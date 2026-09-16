@@ -32,8 +32,10 @@ class QCheckBox;
 class QComboBox;
 class QLabel;
 class QLineEdit;
+class QListWidget;
 class QPushButton;
 class QSpinBox;
+class QTableWidget;
 class ncfg_connection;
 
 class ncfg_interface_dialog : public QDialog {
@@ -50,6 +52,20 @@ public:
 
 private slots:
 	void submit();
+	/* The addressing list, which is a list because the model's is.
+	 *
+	 * **One combo used to stand for the whole `addressing` list** -- `dhcp`,
+	 * `dhcp+slaac`, `static` and four more -- so every composition the list
+	 * could hold and that collection did not name was reported as something
+	 * the form could not carry, and the editor refused to save the interface
+	 * at all. Three sources, two addresses, a lease beside a fixed address:
+	 * each is ordinary and none had a shape. */
+	void add_source();
+	void drop_source();
+	void move_source_up();
+	void move_source_down();
+	void add_route();
+	void drop_route();
 	void addressing_changed();
 	void detection_changed();
 	/* Open the selected script, or start a new one. A probe is a shell script
@@ -59,6 +75,13 @@ private slots:
 
 private:
 	QString block_text() const;
+	/* Put one entry into the addressing list, or one row into the routes
+	 * table. Both keep the value on the item rather than in its text, so a
+	 * label can say more than the file does. */
+	void put_source(const QString &kind, const QString &address);
+	void put_route(const QString &destination, const QString &via, int metric);
+	/* One cell of the routes table, trimmed. */
+	QString cell(int row, int column) const;
 	/* Rebuild the list from disk, keeping the selection where it can be kept.
 	 * Called after the editor writes, because a script that was just created
 	 * is not in a list read before it existed. */
@@ -77,11 +100,31 @@ private:
 	bool        unknown = false;
 
 
-	QComboBox   *addressing;
-	QLineEdit   *static_address;
-	QLineEdit   *gateway;
+	/* The addressing sources, in the document's order. The order is not
+	 * decoration: it is what the model calls a composition, and the entries
+	 * are applied in it. */
+	QListWidget *sources;
+	QComboBox   *source_kind;
+	QLineEdit   *source_address;
+	QPushButton *source_add;
+	QPushButton *source_drop;
+	QPushButton *source_up;
+	QPushButton *source_down;
+	/* Destination, via, metric -- the three parts of a route this form
+	 * carries. A route with a table, a scope or a source address is named in
+	 * `unmodelled` rather than shortened to these. */
+	QTableWidget *routes;
+	QPushButton  *route_add;
+	QPushButton  *route_drop;
+	/* This interface's own name resolution: its own scope, not an overlay on
+	 * the global one (0007). */
+	QComboBox   *dns_mode;
+	QLineEdit   *dns_servers;
+	QLineEdit   *dns_search;
+	QLineEdit   *dns_domains;
+	/* What netcfgd does when the machine stops matching this block. */
+	QComboBox   *on_drift;
 	QSpinBox    *preference;
-	QSpinBox    *mtu;
 	QCheckBox   *enabled;
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;

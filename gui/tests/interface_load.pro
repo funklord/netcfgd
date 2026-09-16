@@ -16,6 +16,12 @@ QMAKE_CXXFLAGS_RELEASE += -Os
 CLIENT_DIR = $$PWD/../../client
 INCLUDEPATH += $$CLIENT_DIR $$PWD/../src
 LIBS += $$CLIENT_DIR/libncfg_client.a
+# Relink when the client changes. Without it `make` here considers the probe up
+# to date after the library is rebuilt, so the test runs against the old C
+# client and passes or fails for reasons that are no longer in the tree -- which
+# the live probes' projects already record, and which cost a debugging round
+# here too.
+PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
 # The probe dialog comes along because the interface dialog constructs one for
 # its `edit`/`new` buttons; linking without it fails on the vtable.

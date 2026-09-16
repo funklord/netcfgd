@@ -421,6 +421,24 @@ static char *dup_string(const char *text)
  * comes back only for a failed allocation, which is why every caller checks it
  * and none of them checks for absence.
  */
+/*
+ * Is this key there at all?
+ *
+ * **`ncfg_json_member` answers `NCFG_JSON_NONE` for a key that is not there,
+ * and that value is `0xffffffff` -- which is true.** So `if (member(...))`
+ * reads as "the key is present" and means "always", and the places where
+ * presence is itself the answer were all wrong in the same direction: the
+ * interface editor's list of keys it cannot express named every key on the
+ * list for every interface, so saving was refused on every block that existed.
+ * Nothing caught it, because both tests that exercise that dialog open it on
+ * an interface the document does not describe -- which returns before the
+ * check.
+ */
+static int has_member(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	return ncfg_json_member(doc, object, name) != NCFG_JSON_NONE;
+}
+
 static char *member_text(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
 {
 	size_t length = 0;
@@ -1939,9 +1957,21 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 	if (!config) {
 		return;
 	}
-	free(config->addressing);
-	free(config->address);
-	free(config->gateway);
+	for (size_t i = 0; i < config->source_count; i++) {
+		free(config->sources[i].source);
+		free(config->sources[i].address);
+	}
+	free(config->sources);
+	for (size_t i = 0; i < config->route_count; i++) {
+		free(config->routes[i].destination);
+		free(config->routes[i].via);
+	}
+	free(config->routes);
+	free(config->dns.mode);
+	free(config->dns.servers);
+	free(config->dns.search);
+	free(config->dns.domains);
+	free(config->on_drift);
 	free(config->probe_command);
 	free(config->probe_args);
 	free(config->unmodelled);
@@ -1966,55 +1996,563 @@ static void note_unmodelled(char **list, const char *key)
 }
 
 /*
- * The addressing, as one of the shapes a form can offer, or empty.
+ * The `addressing` list, as a form carries it.
  *
- * A list of sources is what the document carries, and the dialog offers a
- * handful of common arrangements. Anything else -- a static address with a
- * peer, a delegated prefix, three sources at once -- has no entry to select,
- * so it is reported as unrepresentable rather than approximated to the nearest
- * one. Approximating is what would silently rewrite it on the next save.
+ * Every source in the document's order, with the CIDR beside a static one.
+ * What has no field is reported through `unmodelled` rather than approximated
+ * to the nearest thing that does -- approximating is what silently rewrites a
+ * configuration on the next save.
  */
-static char *addressing_shape(const ncfg_json_doc_t *doc, uint32_t list, char **address)
+static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
+                        ncfg_interface_config_t *out)
 {
 	uint32_t count = ncfg_json_count(doc, list);
-	if (count == 0) {
-		return dup_string("null");
+
+	if (!count) {
+		return 1;
 	}
-	if (count > 2) {
+	out->sources = calloc(count, sizeof(*out->sources));
+	if (!out->sources) {
+		return 0;
+	}
+	out->source_count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, list, i);
+
+		out->sources[i].source = member_text(doc, entry, "source");
+		out->sources[i].address = member_text(doc, entry, "address");
+		if (!out->sources[i].source || !out->sources[i].address) {
+			return 0;
+		}
+		/* A peer, a lifetime or a delegated prefix has nowhere to go on the
+		 * form, and each is content a save would drop. */
+		char *peer = member_text(doc, entry, "peer");
+		if (peer && peer[0]) {
+			note_unmodelled(&out->unmodelled, "addressing (peer)");
+		}
+		free(peer);
+		if (has_member(doc, entry, "from")) {
+			note_unmodelled(&out->unmodelled, "addressing (delegated)");
+		}
+	}
+	return 1;
+}
+
+/*
+ * The `routes` list, as a form carries it: destination, gateway and metric.
+ *
+ * A route carrying anything else -- a source address, a table, a scope, an
+ * onlink flag -- is named through `unmodelled`, because those are the parts a
+ * three-column table would delete on save.
+ */
+static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_interface_config_t *out)
+{
+	uint32_t count = ncfg_json_count(doc, list);
+
+	if (!count) {
+		return 1;
+	}
+	out->routes = calloc(count, sizeof(*out->routes));
+	if (!out->routes) {
+		return 0;
+	}
+	out->route_count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, list, i);
+
+		out->routes[i].destination = member_text(doc, entry, "destination");
+		out->routes[i].via = member_text(doc, entry, "via");
+		out->routes[i].metric =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "metric"), -1);
+		if (!out->routes[i].destination || !out->routes[i].via) {
+			return 0;
+		}
+		static const char *const beyond[] = { "src", "table", "scope", "onlink", "proto" };
+		for (size_t j = 0; j < sizeof(beyond) / sizeof(beyond[0]); j++) {
+			uint32_t extra = ncfg_json_member(doc, entry, beyond[j]);
+			if (extra == NCFG_JSON_NONE || ncfg_json_type(doc, extra) == NCFG_JSON_NULL) {
+				continue;
+			}
+			/* `onlink: false` and a null table are the defaults, which are
+			 * not content: a route that states neither is exactly what the
+			 * three columns above can write back. */
+			if (ncfg_json_type(doc, extra) == NCFG_JSON_BOOL
+			    && !ncfg_json_bool(doc, extra, 0)) {
+				continue;
+			}
+			note_unmodelled(&out->unmodelled, "routes (beyond destination, via, metric)");
+			break;
+		}
+	}
+	return 1;
+}
+
+/* A list of strings out of the document, space-joined for a form. */
+static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array)
+{
+	char *joined = dup_text("", 0);
+	size_t length = 0;
+
+	if (!joined) {
 		return NULL;
 	}
+	uint32_t count = ncfg_json_count(doc, array);
+	for (uint32_t i = 0; i < count; i++) {
+		size_t one_length = 0;
+		const char *one = ncfg_json_string(doc, ncfg_json_at(doc, array, i), &one_length);
 
-	char *first = member_text(doc, ncfg_json_at(doc, list, 0), "source");
-	if (count == 1) {
-		char *shape = NULL;
-		if (strcmp(first, "static") == 0) {
-			uint32_t entry = ncfg_json_at(doc, list, 0);
-			/* A peer or a lifetime has nowhere to go on the form. */
-			char *peer = member_text(doc, entry, "peer");
-			int plain = peer[0] == '\0';
-			free(peer);
-			if (plain) {
-				*address = member_text(doc, entry, "address");
-				shape = dup_string("static");
-			}
-		} else if (strcmp(first, "dhcp4") == 0) {
-			shape = dup_string("dhcp");
-		} else if (strcmp(first, "dhcp6") == 0 || strcmp(first, "slaac") == 0 ||
-		    strcmp(first, "reported") == 0) {
-			shape = dup_string(first);
+		if (!one || !one_length) {
+			continue;
 		}
-		free(first);
-		return shape;
+		char *grown = realloc(joined, length + (length ? 1u : 0u) + one_length + 1u);
+		if (!grown) {
+			free(joined);
+			return NULL;
+		}
+		joined = grown;
+		if (length) {
+			joined[length] = ' ';
+			length += 1u;
+		}
+		memcpy(joined + length, one, one_length);
+		length += one_length;
+		joined[length] = '\0';
+	}
+	return joined;
+}
+
+/* One named field out of each object in an array, space-joined. */
+static char *joined_field(const ncfg_json_doc_t *doc, uint32_t array, const char *field)
+{
+	char *joined = dup_text("", 0);
+	size_t length = 0;
+
+	if (!joined) {
+		return NULL;
+	}
+	uint32_t count = ncfg_json_count(doc, array);
+	for (uint32_t i = 0; i < count; i++) {
+		size_t one_length = 0;
+		const char *one = ncfg_json_string(doc,
+		    ncfg_json_member(doc, ncfg_json_at(doc, array, i), field), &one_length);
+
+		if (!one || !one_length) {
+			continue;
+		}
+		char *grown = realloc(joined, length + (length ? 1u : 0u) + one_length + 1u);
+		if (!grown) {
+			free(joined);
+			return NULL;
+		}
+		joined = grown;
+		if (length) {
+			joined[length] = ' ';
+			length += 1u;
+		}
+		memcpy(joined + length, one, one_length);
+		length += one_length;
+		joined[length] = '\0';
+	}
+	return joined;
+}
+
+/*
+ * The interface's own DNS scope.
+ *
+ * A scope that says nothing is not content: `mode` `none` with three empty
+ * lists is what every interface carries unless somebody wrote something, and
+ * reporting that as unrepresentable is what stopped netcfgd's own generated
+ * wifi block from being editable at all.
+ */
+static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_interface_config_t *out)
+{
+	if (scope == NCFG_JSON_NONE) {
+		out->dns.mode = dup_string("");
+		out->dns.servers = dup_string("");
+		out->dns.search = dup_string("");
+		out->dns.domains = dup_string("");
+		return out->dns.mode && out->dns.servers && out->dns.search && out->dns.domains;
+	}
+	out->dns.mode = member_text(doc, scope, "mode");
+	/* **Servers and domains are objects, not strings.** A server carries an
+	 * address and optionally a port and an SNI name; a routing domain carries
+	 * a suffix and whether it is exclusive. The form takes the part it can
+	 * edit -- the address, the suffix -- and the rest is reported through
+	 * `unmodelled` below, because a save that wrote the address back alone
+	 * would drop the port somebody chose. */
+	out->dns.servers = joined_field(doc, ncfg_json_member(doc, scope, "servers"), "addr");
+	out->dns.search = joined_words(doc, ncfg_json_member(doc, scope, "search"));
+	out->dns.domains = joined_field(doc, ncfg_json_member(doc, scope, "domains"), "suffix");
+	if (!out->dns.mode || !out->dns.servers || !out->dns.search || !out->dns.domains) {
+		return 0;
+	}
+	/* The parts of a scope this form has no field for. Resolver options and
+	 * DNSSEC are policy an operator sets once and would not expect a network
+	 * editor to carry -- but they are content, so a save must not drop them. */
+	if (ncfg_json_count(doc, ncfg_json_member(doc, scope, "options"))) {
+		note_unmodelled(&out->unmodelled, "dns (options)");
+	}
+	/* A server with a port or an SNI name, or an exclusive routing domain:
+	 * each is a field the form does not carry and a save would drop. */
+	uint32_t servers = ncfg_json_member(doc, scope, "servers");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, servers); i++) {
+		uint32_t server = ncfg_json_at(doc, servers, i);
+		if (ncfg_json_type(doc, ncfg_json_member(doc, server, "port")) != NCFG_JSON_NULL) {
+			note_unmodelled(&out->unmodelled, "dns (a server's port)");
+			break;
+		}
+		char *sni = member_text(doc, server, "sni");
+		int named = sni && sni[0];
+		free(sni);
+		if (named) {
+			note_unmodelled(&out->unmodelled, "dns (a server's sni)");
+			break;
+		}
+	}
+	uint32_t domains = ncfg_json_member(doc, scope, "domains");
+	for (uint32_t i = 0; i < ncfg_json_count(doc, domains); i++) {
+		if (ncfg_json_bool(doc, ncfg_json_member(doc, ncfg_json_at(doc, domains, i),
+		        "exclusive"), 0)) {
+			note_unmodelled(&out->unmodelled, "dns (an exclusive routing domain)");
+			break;
+		}
+	}
+	static const char *const beyond[] = { "dnssec", "transport" };
+	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
+		char *value = member_text(doc, scope, beyond[i]);
+		int stated = value && value[0] && strcmp(value, "default") != 0
+		    && strcmp(value, "none") != 0 && strcmp(value, "unset") != 0;
+		free(value);
+		if (stated) {
+			note_unmodelled(&out->unmodelled, "dns (dnssec or transport)");
+			break;
+		}
+	}
+	return 1;
+}
+
+void ncfg_devices_free(ncfg_devices_t *devices)
+{
+	if (!devices) {
+		return;
+	}
+	for (size_t i = 0; i < devices->count; i++) {
+		free(devices->items[i].name);
+		free(devices->items[i].kind);
+		free(devices->items[i].mac);
+		free(devices->items[i].policy);
+	}
+	free(devices->items);
+	memset(devices, 0, sizeof(*devices));
+}
+
+/* The `kind` word out of a device block, whose shape is `{"kind": "..."}`. */
+static char *device_kind(const ncfg_json_doc_t *doc, uint32_t device)
+{
+	uint32_t kind = ncfg_json_member(doc, device, "kind");
+
+	if (kind == NCFG_JSON_NONE) {
+		return dup_string("");
+	}
+	if (ncfg_json_type(doc, kind) == NCFG_JSON_STRING) {
+		return member_text(doc, device, "kind");
+	}
+	return member_text(doc, kind, "kind");
+}
+
+/* Which extra policy block a device carries, as one word. */
+static char *device_policy(const ncfg_json_doc_t *doc, uint32_t device)
+{
+	if (has_member(doc, device, "wifi")) {
+		return dup_string("wifi");
+	}
+	if (has_member(doc, device, "modem")) {
+		return dup_string("modem");
+	}
+	return dup_string("");
+}
+
+int ncfg_client_devices(ncfg_client_t *client, ncfg_devices_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	/*
+	 * Two questions in one request each, because the answer is a union: the
+	 * document says which devices are described and the observation says
+	 * which exist. Either alone loses something real -- a card nobody has
+	 * configured is the commonest thing on a fresh machine, and a block whose
+	 * card is out is what somebody is looking for when nothing came up.
+	 */
+	ncfg_json_doc_t *shown = ncfg_client_request(client, "{\"request\":\"show\"}", err,
+	    err_size);
+	if (!shown) {
+		return 0;
+	}
+	if (took_refusal(shown, err, err_size)) {
+		ncfg_json_free(shown);
+		return 0;
+	}
+	ncfg_json_doc_t *status = ncfg_client_status(client, err, err_size);
+	if (!status) {
+		ncfg_json_free(shown);
+		return 0;
+	}
+	if (took_refusal(status, err, err_size)) {
+		ncfg_json_free(shown);
+		ncfg_json_free(status);
+		return 0;
 	}
 
-	char *second = member_text(doc, ncfg_json_at(doc, list, 1), "source");
-	char *shape = NULL;
-	if (strcmp(first, "dhcp4") == 0 && strcmp(second, "slaac") == 0) {
-		shape = dup_string("dhcp+slaac");
+	uint32_t devices = ncfg_json_member(shown, ncfg_json_root(shown), "devices");
+	uint32_t described = ncfg_json_count(shown, devices);
+	uint32_t links = ncfg_json_member(status, ncfg_json_root(status), "links");
+	uint32_t present = ncfg_json_count(status, links);
+
+	out->items = calloc((size_t)described + present, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(shown);
+		ncfg_json_free(status);
+		return 0;
 	}
-	free(first);
-	free(second);
-	return shape;
+
+	for (uint32_t i = 0; i < described; i++) {
+		uint32_t device = ncfg_json_at(shown, devices, i);
+		ncfg_device_t *row = &out->items[out->count++];
+
+		row->name = member_text(shown, device, "name");
+		row->configured = 1;
+		row->kind = device_kind(shown, device);
+		row->managed = ncfg_json_bool(shown, ncfg_json_member(shown, device, "managed"), 1);
+		row->policy = device_policy(shown, device);
+		row->mac = dup_string("");
+		if (!row->name || !row->kind || !row->policy || !row->mac) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(shown);
+			ncfg_json_free(status);
+			return 0;
+		}
+	}
+
+	for (uint32_t i = 0; i < present; i++) {
+		uint32_t link = ncfg_json_at(status, links, i);
+		char *name = member_text(status, link, "name");
+
+		if (!name) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(shown);
+			ncfg_json_free(status);
+			return 0;
+		}
+		ncfg_device_t *row = NULL;
+		for (size_t j = 0; j < out->count; j++) {
+			if (strcmp(out->items[j].name, name) == 0) {
+				row = &out->items[j];
+				break;
+			}
+		}
+		if (row) {
+			free(name);
+		} else {
+			row = &out->items[out->count++];
+			row->name = name;
+			row->kind = dup_string("");
+			row->policy = dup_string("");
+			row->managed = 1;
+			row->mac = dup_string("");
+			if (!row->kind || !row->policy || !row->mac) {
+				set_error(err, err_size, "out of memory");
+				ncfg_json_free(shown);
+				ncfg_json_free(status);
+				return 0;
+			}
+		}
+		row->present = 1;
+		/* The kernel's answers, which the document does not hold: what the
+		 * adapter is actually using rather than what it was asked for. */
+		free(row->mac);
+		row->mac = member_text(status, link, "mac");
+		row->mtu = (int)ncfg_json_int(status, ncfg_json_member(status, link, "mtu"), 0);
+		if (!row->mac) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(shown);
+			ncfg_json_free(status);
+			return 0;
+		}
+	}
+
+	ncfg_json_free(shown);
+	ncfg_json_free(status);
+	return 1;
+}
+
+void ncfg_device_config_free(ncfg_device_config_t *config)
+{
+	if (!config) {
+		return;
+	}
+	free(config->on_unmanage);
+	free(config->kind);
+	free(config->mac);
+	free(config->duplex);
+	free(config->wol);
+	free(config->wifi_backend);
+	free(config->powersave);
+	free(config->mac_policy);
+	free(config->regdom);
+	free(config->portal_check);
+	free(config->sim);
+	free(config->apn);
+	free(config->unmodelled);
+	memset(config, 0, sizeof(*config));
+}
+
+/* A `Toggle` out of the document: `unmanaged`, `on` or `off`. */
+static ncfg_toggle_t read_toggle(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	char *word = member_text(doc, object, name);
+	ncfg_toggle_t answer = ncfg_toggle_unmanaged;
+
+	if (word && strcmp(word, "on") == 0) {
+		answer = ncfg_toggle_on;
+	} else if (word && strcmp(word, "off") == 0) {
+		answer = ncfg_toggle_off;
+	}
+	free(word);
+	return answer;
+}
+
+int ncfg_client_device_config(ncfg_client_t *client, const char *device,
+                              ncfg_device_config_t *out, char *err, size_t err_size)
+{
+	if (!out || !device) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	out->managed = 1;
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t devices = ncfg_json_member(doc, ncfg_json_root(doc), "devices");
+	uint32_t count = ncfg_json_count(doc, devices);
+	uint32_t found = 0;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, devices, i);
+		if (ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "name"), device)) {
+			found = entry;
+			break;
+		}
+	}
+	if (!found) {
+		/* No block for it, which is the ordinary state of an adapter nobody
+		 * has configured. The defaults are what a form opens on. */
+		out->on_unmanage = dup_string("");
+		out->kind = dup_string("");
+		out->mac = dup_string("");
+		out->duplex = dup_string("");
+		out->wol = dup_string("");
+		out->unmodelled = dup_string("");
+		ncfg_json_free(doc);
+		return out->on_unmanage && out->kind && out->mac && out->duplex && out->wol
+		    && out->unmodelled;
+	}
+	out->present = 1;
+	out->managed = ncfg_json_bool(doc, ncfg_json_member(doc, found, "managed"), 1);
+	out->on_unmanage = member_text(doc, found, "on_unmanage");
+	out->kind = device_kind(doc, found);
+	out->mac = member_text(doc, found, "mac");
+	out->mtu = (int)ncfg_json_int(doc, ncfg_json_member(doc, found, "mtu"), 0);
+
+	uint32_t link = ncfg_json_member(doc, found, "link_settings");
+	if (link != NCFG_JSON_NONE) {
+		out->autoneg = read_toggle(doc, link, "autoneg");
+		out->speed = (int)ncfg_json_int(doc, ncfg_json_member(doc, link, "speed"), 0);
+		out->duplex = member_text(doc, link, "duplex");
+		out->wol = member_text(doc, link, "wol");
+		out->rx_ring = (int)ncfg_json_int(doc, ncfg_json_member(doc, link, "rx_ring"), 0);
+		out->tx_ring = (int)ncfg_json_int(doc, ncfg_json_member(doc, link, "tx_ring"), 0);
+		out->gro = read_toggle(doc, link, "gro");
+		out->gso = read_toggle(doc, link, "gso");
+		out->tso = read_toggle(doc, link, "tso");
+		out->rx_checksum = read_toggle(doc, link, "rx_checksum");
+		out->tx_checksum = read_toggle(doc, link, "tx_checksum");
+	} else {
+		out->duplex = dup_string("");
+		out->wol = dup_string("");
+	}
+
+	uint32_t wifi = ncfg_json_member(doc, found, "wifi");
+	if (wifi != NCFG_JSON_NONE) {
+		out->has_wifi = 1;
+		out->wifi_backend = member_text(doc, wifi, "backend");
+		out->wifi_autoconnect = ncfg_json_bool(doc, ncfg_json_member(doc, wifi, "autoconnect"), 1);
+		out->powersave = member_text(doc, wifi, "powersave");
+		out->mac_policy = member_text(doc, wifi, "mac_policy");
+		out->scan_randomization =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, wifi, "scan_randomization"), 0);
+		out->regdom = member_text(doc, wifi, "regdom");
+		out->portal_check = member_text(doc, wifi, "portal_check");
+	} else {
+		out->wifi_backend = dup_string("");
+		out->powersave = dup_string("");
+		out->mac_policy = dup_string("");
+		out->regdom = dup_string("");
+		out->portal_check = dup_string("");
+	}
+
+	uint32_t modem = ncfg_json_member(doc, found, "modem");
+	if (modem != NCFG_JSON_NONE) {
+		out->has_modem = 1;
+		out->sim = joined_words(doc, ncfg_json_member(doc, modem, "sim"));
+		out->apn = member_text(doc, modem, "apn");
+	} else {
+		out->sim = dup_string("");
+		out->apn = dup_string("");
+	}
+
+	/*
+	 * What a form of these fields cannot carry, by the interface editor's
+	 * rule: only what a save would actually delete. A `kind` other than
+	 * `physical` is the important one -- a bridge or a bond carries members,
+	 * and a form that wrote the block back without them would empty it.
+	 */
+	if (out->kind && out->kind[0] && strcmp(out->kind, "physical") != 0) {
+		note_unmodelled(&out->unmodelled, out->kind);
+	}
+	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "bridge_vlans"))) {
+		note_unmodelled(&out->unmodelled, "bridge_vlans");
+	}
+	static const char *const beyond[] = { "master", "qdisc", "access_control", "match" };
+	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
+		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
+			note_unmodelled(&out->unmodelled, beyond[i]);
+		}
+	}
+	if (!out->unmodelled) {
+		out->unmodelled = dup_string("");
+	}
+
+	int whole = out->on_unmanage && out->kind && out->mac && out->duplex && out->wol
+	    && out->wifi_backend && out->powersave && out->mac_policy && out->regdom
+	    && out->portal_check && out->sim && out->apn && out->unmodelled;
+	ncfg_json_free(doc);
+	if (!whole) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	return 1;
 }
 
 int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
@@ -2057,39 +2595,26 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 	out->forwarding = ncfg_json_bool(doc, ncfg_json_member(doc, found, "forwarding"), 0);
 	out->nat = ncfg_json_bool(doc, ncfg_json_member(doc, found, "nat"), 0);
 	uint32_t preference = ncfg_json_member(doc, found, "preference");
-	if (preference) {
+	if (preference != NCFG_JSON_NONE) {
 		out->preference = (int)ncfg_json_int(doc, preference, -1);
 	}
 
-	uint32_t addressing = ncfg_json_member(doc, found, "addressing");
-	out->addressing = addressing_shape(doc, addressing, &out->address);
-	if (!out->addressing) {
-		note_unmodelled(&out->unmodelled, "addressing");
-		out->addressing = dup_string("");
+	if (!read_sources(doc, ncfg_json_member(doc, found, "addressing"), out)
+	    || !read_routes(doc, ncfg_json_member(doc, found, "routes"), out)
+	    || !read_dns(doc, ncfg_json_member(doc, found, "dns"), out)) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
 	}
-	if (!out->address) {
-		out->address = dup_string("");
-	}
-
-	/* One default route is the gateway box; anything else has no field. */
-	uint32_t routes = ncfg_json_member(doc, found, "routes");
-	uint32_t route_count = ncfg_json_count(doc, routes);
-	out->gateway = dup_string("");
-	for (uint32_t i = 0; i < route_count; i++) {
-		uint32_t route = ncfg_json_at(doc, routes, i);
-		if (ncfg_json_string_equals(doc, ncfg_json_member(doc, route, "destination"),
-		        "default") &&
-		    route_count == 1) {
-			free(out->gateway);
-			out->gateway = member_text(doc, route, "via");
-		} else {
-			note_unmodelled(&out->unmodelled, "routes");
-			break;
-		}
+	out->on_drift = member_text(doc, found, "on_drift");
+	if (!out->on_drift) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
 	}
 
 	uint32_t probe = ncfg_json_member(doc, found, "probe");
-	if (probe) {
+	if (probe != NCFG_JSON_NONE) {
 		out->probe_command = member_text(doc, probe, "command");
 		out->probe_interval = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "interval"), 0);
 		out->probe_timeout = (int)ncfg_json_int(doc, ncfg_json_member(doc, probe, "timeout"), 0);
@@ -2119,14 +2644,24 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->probe_args = dup_string("");
 	}
 
-	/* Everything a form of these fields cannot carry. Named, so a caller can
-	 * refuse rather than overwrite. */
-	static const char *const beyond[] = { "advertise", "dns", "dot1x", "guard", "hooks",
-		"ipv6_token", "on_drift" };
+	/*
+	 * What the fields above cannot carry. Named, so a caller can refuse rather
+	 * than overwrite.
+	 *
+	 * **Only where the key holds something.** This used to name any key that
+	 * was present, and a compiled interface carries `hooks: []` and a default
+	 * `dns` scope whether anybody wrote them or not -- so netcfgd's own
+	 * generated wifi block reported two unrepresentable keys, and the editor
+	 * refused to open it for editing at all. An empty list is not content.
+	 */
+	static const char *const beyond[] = { "advertise", "dot1x", "guard", "ipv6_token" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
-		if (ncfg_json_member(doc, found, beyond[i])) {
+		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);
 		}
+	}
+	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "hooks"))) {
+		note_unmodelled(&out->unmodelled, "hooks");
 	}
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");

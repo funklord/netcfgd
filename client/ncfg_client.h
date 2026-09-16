@@ -1023,14 +1023,61 @@ void ncfg_globals_free(ncfg_globals_t *globals);
  * a client that finds any is expected to refuse to overwrite rather than to
  * guess. Empty means the block is wholly representable.
  */
+/*
+ * One way an interface gets an address.
+ *
+ * **A list, not a shape.** This used to be one word collapsing the whole
+ * `addressing` list -- `dhcp`, `dhcp+slaac`, `static` -- which meant every
+ * composition the model allows and the collapse did not name was reported as
+ * something a form could not carry, and the editor refused to save the
+ * interface at all. The model's own word for it is a list, so this is one.
+ *
+ * `address` is the CIDR for a `static` source and "" for every other kind.
+ */
+typedef struct {
+	char *source; /* dhcp4, dhcp6, slaac, static, reported, null */
+	char *address;
+} ncfg_address_source_t;
+
+/* One route on an interface, as a form can carry it. */
+typedef struct {
+	char *destination; /* `default` or a prefix */
+	char *via;         /* "" for a route with no gateway */
+	/* -1 where the document states none: 0 is a legal metric and the
+	 * strongest one, so an absent metric must not arrive as 0. */
+	int   metric;
+} ncfg_route_t;
+
+/*
+ * An interface's own name resolution.
+ *
+ * Its own scope rather than an overlay on the global one (0007), so `mode`
+ * empty means the interface states none and the host-wide policy answers.
+ * Servers and searches are space-joined, the way a form takes them.
+ */
+typedef struct {
+	char *mode;
+	char *servers;
+	char *search;
+	char *domains;
+} ncfg_dns_scope_t;
+
 typedef struct {
 	/* Whether the document configures this interface at all. */
 	int   present;
-	/* `static`, `dhcp`, `dhcp6`, `slaac`, `dhcp+slaac`, `null`, `reported`,
-	 * or empty where the addressing is a shape a form cannot offer. */
-	char *addressing;
-	char *address;
-	char *gateway;
+	/* How it gets addresses, in the document's order. Empty for an interface
+	 * the document gives none, which is `config = "null"`. */
+	ncfg_address_source_t *sources;
+	size_t                 source_count;
+	/* The routes it installs, in the document's order. */
+	ncfg_route_t *routes;
+	size_t        route_count;
+	/* This interface's name resolution. */
+	ncfg_dns_scope_t dns;
+	/* What netcfgd does when the machine stops matching: "", `reconcile`,
+	 * `report` or `ignore`. Empty means the interface states none and the
+	 * host-wide default applies. */
+	char *on_drift;
 	/* -1 when the document states none, since 0 is a legal preference. */
 	int   preference;
 	int   enabled;
@@ -1040,11 +1087,126 @@ typedef struct {
 	char *probe_args;
 	int   probe_interval;
 	int   probe_timeout;
-	/* The keys above cannot express, joined for a message: `dns, hooks`. */
+	/*
+	 * What the fields above cannot express, joined for a message.
+	 *
+	 * **Only what a save would actually delete.** This used to name any key
+	 * that was *present*, so an interface carrying `hooks: []` and a default
+	 * `dns` scope -- which is what netcfgd's own `ncfg wifi activate` writes
+	 * -- could not be edited at all: the editor refused to save over two keys
+	 * that held nothing. An empty list and a default scope are not content.
+	 */
 	char *unmodelled;
 } ncfg_interface_config_t;
 
 void ncfg_interface_config_free(ncfg_interface_config_t *config);
+
+/*
+ * One device: the hardware, and netcfgd's policy about it.
+ *
+ * **A device is not a link.** A link is where the networking is configured --
+ * addresses, routes, which uplink wins. A device is the thing that has to
+ * exist before a link can: the adapter, its MTU and MAC, what drives a radio,
+ * whether netcfgd touches it at all. The two were one list wearing the other
+ * noun until this existed, and the half that had no screen was this one.
+ *
+ * `present` is the kernel's answer and `configured` the document's; a row can
+ * be either, and both are worth showing -- an adapter nobody has configured is
+ * the commonest thing on a fresh machine, and a `device` block whose card is
+ * out is what an operator is looking for when they ask why nothing came up.
+ */
+typedef struct {
+	char *name;
+	int   present;
+	int   configured;
+	/* From the document: `physical`, `bridge`, `bond`, `vlan`, `veth`,
+	 * `wireguard`, and the rest. "" where the document has no block, because
+	 * the kernel's own kind is on the link and not here. */
+	char *kind;
+	/* Whether netcfgd configures it. True where the document says nothing:
+	 * managing is the default and saying so is the exception. */
+	int   managed;
+	/* The kernel's, not the document's: what the adapter is actually using. */
+	char *mac;
+	int   mtu;
+	/* `wifi`, `modem` or "": which extra policy block this device carries. A
+	 * word rather than two flags, because a device has at most one of them and
+	 * a list shows the word. */
+	char *policy;
+} ncfg_device_t;
+
+typedef struct {
+	ncfg_device_t *items;
+	size_t         count;
+} ncfg_devices_t;
+
+void ncfg_devices_free(ncfg_devices_t *devices);
+
+/*
+ * Every device: the union of what the kernel has and what the document
+ * describes, for the same reason the link inventory is a union (0246).
+ */
+int ncfg_client_devices(ncfg_client_t *client, ncfg_devices_t *out, char *err, size_t err_size);
+
+/* An ethtool-style tunable, as three states rather than two. */
+typedef enum {
+	ncfg_toggle_unmanaged = 0, /* netcfgd does not touch it */
+	ncfg_toggle_on,
+	ncfg_toggle_off,
+} ncfg_toggle_t;
+
+/*
+ * One device's configuration, as far as a form can show it.
+ *
+ * The `unmodelled` rule is the interface editor's: only what a save would
+ * actually delete is named, so a block carrying nothing a field cannot hold is
+ * editable.
+ */
+typedef struct {
+	int   present;
+	int   managed;
+	char *on_unmanage; /* "leave" or "down" */
+	char *kind;        /* read-only here: a bridge is not made into a bond by a form */
+	int   mtu;         /* 0 where the document states none */
+	char *mac;         /* "" where the document states none */
+	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */
+	ncfg_toggle_t autoneg;
+	int           speed;
+	char         *duplex;
+	char         *wol;
+	int           rx_ring;
+	int           tx_ring;
+	ncfg_toggle_t gro;
+	ncfg_toggle_t gso;
+	ncfg_toggle_t tso;
+	ncfg_toggle_t rx_checksum;
+	ncfg_toggle_t tx_checksum;
+	/* wifi policy, where the device has one. */
+	int   has_wifi;
+	char *wifi_backend;
+	int   wifi_autoconnect;
+	char *powersave;
+	char *mac_policy;
+	int   scan_randomization;
+	char *regdom;
+	char *portal_check;
+	/* modem policy, where the device has one. */
+	int   has_modem;
+	char *sim; /* the sources in order, space-joined */
+	char *apn;
+	char *unmodelled;
+} ncfg_device_config_t;
+
+void ncfg_device_config_free(ncfg_device_config_t *config);
+
+/*
+ * Read one device's configuration out of the document.
+ *
+ * Returns 1 on success, including for a device the document does not describe
+ * -- `present` says which.
+ */
+int ncfg_client_device_config(ncfg_client_t *client, const char *device,
+                              ncfg_device_config_t *out, char *err, size_t err_size);
 
 /*
  * Read one interface's configuration out of the document.

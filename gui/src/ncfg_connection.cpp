@@ -878,6 +878,100 @@ bool ncfg_connection::profile_save(const QString &name, bool replace, QString *e
 	return true;
 }
 
+bool ncfg_connection::devices(QList<ncfg_device_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_devices_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_devices(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_device_row row;
+		row.name = from_c(found.items[i].name);
+		row.present = found.items[i].present != 0;
+		row.configured = found.items[i].configured != 0;
+		row.kind = from_c(found.items[i].kind);
+		row.managed = found.items[i].managed != 0;
+		row.mac = from_c(found.items[i].mac);
+		row.mtu = found.items[i].mtu;
+		row.policy = from_c(found.items[i].policy);
+		*out << row;
+	}
+	ncfg_devices_free(&found);
+	return true;
+}
+
+bool ncfg_connection::device_config(const QString &device, ncfg_device_config *out,
+    QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	*out = ncfg_device_config();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_device_config_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_device_config(client, device.toUtf8().constData(), &found, message,
+	        sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	out->present = found.present != 0;
+	out->managed = found.managed != 0;
+	out->on_unmanage = from_c(found.on_unmanage);
+	out->kind = from_c(found.kind);
+	out->mtu = found.mtu;
+	out->mac = from_c(found.mac);
+	out->autoneg = static_cast<int>(found.autoneg);
+	out->speed = found.speed;
+	out->duplex = from_c(found.duplex);
+	out->wol = from_c(found.wol);
+	out->rx_ring = found.rx_ring;
+	out->tx_ring = found.tx_ring;
+	out->gro = static_cast<int>(found.gro);
+	out->gso = static_cast<int>(found.gso);
+	out->tso = static_cast<int>(found.tso);
+	out->rx_checksum = static_cast<int>(found.rx_checksum);
+	out->tx_checksum = static_cast<int>(found.tx_checksum);
+	out->has_wifi = found.has_wifi != 0;
+	out->wifi_backend = from_c(found.wifi_backend);
+	out->wifi_autoconnect = found.wifi_autoconnect != 0;
+	out->powersave = from_c(found.powersave);
+	out->mac_policy = from_c(found.mac_policy);
+	out->scan_randomization = found.scan_randomization != 0;
+	out->regdom = from_c(found.regdom);
+	out->portal_check = from_c(found.portal_check);
+	out->has_modem = found.has_modem != 0;
+	out->sim = from_c(found.sim);
+	out->apn = from_c(found.apn);
+	out->unmodelled = from_c(found.unmodelled);
+	ncfg_device_config_free(&found);
+	return true;
+}
+
 bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_config *out,
     QString *error)
 {
@@ -903,9 +997,24 @@ bool ncfg_connection::interface_config(const QString &interface, ncfg_interface_
 	}
 
 	out->present = found.present != 0;
-	out->addressing = from_c(found.addressing);
-	out->address = from_c(found.address);
-	out->gateway = from_c(found.gateway);
+	for (size_t i = 0; i < found.source_count; i++) {
+		ncfg_address_source_row source;
+		source.source = from_c(found.sources[i].source);
+		source.address = from_c(found.sources[i].address);
+		out->sources << source;
+	}
+	for (size_t i = 0; i < found.route_count; i++) {
+		ncfg_route_row route;
+		route.destination = from_c(found.routes[i].destination);
+		route.via = from_c(found.routes[i].via);
+		route.metric = found.routes[i].metric;
+		out->routes << route;
+	}
+	out->dns.mode = from_c(found.dns.mode);
+	out->dns.servers = from_c(found.dns.servers);
+	out->dns.search = from_c(found.dns.search);
+	out->dns.domains = from_c(found.dns.domains);
+	out->on_drift = from_c(found.on_drift);
 	out->preference = found.preference;
 	out->enabled = found.enabled != 0;
 	out->forwarding = found.forwarding != 0;

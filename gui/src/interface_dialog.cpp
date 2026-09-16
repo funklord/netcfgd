@@ -14,7 +14,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPushButton>
+#include <QHeaderView>
+#include <QListWidget>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QVBoxLayout>
 
 namespace {
@@ -26,13 +29,40 @@ struct choice {
 
 /* What an interface may be given. `dhcp` first because it is what a wired port
  * almost always wants, and "none" last because it is the deliberate one. */
-const choice addressings[] = {
+/* The sources an `addressing` list can hold, spelled as the config language
+ * spells them. `null` is deliberately absent: "no address" is an empty list
+ * rather than a source, which is what `config = "null"` compiles to. */
+const choice sources[] = {
 	{ "DHCP (IPv4)", "dhcp" },
-	{ "DHCP and SLAAC (IPv4 and IPv6)", "dhcp+slaac" },
-	{ "SLAAC only (IPv6)", "slaac" },
 	{ "DHCPv6", "dhcp6" },
+	{ "SLAAC (IPv6)", "slaac" },
 	{ "a fixed address", "static" },
-	{ "none -- no address on this interface", "null" },
+	{ "link-local only", "link-local" },
+	{ "reported by a helper", "reported" },
+};
+
+/* Name resolution for this interface. "leave to the global policy" is first
+ * and is the ordinary answer: an interface that states no scope is one the
+ * host-wide `dns` block answers for. */
+const choice dns_modes[] = {
+	{ "leave to the global policy", "" },
+	{ "none -- netcfgd writes nothing", "none" },
+	{ "write /etc/resolv.conf", "write_resolv_conf" },
+	{ "resolvconf", "resolvconf" },
+	{ "openresolv", "openresolv" },
+	{ "systemd-resolved", "resolved" },
+	{ "dnsmasq", "dnsmasq" },
+	{ "unbound", "unbound" },
+};
+
+/* What netcfgd does when the machine stops matching this block. Empty is the
+ * host-wide default, which is `reconcile` unless the global block says
+ * otherwise. */
+const choice drifts[] = {
+	{ "the host default", "" },
+	{ "reconcile -- put it back", "reconcile" },
+	{ "report -- say so and change nothing", "report" },
+	{ "ignore -- do not even look", "ignore" },
 };
 
 /*
@@ -77,20 +107,92 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	auto *layout = new QVBoxLayout(this);
 	auto *form = new QFormLayout();
 
-	addressing = new QComboBox(this);
-	addressing->setObjectName(QStringLiteral("iface_addressing"));
-	fill(addressing, addressings, sizeof(addressings) / sizeof(addressings[0]));
-	form->addRow(QStringLiteral("addressing"), addressing);
+	/* **The addressing list, as a list.** An interface composes its addresses
+	 * out of several sources -- a lease and a fixed address, DHCP and SLAAC,
+	 * a helper's report -- and the order is applied in. One combo naming a
+	 * handful of arrangements could not carry that, and everything it could
+	 * not carry was refused rather than shown. */
+	this->sources = new QListWidget(this);
+	this->sources->setObjectName(QStringLiteral("iface_sources"));
+	this->sources->setSelectionMode(QAbstractItemView::SingleSelection);
+	this->sources->setMaximumHeight(110);
+	form->addRow(QStringLiteral("addressing"), this->sources);
 
-	static_address = new QLineEdit(this);
-	static_address->setObjectName(QStringLiteral("iface_address"));
-	static_address->setPlaceholderText(QStringLiteral("192.0.2.10/24"));
-	form->addRow(QStringLiteral("address"), static_address);
+	auto *source_row = new QHBoxLayout();
+	source_kind = new QComboBox(this);
+	source_kind->setObjectName(QStringLiteral("iface_source_kind"));
+	fill(source_kind, ::sources, sizeof(::sources) / sizeof(::sources[0]));
+	source_address = new QLineEdit(this);
+	source_address->setObjectName(QStringLiteral("iface_source_address"));
+	source_address->setPlaceholderText(QStringLiteral("192.0.2.10/24"));
+	source_add = new QPushButton(QStringLiteral("add"), this);
+	source_add->setObjectName(QStringLiteral("iface_source_add"));
+	source_drop = new QPushButton(QStringLiteral("remove"), this);
+	source_drop->setObjectName(QStringLiteral("iface_source_drop"));
+	source_up = new QPushButton(QStringLiteral("up"), this);
+	source_up->setObjectName(QStringLiteral("iface_source_up"));
+	source_down = new QPushButton(QStringLiteral("down"), this);
+	source_down->setObjectName(QStringLiteral("iface_source_down"));
+	source_row->addWidget(source_kind);
+	source_row->addWidget(source_address, 1);
+	source_row->addWidget(source_add);
+	source_row->addWidget(source_drop);
+	source_row->addWidget(source_up);
+	source_row->addWidget(source_down);
+	form->addRow(QString(), source_row);
 
-	gateway = new QLineEdit(this);
-	gateway->setObjectName(QStringLiteral("iface_gateway"));
-	gateway->setPlaceholderText(QStringLiteral("192.0.2.1 -- optional"));
-	form->addRow(QStringLiteral("default via"), gateway);
+	/* Routes, as a table rather than one gateway box. A machine with a second
+	 * subnet behind it has a static route to it, and the one box could only
+	 * hold a default -- so an interface with any other route was refused. */
+	this->routes = new QTableWidget(0, 3, this);
+	this->routes->setObjectName(QStringLiteral("iface_routes"));
+	QStringList route_columns;
+	route_columns << QStringLiteral("destination") << QStringLiteral("via")
+	              << QStringLiteral("metric");
+	this->routes->setHorizontalHeaderLabels(route_columns);
+	this->routes->verticalHeader()->setVisible(false);
+	this->routes->horizontalHeader()->setStretchLastSection(true);
+	this->routes->setSelectionBehavior(QAbstractItemView::SelectRows);
+	this->routes->setSelectionMode(QAbstractItemView::SingleSelection);
+	this->routes->setMaximumHeight(110);
+	form->addRow(QStringLiteral("routes"), this->routes);
+
+	auto *route_row = new QHBoxLayout();
+	route_add = new QPushButton(QStringLiteral("add route"), this);
+	route_add->setObjectName(QStringLiteral("iface_route_add"));
+	route_drop = new QPushButton(QStringLiteral("remove route"), this);
+	route_drop->setObjectName(QStringLiteral("iface_route_drop"));
+	route_row->addWidget(route_add);
+	route_row->addWidget(route_drop);
+	route_row->addStretch(1);
+	form->addRow(QString(), route_row);
+
+	dns_mode = new QComboBox(this);
+	dns_mode->setObjectName(QStringLiteral("iface_dns_mode"));
+	fill(dns_mode, dns_modes, sizeof(dns_modes) / sizeof(dns_modes[0]));
+	form->addRow(QStringLiteral("dns"), dns_mode);
+
+	dns_servers = new QLineEdit(this);
+	dns_servers->setObjectName(QStringLiteral("iface_dns_servers"));
+	dns_servers->setPlaceholderText(QStringLiteral("1.1.1.1 9.9.9.9 -- blank takes the "
+	            "lease's"));
+	form->addRow(QStringLiteral("nameservers"), dns_servers);
+
+	dns_search = new QLineEdit(this);
+	dns_search->setObjectName(QStringLiteral("iface_dns_search"));
+	dns_search->setPlaceholderText(QStringLiteral("corp.example lab.example"));
+	form->addRow(QStringLiteral("search domains"), dns_search);
+
+	dns_domains = new QLineEdit(this);
+	dns_domains->setObjectName(QStringLiteral("iface_dns_domains"));
+	dns_domains->setPlaceholderText(QStringLiteral("names under these go to this "
+	            "interface's servers"));
+	form->addRow(QStringLiteral("routing domains"), dns_domains);
+
+	on_drift = new QComboBox(this);
+	on_drift->setObjectName(QStringLiteral("iface_on_drift"));
+	fill(on_drift, drifts, sizeof(drifts) / sizeof(drifts[0]));
+	form->addRow(QStringLiteral("when it drifts"), on_drift);
 
 	preference = new QSpinBox(this);
 	preference->setObjectName(QStringLiteral("iface_preference"));
@@ -105,11 +207,10 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	    "same scale as a wireless network's metric, so the two compare directly."));
 	form->addRow(QStringLiteral("preference (lower wins)"), preference);
 
-	mtu = new QSpinBox(this);
-	mtu->setObjectName(QStringLiteral("iface_mtu"));
-	mtu->setRange(0, 65535);
-	mtu->setSpecialValueText(QStringLiteral("unset"));
-	form->addRow(QStringLiteral("mtu"), mtu);
+	/* **The MTU is not here any more.** It describes the adapter, not the
+	 * networking on it, so it lives in the device editor with the rest of the
+	 * hardware -- and two screens writing one `device` block into two drop-ins
+	 * is a duplicate block the loader refuses. Decision 0250. */
 
 	detection = new QComboBox(this);
 	detection->setObjectName(QStringLiteral("iface_detection"));
@@ -206,7 +307,15 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 
 	connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
 	connect(save_button, &QPushButton::clicked, this, &ncfg_interface_dialog::submit);
-	connect(addressing, &QComboBox::currentIndexChanged, this,
+	connect(source_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_source);
+	connect(source_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_source);
+	connect(source_up, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_up);
+	connect(source_down, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_down);
+	connect(route_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_route);
+	connect(route_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_route);
+	connect(source_kind, &QComboBox::currentIndexChanged, this,
+	    &ncfg_interface_dialog::addressing_changed);
+	connect(this->sources, &QListWidget::itemSelectionChanged, this,
 	    &ncfg_interface_dialog::addressing_changed);
 	connect(detection, &QComboBox::currentIndexChanged, this,
 	    &ncfg_interface_dialog::detection_changed);
@@ -253,12 +362,29 @@ void ncfg_interface_dialog::load_existing()
 		return;
 	}
 
-	const int shape = addressing->findData(existing.addressing);
-	if (shape >= 0) {
-		addressing->setCurrentIndex(shape);
+	for (const ncfg_address_source_row &source : existing.sources) {
+		/* The document's word for a source is not always the config
+		 * language's: it compiles `dhcp` into `dhcp4`, and writing that back
+		 * would be writing a spelling the file never had. */
+		const QString kind = source.source == QLatin1String("dhcp4")
+		    ? QStringLiteral("dhcp")
+		    : source.source;
+		put_source(kind, source.address);
 	}
-	static_address->setText(existing.address);
-	gateway->setText(existing.gateway);
+	for (const ncfg_route_row &route : existing.routes) {
+		put_route(route.destination, route.via, route.metric);
+	}
+	const int mode = dns_mode->findData(existing.dns.mode);
+	if (mode >= 0) {
+		dns_mode->setCurrentIndex(mode);
+	}
+	dns_servers->setText(existing.dns.servers);
+	dns_search->setText(existing.dns.search);
+	dns_domains->setText(existing.dns.domains);
+	const int drift = on_drift->findData(existing.on_drift);
+	if (drift >= 0) {
+		on_drift->setCurrentIndex(drift);
+	}
 	if (existing.preference >= 0) {
 		preference->setValue(existing.preference);
 	}
@@ -379,11 +505,94 @@ void ncfg_interface_dialog::edit_detection()
 
 void ncfg_interface_dialog::addressing_changed()
 {
-	const bool fixed = addressing->currentData().toString() == QStringLiteral("static");
-	auto *form = qobject_cast<QFormLayout *>(layout()->itemAt(0)->layout());
-	if (form) {
-		form->setRowVisible(static_address, fixed);
-		form->setRowVisible(gateway, fixed);
+	/* The address box belongs to one kind of source. Enabled rather than
+	 * hidden, so the row does not jump about while somebody is using it. */
+	const bool fixed = source_kind->currentData().toString() == QStringLiteral("static");
+	source_address->setEnabled(fixed);
+	const int row = sources->currentRow();
+	source_drop->setEnabled(row >= 0);
+	source_up->setEnabled(row > 0);
+	source_down->setEnabled(row >= 0 && row + 1 < sources->count());
+}
+
+/* One entry in the addressing list: the kind, and the address where it has
+ * one. The kind is kept on the item rather than parsed back out of its text,
+ * which is the mistake that would make a translated label unwritable. */
+void ncfg_interface_dialog::put_source(const QString &kind, const QString &address)
+{
+	const QString shown = address.isEmpty()
+	    ? kind
+	    : QStringLiteral("%1  %2").arg(kind, address);
+	auto *item = new QListWidgetItem(shown, sources);
+	item->setData(Qt::UserRole, kind);
+	item->setData(Qt::UserRole + 1, address);
+}
+
+void ncfg_interface_dialog::put_route(const QString &destination, const QString &via, int metric)
+{
+	const int row = routes->rowCount();
+	routes->insertRow(row);
+	routes->setItem(row, 0, new QTableWidgetItem(destination));
+	routes->setItem(row, 1, new QTableWidgetItem(via));
+	routes->setItem(row, 2,
+	    new QTableWidgetItem(metric >= 0 ? QString::number(metric) : QString()));
+}
+
+void ncfg_interface_dialog::add_source()
+{
+	const QString kind = source_kind->currentData().toString();
+	const QString address = source_address->text().trimmed();
+
+	if (kind == QLatin1String("static") && address.isEmpty()) {
+		note->setText(QStringLiteral("a fixed address needs an address"));
+		return;
+	}
+	put_source(kind, kind == QLatin1String("static") ? address : QString());
+	source_address->clear();
+	addressing_changed();
+}
+
+void ncfg_interface_dialog::drop_source()
+{
+	delete sources->takeItem(sources->currentRow());
+	addressing_changed();
+}
+
+void ncfg_interface_dialog::move_source_up()
+{
+	const int row = sources->currentRow();
+	if (row <= 0) {
+		return;
+	}
+	sources->insertItem(row - 1, sources->takeItem(row));
+	sources->setCurrentRow(row - 1);
+	addressing_changed();
+}
+
+void ncfg_interface_dialog::move_source_down()
+{
+	const int row = sources->currentRow();
+	if (row < 0 || row + 1 >= sources->count()) {
+		return;
+	}
+	sources->insertItem(row + 1, sources->takeItem(row));
+	sources->setCurrentRow(row + 1);
+	addressing_changed();
+}
+
+void ncfg_interface_dialog::add_route()
+{
+	/* An empty row rather than a dialog: three cells the operator fills in,
+	 * and `submit` refuses one with no destination. */
+	put_route(QStringLiteral("default"), QString(), -1);
+	routes->setCurrentCell(routes->rowCount() - 1, 1);
+}
+
+void ncfg_interface_dialog::drop_route()
+{
+	const int row = routes->currentRow();
+	if (row >= 0) {
+		routes->removeRow(row);
 	}
 }
 
@@ -426,21 +635,89 @@ void ncfg_interface_dialog::detection_changed()
 	}
 }
 
+/* One cell of the routes table, trimmed, empty where there is none. */
+QString ncfg_interface_dialog::cell(int row, int column) const
+{
+	const QTableWidgetItem *item = routes->item(row, column);
+	return item ? item->text().trimmed() : QString();
+}
+
 QString ncfg_interface_dialog::block_text() const
 {
 	QStringList body;
 
-	const QString kind = addressing->currentData().toString();
-	if (kind == QStringLiteral("static")) {
-		body << QStringLiteral("\tconfig = \"%1\"").arg(static_address->text().trimmed());
-		if (!gateway->text().trimmed().isEmpty()) {
-			body << QStringLiteral("\troutes = \"default via %1\"")
-			        .arg(gateway->text().trimmed());
-		}
-	} else if (kind == QStringLiteral("dhcp+slaac")) {
-		body << QStringLiteral("\tconfig = [\"dhcp\", \"slaac\"]");
+	/* **The list, in its order.** `config` is a composition and every entry
+	 * contributes; a fixed address is written as the address itself, which is
+	 * how the language spells that source. An empty list is `null`, which is
+	 * what a bridge member wants and what "no address at all" means. */
+	QStringList entries;
+	for (int row = 0; row < sources->count(); row++) {
+		const QString kind = sources->item(row)->data(Qt::UserRole).toString();
+		const QString address = sources->item(row)->data(Qt::UserRole + 1).toString();
+		entries << QStringLiteral("\"%1\"").arg(kind == QLatin1String("static") ? address
+		                                                                       : kind);
+	}
+	if (entries.isEmpty()) {
+		body << QStringLiteral("\tconfig = \"null\"");
 	} else {
-		body << QStringLiteral("\tconfig = \"%1\"").arg(kind);
+		body << QStringLiteral("\tconfig = [%1]").arg(entries.join(QStringLiteral(", ")));
+	}
+
+	QStringList lines;
+	for (int row = 0; row < routes->rowCount(); row++) {
+		const QString destination = cell(row, 0);
+		if (destination.isEmpty()) {
+			continue;
+		}
+		QString line = destination;
+		if (!cell(row, 1).isEmpty()) {
+			line += QStringLiteral(" via %1").arg(cell(row, 1));
+		}
+		if (!cell(row, 2).isEmpty()) {
+			line += QStringLiteral(" metric %1").arg(cell(row, 2));
+		}
+		lines << QStringLiteral("\"%1\"").arg(line);
+	}
+	if (!lines.isEmpty()) {
+		body << QStringLiteral("\troutes = [%1]").arg(lines.join(QStringLiteral(", ")));
+	}
+
+	/* A scope only where the operator asked for one: an interface that states
+	 * nothing is one the host-wide policy answers for, and writing an empty
+	 * `dns { }` would be saying something different from saying nothing. */
+	const QString mode = dns_mode->currentData().toString();
+	const bool scoped = !mode.isEmpty() || !dns_servers->text().trimmed().isEmpty()
+	    || !dns_search->text().trimmed().isEmpty() || !dns_domains->text().trimmed().isEmpty();
+	if (scoped) {
+		body << QStringLiteral("\tdns {");
+		if (!mode.isEmpty()) {
+			body << QStringLiteral("\t\tmode = \"%1\"").arg(mode);
+		}
+		const struct {
+			const char *key;
+			QString     value;
+		} scopes[] = {
+			{ "servers", dns_servers->text().trimmed() },
+			{ "search", dns_search->text().trimmed() },
+			{ "domains", dns_domains->text().trimmed() },
+		};
+		for (const auto &one : scopes) {
+			if (one.value.isEmpty()) {
+				continue;
+			}
+			QStringList quoted;
+			const QStringList words = one.value.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+			for (const QString &word : words) {
+				quoted << QStringLiteral("\"%1\"").arg(word);
+			}
+			body << QStringLiteral("\t\t%1 = [%2]")
+			        .arg(QString::fromLatin1(one.key), quoted.join(QStringLiteral(", ")));
+		}
+		body << QStringLiteral("\t}");
+	}
+
+	if (!on_drift->currentData().toString().isEmpty()) {
+		body << QStringLiteral("\ton_drift = \"%1\"").arg(on_drift->currentData().toString());
 	}
 
 	if (preference->value() > 0) {
@@ -497,17 +774,10 @@ QString ncfg_interface_dialog::block_text() const
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
 	block << QStringLiteral("# edit it, diff it, commit it, or delete it.");
 	block << QString();
-	/* **The MTU is the adapter's and goes in a `device` block** -- decision
-	 * 0155 pass 1a moved it, and the compiler refuses it inside `interface`.
-	 * Written as a second block in the same file rather than a second file:
-	 * one screen wrote both, and splitting them across drop-ins would leave an
-	 * operator deleting one and wondering why the other survived. */
-	if (mtu->value() > 0) {
-		block << QStringLiteral("device %1 {").arg(interface);
-		block << QStringLiteral("\tmtu = %1").arg(mtu->value());
-		block << QStringLiteral("}");
-		block << QString();
-	}
+	/* **No `device` block here any more.** It used to write the MTU as a
+	 * second block in this file; the device editor writes the whole of a
+	 * device now, and two drop-ins declaring one `device` is a duplicate block
+	 * the loader refuses -- correctly. Decision 0250. */
 	block << QStringLiteral("interface %1 {").arg(interface);
 	block << body;
 	block << QStringLiteral("}");
@@ -516,7 +786,8 @@ QString ncfg_interface_dialog::block_text() const
 
 void ncfg_interface_dialog::submit()
 {
-	const QLineEdit *values[] = { static_address, gateway, probe_command, probe_args };
+	const QLineEdit *values[] = { source_address, dns_servers, dns_search, dns_domains,
+		probe_command, probe_args };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "
@@ -524,10 +795,12 @@ void ncfg_interface_dialog::submit()
 			return;
 		}
 	}
-	if (addressing->currentData().toString() == QStringLiteral("static") &&
-	    static_address->text().trimmed().isEmpty()) {
-		note->setText(QStringLiteral("a fixed address needs an address"));
-		return;
+	for (int row = 0; row < routes->rowCount(); row++) {
+		if (cell(row, 0).isEmpty()) {
+			note->setText(QStringLiteral("a route needs a destination: `default`, or a "
+			              "network like 10.0.0.0/8"));
+			return;
+		}
 	}
 	if (detection->currentData().toString() == QStringLiteral("command") &&
 	    !probe_command->text().trimmed().startsWith(QLatin1Char('/'))) {

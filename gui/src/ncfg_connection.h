@@ -285,11 +285,41 @@ struct ncfg_globals {
  * field the dialog checks before writing: a block composed from the rest and
  * saved over one containing any of them would delete what it could not show.
  */
+/* One way an interface gets an address. `address` is the CIDR for a `static`
+ * source and empty for every other kind. */
+struct ncfg_address_source_row {
+	QString source;
+	QString address;
+};
+
+/* One route, as the editor's three columns carry it. */
+struct ncfg_route_row {
+	QString destination;
+	QString via;
+	/* -1 where the document states none: 0 is a legal metric, and the
+	 * strongest one. */
+	int     metric = -1;
+};
+
+/* An interface's own name resolution. Empty `mode` means it states none and
+ * the host-wide policy answers (0007). */
+struct ncfg_dns_scope_row {
+	QString mode;
+	QString servers;
+	QString search;
+	QString domains;
+};
+
 struct ncfg_interface_config {
 	bool    present = false;
-	QString addressing;
-	QString address;
-	QString gateway;
+	/* How it gets addresses, in the document's order -- a list rather than
+	 * one word, because the model's own word for it is a list and collapsing
+	 * it made every composition the collapse did not name unrepresentable. */
+	QList<ncfg_address_source_row> sources;
+	QList<ncfg_route_row>          routes;
+	ncfg_dns_scope_row             dns;
+	/* "", "reconcile", "report" or "ignore". */
+	QString on_drift;
 	int     preference = -1;
 	bool    enabled = true;
 	bool    forwarding = false;
@@ -298,6 +328,55 @@ struct ncfg_interface_config {
 	QString probe_args;
 	int     probe_interval = 0;
 	int     probe_timeout = 0;
+	QString unmodelled;
+};
+
+/* One device: the hardware, and netcfgd's policy about it. A device is what
+ * has to exist before a link can; a link is where the networking is
+ * configured. */
+struct ncfg_device_row {
+	QString name;
+	bool    present = false;
+	bool    configured = false;
+	QString kind;
+	bool    managed = true;
+	QString mac;
+	int     mtu = 0;
+	/* "wifi", "modem" or empty: which extra policy block it carries. */
+	QString policy;
+};
+
+/* One device's configuration, as far as a form can show it. */
+struct ncfg_device_config {
+	bool    present = false;
+	bool    managed = true;
+	QString on_unmanage;
+	QString kind;
+	int     mtu = 0;
+	QString mac;
+	/* ethtool. A toggle is three-valued: unmanaged, on, off. */
+	int     autoneg = 0;
+	int     speed = 0;
+	QString duplex;
+	QString wol;
+	int     rx_ring = 0;
+	int     tx_ring = 0;
+	int     gro = 0;
+	int     gso = 0;
+	int     tso = 0;
+	int     rx_checksum = 0;
+	int     tx_checksum = 0;
+	bool    has_wifi = false;
+	QString wifi_backend;
+	bool    wifi_autoconnect = true;
+	QString powersave;
+	QString mac_policy;
+	bool    scan_randomization = false;
+	QString regdom;
+	QString portal_check;
+	bool    has_modem = false;
+	QString sim;
+	QString apn;
 	QString unmodelled;
 };
 
@@ -793,6 +872,11 @@ public:
 	/* The host-wide policy the configuration declares. */
 	bool globals(ncfg_globals *out, QString *error);
 	bool interface_config(const QString &interface, ncfg_interface_config *out, QString *error);
+	/* Every device: the union of what the kernel has and what the document
+	 * describes, for the reason the link inventory is a union (0246). */
+	bool devices(QList<ncfg_device_row> *out, QString *error);
+	/* One device's configuration, defaults where the document has no block. */
+	bool device_config(const QString &device, ncfg_device_config *out, QString *error);
 	/* The credentials this machine holds, by name. Never by value: there is
 	 * no field that could carry one. */
 	bool secrets(QList<ncfg_secret_row> *out, QString *error);

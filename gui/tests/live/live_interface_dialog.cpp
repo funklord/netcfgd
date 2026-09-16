@@ -34,7 +34,9 @@
 #include <QPushButton>
 #include <QFormLayout>
 #include <QPlainTextEdit>
+#include <QListWidget>
 #include <QSpinBox>
+#include <QTableWidget>
 
 #include <cstdio>
 
@@ -85,12 +87,17 @@ int main(int argc, char **argv)
 	check("the dialog's connection reaches netcfgd", true);
 
 	ncfg_interface_dialog dialog(&connection, iface);
-	auto *addressing = dialog.findChild<QComboBox *>(QStringLiteral("iface_addressing"));
+	auto *sources = dialog.findChild<QListWidget *>(QStringLiteral("iface_sources"));
+	auto *source_kind = dialog.findChild<QComboBox *>(QStringLiteral("iface_source_kind"));
+	auto *source_address = dialog.findChild<QLineEdit *>(QStringLiteral("iface_source_address"));
+	auto *source_add = dialog.findChild<QPushButton *>(QStringLiteral("iface_source_add"));
+	auto *routes = dialog.findChild<QTableWidget *>(QStringLiteral("iface_routes"));
+	auto *route_add = dialog.findChild<QPushButton *>(QStringLiteral("iface_route_add"));
 	auto *preference = dialog.findChild<QSpinBox *>(QStringLiteral("iface_preference"));
-	auto *mtu = dialog.findChild<QSpinBox *>(QStringLiteral("iface_mtu"));
 	auto *detection = dialog.findChild<QComboBox *>(QStringLiteral("iface_detection"));
 	auto *save = dialog.findChild<QPushButton *>(QStringLiteral("iface_save"));
-	if (!addressing || !preference || !mtu || !detection || !save) {
+	if (!sources || !source_kind || !source_address || !source_add || !routes || !route_add
+	    || !preference || !detection || !save) {
 		check("the dialog has the fields it needs", false);
 		return 1;
 	}
@@ -118,14 +125,25 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	addressing->setCurrentIndex(addressing->findData(QStringLiteral("dhcp")));
+	/* **A composition, because that is what the model holds**: a lease and a
+	 * fixed address on one interface, which the old single combo could not
+	 * express at all and therefore refused to open. */
+	source_kind->setCurrentIndex(source_kind->findData(QStringLiteral("dhcp")));
+	source_add->click();
+	source_kind->setCurrentIndex(source_kind->findData(QStringLiteral("static")));
+	source_address->setText(QStringLiteral("10.4.4.4/24"));
+	source_add->click();
+	check("both sources are in the list", sources->count() == 2,
+	    QString::number(sources->count()));
+
+	/* And a route that is not a default, which the one gateway box could not
+	 * hold -- an interface with one was refused wholesale. */
+	route_add->click();
+	routes->setItem(0, 0, new QTableWidgetItem(QStringLiteral("10.9.0.0/24")));
+	routes->setItem(0, 1, new QTableWidgetItem(QStringLiteral("10.4.4.1")));
+	routes->setItem(0, 2, new QTableWidgetItem(QStringLiteral("120")));
+
 	preference->setValue(50);
-	/* **The MTU, because it is the field that moved.** 0155 pass 1a put it on
-	 * the device, and this dialog went on writing it inside `interface` -- a
-	 * block the compiler refuses. Nothing caught that: this test set every
-	 * other field and not this one, so the check below on whether netcfgd
-	 * compiled the result had nothing to compile wrongly. */
-	mtu->setValue(1492);
 	detection->setCurrentIndex(at);
 	save->click();
 
@@ -135,10 +153,15 @@ int main(int argc, char **argv)
 	check("the drop-in is there", written.exists(), written.fileName());
 	if (written.open(QIODevice::ReadOnly)) {
 		const QString text = QString::fromUtf8(written.readAll());
-		check("the mtu was written as a device block, not an interface key",
-		    text.contains(QStringLiteral("device gui-probe0 {")) &&
-		        text.contains(QStringLiteral("mtu = 1492")),
-		    text);
+		/* **No `device` block here.** The MTU moved to the device editor,
+		 * which writes `device-<name>`; two drop-ins declaring one `device`
+		 * is a duplicate block the loader refuses. */
+		check("the interface drop-in carries no device block",
+		    !text.contains(QStringLiteral("device gui-probe0 {")), text);
+		check("the addressing was written as a list, in the order given",
+		    text.contains(QStringLiteral("config = [\"dhcp\", \"10.4.4.4/24\"]")), text);
+		check("and the route with its gateway and metric",
+		    text.contains(QStringLiteral("10.9.0.0/24 via 10.4.4.1 metric 120")), text);
 		check("the preference was written", text.contains(QStringLiteral("preference = 50")),
 		    text);
 		check("and a probe block", text.contains(QStringLiteral("probe {")), text);
@@ -181,9 +204,10 @@ int main(int argc, char **argv)
 		QFormLayout *form = dialog.findChild<QFormLayout *>();
 		check("the dialog has a form", form != nullptr);
 		if (form) {
-			const QWidget *fields[] = { addressing, preference, detection };
-			const char *names[] = { "addressing", "preference", "link detection" };
-			for (int i = 0; i < 3; i++) {
+			const QWidget *fields[] = { sources, routes, preference, detection };
+			const char *names[] = { "addressing", "routes", "preference",
+				"link detection" };
+			for (int i = 0; i < 4; i++) {
 				int row = -1;
 				QFormLayout::ItemRole role{};
 				/* A widget inside a row's layout rather than the row

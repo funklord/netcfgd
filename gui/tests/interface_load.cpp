@@ -31,7 +31,9 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QProcess>
+#include <QListWidget>
 #include <QSpinBox>
+#include <QTableWidget>
 #include <QMetaObject>
 #include <QTemporaryDir>
 #include <QThread>
@@ -120,8 +122,12 @@ int main(int argc, char **argv)
 		    QStringLiteral("global { control { observe = \"any\" } }\n"
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "interface eth0 {\n"
-		                   "\tconfig = \"192.0.2.10/24\"\n"
-		                   "\troutes = \"default via 192.0.2.1\"\n"
+		                   "\tconfig = [\"dhcp\", \"192.0.2.10/24\"]\n"
+		                   "\troutes = [\"default via 192.0.2.1\", "
+		                   "\"10.9.0.0/24 via 192.0.2.9\"]\n"
+		                   "\tdns { mode = \"write_resolv_conf\" ; "
+		                   "servers = [\"192.0.2.53\"] }\n"
+		                   "\ton_drift = \"report\"\n"
 		                   "\tpreference = 50\n"
 		                   "\tforwarding = true\n"
 		                   "\tnat = true\n"
@@ -144,13 +150,48 @@ int main(int argc, char **argv)
 		}
 
 		ncfg_interface_dialog dialog(&connection, QStringLiteral("eth0"));
-		auto *kind = widget<QComboBox>(&dialog, "iface_addressing");
-		check(kind ? kind->currentData().toString() : QStringLiteral("<missing>"),
-		    QStringLiteral("static"), "the addressing kind is loaded");
-		check(text_of(&dialog, "iface_address"), QStringLiteral("192.0.2.10/24"),
-		    "the static address is loaded");
-		check(text_of(&dialog, "iface_gateway"), QStringLiteral("192.0.2.1"),
-		    "the gateway is loaded");
+		/* **The addressing list, in the document's order.** One combo used to
+		 * stand for the whole list, so a composition it did not name -- two
+		 * sources, a lease beside a fixed address -- was reported as
+		 * unrepresentable and the interface could not be edited at all. */
+		auto *sources = widget<QListWidget>(&dialog, "iface_sources");
+		check(QString::number(sources ? sources->count() : -1), QStringLiteral("2"),
+		    "both addressing sources are loaded");
+		if (sources && sources->count() == 2) {
+			check(sources->item(0)->data(Qt::UserRole).toString(),
+			    QStringLiteral("dhcp"), "the first source is the lease");
+			check(sources->item(1)->data(Qt::UserRole).toString(),
+			    QStringLiteral("static"), "the second is the fixed address");
+			check(sources->item(1)->data(Qt::UserRole + 1).toString(),
+			    QStringLiteral("192.0.2.10/24"), "with the address beside it");
+		}
+		auto *routes = widget<QTableWidget>(&dialog, "iface_routes");
+		check(QString::number(routes ? routes->rowCount() : -1), QStringLiteral("2"),
+		    "both routes are loaded");
+		if (routes && routes->rowCount() == 2) {
+			/* **In the document's order, which is canonical and not the
+			 * order the file was written in**: the compiler sorts routes, so
+			 * `10.9.0.0/24` comes before `default`. Asserted as a set for
+			 * that reason -- a test that pinned the file's order would be
+			 * pinning something netcfgd does not promise. */
+			QStringList destinations;
+			for (int row = 0; row < routes->rowCount(); row++) {
+				destinations << (routes->item(row, 0) ? routes->item(row, 0)->text()
+				                                      : QString());
+			}
+			destinations.sort();
+			check(destinations.join(QLatin1Char(' ')),
+			    QStringLiteral("10.9.0.0/24 default"),
+			    "the default route and the one to another subnet are both there");
+		}
+		auto *mode = widget<QComboBox>(&dialog, "iface_dns_mode");
+		check(mode ? mode->currentData().toString() : QStringLiteral("<missing>"),
+		    QStringLiteral("write_resolv_conf"), "the interface's dns mode is loaded");
+		check(text_of(&dialog, "iface_dns_servers"), QStringLiteral("192.0.2.53"),
+		    "and its nameservers");
+		auto *drift = widget<QComboBox>(&dialog, "iface_on_drift");
+		check(drift ? drift->currentData().toString() : QStringLiteral("<missing>"),
+		    QStringLiteral("report"), "and what it does when the machine drifts");
 		auto *preference = widget<QSpinBox>(&dialog, "iface_preference");
 		check(QString::number(preference ? preference->value() : -1),
 		    QStringLiteral("50"), "the preference is loaded");
@@ -159,13 +200,34 @@ int main(int argc, char **argv)
 		                                           : QStringLiteral("no"),
 		    QStringLiteral("yes"), "forwarding is loaded");
 
+		/* **And it can be saved**, which is the half that was broken for
+		 * every interface netcfgd writes itself. The refusal used to fire on
+		 * any key that was *present*, and a compiled interface carries
+		 * `hooks: []` and a `dns` scope whether anybody wrote them or not --
+		 * so `ncfg wifi activate`'s own block could not be edited at all. An
+		 * empty list is not content. */
+		QMetaObject::invokeMethod(&dialog, "submit");
+		auto *note = widget<QLabel>(&dialog, "iface_note");
+		const QString said = note ? note->text() : QString();
+		check(said.contains(QStringLiteral("would delete")) ? said
+		                                                    : QStringLiteral("accepted"),
+		    QStringLiteral("accepted"),
+		    "and a block whose every key has a field is saveable");
+
 		daemon.kill();
 		daemon.waitForFinished(2000);
 	}
 
 	/* And a block carrying something the form cannot express. Saving must be
 	 * refused, naming it -- loading harder would not help, because there is no
-	 * field to load into. */
+	 * field to load into.
+	 *
+	 * **`ipv6_token`, because `dns` is a field now.** The refusal used to be
+	 * demonstrated with a `dns` scope, and the list of keys that trip it was
+	 * "any key that is present" -- so a compiled interface carrying `hooks: []`
+	 * and a default scope, which is what `ncfg wifi activate` writes, could not
+	 * be edited at all. What is refused now is a key that holds something no
+	 * field can. */
 	{
 		QTemporaryDir work;
 		QProcess daemon;
@@ -174,7 +236,7 @@ int main(int argc, char **argv)
 		                   "device eth0 { kind = \"physical\" }\n"
 		                   "interface eth0 {\n"
 		                   "\tconfig = \"192.0.2.10/24\"\n"
-		                   "\tdns { servers = [\"192.0.2.53\"] }\n"
+		                   "\tipv6_token = \"::5\"\n"
 		                   "}\n"));
 		if (socket.isEmpty()) {
 			fprintf(stderr, "interface_load: the second daemon never started\n");
@@ -196,7 +258,7 @@ int main(int argc, char **argv)
 		QMetaObject::invokeMethod(&dialog, "submit");
 		auto *note = widget<QLabel>(&dialog, "iface_note");
 		const QString said = note ? note->text() : QStringLiteral("<no note>");
-		check(said.contains(QStringLiteral("dns")) &&
+		check(said.contains(QStringLiteral("ipv6_token")) &&
 		        said.contains(QStringLiteral("would delete"))
 		        ? QStringLiteral("refused")
 		        : said,

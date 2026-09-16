@@ -9473,6 +9473,66 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.144 The device tab, and the refusal that never lifted
+
+Reported, and both halves were true: *"We now have no device section and there
+is no way to configure IP for each link nor is there a way to configure the
+physical interfaces properly."*
+
+**The device half.** `device` blocks have been the model's since 0155 and no
+window could write one; the only key any screen reached was the MTU, which the
+interface editor smuggled out as a second block inside its own drop-in. There
+is a `devices` tab now, beside `links` and after it -- a link is where the
+networking is configured, a device is what has to exist before a link can --
+with an editor for `managed`, `on_unmanage`, the MTU and MAC, the ethtool
+settings and offloads, and the radio and modem policies. The rows are a union of
+the kernel's adapters and the document's blocks, for the reason the link
+inventory is one. `kind` is read-only: a bridge carries members and a form that
+wrote the block back without them would empty it. Decision 0250.
+
+The MTU moved to the device editor and had to: two screens writing one `device`
+block into two drop-ins is a duplicate the loader refuses, correctly.
+
+**The addressing half.** One combo stood for the whole `addressing` list, so
+every composition it did not name -- two sources, a lease beside a fixed address
+-- was unrepresentable; routes were one `default via` box, so an interface with
+a route to another subnet was refused wholesale; a per-interface DNS scope and
+`on_drift` had no field at all. All four are fields now.
+
+### The refusal that never lifted
+
+The editor refuses to save a block carrying a key it has no field for, which is
+right. The list of such keys was built with `if (ncfg_json_member(doc, block,
+key))` -- and **`ncfg_json_member` answers `NCFG_JSON_NONE` for an absent key,
+which is `0xffffffff`, which is true**. So the check read as "the key is
+present" and meant "always": every interface was reported as carrying every key
+on the list, and the interface editor could not save any interface that existed.
+That is the report's "no way to configure IP for each link", exactly.
+
+Nothing caught it, and the reason is worth keeping: both tests that exercise
+that dialog open it on an interface the document does not describe, which
+returns before the check. The live probe wrote its drop-in happily; the headless
+one asserted loading and never tried saving. The headless probe saves now.
+
+The same shape was in the reader: a DNS server is an object with an address, a
+port and an SNI name, not a string, so a scope's servers arrived empty.
+
+### A stale binary, for the third time
+
+The headless probes link the C client and had no `PRE_TARGETDEPS` on it, so
+`make -C gui test` ran them against the previous library -- and cost a debugging
+round chasing a failure that was already fixed. The live probes' projects have
+carried that line since they were written. All twelve headless projects have it
+now. After 0247's sabotage pass and 0249's skipped suite, this is the third time
+this campaign has paid for a stale artifact.
+
+### Seven sabotages, all caught
+
+A key that is merely present counting as unrepresentable again; DNS servers read
+as strings; `managed` written when it is the default; an empty `ethtool` block
+written anyway; a toggle left alone written as `unmanaged`; the interface editor
+writing a device block again; the device editor never loading what was written.
+
 ## 10.143 The group editor, and a suite that had never run
 
 0248 left a linkset that could be written, compiled, chosen and acted on, and no

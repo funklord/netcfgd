@@ -6,6 +6,7 @@
 #include "access_view.h"
 #include "dns_view.h"
 #include "apply_dialog.h"
+#include "links_view.h"
 #include "devices_view.h"
 #include "global_view.h"
 #include "modems_view.h"
@@ -68,6 +69,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	configuration = new QTabWidget(tabs);
 	changes = new QTabWidget(tabs);
 
+	links = new ncfg_links_view(connection, machine);
 	devices = new ncfg_devices_view(connection, machine);
 	wifi = new ncfg_wifi_view(connection, machine);
 	modems = new ncfg_modems_view(connection, machine);
@@ -80,7 +82,13 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * before a link can; a link is where the networking is configured. The
 	 * GUI had one list wearing the other noun, and no view of devices at all.
 	 */
-	machine->addTab(devices, QStringLiteral("links"));
+	machine->addTab(links, QStringLiteral("links"));
+	/* **Beside `links`, and after it.** A device is what has to exist before a
+	 * link can, so an operator meets the link first and comes here when the
+	 * hardware under it is the question -- an MTU, a MAC, what drives a radio,
+	 * whether netcfgd manages the card at all. Those keys have been the
+	 * model's since 0155 and no window could write one until 0250. */
+	machine->addTab(devices, QStringLiteral("devices"));
 	machine->addTab(wifi, QStringLiteral("wifi"));
 	/* Beside wifi: a modem is the other way this machine reaches a network,
 	 * and an operator looking for one looks where the radios are. */
@@ -130,6 +138,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	tabs->addTab(changes, QStringLiteral("changes"));
 	layout->addWidget(tabs);
 
+	connect(links, &ncfg_links_view::reported, this, &ncfg_main_window::note);
 	connect(devices, &ncfg_devices_view::reported, this, &ncfg_main_window::note);
 	connect(modems, &ncfg_modems_view::reported, this, &ncfg_main_window::note);
 	connect(global, &ncfg_global_view::reported, this, &ncfg_main_window::note);
@@ -144,6 +153,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
 	connect(hooks, &ncfg_hooks_view::reported, this, &ncfg_main_window::note);
 	connect(profiles, &ncfg_profiles_view::changed, this, &ncfg_main_window::reload);
+	connect(links, &ncfg_links_view::changed, this, &ncfg_main_window::reload);
 	connect(devices, &ncfg_devices_view::changed, this, &ncfg_main_window::reload);
 	connect(wifi, &ncfg_wifi_view::reported, this, &ncfg_main_window::note);
 	connect(wifi, &ncfg_wifi_view::changed, this, &ncfg_main_window::reload);
@@ -213,6 +223,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	resize(880, 560);
 
 	where->setText(QStringLiteral("netcfgd at %1").arg(connection->where()));
+	links->refresh();
 	devices->refresh();
 	plan->refresh();
 	/* Subscribed from the start rather than when the tab is first opened: an
@@ -256,7 +267,9 @@ void ncfg_main_window::refresh()
 	}
 
 	QWidget *current = current_pane();
-	if (current == devices) {
+	if (current == links) {
+		links->refresh();
+	} else if (current == devices) {
 		devices->refresh();
 	} else if (current == wifi) {
 		/* Re-reads the radios and what they are doing. Never scans: a scan
@@ -291,6 +304,7 @@ void ncfg_main_window::refresh()
 
 void ncfg_main_window::reload()
 {
+	links->refresh();
 	devices->refresh();
 	plan->refresh();
 	/* **The tray too, which this did not do.** `reload` is the path a
