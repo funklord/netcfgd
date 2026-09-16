@@ -545,6 +545,7 @@ fn inventory(observed: &mut Observed) {
 			configured: true,
 			subject: netcfgd_model::link::Subject::Interface,
 			carrier: None,
+			sets: Vec::new(),
 		},
 		netcfgd_model::link::Entry {
 			name: "eth1".to_owned(),
@@ -553,6 +554,7 @@ fn inventory(observed: &mut Observed) {
 			configured: true,
 			subject: netcfgd_model::link::Subject::Interface,
 			carrier: None,
+			sets: Vec::new(),
 		},
 		netcfgd_model::link::Entry {
 			name: "n-cafe".to_owned(),
@@ -563,6 +565,9 @@ fn inventory(observed: &mut Observed) {
 			// The radio carrying it, which is also why there is no row of
 			// its own for `wlan0`.
 			carrier: Some("wlan0".to_owned()),
+			// And the set that is deciding about it, which is the other join
+			// a reader of this schema has to get right.
+			sets: vec!["uplink".to_owned()],
 		},
 		netcfgd_model::link::Entry {
 			name: "n-office".to_owned(),
@@ -572,6 +577,7 @@ fn inventory(observed: &mut Observed) {
 			subject: netcfgd_model::link::Subject::Network,
 			// Nothing is on it, so nothing carries it.
 			carrier: None,
+			sets: Vec::new(),
 		},
 	];
 }
@@ -583,6 +589,29 @@ fn witness() -> Observed {
 		// pushed this function past the line limit, and it is the one part of
 		// the witness that is a join rather than a record.
 		inventory: Vec::new(),
+		// One set, with a member it chose and a member it did not. Both halves
+		// are in the witness because both are what a client renders: the
+		// winner is what the machine is on, and the reason the loser lost is
+		// the only thing that answers "why am I on the modem".
+		linksets: vec![netcfgd_model::linkset::Chosen {
+			name: "uplink".to_owned(),
+			active: Some("n-cafe".to_owned()),
+			interface: Some("wlan0".to_owned()),
+			members: vec![
+				netcfgd_model::linkset::Standing {
+					name: "n-cafe".to_owned(),
+					interface: Some("wlan0".to_owned()),
+					metric: Some(50),
+					ineligible: None,
+				},
+				netcfgd_model::linkset::Standing {
+					name: "eth1".to_owned(),
+					interface: None,
+					metric: Some(100),
+					ineligible: Some(netcfgd_model::linkset::Ineligible::Absent),
+				},
+			],
+		}],
 		// Set rather than absent, so the witness pins the shape: the field
 		// carries `skip_serializing_if`, and a field absent from the witness is
 		// exactly the one that can go quiet unnoticed -- which is what this

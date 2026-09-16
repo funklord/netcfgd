@@ -100,13 +100,14 @@
 # string interpolation. A value is a string, a number, `true`/`false`, a
 # secret reference, or a list of those.
 #
-# Six blocks exist at the top level:
+# Seven blocks exist at the top level:
 #
 #   interface NAME       what an interface should look like
 #   device NAME          the hardware under it, and whether netcfgd touches it
 #   network "SSID"       a wireless network you might join, anywhere
 #   access_point "SSID"  a network this machine offers to others
 #   rule NAME            policy routing, which belongs to no one interface
+#   linkset NAME         a group of links, one of which is used at a time
 #   global               settings with no interface to attach to
 #
 # Configuration is /etc/netcfgd/netcfgd.conf, then /etc/netcfgd/conf.d/*.conf
@@ -1191,6 +1192,61 @@
 #interface tun0 {
 #	config = "reported"
 #}
+
+
+##############################################################################
+# LINKSETS -- ONE LINK AT A TIME
+#
+# A `linkset` is a named group of links that can stand in for each other, and
+# netcfgd uses one of them at a time. A cable and a modem, a cable and the
+# office wifi, two cables to two providers: the sentence is always "these can
+# reach the same place, use the best one that actually works".
+#
+# A member is an interface, a `network` block by name, or another linkset.
+# That last one is what makes the group a link in its own right.
+
+#interface eth0 {
+#	config = "dhcp"
+#	preference = 100
+#}
+#interface wwan0 {
+#	config = "dhcp"
+#	preference = 700
+#}
+#network "office" {
+#	wifi { psk = "@secret:office" }
+#	config = "dhcp"
+#	metric = 300
+#}
+#linkset "uplink" {
+#	members = ["eth0", "office", "wwan0"]
+#}
+
+# THE ONE IN USE is the eligible member with the lowest metric -- an
+# interface's `preference`, a network's `metric` -- and where two cannot be
+# told apart, the one written first. A member is eligible when the link
+# carrying it has carrier and has not failed its `probe`, which are the same
+# two facts `preference` already acts on.
+#
+# An absent metric reads as 0, which is the STRONGEST. That is the kernel's
+# own reading of an unnumbered route, and it is why writing a metric on one
+# member and not another demotes the one you wrote.
+#
+# WHAT IT DOES: the chosen member gets its routes and the others do not.
+# A spare holding a default route at a worse metric is not a spare -- it is a
+# second path the kernel falls back to on its own, with nothing having decided
+# that it works. `ncfg status` prints each set, what it chose, and why each
+# other member is not carrying anything.
+#
+# THE SET CALLED `uplink` IS SPECIAL, by that name and nothing else: it is the
+# one that carries the default route, and it is what netcfgd means by
+# "connected" -- the tray icon, `ncfg wait-online`, and the `connectivity`
+# block in `global` all follow it. Declare it narrowly and you have said that
+# a machine reaching the network any other way is not connected, which is a
+# reasonable thing to say and worth saying on purpose.
+#
+# Any other name is an ordinary set: it chooses one member and withholds the
+# rest's routes, and it says nothing about what "connected" means.
 
 
 ##############################################################################

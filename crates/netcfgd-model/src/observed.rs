@@ -1257,6 +1257,18 @@ pub struct Observed {
 	/// observation written by an older netcfgd still parses.
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub inventory: Vec<crate::link::Entry>,
+	/// What each linkset settled on, and what it settled it from.
+	///
+	/// One entry per set the document declares, in document order. Carried in
+	/// the observation rather than recomputed by each client for the reason
+	/// [`crate::connectivity`] is: a failover decision that two programs work
+	/// out separately is one they can disagree about, and the disagreement
+	/// looks like a machine that cannot decide which link it is on.
+	///
+	/// Empty where nothing has computed it -- a bare netlink snapshot, a
+	/// document with no sets, or a netcfgd older than this field.
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub linksets: Vec<crate::linkset::Chosen>,
 	/// Links, sorted by name.
 	pub links: Vec<ObservedLink>,
 	/// Bluetooth adapters, sorted by name.

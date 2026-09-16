@@ -355,6 +355,9 @@ pub fn build(snapshot: &Snapshot, prior: &PriorState) -> Observed {
 
 	let mut observed = Observed {
 		inventory: Vec::new(),
+		// Both filled in by `host::augment`, which has the document: a set is
+		// declared configuration and a netlink dump has never heard of one.
+		linksets: Vec::new(),
 		connectivity: None,
 		// Filled in by `host::augment`, which reads /sys. The netlink pass
 		// this belongs to knows nothing about Bluetooth: an adapter is not a

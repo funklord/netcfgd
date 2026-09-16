@@ -1867,6 +1867,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			);
 		}
 	}
+	print_linksets(&observed);
 	// Printed once rather than per interface: the conflict is with a table,
 	// not with a device, and repeating it under every link would make one
 	// problem look like several.
@@ -1888,6 +1889,40 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		);
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// What each linkset settled on, and why each loser lost.
+///
+/// **The losers are the point.** "This machine is on the modem" is visible
+/// from the routing table; "because the cable has no carrier and the office
+/// wifi is out of range" is not visible anywhere else, and it is the whole of
+/// what somebody asking "why am I on the modem" wants.
+fn print_linksets(observed: &netcfgd_model::Observed) {
+	for set in &observed.linksets {
+		println!();
+		match &set.active {
+			Some(active) => {
+				let on = set
+					.interface
+					.as_deref()
+					.filter(|interface| *interface != active)
+					.map_or_else(String::new, |interface| format!(" on {interface}"));
+				println!("linkset {} using {active}{on}", set.name);
+			}
+			None => println!("linkset {} using nothing", set.name),
+		}
+		for member in &set.members {
+			// The winner is named above; what each line adds is the standing
+			// of the ones that are not carrying anything.
+			if set.active.as_deref() == Some(member.name.as_str()) {
+				continue;
+			}
+			let why = member
+				.ineligible
+				.map_or("ready", netcfgd_model::linkset::Ineligible::name);
+			println!("    {} [{why}]", member.name);
+		}
+	}
 }
 
 fn command_show(options: &Options) -> Result<ExitCode, String> {

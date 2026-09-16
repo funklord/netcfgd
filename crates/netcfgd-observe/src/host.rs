@@ -67,9 +67,32 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	// particular `ask_supplicants`, which is what puts a radio's `network` on
 	// its link and therefore what gives the primary link the name an operator
 	// recognises rather than `wlan0`. 0243.
-	// Before the verdict, which does not use it, but after everything that
-	// fills in what it reads. One rule, in the model, so the Qt window's
-	// filter, the text interface and the TDE module cannot each invent one.
+	derive(observed, desired);
+}
+
+/// The answers that are computed from an observation rather than read.
+///
+/// Categories, the link inventory, what each linkset chose and the
+/// connectivity verdict: four things that are functions of the links, the
+/// addresses, the routes, the probe verdicts and the document, and nothing
+/// else. Pure, and therefore safe to run twice.
+///
+/// **Separate from `augment` because one of its inputs arrives after it.** The
+/// daemon stamps probe verdicts onto a fresh observation *after* the
+/// observation is built -- the observer reads the kernel and no probe result
+/// comes from there -- so an `uplink` set computed inside `augment` was
+/// computed from `reachable: None` on every link, and said the machine was on
+/// the better-ranked link while the planner, which reads the stamped
+/// observation, had taken that link's routes away. The same was true of
+/// `connectivity` with `requires = "probe"`: the rung could never reach
+/// `online`, because the verdict it asks for had not been written yet.
+///
+/// So the daemon calls this again once the verdicts are on. Everything here is
+/// derived, so running it twice costs one pass over the links and changes
+/// nothing that was already right.
+pub fn derive(observed: &mut Observed, desired: Option<&netcfgd_model::Document>) {
+	// One rule, in the model, so the Qt window's filter, the text interface
+	// and the TDE module cannot each invent one.
 	for index in 0..observed.links.len() {
 		observed.links[index].category = Some(netcfgd_model::link::category_of(
 			&observed.links[index],
@@ -80,6 +103,18 @@ pub fn augment(observed: &mut Observed, run_dir: &Path, desired: Option<&netcfgd
 	// is what puts a radio's network on its link and so decides whether a
 	// configured network counts as associated.
 	observed.inventory = netcfgd_model::link::inventory(desired, observed);
+	// **Before the verdict, which reads it.** Where the document declares an
+	// `uplink` set, that set is what "connected" means, so the choice has to be
+	// made before `overall` asks -- and it is made once, here, rather than by
+	// each client, because two programs working out a failover separately is
+	// two programs that can disagree about which link this machine is on.
+	observed.linksets = desired.map_or_else(Vec::new, |document| {
+		document
+			.linksets
+			.iter()
+			.filter_map(|set| netcfgd_model::linkset::choose(document, observed, &set.name))
+			.collect()
+	});
 	observed.connectivity = Some(netcfgd_model::connectivity::overall(
 		observed,
 		&desired.map_or_else(netcfgd_model::connectivity::Policy::default, |document| {

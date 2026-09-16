@@ -92,6 +92,16 @@ int main(int argc, char **argv)
 	check(ncfg_link_subject(rows, QStringLiteral("nothing")) == QStringLiteral("interface"),
 	    "and so is a row that is not in the inventory at all");
 
+	/* A linkset is a third kind of row, and it is the one with no editor: a
+	 * group opened in an interface dialog would be 0247's fault again, one
+	 * kind of row later. */
+	ncfg_inventory_row group;
+	group.name = QStringLiteral("uplink");
+	group.subject = QStringLiteral("linkset");
+	rows << group;
+	check(ncfg_link_subject(rows, QStringLiteral("uplink")) == QStringLiteral("linkset"),
+	    "a group is not sent to either link editor");
+
 	if (failures == 0) {
 		fprintf(stderr, "link_filter: all checks passed\n");
 	} else {

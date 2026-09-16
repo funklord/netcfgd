@@ -51,6 +51,9 @@ pub fn lower(
 	// can fail -- on a name too long for the kernel -- and a diagnostic
 	// pointing at the top of the file would be useless.
 	let mut ingress_shapers: Vec<(String, crate::diag::Span)> = Vec::new();
+	// `(set, where its block is)`, for the checks that can only run once every
+	// block has been read.
+	let mut linkset_spans: Vec<(String, crate::diag::Span)> = Vec::new();
 
 	for assignment in &merged.assignments {
 		lower_global_key(&mut document, assignment, &mut diagnostics);
@@ -116,11 +119,22 @@ pub fn lower(
 					document.networks.push(network);
 				}
 			}
+			"linkset" => {
+				if let Some(set) = lower_linkset(block, &mut diagnostics) {
+					provenance.record(sources, format!("linkset.{}", set.name), block.span);
+					// Checked after the loop rather than here: a member may
+					// name a block that has not been read yet, and refusing a
+					// forward reference would make the answer depend on which
+					// drop-in the loader happened to open first.
+					linkset_spans.push((set.name.clone(), block.span));
+					document.linksets.push(set);
+				}
+			}
 			other => diagnostics.push(
 				Diagnostic::new(block.span, format!("unknown top-level block `{other}`"))
 					.with_help(
 						"the top-level blocks are interface, network, device, rule, \
-						 access_point and global",
+						 linkset, access_point and global",
 					),
 			),
 		}
@@ -128,6 +142,7 @@ pub fn lower(
 
 	expand_members(&mut document, &memberships, &mut diagnostics);
 	expand_ingress_shapers(&mut document, &ingress_shapers, &mut diagnostics);
+	check_linksets(&document, &linkset_spans, &mut diagnostics);
 
 	if diagnostics.is_empty() {
 		Ok(document)
@@ -314,6 +329,172 @@ fn expand_ingress_shapers(
 ///
 /// Run after every block is lowered, because a member may be declared before
 /// or after the master, or not declared at all.
+/// Lower a `linkset` block.
+///
+/// The whole block is a name and a list, which is the point: a set says which
+/// links can stand in for each other and nothing else. What each member *is* --
+/// an interface, a wifi network, another set -- is read off the rest of the
+/// document rather than declared here, so moving a member from one kind to
+/// another does not mean editing two places.
+fn lower_linkset(
+	block: &Block,
+	diags: &mut Diagnostics,
+) -> Option<netcfgd_model::linkset::Linkset> {
+	let label = require_label(block, diags)?;
+	let mut members: Vec<String> = Vec::new();
+
+	for item in &block.items {
+		let Item::Assignment(assignment) = item else {
+			if let Item::Block(inner) = item {
+				diags.push(Diagnostic::new(
+					inner.span,
+					format!("`{}` is not valid inside `linkset`", inner.head),
+				));
+			}
+			continue;
+		};
+		match assignment.key.as_str() {
+			// `members`, the same word a bridge and a bond use for the same
+			// idea. A second spelling was written first and removed: one key
+			// with two names is two things to document, two to classify in
+			// `privilege.rs`, and nothing an operator gains.
+			"members" => {
+				for word in as_words(&assignment.value, diags) {
+					// **Said twice in one set is refused rather than
+					// deduplicated.** The order is the ranking, so a name in
+					// two places has two different meanings and neither is
+					// obviously the intended one.
+					if members.iter().any(|seen| *seen == word.node) {
+						diags.push(
+							Diagnostic::new(
+								word.span,
+								format!("`{}` is listed twice in `{label}`", word.node),
+							)
+							.with_help(
+								"the order of the list is the ranking, so a member \
+								 can only be in one place in it",
+							),
+						);
+						continue;
+					}
+					members.push(word.node);
+				}
+			}
+			other => diags.push(
+				Diagnostic::new(
+					assignment.span,
+					format!("`{other}` is not a `linkset` setting"),
+				)
+				.with_help("a linkset has `members` and nothing else"),
+			),
+		}
+	}
+
+	Some(netcfgd_model::linkset::Linkset {
+		name: label,
+		members,
+	})
+}
+
+/// The linkset checks that need the whole document.
+///
+/// Three things, none of which can be seen from one block: a member that
+/// resolves to nothing, a set that shares a name with a link, and a set that
+/// contains itself through a chain of other sets.
+fn check_linksets(
+	document: &Document,
+	spans: &[(String, crate::diag::Span)],
+	diags: &mut Diagnostics,
+) {
+	for (name, span) in spans {
+		let Some(set) = netcfgd_model::linkset::find(document, name) else {
+			continue;
+		};
+
+		// **A set with no members is refused.** It can choose nothing, so it
+		// is either a block somebody started and did not finish or one whose
+		// members were removed elsewhere -- and as `uplink` it would answer
+		// "disconnected" for ever with nothing saying why.
+		if set.members.is_empty() {
+			diags.push(
+				Diagnostic::new(*span, format!("`{name}` has no members"))
+					.with_help("a linkset chooses between links, so it needs some"),
+			);
+		}
+
+		// A set called `eth0` beside an interface called `eth0` cannot be
+		// referred to: every reference is by name, and a member naming that
+		// would mean two things at once.
+		if declares(document, name) || document.networks.iter().any(|network| network.id == *name) {
+			diags.push(
+				Diagnostic::new(
+					*span,
+					format!("`{name}` is already the name of a link on this machine"),
+				)
+				.with_help("a linkset is referred to by name, so it needs one of its own"),
+			);
+		}
+
+		for member in &set.members {
+			if resolves(document, member) {
+				continue;
+			}
+			diags.push(
+				Diagnostic::new(
+					*span,
+					format!(
+						"`{name}` lists `{member}`, which this configuration does not describe"
+					),
+				)
+				.with_help(
+					"a member is an interface, a device, a `network` block or another \
+					 linkset, by name",
+				),
+			);
+		}
+
+		if let Some(chain) = linkset_cycle(document, name) {
+			diags.push(
+				Diagnostic::new(*span, format!("`{name}` contains itself: {chain}"))
+					.with_help("a linkset may contain another, but not one that contains it back"),
+			);
+		}
+	}
+}
+
+/// Whether a linkset member names something this document describes.
+fn resolves(document: &Document, name: &str) -> bool {
+	declares(document, name)
+		|| document.networks.iter().any(|network| network.id == name)
+		|| netcfgd_model::linkset::find(document, name).is_some()
+}
+
+/// The chain by which a set reaches itself, or `None` where it does not.
+///
+/// Depth-first with the path carried, so the diagnostic can print the way
+/// round: "uplink -> office -> uplink" is a fix somebody can act on and
+/// "there is a cycle" is not.
+fn linkset_cycle(document: &Document, start: &str) -> Option<String> {
+	fn walk(document: &Document, name: &str, path: &mut Vec<String>) -> Option<String> {
+		if let Some(at) = path.iter().position(|seen| seen == name) {
+			let mut chain = path[at..].to_vec();
+			chain.push(name.to_owned());
+			return Some(chain.join(" -> "));
+		}
+		let set = netcfgd_model::linkset::find(document, name)?;
+		path.push(name.to_owned());
+		for member in &set.members {
+			if let Some(chain) = walk(document, member, path) {
+				return Some(chain);
+			}
+		}
+		path.pop();
+		None
+	}
+
+	walk(document, start, &mut Vec::new())
+}
+
 fn expand_members(
 	document: &mut Document,
 	memberships: &[(String, String, crate::diag::Span)],

@@ -772,6 +772,20 @@ fn witness() -> Document {
 			l3mdev: true,
 			invert: true,
 		}],
+		// One set, whose members cover the three kinds a member can be: an
+		// interface, a `network` block and another set. A witness with one
+		// kind of member would pin nothing about the other two, and the
+		// members are the whole of what a set is.
+		linksets: vec![
+			netcfgd_model::linkset::Linkset {
+				name: "office".to_owned(),
+				members: vec!["eth0".to_owned()],
+			},
+			netcfgd_model::linkset::Linkset {
+				name: "uplink".to_owned(),
+				members: vec!["office".to_owned(), "home".to_owned(), "wlan0".to_owned()],
+			},
+		],
 		access_points: vec![AccessPoint {
 			id: "guest".to_owned(),
 			ssid: Ssid::new(b"guest".to_vec()).expect("an ssid"),

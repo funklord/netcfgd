@@ -222,6 +222,19 @@ impl Policy {
 /// of them used to do instead.
 #[must_use]
 pub fn overall(observed: &Observed, policy: &Policy) -> Connectivity {
+	// **Where the document declares an `uplink` set, that set is the answer.**
+	// A machine whose operator said which links carry its traffic has said what
+	// "connected" means on it, and a verdict assembled from every other link
+	// would contradict the thing they wrote down. Absent such a set the rule is
+	// unchanged: every link the policy counts, best default route wins.
+	if let Some(uplink) = observed
+		.linksets
+		.iter()
+		.find(|set| set.name == crate::linkset::UPLINK)
+	{
+		return through(observed, policy, uplink);
+	}
+
 	let counts = |name: &str| {
 		observed
 			.links
@@ -286,6 +299,79 @@ pub fn overall(observed: &Observed, policy: &Policy) -> Connectivity {
 	}
 }
 
+/// The verdict as the `uplink` set sees it.
+///
+/// The same ladder as [`overall`], asked about one link instead of about the
+/// machine: the set has already decided which link that is, and asking again
+/// here would be the fifth copy of a rule this module exists to have one of.
+fn through(observed: &Observed, policy: &Policy, uplink: &crate::linkset::Chosen) -> Connectivity {
+	let Some(interface) = uplink.interface.as_deref() else {
+		// The set has nothing usable. **Not "offline" by definition**: a
+		// member may still hold an address -- a cable into a switch with no
+		// uplink of its own does -- and the middle rung is exactly the state
+		// where a machine is configured and reaching nothing.
+		let addressed = uplink.members.iter().any(|member| {
+			member.interface.as_deref().is_some_and(|interface| {
+				observed
+					.addresses
+					.iter()
+					.any(|address| address.interface == interface)
+			})
+		});
+		return Connectivity {
+			rung: if addressed {
+				Rung::Local
+			} else {
+				Rung::Offline
+			},
+			primary: None,
+		};
+	};
+
+	let routed = observed
+		.routes
+		.iter()
+		.any(|route| route.destination == "default" && route.interface == interface);
+	let link = observed.links.iter().find(|link| link.name == interface);
+	let addressed = observed
+		.addresses
+		.iter()
+		.any(|address| address.interface == interface);
+	// `Some(false)` and `None` are different answers, which is the rule
+	// `ObservedLink::reachable` states and the one the set itself applies when
+	// deciding whether this member was eligible at all.
+	let probe = link.and_then(|link| link.reachable);
+
+	let rung = if routed || (addressed && policy.requires == Requires::Address) {
+		match (policy.requires, probe) {
+			(Requires::Probe, Some(true)) => Rung::Online,
+			(Requires::Probe, Some(false)) => Rung::Local,
+			_ => Rung::Routed,
+		}
+	} else if addressed {
+		Rung::Local
+	} else {
+		Rung::Offline
+	};
+
+	Connectivity {
+		rung,
+		primary: (rung > Rung::Offline).then(|| Primary {
+			interface: interface.to_owned(),
+			// **The set's own word for the member**: a `network` block's id
+			// where the member is a wifi network, an interface's name where it
+			// is an interface, and the inner set's name where it is a nested
+			// set -- which is the name the operator wrote in the set and so the
+			// one they will recognise in a tray.
+			label: uplink
+				.active
+				.clone()
+				.unwrap_or_else(|| interface.to_owned()),
+			wireless: link.is_some_and(|link| link.wireless),
+		}),
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::{overall, Policy, Requires, Rung};
@@ -335,6 +421,96 @@ mod tests {
 			}))
 			.expect("a route"),
 		);
+	}
+
+	/// The set the operator declared decides, and the rest of the machine does
+	/// not get a vote.
+	///
+	/// **This is the sentence "connected" has needed all along.** The rule
+	/// without a set is "the best default route on any link that counts", which
+	/// is a guess about which link matters assembled from the routing table. A
+	/// machine that says which links carry its traffic has answered that
+	/// question itself, and a verdict naming some other link would contradict
+	/// the thing its operator wrote down.
+	#[test]
+	fn where_an_uplink_set_is_declared_it_is_the_answer() {
+		let mut observed = Observed::default();
+		observed.links.push(link("eth0", true, false));
+		observed.links.push(link("wlan0", true, true));
+		addressed(&mut observed, "eth0", "10.0.0.2/24");
+		addressed(&mut observed, "wlan0", "192.168.1.5/24");
+		// The radio holds the better route, so the ruleless answer is the
+		// radio. The set says the cable.
+		default_route(&mut observed, "wlan0", Some(600));
+		default_route(&mut observed, "eth0", Some(100));
+
+		let answer = overall(&observed, &Policy::default());
+		assert_eq!(
+			answer
+				.primary
+				.as_ref()
+				.map(|primary| primary.interface.clone()),
+			Some("eth0".to_owned()),
+			"with no set, the best metric wins"
+		);
+
+		observed.linksets.push(crate::linkset::Chosen {
+			name: crate::linkset::UPLINK.to_owned(),
+			active: Some("office".to_owned()),
+			interface: Some("wlan0".to_owned()),
+			members: Vec::new(),
+		});
+		let answer = overall(&observed, &Policy::default());
+		let primary = answer.primary.expect("a primary");
+		assert_eq!(primary.interface, "wlan0");
+		assert!(primary.wireless);
+		assert_eq!(
+			primary.label, "office",
+			"named as the set names it, which is what an operator recognises"
+		);
+		assert_eq!(answer.rung, Rung::Routed);
+	}
+
+	/// A set with nothing usable in it is not connected -- and is not
+	/// automatically offline either.
+	#[test]
+	fn a_set_with_no_usable_member_stops_at_what_it_is_holding() {
+		let mut observed = Observed::default();
+		observed.links.push(link("eth0", true, false));
+		addressed(&mut observed, "eth0", "10.0.0.2/24");
+		// Something else entirely is routing. It is not in the set, so it is
+		// not this machine's uplink and does not make it connected.
+		observed.links.push(link("wg0", true, false));
+		addressed(&mut observed, "wg0", "10.9.0.2/32");
+		default_route(&mut observed, "wg0", Some(50));
+
+		let member = |name: &str, interface: Option<&str>| crate::linkset::Standing {
+			name: name.to_owned(),
+			interface: interface.map(std::borrow::ToOwned::to_owned),
+			metric: None,
+			ineligible: Some(crate::linkset::Ineligible::NoCarrier),
+		};
+		observed.linksets.push(crate::linkset::Chosen {
+			name: crate::linkset::UPLINK.to_owned(),
+			active: None,
+			interface: None,
+			members: vec![member("eth0", Some("eth0"))],
+		});
+
+		let answer = overall(&observed, &Policy::default());
+		assert_eq!(
+			answer.rung,
+			Rung::Local,
+			"the cable is plugged into something and reaching nothing"
+		);
+		assert!(!answer.connected());
+		assert_eq!(answer.primary, None, "nothing to name");
+
+		// And with nothing held anywhere in the set, offline.
+		observed
+			.addresses
+			.retain(|address| address.interface != "eth0");
+		assert_eq!(overall(&observed, &Policy::default()).rung, Rung::Offline);
 	}
 
 	/// A machine with nothing but a bridge to nowhere is offline.

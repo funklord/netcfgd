@@ -1364,6 +1364,45 @@ fn warn_radar_channel(
 /// condition made netcfgd try to start a supplicant on a dummy, and the live
 /// suite caught it -- which is the useful shape of that gate, since the
 /// mistake was invisible to every unit test.
+/// Which interfaces a linkset is holding in reserve, and what it chose instead.
+///
+/// **The acting half of a set.** Deciding which member wins is the model's
+/// (`netcfgd_model::linkset::choose`); this turns that decision into the one
+/// thing the planner can do about it -- withhold the routes of everything else
+/// in the set.
+///
+/// An interface any set is using is in none of these, because one set wanting
+/// it is enough for it to be carrying traffic.
+fn standby_interfaces(
+	desired: &Document,
+	observed: &Observed,
+) -> std::collections::HashMap<String, (String, Option<String>)> {
+	let mut chosen: Vec<String> = Vec::new();
+	let mut reserve: Vec<(String, (String, Option<String>))> = Vec::new();
+
+	for set in &desired.linksets {
+		let Some(decision) = netcfgd_model::linkset::choose(desired, observed, &set.name) else {
+			continue;
+		};
+		if let Some(interface) = decision.interface.clone() {
+			chosen.push(interface);
+		}
+		for member in &decision.members {
+			// A member with nothing carrying it has no route to withhold: an
+			// absent interface, a saved network no radio is on.
+			let Some(interface) = member.interface.clone() else {
+				continue;
+			};
+			reserve.push((interface, (set.name.clone(), decision.active.clone())));
+		}
+	}
+
+	reserve
+		.into_iter()
+		.filter(|(interface, _)| !chosen.contains(interface))
+		.collect()
+}
+
 fn radios_of(desired: &Document, observed: &Observed) -> Vec<String> {
 	desired
 		.devices
@@ -1417,6 +1456,7 @@ fn prepare(desired: &Document, observed: &Observed, options: &PlanOptions) -> Bu
 		.iter()
 		.filter_map(|network| network.metric.map(|metric| (network.id.clone(), metric)))
 		.collect();
+	builder.standby = standby_interfaces(desired, observed);
 	builder.has_networks = !desired.networks.is_empty();
 	builder.network_ids = desired
 		.networks
@@ -1638,6 +1678,22 @@ struct Builder {
 	/// document, and threading it through every one of them to reach two
 	/// fields would be a wider change than the move itself.
 	devices: std::collections::HashMap<String, netcfgd_model::Device>,
+	/// Interfaces a linkset is not currently using, by name.
+	///
+	/// `interface -> (the set, what it chose instead)`. **A set means one
+	/// member carries traffic at a time**, so the rest do not get their routes
+	/// -- the same answer `preference` already gives a link with no carrier,
+	/// for the same reason: a second default route at a worse metric is a
+	/// black hole with a fallback, not a spare.
+	///
+	/// Precomputed for the reason `network_metrics` is: the route path does
+	/// not carry the document, and this is the whole of what it needs from it.
+	///
+	/// **An interface chosen by any set is in none of these.** A link may be in
+	/// two sets -- the modem that is the uplink's last resort and the
+	/// out-of-band set's only member -- and one of them wanting it is enough
+	/// for it to be in use.
+	standby: std::collections::HashMap<String, (String, Option<String>)>,
 	/// Each network's `metric`, by network id.
 	///
 	/// Precomputed rather than looked up through the document, because the
@@ -4283,6 +4339,24 @@ impl Builder {
 	) {
 		let name = &interface.name;
 
+		// **A linkset is using something else, so this link is a spare.** The
+		// set's whole meaning is that one member carries traffic at a time,
+		// and a spare that keeps a default route at a worse metric is not a
+		// spare -- it is a second path the kernel will fall back to without
+		// anything having decided that it works. Being in a set is the opt-in
+		// here, exactly as `preference` is for the two rules below.
+		if let Some((set, instead)) = self.standby.get(name).cloned() {
+			let instead = instead.map_or_else(
+				|| format!("`{set}` has nothing it can use"),
+				|winner| format!("`{set}` is using {winner}"),
+			);
+			self.warn(
+				name,
+				format!("{instead}, so {name}'s routes are not installed"),
+			);
+			return;
+		}
+
 		// A route down a cable that is not plugged in is a black hole, and a
 		// lower metric would make the kernel prefer it over the wifi that
 		// works. So an interface with a preference does not get its routes
@@ -5512,6 +5586,11 @@ impl Builder {
 			if !route.ownership.may_remove() {
 				continue;
 			}
+			// A linkset is using something else, so this link's routes stop
+			// being wanted -- the same sentence `plan_route` says about adding
+			// them. Read before the closure because the closure borrows the
+			// document rather than the planner.
+			let standby = self.standby.contains_key(&route.interface);
 			// Only routes this build put there from config are removed. A
 			// route a DHCP client installed is the backend's to withdraw, and
 			// removing it here would fight the lease.
@@ -5532,6 +5611,23 @@ impl Builder {
 							.link(&interface.name)
 							.is_some_and(|link| link.carrier)
 					{
+						return false;
+					}
+					// **And one whose probe says it reaches nothing**, which
+					// is the same black hole with the cable plugged in. 0119
+					// states both halves -- "a link that fails a probe gets
+					// the same answer" as one with no carrier -- and only the
+					// withholding half was ever written: a route added before
+					// the probe first answered stayed installed for ever,
+					// keeping its better metric while reaching nothing. Found
+					// by a linkset's live test, which is built on exactly this
+					// case.
+					if interface.preference.is_some()
+						&& Self::probe_failing(&interface.name, observed)
+					{
+						return false;
+					}
+					if standby {
 						return false;
 					}
 					// The report's routes count as wanted alongside the
@@ -6448,6 +6544,11 @@ fn without_links(observed: &Observed, gone: &[String]) -> Option<Observed> {
 		.collect();
 	Some(Observed {
 		inventory: Vec::new(),
+		// Neither is read by the planner, and both describe the machine as it
+		// is rather than as this hypothetical leaves it: a set's choice made
+		// against links that are about to be deleted would be a choice about
+		// nothing. Empty says "not computed", which is what it is.
+		linksets: Vec::new(),
 		connectivity: None,
 		bluetooth: Vec::new(),
 		links: observed

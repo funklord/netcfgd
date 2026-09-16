@@ -1829,6 +1829,13 @@ live:
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
+	@# A linkset choosing between two links, and the case metrics cannot
+	@# handle on their own: a link that is up, has carrier and reaches
+	@# nothing keeps its better metric while doing so, and only a probe tells
+	@# it apart from one that works. Needs a running daemon for the same
+	@# reason drift.sh does -- a probe is a question asked on a timer, not a
+	@# plan action.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/linkset.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/resolv_owned.sh"
 	@# Bare, and it must stay bare: it makes its own *pid* namespace so the
 	@# sweep it exercises can only see its own children. Under the suite's

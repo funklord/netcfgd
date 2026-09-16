@@ -9435,3 +9435,124 @@ access_point "home" { device = "wlan0"; regdom = "se"; wifi { open = true } }
 		quiet.warnings
 	);
 }
+
+/// A linkset uses one member at a time, and the planner is what makes that
+/// true: everything else in the set goes without its routes.
+///
+/// **A spare that keeps a default route at a worse metric is not a spare.** It
+/// is a second path the kernel falls back to on its own, with nothing having
+/// decided that it works -- which is the black hole `preference` already
+/// withholds routes to avoid when a cable is out. A set says the same thing
+/// about a link that is perfectly fine and simply not the one in use.
+#[test]
+fn only_the_member_a_linkset_chose_gets_its_routes() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "192.168.1.10/24"
+			routes = "default via 192.168.1.1"
+			preference = 100
+		}
+		interface wwan0 {
+			config = "10.64.0.2/32"
+			routes = "default via 10.64.0.1"
+			preference = 700
+		}
+		linkset uplink { members = ["eth0", "wwan0"] }
+		"#,
+	);
+
+	let mut observed = observed_with(&["eth0", "wwan0"]);
+	let first = settle(&desired, &mut observed);
+	let routed: Vec<&str> = first
+		.actions
+		.iter()
+		.filter(|action| action.op.name() == "route.add")
+		.map(|action| action.reason.interface.as_deref().unwrap_or("?"))
+		.collect();
+	assert_eq!(routed, ["eth0"], "one member carries traffic: {routed:?}");
+
+	// And it says why the other one did not, naming what won instead -- "my
+	// modem has no default route" is not a fault report anybody can act on.
+	let said: Vec<&str> = first
+		.warnings
+		.iter()
+		.filter(|warning| warning.interface.as_deref() == Some("wwan0"))
+		.map(|warning| warning.message.as_str())
+		.collect();
+	assert!(
+		said.iter()
+			.any(|message| message.contains("`uplink` is using eth0")),
+		"nothing said why wwan0 is idle: {said:?}"
+	);
+
+	// The cable comes out. The modem takes over with no configuration change,
+	// which is the whole of what a set is for.
+	for link in &mut observed.links {
+		if link.name == "eth0" {
+			link.carrier = false;
+		}
+	}
+	let after = plan(&desired, &observed, &PlanOptions::default());
+	let routed: Vec<&str> = after
+		.actions
+		.iter()
+		.filter(|action| action.op.name() == "route.add")
+		.map(|action| action.reason.interface.as_deref().unwrap_or("?"))
+		.collect();
+	assert_eq!(routed, ["wwan0"], "the spare takes over: {routed:?}");
+}
+
+/// A route already installed on a link whose probe says it reaches nothing is
+/// taken away, not merely not re-added.
+///
+/// **0119 states both halves and only one was written.** Its own words are that
+/// a link failing a probe "gets the same answer" as one with no carrier, and
+/// the carrier answer is spelled out as withholding the routes *and*
+/// withdrawing the ones already installed. The probe answer only withheld: a
+/// route added before the probe first answered -- which is every route on a
+/// freshly applied machine, since the first probe has not run yet -- stayed in
+/// the table for ever, keeping its better metric while reaching nothing. That
+/// is exactly the black hole the probe exists to detect.
+///
+/// Found by the linkset's live test, which is built on this case.
+#[test]
+fn a_probe_that_says_no_takes_away_the_route_it_already_had() {
+	let desired = document(
+		r#"
+		interface eth0 {
+			config = "192.168.1.10/24"
+			routes = "default via 192.168.1.1"
+			preference = 100
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	settle(&desired, &mut observed);
+	assert!(
+		observed
+			.routes
+			.iter()
+			.any(|route| route.destination == "default"),
+		"the route is installed before the probe answers, which is the whole case"
+	);
+
+	// The probe answers, and answers no.
+	observed.links[0].reachable = Some(false);
+	let refused = plan(&desired, &observed, &PlanOptions::default());
+	assert_eq!(
+		names(&refused),
+		["route.del"],
+		"the black-holed route is withdrawn: {:?}",
+		names(&refused)
+	);
+
+	// And a link nobody probed keeps everything, which is the other half of
+	// the rule and the half that takes the network away from a machine with no
+	// probes when it is got wrong.
+	observed.links[0].reachable = None;
+	assert!(
+		plan(&desired, &observed, &PlanOptions::default()).is_empty(),
+		"an unprobed link keeps its routes"
+	);
+}

@@ -30,6 +30,10 @@ skipped by pattern, so that a third joining them is a failure:
   - one `interface eth0` carries a per-interface `dns` scope with routing
 	domains, which needs the `global` block whose `dns_mode` can express them;
 	alone it compiles against the default mode `none` and is refused.
+  - the `linkset` names the links it chooses between, and a member that
+	resolves to nothing is refused on purpose -- an `uplink` naming an
+	interface this configuration does not describe answers "disconnected" for
+	ever with nothing saying why.
 
 Both are correct as documentation and meaningless in isolation. A gate that
 silently tolerated "anything that does not compile" would tolerate the next
@@ -51,6 +55,7 @@ NCFG = "./target/debug/ncfg"
 EXPECTED_INCOMPLETE = {
 	"override interface eth0 {",
 	'interface eth0 {\n\tconfig = "dhcp"\n\tdns {',
+	'linkset "uplink" {',
 }
 
 

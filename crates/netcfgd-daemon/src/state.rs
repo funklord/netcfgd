@@ -257,6 +257,14 @@ impl State {
 			// observation without the verdicts stamped on would say `None`
 			// for a link that has just been declared down.
 			self.probes.apply(&mut self.observed);
+			// And the answers that are computed from the verdicts, again now
+			// that there are verdicts. `augment` ran before this stamp, so the
+			// linkset choices and the connectivity rung it produced were made
+			// from `reachable: None` on every link -- the published record said
+			// the machine was on a link whose routes the planner had just taken
+			// away. Everything `derive` writes is derived, so a second pass is
+			// cheap and idempotent.
+			netcfgd_observe::host::derive(&mut self.observed, self.desired.as_ref());
 			// Which card each SIM source turned out to hold, from whatever a
 			// modem helper reported. Here rather than in `status` because the
 			// pairing has to be taken when it is observed: a helper rewrites

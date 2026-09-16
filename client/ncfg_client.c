@@ -601,6 +601,47 @@ static char *join_addresses(const ncfg_json_doc_t *doc, uint32_t addresses, cons
 }
 
 /*
+ * An array of strings, joined with ", ". "" for an absent or empty array.
+ *
+ * The same answer as `join_addresses` and for the same reason -- a caller that
+ * assembles a list itself is one that can assemble it differently from the
+ * next caller -- with no filtering to do, because the array is already only
+ * what was asked for.
+ */
+static char *join_strings(const ncfg_json_doc_t *doc, uint32_t array)
+{
+	char *joined = dup_text("", 0);
+	size_t length = 0;
+
+	if (!joined) {
+		return NULL;
+	}
+	uint32_t count = ncfg_json_count(doc, array);
+	for (uint32_t i = 0; i < count; i++) {
+		size_t text_length = 0;
+		const char *text = ncfg_json_string(doc, ncfg_json_at(doc, array, i), &text_length);
+
+		if (!text || !text_length) {
+			continue;
+		}
+		char *grown = realloc(joined, length + (length ? 2u : 0u) + text_length + 1u);
+		if (!grown) {
+			free(joined);
+			return NULL;
+		}
+		joined = grown;
+		if (length) {
+			memcpy(joined + length, ", ", 2u);
+			length += 2u;
+		}
+		memcpy(joined + length, text, text_length);
+		length += text_length;
+		joined[length] = '\0';
+	}
+	return joined;
+}
+
+/*
  * Does a default route leave through `name`, in the main table?
  *
  * Table 254 only. A default route in another table is reached through a policy
@@ -1171,8 +1212,9 @@ static int convert_inventory(const ncfg_json_doc_t *doc, ncfg_inventory_t *out, 
 		item->configured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "configured"), 0);
 		item->subject = member_text(doc, entry, "subject");
 		item->carrier = member_text(doc, entry, "carrier");
+		item->sets = join_strings(doc, ncfg_json_member(doc, entry, "sets"));
 		if (!item->name || !item->category || !item->presence || !item->subject
-		    || !item->carrier) {
+		    || !item->carrier || !item->sets) {
 			set_error(err, err_size, "out of memory");
 			return 0;
 		}
@@ -1191,6 +1233,7 @@ void ncfg_inventory_free(ncfg_inventory_t *inventory)
 		free(inventory->items[i].presence);
 		free(inventory->items[i].subject);
 		free(inventory->items[i].carrier);
+		free(inventory->items[i].sets);
 	}
 	free(inventory->items);
 	memset(inventory, 0, sizeof(*inventory));

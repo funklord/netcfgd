@@ -28,7 +28,10 @@
       "presence": "present",
       "configured": true,
       "subject": "network",
-      "carrier": "wlan0"
+      "carrier": "wlan0",
+      "sets": [
+        "uplink"
+      ]
     },
     {
       "name": "n-office",
@@ -36,6 +39,25 @@
       "presence": "unknown",
       "configured": true,
       "subject": "network"
+    }
+  ],
+  "linksets": [
+    {
+      "name": "uplink",
+      "active": "n-cafe",
+      "interface": "wlan0",
+      "members": [
+        {
+          "name": "n-cafe",
+          "interface": "wlan0",
+          "metric": 50
+        },
+        {
+          "name": "eth1",
+          "metric": 100,
+          "ineligible": "absent"
+        }
+      ]
     }
   ],
   "links": [

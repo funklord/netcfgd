@@ -146,6 +146,8 @@ fn references(document: &netcfgd_model::Document) -> BTreeMap<String, Vec<String
 		// A routing rule is selectors and a table.
 		rules: _,
 		access_points,
+		// A linkset is a name and a list of names.
+		linksets: _,
 	} = document;
 	let mut users: BTreeMap<String, Vec<String>> = BTreeMap::new();
 	let mut note = |what: &str, reference: &netcfgd_model::SecretRef| {

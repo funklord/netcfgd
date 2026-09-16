@@ -46,6 +46,7 @@ pub mod hook;
 pub mod interface;
 pub mod key;
 pub mod link;
+pub mod linkset;
 pub mod observed;
 pub mod route;
 pub mod rule;
@@ -286,6 +287,10 @@ pub struct Document {
 	/// [`AccessPoint`].
 	#[serde(default)]
 	pub access_points: Vec<AccessPoint>,
+	/// Named sets of links, one member of each in use at a time, sorted by
+	/// name. See [`linkset`].
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub linksets: Vec<linkset::Linkset>,
 }
 
 // `generated_by` is provenance, not state. Deriving PartialEq would make a
@@ -311,6 +316,7 @@ impl PartialEq for Document {
 			bluetooth,
 			rules,
 			access_points,
+			linksets,
 		} = self;
 		*schema_version == other.schema_version
 			&& *globals == other.globals
@@ -320,6 +326,7 @@ impl PartialEq for Document {
 			&& *bluetooth == other.bluetooth
 			&& *rules == other.rules
 			&& *access_points == other.access_points
+			&& *linksets == other.linksets
 	}
 }
 
@@ -335,6 +342,7 @@ impl Default for Document {
 			bluetooth: Vec::new(),
 			rules: Vec::new(),
 			access_points: Vec::new(),
+			linksets: Vec::new(),
 		}
 	}
 }

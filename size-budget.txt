@@ -695,4 +695,17 @@ netcfgd
 # passed at 2,931,232 against a 3,006,512 ceiling. Same reason as the entry
 # above -- the 3% is for compiler-version noise, and a feature living inside it
 # means the next feature fails for a reason that is not its own.
-total 2931232
+# The linkset, +32,768 bytes to 2,964,000.
+#
+# Eight pages, and the largest single feature this file has recorded. Four
+# things, none of them separable without a second build: the model's `choose`
+# and its standings, the compiler's block and its five checks -- the cycle walk
+# among them -- the planner's standby map, and the words. Every `Ineligible`
+# name, every diagnostic and the `ncfg status` rendering is a string in the
+# binary, and the diagnostics are long because they say what to do.
+#
+# Recorded rather than left to ride the tolerance, which it was doing: the gate
+# passed at 2,964,000 against a 3,019,168 ceiling. Same reason as the two
+# entries above, and more so at this size -- a feature that spends most of the
+# tolerance leaves the next one failing for a reason that is not its own.
+total 2964000

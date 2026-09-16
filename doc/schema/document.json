@@ -5291,5 +5291,21 @@
         ]
       }
     }
+  ],
+  "linksets": [
+    {
+      "name": "office",
+      "members": [
+        "eth0"
+      ]
+    },
+    {
+      "name": "uplink",
+      "members": [
+        "office",
+        "home",
+        "wlan0"
+      ]
+    }
   ]
 }

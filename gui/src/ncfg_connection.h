@@ -66,6 +66,9 @@ struct ncfg_inventory_row {
 	/* The radio a wifi network is running on, or empty. A network is not
 	 * hardware; it runs on whichever radio joined it. */
 	QString carrier;
+	/* The linksets deciding about this link, joined with ", ", or empty.
+	 * A member is not an independent link while its set is choosing. */
+	QString sets;
 };
 
 bool ncfg_link_shows(const QString &category, const QString &wanted);

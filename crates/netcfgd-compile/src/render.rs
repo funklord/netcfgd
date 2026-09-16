@@ -87,6 +87,9 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 	for device in &document.bluetooth {
 		render_bluetooth(device, overrides, &mut text);
 	}
+	for set in &document.linksets {
+		render_linkset(set, overrides, &mut text);
+	}
 
 	if missing.is_empty() {
 		Ok(text)
@@ -897,6 +900,20 @@ fn render_bluetooth(
 	text.push_str("}\n");
 }
 
+/// A `linkset`, which is a name and a ranked list.
+///
+/// **The list is written in its own order**, not sorted and not folded to a
+/// scalar when there is one member: the order is the ranking, and a snapshot
+/// that reordered it would describe a different machine from the one it was
+/// taken of.
+fn render_linkset(set: &netcfgd_model::linkset::Linkset, overrides: &Overrides, text: &mut String) {
+	let head = opening("linkset", &set.name, overrides);
+	let _ = write!(text, "\n{head} {} {{\n", quote(&set.name));
+	let members: Vec<String> = set.members.iter().map(|member| quote(member)).collect();
+	let _ = writeln!(text, "\tmembers = [{}]", members.join(", "));
+	text.push_str("}\n");
+}
+
 /// A Bluetooth profile, spelled as the parser reads it back.
 ///
 /// Hyphenated rather than `snake_case` because these are the profile names
@@ -1352,6 +1369,26 @@ mod tests {
 			 \t\tup_after = 3\n\
 			 \t\thold_down = 60\n\
 			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A linkset, whose one interesting property is that the order survives.
+	///
+	/// A snapshot is what `ncfg profile save` writes, so a set rendered with
+	/// its members in some other order would describe a machine that fails
+	/// over the other way round -- and nothing downstream could tell.
+	#[test]
+	fn a_linkset_round_trips_in_its_own_order() {
+		round_trips(
+			"interface eth0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n\
+			 interface wwan0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n\
+			 linkset \"uplink\" {\n\
+			 \tmembers = [\"wwan0\", \"eth0\"]\n\
 			 }\n",
 		);
 	}

@@ -26,6 +26,12 @@ impl Document {
 		self.bluetooth.sort_by(|a, b| a.id.cmp(&b.id));
 		self.rules.sort();
 		self.access_points.sort_by(|a, b| a.id.cmp(&b.id));
+		// The sets themselves sort by name; **their members deliberately do
+		// not**. A bridge's or a bond's members are a set and get sorted into
+		// canonical order above; a linkset's are a ranked list, and sorting
+		// them would silently rewrite which of two equally ranked links an
+		// operator said they would rather be on.
+		self.linksets.sort_by(|a, b| a.name.cmp(&b.name));
 
 		for access_point in &mut self.access_points {
 			// A station list is a set. Two operators writing the same stations

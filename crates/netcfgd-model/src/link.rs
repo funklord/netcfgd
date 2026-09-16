@@ -71,6 +71,14 @@ pub enum Category {
 	Tunnel,
 	/// A link that exists to be plumbing: `veth`, `dummy`, `ifb`, `vrf`.
 	Virtual,
+	/// A named set of links, one of which is in use. See [`crate::linkset`].
+	///
+	/// **Not a kernel kind at all**, which is why it is here rather than
+	/// derived from one: a set has no index and no link table entry, and the
+	/// only thing that knows it exists is the document. It is a category
+	/// because it is a row an operator filters for -- "show me the groups" --
+	/// and a row in no category falls out of every filtered list.
+	Linkset,
 	/// A kind netcfgd has no word for.
 	///
 	/// **Not an error and not empty.** A kernel gains link kinds faster than
@@ -95,6 +103,7 @@ impl Category {
 			Self::Wireguard => "wireguard",
 			Self::Tunnel => "tunnel",
 			Self::Virtual => "virtual",
+			Self::Linkset => "linkset",
 			Self::Other => "other",
 		}
 	}
@@ -261,6 +270,8 @@ pub enum Subject {
 	Interface,
 	/// A `network` block.
 	Network,
+	/// A `linkset` block: a group rather than a link of its own.
+	Linkset,
 }
 
 impl Subject {
@@ -270,6 +281,7 @@ impl Subject {
 		match self {
 			Self::Interface => "interface",
 			Self::Network => "network",
+			Self::Linkset => "linkset",
 		}
 	}
 }
@@ -307,6 +319,18 @@ pub struct Entry {
 	/// nothing is on.
 	#[serde(skip_serializing_if = "Option::is_none", default)]
 	pub carrier: Option<String>,
+	/// The linksets this link is a member of.
+	///
+	/// Usually none and usually one. A list rather than an `Option` because a
+	/// link may legitimately be in two sets -- the modem that is both the
+	/// `uplink`'s last resort and the out-of-band set's only member -- and
+	/// showing one of the two would make the other invisible.
+	///
+	/// **A member is not an independent link while its set is choosing**, which
+	/// is what this column is for: an operator looking at a list of links needs
+	/// to see which of them something else is already deciding about.
+	#[serde(skip_serializing_if = "Vec::is_empty", default)]
+	pub sets: Vec<String>,
 }
 
 /// Every link this machine has or has been told about.
@@ -363,6 +387,7 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 			subject: Subject::Interface,
 			// An interface carries itself; there is nothing else to name.
 			carrier: None,
+			sets: sets_of(document, observed, &link.name),
 		});
 	}
 
@@ -387,6 +412,7 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 			configured: true,
 			subject: Subject::Interface,
 			carrier: None,
+			sets: sets_of(Some(document), observed, &interface.name),
 		});
 	}
 
@@ -409,11 +435,46 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 			configured: true,
 			subject: Subject::Network,
 			carrier,
+			sets: sets_of(Some(document), observed, &network.id),
+		});
+	}
+
+	// And the sets themselves, which are links in their own right: a set can
+	// be a member of a set, and an operator who groups two links has made a
+	// third thing that the list has to show.
+	for set in &document.linksets {
+		let chosen = crate::linkset::choose(document, observed, &set.name);
+		let interface = chosen.as_ref().and_then(|chosen| chosen.interface.clone());
+		entries.push(Entry {
+			name: set.name.clone(),
+			category: Category::Linkset,
+			// **A set is present when something in it works.** It has no
+			// hardware of its own to be absent, so what its presence can mean
+			// is whether it currently has anything to offer -- which is the
+			// question an operator reading a row called `uplink` is asking.
+			presence: if interface.is_some() {
+				Presence::Present
+			} else {
+				Presence::Absent
+			},
+			configured: true,
+			subject: Subject::Linkset,
+			// The interface its chosen member is running on, so the row can
+			// borrow that link's state exactly as a network's row does.
+			carrier: interface,
+			sets: sets_of(Some(document), observed, &set.name),
 		});
 	}
 
 	entries.sort_by(|left, right| left.name.cmp(&right.name));
 	entries
+}
+
+/// The sets a link is in, or nothing where there is no document.
+fn sets_of(document: Option<&crate::Document>, observed: &Observed, name: &str) -> Vec<String> {
+	document.map_or_else(Vec::new, |document| {
+		crate::linkset::sets_containing(document, observed, name)
+	})
 }
 
 #[cfg(test)]
@@ -678,6 +739,61 @@ mod tests {
 			.map(|entry| entry.name)
 			.collect();
 		assert!(names.contains(&"wlan0".to_owned()), "{names:?}");
+	}
+
+	/// A linkset is a link, so the list holds one -- and says which links it
+	/// is already deciding about.
+	#[test]
+	fn a_set_is_a_row_and_its_members_say_so() {
+		use super::{inventory, Category, Presence, Subject};
+
+		let mut observed = crate::observed::Observed::default();
+		observed.links.push(link("eth0", "", false));
+		observed.links.push(link("wwan0", "", false));
+
+		let mut document = crate::Document::default();
+		for name in ["eth0", "wwan0"] {
+			document.interfaces.push(
+				serde_json::from_value(serde_json::json!({ "name": name })).expect("an interface"),
+			);
+		}
+		document.linksets.push(crate::linkset::Linkset {
+			name: "uplink".to_owned(),
+			members: vec!["eth0".to_owned(), "wwan0".to_owned()],
+		});
+
+		let rows = inventory(Some(&document), &observed);
+		let find = |name: &str| {
+			rows.iter()
+				.find(|entry| entry.name == name)
+				.unwrap_or_else(|| panic!("no row for {name}: {rows:?}"))
+		};
+
+		let set = find("uplink");
+		assert_eq!(set.subject, Subject::Linkset);
+		assert_eq!(set.category, Category::Linkset);
+		// `link()` gives a link with carrier, so the set has something to
+		// offer and its row borrows that link exactly as a network's does.
+		assert_eq!(set.presence, Presence::Present);
+		assert_eq!(set.carrier.as_deref(), Some("eth0"));
+
+		// And each member says which set is deciding about it, which is the
+		// thing an operator cannot see from a list of links alone.
+		assert_eq!(find("eth0").sets, ["uplink"]);
+		assert_eq!(find("wwan0").sets, ["uplink"]);
+		assert!(set.sets.is_empty(), "the set itself is in no set");
+
+		// Nothing in it works, and the row says so rather than naming a link
+		// that is not carrying anything.
+		observed.links[0].carrier = false;
+		observed.links[1].carrier = false;
+		let rows = inventory(Some(&document), &observed);
+		let set = rows
+			.iter()
+			.find(|entry| entry.name == "uplink")
+			.expect("uplink");
+		assert_eq!(set.presence, Presence::Absent);
+		assert_eq!(set.carrier, None);
 	}
 
 	/// An interface row and a network row are told apart, because acting on

@@ -250,6 +250,7 @@ bool ncfg_connection::inventory(QList<ncfg_inventory_row> *out, QString *error)
 		row.configured = found.items[i].configured != 0;
 		row.subject = from_c(found.items[i].subject);
 		row.carrier = from_c(found.items[i].carrier);
+		row.sets = from_c(found.items[i].sets);
 		*out << row;
 	}
 	ncfg_inventory_free(&found);

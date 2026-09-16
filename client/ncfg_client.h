@@ -244,6 +244,20 @@ typedef struct {
 	 * the network's row is that connection.
 	 */
 	char *carrier;
+	/*
+	 * The linksets this link is a member of, joined with ", ", or "".
+	 *
+	 * **Joined here rather than handed over as a list**, for the reason the
+	 * addresses on a link are: a caller that has to assemble it is a caller
+	 * that can assemble it differently from the next one. Usually empty and
+	 * usually one name; two happens where a link is in the uplink set and in
+	 * an out-of-band set as well.
+	 *
+	 * What it is for is that a member is not an independent link while its set
+	 * is choosing: a list of links that does not say which of them something
+	 * else is already deciding about invites configuring one of them by hand.
+	 */
+	char *sets;
 } ncfg_inventory_item_t;
 
 typedef struct {

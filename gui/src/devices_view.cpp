@@ -50,6 +50,11 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	QStringList columns;
 	columns << QStringLiteral("link") << QStringLiteral("category")
 	        << QStringLiteral("presence") << QStringLiteral("configured")
+	        /* Which group is already deciding about this link. Beside
+	         * `configured` because it is the same kind of fact -- what the
+	         * document says about the row -- and before the observed columns
+	         * for the same reason. */
+	        << QStringLiteral("set")
 	        << QStringLiteral("state") << QStringLiteral("device")
 	        << QStringLiteral("addresses") << QStringLiteral("mtu")
 	        << QStringLiteral("mac");
@@ -222,6 +227,7 @@ void ncfg_devices_view::redraw()
 			cells << known.category;
 			cells << known.presence;
 			cells << configured_word(known.configured);
+			cells << known.sets;
 			cells << (seen ? seen->state : QString());
 			/* Which hardware is carrying it, for a network. Blank for an
 			 * interface, which carries itself and would only repeat column
@@ -248,6 +254,9 @@ void ncfg_devices_view::redraw()
 			/* No inventory to ask, so this is not claimed either way. An
 			 * older daemon does not say which links the document names, and
 			 * writing "no" would assert something nobody was told. */
+			cells << QString();
+			/* And no inventory means no sets: an older daemon has none to
+			 * report, and this window does not work them out for itself. */
 			cells << QString();
 			cells << link.state;
 			/* No inventory, so no carrier is known. The kernel's own view has
@@ -302,8 +311,19 @@ void ncfg_devices_view::configure_selected()
 	 * carried its subject this opened the interface dialog for everything,
 	 * which for a network meant an editor for an interface of that name --
 	 * and there is no interface called `OpenPC.se`. */
-	if (ncfg_link_subject(rows_known, name) == QLatin1String("network")) {
+	const QString subject = ncfg_link_subject(rows_known, name);
+	if (subject == QLatin1String("network")) {
 		configure_network(name);
+		return;
+	}
+	/* **A linkset has no editor yet, and says so rather than opening one for
+	 * something else.** It is a `linkset` block in the configuration, which
+	 * the files tab edits; offering the interface dialog for a group would be
+	 * exactly the fault 0247 fixed, one kind of row later. */
+	if (subject == QLatin1String("linkset")) {
+		emit reported(QStringLiteral("`%1` is a linkset: a group of links, edited as a "
+		         "`linkset` block under configuration > files")
+		             .arg(name));
 		return;
 	}
 

@@ -9473,6 +9473,85 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.142 The linkset, and two things it found on the way
+
+10.140 recorded what this would be: a named set of links, one in use at a time,
+chosen on probe and metric, with `uplink` as the set that carries the default
+route. This is that, built.
+
+```ini
+linkset "uplink" {
+	members = ["eth0", "office", "wwan0"]
+}
+```
+
+A member is an `interface`, a `network` block's id, or another set -- which is
+what makes a group a link in its own right. `uplink` is special **by its name
+and nothing else**: no flag, because a boolean needs a rule for what two of them
+mean. Eligible members rank by metric, lowest wins, ties going to the order
+written; a member is eligible when its link has carrier and has not failed a
+probe. The chosen member gets its routes and the others do not. Decision 0248.
+
+Three rules that are each a way to get this wrong, all of them in the record:
+`up` is not consulted, because it is netcfgd's own setting and a plan is in the
+middle of applying it; `None` is not `Some(false)`, so an unprobed link keeps
+its standing; an absent metric reads as 0 -- the strongest -- because that is
+what the kernel does with an unnumbered route, and any other reading makes the
+set and the routing table disagree.
+
+### What it does not do yet, said plainly
+
+A lease's default route is dhcpcd's, and netcfgd's only handle on it is the
+metric passed at startup. So on a machine whose members are all `config =
+"dhcp"` -- most laptops, including the one this was written on -- a set today
+chooses, reports and drives what "connected" means, while the routing order
+stays the metric ranking it already was. Demoting a standby member's lease is
+the next round, and it carries its own question: the metric change means
+restarting the client, and doing that on every failover is churn on the link you
+are switching to.
+
+### A probe that said no did not take away the route it already had
+
+0119's own words are that a link failing a probe "gets the same answer" as one
+with no carrier, and the carrier answer is both halves: withhold the route, and
+withdraw one already installed. **Only the withholding half was ever written.**
+Every route on a freshly applied machine is installed before the first probe
+runs, so the black hole the probe exists to detect kept its better metric for
+ever.
+
+### The daemon's record disagreed with what the daemon did
+
+Probe verdicts are stamped onto a fresh observation *after* it is built, so
+everything derived inside `augment` was derived from `reachable: null` on every
+link. The published linkset choice named the better-ranked link while the
+planner -- which reads the stamped observation -- had just taken that link's
+routes away. `connectivity` with `requires = "probe"` had it too: the rung could
+never reach `online`, because the verdict it asks for had not been written yet.
+The derived answers are a named function now, and the daemon runs it again once
+the verdicts are on.
+
+Both were found by `tests/live/linkset.sh`, which is built on the case metrics
+cannot handle: a link that is up, has carrier and reaches nothing looks
+identical to a working one from the routing table.
+
+### And one divergence left standing
+
+A probe verdict has exactly one producer. A client that observes for itself --
+`ncfg status`, `ncfg plan` -- sees `reachable: null` and works out a different
+winner, so `ncfg status` can print a set choice that is not the one in the
+routing table. Older than linksets and wider than them: `ncfg apply` from the
+command line would re-add a route the daemon withheld. Recorded rather than
+fixed, because the fix is a question about where a client's observation comes
+from. The live test asserts against the daemon's own record for that reason.
+
+### Twelve sabotages, and the ninth
+
+All caught, but the ninth passed first time and the test was the fault: it
+asserted that `["eth0", "office"]` survived canonicalisation, and those two are
+already in alphabetical order, so sorting them changed nothing. **A fixture
+built so that the wrong answer and the right one are the same string** -- the
+fifth time this campaign has found that shape.
+
 ## 10.141 A radio and the network on it are one row
 
 The links tab drew `wlp0s20f3` and `OpenPC.se` as two rows: one with the state,

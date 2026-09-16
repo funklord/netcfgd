@@ -2927,3 +2927,80 @@ fn a_band_or_a_regdom_that_is_not_one_is_refused_at_compile_time() {
 		);
 	}
 }
+
+/// A `linkset` block, and the four ways of writing one that cannot work.
+///
+/// **A member is a reference, and nothing here checked that a reference
+/// resolved** -- the tree's own standing complaint about `master = "brx"`
+/// (0160). A set is worse than a master in that respect: a master that names
+/// nothing leaves an interface unattached, and an `uplink` that names nothing
+/// answers "disconnected" with no clue why.
+#[test]
+fn a_linkset_names_links_that_have_to_exist() {
+	let document = build_ok(
+		r#"interface eth0 { config = "dhcp" ; preference = 100 }
+network "office" { wifi { psk = "@secret:office" } ; metric = 50 }
+linkset uplink { members = ["office", "eth0"] }"#,
+	);
+	assert_eq!(document.linksets.len(), 1);
+	assert_eq!(document.linksets[0].name, "uplink");
+	assert_eq!(document.linksets[0].members, ["office", "eth0"]);
+
+	// **The order survives canonicalisation**, which is the property a bond's
+	// members deliberately do not have: it is the ranking, and sorting it
+	// would rewrite which of two equally ranked links the operator preferred.
+	//
+	// The members here are deliberately not in alphabetical order. Written the
+	// other way round this assertion passed with `canonicalize` sorting them,
+	// which is the vacuous shape this campaign keeps finding: a fixture built
+	// so that the wrong answer and the right one are the same string.
+	let mut canonical = document.clone();
+	canonical.canonicalize();
+	assert_eq!(canonical.linksets[0].members, ["office", "eth0"]);
+
+	let said = errors(r#"linkset uplink { members = ["eth0"] }"#);
+	assert!(
+		said.contains("does not describe"),
+		"a member that resolves to nothing is refused: {said}"
+	);
+
+	let said = errors(r"linkset uplink { }");
+	assert!(said.contains("no members"), "got: {said}");
+
+	let said = errors(
+		r#"interface eth0 { config = "dhcp" }
+linkset uplink { members = ["eth0", "eth0"] }"#,
+	);
+	assert!(said.contains("listed twice"), "got: {said}");
+
+	let said = errors(
+		r#"interface eth0 { config = "dhcp" }
+linkset eth0 { members = ["eth0"] }"#,
+	);
+	assert!(
+		said.contains("already the name of a link"),
+		"a set cannot take a link's name: {said}"
+	);
+}
+
+/// A set may contain a set, and may not contain one that contains it back.
+#[test]
+fn a_linkset_composes_but_does_not_contain_itself() {
+	let document = build_ok(
+		r#"interface eth0 { config = "dhcp" }
+interface eth1 { config = "dhcp" }
+interface wwan0 { config = "dhcp" }
+linkset office { members = ["eth0", "eth1"] }
+linkset uplink { members = ["office", "wwan0"] }"#,
+	);
+	assert_eq!(document.linksets.len(), 2);
+
+	let said = errors(
+		r#"interface eth0 { config = "dhcp" }
+linkset a { members = ["b"] }
+linkset b { members = ["a", "eth0"] }"#,
+	);
+	assert!(said.contains("contains itself"), "got: {said}");
+	// The way round, not the fact of it: a chain somebody can act on.
+	assert!(said.contains("a -> b -> a"), "the chain is printed: {said}");
+}

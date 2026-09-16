@@ -189,6 +189,16 @@ interface wg0 {
 }
 ```
 
+**Linkset — several links that can stand in for each other, one in use:**
+
+```ini
+linkset "uplink" {
+    members = ["eth0", "Office", "wwan0"]   # interface, network block, interface
+}
+```
+
+The eligible member with the best metric carries traffic and the rest do not get their routes; eligible means the link has carrier and has not failed its `probe`. A member may itself be a linkset, which is what makes a group a link in its own right. The set named `uplink` is the one that carries the default route and the one "connected" refers to; any other name is an ordinary group.
+
 Note what is absent from every example: any hostname, site name, group, role, environment, or inventory concept. There is no `host_vars`, no `group_vars`, no `sites/`. The config describes *this machine*, because that is what netcfgd configures.
 
 ### 3.3 Secrets
