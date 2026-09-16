@@ -96,6 +96,7 @@ SOURCES += \
 	src/access_view.cpp \
 	src/dns_view.cpp \
 	src/network_dialog.cpp \
+	src/linkset_dialog.cpp \
 	src/interface_dialog.cpp \
 	src/probe_dialog.cpp \
 	src/add_network_dialog.cpp \
@@ -124,6 +125,7 @@ HEADERS += \
 	src/access_view.h \
 	src/dns_view.h \
 	src/network_dialog.h \
+	src/linkset_dialog.h \
 	src/interface_dialog.h \
 	src/probe_dialog.h \
 	src/add_network_dialog.h \

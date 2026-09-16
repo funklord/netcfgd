@@ -1182,6 +1182,125 @@ int ncfg_client_connectivity(ncfg_client_t *client, ncfg_connectivity_t *out, ch
 	return done;
 }
 
+/*
+ * One linkset out of the observation, members and all.
+ *
+ * Returns 0 having set `err` on the one thing that can go wrong here, which is
+ * memory. A set with no members is not an error to this layer: the compiler
+ * refuses one, and a client that crashed on a document it did not expect would
+ * be the worse failure.
+ */
+static int convert_linkset(const ncfg_json_doc_t *doc, uint32_t entry, ncfg_linkset_t *set,
+                           char *err, size_t err_size)
+{
+	set->name = member_text(doc, entry, "name");
+	set->active = member_text(doc, entry, "active");
+	set->interface = member_text(doc, entry, "interface");
+	if (!set->name || !set->active || !set->interface) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+
+	uint32_t members = ncfg_json_member(doc, entry, "members");
+	uint32_t count = ncfg_json_count(doc, members);
+
+	if (!count) {
+		return 1;
+	}
+	set->members = calloc(count, sizeof(*set->members));
+	if (!set->members) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	set->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t member = ncfg_json_at(doc, members, i);
+
+		set->members[i].name = member_text(doc, member, "name");
+		set->members[i].interface = member_text(doc, member, "interface");
+		/* "" for a member that can be used. The daemon writes the field only
+		 * when there is a reason, so absent is the good case -- and
+		 * `member_text` gives "" for both an absent field and an empty one,
+		 * which is what a screen wants. */
+		set->members[i].ineligible = member_text(doc, member, "ineligible");
+		/* -1 for absent, because 0 is a legal metric and the strongest one. */
+		set->members[i].metric =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, member, "metric"), -1);
+		if (!set->members[i].name || !set->members[i].interface
+		    || !set->members[i].ineligible) {
+			set_error(err, err_size, "out of memory");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+static int convert_linksets(const ncfg_json_doc_t *doc, ncfg_linksets_t *out, char *err,
+                            size_t err_size)
+{
+	uint32_t root = ncfg_json_root(doc);
+	uint32_t list = ncfg_json_member(doc, root, "linksets");
+	uint32_t count = ncfg_json_count(doc, list);
+
+	if (!count) {
+		/* No set declared, or a daemon older than this client. The same answer
+		 * to a caller either way: there is no group to draw. */
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		return 0;
+	}
+	out->count = count;
+	for (uint32_t i = 0; i < count; i++) {
+		if (!convert_linkset(doc, ncfg_json_at(doc, list, i), &out->items[i], err, err_size)) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+void ncfg_linksets_free(ncfg_linksets_t *linksets)
+{
+	if (!linksets) {
+		return;
+	}
+	for (size_t i = 0; i < linksets->count; i++) {
+		for (size_t j = 0; j < linksets->items[i].count; j++) {
+			free(linksets->items[i].members[j].name);
+			free(linksets->items[i].members[j].interface);
+			free(linksets->items[i].members[j].ineligible);
+		}
+		free(linksets->items[i].members);
+		free(linksets->items[i].name);
+		free(linksets->items[i].active);
+		free(linksets->items[i].interface);
+	}
+	free(linksets->items);
+	memset(linksets, 0, sizeof(*linksets));
+}
+
+int ncfg_client_linksets(ncfg_client_t *client, ncfg_linksets_t *out, char *err, size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_status(client, err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	int done = !took_refusal(doc, err, err_size) && convert_linksets(doc, out, err, err_size);
+	if (!done) {
+		ncfg_linksets_free(out);
+	}
+	ncfg_json_free(doc);
+	return done;
+}
+
 static int convert_inventory(const ncfg_json_doc_t *doc, ncfg_inventory_t *out, char *err,
                              size_t err_size)
 {

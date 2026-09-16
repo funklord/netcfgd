@@ -257,6 +257,49 @@ bool ncfg_connection::inventory(QList<ncfg_inventory_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::linksets(QList<ncfg_linkset_row> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_linksets_t found = {};
+	char message[NCFG_ERROR_MAX];
+
+	if (!ncfg_client_linksets(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_linkset_row row;
+		row.name = from_c(found.items[i].name);
+		row.active = from_c(found.items[i].active);
+		row.interface = from_c(found.items[i].interface);
+		for (size_t j = 0; j < found.items[i].count; j++) {
+			ncfg_linkset_member_row member;
+			member.name = from_c(found.items[i].members[j].name);
+			member.interface = from_c(found.items[i].members[j].interface);
+			member.ineligible = from_c(found.items[i].members[j].ineligible);
+			member.metric = found.items[i].members[j].metric;
+			row.members << member;
+		}
+		*out << row;
+	}
+	ncfg_linksets_free(&found);
+	return true;
+}
+
 bool ncfg_connection::links(QList<ncfg_link_row> *out, QString *error)
 {
 	if (!out) {
