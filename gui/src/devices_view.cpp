@@ -6,6 +6,7 @@
 #include "explain_dialog.h"
 #include "interface_dialog.h"
 #include "ncfg_connection.h"
+#include "network_dialog.h"
 #include "table_view.h"
 
 #include <QComboBox>
@@ -42,10 +43,14 @@ ncfg_devices_view::ncfg_devices_view(ncfg_connection *connection, QWidget *paren
 	 * machine it added nothing to any row and cost the width that truncated
 	 * the MAC. The kernel's own kind is still in `ncfg_link_row` for anything
 	 * that wants it. */
+	/* `link`, not `interface`. The first column holds both kinds of block now
+	 * -- an interface and a saved wifi network are both links -- and a header
+	 * saying `interface` over a row called `OpenPC.se` is the same confusion
+	 * the two-row list had, moved into the heading. */
 	QStringList columns;
-	columns << QStringLiteral("interface") << QStringLiteral("category")
+	columns << QStringLiteral("link") << QStringLiteral("category")
 	        << QStringLiteral("presence") << QStringLiteral("configured")
-	        << QStringLiteral("state") << QStringLiteral("network")
+	        << QStringLiteral("state") << QStringLiteral("device")
 	        << QStringLiteral("addresses") << QStringLiteral("mtu")
 	        << QStringLiteral("mac");
 	table = new ncfg_table_view(columns, QStringLiteral("devices_note"), this);
@@ -198,9 +203,16 @@ void ncfg_devices_view::redraw()
 				hidden++;
 				continue;
 			}
+			/* The observed link this row's detail comes from. For an
+			 * interface that is itself; for a wifi network it is the radio
+			 * carrying it, because the addresses, the state and the lease
+			 * live on the radio while the connection they belong to is the
+			 * network. That is the join that turned two half-rows into one
+			 * whole one. */
+			const QString detail_from = known.carrier.isEmpty() ? known.name : known.carrier;
 			const ncfg_link_row *seen = nullptr;
 			for (const ncfg_link_row &link : links) {
-				if (link.name == known.name) {
+				if (link.name == detail_from) {
 					seen = &link;
 					break;
 				}
@@ -211,7 +223,10 @@ void ncfg_devices_view::redraw()
 			cells << known.presence;
 			cells << configured_word(known.configured);
 			cells << (seen ? seen->state : QString());
-			cells << (seen ? seen->network : QString());
+			/* Which hardware is carrying it, for a network. Blank for an
+			 * interface, which carries itself and would only repeat column
+			 * one. */
+			cells << known.carrier;
 			cells << (seen ? seen->addresses : QString());
 			cells << (seen && seen->mtu ? QString::number(seen->mtu) : QString());
 			cells << (seen ? seen->mac : QString());
@@ -235,7 +250,11 @@ void ncfg_devices_view::redraw()
 			 * writing "no" would assert something nobody was told. */
 			cells << QString();
 			cells << link.state;
-			cells << link.network;
+			/* No inventory, so no carrier is known. The kernel's own view has
+			 * the network on the radio's row, which is the shape this column
+			 * replaced -- leaving it blank says less than it could, and says
+			 * nothing wrong. */
+			cells << QString();
 			cells << link.addresses;
 			cells << (link.mtu ? QString::number(link.mtu) : QString());
 			cells << link.mac;
@@ -277,10 +296,51 @@ void ncfg_devices_view::configure_selected()
 		return;
 	}
 
+	/* Two kinds of row share this list, and configuring them is not the same
+	 * job: an interface has a device to set up, a wifi network has an ssid and
+	 * a credential. Dispatch on what the row says it is. Before the row
+	 * carried its subject this opened the interface dialog for everything,
+	 * which for a network meant an editor for an interface of that name --
+	 * and there is no interface called `OpenPC.se`. */
+	if (ncfg_link_subject(rows_known, name) == QLatin1String("network")) {
+		configure_network(name);
+		return;
+	}
+
 	ncfg_interface_dialog dialog(connection, name, this);
 	if (dialog.exec() != QDialog::Accepted) {
 		return;
 	}
 	emit reported(dialog.outcome());
 	emit changed();
+}
+
+void ncfg_devices_view::configure_network(const QString &id)
+{
+	/* The dialog edits a block, so it needs the block and not just its name.
+	 * The document is the daemon's to hand out; asking for it here keeps this
+	 * view from having to mirror every network field in its own row. */
+	QList<ncfg_saved_network_row> saved;
+	QString error;
+
+	if (!connection->saved_networks(&saved, &error)) {
+		emit reported(error);
+		return;
+	}
+	for (const ncfg_saved_network_row &network : saved) {
+		if (network.id != id) {
+			continue;
+		}
+		ncfg_network_dialog dialog(connection, network, this);
+		if (dialog.exec() != QDialog::Accepted) {
+			return;
+		}
+		emit reported(dialog.outcome());
+		emit changed();
+		return;
+	}
+	/* A row naming a network the document no longer has: the list is one
+	 * refresh behind. Say so rather than opening an empty editor, which would
+	 * write the block back. */
+	emit reported(QStringLiteral("no saved network called %1 any more").arg(id));
 }

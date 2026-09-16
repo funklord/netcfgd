@@ -1169,7 +1169,10 @@ static int convert_inventory(const ncfg_json_doc_t *doc, ncfg_inventory_t *out, 
 		item->category = member_text(doc, entry, "category");
 		item->presence = member_text(doc, entry, "presence");
 		item->configured = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "configured"), 0);
-		if (!item->name || !item->category || !item->presence) {
+		item->subject = member_text(doc, entry, "subject");
+		item->carrier = member_text(doc, entry, "carrier");
+		if (!item->name || !item->category || !item->presence || !item->subject
+		    || !item->carrier) {
 			set_error(err, err_size, "out of memory");
 			return 0;
 		}
@@ -1186,6 +1189,8 @@ void ncfg_inventory_free(ncfg_inventory_t *inventory)
 		free(inventory->items[i].name);
 		free(inventory->items[i].category);
 		free(inventory->items[i].presence);
+		free(inventory->items[i].subject);
+		free(inventory->items[i].carrier);
 	}
 	free(inventory->items);
 	memset(inventory, 0, sizeof(*inventory));

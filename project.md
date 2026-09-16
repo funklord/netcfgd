@@ -9473,6 +9473,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.141 A radio and the network on it are one row
+
+The links tab drew `wlp0s20f3` and `OpenPC.se` as two rows: one with the state,
+the addresses, the MTU and the MAC and no word for what the machine was
+connected to, one saying `present` and `yes` and nothing else. That is the
+kernel's shape -- a link table that knows nothing about networks, beside a
+supplicant that keeps networks and does not own the link. netcfgd already joins
+them; the list was drawing both halves instead of the join.
+
+**A radio carrying a configured network gets no row of its own, and the
+network's row names the radio.** `Entry` gained `subject`, which says whether a
+row is an `interface` block or a `network` block, and `carrier`, which names the
+interface a network is running on. Only for a configured network: `link.network`
+is `None` for an association to something the document does not describe, which
+is a real state an operator can reach by hand, and there the radio keeps its row
+because there is nothing for it to hide behind. Decision 0247.
+
+The first column is headed `link` rather than `interface`, since it holds both
+kinds of block. `network` left the table and `device` replaced it. On a network row the old
+column repeated the first one; the new one answers what the merge raises, which
+is what hardware this is running on. The state and the addresses on that row are
+the carrier's, because they are the radio's while the connection they describe is
+the network.
+
+### The bug the union had already shipped
+
+The list holds two kinds of block and `configure` opened the *interface* dialog
+for whatever was in column one -- so selecting `OpenPC.se` offered to set the
+MTU of an interface that does not exist. It went in with 0246 and was found by
+clicking, not by reading.
+
+`ncfg_link_subject` decides, beside `ncfg_link_shows` and for the same reason:
+both of its wrong answers are invisible in a screenshot. It defaults to
+`interface` for a row the daemon did not label and for a row that is not in the
+inventory at all -- which is one case, a list fallen back to the kernel's links,
+every one of which is an interface.
+
+### Two sabotages passed against a stale binary
+
+Five sabotages, all caught -- but the two C++ ones reported a pass on the first
+run, because `make -C gui` builds the program and not the probes and the old
+executable ran. Nothing in the output said so. What caught it was the split:
+three Rust sabotages failed and both GUI ones passed, which is not a plausible
+result.
+
+Second time this campaign has paid for the same rule. **A sabotage pass proves
+the tests can fail, and proves nothing if the tests did not run.**
+
 ## 10.140 The link list is a union, and presence is its own column
 
 10.139 settled the shape and changed none of it. This is that, built.

@@ -225,6 +225,25 @@ typedef struct {
 	 */
 	char *presence;
 	int   configured; /* whether the document names it */
+	/*
+	 * "interface" or "network": which of the document's two link-shaped
+	 * blocks this row is.
+	 *
+	 * **A caller has to know, because acting on them differs.** Configuring an
+	 * interface and configuring a wifi network are different dialogs against
+	 * different blocks, and a list that mixed them without saying which sent
+	 * one to the other.
+	 */
+	char *subject;
+	/*
+	 * The interface carrying this link right now, or "".
+	 *
+	 * Only a wifi network has one, and it is the radio it is associated with.
+	 * A network is not hardware -- it runs on whichever radio joined it -- and
+	 * a radio carrying a configured network has no row of its own, because
+	 * the network's row is that connection.
+	 */
+	char *carrier;
 } ncfg_inventory_item_t;
 
 typedef struct {

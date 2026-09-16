@@ -524,35 +524,65 @@ fn backends(observed: &mut Observed) {
 	});
 }
 
+/// The link inventory: the union of what the machine has and what the document
+/// names, which is the one part of the witness that is a join rather than a
+/// record of something observed.
+fn inventory(observed: &mut Observed) {
+	// Set rather than empty, so the witness pins the shape: it carries
+	// `skip_serializing_if`, and a field absent from the witness is the one
+	// that can go quiet unnoticed. All three provenances and all three
+	// presences, because those are what a reader of the schema needs to
+	// see -- especially `unknown`, which is the value that must never be
+	// rendered as absent. Both subjects too, and a `carrier`: a network
+	// row that is on a radio is the one row a reader is most likely to
+	// get wrong, because it is the join of two things the kernel keeps
+	// apart.
+	observed.inventory = vec![
+		netcfgd_model::link::Entry {
+			name: "eth0".to_owned(),
+			category: netcfgd_model::link::Category::Ethernet,
+			presence: netcfgd_model::link::Presence::Present,
+			configured: true,
+			subject: netcfgd_model::link::Subject::Interface,
+			carrier: None,
+		},
+		netcfgd_model::link::Entry {
+			name: "eth1".to_owned(),
+			category: netcfgd_model::link::Category::Other,
+			presence: netcfgd_model::link::Presence::Absent,
+			configured: true,
+			subject: netcfgd_model::link::Subject::Interface,
+			carrier: None,
+		},
+		netcfgd_model::link::Entry {
+			name: "n-cafe".to_owned(),
+			category: netcfgd_model::link::Category::Wifi,
+			presence: netcfgd_model::link::Presence::Present,
+			configured: true,
+			subject: netcfgd_model::link::Subject::Network,
+			// The radio carrying it, which is also why there is no row of
+			// its own for `wlan0`.
+			carrier: Some("wlan0".to_owned()),
+		},
+		netcfgd_model::link::Entry {
+			name: "n-office".to_owned(),
+			category: netcfgd_model::link::Category::Wifi,
+			presence: netcfgd_model::link::Presence::Unknown,
+			configured: true,
+			subject: netcfgd_model::link::Subject::Network,
+			// Nothing is on it, so nothing carries it.
+			carrier: None,
+		},
+	];
+}
+
 /// The whole observed surface, in one value.
 fn witness() -> Observed {
 	let mut observed = Observed {
-		// Set rather than empty, so the witness pins the shape: it carries
-		// `skip_serializing_if`, and a field absent from the witness is the one
-		// that can go quiet unnoticed. All three provenances and all three
-		// presences, because those are what a reader of the schema needs to
-		// see -- especially `unknown`, which is the value that must never be
-		// rendered as absent.
-		inventory: vec![
-			netcfgd_model::link::Entry {
-				name: "eth0".to_owned(),
-				category: netcfgd_model::link::Category::Ethernet,
-				presence: netcfgd_model::link::Presence::Present,
-				configured: true,
-			},
-			netcfgd_model::link::Entry {
-				name: "eth1".to_owned(),
-				category: netcfgd_model::link::Category::Other,
-				presence: netcfgd_model::link::Presence::Absent,
-				configured: true,
-			},
-			netcfgd_model::link::Entry {
-				name: "n-office".to_owned(),
-				category: netcfgd_model::link::Category::Wifi,
-				presence: netcfgd_model::link::Presence::Unknown,
-				configured: true,
-			},
-		],
+		// Filled below, by `inventory()`: the list is long enough that it
+		// pushed this function past the line limit, and it is the one part of
+		// the witness that is a join rather than a record.
+		inventory: Vec::new(),
 		// Set rather than absent, so the witness pins the shape: the field
 		// carries `skip_serializing_if`, and a field absent from the witness is
 		// exactly the one that can go quiet unnoticed -- which is what this
@@ -640,6 +670,7 @@ fn witness() -> Observed {
 		address_proto_supported: true,
 	};
 
+	inventory(&mut observed);
 	addresses_and_routes(&mut observed);
 	backends(&mut observed);
 	observed

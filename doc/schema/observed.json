@@ -12,19 +12,30 @@
       "name": "eth0",
       "category": "ethernet",
       "presence": "present",
-      "configured": true
+      "configured": true,
+      "subject": "interface"
     },
     {
       "name": "eth1",
       "category": "other",
       "presence": "absent",
-      "configured": true
+      "configured": true,
+      "subject": "interface"
+    },
+    {
+      "name": "n-cafe",
+      "category": "wifi",
+      "presence": "present",
+      "configured": true,
+      "subject": "network",
+      "carrier": "wlan0"
     },
     {
       "name": "n-office",
       "category": "wifi",
       "presence": "unknown",
-      "configured": true
+      "configured": true,
+      "subject": "network"
     }
   ],
   "links": [

@@ -39,6 +39,8 @@ private:
 	void rebuild_filter();
 	/* Draw the rows the filter allows, and say how many it hid. */
 	void redraw();
+	/* Open the network editor on a saved wifi network, by block id. */
+	void configure_network(const QString &id);
 
 signals:
 	void reported(const QString &summary);
@@ -46,7 +48,8 @@ signals:
 	void changed();
 
 private slots:
-	/* Open the interface editor on the selected row. This is where
+	/* Open the editor the selected row calls for -- the interface one for a
+	 * device, the network one for a saved wifi network. This is where
 	 * `preference` -- which uplink wins -- and a wired port's addressing are
 	 * set, neither of which the program could reach before. */
 	void configure_selected();

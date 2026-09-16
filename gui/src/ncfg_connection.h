@@ -59,9 +59,24 @@ struct ncfg_inventory_row {
 	 * unknown must never be drawn as absent. */
 	QString presence;
 	bool    configured = false;
+	/* "interface" or "network": which block this row is, and so what
+	 * configuring it means. A list that mixed the two without saying which
+	 * sent one to the other's dialog. */
+	QString subject;
+	/* The radio a wifi network is running on, or empty. A network is not
+	 * hardware; it runs on whichever radio joined it. */
+	QString carrier;
 };
 
 bool ncfg_link_shows(const QString &category, const QString &wanted);
+
+/* Which editor the row called `name` calls for: "network" or "interface".
+ *
+ * Beside `ncfg_link_shows` and for the same reason -- the decision is one
+ * lookup and a default, and both of those are wrong in ways a window cannot
+ * show you. See the definition.
+ */
+QString ncfg_link_subject(const QList<ncfg_inventory_row> &rows, const QString &name);
 
 struct ncfg_connectivity_row {
 	ncfg_rung_t rung = ncfg_rung_offline;

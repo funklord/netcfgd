@@ -158,6 +158,28 @@ bool ncfg_link_shows(const QString &category, const QString &wanted)
 	return category == wanted;
 }
 
+QString ncfg_link_subject(const QList<ncfg_inventory_row> &rows, const QString &name)
+{
+	for (const ncfg_inventory_row &row : rows) {
+		if (row.name != name) {
+			continue;
+		}
+		/* Trust the row, but only when it says something. A daemon older than
+		 * this window fills no subject, and an empty one is not a third kind
+		 * of block -- it is silence, and silence has to fall through to the
+		 * default rather than open an editor for nothing. */
+		if (!row.subject.isEmpty()) {
+			return row.subject;
+		}
+		break;
+	}
+	/* **Interface, for a row that is not in the inventory at all.** That is
+	 * what the list holds when the daemon gave none: the kernel's links,
+	 * every one of which is an interface. Defaulting the other way would
+	 * offer a network editor for `eth0`. */
+	return QStringLiteral("interface");
+}
+
 bool ncfg_connection::connectivity(ncfg_connectivity_row *out, QString *error)
 {
 	if (!out) {
@@ -226,6 +248,8 @@ bool ncfg_connection::inventory(QList<ncfg_inventory_row> *out, QString *error)
 		row.category = from_c(found.items[i].category);
 		row.presence = from_c(found.items[i].presence);
 		row.configured = found.items[i].configured != 0;
+		row.subject = from_c(found.items[i].subject);
+		row.carrier = from_c(found.items[i].carrier);
 		*out << row;
 	}
 	ncfg_inventory_free(&found);

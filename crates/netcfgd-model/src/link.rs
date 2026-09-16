@@ -226,12 +226,52 @@ pub fn category_of(link: &ObservedLink, document: Option<&crate::Document>) -> C
 	}
 }
 
+/// Whether this link is a radio carrying a network the document describes.
+///
+/// Split out because it decides whether a row exists at all, which is worth
+/// being able to read on its own. `link.network` is the `network` block's id
+/// the observation resolved -- empty for a radio joined to something the
+/// document does not describe, which is the case that keeps its own row.
+fn carries_a_configured_network(link: &ObservedLink, document: Option<&crate::Document>) -> bool {
+	let Some(id) = link.network.as_deref() else {
+		return false;
+	};
+	document.is_some_and(|document| document.networks.iter().any(|network| network.id == id))
+}
+
 /// Whether the document gives this link's device a modem policy.
 fn is_modem(link: &ObservedLink, document: &crate::Document) -> bool {
 	document
 		.devices
 		.iter()
 		.any(|device| device.name == link.name && device.modem.is_some())
+}
+
+/// Which of the document's two link-shaped things a row is.
+///
+/// **A row has to know, because acting on it differs.** Configuring an
+/// interface and configuring a wifi network are different dialogs against
+/// different blocks, and a list that mixed them without saying which is which
+/// sent one to the other -- selecting a network opened an interface dialog for
+/// an interface that does not exist. 0247.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Subject {
+	/// An `interface` block, or a link the kernel has that no block names.
+	Interface,
+	/// A `network` block.
+	Network,
+}
+
+impl Subject {
+	/// The word a column or a client uses.
+	#[must_use]
+	pub fn name(self) -> &'static str {
+		match self {
+			Self::Interface => "interface",
+			Self::Network => "network",
+		}
+	}
 }
 
 /// One row of the link list: what netcfgd knows about one link.
@@ -254,6 +294,19 @@ pub struct Entry {
 	/// hiding something demonstrably on the machine is worse than showing
 	/// something netcfgd does not manage.
 	pub configured: bool,
+	/// Which kind of thing this row is, and so what acting on it means.
+	pub subject: Subject,
+	/// The interface carrying this link right now, where that is not itself.
+	///
+	/// **Only a wifi network has one**, and it is the radio it is associated
+	/// with. A network is not hardware: it runs on whichever radio joined it,
+	/// and which one that is belongs in the row rather than being inferred by
+	/// whoever is reading.
+	///
+	/// `None` for an interface, which carries itself, and for a network that
+	/// nothing is on.
+	#[serde(skip_serializing_if = "Option::is_none", default)]
+	pub carrier: Option<String>,
 }
 
 /// Every link this machine has or has been told about.
@@ -281,6 +334,17 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 	let mut entries: Vec<Entry> = Vec::new();
 
 	for link in &observed.links {
+		// **A radio carrying a configured network does not get a row of its
+		// own**, because the network's row is that connection: it holds the
+		// state, the addresses and the lease, and naming the same thing twice
+		// put all the detail on one row and all the meaning on the other.
+		//
+		// Only when the network is one the document describes. A radio joined
+		// to something nobody configured still appears as itself, since there
+		// is no other row for it to hide behind.
+		if carries_a_configured_network(link, document) {
+			continue;
+		}
 		let configured = document.is_some_and(|document| {
 			document
 				.interfaces
@@ -296,6 +360,9 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 			category: link.category.unwrap_or_else(|| category_of(link, document)),
 			presence: Presence::Present,
 			configured,
+			subject: Subject::Interface,
+			// An interface carries itself; there is nothing else to name.
+			carrier: None,
 		});
 	}
 
@@ -318,23 +385,30 @@ pub fn inventory(document: Option<&crate::Document>, observed: &Observed) -> Vec
 			category: Category::Other,
 			presence: presence_of_interface(&interface.name, observed),
 			configured: true,
+			subject: Subject::Interface,
+			carrier: None,
 		});
 	}
 
 	// Every configured network, which is a link whether or not a radio is on
-	// it. A radio that is associated already appears above as its interface;
-	// this row is the *network*, which is the thing an operator configured and
-	// the thing a linkset would hold.
+	// it. Where a radio is on one, the radio's own row was skipped above and
+	// this is the only row for the pair: the network is the thing an operator
+	// configured, the thing a linkset would hold, and -- through `carrier` --
+	// the thing that says which hardware is carrying it.
 	for network in &document.networks {
-		let associated = observed
+		// The radio it is on, which is also what decides whether it is there.
+		let carrier = observed
 			.links
 			.iter()
-			.any(|link| link.network.as_deref() == Some(network.id.as_str()));
+			.find(|link| link.network.as_deref() == Some(network.id.as_str()))
+			.map(|link| link.name.clone());
 		entries.push(Entry {
 			name: network.id.clone(),
 			category: Category::Wifi,
-			presence: presence_of_network(network.hidden, associated, None),
+			presence: presence_of_network(network.hidden, carrier.is_some(), None),
 			configured: true,
+			subject: Subject::Network,
+			carrier,
 		});
 	}
 
@@ -537,6 +611,106 @@ mod tests {
 		let bare = inventory(None, &observed);
 		assert_eq!(bare.len(), 2);
 		assert!(bare.iter().all(|entry| !entry.configured));
+	}
+
+	/// One connection is one row, and it is the network's.
+	///
+	/// **A radio and the network it is on were two rows, and neither was
+	/// complete**: the radio held the addresses, the state and the lease while
+	/// the network held only its name. All the detail on one, all the meaning
+	/// on the other. The network is the link -- the radio is the hardware it
+	/// runs on -- so the network's row is the one that survives, naming its
+	/// carrier.
+	#[test]
+	fn a_radio_carrying_a_configured_network_does_not_get_its_own_row() {
+		use super::{inventory, Presence, Subject};
+
+		let mut observed = crate::observed::Observed::default();
+		let mut radio = link("wlan0", "", true);
+		radio.network = Some("office".to_owned());
+		observed.links.push(radio);
+
+		let mut document = crate::Document::default();
+		document.interfaces.push(
+			serde_json::from_value(serde_json::json!({ "name": "wlan0" })).expect("an interface"),
+		);
+		document.networks.push(
+			serde_json::from_value(serde_json::json!({
+				"id": "office",
+				"ssid": "6f6666696365",
+				"security": { "type": "open" },
+			}))
+			.expect("a network"),
+		);
+
+		let rows = inventory(Some(&document), &observed);
+		assert_eq!(rows.len(), 1, "one connection is one row: {rows:?}");
+		assert_eq!(rows[0].name, "office");
+		assert_eq!(rows[0].subject, Subject::Network);
+		assert_eq!(rows[0].presence, Presence::Present);
+		// The hardware it is running on, in the row rather than inferred by
+		// whoever is reading it.
+		assert_eq!(rows[0].carrier.as_deref(), Some("wlan0"));
+
+		// **A radio joined to something nobody configured keeps its own row**,
+		// because there is no other row for it to hide behind -- and that is
+		// a real state: an operator may associate by hand.
+		observed.links[0].network = Some("somewhere-else".to_owned());
+		let rows = inventory(Some(&document), &observed);
+		let names: Vec<&str> = rows.iter().map(|entry| entry.name.as_str()).collect();
+		assert!(
+			names.contains(&"wlan0"),
+			"the radio keeps its row: {names:?}"
+		);
+		// And the configured network is now nowhere, which is honest: nothing
+		// is on it and no scan has looked.
+		let office = rows
+			.iter()
+			.find(|entry| entry.name == "office")
+			.expect("office");
+		assert_eq!(office.presence, Presence::Unknown);
+		assert_eq!(office.carrier, None);
+
+		// An idle radio keeps its row too, for the same reason.
+		observed.links[0].network = None;
+		let names: Vec<String> = inventory(Some(&document), &observed)
+			.into_iter()
+			.map(|entry| entry.name)
+			.collect();
+		assert!(names.contains(&"wlan0".to_owned()), "{names:?}");
+	}
+
+	/// An interface row and a network row are told apart, because acting on
+	/// them differs.
+	///
+	/// Selecting a network and pressing configure opened an *interface* dialog
+	/// for an interface that does not exist, which is what happens when a list
+	/// mixes two kinds of thing without saying which is which.
+	#[test]
+	fn a_row_says_which_kind_of_block_it_is() {
+		use super::{inventory, Subject};
+
+		let mut observed = crate::observed::Observed::default();
+		observed.links.push(link("eth0", "", false));
+
+		let mut document = crate::Document::default();
+		document.networks.push(
+			serde_json::from_value(serde_json::json!({
+				"id": "office",
+				"ssid": "6f6666696365",
+				"security": { "type": "open" },
+			}))
+			.expect("a network"),
+		);
+
+		let rows = inventory(Some(&document), &observed);
+		let find = |name: &str| {
+			rows.iter()
+				.find(|entry| entry.name == name)
+				.unwrap_or_else(|| panic!("no row for {name}"))
+		};
+		assert_eq!(find("eth0").subject, Subject::Interface);
+		assert_eq!(find("office").subject, Subject::Network);
 	}
 
 	/// A modem is the one category the link cannot answer for itself.
