@@ -115,6 +115,7 @@ SOURCES += \
 	src/secrets_view.cpp \
 	src/profiles_view.cpp \
 	src/rules_view.cpp \
+	src/bluetooth_dialog.cpp \
 	src/bluetooth_view.cpp \
 	src/hooks_view.cpp \
 	src/events_view.cpp \
@@ -149,6 +150,7 @@ HEADERS += \
 	src/secrets_view.h \
 	src/profiles_view.h \
 	src/rules_view.h \
+	src/bluetooth_dialog.h \
 	src/bluetooth_view.h \
 	src/hooks_view.h \
 	src/events_view.h \

@@ -156,6 +156,7 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	 * describing the configuration from before it. */
 	connect(rules, &ncfg_rules_view::changed, this, &ncfg_main_window::reload);
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
+	connect(bluetooth, &ncfg_bluetooth_view::changed, this, &ncfg_main_window::reload);
 	connect(hooks, &ncfg_hooks_view::reported, this, &ncfg_main_window::note);
 	connect(hooks, &ncfg_hooks_view::changed, this, &ncfg_main_window::reload);
 	connect(profiles, &ncfg_profiles_view::changed, this, &ncfg_main_window::reload);

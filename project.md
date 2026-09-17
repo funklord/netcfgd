@@ -9499,6 +9499,71 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.154 A bluetooth device the window can write
+
+A `bluetooth` block is a device declared like a network (0149): a handle the
+operator chose, the address as the fact about the hardware. The window could
+list them and nothing more; it has `view / change` and `new device...` now.
+Decision 0260.
+
+The profile is a list because the language's set is closed -- five names, and
+anything else is refused -- and the address is taken in the three forms a
+person arrives with (colons, dashes, twelve bare digits) and written in the one
+the compiler takes. Anything else is refused beside the field rather than at a
+line number in a file the operator did not write.
+
+### Saying what the daemon will not do
+
+**This build does not act on a `bluetooth` block at all** -- nothing pairs a
+device, connects it, or brings a `pan` link up, which the planner warns about
+per device. So the outcome line says it in the planner's own words, and the
+note under the table stopped saying the opposite: it read *"a device is
+declared like a network and netcfgd pairs and connects it"*, which is the one
+sentence somebody reads before there is anything in the table.
+
+The dialog also says what the planner cannot, because it depends on a choice
+made a moment ago in the window: an audio profile carries sound, which is
+`bluealsa`'s business, and a `pan` or `nap` device produces a `bnep` link that
+needs an `interface` block or it comes up with no address.
+
+### The manual had never mentioned it
+
+`netcfgd.conf.example` calls itself "every feature, with the syntax to use it"
+and the postinst sends an operator to it on a machine with no network. It
+contained the word `bluetooth` **zero times**, for eleven decisions. The
+example gate compiles every block in the file, which cannot notice one that is
+not there; it now reads the top-level heads out of `lower.rs` and requires each
+to appear. Eight heads, all documented.
+
+**A gate that checks what is present cannot see an absence**, which is the same
+shape as the icon gate's sentence from 0259 -- a themed name is never wrong,
+only missing -- and as the vacuous-fixture findings before it.
+
+### The value that proves a load
+
+Five sabotages were caught at once and the sixth was not: an editor that loads
+nothing still passed the live probe, because every other assertion sets its
+field before saving. **The only value that proves a load is one that differs
+from the default.** `autoconnect` is the one field in this block where that is
+possible, so the probe turns it off, saves, re-opens and asserts the box comes
+back off.
+
+### Two process failures in one day, both mine
+
+`systemctl reboot` on the user's workstation, from *"fold all your knowledge,
+then let's reboot"* -- which meant the session. It killed another worker's
+session in `~/src/tde` along with the desktop, and the reply claiming nothing
+was lost was true only of this project's own work, which was not the thing to
+reassure anybody about. **An instruction that could mean the machine or
+something smaller is a question, not an authorisation.**
+
+Then `git checkout -- tool/example_gate.py` to undo a sabotage, which is the
+one command `CLAUDE.md` singles out as unrecoverable, and it discarded this
+round's whole gate addition. It cost only a re-apply because the change was
+minutes old and scripted -- the point of the rule is that the next time it
+would not be. A sabotage pass restores from a copy it made itself; the index is
+not that copy.
+
 ## 10.153 A client that outlives its daemon
 
 *"Each time we update the software the tray software loses its icons."* Two

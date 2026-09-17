@@ -49,6 +49,12 @@ import tempfile
 EXAMPLE = "doc/netcfgd.conf.example"
 NCFG = "./target/debug/ncfg"
 
+# Where the compiler decides what a top-level block is. The list is read from
+# it rather than written here, for the reason the planner's `FIRED_PHASES`
+# gives: a second copy is a thing that goes stale, and this one would go stale
+# in the direction of passing.
+LOWER = "crates/netcfgd-compile/src/lower.rs"
+
 # The blocks that cannot stand alone, by the line they start on and their first
 # line. Both are checked, so moving one without updating this is a failure
 # rather than a silent pass.
@@ -107,6 +113,65 @@ def compiles(text):
 	return None
 
 
+def block_heads():
+	"""Every top-level block head the compiler accepts, read from `lower.rs`.
+
+	The arms of the `match block.head.as_str()` that walks the merged document.
+	Nested heads -- `wifi`, `bridge`, `probe` and the rest -- are not this
+	question: they cannot be written on their own, and the gate above compiles
+	the blocks that contain them.
+	"""
+	text = open(LOWER).read()
+	start = text.find("for block in &merged.blocks {")
+	if start < 0:
+		return []
+	body = text[start : text.find("\n\t}\n", start)]
+	return re.findall(r'^\t\t\t"([a-z_]+)"', body, re.MULTILINE)
+
+
+def check_every_block_is_documented():
+	"""Every block the language accepts is written down in the example.
+
+	**`bluetooth` was in the language from 0149 and in this file never.** The
+	file calls itself "every feature, with the syntax to use it" and the
+	postinst points an operator at it as the thing to read on a machine with no
+	network -- and a block that is missing entirely is invisible to the gate
+	above, which only compiles what is there. A feature nobody can find is not
+	far from a feature nobody has.
+
+	Returns 0 when every head appears, 1 when one does not.
+	"""
+	heads = block_heads()
+	if len(heads) < 6:
+		print(
+			f"example-gate: only {len(heads)} block head(s) read from {LOWER};"
+			" the extraction is broken, which looks exactly like a pass",
+			file=sys.stderr,
+		)
+		return 1
+
+	text = open(EXAMPLE).read()
+	missing = [
+		head
+		for head in heads
+		if not re.search(rf"^#(override )?{head}[ \t{{]", text, re.MULTILINE)
+	]
+	for head in missing:
+		print(
+			f"example-gate: the language has a `{head}` block and {EXAMPLE} has none",
+			file=sys.stderr,
+		)
+		print(
+			"example-gate:   the file calls itself every feature with the syntax to"
+			" use it",
+			file=sys.stderr,
+		)
+	if missing:
+		return 1
+	print(f"example-gate: {len(heads)} block head(s) in the language, all documented")
+	return 0
+
+
 def main():
 	if not os.path.exists(NCFG):
 		print("example-gate: ncfg is not built", file=sys.stderr)
@@ -146,7 +211,7 @@ def main():
 		f"example-gate: {len(found)} blocks in {EXAMPLE} compile"
 		f" ({len(allowed)} known-incomplete, named)"
 	)
-	return 0
+	return check_every_block_is_documented()
 
 
 if __name__ == "__main__":

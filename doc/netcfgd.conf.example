@@ -1033,6 +1033,52 @@
 
 
 ##############################################################################
+# BLUETOOTH DEVICES
+#
+# A device is a block like a network: you choose the name, and the address is
+# the fact about the hardware. Replacing the headphones is then one line
+# rather than every mention of them.
+#
+# WHAT THIS BUILD DOES WITH ONE: nothing yet. The block compiles, `ncfg show`
+# carries it and `ncfg plan` says, per device, that it is understood and not
+# acted on -- nothing pairs a device, connects it, or brings a `pan` link up.
+# It is in the language so that a configuration written now still means this
+# when the backends arrive.
+
+#bluetooth "headphones" {
+#	address = "AA:BB:CC:DD:EE:FF"
+#	profile = "a2dp-sink"
+#}
+
+# `profile` is what this machine uses the device FOR, and it is a closed set:
+#
+#   a2dp-sink     this machine plays to it: a speaker, headphones
+#   a2dp-source   this machine receives from it: a phone, another computer
+#   hfp           hands-free -- a microphone and an earpiece
+#   pan           this machine joins the device's network
+#   nap           this machine serves a network to the device
+#
+# The first three carry sound, which is `bluealsa`'s business and not
+# netcfgd's. The last two carry packets: a connected `pan` or `nap` device
+# produces a `bnep` interface, and that is a link like any other -- give it an
+# `interface` block or it comes up with no address.
+#
+# `autoconnect` is true unless you say otherwise, which is `network`'s rule: a
+# device somebody wrote down is one they want used.
+
+#bluetooth "car" {
+#	address = "00:11:22:33:44:55"
+#	profile = "hfp"
+#	autoconnect = false
+#}
+
+# WHAT IS NOT HERE, deliberately. Whether a device is PAIRED is a fact about
+# the adapter's key store, established interactively by whatever did the
+# pairing, and writing it here would be a second source of truth for something
+# netcfgd does not own. Codecs and volume belong to the audio layer.
+
+
+##############################################################################
 # LINK TYPES
 #
 # A BRIDGE. Members take no address of their own; the bridge does.
