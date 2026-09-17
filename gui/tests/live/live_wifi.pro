@@ -27,8 +27,13 @@ PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
 # `network_dialog` is here because `wifi_view` opens it: the saved-networks
 # table's view/change button and the add-by-hand one both construct it, so the
-# tab does not link without it.
+# tab does not link without it. `access_point_dialog` joined the list for the
+# same reason when the tab grew the third table -- and the failure is a
+# link-time "undefined reference to vtable", which reads like a build problem
+# rather than a missing source until you know.
 SOURCES += live_wifi.cpp ../../src/ncfg_connection.cpp ../../src/wifi_view.cpp \
-	../../src/add_network_dialog.cpp ../../src/network_dialog.cpp
+	../../src/add_network_dialog.cpp ../../src/network_dialog.cpp \
+	../../src/access_point_dialog.cpp
 HEADERS += ../../src/ncfg_connection.h ../../src/wifi_view.h \
-	../../src/add_network_dialog.h ../../src/network_dialog.h
+	../../src/add_network_dialog.h ../../src/network_dialog.h \
+	../../src/access_point_dialog.h

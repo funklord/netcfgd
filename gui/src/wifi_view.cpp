@@ -3,6 +3,7 @@
  */
 #include "wifi_view.h"
 
+#include "access_point_dialog.h"
 #include "network_dialog.h"
 
 #include "add_network_dialog.h"
@@ -35,6 +36,16 @@ constexpr int column_count = static_cast<int>(sizeof(column_titles) / sizeof(col
 const char *const saved_column_titles[] = {
 	"network", "security", "credential", "metric", "autoconnect", "in range"
 };
+
+/* What this machine *offers*, which is the other half of wifi. `on air` is the
+ * observation and the rest is the document: an access point that is configured
+ * and not running is the state an operator is looking for when the network
+ * they set up is not there. */
+const char *const ap_column_titles[] = {
+	"access point", "radio", "security", "band", "channel", "on air"
+};
+constexpr int ap_column_count =
+    static_cast<int>(sizeof(ap_column_titles) / sizeof(ap_column_titles[0]));
 constexpr int saved_column_count =
     static_cast<int>(sizeof(saved_column_titles) / sizeof(saved_column_titles[0]));
 
@@ -160,6 +171,45 @@ ncfg_wifi_view::ncfg_wifi_view(ncfg_connection *connection, QWidget *parent)
 	saved_table->horizontalHeader()->setStretchLastSection(true);
 	layout->addWidget(saved_table);
 
+	/* A third list, below the saved networks and clearly its own: a saved
+	 * network is somewhere this machine joins and an access point is a network
+	 * it runs. hostapd's configuration is netcfgd's to generate, and until
+	 * this there was no way to see one, let alone write one. */
+	auto *ap_controls = new QHBoxLayout();
+	ap_controls->addWidget(new QLabel(QStringLiteral("access points this machine offers"),
+	    this));
+	ap_edit_button = new QPushButton(QStringLiteral("view / change"), this);
+	ap_edit_button->setObjectName(QStringLiteral("edit_access_point"));
+	ap_edit_button->setEnabled(false);
+	ap_new_button = new QPushButton(QStringLiteral("new access point..."), this);
+	ap_new_button->setObjectName(QStringLiteral("new_access_point"));
+	ap_controls->addWidget(ap_edit_button);
+	ap_controls->addWidget(ap_new_button);
+	ap_controls->addStretch();
+	layout->addLayout(ap_controls);
+
+	ap_table = new QTableWidget(0, ap_column_count, this);
+	QStringList ap_headers;
+	for (int i = 0; i < ap_column_count; i++) {
+		ap_headers << QString::fromLatin1(ap_column_titles[i]);
+	}
+	ap_table->setObjectName(QStringLiteral("access_points"));
+	ap_table->setHorizontalHeaderLabels(ap_headers);
+	ap_table->verticalHeader()->setVisible(false);
+	ap_table->setSelectionBehavior(QAbstractItemView::SelectRows);
+	ap_table->setSelectionMode(QAbstractItemView::SingleSelection);
+	ap_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
+	ap_table->horizontalHeader()->setStretchLastSection(true);
+	layout->addWidget(ap_table);
+
+	connect(ap_edit_button, &QPushButton::clicked, this,
+	    &ncfg_wifi_view::edit_access_point);
+	connect(ap_new_button, &QPushButton::clicked, this, &ncfg_wifi_view::new_access_point);
+	connect(ap_table, &QTableWidget::doubleClicked, this,
+	    &ncfg_wifi_view::edit_access_point);
+	connect(ap_table, &QTableWidget::itemSelectionChanged, this,
+	    [this]() { ap_edit_button->setEnabled(ap_table->currentRow() >= 0); });
+
 	connect(edit_button, &QPushButton::clicked, this, &ncfg_wifi_view::edit_selected);
 	connect(forget_button, &QPushButton::clicked, this, &ncfg_wifi_view::forget_selected);
 	connect(manual_button, &QPushButton::clicked, this, &ncfg_wifi_view::add_manually);
@@ -199,6 +249,71 @@ QString ncfg_wifi_view::chosen_interface() const
  * facts and a table that spelled them the same way would be the sort of
  * confident wrong answer this program avoids elsewhere.
  */
+void ncfg_wifi_view::update_access_points()
+{
+	QString error;
+	if (!connection->access_points(&offered, &error)) {
+		/* Not fatal to the tab, for the reason the saved list is not: a
+		 * refusal here is usually a tier this caller lacks, and the scan half
+		 * still works. */
+		ap_table->setRowCount(0);
+		return;
+	}
+
+	ap_table->setRowCount(offered.size());
+	for (int row = 0; row < offered.size(); row++) {
+		const ncfg_access_point_config &point = offered.at(row);
+		/* **What hostapd took, where it differs from what was asked.** A
+		 * channel can be refused and hostapd then chooses; an access point
+		 * beaconing somewhere other than where the block put it is exactly
+		 * what somebody is looking for when the network is not where they
+		 * expect. */
+		const QString where = point.channel > 0 ? QString::number(point.channel)
+		                                        : QStringLiteral("auto");
+		const QString taken = point.running && point.started_channel > 0
+		        && point.started_channel != point.channel
+		    ? QStringLiteral("%1 (on %2)").arg(where).arg(point.started_channel)
+		    : where;
+		const QString air = point.running
+		    ? (point.answering ? QStringLiteral("yes") : QStringLiteral("started, silent"))
+		    : QStringLiteral("no");
+		QStringList cells;
+		cells << point.id << point.device << point.security
+		      << (point.band.isEmpty() ? QStringLiteral("auto") : point.band) << taken
+		      << air;
+		for (int column = 0; column < ap_column_count; column++) {
+			ap_table->setItem(row, column, new QTableWidgetItem(cells.at(column)));
+		}
+	}
+	ap_table->resizeColumnsToContents();
+}
+
+void ncfg_wifi_view::edit_access_point()
+{
+	const int row = ap_table->currentRow();
+	if (row < 0 || row >= offered.size()) {
+		return;
+	}
+	ncfg_access_point_dialog dialog(connection, offered.at(row), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	update_access_points();
+	emit changed();
+}
+
+void ncfg_wifi_view::new_access_point()
+{
+	ncfg_access_point_dialog dialog(connection, ncfg_access_point_config(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	update_access_points();
+	emit changed();
+}
+
 void ncfg_wifi_view::update_saved()
 {
 	QString error;
@@ -355,6 +470,7 @@ void ncfg_wifi_view::refresh()
 	QString error;
 
 	update_saved();
+	update_access_points();
 
 	if (!connection->links(&rows, &error)) {
 		status->setText(error);

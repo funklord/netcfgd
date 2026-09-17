@@ -104,6 +104,7 @@ SOURCES += \
 	src/links_view.cpp \
 	src/devices_view.cpp \
 	src/device_dialog.cpp \
+	src/access_point_dialog.cpp \
 	src/config_view.cpp \
 	src/explain_dialog.cpp \
 	src/global_view.cpp \
@@ -135,6 +136,7 @@ HEADERS += \
 	src/links_view.h \
 	src/devices_view.h \
 	src/device_dialog.h \
+	src/access_point_dialog.h \
 	src/config_view.h \
 	src/explain_dialog.h \
 	src/global_view.h \

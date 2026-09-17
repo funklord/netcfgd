@@ -70,6 +70,11 @@ private slots:
 	/* Take a saved network away, and its credential with it. */
 	void forget_selected();
 	void add_manually();
+	/* The access points this machine *offers*, which is the other half of
+	 * wifi: a saved network is somewhere it joins, an access point is a
+	 * network it runs. */
+	void edit_access_point();
+	void new_access_point();
 
 private:
 	QString chosen_interface() const;
@@ -129,7 +134,15 @@ private:
 	QPushButton     *forget_button;
 	QPushButton     *manual_button;
 	QList<ncfg_saved_network_row> saved;
+	/* The access points this machine offers: the document's blocks with what
+	 * hostapd is actually running joined on. */
+	QTableWidget    *ap_table;
+	QPushButton     *ap_edit_button;
+	QPushButton     *ap_new_button;
+	QList<ncfg_access_point_config> offered;
 	void    update_saved();
+	/* Redraw the access point list from the daemon's answer. */
+	void    update_access_points();
 	/* Open the editor on a saved network, or on nothing to write one by
 	 * hand. One dialog for both, because "view what this is set to" and
 	 * "set one up" are the same form with different starting values. */

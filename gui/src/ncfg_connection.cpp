@@ -915,6 +915,51 @@ bool ncfg_connection::devices(QList<ncfg_device_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::access_points(QList<ncfg_access_point_config> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_access_points_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_access_points(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_access_point_config row;
+		row.id = from_c(found.items[i].id);
+		row.name = from_c(found.items[i].name);
+		row.ssid = from_c(found.items[i].ssid);
+		row.device = from_c(found.items[i].device);
+		row.security = from_c(found.items[i].security);
+		row.credential = from_c(found.items[i].credential);
+		row.band = from_c(found.items[i].band);
+		row.regdom = from_c(found.items[i].regdom);
+		row.channel = found.items[i].channel;
+		row.hidden = found.items[i].hidden != 0;
+		row.acl_policy = from_c(found.items[i].acl_policy);
+		row.stations = from_c(found.items[i].stations);
+		row.running = found.items[i].running != 0;
+		row.answering = found.items[i].answering != 0;
+		row.started_band = from_c(found.items[i].started_band);
+		row.started_channel = found.items[i].started_channel;
+		*out << row;
+	}
+	ncfg_access_points_free(&found);
+	return true;
+}
+
 bool ncfg_connection::device_config(const QString &device, ncfg_device_config *out,
     QString *error)
 {

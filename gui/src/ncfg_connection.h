@@ -331,6 +331,34 @@ struct ncfg_interface_config {
 	QString unmodelled;
 };
 
+/* One access point this machine offers, and whether it is on the air.
+ *
+ * **The other half of wifi.** A `network` block is somewhere this machine
+ * joins; an `access_point` block is a network it runs -- netcfgd generates
+ * hostapd's configuration and starts it. `started_band` and `started_channel`
+ * are what hostapd actually took, which is not always what the block asks for:
+ * a channel can be refused and hostapd then chooses. */
+struct ncfg_access_point_config {
+	QString id;
+	QString name;
+	QString ssid;
+	QString device;
+	QString security;
+	QString credential;
+	QString band;
+	QString regdom;
+	/* -1 where the document names none; 0 is not a channel. */
+	int     channel = -1;
+	bool    hidden = false;
+	/* "allow", "deny", or empty for one that talks to everyone. */
+	QString acl_policy;
+	QString stations;
+	bool    running = false;
+	bool    answering = false;
+	QString started_band;
+	int     started_channel = -1;
+};
+
 /* One device: the hardware, and netcfgd's policy about it. A device is what
  * has to exist before a link can; a link is where the networking is
  * configured. */
@@ -933,6 +961,9 @@ public:
 	/* Every device: the union of what the kernel has and what the document
 	 * describes, for the reason the link inventory is a union (0246). */
 	bool devices(QList<ncfg_device_row> *out, QString *error);
+	/* Every access point the configuration describes, with what is running
+	 * joined on. Empty for a machine that offers none. */
+	bool access_points(QList<ncfg_access_point_config> *out, QString *error);
 	/* One device's configuration, defaults where the document has no block. */
 	bool device_config(const QString &device, ncfg_device_config *out, QString *error);
 	/* The credentials this machine holds, by name. Never by value: there is

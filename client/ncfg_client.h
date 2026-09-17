@@ -1698,6 +1698,57 @@ typedef struct {
 	int   hidden;      /* whether the document says it does not broadcast */
 } ncfg_saved_network_t;
 
+/*
+ * One access point this machine offers, and whether it is on the air.
+ *
+ * **The other half of wifi, and the one no client could see.** A `network`
+ * block is somewhere this machine joins; an `access_point` block is a network
+ * it *runs* -- netcfgd generates hostapd's configuration and starts it. The
+ * document has carried the block since M4 and no window could show one.
+ *
+ * Configuration and observation, joined: `running` and `answering` come from
+ * the backend, and `on_band` and `on_channel` are what hostapd was actually
+ * started with -- which is not always what the document asks for, because a
+ * channel can be refused or a band unsupported and hostapd chooses.
+ */
+typedef struct {
+	char *id;
+	char *name; /* the SSID as text, "" when it is not text */
+	char *ssid; /* lowercase hex; always present */
+	char *device;
+	char *security;   /* "psk", "eap", "open", "owe" */
+	char *credential; /* the `@secret:` reference, or "" where it needs none */
+	char *band;       /* "2.4", "5", "6", or "" where the document says nothing */
+	char *regdom;
+	/* -1 where the document names none: 0 is not a channel, but a client that
+	 * showed one would be inventing a choice netcfgd leaves to hostapd. */
+	int   channel;
+	int   hidden;
+	/* "allow", "deny" or "" for an access point that talks to everyone. */
+	char *acl_policy;
+	char *stations; /* the addresses, space-joined */
+	/* The running half. `started_band` and `started_channel` are what hostapd
+	 * took, which is the answer to "why is it not on channel 36". */
+	int   running;
+	int   answering;
+	char *started_band;
+	int   started_channel;
+} ncfg_access_point_config_t;
+
+typedef struct {
+	ncfg_access_point_config_t *items;
+	size_t                      count;
+} ncfg_access_points_t;
+
+void ncfg_access_points_free(ncfg_access_points_t *points);
+
+/*
+ * Every access point the configuration describes, with what is running joined
+ * on. Empty for a machine that offers none, which is most of them.
+ */
+int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, char *err,
+                              size_t err_size);
+
 typedef struct {
 	ncfg_saved_network_t *items;
 	size_t                count;

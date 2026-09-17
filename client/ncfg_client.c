@@ -1606,6 +1606,169 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 	return 1;
 }
 
+void ncfg_access_points_free(ncfg_access_points_t *points)
+{
+	if (!points) {
+		return;
+	}
+	for (size_t i = 0; i < points->count; i++) {
+		free(points->items[i].id);
+		free(points->items[i].name);
+		free(points->items[i].ssid);
+		free(points->items[i].device);
+		free(points->items[i].security);
+		free(points->items[i].credential);
+		free(points->items[i].band);
+		free(points->items[i].regdom);
+		free(points->items[i].acl_policy);
+		free(points->items[i].stations);
+		free(points->items[i].started_band);
+	}
+	free(points->items);
+	memset(points, 0, sizeof(*points));
+}
+
+/* Defined below, beside the other join this file does: an access point's
+ * station list is read before the interface reader that first needed it. */
+static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array);
+
+/* The `@secret:` name a security block refers to, whichever key holds it. */
+static char *security_credential(const ncfg_json_doc_t *doc, uint32_t security)
+{
+	static const char *const keys[] = { "passphrase", "password", "private_key" };
+
+	for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++) {
+		char *named = member_text(doc, ncfg_json_member(doc, security, keys[k]), "name");
+		if (named && *named) {
+			return named;
+		}
+		free(named);
+	}
+	return dup_string("");
+}
+
+/*
+ * What hostapd was started with for this access point, where one is running.
+ *
+ * **Not the same question as what the document asks for**, which is the reason
+ * it is joined on at all: a channel can be refused and a band unsupported, and
+ * hostapd then chooses. An access point beaconing on channel 6 while the block
+ * says 36 is a fact only the observation has.
+ */
+static void running_state(const ncfg_json_doc_t *status, const char *device,
+                          ncfg_access_point_config_t *item)
+{
+	uint32_t backends = ncfg_json_member(status, ncfg_json_root(status), "backends");
+
+	item->started_channel = -1;
+	for (uint32_t i = 0; i < ncfg_json_count(status, backends); i++) {
+		uint32_t entry = ncfg_json_at(status, backends, i);
+		if (!ncfg_json_string_equals(status, ncfg_json_member(status, entry, "kind"),
+		        "access_point")) {
+			continue;
+		}
+		if (!ncfg_json_string_equals(status, ncfg_json_member(status, entry, "interface"),
+		        device)) {
+			continue;
+		}
+		item->running = ncfg_json_bool(status, ncfg_json_member(status, entry, "running"), 0);
+		item->answering =
+		    ncfg_json_bool(status, ncfg_json_member(status, entry, "answering"), 0);
+		uint32_t started = ncfg_json_member(status, entry, "started_with");
+		if (ncfg_json_type(status, started) == NCFG_JSON_OBJECT) {
+			item->started_band = member_text(status, started, "band");
+			item->started_channel =
+			    (int)ncfg_json_int(status, ncfg_json_member(status, started, "channel"), -1);
+		}
+		break;
+	}
+	if (!item->started_band) {
+		item->started_band = dup_string("");
+	}
+}
+
+int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, char *err,
+                              size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+
+	ncfg_json_doc_t *doc = ncfg_client_request(client, "{\"request\":\"show\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+	uint32_t points = ncfg_json_member(doc, ncfg_json_root(doc), "access_points");
+	uint32_t count = ncfg_json_count(doc, points);
+	if (!count) {
+		/* A machine that offers none, which is most of them. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+
+	/* The running half. Asked for once rather than per access point: a machine
+	 * with three radios still has one observation. */
+	ncfg_json_doc_t *status = ncfg_client_status(client, err, err_size);
+	if (!status || took_refusal(status, err, err_size)) {
+		ncfg_json_free(doc);
+		ncfg_json_free(status);
+		return 0;
+	}
+
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		ncfg_json_free(status);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, points, i);
+		ncfg_access_point_config_t *item = &out->items[i];
+
+		item->id = member_text(doc, entry, "id");
+		item->name = member_text(doc, entry, "id");
+		item->ssid = member_text(doc, entry, "ssid");
+		item->device = member_text(doc, entry, "device");
+		uint32_t security = ncfg_json_member(doc, entry, "security");
+		item->security = member_text(doc, security, "type");
+		item->credential = security_credential(doc, security);
+		item->band = member_text(doc, entry, "band");
+		item->regdom = member_text(doc, entry, "regdom");
+		/* -1 rather than 0: 0 is not a channel, and a client that drew one
+		 * would be inventing a choice netcfgd leaves to hostapd. */
+		item->channel = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "channel"), -1);
+		item->hidden = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "hidden"), 0);
+
+		uint32_t acl = ncfg_json_member(doc, entry, "access_control");
+		item->acl_policy = member_text(doc, acl, "policy");
+		item->stations = joined_words(doc, ncfg_json_member(doc, acl, "stations"));
+
+		running_state(status, item->device ? item->device : "", item);
+
+		if (!item->id || !item->name || !item->ssid || !item->device || !item->security
+		    || !item->credential || !item->band || !item->regdom || !item->acl_policy
+		    || !item->stations || !item->started_band) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_json_free(status);
+			return 0;
+		}
+	}
+
+	ncfg_json_free(doc);
+	ncfg_json_free(status);
+	return 1;
+}
+
 void ncfg_dns_free(ncfg_dns_t *dns)
 {
 	if (!dns) {

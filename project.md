@@ -9489,6 +9489,49 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.150 The other half of wifi
+
+A `network` block is somewhere this machine joins; an `access_point` block is a
+network it **runs** -- netcfgd generates hostapd's configuration and starts it.
+The block has been in the model since M4 and no window could show one, let alone
+write one. The wifi tab has a third list now, under the saved networks, with an
+editor behind it. Decision 0256.
+
+**Configuration and observation, joined**, because an operator is usually asking
+the second half: `on air` is `no` for an access point that is configured and not
+running -- the state somebody is looking for when the network they set up is not
+there -- and the channel column reads `36 (on 6)` where hostapd took a different
+one. A channel can be refused and hostapd then chooses; that is a fact only the
+observation has.
+
+The form refuses three things in its own words: a passphrase typed where a
+`@secret:` reference belongs, an empty station list with a policy (`only these`
+with nobody on it admits nobody), and a regulatory domain that is not two
+letters. And it says the one thing it cannot refuse -- the radio still needs an
+address, because hostapd beacons and stations associate while **netcfgd serves
+no DHCP**.
+
+`eap` is not offered: on an access point it means pointing hostapd at a RADIUS
+server rather than holding a credential, which is a different form.
+
+### A link-time trap, and the fourth stale artifact
+
+`live_wifi` links `wifi_view.cpp`, so the tab growing a third table meant that
+probe had to link `access_point_dialog.cpp` too. Without it the failure is
+`undefined reference to vtable`, which reads like a build-system problem rather
+than a missing source -- and it was invisible until the whole live suite was
+rebuilt, because the stale binary kept passing.
+
+**Fourth stale-artifact cost this campaign**, after 0247's sabotage pass, 0249's
+skipped suite and 0250's headless probes. Same shape each time: a test that was
+not rebuilt reports on code that no longer exists.
+
+### Five sabotages against the access point
+
+The station list dropped on save; `hidden = false` stated as though chosen; an
+open network still writing a `psk` key; a typed passphrase accepted; the editor
+opening without loading what was written. All caught.
+
 ## 10.149 There is no `ifb` to write
 
 `ifb` was the last entry on the device editor's refusal list, and the natural
