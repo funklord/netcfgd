@@ -18,6 +18,7 @@
 //! a command line, in a prompt, or in a shell history -- and the file is 0600
 //! from the moment it exists, because a `chmod` afterwards is a window.
 
+use netcfgd_sys::sayln;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -255,7 +256,7 @@ pub(crate) fn set(positional: &[String], options: &Options) -> Result<ExitCode, 
 /// everywhere and a convenience command is not the place to break it.
 fn report(secret: &Path, name: &str, replacing: bool, options: &Options) {
 	let verb = if replacing { "replaced" } else { "stored" };
-	println!("{verb} {} (0600)", secret.display());
+	sayln!("{verb} {} (0600)", secret.display());
 
 	// The document is compiled to answer "does anything use this?", and a
 	// configuration that does not compile is not an error *here*: the secret is
@@ -266,9 +267,9 @@ fn report(secret: &Path, name: &str, replacing: bool, options: &Options) {
 	};
 	let users = referring_to(&document, name);
 	if users.is_empty() {
-		println!("note: nothing in the configuration refers to `@secret:{name}` yet");
+		sayln!("note: nothing in the configuration refers to `@secret:{name}` yet");
 	} else {
-		println!("used by: {}", users.join(", "));
+		sayln!("used by: {}", users.join(", "));
 	}
 }
 

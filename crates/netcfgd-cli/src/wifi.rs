@@ -16,6 +16,7 @@
 use crate::Options;
 use netcfgd_host::{config, wifi_profile};
 use netcfgd_model::Ssid;
+use netcfgd_sys::sayln;
 use std::path::Path;
 #[cfg(test)]
 use std::path::PathBuf;
@@ -351,7 +352,7 @@ pub(crate) fn forget(positional: &[String], options: &Options) -> Result<ExitCod
 		let request = netcfgd_proto::Request::WifiForget { id: id.clone() };
 		return match crate::client::ask(&socket, &request) {
 			Ok(crate::client::Answer::Ok) => {
-				println!("netcfgd forgot `{id}`");
+				sayln!("netcfgd forgot `{id}`");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -364,14 +365,14 @@ pub(crate) fn forget(positional: &[String], options: &Options) -> Result<ExitCod
 	let (document, _, _) = crate::compile(options)?;
 	let forgotten = wifi_profile::forget(&config_dir, &factory_dir, Some(&document), id)
 		.map_err(|error| crate::drop_in::refused_locally(error, &socket))?;
-	println!("forgot `{id}`");
+	sayln!("forgot `{id}`");
 	// Said, because a credential outliving what wanted it is a fault this
 	// project names elsewhere and an operator cannot see it from here.
 	for name in &forgotten.credentials_removed {
-		println!("and removed the credential `{name}`, which nothing refers to now");
+		sayln!("and removed the credential `{name}`, which nothing refers to now");
 	}
 	for name in &forgotten.credentials_kept {
-		println!("the credential `{name}` stays: something else still refers to it");
+		sayln!("the credential `{name}` stays: something else still refers to it");
 	}
 	Ok(ExitCode::SUCCESS)
 }
@@ -679,12 +680,12 @@ fn add_over_socket(
 	match crate::client::ask(&socket, &request) {
 		Ok(crate::client::Answer::Ok) => {
 			say_activated(activated);
-			println!("added `{}` through netcfgd", profile.id);
-			println!(
+			sayln!("added `{}` through netcfgd", profile.id);
+			sayln!(
 				"the configuration is root's, so this went to the daemon rather than \
 				 straight to a file"
 			);
-			println!("`ncfg wifi connect \"{}\"` joins it now", profile.id);
+			sayln!("`ncfg wifi connect \"{}\"` joins it now", profile.id);
 			Ok(ExitCode::SUCCESS)
 		}
 		Ok(crate::client::Answer::Error { message }) => Err(message),
@@ -775,7 +776,7 @@ fn security_of(wanted: &Wanted) -> wifi_profile::Security {
 /// silently is one whose next surprise is worse.
 fn say_activated(interface: Option<&str>) {
 	if let Some(interface) = interface {
-		println!(
+		sayln!(
 			"activated `{interface}`: netcfgd manages that radio now, which is what \
 			 lets it join anything. `ncfg wifi deactivate {interface}` hands it back"
 		);
@@ -791,12 +792,12 @@ fn report(
 	before: Option<&netcfgd_model::Document>,
 	activated: Option<&str>,
 ) {
-	println!("wrote {}", file.display());
+	sayln!("wrote {}", file.display());
 	if stored {
-		println!("wrote {} (mode 0600)", secret.display());
+		sayln!("wrote {} (mode 0600)", secret.display());
 	}
 	if wanted.open {
-		println!(
+		sayln!(
 			"`{id}` has no security: anything sent over it is readable by \
 			 anybody in range"
 		);
@@ -817,7 +818,7 @@ fn report(
 	let radio =
 		before.is_some_and(|document| document.devices.iter().any(|device| device.wifi.is_some()));
 	if !radio && activated.is_none() {
-		println!(
+		sayln!(
 			"nothing will use it yet: no device in this configuration has a \
 			 `wifi` block, and no radio was activated for it"
 		);
@@ -830,7 +831,7 @@ fn report(
 	} else {
 		id.to_owned()
 	};
-	println!("`ncfg plan` shows what it changes; `ncfg wifi connect {quoted}` joins it now");
+	sayln!("`ncfg plan` shows what it changes; `ncfg wifi connect {quoted}` joins it now");
 }
 
 /// Ask for the passphrase, or read it from a pipe.

@@ -20,6 +20,7 @@
 use crate::Options;
 use netcfgd_host::config;
 use netcfgd_model::{Control, Principal};
+use netcfgd_sys::sayln;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -384,17 +385,17 @@ fn show(options: &Options) -> Result<ExitCode, String> {
 	let (document, _, _) = super::compile(options)?;
 	let control = &document.globals.control;
 
-	println!("observe  {}", control.observe.render());
-	println!("wifi     {}", control.wifi.render());
-	println!("admin    {}", control.admin.render());
+	sayln!("observe  {}", control.observe.render());
+	sayln!("wifi     {}", control.wifi.render());
+	sayln!("admin    {}", control.admin.render());
 
 	// The socket's mode follows the policy, and an operator reading this is
 	// nearly always asking why a client was refused. Saying which file decides
 	// is the part that saves the afternoon.
 	if !control.opens_beyond_root() {
-		println!();
-		println!("every tier is root, so the socket is root-only and no client run");
-		println!("by an ordinary user can reach it. `ncfg control set` changes that.");
+		sayln!();
+		sayln!("every tier is root, so the socket is root-only and no client run");
+		sayln!("by an ordinary user can reach it. `ncfg control set` changes that.");
 	}
 	Ok(ExitCode::SUCCESS)
 }
@@ -428,7 +429,7 @@ fn set(options: &Options) -> Result<ExitCode, String> {
 	}
 
 	let path = write_policy(&control, options)?;
-	println!("{}", path.display());
+	sayln!("{}", path.display());
 	report(&control);
 	Ok(ExitCode::SUCCESS)
 }
@@ -496,14 +497,14 @@ fn write_policy(control: &Control, options: &Options) -> Result<PathBuf, String>
 
 /// What the policy is now, and what an operator still has to do about it.
 fn report(control: &Control) {
-	println!("observe  {}", control.observe.render());
-	println!("wifi     {}", control.wifi.render());
-	println!("admin    {}", control.admin.render());
+	sayln!("observe  {}", control.observe.render());
+	sayln!("wifi     {}", control.wifi.render());
+	sayln!("admin    {}", control.admin.render());
 	if control.opens_beyond_root() {
-		println!();
-		println!("netcfgd applies this when it next reads its configuration. A member of");
-		println!("a named group has to log out and back in before the kernel gives their");
-		println!("session that membership.");
+		sayln!();
+		sayln!("netcfgd applies this when it next reads its configuration. A member of");
+		sayln!("a named group has to log out and back in before the kernel gives their");
+		sayln!("session that membership.");
 	}
 }
 

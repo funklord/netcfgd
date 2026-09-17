@@ -17,6 +17,7 @@ mod tui;
 mod wifi;
 
 use netcfgd_host::{config, hooks, state};
+use netcfgd_sys::{say, sayln};
 
 use netcfgd_apply::{apply, KernelExecutor};
 use netcfgd_model::Observed;
@@ -228,11 +229,11 @@ pub(crate) struct Options {
 
 fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	let Some(command) = arguments.first() else {
-		print!("{USAGE}");
+		say!("{USAGE}");
 		return Ok(ExitCode::from(2));
 	};
 	if command == "-h" || command == "--help" || command == "help" {
-		print!("{USAGE}");
+		say!("{USAGE}");
 		return Ok(ExitCode::SUCCESS);
 	}
 	// One of the three surfaces harmonization.md names for the copyright
@@ -240,8 +241,8 @@ fn run(arguments: &[String]) -> Result<ExitCode, String> {
 	// `netcfgd_model::COPYRIGHT` so that this and the daemon cannot come to
 	// disagree about a fact neither of them owns.
 	if command == "--version" || command == "version" {
-		println!("ncfg {}", env!("CARGO_PKG_VERSION"));
-		println!("{}", netcfgd_model::COPYRIGHT);
+		sayln!("ncfg {}", env!("CARGO_PKG_VERSION"));
+		sayln!("{}", netcfgd_model::COPYRIGHT);
 		return Ok(ExitCode::SUCCESS);
 	}
 
@@ -559,7 +560,7 @@ fn command_plan(options: &Options) -> Result<ExitCode, String> {
 	let _ = state::write_observed(&run_dir, &observed);
 
 	if options.json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(&plan).map_err(|error| error.to_string())?
 		);
@@ -595,13 +596,13 @@ fn note_empty_config(options: &Options) {
 	if !sources.is_empty() {
 		return;
 	}
-	println!();
-	println!(
+	sayln!();
+	sayln!(
 		"there is no configuration in {}, so netcfgd manages nothing here.",
 		config_dir.display()
 	);
-	println!("`ncfg wifi add SSID` writes the first one; doc/first-run.md has the");
-	println!("wired case.");
+	sayln!("`ncfg wifi add SSID` writes the first one; doc/first-run.md has the");
+	sayln!("wired case.");
 }
 
 /// Say so if another daemon manages an interface this plan touches.
@@ -621,8 +622,8 @@ fn warn_about_contention(document: &netcfgd_model::Document, observed: &Observed
 		.collect();
 
 	for contender in netcfgd_host::contention::contenders(&claimed) {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"warning: {}",
 			netcfgd_host::contention::describe(&contender)
 		);
@@ -645,14 +646,14 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 		return match client::ask(&client::socket_path(&run_dir), &request)? {
 			client::Answer::Journal(journal) => {
 				for record in &journal.records {
-					println!("{:?} {}", record.outcome, record.op);
+					sayln!("{:?} {}", record.outcome, record.op);
 					// The record has carried this all along and this path dropped
 					// it, so a failure over the socket said `Failed hook.run` and
 					// nothing about why -- while the same failure through `ncfg
 					// apply` printed the reason. Found by a live test looking for a
 					// message that was already in the journal (0063).
 					if let Some(error) = &record.error {
-						println!("     {error}");
+						sayln!("     {error}");
 					}
 				}
 				// Zero is the operator declining a window on a machine whose
@@ -662,12 +663,12 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 				// the flag is to override a default, and silence would look
 				// the same as the default having been applied.
 				if seconds > 0 {
-					println!(
+					sayln!(
 						"confirm window open for {seconds}s -- run `ncfg confirm` to keep this, \
 						 or `ncfg revert` to undo it now"
 					);
 				} else {
-					println!("applied with no confirm window, as `--confirm-within 0` asked");
+					sayln!("applied with no confirm window, as `--confirm-within 0` asked");
 				}
 				// **The same exit code the local path gives for the same
 				// journal.** `ncfg apply` returns 1 when an action failed;
@@ -718,7 +719,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 				print_refusals(&plan);
 				print_stranded(&plan);
 			} else {
-				println!("nothing to do");
+				sayln!("nothing to do");
 			}
 		}
 		return Ok(outcome(&plan));
@@ -739,7 +740,7 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 	}
 
 	if options.json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(&journal).map_err(|error| error.to_string())?
 		);
@@ -750,9 +751,9 @@ fn command_apply(options: &Options) -> Result<ExitCode, String> {
 				netcfgd_apply::Outcome::Failed => "FAIL",
 				netcfgd_apply::Outcome::Skipped => "skip",
 			};
-			println!("{mark} {}", describe(&record.op, &record.reason));
+			sayln!("{mark} {}", describe(&record.op, &record.reason));
 			if let Some(error) = &record.error {
-				println!("     {error}");
+				sayln!("     {error}");
 			}
 		}
 	}
@@ -844,18 +845,18 @@ fn command_explain(positional: &[String], options: &Options) -> Result<ExitCode,
 	let explanation = netcfgd_host::explain(&subject, desired.as_ref(), &observed, &provenance);
 
 	if options.json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(&explanation).map_err(|error| error.to_string())?
 		);
 		return Ok(ExitCode::SUCCESS);
 	}
 
-	println!("{}", explanation.subject);
+	sayln!("{}", explanation.subject);
 	for fact in &explanation.facts {
 		match &fact.source {
-			Some(source) => println!("  {:<9} {}   [{}]", fact.topic, fact.detail, source),
-			None => println!("  {:<9} {}", fact.topic, fact.detail),
+			Some(source) => sayln!("  {:<9} {}   [{}]", fact.topic, fact.detail, source),
+			None => sayln!("  {:<9} {}", fact.topic, fact.detail),
 		}
 	}
 	Ok(ExitCode::SUCCESS)
@@ -1037,7 +1038,7 @@ fn command_wifi(positional: &[String], options: &Options) -> Result<ExitCode, St
 			Ok(ExitCode::SUCCESS)
 		}
 		client::Answer::Ok => {
-			println!(
+			sayln!(
 				"{}",
 				match &request {
 					// **It has joined by the time this prints.** Since 0197 the
@@ -1108,31 +1109,37 @@ fn bytes(count: u64) -> String {
 /// there is more important than the signal strength that is not.
 fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<(), String> {
 	if json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(report).map_err(|error| error.to_string())?
 		);
 		return Ok(());
 	}
 	if report.stations.is_empty() {
-		println!(
+		sayln!(
 			"nothing is associated with `{}` on {}",
-			report.access_point, report.interface
+			report.access_point,
+			report.interface
 		);
 		return Ok(());
 	}
 
-	println!(
+	sayln!(
 		"{} station{} on `{}` ({})",
 		report.stations.len(),
 		if report.stations.len() == 1 { "" } else { "s" },
 		report.access_point,
 		report.interface
 	);
-	println!();
-	println!(
+	sayln!();
+	sayln!(
 		"{:<17}  {:>7}  {:>9}  {:>7}  {:>8}  {:>8}",
-		"ADDRESS", "SIGNAL", "CONNECTED", "IDLE", "RX", "TX"
+		"ADDRESS",
+		"SIGNAL",
+		"CONNECTED",
+		"IDLE",
+		"RX",
+		"TX"
 	);
 
 	let mut anomalies = 0;
@@ -1165,21 +1172,21 @@ fn render_stations(report: &netcfgd_proto::StationReport, json: bool) -> Result<
 			_ => "",
 		};
 
-		println!(
+		sayln!(
 			"{:<17}  {signal:>7}  {connected:>9}  {idle:>7}  {rx:>8}  {tx:>8}{note}",
 			station.address
 		);
 	}
 
 	if anomalies > 0 {
-		println!();
+		sayln!();
 		// What this means changed with decision 0041, and saying the old thing
 		// would send an operator to restart an access point that was about to
 		// fix itself. hostapd still reads its file once at startup, but netcfgd
 		// now converges the live list over the control socket, so an arrow is a
 		// state that lasts until the next reconcile rather than until somebody
 		// intervenes. `ncfg apply` is the way to stop waiting.
-		println!(
+		sayln!(
 			"An arrow means hostapd's live list does not match the document yet: it reads \n\
 			 the file once at startup and netcfgd converges the difference over the control \n\
 			 socket. `ncfg apply` does it now; if an arrow survives that, `ncfg plan` says \n\
@@ -1318,11 +1325,11 @@ fn render_modems(modems: &[netcfgd_proto::ModemStatus], json: bool) -> Result<()
 	if json {
 		let text = serde_json::to_string(modems)
 			.map_err(|error| format!("cannot render modems as json: {error}"))?;
-		println!("{text}");
+		sayln!("{text}");
 		return Ok(());
 	}
 	if modems.is_empty() {
-		println!("no device in the configuration has a `modem` block");
+		sayln!("no device in the configuration has a `modem` block");
 		return Ok(());
 	}
 	for modem in modems {
@@ -1334,12 +1341,12 @@ fn render_modems(modems: &[netcfgd_proto::ModemStatus], json: bool) -> Result<()
 		} else {
 			"on its first choice"
 		};
-		println!("{}  {selected}  {state}", modem.device);
+		sayln!("{}  {selected}  {state}", modem.device);
 		if !modem.sim.is_empty() {
-			println!("    sources: {}", modem.sim.join(", "));
+			sayln!("    sources: {}", modem.sim.join(", "));
 		}
 		if let Some(apn) = &modem.apn {
-			println!("    apn: {apn}");
+			sayln!("    apn: {apn}");
 		}
 		// **Only the sources a card has actually been read on.** The mux shows
 		// the module one SIM at a time, so a source netcfgd has never been on
@@ -1354,7 +1361,7 @@ fn render_modems(modems: &[netcfgd_proto::ModemStatus], json: bool) -> Result<()
 			} else {
 				""
 			};
-			println!("    {} card: {}{here}", card.source, card.iccid);
+			sayln!("    {} card: {}{here}", card.source, card.iccid);
 		}
 	}
 	Ok(())
@@ -1371,11 +1378,11 @@ fn render_radios(radios: &[netcfgd_proto::Radio], json: bool) -> Result<(), Stri
 	if json {
 		let text = serde_json::to_string(radios)
 			.map_err(|error| format!("cannot render radios as json: {error}"))?;
-		println!("{text}");
+		sayln!("{text}");
 		return Ok(());
 	}
 	if radios.is_empty() {
-		println!("no radios on this machine");
+		sayln!("no radios on this machine");
 		return Ok(());
 	}
 	for radio in radios {
@@ -1388,17 +1395,17 @@ fn render_radios(radios: &[netcfgd_proto::Radio], json: bool) -> Result<(), Stri
 			}
 			(false, false) => "not activated",
 		};
-		println!("{:<16} {state}", radio.interface);
+		sayln!("{:<16} {state}", radio.interface);
 	}
 	if radios.iter().any(|radio| !radio.activated) {
-		println!("\n`ncfg wifi activate <radio>` hands one to netcfgd.");
+		sayln!("\n`ncfg wifi activate <radio>` hands one to netcfgd.");
 	}
 	Ok(())
 }
 
 fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), String> {
 	if json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(report).map_err(|error| error.to_string())?
 		);
@@ -1410,10 +1417,10 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 	// range" and "netcfgd could not scan" are different answers and the second
 	// one printed as the first is the whole complaint this fixes.
 	if let Some(why) = &report.stale {
-		println!("these are the previous scan's results: {why}");
+		sayln!("these are the previous scan's results: {why}");
 	}
 	if report.access_points.is_empty() {
-		println!("no access points in range of {}", report.interface);
+		sayln!("no access points in range of {}", report.interface);
 		return Ok(());
 	}
 	let mut any_unconfigured = false;
@@ -1426,14 +1433,15 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 			any_unconfigured = true;
 			String::new()
 		};
-		println!(
+		sayln!(
 			"{:>4} dBm  {:>5} MHz  {security:<7}  {name}{configured}",
-			entry.signal, entry.frequency
+			entry.signal,
+			entry.frequency
 		);
 	}
 	if any_unconfigured {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"a name in brackets is a `network` block: `ncfg wifi connect ID` joins it. \
 			 The rest need config written first, which needs the admin tier."
 		);
@@ -1443,18 +1451,18 @@ fn render_scan(report: &netcfgd_proto::ScanReport, json: bool) -> Result<(), Str
 
 fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<(), String> {
 	if json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(state).map_err(|error| error.to_string())?
 		);
 		return Ok(());
 	}
-	println!("{} {}", state.interface, state.state);
+	sayln!("{} {}", state.interface, state.state);
 	// **First, above the association.** A switched-off radio is the answer to
 	// "why is there no network", and printing it under the details of what the
 	// supplicant is not doing buries the one line that explains all of them.
 	if let Some(why) = &state.blocked {
-		println!("    {why}");
+		sayln!("    {why}");
 	}
 	// Keyed on the ssid, which is the field that says "associated at all", and
 	// rendered by the shared namer. `name.or(ssid)` printed the raw hex with
@@ -1467,11 +1475,11 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 			.bssid
 			.as_ref()
 			.map_or_else(String::new, |bssid| format!(" ({bssid})"));
-		println!("    {name}{bssid}");
+		sayln!("    {name}{bssid}");
 	}
 	match &state.network {
-		Some(id) => println!("    from the `{id}` network block"),
-		None if state.ssid.is_some() => println!(
+		Some(id) => sayln!("    from the `{id}` network block"),
+		None if state.ssid.is_some() => sayln!(
 			"    not from any `network` block, which should not happen: netcfgd supplies \
 			 every network the supplicant knows. Worth reporting."
 		),
@@ -1481,10 +1489,10 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 	// reads `SCANNING` whether it is looking hopefully or has given up on
 	// everything it was given, and this is the difference. Decision 0192.
 	if !state.not_trying.is_empty() {
-		println!("    not being tried:");
+		sayln!("    not being tried:");
 		for network in &state.not_trying {
 			let name = access_point_name(network.name.as_deref(), &network.ssid);
-			println!("        {name} {}", network.flags);
+			sayln!("        {name} {}", network.flags);
 		}
 	}
 	// Said once, here, rather than on each of the log lines that got the
@@ -1497,7 +1505,7 @@ fn render_wifi_status(state: &netcfgd_proto::WifiState, json: bool) -> Result<()
 		.iter()
 		.any(|network| network.flags.contains("TEMP-DISABLED"))
 	{
-		println!(
+		sayln!(
 			"    a temporary disable is the supplicant giving up after repeated failures \
 			 and waiting before it tries again. It is not a network out of range -- that \
 			 one is absent from a scan, not disabled. `journalctl -u netcfgd | grep \
@@ -1531,7 +1539,7 @@ fn command_reload(options: &Options) -> Result<ExitCode, String> {
 	let request = netcfgd_proto::Request::Reload;
 	match client::ask(&client::socket_path(&run_dir), &request)? {
 		client::Answer::Ok => {
-			println!("reloaded; the configuration compiles");
+			sayln!("reloaded; the configuration compiles");
 			Ok(ExitCode::SUCCESS)
 		}
 		// The daemon's own diagnostics, which name a file and a line. A
@@ -1553,7 +1561,7 @@ fn command_confirm(
 	let response = client::ask(&client::socket_path(&run_dir), request)?;
 	match response {
 		client::Answer::Ok => {
-			println!(
+			sayln!(
 				"{}",
 				if matches!(request, netcfgd_proto::Request::Confirm) {
 					"confirmed; the change stands"
@@ -1597,12 +1605,12 @@ fn command_reset(options: &Options) -> Result<ExitCode, String> {
 	let factory = config::writable_files(&factory_dir).map_err(|error| error.to_string())?;
 
 	if doomed.is_empty() {
-		println!("nothing to reset: {} holds no config", config_dir.display());
+		sayln!("nothing to reset: {} holds no config", config_dir.display());
 		return Ok(ExitCode::SUCCESS);
 	}
 
 	for path in &doomed {
-		println!(
+		sayln!(
 			"{} {}",
 			if options.yes {
 				"removed"
@@ -1618,16 +1626,16 @@ fn command_reset(options: &Options) -> Result<ExitCode, String> {
 	// happens rather than discovered by the next apply tearing everything
 	// down.
 	if factory.is_empty() {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"note: {} holds no factory config, so this leaves netcfgd with no \
 			 configuration at all. The next apply would remove every address, route \
 			 and link netcfgd installed.",
 			factory_dir.display()
 		);
 	} else {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"{} file{} remain{}, from {}",
 			factory.len(),
 			if factory.len() == 1 { "" } else { "s" },
@@ -1637,8 +1645,8 @@ fn command_reset(options: &Options) -> Result<ExitCode, String> {
 	}
 
 	if !options.yes {
-		println!();
-		println!("nothing was removed; add --yes to do it");
+		sayln!();
+		sayln!("nothing was removed; add --yes to do it");
 		return Ok(ExitCode::SUCCESS);
 	}
 
@@ -1668,7 +1676,7 @@ fn observe_with_document(options: &Options, run_dir: &std::path::Path) -> Result
 /// interface buries the one that matters.
 fn print_link_settings(link: &netcfgd_model::ObservedLink, observed: &netcfgd_model::Observed) {
 	if !link.offloads.is_empty() {
-		println!("    offloads {}", link.offloads.join(" "));
+		sayln!("    offloads {}", link.offloads.join(" "));
 	}
 	if let Some(kind) = &link.qdisc {
 		let shaped = link.qdisc_bandwidth_bits.map_or_else(String::new, |bits| {
@@ -1680,16 +1688,16 @@ fn print_link_settings(link: &netcfgd_model::ObservedLink, observed: &netcfgd_mo
 		} else {
 			" [kernel default or set elsewhere]"
 		};
-		println!("    qdisc {kind}{shaped}{ours}");
+		sayln!("    qdisc {kind}{shaped}{ours}");
 	}
 	if let Some(target) = &link.ingress_redirect {
-		println!("    ingress redirected to {target}");
+		sayln!("    ingress redirected to {target}");
 	}
 	if observed.nat.contains(&link.name) {
-		println!("    masquerade");
+		sayln!("    masquerade");
 	}
 	if link.forwarding == Some(true) {
-		println!("    forwarding");
+		sayln!("    forwarding");
 	}
 	// Only when it is off. A radio that works needs no line, and an operator
 	// scanning this list is looking for the reason something does not work --
@@ -1697,7 +1705,7 @@ fn print_link_settings(link: &netcfgd_model::ObservedLink, observed: &netcfgd_mo
 	if let Some(rfkill) = &link.rfkill {
 		if rfkill.blocked() {
 			let switch = if rfkill.hard { "hardware" } else { "software" };
-			println!("    radio off [{switch} block at {}]", rfkill.switch);
+			sayln!("    radio off [{switch} block at {}]", rfkill.switch);
 		}
 	}
 }
@@ -1805,7 +1813,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 	let _ = state::write_observed(&run_dir, &observed);
 
 	if options.json {
-		println!(
+		sayln!(
 			"{}",
 			serde_json::to_string_pretty(&observed).map_err(|error| error.to_string())?
 		);
@@ -1815,9 +1823,9 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 	for link in &observed.links {
 		let state = if link.up { "up" } else { "down" };
 		let carrier = if link.carrier { "" } else { ", no carrier" };
-		println!("{} {state}{carrier} mtu {}", link.name, link.mtu);
+		sayln!("{} {state}{carrier} mtu {}", link.name, link.mtu);
 		for address in observed.addresses_on(&link.name) {
-			println!("    {} [{:?}]", address.address, address.ownership);
+			sayln!("    {} [{:?}]", address.address, address.ownership);
 		}
 		for vlan in observed
 			.bridge_vlans
@@ -1830,7 +1838,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 				(false, true) => " untagged",
 				(false, false) => "",
 			};
-			println!("    vlan {}{flags}", vlan.vid);
+			sayln!("    vlan {}{flags}", vlan.vid);
 		}
 		print_link_settings(link, &observed);
 		// What something outside netcfgd reported, shown as reported rather than
@@ -1845,13 +1853,13 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			.find(|report| report.interface == link.name)
 		{
 			for address in &report.addresses {
-				println!("    {address} [reported, not applied]");
+				sayln!("    {address} [reported, not applied]");
 			}
 			for gateway in &report.gateways {
-				println!("    via {gateway} [reported, not applied]");
+				sayln!("    via {gateway} [reported, not applied]");
 			}
 			if !report.nameservers.is_empty() {
-				println!(
+				sayln!(
 					"    nameservers {} [reported, not applied]",
 					report.nameservers.join(" ")
 				);
@@ -1861,9 +1869,10 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 			let via = route
 				.via
 				.map_or_else(String::new, |gateway| format!(" via {gateway}"));
-			println!(
+			sayln!(
 				"    route {}{via} [{:?}]",
-				route.destination, route.ownership
+				route.destination,
+				route.ownership
 			);
 		}
 	}
@@ -1872,8 +1881,8 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 	// not with a device, and repeating it under every link would make one
 	// problem look like several.
 	if !observed.nat_conflicts.is_empty() {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"note: nftables table(s) `{}` also translate source addresses. netcfgd \
 			 does not touch tables it did not create, so this is a report, not \
 			 something it will resolve.",
@@ -1881,8 +1890,8 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		);
 	}
 	if !observed.address_proto_supported {
-		println!();
-		println!(
+		sayln!();
+		sayln!(
 			"note: no address carries a protocol tag yet, so address ownership \
 			 comes from recorded state and is weaker. It strengthens once netcfgd \
 			 installs its first address."
@@ -1899,7 +1908,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 /// what somebody asking "why am I on the modem" wants.
 fn print_linksets(observed: &netcfgd_model::Observed) {
 	for set in &observed.linksets {
-		println!();
+		sayln!();
 		match &set.active {
 			Some(active) => {
 				let on = set
@@ -1907,9 +1916,9 @@ fn print_linksets(observed: &netcfgd_model::Observed) {
 					.as_deref()
 					.filter(|interface| *interface != active)
 					.map_or_else(String::new, |interface| format!(" on {interface}"));
-				println!("linkset {} using {active}{on}", set.name);
+				sayln!("linkset {} using {active}{on}", set.name);
 			}
-			None => println!("linkset {} using nothing", set.name),
+			None => sayln!("linkset {} using nothing", set.name),
 		}
 		for member in &set.members {
 			// The winner is named above; what each line adds is the standing
@@ -1920,7 +1929,7 @@ fn print_linksets(observed: &netcfgd_model::Observed) {
 			let why = member
 				.ineligible
 				.map_or("ready", netcfgd_model::linkset::Ineligible::name);
-			println!("    {} [{why}]", member.name);
+			sayln!("    {} [{why}]", member.name);
 		}
 	}
 }
@@ -1928,7 +1937,7 @@ fn print_linksets(observed: &netcfgd_model::Observed) {
 fn command_show(options: &Options) -> Result<ExitCode, String> {
 	let (document, run_dir, _) = compile(options)?;
 	let _ = state::write_desired(&run_dir, &document);
-	println!(
+	sayln!(
 		"{}",
 		document
 			.to_json_canonical()
@@ -1939,10 +1948,10 @@ fn command_show(options: &Options) -> Result<ExitCode, String> {
 
 fn print_plan(plan: &Plan) {
 	if plan.is_empty() {
-		println!("nothing to do");
+		sayln!("nothing to do");
 	} else {
 		for action in &plan.actions {
-			println!(
+			sayln!(
 				"{:>3}  {}",
 				action.id,
 				describe(action.op.name(), &action.reason)
@@ -1951,8 +1960,8 @@ fn print_plan(plan: &Plan) {
 	}
 	for warning in &plan.warnings {
 		match &warning.interface {
-			Some(interface) => println!("warning: {interface}: {}", warning.message),
-			None => println!("warning: {}", warning.message),
+			Some(interface) => sayln!("warning: {interface}: {}", warning.message),
+			None => sayln!("warning: {}", warning.message),
 		}
 	}
 	print_refusals(plan);
@@ -1966,15 +1975,17 @@ fn print_plan(plan: &Plan) {
 /// described.
 fn print_refusals(plan: &Plan) {
 	for refusal in &plan.refusals {
-		println!(
+		sayln!(
 			"refused: {} on {} -- {} depends on it",
-			refusal.op, refusal.interface, refusal.guard
+			refusal.op,
+			refusal.interface,
+			refusal.guard
 		);
-		println!(
+		sayln!(
 			"         would have been: {}",
 			describe(&refusal.op, &refusal.reason)
 		);
-		println!("         to allow it:     {}", refusal.override_with);
+		sayln!("         to allow it:     {}", refusal.override_with);
 	}
 }
 
@@ -1986,13 +1997,14 @@ fn print_refusals(plan: &Plan) {
 /// flag look like the fix.
 fn print_stranded(plan: &Plan) {
 	for stranded in &plan.stranded {
-		println!(
+		sayln!(
 			"stranded: unmanaging {} leaves {}",
-			stranded.interface, stranded.credential
+			stranded.interface,
+			stranded.credential
 		);
-		println!("          it cannot be revoked: {}", stranded.irrevocable);
-		println!("          to remove it:  {}", stranded.remove_with);
-		println!("          to leave it:   {}", stranded.consent_with);
+		sayln!("          it cannot be revoked: {}", stranded.irrevocable);
+		sayln!("          to remove it:  {}", stranded.remove_with);
+		sayln!("          to leave it:   {}", stranded.consent_with);
 	}
 }
 
@@ -2403,6 +2415,67 @@ mod tests {
 			));
 		}
 		out
+	}
+
+	/// A reader that goes away is not a crash.
+	///
+	/// **`ncfg status | head -1` aborted with a Rust panic**: exit 134, and
+	/// four lines about `library/std/src/io/stdio.rs` at somebody who had done
+	/// nothing wrong. `println!` unwraps the write; Rust ignores `SIGPIPE`, so
+	/// a reader that has gone comes back as `EPIPE` rather than as a signal,
+	/// and the unwrap turns that into a panic. Every ordinary shape did it --
+	/// `| head`, `| less` quit early, `| jq .interfaces[0]`.
+	///
+	/// **The pipe is dead before the child exists**, which is what makes this
+	/// a test rather than a race: a socket pair whose reader is dropped before
+	/// the spawn, so the first write cannot do anything but fail. Dropping it
+	/// afterwards would let the child finish writing first on a fast machine,
+	/// and the check would pass having proved nothing -- this file's
+	/// conformance test refuses to skip for the same reason.
+	///
+	/// Both names, because they are two programs in one binary and the paths
+	/// that print are not shared: `ncfg` prints a usage through the CLI's own
+	/// writer and `netcfgd --version` through the daemon's.
+	#[test]
+	fn a_reader_that_goes_away_is_not_a_crash() {
+		use std::os::fd::OwnedFd;
+		use std::os::unix::net::UnixStream;
+		use std::process::{Command, Stdio};
+
+		let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+		for (name, argument) in [("ncfg", "--help"), ("netcfgd", "--version")] {
+			let binary = root.join("target/debug").join(name);
+			assert!(
+				binary.exists(),
+				"{name} is not built, so nothing would be tested: run `make build`"
+			);
+
+			let (reader, writer) = UnixStream::pair().expect("a socket pair");
+			drop(reader);
+			let output = Command::new(&binary)
+				.arg(argument)
+				.stdout(Stdio::from(OwnedFd::from(writer)))
+				.stderr(Stdio::piped())
+				.output()
+				.expect("the program runs");
+
+			let said = String::from_utf8_lossy(&output.stderr);
+			assert!(
+				!said.contains("panicked"),
+				"{name} {argument} panicked when its reader had gone:\n{said}"
+			);
+			assert!(
+				said.is_empty(),
+				"{name} {argument} said something to a pipe nobody was reading:\n{said}"
+			);
+			// 141 is 128 + SIGPIPE: what a shell reports for the tool this
+			// would have been if Rust left the signal on its default.
+			assert_eq!(
+				output.status.code(),
+				Some(141),
+				"{name} {argument} did not end the way a tool in a pipeline ends"
+			);
+		}
 	}
 
 	/// The two client implementations agree about the same bytes.

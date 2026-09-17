@@ -13,6 +13,7 @@
 //! [0151]: ../../../doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md
 
 use crate::Options;
+use netcfgd_sys::sayln;
 use std::process::ExitCode;
 
 // The drop-in this command owns, named where the loader's guard reads it so
@@ -94,8 +95,8 @@ fn get(options: &Options) -> Result<ExitCode, String> {
 		// **Not a profile called "none".** 0151: an absent selection and the
 		// shipped do-nothing profile are different states, and printing one
 		// name for both would make every diagnostic ambiguous.
-		None => println!("no profile chosen"),
-		Some(name) => println!("{name}"),
+		None => sayln!("no profile chosen"),
+		Some(name) => sayln!("{name}"),
 	}
 	Ok(ExitCode::SUCCESS)
 }
@@ -104,7 +105,7 @@ fn list(options: &Options) -> ExitCode {
 	let chosen = active(options).unwrap_or(None);
 	let found = profile_dirs(options);
 	if found.is_empty() {
-		println!("no profiles; a profile is a directory under `profile/`");
+		sayln!("no profiles; a profile is a directory under `profile/`");
 		return ExitCode::SUCCESS;
 	}
 	for (name, mine) in found {
@@ -114,7 +115,7 @@ fn list(options: &Options) -> ExitCode {
 			" "
 		};
 		let origin = if mine { "yours" } else { "shipped" };
-		println!("{mark} {name}  ({origin})");
+		sayln!("{mark} {name}  ({origin})");
 	}
 	ExitCode::SUCCESS
 }
@@ -159,7 +160,7 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 			Ok(crate::client::Answer::Ok) => {
 				// No path: netcfgd chose where it went, and 0127's rule is
 				// that handing one back invites a client to keep it.
-				println!("netcfgd saved `{name}` and is running it");
+				sayln!("netcfgd saved `{name}` and is running it");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -187,8 +188,8 @@ fn save(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 		"`--replace`",
 	)
 	.map_err(|error| crate::drop_in::refused_locally(error, &socket))?;
-	println!("wrote {}", snapshot.display());
-	println!("`{name}` is now the profile in use");
+	sayln!("wrote {}", snapshot.display());
+	sayln!("`{name}` is now the profile in use");
 	Ok(ExitCode::SUCCESS)
 }
 
@@ -225,11 +226,11 @@ fn set(rest: &[String], options: &Options) -> Result<ExitCode, String> {
 
 	let text = format!("global {{\n\tprofile = \"{name}\"\n}}\n");
 	write_selection(Some(name), text, options)?;
-	println!("profile is now `{name}`");
+	sayln!("profile is now `{name}`");
 	// Said because a profile switch is the change most likely to need it: it
 	// is large, deliberate, and cannot be undone from the far end of a link it
 	// just took down.
-	println!(
+	sayln!(
 		"`ncfg plan` shows what that changes; `ncfg apply --confirm-within 60` \
 	          keeps a way back"
 	);
@@ -276,7 +277,7 @@ fn write_selection(name: Option<&str>, text: String, options: &Options) -> Resul
 
 fn unset(options: &Options) -> Result<ExitCode, String> {
 	write_selection(None, String::new(), options)?;
-	println!(
+	sayln!(
 		"no profile is chosen now, which is the default rather than a \
 	          profile called `none`"
 	);

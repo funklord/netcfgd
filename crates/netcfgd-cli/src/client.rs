@@ -7,6 +7,7 @@
 
 use netcfgd_apply::Journal;
 use netcfgd_proto::{read_message, write_message, Request};
+use netcfgd_sys::sayln;
 use serde::Deserialize;
 use std::io::{BufReader, BufWriter};
 use std::os::unix::net::UnixStream;
@@ -254,9 +255,9 @@ pub(crate) fn stream(socket: &Path, json: bool) -> Result<std::process::ExitCode
 		match read_message::<serde_json::Value, _>(&mut reader) {
 			Ok(Some(value)) => {
 				if json {
-					println!("{value}");
+					sayln!("{value}");
 				} else {
-					println!("{}", render_event(&value));
+					sayln!("{}", render_event(&value));
 				}
 			}
 			Ok(None) => return Ok(std::process::ExitCode::SUCCESS),

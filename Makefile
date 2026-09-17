@@ -1130,6 +1130,10 @@ packaging:
 	@# Every config key the compiler accepts is classified, so that a key
 	@# added later cannot default to "a client may send this". 0127.
 	@python3 tool/privilege_gate.py
+	@# Neither program prints with `println!`, which panics when the reader
+	@# of a pipe goes away. A print site is never wrong, only absent from the
+	@# path a test drives. 0261.
+	@python3 tool/print_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the

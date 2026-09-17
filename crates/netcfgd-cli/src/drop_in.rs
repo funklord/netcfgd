@@ -28,6 +28,7 @@
 
 use crate::Options;
 use netcfgd_host::config;
+use netcfgd_sys::sayln;
 use std::process::ExitCode;
 
 /// `ncfg config SUBCOMMAND`.
@@ -122,7 +123,7 @@ fn take_off_profile(
 	match config::adopt_profile(config_dir, factory_dir) {
 		Ok(None) => Ok(None),
 		Ok(Some(profile)) => {
-			println!(
+			sayln!(
 				"the `{profile}` profile was folded into your configuration and \
 				 no profile is chosen now; what is running has not changed"
 			);
@@ -154,7 +155,7 @@ fn with_profile_taken_off<T>(
 					 back: {undo})"
 				));
 			}
-			println!("nothing was written, so the `{profile}` profile is chosen again");
+			sayln!("nothing was written, so the `{profile}` profile is chosen again");
 			Err(error)
 		}
 	}
@@ -188,7 +189,7 @@ pub(crate) fn put_text(
 		};
 		return match crate::client::ask(&socket, &request) {
 			Ok(crate::client::Answer::Ok) => {
-				println!("netcfgd stored {subject} and re-read its configuration");
+				sayln!("netcfgd stored {subject} and re-read its configuration");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -202,8 +203,8 @@ pub(crate) fn put_text(
 		config::install_drop_in(&config_dir, &factory_dir, name, &text, replace)
 			.map_err(|error| refused_locally(error, &socket))
 	})?;
-	println!("wrote {}", path.display());
-	println!(
+	sayln!("wrote {}", path.display());
+	sayln!(
 		"nothing is listening on {}, so this was written directly",
 		socket.display()
 	);
@@ -225,7 +226,7 @@ pub(crate) fn remove_named(
 			Ok(crate::client::Answer::Ok) => {
 				// Said plainly, because an absent file is success and somebody
 				// who mistyped the name would otherwise read that as "removed".
-				println!("netcfgd no longer has {subject}");
+				sayln!("netcfgd no longer has {subject}");
 				Ok(ExitCode::SUCCESS)
 			}
 			Ok(crate::client::Answer::Error { message }) | Err(message) => Err(message),
@@ -246,9 +247,9 @@ pub(crate) fn remove_named(
 	if removed {
 		// The same words the daemon path uses, because it is the same event
 		// and an operator should not have to tell which route it took.
-		println!("netcfgd no longer has {subject}");
+		sayln!("netcfgd no longer has {subject}");
 	} else {
-		println!("{subject} is not in {}", config_dir.display());
+		sayln!("{subject} is not in {}", config_dir.display());
 	}
 	Ok(ExitCode::SUCCESS)
 }

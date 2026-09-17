@@ -28,6 +28,7 @@ pub mod lock;
 pub mod log;
 pub mod nft;
 pub mod ops;
+pub mod out;
 pub mod peer;
 pub mod privilege;
 pub mod process;

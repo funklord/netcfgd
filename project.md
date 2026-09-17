@@ -9499,6 +9499,80 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.155 A reader that goes away is not a crash
+
+`ncfg status | head -1` aborted with a Rust panic: exit 134 and four lines
+about `library/std/src/io/stdio.rs` at somebody who had done nothing wrong.
+`println!` unwraps its write; Rust ignores `SIGPIPE`, so a reader that has gone
+comes back as `EPIPE` rather than as a signal, and the unwrap turns that into a
+panic. `| head`, `| less` quit early, `| jq` -- every ordinary shape did it, and
+so did `netcfgd --version`. Decision 0261.
+
+**The one-line fix is the wrong one.** Restoring `SIGPIPE` to its default would
+also apply to the socket the client writes its requests into, so a daemon
+restarted mid-request would kill `ncfg` where today it prints *"cannot send to
+netcfgd"* -- and there is a test whose whole subject is that an unreachable
+daemon says what to do. The C client reached the same junction from the other
+side and answered it the same way: `send` with `MSG_NOSIGNAL` per call, with a
+comment refusing to change a process-wide disposition on a program's behalf. **A
+dead reader on stdout is the program's own business; a dead peer on a socket is
+a diagnostic somebody needs.**
+
+So printing changed. `say!` and `sayln!` write through `write_fmt` and, where
+`println!` would unwrap, exit 141 -- 128 + SIGPIPE, what a shell reports for
+the tool this would have been. `log::emit` has always done this for stderr,
+writing with `let _ =`; this is that rule arriving at the other stream.
+
+### `format_args!` is free and `format!` is not
+
+The first version took a `&str`, so every site materialised a `String`: a page
+of binary and an allocation per line. Passing `std::fmt::Arguments` through is
+what `println!` expands to anyway, and the installed size came back
+byte-identical to the round before.
+
+### A test for the behaviour, a gate for the sites
+
+The test drops the reader of a socket pair **before** the spawn, so the first
+write cannot do anything but fail; dropping it afterwards would let a fast
+machine finish writing first and pass having proved nothing. It drives both
+names, because they are two programs in one binary.
+
+The gate forbids `println!` in either program. **A print site is never wrong,
+only absent from the path a test drives** -- the sabotage that proved this is a
+`println!` on the no-arguments path, which the test does not reach and the gate
+names by line. Same shape as 0259's icon names, and as every vacuous-fixture
+finding before it.
+
+### A flake in `netcfgd-sys`, explained by its own source
+
+One `make check` in this round failed at
+`process::tests::a_program_with_no_executable_bit_is_named_with_its_mode`, on
+`chmod: PermissionDenied`, as root. It passes alone and passed on the next full
+run.
+
+The explanation is written in the crate already, in the test two lines further
+down the same file: `a_shed_leaves_its_own_thread_nothing_and_the_others_what_
+the_uid_allows` calls `shed`, and where that reaches `Fully` -- there is an id
+to become, so glibc broadcasts the change to every thread -- *"every test that
+runs after this one in a root run is running as 65534"*. Rust runs tests as
+threads in one process, so whichever tests are still going lose root
+mid-flight. A `chmod` on a file made a moment earlier as root is then EPERM,
+and which test is in the way depends on the scheduler.
+
+Not fixed here: the test is right about what it is testing, and the answer --
+running it in a process of its own -- is a change to how this crate's suite is
+run rather than to any code in it. Recorded because the failure names a file
+mode and says nothing about privilege, so the next person to see it starts in
+the wrong place.
+
+### The proof a mechanical change carries
+
+160 sites rewritten, so what must not change is the output. The previous binary
+was still installed at `/usr/bin/ncfg`, so the two ran side by side over ten
+read-only commands and were compared byte for byte: ten identical, none
+differing. **The old binary on the machine is the control**, and it is there
+exactly once -- after the next install it is gone.
+
 ## 10.154 A bluetooth device the window can write
 
 A `bluetooth` block is a device declared like a network (0149): a handle the

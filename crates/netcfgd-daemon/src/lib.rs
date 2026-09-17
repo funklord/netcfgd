@@ -45,6 +45,7 @@ use netcfgd_model::{Document, HookPhase};
 use netcfgd_plan::PlanOptions;
 use netcfgd_proto::{Event, Request, Response, DEFAULT_SOCKET};
 use netcfgd_sys::socket::groups;
+use netcfgd_sys::{say, sayln};
 use netcfgd_sys::{Netlink, Watcher};
 use server::Command;
 use state::{Paths, State};
@@ -156,15 +157,15 @@ fn parse_options(arguments: &[String]) -> Result<Option<Options>, String> {
 		};
 		match argument {
 			"-h" | "--help" => {
-				print!("{USAGE}");
+				say!("{USAGE}");
 				return Ok(None);
 			}
 			// The copyright surface harmonization.md names first. Shares
 			// `netcfgd_model::COPYRIGHT` with `ncfg` so the two cannot drift
 			// apart about a fact neither of them owns.
 			"--version" => {
-				println!("netcfgd {}", env!("CARGO_PKG_VERSION"));
-				println!("{}", netcfgd_model::COPYRIGHT);
+				sayln!("netcfgd {}", env!("CARGO_PKG_VERSION"));
+				sayln!("{}", netcfgd_model::COPYRIGHT);
 				return Ok(None);
 			}
 			"--config-dir" => options.config_dir = Some(value("--config-dir")?),
