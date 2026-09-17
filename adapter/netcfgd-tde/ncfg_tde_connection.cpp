@@ -28,6 +28,11 @@ void ncfg_tde_connection::forget_tiers()
 	m_admin = false;
 }
 
+bool ncfg_tde_connection::is_open() const
+{
+	return m_client != 0 && !ncfg_client_broken(m_client);
+}
+
 bool ncfg_tde_connection::open()
 {
 	close();

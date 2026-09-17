@@ -67,6 +67,29 @@ void ncfg_client_close(ncfg_client_t *client);
 const char *ncfg_client_socket_path(const ncfg_client_t *client);
 
 /*
+ * Whether the connection is dead, as opposed to the daemon having said no.
+ *
+ * **A long-running client cannot tell those apart from an error string, and
+ * the difference is the whole of whether to reconnect.** netcfgd is restarted
+ * by every package upgrade, which closes every socket it had; a tray or a
+ * window that keeps asking on the old one gets an error for ever, and reads to
+ * its operator as the program having broken. The TDE tray did exactly this --
+ * its `is_open()` tested a pointer -- so an upgrade left it stuck reporting no
+ * daemon until somebody restarted it by hand.
+ *
+ * Set only where the *transport* failed: a send that could not be written, a
+ * read that failed or returned end of file, or a line so long that the stream
+ * can no longer be framed. A refusal from netcfgd, or an answer this cannot
+ * parse, leaves the connection usable and this false -- reconnecting on a
+ * refusal would mean a new socket every time somebody is told they may not do
+ * something.
+ *
+ * Once true it stays true: the fix is `ncfg_client_close` and a fresh
+ * `ncfg_client_open`, not another request.
+ */
+int ncfg_client_broken(const ncfg_client_t *client);
+
+/*
  * One request, one response.
  *
  * `request` is a complete JSON object without its newline -- `{"request":

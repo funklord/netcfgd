@@ -24,7 +24,18 @@ public:
 	//! open the socket; false leaves error() set and every query refusing
 	bool open();
 	void close();
-	bool is_open() const { return m_client != 0; }
+	/*!
+	 * Whether this connection can still be asked anything.
+	 *
+	 * **Not `m_client != 0`, which is what it was.** That tests whether a
+	 * client was ever made, and netcfgd is restarted by every package
+	 * upgrade -- which closes the socket and leaves the pointer exactly as it
+	 * was. The tray's `refresh()` reopens only when this says shut, so an
+	 * upgrade left it asking on a dead socket for ever, reporting no daemon
+	 * and drawing the icon for it. The C client knows which failures were the
+	 * transport, and this is that answer.
+	 */
+	bool is_open() const;
 
 	//! the last failure, in the daemon's own words where it gave any
 	TQString error() const { return m_error; }

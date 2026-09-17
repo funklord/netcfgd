@@ -754,7 +754,26 @@ public:
 	 * `ncfg` cannot disagree about which daemon they are talking to. */
 	bool open(const QString &socket_path, QString *error);
 	void close();
-	bool is_open() const { return client != nullptr; }
+	/*
+	 * Whether this connection can still be asked anything.
+	 *
+	 * **Not `client != nullptr`, which is what it was.** That says a client
+	 * was made, and netcfgd is restarted by every package upgrade -- which
+	 * closes the socket and leaves the pointer alone. The C client knows which
+	 * failures were the transport rather than the daemon saying no, and this
+	 * is that answer.
+	 */
+	bool is_open() const;
+	/*
+	 * Reopen where the socket died, and say whether anything happened.
+	 *
+	 * Called from the window's refresh, which is the one place that runs on
+	 * its own: a client whose daemon was restarted underneath it would
+	 * otherwise report an error from every view until the operator noticed
+	 * and started the program again. A connection that is fine, or one that
+	 * was never opened, is left exactly as it is.
+	 */
+	bool reopen_if_broken();
 
 	/* Which machine this is. A client that can configure a router across the
 	 * room must never leave the operator unsure whose network it is about to

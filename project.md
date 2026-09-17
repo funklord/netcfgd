@@ -9499,6 +9499,60 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.153 A client that outlives its daemon
+
+*"Each time we update the software the tray software loses its icons."* Two
+defects, meeting at exactly that moment. Decision 0259.
+
+### The tray never reconnected
+
+`refresh()` reopens when the connection looks shut, and `is_open()` was
+`m_client != 0` -- a test of whether a client was ever made, which is true of a
+dead one. Nothing set the pointer back when a request failed. **Every package
+upgrade restarts netcfgd**, which closes every socket it had, so the first
+upgrade after the tray started left it asking on a socket with nobody at the
+other end, for the rest of its life, reporting no daemon while netcfgd ran.
+
+Not inferred: on the machine that reported it the tray held an `ESTAB` unix
+socket whose peer was `0`, while the daemon listened on a newer one.
+
+**The error string cannot tell a dead socket from a refusal**, and that
+difference is the whole of whether to reconnect. `ncfg_client_broken` is set
+where the transport failed -- an unwritable send, a read that failed or hit end
+of file, a line too long to frame -- and not where netcfgd said no; a client
+that reconnected on a refusal would open a socket every time somebody is told
+they may not do something. Both front ends ask that now, and the Qt window had
+the same shape: it opened once at startup and nothing reopened it.
+
+### The icon it was stuck on did not exist
+
+The no-daemon rung asked for `network-disconnect`, a freedesktop name; the
+tray's other three glyphs are TDE names that crystalsvg has. On this machine
+that one exists only under `/usr/share/icons/breeze*`, outside the theme chain
+TDE uses, so the loader substituted the generic `unknown` picture and said
+nothing. **A themed icon name is never wrong, only absent** -- `icon_gate.py`
+was written around that sentence and now checks the names the TDE front end
+asks for against the installed themes, skipping where no TDE is present and
+refusing to pass an extraction that found fewer than six names.
+
+The rung asks for `messagebox_warning` -- a fault in the tool rather than a
+report about the network -- and `state_glyph` probes with `canReturnNull`,
+which is the only way to find out whether a theme has a name, falling back to
+`connect_no` rather than to a question mark.
+
+### One path each, and each passed the other's sabotage
+
+The two transport failures are different code. Killing a daemon makes the next
+*write* fail, so `gui/tests/reconnect.cpp` -- a real daemon, killed and started
+again under a live connection -- covers that one and passed the sabotage that
+removed the end-of-file case. The client test's fake daemon closed immediately,
+so it met the same write failure and passed the mirror sabotage. It reads the
+request before closing now, which is what puts it on the read path.
+
+Neither test was wrong. **A sabotage that one test catches says nothing about
+the path the other one covers**, and two tests that look like they overlap can
+both be blind to the same line.
+
 ## 10.152 A hook is shell, and the window can write it
 
 The hooks tab could list a hook -- an interface, a phase, a path under `/run`,

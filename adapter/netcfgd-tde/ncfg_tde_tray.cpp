@@ -7,6 +7,7 @@
 #include <tdeapplication.h>
 #include <tdemessagebox.h>
 #include <kiconloader.h>
+#include <tdeglobal.h>
 #include <kprocess.h>
 #include <kshell.h>
 
@@ -92,13 +93,50 @@ void ncfg_tde_tray::build_menu()
 	                   0, ID_CONFIGURE);
 }
 
+/*
+ * The glyph for a state, and a glyph that is certainly there.
+ *
+ * **A themed icon name is never wrong, only absent**, and the loader
+ * substitutes the generic `unknown` picture without telling anybody. The
+ * no-daemon rung asked for `network-disconnect`, which is a freedesktop name
+ * that no TDE theme carries -- so that rung drew a question mark, and it drew
+ * it at exactly the moment an operator was looking: the daemon is restarted by
+ * every package upgrade.
+ *
+ * So the wanted name is probed with `canReturnNull`, which is the only way to
+ * find out whether a theme has one, and a name from the same family answers
+ * when it does not. The fallback is not a guess either: `connect_no` is in
+ * every TDE theme that carries any of these.
+ */
+static TQPixmap state_glyph(const char *wanted, const char *fallback)
+{
+	const TQPixmap probe = TDEGlobal::iconLoader()->loadIcon(
+	    TQString::fromLatin1(wanted), TDEIcon::Panel, 0, TDEIcon::DefaultState, 0, true);
+	return KSystemTray::loadIcon(
+	    TQString::fromLatin1(probe.isNull() ? fallback : wanted));
+}
+
 void ncfg_tde_tray::refresh()
 {
 	if (!m_connection->is_open())
 		m_connection->open();
 
 	ncfg_tde_connection::reach reach;
-	const TQString line = m_connection->state_line(reach);
+	TQString line = m_connection->state_line(reach);
+	/*
+	 * **A daemon restarted between two ticks, which is what an upgrade is.**
+	 * The socket it closed is found out about by the request above failing,
+	 * and `is_open()` is false from here on. Reopening and asking once more
+	 * costs one connect and saves the ten seconds of "netcfgd is not
+	 * reachable" that would otherwise be shown after netcfgd is already back.
+	 *
+	 * Once, not in a loop: if the second attempt fails too, the daemon really
+	 * is not there and saying so is the right answer.
+	 */
+	if (reach == ncfg_tde_connection::reach_no_daemon && !m_connection->is_open()) {
+		if (m_connection->open())
+			line = m_connection->state_line(reach);
+	}
 	m_menu->changeItem(m_status_id, line);
 	TQToolTip::remove(this);
 	TQToolTip::add(this, line);
@@ -121,9 +159,16 @@ void ncfg_tde_tray::refresh()
 	case ncfg_tde_connection::reach_routed:    glyph = "connect_established"; break;
 	case ncfg_tde_connection::reach_local:     glyph = "connect_creating";    break;
 	case ncfg_tde_connection::reach_offline:   glyph = "connect_no";          break;
-	case ncfg_tde_connection::reach_no_daemon: glyph = "network-disconnect";  break;
+	/*
+	 * **A fault in the tool rather than a report about the network**, which is
+	 * why this one is not another `connect_` glyph: netcfgd not answering says
+	 * nothing at all about whether this machine can reach anything. It used to
+	 * ask for `network-disconnect`, a name from the freedesktop set that no
+	 * TDE theme has.
+	 */
+	case ncfg_tde_connection::reach_no_daemon: glyph = "messagebox_warning";  break;
 	}
-	setPixmap(loadIcon(TQString::fromLatin1(glyph)));
+	setPixmap(state_glyph(glyph, "connect_no"));
 
 	rebuild_profiles();
 }

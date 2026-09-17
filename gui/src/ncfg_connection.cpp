@@ -93,6 +93,22 @@ ncfg_connection::~ncfg_connection()
 	close();
 }
 
+bool ncfg_connection::is_open() const
+{
+	return client != nullptr && !ncfg_client_broken(client);
+}
+
+bool ncfg_connection::reopen_if_broken()
+{
+	if (client == nullptr || !ncfg_client_broken(client)) {
+		return false;
+	}
+	/* The same path as it was opened on. `open` closes first, so the dead
+	 * client goes with it. */
+	QString ignored;
+	return open(path, &ignored);
+}
+
 bool ncfg_connection::open(const QString &socket_path, QString *error)
 {
 	close();

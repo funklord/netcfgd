@@ -266,6 +266,14 @@ void ncfg_main_window::closeEvent(QCloseEvent *event)
 
 void ncfg_main_window::refresh()
 {
+	/*
+	 * **Before anything is asked.** netcfgd is restarted by every package
+	 * upgrade, which closes this socket; without this the window reports an
+	 * error from every view it draws until somebody starts it again, which is
+	 * indistinguishable from the program being broken. Costs a connect only
+	 * where the socket actually died.
+	 */
+	connection->reopen_if_broken();
 	where->setText(QStringLiteral("netcfgd at %1").arg(connection->where()));
 
 	if (tray) {

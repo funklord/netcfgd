@@ -344,6 +344,103 @@ static void fake_daemon(int fd)
 	usleep(200000);
 }
 
+/*
+ * A refusal and a dead socket, told apart.
+ *
+ * WHY THIS EXISTS
+ *   A long-running client cannot tell them apart from the error string, and
+ *   the difference is the whole of whether to reconnect. netcfgd is restarted
+ *   by every package upgrade; the TDE tray tested a pointer for "am I
+ *   connected", so an upgrade left it asking on a socket whose other end was
+ *   gone -- for ever, since nothing ever closed it -- and reading to its
+ *   operator as the program having broken.
+ *
+ *   The daemon answers the first request with a refusal, which is netcfgd
+ *   talking and leaves the connection good. Then it goes away, which is not.
+ */
+static void a_refusal_is_not_a_dead_socket(void)
+{
+	struct sockaddr_un address;
+	char path[sizeof(address.sun_path)];
+
+	if (!socket_path(path, sizeof(path), "the reconnect test's socket path fits", -2)) {
+		return;
+	}
+	unlink(path);
+
+	int listener = socket(AF_UNIX, SOCK_STREAM, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+	if (listener < 0 || bind(listener, (struct sockaddr *)&address, sizeof(address)) < 0 ||
+	    listen(listener, 1) < 0) {
+		ok("a daemon that will go away can be started", 0, strerror(errno));
+		return;
+	}
+
+	pid_t child = fork();
+	if (child == 0) {
+		char scratch[512];
+		int fd = accept(listener, NULL, NULL);
+		if (fd >= 0) {
+			const char *refusal =
+			    "{\"response\":\"error\",\"message\":\"you may not\"}\n";
+			if (read(fd, scratch, sizeof(scratch)) > 0) {
+				(void)!write(fd, refusal, strlen(refusal));
+			}
+			/* And then it stops, the way a restart stops it -- but
+			 * only after taking the next request, so what the client
+			 * meets is end of file on the read rather than a write to
+			 * a socket nobody holds. Both are a dead transport and
+			 * they are different code paths; the other one is what
+			 * `gui/tests/reconnect.cpp` produces, by killing a real
+			 * daemon. */
+			(void)!read(fd, scratch, sizeof(scratch));
+			close(fd);
+		}
+		close(listener);
+		_exit(0);
+	}
+
+	char err[NCFG_ERROR_MAX];
+	ncfg_client_t *client = ncfg_client_open(path, err, sizeof(err));
+	if (!client) {
+		ok("the client connects to it", 0, err);
+		kill(child, SIGTERM);
+		waitpid(child, NULL, 0);
+		close(listener);
+		unlink(path);
+		return;
+	}
+	ok("a fresh connection is not broken", !ncfg_client_broken(client), NULL);
+
+	ncfg_json_doc_t *refused = ncfg_client_hello(client, err, sizeof(err));
+	ok("a refusal arrives as an answer", refused != NULL, err);
+	if (refused) {
+		ncfg_json_free(refused);
+	}
+	/* **The half that matters.** netcfgd said no, which is netcfgd talking:
+	 * a client that reconnected here would open a new socket every time
+	 * somebody is told they may not do something. */
+	ok("and does not make the connection broken", !ncfg_client_broken(client), NULL);
+
+	/* The daemon has gone. The write may well succeed -- the kernel buffers
+	 * it -- and the read is what finds out. */
+	ncfg_json_doc_t *gone = ncfg_client_status(client, err, sizeof(err));
+	ok("a request after the daemon went away fails", gone == NULL, NULL);
+	if (gone) {
+		ncfg_json_free(gone);
+	}
+	ok("and says the connection is broken, which is the cue to reopen",
+	   ncfg_client_broken(client), err);
+
+	ncfg_client_close(client);
+	kill(child, SIGTERM);
+	waitpid(child, NULL, 0);
+	close(listener);
+	unlink(path);
+}
+
 static void connection_reads_lines_however_they_arrive(void)
 {
 	/* Sized from sun_path rather than from a round number: a path longer
@@ -2088,6 +2185,7 @@ int main(int argc, char **argv)
 	reader_refuses();
 	quoting_escapes_what_it_must();
 	connection_reads_lines_however_they_arrive();
+	a_refusal_is_not_a_dead_socket();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();
 	a_status_becomes_links();

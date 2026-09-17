@@ -32,6 +32,9 @@ struct ncfg_client {
 	char  *buffer;    /* what has been read and not yet consumed */
 	size_t length;
 	size_t capacity;
+	/* Set when the socket, rather than the daemon, is what failed. See
+	 * `ncfg_client_broken`. */
+	int    broken;
 };
 
 static void set_error(char *err, size_t err_size, const char *format, ...)
@@ -273,6 +276,11 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 			set_error(err, err_size,
 			      "netcfgd sent more than %u bytes with no end of line",
 			      NCFG_LINE_MAX);
+			/* Whatever is on this socket is not this protocol, and the
+			 * bytes already read cannot be put back. A caller that kept
+			 * using it would read the tail of one message as the head
+			 * of the next. */
+			client->broken = 1;
 			return NULL;
 		}
 		if (client->length == client->capacity) {
@@ -292,11 +300,13 @@ static char *read_line(ncfg_client_t *client, size_t *length_out, char *err, siz
 				continue;
 			}
 			set_error(err, err_size, "cannot read from netcfgd: %s", strerror(errno));
+			client->broken = 1;
 			return NULL;
 		}
 		if (got == 0) {
 			set_error(err, err_size,
 			      "netcfgd closed the connection without answering");
+			client->broken = 1;
 			return NULL;
 		}
 		client->length += (size_t)got;
@@ -325,6 +335,7 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 	size_t length = strlen(request);
 	if (!write_all(client->fd, request, length) || !write_all(client->fd, "\n", 1)) {
 		set_error(err, err_size, "cannot send to netcfgd: %s", strerror(errno));
+		client->broken = 1;
 		return NULL;
 	}
 
@@ -344,6 +355,14 @@ ncfg_json_doc_t *ncfg_client_request(ncfg_client_t *client, const char *request,
 		return NULL;
 	}
 	return doc;
+}
+
+int ncfg_client_broken(const ncfg_client_t *client)
+{
+	/* No client is not a broken one: a caller that never opened has nothing
+	 * to reopen, and answering "broken" would send it round a reconnect loop
+	 * it did not ask for. */
+	return client ? client->broken : 0;
 }
 
 ncfg_json_doc_t *ncfg_client_hello(ncfg_client_t *client, char *err, size_t err_size)
