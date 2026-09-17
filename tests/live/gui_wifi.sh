@@ -99,6 +99,7 @@ rm -f "$build_log"
 # Short, because a unix socket path has to fit in SUN_LEN.
 work=$(mktemp -d /tmp/ncfg-guiw.XXXXXX)
 daemon=
+dummy=
 
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
@@ -126,10 +127,21 @@ cleanup() {
 		esac
 	done
 	rm -rf "$work"
+	# The dummy, where this run is what made it. Under `make live` the whole
+	# script is inside `unshare -rn` and the link goes with the namespace, so
+	# for a year nothing missed this; run by hand -- which is how a probe gets
+	# debugged -- it stayed behind, and the *next* run then failed to create
+	# it and skipped. A suite that skips because its own leftovers are in the
+	# way reports success exactly as loudly as one that ran.
+	[ -n "$dummy" ] && ip link del "$dummy" 2>/dev/null
+	return 0
 }
 trap cleanup EXIT INT TERM
 
-ip link add radio0 type dummy 2>/dev/null || skip "cannot create a dummy link"
+dummy=
+ip link add radio0 type dummy 2>/dev/null ||
+	skip "cannot create a dummy link; if radio0 is left over, ip link del radio0"
+dummy=radio0
 ip link set radio0 up
 mkdir -p "$work/sys/radio0/wireless" "$work/etc/conf.d" "$work/run" "$work/ctrl"
 cp "$repo/tests/live/fake_supplicant.py" "$work/fake_supplicant"

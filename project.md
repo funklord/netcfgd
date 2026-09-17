@@ -1036,11 +1036,12 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Six model fields cannot be reached from the configuration language at
+- **Seven model fields cannot be reached from the configuration language at
   all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`, `DnsServer`'s
-  `port` and `sni`, and `Device`'s `match`. Either the parser gains the keys or
-  the schema loses the fields, and the schema is witnessed, so neither is a
-  passing change.
+  `port` and `sni`, `Device`'s `match`, and `RoutingRule::invert`, which 0257
+  found when the rule editor had to decide whether to offer it. Either the
+  parser gains the keys or the schema loses the fields, and the schema is
+  witnessed, so neither is a passing change.
 - **`ncfg apply` without `--confirm` spawns backends as children of a
   short-lived CLI**, so which process owns dhcpcd depends on whether the
   operator typed a flag. Raised with the holder; unanswered.
@@ -2290,7 +2291,10 @@ fix.
 **Six model fields cannot be reached from the configuration language at
 all**, which is 0061's disease in a place nobody had looked: `DnsPolicy`'s
 `options`, `dnssec` and `transport`, `DnsServer`'s `port` and `sni`, and
-`Device`'s `match`. `lower_dns` reads four keys -- `servers`, `search`,
+`Device`'s `match`. (**Seven, as of 0257**: `RoutingRule::invert` is the
+seventh, found when the rule editor had to decide whether to offer it. It is
+not in the list below because the renderer refuses a document with any rule in
+it outright, so unlike these six it was never a renderer's problem.) `lower_dns` reads four keys -- `servers`, `search`,
 `domains`, `mode` -- and hardcodes `port: None, sni: None`; `lower_device`
 never assigns `r#match`. Nothing else in the tree writes any of them either,
 measured across `crates/`, `backend/` and `adapter/`.
@@ -9488,6 +9492,74 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.151 The rule that says what a route cannot
+
+A route says where a packet goes; a **rule** says which set of routes is
+consulted at all, which is what multi-homing, split tunnelling and per-mark
+routing are answers to. The block has been the model's since 0018 and the
+window could only list them. It has `view / change` and `new rule...` now.
+Decision 0257.
+
+The priority is asked for rather than invented, because it *is* the rule's
+identity to the kernel -- which is also why two rules at one priority is a
+question for the operator and not something a form renumbers.
+
+### Zero is a value, and `none` is not zero
+
+`fwmark = 0` is a rule matching an unmarked packet, and
+`suppress_prefixlength = 0` ignores a table's default route so a more specific
+rule below can catch the traffic -- the commonest use of that key. So absent is
+`-1` everywhere here: in the client, in the spin boxes (whose special text at
+-1 reads `any`, `all bits`, `off`) and in the block writer, which tests `>= 0`
+rather than truthiness. Three of this round's six sabotages are that one
+distinction.
+
+### Two columns that had been blank all along
+
+**The selector column, for any rule matching on a mark.** The phrase was built
+from the address and interface selectors alone, so `from all fwmark 0x1 lookup
+100` -- the commonest shape there is -- drew as an empty cell, which reads as
+*matches everything* and is the opposite of what it does. It carries the mark
+in hex now, as `ip rule` prints it, and `l3mdev`.
+
+**The table column, for every rule ever listed.** The document holds a table as
+a number; the client read it with `member_text`, which returns the empty string
+for a number and is therefore indistinguishable from a key that is not there.
+A blank table cell reads as "the main one", the single thing it never means.
+
+Neither could be seen: a field that is there and renders as nothing, with no
+test asserting a cell's content. The second was found by the live probe asking
+the daemon what it had compiled -- the only reader in the tree that would have.
+**The same shape as `NCFG_JSON_NONE == 0xffffffff`**: the wrong reader for the
+type, returning a value that is a plausible answer.
+
+### A seventh field the language cannot reach
+
+`RoutingRule::invert` is in the model, and the executor applies it --
+`FIB_RULE_INVERT` on the netlink message, read back by the kernel reader. The
+configuration language has no key for it, so a form offering it would write a
+block netcfgd refuses, and the editor leaves it out. That makes **seven**, not
+the six recorded above; the count is corrected where it appears. Adding a
+parser key is a decision about the language and a witnessed schema, so it is
+recorded rather than taken.
+
+### A harness that left a link behind
+
+`gui_wifi.sh` created a dummy `radio0` and never deleted it. Under `make live`
+the script is inside `unshare -rn` and the link goes with the namespace, so for
+a year nothing missed it; run by hand -- which is how a probe gets debugged --
+it stayed, and the next run failed to create it and **skipped the whole GUI
+suite, reporting success as loudly as a run that executed**. The trap deletes
+what it made, and the skip names the leftover.
+
+### The sabotage that says whose refusal it is
+
+Removing the dialog's refusal of a mask with no mark still fails the save: the
+compiler refuses that too, with its own sentence, after a round trip. The probe
+asserts the dialog's words. Two vacuous assertions in this campaign have been
+exactly this, and the rule they leave behind is that **a refusal test has to
+name whose refusal it is.**
 
 ## 10.150 The other half of wifi
 

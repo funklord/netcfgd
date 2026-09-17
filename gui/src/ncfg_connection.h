@@ -239,9 +239,23 @@ struct ncfg_rule_row {
 	QString id;
 	int     priority = 0;
 	QString family;
+	/* The selectors joined, for the column. The fields below are the same
+	 * facts as themselves, for the editor -- parsing the phrase back apart
+	 * would be a second reader of one thing. */
 	QString selector;
 	QString action;
 	QString table;
+	QString from;
+	QString to;
+	QString iif;
+	QString oif;
+	/* -1 where the document states none. 0 is a legal mark and a legal prefix
+	 * length -- `suppress_prefixlength = 0` is the rule that drops a table's
+	 * default route, which is the commonest use of it. */
+	int     fwmark = -1;
+	int     fwmask = -1;
+	int     suppress_prefixlength = -1;
+	bool    l3mdev = false;
 };
 
 struct ncfg_bluetooth_row {

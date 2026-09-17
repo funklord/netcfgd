@@ -1178,6 +1178,14 @@ bool ncfg_connection::rules(QList<ncfg_rule_row> *out, QString *error)
 		row.priority = found.items[i].priority;
 		row.family = from_c(found.items[i].family);
 		row.selector = from_c(found.items[i].selector);
+		row.from = from_c(found.items[i].from);
+		row.to = from_c(found.items[i].to);
+		row.iif = from_c(found.items[i].iif);
+		row.oif = from_c(found.items[i].oif);
+		row.fwmark = found.items[i].fwmark;
+		row.fwmask = found.items[i].fwmask;
+		row.suppress_prefixlength = found.items[i].suppress_prefixlength;
+		row.l3mdev = found.items[i].l3mdev != 0;
 		row.action = from_c(found.items[i].action);
 		row.table = from_c(found.items[i].table);
 		out->append(row);

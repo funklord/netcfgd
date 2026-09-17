@@ -439,6 +439,35 @@ static int has_member(const ncfg_json_doc_t *doc, uint32_t object, const char *n
 	return ncfg_json_member(doc, object, name) != NCFG_JSON_NONE;
 }
 
+/*
+ * A numeric member, as the text a column shows.
+ *
+ * **Because `member_text` on a number returns the empty string**, which is
+ * indistinguishable from a key that is not there -- and for a rule's `table`
+ * that blank cell reads as "the main one", which is the single thing it never
+ * means. The rules list had shown an empty table column for every rule since
+ * it was written, and nothing could see it: the reader was the wrong one, not
+ * the value.
+ *
+ * An absent key stays the empty string, which for a table is honest: an action
+ * that stops at the rule consults none.
+ */
+static char *member_number_text(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	char buffer[24];
+	int written;
+
+	if (!has_member(doc, object, name)) {
+		return dup_text("", 0);
+	}
+	written = snprintf(buffer, sizeof(buffer), "%lld",
+	    (long long)ncfg_json_int(doc, ncfg_json_member(doc, object, name), 0));
+	if (written < 0 || (size_t)written >= sizeof(buffer)) {
+		return dup_text("", 0);
+	}
+	return dup_text(buffer, (size_t)written);
+}
+
 static char *member_text(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
 {
 	size_t length = 0;
@@ -1949,6 +1978,10 @@ void ncfg_rules_free(ncfg_rules_t *rules)
 		free(rules->items[i].id);
 		free(rules->items[i].family);
 		free(rules->items[i].selector);
+		free(rules->items[i].from);
+		free(rules->items[i].to);
+		free(rules->items[i].iif);
+		free(rules->items[i].oif);
 		free(rules->items[i].action);
 		free(rules->items[i].table);
 	}
@@ -1996,14 +2029,48 @@ int ncfg_client_rules(ncfg_client_t *client, ncfg_rules_t *out, char *err, size_
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "priority"), 0);
 		out->items[i].family = member_text(doc, entry, "family");
 		out->items[i].action = member_text(doc, entry, "action");
-		out->items[i].table = member_text(doc, entry, "table");
+		out->items[i].table = member_number_text(doc, entry, "table");
+
+		/* The selectors as themselves, for an editor. */
+		out->items[i].from = member_text(doc, entry, "from");
+		out->items[i].to = member_text(doc, entry, "to");
+		out->items[i].iif = member_text(doc, entry, "iif");
+		out->items[i].oif = member_text(doc, entry, "oif");
+		/* -1 for absent: 0 is a legal mark and a legal prefix length, and
+		 * `suppress_prefixlength = 0` is the commonest use of that key. */
+		out->items[i].fwmark =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "fwmark"), -1);
+		out->items[i].fwmask =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "fwmask"), -1);
+		out->items[i].suppress_prefixlength = (int)ncfg_json_int(
+		    doc, ncfg_json_member(doc, entry, "suppress_prefixlength"), -1);
+		out->items[i].l3mdev =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "l3mdev"), 0);
 
 		char phrase[256];
 		phrase[0] = '\0';
-		append_selector(phrase, sizeof(phrase), "from", member_text(doc, entry, "from"));
-		append_selector(phrase, sizeof(phrase), "to", member_text(doc, entry, "to"));
-		append_selector(phrase, sizeof(phrase), "iif", member_text(doc, entry, "iif"));
-		append_selector(phrase, sizeof(phrase), "oif", member_text(doc, entry, "oif"));
+		append_selector(phrase, sizeof(phrase), "from", dup_string(out->items[i].from));
+		append_selector(phrase, sizeof(phrase), "to", dup_string(out->items[i].to));
+		append_selector(phrase, sizeof(phrase), "iif", dup_string(out->items[i].iif));
+		append_selector(phrase, sizeof(phrase), "oif", dup_string(out->items[i].oif));
+		/* **The two that had no column at all.** A rule matching only a
+		 * firewall mark, or only membership of a VRF, showed an empty selector
+		 * -- which reads as "matches everything" and is the opposite of what it
+		 * does. `fwmark` is written in hex because that is how `ip rule` prints
+		 * it and how every firewall names it. */
+		if (out->items[i].fwmark >= 0) {
+			char mark[32];
+			if (out->items[i].fwmask >= 0) {
+				(void)snprintf(mark, sizeof(mark), "0x%x/0x%x", out->items[i].fwmark,
+				    out->items[i].fwmask);
+			} else {
+				(void)snprintf(mark, sizeof(mark), "0x%x", out->items[i].fwmark);
+			}
+			append_selector(phrase, sizeof(phrase), "fwmark", dup_string(mark));
+		}
+		if (out->items[i].l3mdev) {
+			append_selector(phrase, sizeof(phrase), "l3mdev", dup_string("yes"));
+		}
 		out->items[i].selector = dup_string(phrase);
 	}
 	ncfg_json_free(doc);

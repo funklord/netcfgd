@@ -8,8 +8,10 @@
 #include "rules_view.h"
 
 #include "ncfg_connection.h"
+#include "rule_dialog.h"
 #include "table_view.h"
 
+#include <QPushButton>
 #include <QVBoxLayout>
 
 ncfg_rules_view::ncfg_rules_view(ncfg_connection *connection, QWidget *parent)
@@ -19,9 +21,51 @@ ncfg_rules_view::ncfg_rules_view(ncfg_connection *connection, QWidget *parent)
 	columns << QStringLiteral("priority") << QStringLiteral("id") << QStringLiteral("family") << QStringLiteral("selector") << QStringLiteral("action") << QStringLiteral("table");
 	table = new ncfg_table_view(columns, QStringLiteral("rules_note"), this);
 
+	edit_button = new QPushButton(QStringLiteral("view / change"), this);
+	edit_button->setObjectName(QStringLiteral("edit_rule"));
+	edit_button->setEnabled(false);
+	table->add_control(edit_button);
+	/* The one control here that needs no row: a rule being written is not in
+	 * the list yet. */
+	new_button = new QPushButton(QStringLiteral("new rule..."), this);
+	new_button->setObjectName(QStringLiteral("new_rule"));
+	table->add_control(new_button);
+
 	auto *layout = new QVBoxLayout(this);
 	layout->setContentsMargins(0, 0, 0, 0);
 	layout->addWidget(table);
+
+	connect(edit_button, &QPushButton::clicked, this, &ncfg_rules_view::edit_selected);
+	connect(new_button, &QPushButton::clicked, this, &ncfg_rules_view::new_rule);
+	connect(table, &ncfg_table_view::activated, this, &ncfg_rules_view::edit_selected);
+	connect(table, &ncfg_table_view::selection_changed, this,
+	    [this]() { edit_button->setEnabled(table->selected_row() >= 0); });
+}
+
+void ncfg_rules_view::edit_selected()
+{
+	const int row = table->selected_row();
+	if (row < 0 || row >= rules.size()) {
+		return;
+	}
+	ncfg_rule_dialog dialog(connection, rules.at(row), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	refresh();
+	emit changed();
+}
+
+void ncfg_rules_view::new_rule()
+{
+	ncfg_rule_dialog dialog(connection, ncfg_rule_row(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	emit reported(dialog.outcome());
+	refresh();
+	emit changed();
 }
 
 void ncfg_rules_view::refresh()
@@ -30,10 +74,15 @@ void ncfg_rules_view::refresh()
 	QString error;
 
 	if (!connection->rules(&found, &error)) {
+		rules.clear();
 		table->show_error(error);
 		emit reported(error);
 		return;
 	}
+
+	/* Kept, so the editor opens on the daemon's own row rather than on a
+	 * re-parse of the strings this view just made out of it. */
+	rules = found;
 
 	QList<QStringList> rows;
 	for (const ncfg_rule_row &item : found) {

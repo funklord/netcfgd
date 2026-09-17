@@ -15,14 +15,21 @@
  * one column rather than eight, since a rule setting six of them is
  * unreadable as six columns that are empty on every other row.
  *
- * Read-only. What this program can change it changes through plan and apply,
- * where the operator sees the whole change before any of it happens.
+ * **Editable since 0257, and the distinction the old comment drew still
+ * holds.** What this window writes is the *document*; what the kernel has is
+ * changed by plan and apply, where the operator sees the whole change before
+ * any of it happens. A rule written here appears in the plan like every other
+ * configuration change.
  */
 #ifndef NCFG_RULES_VIEW_H
 #define NCFG_RULES_VIEW_H
 
+#include "ncfg_connection.h"
+
+#include <QList>
 #include <QWidget>
 
+class QPushButton;
 class ncfg_connection;
 class ncfg_table_view;
 
@@ -35,11 +42,23 @@ public:
 public slots:
 	void refresh();
 
+private slots:
+	/* Open the editor on the selected rule, or on nothing to write one. */
+	void edit_selected();
+	void new_rule();
+
 signals:
 	void reported(const QString &summary);
+	/* The configuration changed, so anything showing a plan is stale. */
+	void changed();
 
 private:
 	ncfg_connection *connection;
+	/* The rules as the daemon reports them, so the editor opens on the row
+	 * rather than on a re-parse of the table's strings. */
+	QList<ncfg_rule_row> rules;
+	QPushButton *edit_button;
+	QPushButton *new_button;
 	/* The shared read-only table: columns, rows, and the sentence underneath
 	 * that says why an empty one is empty. What is this view's own is turning
 	 * a row into strings, which is below. */

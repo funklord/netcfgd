@@ -903,6 +903,27 @@ typedef struct {
 	char *action;
 	/* The table consulted, or empty where the action does not consult one. */
 	char *table;
+	/*
+	 * The selectors as themselves, for an editor rather than a list.
+	 *
+	 * `selector` above is these joined for a column; a form has to set them
+	 * one at a time, and a caller that parsed the phrase back apart would be
+	 * inventing a second reader of the same fact.
+	 *
+	 * Empty strings for the four that are addresses and names. The three
+	 * numbers are -1 where the document states none, because 0 is a legal
+	 * firewall mark and a legal prefix length -- `suppress_prefixlength = 0`
+	 * is the rule that drops a table's default route, which is the commonest
+	 * use of it.
+	 */
+	char *from;
+	char *to;
+	char *iif;
+	char *oif;
+	int   fwmark;
+	int   fwmask;
+	int   suppress_prefixlength;
+	int   l3mdev;
 } ncfg_rule_t;
 
 typedef struct {
