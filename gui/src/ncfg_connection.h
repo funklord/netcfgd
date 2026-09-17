@@ -275,6 +275,24 @@ struct ncfg_hook_row {
 	int     timeout = 0;
 };
 
+/* One hook script: the program, rather than the reference to it.
+ *
+ * The row above is what the document says and is all a list needs. This is
+ * what the file holds, which is what an editor needs and what no document
+ * carries -- a document that could hold shell would be remote code execution
+ * with extra steps, so the compiler materialises the body and keeps the path.
+ *
+ * `readable` false means netcfgd could not open the file it names. The text is
+ * then empty, which is **not** a hook with nothing in it: writing that back
+ * would delete somebody's script. */
+struct ncfg_hook_script {
+	QString interface;
+	QString phase;
+	QString path;
+	QString text;
+	bool    readable = false;
+};
+
 /* The host-wide policy: the `global` block, minus the dns half the dns view
  * already owns. Rendered strings rather than typed values, because these have
  * little in common beyond living in one block. */
@@ -969,6 +987,15 @@ public:
 	bool bluetooth(QList<ncfg_bluetooth_row> *out, QString *error);
 	/* Every hook on every interface, in interface order. */
 	bool hooks(QList<ncfg_hook_row> *out, QString *error);
+	/*
+	 * The same hooks with their scripts, which needs `admin`.
+	 *
+	 * A heavier tier than the listing, and deliberately: this returns a
+	 * program netcfgd runs as root, from a file kept at 0700 because nobody
+	 * else needs to read it. A view that shows what runs and when calls
+	 * `hooks`; this is for the editor, which is `admin` to save anyway.
+	 */
+	bool hook_scripts(QList<ncfg_hook_script> *out, QString *error);
 	/* The host-wide policy the configuration declares. */
 	bool globals(ncfg_globals *out, QString *error);
 	bool interface_config(const QString &interface, ncfg_interface_config *out, QString *error);

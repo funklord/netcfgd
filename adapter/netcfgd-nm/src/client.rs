@@ -313,6 +313,7 @@ fn describe(response: &Response) -> &'static str {
 		Response::Radios { .. } => "a radio list",
 		Response::Configs { .. } => "a configuration listing",
 		Response::Probes { .. } => "a link-detection script list",
+		Response::Hooks { .. } => "a hook script list",
 		Response::Profiles { .. } => "a profile list",
 		Response::Secrets { .. } => "a credential list",
 		Response::Modems { .. } => "a modem list",

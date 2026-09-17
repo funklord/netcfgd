@@ -18,6 +18,14 @@
  * Every closed set is a list, and free text is a *value* in a key this file
  * chose -- an address, a host, a command. The dialog composes the block; the
  * operator never types one.
+ *
+ * **The hooks are here because the block is here.** A hook belongs to an
+ * interface, one drop-in owns that interface's block whole, and a second file
+ * declaring the same interface is a duplicate the loader refuses. So an editor
+ * for hooks alone would have to compose everything this form composes; the
+ * hooks list lives in this dialog instead, and `ncfg_hook_dialog` edits one
+ * script and writes nothing. Until 0258 this form refused to save any
+ * interface carrying a hook, because saving would have deleted it.
  */
 
 #ifndef NCFG_INTERFACE_DIALOG_H
@@ -66,6 +74,13 @@ private slots:
 	void move_source_down();
 	void add_route();
 	void drop_route();
+	/* The hooks this interface declares. A hook is shell and is edited as
+	 * shell, in `ncfg_hook_dialog`; what is kept here is the list, because a
+	 * drop-in owns the whole `interface` block and this is the form that
+	 * writes it. */
+	void add_hook();
+	void change_hook();
+	void drop_hook();
 	void addressing_changed();
 	void detection_changed();
 	/* Open the selected script, or start a new one. A probe is a shell script
@@ -98,6 +113,18 @@ private:
 	ncfg_interface_config existing;
 
 	bool        unknown = false;
+	/* This interface's hooks, with the scripts, and whether they could all be
+	 * read back. **A hook that could not be read is a save refused**: the
+	 * block is written whole, so writing a body this form does not have is
+	 * deleting somebody's script. Reading them needs `admin`, which a client
+	 * below that tier does not have -- and could not save either way. */
+	QList<ncfg_hook_script> hook_list;
+	bool                    hooks_unknown = false;
+
+	void load_hooks();
+	/* One row's label: the phase, and the first line of the script that is
+	 * neither the shebang nor a comment. */
+	void put_hook(const ncfg_hook_script &hook);
 
 
 	/* The addressing sources, in the document's order. The order is not
@@ -128,6 +155,10 @@ private:
 	QCheckBox   *enabled;
 	QCheckBox   *forwarding;
 	QCheckBox   *nat;
+	QListWidget *hooks;
+	QPushButton *hook_add;
+	QPushButton *hook_change;
+	QPushButton *hook_drop;
 	QComboBox   *detection;
 	/* What the daemon said, kept so the editor can be handed the text rather
 	 * than a path this machine would have to open. */

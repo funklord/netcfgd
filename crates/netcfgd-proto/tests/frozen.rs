@@ -94,6 +94,7 @@ fn every_request() -> Vec<Request> {
 		Request::SecretDelete { .. } => "secret_delete",
 		Request::Radios => "radios",
 		Request::ProbeList => "probe_list",
+		Request::HookList => "hook_list",
 		Request::ProfileList => "profile_list",
 		Request::ModemList => "modem_list",
 		Request::SecretList => "secret_list",
@@ -116,6 +117,7 @@ fn every_request() -> Vec<Request> {
 			"confirm",
 			"explain",
 			"hello",
+			"hook_list",
 			"modem_list",
 			"monitor",
 			"plan",
@@ -156,6 +158,10 @@ fn every_request() -> Vec<Request> {
 fn probe_samples() -> Vec<Request> {
 	vec![
 		Request::ProbeList,
+		// The hook listing rides here rather than in a group of its own: it is
+		// the same shape of question -- what does netcfgd hold -- and differs
+		// only in the tier, which no witness pins.
+		Request::HookList,
 		Request::ProfileList,
 		Request::ModemList,
 		Request::SecretList,
@@ -375,6 +381,33 @@ fn enterprise_samples() -> Vec<Request> {
 /// One of each kind, because the pair is the point: a shipped example is not
 /// editable in place, and the operator's copy of the same name is what shadows
 /// it. A witness carrying only one would not pin that.
+/// The hook listing, and a hook netcfgd could not read.
+///
+/// Both, because the pair is the point: `readable` false means the text is
+/// empty *and is not a hook with nothing in it*, and a client that wrote that
+/// body back would delete somebody's script. A witness carrying only the first
+/// would not pin the difference.
+fn hooks_sample() -> Response {
+	Response::Hooks {
+		hooks: vec![
+			netcfgd_proto::HookScript {
+				interface: "eth0".to_owned(),
+				phase: netcfgd_model::HookPhase::PostUp,
+				path: "/run/netcfgd/hooks/eth0.post_up.0".to_owned(),
+				text: "#!/bin/sh\nlogger up\n".to_owned(),
+				readable: true,
+			},
+			netcfgd_proto::HookScript {
+				interface: "eth1".to_owned(),
+				phase: netcfgd_model::HookPhase::Drift,
+				path: "/run/netcfgd/hooks/eth1.drift.1".to_owned(),
+				text: String::new(),
+				readable: false,
+			},
+		],
+	}
+}
+
 fn probes_sample() -> Response {
 	Response::Probes {
 		probes: vec![
@@ -498,6 +531,7 @@ fn every_response() -> Vec<Response> {
 		}])
 		.chain([configs_sample()])
 		.chain([probes_sample()])
+		.chain([hooks_sample()])
 		.collect();
 
 	let name = |response: &Response| match response {
@@ -514,6 +548,7 @@ fn every_response() -> Vec<Response> {
 		Response::Radios { .. } => "radios",
 		Response::Configs { .. } => "configs",
 		Response::Probes { .. } => "probes",
+		Response::Hooks { .. } => "hooks",
 		Response::Profiles { .. } => "profiles",
 		Response::Modems { .. } => "modems",
 		Response::Secrets { .. } => "secrets",
@@ -533,6 +568,7 @@ fn every_response() -> Vec<Response> {
 			"event",
 			"explanation",
 			"hello",
+			"hooks",
 			"journal",
 			"modems",
 			"ok",

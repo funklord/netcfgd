@@ -244,8 +244,15 @@ pub fn run(hook: &HookRef, env: &HookEnv) -> Outcome {
 /// Sixty seconds because the honest slow cases are real: a `pre_up` that waits
 /// for a peer, or a `post_up` bringing a tunnel to a far end, takes tens of
 /// seconds and is not misbehaving. The number is a bound on damage rather than
-/// a service-level target, and a hook that genuinely needs longer says so with
-/// `timeout` in its own block rather than making every hook wait for it.
+/// a service-level target.
+///
+/// **It is also the only limit any hook has.** This reads `HookRef::timeout`
+/// and the sentence here used to say a hook needing longer "says so with
+/// `timeout` in its own block" -- there is no such key in the configuration
+/// language, so the field is never anything but `None` and this number is what
+/// every hook on every machine gets. Giving the parser a key is a decision
+/// about the language; until it is taken, the sentence describes a mechanism
+/// rather than a feature.
 pub const DEFAULT_TIMEOUT_SECONDS: u32 = 60;
 
 /// How long a killed hook gets between `SIGTERM` and `SIGKILL`.

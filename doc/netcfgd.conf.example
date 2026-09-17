@@ -1357,9 +1357,32 @@
 # HOOKS -- RUNNING SOMETHING WHEN THE NETWORK CHANGES
 #
 # A hook body is shell. It ends at the first line that is nothing but a
-# closing brace, so braces inside the shell do not matter.
+# closing brace -- and braces inside the shell DO matter, because netcfgd
+# does not parse what is in a hook and so cannot tell your braces from its
+# own. A shell function must therefore keep its closing brace off a line of
+# its own:
+
+#interface eth0 {
+#	post_up {
+#	greet() { echo hello; }
+#	greet
+#	}
+#}
+
+# Spread over three lines, the lone `}` ends the hook there and everything
+# after it is read as configuration -- which fails somewhere else entirely,
+# talking about `=` and `{` at a line you wrote shell on.
 #
-# The phases are pre_up, up, post_up, pre_down, down and post_down.
+# The phases are pre_up, up, post_up, pre_down, down and post_down, plus five
+# events, which are written with `on` in front of them:
+#
+#   on carrier   carrier gained or lost
+#   on lease     a lease acquired, renewed or lost
+#   on roam      the station moved to another access point
+#   on portal    a captive portal was detected
+#   on drift     the machine stopped matching this document
+#
+# All eleven fire in this build.
 #
 # THE ORDERING TRAP, learned from netifrc: `pre_up` runs BEFORE the link is
 # up, so anything in it that needs the network will fail. Use `post_up` for
@@ -1374,18 +1397,28 @@
 
 # The environment a hook gets is prefixed `NCFG_`.
 #
-# A hook runs as root unless it says otherwise, and `run_as` is how it says
-# otherwise. Anything able to write config into /etc/netcfgd can therefore
-# run code as root, whatever the file's mode says -- which is why the
-# directory is root's, and why `ncfg wifi add` takes typed fields over a
-# socket rather than a file somebody wrote.
+# A HOOK RUNS AS ROOT. There is no way to ask for anything else: netcfgd's
+# hook runner will drop to a named user and will kill a hook that overruns,
+# and the configuration language has no key for either, so nothing you can
+# write here reaches them.
+#
+# This file used to show `run_as=nobody` and `timeout=30` as the first two
+# lines of a hook body, as though they were settings. They are not. A hook
+# body is shell and nothing reads it but the shell, so those two lines set
+# two shell variables, and the hook runs as root with the default 60-second
+# limit exactly as it would without them. The example is gone rather than corrected in place,
+# because a wrong one is worse than none: it was read as privilege being
+# dropped where none was.
+#
+# So: anything able to write config into /etc/netcfgd can run code as root,
+# whatever the file's mode says -- which is why the directory is root's, and
+# why `ncfg wifi add` takes typed fields over a socket rather than a file
+# somebody wrote.
 
 #interface eth0 {
 #	config = "dhcp"
 #	post_up {
-#		run_as=nobody
-#		timeout=30
-#		/usr/local/bin/announce-address
+#	/usr/local/bin/announce-address
 #	}
 #}
 

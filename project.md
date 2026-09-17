@@ -1036,12 +1036,16 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Seven model fields cannot be reached from the configuration language at
+- **Nine model fields cannot be reached from the configuration language at
   all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`, `DnsServer`'s
-  `port` and `sni`, `Device`'s `match`, and `RoutingRule::invert`, which 0257
-  found when the rule editor had to decide whether to offer it. Either the
-  parser gains the keys or the schema loses the fields, and the schema is
-  witnessed, so neither is a passing change.
+  `port` and `sni`, `Device`'s `match`, `RoutingRule::invert`, which 0257 found
+  when the rule editor had to decide whether to offer it, and `HookRef`'s
+  `run_as` and `timeout`, which 0258 found the same way -- and which the
+  example file documented a syntax for that does nothing. Either the parser
+  gains the keys or the schema loses the fields, and the schema is witnessed,
+  so neither is a passing change. `run_as` needs one thing more than grammar:
+  a materialiser that writes the script somewhere the named user can read,
+  which 0700 under root is not.
 - **`ncfg apply` without `--confirm` spawns backends as children of a
   short-lived CLI**, so which process owns dhcpcd depends on whether the
   operator typed a flag. Raised with the holder; unanswered.
@@ -2291,10 +2295,12 @@ fix.
 **Six model fields cannot be reached from the configuration language at
 all**, which is 0061's disease in a place nobody had looked: `DnsPolicy`'s
 `options`, `dnssec` and `transport`, `DnsServer`'s `port` and `sni`, and
-`Device`'s `match`. (**Seven, as of 0257**: `RoutingRule::invert` is the
-seventh, found when the rule editor had to decide whether to offer it. It is
-not in the list below because the renderer refuses a document with any rule in
-it outright, so unlike these six it was never a renderer's problem.) `lower_dns` reads four keys -- `servers`, `search`,
+`Device`'s `match`. (**Nine, as of 0258**: `RoutingRule::invert` is the
+seventh, found when the rule editor had to decide whether to offer it, and
+`HookRef`'s `run_as` and `timeout` are the eighth and ninth, found the same
+way. None of the three is in the list below, because the renderer refuses a
+document carrying a rule or a hook outright -- so unlike these six they were
+never a renderer's problem.) `lower_dns` reads four keys -- `servers`, `search`,
 `domains`, `mode` -- and hardcodes `port: None, sni: None`; `lower_device`
 never assigns `r#match`. Nothing else in the tree writes any of them either,
 measured across `crates/`, `backend/` and `adapter/`.
@@ -9492,6 +9498,94 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.152 A hook is shell, and the window can write it
+
+The hooks tab could list a hook -- an interface, a phase, a path under `/run`,
+and two columns that were always empty -- and nothing could show what was *in*
+one or write one. The interface editor refused outright to save any interface
+carrying a hook, because it writes the block whole and a hook it could not
+carry was a hook it would delete. The editor has a hooks list now, and
+`ncfg_hook_dialog` edits one as what it is: a shell script in a fixed-width
+box, with no form pretending a program is a set of fields. Decision 0258.
+
+**In the interface editor rather than in one of its own**, because a hook is
+inside an `interface` block, one drop-in owns that block whole, and a second
+file declaring the same interface is a duplicate the loader refuses. A separate
+hook editor would have had to compose everything the interface editor composes.
+
+### `hook_list`, and the first reading verb at `admin`
+
+A document carries `{phase, path, sha256}` and never shell -- which is what
+keeps a desired-state document from being remote code execution with extra
+steps -- so there was nothing for a client to show. The daemon reads the
+materialised script back. `probe_list` is `observe` and this is not: a probe is
+a command the document states in the open, in a file kept at 0755 so somebody
+debugging a link can run it by hand, and a hook body is whatever an operator
+wrote, in a file the materialiser opens 0700 *because* it runs as root. Protocol
+1.2 to 1.3, additive.
+
+### The defect underneath, which was bigger than the feature
+
+The first save was refused with **"that would stop the configuration
+compiling"**, about a file the same daemon loads on every reload. It compiles.
+What refused it was the sink: ten places compile the configuration in order to
+*read* it, and every one used `NoHooks`, whose whole behaviour is to refuse.
+
+* **`install_drop_in` refused every configuration write** on a machine with one
+  hook anywhere -- every editor in the window, every `ncfg config put` -- and
+  blamed the file being written rather than the check doing the writing.
+* **`load_with_profile` returned before adding the selected profile**, so
+  `ncfg profile set` wrote a selection, reported success, and the profile's
+  drop-ins were never read.
+
+`UnwrittenHooks` accepts a hook, hashes what `PendingHooks` would have written,
+and names no file. Its placeholder path is absolute because `validate` requires
+that -- a parenthesised sentence was refused there, the check doing its job --
+and under `/nonexistent` so a document that somehow reached the runner fails at
+the `exec` naming this path rather than running something plausible.
+
+**The shape is one this document keeps finding: a default whose whole behaviour
+is to refuse, used where the question was not the one it answers.** `NoHooks`
+is right for a caller producing a document to act on with nowhere to put the
+scripts, which is what its own comment describes. Nothing said what to use when
+compiling to read, so everybody used the one that was there.
+
+### Two fields nobody can set, and a manual that promised them
+
+`HookRef::run_as` and `HookRef::timeout` are in the model and the runner
+honours both. The configuration language has **no key for either**, so every
+hook on every machine runs as root for the default sixty seconds -- and
+`netcfgd.conf.example` showed `run_as=nobody` and `timeout=30` as the first two
+lines of a hook body, as though they were settings. They are shell assignments.
+The hook runs as root exactly as it would without them, and the example reads
+as privilege being dropped where none is. Removed rather than corrected in
+place: a wrong example is worse than none. `DEFAULT_TIMEOUT_SECONDS` carried
+the same claim in its comment.
+
+That makes **nine** model fields the language cannot reach, not seven, and
+these two are the only ones any document ever promised. The count is corrected
+where it appears.
+
+The same file also said braces inside a hook body "do not matter"; they end it.
+The editor refuses such a body beside the field rather than letting the daemon
+report a syntax error about a line somebody wrote shell on.
+
+### The round trip is why the body is not indented
+
+The materialiser prepends `#!/bin/sh` to a body without one. Indent the body
+when writing the block -- as every other block writer here indents -- and the
+shebang stops being one, so the next save adds another and the script grows by
+a line on every edit. Written verbatim at column zero, with the round trip
+asserted rather than the indentation.
+
+### The sabotage that changed the tests
+
+Reporting an unreadable hook as readable passed unnoticed: nothing had ever
+taken a materialised script away. The live probe removes one now and asserts
+the flag, the empty text that is **not** an empty hook, and the editor's
+refusal to save over it -- which is the one way this round could have deleted
+somebody's script.
 
 ## 10.151 The rule that says what a route cannot
 

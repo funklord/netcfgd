@@ -244,7 +244,9 @@ pub fn forget(
 
 	let after = crate::config::load_with_profile(factory_dir, config_dir)
 		.ok()
-		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
+		.and_then(|sources| {
+			netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks).ok()
+		});
 	let mut forgotten = Forgotten {
 		credentials_removed: Vec::new(),
 		credentials_kept: Vec::new(),
@@ -608,7 +610,7 @@ fn compiles_back(config_dir: &Path, factory_dir: &Path, profile: &Profile) -> Re
 	let sources = config::load_layered(factory_dir, config_dir)
 		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))?;
 	let document =
-		netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).map_err(|error| {
+		netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks).map_err(|error| {
 			format!(
 				"what that would have written does not compile, so it was \
 				 removed again:\n{error}"

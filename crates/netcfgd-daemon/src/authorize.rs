@@ -138,7 +138,24 @@ pub(crate) fn tier_of(request: &Request) -> Tier {
 		// in the text granting more than configuring a network, so opening
 		// `admin` to a group is survivable rather than equivalent to handing
 		// it root.
-		Request::Apply { .. }
+		// **Reading a hook body is `admin`, where reading a probe is not.**
+		// Both are programs netcfgd runs as root, and the difference is who
+		// wrote them into what. A probe is a command the document states in
+		// the open and a file netcfgd keeps at 0755 so somebody debugging a
+		// link can run it by hand; a hook body is whatever an operator put in
+		// it, in a file the materialiser deliberately opens 0700 because
+		// nobody else needs to read it. Serving that at `observe` would publish
+		// the contents of the one file this daemon takes care to keep to
+		// itself, and the client that wants it is an editor, which is `admin`
+		// to save anyway.
+		//
+		// Not the mode argument the `ConfigList` bullet rules out: that one
+		// says "anybody local could read it anyway", which is a fact about
+		// somebody other than the caller. This is the reverse -- the mode is
+		// evidence of what the daemon decided the content is worth, and the
+		// content is why.
+		Request::HookList
+		| Request::Apply { .. }
 		| Request::Confirm
 		| Request::Revert
 		| Request::Reload

@@ -141,7 +141,7 @@ reach.
 |---|---|
 | `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list` |
 | `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list` |
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
@@ -238,6 +238,35 @@ first glance:
   **Inbound only.** There is no request that reads a credential back and there
   is not going to be: 0031's bridge runs one way, `GetSecrets` refuses, and the
   document carries references rather than values.
+
+- **`hook_list` is `admin`, and it is the one *reading* verb at this tier.**
+  It returns the hook scripts themselves, which is the one thing a
+  desired-state document cannot carry: a document holding shell would be
+  remote code execution with extra steps, so the compiler materialises a body
+  into a file and the document keeps `{phase, path, sha256}`. Without this
+  verb no client can show an operator what a hook does, and an editor that
+  loaded the fields it knew and saved the block would delete the body.
+
+  The tier is not `observe`, where `probe_list` sits, and the difference is
+  what is in the file rather than where it is. A probe is a command the
+  document states in the open, in a file netcfgd keeps at 0755 so somebody
+  debugging a link judged down can run it by hand. A hook body is whatever an
+  operator wrote, in a file the materialiser opens 0700 because it runs as
+  root and nobody else needs to read it -- serving that to `observe` would
+  publish the contents of the one file this daemon takes care to keep to
+  itself. The client that wants it is an editor, which is `admin` to save
+  anyway.
+
+  This is not the mode argument the `config_list` bullet rules out. That one
+  says "anybody local could read it anyway", which is a fact about somebody
+  other than the caller and evaporates when a mode changes. This is the
+  reverse: the mode is evidence of what netcfgd decided the *content* is
+  worth, and the content is the reason.
+
+  A hook the daemon could not read back is listed as itself with
+  `readable: false` rather than skipped. The document names it, so a client
+  that never saw the row would write the interface back without it -- which is
+  to say, delete a hook because netcfgd could not open it.
 
 - **Deleting is writing**, so `config_delete` and `secret_delete` are here for
   the same reason: a client that could remove files from `/etc/netcfgd` would

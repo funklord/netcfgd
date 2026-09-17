@@ -317,7 +317,7 @@ pub fn load_with_profile(factory: &Path, runtime: &Path) -> io::Result<SourceMap
 	// to check: the caller compiles it properly next and reports diagnostics
 	// that point at the line. Answering a syntax error with "your profile was
 	// taken away" would send the reader somewhere the fault is not.
-	let Ok(document) = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks) else {
+	let Ok(document) = netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks) else {
 		return Ok(sources);
 	};
 	let selected = document.globals.profile.clone();
@@ -362,7 +362,7 @@ pub fn load_with_profile(factory: &Path, runtime: &Path) -> io::Result<SourceMap
 	// that does not compile is the caller's to report, with diagnostics that
 	// point at the line -- answering that with "your profile chose again"
 	// would send the reader somewhere the fault is not.
-	let after = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks);
+	let after = netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks);
 	if after.is_ok_and(|document| document.globals.profile.as_deref() != Some(name.as_str())) {
 		return Err(io::Error::new(
 			io::ErrorKind::InvalidData,
@@ -388,7 +388,7 @@ fn profile_drop_in_asks(sources: &SourceMap) -> Option<String> {
 	})?;
 	let mut alone = SourceMap::new();
 	alone.add(sources.name(id), sources.text(id));
-	netcfgd_compile::compile(&alone, &mut netcfgd_compile::NoHooks)
+	netcfgd_compile::compile(&alone, &mut crate::hooks::UnwrittenHooks)
 		.ok()?
 		.globals
 		.profile
@@ -1199,6 +1199,83 @@ mod layering {
 		root
 	}
 
+	/// A machine with a hook in its configuration can still be written to.
+	///
+	/// **The defect this replaces refused everything.** `install_drop_in`
+	/// verifies by compiling, it compiled with a sink whose entire behaviour is
+	/// to refuse a hook, and the failure was reported as *"that would stop the
+	/// configuration compiling"* -- about a configuration the same daemon
+	/// loads on every reload. So on any machine with one hook, every editor in
+	/// the window and every `ncfg config put` was refused, and the message
+	/// blamed the file being written rather than the check doing the writing.
+	#[test]
+	fn a_drop_in_is_installed_on_a_machine_that_has_a_hook() {
+		let dir = tree(
+			"hooked",
+			&[(
+				"etc/netcfgd.conf",
+				"interface eth0 {\n\tconfig = \"dhcp\"\n\tpost_up {\n#!/bin/sh\nlogger up\n\t}\n}\n",
+			)],
+		);
+		let config = dir.join("etc");
+		let factory = dir.join("factory");
+
+		let written = install_drop_in(
+			&config,
+			&factory,
+			"another",
+			"interface eth1 {\n\tconfig = \"dhcp\"\n}\n",
+			false,
+		)
+		.expect("a drop-in beside a hook is installed");
+		assert!(written.exists());
+
+		// And a drop-in that carries one itself, which is what the window
+		// writes when somebody adds a hook to an interface.
+		install_drop_in(
+			&config,
+			&factory,
+			"hooked",
+			"interface eth2 {\n\tconfig = \"dhcp\"\n\ton drift {\n#!/bin/sh\nlogger drifted\n\t}\n}\n",
+			false,
+		)
+		.expect("a drop-in carrying a hook is installed");
+	}
+
+	/// And its profile still loads.
+	///
+	/// The other half of the same fault, and the quieter one: `load_with_profile`
+	/// compiles the base to find out which profile is selected, and returned
+	/// early when that compile failed. With a hook in the base it always
+	/// failed, so the profile directory was never added -- `ncfg profile set`
+	/// wrote a selection, reported success, and the profile's drop-ins were
+	/// not read on this or any later load.
+	#[test]
+	fn a_profile_is_still_loaded_on_a_machine_that_has_a_hook() {
+		let dir = tree(
+			"hooked-profile",
+			&[
+				(
+					"netcfgd.conf",
+					"device eth0 { mtu = 1500 }\ninterface eth0 {\n\tconfig = \"dhcp\"\n\tpost_up {\n#!/bin/sh\nlogger up\n\t}\n}\n",
+				),
+				("conf.d/00-profile.conf", "global { profile = \"office\" }\n"),
+				(
+					"profile/office/10-office.conf",
+					"override device eth0 { mtu = 9000 }\n",
+				),
+			],
+		);
+		let sources = load_with_profile(&dir.join(""), &dir.join("")).expect("load");
+		assert!(
+			names(&sources)
+				.iter()
+				.any(|name| name.contains("10-office.conf")),
+			"the selected profile was not read: {:?}",
+			names(&sources)
+		);
+	}
+
 	fn names(sources: &netcfgd_compile::SourceMap) -> Vec<String> {
 		sources
 			.ids()
@@ -1719,7 +1796,8 @@ pub fn install_drop_in(
 			return Err(format!("could not read {}: {error}", config_dir.display()).into());
 		}
 	};
-	if let Err(diagnostics) = netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks) {
+	if let Err(diagnostics) = netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks)
+	{
 		let rendered = diagnostics.render(&sources);
 		restore(&path, previous.as_deref());
 		return Err(format!(
@@ -2107,7 +2185,7 @@ pub fn remove_drop_in(
 	let compiles = load_layered(factory_dir, config_dir)
 		.map_err(|error| format!("could not read {}: {error}", config_dir.display()))
 		.and_then(|sources| {
-			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
+			netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks)
 				.map(|_| ())
 				.map_err(|diagnostics| diagnostics.render(&sources))
 		});
@@ -2192,7 +2270,7 @@ const FOLDED_PREFIXES: [&str; 2] = ["05-profile-", "zz-profile-"];
 /// [0151]: ../../../doc/decision/0151-a-profile-is-a-directory-and-it-is-switched-by-hand.md
 pub fn adopt_profile(config_dir: &Path, factory_dir: &Path) -> io::Result<Option<String>> {
 	let before_sources = load_with_profile(factory_dir, config_dir)?;
-	let Ok(before) = netcfgd_compile::compile(&before_sources, &mut netcfgd_compile::NoHooks)
+	let Ok(before) = netcfgd_compile::compile(&before_sources, &mut crate::hooks::UnwrittenHooks)
 	else {
 		// It does not compile, so there is nothing to preserve and nothing to
 		// prove. Leave it alone and let the caller report the diagnostics.
@@ -2256,7 +2334,7 @@ pub fn adopt_profile(config_dir: &Path, factory_dir: &Path) -> io::Result<Option
 		let after = load_with_profile(factory_dir, config_dir)
 			.ok()
 			.and_then(|sources| {
-				netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok()
+				netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks).ok()
 			});
 		if after.as_ref() == Some(&expected) {
 			return Ok(Some(name));
@@ -2580,7 +2658,9 @@ fn write_profile_snapshot(
 	// detail the renderer can guess.
 	let base = load_layered(factory_dir, config_dir)
 		.ok()
-		.and_then(|sources| netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).ok());
+		.and_then(|sources| {
+			netcfgd_compile::compile(&sources, &mut crate::hooks::UnwrittenHooks).ok()
+		});
 	let mut overrides = netcfgd_compile::render::Overrides::new();
 	if let Some(base) = &base {
 		for interface in &base.interfaces {

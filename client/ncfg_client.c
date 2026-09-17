@@ -3235,9 +3235,12 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 			note_unmodelled(&out->unmodelled, beyond[i]);
 		}
 	}
-	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "hooks"))) {
-		note_unmodelled(&out->unmodelled, "hooks");
-	}
+	/* **`hooks` is no longer on that list.** It was, and correctly so while no
+	 * client could carry one: a form that loaded the keys it knew and saved
+	 * the block deleted the hooks. Since 0258 the interface editor renders
+	 * them, and what it cannot get hold of -- a body netcfgd would not hand
+	 * over, which is the `admin` tier saying no -- it refuses on for itself,
+	 * because that refusal is about the caller rather than about the block. */
 	if (!out->unmodelled) {
 		out->unmodelled = dup_string("");
 	}
@@ -3510,6 +3513,74 @@ void ncfg_probes_free(ncfg_probes_t *probes)
 	free(probes->items);
 	probes->items = NULL;
 	probes->count = 0;
+}
+
+void ncfg_hook_scripts_free(ncfg_hook_scripts_t *scripts)
+{
+	if (!scripts) {
+		return;
+	}
+	for (size_t i = 0; i < scripts->count; i++) {
+		free(scripts->items[i].interface);
+		free(scripts->items[i].phase);
+		free(scripts->items[i].path);
+		free(scripts->items[i].text);
+	}
+	free(scripts->items);
+	scripts->items = NULL;
+	scripts->count = 0;
+}
+
+int ncfg_client_hook_scripts(ncfg_client_t *client, ncfg_hook_scripts_t *out, char *err,
+    size_t err_size)
+{
+	if (!out) {
+		set_error(err, err_size, "no result to fill in");
+		return 0;
+	}
+	out->items = NULL;
+	out->count = 0;
+
+	ncfg_json_doc_t *doc =
+	    ncfg_client_request(client, "{\"request\":\"hook_list\"}", err, err_size);
+	if (!doc) {
+		return 0;
+	}
+	if (took_refusal(doc, err, err_size)) {
+		ncfg_json_free(doc);
+		return 0;
+	}
+
+	uint32_t hooks = ncfg_json_member(doc, ncfg_json_root(doc), "hooks");
+	uint32_t count = ncfg_json_count(doc, hooks);
+	if (!count) {
+		/* A machine with no hooks is the ordinary answer, and calloc(0, n) may
+		 * return NULL -- which the next line would read as being out of
+		 * memory. */
+		ncfg_json_free(doc);
+		return 1;
+	}
+	out->items = calloc(count, sizeof(*out->items));
+	if (!out->items) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+	out->count = count;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, hooks, i);
+		out->items[i].interface = member_text(doc, entry, "interface");
+		out->items[i].phase = member_text(doc, entry, "phase");
+		out->items[i].path = member_text(doc, entry, "path");
+		out->items[i].text = member_text(doc, entry, "text");
+		/* Defaulting to 0 rather than 1: a daemon that did not say is one this
+		 * client should not write a hook body back to. */
+		out->items[i].readable =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "readable"), 0);
+	}
+	ncfg_json_free(doc);
+	return 1;
 }
 
 int ncfg_client_probes(ncfg_client_t *client, ncfg_probes_t *out, char *err, size_t err_size)

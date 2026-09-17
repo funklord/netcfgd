@@ -150,8 +150,14 @@ ncfg_main_window::ncfg_main_window(ncfg_connection *connection, QWidget *parent)
 	connect(global, &ncfg_global_view::changed, this, &ncfg_main_window::reload);
 	connect(profiles, &ncfg_profiles_view::reported, this, &ncfg_main_window::note);
 	connect(rules, &ncfg_rules_view::reported, this, &ncfg_main_window::note);
+	/* A rule written is a document changed, so whatever is showing a plan is
+	 * stale. 0257 gave the view the signal and left this line out, which is
+	 * the whole of the defect: the editor worked and the plan tab went on
+	 * describing the configuration from before it. */
+	connect(rules, &ncfg_rules_view::changed, this, &ncfg_main_window::reload);
 	connect(bluetooth, &ncfg_bluetooth_view::reported, this, &ncfg_main_window::note);
 	connect(hooks, &ncfg_hooks_view::reported, this, &ncfg_main_window::note);
+	connect(hooks, &ncfg_hooks_view::changed, this, &ncfg_main_window::reload);
 	connect(profiles, &ncfg_profiles_view::changed, this, &ncfg_main_window::reload);
 	connect(links, &ncfg_links_view::changed, this, &ncfg_main_window::reload);
 	connect(devices, &ncfg_devices_view::changed, this, &ncfg_main_window::reload);

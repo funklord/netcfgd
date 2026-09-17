@@ -28,11 +28,12 @@ use serde::{Deserialize, Serialize};
 /// than refusing.
 ///
 /// **The minor is what a client reads to know whether a verb is there.** 1.1
-/// added [`Request::WifiForget`] and 1.2 adds [`Request::ConfigList`]; both
-/// remove nothing, so an older client is unaffected and a newer one can tell
-/// -- which is the whole of what the field is for. A major stays reserved for
-/// a change that makes an old client wrong rather than merely incomplete.
-pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 2 };
+/// added [`Request::WifiForget`], 1.2 [`Request::ConfigList`] and 1.3
+/// [`Request::HookList`]; each removes nothing, so an older client is
+/// unaffected and a newer one can tell -- which is the whole of what the field
+/// is for. A major stays reserved for a change that makes an old client wrong
+/// rather than merely incomplete.
+pub const PROTOCOL_VERSION: Version = Version { major: 1, minor: 3 };
 
 /// Where the socket lives when nothing says otherwise.
 pub const DEFAULT_SOCKET: &str = "/run/netcfgd/netcfgd.sock";
@@ -263,6 +264,28 @@ pub enum Request {
 	/// configuring a remote machine -- and would then save an edit of one
 	/// machine's script onto another.
 	ProbeList,
+
+	/// The hook scripts, as netcfgd would run them.
+	///
+	/// **The one thing `Show` cannot answer.** A document carries a hook as
+	/// `{phase, path, sha256}` and never as shell (section 2.2), which is what
+	/// keeps a desired-state document from being remote code execution with
+	/// extra steps. That leaves no way for a client to show an operator what a
+	/// hook *does*, let alone offer to change it -- and an editor that loaded
+	/// the fields it knew and saved the block would delete the body.
+	///
+	/// So this reads the materialised script back, from the path the document
+	/// names. What comes out is what netcfgd would execute, shebang and all,
+	/// rather than what the configuration file says -- the two differ by the
+	/// `#!/bin/sh` the materialiser prepends to a body that has none.
+	///
+	/// **`admin`, unlike [`Request::ProbeList`].** A probe is a command the
+	/// document states in the open; a hook body is whatever an operator wrote,
+	/// in a file netcfgd deliberately keeps at 0700 because it runs as root.
+	/// Handing that to `observe` would publish the contents of the one file
+	/// this daemon takes care not to let anybody else read. The client that
+	/// needs it is an editor, which is `admin` to save anyway.
+	HookList,
 
 	/// The profiles this machine has, and which one is chosen.
 	///
@@ -497,6 +520,7 @@ impl Request {
 			| Self::Status
 			| Self::Plan
 			| Self::ProbeList
+			| Self::HookList
 			| Self::ProfileList
 			| Self::ModemList
 			| Self::SecretList
@@ -593,6 +617,38 @@ pub struct ProbeScript {
 	/// Whether netcfgd would overwrite this file, rather than write a copy
 	/// into `/etc` beside it. A shipped example is not edited in place.
 	pub editable: bool,
+}
+
+/// One hook script, as netcfgd holds it.
+///
+/// The text comes with the listing for the reason [`ProbeScript`]'s does: a
+/// client needs it to show one, and a second round trip per hook would mean a
+/// list and a body that could disagree about what is going to run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HookScript {
+	/// The interface whose lifecycle this follows.
+	///
+	/// A hook belongs to one, and a hook declared on a `network` block is not
+	/// run by this build at any phase -- the planner warns about those, and
+	/// they are not listed here.
+	pub interface: String,
+	/// Which phase it runs in.
+	pub phase: netcfgd_model::HookPhase,
+	/// The file netcfgd would execute, as the document names it.
+	pub path: String,
+	/// The script.
+	///
+	/// Empty where `readable` is false, which is not the same as a hook with
+	/// nothing in it.
+	#[serde(default)]
+	pub text: String,
+	/// Whether the file was there and could be read.
+	///
+	/// **False is a fact a client must not round-trip.** The document names a
+	/// hook netcfgd could not read back, so an editor that saved the block
+	/// would write the body it does not have -- which is to say, delete it.
+	pub readable: bool,
 }
 
 /// One profile this machine could be switched to.
@@ -849,6 +905,12 @@ pub enum Response {
 	Configs {
 		/// One per file the loader would read, in that order.
 		configs: Vec<ConfigFile>,
+	},
+	/// The hook scripts, in answer to [`Request::HookList`].
+	Hooks {
+		/// One per hook the document declares, in interface order and then in
+		/// the order the interface declares them.
+		hooks: Vec<HookScript>,
 	},
 	/// The link-detection scripts, in answer to [`Request::ProbeList`].
 	Probes {

@@ -74,19 +74,72 @@ impl PendingHooks {
 	}
 }
 
+/// The path a document gets when nothing was written.
+///
+/// Absolute, because `Document::validate` requires a hook path to be -- a
+/// sentence in parentheses was refused there, which is the check doing its job.
+/// Under `/nonexistent`, because a document from [`UnwrittenHooks`] is for
+/// reading: if one ever reaches the runner anyway it has to fail at the `exec`,
+/// naming this path, rather than run whatever happens to sit somewhere
+/// plausible.
+const NOT_MATERIALISED: &str = "/nonexistent/netcfgd/hook-compiled-for-reading";
+
+/// A sink for a caller that compiles to **read** the configuration.
+///
+/// **Not every compile is a compile to run.** Something like a dozen places
+/// compile the machine's configuration in order to ask it a question -- which
+/// profile is selected, does this drop-in still parse, what did forgetting
+/// that network leave behind -- and then throw the document away. Every one of
+/// them used [`netcfgd_compile::NoHooks`], whose whole behaviour is to refuse,
+/// and every one of them therefore gave a wrong answer on any machine with a
+/// hook in its configuration. Found when the gui's interface editor tried to
+/// save an interface carrying one and the daemon answered *"that would stop
+/// the configuration compiling"* about a file the same daemon loads on every
+/// reload. Two of the consequences were not small:
+///
+/// * `install_drop_in` refused **every** configuration write on such a
+///   machine, which is every editor in the window and `ncfg config put`;
+/// * `load_with_profile` returned before it had added the selected profile's
+///   directory, so the profile silently did not load.
+///
+/// So this accepts a hook, hashes exactly what [`PendingHooks`] would have
+/// written, and names no file. `NoHooks` stays for what its own documentation
+/// describes: a caller that is producing a document to *act* on and has
+/// nowhere to put the scripts, where refusing loudly is right.
+pub struct UnwrittenHooks;
+
+impl HookSink for UnwrittenHooks {
+	fn record(&mut self, phase: HookPhase, _owner: &str, body: &str) -> Result<HookRef, String> {
+		Ok(HookRef {
+			phase,
+			path: NOT_MATERIALISED.to_owned(),
+			sha256: sha256_hex(script_for(body).as_bytes()),
+			run_as: None,
+			timeout: None,
+		})
+	}
+}
+
+/// The bytes that get written, from the body as the author wrote it.
+///
+/// A hook body is shell, and the runner executes it directly rather than
+/// through `sh -c`, so it needs a shebang and the execute bit. A body that
+/// already declares one keeps it -- which is also what makes an editor's round
+/// trip stable: read the file back, write it out again, and the script does not
+/// grow a line.
+fn script_for(body: &str) -> String {
+	if body.starts_with("#!") {
+		body.to_owned()
+	} else {
+		format!("#!/bin/sh\n{body}")
+	}
+}
+
 impl HookSink for PendingHooks {
 	fn record(&mut self, phase: HookPhase, owner: &str, body: &str) -> Result<HookRef, String> {
 		let name = format!("{owner}.{}.{}", phase.name(), self.pending.len());
 		let path = self.dir.join(&name);
-
-		// A hook body is shell, and the runner executes it directly rather
-		// than through `sh -c`, so it needs a shebang and the execute bit. A
-		// body that already declares one keeps it.
-		let script = if body.starts_with("#!") {
-			body.to_owned()
-		} else {
-			format!("#!/bin/sh\n{body}")
-		};
+		let script = script_for(body);
 
 		let reference = HookRef {
 			phase,

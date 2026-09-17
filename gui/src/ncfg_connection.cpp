@@ -1227,6 +1227,40 @@ bool ncfg_connection::bluetooth(QList<ncfg_bluetooth_row> *out, QString *error)
 	return true;
 }
 
+bool ncfg_connection::hook_scripts(QList<ncfg_hook_script> *out, QString *error)
+{
+	if (!out) {
+		return false;
+	}
+	out->clear();
+	if (!client) {
+		if (error) {
+			*error = QStringLiteral("not connected");
+		}
+		return false;
+	}
+
+	ncfg_hook_scripts_t found = {};
+	char message[NCFG_ERROR_MAX];
+	if (!ncfg_client_hook_scripts(client, &found, message, sizeof(message))) {
+		if (error) {
+			*error = QString::fromUtf8(message);
+		}
+		return false;
+	}
+	for (size_t i = 0; i < found.count; i++) {
+		ncfg_hook_script row;
+		row.interface = from_c(found.items[i].interface);
+		row.phase = from_c(found.items[i].phase);
+		row.path = from_c(found.items[i].path);
+		row.text = from_c(found.items[i].text);
+		row.readable = found.items[i].readable != 0;
+		out->append(row);
+	}
+	ncfg_hook_scripts_free(&found);
+	return true;
+}
+
 bool ncfg_connection::hooks(QList<ncfg_hook_row> *out, QString *error)
 {
 	if (!out) {

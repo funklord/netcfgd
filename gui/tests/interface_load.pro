@@ -25,9 +25,9 @@ PRE_TARGETDEPS += $$CLIENT_DIR/libncfg_client.a
 
 # The probe dialog comes along because the interface dialog constructs one for
 # its `edit`/`new` buttons; linking without it fails on the vtable.
-SOURCES += interface_load.cpp ../src/interface_dialog.cpp ../src/probe_dialog.cpp \
+SOURCES += interface_load.cpp ../src/interface_dialog.cpp ../src/hook_dialog.cpp ../src/probe_dialog.cpp \
 	../src/ncfg_connection.cpp
-HEADERS += ../src/interface_dialog.h ../src/probe_dialog.h ../src/ncfg_connection.h
+HEADERS += ../src/interface_dialog.h ../src/hook_dialog.h ../src/probe_dialog.h ../src/ncfg_connection.h
 
 # The daemon this drives, by absolute path: the test starts a real one, because
 # the configuration has to come from somewhere and the socket round trip is the

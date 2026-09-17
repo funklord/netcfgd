@@ -1,5 +1,6 @@
 #include "interface_dialog.h"
 
+#include "hook_dialog.h"
 #include "probe_dialog.h"
 
 #include "ncfg_connection.h"
@@ -294,6 +295,28 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	nat->setObjectName(QStringLiteral("iface_nat"));
 	form->addRow(QString(), nat);
 
+	/* **Every program netcfgd runs for this interface.** A hook belongs to the
+	 * interface whose lifecycle it follows, and the drop-in this form writes
+	 * owns that block whole -- so this is where they can be edited at all. */
+	hooks = new QListWidget(this);
+	hooks->setObjectName(QStringLiteral("iface_hooks"));
+	hooks->setSelectionMode(QAbstractItemView::SingleSelection);
+	hooks->setMaximumHeight(90);
+	form->addRow(QStringLiteral("hooks"), hooks);
+
+	auto *hook_row = new QHBoxLayout();
+	hook_add = new QPushButton(QStringLiteral("new hook..."), this);
+	hook_add->setObjectName(QStringLiteral("iface_hook_add"));
+	hook_change = new QPushButton(QStringLiteral("view / change"), this);
+	hook_change->setObjectName(QStringLiteral("iface_hook_change"));
+	hook_drop = new QPushButton(QStringLiteral("remove"), this);
+	hook_drop->setObjectName(QStringLiteral("iface_hook_drop"));
+	hook_row->addWidget(hook_add);
+	hook_row->addWidget(hook_change);
+	hook_row->addWidget(hook_drop);
+	hook_row->addStretch(1);
+	form->addRow(QString(), hook_row);
+
 	layout->addLayout(form);
 
 	/* Constructed near the top rather than here; see the comment there. */
@@ -311,6 +334,10 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	connect(source_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_source);
 	connect(source_up, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_up);
 	connect(source_down, &QPushButton::clicked, this, &ncfg_interface_dialog::move_source_down);
+	connect(hook_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_hook);
+	connect(hook_change, &QPushButton::clicked, this, &ncfg_interface_dialog::change_hook);
+	connect(hooks, &QListWidget::itemActivated, this, &ncfg_interface_dialog::change_hook);
+	connect(hook_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_hook);
 	connect(route_add, &QPushButton::clicked, this, &ncfg_interface_dialog::add_route);
 	connect(route_drop, &QPushButton::clicked, this, &ncfg_interface_dialog::drop_route);
 	connect(source_kind, &QComboBox::currentIndexChanged, this,
@@ -321,6 +348,7 @@ ncfg_interface_dialog::ncfg_interface_dialog(ncfg_connection *connection, const 
 	    &ncfg_interface_dialog::detection_changed);
 
 	load_existing();
+	load_hooks();
 	addressing_changed();
 	detection_changed();
 }
@@ -407,6 +435,142 @@ void ncfg_interface_dialog::load_existing()
 		probe_interval->setValue(existing.probe_interval);
 		probe_timeout->setValue(existing.probe_timeout);
 	}
+}
+
+/*
+ * This interface's hooks, and their scripts.
+ *
+ * **Two questions, two tiers, and both answers are needed.** Whether this
+ * interface has hooks comes from the document, which is `observe`; what is in
+ * them comes from the file the compiler materialised, which is `admin` --
+ * netcfgd keeps that file at 0700 because it runs as root. A client that can
+ * see the first and not the second knows there is a hook and not what it says,
+ * and must refuse to save rather than write a block without it.
+ *
+ * That is also the honest answer for a client below `admin`: it could not have
+ * saved anything anyway, since writing a hook is the production `check_content`
+ * refuses from anybody but root.
+ */
+void ncfg_interface_dialog::load_hooks()
+{
+	QList<ncfg_hook_row> declared;
+	QString error;
+	if (!connection->hooks(&declared, &error)) {
+		hooks_unknown = true;
+		return;
+	}
+	int mine = 0;
+	for (const ncfg_hook_row &row : declared) {
+		if (row.interface == interface) {
+			mine++;
+		}
+	}
+	if (mine == 0) {
+		return;
+	}
+
+	QList<ncfg_hook_script> scripts;
+	if (!connection->hook_scripts(&scripts, &error)) {
+		/* Refused, or a daemon that does not know the verb. Either way this
+		 * form has the hooks' existence and not their bodies. */
+		hooks_unknown = true;
+		note->setText(QStringLiteral("this interface has %1 hook(s) and netcfgd would not "
+		              "hand over what is in them: %2")
+		                  .arg(mine)
+		                  .arg(error));
+		return;
+	}
+	for (const ncfg_hook_script &script : scripts) {
+		if (script.interface != interface) {
+			continue;
+		}
+		if (!script.readable) {
+			/* The document names a file netcfgd could not open. Writing the
+			 * block back would write an empty body over it. */
+			hooks_unknown = true;
+			note->setText(QStringLiteral("netcfgd could not read %1, the script behind "
+			              "this interface's `%2` hook")
+			                  .arg(script.path, script.phase));
+			return;
+		}
+		hook_list.append(script);
+		put_hook(script);
+	}
+	if (hook_list.size() != mine) {
+		/* The document says one number and the listing another. Not a state
+		 * anything produces today; refusing is the only safe reading of it. */
+		hooks_unknown = true;
+	}
+}
+
+/*
+ * One row: the phase, and what the script does.
+ *
+ * The first line that is neither the shebang nor a comment, because a hook
+ * written from the template starts with ten lines explaining the environment
+ * and a list showing ten copies of `#!/bin/sh` says nothing about any of them.
+ */
+void ncfg_interface_dialog::put_hook(const ncfg_hook_script &hook)
+{
+	QString first;
+	const QStringList lines = hook.text.split(QLatin1Char('\n'));
+	for (const QString &line : lines) {
+		const QString trimmed = line.trimmed();
+		if (trimmed.isEmpty() || trimmed.startsWith(QLatin1Char('#'))) {
+			continue;
+		}
+		first = trimmed;
+		break;
+	}
+	auto *item = new QListWidgetItem(
+	    first.isEmpty() ? hook.phase : QStringLiteral("%1 -- %2").arg(hook.phase, first), hooks);
+	item->setData(Qt::UserRole, hook.phase);
+}
+
+void ncfg_interface_dialog::add_hook()
+{
+	ncfg_hook_dialog dialog(ncfg_hook_script(), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	ncfg_hook_script written;
+	written.interface = interface;
+	written.phase = dialog.chosen_phase();
+	written.text = dialog.chosen_body();
+	written.readable = true;
+	hook_list.append(written);
+	put_hook(written);
+}
+
+void ncfg_interface_dialog::change_hook()
+{
+	const int row = hooks->currentRow();
+	if (row < 0 || row >= hook_list.size()) {
+		note->setText(QStringLiteral("choose a hook first"));
+		return;
+	}
+	ncfg_hook_dialog dialog(hook_list.at(row), this);
+	if (dialog.exec() != QDialog::Accepted) {
+		return;
+	}
+	ncfg_hook_script changed = hook_list.at(row);
+	changed.phase = dialog.chosen_phase();
+	changed.text = dialog.chosen_body();
+	hook_list[row] = changed;
+	delete hooks->takeItem(row);
+	put_hook(changed);
+	hooks->insertItem(row, hooks->takeItem(hooks->count() - 1));
+	hooks->setCurrentRow(row);
+}
+
+void ncfg_interface_dialog::drop_hook()
+{
+	const int row = hooks->currentRow();
+	if (row < 0 || row >= hook_list.size()) {
+		return;
+	}
+	hook_list.removeAt(row);
+	delete hooks->takeItem(row);
 }
 
 /*
@@ -770,6 +934,14 @@ QString ncfg_interface_dialog::block_text() const
 		body << QStringLiteral("\t}");
 	}
 
+	/* **Last in the block, and verbatim.** A hook body is raw shell that the
+	 * language keeps byte for byte, so it is written unindented -- see
+	 * `ncfg_hook_block`, where the reason is that an indented `#!/bin/sh` is
+	 * not a shebang and the materialiser would add another on every save. */
+	for (const ncfg_hook_script &hook : hook_list) {
+		body << ncfg_hook_block(hook.phase, hook.text);
+	}
+
 	QStringList block;
 	block << QStringLiteral("# Written by netcfgd's gui. Ordinary netcfgd configuration:");
 	block << QStringLiteral("# edit it, diff it, commit it, or delete it.");
@@ -819,6 +991,18 @@ void ncfg_interface_dialog::submit()
 		note->setText(QStringLiteral(
 		    "netcfgd could not say what this interface is configured with, so saving "
 		    "would overwrite something unknown. Check the daemon is running."));
+		return;
+	}
+	/* **A hook whose body this form does not have.** The block is written
+	 * whole, so saving would write the hook with nothing in it -- which is to
+	 * say, delete the script. The tier is usually why: reading a hook body is
+	 * `admin`, and a client below it could not have saved this anyway. */
+	if (hooks_unknown) {
+		note->setText(QStringLiteral(
+		    "this interface declares a hook whose script netcfgd would not hand over, "
+		    "so saving would write the hook empty. Editing a hook needs root, which is "
+		    "what runs it. Use `ncfg config edit interface-%1` instead.")
+		        .arg(interface));
 		return;
 	}
 	if (!existing.unmodelled.isEmpty()) {

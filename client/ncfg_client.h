@@ -992,6 +992,36 @@ typedef struct {
 void ncfg_hooks_free(ncfg_hooks_t *hooks);
 
 /*
+ * One hook script: the program itself, rather than the reference to it.
+ *
+ * `ncfg_hook_t` above is what the document says -- a phase, a path and a
+ * privilege -- and that is all a *list* needs. This is what the file holds,
+ * which is what an editor needs and what no document carries: a desired-state
+ * document that could hold shell would be remote code execution with extra
+ * steps, so the compiler materialises a body into a file and the document
+ * keeps the path.
+ *
+ * `readable` false means netcfgd could not open the file the document names.
+ * The text is then empty, **which is not a hook with nothing in it** -- a
+ * caller that writes the interface back out must refuse rather than write an
+ * empty body over somebody's script.
+ */
+typedef struct {
+	char *interface;
+	char *phase;
+	char *path;
+	char *text;
+	int   readable;
+} ncfg_hook_script_t;
+
+typedef struct {
+	ncfg_hook_script_t *items;
+	size_t              count;
+} ncfg_hook_scripts_t;
+
+void ncfg_hook_scripts_free(ncfg_hook_scripts_t *scripts);
+
+/*
  * The host-wide policy: the `global` block, minus the dns half the dns view
  * already owns.
  *
@@ -1511,6 +1541,18 @@ int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, s
  * Every hook on every interface, in interface order. Needs `observe`.
  */
 int ncfg_client_hooks(ncfg_client_t *client, ncfg_hooks_t *out, char *err, size_t err_size);
+
+/*
+ * The same hooks with their scripts. Needs `admin`.
+ *
+ * A heavier tier than the listing above, and deliberately: what this returns
+ * is a program netcfgd runs as root, out of a file the materialiser keeps at
+ * 0700 because nobody else needs to read it. A client that only wants to show
+ * what runs and when asks `ncfg_client_hooks`; this is for one that offers to
+ * change it, which is `admin` to save in any case.
+ */
+int ncfg_client_hook_scripts(ncfg_client_t *client, ncfg_hook_scripts_t *out, char *err,
+                             size_t err_size);
 
 /*
  * The modem devices, their SIM order, and which source is in use. Needs

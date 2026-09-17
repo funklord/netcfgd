@@ -11,14 +11,26 @@
  * what makes that visible, and finding it by opening eleven interface dialogs
  * is how it stays invisible.
  *
- * Read-only. What this program can change it changes through plan and apply,
- * where the operator sees the whole change before any of it happens.
+ * **A hook is edited with the interface it belongs to**, and the button here
+ * opens that editor. It is not a separate form for a reason worth knowing: a
+ * hook lives inside an `interface` block, one drop-in owns that block whole,
+ * and a second file declaring the same interface is a duplicate the loader
+ * refuses. An editor for hooks alone would have to write everything the
+ * interface editor writes, and the two would drift.
+ *
+ * What this program writes is the *document*. The kernel is changed through
+ * plan and apply, where the operator sees the whole change before any of it
+ * happens.
  */
 #ifndef NCFG_HOOKS_VIEW_H
 #define NCFG_HOOKS_VIEW_H
 
+#include "ncfg_connection.h"
+
+#include <QList>
 #include <QWidget>
 
+class QPushButton;
 class ncfg_connection;
 class ncfg_table_view;
 
@@ -31,11 +43,21 @@ public:
 public slots:
 	void refresh();
 
+private slots:
+	/* Open the interface editor on the selected hook's interface. */
+	void edit_selected();
+
 signals:
 	void reported(const QString &summary);
+	/* The configuration changed, so anything showing a plan is stale. */
+	void changed();
 
 private:
 	ncfg_connection *connection;
+	/* The hooks as the daemon reports them, so the button opens on the row's
+	 * own interface rather than on a re-read of the table's strings. */
+	QList<ncfg_hook_row> rows;
+	QPushButton *edit_button;
 	/* The shared read-only table: columns, rows, and the sentence underneath
 	 * that says why an empty one is empty. What is this view's own is turning
 	 * a row into strings, which is below. */

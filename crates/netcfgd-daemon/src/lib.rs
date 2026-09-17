@@ -1868,6 +1868,7 @@ fn answer(
 		},
 		Request::ConfigList => list_configs_request(state),
 		Request::ProbeList => list_probes_request(state),
+		Request::HookList => list_hooks_request(state),
 		Request::ProbePut {
 			name,
 			text,
@@ -2310,6 +2311,44 @@ fn list_probes_request(state: &State) -> Response {
 	Response::Probes {
 		probes: netcfgd_host::config::list_probes(&state.paths.config, &state.paths.factory),
 	}
+}
+
+/// Every hook the document declares, with the script netcfgd would run.
+///
+/// **Read back from disk rather than remembered.** The bodies pass through
+/// this process at every reload -- the compiler names them and `PendingHooks`
+/// writes them -- and keeping a copy would mean a second answer to "what runs
+/// at `post_up`" that can disagree with the file the runner opens. What a
+/// client is shown is therefore the same bytes the hook runner executes,
+/// including the `#!/bin/sh` the materialiser prepends to a body that has
+/// none.
+///
+/// A file that is not there is listed as itself and not skipped. The document
+/// names it, so a client that never saw the row would write an `interface`
+/// block with the hook missing -- which is to say, delete a hook because
+/// netcfgd could not read it.
+///
+/// Interface hooks only. A `network` block may carry them and this build runs
+/// none of them at any phase, which the planner warns about; listing them here
+/// would offer an editor for something that does not execute.
+fn list_hooks_request(state: &State) -> Response {
+	let mut hooks = Vec::new();
+	let Some(document) = state.desired.as_ref() else {
+		return Response::Hooks { hooks };
+	};
+	for interface in &document.interfaces {
+		for hook in &interface.hooks {
+			let found = std::fs::read_to_string(&hook.path);
+			hooks.push(netcfgd_proto::HookScript {
+				interface: interface.name.clone(),
+				phase: hook.phase,
+				path: hook.path.clone(),
+				readable: found.is_ok(),
+				text: found.unwrap_or_default(),
+			});
+		}
+	}
+	Response::Hooks { hooks }
 }
 
 /// Every configuration file netcfgd reads, in the order it reads them.

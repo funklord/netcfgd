@@ -719,4 +719,15 @@ netcfgd
 # passed at 2,968,096 against a 3,052,920 ceiling. The 3% is for compiler
 # noise, and a feature living inside it means the next feature fails for a
 # reason that is not its own.
-total 2968096
+# hook scripts over the socket, +4,096 bytes to 2,972,192.
+#
+# One page, and most of it is the sink rather than the verb. `hook_list` is a
+# handler that walks the document and reads a file per hook; what came with it
+# is `UnwrittenHooks`, which every compile-to-read caller in the tree now uses
+# instead of the sink that refused -- ten call sites, one small type, and the
+# `HookScript` shape on the wire.
+#
+# Recorded rather than left to ride the tolerance, which it was doing: the gate
+# passed at 2,972,192 against a 3,057,138 ceiling. Same reason as every entry
+# above it.
+total 2972192

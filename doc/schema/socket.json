@@ -1,5 +1,6 @@
 {"request":"wifi_add","ssid":"656475726f616d","id":"eduroam","passphrase":"NOT-A-REAL-SECRET","eap":{"method":"peap","identity":"you@corp.example","anonymous_identity":"anonymous@corp.example","phase2":"mschapv2","ca_cert":"corp-ca"}}
 {"request":"probe_list"}
+{"request":"hook_list"}
 {"request":"profile_list"}
 {"request":"modem_list"}
 {"request":"secret_list"}
@@ -38,7 +39,7 @@
 {"request":"wifi_forget","id":"home"}
 {"request":"config_list"}
 {"request":"ap_stations","interface":"wlan0"}
-{"response":"hello","protocol":{"major":1,"minor":2},"schema":{"major":1,"minor":1},"tiers":["observe","admin"]}
+{"response":"hello","protocol":{"major":1,"minor":3},"schema":{"major":1,"minor":1},"tiers":["observe","admin"]}
 {"response":"explanation","subject":"eth0","facts":[{"topic":"desired","detail":"static 192.0.2.1/24","source":"netcfgd.conf:3"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[{"bssid":"00:11:22:33:44:55","frequency":2412,"signal":-40,"secured":true,"owe":false,"enterprise":false,"ssid":"686f6d65","name":"home","mobility_domain":"a1b2","configured":"home"},{"bssid":"00:11:22:33:44:66","frequency":5180,"signal":-58,"secured":false,"owe":false,"enterprise":false,"ssid":"","name":""},{"bssid":"00:11:22:33:44:77","frequency":2437,"signal":-71,"secured":true,"owe":false,"enterprise":true,"ssid":"ff00ff"},{"bssid":"00:11:22:33:44:88","frequency":5200,"signal":-63,"secured":false,"owe":true,"enterprise":false,"ssid":"6775657374","name":"guest"}]}
 {"response":"wifi_scan","interface":"wlan0","access_points":[],"stale":"the supplicant could not scan (ret=-16)"}
@@ -58,6 +59,7 @@
 {"response":"profiles","profiles":[{"name":"offline","shipped":true},{"name":"office","shipped":false}],"chosen":"office"}
 {"response":"configs","configs":[{"file":"netcfgd.conf","removable":false,"text":"global { }\n"},{"name":"wifi-home","file":"conf.d/wifi-home.conf","removable":true,"text":"network \"home\" { }\n"}]}
 {"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}
+{"response":"hooks","hooks":[{"interface":"eth0","phase":"post_up","path":"/run/netcfgd/hooks/eth0.post_up.0","text":"#!/bin/sh\nlogger up\n","readable":true},{"interface":"eth1","phase":"drift","path":"/run/netcfgd/hooks/eth1.drift.1","text":"","readable":false}]}
 {"event":"observed","summary":"eth0 gained an address"}
 {"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
 {"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
