@@ -38,6 +38,7 @@ pub mod rule;
 pub mod signals;
 pub mod socket;
 pub mod term;
+pub mod tun;
 pub mod watch;
 pub mod wg;
 pub mod wire;

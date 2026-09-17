@@ -708,4 +708,15 @@ netcfgd
 # passed at 2,964,000 against a 3,019,168 ceiling. Same reason as the two
 # entries above, and more so at this size -- a feature that spends most of the
 # tolerance leaves the next one failing for a reason that is not its own.
-total 2964000
+# tun and tap, +4,096 bytes to 2,968,096.
+#
+# One page, for the smallest feature in this file: an ioctl module of three
+# calls, the executor branch that reaches it, and the strings -- each step of
+# the creation names itself in its error, because `EBUSY`, `EPERM` and `ENOENT`
+# from three different ioctls are three different things to do about it.
+#
+# Recorded rather than left to ride the tolerance, which it was doing: the gate
+# passed at 2,968,096 against a 3,052,920 ceiling. The 3% is for compiler
+# noise, and a feature living inside it means the next feature fails for a
+# reason that is not its own.
+total 2968096

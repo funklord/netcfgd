@@ -1256,6 +1256,14 @@ typedef struct {
 	char *service; /* pppoe: the provider's service name, where it needs one */
 	char *ac;      /* pppoe: the access concentrator, likewise */
 	char *config;  /* openvpn: the path to the operator's own file */
+	/* tun and tap: who may attach to the device. Empty for one only root can
+	 * attach to, which is the kernel's default. */
+	char *owner;
+	char *group;
+	/* "tun" or "tap" -- which of the two the block asked for. The kernel
+	 * reports both as `tun`, so this comes from the document and not from the
+	 * link. */
+	char *tun_mode;
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */

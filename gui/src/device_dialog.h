@@ -120,6 +120,9 @@ private:
 	QLineEdit *service;
 	QLineEdit *ac;
 	QLineEdit *config;
+	/* tun and tap: who may attach to the device. */
+	QLineEdit *owner;
+	QLineEdit *group;
 	QWidget      *peer_buttons;
 	QPushButton  *peer_add;
 	QPushButton  *peer_drop;

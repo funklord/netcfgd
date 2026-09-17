@@ -56,6 +56,13 @@ const choice kinds[] = {
 	{ "wireguard", "wireguard" },
 	{ "pppoe", "pppoe" },
 	{ "openvpn", "openvpn" },
+	/* Two entries for one `InterfaceKind`, because the mode is what an
+	 * operator is choosing: `tun` carries IP packets and `tap` carries
+	 * ethernet frames, and which you want is the question -- not a setting
+	 * inside a kind called "tun/tap". The config language spells it the same
+	 * way, with the block's name saying which. */
+	{ "tun -- carries IP packets", "tun" },
+	{ "tap -- carries ethernet frames", "tap" },
 	{ "dummy", "dummy" },
 };
 
@@ -380,6 +387,21 @@ QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
 			body << QStringLiteral("\t\tpassword = \"%1\"").arg(settings.password);
 		}
 		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("tun") || kind == QLatin1String("tap")) {
+		/* The block's name is the mode -- `tun { }` or `tap { }` -- which is
+		 * how the language spells it, and why these are two entries in the
+		 * kind list rather than one with a mode inside. */
+		QStringList inner;
+		if (!settings.owner.isEmpty()) {
+			inner << QStringLiteral("owner = \"%1\"").arg(settings.owner);
+		}
+		if (!settings.group.isEmpty()) {
+			inner << QStringLiteral("group = \"%1\"").arg(settings.group);
+		}
+		body << QStringLiteral("\t%1 { %2 }")
+		        .arg(kind, inner.join(QStringLiteral("; ")))
+		        .trimmed()
+		        .replace(QStringLiteral("{  }"), QStringLiteral("{ }"));
 	} else if (kind == QLatin1String("dummy")) {
 		body << QStringLiteral("\tkind = \"dummy\"");
 	}
@@ -715,6 +737,20 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	ac->setPlaceholderText(QStringLiteral("only where the provider requires one"));
 	form->addRow(QStringLiteral("access concentrator"), ac);
 
+	/* **Who may attach to it**, which is the whole point of a persistent tun:
+	 * something else -- a VPN daemon, a hypervisor -- opens it later. Without
+	 * either only root can, which is the kernel's default rather than a choice
+	 * netcfgd makes. */
+	owner = new QLineEdit(this);
+	owner->setObjectName(QStringLiteral("device_owner"));
+	owner->setPlaceholderText(QStringLiteral("a user -- blank leaves it to root"));
+	form->addRow(QStringLiteral("owner"), owner);
+
+	group = new QLineEdit(this);
+	group->setObjectName(QStringLiteral("device_group"));
+	group->setPlaceholderText(QStringLiteral("a group -- blank leaves it to root"));
+	form->addRow(QStringLiteral("group"), group);
+
 	managed = new QCheckBox(QStringLiteral("netcfgd configures this device"), this);
 	managed->setObjectName(QStringLiteral("device_managed"));
 	managed->setChecked(true);
@@ -932,6 +968,8 @@ void ncfg_device_dialog::kind_changed()
 		{ password, "pppoe openvpn" },
 		{ service, "pppoe" },
 		{ ac, "pppoe" },
+		{ owner, "tun tap" },
+		{ group, "tun tap" },
 	};
 	for (const auto &row : rows) {
 		const QString wanted = QString::fromLatin1(row.kinds);
@@ -963,7 +1001,15 @@ void ncfg_device_dialog::load()
 
 	/* A device with no block opens on `physical`, which asks for nothing: an
 	 * adapter the kernel has is not a link netcfgd creates. */
-	select(kind, existing.kind.isEmpty() ? QStringLiteral("physical") : existing.kind);
+	/* **A tap device says `tun` in the document**, because the kernel has one
+	 * kind name for both and the model carries the mode beside it. The form
+	 * offers the two as two entries, so this is where the pair is put back
+	 * together -- without it, opening a tap and saving would write a tun. */
+	QString opened = existing.kind.isEmpty() ? QStringLiteral("physical") : existing.kind;
+	if (opened == QLatin1String("tun") && existing.tun_mode == QLatin1String("tap")) {
+		opened = QStringLiteral("tap");
+	}
+	select(kind, opened);
 	members->setText(existing.members);
 	stp->setChecked(existing.stp);
 	vlan_filtering->setChecked(existing.vlan_filtering);
@@ -988,6 +1034,8 @@ void ncfg_device_dialog::load()
 	service->setText(existing.service);
 	ac->setText(existing.ac);
 	config->setText(existing.config);
+	owner->setText(existing.owner);
+	group->setText(existing.group);
 	listen_port->setValue(existing.listen_port);
 	fwmark->setValue(existing.fwmark);
 	for (const ncfg_wg_peer_row &known : existing.peers) {
@@ -1100,6 +1148,8 @@ QString ncfg_device_dialog::block_text() const
 	settings.service = service->text().trimmed();
 	settings.ac = ac->text().trimmed();
 	settings.config = config->text().trimmed();
+	settings.owner = owner->text().trimmed();
+	settings.group = group->text().trimmed();
 	settings.listen_port = listen_port->value();
 	settings.fwmark = fwmark->value();
 	for (int row = 0; row < peers->rowCount(); row++) {
@@ -1229,7 +1279,8 @@ void ncfg_device_dialog::submit()
 	}
 
 	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
-		peer, local, remote, private_key, username, password, service, ac, config };
+		peer, local, remote, private_key, username, password, service, ac, config, owner,
+		group };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "

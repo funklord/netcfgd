@@ -96,6 +96,15 @@ device sit1 { tunnel { mode = "sit"; local = "10.7.0.1"; remote = "10.7.0.3"; tt
 interface sit1 { config = "null" }
 device gnv0 { tunnel { mode = "geneve"; remote = "10.7.0.4"; vni = 500 } }
 interface gnv0 { config = "null" }
+# The one link that is not an RTM_NEWLINK: a tun or tap comes from a TUNSETIFF
+# ioctl on /dev/net/tun and exists only while something holds that descriptor,
+# unless TUNSETPERSIST is set on it. Both modes here, because the block's name
+# is the mode and getting that wrong gives a device of the other sort with
+# nothing saying so -- the kernel calls both `tun` in `IFLA_INFO_KIND`.
+device tun0 { tun { owner = "root" } }
+interface tun0 { config = "10.11.0.1/24" }
+device tap0 { tap { } }
+interface tap0 { config = "null" }
 
 # Per-port VLAN membership: how a switch is provisioned on a current kernel.
 device brv2 { bridge { vlan_filtering = true }; vlans = "10" }
@@ -192,6 +201,23 @@ if ! "$ncfg" apply > "$work/apply.log" 2>&1; then
 fi
 
 detail() { ip -d link show "$1" 2>&1; }
+
+# **The tun pair, and the detail that tells them apart.** `ip -d` says
+# `tun type tun` or `tun type tap`, which is the only place the mode is
+# visible: the link's kind is `tun` for both, so a tap created as a tun would
+# look right everywhere else. `persist on` is the other half -- without
+# TUNSETPERSIST the device vanishes when the descriptor closes, and an apply
+# that reported success would leave no link at all.
+contains "a tun device is made, and it carries IP packets" \
+	"$(detail tun0)" "tun type tun"
+contains "and it persists past the process that made it" "$(detail tun0)" "persist on"
+contains "and belongs to whoever the document says" "$(detail tun0)" "user root"
+contains "a tap device is the other mode" "$(detail tap0)" "tun type tap"
+contains "and it persists too" "$(detail tap0)" "persist on"
+missing "while a tap with no owner belongs to nobody in particular" \
+	"$(detail tap0)" "user "
+contains "and the address landed on the tun" \
+	"$(ip -br addr show tun0)" "10.11.0.1/24"
 
 contains "a bond gets its mode"        "$(detail bond0)"  "mode active-backup"
 contains "and its monitoring interval" "$(detail bond0)"  "miimon 100"

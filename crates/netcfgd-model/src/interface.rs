@@ -524,11 +524,16 @@ pub enum TunMode {
 
 /// A persistent tun or tap device.
 ///
-/// In the schema and not implemented, and the reason is specific: unlike every
-/// other link kind here, tun and tap are not created over rtnetlink. They come
-/// from a `TUNSETIFF` ioctl on `/dev/net/tun`, which is an ioctl outside the
-/// one crate permitted `unsafe` -- the same wall `LinkSettings` hit, and it
-/// does not fall to the generic netlink work that cleared ethtool's.
+/// **The one link kind that is not an `RTM_NEWLINK`.** Unlike every other kind
+/// here, a tun or tap device is not created over rtnetlink: it comes from a
+/// `TUNSETIFF` ioctl on `/dev/net/tun`, and it exists only while something
+/// holds that descriptor unless `TUNSETPERSIST` is set on it.
+///
+/// That kept it unimplemented for as long as the ioctl looked like a wall --
+/// `unsafe` lives in one audited crate (constraint 4), so the answer was
+/// `netcfgd_sys::tun` rather than an exception to the rule. Implemented in
+/// 0254; what is still not read back is which of the two modes a live device
+/// is, because the kernel reports both as `tun`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TunConfig {

@@ -9489,6 +9489,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.148 The link that is not a netlink message
+
+`InterfaceKind::Tun` sat in the model from the beginning with "in the schema and
+not implemented" on it, and the reason was specific: every other virtual link is
+an `RTM_NEWLINK` with a kind name, and a tun or tap device comes from a
+`TUNSETIFF` ioctl on `/dev/net/tun`. An ioctl is `unsafe`; `unsafe` lives in one
+audited crate; so the executor refused the kind and told the operator to run
+`ip tuntap add` themselves.
+
+**That was a wall made of a rule whose own text had the answer.** The one crate
+permitted `unsafe` is where the libc boundary lives -- the terminal size and
+`SO_PEERCRED` are in it and neither is netlink -- so `netcfgd_sys::tun` is three
+ioctls in the place the policy already points at. Decision 0254.
+
+Two orderings are load-bearing and both are silent when wrong. **Owner and group
+before persistence**, so a device that cannot be given the owner the document
+asked for is not left behind -- closing the descriptor without persisting
+removes it, which is measured: an unmapped uid fails with `EINVAL` and no link
+remains. **Persistence last**, which is the only reason the device survives the
+call; sabotaging it away makes the apply report `link.create` as done and fail
+the next action with no such device.
+
+### Both modes, one kind name
+
+The kernel registers one `rtnl_link_ops` for tun and tap alike, so
+`IFLA_INFO_KIND` is `tun` whichever was asked for and `ip -d` is the only place
+the mode shows. So: the planner's recreate check catches a `tun` block whose
+name is held by something else and **not** a block changed from `tun` to `tap`
+-- recorded, because telling them apart needs `IFLA_TUN_TYPE` and the
+observation does not read it. The window offers the two as two kinds, which is
+what the config language does too, the block's name being the mode. And opening
+an existing tap has to put the pair back together, or a tap opens as a tun and
+is saved as one.
+
+### Five sabotages
+
+The device not made to persist; a tap made as a tun; the owner never set; the
+block's name no longer the mode; a tap opening as a tun in the editor. All
+caught.
+
+### What it closes
+
+0019's audit of foreign formats left one row open -- "tun/tap: in the schema;
+needs an ioctl". That was the last of its six gaps. What is left unwritable from
+the window is `ifb` alone, which netcfgd synthesises for ingress shaping and
+nobody writes by hand.
+
 ## 10.147 The last two kinds, and the second spelling trap
 
 PPPoE and OpenVPN, after which two kinds are left and neither is a link anybody

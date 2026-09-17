@@ -321,6 +321,38 @@ int main(int argc, char **argv)
 		    "and no login where none was given");
 	}
 
+	/* TUN AND TAP, the kind netcfgd could not make until it grew one ioctl.
+	 *
+	 * The block's *name* is the mode -- `tun { }` or `tap { }` -- which is why
+	 * the form offers two entries rather than one kind with a mode inside it. */
+	{
+		ncfg_device_config tun;
+		tun.kind = QStringLiteral("tun");
+		tun.owner = QStringLiteral("openvpn");
+		const QString packets = ncfg_device_block(QStringLiteral("tun0"), tun);
+		check(packets.contains(QStringLiteral("tun { owner = \"openvpn\" }")),
+		    "a tun device names the mode with the block and the owner inside it");
+
+		ncfg_device_config tap;
+		tap.kind = QStringLiteral("tap");
+		tap.owner = QStringLiteral("kvm");
+		tap.group = QStringLiteral("kvm");
+		const QString frames = ncfg_device_block(QStringLiteral("tap0"), tap);
+		check(frames.contains(QStringLiteral("tap {")) &&
+		        frames.contains(QStringLiteral("owner = \"kvm\"")) &&
+		        frames.contains(QStringLiteral("group = \"kvm\"")),
+		    "and a tap device is the other block, with both ids");
+
+		/* Neither is required: a device only root attaches to is the kernel's
+		 * default, and a block claiming an owner nobody asked for would be
+		 * netcfgd deciding who may open it. */
+		ncfg_device_config bare;
+		bare.kind = QStringLiteral("tun");
+		check(ncfg_device_block(QStringLiteral("tun1"), bare)
+		          .contains(QStringLiteral("tun { }")),
+		    "and one with no owner says so by saying nothing");
+	}
+
 	/* THE NAME, which is the link's name and the drop-in's filename. */
 	{
 		check(ncfg_device_name_refusal(QStringLiteral("br0")).isEmpty(),

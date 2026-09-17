@@ -1199,6 +1199,17 @@ impl Executor for KernelExecutor {
 	fn execute(&mut self, op: &Op) -> Result<(), String> {
 		match op {
 			Op::LinkCreate { name, kind } => {
+				// **The one kind that is not a netlink message.** A tun or tap
+				// device comes from a `TUNSETIFF` ioctl on `/dev/net/tun`, so
+				// it cannot be a `NewLink` and cannot go through `create_link`
+				// -- it is the same link to netcfgd afterwards, and a different
+				// syscall to make. 0254.
+				if let netcfgd_model::InterfaceKind::Tun(config) = kind.as_ref() {
+					create_tun(name, config)?;
+					self.effects.created_links.push(name.clone());
+					self.indices.clear();
+					return Ok(());
+				}
 				let new = new_link(name, kind, self)?;
 				self.socket
 					.create_link(name, &new)
@@ -2376,6 +2387,44 @@ pub fn resolv_conf_path() -> std::path::PathBuf {
 	)
 }
 
+/// Make a persistent tun or tap device, with the owner and group resolved.
+///
+/// **Names rather than ids in the document, and ids at the ioctl.** The
+/// configuration says `owner = "nabbe"` because that is what an operator
+/// knows; the kernel wants a uid. Resolved through the same reader hooks use
+/// for `run_as`, which reads `/etc/passwd` directly rather than calling NSS
+/// into a process holding `CAP_NET_ADMIN` (0140's rule).
+///
+/// A name that resolves to nothing is a refusal rather than a silent "root
+/// then": an owner the operator asked for and did not get is a device somebody
+/// cannot attach to, and finding that out at creation beats finding it out
+/// when the VPN will not start.
+fn create_tun(name: &str, config: &netcfgd_model::TunConfig) -> Result<(), String> {
+	let mode = match config.mode {
+		netcfgd_model::TunMode::Tun => netcfgd_sys::tun::Mode::Tun,
+		netcfgd_model::TunMode::Tap => netcfgd_sys::tun::Mode::Tap,
+	};
+
+	let owner = match &config.owner {
+		Some(user) => Some(
+			netcfgd_sys::peer::user_ids(user)
+				.ok_or_else(|| format!("{name}: no such user `{user}` to own it"))?
+				.uid,
+		),
+		None => None,
+	};
+	let group = match &config.group {
+		Some(group) => Some(
+			netcfgd_sys::peer::group_id(group)
+				.ok_or_else(|| format!("{name}: no such group `{group}` to own it"))?,
+		),
+		None => None,
+	};
+
+	netcfgd_sys::tun::create(name, mode, owner, group)
+		.map_err(|error| format!("could not create {name}: {error}"))
+}
+
 fn new_link(
 	name: &str,
 	kind: &InterfaceKind,
@@ -2432,11 +2481,14 @@ fn new_link(
 			key: tunnel.key,
 		})),
 		InterfaceKind::Ifb => Ok(NewLink::Ifb),
+		// Not reachable through this function: `Op::LinkCreate` makes a tun
+		// device with an ioctl before it asks for a `NewLink`, because there is
+		// no netlink kind for one. Said rather than left as a fall-through, so
+		// that a second caller finds the sentence instead of the generic
+		// "not implemented in this build".
 		InterfaceKind::Tun(_) => Err(format!(
-			"{name} is a tun/tap device, which this build cannot create: they come from a \
-			 TUNSETIFF ioctl on /dev/net/tun rather than from netlink, and that is outside \
-			 the one crate permitted unsafe. Create it with `ip tuntap add` and netcfgd will \
-			 address it."
+			"{name} is a tun/tap device, which is made with an ioctl rather than a \
+			 netlink message; this is the wrong path to it"
 		)),
 		other => Err(format!(
 			"creating a {} link ({name}) is not implemented in this build",

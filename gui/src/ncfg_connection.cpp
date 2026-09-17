@@ -967,6 +967,9 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->service = from_c(found.service);
 	out->ac = from_c(found.ac);
 	out->config = from_c(found.config);
+	out->owner = from_c(found.owner);
+	out->group = from_c(found.group);
+	out->tun_mode = from_c(found.tun_mode);
 	out->listen_port = found.listen_port;
 	out->fwmark = found.fwmark;
 	for (size_t i = 0; i < found.peer_count; i++) {

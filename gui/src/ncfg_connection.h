@@ -398,6 +398,11 @@ struct ncfg_device_config {
 	QString service;
 	QString ac;
 	QString config;
+	/* tun and tap: who may attach, and which of the two it is. The kernel
+	 * reports both as `tun`, so the mode comes from the document. */
+	QString owner;
+	QString group;
+	QString tun_mode;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */

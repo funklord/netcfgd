@@ -1094,6 +1094,27 @@
 #	config = "10.9.0.2/24"
 #}
 
+# A PERSISTENT TUN OR TAP DEVICE, for something else to attach to: a VPN
+# daemon, a hypervisor, a test rig. `tun` carries IP packets and `tap` carries
+# ethernet frames, and the block's name is which one you get.
+#
+# `owner` and `group` are who may attach to it. Without them only root can,
+# which is the kernel's default rather than netcfgd's choice.
+#
+# This is the one link netcfgd does not make over netlink: tun and tap come
+# from a TUNSETIFF ioctl on /dev/net/tun. That is invisible from here and is
+# the reason the kind was in the schema and unimplemented until netcfgd grew
+# the one syscall for it.
+
+#device tun0 {
+#	tun {
+#		owner = "openvpn"
+#	}
+#}
+#interface tun0 {
+#	config = "10.8.0.1/24"
+#}
+
 # A VXLAN overlay.
 
 #device vx0 {

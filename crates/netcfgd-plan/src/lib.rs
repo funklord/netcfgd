@@ -6454,10 +6454,15 @@ fn recreatable_kind(kind: &InterfaceKind) -> Option<&'static str> {
 		InterfaceKind::Macvlan(_) => Some("macvlan"),
 		InterfaceKind::Tunnel(tunnel) => Some(tunnel.mode.name()),
 		InterfaceKind::Ifb => Some("ifb"),
-		InterfaceKind::Physical
-		| InterfaceKind::Pppoe(_)
-		| InterfaceKind::OpenVpn(_)
-		| InterfaceKind::Tun(_) => None,
+		// **Both modes are `tun` to the kernel.** The driver registers one
+		// `rtnl_link_ops` for tun and tap alike, so `IFLA_INFO_KIND` says `tun`
+		// whichever was asked for -- which means this catches a `tun` block
+		// whose name is held by something else entirely, and does not catch a
+		// block changed from `tun` to `tap`. The second is recorded rather than
+		// worked around: telling them apart needs `IFLA_TUN_TYPE` out of the
+		// link's own nest, which the observation does not read yet. 0254.
+		InterfaceKind::Tun(_) => Some("tun"),
+		InterfaceKind::Physical | InterfaceKind::Pppoe(_) | InterfaceKind::OpenVpn(_) => None,
 	}
 }
 

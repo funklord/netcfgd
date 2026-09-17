@@ -430,8 +430,61 @@ int main(int argc, char **argv)
 		    written.unmodelled.isEmpty(), written.unmodelled);
 	}
 
+	/* **A tun device, which netcfgd could not make at all until 0254.** The
+	 * refusal list carried `tun` because the kind needed an ioctl nothing in
+	 * the tree had; it has one now, so what is checked here is the other half:
+	 * that the form writes the block the compiler takes, with the mode as the
+	 * block's own name. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *owner = dialog.findChild<QLineEdit *>(QStringLiteral("device_owner"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!made || !kind || !owner || !save) {
+			check("the tun fields are there", false);
+			return 1;
+		}
+		check("the tun fields are there", true);
+		check("and both modes are offered as kinds of their own",
+		    kind->findData(QStringLiteral("tun")) >= 0
+		        && kind->findData(QStringLiteral("tap")) >= 0);
+
+		made->setText(QStringLiteral("gui-tap0"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("tap")));
+		owner->setText(QStringLiteral("root"));
+		save->click();
+
+		ncfg_device_config written;
+		check("netcfgd compiled the tap device",
+		    connection.device_config(QStringLiteral("gui-tap0"), &written, &error), error);
+		/* **The kind is `tun` for both modes**, which is the kernel's own
+		 * naming and the reason the mode is a field beside it. A form that
+		 * read the kind alone would open a tap as a tun and save it as one. */
+		check("as a tun kind carrying the tap mode",
+		    written.kind == QStringLiteral("tun")
+		        && written.tun_mode == QStringLiteral("tap"),
+		    QStringLiteral("%1 / %2").arg(written.kind, written.tun_mode));
+		check("with the owner it was given", written.owner == QStringLiteral("root"),
+		    written.owner);
+		check("and the block is editable rather than refused",
+		    written.unmodelled.isEmpty(), written.unmodelled);
+	}
+
+	/* And re-opening it puts the two back together: the document says `tun`
+	 * with a mode beside it, the form offers two kinds, and a tap that opened
+	 * as a tun would be saved as one. */
+	{
+		ncfg_device_dialog dialog(&connection, QStringLiteral("gui-tap0"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		check("re-opening a tap device says tap",
+		    kind && kind->currentData().toString() == QStringLiteral("tap"),
+		    kind ? kind->currentData().toString() : QString());
+	}
+
 	{
 		QString removed;
+		connection.config_delete(QStringLiteral("device-gui-tap0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-ppp0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-tun0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-wg0"), &removed);

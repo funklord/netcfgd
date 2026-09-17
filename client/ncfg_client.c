@@ -2473,6 +2473,9 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	free(config->service);
 	free(config->ac);
 	free(config->config);
+	free(config->owner);
+	free(config->group);
+	free(config->tun_mode);
 	for (size_t i = 0; i < config->peer_count; i++) {
 		free(config->peers[i].name);
 		free(config->peers[i].public_key);
@@ -2538,11 +2541,15 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 		out->service = dup_string("");
 		out->ac = dup_string("");
 		out->config = dup_string("");
+		out->owner = dup_string("");
+		out->group = dup_string("");
+		out->tun_mode = dup_string("");
 		out->tunnel_key = -1;
 		return out->members && out->bond_mode && out->parent && out->vlan_protocol
 		    && out->peer && out->macvlan_mode && out->tunnel_mode && out->local
 		    && out->remote && out->private_key && out->username && out->password
-		    && out->service && out->ac && out->config;
+		    && out->service && out->ac && out->config && out->owner && out->group
+		    && out->tun_mode;
 	}
 
 	out->members = joined_words(doc, ncfg_json_member(doc, kind, "members"));
@@ -2572,7 +2579,12 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	out->service = member_text(doc, kind, "service");
 	out->ac = member_text(doc, kind, "ac");
 	out->config = member_text(doc, kind, "config");
-	if (!out->username || !out->password || !out->service || !out->ac || !out->config) {
+	/* tun and tap, where `mode` is the pair's own word rather than a bond's or
+	 * a tunnel's: read by the kind, like the other two `mode`s above. */
+	out->owner = member_text(doc, kind, "owner");
+	out->group = member_text(doc, kind, "group");
+	if (!out->username || !out->password || !out->service || !out->ac || !out->config
+	    || !out->owner || !out->group) {
 		return 0;
 	}
 
@@ -2620,6 +2632,15 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	} else {
 		out->macvlan_mode = dup_string("");
 		out->tunnel_mode = dup_string("");
+	}
+	if (word && strcmp(word, "tun") == 0) {
+		out->tun_mode = member_text(doc, kind, "mode");
+	} else {
+		out->tun_mode = dup_string("");
+	}
+	if (!out->tun_mode) {
+		free(word);
+		return 0;
 	}
 	if (word && strcmp(word, "vlan") == 0) {
 		out->vlan_id = (int)ncfg_json_int(doc, ncfg_json_member(doc, kind, "id"), -1);
@@ -2755,7 +2776,13 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * and keys, a PPPoE session's credentials, an `OpenVPN` link's own config
 	 * file -- and `ifb`, which netcfgd synthesises and nobody writes.
 	 */
-	static const char *const unheld[] = { "tun", "ifb" };
+	/*
+	 * **`ifb` alone now.** netcfgd synthesises one per interface that asks for
+	 * ingress shaping and nobody writes one by hand, so a form for it would be
+	 * a form for something the document generates. `tun` left this list when
+	 * netcfgd learned to make one (0254).
+	 */
+	static const char *const unheld[] = { "ifb" };
 	for (size_t i = 0; i < sizeof(unheld) / sizeof(unheld[0]); i++) {
 		if (out->kind && strcmp(out->kind, unheld[i]) == 0) {
 			note_unmodelled(&out->unmodelled, out->kind);
