@@ -482,8 +482,88 @@ int main(int argc, char **argv)
 		    kind ? kind->currentData().toString() : QString());
 	}
 
+	/* **Shaping, and the `ifb` device netcfgd makes out of it.**
+	 *
+	 * There is no `ifb` to write: the language refuses `kind = "ifb"`, and one
+	 * is synthesised per interface that asks for `ingress_bandwidth` because
+	 * the kernel cannot queue on the way in. So what this checks is that the
+	 * form writes the rate, that netcfgd turns it into the pair, and that the
+	 * pair comes back as one block -- the operator wrote one. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *scheduler = dialog.findChild<QComboBox *>(QStringLiteral("device_qdisc_kind"));
+		auto *out = dialog.findChild<QSpinBox *>(QStringLiteral("device_bandwidth"));
+		auto *in = dialog.findChild<QSpinBox *>(QStringLiteral("device_ingress_bandwidth"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!made || !scheduler || !out || !in || !save) {
+			check("the queueing fields are there", false);
+			return 1;
+		}
+		check("the queueing fields are there", true);
+
+		made->setText(QStringLiteral("gui-shaped0"));
+		/* A dummy, so the device exists to be shaped without needing hardware. */
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("dummy")));
+		scheduler->setCurrentIndex(scheduler->findData(QStringLiteral("fq_codel")));
+		out->setValue(20000);
+		in->setValue(8000);
+		save->click();
+		/* The compiler's rule, said beside the field rather than after a round
+		 * trip: ingress shaping puts `cake` on the `ifb`, so it has to be
+		 * `cake`. */
+		check("shaping arriving traffic with anything but cake is refused here",
+		    note && note->text().startsWith(QStringLiteral("only `cake` can shape arriving")),
+		    note ? note->text() : QString());
+
+		scheduler->setCurrentIndex(scheduler->findData(QStringLiteral("cake")));
+		save->click();
+		check("and with cake it is written",
+		    dialog.outcome().contains(QStringLiteral("gui-shaped0")),
+		    QStringLiteral("%1 / %2").arg(dialog.outcome(),
+		        note ? note->text() : QString()));
+	}
+
+	{
+		ncfg_device_config shaped;
+		check("netcfgd compiled the shaped device",
+		    connection.device_config(QStringLiteral("gui-shaped0"), &shaped, &error), error);
+		check("with the scheduler", shaped.qdisc_kind == QStringLiteral("cake"),
+		    shaped.qdisc_kind);
+		check("and the rate going out", shaped.bandwidth_kbit == 20000,
+		    QString::number(shaped.bandwidth_kbit));
+		/* **The join.** This number is not on this device in the document: it
+		 * is on the `ifb` netcfgd synthesised, and the client puts the halves
+		 * back together so the form shows the one block that was written. */
+		check("and the rate arriving, which lives on the ifb netcfgd made",
+		    shaped.ingress_bandwidth_kbit == 8000,
+		    QString::number(shaped.ingress_bandwidth_kbit));
+
+		QList<ncfg_device_row> rows;
+		check("the daemon lists devices", connection.devices(&rows, &error), error);
+		bool synthesised = false;
+		for (const ncfg_device_row &row : rows) {
+			if (row.name == QStringLiteral("ifb-gui-shaped0")) {
+				synthesised = row.kind == QStringLiteral("ifb");
+			}
+		}
+		check("and the ifb appears in the device list as netcfgd's own", synthesised);
+
+		/* Which is not editable here, and says why rather than offering a form
+		 * for something the language refuses to take. */
+		ncfg_device_config made;
+		check("the ifb can be read",
+		    connection.device_config(QStringLiteral("ifb-gui-shaped0"), &made, &error), error);
+		check("and says netcfgd makes it rather than offering to edit it",
+		    made.unmodelled.contains(QStringLiteral("netcfgd makes this one")),
+		    made.unmodelled);
+	}
+
 	{
 		QString removed;
+		connection.config_delete(QStringLiteral("device-gui-shaped0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-tap0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-ppp0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-tun0"), &removed);

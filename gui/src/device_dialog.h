@@ -123,6 +123,10 @@ private:
 	/* tun and tap: who may attach to the device. */
 	QLineEdit *owner;
 	QLineEdit *group;
+	/* Queueing, which is the only way an `ifb` comes into being. */
+	QComboBox *qdisc_kind;
+	QSpinBox  *bandwidth;
+	QSpinBox  *ingress_bandwidth;
 	QWidget      *peer_buttons;
 	QPushButton  *peer_add;
 	QPushButton  *peer_drop;

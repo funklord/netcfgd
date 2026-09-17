@@ -353,6 +353,47 @@ int main(int argc, char **argv)
 		    "and one with no owner says so by saying nothing");
 	}
 
+	/* QUEUEING, which is the only way an `ifb` device comes into being.
+	 *
+	 * **There is no `ifb` kind to write, and that is the design.** The config
+	 * language refuses `kind = "ifb"` outright: one is synthesised per
+	 * interface that asks for `ingress_bandwidth`, because the kernel cannot
+	 * queue traffic on the way in -- it is redirected onto an `ifb` where it
+	 * has become egress. So what a form can offer is the rate, and netcfgd
+	 * makes the device. */
+	{
+		ncfg_device_config shaped;
+		shaped.kind = QStringLiteral("physical");
+		shaped.qdisc_kind = QStringLiteral("cake");
+		shaped.bandwidth_kbit = 20000;
+		shaped.ingress_bandwidth_kbit = 8000;
+		const QString block = ncfg_device_block(QStringLiteral("eth0"), shaped);
+
+		check(block.contains(QStringLiteral("qdisc {")), "a shaped device gets a qdisc block");
+		check(block.contains(QStringLiteral("kind = \"cake\"")), "naming the scheduler");
+		check(block.contains(QStringLiteral("bandwidth = \"20000kbit\"")),
+		    "and the rate going out, in kbit rather than rounded to megabits");
+		check(block.contains(QStringLiteral("ingress_bandwidth = \"8000kbit\"")),
+		    "and the rate arriving, which is what makes netcfgd build an ifb");
+
+		/* A scheduler with no rate is ordinary -- `fq_codel` on a link whose
+		 * speed nobody knows -- and writes no rate rather than a zero. */
+		ncfg_device_config plain;
+		plain.qdisc_kind = QStringLiteral("fq_codel");
+		const QString bare = ncfg_device_block(QStringLiteral("eth0"), plain);
+		check(bare.contains(QStringLiteral("kind = \"fq_codel\"")) &&
+		        !bare.contains(QStringLiteral("bandwidth")),
+		    "a scheduler with no rate writes no rate");
+
+		/* And no scheduler writes no block at all: an empty `qdisc { }` is not
+		 * nothing -- it compiles to a policy, and netcfgd would then have an
+		 * opinion about a queue nobody asked it to touch. */
+		ncfg_device_config none;
+		check(!ncfg_device_block(QStringLiteral("eth0"), none)
+		           .contains(QStringLiteral("qdisc")),
+		    "and a device with no scheduler gets no qdisc block");
+	}
+
 	/* THE NAME, which is the link's name and the drop-in's filename. */
 	{
 		check(ncfg_device_name_refusal(QStringLiteral("br0")).isEmpty(),

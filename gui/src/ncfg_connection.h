@@ -403,6 +403,13 @@ struct ncfg_device_config {
 	QString owner;
 	QString group;
 	QString tun_mode;
+	/* Queueing. The rates are kbit/s, which is what the form takes; a rate
+	 * finer than a kbit comes back as -1 and makes the block unrepresentable
+	 * rather than being rounded. The ingress rate lives on the `ifb` netcfgd
+	 * synthesised and is joined back here. */
+	QString qdisc_kind;
+	int     bandwidth_kbit = 0;
+	int     ingress_bandwidth_kbit = 0;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */

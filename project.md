@@ -9489,6 +9489,52 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.149 There is no `ifb` to write
+
+`ifb` was the last entry on the device editor's refusal list, and the natural
+next round would have been a form for it. That would have been wrong: the config
+language refuses `kind = "ifb"` outright. One is **synthesised**, one per
+interface that asks for `ingress_bandwidth`, because the kernel cannot queue
+traffic on the way in -- by the time a packet can be classified it has already
+arrived, so everything arriving is redirected onto an intermediate device where
+it has become egress. Decision 0255.
+
+**The gap was the `qdisc` block that makes one**, which had no field anywhere --
+and which therefore also stopped the device editor saving any device carrying
+shaping at all. A scheduler, a rate out and a rate in, on every kind of device.
+
+* **kbit/s, not megabits**: a 2.5 Mbit line written in megabits rounds to 2 and
+  shapes somebody a fifth slow. A rate finer than a kbit is reported as
+  unrepresentable rather than rounded.
+* A scheduler with no rate is ordinary and writes no rate; a rate with no
+  scheduler is refused.
+* **Only `cake` can shape arriving traffic**, which is the compiler's rule said
+  beside the field rather than after a round trip.
+* An empty `qdisc { }` is not nothing -- it compiles to a policy -- so a device
+  with no scheduler gets no block.
+
+### One block written, two read back
+
+`ingress_bandwidth` compiles into a scheduler on the device *plus* an
+`ifb-<name>` device carrying the arriving rate. Read back naively, the ingress
+rate has vanished: it is on a device the operator never wrote. The client joins
+the halves through `ingress_redirect`, so one block written is one block shown --
+and the `ifb` appears in the device list as netcfgd's own, with the editor
+saying who made it rather than offering a form.
+
+### Five sabotages against the shaping
+
+An empty `qdisc` block written for a device with no scheduler; the rate written
+in megabits and rounded; ingress shaping accepted with any scheduler; the ingress
+rate read off the device rather than off its `ifb`; an `ifb` offering itself for
+editing. All caught.
+
+### Where the window stands
+
+Every `device` key the model has is reachable from it, and every link kind but
+the one no operator writes. The editor's refusal list is one entry long, and
+that entry is a sentence naming who made the device.
+
 ## 10.148 The link that is not a netlink message
 
 `InterfaceKind::Tun` sat in the model from the beginning with "in the schema and

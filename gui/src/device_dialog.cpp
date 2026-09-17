@@ -100,6 +100,18 @@ const choice vlan_protocols[] = {
 	{ "802.1ad -- QinQ", "dot1ad" },
 };
 
+/* The schedulers netcfgd will put on a link. A closed set, not a free string:
+ * 0023 keeps netcfgd to the root qdisc and to schedulers that need no classes
+ * or filters under them, and an open string would make that line invisible. */
+const choice qdiscs[] = {
+	{ "leave alone", "" },
+	{ "cake -- the answer for nearly every link", "cake" },
+	{ "fq_codel", "fq_codel" },
+	{ "fq", "fq" },
+	{ "pfifo_fast", "pfifo_fast" },
+	{ "noqueue", "noqueue" },
+};
+
 const choice unmanages[] = {
 	{ "leave -- change nothing on the way out", "leave" },
 	{ "clear -- remove what netcfgd owns first", "clear" },
@@ -429,6 +441,20 @@ QString ncfg_device_block(const QString &name, const ncfg_device_config &setting
 	if (settings.mtu > 0) {
 		body << QStringLiteral("\tmtu = %1").arg(settings.mtu);
 	}
+	if (!settings.qdisc_kind.isEmpty()) {
+		body << QStringLiteral("\tqdisc {");
+		body << QStringLiteral("\t\tkind = \"%1\"").arg(settings.qdisc_kind);
+		/* kbit rather than mbit, so a rate that is not a whole megabit is
+		 * written as what it is. The language takes either. */
+		if (settings.bandwidth_kbit > 0) {
+			body << QStringLiteral("\t\tbandwidth = \"%1kbit\"").arg(settings.bandwidth_kbit);
+		}
+		if (settings.ingress_bandwidth_kbit > 0) {
+			body << QStringLiteral("\t\tingress_bandwidth = \"%1kbit\"")
+			        .arg(settings.ingress_bandwidth_kbit);
+		}
+		body << QStringLiteral("\t}");
+	}
 	if (!settings.mac.isEmpty()) {
 		body << QStringLiteral("\tmac = \"%1\"").arg(settings.mac);
 	}
@@ -751,6 +777,39 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	group->setPlaceholderText(QStringLiteral("a group -- blank leaves it to root"));
 	form->addRow(QStringLiteral("group"), group);
 
+	/* **Queueing, which is where bufferbloat is fixed** -- and the only way an
+	 * `ifb` device comes into being. Shown for every kind, because any link
+	 * can be shaped: a cable, a radio, a bridge, a tunnel. */
+	qdisc_kind = new QComboBox(this);
+	qdisc_kind->setObjectName(QStringLiteral("device_qdisc_kind"));
+	fill(qdisc_kind, qdiscs, sizeof(qdiscs) / sizeof(qdiscs[0]));
+	form->addRow(QStringLiteral("queueing"), qdisc_kind);
+
+	bandwidth = new QSpinBox(this);
+	bandwidth->setObjectName(QStringLiteral("device_bandwidth"));
+	bandwidth->setRange(0, 100'000'000);
+	bandwidth->setSpecialValueText(QStringLiteral("unshaped"));
+	bandwidth->setSuffix(QStringLiteral(" kbit/s"));
+	bandwidth->setToolTip(QStringLiteral(
+	    "The real rate of the link going out, which is what lets the scheduler keep "
+	    "the queue in netcfgd rather than in somebody else's modem."));
+	form->addRow(QStringLiteral("bandwidth out"), bandwidth);
+
+	/* **A second number, not another field on the same queue.** The kernel
+	 * cannot queue on the way in -- the packets are already here -- so asking
+	 * for this makes netcfgd build an `ifb` device, redirect everything
+	 * arriving onto it, and shape it there, where it has become egress. The
+	 * `ifb` is netcfgd's to make and appears in the device list as one. */
+	ingress_bandwidth = new QSpinBox(this);
+	ingress_bandwidth->setObjectName(QStringLiteral("device_ingress_bandwidth"));
+	ingress_bandwidth->setRange(0, 100'000'000);
+	ingress_bandwidth->setSpecialValueText(QStringLiteral("unshaped"));
+	ingress_bandwidth->setSuffix(QStringLiteral(" kbit/s"));
+	ingress_bandwidth->setToolTip(QStringLiteral(
+	    "Shaping traffic arriving here needs an `ifb` device, which netcfgd creates "
+	    "and redirects onto. `cake` is the only scheduler that can do it."));
+	form->addRow(QStringLiteral("bandwidth in"), ingress_bandwidth);
+
 	managed = new QCheckBox(QStringLiteral("netcfgd configures this device"), this);
 	managed->setObjectName(QStringLiteral("device_managed"));
 	managed->setChecked(true);
@@ -1036,6 +1095,10 @@ void ncfg_device_dialog::load()
 	config->setText(existing.config);
 	owner->setText(existing.owner);
 	group->setText(existing.group);
+	select(qdisc_kind, existing.qdisc_kind);
+	bandwidth->setValue(existing.bandwidth_kbit > 0 ? existing.bandwidth_kbit : 0);
+	ingress_bandwidth->setValue(
+	    existing.ingress_bandwidth_kbit > 0 ? existing.ingress_bandwidth_kbit : 0);
 	listen_port->setValue(existing.listen_port);
 	fwmark->setValue(existing.fwmark);
 	for (const ncfg_wg_peer_row &known : existing.peers) {
@@ -1150,6 +1213,9 @@ QString ncfg_device_dialog::block_text() const
 	settings.config = config->text().trimmed();
 	settings.owner = owner->text().trimmed();
 	settings.group = group->text().trimmed();
+	settings.qdisc_kind = qdisc_kind->currentData().toString();
+	settings.bandwidth_kbit = bandwidth->value();
+	settings.ingress_bandwidth_kbit = ingress_bandwidth->value();
 	settings.listen_port = listen_port->value();
 	settings.fwmark = fwmark->value();
 	for (int row = 0; row < peers->rowCount(); row++) {
@@ -1225,6 +1291,20 @@ void ncfg_device_dialog::submit()
 	}
 	if (chosen == QLatin1String("vrf") && vrf_table->value() == 0) {
 		note->setText(QStringLiteral("a vrf needs the routing table it owns"));
+		return;
+	}
+	if (qdisc_kind->currentData().toString().isEmpty()
+	    && (bandwidth->value() > 0 || ingress_bandwidth->value() > 0)) {
+		note->setText(QStringLiteral("a shaped rate needs a scheduler to shape with: "
+		              "pick one under `queueing`"));
+		return;
+	}
+	/* The compiler's own rule, said beside the field: ingress shaping puts
+	 * `cake` on an `ifb` device, so the scheduler has to be `cake`. */
+	if (ingress_bandwidth->value() > 0
+	    && qdisc_kind->currentData().toString() != QLatin1String("cake")) {
+		note->setText(QStringLiteral("only `cake` can shape arriving traffic: netcfgd puts "
+		              "it on the `ifb` device it makes for this link"));
 		return;
 	}
 	if (chosen == QLatin1String("pppoe")) {

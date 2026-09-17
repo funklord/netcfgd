@@ -2476,6 +2476,7 @@ void ncfg_device_config_free(ncfg_device_config_t *config)
 	free(config->owner);
 	free(config->group);
 	free(config->tun_mode);
+	free(config->qdisc_kind);
 	for (size_t i = 0; i < config->peer_count; i++) {
 		free(config->peers[i].name);
 		free(config->peers[i].public_key);
@@ -2544,12 +2545,13 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 		out->owner = dup_string("");
 		out->group = dup_string("");
 		out->tun_mode = dup_string("");
+		out->qdisc_kind = dup_string("");
 		out->tunnel_key = -1;
 		return out->members && out->bond_mode && out->parent && out->vlan_protocol
 		    && out->peer && out->macvlan_mode && out->tunnel_mode && out->local
 		    && out->remote && out->private_key && out->username && out->password
 		    && out->service && out->ac && out->config && out->owner && out->group
-		    && out->tun_mode;
+		    && out->tun_mode && out->qdisc_kind;
 	}
 
 	out->members = joined_words(doc, ncfg_json_member(doc, kind, "members"));
@@ -2653,6 +2655,74 @@ static int read_kind(const ncfg_json_doc_t *doc, uint32_t kind, ncfg_device_conf
 	    && out->macvlan_mode && out->tunnel_mode && out->local && out->remote;
 }
 
+/*
+ * A shaped rate in kbit/s, or -1 for one the form cannot carry exactly.
+ *
+ * The document is in bits and the form is in kbit, because kbit is what
+ * `tc` takes and what an operator writes. A rate that is not a whole kbit --
+ * somebody wrote `1234567bit` -- is not rounded: it comes back as -1 and the
+ * caller reports the block as unrepresentable, which is the same rule every
+ * other field here follows.
+ */
+static int rate_kbit(const ncfg_json_doc_t *doc, uint32_t object, const char *name)
+{
+	uint32_t value = ncfg_json_member(doc, object, name);
+
+	if (ncfg_json_type(doc, value) == NCFG_JSON_NULL) {
+		return 0;
+	}
+	int64_t bits = ncfg_json_int(doc, value, 0);
+	if (bits <= 0 || bits % 1000 != 0 || bits / 1000 > 2147483647) {
+		return -1;
+	}
+	return (int)(bits / 1000);
+}
+
+/*
+ * The device's queueing, and the ingress rate that lives beside it.
+ *
+ * **Two documents' worth of one block.** `qdisc { ingress_bandwidth = ... }`
+ * compiles into a scheduler on this device plus an `ifb-<name>` device
+ * carrying the arriving rate, because the kernel cannot queue on the way in.
+ * The operator wrote one block; this puts the halves back together so a form
+ * can show one.
+ */
+static int read_qdisc(const ncfg_json_doc_t *doc, uint32_t devices, uint32_t found,
+                      ncfg_device_config_t *out)
+{
+	uint32_t qdisc = ncfg_json_member(doc, found, "qdisc");
+
+	if (ncfg_json_type(doc, qdisc) != NCFG_JSON_OBJECT) {
+		out->qdisc_kind = dup_string("");
+		return out->qdisc_kind != NULL;
+	}
+	out->qdisc_kind = member_text(doc, qdisc, "kind");
+	if (!out->qdisc_kind) {
+		return 0;
+	}
+	out->bandwidth_kbit = rate_kbit(doc, qdisc, "bandwidth_bits");
+
+	/* The redirect names the `ifb` netcfgd made, and that device's own rate is
+	 * what the operator asked for as `ingress_bandwidth`. */
+	char *redirect = member_text(doc, found, "ingress_redirect");
+	if (!redirect) {
+		return 0;
+	}
+	if (redirect[0]) {
+		for (uint32_t i = 0; i < ncfg_json_count(doc, devices); i++) {
+			uint32_t entry = ncfg_json_at(doc, devices, i);
+			if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "name"), redirect)) {
+				continue;
+			}
+			out->ingress_bandwidth_kbit =
+			    rate_kbit(doc, ncfg_json_member(doc, entry, "qdisc"), "bandwidth_bits");
+			break;
+		}
+	}
+	free(redirect);
+	return 1;
+}
+
 int ncfg_client_device_config(ncfg_client_t *client, const char *device,
                               ncfg_device_config_t *out, char *err, size_t err_size)
 {
@@ -2733,6 +2803,12 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 		out->wol = dup_string("");
 	}
 
+	if (!read_qdisc(doc, devices, found, out)) {
+		set_error(err, err_size, "out of memory");
+		ncfg_json_free(doc);
+		return 0;
+	}
+
 	uint32_t wifi = ncfg_json_member(doc, found, "wifi");
 	if (wifi != NCFG_JSON_NONE) {
 		out->has_wifi = 1;
@@ -2782,16 +2858,28 @@ int ncfg_client_device_config(ncfg_client_t *client, const char *device,
 	 * a form for something the document generates. `tun` left this list when
 	 * netcfgd learned to make one (0254).
 	 */
-	static const char *const unheld[] = { "ifb" };
-	for (size_t i = 0; i < sizeof(unheld) / sizeof(unheld[0]); i++) {
-		if (out->kind && strcmp(out->kind, unheld[i]) == 0) {
-			note_unmodelled(&out->unmodelled, out->kind);
-		}
+	/*
+	 * **`ifb` alone, and it is netcfgd's own.** One is synthesised per
+	 * interface that asks for `ingress_bandwidth` -- the kernel cannot queue
+	 * on the way in, so arriving traffic is redirected onto an `ifb` where it
+	 * has become egress. The config language refuses `kind = "ifb"` outright,
+	 * so there is nothing for a form to write and the sentence says which of
+	 * the two reasons this is.
+	 */
+	if (out->kind && strcmp(out->kind, "ifb") == 0) {
+		note_unmodelled(&out->unmodelled, "ifb (netcfgd makes this one; shape the "
+		    "interface it belongs to)");
 	}
 	if (ncfg_json_count(doc, ncfg_json_member(doc, found, "bridge_vlans"))) {
 		note_unmodelled(&out->unmodelled, "bridge_vlans");
 	}
-	static const char *const beyond[] = { "master", "qdisc", "access_control", "match" };
+	/* A rate the form cannot write back exactly: `-1` is what `rate_kbit`
+	 * answers for one that is not a whole kbit, and rounding somebody's shaped
+	 * rate silently is what this editor exists not to do. */
+	if (out->bandwidth_kbit < 0 || out->ingress_bandwidth_kbit < 0) {
+		note_unmodelled(&out->unmodelled, "qdisc (a rate finer than a kbit)");
+	}
+	static const char *const beyond[] = { "master", "access_control", "match" };
 	for (size_t i = 0; i < sizeof(beyond) / sizeof(beyond[0]); i++) {
 		if (ncfg_json_type(doc, ncfg_json_member(doc, found, beyond[i])) != NCFG_JSON_NULL) {
 			note_unmodelled(&out->unmodelled, beyond[i]);

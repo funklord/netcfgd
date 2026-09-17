@@ -970,6 +970,9 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->owner = from_c(found.owner);
 	out->group = from_c(found.group);
 	out->tun_mode = from_c(found.tun_mode);
+	out->qdisc_kind = from_c(found.qdisc_kind);
+	out->bandwidth_kbit = found.bandwidth_kbit;
+	out->ingress_bandwidth_kbit = found.ingress_bandwidth_kbit;
 	out->listen_port = found.listen_port;
 	out->fwmark = found.fwmark;
 	for (size_t i = 0; i < found.peer_count; i++) {

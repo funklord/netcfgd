@@ -1264,6 +1264,24 @@ typedef struct {
 	 * reports both as `tun`, so this comes from the document and not from the
 	 * link. */
 	char *tun_mode;
+	/*
+	 * Queueing, which is where bufferbloat is fixed.
+	 *
+	 * `qdisc_kind` is "" for a device the document gives no scheduler. The two
+	 * rates are in kbit/s, which is what an operator writes and what the form
+	 * takes; the document holds bits, and a rate that is not a whole kbit is
+	 * reported through `unmodelled` rather than rounded -- rounding somebody's
+	 * shaped rate silently is exactly what this editor must not do.
+	 *
+	 * **The ingress rate is not on this device in the document.** Asking for
+	 * one makes netcfgd build an `ifb`, redirect everything arriving here onto
+	 * it and shape it there, where it has become egress -- so the number lives
+	 * on the `ifb-<name>` device netcfgd synthesised. Joined back here, because
+	 * the operator wrote one block and should see one block.
+	 */
+	char *qdisc_kind;
+	int   bandwidth_kbit;
+	int   ingress_bandwidth_kbit;
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */
