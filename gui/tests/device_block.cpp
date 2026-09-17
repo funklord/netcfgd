@@ -284,6 +284,43 @@ int main(int argc, char **argv)
 		    "while no key at all writes nothing");
 	}
 
+	/* PPPOE AND OPENVPN, the two kinds that carry a login.
+	 *
+	 * Both were refused until this round, and `openvpn` was refused by a name
+	 * that never matched -- the document spells the kind `open_vpn` -- which
+	 * is the same trap `wire_guard` sprang one round earlier. */
+	{
+		ncfg_device_config pppoe;
+		pppoe.kind = QStringLiteral("pppoe");
+		pppoe.parent = QStringLiteral("eth0");
+		pppoe.username = QStringLiteral("user@isp.example");
+		pppoe.password = QStringLiteral("@secret:isp");
+		pppoe.service = QStringLiteral("svc");
+		const QString session = ncfg_device_block(QStringLiteral("ppp0"), pppoe);
+		check(session.contains(QStringLiteral("pppoe {")), "a pppoe device gets a block");
+		check(session.contains(QStringLiteral("parent = \"eth0\"")),
+		    "naming the ethernet link it runs over");
+		check(session.contains(QStringLiteral("username = \"user@isp.example\"")) &&
+		        session.contains(QStringLiteral("password = \"@secret:isp\"")),
+		    "and the login, with the password as a reference");
+		check(session.contains(QStringLiteral("service = \"svc\"")),
+		    "and a service name where the provider needs one");
+		check(!session.contains(QStringLiteral("ac =")),
+		    "while an access concentrator nobody named is not written");
+
+		ncfg_device_config vpn;
+		vpn.kind = QStringLiteral("openvpn");
+		vpn.config = QStringLiteral("/etc/openvpn/client.conf");
+		const QString tunnel = ncfg_device_block(QStringLiteral("tun0"), vpn);
+		check(tunnel.contains(QStringLiteral("openvpn {")), "an openvpn device gets a block");
+		check(tunnel.contains(QStringLiteral("config = \"/etc/openvpn/client.conf\"")),
+		    "naming the file OpenVPN reads, which netcfgd does not");
+		/* Both credentials are optional: a `.ovpn` that carries its own, or a
+		 * server that wants none, is the ordinary case. */
+		check(!tunnel.contains(QStringLiteral("username")),
+		    "and no login where none was given");
+	}
+
 	/* THE NAME, which is the link's name and the drop-in's filename. */
 	{
 		check(ncfg_device_name_refusal(QStringLiteral("br0")).isEmpty(),

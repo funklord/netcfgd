@@ -962,6 +962,11 @@ bool ncfg_connection::device_config(const QString &device, ncfg_device_config *o
 	out->ttl = found.ttl;
 	out->tunnel_key = found.tunnel_key;
 	out->private_key = from_c(found.private_key);
+	out->username = from_c(found.username);
+	out->password = from_c(found.password);
+	out->service = from_c(found.service);
+	out->ac = from_c(found.ac);
+	out->config = from_c(found.config);
 	out->listen_port = found.listen_port;
 	out->fwmark = found.fwmark;
 	for (size_t i = 0; i < found.peer_count; i++) {

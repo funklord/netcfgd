@@ -9489,6 +9489,43 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.147 The last two kinds, and the second spelling trap
+
+PPPoE and OpenVPN, after which two kinds are left and neither is a link anybody
+writes: `tun`, which the model calls unimplemented, and `ifb`, which netcfgd
+synthesises for ingress shaping. Decision 0253.
+
+**PPPoE** takes a parent, a username, a password by reference and the two names
+a provider may insist on. The parent is required -- a session runs *over* an
+ethernet link and netcfgd cannot invent one -- and a password typed where the
+reference belongs is refused beside the field.
+
+**OpenVPN** takes the absolute path to the `.ovpn` file and an optional login.
+netcfgd owns the lifecycle and not the contents (0046: 253 top-level options
+against hostapd's couple of dozen), and an absolute path because netcfgd hands
+it over as given.
+
+### The second spelling trap, and the table that ends it
+
+`openvpn` was in the refusal list and **never matched**: the document spells the
+kind `open_vpn` and the language spells it as one word, so an OpenVPN device did
+not trip the refusal at all -- the kind combo found no such entry, sat at
+`physical`, and a save would have written a `device` block with no tunnel in it.
+
+**That is what `wire_guard` did one round ago**, and it was invisible for the
+same reason: the refusal list meant to catch it was written in the language's
+spelling too. One bug, two variants, and the second was already in the tree when
+the first was fixed. The translation is a table now, a third variant is one line
+in it, and the live probe asserts the spelling that comes back for each.
+
+### Five more sabotages
+
+The PPPoE parent dropped; an OpenVPN login written when nobody gave one; a typed
+PPPoE password accepted; a relative OpenVPN path accepted; `open_vpn` handed to
+the form untranslated. All caught. The last three assert the dialog's own sentence rather
+than a word the daemon's refusal also contains -- 0252's rule, applied without
+having to be found again.
+
 ## 10.146 WireGuard from the window, and a kind that was never refused
 
 0251 made every virtual link but four; `wireguard` was one of them, refused

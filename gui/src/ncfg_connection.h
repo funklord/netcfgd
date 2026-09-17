@@ -390,6 +390,14 @@ struct ncfg_device_config {
 	int     listen_port = 0;
 	int     fwmark = 0;
 	QList<ncfg_wg_peer_row> peers;
+	/* pppoe and openvpn, which share a login. `password` is a reference and
+	 * `config` is the path to the operator's own `.ovpn`, which netcfgd hands
+	 * to OpenVPN and never reads (0046). */
+	QString username;
+	QString password;
+	QString service;
+	QString ac;
+	QString config;
 	int     mtu = 0;
 	QString mac;
 	/* ethtool. A toggle is three-valued: unmanaged, on, off. */

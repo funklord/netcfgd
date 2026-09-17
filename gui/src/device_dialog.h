@@ -114,6 +114,12 @@ private:
 	QSpinBox     *listen_port;
 	QSpinBox     *fwmark;
 	QTableWidget *peers;
+	/* pppoe and openvpn: one login, shown for both. */
+	QLineEdit *username;
+	QLineEdit *password;
+	QLineEdit *service;
+	QLineEdit *ac;
+	QLineEdit *config;
 	QWidget      *peer_buttons;
 	QPushButton  *peer_add;
 	QPushButton  *peer_drop;

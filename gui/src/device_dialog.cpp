@@ -54,6 +54,8 @@ const choice kinds[] = {
 	{ "vxlan", "vxlan" },
 	{ "tunnel", "tunnel" },
 	{ "wireguard", "wireguard" },
+	{ "pppoe", "pppoe" },
+	{ "openvpn", "openvpn" },
 	{ "dummy", "dummy" },
 };
 
@@ -351,6 +353,31 @@ QStringList ncfg_device_kind_body(const ncfg_device_config &settings)
 				        .arg(peer.preshared_key);
 			}
 			body << QStringLiteral("\t\t}");
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("pppoe")) {
+		body << QStringLiteral("\tpppoe {");
+		body << QStringLiteral("\t\tparent = \"%1\"").arg(settings.parent);
+		body << QStringLiteral("\t\tusername = \"%1\"").arg(settings.username);
+		body << QStringLiteral("\t\tpassword = \"%1\"").arg(settings.password);
+		if (!settings.service.isEmpty()) {
+			body << QStringLiteral("\t\tservice = \"%1\"").arg(settings.service);
+		}
+		if (!settings.ac.isEmpty()) {
+			body << QStringLiteral("\t\tac = \"%1\"").arg(settings.ac);
+		}
+		body << QStringLiteral("\t}");
+	} else if (kind == QLatin1String("openvpn")) {
+		body << QStringLiteral("\topenvpn {");
+		body << QStringLiteral("\t\tconfig = \"%1\"").arg(settings.config);
+		/* Both optional: a `.ovpn` that carries its own credentials, or one
+		 * whose server wants none, is the ordinary case. Written only when the
+		 * operator gave them, so the block says what is unusual. */
+		if (!settings.username.isEmpty()) {
+			body << QStringLiteral("\t\tusername = \"%1\"").arg(settings.username);
+		}
+		if (!settings.password.isEmpty()) {
+			body << QStringLiteral("\t\tpassword = \"%1\"").arg(settings.password);
 		}
 		body << QStringLiteral("\t}");
 	} else if (kind == QLatin1String("dummy")) {
@@ -654,6 +681,40 @@ ncfg_device_dialog::ncfg_device_dialog(ncfg_connection *connection, const QStrin
 	peer_row->addStretch(1);
 	form->addRow(QString(), peer_buttons);
 
+	/* **The file OpenVPN already understands, by path.** netcfgd never reads
+	 * it: 0046 measured `openvpn --help` at 253 top-level options against
+	 * hostapd's couple of dozen, so expressing that surface would be a second
+	 * OpenVPN configuration language permanently behind the first. What
+	 * netcfgd owns is the lifecycle. */
+	config = new QLineEdit(this);
+	config->setObjectName(QStringLiteral("device_config"));
+	config->setPlaceholderText(QStringLiteral("/etc/openvpn/client.conf"));
+	form->addRow(QStringLiteral("openvpn config"), config);
+
+	username = new QLineEdit(this);
+	username->setObjectName(QStringLiteral("device_username"));
+	username->setPlaceholderText(QStringLiteral("user@isp.example"));
+	form->addRow(QStringLiteral("username"), username);
+
+	/* A reference, like every other credential here: the document type cannot
+	 * hold the password itself. `ncfg secret set isp` is what puts one in the
+	 * store, and this names it. */
+	password = new QLineEdit(this);
+	password->setObjectName(QStringLiteral("device_password"));
+	password->setPlaceholderText(QStringLiteral("@secret:isp -- `ncfg secret set isp` "
+	            "puts one there"));
+	form->addRow(QStringLiteral("password"), password);
+
+	service = new QLineEdit(this);
+	service->setObjectName(QStringLiteral("device_service"));
+	service->setPlaceholderText(QStringLiteral("only where the provider requires one"));
+	form->addRow(QStringLiteral("service name"), service);
+
+	ac = new QLineEdit(this);
+	ac->setObjectName(QStringLiteral("device_ac"));
+	ac->setPlaceholderText(QStringLiteral("only where the provider requires one"));
+	form->addRow(QStringLiteral("access concentrator"), ac);
+
 	managed = new QCheckBox(QStringLiteral("netcfgd configures this device"), this);
 	managed->setObjectName(QStringLiteral("device_managed"));
 	managed->setChecked(true);
@@ -844,7 +905,7 @@ void ncfg_device_dialog::kind_changed()
 		const char *kinds;
 	} rows[] = {
 		{ members, "bridge bond" },
-		{ parent_link, "vlan macvlan vxlan tunnel" },
+		{ parent_link, "vlan macvlan vxlan tunnel pppoe" },
 		{ stp, "bridge" },
 		{ vlan_filtering, "bridge" },
 		{ bond_mode, "bond" },
@@ -866,6 +927,11 @@ void ncfg_device_dialog::kind_changed()
 		{ fwmark, "wireguard" },
 		{ peers, "wireguard" },
 		{ peer_buttons, "wireguard" },
+		{ config, "openvpn" },
+		{ username, "pppoe openvpn" },
+		{ password, "pppoe openvpn" },
+		{ service, "pppoe" },
+		{ ac, "pppoe" },
 	};
 	for (const auto &row : rows) {
 		const QString wanted = QString::fromLatin1(row.kinds);
@@ -917,6 +983,11 @@ void ncfg_device_dialog::load()
 	ttl->setValue(existing.ttl);
 	tunnel_key->setValue(existing.tunnel_key);
 	private_key->setText(existing.private_key);
+	username->setText(existing.username);
+	password->setText(existing.password);
+	service->setText(existing.service);
+	ac->setText(existing.ac);
+	config->setText(existing.config);
 	listen_port->setValue(existing.listen_port);
 	fwmark->setValue(existing.fwmark);
 	for (const ncfg_wg_peer_row &known : existing.peers) {
@@ -1024,6 +1095,11 @@ QString ncfg_device_dialog::block_text() const
 	settings.ttl = ttl->value();
 	settings.tunnel_key = tunnel_key->value();
 	settings.private_key = private_key->text().trimmed();
+	settings.username = username->text().trimmed();
+	settings.password = password->text().trimmed();
+	settings.service = service->text().trimmed();
+	settings.ac = ac->text().trimmed();
+	settings.config = config->text().trimmed();
 	settings.listen_port = listen_port->value();
 	settings.fwmark = fwmark->value();
 	for (int row = 0; row < peers->rowCount(); row++) {
@@ -1101,6 +1177,39 @@ void ncfg_device_dialog::submit()
 		note->setText(QStringLiteral("a vrf needs the routing table it owns"));
 		return;
 	}
+	if (chosen == QLatin1String("pppoe")) {
+		if (parent_link->text().trimmed().isEmpty()) {
+			note->setText(QStringLiteral("a pppoe session needs the ethernet link it "
+			              "runs over"));
+			return;
+		}
+		if (username->text().trimmed().isEmpty()) {
+			note->setText(QStringLiteral("a pppoe session needs the username the "
+			              "provider gave you"));
+			return;
+		}
+		if (!password->text().trimmed().startsWith(QLatin1String("@secret:"))) {
+			note->setText(QStringLiteral("the password is a reference, not the password: "
+			              "`@secret:isp`, with `ncfg secret set isp` to put one there"));
+			return;
+		}
+	}
+	if (chosen == QLatin1String("openvpn")) {
+		/* The model requires an absolute path: netcfgd hands it to OpenVPN as
+		 * given, and a relative one would be resolved against whatever
+		 * directory the daemon happens to be in. */
+		if (!config->text().trimmed().startsWith(QLatin1Char('/'))) {
+			note->setText(QStringLiteral("an openvpn tunnel needs the absolute path to "
+			              "the .ovpn file OpenVPN reads"));
+			return;
+		}
+		if (!password->text().trimmed().isEmpty()
+		    && !password->text().trimmed().startsWith(QLatin1String("@secret:"))) {
+			note->setText(QStringLiteral("the password is a reference, not the password: "
+			              "`@secret:vpn`, with `ncfg secret set vpn` to put one there"));
+			return;
+		}
+	}
 	if (chosen == QLatin1String("wireguard")) {
 		/* **A reference, and it has to look like one.** The document type
 		 * cannot hold key material at all, so a key pasted here would be
@@ -1120,7 +1229,7 @@ void ncfg_device_dialog::submit()
 	}
 
 	const QLineEdit *values[] = { mac, regdom, portal_check, sim, apn, members, parent_link,
-		peer, local, remote, private_key };
+		peer, local, remote, private_key, username, password, service, ac, config };
 	for (const QLineEdit *value : values) {
 		if (!safe_value(value->text())) {
 			note->setText(QStringLiteral("a value cannot carry a quote, a backslash "

@@ -343,8 +343,97 @@ int main(int argc, char **argv)
 		    wg.unmodelled);
 	}
 
+	/* **PPPoE and OpenVPN, the last two kinds a form could hold.** `openvpn`
+	 * was refused by a name that never matched -- the document spells the kind
+	 * `open_vpn` -- so an OpenVPN device looked physical to the editor and a
+	 * save would have written a `device` block with no tunnel in it, exactly as
+	 * `wire_guard` did one round earlier. Both spellings are translated in one
+	 * table now, and this is the check that the second one is translated. */
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *parent = dialog.findChild<QLineEdit *>(QStringLiteral("device_parent"));
+		auto *user = dialog.findChild<QLineEdit *>(QStringLiteral("device_username"));
+		auto *secret = dialog.findChild<QLineEdit *>(QStringLiteral("device_password"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+		if (!made || !kind || !parent || !user || !secret || !save) {
+			check("the pppoe fields are there", false);
+			return 1;
+		}
+		check("the pppoe fields are there", true);
+
+		made->setText(QStringLiteral("gui-ppp0"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("pppoe")));
+		parent->setText(QStringLiteral("gui-set-a"));
+		user->setText(QStringLiteral("user@isp.example"));
+		/* A password typed where a reference belongs, refused beside the
+		 * field: the document type cannot hold one. */
+		secret->setText(QStringLiteral("hunter2"));
+		save->click();
+		check("a pppoe password typed instead of a reference is refused here",
+		    note && note->text().startsWith(
+		                QStringLiteral("the password is a reference, not the password")),
+		    note ? note->text() : QString());
+
+		secret->setText(QStringLiteral("@secret:gui-isp"));
+		save->click();
+		check("and a whole session is written",
+		    dialog.outcome().contains(QStringLiteral("gui-ppp0")),
+		    QStringLiteral("%1 / %2").arg(dialog.outcome(),
+		        note ? note->text() : QString()));
+
+		ncfg_device_config written;
+		check("netcfgd compiled the pppoe session",
+		    connection.device_config(QStringLiteral("gui-ppp0"), &written, &error), error);
+		check("as pppoe on its parent", written.kind == QStringLiteral("pppoe")
+		        && written.parent == QStringLiteral("gui-set-a"),
+		    QStringLiteral("%1 on %2").arg(written.kind, written.parent));
+		check("with the login and the password as a reference",
+		    written.username == QStringLiteral("user@isp.example")
+		        && written.password == QStringLiteral("@secret:gui-isp"),
+		    written.password);
+	}
+
+	{
+		ncfg_device_dialog dialog(&connection, QString());
+		auto *made = dialog.findChild<QLineEdit *>(QStringLiteral("device_name"));
+		auto *kind = dialog.findChild<QComboBox *>(QStringLiteral("device_kind"));
+		auto *file = dialog.findChild<QLineEdit *>(QStringLiteral("device_config"));
+		auto *note = dialog.findChild<QLabel *>(QStringLiteral("device_note"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("device_save"));
+
+		made->setText(QStringLiteral("gui-tun0"));
+		kind->setCurrentIndex(kind->findData(QStringLiteral("openvpn")));
+		file->setText(QStringLiteral("client.conf"));
+		save->click();
+		check("a relative openvpn config path is refused here",
+		    note && note->text().startsWith(QStringLiteral("an openvpn tunnel needs the "
+		                                              "absolute path")),
+		    note ? note->text() : QString());
+
+		file->setText(QStringLiteral("/etc/openvpn/client.conf"));
+		save->click();
+
+		ncfg_device_config written;
+		check("netcfgd compiled the openvpn tunnel",
+		    connection.device_config(QStringLiteral("gui-tun0"), &written, &error), error);
+		/* **The spelling, which is the whole point of this pair of checks.**
+		 * `open_vpn` in the document and `openvpn` in the language: untranslated,
+		 * this comes back as a kind the form has never heard of. */
+		check("as openvpn, spelled as the language spells it",
+		    written.kind == QStringLiteral("openvpn"), written.kind);
+		check("naming the file OpenVPN reads",
+		    written.config == QStringLiteral("/etc/openvpn/client.conf"), written.config);
+		check("and the block is editable rather than refused",
+		    written.unmodelled.isEmpty(), written.unmodelled);
+	}
+
 	{
 		QString removed;
+		connection.config_delete(QStringLiteral("device-gui-ppp0"), &removed);
+		connection.config_delete(QStringLiteral("device-gui-tun0"), &removed);
 		connection.config_delete(QStringLiteral("device-gui-wg0"), &removed);
 		check("the block can be removed again",
 		    connection.config_delete(QStringLiteral("device-%1").arg(name), &removed),

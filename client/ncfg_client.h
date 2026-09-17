@@ -1242,6 +1242,20 @@ typedef struct {
 	int   fwmark;      /* 0 where the document states none */
 	ncfg_wg_peer_t *peers;
 	size_t          peer_count;
+	/*
+	 * pppoe and openvpn, which share a login.
+	 *
+	 * `password` is a reference like every other credential -- `@secret:isp`
+	 * -- and `config` is the path to the `.ovpn` file `OpenVPN` already
+	 * understands. netcfgd never reads that file: it is the operator's, and
+	 * expressing its 253 options would be a second `OpenVPN` configuration
+	 * language permanently behind the first (0046).
+	 */
+	char *username;
+	char *password;
+	char *service; /* pppoe: the provider's service name, where it needs one */
+	char *ac;      /* pppoe: the access concentrator, likewise */
+	char *config;  /* openvpn: the path to the operator's own file */
 	int   mtu;         /* 0 where the document states none */
 	char *mac;         /* "" where the document states none */
 	/* ethtool. `speed` 0 and `duplex`/`wol` "" mean the document states none. */
