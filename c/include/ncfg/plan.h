@@ -577,4 +577,28 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 ncfg_optint_t ncfg_plan_confirm_window(const ncfg_document_t *desired,
     const ncfg_plan_options_t *options);
 
+/*
+ * Whether a report about this interface is one netcfgd was told to act on.
+ *
+ * Public for `ncfg_plan_confirm_window`'s reason and a sharper one: `ncfg
+ * explain` has to answer the same question, and the Rust makes this `pub`
+ * precisely so the explanation and the planner cannot disagree about which
+ * reports are believed. An operator asking why a route is there would
+ * otherwise get "the configuration does not ask for it" about a route netcfgd
+ * installed itself.
+ *
+ * Two ways in, and they are the same question asked of different documents:
+ * the addressing list says `reported`, which is how a modem helper's file is
+ * claimed, or netcfgd started the writer itself -- a tunnel or a PPPoE session
+ * reports through a script netcfgd generated, and there is nothing left to opt
+ * into. What it is *not* is "there is a file": a report for an interface the
+ * document says nothing about is an observation with no instruction behind it.
+ *
+ * Not the gate for a *nameserver*, which is narrower and lives with the DNS
+ * rules: having started the writer is enough to install a route down that link
+ * and deliberately not enough to change where every query on the machine goes
+ * (decision 0049).
+ */
+int ncfg_plan_takes_reports(const ncfg_document_t *desired, const ncfg_interface_t *interface);
+
 #endif /* NCFG_PLAN_H */

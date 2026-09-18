@@ -602,19 +602,26 @@ static void a_client_the_document_no_longer_asks_for_is_stopped(void)
 
 	/*
 	 * **A backend no pass here starts is not one this pass may stop.** The
-	 * supplicant, the access point, the tunnels and the router advertisement
-	 * daemon are started by passes this build does not have, so answering
-	 * "the document does not ask for this" about them would stop something
-	 * netcfgd never started and start nothing in its place.
+	 * access point and the two tunnels are started by passes this build does
+	 * not have, so answering "the document does not ask for this" about them
+	 * would stop something netcfgd never started and start nothing in its
+	 * place.
+	 *
+	 * The supplicant used to be in that list and is not any more: `dot1x.c`
+	 * starts one, so this build decides about one. A **radio's** supplicant is
+	 * still started by nothing here, which is the arm that keeps the rule safe
+	 * -- so the case is now that a radio's is left alone, and
+	 * `plan_gaps_test.c` walks the rest of the rule.
 	 */
 	plan = plan_of("{}",
-	    "\"devices\":[{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"}}],"
+	    "\"devices\":[{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"wifi\":{}}],"
 	    "\"interfaces\":[{\"name\":\"wlan0\",\"addressing\":[]}]",
 	    "\"links\":[" LINK_UP("wlan0") "],"
 	    "\"backends\":[{\"kind\":\"supplicant\",\"interface\":\"wlan0\",\"running\":true}]",
 	    &document, &observed);
 	check(plan && !has_name(plan, "backend.stop"),
-	    "and a supplicant this build cannot start is not one it stops either");
+	    "and a radio's supplicant, which this build cannot start, is not one it stops");
 	planfix_release(plan, document, observed);
 }
 

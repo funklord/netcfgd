@@ -7,16 +7,28 @@
  *   source is a client process, and what the planner emits is the decision to
  *   run one. This pass carries those two kinds and no others.
  *
- *   **The teardown is restricted to the same two kinds, and that is the rule
- *   rather than the gap.** The Rust's `backend_wanted` is exhaustive over all
- *   nine, which is right in a planner where every pass that starts one exists;
- *   here the supplicant, the access point, the tunnels and the router
- *   advertisement daemon are started by passes this build does not have, so
- *   answering "the document does not ask for this" about them would stop
- *   something netcfgd never started -- and on the next reconcile, start
- *   nothing in its place. That is the Rust's own reasoning for `WireGuard` and
- *   `Dns`, which it excuses for exactly this reason, applied to the kinds this
- *   port has not reached yet. Each becomes ordinary the day its pass lands.
+ *   **The teardown answers only for the kinds something here starts, and that
+ *   is the rule rather than the gap.** The Rust's `backend_wanted` is
+ *   exhaustive over all nine, which is right in a planner where every pass
+ *   that starts one exists; here the access point and the two tunnels are
+ *   started by passes this build does not have, so answering "the document
+ *   does not ask for this" about them would stop something netcfgd never
+ *   started -- and on the next reconcile, start nothing in its place. That is
+ *   the Rust's own reasoning for `WireGuard` and `Dns`, which it excuses for
+ *   exactly this reason, applied to the kinds this port has not reached yet.
+ *   Each becomes ordinary the day its pass lands, and two just have:
+ *   `dot1x.c` starts a supplicant and `advertise.c` a router advertisement
+ *   daemon, so both are decided about here now.
+ *
+ *   **The supplicant's rule is the one to be careful with.** It is asked in
+ *   `ncfg_plan_supplicant_wanted` rather than spelled here, beside the pass
+ *   that starts one, because the conditions that start a supplicant and the
+ *   conditions that keep one have to stay the same: wrong in the permissive
+ *   direction leaves a process nobody owns, and wrong in the other direction
+ *   is netcfgd starting a supplicant and killing it on every reconcile for
+ *   ever. A radio's supplicant is *wanted* there and started by nothing here,
+ *   which is the arm that keeps this build from stopping one it cannot
+ *   replace.
  *
  * WHY A COUNT AND NOT A RETRY
  *   A daemon that dies as fast as netcfgd starts it produced 181 starts in
@@ -104,13 +116,54 @@ void ncfg_plan_backend(ncfg_builder_t *builder, const char *name, int kind, cons
 	}
 }
 
+/*
+ * Whether a running backend is one the document asks for, and which field
+ * decides it.
+ *
+ * **The field is answered alongside on purpose**: an operator told a
+ * supplicant was stopped because of `addressing` goes and looks at the wrong
+ * block, and the four kinds here are decided by four different ones.
+ *
+ * The default arm is the restriction the header describes, and it is the
+ * permissive direction deliberately: a kind no pass here starts is one this
+ * build would be stopping without ever putting back. `NCFG_BACKEND_WIREGUARD`
+ * and `NCFG_BACKEND_DNS` are in it for the Rust's own reason and stay there
+ * when the rest land -- a WireGuard device is configured at creation and a DNS
+ * delivery is an action rather than a process.
+ */
+static int backend_wanted(const ncfg_builder_t *builder, const ncfg_observed_backend_t *backend,
+    const char **field)
+{
+	const ncfg_interface_t *interface;
+
+	switch (backend->kind) {
+	case NCFG_BACKEND_DHCP4:
+	case NCFG_BACKEND_DHCP6:
+		*field = "addressing";
+		interface = ncfg_plan_interface(builder->desired, backend->interface);
+		return interface && addressing_asks_for(interface, backend->kind);
+	case NCFG_BACKEND_SUPPLICANT:
+		/* Both blocks, because 0008 puts wired 802.1X on the same supplicant
+		 * as wifi and one process cannot be half wanted. */
+		*field = "wifi/dot1x";
+		return ncfg_plan_supplicant_wanted(builder->desired, backend->interface);
+	case NCFG_BACKEND_ROUTER_ADVERT:
+		*field = "advertise";
+		interface = ncfg_plan_interface(builder->desired, backend->interface);
+		return interface && interface->advertise;
+	default:
+		*field = "";
+		return 1;
+	}
+}
+
 void ncfg_plan_teardown_backends(ncfg_builder_t *builder)
 {
 	size_t i;
 
 	for (i = 0; i < builder->observed->backend_count; i++) {
 		const ncfg_observed_backend_t *backend = &builder->observed->backends[i];
-		const ncfg_interface_t        *interface;
+		const char                    *field = "";
 		ncfg_op_t                      op;
 		ncfg_op_t                      inverse;
 		ncfg_reason_t                  reason;
@@ -118,13 +171,7 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder)
 		if (!backend->running) {
 			continue;
 		}
-		/* See the note at the top: a kind no pass here starts is not one this
-		 * pass may decide is unwanted. */
-		if (backend->kind != NCFG_BACKEND_DHCP4 && backend->kind != NCFG_BACKEND_DHCP6) {
-			continue;
-		}
-		interface = ncfg_plan_interface(builder->desired, backend->interface);
-		if (interface && addressing_asks_for(interface, backend->kind)) {
+		if (backend_wanted(builder, backend, &field)) {
 			continue;
 		}
 
@@ -136,10 +183,10 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder)
 		inverse.kind = NCFG_OP_BACKEND_START;
 		inverse.u.backend.kind = backend->kind;
 		inverse.u.backend.iface = backend->interface;
-		/* `addressing` rather than the op's own name, because an operator told
-		 * a client was stopped because of the backend goes and looks at the
+		/* The block rather than the op's own name, because an operator told a
+		 * client was stopped because of the backend goes and looks at the
 		 * wrong block. */
-		reason = ncfg_plan_reason_unwanted(backend->interface, "addressing",
+		reason = ncfg_plan_reason_unwanted(backend->interface, field,
 		    ncfg_backend_kind_name(backend->kind));
 		(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
 	}

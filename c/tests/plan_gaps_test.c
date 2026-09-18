@@ -1,0 +1,612 @@
+/*
+ * plan_gaps_test.c -- the four blocks the planner used to warn about instead
+ * of acting on, and the three it still warns about for a different reason.
+ *
+ * WHAT THIS FILE IS REALLY CHECKING
+ *   `build.c`'s `warn_unported` held seven arms, each one a sentence telling
+ *   an operator that this build of the planner reads their block and does
+ *   nothing with it. Four of them were port gaps -- the Rust plans an
+ *   `advertise` block, a `dot1x` block, a `linkset`'s choice and
+ *   `on_unmanage = "clear"`, and this build did not -- and those four are
+ *   ported here, so their arms are gone and this file is what stands in their
+ *   place. Three were not port gaps at all: a `probe` block and a `modem`
+ *   block are read by the daemon rather than by the planner, and nothing in
+ *   either language acts on a `bluetooth` block. Those three keep a warning
+ *   and the warning had to stop claiming otherwise.
+ *
+ *   **The wording is under test as much as the actions are, and that is the
+ *   point rather than a flourish.** "This build of the planner does not act on
+ *   it" is a promise that a later release will. Said about a feature nobody has
+ *   written, it tells somebody to wait for something that is not coming; said
+ *   about a block the daemon *does* act on, it is simply false. Both read as
+ *   an operator's own configuration being ignored, and neither can be found by
+ *   a check that only looks at what a plan does.
+ *
+ * THE PROPERTY UNDERNEATH ALL OF IT
+ *   `plan.h` calls it load-bearing: **applying a plan twice produces an empty
+ *   second plan.** Every pass added here compares something it computed
+ *   against something the machine reported, and each comparison is a place a
+ *   plan can start adding and removing the same object for ever. So each of
+ *   the four has a case that plans the action and a case that plans *nothing*
+ *   against an observation carrying the result.
+ *
+ * NOTHING HERE TOUCHES A MACHINE
+ *   Planning is a pure function of a document and an observation, both written
+ *   as JSON and read by the readers a daemon uses. No socket, no radio, no
+ *   file, nothing under `/tmp` -- which is what lets this run on a workstation
+ *   whose network must not be disturbed.
+ */
+#include "planfix.h"
+
+#include <stdio.h>
+#include <string.h>
+
+static int failures;
+static int checks;
+
+static void check(int condition, const char *what)
+{
+	checks++;
+	printf("%-74s %s\n", what, condition ? "ok" : "FAILED");
+	if (!condition) {
+		failures++;
+	}
+}
+
+static int has_name(const ncfg_plan_t *plan, const char *name)
+{
+	return plan && planfix_action(plan, name) != NULL;
+}
+
+/* Where the first action of this name sits, or a number past every action so
+ * that "before" comparisons fail rather than pass by accident. */
+static size_t position(const ncfg_plan_t *plan, const char *name)
+{
+	size_t i;
+
+	for (i = 0; i < plan->action_count; i++) {
+		if (strcmp(ncfg_op_name(&plan->actions[i].op), name) == 0) {
+			return i;
+		}
+	}
+	return plan->action_count + 1u;
+}
+
+/* Print what a plan holds, so a failure says what happened rather than only
+ * that something did. */
+static int quiet(const ncfg_plan_t *plan)
+{
+	char names[512];
+
+	if (ncfg_plan_is_empty(plan)) {
+		return 1;
+	}
+	planfix_names(plan, names, sizeof(names));
+	printf("  expected nothing to do; the plan is [%s]\n", names);
+	return 0;
+}
+
+/* ------------------------------------------------------------------------ *
+ * `advertise`
+ * ------------------------------------------------------------------------ */
+
+#define LAN_DEVICE "{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}"
+
+#define ADVERTISING_LAN \
+	"{\"name\":\"lan0\",\"addressing\":[],\"advertise\":{\"backend\":\"radvd\"," \
+	"\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}"
+
+#define PLAIN_LAN "{\"name\":\"lan0\",\"addressing\":[]}"
+
+/* A delegation on the *other* interface, which is where an `advertise` block's
+ * prefix comes from. `subnet` 1 of `2001:db8:0:100::/56` is `2001:db8:0:101::`,
+ * and `::/64` is the suffix because what is advertised is the block rather
+ * than an address in it. */
+#define DELEGATION "\"delegations\":[{\"interface\":\"wan0\"," \
+	"\"prefixes\":[\"2001:db8:0:100::/56\"]}]"
+
+#define RADVD(advertised) \
+	"\"backends\":[{\"kind\":\"router_advert\",\"interface\":\"lan0\"," \
+	"\"running\":true,\"advertised\":[" advertised "]}]"
+
+static void a_prefix_that_has_not_arrived_starts_nothing(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, ADVERTISING_LAN, "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]", &document, &observed);
+
+	/*
+	 * An action that must fail, planned before the one that would make it
+	 * succeed, stops the apply and takes the rest with it -- and here the rest
+	 * is the DHCPv6 client on the interface whose delegation this is waiting
+	 * for, so the router would never have come up at all.
+	 */
+	check(plan && !has_name(plan, "backend.start"),
+	    "an `advertise` block with no delegation yet starts no daemon");
+	check(plan && planfix_warned(plan, "waiting on a delegated prefix from wan0"),
+	    "and says which interface it is waiting on, rather than nothing");
+	planfix_release(plan, document, observed);
+}
+
+static void a_delegated_prefix_starts_the_daemon(void)
+{
+	ncfg_document_t      *document;
+	ncfg_observed_t      *observed;
+	ncfg_plan_t          *plan = planfix_plan(LAN_DEVICE, ADVERTISING_LAN, "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," DELEGATION, &document, &observed);
+	const ncfg_action_t  *start;
+
+	start = plan ? planfix_for_field(plan, "backend.start", "advertise") : NULL;
+	check(start != NULL, "a delegation that has arrived starts the advertisement daemon");
+	check(start && start->reason.interface && strcmp(start->reason.interface, "lan0") == 0,
+	    "and the reason names the interface the block is on");
+	check(plan && !planfix_warned(plan, "does not act on it"),
+	    "and the block is no longer reported as one this build reads and ignores");
+	planfix_release(plan, document, observed);
+}
+
+static void the_daemon_waits_for_the_addressing(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE,
+	    "{\"name\":\"lan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"2001:db8:0:101::1/64\"}],\"advertise\":{\"backend\":\"radvd\","
+	    "\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}", "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," DELEGATION, &document, &observed);
+	const ncfg_action_t *start;
+	const ncfg_action_t *added;
+
+	start = plan ? planfix_for_field(plan, "backend.start", "advertise") : NULL;
+	added = plan ? planfix_action(plan, "addr.add") : NULL;
+	check(start && added && planfix_depends_on(start, added->id),
+	    "the daemon waits for the address, not races it: a router advertising a "
+	    "prefix it does not hold");
+	check(plan && position(plan, "addr.add") < position(plan, "backend.start"),
+	    "and the list order says the same thing, for an executor that reads no edges");
+	planfix_release(plan, document, observed);
+}
+
+static void a_daemon_already_announcing_the_right_block_is_left_alone(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LAN_DEVICE, ADVERTISING_LAN, "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," DELEGATION ","
+	    RADVD("\"2001:db8:0:101::/64\""), &document, &observed);
+
+	check(plan && quiet(plan), "applying an `advertise` block twice plans nothing the second time");
+	planfix_release(plan, document, observed);
+}
+
+static void a_daemon_announcing_a_block_the_isp_took_back_is_reloaded(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE, ADVERTISING_LAN, "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," DELEGATION ","
+	    RADVD("\"2001:db8:0:9::/64\""), &document, &observed);
+	const ncfg_action_t *reload;
+
+	/*
+	 * The prefix is the one value here that arrives after the document does.
+	 * An ISP that renumbers leaves a daemon announcing a block the upstream
+	 * has taken back, every host on the LAN holds an address that does not
+	 * route, and nothing in the document changed to say so.
+	 */
+	reload = plan ? planfix_for_field(plan, "backend.reload", "advertise.prefixes") : NULL;
+	check(reload != NULL, "a renumbering the daemon has not been told about is a reload");
+	check(reload && reload->reason.desired &&
+	    strcmp(reload->reason.desired, "2001:db8:0:101::/64") == 0,
+	    "and the reason carries the block that should be announced");
+	check(reload && reload->reason.observed &&
+	    strcmp(reload->reason.observed, "2001:db8:0:9::/64") == 0,
+	    "and the one that is being announced instead");
+	check(plan && !has_name(plan, "backend.start"),
+	    "and it is a reload rather than a restart: nothing on the wire is disturbed");
+	planfix_release(plan, document, observed);
+}
+
+static void a_daemon_the_document_stopped_asking_for_is_stopped(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE, PLAIN_LAN, "", "",
+	    "\"links\":[" PLANFIX_LINK("lan0", "") "]," RADVD("\"2001:db8:0:101::/64\""),
+	    &document, &observed);
+	const ncfg_action_t *stop;
+
+	/* The half that lands with the pass: a build that starts something and
+	 * cannot stop it leaves a daemon announcing a prefix the document has
+	 * forgotten. */
+	stop = plan ? planfix_for_field(plan, "backend.stop", "advertise") : NULL;
+	check(stop != NULL, "an `advertise` block that was deleted stops the daemon");
+	check(stop && stop->reason.field && strcmp(stop->reason.field, "advertise") == 0,
+	    "and names the block rather than `addressing`, which is a different line");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
+ * `dot1x`
+ * ------------------------------------------------------------------------ */
+
+#define PORT_DEVICE "{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"}}"
+
+#define DOT1X \
+	"\"dot1x\":{\"method\":\"peap\",\"identity\":\"dave\"," \
+	"\"password\":{\"provider\":\"file\",\"name\":\"dot1x\"}}"
+
+#define DOT1X_PORT \
+	"{\"name\":\"eth0\",\"addressing\":[{\"source\":\"dhcp4\"}]," DOT1X "}"
+
+#define SUPPLICANT(iface) \
+	"\"backends\":[{\"kind\":\"supplicant\",\"interface\":\"" iface "\",\"running\":true}]"
+
+static void an_authenticating_port_gets_its_supplicant_first(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(PORT_DEVICE, DOT1X_PORT, "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+	const ncfg_action_t *supplicant;
+	const ncfg_action_t *client;
+
+	supplicant = plan ? planfix_for_field(plan, "backend.start", "dot1x") : NULL;
+	client = plan ? planfix_for_field(plan, "backend.start", "addressing[0]") : NULL;
+	check(supplicant != NULL, "a `dot1x` block starts a supplicant");
+	check(client != NULL, "and the DHCP client the same interface asks for is still planned");
+	/*
+	 * A port that has not authenticated drops everything, so a client started
+	 * first spends its whole backoff sequence talking to a switch that is not
+	 * listening -- and then reports a failure whose real cause is two steps
+	 * earlier. Decision 0008.
+	 */
+	check(supplicant && client && planfix_depends_on(client, supplicant->id),
+	    "and the client waits for it rather than talking to a port that drops everything");
+	check(plan && !planfix_warned(plan, "a `dot1x` block is carried"),
+	    "and the block is no longer reported as one this build reads and ignores");
+	planfix_release(plan, document, observed);
+}
+
+static void a_supplicant_already_running_is_not_started_again(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(PORT_DEVICE,
+	    "{\"name\":\"eth0\",\"addressing\":[]," DOT1X "}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]," SUPPLICANT("eth0"),
+	    &document, &observed);
+
+	check(plan && quiet(plan), "applying a `dot1x` block twice plans nothing the second time");
+	planfix_release(plan, document, observed);
+}
+
+static void the_rule_that_keeps_a_supplicant_is_the_rule_that_starts_one(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	const ncfg_action_t *stop;
+	ncfg_plan_t         *plan;
+
+	/*
+	 * **The two rules have to stay the same.** Wrong in the permissive
+	 * direction leaves a supplicant nobody owns; wrong in the other direction
+	 * is netcfgd starting one and killing it on every reconcile, for ever --
+	 * which is what the Rust's idempotence gate caught the day
+	 * `supplicant_wanted` did not know a kind existed.
+	 */
+	plan = planfix_plan(PORT_DEVICE, "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]," SUPPLICANT("eth0"),
+	    &document, &observed);
+	stop = plan ? planfix_for_field(plan, "backend.stop", "wifi/dot1x") : NULL;
+	check(stop != NULL, "a supplicant on a port whose `dot1x` block went is stopped");
+	check(stop && stop->reason.field && strcmp(stop->reason.field, "wifi/dot1x") == 0,
+	    "and the reason names both blocks, because one process cannot be half wanted");
+	planfix_release(plan, document, observed);
+
+	/* A radio that has been given an access point is not a station, so a
+	 * supplicant left from before the `access_point` block was written is
+	 * unwanted -- without this arm the two backends would each be started by
+	 * the pass that wants one and stopped by the pass that does not. */
+	plan = planfix_plan("{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},\"wifi\":{}}",
+	    "{\"name\":\"wlan0\",\"addressing\":[]}", "",
+	    ",\"access_points\":[{\"id\":\"home\",\"ssid\":\"6161\",\"device\":\"wlan0\","
+	    "\"security\":{\"type\":\"owe\"}}]",
+	    "\"links\":[" PLANFIX_LINK("wlan0", "") "]," SUPPLICANT("wlan0"),
+	    &document, &observed);
+	check(plan && has_name(plan, "backend.stop"),
+	    "a supplicant on a radio that now runs an access point is stopped");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
+ * `linkset`
+ * ------------------------------------------------------------------------ */
+
+#define TWO_PORTS \
+	"{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"}}," \
+	"{\"name\":\"eth1\",\"kind\":{\"kind\":\"physical\"}}"
+
+#define TWO_ROUTED_PORTS \
+	"{\"name\":\"eth0\",\"addressing\":[],\"routes\":[{\"destination\":\"default\"," \
+	"\"via\":\"10.0.0.254\"}]}," \
+	"{\"name\":\"eth1\",\"addressing\":[],\"routes\":[{\"destination\":\"default\"," \
+	"\"via\":\"10.0.1.254\"}]}"
+
+#define UPLINK_SET ",\"linksets\":[{\"name\":\"uplink\",\"members\":[\"eth0\",\"eth1\"]}]"
+
+/* A link, with carrier or without. `PLANFIX_LINK` always has it. */
+#define DARK_LINK(name) \
+	"{\"name\":\"" name "\",\"index\":3,\"mtu\":1500,\"up\":true,\"carrier\":false," \
+	"\"ownership\":\"unknown\"}"
+
+static void only_the_member_a_set_chose_gets_its_routes(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_PORTS, TWO_ROUTED_PORTS, "", UPLINK_SET,
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "," PLANFIX_LINK("eth1", "") "]",
+	    &document, &observed);
+
+	/*
+	 * A set's whole meaning is that one member carries traffic at a time. A
+	 * spare that keeps a default route at a worse metric is not a spare -- it
+	 * is a second path the kernel falls back to without anything having
+	 * decided that it works.
+	 */
+	check(plan && planfix_count(plan, "route.add") == 1u,
+	    "a set with two members installs one member's routes and not the other's");
+	check(plan && planfix_mentions(plan, "10.0.0.254"),
+	    "and it is the one the set chose");
+	check(plan && planfix_warned(plan, "`uplink` is using eth0, so eth1's routes are not "
+	    "installed"),
+	    "and the spare is told which set decided and what it decided on");
+	check(plan && !planfix_warned(plan, "a `linkset`, whose choice would decide"),
+	    "and the set is no longer reported as something this build reads and ignores");
+	planfix_release(plan, document, observed);
+}
+
+static void a_spare_that_already_has_a_route_has_it_withdrawn(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_PORTS, TWO_ROUTED_PORTS, "", UPLINK_SET,
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "," PLANFIX_LINK("eth1", "") "],"
+	    "\"routes\":[{\"interface\":\"eth1\",\"destination\":\"default\","
+	    "\"via\":\"10.0.1.254\",\"proto\":110,\"ownership\":\"ours\","
+	    "\"origin\":\"static\"}]",
+	    &document, &observed);
+
+	/*
+	 * Withholding alone leaves the route that was installed before the set
+	 * changed its mind, at whatever metric it had -- which is the black hole
+	 * the withholding exists to prevent, arriving by the other door.
+	 */
+	check(plan && has_name(plan, "route.del"),
+	    "a route already installed on a spare is withdrawn, which is how a set switches");
+	planfix_release(plan, document, observed);
+}
+
+static void a_set_with_nothing_it_can_use_says_so(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_PORTS, TWO_ROUTED_PORTS, "", UPLINK_SET,
+	    "\"links\":[" DARK_LINK("eth0") "," DARK_LINK("eth1") "]",
+	    &document, &observed);
+
+	/* Two different sentences for an operator, and the one that matters most
+	 * is this: a set with nothing it can use is a machine with no uplink, and
+	 * "the routes are not installed" without it reads as a decision rather
+	 * than a failure. */
+	check(plan && planfix_warned(plan, "`uplink` has nothing it can use"),
+	    "a set whose members are all unusable says that, rather than naming a winner");
+	check(plan && !has_name(plan, "route.add"),
+	    "and installs nothing, since there is nothing to install it on");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
+ * `on_unmanage = "clear"`
+ * ------------------------------------------------------------------------ */
+
+#define CLEARING_VETH \
+	"{\"name\":\"veth0\",\"kind\":{\"kind\":\"veth\",\"peer\":\"veth1\"}," \
+	"\"managed\":false,\"on_unmanage\":\"clear\"}"
+
+#define LEAVING_VETH \
+	"{\"name\":\"veth0\",\"kind\":{\"kind\":\"veth\",\"peer\":\"veth1\"}," \
+	"\"managed\":false,\"on_unmanage\":\"leave\"}"
+
+/* The document asks for a *different* address from the one the machine holds,
+ * deliberately: a forward pass that was not stopped would plan an `addr.add`
+ * for it, which is what makes "plans nothing forward on it" a check rather
+ * than a sentence about an empty list. */
+#define CONFIGURED_VETH \
+	"{\"name\":\"veth0\",\"addressing\":[{\"source\":\"static\"," \
+	"\"address\":\"10.9.0.2/24\"}]}"
+
+#define OURS_LINK(name) \
+	"{\"name\":\"" name "\",\"index\":4,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"kind\":\"veth\",\"ownership\":\"ours\"}"
+
+#define OUR_ADDRESS \
+	"\"addresses\":[{\"interface\":\"veth0\",\"address\":\"10.9.0.1/24\"," \
+	"\"proto\":110,\"ownership\":\"ours\",\"origin\":\"static\"}]"
+
+static void clearing_removes_what_netcfgd_owns_and_then_the_device(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(CLEARING_VETH, CONFIGURED_VETH, "", "",
+	    "\"links\":[" OURS_LINK("veth0") "]," OUR_ADDRESS,
+	    &document, &observed);
+
+	check(plan && has_name(plan, "addr.del"),
+	    "`on_unmanage = \"clear\"` withdraws an address carrying netcfgd's tag");
+	/*
+	 * **And the device itself.** This is project.md 10.16: the Rust filtered
+	 * only the interface list, which was complete while a link's existence was
+	 * stated there. 0155 moved that onto the device, `teardown_links` reads
+	 * the device list, and a clearing device stayed in it -- so `clear`
+	 * withdrew the addresses and left the device standing, which is the one
+	 * thing it exists to take away.
+	 */
+	check(plan && has_name(plan, "link.delete"),
+	    "and deletes the device, which is the half filtering only interfaces missed");
+	check(plan && !has_name(plan, "addr.add"),
+	    "and plans nothing forward on it: adding and removing in one plan is a loop");
+	planfix_release(plan, document, observed);
+}
+
+static void clearing_a_machine_it_has_already_cleared_plans_nothing(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(CLEARING_VETH, CONFIGURED_VETH, "", "", "\"links\":[]",
+	    &document, &observed);
+
+	/* A state rather than a transition, which is why nothing detects an edge:
+	 * once there is nothing of netcfgd's left, there is nothing to do, for
+	 * ever. */
+	check(plan && quiet(plan), "and once it is done, every plan after it is empty");
+	planfix_release(plan, document, observed);
+}
+
+static void leaving_is_still_leaving(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(LEAVING_VETH, CONFIGURED_VETH, "", "",
+	    "\"links\":[" OURS_LINK("veth0") "]," OUR_ADDRESS,
+	    &document, &observed);
+
+	check(plan && quiet(plan),
+	    "`managed = false` on its own still touches nothing, including the teardown");
+	check(plan && planfix_warned(plan, "netcfgd will not touch it"),
+	    "and says so in the sentence that is true of it");
+	check(plan && !planfix_warned(plan, "removes everything it owns on it"),
+	    "and not in the one that is true of the other policy");
+	planfix_release(plan, document, observed);
+}
+
+static void the_clearing_sentence_says_what_will_happen(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(CLEARING_VETH, CONFIGURED_VETH, "", "",
+	    "\"links\":[" OURS_LINK("veth0") "]," OUR_ADDRESS,
+	    &document, &observed);
+
+	check(plan && planfix_warned(plan, "removes everything it owns on it"),
+	    "a clearing device is described by what clearing does");
+	check(plan && planfix_warned(plan, "an empty one means it is done"),
+	    "and tells the operator how to know when it has finished");
+	check(plan && !planfix_warned(plan, "would empty the device of everything netcfgd owns; "
+	    "this build leaves it instead"),
+	    "and the sentence saying this build does not do it is gone");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
+ * The three that are not port gaps
+ * ------------------------------------------------------------------------ */
+
+static void a_bluetooth_block_is_not_something_to_wait_for(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "", "",
+	    ",\"bluetooth\":[{\"id\":\"headphones\",\"address\":\"AA:BB:CC:DD:EE:FF\","
+	    "\"profile\":\"a2dp-sink\",\"autoconnect\":true}]", "\"links\":[]", &document, &observed);
+
+	/*
+	 * Nothing pairs the device, connects it or brings a `pan` link up -- and
+	 * nothing in the Rust does either, which is the half the old sentence left
+	 * out. "This build of the planner does not act on it" reads as a port
+	 * catching up, so an operator keeps the block and waits for a release that
+	 * is not coming.
+	 */
+	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
+	    "a `bluetooth` block is reported as a product gap and not as a port gap");
+	check(plan && !planfix_warned(plan, "a `bluetooth` block is carried in the document and "
+	    "this build of the planner"),
+	    "and no longer as something a later build of this port will do");
+	planfix_release(plan, document, observed);
+}
+
+static void a_probe_block_is_the_daemons_and_its_answer_is_acted_on(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(PORT_DEVICE,
+	    "{\"name\":\"eth0\",\"addressing\":[],\"preference\":10,"
+	    "\"routes\":[{\"destination\":\"default\",\"via\":\"10.0.0.254\"}],"
+	    "\"probe\":{\"command\":\"/bin/ping\",\"args\":[],\"interval\":30,"
+	    "\"timeout\":5,\"down_after\":3,\"up_after\":2,\"require_lease\":false}}", "", "",
+	    "\"links\":[{\"name\":\"eth0\",\"index\":2,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"reachable\":false,\"ownership\":\"unknown\"}]",
+	    &document, &observed);
+
+	check(plan && planfix_warned(plan, "run by the daemon rather than by the planner"),
+	    "a `probe` block is reported as the daemon's, which is whose it is");
+	/*
+	 * And the second half, which is the one the old sentence got backwards:
+	 * the planner *does* act on a probe -- on its answer. Saying it did not
+	 * was false about code that has been here since the addressing pass
+	 * landed.
+	 */
+	check(plan && !has_name(plan, "route.add"),
+	    "and the verdict is acted on: a failing probe withholds the routes");
+	check(plan && !planfix_warned(plan, "a `probe` block, whose answer would decide"),
+	    "so the sentence promising that it would one day is gone");
+	planfix_release(plan, document, observed);
+}
+
+static void a_modem_block_is_the_daemons_and_the_gap_is_named_exactly(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"wwan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"modem\":{\"sim\":[\"esim\",\"socket\"],\"apn\":\"im.cxn\"}}",
+	    "{\"name\":\"wwan0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("wwan0", "") "]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "the daemon's SIM selection"),
+	    "a `modem` block is reported as the daemon's, which is whose it is");
+	check(plan && planfix_warned(plan, "cannot yet be asked to cycle the link"),
+	    "and the part that really is missing here is named exactly rather than in general");
+	planfix_release(plan, document, observed);
+}
+
+int main(void)
+{
+	a_prefix_that_has_not_arrived_starts_nothing();
+	a_delegated_prefix_starts_the_daemon();
+	the_daemon_waits_for_the_addressing();
+	a_daemon_already_announcing_the_right_block_is_left_alone();
+	a_daemon_announcing_a_block_the_isp_took_back_is_reloaded();
+	a_daemon_the_document_stopped_asking_for_is_stopped();
+
+	an_authenticating_port_gets_its_supplicant_first();
+	a_supplicant_already_running_is_not_started_again();
+	the_rule_that_keeps_a_supplicant_is_the_rule_that_starts_one();
+
+	only_the_member_a_set_chose_gets_its_routes();
+	a_spare_that_already_has_a_route_has_it_withdrawn();
+	a_set_with_nothing_it_can_use_says_so();
+
+	clearing_removes_what_netcfgd_owns_and_then_the_device();
+	clearing_a_machine_it_has_already_cleared_plans_nothing();
+	leaving_is_still_leaving();
+	the_clearing_sentence_says_what_will_happen();
+
+	a_bluetooth_block_is_not_something_to_wait_for();
+	a_probe_block_is_the_daemons_and_its_answer_is_acted_on();
+	a_modem_block_is_the_daemons_and_the_gap_is_named_exactly();
+
+	printf("plan gaps: %d checks, %d failed\n", checks, failures);
+	return failures == 0 ? 0 : 1;
+}

@@ -102,6 +102,22 @@ typedef struct {
 } ncfg_plan_added_t;
 
 /*
+ * An interface a `linkset` is not currently using, and why.
+ *
+ * `instead` is the member the set chose, or NULL where it could use none of
+ * them -- two different sentences for an operator, and the one that matters
+ * most is the second: a set with nothing it can use is a machine with no
+ * uplink, and "the routes are not installed" without it reads as a decision
+ * rather than a failure. Every string is interned into the plan, because the
+ * choice these came out of is freed before the first route is planned.
+ */
+typedef struct {
+	const char *interface;
+	const char *set;
+	const char *instead;
+} ncfg_plan_standby_t;
+
+/*
  * Everything the passes accumulate while a plan is being assembled.
  *
  * Held in one struct rather than threaded through, which is the Rust's shape
@@ -145,6 +161,25 @@ typedef struct {
 	/* Devices a `device` block marks `managed = false`. */
 	const char **unmanaged;
 	size_t       unmanaged_count;
+	/* Of those, the ones whose `on_unmanage` is `clear`: netcfgd owns nothing
+	 * on them, so the teardown removes what it left behind. */
+	const char **clearing;
+	size_t       clearing_count;
+	/* Whether the teardown passes are running. The forward passes must not
+	 * touch a clearing device -- planning an address and removing it in the
+	 * same plan is a loop, not a convergence -- so the exemption in
+	 * `ncfg_builder_push` applies during teardown only. */
+	int          tearing_down;
+	/* The document the forward passes read, held while the teardown reads a
+	 * copy with the clearing devices filtered out. Both NULL otherwise. */
+	const ncfg_document_t *unfiltered;
+	ncfg_document_t       *filtered;
+
+	/* Interfaces a linkset has not chosen, collected once before anything is
+	 * planned: `ncfg_linkset_choose` walks nested sets, the link table and the
+	 * probe verdicts, and the answer cannot change inside one plan. */
+	ncfg_plan_standby_t *standby;
+	size_t               standby_count;
 } ncfg_builder_t;
 
 /* The ids every later action on this interface must wait for: its creation. */
@@ -266,6 +301,15 @@ void ncfg_plan_bridge_vlans(ncfg_builder_t *builder, const ncfg_device_t *device
  * than not redirecting it at all.
  */
 void ncfg_plan_offloads(ncfg_builder_t *builder);
+/*
+ * The IPv6 interface identifier, and netcfgd's one nftables table.
+ *
+ * Neither has a teardown half and each says why where it is defined: a token
+ * carries no ownership tag, and the NAT table is replaced whole rather than
+ * diffed, so an empty list *is* the removal.
+ */
+void ncfg_plan_ipv6_token(ncfg_builder_t *builder);
+void ncfg_plan_nat(ncfg_builder_t *builder);
 void ncfg_plan_rules(ncfg_builder_t *builder);
 void ncfg_plan_qdisc(ncfg_builder_t *builder);
 void ncfg_plan_ingress(ncfg_builder_t *builder);
@@ -295,6 +339,64 @@ void ncfg_plan_backend(ncfg_builder_t *builder, const char *name, int kind, cons
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
 void ncfg_plan_teardown_backends(ncfg_builder_t *builder);
 
+/* ------------------------------------------------------------------------ *
+ * 802.1X, router advertisements, failover sets and `on_unmanage = "clear"`
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The supplicant a wired 802.1X port needs, and whether a running one is still
+ * asked for.
+ *
+ * Planned before any address, because a port that has not authenticated drops
+ * everything and a DHCP client started first spends its whole backoff talking
+ * to a switch that is not listening. The two are one file for the reason
+ * `dot1x.c` gives: the conditions that start a supplicant and the conditions
+ * that keep one have to stay the same, and a rule in two files is one that
+ * eventually disagrees with itself.
+ */
+void ncfg_plan_dot1x(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const char *name);
+
+/*
+ * What this interface tells the hosts behind it.
+ *
+ * Takes the addressing ids as well as the base, because a router advertising a
+ * prefix it does not itself hold is advertising a route to nowhere -- and the
+ * prefix is very often the one the addressing just derived from a delegation.
+ */
+void ncfg_plan_advertise(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);
+
+/*
+ * Which interfaces a `linkset` is not using, and the sentence that says so.
+ *
+ * Collected before anything is planned and released at the end. Two passes ask:
+ * the route pass withholds a spare's routes, and the teardown withdraws the
+ * ones already installed -- which is how the set actually switches over, since
+ * a second default route at a worse metric is a black hole with a fallback
+ * rather than a spare.
+ */
+void ncfg_plan_standby_collect(ncfg_builder_t *builder);
+void ncfg_plan_standby_free(ncfg_builder_t *builder);
+int  ncfg_plan_standby_of(const ncfg_builder_t *builder, const char *name, const char **set_out,
+    const char **instead_out);
+void ncfg_plan_standby_warn(ncfg_builder_t *builder, const char *name);
+
+/*
+ * `on_unmanage = "clear"`: the devices netcfgd is to own nothing on.
+ *
+ * `collect` runs before the warnings, because the sentence an operator reads
+ * about an unmanaged device depends on which of the two policies it carries.
+ * `begin` and `end` bracket the teardown: between them the document has the
+ * clearing devices filtered out and `ncfg_builder_push` lets an action through
+ * for one, which is the only window in which either is true.
+ */
+void ncfg_plan_clearing_collect(ncfg_builder_t *builder);
+int  ncfg_plan_clearing(const ncfg_builder_t *builder, const char *name);
+void ncfg_plan_clearing_begin(ncfg_builder_t *builder);
+void ncfg_plan_clearing_end(ncfg_builder_t *builder);
+
 /*
  * The address a `delegated` source names, resolved against the observation.
  *
@@ -307,6 +409,59 @@ void ncfg_plan_delegated(ncfg_builder_t *builder, const ncfg_interface_t *interf
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
 int ncfg_plan_delegated_address(const ncfg_builder_t *builder,
     const ncfg_address_source_t *source, char *out, size_t out_size, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * What something outside netcfgd reported
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The report for this interface, where there is one.
+ *
+ * Shared for the reason `ncfg_plan_delegated_address` is: the addressing pass,
+ * the route list and the teardown each have to answer "is this still wanted?"
+ * about a value the document does not hold, and a second answer to that
+ * question is a plan that adds something and deletes it again for ever.
+ *
+ * The rule that decides whether a report is believed at all is
+ * `ncfg_plan_takes_reports`, and it is in `plan.h` rather than here because
+ * `ncfg explain` is its second caller -- which is what 0263 said should happen
+ * to it the moment this planner acted on `reported` rather than holding it.
+ */
+const ncfg_observed_report_t *ncfg_plan_report_for(const ncfg_observed_t *observed,
+    const char *name);
+
+/* The addresses a report carries, planned as netcfgd's own (decision 0047). */
+void ncfg_plan_reported(ncfg_builder_t *builder, const ncfg_interface_t *interface, size_t index,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+
+/*
+ * Whether the report for this interface still names this address.
+ *
+ * The teardown's half of the pass above, and **compared canonically**: a
+ * report's text is whatever its writer printed and never went through the
+ * compiler, while the kernel reports its own spelling. project.md 10.169 is
+ * what comparing the two as text costs.
+ */
+int ncfg_plan_reported_holds(const ncfg_observed_t *observed, const char *interface,
+    const char *address);
+
+/*
+ * Every route an interface should have: the document's, then the report's.
+ *
+ * Entries below `owned_from` are shallow copies whose strings are the
+ * document's; from there on the strings are this block's and
+ * `ncfg_plan_routes_free` gives them back. A caller may copy a route by value
+ * so long as the copy does not outlive the block.
+ */
+typedef struct {
+	ncfg_route_t *routes;
+	size_t        count;
+	size_t        owned_from;
+} ncfg_plan_routes_t;
+
+void ncfg_plan_routes_for(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    ncfg_plan_routes_t *out);
+void ncfg_plan_routes_free(ncfg_plan_routes_t *routes);
 
 /*
  * How many times netcfgd starts a backend that does not stay up before it
