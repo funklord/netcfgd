@@ -218,7 +218,13 @@ taken.
   itself, which is what lets the whole path be driven by a double. It does not
   write `plan.last.json` or fold the effects into `owned.json`: both are
   deferred with the types they need, and both are named here rather than
-  quietly missing.
+  quietly missing. **Both have since landed, and neither landed here.**
+  `ncfg_apply_revert` is still a library call taking a plan, a journal and an
+  executor, with no run directory -- what changed is that its *caller* does
+  both, `confirm.c`'s `record_what_ran` folding the journal into `owned.json`
+  and then writing it to `plan.last.json`. That is the right place for the same
+  reason the executor is an argument: the revert path is driven by a double in
+  the tests, and a library call that wrote into `/run` could not be.
 * **The resolv sweep is driven through a seam, and the seam has no default.**
   The Rust's sweep ends in `SIGTERM` to a pid it found in `/proc`, which is why
   it has no unit tests at all and a live script instead -- on the machine these
@@ -659,6 +665,11 @@ taken.
 * **`plan.last.json` and the fold into `owned.json` are deferred here as they
   are for the revert path**, and for the same reason: the executor seam reports
   no effects, so there is nothing to fold. Named rather than quietly missing.
+  **Neither is deferred any more.** The fold closed when it stopped needing an
+  effect list at all -- `ncfg_apply_record` takes the plan and the journal --
+  and the journal writer closed with `ncfg_apply_write_journal`, which
+  `reconcile_pass.c`'s `record_what_ran` calls straight after the fold, under
+  the apply lock and before the executor is closed.
 
 * **`src/main/` is not in `libncfg.a`, and it is the one directory the
   wildcard holds out.** The Makefile's rule is that the directory is the list;
@@ -1692,7 +1703,10 @@ taken.
   executor cannot carry out is refused **while the plan is running**, so a plan
   mixing one with a supported op changes the machine and stops halfway; and
   `plan.last.json` is still not written, so a plan that stopped halfway leaves
-  nothing under `/run` saying where. `main_test.c` asserts the two closed facts
+  nothing under `/run` saying where. **That third fact is closed too**, by
+  `ncfg_apply_write_journal`; what is left is the planner's ten blocks and the
+  mid-plan refusal, and `daemon_answer.c`'s refusal on the socket says two
+  things now rather than three. `main_test.c` asserts the closed facts
   closed and the executor's mid-plan refusal still true, so the check moves
   with the sentence in both directions -- the version before it grepped
   `kernel_link.c` for an alternative name, and `create_link` has never been in
@@ -1974,7 +1988,485 @@ taken.
   sentence saying so, where the Rust's is a `Vec` with no bound and says
   nothing. Closing that last gap means the loop watching the subscriber
   descriptors for `POLLHUP`, which is a `prune` in `daemon_world.c` and belongs
-  to whoever owns that file next.
+  to whoever owns that file next. **It is closed**, and the entries below say
+  what the sweep decides with and why that is not what a source is judged by.
+
+* **A tun is created, and `tun.h`'s mode enum is the model's rather than its
+  own.** `ncfg_apply_supported` says a `tun` can be created again and
+  `create_link` takes the kind before it builds anything, handing a tun to
+  `ncfg_tun_create` rather than to `ncfg_kernel_newlink_of` -- which refuses
+  one and always will, there being no `RTM_NEWLINK` for a device that comes
+  from an ioctl. The planner followed without being touched, because
+  `src/plan/link.c` asks the executor rather than keeping a list; that is now
+  a check rather than a claim.
+
+  **What the wiring found is that the two halves could never have been
+  compiled together.** `tun.h` declared its own `ncfg_tun_mode_t`, with the
+  same two enumerators and the same two values as `document.h`'s, and C makes
+  a repeated enumerator a redeclaration rather than a redefinition -- so any
+  translation unit including both failed to compile. Nothing did: `tun.c` and
+  `tun_test.c` include `tun.h` alone, so the module built, its tests passed,
+  and the clash was invisible for exactly as long as nothing called the module
+  from anywhere the model was in scope. The model keeps the numbering, as it
+  does for a bond's mode and a tunnel's kind word, and `tun.h` includes
+  `document.h` for it -- which `ops.h` and `wg.h` already do from the same
+  layer.
+
+  **The conversion is a builder, and the owner and the group are why.** The
+  document names a user and a group and the kernel wants a uid and a gid, so
+  `ncfg_kernel_tun_spec_of` in `kernel_link.c` is where that happens, beside
+  the one netlink conversion and for its reason. The lookup is
+  `ncfg_peer_user_id`/`ncfg_peer_group_id` -- `daemon.h`'s, read out of
+  `/etc/passwd` and `/etc/group` as files rather than through NSS -- which
+  makes `src/apply/` include `daemon.h` for two functions. That is upward and
+  is recorded rather than hidden; the alternative was a second reader of those
+  two files in this directory, which is the duplication every other comment in
+  it refuses. Both paths take the file as an argument, so the conversion is
+  checked against a passwd and a group file a test wrote, on a machine where
+  the names need not exist.
+
+  **A tun this build creates wears the alternative name**, which is the one
+  place this deliberately does not copy the Rust: its `Op::LinkCreate` returns
+  from the tun arm twenty lines above the block that marks a created link, so
+  the one kind whose ownership most needs the kernel's mark is the one kind
+  without it (project.md 10.173). `create_tun` calls `mark_as_ours` exactly as
+  the netlink path does, after the device exists and never before.
+
+  **What is not tested, and cannot be here:** that a device actually appears.
+  Making one needs `CAP_NET_ADMIN` and `/dev/net/tun`, and this suite runs on
+  the machine netcfgd would configure -- a persistent tap left behind by a test
+  is a device on somebody's workstation that only `ip link delete` removes. So
+  `tun_test.c`'s arrangement is taken one layer up: the spec the executor built
+  is handed to `ncfg_tun_create` with an ordinary file as the clone device, the
+  open succeeds, `TUNSETIFF` answers `ENOTTY`, and what is asserted is that the
+  refusal names the device -- which is the seam joining up, with the ioctls'
+  order still `tun_test.c`'s subject and still asserted as a value.
+
+* **`plan.last.json` is written, under `owned.lock`, and an empty journal is
+  written too.** `ncfg_apply_write_journal` is the writer and `src/apply/` is
+  its home, because the type is that module's -- `state.h` said so while
+  deferring it and says where it went now. Three divergences from the Rust,
+  each small and each deliberate:
+
+  * **The lock.** The Rust's writer is an atomic rename and nothing else, so
+    `plan.last.json` and `owned.json` can be replaced in either order by the
+    two processes that write both. They are two halves of one statement about
+    one apply, and a reader that finds a journal claiming a link was created
+    beside a record that does not claim it has been handed two applies' worth
+    of machine. The critical section is a render and a rename, which is what
+    `ncfg_owned_update` already pays. The cost is a rule: this may not be
+    called from inside that function's change callback, `flock` being held by
+    the open file description, so every caller does the pair in sequence.
+  * **An empty journal is written**, where the fold beside it deliberately
+    writes nothing. Not an inconsistency: the record is a claim that
+    accumulates and must not be rewritten by a pass that changed nothing,
+    while this file answers a question about the *last* apply -- and "it did
+    nothing" is that answer. A file left behind from an earlier apply would be
+    read as this one's.
+  * **A failure is reported to the caller**, which is the Rust's silent
+    `let _ =` in all three of its daemon call sites and is a defect reported
+    with this wave. Both C callers log a note and carry on, which is
+    `state.h`'s bargain about a derived directory -- but they are told.
+
+  **It is checked through the pass rather than only at the call.**
+  `reconcile_test.c` drives a real reconcile over a run directory of its own
+  with an executor that is a double, and reads the file back: once where the
+  action stood, and once where the double refused it, so the failed outcome and
+  the executor's own sentence are asserted to be in the file rather than only
+  in the log. That is the case the file exists for -- a reconcile has no
+  terminal, so an apply that stopped at its third action has nowhere else to
+  say so.
+
+* **A dead subscriber is swept once a round, and what a `revents` means for a
+  stream is not what it means for a source.** `ncfg_main_subscribers_prune`
+  closes the gap the entry above named: pruning used to happen only inside a
+  broadcast, and a converged machine broadcasts nothing, so sixteen streams
+  whose clients had gone could hold every place in the list and refuse the
+  seventeenth `monitor`.
+
+  **The decision is a value in `daemon_wake.c`** like every other reading of a
+  `revents` in this program, and it is a *second* one rather than a reuse of
+  `ncfg_main_readiness` -- which is the whole of what is interesting here.
+  That function puts `POLLIN` ahead of `POLLHUP` because a source is drained by
+  whoever owns it and its last records must not go with the hang-up. Nothing
+  drains a subscriber: it is written to and never read. A client that closed
+  leaves `POLLIN|POLLHUP` set together and set for ever, so borrowing the
+  source's reading would keep exactly the descriptors the sweep exists to drop.
+  `ncfg_main_subscriber_ended` answers on `POLLHUP|POLLERR|POLLNVAL` and reads
+  a readable-only stream as a client being rude rather than a client leaving.
+  Both readings of `POLLIN|POLLHUP` are asserted side by side, because the
+  difference is the entire reason there are two functions.
+
+  **The sweep asks `poll` about its own descriptors with a zero timeout rather
+  than joining the loop's wait**, and the reason is what a subscriber is: it
+  has no drain, no kind and no place in the source set, so putting sixteen of
+  them into `ncfg_main_round`'s set would make the daemon wake for a hang-up it
+  can do nothing about beyond dropping. What that costs is named rather than
+  claimed away: a dead stream is carried for at most one tick
+  (`NCFG_MAIN_TICK_MS`) instead of until the next event, which on the machine
+  this is about was never. The call is made after the mailbox is emptied and
+  before the pass, so a `monitor` that arrived this round is swept with
+  everything else and an event is not written to a descriptor already known to
+  be gone.
+
+* **A report's addresses and routes are compared as addresses, never as text --
+  and that includes a route's destination, where the Rust canonicalises only
+  the next hop.** `reported` is the one addressing source whose value went
+  through no compiler: every other address netcfgd installs came through
+  `canonical_address` and already reads the way the kernel prints it, while a
+  report is the text somebody's shell script produced. project.md 10.169
+  measures what `strcmp` costs there against the shipped Rust -- an `addr.add`
+  planned for an address the kernel is already holding, and, because the
+  address is netcfgd's, an `addr.del` for it in the same plan, on every
+  reconcile, for ever, each half succeeding.
+
+  So `ncfg_plan_address_equal` is what the forward pass and the teardown both
+  ask, and a reported gateway and a reported route's destination are
+  canonicalised as they are synthesised. The next hop is the Rust's own
+  behaviour by accident -- it parses to `IpAddr` and renders through `Display`
+  -- and **the destination is not**: `normalize_destination` maps the three
+  spellings of a default route to `default` and hands everything else back as
+  written, so a VPN pushing `2001:0DB8:2::/64` is a route the kernel reports as
+  `2001:db8:2::/64` and the comparison never matches. Reported with this wave.
+  `ipv6_token` is compared the same way and is *not* a divergence: the Rust
+  parses both sides there and says why.
+
+  Two further consequences, each the removal of something rather than an
+  addition. The teardown no longer declines to answer for an interface that
+  takes a `reported` source -- it used to warn that nothing of netcfgd's would
+  be withdrawn from such an interface, which was honest while the report was
+  unread and is a lie now that it is read. And `ncfg_plan_routes_for` is the
+  one function both directions ask for an interface's routes, which is the
+  Rust's `routes_for` and its reason: two answers to "which routes does this
+  interface want" is a plan that installs a route and deletes it on alternate
+  reconciles.
+
+* **`warn_block`'s sentence has gone, with the last three arms that made it.**
+  The planner had two shapes of warning for a block it was holding:
+  `warn_block`, which said "this build of the planner does not act on it", and
+  `warn_unbuilt`, which says nothing acts on it in either language. The first
+  is a promise that a later release will, and `reported`, `nat` and
+  `ipv6_token` were the last three blocks it was made about. With those ported
+  the function had no callers, which is a warning at the full set and an
+  invitation for the next arm to reach for a promise nobody has checked -- so
+  it is gone, and a block that is a real port gap now gets a sentence naming
+  what is missing, in the arm itself, where a reader can check it against the
+  pass that will fill it.
+
+* **`takes_reports` is `plan.h`'s now, and `explain.c` calls it.** An earlier
+  entry records it as one of two rules spelled a second time in `explain.c`,
+  each because this port had one caller for it so far, and says the second
+  caller takes that one rather than writing a third. The condition it named has
+  ended: the planner no longer holds `reported` addressing, it acts on it, so
+  the rule has two callers and one definition. `derive_from_delegation` went
+  the same way a wave earlier and `explain.c`'s header no longer claims either.
+
+  This is the arrangement the Rust has, and its reason is worth restating
+  because it is not tidiness: `netcfgd-plan` makes the rule `pub` so that the
+  explanation and the planner cannot disagree about which reports are believed.
+  An operator asking why a route is there would otherwise be told the
+  configuration does not ask for it, about a route netcfgd installed itself.
+
+* **`--json` is answered at the seven verbs that write, which the entry above
+  said still ignored it.** *The subcommands that write still ignore `--json`,
+  in both programs* has stopped being true of this port. That entry named what
+  it needed -- the human lines behind the same test inside each writer -- and
+  that is what `control.c`, `drop_in.c`, `profile.c`, `secret.c`,
+  `wifi_write.c` and `reset.c` now do: the table and the document are the two
+  arms of one `if` at each verb, so a line added to either side has the other
+  in front of it. **The Rust is still in the state that entry describes**; the
+  five CLI modules and `command_reset` between them contain no reading of
+  `options.json` at all.
+* **The object is the payload, as everywhere else, and it borrows the socket's
+  word wherever the socket has one.** `cli.h`'s rule is unchanged -- compact,
+  one line, no `"response"` envelope, an optional member absent rather than
+  null -- and the spelling of a fact is taken rather than invented: `chosen`
+  for a profile (from the `profiles` response), `used_by` for a credential
+  (from the `secrets` response), `secured` for a network (from a scan entry).
+  So `ncfg profile set --json` and `ncfg profile get --json` answer in the same
+  member, and a reader learns one name per fact rather than one per verb.
+  What each verb prints:
+  * `control show` -- `{"observe","wifi","admin"}`, the three tiers rendered by
+    `ncfg_cli_principal_render` so that the document and the configuration file
+    cannot spell `group:NAME` two ways. `control set` puts `path` in front of
+    them, which is the file this run wrote; `show` has none, because it
+    compiled the whole layered configuration rather than reading one file.
+  * `config put` -- `{"name","daemon"}` with `path` where this process wrote
+    the file and `folded` where a profile was folded into `conf.d`.
+    `config rm` is the same plus `removed`.
+  * `profile get` -- `{"chosen":"office"}`, or `{}`. `list` is the socket's
+    `profiles` payload exactly. `set`, `save` and `unset` print `chosen` beside
+    `daemon`, and `save` adds `path` on the local route only.
+  * `secret set` -- `{"name","path","replaced","daemon","used_by"}`.
+  * `wifi add` -- `{"id","secured","daemon"}` with `file`, `secret`,
+    `activated` and `usable` where there is one. `wifi forget` --
+    `{"id","daemon","removed","kept"}`.
+  * `reset` -- `{"config_dir","factory_dir","factory_remaining"}` with
+    `credentials_remaining` and exactly one of `removed` or `would_remove`.
+* **A profile that is not chosen is an absent member, not a name.** `ncfg
+  profile get --json` on a machine with no profile prints `{}`, and `unset`
+  prints an object with no `chosen` in it, so `get` straight afterwards agrees
+  by construction rather than by wording. 0151's rule is that an absent
+  selection and the shipped do-nothing profile are different states; a document
+  saying `"none"` would be the one sentence the text form refuses to print,
+  spelled as JSON. The socket agrees -- its `profiles` response skips `chosen`
+  when nothing is selected.
+* **An absent member means "not known", and never "none".** These verbs have
+  two routes and the daemon's answer is `ok`, which settles less than a local
+  write does. So `removed` is written by `config rm` only on the route that
+  looked; `removed` and `kept` by `wifi forget` only there; `usable` by `wifi
+  add` only there; `used_by` by `secret set` only where the configuration
+  compiled; and `credentials_remaining` by `reset` only where the store could
+  be listed. **The alternative is the fault this record spends its length
+  refusing**: an empty list written by a command that never looked is a finding
+  nobody made, and a script cannot tell it from one that did.
+* **`ncfg reset --json` writes `removed` from what `unlink` answered, and never
+  beside `would_remove`.** project.md 10.175 is the reason and it is the worst
+  case this flag has: the Rust prints the word `removed` over the whole list
+  *before* the loop that removes anything, so a reset that stops on its second
+  file has already reported that all of them are gone. A document claiming a
+  removal is worse than a sentence doing it, because a script believes it. The
+  two members are therefore mutually exclusive -- a run that attempted nothing
+  prints the prediction, a run that removed prints the record, and the record
+  is built from the paths `unlink` returned 0 for. **A run that stops part way
+  prints no document at all**: the verb answers 0 and its sentence carries
+  which file stopped it and how many of how many had gone, which is
+  `say_json`'s rule for a render that failed and is right here for the same
+  reason -- half an answer is the one that gets parsed.
+* **The refusal these verbs print says that the command already happened.**
+  `run.c`'s `say_json` does not need that clause, because the verbs it serves
+  render and change nothing. These six write first and compose the answer
+  after, so a name off `argv` that is not valid UTF-8 -- the refusal a caller
+  actually meets, per *A name that is not valid UTF-8 fails the command rather
+  than the program* above -- fails a command whose file is already on disk. A
+  reader told only "could not be written as JSON" concludes the write did not
+  happen and stores the credential somewhere else. Driven end to end in
+  `cli_secret_test.c`, which asserts the sentence, that nothing at all is
+  printed, and that the file is there.
+* **The shared write helpers hand their facts back rather than printing a
+  document.** `ncfg_cli_put_text` and `ncfg_cli_remove_named` are one helper
+  with three callers, and `ncfg config rm` and `ncfg profile unset` do not have
+  the same answer -- one is about a drop-in by name, the other about which
+  profile the machine is on. A helper that wrote its own object would put two
+  values on a stream that promised one, so it fills `ncfg_cli_wrote_t` and the
+  verb composes. The human lines stay where they were, behind the same test.
+* **The advice is not in the document, at any verb.** `ncfg plan` and `ncfg
+  apply --confirm-within 60` after a profile switch, what to do about a
+  root-only socket, that a group's member has to log in again, that an open
+  network is readable by anybody in range -- each is a sentence addressed to a
+  person and the same sentence on every run. This is `ncfg plan --json`'s own
+  rule for the two notes under a plan, applied to the verbs that write.
+* **`fresh_tree` in `cli_wifi_test.c` was removing two files that never
+  existed.** Not a divergence but a fault in this port's own fixture, found
+  while writing the `--json` cases: the radio drop-in is
+  `radio-<interface>.conf`, from `ncfg_wifi_radio_drop_in`, and the list held
+  `50-wifi-wlan0.conf` and `50-wifi-wlan1.conf`. So a radio handed over by one
+  case stayed handed over for every case after it, and no case after the first
+  could assert that `wifi add` activates a radio. Corrected, and the `--json`
+  case asserts `activated` because of it.
+
+* **Four of `warn_unported`'s seven arms were port gaps and three were not, and
+  the three had to stop saying they were.** The arm's sentence -- "this build of
+  the planner does not act on it" -- is a *promise*: it tells an operator that a
+  later release will, and that waiting is the right response. Each of the seven
+  was checked against `crates/` before anything was written, and they did not
+  come out the same way.
+
+  `advertise` is `plan_advertising` (`crates/netcfgd-plan/src/lib.rs:3885`),
+  `dot1x` is the first arm of `plan_prerequisite` (`:2447`, the arm at `:2453`),
+  a `linkset`'s choice is `standby_interfaces` (`:1376`) read by `plan_route`
+  (`:4348`) and `teardown_routes` (`:5593`), and `on_unmanage = "clear"` is
+  `prepare` (`:1477`), the exemption in `Builder::push` (`:1850`) and the
+  filtered document in `plan_teardown` (`:5565`). Four real gaps, now four
+  passes, and their arms are gone.
+
+  A **`probe`** block is not the planner's at all: the daemon runs it
+  (`crates/netcfgd-daemon/src/probe.rs:219`, ported at
+  `c/src/daemon/probe.c:817`) and what the planner reads is the *verdict*,
+  `Self::probe_failing` (`:1963`) at `plan_route:4380` and
+  `teardown_routes:5626` -- both of which this port already has, at
+  `c/src/plan/address.c:339` and `:435`. So the old sentence was wrong twice
+  over: it named a gap that is not this port's, about a rule this port had
+  already ported. A **`modem`** block is the same shape:
+  `crates/netcfgd-daemon/src/sim.rs` reads it, ported at
+  `c/src/daemon/sim.c:335`, and the planner's only interest is the SIM cycle,
+  which is the `cycle` option this record already defers. A **`bluetooth`**
+  block is acted on by nothing, in either language -- `warn_bluetooth`
+  (`:1075`) says so in the Rust's own words, the only other readers are the
+  compiler and an observer that lists adapters
+  (`crates/netcfgd-observe/src/host.rs:874`), and `tests/live/bluetooth.sh`
+  states in its own header that adapter observation "is all netcfgd's core
+  does".
+
+  So the three keep a warning and each now says which of the two things is
+  true. `warn_block` has gone with the last arm that used it, and `warn_unbuilt`
+  is what a block that nothing anywhere acts on gets: *nothing acts on it in the
+  Rust either, so there is nothing to wait for*. Telling somebody to wait for
+  something that is not coming is worse than saying nothing, and no check that
+  looks only at what a plan *does* can find it -- so the wording is asserted,
+  and putting each old sentence back turns a check red.
+* **The `advertise` pass compares the two prefix lists as one space-joined
+  string.** The Rust compares `Vec<String>` element by element and then joins
+  each side for the reason line. No address contains a space, so the two
+  questions have the same answer -- and this way the comparison is made of
+  exactly the text the operator is shown, which a difference that did not reach
+  the sentence could not be.
+* **A `linkset`'s standby set is collected once, into a counted array, with its
+  strings interned into the plan.** The Rust builds a `HashMap` in `prepare`;
+  the shape here is the same decision for the same reason -- `ncfg_linkset_choose`
+  walks nested sets, the link table and the probe verdicts, and asking it per
+  route would make planning cost scale with the number of routes an operator
+  wrote. Interning is what the C adds: the choice is freed before the first
+  route is planned, so a borrowed name would be read afterwards. Replacing in
+  place is the "last set wins" a `collect` into a map gives.
+* **`on_unmanage = "clear"` filters a shallow copy of the document and swaps it
+  in for the teardown only.** The Rust clones the whole `Document` and retains
+  on the clone; here two arrays are allocated, every string in them is still the
+  document's, and `ncfg_plan_clearing_end` puts the original back. Nothing in a
+  teardown writes through the document and the original outlives the plan, so a
+  deep copy would be a second lifetime to get wrong for no answer that differs.
+  Both lists are filtered, and the device list is the one that matters: 10.16 is
+  what filtering only the interfaces cost, and the sabotage that puts that back
+  turns the `link.delete` check red.
+* **`ncfg_plan_teardown_backends` asks a `backend_wanted` of its own, with a
+  permissive default.** The Rust's is exhaustive over all nine kinds, which is
+  right in a planner where every pass that starts one exists. Here the access
+  point and the two tunnels are still started by passes this build does not
+  have, so the default arm answers *wanted* -- stopping something netcfgd never
+  started, and starting nothing in its place, is the worse direction. The
+  supplicant and the router advertisement daemon have left that arm with their
+  passes. The supplicant's rule is asked in `ncfg_plan_supplicant_wanted`,
+  beside the pass that starts one rather than here, because the conditions that
+  start a supplicant and the conditions that keep one have to stay the same --
+  and its radio arm is what keeps this build from stopping one it cannot
+  replace.
+* **The supplicant and the advertisement daemon inherit `ncfg_plan_backend`'s
+  `link.up` dependency, which the Rust's equivalents do not have.** The Rust's
+  `base` at that point carries the gate, the enslavements and the `up` hook
+  ids, and *not* the `link.up` id itself -- so on an interface with no `up`
+  hook, `plan_prerequisite` and `plan_advertising` depend on nothing that
+  brings the link up, and only the list order puts them after it. Rule 3 is
+  already this port's answer for a DHCP client and it costs nothing to be right
+  about here.
+* **The two calls are in `link.c`'s interface walk rather than in `build.c`'s
+  sequence, and that is where they have to be.** Both are defined in files of
+  their own under `src/plan/`, but a supplicant has to be emitted between
+  `link.up` and the addressing it gates, and the advertisement daemon has to
+  carry the addressing ids it waits on -- and those ids are local to
+  `ncfg_plan_interface_contents`. A whole-document pass called afterwards could
+  reconstruct neither: `plan.h` says the action list is already a valid
+  execution order, so emitting the supplicant after the DHCP client would be
+  the defect the prerequisite exists to prevent, whatever the edges said. The
+  other two are `build.c`'s: the standby set is collected before every pass that
+  plans a route, and the clearing filter brackets the teardown.
+
+* **The DHCP client's machine paths are members of a struct with no defaults,
+  where the Rust reads two environment variables.** `NCFG_DHCPCD_HOOK` and
+  `NCFG_DHCPCD_RUN_DIR` exist there so that a test can point them somewhere
+  safe, which means the production path reads `/usr/libexec/netcfgd/dhcpcd-hook`
+  and `/run/dhcpcd` whenever nobody remembered to set them. `ncfg_dhcp_machine_t`
+  carries the hook, dhcpcd's own run directory, what `-f` points at, the three
+  programs and the stop's patience; `ncfg_dhcp_machine` is the one place this
+  machine's answers are written down, so a check asserts what a daemon would use
+  by reading it. That is `ncfg_contention_machine`'s arrangement and
+  `ncfg_service_t`'s bargain, taken here for the reason both give: the machine
+  these tests are built on is a workstation whose network is live, and a default
+  is how the difference between a check and an outage becomes a variable
+  somebody remembered to set.
+* **The dhcpcd hook is demanded of the dhcpcd candidate, not before a client is
+  chosen.** The Rust resolves it at the top of the `Dhcp4` arm, before the three
+  candidates are tried at all, so a machine whose only client is busybox udhcpc
+  is refused its lease over a file it would never have run -- the hook is
+  `-c`'s, and udhcpc has no equivalent. Reported in project.md 10.178. Here the
+  check is inside the dhcpcd candidate, so a missing hook still refuses the
+  machine that would have used one, by name and quoting the path, and no longer
+  refuses the machine that would not.
+* **The metric record is written only for the client that was given a metric.**
+  `record_started_metric` runs on whichever of dhcpcd, udhcpc and busybox
+  started, and the last two have no `-m` at all -- busybox udhcpc's script does
+  the routing. So on a busybox machine the Rust writes down a number the client
+  never heard, and 0241's own reader takes that record *instead of* comparing
+  the installed route, which is the fallback that would have noticed. Here
+  dhcpcd's start records the metric and the other two clear the record, which
+  leaves the planner reading "cannot tell" -- the answer it had before the
+  record existed, and the correct one.
+* **A dhcpcd on the interface that is not netcfgd's refuses the start rather
+  than being spawned beside.** The Rust's own comment at that point says
+  "neither is a reason to spawn beside it" and the code then falls through and
+  spawns: dhcpcd's instance lock refuses the second, it prints "sending commands
+  to dhcpcd process" and **exits 0**, so netcfgd records a start it did not
+  make, on a client whose `-f` it does not hold and which its own
+  `confirm_dhcpcd_stopped` will decline to account for. The refusal here names
+  what the running client recites and says why attempting it would have looked
+  like success. `None` is unchanged and still starts: that is "netcfgd could not
+  tell", which is the ordinary state of every machine whose client is udhcpc.
+* **A stop asks whose the client is before it signals, not after.** `dhcpcd -k
+  <iface>` finds a client by convention, which is exactly what 0014 forbids, and
+  the Rust sends it first and asks the control socket afterwards -- so a
+  stranger's `dhcpcd -4` on that interface is signalled, and
+  `confirm_dhcpcd_stopped` then reports that the stop "neither reached nor
+  disturbed" it, which is its own doc comment's claim and is false. Here the
+  question comes first: netcfgd's own client is signalled and confirmed, a
+  stranger's is left alone and named in a note, and what the op asked for --
+  that no client *of netcfgd's* is running there -- is satisfied either way.
+  0141 keeps what to do about somebody else's daemon a person's decision.
+* **The marker a stop checks is the pid-file path, which is the marker the
+  start already uses.** The Rust's `backend_pid_file` gives both DHCP clients
+  the *interface name*, calling it in the same breath "the weakest marker
+  netcfgd uses", and `stop_recorded_client` signals on it -- while the start
+  path twelve hundred lines earlier adopts the same process by the `-p` path in
+  its own `argv`. Two markers for one process, and the weaker one is where the
+  signal goes. netcfgd puts that path there, busybox does not call
+  `setproctitle`, and `ncfg_process_pid_of` already applies the whole-argument
+  rule to it, so there is nothing to invent. Reported in project.md 10.178.
+* **How long a stop waits for `dhcpcd -k` is an argument.** The Rust sleeps
+  100ms at a time for three seconds against a live socket, which is why nothing
+  exercises it; `patience_ms` lets a check drive both outcomes -- a client that
+  goes and one that does not -- in a fifth of a second, and the constant is
+  published so the default is not spelled twice.
+* **A DHCPv6 start is refused and a DHCPv6 stop is carried out.** Which v6
+  client can serve a document turns on whether it asked for a delegated prefix,
+  since dhcpcd measurably reports one to a script and odhcp6c does (0050), and a
+  plain `backend.start` carries neither the request nor an odhcp6c -- the Rust
+  refuses it in the same words at the same point. Stopping is a different
+  question and is answerable with what is here: `dhcpcd -6 -k` under the same
+  ownership rule, and an odhcp6c by the pid it was told to record.
+  `ncfg_apply_supported` therefore answers differently for the two verbs of one
+  kind, which nothing else in this build does and which is the honest shape.
+* **The metric that reaches the client is resolved by the caller.**
+  `netcfgd_model::wifi::effective_metric` is the rule -- the network's `metric`
+  where the radio is associated to one that carries it, the interface's own
+  `preference` otherwise -- and half of it comes from the observation, which the
+  service context does not hold. The Rust records what building it from the
+  document alone cost: measured on a veth against a real server, the lease's
+  route carried 1003, dhcpcd's own default, on a document whose network said
+  100, and stayed 1003 across a switch to a network saying 400. So
+  `ncfg_service_client_metric_t` is a list the caller fills, which is
+  `ncfg_service_advertise_t`'s arrangement for `ncfg_service_advertise_t`'s
+  reason. An interface with no entry starts a client with no `-m`, which is not
+  a refusal: no metric is an ordinary document. **`value.h` has no port of
+  `effective_metric` and this build has no reader for the record either** --
+  `src/plan/` carries no metric-driven restart -- so both halves are named here
+  rather than quietly missing.
+* **The metric record is removed when the client is stopped.** The Rust leaves
+  it, and a record of what a *running* client was started with is an account of
+  nothing once there is no client. Nothing observable turned on it either way --
+  the following start rewrites or clears it -- so this is tidiness with a reason
+  rather than a defect closed, and it is here because the record's own rule is
+  that a stale one says the running client carries a metric it was never given.
+* **The udhcpc script refuses a path that carries a single quote.** Every one of
+  the three is composed by netcfgd out of a run directory and an interface name,
+  so none of them can hold one -- and "cannot" is the claim this project checks
+  rather than makes, because what is on the other side of being wrong is a lease
+  event running the rest of the path as root. The Rust interpolates all three
+  unexamined.
+* **`ncfg_dhcp_running_pid` and `ncfg_dhcp_adopt` are public**, where the Rust
+  keeps the equivalents inside `start_backend` and reaches them from a unit test
+  in the same file. A C test links against the library and can see only what the
+  header publishes, which is `ncfg_process_pid_of_as`'s reason one module over;
+  and adoption is the half of this backend that is worth exercising on its own,
+  since the pid file going with the run directory is what happens on every
+  restart rather than an edge case.
 
 ## What is not being decided here
 

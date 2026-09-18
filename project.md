@@ -6931,8 +6931,8 @@ a shell cannot satisfy.
 ## 10.14 Bluetooth is written and has never run
 
 Recorded because the README now points here for what is proven. The
-`bluetooth` block, the two backends and the adapter compile and are covered by
-fixtures, and `tests/live/bluetooth.sh` exists — but it needs real root for
+`bluetooth` block compiles and is covered by fixtures, and
+`tests/live/bluetooth.sh` exists — but it needs real root for
 `/dev/vhci` and **has never been executed**, on this machine or any other. Its
 skip was one of the two that reported success under `NCFG_LIVE=1` until
 2026-09-03 (10.11), which is how it stayed invisible: the suite was reporting a
@@ -6941,6 +6941,22 @@ pass for a script that ran nothing.
 So Bluetooth's status is *written, unverified* — a weaker claim than every
 other feature in the README, and the one to say out loud if anybody asks what
 to try first.
+
+> **Corrected 2026-09-18: it was weaker than that.** This paragraph said "the
+> two backends and the adapter compile", and **neither backend exists**.
+> [0148](doc/decision/0148-bluetooth-is-two-backends-and-an-adapter.md) names
+> them and settles their shape; nothing was ever written, and
+> `git log --diff-filter=D` finds no bluetooth backend ever deleted, so they
+> have never been in the tree. What does exist is the model type, the
+> compiler's lowering and rendering, the observer listing adapters, the GUI
+> dialog, and `warn_bluetooth` -- whose own sentence is that "nothing pairs the
+> device, connects it, or brings a `pan` link up".
+>
+> So the status is **specified and not written**, a step below *written,
+> unverified*, and this was the sentence a reader would otherwise have used to
+> believe there was code to run. Found while porting the planner: a worker
+> deciding whether the C should act on a `bluetooth` block went looking for
+> what the Rust does and found nothing acting in either language.
 
 ---
 
@@ -9499,6 +9515,366 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.180 Three warnings that told an operator to wait for nothing
+
+Found by asking, before writing anything, which of the blocks this port still
+held were the *port's* gap and which were the *product's*. A grep finds no
+`plan_advertise`, `plan_probe`, `plan_modem`, `plan_bluetooth`, `plan_dot1x`
+or `plan_linkset` in the Rust either, so every one of them had to be settled
+against `crates/` rather than assumed.
+
+Four were the Rust planning under another name -- `plan_advertising`,
+`plan_prerequisite`, `standby_interfaces`, and the `clearing` list `prepare`
+builds -- and are ported.
+
+**Three were not, and their warnings were saying the wrong thing.**
+
+* **A `probe` block** is the daemon's, not the planner's, and this port had
+  *already* ported both halves of what the planner does with the answer: an
+  interface whose probe says it is reaching nothing does not get its routes,
+  and loses the ones it has. The warning said the planner did not act on a
+  probe. It was wrong twice over, and the Rust's own `warn_unapplied` carries
+  the precedent -- `portal_check` was taken off that list for exactly this
+  reason once the daemon started probing.
+* **A `modem` block** is the SIM selection's, ported in `sim.c`. The planner
+  reads only a cycle option, which 0263 already records as deferred. What is
+  missing is a switch, not the block.
+* **A `bluetooth` block** is acted on by **nothing, in either language**. The
+  Rust's own `warn_bluetooth` says so: "nothing pairs the device, connects it,
+  or brings a `pan` link up".
+
+The first two told an operator to wait for this port to catch up on work that
+is already done. The third told them to wait for something nobody has written.
+A `warn_unbuilt` beside `warn_block` now marks the difference, because "this
+port has not got there yet" and "there is nothing to wait for" are the same
+sentence to a reader and different facts.
+
+**And §10.14 was the sentence that would have contradicted the third.** It
+said Bluetooth's "two backends and the adapter compile". Neither backend
+exists; 0148 names them and settles their shape, and nothing was ever written.
+Corrected in place, above.
+
+### The shape, which this document keeps arriving at from a new direction
+
+A warning is a promise about the future, and nobody re-reads one once it is
+written. These three were accurate when they were written and stopped being so
+without anybody touching them -- one because the daemon grew the feature, one
+because the port caught up, one because the thing was never coming. The code
+each describes was correct throughout; what rotted was the sentence.
+
+That is the same failure as a stale comment, a stale count in a refusal
+(§10.177) and a gate over the wrong file (§10.177 again) -- and it is worse
+than all three, because this one is addressed to somebody who cannot check it.
+
+## 10.179 Five in the DHCP client, four of which decide whose process gets signalled
+
+The wave that ported `src/backend/dhcp/` -- the last backend `src/backend/`
+was missing, and the one `ncfg_apply_supported` refused by name with the
+sentence *"needs a DHCP client to be started, marked and adopted again after a
+restart"*. All five are in `crates/netcfgd-apply/src/kernel.rs`. Four of them
+are about identity: which process is netcfgd's, asked in one place and not in
+another, or asked after the signal rather than before it.
+
+**These were found by porting, which is the method rather than a coincidence.**
+Writing the same thing twice puts a reader in front of both halves of a rule at
+once, and three of the five below are a comment and the code beneath it saying
+different things.
+
+### A stop signals a process it has not identified, and then says it did not
+
+`kernel.rs:4463`, in the `Dhcp4` arm of `stop_backend`, runs
+
+    dhcpcd -4 -k <iface>
+
+and only afterwards calls `confirm_dhcpcd_stopped`, which asks the control
+socket whose client is there. **`dhcpcd -k <iface>` finds a client by
+convention** -- it reads `<rundir>/<iface>-4.pid` and signals whatever it names
+-- which is exactly what 0014 forbids everywhere else in this codebase, and the
+ordering means the question that would have stopped it is asked one syscall too
+late.
+
+`confirm_dhcpcd_stopped`'s own comment, at `kernel.rs:3454`, then says of a
+reply that is not netcfgd's mark:
+
+    // Somebody else's dhcpcd, which this stop neither reached nor
+    // disturbed, and which 0141 keeps the caller's business.
+
+It did reach it. An operator running `dhcpcd -4 eth0` on a link netcfgd also
+manages loses that client to any `backend.stop` netcfgd makes, and the one
+function that exists to report the outcome reports `Ok(())`.
+
+Reproduction: start `dhcpcd -4 <iface>` as anybody, drop `config = "dhcp"` from
+that interface, apply. The client is gone and nothing says so. Cost: 0014's
+whole argument -- an operator's own daemons are common and a process found by
+name is reached along with netcfgd's -- applied to the one backend where the
+signal is sent by a third-party program rather than by netcfgd's own code, so
+none of the guards in `netcfgd_sys::process` are in the path at all.
+
+The port asks first: `ncfg_dhcpcd_whose` before the `-k`, netcfgd's own client
+signalled and confirmed, a stranger's left alone and named in a note.
+
+### The stop's marker is the weak one, and the start's is the strong one
+
+`backend_pid_file` at `kernel.rs:3371` gives both DHCP clients the interface
+name as their marker, and says so in the comment above it:
+
+    // The interface name is the weakest marker netcfgd uses and is what
+    // these two clients give it -- neither is invoked with a path netcfgd
+    // chose that ends up in its command line.
+
+**Both of them are.** `start_backend` at `kernel.rs:2761` -- six hundred
+lines earlier in the same file -- adopts a running udhcpc by
+`pid_by_marker(&pidfile.to_string_lossy())`, because netcfgd starts it with
+`-p <run>/netcfgd/udhcpc/<iface>.pid` and busybox does not call
+`setproctitle`. `start_supplicant` does the same at `kernel.rs:4319` for the `-P` path, and
+says in its own comment that the file is an index into a fact rather than the
+fact. So the path is there, two start paths already rely on it, and
+`stop_recorded_client`
+(`kernel.rs:3401`) nevertheless calls
+
+    netcfgd_sys::process::pid_of(&path, iface)
+
+-- one process, two markers, and the weaker one is where `terminate` is called.
+
+`pid_of` checks ownership, so this needs a pid that netcfgd itself wrote down.
+That is the ordinary stale-pid-file case the function's own comment opens with:
+the client dies, the pid is recycled, and the next `backend.stop` reads the
+file. The marker is then all that separates a signal from a mistake, and
+`eth0` as a whole `argv` element is what `wpa_supplicant -i eth0` and
+`dhclient eth0` both carry -- root processes, so the ownership check passes.
+
+Cost: netcfgd terminates another manager's daemon on the interface it was
+asked to tidy up. Closing it needs no new mechanism: `ncfg_process_pid_of`
+already applies the whole-argument rule, and the port passes the pid-file path
+to it in both places. `dhcp_test.c` drives exactly that case -- a process
+carrying `ethJ` and nothing else, netcfgd's own pid file naming it -- and
+asserts nothing is signalled.
+
+### A start beside somebody else's dhcpcd, which its own comment rules out
+
+`kernel.rs:2800` asks the control socket whose dhcpcd is on the interface, and
+`kernel.rs:2815` handles the two answers that are not netcfgd's:
+
+    // Somebody else's, or netcfgd could not tell. Neither is a reason to
+    // spawn beside it, and 0141 makes the difference the caller's to report
+    // rather than this function's to guess.
+    Some(_) | None => {}
+
+The arm then falls through to the three-candidate loop and spawns. What makes
+this worse than a wasted process is what the second `dhcpcd -b` does:
+**dhcpcd's instance lock refuses it, it prints `sending commands to dhcpcd
+process`, and it exits 0** -- which the comment at `kernel.rs:2795` records as
+measured, three lines above the code that relies on the opposite. So
+`status.success()` is true, `record_started_metric` runs, the effect is pushed
+onto `started_backends`, and netcfgd has recorded starting a client it did not
+start and whose `-f` it does not hold. The matching stop then declines to
+account for it, by the `Some(seen) if seen != marker` arm of
+`confirm_dhcpcd_stopped` -- so the machine is managed by a stranger's client
+for as long as it runs, and netcfgd reports convergence throughout.
+
+`None` is a different case and is right to go on: it is "netcfgd could not
+tell", which is the state of every machine whose client is udhcpc and every
+machine with no dhcpcd at all. The port refuses only `Some(other)`, naming what
+the running client recites.
+
+### A busybox machine is refused its lease over dhcpcd's hook
+
+`kernel.rs:2781`, in the `Dhcp4` arm and before any client is chosen:
+
+    let hook = dhcpcd_hook_path()?;
+
+`dhcpcd_hook_path` returns an error where the file is not there, with a message
+naming `/usr/libexec/netcfgd/dhcpcd-hook`. The `?` is unconditional and
+precedes the candidate loop at `kernel.rs:2834`, so **a machine whose only
+DHCPv4 client is busybox udhcpc cannot start one unless dhcpcd's hook is
+installed** -- and the hook is `-c`'s, which is dhcpcd's option. udhcpc never
+runs it; it runs the generated script `-s` names, which `write_udhcpc_script`
+has already written four lines earlier.
+
+Reproduction: a machine with busybox and no dhcpcd, and the hook not installed
+-- an image built without `make install` placing `libexec`, or
+`NCFG_DHCPCD_HOOK` pointed anywhere -- and a `config = "dhcp"` interface.
+`backend.start` fails with a sentence about a resolver and a file the client
+would not have touched. Cost: no DHCPv4 addressing at all on exactly the
+embedded machines this project is built for, refused for a reason that does not
+apply to them, and 0079's restart counter then gives up on the interface. (Read
+at the line rather than run: the control flow is a `?` before a loop, with no
+branch between them.)
+
+The port checks the hook inside the dhcpcd candidate. A machine that would have
+used one is refused by name as before; a machine that would not is not.
+
+### A metric written down for a client that was never given one
+
+`kernel.rs:2843`, inside the loop over `[("dhcpcd", ...), ("udhcpc", ...),
+("busybox", ...)]`:
+
+    record_started_metric(&run_dir_path(), iface, metric.as_deref());
+
+It runs for whichever candidate started. **Only dhcpcd takes `-m`** --
+`dhcpcd_start_args`' own comment says so: *"busybox udhcpc has no metric option
+-- its script does the routing -- so this is the one thing the two DHCPv4
+clients cannot do the same way"* -- so on a busybox machine netcfgd writes
+`<run>/dhcpcd/<iface>.metric` holding a number no client ever heard.
+
+What that costs is not the wrong file but the check it switches off. 0241 makes
+this record the *fast* answer and the installed route the fallback, taken when
+the record reads `None`; a record that reads `100` is believed, so the
+comparison that would have found the lease's route at dhcpcd's or udhcpc's own
+default never happens. A document's `metric` or `preference` is then silently
+not in force on every busybox machine, with netcfgd reporting a converged
+interface -- and `record_started_metric`'s own doc comment describes the
+symmetric case ("a record left over from the previous network would then say
+the running client carries a metric it was never given") without noticing that
+the writer produces it directly.
+
+Reproduction: `metric = 100` on a `config = "dhcp"` interface, on a machine
+with busybox and no dhcpcd. `dhcp_started_metric` answers `Some(100)`; the
+lease's default route has no metric.
+
+The port records the metric on dhcpcd's start and clears the record on the
+other two, which leaves the planner reading "cannot tell" -- what it read
+before the record existed, and the correct answer for a client that cannot be
+told.
+
+### What the sabotage did not catch
+
+Eighteen deliberate breakages, seventeen named by a check. The one that caught
+nothing is `NCFG_DHCP_STOP_PATIENCE_MS`: every case sets `patience_ms` on the
+machine struct so that a stop which will not take is decided in a fifth of a
+second rather than three, so changing the default moves nothing. That is the
+price of making it an argument and it is the right trade -- the alternative is
+a suite that waits out three seconds twice -- but the default itself is
+exercised by nothing, and a check that spelled the number would be asserting
+the constant against itself.
+
+## 10.178 Three gaps closed, a journal nobody was told about, and an enum that could not be included twice
+
+The wave that wired `ncfg_tun_create` into the executor, wrote
+`plan.last.json`, and gave the loop a way to notice a monitor stream whose
+client has gone. One defect in the Rust, and two faults of the port's own that
+the work walked into rather than found by looking.
+
+### The daemon never says that it could not write the journal
+
+`crates/netcfgd-daemon/src/state.rs:340`,
+`crates/netcfgd-daemon/src/lib.rs:1584`,
+`crates/netcfgd-daemon/src/wifi.rs:239`. Every apply the daemon makes ends the
+same way:
+
+```quote from=crates/netcfgd-daemon/src/state.rs
+let journal = apply(&plan, executor);
+let _ = run_state::write_journal(&self.paths.run, &journal);
+```
+
+`write_journal` (`crates/netcfgd-host/src/state.rs:846`) returns
+`io::Result<()>` and all three daemon call sites discard it with `let _ =`.
+**The CLI does not** -- `crates/netcfgd-cli/src/lib.rs:738` prints
+`ncfg: could not write the journal: {error}` -- so the same failure is reported
+to somebody at a terminal and never to anybody watching a daemon.
+
+**The cost is the file being trusted, not the file being missing.**
+`plan.last.json` is the answer to *where did an apply stop*, and a reconcile
+has no terminal to print it to; §10.168 records a case where it "named the
+cause exactly" while the daemon log held two startup lines and nothing else.
+A write that fails leaves whatever was there before, so the next reader is not
+told that nothing was written -- they are shown an *older* apply's journal and
+have no way to tell. On a machine where an apply has just stopped halfway,
+that is the wrong answer to the only question being asked.
+
+Reproduction: fill or remount read-only whatever `/run/netcfgd` is on, then
+let the daemon reconcile anything. `ncfg apply` in the same state prints the
+failure; the daemon writes nothing, logs nothing, and `plan.last.json` keeps
+its previous contents with a previous timestamp.
+
+**Decision 0180 is the rule this breaks**, and it is the project's own: a
+record whose loss must not fail an apply still says what could not be written,
+because the consequence arrives much later and looks like netcfgd having no
+opinion. `tool/write_gate.py` exists to enforce exactly that and reports
+`OK (1 best-effort writes, all accounted for)` over these three, which is the
+limitation its own header names -- *it cannot see writes done through a helper
+it does not recognise*. `write_journal` is such a helper. Not fixed here and
+not widened here either: the gate's blind spot is a separate decision from the
+three call sites, and a gate taught to follow one helper should be taught to
+follow all of them at once.
+
+The C port answers it: `ncfg_apply_write_journal` returns 1 or 0 with a
+sentence, and both callers log a note naming what was lost.
+
+### An enum declared twice, in two headers that could never meet
+
+`c/include/ncfg/tun.h` declared `ncfg_tun_mode_t` -- `NCFG_TUN_MODE_TUN`,
+`NCFG_TUN_MODE_TAP` -- and so did `c/include/ncfg/document.h`, with the same
+two names and the same two values. C makes a repeated enumerator a
+**redeclaration** rather than a redefinition, so any translation unit that
+included both simply failed to compile:
+
+    include/ncfg/tun.h:87:9: error: redeclaration of enumerator 'NCFG_TUN_MODE_TUN'
+
+**Nothing ever did, which is why it survived a whole wave.** `tun.c` and
+`tun_test.c` include `tun.h` and not the model, so the module built cleanly and
+its twenty-nine checks passed; the header's own comment said it was ported and
+ready to be called. It could not be called from anywhere the model was in
+scope, which is every caller it would ever have had. Found by writing the one
+line that calls it.
+
+The shape is worth more than the fix. **A module whose tests pass in isolation
+is not a module that has been integrated**, and the port's gate --
+`tool/c_tests_gate.py`, which requires a test to include each header -- cannot
+see it, because the test that includes `tun.h` alone satisfies the gate exactly
+as a real caller would. That is the same family as §10.177's guard over the
+wrong file: a check that passes for a reason unrelated to the thing it names.
+The model keeps the numbering, as it does for a bond's mode and a tunnel's kind
+word, and `tun.h` includes `document.h` for it.
+
+### A test that created the path it was asserting was not there
+
+Written while checking that `ncfg_apply_write_journal` reports a run directory
+it cannot use, the obvious check was `/nonexistent/netcfgd-run` -- and it went
+red, because the call **succeeded**. `ncfg_lock_take` creates the directory it
+is asked to put the lock in, which is `ncfg_owned_update`'s behaviour too, so
+the suite had made `/nonexistent/netcfgd-run/` on the machine it was running
+on, with `owned.lock` and `plan.last.json` in it. Removed by hand within the
+minute, and the check now points at a path under the test's own directory that
+`mkdir` refuses with `ENOTDIR`.
+
+Two things worth keeping. The first is that the test was right and the guess
+was wrong: the call does not refuse an absent directory, it makes one, and a
+check written the other way round would have passed while asserting something
+false. The second is `testdir.h`'s rule saying it out loud -- **a test that
+writes outside the directory it made is one wrong constant away from writing
+anywhere**, and an absolute path spelled into a check is exactly that constant.
+The header's own comment already refuses defaults for this reason; a literal in
+a test is the same hazard wearing a different hat.
+
+### Three sabotages that caught nothing, and what they bought
+
+Thirteen breakages were made against this wave's checks and ten went red at
+once. The three that did not are worth more than the ten.
+
+**A tun created wore no alternative name and nothing noticed.** `main_test.c`
+read `kernel.c` for `mark_as_ours(kernel,` -- which the *netlink* path also
+calls, so deleting the call from `create_tun` alone left the search satisfied.
+That is §10.177's shape one turn further on: the file was right this time, and
+the *granularity* was wrong. The check now reads the span between
+`static int create_tun` and the next function and requires the call inside it.
+
+**A publish that failed was reported as done and nothing noticed.** The only
+failure path exercised was the lock's -- a run directory that could not be
+made -- and `ncfg_write_atomically`'s result being discarded left every check
+green. The two failures are far apart in one call and only one of them had a
+case. A directory standing in the journal's place, inside the test's own tree,
+produces the other.
+
+**And one that still catches nothing, reported rather than papered over.**
+Disabling `create_link`'s tun arm with a condition that is never true -- the
+code present and unreachable -- leaves `main_test.c`'s source read satisfied,
+because the text is still there. Deleting the arm goes red, which is the case
+that actually happens when nobody wires it; a disabled one does not. Closing it
+properly means executing `link.create` for a tun, which needs `CAP_NET_ADMIN`
+and leaves a device on the machine the suite runs on, so it is named here
+instead of asserted.
+
 ## 10.177 A check that could not fail, and a claim four waves outlived
 
 Two faults in this port's own record-keeping, both found by the wave that
@@ -10046,13 +10422,36 @@ ends in that call, which is to say the code under test was writing the record
 twice.
 
 **And four checks that were vacuous for one reason worth keeping.** A tunnel
-endpoint compared as text could not be caught, because `ncfg_document_read`
-and `ncfg_observed_read` both canonicalise every address they parse -- so **a
-JSON fixture cannot express two spellings of one address**, and the check
-passed whatever the planner compared. The test now edits the observation after
-reading it, which is the shape a report keeping a shell script's text actually
-hands over. That is §10.169's defect, and the fixture that would have found it
-could not have existed.
+endpoint compared as text could not be caught. The test now edits the
+observation after reading it, which is the shape a report keeping a shell
+script's text actually hands over. That is §10.169's defect, and the fixture
+that would have found it was said not to be expressible.
+
+> **Corrected, and the correction is the more useful entry.** The reason given
+> above was that `ncfg_document_read` and `ncfg_observed_read` both
+> canonicalise every address they parse, so a JSON fixture cannot express two
+> spellings. **That is not true of this port**, measured three ways against the
+> library: a document holding
+> `2001:0DB8:0000:0000:0000:0000:0000:0001/64` reads back with that spelling
+> intact, an observed address does too, a report's addresses do too -- and
+> `ncfg_document_canonicalize` does not re-render them either. A JSON fixture
+> *can* say two spellings, which is how a real report arrives and how the
+> `reported` pass is now tested.
+>
+> It reached this document because a worker reported having measured it, and
+> the sentence was repeated into a brief and then into this record without
+> being checked -- twice, by the same hand that keeps writing that corroboration
+> has to be independent. **Two documents agreeing are one witness if the same
+> hand wrote both**, and here the second was the first, copied.
+>
+> What made that sabotage catch nothing is therefore **not established**. The
+> honest state is: the check was weak, the stated cause was wrong, and the real
+> cause was never found because the wrong one sounded sufficient. Where
+> canonicalisation genuinely happens is the *compiler* -- `lower.c` turns
+> configuration text into a document -- and a report never goes through it,
+> which is the whole of why §10.169 and 10.172's route-destination defect
+> exist.
+
 
 ## 10.171 A control policy the daemon obeys and the socket does not
 
