@@ -9499,6 +9499,74 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.159 What the port has found in the Rust so far
+
+Porting a module means reading every line of it with a reason to disagree,
+which is a review nobody has budget for on its own. Eleven findings so far,
+none of them from a reviewer and all of them from somebody trying to make the
+same thing work twice. Two already have sections of their own -- the attribute
+length that truncates (10.157) and the request payload that is not strict
+(10.158). The rest are here, with what was actually checked rather than
+reported.
+
+**Verified by reading the source, or by measurement:**
+
+* **The netlink receive documents `MSG_TRUNC` and passes `0`.** `socket.rs`'s
+  `receive` carries a SAFETY comment explaining that with `MSG_TRUNC` "the
+  *return value* may exceed that length", and the `libc::recv` two lines below
+  it passes flags `0`. `receive_whole` is saved by peeking first, so the
+  property is unreachable rather than wrong -- except in `send_batch`, which
+  reads into a fixed 32 KiB with no peek and no truncation signal, so an
+  nftables reply larger than that is silently short. That is the defect 0183
+  fixed on the other path.
+* **Nothing checks who sent a netlink message.** `recv`, not `recvfrom`, and no
+  test that `nl_pid` is 0. `/proc/net/netlink` is world-readable and shows this
+  daemon's port id -- measured on this machine -- and sequence numbers are
+  small predictable integers, so a local process can unicast a forged
+  `NLMSG_ERROR` or a forged link record into a dump in progress on a root
+  daemon. Narrow and real. The C port drops a datagram that did not come from
+  the kernel and counts it; dropping rather than failing is deliberate, since
+  failing would let the same process abort a dump instead.
+* **`ETH_P_ALL` is written as `0x0300`**, the byte-swapped constant, in
+  `qdisc.rs`. Correct on x86 and an ingress filter for no protocol at all
+  anywhere else.
+* **An interface index that does not fit is folded to zero**, four times in
+  `qdisc.rs` (`try_from(...).unwrap_or(0)`). A request about one interface
+  becomes a request about none -- and `RTM_GETTFILTER` answers index 0 with an
+  empty dump, which reads exactly like "no redirects installed".
+* **The nftables reader ignores the comparison operator.** `NFT_CMP_EQ` appears
+  once in `nft.rs`, in the writer; the reader takes `NFTA_CMP_DATA` without
+  looking at `NFTA_CMP_OP`. Since 0022's conflict check reads *other* people's
+  tables, a hand-written `oifname != "wan0" masquerade` there is read as
+  "wan0 is an uplink" -- not a near miss, the exact opposite.
+
+**Reported by the porting worker and not independently checked:**
+
+* Cake's options are read out of any scheduler's attribute 2, where the comment
+  says they are read only under `cake`; an 8-byte length check stands in for a
+  type check.
+* An nftables transaction with nothing in it is still emitted as begin+end,
+  which asks for no acknowledgement and receives no reply, so the reply loop
+  waits out its five-second timeout and reports a failure that did not happen.
+* `parse_mac` accepts one hex digit per octet and a leading `+`, because
+  `u8::from_str_radix` does; the configuration language's own reader requires
+  exactly two. So `+1:2:3:4:5:6` is a hardware address to one half of netcfgd
+  and not to the other.
+* `set_ipv6_token` takes an address of either family, and only one has a wire
+  form.
+* Five structs in `observed.rs` carry no `deny_unknown_fields` where every
+  other one does: `Entry`, `Connectivity`, `Primary`, `Standing`, `Chosen`.
+  That reads as an omission rather than a decision.
+* The netlink sequence counter can wrap to zero, after which every unsolicited
+  message matches the reply filter. Four billion requests away and one line to
+  make unreachable.
+
+**None of these is fixed on `master`**, and that is deliberate: the port is on
+its own branch, the fixes want tests written against the Rust, and two of them
+-- the sender check and the `Subject` payload -- are decisions rather than
+repairs. What this section is for is that they do not evaporate when the branch
+is merged or abandoned.
+
 ## 10.158 A payload that is not strict, and a document that says it is
 
 `doc/socket-protocol.md` section 7 states the rule plainly: *"Unknown members
