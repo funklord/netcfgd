@@ -9499,6 +9499,189 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.172 Four more, and what the halves found when they met
+
+The wave that closed the planner's gaps and the executor's. Four defects in
+the Rust, and two in the port that only appeared where two workers' work
+touched.
+
+### A rule selector written the way `ip rule` is written
+
+`canonical_address` returns a bare address unchanged and without a prefix, and
+`rule_record`'s selector then asks `parse_cidr`, which begins
+`text.split_once('/')?` and answers `None`. So
+
+    rule "r1" { priority = 100; family = "inet"; from = "10.0.0.5"; lookup = 100 }
+
+compiles, `plan_rules` emits `Op::RuleAdd`, and the apply fails with
+``` `10.0.0.5` is not a prefix ```. Execution stops at the first failed action,
+so one selector written the ordinary way abandons every later action in the
+plan, on every apply, for ever -- while `ncfg plan` lists `rule.add` as
+something it will do.
+
+**This is a fix that landed on one of a pair.** §"Three were accepted" records
+the same shape for a route destination -- `parse_route` canonicalising anything
+that parsed as a prefix and letting the rest through -- and that one was fixed
+at compile time. The rule selector was not. The C accepts it as a host
+selector, which is what `ip rule` means and what `route_of` already does for a
+route.
+
+### The whole DNS delivery happens once per scope
+
+`plan_dns` pushes one `Op::DnsApply` per changed scope, and the executor
+delivers **every** scope on each one -- its own comment admits it: *"Named for
+the reader rather than for the executor, which delivers every scope on any
+`dns.apply` whatever this says."* Reproduced at four scopes: four actions, each
+naming a different one, each doing the same thing.
+
+`write_resolv_conf` is four stage-and-rename rewrites of identical bytes.
+`resolvconf` is worse -- `hand_to_resolvconf` loops over scopes *inside* each
+delivery, so it is N squared subprocess invocations, sixteen here. And `exec`
+mode runs **the operator's own command** four times per apply with
+byte-identical input; a script that appends, reloads a daemon or bumps a serial
+does it four times, and nothing anywhere says why. Distinct from the entry that
+records deliver-every-scope as the *repair* for a removed `dns` block: that one
+never asked what the per-scope planning then costs.
+
+### A forwarding sysctl that cannot be read is written anyway
+
+`plan_privacy` and `plan_accept_ra` each warn and skip when the interface
+exists and the sysctl is unreadable, both saying that an action planned before
+the thing that would make it succeed is a plan that never converges.
+`plan_forwarding` renders `"<unreadable>"` into the reason and plans the write,
+with no inverse -- and the observer answers `None` when *either* family's file
+is unreadable, its own comment explaining that reporting the IPv4 answer alone
+"would have the planner satisfied by half a change it can never complete". The
+planner reads `None` as "differs", so that is exactly what happens. On an
+IPv6-disabled kernel or a container without `/proc/sys`, work is reported on
+every tick for ever and fails every time.
+
+### A trunk port's VLANs are never planned
+
+`plan_bridge_vlans` is reached only through `plan_interface_contents`, which is
+driven by `for interface in &desired.interfaces`. A device with `bridge_vlans`
+and no `interface` block is never visited, and nothing warns.
+
+That is the ordinary shape of a trunk port: it carries no address and never
+will, **which is the whole reason §10.10 made a device with no interface
+representable**. All four of the Rust's own fixtures give the port an
+`interface lan1 { config = "null" }`, so nothing was looking. The kernel's
+default VLAN 1 is not deleted either, which is where every real trunk setup
+begins. The C drives the pass from the device list.
+
+### What the two halves found when they met
+
+**A plan for a device that will never exist.** The planner learned to configure
+a bond, a macvlan and a tunnel in the same wave the executor learned the
+`link.set_*` family -- and `link.create` for those kinds is still refused,
+because `newlink_of` builds no nest for them. Nothing connected the two, so a
+document naming a bond planned a creation that fails on every apply. Declining
+it was half the fix: the witness's `k-bond` kept **eighteen** further actions
+against a device nothing would bring into existence, because the passes this
+wave added are driven from the document rather than through
+`ncfg_plan_interface_contents`, which does ask. The filter went into
+`ncfg_builder_push`, beside the identical one for `managed = false`, whose
+comment already gives the reason -- *a pass added later would not know to ask*.
+
+**And a guard that answered for arms that had their own answer.** Put first,
+the new refusal preempted the physical-device arm, so `eth9` stopped being
+reported as "no such device is present". It is last of the arms now. A test
+caught it; the same test then appeared to keep failing, and it did not -- the
+binary was a stale sanitizer build, which is the trap `c/Makefile`'s missing
+header dependencies sets and which a worker had reported hitting an hour
+earlier.
+
+### Three sabotages that caught nothing, and were right not to
+
+A worker's `uplinks == NULL` and `features == NULL` checks caught nothing
+because both were second copies of rules `nft.c` and `ethtool.c` already have;
+the duplicates were deleted rather than given tests. A third -- removing an
+`ncfg_dns_record` call -- caught nothing because `ncfg_dns_deliver` already
+ends in that call, which is to say the code under test was writing the record
+twice.
+
+**And four checks that were vacuous for one reason worth keeping.** A tunnel
+endpoint compared as text could not be caught, because `ncfg_document_read`
+and `ncfg_observed_read` both canonicalise every address they parse -- so **a
+JSON fixture cannot express two spellings of one address**, and the check
+passed whatever the planner compared. The test now edits the observation after
+reading it, which is the shape a report keeping a shell script's text actually
+hands over. That is §10.169's defect, and the fixture that would have found it
+could not have existed.
+
+## 10.171 A control policy the daemon obeys and the socket does not
+
+Found by porting the daemon's assembly — the part of `netcfgd-daemon::run`
+that binds the sockets — which is where the choice the Rust makes implicitly
+has to be written down.
+
+### The socket's reach is decided once; authorisation follows every reload
+
+`bind_sockets` is called once, before the loop, with a **clone** of
+`state.desired.globals.control` taken at that moment. That clone is what
+`server::serve` uses for `reach`, and `reach` is what decides the socket
+file's mode and its group — `0666` where a tier is `any`, `0660` where the
+policy opens beyond root, `0600` otherwise.
+
+`serve_requests` does the opposite. It re-reads `state.desired.globals.control`
+**per request**, so the tiers a caller is judged by follow every reload.
+
+So after `ncfg control set --observe group:netdev` and a reload:
+
+- the daemon would say yes to a member of `netdev`;
+- the socket file is still `0600 root:root`, so that member cannot connect to
+  be told yes.
+
+And `ncfg control set` tells them it is done. Reproduced against
+`target/release/ncfg` with the roots redirected into a scratch tree:
+
+    $ ncfg control set --observe group:netdev
+    …/etc/conf.d/00-control.conf
+    observe  group:netdev
+    …
+    netcfgd applies this when it next reads its configuration. A member of
+    a named group has to log out and back in before the kernel gives their
+    session that membership.
+
+It does read its configuration, and the sentence is still wrong: nothing
+re-binds. The remaining instruction — log out and back in — sends the operator
+to do the one thing that cannot help, and the state they are left in is
+**exactly the one this document's own control notes call "a lie that costs an
+afternoon to diagnose"**: a config that says `group:netdev` over a root-only
+socket. The daemon's own startup check for that condition is the loud one, and
+it cannot fire, because at startup the two agreed.
+
+The narrowing direction is safe and still untidy: going back from `any` to
+`root` leaves the socket `0666` until a restart, so anyone can connect and is
+then refused by the second gate. The gate holds; the file permission is a
+stale promise.
+
+**And a reload that opens remote access binds nothing at all.**
+`bind_sockets` returns early where `remote.is_open()` is false, and that is the
+only place `remote.sock` is ever created. A machine whose configuration grows a
+`remote` block has `ncfg control show` and the compiled document saying remote
+access is open, an agent with nowhere to connect, and no message anywhere — the
+"remote access is open on …" note is on the path that was not taken.
+
+**Read out of the source, not measured.** Starting a daemon that binds the real
+control socket and takes the apply lock is not a thing to do on this
+workstation; what is reproduced above is the promise, and the absence of a
+second `server::serve` is a fact about the file.
+
+Neither half is expensive to close — re-binding on a policy change is what the
+startup path already does — but it is a change to the socket's lifetime under a
+live daemon, which is a decision rather than a patch.
+
+### The C copies the policy for the same reason and inherits the same gap
+
+`ncfg_daemon_serve_t` borrows the policies and says they must outlive the
+server; `state->desired` is replaced by every reload. So the port copies the
+policy at startup too — pointing the socket at the document's own block would
+read freed memory the first time somebody wrote in the configuration
+directory, which is worse than the gap. `ncfg_main_policy_copy` is that copy,
+it is checked against a document that is freed before the copy is read, and
+0263 records the divergence and points here.
+
 ## 10.170 The port links, and what linking it measured
 
 `c/` had no `main` until today. The library built and the suite passed, so
