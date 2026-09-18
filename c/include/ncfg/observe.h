@@ -47,8 +47,11 @@
  *       already here; the map is not;
  *     * `read_offloads`, `read_netfilter` and `read_wireguard_keys`, which are
  *       netlink round trips rather than file reads. ethtool.h, nft.h and wg.h
- *       build the messages; nothing yet owns the socket an observation would
- *       send them on.
+ *       build the messages, and `ncfg_observe_collect_from` now owns a socket
+ *       for the round -- so what is missing is the three passes themselves
+ *       rather than somewhere to send them. Two of the three need a second
+ *       socket in any case: ethtool and WireGuard speak generic netlink, which
+ *       `ncfg_netlink_open_protocol` says cannot share a route socket.
  *
  *   What is here is the whole of `lib.rs`, the file-reading half of `host.rs`
  *   -- the sysctls, the hostname, rfkill and Bluetooth -- and the whole of
@@ -208,6 +211,219 @@ typedef struct {
 	 */
 	int                              address_proto_supported;
 } ncfg_observe_snapshot_t;
+
+/* ------------------------------------------------------------------------ *
+ * Taking the dumps that fill one
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The most records of one kind a round of dumps will hold.
+ *
+ * **Chosen for the routing table**, which is the only one of the seven a
+ * *network* can make large: a machine carrying a full BGP feed has a million
+ * routes and refusing to read them would be a daemon that cannot see its own
+ * machine, which is the argument `netlink.h` makes about the reply buffer. The
+ * other six reach this only on a machine that has already stopped working, and
+ * the ceiling is there so that growth is bounded rather than because this is
+ * the right number of links.
+ *
+ * A dump past it is refused **naming the kind and the number**, which is the
+ * pair whoever raises it needs. It is not truncated: an observation quietly
+ * missing half the routes plans a machine back to a state nobody asked for,
+ * and `total`-past-the-bound -- the parser's arrangement -- is right for a
+ * renderer and wrong for the input to a planner.
+ */
+#define NCFG_OBSERVE_RECORDS_MAX 1048576u
+
+/*
+ * How long one receive waits before a round of dumps gives up.
+ *
+ * The Rust's, unchanged. It applies only where this module opens the socket:
+ * a caller handing one over has already decided, and `ncfg_netlink_set_timeout`
+ * is how it decided.
+ */
+#define NCFG_OBSERVE_TIMEOUT_SECONDS 5
+
+/*
+ * One request and the replies it drew, however the caller performs one.
+ *
+ * **The seam that keeps a kernel out of the tests.** Everything below it is
+ * the same code on a live machine and on bytes a test wrote: the requests are
+ * built by the modules that own them, the replies are decoded by the decoders,
+ * and the only thing that changes is where the datagrams came from. Without it
+ * the seven dumps could be exercised only against whatever the developer's
+ * machine happened to be doing at the time -- and never at all against a
+ * truncated final message, a kernel answering `ENOBUFS` mid-dump, or a dump one
+ * record past what this will hold, none of which a kernel produces on demand.
+ *
+ * The signature is `ncfg_netlink_request`'s without its socket, so the live
+ * implementation is a forwarding call and cannot drift from it.
+ */
+typedef int (*ncfg_observe_exchange_t)(void *context, uint16_t kind, uint16_t flags,
+    const ncfg_buf_t *body, const ncfg_buf_t *attrs, ncfg_netlink_reply_t *out, char *err,
+    size_t err_size);
+
+/* Whatever performs this round's requests, and the ceiling it holds records
+ * to. */
+typedef struct {
+	ncfg_observe_exchange_t exchange;
+	void                   *context;
+	/* 0 means `NCFG_OBSERVE_RECORDS_MAX`. It is a field for the reason
+	 * `ncfg_netlink_request_from`'s initial size is a parameter: the kernel
+	 * will not produce an oversized answer on demand, so a test that could
+	 * not lower this could never reach the refusal at all. */
+	size_t                  records_max;
+} ncfg_observe_kernel_t;
+
+/* The exchange that speaks to a socket. `context` is an open `ncfg_netlink_t
+ * *`, and this is exactly `ncfg_netlink_request` with its arguments in the
+ * seam's order. */
+int ncfg_observe_exchange_socket(void *context, uint16_t kind, uint16_t flags,
+    const ncfg_buf_t *body, const ncfg_buf_t *attrs, ncfg_netlink_reply_t *out, char *err,
+    size_t err_size);
+
+/*
+ * Where a replayed round of dumps reads its datagrams from.
+ *
+ * `ncfg_netlink_change_from` is split out of the watcher for this reason and
+ * this is the same split one layer up: the whole of a round of dumps minus the
+ * send. `recv` is the source `netlink.h` already defines, and it is asked for
+ * datagrams until each dump is complete.
+ */
+typedef struct {
+	ncfg_netlink_recv_t recv;
+	void               *context;
+	/* The buffer each reply starts in. 0 means
+	 * `NCFG_NETLINK_REPLY_INITIAL`, and a small number reaches the growth
+	 * path the way a single oversized message does. */
+	size_t              initial;
+	/*
+	 * The sequence number the next reply is matched against, incremented
+	 * per exchange as a socket's is.
+	 *
+	 * Left at 0 it matches everything, since netlink's own "nobody asked for
+	 * this" is sequence number 0 and `ncfg_netlink_collect` lets it through.
+	 * That is the useful default for a source whose datagrams were written
+	 * by hand.
+	 */
+	uint32_t            seq;
+} ncfg_observe_replay_t;
+
+/* The exchange that sends nothing and reads from `context`, an
+ * `ncfg_observe_replay_t *`. The request is still built, and a buffer that
+ * failed building it is still refused: what is dropped is only the send. */
+int ncfg_observe_exchange_replay(void *context, uint16_t kind, uint16_t flags,
+    const ncfg_buf_t *body, const ncfg_buf_t *attrs, ncfg_netlink_reply_t *out, char *err,
+    size_t err_size);
+
+/*
+ * One round of dumps, and the storage the snapshot in it borrows.
+ *
+ * `ncfg_observe_snapshot_t` borrows every field and has no free, which its own
+ * comment says in as many words -- so something has to own the arrays, and this
+ * is it. `snapshot` is filled in pointing at the arrays beside it, so a caller
+ * that has a capture has an argument for `ncfg_observe_build` without writing
+ * fourteen assignments and getting one of them wrong.
+ *
+ * **Do not copy it by value.** `snapshot` points into *this* capture, so a
+ * copy's snapshot describes the original's arrays and outlives them the moment
+ * the original is freed. Pass a pointer, and free the one that was filled in.
+ */
+typedef struct {
+	ncfg_link_record_t        *links;
+	size_t                     link_count;
+	ncfg_address_record_t     *addresses;
+	size_t                     address_count;
+	ncfg_route_record_t       *routes;
+	size_t                     route_count;
+	ncfg_bridge_vlan_record_t *bridge_vlans;
+	size_t                     bridge_vlan_count;
+	ncfg_qdisc_record_t       *qdisc_roots;
+	size_t                     qdisc_root_count;
+	ncfg_observe_redirect_t   *redirects;
+	size_t                     redirect_count;
+	ncfg_rule_record_t        *rules;
+	size_t                     rule_count;
+	/*
+	 * Interfaces carrying an ingress qdisc, sorted and deduplicated.
+	 *
+	 * Not part of the snapshot and kept anyway: it is what the filter dumps
+	 * were aimed at, so an empty `redirects` beside an empty list of hooks
+	 * is a machine with no ingress shaping, and an empty `redirects` beside
+	 * three hooks is three dumps that found nothing. Those are different
+	 * facts and the snapshot cannot tell them apart.
+	 */
+	uint32_t                  *ingress_hooks;
+	size_t                     ingress_hook_count;
+	/*
+	 * Payloads a decoder refused, across every dump.
+	 *
+	 * `netlink.h` says a caller that dumps and decodes skips what it cannot
+	 * read **and says how many**, which is the half the Rust's `filter_map`
+	 * leaves out: a truncated dump and a quiet machine look the same
+	 * afterwards.
+	 */
+	size_t                     skipped;
+	/* Interfaces whose filter dump could not be read. See
+	 * `ncfg_observe_collect_from` for why that is a count rather than a
+	 * refusal. */
+	size_t                     redirects_unreadable;
+	/*
+	 * Datagrams discarded across this round because they did not come from
+	 * the kernel. Nonzero means somebody local is writing to the socket,
+	 * which is worth a line in a log even though nothing went wrong.
+	 */
+	size_t                     dropped;
+	/*
+	 * The first sentence either count above produced, or empty.
+	 *
+	 * One buffer and not one per event: a count with no sentence is a number
+	 * nobody can act on, and a sentence per payload is a log nobody reads.
+	 */
+	char                       note[NCFG_ERROR_MAX];
+	/* Borrowing every array above. */
+	ncfg_observe_snapshot_t    snapshot;
+} ncfg_observe_capture_t;
+
+/* Release everything a capture owns, including each link record's alternative
+ * names, and leave it empty. Freeing one that was never filled in is nothing,
+ * which is what makes every failure path here one line. */
+void ncfg_observe_capture_free(ncfg_observe_capture_t *capture);
+
+/*
+ * Take one round of dumps over `kernel` and decode it.
+ *
+ * Seven requests in a fixed order -- links, addresses, routes, bridge VLANs,
+ * qdiscs, one filter dump per ingress hook, rules -- which is the Rust's order
+ * and is kept because the fifth decides how many the sixth is.
+ *
+ * **A dump that fails, fails the round.** A snapshot missing its routes is not
+ * a smaller answer to the same question, it is a plan that installs them all
+ * again; so the capture is freed and a sentence comes back. The one exception
+ * is a *filter* dump, which is asked per interface and is counted in
+ * `redirects_unreadable` instead: the interface was reported as carrying an
+ * ingress hook by a dump taken a moment earlier, so a failure now is a machine
+ * that moved between two requests, and a USB device being unplugged must not
+ * be able to deny an observation to the operator looking at why it went.
+ *
+ * A payload a decoder refuses is skipped and counted, which is what
+ * `netlink.h` asks of a caller that dumps.
+ */
+int ncfg_observe_collect_from(const ncfg_observe_kernel_t *kernel,
+    ncfg_observe_capture_t *out, char *err, size_t err_size);
+
+/* The same over an open socket, whose timeout is the caller's to have set. */
+int ncfg_observe_collect_on(ncfg_netlink_t *netlink, ncfg_observe_capture_t *out, char *err,
+    size_t err_size);
+
+/*
+ * The same, opening and closing a socket of its own.
+ *
+ * `NCFG_OBSERVE_TIMEOUT_SECONDS` is set on it, because a receive with no
+ * timeout wedges the caller for ever and this one has no caller to have
+ * decided otherwise.
+ */
+int ncfg_observe_collect(ncfg_observe_capture_t *out, char *err, size_t err_size);
 
 /* ------------------------------------------------------------------------ *
  * What netcfgd wrote down
