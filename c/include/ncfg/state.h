@@ -351,9 +351,16 @@ const ncfg_provenance_entry_t *ncfg_provenance_lookup(const ncfg_provenance_t *p
  * NUL-terminates. */
 void ncfg_provenance_location(const ncfg_provenance_entry_t *entry, char *out, size_t out_size);
 
-/* Put the entries in a stable order and drop repeated paths, so the file does
- * not change between compiles of one configuration. */
-void ncfg_provenance_canonicalize(ncfg_provenance_t *provenance);
+/*
+ * Put the entries in a stable order and drop repeated paths, so the file does
+ * not change between compiles of one configuration.
+ *
+ * Stable in both senses, and the second is the one with a rule behind it: the
+ * same configuration gives the same file, **and** where two entries share a
+ * path the one recorded first is the one kept. That is the base rather than
+ * the override, and it is what `ncfg explain` names.
+ */
+int ncfg_provenance_canonicalize(ncfg_provenance_t *provenance, char *err, size_t err_size);
 
 /* Write it, so `ncfg explain` can name a file and line without recompiling. */
 int ncfg_state_write_provenance(const char *run_dir, ncfg_provenance_t *provenance, char *err,
