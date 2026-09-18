@@ -9499,6 +9499,121 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.169 Five more, from the reconcile loop, `explain` and the portal check
+
+The wave that ported `netcfgd-daemon/src/lib.rs`, `ncfg explain`, the portal
+check and the contention detector. Four of the five were reproduced.
+
+### An address spelled two ways is added for ever
+
+A report's `address=` is kept as the text the writer's shell script produced --
+`state.rs` says so in a comment -- and both places that consume it compare
+**strings**: `plan_reported` skips an address only when `held.address ==
+address`, and the teardown asks `report.addresses.contains(&address.address)`.
+A report never goes through the compiler, so `lower.rs`'s `canonical_address`,
+which exists for exactly this on the document side, never touches it.
+
+Reproduced against `target/release/ncfg` with the roots redirected into a
+scratch tree, on `lo`, which already holds `::1/128`:
+
+    address=::1/128                                     -> nothing to do
+    address=0000:0000:...:0001/128                      -> addr.add lo (was <absent>)
+
+The same address. The second plans an `addr.add` for something the kernel is
+already holding and calls it `<absent>`. That half is permanent on its own; on
+an interface netcfgd owns the address on the teardown half fires too, so the
+address is deleted and re-added on every pass -- which breaks the idempotence
+`plan.h` names as load-bearing, *applying a plan twice produces an empty second
+plan*. Live rather than contrived: `openvpn` and cellular helpers write IPv6
+addresses through whatever their tooling prints, and 0047 makes those addresses
+netcfgd's to install. `ncfg explain` inherits the comparison and answers "the
+configuration does not ask for this address" about an address netcfgd installed
+itself, which is the defect `indirect_source` was written to close, reappearing
+through the spelling.
+
+### The apply lock, taken every five seconds, for ever
+
+`release_contended` collects the interfaces netcfgd runs a backend on, returns
+early if there are none, and then opens an executor -- which takes
+`apply_lock()` and a netlink socket -- **before** asking
+`contention::contenders` whether anything is contended. That list is non-empty
+on any machine running a supplicant, a DHCP client or a tunnel on a configured
+interface, which is every laptop with wifi. The function runs unconditionally
+in the tick block and `TICK_MS` is 5,000.
+
+So an ordinary machine takes and drops the global apply lock every five seconds
+for the life of the daemon, to find out there is nothing to do -- against the
+same lock `ncfg apply` waits on (0184). **Read out of the source, not
+measured**: starting a daemon that takes the real apply lock is not a thing to
+do on this workstation, and saying so is cheaper than a number nobody can
+trust.
+
+### A portal check that sends a `Host:` no browser sends
+
+`split`'s comment describes two values -- *"the `Host:` header is the authority
+as written, port and all; the connect target needs a port whether or not the
+URL gave one"* -- and the function returns one. `exchange` then writes `Host:
+{target}`, so `http://example.com/generate_204` is fetched under `Host:
+example.com:80`.
+
+A name-based virtual host, or a `generate_204` endpoint matching `Host`
+exactly, answers that differently from what a browser gets -- and comparing
+those two answers is the entire purpose of a portal check, so the result is a
+wrong verdict on a network that is fine, or a portal missed. Nothing could
+catch it: `split`'s own test asserts the target, and there is no test of the
+request at all.
+
+**And a `portal_check` naming an IPv6 literal compiles and can never be
+fetched.** The authority already contains a colon, so no port is appended and
+the brackets are never stripped; `to_socket_addrs` answers *"invalid port
+value"* on every join, for ever. The operator who wrote an address literal did
+it because the machine has no DNS, and the message they get reads as a network
+fault.
+
+### A reply cut at its length prefix is a quotation mark
+
+`dhcpcd_control.rs` reads the control socket **once** and takes the last run of
+printable bytes. The eight-byte little-endian prefix of a 34-byte path is
+`22 00 00 00 00 00 00 00`, and `0x22` is `"`. So a reply that arrives split
+answers `Some("\"")`.
+
+The module knows: its own comment records that measurement, and
+`the_printable_length_byte_is_not_the_answer` exists to refuse exactly this
+shape -- for a whole reply. A read that catches only the prefix is the one
+corner nothing covers, and `nothing_printable_is_no_answer` uses all-zero
+bytes, which has no printable byte at all.
+
+`Some(anything)` that is not the marker reads as "somebody else's dhcpcd", so a
+stop reports success against a client still holding the lease, and a start
+spawns a second `dhcpcd -b` beside a running one -- which the code three lines
+above records as a **silent** no-op that "exits 0 having started nothing". So
+netcfgd records a start it did not make and keeps no handle on the orphan.
+Latent rather than routine: dhcpcd's two-iovec `writev` normally lands in one
+read. It is one scheduling accident from routine, and the reader has no guard.
+
+### Two smaller ones
+
+`explain.rs` pushes the ownership fact *before* the address it describes and
+names no address, so on any dual-stack interface the reader attaches each
+ownership answer to the other address -- and what that answer says is whether
+netcfgd may delete it.
+
+And dead monitor subscribers accumulate on a quiet machine: the only pruning is
+in `broadcast`'s `retain`, and a converged machine broadcasts nothing. A client
+that subscribes and hangs up leaves a `sync_channel(64)` in the vector until
+the next real event. `monitor` needs only the `observe` tier, which
+`control { observe = "any" }` opens to every local user.
+
+### What the ports got right that the reviews did not
+
+Three of these five were found by having to choose, in C, what the Rust chose
+implicitly: a comparison (`same_address`), an ordering (who is contending
+before opening an executor), and a read (is this reply a whole path). None is
+subtle once stated, and all five had been read past for as long as the code has
+existed -- including by the sweeps in this document. **Rewriting a line is a
+harder read than reviewing it**, which is the argument for this port that was
+not in 0263 when it was written.
+
 ## 10.168 What porting the daemon's second half and the command line found
 
 Six workers, five modules, 12,420 lines of C and 867 checks. The suite is 56
