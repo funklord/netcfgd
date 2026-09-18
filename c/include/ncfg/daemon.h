@@ -5,9 +5,10 @@
  * of `state.rs` that is a document and a reload, and -- since the second wave
  * -- `probe.rs`, `sim.rs`, `confirm.rs` and `resolv_guard.rs`, which are the
  * pieces of the reconcile loop that decide something rather than merely
- * sequence it, and `wifi.rs`, which is every wireless request. The loop itself
- * is still named in the port's notes rather than stubbed, because a stub that
- * answers is worse than a symbol that is missing.
+ * sequence it, and `wifi.rs`, which is every wireless request. **The loop that
+ * drives all of them is the last section of this header**: what it decides and
+ * the order it does it in, which are two files because they are two different
+ * kinds of thing.
  *
  * WHAT THIS MODULE IS FOR, IN ONE SENTENCE
  *   Everything a stranger can reach passes through `ncfg_authz_permitted`, and
@@ -66,6 +67,7 @@
 #include "ncfg/document.h"
 #include "ncfg/lex.h"
 #include "ncfg/observed.h"
+#include "ncfg/portal.h"
 #include "ncfg/process.h"
 #include "ncfg/proto.h"
 
@@ -1903,5 +1905,802 @@ typedef int (*ncfg_wifi_install_fn)(void *context, const ncfg_wifi_profile_t *pr
 int ncfg_wifi_configure_network(const ncfg_document_t *document,
     const ncfg_proto_wifi_add_t *wanted, ncfg_wifi_install_fn install, void *install_context,
     ncfg_buf_t *out, char *err, size_t err_size);
+
+/* ---------------------------------------------------- the reconcile loop */
+
+/*
+ * `lib.rs`: the pass that drives every module above it.
+ *
+ * WHAT IS SPLIT FROM WHAT, AND WHY THAT IS THE WHOLE DESIGN
+ *   A loop that owns a `poll`, a clock, an inotify descriptor and a socket is
+ *   a loop nothing can test. The Rust says so about itself in one place --
+ *   `a_window_is_requested` is split out of `defers_to_a_window` because the
+ *   tuples arriving at the loop carry a `SyncSender`, and "a predicate that
+ *   cannot be exercised without building one is a predicate nothing
+ *   exercises". That split is made once there and everywhere here.
+ *
+ *   So this module is two files. `reconcile.c` is what the loop **decides**:
+ *   every call in it takes values and answers one, it opens nothing, writes
+ *   nothing and runs nothing, and `reconcile_test.c` walks its cases rather
+ *   than sampling them. `reconcile_pass.c` is the **order** those decisions
+ *   are carried out in, and it decides nothing: everything it reaches the
+ *   world through is a seam in `ncfg_reconcile_world_t`, so the orderings the
+ *   Rust's comments call load-bearing -- the drift hooks before the reconcile,
+ *   the portal checks after them, the contended radio given back before the
+ *   reconcile rather than inside it -- are a list a test reads back rather
+ *   than a claim a reader has to take on trust.
+ *
+ * WHAT IS DELIBERATELY NOT HERE
+ *   **The threads.** The Rust has four watchers and a one-shot timer feeding
+ *   one `mpsc`; what reaches this module is their result. A burst is folded
+ *   into `ncfg_reconcile_wake_t` by `ncfg_reconcile_collapse`, and whoever
+ *   owns the descriptors goes on owning them.
+ *
+ *   **Serving the requests.** `ncfg_daemon_answer_fn` is that seam and
+ *   already says what a handler owes. The loop is handed the requests that
+ *   are waiting because two of its decisions turn on them -- a pending window
+ *   defers the reconcile, an explicit apply releases the hold -- and it
+ *   answers none of them.
+ *
+ *   **Giving a radio back, and asking a URL a question.** Both reach the
+ *   machine this is built on -- one stops a backend, the other execs this
+ *   process' own image -- so each is a seam with a real implementation named
+ *   beside it. A build with neither observes, reports drift and reconciles
+ *   exactly as before; what it does not do is give a radio back or ask.
+ */
+
+/* ------------------------------------------------------------ what woke it */
+
+/*
+ * One thing the loop was told, before the burst is collapsed.
+ *
+ * `roamed` and a client's request are not in here, and that is the rule
+ * rather than an omission: **two roams are two events**, and a station that
+ * moved twice moved twice. They travel as lists beside the wake.
+ */
+typedef enum {
+	/* Netlink said the machine moved. */
+	NCFG_WOKE_KERNEL = 0,
+	/* Something wrote in the configuration directory. Not "the configuration
+	 * changed" -- see `ncfg_reconcile_report_t::config_is_new`. */
+	NCFG_WOKE_CONFIG,
+	/* A commit-confirm timer fired. It carries no identity, so it is a
+	 * prompt to ask the window rather than an instruction to revert. */
+	NCFG_WOKE_CONFIRM_EXPIRED,
+	/*
+	 * Nothing arrived in time.
+	 *
+	 * **The backstop, which the Rust discarded for a while.** It is what
+	 * makes this a verification loop rather than an apply: the plan computed
+	 * on a tick *is* the verification and its actions are the fix, so a
+	 * machine that drifted in a way netlink does not announce costs seconds
+	 * rather than for ever. A tick that finds nothing outstanding costs one
+	 * observation and stops.
+	 */
+	NCFG_WOKE_TICK
+} ncfg_woke_t;
+
+/*
+ * A burst of those, collapsed.
+ *
+ * Bringing an interface up produces a run of netlink messages, and re-reading
+ * once per message would make the daemon's cost scale with the kernel's
+ * chattiness. Declare one as `= {0}` per pass.
+ */
+typedef struct {
+	int kernel_changed;
+	int config_changed;
+	int confirm_expired;
+	int ticked;
+} ncfg_reconcile_wake_t;
+
+/* Fold one command in. Passing the same one twice is the point. */
+void ncfg_reconcile_collapse(ncfg_reconcile_wake_t *wake, ncfg_woke_t woke);
+
+/*
+ * Whether this pass has any reason to look at the machine.
+ *
+ * `probe_changed` is not part of the wake because it is not something the
+ * loop was told: it is what running the due probes turned out to answer, and
+ * a *changed* verdict is movement for the same reason a carrier change is
+ * (0119). A probe that has agreed with itself for an hour costs the program
+ * it runs and nothing else.
+ */
+int ncfg_reconcile_looks(const ncfg_reconcile_wake_t *wake, int probe_changed);
+
+/*
+ * Whether this pass should ask the confirm window whether it closed.
+ *
+ * A named decision rather than an inline `||`, because the second half reads
+ * like an accident and was absent (0234): **a tick must ask, not only the
+ * timer's own message.** The Rust's `spawn_expiry_timer` discarded the result
+ * of `spawn`, so a timer that could not start left the window open for ever
+ * -- and this was the only thing that closed one, which turned the silent
+ * failure of a safety mechanism into a change that never reverted.
+ *
+ * The timer stays, for the reason its own comment gives: a safety mechanism
+ * that fires up to five seconds late is one whose window is not the length it
+ * says. What the tick adds is that a *missing* timer costs seconds rather
+ * than the window. Asking on every pass is free because the resolver asks the
+ * window whether it has really expired, and a window with time left is not
+ * one that closed.
+ */
+int ncfg_reconcile_should_resolve_window(int confirm_expired, int ticked);
+
+/* One station that moved, on its way to the `roam` hooks. Both strings are
+ * the caller's and live only for the pass. */
+typedef struct {
+	const char *interface;
+	const char *bssid;
+} ncfg_reconcile_roam_t;
+
+/* ---------------------------------------------- what the waiting requests say */
+
+/*
+ * Does any pending request ask for a commit-confirm window?
+ *
+ * **The reconcile runs before the requests are served**, so an operator's
+ * `ncfg apply --confirm-within 60` landing in the same burst as the write it
+ * accompanies would otherwise be answered after the change had already been
+ * applied -- and the window would then cover nothing, which is worse than no
+ * window because the operator believes they have a way back.
+ *
+ * `--confirm-within 0` is how an operator says *no* window on a machine whose
+ * configuration sets one (0094), so it is not a window and must not hold the
+ * reconcile off.
+ */
+int ncfg_reconcile_window_requested(const ncfg_proto_request_t *requests, size_t count);
+
+/*
+ * Whether this batch is the operator taking their turn.
+ *
+ * `--no-apply-on-start` holds the acting until somebody applies deliberately,
+ * so that the *first* apply after a boot is the one carrying a window -- it is
+ * the one that can take the network away. An explicit apply is what the hold
+ * was waiting for; nothing else releases it, because nothing else is the
+ * operator saying go.
+ */
+int ncfg_reconcile_releases_hold(const ncfg_proto_request_t *requests, size_t count);
+
+/*
+ * Whether the loop should stand back and let a window cover this change.
+ *
+ * Two cases and they are different questions. A pending apply carrying a
+ * window is the operator saying they want this change to be revertible, and
+ * deferring costs one pass. An **open** window means a change is already
+ * awaiting confirmation: reconciling over it would apply something the
+ * operator has not accepted yet, on top of something they may be about to
+ * reject, and the revert would then undo a state nobody ever chose.
+ *
+ * `window_open` is passed rather than read, which is this module's rule and
+ * `ncfg_confirm_expired_at`'s: the file is the caller's to read and this is
+ * the decision.
+ */
+int ncfg_reconcile_defers(int window_open, const ncfg_proto_request_t *requests, size_t count);
+
+/* ------------------------------------------------------------------ drift */
+
+/*
+ * The drift policy in force for one interface.
+ *
+ * The interface's own where it states one, the document's default otherwise,
+ * and `report` where there is no document at all -- which is the direction
+ * that changes nothing on a machine netcfgd cannot compile a configuration
+ * for.
+ */
+ncfg_drift_policy_t ncfg_reconcile_policy_for(const ncfg_document_t *document,
+    const char *interface);
+
+/*
+ * Whether netcfgd may put the *host's* configuration back.
+ *
+ * Separate from the per-interface question because `resolv.conf` and the
+ * hostname belong to no interface, so no per-interface policy can speak for
+ * them. This is what an operator writing `global { on_drift = "reconcile" }`
+ * is setting, and it is the half whose absence meant a foreign overwrite of
+ * `resolv.conf` was never put back (0165).
+ */
+int ncfg_reconcile_host_wide(const ncfg_document_t *document);
+
+/*
+ * Whether this interface's drift is netcfgd's to put back.
+ *
+ * A predicate rather than the Rust's list of names, so that nothing has to
+ * bound a list whose length is the operator's to choose -- and so that
+ * `ncfg_reconcile_restrict` asks the question per action instead of searching
+ * a vector it was handed.
+ *
+ * Two exceptions, and neither is drift. An interface with a `preference` is
+ * always reconciled, because losing carrier is the configuration's own
+ * meaning changing rather than something else moving the machine -- a laptop
+ * that announces "your cable is out" while still routing down it is not the
+ * feature anybody asked for. A **pending SIM cycle** is the same shape:
+ * netcfgd decided the modem should be on another source and the only way to
+ * act on that is to take the link down and up, so leaving it out of this
+ * answer would have the cycle planned and then dropped, with the machine
+ * sitting on a source nothing ever selected.
+ */
+int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t *sims,
+    const char *interface);
+
+/*
+ * Keep only the actions netcfgd may act on, and say what was dropped.
+ *
+ * Reconciling drift on one interface must not drag along a change to another
+ * the operator has set to `report`. Filtering an ordered DAG can orphan a
+ * dependency, so an action whose `depends_on` names something that was not
+ * kept is dropped as well and named: applying it would run out of order, and
+ * silently applying a subset that happens to work is how a reconciler becomes
+ * unpredictable.
+ *
+ * `host_wide` decides the actions that belong to no interface, which the
+ * per-interface filter could only ever drop (0165). The three commit ops name
+ * no interface either and are deliberately not swept in by it.
+ *
+ * `dropped` takes one sentence per orphan, newline-terminated, and may be
+ * NULL. It is an `ncfg_buf_t` for the reason every accumulation in this port
+ * is one: a ceiling and a sticky failure, so a malformed day cannot buy an
+ * allocation.
+ *
+ * **The warnings are not copied and the refusals are.** A plan copies the
+ * "cannot be undone" warning in as each action is added, so carrying the
+ * source's warning list across would say it twice; the restricted plan is
+ * applied and never rendered, and what a client is shown is the full plan.
+ * The refusals and the stranded credentials are copied, because restricting a
+ * plan changes what will be *done* and not what is true about the
+ * configuration.
+ *
+ * NULL with a sentence where memory ran out. The result borrows from the same
+ * document the source plan does, so it must not outlive it, and
+ * `ncfg_plan_free` releases it.
+ */
+ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_document_t *document,
+    const ncfg_sims_t *sims, int host_wide, ncfg_buf_t *dropped, char *err, size_t err_size);
+
+/* The longest thing said about one piece of drift, and about what netcfgd is
+ * doing with it. Sentences an operator reads, bounded for `NCFG_LOG_MAX`'s
+ * reason: anything longer is a payload. */
+#define NCFG_DRIFT_SUMMARY_MAX 200
+#define NCFG_DRIFT_ACTION_MAX  128
+
+/*
+ * How many pieces of drift are kept, with `total` counting past it.
+ *
+ * `NCFG_DIAGS_MAX`'s bargain again: a machine fighting netcfgd over every
+ * interface it has produces one of these per action, and a client that shows
+ * "32 of 60" is showing more than one that shows sixty nobody scrolls
+ * through. The Rust grows a `Vec` from whatever the plan holds.
+ */
+#define NCFG_DRIFT_MAX 32
+
+/* One thing that has moved away from the configuration. */
+typedef struct {
+	/* Borrowed from the plan this was read out of, which outlives it. */
+	const char *interface;
+	/* `addr.add: addressing[0] is <absent> but should be 10.0.0.5/24`. */
+	char        summary[NCFG_DRIFT_SUMMARY_MAX];
+	/* `reconciling`, `reported only`, or what to do about a refusal. */
+	char        action[NCFG_DRIFT_ACTION_MAX];
+} ncfg_drift_t;
+
+typedef struct {
+	ncfg_drift_t at[NCFG_DRIFT_MAX];
+	size_t       count;
+	size_t       total;
+} ncfg_drifts_t;
+
+/*
+ * Read the drift out of a plan.
+ *
+ * One entry per drifting interface -- the *first* action that names it, since
+ * a second is the same fight -- plus one per refusal and one per stranded
+ * credential. A refusal is worth saying out loud because it is exactly the
+ * case where an operator is waiting for a change that is never going to
+ * happen; a stranded credential is the stronger version of the same reason,
+ * since nothing is waiting on that one at all.
+ *
+ * An interface whose policy is `ignore` produces nothing. Declare `out` as
+ * `= {0}`; it owns nothing and there is nothing to free.
+ */
+void ncfg_reconcile_drift(const ncfg_plan_t *plan, const ncfg_document_t *document,
+    ncfg_drifts_t *out);
+
+/*
+ * The same thing as a `drift` event, for a monitor stream.
+ *
+ * `out` borrows every string from `drift`, which must outlive it -- the event
+ * is sent inside the pass that read it.
+ */
+void ncfg_drift_event(const ncfg_drift_t *drift, ncfg_proto_event_t *out);
+
+/*
+ * What a phase was last told about an interface, or NULL.
+ *
+ * Through the `/run` record the `carrier` and `lease` phases use, and through
+ * that alone. It is what makes "fire on the change" possible for `drift` and
+ * for `portal` without either keeping state of its own: the record is read
+ * back by every observation, so an in-memory copy beside it would be a second
+ * answer that can disagree (0084).
+ */
+const char *ncfg_reconcile_told(const ncfg_observed_t *observed, const char *interface,
+    int phase);
+
+/*
+ * Whether the `drift` hooks should fire for this drift.
+ *
+ * Fires when drift **appears**, not while it persists. Under `report` the
+ * drift is still there on the next netlink event and the one after it, so
+ * firing on presence would run somebody else's script on every observation
+ * for as long as the operator left it alone. What the script is told is what
+ * changed rather than what netcfgd did about it, so a hook that has already
+ * seen this drift stays quiet even if the policy moved underneath it.
+ */
+int ncfg_reconcile_tells(const char *last_told, const char *summary);
+
+/* ---------------------------------------------------------- captive portal */
+
+/*
+ * **The asking is `portal.h`'s and only the record is here.** That module
+ * carries the verdict, `ncfg_portal_is_routable`, and the child that does the
+ * fetching; what this one decides is when to ask at all and what to write
+ * down afterwards, which is the half that lives in the loop and the half the
+ * Rust could only reach with a network behind a captive portal.
+ */
+
+/* `trying:6` and a NUL, with room to spare. */
+#define NCFG_PORTAL_RECORD_MAX 16
+
+/*
+ * What the record under the `portal` phase is written as.
+ *
+ * Spelled here rather than in the source, because a test that spelled them
+ * itself would go on passing the day one changed -- and because the record is
+ * read back out of `/run` by the next pass, which makes these three words a
+ * format rather than an implementation detail.
+ */
+#define NCFG_PORTAL_RECORD_DONE   "addressed"
+#define NCFG_PORTAL_RECORD_BARE   "bare"
+#define NCFG_PORTAL_RECORD_TRYING "trying:"
+
+/*
+ * How many times an inconclusive check is retried before it gives up.
+ *
+ * The retry exists because the probe runs before the reconcile that delivers
+ * DNS, so a fresh join can fail to resolve for a pass or two through nothing
+ * being wrong -- and DNS is exactly what a portal hijacks, so recording that
+ * as "checked, and clear" meant the one network behind a portal and slow to
+ * come up was the one netcfgd never told anybody about.
+ *
+ * The *bound* exists because the loop has a five-second backstop, and a
+ * question asked for ever is a request to somebody else's server every five
+ * seconds for as long as the machine sits on a network with no route. Six is
+ * about thirty seconds of a quiet loop.
+ */
+#define NCFG_PORTAL_RECORD_ATTEMPTS 6
+
+/* Whether to ask at all, and what to record when the answer is not wanted. */
+typedef enum {
+	/* Nothing to do: already answered for this joining, or already bare. */
+	NCFG_PORTAL_STEP_NOTHING = 0,
+	/* No address worth asking about; the record goes back to `bare`. The
+	 * record holds the *state* rather than the verdict, because what this
+	 * fires on is the transition and not what it turned out to mean. */
+	NCFG_PORTAL_STEP_BARE,
+	/* Ask. */
+	NCFG_PORTAL_STEP_ASK
+} ncfg_portal_step_t;
+
+/*
+ * Decide the step from what the interface looks like and what it was last
+ * told.
+ *
+ * `*attempts_out` is the count read out of a `trying:N` record, and 0 for a
+ * record that is absent or that this build does not recognise. It is written
+ * whatever the answer is.
+ */
+ncfg_portal_step_t ncfg_portal_step(int addressed, const char *was, unsigned *attempts_out);
+
+/* What to do with the answer that came back. */
+typedef struct {
+	/* What the record should say now: `addressed`, or `trying:N`. */
+	char     record[NCFG_PORTAL_RECORD_MAX];
+	/* Whether the `portal` hooks should run, which is a portal and nothing
+	 * else. `Clear` is said to the log and to nobody else: a hook that ran on
+	 * every successful join is a hook nobody keeps. */
+	int      run_hooks;
+	/* Whether this attempt was inconclusive and will be tried again. */
+	int      retrying;
+	/* Which attempt this was, for the warning that names it. */
+	unsigned attempt;
+} ncfg_portal_answer_t;
+
+/*
+ * Turn a verdict and the attempts so far into the next record.
+ *
+ * **An answer that was not an answer must not consume the transition**, which
+ * is the whole of the retry; and the giving up is said once, loudly, rather
+ * than kept quiet, because the operator asked for this network to be checked
+ * and it was not.
+ */
+void ncfg_portal_answered(int verdict, unsigned attempts, ncfg_portal_answer_t *out);
+
+/* ------------------------------------------------------- the resolv counting */
+
+/*
+ * Whether this pass had to put `/etc/resolv.conf` back.
+ *
+ * **Asked of the plan that is about to run rather than of the file**, because
+ * this is the only place that knows the write is a *reclaim* -- a pass that
+ * had to deliver again something netcfgd had already delivered. The executor
+ * writing the file on a first apply is not interference.
+ */
+int ncfg_reconcile_reclaimed(const ncfg_plan_t *plan);
+
+/*
+ * Move the reclaim count, and say whether it is time to sweep.
+ *
+ * Reset on any drift pass that did not have to reclaim, so the count means
+ * "in a row" rather than "ever": a machine where something rewrites the file
+ * once an hour never reaches the threshold, which is the intent -- that is
+ * somebody's cron, not a fight. Answering 1 starts the count again rather
+ * than sweeping on every pass afterwards, because whatever was signalled
+ * needs a moment to go and a sweep per tick would be its own storm.
+ */
+int ncfg_reconcile_sweeps(unsigned *reclaims, int reclaimed);
+
+/* ---------------------------------------------------- arming for a change */
+
+/* Whether a configuration change gets a window, and what refused it. */
+typedef enum {
+	NCFG_ARM_YES = 0,
+	/*
+	 * Not a configuration change.
+	 *
+	 * A drift reconcile is netcfgd putting back what something else changed.
+	 * Arming there would revert netcfgd's own correction when nobody
+	 * confirmed, the drift would be found again on the next pass, and the
+	 * machine would oscillate -- spending half its time in the state the
+	 * reconcile exists to leave. Nobody is waiting to confirm a correction
+	 * they did not ask for (0157).
+	 */
+	NCFG_ARM_NOT_A_CHANGE,
+	/* The document asks for no window, or asks for one of no seconds --
+	 * which is two spellings of "no", one of which reverts the change. */
+	NCFG_ARM_NO_WINDOW,
+	/* A window is already open, or there is nothing to fall back to.
+	 * `ncfg_confirm_may_arm` is what answered, and it said why. */
+	NCFG_ARM_REFUSED,
+	/*
+	 * The last-good configuration is the empty placeholder.
+	 *
+	 * **A window whose fall-back is that is not a safety net, it is a
+	 * scheduled outage.** `ncfg_reconcile_establish_last_good` writes an
+	 * empty document before the first apply so that `--confirm-within` works
+	 * from the very beginning, where "revert to nothing" really is the exact
+	 * undo of a first apply -- an operator asked, is watching, and can
+	 * confirm. Nobody asked for this one, and the placeholder outlives the
+	 * moment it was written for, because the startup apply only replaces it
+	 * where it had no failure at all. An operator then changing one field
+	 * would arm a window whose revert removes *every* address, route and
+	 * backend netcfgd has installed.
+	 */
+	NCFG_ARM_EMPTY_LAST_GOOD
+} ncfg_arm_t;
+
+/*
+ * Whether to arm, given what the caller has already read.
+ *
+ * `window` is `ncfg_plan_confirm_window`'s answer, asked of the planner
+ * rather than re-derived: the rule has three cases -- the caller's number, the
+ * caller's zero meaning "no window despite the default", and the document's
+ * own -- and a second copy beside this one is how the two would stop agreeing.
+ *
+ * `last_good` is what `ncfg_confirm_may_arm` answered, and NULL is its
+ * refusal. Nothing here opens a file, which is what lets every one of the
+ * five answers be a check.
+ */
+ncfg_arm_t ncfg_reconcile_arms(int config_is_new, ncfg_optint_t window,
+    const ncfg_document_t *last_good);
+
+/* What to say about an answer that was not yes. NULL for `NCFG_ARM_YES`, and
+ * for a value outside the enum. */
+const char *ncfg_reconcile_arm_why(ncfg_arm_t answer);
+
+/*
+ * Whether this document is the empty placeholder.
+ *
+ * By identity rather than by field, so that it cannot come to disagree with
+ * `ncfg_document_new` about what a default is: both are hashed and the hashes
+ * are compared. **Doubt answers yes**, which is the direction that refuses a
+ * window rather than arming one whose revert undoes everything netcfgd has
+ * done.
+ */
+int ncfg_reconcile_document_is_empty(const ncfg_document_t *document);
+
+/* --------------------------------------------------------------- the pass */
+
+/*
+ * How a hook is run.
+ *
+ * **A seam because running one forks and execs**, and a test that drove the
+ * real thing would run the developer's own scripts. `ncfg_reconcile_hook_run`
+ * is the implementation that does it for real.
+ *
+ * `variable` and `value` are the second environment variable each of the
+ * three event phases carries -- `NCFG_ACTION` for `drift`, `NCFG_BSSID` for
+ * `roam`, `NCFG_URL` for `portal` -- and are NULL where a phase has none.
+ * They are passed here rather than in `ncfg_hook_env_t` because that struct
+ * carries four fixed members and is `apply.h`'s; the day it grows a general
+ * pair, the default runner below is where the two lines go and nothing else
+ * changes.
+ */
+typedef void (*ncfg_reconcile_hook_fn)(void *context, const ncfg_hook_ref_t *hook,
+    const ncfg_hook_env_t *env, const char *variable, const char *value);
+
+/*
+ * Run it for real, through `ncfg_hook_run`.
+ *
+ * Never a veto at any of these three phases: the drift has happened, the
+ * station has moved, the portal has answered, and there is nothing left to
+ * stop. A failing script is a line in the log and nothing else.
+ *
+ * `context` is ignored, so this may be installed with none.
+ */
+void ncfg_reconcile_hook_run(void *context, const ncfg_hook_ref_t *hook,
+    const ncfg_hook_env_t *env, const char *variable, const char *value);
+
+/*
+ * Ask for real, through `ncfg_portal_probe` and this process' own image.
+ *
+ * The daemon passes `NCFG_PORTAL_OWN_IMAGE` and the default expectation,
+ * which is what `portal.h` says a caller in the daemon does. `context` is
+ * ignored, so this may be installed with none. **Nothing under `tests/` calls
+ * it**: it forks, execs and reaches the network.
+ */
+void ncfg_reconcile_portal_probe(void *context, const char *url, ncfg_portal_result_t *out);
+
+/*
+ * Everything the pass reaches the world through.
+ *
+ * Every member may be NULL and the pass says what a NULL one costs rather
+ * than refusing: a build with no portal probe checks no URLs, one with no
+ * hook runner runs no scripts, one with no executor observes and reports and
+ * changes nothing. That is the same bargain `ncfg_resolv_machine_t` takes --
+ * **doing nothing on a missing seam is the point rather than the fallback** --
+ * and it is what makes a test able to install exactly the two seams its case
+ * is about.
+ */
+typedef struct {
+	/* Whatever the implementation keeps. Never touched by this module. */
+	void *context;
+	/*
+	 * Take the apply lock, open a netlink socket, and fill in the seam.
+	 *
+	 * Opened per operation rather than per pass, which is the Rust's
+	 * lifetime: the lock covers the plan as well as the actions, and a pass
+	 * that only observes never takes it. 0 with a sentence holds the acting
+	 * rather than failing the pass -- an apply that cannot start is a fact to
+	 * report, not a reason to stop watching.
+	 */
+	int  (*executor_open)(void *context, ncfg_executor_t *out, char *err, size_t err_size);
+	/* Release what `executor_open` filled in. */
+	void (*executor_close)(void *context, ncfg_executor_t *executor);
+	/* Tell every subscriber. NULL is nobody listening, which is an ordinary
+	 * daemon with no monitor attached. */
+	void (*announce)(void *context, const ncfg_proto_event_t *event);
+	/* Run one hook. */
+	ncfg_reconcile_hook_fn hook;
+	/*
+	 * Ask a URL whether something is in the way.
+	 *
+	 * A seam although `ncfg_portal_probe` exists, because that call forks and
+	 * execs this process' own image: a test that drove it would run the
+	 * developer's netcfgd. `ncfg_reconcile_portal_probe` is the
+	 * implementation that does it for real, and it always produces a verdict
+	 * -- a probe that could not be run has not found a portal, so everything
+	 * that can go wrong is `unreachable` with a sentence and is retried.
+	 */
+	void (*portal)(void *context, const char *url, ncfg_portal_result_t *out);
+	/*
+	 * Give a radio back that netcfgd should not be holding.
+	 *
+	 * `ncfg_contenders_find` landed in the same wave and is what an
+	 * implementation calls; it is a seam rather than a call because giving a
+	 * radio back means stopping a backend on the machine this is built on.
+	 * The boot race is the
+	 * part netcfgd can fix: it starts `Before=network-pre.target`, so it can
+	 * take a radio before `NetworkManager` has written anything that says the
+	 * device is NM's, and two supplicants on one radio drop the association.
+	 * Called on every pass and not only at start, because once netcfgd holds
+	 * a backend the plan says "nothing to do" for that interface and nothing
+	 * would ever look again.
+	 *
+	 * **An implementation asks who the contenders are before it opens an
+	 * executor.** The Rust does it the other way round -- it opens one as soon
+	 * as netcfgd is running any backend at all -- so on every machine it
+	 * manages it takes the apply lock and a netlink socket every five seconds
+	 * to find out there is nothing to give back, against the same lock `ncfg
+	 * apply` waits on (0184).
+	 */
+	int  (*release_contended)(void *context, ncfg_daemon_state_t *state, char *err,
+	    size_t err_size);
+	/* Wake the loop when a window closes. NULL leaves the tick to close it,
+	 * which costs seconds rather than the window. */
+	void (*expiry)(void *context, uint32_t seconds);
+	/* Seconds since the epoch. NULL is `ncfg_confirm_now`, and a test hands
+	 * over a counter it moves itself -- `ncfg_confirm_expired_at`'s rule,
+	 * applied to the caller that reads the clock. */
+	uint64_t (*now)(void *context);
+	/* The machine the resolv sweep asks about processes and signals. NULL
+	 * never sweeps, which that seam's own rule requires. */
+	const ncfg_resolv_machine_t *resolv;
+} ncfg_reconcile_world_t;
+
+/*
+ * The loop's own state, beside the modules it drives.
+ *
+ * `probes`, `sims` and `armed` are held *beside* `ncfg_daemon_state_t` rather
+ * than inside it, for the reason that header gives: a reload replaces the
+ * document and must not replace a tally that has been counting across ticks,
+ * and what an open window covers legitimately outlives a reload. This struct
+ * is where the four meet, and it owns none of them.
+ */
+typedef struct {
+	ncfg_daemon_state_t   *state;
+	ncfg_probes_t         *probes;
+	ncfg_sims_t           *sims;
+	/* What an open window covers. May be NULL, which is a caller that does
+	 * not arm from this loop; a daemon that restarted inside a window has one
+	 * that is empty, and `ncfg_confirm_revert` says what that falls back to. */
+	ncfg_confirm_armed_t  *armed;
+	ncfg_reconcile_world_t world;
+	/*
+	 * `--no-apply-on-start`, as a latch rather than a startup skip.
+	 *
+	 * The flag says the daemon should observe and be told when to act, and
+	 * once the loop reconciles on its own that has to keep meaning something
+	 * -- otherwise it delays acting by one tick and no more, and the
+	 * *protected first apply* it exists for cannot happen. Set by
+	 * `ncfg_reconcile_start` and cleared by the first explicit apply.
+	 */
+	int      holding;
+	/* Reclaims in a row, which `NCFG_RESOLV_PATIENCE` bounds. */
+	unsigned reclaims;
+} ncfg_reconcile_t;
+
+/* What one pass did. For a caller that wants to say so, and for a test that
+ * would otherwise have to infer it from the machine. */
+typedef struct {
+	/* A window was found closed and put back. */
+	int    window_resolved;
+	/* The configuration directory was recompiled. */
+	int    reloaded;
+	/*
+	 * And the document that came out of it is a different one.
+	 *
+	 * **"The file was written" is not "the configuration changed"**, and the
+	 * confirm window turns on the difference: an editor writing the same
+	 * bytes, or a configuration-management tool rewriting the file on a
+	 * timer, is a write -- and a reload that fails to compile is a write that
+	 * leaves the desired document exactly as it was. Either of those on a
+	 * pass that is also correcting drift used to arm a window over the drift
+	 * correction, which 0157 says never happens; on expiry that reverts
+	 * netcfgd's own repair, the drift is found again, and the machine
+	 * oscillates. Comparing the document either side of the reload is what
+	 * makes the exclusion true rather than intended.
+	 */
+	int    config_is_new;
+	int    probes_changed;
+	/* The pass looked at the machine at all. */
+	int    looked;
+	/* The link set the kernel reports moved. */
+	int    links_moved;
+	size_t drift_count;
+	/* A restricted plan was applied. */
+	int    reconciled;
+	size_t actions_done;
+	/* A window was armed over the change. */
+	int    armed;
+	/* The resolv sweep ran, and how many it signalled. */
+	int    swept;
+	size_t signalled;
+	/* The hold was released by an explicit apply. */
+	int    released_hold;
+} ncfg_reconcile_report_t;
+
+/*
+ * Make a confirm window possible on the very first apply.
+ *
+ * A window reverts to the last-good configuration, and until netcfgd has
+ * applied once there is none -- so `ncfg apply --confirm-within` was refused
+ * exactly when an operator most wanted it, on the first apply on a machine
+ * they were still unsure about.
+ *
+ * The missing document is an empty one, and that is not a placeholder: before
+ * netcfgd's first apply its desired state genuinely was nothing. Reverting to
+ * it removes every address, route, link and backend netcfgd installed and
+ * touches nothing it did not, which is the exact undo of a first apply. What
+ * it does not do is restore connectivity netcfgd was not providing.
+ *
+ * Written only where none exists, so the ordinary reboot case is untouched.
+ * Answers 1 where one was already there as well as where one was written; 0
+ * with a sentence only where the write was refused.
+ */
+int ncfg_reconcile_establish_last_good(const ncfg_daemon_state_t *state, char *err,
+    size_t err_size);
+
+/*
+ * Apply everything the configuration asks for, and record it as last-good.
+ *
+ * The startup apply, and deliberately **not** a path that ever arms a window:
+ * `ncfg_reconcile_establish_last_good` writes an empty document before this
+ * runs, so a window armed at boot and left unconfirmed on a machine that has
+ * never applied would revert to *nothing* -- taking down every address, route
+ * and backend netcfgd had just brought up, N seconds after start, with no
+ * operator present. It is exempt by construction in the Rust as well, and
+ * this sentence is here to stop somebody wiring it in later.
+ *
+ * The configuration in force becomes the last-good only where the apply had
+ * no failure at all. Without recording it the first `apply --confirm-within`
+ * after a boot is refused for having nothing to revert to, which is safe and
+ * useless.
+ */
+int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *report, char *err,
+    size_t err_size);
+
+/*
+ * Configure the machine at startup, and set the latch.
+ *
+ * `reverted` is whether a window found at startup was resolved by reverting:
+ * a machine that has just been put back is not one to apply over.
+ *
+ * A network configuration daemon that starts and configures nothing is not
+ * doing its job -- design section 4.4 makes oneshot the alternative rather
+ * than the default -- so `apply_on_start` converges here, and only the
+ * *acting* is what `--no-apply-on-start` holds.
+ */
+int ncfg_reconcile_start(ncfg_reconcile_t *loop, int apply_on_start, int reverted, char *err,
+    size_t err_size);
+
+/*
+ * One pass of the loop.
+ *
+ * The order is the whole of this function and every step of it is written
+ * down in the Rust with a reason:
+ *
+ *   1. a window whose timer fired -- or whose timer never started, which is
+ *      what the tick is for -- is asked whether it has really closed;
+ *   2. the `roam` hooks run, before anything re-observes, so a script sees
+ *      the machine as the move left it;
+ *   3. the configuration is recompiled where something wrote in the
+ *      directory, and the documents either side are compared;
+ *   4. whatever probes are due are run, and a SIM is advanced where one has
+ *      just been declared dead;
+ *   5. and where anything at all moved: the kernel is re-read, the drift is
+ *      broadcast, the `drift` hooks run **before** the reconcile so a script
+ *      sees the machine as it drifted rather than as netcfgd has just put it
+ *      back, the portal checks run after them and before the reconcile for
+ *      the same reason, a contended radio is given back **before** the
+ *      reconcile and not inside it -- once netcfgd holds a backend the plan
+ *      says "nothing to do" for that interface and a claim appearing later
+ *      would never be looked at again -- and then the restricted plan is
+ *      applied.
+ *
+ * **Only step 5's last part is held by `--no-apply-on-start`.** Gating the
+ * observation too left the daemon planning against what it saw at startup,
+ * which is worse than not looking: it answers `apply` with a plan for a
+ * machine that has since moved, and the operator gets an apply that does the
+ * wrong work and reports success.
+ *
+ * `requests` is what is waiting to be answered, and this answers none of them.
+ * `report` may be NULL. Returns 0 with a sentence only where the pass could
+ * not be carried out at all; everything a machine can refuse is reported
+ * through the log and the report and leaves the loop running, because a
+ * daemon that stopped reconciling on a failed apply is a daemon that stopped.
+ */
+int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wake,
+    const ncfg_reconcile_roam_t *roams, size_t roam_count,
+    const ncfg_proto_request_t *requests, size_t request_count,
+    ncfg_reconcile_report_t *report, char *err, size_t err_size);
 
 #endif /* NCFG_DAEMON_H */
