@@ -393,6 +393,27 @@ static void provenance_round_trips(const char *run_dir)
 	check(provenance.count == 2u &&
 	    strcmp(provenance.entries[0].path, "globals.on_drift") == 0,
 	    "sorted by path and with one entry per path, so the file is stable");
+	/*
+	 * **Which one survived, which the check above cannot see.** Counting the
+	 * entries proves a duplicate went; it says nothing about whether the one
+	 * kept is the one the rule names, and the rule is the whole reason this
+	 * function does not simply keep the last. `qsort` is not stable, so
+	 * before the comparator learned to break ties by arrival this was left to
+	 * the libc.
+	 *
+	 * **And this check passes against the version that leaves it to the
+	 * libc**, measured: glibc's `qsort` is a merge sort and happens to keep
+	 * these two in order, so the old code was right here by luck and would
+	 * have been wrong on a libc that chose differently. What turns it red is a
+	 * comparator that reverses ties, which is what an unstable sort is
+	 * entitled to do. A check that only fails against a deliberately hostile
+	 * sort is still worth having: it is the rule written down where the next
+	 * reader of this function will see it.
+	 */
+	ncfg_provenance_location(ncfg_provenance_lookup(&provenance, "globals.on_drift"), where,
+	    sizeof(where));
+	check(strcmp(where, "/etc/netcfgd/netcfgd.conf:9:1") == 0,
+	    "and the entry kept is the one recorded first, not the override at line 99");
 	check(ncfg_state_read_provenance(run_dir, &back, message, sizeof(message)) &&
 	    back.count == 2u,
 	    "and read back");

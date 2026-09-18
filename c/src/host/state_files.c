@@ -119,37 +119,81 @@ void ncfg_provenance_location(const ncfg_provenance_entry_t *entry, char *out, s
 	    (long long)entry->column);
 }
 
-static int by_path(const void *one, const void *other)
+/*
+ * By path, and by arrival where two entries share one.
+ *
+ * **The tie-break is the whole point.** `qsort` is not stable, and the rule
+ * below -- the first entry for a path wins -- is a fact about the order the
+ * compiler reached them in, which an unstable sort is free to destroy. Where
+ * two records exist for one field the earlier is the base and the later the
+ * override, so losing that order would make `ncfg explain` send a reader to
+ * the file that was overridden rather than to the one that produced the value,
+ * and it would do it differently on different libcs.
+ *
+ * What is sorted is an index of pointers into the entry array, and `qsort`
+ * never moves that array -- only the index. So two pointers into it still say
+ * which of the two arrived first, and the comparison is total without the
+ * entry needing to carry a sequence number it has no other use for.
+ */
+static int by_path_then_arrival(const void *one, const void *other)
 {
-	const ncfg_provenance_entry_t *a = one;
-	const ncfg_provenance_entry_t *b = other;
+	const ncfg_provenance_entry_t *const *a = one;
+	const ncfg_provenance_entry_t *const *b = other;
+	int order = strcmp((*a)->path, (*b)->path);
 
-	return strcmp(a->path, b->path);
+	if (order != 0) {
+		return order;
+	}
+	if (*a < *b) {
+		return -1;
+	}
+	return *a > *b ? 1 : 0;
 }
 
-void ncfg_provenance_canonicalize(ncfg_provenance_t *provenance)
+int ncfg_provenance_canonicalize(ncfg_provenance_t *provenance, char *err, size_t err_size)
 {
+	const ncfg_provenance_entry_t **order;
+	ncfg_provenance_entry_t *sorted;
 	size_t kept = 0;
 	size_t i;
 
-	if (!provenance || provenance->count < 1u) {
-		return;
+	if (!provenance) {
+		ncfg_error_set(err, err_size, "nothing was given to canonicalize");
+		return 0;
 	}
-	qsort(provenance->entries, provenance->count, sizeof(*provenance->entries), by_path);
+	if (provenance->count < 2u) {
+		return 1;
+	}
+	order = malloc(provenance->count * sizeof(*order));
+	sorted = malloc(provenance->count * sizeof(*sorted));
+	if (!order || !sorted) {
+		free(order);
+		free(sorted);
+		ncfg_error_set(err, err_size, "out of memory ordering %zu recorded position(s)",
+		    provenance->count);
+		return 0;
+	}
+	for (i = 0; i < provenance->count; i++) {
+		order[i] = &provenance->entries[i];
+	}
+	qsort(order, provenance->count, sizeof(*order), by_path_then_arrival);
 	/* **The first entry for a path wins**, which is the Rust's `dedup_by`:
 	 * where two records exist for one field the earlier one is the one the
 	 * compiler reached first, and an explanation that named the later would
 	 * send a reader to the override rather than to what produced the value. */
 	for (i = 0; i < provenance->count; i++) {
-		if (kept && strcmp(provenance->entries[kept - 1u].path,
-		    provenance->entries[i].path) == 0) {
-			free(provenance->entries[i].path);
-			free(provenance->entries[i].file);
+		if (kept && strcmp(sorted[kept - 1u].path, order[i]->path) == 0) {
+			free(order[i]->path);
+			free(order[i]->file);
 			continue;
 		}
-		provenance->entries[kept++] = provenance->entries[i];
+		sorted[kept++] = *order[i];
 	}
+	free(order);
+	free(provenance->entries);
+	provenance->entries = sorted;
 	provenance->count = kept;
+	return 1;
 }
 
 int ncfg_state_write_provenance(const char *run_dir, ncfg_provenance_t *provenance, char *err,
@@ -168,7 +212,9 @@ int ncfg_state_write_provenance(const char *run_dir, ncfg_provenance_t *provenan
 	/* Sorted, so the file is stable across compiles for the same reason the
 	 * document is: a table that reordered itself would make every `diff` of
 	 * two runs look like a change. */
-	ncfg_provenance_canonicalize(provenance);
+	if (!ncfg_provenance_canonicalize(provenance, err, err_size)) {
+		return 0;
+	}
 
 	ncfg_buf_init(&buf, STATE_BUILD_MAX);
 	ncfg_json_write_init(&writer, &buf);
