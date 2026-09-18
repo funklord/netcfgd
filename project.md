@@ -9499,6 +9499,60 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.156 A test that disarms the process it shares
+
+Two symptoms in `netcfgd-sys`, neither mentioning its cause: **thirty seconds**
+on the clock of every run after the last assertion, and an intermittent
+`chmod: PermissionDenied` as root in a test about file modes. Decision 0262.
+
+### The cause said so itself
+
+`shed` takes a thread's capabilities and, where there is an id to become, its
+uid -- and POSIX makes credentials a property of the *process*, so glibc
+broadcasts the change to every thread. Rust runs the tests of one binary as
+threads in one process. The test's own comment: *"It is also why every test
+that runs after this one in a root run is running as 65534."* Written as an
+observation about the shed, read by nobody as a fact about the suite.
+
+A sibling still running then finds `chmod` returning `EPERM`, or `kill` of a
+root-owned child returning `EPERM` -- and the test that had just killed its
+child calls `wait`, which blocks until the `sleep 30` inside it ends on its
+own. The thirty seconds and the failing chmod are the same disarmament landing
+on whichever test the scheduler had in flight.
+
+An integration test is a binary of its own, so the shed moved to
+`crates/netcfgd-sys/tests/shed.rs` and now disarms only itself.
+
+### The accomplice, which the same file documents
+
+Four tests spawn `sh -c 'sleep 30'` and kill the child. `sh -c` forks the
+command and waits, so the sleep is a *grandchild*: killing the child kills the
+shell and leaves the sleep reparented to init, holding the test binary's
+stderr, which `cargo test` reads until every writer is gone.
+
+`process::terminate_group` exists for exactly this, twelve screens up the same
+file, and its documentation says the caller must use `Command::process_group(0)`
+-- recorded after two `sleep 300` processes outlived a run that believed it had
+killed them. **The production code learned it and the tests beside it did not.**
+
+Each half measured on its own, because two fixes at once prove neither: shed
+moved and groups unfixed, thirty seconds; groups fixed and shed left in, thirty
+seconds; both, **3.94 s** across ten runs with no failures, from 30.05 s.
+
+### A gate, and a sabotage against the gate
+
+One line removed brings back a thirty-second suite and an `EPERM` about file
+modes, which is a regression no failure describes. `tool/disarm_gate.py`
+refuses a `shed()` in a unit test and a spawned `sh` without a process group.
+It reads only spawned shells -- `.output()` and `.status()` wait, so nothing
+can be orphaned -- and narrowing it that way turned four false positives in
+other crates into none.
+
+**Its first version was wrong in the direction that passes.** The pattern
+forbade a `:` before the call, which excluded `super::shed()`, the one spelling
+it exists to catch; the gate reported a clean tree over a sabotaged one. Run
+the sabotage against the gate, not only against the code.
+
 ## 10.155 A reader that goes away is not a crash
 
 `ncfg status | head -1` aborted with a Rust panic: exit 134 and four lines
@@ -9563,7 +9617,8 @@ Not fixed here: the test is right about what it is testing, and the answer --
 running it in a process of its own -- is a change to how this crate's suite is
 run rather than to any code in it. Recorded because the failure names a file
 mode and says nothing about privilege, so the next person to see it starts in
-the wrong place.
+the wrong place. **Fixed in 0262**, which also found what the disarmament was
+doing to the clock.
 
 ### The proof a mechanical change carries
 

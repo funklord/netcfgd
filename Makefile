@@ -1134,6 +1134,10 @@ packaging:
 	@# of a pipe goes away. A print site is never wrong, only absent from the
 	@# path a test drives. 0261.
 	@python3 tool/print_gate.py
+	@# No test disarms the process its siblings are in, and no test spawns a
+	@# shell it cannot kill as a group. Both cost thirty seconds a run and
+	@# said nothing about the cause. 0262.
+	@python3 tool/disarm_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the

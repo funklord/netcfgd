@@ -612,6 +612,10 @@ pub fn exec_refusal(program: &str, error: &io::Error) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+	// `process_group`, so a child that forks can be killed as a group. See
+	// the spawn sites below.
+	use std::os::unix::process::CommandExt as _;
+
 	/// A whole-argument match finds netcfgd's own process.
 	#[test]
 	fn a_marker_in_argv_is_found() {
@@ -630,6 +634,14 @@ mod tests {
 			.arg("-c")
 			.arg("sleep 30")
 			.arg(&marker)
+			// **Its own group, for the reason `terminate_group` documents
+			// above.** `sh -c 'sleep 30'` forks the sleep and waits, so
+			// killing the child kills the shell and leaves the grandchild
+			// reparented to init -- holding the test binary's stderr, which
+			// `cargo test` reads until every writer is gone. Every run of this
+			// crate's tests sat for **thirty seconds** after the last
+			// assertion, on two orphans this file's own module documents.
+			.process_group(0)
 			.spawn()
 			.expect("spawn");
 		// The child may not have exec'd yet; /proc is authoritative only once
@@ -643,7 +655,8 @@ mod tests {
 			std::thread::sleep(std::time::Duration::from_millis(20));
 		}
 		let seen = found;
-		let _ = child.kill();
+		// The group, not the child: the sleep is a grandchild.
+		let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 		let _ = child.wait();
 		assert_eq!(seen, i32::try_from(child.id()).ok());
 	}
@@ -667,6 +680,14 @@ mod tests {
 			.arg("-c")
 			.arg("sleep 30")
 			.arg(&marker)
+			// **Its own group, for the reason `terminate_group` documents
+			// above.** `sh -c 'sleep 30'` forks the sleep and waits, so
+			// killing the child kills the shell and leaves the grandchild
+			// reparented to init -- holding the test binary's stderr, which
+			// `cargo test` reads until every writer is gone. Every run of this
+			// crate's tests sat for **thirty seconds** after the last
+			// assertion, on two orphans this file's own module documents.
+			.process_group(0)
 			.spawn()
 			.expect("spawn");
 		let mut ready = false;
@@ -679,7 +700,8 @@ mod tests {
 		}
 		let prefix = pid_by_marker(&marker[..marker.len() - 4]);
 		let longer = pid_by_marker(&format!("{marker}.more"));
-		let _ = child.kill();
+		// The group, not the child: the sleep is a grandchild.
+		let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 		let _ = child.wait();
 		assert!(ready, "the child never appeared, so this proved nothing");
 		assert_eq!(prefix, None, "a proper prefix must not match");
@@ -704,6 +726,14 @@ mod tests {
 			.arg("-c")
 			.arg("sleep 30")
 			.arg(&marker)
+			// **Its own group, for the reason `terminate_group` documents
+			// above.** `sh -c 'sleep 30'` forks the sleep and waits, so
+			// killing the child kills the shell and leaves the grandchild
+			// reparented to init -- holding the test binary's stderr, which
+			// `cargo test` reads until every writer is gone. Every run of this
+			// crate's tests sat for **thirty seconds** after the last
+			// assertion, on two orphans this file's own module documents.
+			.process_group(0)
 			.spawn()
 			.expect("spawn");
 		// **A root-owned child cannot demonstrate this refusal, by design.**
@@ -717,7 +747,8 @@ mod tests {
 		// Probed on the child rather than asked of `geteuid`: what decides is
 		// who owns the process, and that is what is read here.
 		if uids_of(&child.id().to_string()).is_some_and(|(real, _)| real == 0) {
-			let _ = child.kill();
+			// The group, not the child: the sleep is a grandchild.
+			let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 			let _ = child.wait();
 			eprintln!(
 				"a_marker_carried_by_another_user_is_refused: skipped -- this suite is running as root, so its own \
@@ -739,7 +770,8 @@ mod tests {
 		// A uid nothing on the machine runs as, so `ours` can answer only
 		// "not root and not you". `mine + 1` would be a real account.
 		let refused = pid_by_marker_as(&marker, u32::MAX - 1);
-		let _ = child.kill();
+		// The group, not the child: the sleep is a grandchild.
+		let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 		let _ = child.wait();
 		assert!(ready, "the child never appeared, so this proved nothing");
 		assert_eq!(
@@ -758,6 +790,14 @@ mod tests {
 			.arg("-c")
 			.arg("sleep 30")
 			.arg(&marker)
+			// **Its own group, for the reason `terminate_group` documents
+			// above.** `sh -c 'sleep 30'` forks the sleep and waits, so
+			// killing the child kills the shell and leaves the grandchild
+			// reparented to init -- holding the test binary's stderr, which
+			// `cargo test` reads until every writer is gone. Every run of this
+			// crate's tests sat for **thirty seconds** after the last
+			// assertion, on two orphans this file's own module documents.
+			.process_group(0)
 			.spawn()
 			.expect("spawn");
 		// **A root-owned child cannot demonstrate this refusal, by design.**
@@ -771,7 +811,8 @@ mod tests {
 		// Probed on the child rather than asked of `geteuid`: what decides is
 		// who owns the process, and that is what is read here.
 		if uids_of(&child.id().to_string()).is_some_and(|(real, _)| real == 0) {
-			let _ = child.kill();
+			// The group, not the child: the sleep is a grandchild.
+			let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 			let _ = child.wait();
 			eprintln!(
 				"a_pid_file_naming_another_user_is_refused: skipped -- this suite is running as root, so its own \
@@ -796,7 +837,8 @@ mod tests {
 			std::thread::sleep(std::time::Duration::from_millis(20));
 		}
 		let refused = pid_of_as(&file, &marker, u32::MAX - 1);
-		let _ = child.kill();
+		// The group, not the child: the sleep is a grandchild.
+		let _ = super::kill_group(i32::try_from(child.id()).unwrap_or(0));
 		let _ = child.wait();
 		let _ = std::fs::remove_file(&file);
 		let _ = std::fs::remove_dir(&dir);
