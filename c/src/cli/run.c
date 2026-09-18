@@ -1226,11 +1226,12 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  */
 static int command_apply(void)
 {
-	(void)failf("`ncfg apply` is not in this wave of the C port: its planner holds ten "
-	    "kinds of configuration block and warns about each rather than acting on it, and "
-	    "its executor refuses an op it cannot carry out while the plan is running rather "
-	    "than before it -- so an apply would change part of a machine, or stop halfway "
-	    "through changing it, and report neither.");
+	(void)failf("`ncfg apply` is not in this wave of the C port: its planner carries a "
+	    "`network` block's addressing and an `access_point` block's configuration "
+	    "without acting on either, and its executor refuses a `link.create` it cannot "
+	    "carry out while the plan is running rather than before it -- so an apply would "
+	    "change part of a machine, or stop halfway through changing it, and report "
+	    "neither.");
 	(void)fail("It also has nothing to record with and nothing to revert with: the "
 	    "fold into owned.json and the `" NCFG_OBSERVE_ALTNAME_PREFIX "` mark a created "
 	    "link wears are written, and this command has no apply path to reach either "

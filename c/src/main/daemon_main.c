@@ -822,11 +822,11 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start: its planner holds ten kinds of "
-	    "configuration block and warns about each rather than acting on it, and its "
-	    "executor refuses an op it cannot carry out while the plan is running rather "
-	    "than before it -- so a reconcile would converge part of a machine, or stop "
-	    "halfway through changing it, and report neither to anybody");
+	(void)fail("this build of the C port will not start: its planner carries a `network` "
+	    "block's addressing and an `access_point` block's configuration without acting "
+	    "on either, and its executor refuses a `link.create` it cannot carry out while "
+	    "the plan is running rather than before it -- so a reconcile would converge part "
+	    "of a machine, or stop halfway through changing it, and report neither to anybody");
 	(void)fail("`ncfg apply` is refused here for the same reasons, and a daemon "
 	    "reconciling on drift is an apply nobody typed. The loop, the seams, the "
 	    "window, the control socket, the mark on a link this build creates and the "

@@ -1758,9 +1758,20 @@ static void apply_is_refused_and_says_what_it_is_waiting_for(void)
 	 * matters to somebody reading the refusal is which shape of thing is
 	 * missing, so that is what is asserted.
 	 */
-	check(strstr(said, "holds ten kinds of configuration block") != NULL,
+	/*
+	 * **Named, not counted -- for the second time.** This asserted "ten kinds
+	 * of configuration block" and the number was wrong within one wave: four
+	 * of the ten were ported and three of the rest turned out not to be this
+	 * port's gap at all. A refusal that cites a figure has to be swept
+	 * whenever the figure moves, which is the lesson 10.177 recorded about
+	 * the executor's op count and which this check then repeated. What is
+	 * asserted now is which blocks are held, because that is what a reader
+	 * needs and it changes only when the fact does.
+	 */
+	check(strstr(said, "`network` block's addressing") != NULL &&
+	    strstr(said, "`access_point` block's configuration") != NULL,
 	    "  naming the blocks the planner is holding rather than acting on");
-	check(strstr(said, "refuses an op it cannot carry out") != NULL,
+	check(strstr(said, "refuses a `link.create` it cannot carry out") != NULL,
 	    "  and the executor refusing what it cannot do");
 	check(strstr(said, "rather than before it") != NULL,
 	    "  and that the refusal for an op it cannot do comes mid-plan");
