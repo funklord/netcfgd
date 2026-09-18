@@ -512,6 +512,36 @@ typedef int (*ncfg_daemon_answer_fn)(void *context, const ncfg_proto_request_t *
     const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err, size_t err_size);
 
 /*
+ * What takes a subscribed connection.
+ *
+ * **`monitor` is the one request that is not answered**, and the reason is
+ * structural rather than a preference: every other request is a question with
+ * a reply, and this one turns the connection into a stream that somebody else
+ * writes to for as long as the client is there. `ncfg_daemon_answer_fn` is
+ * handed a request and a buffer and has no descriptor at all, so there is
+ * nothing it could hand over -- which is why the Rust special-cases `monitor`
+ * in its server too, beside the loop it hands the stream to, rather than in
+ * the dispatcher behind it.
+ *
+ * It is called **after `ncfg_authz_permitted` has said yes**, so an
+ * implementation never re-decides authorization; `monitor` needs the
+ * `observe` tier and the gate has already asked.
+ *
+ * **The descriptor becomes the seam's on success**, and stays the server's on
+ * failure. Return 1 and this server never touches that number again -- it is
+ * a `dup` of the connection made for the purpose, so the server goes on
+ * closing its own in the ordinary way and neither close can reach the other's.
+ * Return 0 with a sentence and the server closes it and answers `error` with
+ * that sentence, which is still an answer.
+ *
+ * **It is called with the server's lock held**, as the answer seam is, and it
+ * may block for as long as that one may: `ncfg_daemon_server_stop` locks the
+ * same mutex, so whoever installs a seam that parks owes the same release
+ * `ncfg_daemon_answer_fn`'s does.
+ */
+typedef int (*ncfg_daemon_stream_fn)(void *context, int fd, char *err, size_t err_size);
+
+/*
  * What to serve, and where.
  *
  * `path` has **no default**, deliberately: the real daemon's socket is
@@ -537,6 +567,16 @@ typedef struct {
 	const ncfg_remote_policy_t   *remote;
 	ncfg_authz_roots_t            roots;
 	ncfg_daemon_answer_fn         answer;
+	/* What a `monitor` hands its connection to. A server with none refuses
+	 * `monitor` by name -- a daemon that accepted the request and streamed
+	 * nothing would leave a client watching a socket that can never say
+	 * anything. */
+	ncfg_daemon_stream_fn         stream;
+	/* Shared by both seams, deliberately: they are two halves of one
+	 * answer -- what a request means -- and two contexts would be two
+	 * implementations of the daemon's state with nothing keeping them in
+	 * step. The Rust sends a request and a subscription down the same
+	 * channel to the same loop for the same reason. */
 	void                         *context;
 } ncfg_daemon_serve_t;
 

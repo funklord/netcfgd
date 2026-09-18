@@ -435,6 +435,14 @@ typedef struct {
 	ncfg_buf_t                 *out;
 	char                       *err;
 	size_t                      err_size;
+	/* A connection waiting to become a subscriber, or -1 for an ordinary
+	 * request. The two share a slot because they share everything that
+	 * matters about waiting -- a thread parked until the loop has looked --
+	 * and a second array would be a second thing to shut, to bound and to
+	 * answer on the way down. `request` is NULL for one of these, which is
+	 * what keeps `ncfg_main_mailbox_take` from handing a subscription to the
+	 * pass as though it were something to reconcile against. */
+	int                         stream_fd;
 	int                         in_use;
 	/* The loop has taken it and is looking at it. */
 	int                         taken;
@@ -454,11 +462,16 @@ typedef struct {
 	/* What actually answers, once the loop has seen it. NULL refuses by
 	 * name -- see `ncfg_main_mailbox_answer`. */
 	ncfg_daemon_answer_fn answer;
+	/* What takes a subscribed connection, on the loop's thread. NULL refuses
+	 * by name too, and the caller keeps the descriptor. */
+	ncfg_daemon_stream_fn stream;
+	/* Shared by both, for `ncfg_daemon_serve_t`'s reason: they are two halves
+	 * of one answer and two contexts would be two states. */
 	void                 *answer_context;
 } ncfg_main_mailbox_t;
 
 int  ncfg_main_mailbox_open(ncfg_main_mailbox_t *mailbox, ncfg_daemon_answer_fn answer,
-    void *answer_context, int wake, char *err, size_t err_size);
+    ncfg_daemon_stream_fn stream, void *answer_context, int wake, char *err, size_t err_size);
 
 /*
  * Refuse everything waiting, and everything that arrives afterwards.
@@ -493,6 +506,28 @@ void ncfg_main_mailbox_close(ncfg_main_mailbox_t *mailbox);
 int ncfg_main_mailbox_answer(void *context, const ncfg_proto_request_t *request,
     const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
     size_t err_size);
+
+/*
+ * `ncfg_daemon_stream_fn`, to be installed in `ncfg_daemon_serve_t::stream`.
+ *
+ * `context` is the mailbox. **This is the crossing the subscriber list needs
+ * and cannot do without**: that list holds no lock because every call on it
+ * happens on the loop's thread, so a connection thread adding to it directly
+ * would race the pass announcing through it. The descriptor therefore waits
+ * here exactly as a request does, and is handed to `stream` from inside
+ * `ncfg_main_mailbox_settle`.
+ *
+ * **The descriptor is taken only where this answers 1.** A mailbox that is
+ * shut or full refuses by name and the caller still owns it, which is what
+ * lets `server.c` close its copy on a refusal without wondering whether the
+ * loop has it.
+ *
+ * It settles **after** the round's pass, never before, which is deliberate
+ * and is the Rust's order as well: a client that asks to watch is told what
+ * happens next rather than about a pass that was already running when it
+ * asked.
+ */
+int ncfg_main_mailbox_stream(void *context, int fd, char *err, size_t err_size);
 
 /*
  * Take what is waiting, as an array the pass can read.
@@ -983,7 +1018,8 @@ typedef struct {
 	 * materialised for a supplicant to open. Neither has a default. */
 	const char              *secrets_dir;
 	const char              *certs_dir;
-	/* Told when a reload is asked for and takes. NULL tells nobody. */
+	/* Where a `monitor` lands, and who is told when a reload is asked for.
+	 * NULL tells nobody and refuses a subscription by name. */
 	ncfg_main_subscribers_t *subscribers;
 } ncfg_main_desk_t;
 
@@ -998,6 +1034,17 @@ typedef struct {
 int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
     const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
     size_t err_size);
+
+/*
+ * `ncfg_daemon_stream_fn`, reached through `ncfg_main_mailbox_stream` so that
+ * it runs on the loop's thread.
+ *
+ * `context` is an `ncfg_main_desk_t *`, and all this does is put the
+ * descriptor in the desk's subscriber list -- which is the whole of what
+ * `monitor` is. A desk with no list refuses by name rather than closing a
+ * connection somebody is waiting on events from.
+ */
+int ncfg_main_stream(void *context, int fd, char *err, size_t err_size);
 
 /*
  * Why this build cannot answer a request kind, or NULL where it can.

@@ -26,6 +26,11 @@
  *   **The socket write happens after the lock is released**, which is what
  *   keeps a slow client from stalling everybody: the answer is built into a
  *   buffer under the lock and sent outside it.
+ *
+ *   **`monitor` is special-cased here in both**, and that is not an accident
+ *   of either design: it is the one request whose answer is the connection
+ *   itself, and the seam that answers requests is handed no descriptor. See
+ *   `serve_monitor`.
  */
 #include "ncfg/daemon.h"
 
@@ -63,6 +68,7 @@ struct ncfg_daemon_server {
 	const ncfg_remote_policy_t *remote;
 	ncfg_authz_roots_t          roots;
 	ncfg_daemon_answer_fn       answer;
+	ncfg_daemon_stream_fn       stream;
 	void                       *context;
 	pthread_mutex_t             lock;
 	pthread_t                   acceptor;
@@ -250,6 +256,94 @@ static void send_error(int fd, const char *message)
 }
 
 /*
+ * `monitor`: the connection stops being a conversation and becomes a stream.
+ *
+ * WHY THIS IS HERE AND NOT BEHIND THE ANSWER SEAM
+ *   That seam is handed a request and a buffer and no descriptor, so there is
+ *   nothing it could give away. The Rust special-cases `monitor` in its server
+ *   for the same reason, beside the loop the stream is handed to.
+ *
+ * WHAT IS HANDED OVER, AND WHY IT IS A COPY
+ *   A `dup`, never this connection's own number. Two owners closing one
+ *   descriptor is how a daemon comes to write one client's events into
+ *   another client's socket -- the first close frees the number, the kernel
+ *   hands it to the next `accept`, and the second close takes that one away.
+ *   With a copy each side closes exactly what it opened, and the *socket*
+ *   outlives this thread because the copy still refers to it.
+ *
+ * WHY THE THREAD THEN ENDS RATHER THAN PARKING ON THE CONNECTION
+ *   Three reasons, and the first is the one that decides it. The seam puts the
+ *   descriptor in non-blocking mode -- it must, since the loop writes events
+ *   from the thread that reconciles -- and `O_NONBLOCK` belongs to the open
+ *   file description, which a `dup` *shares*. A parked `recv` on this side
+ *   would therefore return `EAGAIN` at once, for ever: a thread spinning at
+ *   100% CPU for as long as somebody is watching events.
+ *
+ *   Second, a parked thread holds one of `NCFG_DAEMON_MAX_CONNECTIONS` slots
+ *   for the life of the stream, and a monitor stream is measured in hours.
+ *   Sixteen of them -- which is `NCFG_MAIN_SUBSCRIBERS_MAX` -- would be
+ *   sixteen slots held by threads with nothing left to read.
+ *
+ *   Third, there is nothing worth learning from this side. End of stream on
+ *   the read half is *not* proof the client has gone: a client may
+ *   `shutdown(SHUT_WR)` once it has asked and go on reading events for hours.
+ *   The one reliable signal that a subscriber is gone is a write that fails,
+ *   and that belongs to whoever writes.
+ *
+ *   So the connection is handed over whole and this thread returns. The client
+ *   keeps its socket, the slot is released, and anything the client sends
+ *   afterwards is unread -- which is what the Rust does too, its thread
+ *   forwarding events and never reading again.
+ */
+static int serve_monitor(ncfg_daemon_server_t *server, int fd)
+{
+	char err[NCFG_ERROR_MAX];
+	int  copy;
+	int  took;
+
+	if (!server->stream) {
+		/* Named rather than bare. A client told only `error` reads it as a
+		 * request the daemon did not recognise, and `monitor` is a verb this
+		 * daemon does speak -- it has nowhere to put the connection. */
+		send_error(fd, "this daemon does not stream events: nothing in it takes a "
+		    "subscribed connection, so `monitor` would subscribe to a stream that "
+		    "can never carry anything");
+		return 1;
+	}
+	copy = dup(fd);
+	if (copy < 0) {
+		char message[160];
+
+		(void)snprintf(message, sizeof(message),
+		    "this connection could not be handed over to be streamed to: %s",
+		    strerror(errno));
+		send_error(fd, message);
+		return 1;
+	}
+	/* `dup` clears it, and a stream that survived an exec would be a
+	 * descriptor a hook's child could write events into. */
+	(void)fcntl(copy, F_SETFD, FD_CLOEXEC);
+	err[0] = '\0';
+	/* Under the lock, exactly as the answer seam is: the same implementation
+	 * is on the other side of both, and a subscription arriving while a
+	 * request is being answered would be a second thread inside it. */
+	pthread_mutex_lock(&server->lock);
+	took = server->stream(server->context, copy, err, sizeof(err));
+	pthread_mutex_unlock(&server->lock);
+	if (!took) {
+		/* Still the server's, so the server closes it. A failed hand-over
+		 * that had closed the copy *and* left the seam holding the number is
+		 * the double close this whole arrangement exists to avoid. */
+		(void)close(copy);
+		send_error(fd, err[0] ? err : "this daemon could not take a subscription");
+		/* **A refusal does not end the connection**, here as everywhere else:
+		 * a client refused a stream is entitled to ask something smaller. */
+		return 1;
+	}
+	return 0;
+}
+
+/*
  * One decoded request, answered.
  *
  * Returns 1 to go on serving this connection and 0 to end it. **A refusal does
@@ -273,6 +367,17 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 	        peer, request, err, sizeof(err))) {
 		send_error(fd, err);
 		return 1;
+	}
+
+	/*
+	 * **After the gate and before anything else**, which is the order that
+	 * matters: `monitor` needs the `observe` tier, and a connection handed to
+	 * the event stream before that was asked would be a subscription nobody
+	 * checked. Like `hello`, it never reaches the answer seam -- see
+	 * `serve_monitor` for why it cannot.
+	 */
+	if (request->kind == NCFG_PROTO_REQ_MONITOR) {
+		return serve_monitor(server, fd);
 	}
 
 	ncfg_buf_init(&line, NCFG_PROTO_MAX_LINE);
@@ -555,6 +660,7 @@ ncfg_daemon_server_t *ncfg_daemon_serve(const ncfg_daemon_serve_t *how, char *er
 	    ? how->roots
 	    : ncfg_authz_roots_default();
 	server->answer = how->answer;
+	server->stream = how->stream;
 	server->context = how->context;
 	(void)snprintf(server->path, sizeof(server->path), "%s", how->path);
 	for (at = 0; at < NCFG_DAEMON_MAX_CONNECTIONS; at++) {

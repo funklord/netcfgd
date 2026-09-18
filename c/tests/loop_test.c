@@ -1256,6 +1256,35 @@ static int answer_fixture(void *context, const ncfg_proto_request_t *request,
 	return 1;
 }
 
+/*
+ * What the stream seam was handed, and -- the part that matters -- which
+ * thread handed it over.
+ *
+ * The subscriber list holds no lock because every call on it happens on the
+ * loop's thread. That sentence is worth nothing unless something checks it,
+ * and the way it fails is silent: a subscription added from the connection's
+ * own thread works perfectly until the day a pass is announcing while one
+ * arrives. So the seam records `pthread_self()` and the check is that it is
+ * the loop's.
+ */
+static int       streams;
+static int       streamed_fd;
+static pthread_t streamed_on;
+static int       stream_refuses;
+
+static int stream_fixture(void *context, int fd, char *err, size_t err_size)
+{
+	(void)context;
+	streams++;
+	streamed_fd = fd;
+	streamed_on = pthread_self();
+	if (stream_refuses) {
+		ncfg_error_set(err, err_size, "this fixture is not taking subscriptions today");
+		return 0;
+	}
+	return 1;
+}
+
 typedef struct {
 	ncfg_main_mailbox_t *mailbox;
 	ncfg_proto_request_t request;
@@ -1264,6 +1293,27 @@ typedef struct {
 	int                  result;
 	int                  arrived;
 } caller_t;
+
+/* A connection asking to be streamed to, on its own thread. `fd` is what it
+ * hands over; the mailbox takes it only where the seam answers yes. */
+typedef struct {
+	ncfg_main_mailbox_t *mailbox;
+	int                  fd;
+	char                 err[NCFG_ERROR_MAX];
+	int                  result;
+	int                  arrived;
+} subscriber_caller_t;
+
+static void *the_subscribing_thread(void *argument)
+{
+	subscriber_caller_t *caller = argument;
+
+	caller->err[0] = '\0';
+	caller->result = ncfg_main_mailbox_stream(caller->mailbox, caller->fd, caller->err,
+	    sizeof(caller->err));
+	caller->arrived = 1;
+	return NULL;
+}
 
 static void *the_connection_thread(void *argument)
 {
@@ -1441,7 +1491,8 @@ static void the_pass_sees_a_waiting_request_before_anything_answers_it(const cha
 	harness.loop.holding = 1;
 
 	err[0] = '\0';
-	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, NULL, -1, err, sizeof(err))) {
+	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, stream_fixture, NULL, -1, err,
+	    sizeof(err))) {
 		check(0, "a mailbox for a request waiting on its own thread");
 		harness_stop(&harness);
 		return;
@@ -1550,6 +1601,166 @@ static void the_pass_sees_a_waiting_request_before_anything_answers_it(const cha
 }
 
 /*
+ * A subscription crosses to the loop's thread, and is never a request.
+ *
+ * **This is the whole of why `monitor` goes through the mailbox at all.** The
+ * subscriber list holds no lock, on the stated grounds that every call on it
+ * happens on the thread that reconciles -- so a connection thread adding to it
+ * directly would race the pass announcing through it, and would work until the
+ * first machine busy enough for the two to overlap.
+ *
+ * The second half is that a subscription is not something to reconcile
+ * against. It carries no request, and a slot copied into the pass' array with
+ * a zeroed kind would read as a `hello` the loop was asked to act on.
+ */
+static void a_subscription_crosses_to_the_loops_thread(const char *base)
+{
+	ncfg_main_sources_t      sources;
+	ncfg_main_mailbox_t      mailbox;
+	ncfg_main_run_t          run;
+	ncfg_main_round_report_t report;
+	harness_t                harness;
+	subscriber_caller_t      caller;
+	pthread_t                thread;
+	char                     err[NCFG_ERROR_MAX];
+	int                      ends[2];
+	int                      requests_seen = 0;
+	int                      at;
+
+	if (!harness_start(&harness, base, "stream")) {
+		check(0, "a daemon state over this test's own directories");
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, stream_fixture, NULL, -1, err,
+	    sizeof(err))) {
+		check(0, "a mailbox for a connection waiting to be subscribed");
+		harness_stop(&harness);
+		return;
+	}
+	ncfg_main_sources_init(&sources);
+	memset(&run, 0, sizeof(run));
+	run.sources = &sources;
+	run.mailbox = &mailbox;
+	run.loop = &harness.loop;
+	run.ticks = fake_ticks;
+
+	/* A socketpair rather than a pipe: what is handed over is a connection,
+	 * and this test's own descriptors never leave this process. */
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, ends) != 0) {
+		check(0, "a socketpair standing in for a connection");
+		ncfg_main_mailbox_close(&mailbox);
+		harness_stop(&harness);
+		return;
+	}
+	streams = 0;
+	streamed_fd = -1;
+	stream_refuses = 0;
+	answers = 0;
+	memset(&caller, 0, sizeof(caller));
+	caller.mailbox = &mailbox;
+	caller.fd = ends[0];
+	if (pthread_create(&thread, NULL, the_subscribing_thread, &caller) != 0) {
+		check(0, "a thread standing in for a connection asking to watch");
+		(void)close(ends[0]);
+		(void)close(ends[1]);
+		ncfg_main_mailbox_close(&mailbox);
+		harness_stop(&harness);
+		return;
+	}
+	/* Bounded, for the reason every wait in this file is: a crossing that
+	 * never happens must fail this rather than hang the suite. */
+	for (at = 0; at < 2000 && streams == 0; at++) {
+		clock_is_expired();
+		err[0] = '\0';
+		if (!ncfg_main_round(&run, &report, err, sizeof(err))) {
+			detail("a round failed", err);
+			break;
+		}
+		requests_seen += (int)report.request_count;
+	}
+	check(streams == 1, "a waiting subscription reaches the stream seam");
+	check(pthread_equal(streamed_on, pthread_self()) != 0,
+	    "on the loop's thread and not the connection's, which is what lets the "
+	    "subscriber list hold no lock");
+	check(streamed_fd == ends[0], "and it is the descriptor the connection handed over");
+	check(requests_seen == 0 && answers == 0,
+	    "a subscription is never handed to the pass or the answer seam as a request");
+	if (streams == 0) {
+		ncfg_main_mailbox_shut(&mailbox);
+	}
+	(void)pthread_join(thread, NULL);
+	check(caller.arrived && caller.result == 1,
+	    "and the connection thread is told the loop took it");
+
+	/*
+	 * A seam that refuses leaves the descriptor with the caller. `server.c`
+	 * closes its copy on a refusal, so a mailbox that had closed it as well
+	 * would be the double close the whole hand-over is arranged to avoid --
+	 * and the way that shows up is a daemon writing one client's events into
+	 * another client's socket.
+	 */
+	stream_refuses = 1;
+	streams = 0;
+	memset(&caller, 0, sizeof(caller));
+	caller.mailbox = &mailbox;
+	caller.fd = ends[0];
+	if (pthread_create(&thread, NULL, the_subscribing_thread, &caller) == 0) {
+		for (at = 0; at < 2000 && streams == 0; at++) {
+			clock_is_expired();
+			err[0] = '\0';
+			if (!ncfg_main_round(&run, &report, err, sizeof(err))) {
+				break;
+			}
+		}
+		if (streams == 0) {
+			ncfg_main_mailbox_shut(&mailbox);
+		}
+		(void)pthread_join(thread, NULL);
+		check(caller.result == 0 && strstr(caller.err, "not taking subscriptions") != NULL,
+		    "a seam that refuses a subscription says so, through to the connection");
+		check(fcntl(ends[0], F_GETFD) >= 0,
+		    "and the refused descriptor is still the caller's to close");
+	}
+
+	/*
+	 * And with no seam at all, which is what a daemon assembled without one
+	 * would be: a refusal naming the symbol rather than a connection quietly
+	 * taken and never written to.
+	 */
+	mailbox.stream = NULL;
+	streams = 0;
+	memset(&caller, 0, sizeof(caller));
+	caller.mailbox = &mailbox;
+	caller.fd = ends[0];
+	if (pthread_create(&thread, NULL, the_subscribing_thread, &caller) == 0) {
+		for (at = 0; at < 2000 && !caller.arrived; at++) {
+			clock_is_expired();
+			err[0] = '\0';
+			if (!ncfg_main_round(&run, &report, err, sizeof(err))) {
+				break;
+			}
+		}
+		if (!caller.arrived) {
+			ncfg_main_mailbox_shut(&mailbox);
+		}
+		(void)pthread_join(thread, NULL);
+		check(caller.result == 0 && strstr(caller.err, "ncfg_daemon_stream_fn") != NULL,
+		    "a build with no stream seam refuses by naming the seam it is missing");
+		detail("it said", caller.err);
+		check(fcntl(ends[0], F_GETFD) >= 0,
+		    "and leaves the descriptor alone rather than closing a connection it "
+		    "would not take");
+	}
+
+	(void)close(ends[0]);
+	(void)close(ends[1]);
+	ncfg_main_mailbox_close(&mailbox);
+	harness_stop(&harness);
+}
+
+/*
  * And the wait ends when a request arrives, rather than at the end of the tick.
  *
  * The real clock here, deliberately: what is being checked is that the byte on
@@ -1578,8 +1789,8 @@ static void a_request_arriving_ends_the_wait(const char *base)
 		return;
 	}
 	err[0] = '\0';
-	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, NULL, watchers.nudge_write, err,
-	    sizeof(err))) {
+	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, stream_fixture, NULL,
+	    watchers.nudge_write, err, sizeof(err))) {
 		check(0, "a mailbox wired to the pipe the loop waits on");
 		ncfg_main_watchers_close(&watchers);
 		return;
@@ -1637,7 +1848,8 @@ static void a_mailbox_that_is_shut_or_full_refuses_rather_than_holding_on(void)
 	memset(&out, 0, sizeof(out));
 	request.kind = NCFG_PROTO_REQ_STATUS;
 	err[0] = '\0';
-	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, NULL, -1, err, sizeof(err))) {
+	if (!ncfg_main_mailbox_open(&mailbox, answer_fixture, stream_fixture, NULL, -1, err,
+	    sizeof(err))) {
 		check(0, "a mailbox");
 		return;
 	}
@@ -1801,6 +2013,7 @@ int main(void)
 
 	fifty_events_are_one_observation(base);
 	the_pass_sees_a_waiting_request_before_anything_answers_it(base);
+	a_subscription_crosses_to_the_loops_thread(base);
 	a_request_arriving_ends_the_wait(base);
 	a_mailbox_that_is_shut_or_full_refuses_rather_than_holding_on();
 	a_closed_thing_has_no_descriptor();

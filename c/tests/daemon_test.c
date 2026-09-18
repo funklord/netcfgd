@@ -38,6 +38,7 @@
 
 #include "testdir.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -357,6 +358,418 @@ static void a_refusal_arrives_as_an_answer_and_names_the_tier(const char *base)
 	        strstr(line, "root on this machine") != NULL,
 	    "with the content gate's refusal, not the tier gate's");
 	detail("refusal", line);
+
+	(void)close(fd);
+	ncfg_daemon_server_stop(server);
+}
+
+/* ---------------------------------------------------------------- monitor */
+
+/*
+ * One context for both seams, because `ncfg_daemon_serve_t` has one -- and
+ * because what these checks are about is which of the two a request reached.
+ */
+typedef struct {
+	unsigned answers;
+	unsigned streams;
+	/* What the stream seam was handed and now owns, or -1. */
+	int      fd;
+	int      refuse;
+} ncfg_test_monitor_t;
+
+static int monitor_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_test_monitor_t *seen = context;
+
+	(void)request;
+	(void)peer;
+	(void)arrival;
+	if (seen) {
+		seen->answers++;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+static int monitor_stream(void *context, int fd, char *err, size_t err_size)
+{
+	ncfg_test_monitor_t *seen = context;
+
+	if (!seen) {
+		ncfg_error_set(err, err_size, "this fixture has nowhere to record it");
+		return 0;
+	}
+	seen->streams++;
+	if (seen->refuse) {
+		ncfg_error_set(err, err_size, "this daemon is not taking subscriptions just now");
+		return 0;
+	}
+	seen->fd = fd;
+	return 1;
+}
+
+/*
+ * A deadline on a client's reads, so that an answer which never comes is a
+ * failed check rather than a suite that hangs.
+ *
+ * It is not decoration. A `monitor` handed over before the authorization gate
+ * was asked leaves the seam holding the socket open, so the refusal the client
+ * is waiting for never arrives and never will -- and without this the test
+ * that is precisely about that ordering waits for ever instead of going red.
+ * Generous, because everything here answers in microseconds.
+ */
+static void client_deadline(int fd)
+{
+	struct timeval deadline;
+
+	deadline.tv_sec = 5;
+	deadline.tv_usec = 0;
+	(void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &deadline, (socklen_t)sizeof(deadline));
+}
+
+/* How many descriptors this process holds. A hand-over that leaked one on the
+ * refusal path is invisible to every other check here -- the client gets its
+ * error, the connection goes on serving, and the daemon quietly runs out of
+ * descriptors on the machine with a client that retries. */
+static int descriptors_held(void)
+{
+	DIR           *open_dir = opendir("/proc/self/fd");
+	struct dirent *entry;
+	int            held = 0;
+
+	if (!open_dir) {
+		return -1;
+	}
+	while ((entry = readdir(open_dir)) != NULL) {
+		if (entry->d_name[0] != '.') {
+			held++;
+		}
+	}
+	(void)closedir(open_dir);
+	return held;
+}
+
+/* Bounded, because a hand-over that never happens must fail this rather than
+ * hang the suite. */
+static int wait_for_streams(const ncfg_test_monitor_t *seen, unsigned want)
+{
+	int at;
+
+	for (at = 0; at < 500; at++) {
+		if (seen->streams >= want) {
+			return 1;
+		}
+		pause_briefly();
+	}
+	return 0;
+}
+
+static int wait_for_open(const ncfg_daemon_server_t *server, size_t want)
+{
+	int at;
+
+	for (at = 0; at < 500; at++) {
+		if (ncfg_daemon_server_open(server) == want) {
+			return 1;
+		}
+		pause_briefly();
+	}
+	return 0;
+}
+
+/*
+ * `monitor` hands the connection over, and the socket outlives the thread.
+ *
+ * **This is the wire, end to end on this side of it.** What makes it worth a
+ * test of its own rather than a line in the round-trip check is the ownership:
+ * the seam is given a `dup`, the connection thread then ends and closes its
+ * own number, and the thing that must still work afterwards is the *socket* --
+ * a client watching events for hours after the thread that accepted it
+ * returned. An implementation that handed over the connection's own descriptor
+ * would pass every check up to the last three here and then write one client's
+ * events into whatever the number was reused for.
+ */
+static void a_monitor_hands_its_connection_over_and_the_socket_survives(const char *base)
+{
+	ncfg_daemon_serve_t   how;
+	ncfg_control_t        control = control_of(NCFG_PRINCIPAL_ANY, NCFG_PRINCIPAL_ANY,
+	    NCFG_PRINCIPAL_ANY);
+	ncfg_remote_policy_t  remote;
+	ncfg_test_monitor_t   seen;
+	ncfg_daemon_server_t *server;
+	char                  path[512];
+	char                  err[NCFG_ERROR_MAX];
+	char                  line[1024];
+	int                   fd;
+
+	memset(&remote, 0, sizeof(remote));
+	memset(&seen, 0, sizeof(seen));
+	seen.fd = -1;
+	memset(&how, 0, sizeof(how));
+	how.path = testdir_in(base, "monitor.sock", path, sizeof(path));
+	how.arrival = NCFG_ARRIVED_LOCAL;
+	how.control = &control;
+	how.remote = &remote;
+	how.answer = monitor_answer;
+	how.stream = monitor_stream;
+	how.context = &seen;
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	check(server != NULL, "a socket that streams events binds");
+	if (!server) {
+		detail("because", err);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		return;
+	}
+	client_deadline(fd);
+	check(send_text(fd, "{\"request\":\"monitor\"}\n"), "a monitor request goes out");
+	check(wait_for_streams(&seen, 1u), "and the connection reaches the stream seam");
+	check(seen.answers == 0,
+	    "which is not the answer seam -- `monitor` is answered by the connection itself");
+	check(seen.fd >= 0, "the seam is given a descriptor to keep");
+
+	/*
+	 * The slot goes back. A parked thread would hold one of
+	 * `NCFG_DAEMON_MAX_CONNECTIONS` for as long as somebody is watching, and
+	 * sixteen streams -- which is what the subscriber list carries -- would be
+	 * sixteen slots held by threads with nothing left to read.
+	 */
+	check(wait_for_open(server, 0u),
+	    "and the connection's slot is released rather than parked on for the life of "
+	    "the stream");
+
+	/*
+	 * **And what the seam holds is still open, now that the connection thread
+	 * has closed its own.** That is the whole of "a copy, not the connection's
+	 * own number": handing over the descriptor itself would leave this one
+	 * closed, and the number free for the next `accept` to hand to somebody
+	 * else's client.
+	 */
+	check(seen.fd >= 0 && fcntl(seen.fd, F_GETFD) != -1,
+	    "and it is a copy -- still open after the connection thread closed its own");
+
+	/* The socket is still there, which is the whole point of the copy. */
+	check(send_text(seen.fd, "{\"response\":\"event\",\"event\":\"observed\","
+	    "\"summary\":\"two links moved\"}\n"),
+	    "an event written to the handed-over descriptor goes out");
+	check(read_line(fd, line, sizeof(line)) &&
+	        strstr(line, "\"event\":\"observed\"") != NULL,
+	    "and the client reads it, so the connection outlived the thread that took it");
+	detail("event", line);
+
+	/*
+	 * And a client that hangs up is found by the write that fails -- which is
+	 * the only reliable signal there is. End of stream on the *read* half says
+	 * nothing: a client may `shutdown(SHUT_WR)` once it has asked and go on
+	 * reading for hours.
+	 */
+	(void)close(fd);
+	check(!send_text(seen.fd, "{\"response\":\"event\",\"event\":\"observed\","
+	    "\"summary\":\"nobody is there\"}\n"),
+	    "a subscriber that hung up refuses the next write, which is how it is dropped");
+	(void)close(seen.fd);
+	ncfg_daemon_server_stop(server);
+}
+
+/*
+ * A refused hand-over keeps the connection and gives the descriptor back.
+ *
+ * Two things at once, and the second is the one nothing else would notice: the
+ * copy the server made must be closed where the seam did not take it. A daemon
+ * leaking one per refused `monitor` runs out of descriptors on exactly the
+ * machine whose client retries.
+ */
+static void a_refused_monitor_keeps_the_connection_and_leaks_nothing(const char *base)
+{
+	ncfg_daemon_serve_t   how;
+	ncfg_control_t        control = control_of(NCFG_PRINCIPAL_ANY, NCFG_PRINCIPAL_ANY,
+	    NCFG_PRINCIPAL_ANY);
+	ncfg_remote_policy_t  remote;
+	ncfg_test_monitor_t   seen;
+	ncfg_daemon_server_t *server;
+	char                  path[512];
+	char                  err[NCFG_ERROR_MAX];
+	char                  line[1024];
+	int                   before;
+	int                   after;
+	int                   fd;
+
+	memset(&remote, 0, sizeof(remote));
+	memset(&seen, 0, sizeof(seen));
+	seen.fd = -1;
+	seen.refuse = 1;
+	memset(&how, 0, sizeof(how));
+	how.path = testdir_in(base, "monitor-refused.sock", path, sizeof(path));
+	how.arrival = NCFG_ARRIVED_LOCAL;
+	how.control = &control;
+	how.remote = &remote;
+	how.answer = monitor_answer;
+	how.stream = monitor_stream;
+	how.context = &seen;
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	if (!server) {
+		check(0, "a socket whose stream seam refuses binds");
+		detail("because", err);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		return;
+	}
+	client_deadline(fd);
+	/* Taken with the connection already open, so what this measures is the
+	 * hand-over and not the accept. */
+	check(send_text(fd, "{\"request\":\"status\"}\n") &&
+	        read_line(fd, line, sizeof(line)),
+	    "a connection is open and answering before anything is counted");
+	before = descriptors_held();
+	check(send_text(fd, "{\"request\":\"monitor\"}\n"), "a monitor request goes out");
+	check(read_line(fd, line, sizeof(line)), "and is answered rather than dropped");
+	check(strstr(line, "\"response\":\"error\"") != NULL &&
+	        strstr(line, "not taking subscriptions") != NULL,
+	    "with the seam's own sentence");
+	detail("refusal", line);
+	after = descriptors_held();
+	check(before > 0 && after == before,
+	    "and the copy the server made is closed, so a refused monitor leaks nothing");
+	if (after != before) {
+		detail("descriptors before and after", "they differ");
+	}
+
+	check(send_text(fd, "{\"request\":\"status\"}\n"), "a request follows the refusal");
+	check(read_line(fd, line, sizeof(line)) && strcmp(line, "{\"response\":\"ok\"}") == 0,
+	    "and is answered on the same connection, a refusal being an answer");
+
+	(void)close(fd);
+	ncfg_daemon_server_stop(server);
+}
+
+/*
+ * A daemon with no stream seam refuses `monitor` by name.
+ *
+ * The shape 0263 keeps refusing: accepting the request and streaming nothing
+ * would leave a client watching a socket that can never say anything, which it
+ * cannot tell from a machine where nothing is happening.
+ */
+static void a_daemon_that_streams_nothing_refuses_monitor_by_name(const char *base)
+{
+	ncfg_daemon_serve_t   how;
+	ncfg_control_t        control = control_of(NCFG_PRINCIPAL_ANY, NCFG_PRINCIPAL_ANY,
+	    NCFG_PRINCIPAL_ANY);
+	ncfg_remote_policy_t  remote;
+	ncfg_test_monitor_t   seen;
+	ncfg_daemon_server_t *server;
+	char                  path[512];
+	char                  err[NCFG_ERROR_MAX];
+	char                  line[1024];
+	int                   fd;
+
+	memset(&remote, 0, sizeof(remote));
+	memset(&seen, 0, sizeof(seen));
+	seen.fd = -1;
+	memset(&how, 0, sizeof(how));
+	how.path = testdir_in(base, "monitor-none.sock", path, sizeof(path));
+	how.arrival = NCFG_ARRIVED_LOCAL;
+	how.control = &control;
+	how.remote = &remote;
+	how.answer = monitor_answer;
+	how.context = &seen;
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	if (!server) {
+		check(0, "a socket with no stream seam binds");
+		detail("because", err);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		return;
+	}
+	client_deadline(fd);
+	check(send_text(fd, "{\"request\":\"monitor\"}\n"), "a monitor request goes out");
+	check(read_line(fd, line, sizeof(line)), "and is answered");
+	check(strstr(line, "\"response\":\"error\"") != NULL &&
+	        strstr(line, "does not stream events") != NULL,
+	    "naming what is missing rather than leaving it to read as an unknown request");
+	detail("refusal", line);
+	check(seen.answers == 0 && seen.streams == 0,
+	    "and neither seam was asked, there being nothing to ask");
+	check(send_text(fd, "{\"request\":\"status\"}\n") &&
+	        read_line(fd, line, sizeof(line)) &&
+	        strcmp(line, "{\"response\":\"ok\"}") == 0,
+	    "the connection goes on serving afterwards");
+
+	(void)close(fd);
+	ncfg_daemon_server_stop(server);
+}
+
+/*
+ * A `monitor` beyond the tier never reaches the stream seam.
+ *
+ * The gate is before the hand-over, which is the ordering the whole thing
+ * turns on: a connection given to the event stream before authorization was
+ * asked is a subscription nobody checked, and `monitor` needs only `observe`
+ * -- the tier `control { observe = "any" }` opens to every local user.
+ *
+ * Driven over the remote arrival for this file's stated reason: root satisfies
+ * every local principal, so a suite that may be run as root cannot produce a
+ * local tier refusal at all.
+ */
+static void a_monitor_beyond_the_tier_never_reaches_the_stream(const char *base)
+{
+	ncfg_daemon_serve_t   how;
+	ncfg_control_t        control = control_of(NCFG_PRINCIPAL_ANY, NCFG_PRINCIPAL_ANY,
+	    NCFG_PRINCIPAL_ANY);
+	ncfg_remote_policy_t  remote;
+	ncfg_test_monitor_t   seen;
+	ncfg_daemon_server_t *server;
+	char                  path[512];
+	char                  err[NCFG_ERROR_MAX];
+	char                  line[1024];
+	int                   fd;
+
+	/* Every tier shut remotely, and wide open locally -- which is what makes
+	 * the refusal below about the remote policy rather than about nothing. */
+	memset(&remote, 0, sizeof(remote));
+	memset(&seen, 0, sizeof(seen));
+	seen.fd = -1;
+	memset(&how, 0, sizeof(how));
+	how.path = testdir_in(base, "monitor-remote.sock", path, sizeof(path));
+	how.arrival = NCFG_ARRIVED_REMOTE;
+	how.control = &control;
+	how.remote = &remote;
+	how.answer = monitor_answer;
+	how.stream = monitor_stream;
+	how.context = &seen;
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	if (!server) {
+		check(0, "a socket judged by a shut remote policy binds");
+		detail("because", err);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		return;
+	}
+	client_deadline(fd);
+	check(send_text(fd, "{\"request\":\"monitor\"}\n"),
+	    "a monitor request arrives from off the machine");
+	check(read_line(fd, line, sizeof(line)) &&
+	        strstr(line, "\"response\":\"error\"") != NULL,
+	    "and is refused");
+	detail("refusal", line);
+	check(seen.streams == 0,
+	    "the stream seam was never reached, so the gate is before the hand-over");
+	check(seen.answers == 0, "and neither was the answer seam");
 
 	(void)close(fd);
 	ncfg_daemon_server_stop(server);
@@ -939,6 +1352,10 @@ int main(void)
 
 	a_connection_carries_a_request_and_its_answer(base);
 	a_refusal_arrives_as_an_answer_and_names_the_tier(base);
+	a_monitor_hands_its_connection_over_and_the_socket_survives(base);
+	a_refused_monitor_keeps_the_connection_and_leaks_nothing(base);
+	a_daemon_that_streams_nothing_refuses_monitor_by_name(base);
+	a_monitor_beyond_the_tier_never_reaches_the_stream(base);
 	an_unknown_member_is_refused_and_named(base);
 	a_seam_that_refuses_produces_an_answer(base);
 	the_socket_refuses_past_the_cap_and_recovers(base);
