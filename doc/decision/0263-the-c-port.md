@@ -146,9 +146,29 @@ taken.
   "already defined; first defined at conf.d/10-office.conf:3" is the whole
   point of the redefinition check.
 * **`NCFG_DIAGS_MAX` bounds lowering too**, with `total` counting past it.
-* **No provenance side table.** `compile_with_provenance` is not ported;
-  `ncfg explain` is not in this wave, and a side table nobody reads is a second
-  thing that has to go on agreeing with the document.
+* **No provenance side table, and `ncfg explain` says so rather than going
+  quiet.** `compile_with_provenance` is not ported: nothing in `src/compile/`
+  records an entry, because a side table nobody reads is a second thing that
+  has to go on agreeing with the document. `state.h` declares the table and
+  reads and writes `provenance.json` regardless, since that file's *shape* is
+  something this port reads whoever wrote it.
+
+  `ncfg explain` **is** in this wave, and it is the command that exists to
+  answer where a value came from -- so this is the whole of its subject rather
+  than a detail of it. It takes the table as an argument exactly as the Rust
+  does and is complete the day lowering starts recording one; until then every
+  lookup misses. **An explanation whose every lookup missed against an empty
+  table says so, in its own output, as its first fact**, and names no file and
+  no line anywhere. The alternative is an answer that silently stops naming
+  files, which a reader cannot tell from a configuration that has nothing to
+  name -- and an `explain` that invented a position would be worse than one
+  that says it does not know. It is the *first* fact for the reason the radio
+  fact comes before the addresses: a caveat about what an answer cannot contain
+  is worth nothing printed after the answer. Where the table has entries and
+  this field is not among them, nothing is said: that is a gap in a table
+  rather than the absence of one, and a blanket claim about it would be wrong.
+  Both directions are tested, including that the notice disappears the moment
+  a table with one entry is handed in.
 * **The linkset cycle walk is bounded**, and the bound is published so a test
   cannot spell the number itself. The Rust's recursion terminates on its own,
   which bounds its depth by the number of sets -- a bound on paper rather than
@@ -413,6 +433,374 @@ taken.
   `interface` block the plan has an action, without it the plan is empty, so
   the check still fails against the file that reported success and changed
   nothing. Each becomes its real op when the planner's backend half lands.
+* **An address in an explanation is compared canonically, never as text.** The
+  document's addresses come through the compiler's `canonical_address` and
+  match the kernel's spelling already; a *report's* do not -- `read_report`
+  keeps the text somebody's shell script wrote -- and the kernel reports back
+  its own spelling of whatever was installed. The Rust compares the two as
+  strings, so one address written twice reads as two, and `ncfg explain`
+  answers "the configuration does not ask for this address" about an address
+  netcfgd installed itself. Reproduced against the shipped binary, which
+  plans the same address again on every run; the planner has the same
+  comparison and pays more for it than `explain` does.
+* **An ownership fact names the address it is about.** The Rust pushes it
+  *before* the address it describes and puts no address in it, so on an
+  interface holding two -- which is every dual-stack one -- the reader attaches
+  each answer to the line above it, and the answer is whether netcfgd may
+  delete that address. Here the address comes first and the ownership line
+  names it. The single-address subject is unchanged, its subject being the
+  address already.
+* **An explanation is bounded at `NCFG_EXPLAIN_FACTS_MAX`, with `total`
+  counting past it** -- the parser's arrangement again, applied to a renderer
+  whose input is a file in the run directory and a message on the socket. Two
+  facts per observed address means the count is chosen by whoever wrote the
+  observation. The rendering ends with "showing 256 of 1202" rather than
+  stopping without saying, and the bound is published so a test cannot spell
+  the number itself.
+* **A subject's names are bounded at `NCFG_EXPLAIN_SUBJECT_MAX`**, and one
+  carrying a NUL is refused rather than compared as the part before it -- which
+  would match an interface nobody asked about. The Rust's `Subject` holds
+  `String`s that came off the wire; the refusal names the field and the bound.
+* **A plan that could not be built is a fact, not a failure.** `pending` plans
+  to answer "what happens next", and the Rust's planner cannot say no. This
+  one can, and refusing the whole explanation over it would withhold the
+  observation half at exactly the moment somebody needs it -- `explain` is what
+  people reach for when things are already broken.
+* **`explain` renders into a buffer and prints nothing**, and the layout is
+  `command_explain`'s format string character for character. A library never
+  prints; the caller hands the text to `ncfg_out_*`. The verb itself is not
+  wired, its first step being a local observation, so `run.c`'s stub should now
+  name the observer rather than the provenance table.
+* **Two rules the Rust shares are spelled a second time in `explain.c`**, each
+  because this port has one caller for them so far, and each says so where it
+  is defined. `takes_reports` is `netcfgd-plan`'s -- the Rust calls it from
+  `explain` precisely so the two cannot disagree about which reports are
+  believed -- and this build's planner holds `reported` addressing rather than
+  acting on it, so the rule is private there. `derive_from_delegation` is
+  `netcfgd-model`'s and `value.h` has no port of it; without it an address
+  netcfgd derived itself explains as one the configuration does not ask for.
+  The second caller takes these rather than writing a third.
+* **The ownership, backend and drift words are the model's spellings, not
+  Rust's `Debug`.** `ours`, `access_point`, `reconcile` -- what `ncfg status`
+  prints and what the JSON carries -- where the Rust's `{:?}` gives `Ours`,
+  `AccessPoint` and `Reconcile`. One word per concept, and `explain` is not the
+  place a second spelling of an enum enters the vocabulary.
+* **The portal helper's image is an argument, and there is no default.** The
+  Rust runs `/proc/self/exe` under `argv[0] = netcfgd-probe`, which is right
+  for a multi-call binary and wrong for a library: whatever links this is not
+  necessarily netcfgd, and a default would have a test binary re-exec itself --
+  once per case, and then again. `NCFG_PORTAL_OWN_IMAGE` is the value the
+  daemon passes, written once so that a test can assert it by reading it.
+  It is also what makes the parent's half testable at all: `probe_test.c` has
+  no equivalent here because the Rust has no test of `probe` whatsoever -- it
+  can only be reached with the real binary and a real network -- while
+  `portal_test.c` drives every exit status the parent must tell apart against
+  four-line scripts under its own directory.
+* **The parent bounds the child as well, and the deadline signals the group
+  twice.** The Rust leans entirely on the child's own alarm, which is sound
+  while the child is netcfgd's own image and is a promise the caller makes once
+  the image is an argument. So the read of the child's output is watched by a
+  clock, and what the deadline signals is the process group -- `SIGTERM` then
+  `SIGKILL` even where the leader has already gone, which is `probe.c`'s
+  arrangement for `probe.c`'s reason. The case that tells the two apart is a
+  helper that exits at once and leaves something of its own holding the pipe;
+  that is what `portal_test.c` drives, and it is the one case in this port that
+  deliberately waits out a deadline rather than mocking one.
+* **A URL is split into an authority and a connect target, not one string.**
+  The `Host:` header carries the authority the operator wrote and the
+  connection gets a port whether or not the URL gave one. The Rust's `split`
+  says exactly that in its own comment and then hands `exchange` the target, so
+  `http://example.com/generate_204` is asked for under `Host: example.com:80`
+  -- which is not what a browser sends, and a portal check is a comparison
+  against what a browser would have got. Its own test asserts the target and
+  there is no test of the request at all, so nothing was reading the comment
+  against the code.
+* **An IPv6 literal loses its brackets before the resolver sees it.** They are
+  URL syntax rather than part of the address. The Rust keeps them, and every
+  colon inside the literal then reads as a port separator: measured,
+  `http://[2001:db8::1]/x` resolves to `cannot resolve [2001:db8::1]: invalid
+  port value`, so a `portal_check` naming an address rather than a name
+  compiles and can never be fetched.
+* **The probe child's body is a function, not a `main`.** It answers the exit
+  status and the one line to print; the caller prints and exits. The Rust's
+  `helper_main` does both, which a library here may not (section *The three
+  conventions*). It is the only difference between the two.
+* **Where a contention check reads is an argument, not an environment
+  variable.** The Rust reads `NCFG_RUN_ROOT` and `NCFG_PROC` so that its tests
+  can point it at a fixture; here the two roots and "is this `/run` the
+  machine's own" are a struct the caller fills, and
+  `ncfg_contention_machine` is the one place `/run` and `/proc` are written
+  down. That is `testdir.h`'s rule about defaults, and it buys a case the Rust
+  cannot write: its namespace check is skipped outright whenever `NCFG_RUN_ROOT`
+  is set, which is in every one of its tests, so the guard that
+  `tests/live/hwsim.sh` proved necessary is exercised by nothing. Here the
+  namespace links are part of the fixture and the hwsim case is a check.
+* **`/proc` is walked once per contention check rather than once per daemon.**
+  The Rust asks `daemon_is_running` separately for `NetworkManager` and for
+  `systemd-networkd`, which is two full scans on every reconcile tick for one
+  question about two names.
+* **A dhcpcd control reply must be an absolute path, terminated.** The Rust
+  takes the last run of printable bytes, which is right for the whole frame and
+  wrong for half of one: the eight-byte length prefix of a 34-byte path is
+  `22 00 00 00 00 00 00 00`, and on its own it answers `Some("\"")` --
+  measured against a transcription. That is the very defect the tail rule
+  replaced, coming back through a short read, and a caller comparing it against
+  netcfgd's own `-f` reads it as somebody else's dhcpcd: a stop reports a client
+  gone that is still running, and a start spawns beside one that is already
+  there. So a reply with no terminator after its run, or one that is not an
+  absolute path, is not an answer -- and `ncfg_dhcpcd_config_file_of` reads
+  again under the same deadline rather than believing it. The Rust reads once.
+  Both halves are driven over a real `AF_UNIX` socket in `contention_test.c`,
+  with the reply cut at the prefix.
+
+* **The reconcile loop is two files, and the split is the module.** `lib.rs`
+  keeps its rules inside a loop that owns a channel, four watcher threads, a
+  timer and a socket, so nearly none of them can be reached without standing a
+  daemon up -- and the Rust says so once, where `a_window_is_requested` is
+  split out of `defers_to_a_window` because "a predicate that cannot be
+  exercised without building one is a predicate nothing exercises". Here
+  `reconcile.c` is every rule as a value in and a value out, opening nothing
+  and running nothing, and `reconcile_pass.c` is the order they are acted on
+  in, reaching the world only through `ncfg_reconcile_world_t`. What that buys
+  is the five orderings the Rust's comments call load-bearing -- the drift
+  hooks before the reconcile, the portal checks after them, a contended radio
+  given back before the reconcile rather than inside it, the observation never
+  held by `--no-apply-on-start`, the documents compared either side of a
+  reload -- each of which is now a list a test reads back rather than a
+  sentence a reader has to take on trust. Thirty deliberate breakages were
+  made against it and every one is named by a check.
+* **The watchers are not ported and the wake is.** The Rust has four threads
+  and a one-shot timer feeding one `mpsc`; what crosses into this module is
+  `ncfg_reconcile_wake_t`, which `ncfg_reconcile_collapse` folds a burst into.
+  Whoever owns the descriptors goes on owning them, which is what lets a test
+  drive a pass without a kernel, a socket or a second of waiting. The roams
+  and the waiting requests travel beside it as lists, because two roams are two
+  events and collapsing them would tell a script once about a station that
+  moved twice.
+* **The loop serves no requests.** `ncfg_daemon_answer_fn` already says what a
+  handler owes, so the requests are passed in for the two decisions that turn
+  on them -- a pending window defers the reconcile, an explicit apply releases
+  the `--no-apply-on-start` hold -- and answered elsewhere. The Rust's
+  `answer` dispatcher is the same wave's, not this one's.
+* **One plan per pass where the Rust builds two.** `detect_drift` builds one
+  and `reconcile_drift` builds another a few lines later, from the same
+  document and the same observation. Nothing between them touches either: the
+  hooks and the contention stop change the *machine*, and neither re-observes,
+  so the second build can only ever be the first again.
+* **The restriction asks a predicate per action rather than taking a list of
+  names.** The Rust collects `reconciling_interfaces` into a `Vec<String>` and
+  searches it per action; `ncfg_reconcile_reconciles` answers the same question
+  directly, so nothing has to bound a list whose length is the operator's to
+  choose. Its warnings are deliberately not copied across, because
+  `ncfg_plan_add` writes the "cannot be undone" one as each action is copied
+  and carrying the source's list over would say it twice; the refusals and the
+  stranded credentials are copied, since restricting a plan changes what will
+  be done and not what is true about the configuration.
+* **The drift a pass reports is bounded at `NCFG_DRIFT_MAX`, with `total`
+  counting past it.** The parser's arrangement again, applied to a list whose
+  length is how badly a machine is losing a fight: a client that shows "32 of
+  60" shows more than one that shows sixty nobody scrolls through. Which
+  action counts as an interface's drift is asked of the plan rather than of a
+  `seen` list, so the count is right past the bound too.
+* **The captive-portal record is here and the asking is `portal.h`'s.** That
+  module carries the verdict, `ncfg_portal_is_routable` and the child that
+  fetches; this one decides when to ask at all, what a `trying:N` record means,
+  and when to give up -- which is the half the Rust could only reach with a
+  real network behind a real portal, and which is now walked case by case.
+* **Three event hooks lose their second environment variable.**
+  `NCFG_ACTION`, `NCFG_BSSID` and `NCFG_URL` are not set, because
+  `ncfg_hook_env_t` is `apply.h`'s and carries four fixed members. The pair is
+  passed to the hook seam rather than dropped at the call site, so the loop is
+  not where the fact is lost and the default runner is the one place the two
+  lines go when that struct grows a general pair.
+* **Giving a contended radio back and asking a URL are seams, with their
+  implementations named.** Both reach the machine these tests are built on --
+  one stops a backend, the other execs this process' own image -- so neither is
+  called directly from a pass a test drives. `ncfg_reconcile_portal_probe` is
+  the real one for the second. For the first, `ncfg_contenders_find` is what an
+  implementation calls, **and it asks before opening an executor**: the Rust
+  opens one as soon as netcfgd is running any backend at all, so on every
+  machine it manages it takes the apply lock and a netlink socket every five
+  seconds to discover there is nothing to give back -- against the same lock
+  `ncfg apply` waits on (0184).
+* **A pending SIM cycle is not cleared while the planner cannot carry one.**
+  `ncfg_plan_options_t` has no `cycle`, so this build emits no `link.down` for
+  a modem that has advanced, and `ncfg_sims_cycled` reads "no records at all"
+  as "no cycle was needed" -- which is right for a planner that emits them and
+  would silently drop the note here. The pass therefore passes only the
+  devices whose cycle the plan actually carried, which is the same condition
+  said where it can be checked: nothing is cleared today, and everything is
+  cleared correctly the day the option lands.
+* **Every seam may be absent, and the pass says what a missing one costs.** A
+  loop with no executor observes, reports drift, runs its hooks and changes
+  nothing; one with no portal probe checks no URLs; one with no subscriber
+  list tells nobody. That is `ncfg_resolv_machine_t`'s bargain -- doing nothing
+  on a missing seam is the point rather than the fallback -- and it is what
+  lets a test install exactly the two seams its case is about.
+* **The loop's clock is an argument too.** `ncfg_confirm_expired_at` already
+  takes one; here the pass takes `now` from the same seam struct, so "a window
+  with time left is not one that closed" is checked by moving a number rather
+  than by waiting. `ncfg_reconcile_document_is_empty` is the other side of the
+  same instinct: it answers by hashing against `ncfg_document_new` rather than
+  by comparing fields, and **answers "empty" on any doubt**, which refuses a
+  window rather than arming one whose revert would undo everything netcfgd has
+  done.
+* **`plan.last.json` and the fold into `owned.json` are deferred here as they
+  are for the revert path**, and for the same reason: the executor seam reports
+  no effects, so there is nothing to fold. Named rather than quietly missing.
+
+* **`src/main/` is not in `libncfg.a`, and it is the one directory the
+  wildcard holds out.** The Makefile's rule is that the directory is the list;
+  this is the exception and it is section *The three conventions* rather than
+  convenience. A library never exits, and the archive that carries every file
+  written to that rule would otherwise have a `main` inside it. What is under
+  `src/main/` is therefore built into the program and `main_test` links the
+  parts of it that are not the entry point -- which is the whole of why
+  `main.c` is four lines: everything a test cannot reach lives in the one
+  symbol a test cannot have twice.
+* **The port links, and this is the first time it could be measured.** One
+  image, two names, `argv[0]` deciding which -- 0024's arrangement, and the
+  reason for it is the reason the port has one `main` rather than two: the
+  Rust measured 775 KB duplicated between two binaries against a 2.89 MB
+  install. Measured here at 441,336 bytes stripped, against the Rust's
+  2,972,192, with one `NEEDED` entry -- `libc.so.6` -- where the Rust has
+  four. **Neither number is a like-for-like comparison and the entry says so
+  rather than leaving it to be read as one**: this build's planner is four
+  passes of thirty, its executor takes thirteen ops of forty-eight, the daemon
+  runtime is unreachable code, `--json` and the `network`-block writer are not
+  ported, and nothing records provenance. Three of the Rust's four libraries
+  are ncurses and its unwinder, which the port gives up deliberately (see
+  `ncfg tui` above) rather than beats. The figure is worth recording because a
+  port with no linked artefact has no size at all, and a symbol no binary
+  needs is a symbol whose cost nobody has checked.
+* **`make linkage` cannot be pointed at it.** The gate builds
+  `target/release/netcfgd` and reads that path by name, so the C binary is
+  checked by hand against the same `LINKAGE_ALLOWED` list -- one entry, and it
+  is allowed. Teaching the gate a second binary is a Makefile change with an
+  install decision behind it, which is what *What is not being decided here*
+  holds back.
+* **`argv[0]` is made legible before it is repeated back**, and so is an
+  option name. The Rust prints both raw. In C the same string is a fixed array
+  away from a byte that moves a cursor, clears a screen or sets a title, and
+  the one thing the program knows at that moment is that the name it was given
+  is wrong. Printable ASCII kept, everything else a dot, and a ceiling with an
+  ellipsis so that a cut name does not read as a whole one.
+* **A program name is the text after the last `/`, so a trailing slash
+  resolves to nothing.** Rust's `file_name` answers the component above it --
+  `/usr/bin/` is `bin` -- which is a directory being read as a program name.
+  Answering nothing sends that case to the arm that refuses, and refusing is
+  the only safe answer here: a wrong guess starts a network configuration
+  daemon for somebody who typed a client's name.
+* **The daemon's usage text is pasted together from the constants that decide
+  its defaults.** The Rust writes `default /etc/netcfgd, or $NCFG_CONFIG_DIR`
+  as literal text beside a `config` module that holds the same path, and the
+  help is the copy nobody recompiles. Here a default that moves moves in the
+  help or does not compile. The version and the copyright are read from
+  `cli.h` for the same reason and a stronger one: the Rust shares
+  `CARGO_PKG_VERSION` and `netcfgd_model::COPYRIGHT` between the two programs
+  precisely so they cannot drift apart about a fact neither of them owns, and
+  the C port has exactly one spelling of each, so the daemon reads the
+  client's rather than growing a second.
+* **`netcfgd` will not start, and it refuses by naming a symbol.** Nothing
+  implements `ncfg_daemon_observe_fn`, so the loop would watch a machine it
+  cannot see -- `ncfg_reconcile_pass` would run on every tick, report no drift
+  because it can see none, and answer `ncfg plan` with an empty plan, which is
+  an answer nobody can tell from a converged machine. The refusal names the
+  type rather than describing the absence, because the only way to have typed
+  `netcfgd` here is to have built it: nothing installs this program. The name
+  is checked -- `main_test.c` pulls the identifier out of the sentence and
+  looks it up in `daemon.h`, so a rename makes the refusal go red rather than
+  leaving it pointing at a module under a name nothing has.
+* **The watchers are this directory's work, and they are named where they
+  would live.** *The watchers are not ported and the wake is*, above, says
+  what crosses into the reconcile module; the other side of that sentence is
+  that somebody owns the netlink socket, the configuration watch,
+  `/dev/rfkill`, the supplicant directory and the window timer, and that
+  somebody is a `main`. `ncfg_daemon_serve` is finished and would be bound
+  from here; the loop that collapses a burst of wakes into one pass, drives
+  `ncfg_reconcile_pass` and hands the waiting requests to
+  `ncfg_daemon_answer_fn` is what `src/main/` still owes.
+
+* **The round of dumps is taken through a seam, and the seam has two
+  implementations in the library.** `snapshot_with` takes a `&mut Netlink` and
+  is therefore reachable only with a socket, which is why nothing in
+  `netcfgd-sys` tests it and why its own crate's one attempt --
+  `tests/wire.rs` -- gives up and writes `if let Ok(snapshot) = ...`.
+  `ncfg_observe_exchange_t` is `ncfg_netlink_request` without its socket;
+  `ncfg_observe_exchange_socket` is the live one and forwards, and
+  `ncfg_observe_exchange_replay` is the same round with the send taken out,
+  reading through `netlink.h`'s own `ncfg_netlink_recv_t`. That is
+  `ncfg_netlink_change_from`'s split one layer up, and what it buys is the six
+  cases a kernel will not produce on request: a dump ending in `NLMSG_ERROR`,
+  a truncated final message, a message claiming more bytes than the datagram
+  carried, `ENOBUFS` mid-round, an empty machine, and one record more than an
+  observation holds. The replay still *builds* each request and refuses a
+  buffer that failed, because a seam that skipped the step would test less
+  than the thing it stands in for.
+* **There is an aggregate that owns the arrays, and the snapshot borrows it.**
+  `ncfg_observe_snapshot_t` borrows every field and has no free, which its own
+  comment says in as many words -- so `ncfg_observe_capture_t` owns the seven
+  arrays and the alternative names hanging off each link record, and 0263's
+  rule about an `ncfg_x_free` per aggregate lands there rather than on a type
+  the observer's input may not become. The snapshot is a member of it, filled
+  in pointing at its neighbours, so the fourteen assignments happen once here
+  rather than at each call site with one of them wrong. The cost is a rule
+  written down where the borrow checker used to stand: a capture is not copied
+  by value, because a copy's snapshot describes the original's arrays.
+* **Records of one kind are bounded, and the bound is an argument.** The Rust
+  collects into a `Vec` per dump with no ceiling at all. `NCFG_OBSERVE_RECORDS_MAX`
+  is chosen for the routing table, which is the only one of the seven a
+  *network* can make large, and the refusal names the kind and the number. It
+  is a refusal rather than a truncation for the reason `total`-past-the-bound
+  is right for a renderer and wrong here: an observation quietly missing half
+  its routes is a plan that installs them all again. The ceiling is a field of
+  `ncfg_observe_kernel_t` for the reason `ncfg_netlink_request_from`'s initial
+  buffer size is a parameter -- the kernel will not grow a machine a million
+  interfaces on demand, so a test that could not lower it could never reach
+  the refusal. The growth deliberately does not lean on that comparison
+  either: asking for one more than is held costs nothing, and without it an
+  edit to the ceiling test turns a refusal into a write past the array, which
+  is the failure a bound exists to prevent.
+* **A payload a decoder refuses is skipped and counted, and the first sentence
+  is kept.** `netlink.h` already asks this of a caller that dumps; the Rust's
+  four `filter_map`s drop and say nothing, so a truncated dump and a quiet
+  machine look identical afterwards. One buffer and not one per event, because
+  a count with no sentence is a number nobody can act on and a sentence per
+  payload is a log nobody reads. The forged-datagram count `ncfg_netlink_collect`
+  keeps is carried up the same way, for the same reason it survives a refusal
+  down there: a dump that came back empty having discarded three datagrams
+  from a local process is a different fact from one that came back empty.
+* **A filter dump that fails is counted rather than fatal**, which is the one
+  deliberate softness in the round. The Rust excuses `ENOENT` and `EINVAL` on
+  that path and propagates everything else with `?`, so one interface's filter
+  dump failing ends the whole snapshot -- and with it the observation, on the
+  tick a daemon is reading the machine. The interface was reported as carrying
+  an ingress hook by a dump taken a moment earlier, so a failure now is a
+  machine that moved between two of the seven; a USB device being unplugged is
+  exactly that, and it is also what generates the event the observation is
+  running on, which is the coincidence `observe.h` already records about the
+  rfkill search. `redirects_unreadable` is what tells "no redirects" from "not
+  asked", and `ingress_hooks` is kept in the capture -- it is not in the
+  snapshot -- so that the distinction is readable at all.
+
+  Measured while porting it, on the 6.12 kernel this was built on: a
+  `RTM_GETTFILTER` dump aimed at an interface with no ingress qdisc, and one
+  aimed at an ifindex that does not exist, both come back as an **empty dump**
+  rather than as `ENOENT` or `EINVAL`. So the Rust's excuse never fires on a
+  current kernel and what is left of that arm is the `?`.
+* **The two traffic-control requests are taken apart rather than written
+  again.** `qdisc.h`'s builders write a complete message with its own header,
+  because that is what their other callers send, and `netlink.h` has no call
+  that sends a prepared message and collects until `NLMSG_DONE` --
+  `ncfg_netlink_send_batch` ends on an acknowledgement, which a dump never
+  gets. So the collector builds the message with `ncfg_qdisc_build_dump` and
+  `ncfg_qdisc_build_filter_dump`, walks it with the wire layer, and hands the
+  exchange the kind, the flags and the body it finds there. Nothing about
+  either request is spelled a second time: not the ingress parent, not the
+  dump flags, and not the refusal of a zero index -- which is reachable, since
+  a kernel can report an ingress hook on interface zero and the builder is
+  what refuses to aim a dump at it. `collect_test.c` holds both bodies to the
+  builders' own bytes, so the day a builder changes the proof moves with it.
 
 ## What is not being decided here
 
