@@ -37,15 +37,49 @@ STANDARD = {
 	"org.freedesktop.DBus.ObjectManager",
 }
 
-INTERFACE = re.compile(r'"(org\.freedesktop\.NetworkManager(?:\.[A-Za-z0-9_]+)*)"')
+# **What zbus exports, which is the only thing that is served.** The first
+# version of this matched any quoted string shaped like an NM interface name,
+# anywhere in the source, and got two answers wrong in opposite directions --
+# so the count came out right and the set did not:
+#
+#   * `org.netcfgd.Compat` is served, from `manager.rs`, and the pattern was
+#     anchored to `org.freedesktop.NetworkManager`, so the one interface that
+#     is not NetworkManager's was the one interface this could not see. It was
+#     absent from the policy too, which is the failure this file exists to
+#     catch, and the file reported "all granted".
+#   * `org.freedesktop.NetworkManager.SecretAgent` is a `const` in `agent.rs`
+#     naming an interface the shim **calls**. Counting it as served made the
+#     policy's grant for it look justified by the wrong reason.
+#
+# Two errors that cancel in a total are exactly what a count cannot show, so
+# this reads the attribute that decides the matter instead. An interface is
+# served if and only if `#[zbus::interface(name = "...")]` says so.
+INTERFACE = re.compile(r'#\[zbus::interface\(\s*name\s*=\s*"([^"]+)"')
+
+# Interfaces the shim sends to rather than answers for, which the policy must
+# still grant and which are therefore neither an unserved grant nor a missing
+# one. Listed rather than derived: the shim builds these calls by hand from a
+# `const` rather than through a proxy type, so there is no attribute to read.
+# Each is checked below for still being mentioned in the source, so an entry
+# that outlives its caller is caught rather than quietly excusing a stale rule.
+CALLED_OUT = {
+	# 0031: a credential travels inbound and is never handed back, so the
+	# shim calls `GetSecrets` on somebody else's agent and implements none.
+	"org.freedesktop.NetworkManager.SecretAgent",
+}
 
 
 def served():
-	"""Interfaces the shim's source names."""
+	"""Interfaces zbus exports for the shim, by its own attribute."""
 	found = set()
 	for path in sorted(SHIM.rglob("*.rs")):
 		found.update(INTERFACE.findall(path.read_text()))
 	return found
+
+
+def sources():
+	"""Every line of the shim, for checking that a listed name is still used."""
+	return "\n".join(path.read_text() for path in sorted(SHIM.rglob("*.rs")))
 
 
 def granted():
@@ -98,12 +132,24 @@ def main():
 	code = served()
 	policy = granted() - STANDARD
 
+	# A name excused as outbound has to still be one, or the excuse is stale.
+	text = sources()
+	for name in sorted(CALLED_OUT):
+		if name not in text:
+			print(f"dbus-policy: {name} is listed as called and appears nowhere in {SHIM}")
+			print("dbus-policy:   it would excuse a policy rule nothing needs")
+			return 1
+	policy -= CALLED_OUT
+
 	# A run that matched nothing reports success exactly as loudly as a real
 	# pass. If the extraction breaks -- a rename, a different quoting style --
 	# both sets go empty and every comparison below succeeds, so the emptiness
 	# is the thing to refuse.
-	if not code:
-		print(f"dbus-policy: no interfaces found in {SHIM}, so the comparison is vacuous")
+	# A floor, not merely a non-empty check: the attribute could be renamed by
+	# a zbus upgrade and a handful would still match something.
+	if len(code) < 10:
+		print(f"dbus-policy: only {len(code)} interface(s) found in {SHIM}, so the")
+		print("dbus-policy:   extraction is broken rather than the shim being small")
 		return 1
 	if not policy:
 		print(f"dbus-policy: no send_interface rules found in {POLICY}, likewise")
