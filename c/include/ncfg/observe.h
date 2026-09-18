@@ -799,4 +799,134 @@ int ncfg_connectivity_overall(const ncfg_observed_t *observed,
 int ncfg_observe_derive(ncfg_observed_t *observed, const ncfg_document_t *document, char *err,
     size_t err_size);
 
+/* ------------------------------------------------------------------------ *
+ * The four of them, in one call
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Room for the run directory the record is read out of.
+ *
+ * `NCFG_OBSERVE_ROOT_MAX` again rather than a fourth opinion about how long a
+ * directory may be: it is the same question the three roots ask, and a second
+ * number here would be a ceiling that disagrees with `ncfg_state_resolve_dir`'s
+ * caller on one machine and nowhere else.
+ */
+#define NCFG_OBSERVE_RUN_DIR_MAX NCFG_OBSERVE_ROOT_MAX
+
+/*
+ * Collect, build, augment and derive: the machine, as an observation.
+ *
+ * **One call because there are two callers.** The daemon reobserves on every
+ * tick and `ncfg status`, `ncfg plan`, `ncfg explain` and `ncfg wait-online`
+ * each take one of their own, and a second copy of this sequence is how the
+ * two would come to disagree about what netcfgd can see -- which is not a
+ * hypothetical in this tree: `netcfgd_host::prior_state` exists in the Rust
+ * with that reason written above it, because the delegations had been folded
+ * in on one side and not the other.
+ *
+ * The order is `netcfgd_observe::current`'s with `derive` after it: the
+ * kernel, then what netcfgd wrote down, then the files the kernel cannot
+ * answer for, then the answers computed from all three. **`derive` is inside
+ * rather than left to the caller** because a caller that forgot it gets an
+ * observation with no link inventory, no linkset choices and no connectivity
+ * rung -- and that is not an error, it reads as a machine that has none of
+ * those things. The daemon calls `ncfg_observe_derive` a second time once the
+ * probe verdicts are stamped on, which is what that function's own comment
+ * asks for and is why running it twice has to cost nothing.
+ *
+ * `run_dir` is where `owned.json`, `prefixes/` and the reports are read from.
+ * **An unreadable ownership record is not a failure and an unreadable report
+ * is**, which is a distinction rather than an inconsistency: `ncfg_owned_read`
+ * says why the first fails open -- the worst case is netcfgd under-claiming
+ * what is its own, which is the safe direction -- while a delegation or a
+ * report carries addressing a helper negotiated and netcfgd did not, so an
+ * observation quietly missing them is the input-to-a-planner case that
+ * `NCFG_OBSERVE_RECORDS_MAX` refuses for.
+ *
+ * `desired` may be NULL, and that is an ordinary answer rather than an edge
+ * case: `ncfg status` on a machine whose configuration has stopped compiling
+ * still observes the kernel, and is exactly when somebody runs it.
+ *
+ * 1 with a fresh observation in `*out`, which the caller frees with
+ * `ncfg_observed_free`; 0 with a sentence and `*out` NULL.
+ */
+int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *run_dir,
+    const ncfg_observe_roots_t *roots, const ncfg_document_t *desired, ncfg_observed_t **out,
+    char *err, size_t err_size);
+
+/*
+ * The same, opening and closing a socket of its own.
+ *
+ * `ncfg_observe_collect`'s round, with `NCFG_OBSERVE_TIMEOUT_SECONDS` on it,
+ * for the same reason that call gives: a receive with no timeout wedges the
+ * caller for ever and this one has no caller to have decided otherwise.
+ */
+int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
+    const ncfg_document_t *desired, ncfg_observed_t **out, char *err, size_t err_size);
+
+/*
+ * Everything an observation needs that `ncfg_daemon_observe_fn` cannot carry.
+ *
+ * That seam takes a document and a `void *`, so the run directory and the
+ * three roots have to travel inside the context -- and they travel as storage
+ * rather than as pointers for `ncfg_observe_roots_t`'s reason: a caller can
+ * put one on the stack and there is no ownership question about it.
+ *
+ * **Resolved once, by `ncfg_observe_source_machine`, rather than per
+ * observation.** A reader whose answer depends on the environment at the
+ * moment it is called is one nobody can test twice, which is what that
+ * function and `ncfg_observe_roots_default` exist to prevent; the daemon
+ * resolves a source at startup and the answer stops moving.
+ */
+typedef struct {
+	/* Where `owned.json`, `prefixes/` and the reports are. */
+	char                  run_dir[NCFG_OBSERVE_RUN_DIR_MAX];
+	/* `/sys/class/net`, `/proc` and `/sys`. */
+	ncfg_observe_roots_t  roots;
+	/*
+	 * The round of dumps.
+	 *
+	 * **An `exchange` of NULL is this machine's own socket**, which is not a
+	 * default hiding a decision but the same choice `ncfg_observe_collect`
+	 * offers next to `ncfg_observe_collect_from` -- a round of `GET`s that
+	 * changes nothing, on the machine the caller is already the daemon of.
+	 * `ncfg_observe_source_machine` leaves it NULL and a test replaces it, so
+	 * the seam the daemon actually installs is the one a test drives rather
+	 * than a second path that only ever runs against a live kernel.
+	 *
+	 * That is the opposite of `ncfg_resolv_machine_t`, whose seam has no
+	 * default, and deliberately: the sweep's default ends in a signal to a
+	 * process on the developer's machine, and this one reads.
+	 */
+	ncfg_observe_kernel_t kernel;
+} ncfg_observe_source_t;
+
+/*
+ * A source pointed at this machine, with `run_dir` resolved the way every
+ * other caller resolves it.
+ *
+ * `run_dir` may be NULL, which means `ncfg_state_resolve_dir`'s answer --
+ * `NCFG_RUN_DIR`, then the default. `ncfg_contention_machine` is the same
+ * shape for the same reason: one place where `/run`, `/proc` and `/sys` are
+ * written down.
+ */
+int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir, char *err,
+    size_t err_size);
+
+/*
+ * One observation, through a source.
+ *
+ * **This is `ncfg_daemon_observe_fn`, signature for signature**, and it is
+ * spelled out here rather than declared with that type because `daemon.h` is
+ * the layer above this one and an include pointing back down it would invert
+ * the order 0263 sets out. What checks the two still agree is a test that
+ * assigns this to one: a drift in either signature is then a build that fails
+ * rather than a seam nothing can be installed in.
+ *
+ * `context` is an `ncfg_observe_source_t *` the caller owns and keeps alive
+ * for as long as the daemon holds the seam.
+ */
+int ncfg_observe_source_observe(void *context, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size);
+
 #endif /* NCFG_OBSERVE_H */
