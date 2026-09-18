@@ -28,6 +28,7 @@
  */
 #include "../src/main/main_internal.h"
 
+#include "ncfg/apply.h"
 #include "ncfg/base.h"
 #include "ncfg/cli.h"
 #include "ncfg/document.h"
@@ -828,38 +829,34 @@ static void the_statuses_are_three_different_things(void)
 }
 
 /*
- * This build does not reconcile, and the reason is not the assembly.
+ * This build does not reconcile, and the reason is no longer the ownership
+ * record.
  *
- * Every piece of the daemon's assembly has checks. What stops it running is
- * one fact underneath: the executor writes no `netcfgd:` alternative name on a
- * created link and nothing folds an apply into `owned.json`, so
- * `ncfg_observe_link_ownership` -- which decides netcfgd's own links by
- * exactly those two things -- would answer "somebody else's" about every link
- * this build made, for ever.
+ * **What this check is for has not changed: the guard must not be deleted
+ * quietly.** What has changed is the reason it guards, so the check moves with
+ * it -- and it moves in both directions, because a guard still standing for a
+ * fact that is no longer true is the other way this goes wrong.
  *
- * `ncfg apply` refuses at the terminal for that reason, and `on_drift =
- * reconcile` is the default, so a daemon that started would be an apply nobody
- * typed. The rule the socket's own refusal states is that one build must not
- * refuse an apply at a terminal and accept one over a socket; a timer is no
- * different.
+ * The version before this one asserted that nothing in `src/apply/kernel_link.c`
+ * mentioned an alternative name. That file has never held `create_link` -- it
+ * is `kernel.c`'s -- so the grep could not have gone red however the marking
+ * landed. It is replaced here by two behavioural checks and one that reads the
+ * file the marking is actually in.
  *
- * This check is here so the guard cannot be deleted quietly. When the marking
- * and the record land it goes, deliberately, in the same change.
+ * So: the two facts that used to stop this build are closed and are asserted
+ * closed; the facts that stop it now are asserted still true; and the guard
+ * itself still answers 0 and is still asked.
  */
 static void this_build_does_not_reconcile(void)
 {
-	char *source = read_source("src/apply/kernel_link.c");
-	char *main_source = read_source("src/main/daemon_main.c");
+	char              *main_source = read_source("src/main/daemon_main.c");
+	char              *executor = read_source("src/apply/kernel.c");
+	ncfg_owned_state_t owned;
+	ncfg_op_t          op;
+	char               message[NCFG_ERROR_MAX];
 
 	check(!ncfg_main_netcfgd_may_reconcile(),
 	    "this build does not reconcile, and says so rather than starting");
-	if (source) {
-		check(strstr(source, "ALT_IFNAME") == NULL && strstr(source, "altname") == NULL,
-		    "  and the reason still holds: no created link is marked as netcfgd's");
-		free(source);
-	} else {
-		check(0, "  and the reason still holds: no created link is marked as netcfgd's");
-	}
 	if (main_source) {
 		check(strstr(main_source, "may_reconcile()") != NULL,
 		    "  and the entry point still asks before it starts anything");
@@ -867,6 +864,54 @@ static void this_build_does_not_reconcile(void)
 	} else {
 		check(0, "  and the entry point still asks before it starts anything");
 	}
+
+	/*
+	 * The first of the two old reasons, read from the file that creates a
+	 * link. A source read rather than a call, because what is being asserted
+	 * is that `create_link` reaches the marking at all -- the bytes it builds
+	 * are `apply_kernel_test.c`'s subject and are checked there against the
+	 * wire layer.
+	 */
+	if (executor) {
+		/* The definition *and* the call: a marker nothing invokes is the
+		 * same machine as no marker at all, and a grep for the name alone
+		 * would find the one without the other. */
+		check(strstr(executor, "static void mark_as_ours") != NULL &&
+		    strstr(executor, "ncfg_kernel_build_altname") != NULL &&
+		    strstr(executor, "mark_as_ours(kernel,") != NULL,
+		    "  a link this build creates is marked as netcfgd's, which it was not");
+		free(executor);
+	} else {
+		check(0, "  a link this build creates is marked as netcfgd's, which it was not");
+	}
+
+	/* And the second: an apply's effects reach the ownership record. */
+	memset(&owned, 0, sizeof(owned));
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "br0";
+	check(ncfg_owned_absorb(&owned, &op) && owned.created_link_count == 1u,
+	    "  and what an apply did is folded into the ownership record, which it was not");
+	ncfg_owned_free(&owned);
+
+	/*
+	 * What stops it now, checked rather than described. `ncfg_apply_supported`
+	 * is asked by `execute` one action at a time and `ncfg_apply` stops at the
+	 * first failure, so an op it refuses is a plan that changes a machine and
+	 * stops halfway -- and a `link.create` for a bond is one of them.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "bond0";
+	{
+		static ncfg_interface_kind_t bond;
+
+		bond.kind = (int)NCFG_KIND_BOND;
+		op.u.link_create.kind = &bond;
+	}
+	message[0] = '\0';
+	check(!ncfg_apply_supported(&op, message, sizeof(message)) && message[0] != '\0',
+	    "  and the executor still refuses an op it cannot carry out, while a plan runs");
 }
 
 int main(void)

@@ -509,6 +509,14 @@ static ncfg_daemon_server_t *bind_one(const char *path, ncfg_arrival_t arrival,
 	 * that has the request in hand.
 	 */
 	how.answer = ncfg_main_mailbox_answer;
+	/*
+	 * And the same crossing for the one request that is not answered.
+	 * `monitor` hands its connection over instead of getting a reply, and the
+	 * list it is handed to holds no lock because every call on it happens on
+	 * the loop's thread -- so the descriptor waits in the mailbox exactly as a
+	 * request does rather than being added from the connection's own thread.
+	 */
+	how.stream = ncfg_main_mailbox_stream;
 	how.context = mailbox;
 	message[0] = '\0';
 	server = ncfg_daemon_serve(&how, message, sizeof(message));
@@ -665,8 +673,8 @@ static int start(const options_t *options)
 	desk.subscribers = &subscribers;
 
 	err[0] = '\0';
-	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, &desk, watchers.nudge_write, err,
-	    sizeof(err))) {
+	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, ncfg_main_stream, &desk,
+	    watchers.nudge_write, err, sizeof(err))) {
 		code = cannot("this daemon cannot take requests", err);
 		goto done;
 	}
@@ -759,31 +767,44 @@ done:
 /*
  * Whether this build may be let loose on a machine.
  *
- * **The assembly below is written and tested; what is missing is underneath
- * it.** `ncfg_apply_supported` carries out forty-five of the forty-eight ops
- * now, so the obvious reading is that an apply is nearly safe. It is not, and
- * the reason is not in that list at all: this executor writes no
- * `netcfgd:` alternative name when it creates a link, and nothing folds an
- * apply's effects into `owned.json`. `ncfg_observe_link_ownership` decides
- * netcfgd's own links by exactly those two things, so **every link this build
- * created would read back as somebody else's, for ever** -- netcfgd could
- * never take it down, and `ncfg apply` refuses at the terminal for that
- * reason today.
+ * **The two facts that used to be here are closed, and this still answers 0.**
+ * A created link now wears `NCFG_OBSERVE_ALTNAME_PREFIX` as an alternative
+ * name (`kernel.c`'s `mark_as_ours`), and every apply and every revert folds
+ * what it did into `owned.json` (`ncfg_apply_record`). So
+ * `ncfg_observe_link_ownership` answers `ours` about a link this build made,
+ * by the kernel's mark and by the record, and the change that had no way to be
+ * undone can be undone.
  *
- * A daemon does the same thing on a drift tick. `on_drift = reconcile` is the
- * default, so starting this build on a machine is an apply nobody typed --
- * and the rule the socket's own refusal states is that the same build must
- * not refuse an apply at a terminal and accept one over a socket. It must not
- * accept one from a timer either.
+ * What is left is not bookkeeping and is not this directory's:
  *
- * So this is not caution about an untested assembly: every piece of it has
- * checks, and the two binds and the teardown order are the only things a test
- * cannot reach. It is the one fact that makes the difference between a port
- * that can be run and a port that can be run safely, and it is a short piece
- * of work: mark a created link, and record what an apply did.
+ *   * **The planner still holds blocks rather than acting on them**, and warns
+ *     by name for each one: `reported` addressing, `advertise`, `dot1x`, a
+ *     `nat` setting, an `ipv6_token`, a `probe`, a `modem`, `on_unmanage =
+ *     "clear"`, a `bluetooth` block and a `linkset` -- see `warn_unported` in
+ *     `src/plan/build.c`, which is the list. A warning is what makes `ncfg
+ *     plan` honest and is exactly what a reconcile on a timer would act past:
+ *     it would converge part of a machine and report having converged it, to
+ *     nobody who is reading.
+ *   * **An op this executor cannot carry out is refused while the plan is
+ *     running.** `ncfg_apply_supported` is asked by `execute`, one action at a
+ *     time -- a `link.create` for a vlan, a bond, a macvlan or a tunnel, and a
+ *     `backend.start` for six of the nine backend kinds -- and `ncfg_apply`
+ *     stops at the first failure. A plan mixing a supported op with an
+ *     unsupported one therefore changes the machine and stops halfway.
+ *   * **`plan.last.json` is still not written**, so an apply that stopped
+ *     halfway leaves nothing under `/run` saying where it stopped. 0263 defers
+ *     it beside the fold; the fold has landed and this has not.
  *
- * Deleting this function is how the daemon is turned on, and the two things
- * above are what has to be true first.
+ * And the decision is the operator's rather than this function's. `on_drift =
+ * reconcile` is the default, so starting this build on a machine is an apply
+ * nobody typed -- against, on the machine this port is written on, a live
+ * network somebody is working over. The rule the socket's own refusal states
+ * is that one build must not refuse an apply at a terminal and accept one over
+ * a socket; it must not accept one from a timer either, and `ncfg apply` is
+ * still refused.
+ *
+ * Deleting this function is how the daemon is turned on, and the three facts
+ * above are what has to be answered first.
  */
 int ncfg_main_netcfgd_may_reconcile(void)
 {
@@ -795,14 +816,16 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start: it creates links without "
-	    "netcfgd's own alternative name and records nothing an apply did in "
-	    "owned.json, so every link it made would read back as somebody else's and "
-	    "could never be taken down again");
-	(void)fail("that is why `ncfg apply` refuses here too, and a daemon reconciling "
-	    "on drift is an apply nobody typed. The loop, the seams, the window and the "
-	    "control socket are written and checked; what is missing is the marking and "
-	    "the record");
+	(void)fail("this build of the C port will not start: its planner holds ten kinds of "
+	    "configuration block and warns about each rather than acting on it, and its "
+	    "executor refuses an op it cannot carry out while the plan is running rather "
+	    "than before it -- so a reconcile would converge part of a machine, or stop "
+	    "halfway through changing it, and report neither to anybody");
+	(void)fail("`ncfg apply` is refused here for the same reasons, and a daemon "
+	    "reconciling on drift is an apply nobody typed. The loop, the seams, the "
+	    "window, the control socket, the mark on a link this build creates and the "
+	    "record of what an apply did are written and checked; what is missing is "
+	    "underneath them");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 

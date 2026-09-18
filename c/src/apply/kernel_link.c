@@ -40,6 +40,7 @@
 #include "kernel_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/observe.h"
 #include "ncfg/wire.h"
 
 #include <stdio.h>
@@ -303,6 +304,57 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 	    "%s is a %s, which this executor does not build a netlink message for",
 	    name ? name : "?", word ? word : "kind of its own");
 	return 0;
+}
+
+/* ------------------------------------------------------------------------ *
+ * The mark a created link wears
+ * ------------------------------------------------------------------------ */
+
+int ncfg_kernel_altname_of(const char *link, char *out, size_t out_size, char *err,
+    size_t err_size)
+{
+	size_t needed;
+
+	if (!out || out_size == 0u) {
+		ncfg_error_set(err, err_size, "there is nowhere to put an alternative name");
+		return 0;
+	}
+	out[0] = '\0';
+	if (!link || link[0] == '\0') {
+		ncfg_error_set(err, err_size,
+		    "a link with no name cannot be marked as netcfgd's");
+		return 0;
+	}
+	/*
+	 * The prefix is `observe.h`'s constant and not a string written here. That
+	 * header asks for exactly this -- "when the executor lands it should use
+	 * this constant rather than write the string again" -- and the reason is
+	 * the one failure this whole mechanism has: netcfgd stamping one spelling
+	 * and reading back another makes every link it creates foreign to it.
+	 */
+	needed = strlen(NCFG_OBSERVE_ALTNAME_PREFIX) + strlen(link) + 1u;
+	if (needed > out_size || needed > (size_t)NCFG_WIRE_ALT_IFNAME_MAX) {
+		ncfg_error_set(err, err_size,
+		    "netcfgd's mark for %s would be %zu bytes and an alternative name holds "
+		    "%u", link, needed - 1u, (unsigned)(NCFG_WIRE_ALT_IFNAME_MAX - 1u));
+		return 0;
+	}
+	(void)snprintf(out, out_size, "%s%s", NCFG_OBSERVE_ALTNAME_PREFIX, link);
+	return 1;
+}
+
+int ncfg_kernel_build_altname(ncfg_buf_t *out, uint32_t seq, uint32_t index, const char *name,
+    char *err, size_t err_size)
+{
+	char altname[NCFG_WIRE_ALT_IFNAME_MAX];
+
+	if (!ncfg_kernel_altname_of(name, altname, sizeof(altname), err, err_size)) {
+		return 0;
+	}
+	/* `ncfg_ops_add_altname` owns the message: `RTM_NEWLINKPROP` rather than an
+	 * attribute on `RTM_NEWLINK`, and the `NLA_F_NESTED` that message type
+	 * insists on. Nothing about either is spelled a second time here. */
+	return ncfg_ops_add_altname(out, seq, index, altname, err, err_size);
 }
 
 /* ------------------------------------------------------------------------ *

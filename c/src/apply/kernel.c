@@ -28,6 +28,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/log.h"
 #include "ncfg/netlink.h"
 #include "ncfg/ops.h"
 #include "ncfg/service.h"
@@ -188,6 +189,67 @@ static int send_built(ncfg_kernel_t *kernel, const ncfg_buf_t *message, uint32_t
  * Links
  * ------------------------------------------------------------------------ */
 
+/*
+ * Mark a link this executor has just created as netcfgd's.
+ *
+ * **Decision 0136, and the one mark that has nowhere else to live.** An
+ * address and a route carry netcfgd's protocol number in the kernel (0002); a
+ * link has no such field, so without an alternative name its ownership lives
+ * only in `/run` -- and a restart deletes that. `ncfg_observe_link_ownership`
+ * reads this prefix back and answers `ours`; with no mark and no record it
+ * answers `unknown`, and an `unknown` link is one netcfgd may never take down
+ * again.
+ *
+ * **Deliberately not a failure, which is the Rust's arrangement and its
+ * reason.** Alternative names share the lookup namespace with real ones, so a
+ * machine that already has an interface by the marked name refuses this with
+ * `EEXIST`, and a kernel too old for `RTM_NEWLINKPROP` refuses it outright.
+ * Neither is a reason to fail a link that was created perfectly well. What is
+ * left is `link_ownership`'s additive half: **a recorded link with no marker is
+ * still ours**, so an unmarked link falls back to the record this apply also
+ * writes -- and the second line says exactly what that costs, because the loss
+ * is invisible until a restart fails to reconcile the device.
+ *
+ * Said rather than swallowed, through `log.h`, which a library may call.
+ */
+static void mark_as_ours(ncfg_kernel_t *kernel, const char *name)
+{
+	ncfg_buf_t message;
+	char       err[NCFG_ERROR_MAX];
+	char       doing[NCFG_ERROR_MAX];
+	uint32_t   index;
+	uint32_t   seq;
+	int        ok;
+
+	err[0] = '\0';
+	/* Looked up after the create rather than carried from it: `RTM_NEWLINK`
+	 * with `CREATE | EXCL` is acknowledged, not answered with the new link, and
+	 * a cache of names to indices is the staleness `kernel.c`'s header declines
+	 * to keep. */
+	index = index_of(name, err, sizeof(err));
+	if (index != 0) {
+		seq = ncfg_netlink_take_seq(&kernel->socket);
+		ncfg_buf_init(&message, 0);
+		ok = ncfg_kernel_build_altname(&message, seq, index, name, err, sizeof(err));
+		if (ok) {
+			(void)snprintf(doing, sizeof(doing), "mark %s as netcfgd's", name);
+			ok = send_built(kernel, &message, seq, doing, err, sizeof(err));
+		}
+		ncfg_buf_free(&message);
+		if (ok) {
+			return;
+		}
+	}
+	ncfg_log_emitf("link", NCFG_LOG_WARNING,
+	    "could not mark %s as netcfgd's with an alternative name: %s", name,
+	    err[0] ? err : "it did not say why");
+	/* Not a path: this executor is not told which run directory it is for, and
+	 * naming the default one would be wrong on exactly the machine that set
+	 * `NCFG_RUN_DIR`. */
+	ncfg_log_emitf("link", NCFG_LOG_WARNING,
+	    "  its ownership is recorded in owned.json instead, which a restart loses");
+}
+
 static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_t err_size)
 {
 	ncfg_ops_newlink_t link;
@@ -215,6 +277,12 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 		built = send_built(kernel, &message, seq, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
+	if (built) {
+		/* After the acknowledgement and never before it: a mark on a link the
+		 * kernel refused to create would be aimed at whatever else holds that
+		 * name. */
+		mark_as_ours(kernel, op->u.link_create.name);
+	}
 	return built;
 }
 

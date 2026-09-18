@@ -594,6 +594,26 @@ static char *duplicate(const char *text)
  * half-applied plan that stopped at a failure, and a restart, which loses the
  * inverses entirely. If the inverses were complete it finds nothing to do.
  */
+/*
+ * Fold what an apply or a revert did into `owned.json`.
+ *
+ * A note rather than a refusal, for `state.h`'s reason: the run directory is
+ * derived and disposable, and a record that lost an entry makes netcfgd leave
+ * an object of its own alone -- which is the safe direction of being wrong.
+ */
+static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
+    const ncfg_journal_t *journal)
+{
+	char message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	if (!ncfg_apply_record(run_dir, plan, journal, message, sizeof(message))) {
+		ncfg_log_emitf("confirm", NCFG_LOG_NOTE,
+		    "what this apply did could not be recorded (%s), so netcfgd will not claim "
+		    "those objects as its own", message);
+	}
+}
+
 static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executor_t *executor)
 {
 	char             why[NCFG_ERROR_MAX];
@@ -619,6 +639,7 @@ static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executo
 	}
 	ncfg_journal_init(&journal);
 	(void)ncfg_apply(plan, executor, &journal, why, sizeof(why));
+	record_what_ran(state->paths.run, plan, &journal);
 	failure = ncfg_journal_failure(&journal);
 	if (failure) {
 		ncfg_log_emitf("confirm", NCFG_LOG_ERROR, "revert incomplete: %s failed: %s",
@@ -700,6 +721,18 @@ int ncfg_confirm_revert(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
 
 		ncfg_log_emitf("confirm", NCFG_LOG_NOTE, "revert: undid %lu of %lu applied action(s)",
 		    (unsigned long)undone, (unsigned long)total);
+		/*
+		 * **Folded again, and the second fold is what takes the claims back.**
+		 * `ncfg_apply_revert` marks every record whose inverse ran
+		 * `NCFG_OUTCOME_REVERTED`, and `ncfg_apply_record` folds the *inverse*
+		 * for those -- so an address this window installed stops being
+		 * netcfgd's the moment it is withdrawn. A record whose inverse failed
+		 * stays `done` and is folded again, which is the honest answer: that
+		 * change is still in effect. Folding one journal twice is safe by
+		 * construction, every rule in the fold replacing or removing before it
+		 * adds.
+		 */
+		record_what_ran(state->paths.run, armed->undo, &armed->journal);
 		/*
 		 * **The re-plan below has to see the machine the inverses left.**
 		 * Without this it plans against the observation taken before they ran
