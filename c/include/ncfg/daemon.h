@@ -1,11 +1,13 @@
 /*
  * daemon.h -- who may ask, how the asking arrives, and what the daemon holds.
  *
- * This is `crates/netcfgd-daemon` in C: `authorize.rs`, `server.rs` and the
- * part of `state.rs` that is a document and a reload. The parts that are a
- * reconcile loop -- confirm windows, probes, sims, the resolv guard -- are not
- * here yet and are named in the port's notes rather than stubbed, because a
- * stub that answers is worse than a symbol that is missing.
+ * This is `crates/netcfgd-daemon` in C: `authorize.rs`, `server.rs`, the part
+ * of `state.rs` that is a document and a reload, and -- since the second wave
+ * -- `probe.rs`, `sim.rs`, `confirm.rs` and `resolv_guard.rs`, which are the
+ * pieces of the reconcile loop that decide something rather than merely
+ * sequence it, and `wifi.rs`, which is every wireless request. The loop itself
+ * is still named in the port's notes rather than stubbed, because a stub that
+ * answers is worse than a symbol that is missing.
  *
  * WHAT THIS MODULE IS FOR, IN ONE SENTENCE
  *   Everything a stranger can reach passes through `ncfg_authz_permitted`, and
@@ -54,14 +56,17 @@
 #define NCFG_DAEMON_H
 
 #include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
 
+#include "ncfg/apply.h"
 #include "ncfg/ast.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
 #include "ncfg/lex.h"
 #include "ncfg/observed.h"
+#include "ncfg/process.h"
 #include "ncfg/proto.h"
 
 /* ------------------------------------------------------------- the peer */
@@ -618,9 +623,14 @@ typedef int (*ncfg_daemon_observe_fn)(void *context, const ncfg_document_t *desi
  * call taking the state and returning what happened, which is the seam that
  * makes it testable without hardware.
  *
- * Not here yet, and named rather than stubbed: the confirm window, the probe
- * verdicts, the SIM pairings and the resolv guard. Each is its own module in
- * the Rust and each lands with its own tests.
+ * **The probe verdicts and the SIM selection are not fields here**, although
+ * they are in the Rust's `State`. Each is a module of its own below with its
+ * own lifetime, and a caller holds one beside a state rather than inside it:
+ * a reload replaces the document and must not replace a tally that has been
+ * counting across ticks, which is exactly what a field freed with the state
+ * would invite. `ncfg_confirm_armed_t` is the third and the strongest case of
+ * the same rule: what an open window covers legitimately outlives a reload,
+ * which is the whole reason a revert knows what it is putting back.
  */
 typedef struct {
 	ncfg_daemon_paths_t     paths;
@@ -711,5 +721,1187 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
 #define NCFG_DAEMON_HASH_MAX 65
 int ncfg_daemon_document_hash(const ncfg_document_t *document, char *out, char *err,
     size_t err_size);
+
+/* ------------------------------------------------------- the probe verdicts */
+
+/*
+ * Asking an uplink whether it actually carries traffic (0119).
+ *
+ * **A probe is an observation.** It runs a program the operator named, takes
+ * the exit status as the answer, and the verdict joins observed state beside
+ * carrier -- where the planner already knows what to do with a link that is
+ * not carrying anything.
+ *
+ * **The verdict lives here and not in the observation**, because the observer
+ * reads the kernel and no probe result comes from there.
+ * `ncfg_daemon_state_reobserve` builds a fresh observation every time, so a
+ * verdict written into one would be gone on the next tick; this keeps the
+ * tally across ticks and `ncfg_probes_apply` stamps it on.
+ */
+typedef struct ncfg_probes ncfg_probes_t;
+
+/*
+ * How many consecutive failures to *start* a probe before it is set aside.
+ *
+ * Only start failures count. A program that runs and exits non-zero is the
+ * feature working -- that is a link that is down -- and no number of those
+ * ever sets a probe aside. Published so a test cannot spell the number itself
+ * and go on passing when the number changes.
+ */
+#define NCFG_PROBE_START_FAILURES_BEFORE_SET_ASIDE 5
+
+/*
+ * The most of a probe's standard error that is kept.
+ *
+ * It crosses the socket to every client, and a script can write without end.
+ * The tail rather than the head: a shell script's last words are the ones
+ * about the thing that just failed.
+ */
+#define NCFG_PROBE_DETAIL_MAX 400
+
+/*
+ * Where "now" comes from, in monotonic milliseconds.
+ *
+ * **A seam, for the reason `ncfg_daemon_observe_fn` is one**: the thing on the
+ * other side is not something a test can arrange. The Rust's dwell tests pace
+ * themselves against the real clock -- six runs a second apart, twice -- and
+ * one of them is the flake its own comments record. Here a test hands over a
+ * counter it moves itself, and the hysteresis is measured rather than waited
+ * for.
+ *
+ * **It is the scheduling clock only.** The deadline a running program is
+ * killed at is read from `CLOCK_MONOTONIC` directly and is not this, because
+ * a frozen clock against a live child is a wait that never ends -- which is
+ * the one thing a probe timeout exists to prevent.
+ */
+typedef int64_t (*ncfg_probes_clock_fn)(void *context);
+
+/* An empty tally set. NULL with a sentence where memory ran out. */
+ncfg_probes_t *ncfg_probes_new(char *err, size_t err_size);
+
+/* Release it. Freeing NULL is nothing. */
+void ncfg_probes_free(ncfg_probes_t *probes);
+
+/* Take "now" from somewhere else. Passing NULL puts `CLOCK_MONOTONIC` back. */
+void ncfg_probes_clock(ncfg_probes_t *probes, ncfg_probes_clock_fn clock, void *context);
+
+/*
+ * Run whatever is due, and say whether any verdict changed.
+ *
+ * `*changed` is what the caller needs, because it is the only reason to
+ * re-plan: a probe that agrees with itself for an hour should cost nothing but
+ * the program it runs. A NULL document clears every tally, which is what a
+ * daemon holding no desired state knows about the links.
+ *
+ * **`observed` is here for the lease precondition and nothing else** (0191). A
+ * probe is still an observation of the *link*, made by running the operator's
+ * program; what the kernel's own state decides is whether running it could
+ * tell us anything.
+ *
+ * Returns 1, or 0 with a sentence where memory ran out. A probe that could not
+ * be started is not a failure of this call -- it is an answer, and it is
+ * counted.
+ */
+int ncfg_probes_run_due(ncfg_probes_t *probes, const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, int *changed, char *err, size_t err_size);
+
+/*
+ * The interfaces whose probe has decided the link does not work.
+ *
+ * A decided `false` only: an interface with no probe, or one whose probe has
+ * not yet agreed with itself `down_after` times, is not in here. That is
+ * 0119's rule and it is what stops a SIM being switched on no information
+ * (0152).
+ *
+ * In name order, so a machine with two failing modems advances them in the
+ * same order every time and a test can say what it expects. Counted and
+ * indexed rather than collected into an array the caller frees: the answer is
+ * usually empty, and a walk that cannot fail is one a caller will not skip
+ * checking. The names belong to `probes` and last until the next `run_due`.
+ */
+size_t ncfg_probes_failing_count(const ncfg_probes_t *probes);
+const char *ncfg_probes_failing_at(const ncfg_probes_t *probes, size_t at);
+
+/*
+ * Stamp the verdicts onto a fresh observation.
+ *
+ * Only a decided verdict is written. A link with no probe, or one whose probe
+ * has not yet agreed with itself enough times, is left absent -- and the
+ * planner treats absent as "nobody asked", which is what stops this taking the
+ * network away from a machine that configured no probes.
+ *
+ * Returns 1, or 0 with a sentence where a detail could not be copied; every
+ * link it reached before that is still stamped, because a half-stamped
+ * observation is closer to the truth than an unstamped one.
+ */
+int ncfg_probes_apply(const ncfg_probes_t *probes, ncfg_observed_t *observed, char *err,
+    size_t err_size);
+
+/*
+ * What this module has decided about one interface, and why.
+ *
+ * Read by the tests that are about the decision rather than about the stamping
+ * -- going through `ncfg_probes_apply` would mean hand-building a link and its
+ * thirty fields for one optional boolean. The detail belongs to `probes` and
+ * is NULL where the probe has said nothing.
+ */
+ncfg_optbool_t ncfg_probes_verdict(const ncfg_probes_t *probes, const char *interface);
+const char *ncfg_probes_detail(const ncfg_probes_t *probes, const char *interface);
+
+/* ---------------------------------------------------------- the SIM sources */
+
+/*
+ * Which SIM source netcfgd wants, per modem device (0150, 0152).
+ *
+ * **The choice lives in `/run` and the preference lives in the document.** The
+ * ordered list is the operator's intent and is never written to. What moves is
+ * the index, which is derived and disposable and gone after a reboot, so a
+ * cold start begins at the preference again.
+ *
+ * netcfgd says which source is wanted; a `pre_up` hook makes the hardware do
+ * it, because driving a mux select line is board enablement and netcfgd has no
+ * GPIO anywhere.
+ */
+typedef struct ncfg_sims ncfg_sims_t;
+
+/* An empty selection. NULL with a sentence where memory ran out. */
+ncfg_sims_t *ncfg_sims_new(char *err, size_t err_size);
+
+/* Release it. Freeing NULL is nothing. */
+void ncfg_sims_free(ncfg_sims_t *sims);
+
+/*
+ * Bring the selection into line with a document, and publish it.
+ *
+ * Called on every reload. A device that gains a modem block starts at its
+ * first source; one that loses it, or leaves the document, has its file
+ * removed rather than left behind to be read as current by a hook that has no
+ * other way of knowing.
+ *
+ * The index is **clamped rather than reset**, so shortening the list of a
+ * device already on a later source moves it to the last one that still exists
+ * instead of silently taking it back to the first -- which would be a SIM
+ * switch nobody asked for, arriving through an edit to an unrelated part of
+ * the list.
+ *
+ * Returns 1, or 0 with a sentence naming the file that could not be written.
+ * The in-memory selection is brought into line either way: a `/run` that
+ * cannot be written is a fact to report, and refusing to track the document as
+ * well would make the next reload publish from a selection that had stopped
+ * following it.
+ */
+int ncfg_sims_sync(ncfg_sims_t *sims, const ncfg_document_t *document, const char *run_dir,
+    char *err, size_t err_size);
+
+/*
+ * Move a device to its next SIM source, if it has one.
+ *
+ * `*moved_to` names the source it moved to, borrowed from `document`, or is
+ * left NULL where it is already on the last one -- 0152 stops there rather
+ * than wrapping, because a machine whose subscription has lapsed would
+ * otherwise reset its modem for ever and be permanently offline rather than
+ * offline until somebody looked.
+ *
+ * Returns 1 where the call did what was asked, **whether or not it moved**,
+ * and 0 with a sentence for a device this document gives no modem policy, a
+ * selection that could not be published, or no memory. The Rust answers `None`
+ * to all four of those and to "there is nowhere to go"; a caller cannot tell
+ * the one that is normal from the three that are not.
+ */
+int ncfg_sims_advance(ncfg_sims_t *sims, const ncfg_document_t *document, const char *device,
+    const char *run_dir, const char **moved_to, char *err, size_t err_size);
+
+/*
+ * Devices whose link has to be cycled for the new selection to take.
+ *
+ * Publishing the choice is not applying it: a `pre_up` hook is what acts on
+ * the file, and `pre_up` fires on the way up. So an advance leaves a note
+ * here, the reconcile turns it into a plan's cycle list, and it is cleared
+ * once a plan carrying that cycle has been **applied** -- not when it is
+ * planned, so a plan that could not run is tried again rather than leaving the
+ * machine on a source nothing ever selected.
+ *
+ * In name order. The names belong to `sims` and a caller that collects them
+ * and then calls `ncfg_sims_cycled` is holding pointers into this module's own
+ * storage: that is safe and is what the reconcile loop does, because `cycled`
+ * decides everything it is going to drop before it drops any of it.
+ */
+size_t ncfg_sims_pending_count(const ncfg_sims_t *sims);
+const char *ncfg_sims_pending_at(const ncfg_sims_t *sims, size_t at);
+int ncfg_sims_is_pending(const ncfg_sims_t *sims, const char *device);
+
+/*
+ * Forget the notes that a plan has now acted on.
+ *
+ * **A note is dropped only where its cycle actually happened.** Both Rust call
+ * sites once cleared every note the moment `apply` returned, and `apply`
+ * returns a journal rather than a result -- so a `link.down` that failed
+ * forgot the note anyway and nothing retried. The modem then sat on the source
+ * it had, with the new one published to `/run` and `pre_up` never fired, until
+ * something unrelated cycled the link.
+ *
+ * The condition is **per device rather than per plan**, and that matters in
+ * both directions. Clearing on a whole-plan success would keep the note alive
+ * whenever anything else in the plan failed -- a wifi backend, an unrelated
+ * address -- and every apply after would take a working link down and up
+ * again.
+ *
+ * A device with no records at all clears, and that is the right answer rather
+ * than an oversight: the planner emits a cycle only for a link that is *up*,
+ * because a link that is down runs `pre_up` on its way up regardless. No
+ * records means no cycle was needed.
+ */
+void ncfg_sims_cycled(ncfg_sims_t *sims, const char *const *devices, size_t device_count,
+    const ncfg_journal_t *journal);
+
+/*
+ * Take note of the cards helpers have reported, so a status can show them.
+ *
+ * **The pairing comes from the report, not from the current selection.**
+ * netcfgd publishes the source it wants and a helper reads the card some
+ * seconds later, across a modem reset -- so pairing the current selection with
+ * whatever ICCID last appeared would file one card under the other's name
+ * every time a source advanced. An advance publishes immediately while the
+ * module is still reading the old card, which is exactly the window where that
+ * mistake would be made and would then persist.
+ *
+ * So a report without a `sim` field contributes nothing. It is not an error,
+ * and older helpers write exactly that: an ICCID with no idea which source it
+ * belongs to is a fact netcfgd cannot use, and guessing would be worse than
+ * not showing it. A source is only accepted if the document lists it, so a
+ * stale report naming a source that has been edited out cannot resurrect it.
+ *
+ * Returns 1, or 0 with a sentence where memory ran out.
+ */
+int ncfg_sims_observe(ncfg_sims_t *sims, const ncfg_document_t *document,
+    const ncfg_observed_report_t *reports, size_t report_count, char *err, size_t err_size);
+
+/*
+ * Every modem device, what it asks for and what is in force.
+ *
+ * Joined here rather than by the client, because the two halves live apart:
+ * the order comes from the document and the choice from this module's own
+ * state. A client stitching them together would be a second copy of a rule
+ * that belongs to the daemon.
+ *
+ * **Every string in the result is borrowed** -- from `document` and from
+ * `sims` -- so both must outlive it and neither may be changed while it is
+ * held. Only the arrays are allocated; `ncfg_sims_status_free` releases them
+ * and freeing what was never filled in is nothing. A daemon holding no
+ * document answers an empty list rather than an error: no configuration is a
+ * state.
+ */
+int ncfg_sims_status(const ncfg_sims_t *sims, const ncfg_document_t *document,
+    ncfg_proto_modem_t **out, size_t *count_out, char *err, size_t err_size);
+void ncfg_sims_status_free(ncfg_proto_modem_t *modems, size_t count);
+
+/*
+ * The source a device is on, or NULL where it has none.
+ *
+ * Borrowed from `document`. For a caller reporting what is in force, and for
+ * the tests about clamping and advancing, which are about the index and not
+ * about the file.
+ */
+const char *ncfg_sims_current(const ncfg_sims_t *sims, const ncfg_document_t *document,
+    const char *device);
+
+/* ------------------------------------------------------ the confirm window */
+
+/*
+ * Apply, start a timer, and put the last-good configuration back unless
+ * somebody confirms (design section 4.5).
+ *
+ * The point is a machine you are connected *through*: if the change severs
+ * your session, the box comes back on the old configuration by itself. So
+ * everything here is arranged around the operator not being able to speak
+ * afterwards, and the questions that matter are what survives a restart and
+ * what happens when nobody answers.
+ *
+ * WHERE THE PROMISE IS KEPT, AND WHY IT IS NOT THE RUN DIRECTORY
+ *   Everything else netcfgd records is a claim about an object that still
+ *   exists, so it can be rebuilt by asking the object. A window is not that:
+ *   it asserts that somebody applied a change and *did not come back*, which
+ *   nothing in the world holds a copy of, so losing the file is losing the
+ *   thing itself. `systemd.exec(5)` deletes a `RuntimeDirectory=` on a real
+ *   stop, so a window written inside `/run/netcfgd` survived `systemctl
+ *   restart` and was destroyed by a stop and a start -- two spellings of one
+ *   operator intent with opposite outcomes, and the safe-looking spelling was
+ *   the losing one. Both files therefore live in a **sibling** of the run
+ *   directory: `/run/netcfgd` gives `/run/netcfgd-confirm` (0163).
+ *
+ * WHY THE FILES ARE IN THIS MODULE AND NOT THE HOST ONE
+ *   The Rust splits them -- `netcfgd-host::confirm` holds the two files and
+ *   `netcfgd-daemon::confirm` the state machine -- and nothing outside the
+ *   daemon calls either half. One module, and the file format beside the only
+ *   code that reads it.
+ *
+ * WHAT IS DELIBERATELY NOT HERE
+ *   The replay of the inverses is `ncfg_apply_revert`. It is a pure function
+ *   of a plan, a journal and an executor -- no window file, no last-good
+ *   document, no socket -- so it lives where the same double that drives every
+ *   other apply can drive it too.
+ */
+
+/* A path this module composes. `NCFG_RA_PATH_MAX`'s number, for its reason. */
+#define NCFG_CONFIRM_PATH_MAX 512
+
+/*
+ * Where the window and the last-good document are written.
+ *
+ * `<parent>/<name>-confirm`, and `<run>/confirm` for a run directory with no
+ * final component: `/` and the empty string are not real configurations, and a
+ * subdirectory is the answer that cannot escape upwards. A trailing slash
+ * names the same directory and must not answer differently.
+ *
+ * Copies into `out` and returns it, which is `ncfg_state_resolve_dir`'s shape
+ * -- one buffer and no ownership question. NULL where it would not fit.
+ */
+const char *ncfg_confirm_dir(const char *run_dir, char *out, size_t out_size);
+
+/*
+ * An open commit-confirm window.
+ *
+ * The deadline is **absolute and wall-clock**, and both halves of that are
+ * load-bearing. Absolute, so a daemon that restarts inside the window knows
+ * how much is left without having to trust its own uptime. Wall-clock, so a
+ * machine that sleeps through a window wakes with it already closed -- a
+ * monotonic instant does not advance across a suspend, so a window stored that
+ * way would come back with its whole duration still to run and would revert a
+ * change the operator had been living with all night. The cost is that a clock
+ * step moves an open window, which `confirm_test.c` pins in both directions so
+ * that changing it is a decision with a number attached rather than an
+ * accident.
+ */
+typedef struct {
+	uint64_t deadline_epoch;
+	/* How long the window was, for reporting. */
+	uint32_t window_seconds;
+	/* The document to go back to, by `ncfg_daemon_document_hash`. */
+	char     last_good_hash[NCFG_DAEMON_HASH_MAX];
+} ncfg_confirm_window_t;
+
+/* Seconds since the epoch, or 0 where this machine's clock is before it. */
+uint64_t ncfg_confirm_now(void);
+
+/*
+ * Whether the window has closed, and how long is left, against a clock the
+ * caller supplies.
+ *
+ * **The clock is always an argument, and there is no form that reads it.** The
+ * Rust has both, and its own tests say what that cost: the two cases that
+ * matter -- a machine that slept through the window, and a clock somebody
+ * moved -- were unwritable until the split was made, so neither had ever been
+ * checked. One form, and the shape that cannot be tested cannot be spelled.
+ * `ncfg_confirm_now()` is what an ordinary caller passes.
+ */
+int ncfg_confirm_expired_at(const ncfg_confirm_window_t *window, uint64_t now);
+uint64_t ncfg_confirm_remaining_at(const ncfg_confirm_window_t *window, uint64_t now);
+
+/*
+ * The open window, if there is one. 1 where one was read, 0 otherwise, and
+ * `out` is written either way.
+ *
+ * **Absent and unreadable are one answer**, which is the Rust's behaviour and
+ * is the direction that leaves a change standing. It is kept rather than
+ * corrected because the alternative is reverting a machine on the strength of
+ * a corrupt byte, and the file is netcfgd's own and written atomically, so a
+ * half-written one cannot be observed. What it costs is said in
+ * `ncfg_confirm_write_window`, which is where something can still be done
+ * about it.
+ *
+ * A member that is not one of the three refuses the file, as the Rust's
+ * `deny_unknown_fields` does.
+ */
+int ncfg_confirm_read_window(const char *run_dir, ncfg_confirm_window_t *out);
+
+/*
+ * Record an open window.
+ *
+ * **A window that could not be written is not a window.** The Rust logs that
+ * and carries on, so a full or read-only `/run` produced a `confirm_armed`
+ * event, a recorded undo list and no window on disk -- and the expiry then
+ * found nothing to resolve, so the change stood while every client had been
+ * told it was covered. That is the worst direction to be wrong in: an operator
+ * relies on a safety net exactly when they cannot see the machine. Here it is
+ * 0 and a sentence, and `ncfg_confirm_arm` refuses rather than announcing a
+ * window that does not exist.
+ */
+int ncfg_confirm_write_window(const char *run_dir, const ncfg_confirm_window_t *window,
+    char *err, size_t err_size);
+
+/*
+ * Close it.
+ *
+ * Removing one that is not there is success: an expiry and an explicit revert
+ * can both reach this and neither should fail because the other won.
+ */
+int ncfg_confirm_clear_window(const char *run_dir, char *err, size_t err_size);
+
+/*
+ * The last configuration that was applied and stood, or NULL.
+ *
+ * The caller owns what comes back and frees it with `ncfg_document_free`.
+ */
+ncfg_document_t *ncfg_confirm_read_last_good(const char *run_dir, char *err, size_t err_size);
+
+/*
+ * Record one as the configuration to fall back to.
+ *
+ * Written canonically, which is what makes a hash identify a *configuration*
+ * rather than a compilation: two compiles of one config produce the same bytes
+ * and therefore the same hash. Canonicalises in place, as
+ * `ncfg_document_write_canonical` does.
+ */
+int ncfg_confirm_write_last_good(const char *run_dir, ncfg_document_t *document, char *err,
+    size_t err_size);
+
+/*
+ * What an open window covers: the inverses of the actions that actually ran,
+ * in the order they ran, and the hash of the document they came from.
+ *
+ * **One aggregate rather than two fields, because the two must move together.**
+ * The inverses and the hash are recorded at the same instant, cleared at the
+ * same instant and consumed at the same instant; apart they would be a second
+ * list nothing compels to track the first.
+ *
+ * **A plan of its own rather than a list of ops, and that is ownership rather
+ * than taste.** `plan.h` says a plan owns every string interned into it and
+ * borrows four deep trees from the document it was built from -- an interface
+ * kind, a DNS policy, a WireGuard peer list, a routing rule list. None of the
+ * ops that declare an inverse carries any of those four, so copying the pairs
+ * into a plan of their own makes this record self-contained. It has to be: a
+ * reload *inside* a window replaces the daemon's desired document with an edit
+ * that was deferred and never applied, so a record borrowing from that
+ * document would be reading freed memory at the moment the revert runs.
+ * `confirm_test.c` frees the document and the plan before reverting, which
+ * under ASan is an assertion rather than a claim.
+ *
+ * **In memory rather than in the window file, which is a limit rather than an
+ * oversight.** Writing the inverses out would mean reading them back, and an
+ * op is a union of forty-eight arms. So a daemon that restarts inside a window
+ * has none of this, and `ncfg_confirm_revert` falls back to re-planning
+ * against the last-good document -- the weaker path, and still a correct one.
+ */
+typedef struct {
+	/* The actions that ran and declared an inverse, in plan order. */
+	ncfg_plan_t   *undo;
+	/* One `NCFG_OUTCOME_DONE` record per action above, which is what lets
+	 * `ncfg_apply_revert` drive this: it replays the inverse of every record
+	 * saying the machine changed, newest first, and marks what it put back. */
+	ncfg_journal_t journal;
+	/* The hash of the document those actions were applied from. */
+	char           document[NCFG_DAEMON_HASH_MAX];
+} ncfg_confirm_armed_t;
+
+/*
+ * What to undo if nobody confirms, taken from the plan that ran and the
+ * journal saying which of it reached the kernel.
+ *
+ * **Driven by the journal rather than by the plan alone**, because an action
+ * that failed or never ran has nothing to undo -- replaying its inverse would
+ * be netcfgd removing an address it never added, or bringing down a link
+ * somebody else owns, on a machine that is already in the state a revert
+ * exists to rescue. `NCFG_OUTCOME_DONE` is the only outcome that means the
+ * machine changed.
+ *
+ * An action with no declared inverse contributes nothing, which is what the
+ * plan's "cannot be undone" warning is about: those are the actions a revert
+ * cannot take back, and the warning was true before this and stays true.
+ *
+ * `commit.arm` is kept and is deliberately left there. Its inverse is
+ * `commit.revert`, and all three commit ops are no-ops in the executor -- the
+ * window is this module's bookkeeping, not the kernel's -- so replaying it
+ * changes nothing and keeps the count a revert reports equal to the count the
+ * apply reported.
+ *
+ * Declare `out` as `= {0}` and free it with `ncfg_confirm_armed_free`.
+ */
+int ncfg_confirm_armed_from(const ncfg_plan_t *plan, const ncfg_journal_t *journal,
+    const ncfg_document_t *document, ncfg_confirm_armed_t *out, char *err, size_t err_size);
+void ncfg_confirm_armed_free(ncfg_confirm_armed_t *armed);
+
+/*
+ * Check that a window may be opened, and answer what it would revert to.
+ *
+ * NULL with a sentence where one is already open -- naming how many seconds it
+ * has left -- or where there is nothing to fall back to. Arming without a
+ * last-good document is refused rather than allowed with an empty target: a
+ * window whose revert does nothing is worse than no window, because the
+ * operator believes they have a safety net. The daemon applies on start and
+ * records a last-good then, so in ordinary use one always exists by the time
+ * anybody asks.
+ *
+ * The caller owns the document that comes back.
+ */
+ncfg_document_t *ncfg_confirm_may_arm(const ncfg_daemon_state_t *state, char *err,
+    size_t err_size);
+
+/*
+ * Open the window. Called after the apply has run.
+ *
+ * `last_good` is what `ncfg_confirm_may_arm` answered: the document a revert
+ * will go back to, which is **not** the one that was just applied.
+ *
+ * Fills `event` with `confirm_armed` and returns 1. 0 with a sentence where
+ * the window could not be written, and `event` is then untouched -- see
+ * `ncfg_confirm_write_window` for why this refuses where the Rust logs.
+ */
+int ncfg_confirm_arm(const ncfg_daemon_state_t *state, uint32_t window_seconds,
+    const ncfg_document_t *last_good, ncfg_proto_event_t *event, char *err, size_t err_size);
+
+/*
+ * Keep the change: close the window, drop what it covered, and record what
+ * stood as the configuration a future revert falls back to.
+ *
+ * **`applied` is the document the window covered, and it is an argument for a
+ * reason.** The Rust reads the daemon's *current* desired state here, which a
+ * reload inside the window may have replaced with an edit that was deferred
+ * and never applied -- so confirming can record as last-good a configuration
+ * the machine has never been in, and the next window's revert then takes the
+ * machine somewhere it has never been. The same hazard is recognised and
+ * handled two functions down, where the hash a revert blacklists comes from
+ * the armed record rather than from `desired`. Passing it in is what lets a
+ * caller be right about it.
+ *
+ * `armed` may be NULL, and is emptied where it is not. 0 with a sentence where
+ * no window is open, which is an answer to send the caller rather than a
+ * failure.
+ */
+int ncfg_confirm_keep(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
+    ncfg_document_t *applied, ncfg_proto_event_t *event, char *err, size_t err_size);
+
+/*
+ * Put the last-good configuration back.
+ *
+ * **Two steps, and both are needed.** The declared inverses of what was
+ * applied run first, newest first, because an action knows how to undo itself
+ * in a way a re-plan cannot work out afterwards: a re-plan compares the machine
+ * against a document, so it can only take back what that document *disagrees*
+ * with. Measured, on a window that moved an address, a route and the MTU, with
+ * the document restore alone as the control:
+ *
+ *     document restore only   addr restored   route restored   mtu 1400
+ *     declared inverses       addr restored   route restored   mtu 1500
+ *
+ * The MTU is the case and it is the general shape rather than one field: the
+ * last-good document states no MTU for that device, so 1400 agrees with it as
+ * well as 1500 does and the re-plan has nothing to say -- while `link.set_mtu`
+ * declared an inverse carrying the value it replaced. The machine was left one
+ * revert away from the configuration the operator thought they had returned to.
+ *
+ * Then the desired state becomes the last-good document and a plan is built and
+ * applied against it. That is the safety net rather than a duplicate: it
+ * converges from wherever the machine actually is -- including from a
+ * half-applied plan that stopped at a failure, and from a restart, which loses
+ * the inverses entirely. If the inverses were complete it finds nothing to do.
+ *
+ * **What was rejected is remembered by identity**, so a reload of the *same*
+ * configuration is refused and a genuinely edited one is not -- and it is the
+ * hash the window covered rather than what is on disk now. An operator editing
+ * twice inside one window leaves `desired` holding an edit that was deferred
+ * and never applied; blacklisting that one refuses the operator's newest
+ * configuration for something it never did. Where `armed` is NULL -- a
+ * restarted daemon, which has lost the record -- `desired` is the fallback,
+ * which is the old behaviour.
+ *
+ * `reason` is what the log line says the revert was for. Fills `event` with
+ * `confirm_resolved` and returns 1. 0 with a sentence where no window is open,
+ * or where the last-good document is unreadable -- in which case the window is
+ * closed anyway, since a window nothing can resolve is a timer that never
+ * stops.
+ *
+ * Nothing here needs the network: the inverses are in memory, the target
+ * document is on disk, and the machine's state comes from the observe seam.
+ */
+int ncfg_confirm_revert(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
+    const ncfg_executor_t *executor, const char *reason, ncfg_proto_event_t *event, char *err,
+    size_t err_size);
+
+/*
+ * What to do about a window found at startup.
+ *
+ * A daemon that died inside a window cannot have received a confirmation, so
+ * the window is resolved by reverting whether or not the deadline has passed.
+ * The alternative -- honouring the remaining time -- assumes the operator is
+ * still there and still able to reach a socket that has been gone for however
+ * long the daemon was down, which is exactly the assumption commit-confirm
+ * exists because you cannot make.
+ *
+ * `*resolved` says whether there was a window at all, which is the ordinary
+ * answer and not a failure; `event` is filled only when there was one. 0 with a
+ * sentence where a window was found and the revert refused.
+ */
+int ncfg_confirm_resolve_on_startup(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
+    const ncfg_executor_t *executor, int *resolved, ncfg_proto_event_t *event, char *err,
+    size_t err_size);
+
+/* --------------------------------------------------------- the resolv guard */
+
+/*
+ * Removing what keeps taking `/etc/resolv.conf` back.
+ *
+ * 0165 made netcfgd notice a foreign write and put its own file back, which is
+ * enough to win every round. What it does not do is stop the rounds: a writer
+ * that rewrites the file every few seconds leaves the machine's resolver
+ * flapping between two answers, and a name looked up in the wrong second gets
+ * the wrong server.
+ *
+ * **This is the last resort and it is deliberately hard to reach.** It fires
+ * only where netcfgd was told to own the file outright, and only after the file
+ * has been taken away and put back several times in a row -- so a single write
+ * during boot, which is ordinary, never reaches it.
+ *
+ * **It cannot tell who wrote the file, and the consequence is blunt.** There is
+ * no way to ask the kernel which process last wrote a path -- `fanotify` could
+ * report it and needs `CAP_SYS_ADMIN`, which netcfgd does not take. So what
+ * this actually does is signal **every** known resolver-writing program netcfgd
+ * did not start, not the one that is interfering. An idle `dhclient` that has
+ * written nothing is terminated alongside the one that will not stop.
+ *
+ * That is defensible and it is not what the instruction sounds like, so it is
+ * written here rather than discovered: on a machine where netcfgd has been told
+ * to own `resolv.conf`, a foreign DHCP client that is running *will* write that
+ * file when its lease renews, so the distinction between "is interfering" and
+ * "is going to" is thinner than it looks. It is still a bystander at the moment
+ * it is killed.
+ *
+ * **A supervised process is reported and not signalled.** Killing
+ * `systemd-resolved` buys seconds: its unit carries `Restart=`, so the
+ * supervisor puts it straight back and netcfgd would be fighting something that
+ * cannot lose. The answer there is `Conflicts=` in a unit, and saying so is
+ * worth more than a signal that achieves nothing.
+ */
+
+/*
+ * How many reclaims in a row before netcfgd stops merely rewriting.
+ *
+ * Three rather than one, because one is ordinary. A DHCP client that took a
+ * lease, a hook that ran, an operator with an editor -- each writes the file
+ * once, netcfgd puts its own back, and nothing else should happen. Something
+ * that has done it three times running is not passing through.
+ *
+ * **The counting is the loop's and not this module's**, in the Rust as here:
+ * only the caller knows that a write was a *reclaim* -- a pass that had to put
+ * back something netcfgd had already delivered -- and that the count means
+ * "in a row" rather than "ever".
+ */
+#define NCFG_RESOLV_PATIENCE 3
+
+/*
+ * How many of netcfgd's own pids the sweep can hold.
+ *
+ * **Overflowing it stops the sweep, which is the opposite of what
+ * `NCFG_PEER_GROUPS_MAX` does, and the two are right for the same reason.** A
+ * membership that did not fit denies, so dropping one there is safe; a pid of
+ * netcfgd's own that did not fit would make its own DHCP client look foreign,
+ * and terminating the client holding this machine's lease is the worst outcome
+ * available. So a set that does not fit signals nobody and says so.
+ */
+#define NCFG_RESOLV_OURS_MAX 256
+
+/* How many candidate writers one sweep looks at. Generous: the whole list is
+ * six program names, and a machine running more than this many copies of them
+ * has a problem netcfgd is not going to fix. */
+#define NCFG_RESOLV_CANDIDATES_MAX 64
+
+/*
+ * Programs known to write `/etc/resolv.conf`, and how many there are.
+ *
+ * **`/proc/<pid>/comm` is truncated to 15 characters**, which is why
+ * `systemd-resolved` is spelled `systemd-resolve` in the list. A name one
+ * character too long never matches, and the sweep would report nothing while
+ * looking like it had looked -- the vacuous pass in its most literal form.
+ * `confirm_test.c` measures every name against `NCFG_PROGRAM_MAX` so that a
+ * seventh added later cannot be silently too long.
+ *
+ * `dhcpcd` is on the list and netcfgd starts its own, which is exactly why the
+ * pids netcfgd recorded starting are excluded before anything is signalled.
+ */
+const char *const *ncfg_resolv_writers(size_t *count_out);
+
+/*
+ * Every pid netcfgd recorded starting, so none of them is a target.
+ *
+ * The backends write `<run>/<kind>/<iface>.pid`, one directory down. A file
+ * that cannot be read or does not hold a number is skipped rather than guessed
+ * at: the cost of missing one is signalling something netcfgd owns, so the
+ * reading is deliberately strict. netcfgd's own pid is first -- it is not
+ * called any of the names in the list, but a future rename should not be able
+ * to make it kill itself.
+ *
+ * Answers how many there are, which may be more than `out_max`; the caller is
+ * expected to refuse to sweep when it is. Writes the lowest `out_max` of them.
+ */
+size_t ncfg_resolv_ours(const char *run_dir, pid_t *out, size_t out_max);
+
+/*
+ * The machine a sweep asks about processes and signals.
+ *
+ * **A seam, and this is the module that most needs one.** Every other question
+ * here is about a file; this one ends with `SIGTERM` to a process id, and the
+ * daemon under test is running on the machine the tests are built on. The Rust
+ * has no unit tests for its sweep at all -- it has a live script instead -- and
+ * the reason is visible in the shape: the decision and the signal are the same
+ * function. Here a test hands over a machine it made up, and the four exclusions
+ * are checked without a process being signalled.
+ *
+ * `ncfg_resolv_machine_default` answers the real one. There is **no default in
+ * the struct and none inside the sweep**, for the reason the server's socket
+ * path has none: whoever sweeps says what they are sweeping.
+ */
+typedef struct {
+	/* Whatever the implementation keeps. Never touched by this module. */
+	void *state;
+	/* Every process running one of the writer names, lowest pid first.
+	 * Answers how many there are, as `ncfg_process_pids_of_programs` does. */
+	size_t (*candidates)(void *state, ncfg_process_ref_t *out, size_t out_max);
+	/* Whether this pid is in netcfgd's own service: the positive
+	 * identification of children netcfgd has no pid file for. */
+	int (*in_our_service)(void *state, pid_t pid);
+	/* Whether it is in this network namespace. A daemon in another one is not
+	 * configuring netcfgd's interfaces, so it cannot be interfering. */
+	int (*shares_network_namespace)(void *state, pid_t pid);
+	/* Whether *another* service manager holds it up, which is not the same as
+	 * any service manager: everything netcfgd starts inherits netcfgd's own
+	 * cgroup (0198). */
+	int (*is_service_supervised)(void *state, pid_t pid);
+	/* Ask it to stop. 1, or 0 with a sentence. */
+	int (*terminate)(void *state, pid_t pid, char *err, size_t err_size);
+} ncfg_resolv_machine_t;
+
+/* The real machine: `/proc`, this process' cgroup and namespace, and
+ * `SIGTERM`. */
+ncfg_resolv_machine_t ncfg_resolv_machine_default(void);
+
+/*
+ * Signal whatever is taking the file back, and say what was left alone.
+ *
+ * Answers how many processes were signalled, so the caller can say whether the
+ * sweep did anything rather than inferring it. A NULL machine, or one missing
+ * any of its five calls, signals nobody: this is the one place in the library
+ * where doing nothing on a malformed argument is the point rather than the
+ * fallback.
+ */
+size_t ncfg_resolv_sweep(const char *run_dir, const ncfg_resolv_machine_t *machine);
+
+/* ---------------------------------------------------------- the wifi half */
+
+/*
+ * `wifi.rs`: the wireless requests, and the supplicant behind them.
+ *
+ * **Every call here opens a control socket, uses it and drops it.** Decision
+ * 0015 says the supplicant holds no state, and a daemon keeping a long-lived
+ * connection to it would start caching what it last saw. A datagram socket and
+ * a `PING` cost a round trip on a local socket, which is nothing next to the
+ * scan they precede.
+ *
+ * **A caller in the `wifi` tier can join a network the configuration already
+ * describes, and nothing else.** Nothing below can create one -- `wifi_add`
+ * writes a `network` block and is `admin` -- so the tier cannot be talked into
+ * writing config (0013).
+ *
+ * WHY THESE FILL A BUFFER RATHER THAN RETURNING A RESPONSE
+ *   The Rust returns `Response`, an enum with an `Error` arm, so a refusal and
+ *   an answer come back the same way. Here the module already has a way to say
+ *   both: **1 with one JSON object in `out`, or 0 with a sentence in `err`**,
+ *   which is `ncfg_daemon_answer_fn`'s contract -- "the server answers `error`
+ *   with that sentence, which is still an answer". So every `Response::error`
+ *   in `wifi.rs` is a 0 here and the sentence is unchanged, and each of these
+ *   is usable as the body of a handler without a translation step in between.
+ *
+ *   The encoders are here for `proto.h`'s reason: it decodes every response
+ *   and encodes none, because an encoder belongs beside the request that
+ *   produces it.
+ *
+ * WHERE THE PATHS COME FROM
+ *   `ncfg_wifi_where_t`, passed by the caller, for the reason
+ *   `ncfg_authz_roots_t` is passed: **the real netcfgd runs on the machine
+ *   these tests are built on and its wifi is real**. Nothing here falls back
+ *   to `/run/wpa_supplicant`, to `/sys/class/net` or to `/run/netcfgd`, and
+ *   there is no default to reach for by mistake.
+ *
+ * THE RFKILL SWITCH IS LOOKED UP RATHER THAN PASSED
+ *   The Rust hands `scan` and `status` an `Option<&ObservedRfkill>` that both
+ *   call sites build the same way -- `observed.link(interface).rfkill`. Here
+ *   the observation is passed and the lookup happens once, inside: a fact two
+ *   callers each dig out of the same structure is a fact one of them will
+ *   eventually dig out differently.
+ */
+
+/*
+ * Where the wifi half looks. **No field has a default and none may be NULL.**
+ *
+ * `ctrl_dir` is `wpa_supplicant`'s control directory, `class_net` is where the
+ * kernel publishes per-interface attributes, and `run_dir` is netcfgd's own
+ * runtime directory -- which holds both the supplicant pid files and hostapd's
+ * control sockets.
+ */
+typedef struct {
+	const char *ctrl_dir;
+	const char *class_net;
+	const char *run_dir;
+} ncfg_wifi_where_t;
+
+/*
+ * Refuse a device the configuration points at a supplicant netcfgd cannot
+ * drive.
+ *
+ * 0014: asking for `iwd` is refused **by name** rather than quietly served by
+ * `wpa_supplicant`. Substituting a different supplicant would produce
+ * different roaming behaviour than the config asked for, which is exactly the
+ * sort of thing nobody thinks to check.
+ *
+ * 1 for a device netcfgd can drive, for one the document says nothing about,
+ * and where there is no document at all.
+ */
+int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interface, char *err,
+    size_t err_size);
+
+/*
+ * Which configured network an association is on.
+ *
+ * By SSID, and by BSSID for a network that has no SSID to match on -- one that
+ * names access points instead and learns the name from them. Without the
+ * second, exactly the networks whose whole point is being identified by
+ * address would show as unconfigured.
+ *
+ * **A block that names this access point answers first** (0239). Taking the
+ * first block matching on *either* rule meant two blocks sharing an SSID and
+ * pinned to different access points -- which compiles with no diagnostic --
+ * were both answered with whichever sorted earlier, so the station on the
+ * second was reported as being on the first and took the first one's `metric`.
+ *
+ * A block that states no SSID is matched on its addresses alone; one that
+ * states an SSID must agree on both, so a listed address that has moved to a
+ * different network is not answered with the block that used to name it.
+ *
+ * **This is `netcfgd_model::wifi::network_for` and it belongs in the model**,
+ * which is where the Rust keeps it and says why: the socket answers "which
+ * network is this radio on?" for a client and the observation answers it for
+ * the planner, and two copies could disagree about a route metric. It is here
+ * because this port has only the first caller so far. The second one takes
+ * this rather than writing its own, and moves it down when it lands.
+ *
+ * Borrowed from `networks`, or NULL.
+ */
+const ncfg_wifi_network_t *ncfg_wifi_network_for(const ncfg_wifi_network_t *networks,
+    size_t count, const ncfg_ssid_t *ssid, const char *bssid);
+
+/*
+ * Why there is no supplicant on an interface, in words that say what to do.
+ *
+ * **The control socket's own message cannot answer this and should not try.**
+ * It says "no control socket at ...: is `wpa_supplicant` running?", which is
+ * true, unhelpful, and points at the wrong program: the question is not
+ * whether somebody started a supplicant, it is why *netcfgd* did not. Only the
+ * document knows, and the document is here.
+ *
+ * The case this was written for: a machine with no `device` block at all,
+ * where scanning worked until `NetworkManager` was stopped. NM adds the
+ * interface to the system `wpa_supplicant`, which creates the socket, so
+ * netcfgd was scanning through a supplicant it had not started and had no
+ * opinion about.
+ *
+ * **The question is who bound the socket, not whether it answers.** The first
+ * fix asked whether the socket replied and so said nothing in exactly the
+ * reported case: NetworkManager drives its supplicant over D-Bus and it does
+ * not reply on the control interface, so the socket exists and stays mute.
+ *
+ * 1 where there is a diagnosis, with it in `out`; 0 where the caller's own
+ * message is the right one -- an interface that is not a radio at all, and a
+ * radio netcfgd has simply not got to yet. `out` is `NCFG_ERROR_MAX` or more.
+ */
+int ncfg_wifi_why_no_supplicant(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const char *interface, char *out, size_t out_size);
+
+/*
+ * The drop-in a radio's activation is filed under, and what goes in it.
+ *
+ * **These are `netcfgd_host::config`'s, and they land here only because that
+ * module's port does not carry them yet.** Two commands write this block --
+ * `ncfg wifi activate` through the daemon and `ncfg wifi add` locally on a
+ * machine where nothing is listening -- so when the CLI half arrives it calls
+ * these rather than growing a second copy, and both move to `config.h`
+ * together.
+ *
+ * One file per radio, named for it, so activating a second radio does not
+ * rewrite the first one's and `ncfg config rm` can undo it by a name somebody
+ * can guess.
+ *
+ * **Two blocks, and the second is not optional.** The first draft wrote only
+ * the `device` block, on the reasoning that it is the smallest thing that says
+ * netcfgd manages the radio. It plans nothing at all: the planner walks the
+ * interfaces, so a device nothing has an `interface` block for is never
+ * visited, and activation reported success for a file that changed no
+ * behaviour. The empty `dns { }` is load-bearing for the same kind of reason
+ * -- a lease's nameservers are offered to an interface and taken only where
+ * one asks -- and `daemon_wifi_test.c` asserts both outcomes by compiling what
+ * this writes and asking the planner, rather than by comparing the text.
+ */
+#define NCFG_WIFI_DROP_IN_MAX 64
+int ncfg_wifi_radio_drop_in(const char *interface, char *out, size_t out_size, char *err,
+    size_t err_size);
+int ncfg_wifi_radio_blocks(const char *interface, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * The radios this machine has, and what netcfgd is doing about each.
+ *
+ * **From the kernel, not from the document.** A list built out of `device`
+ * blocks would show only the radios already taken on, and this list exists so
+ * that somebody can take one on -- it has to name the ones netcfgd is not
+ * managing, because those are the interesting ones.
+ *
+ * `supplicant` is asked separately from `activated` because the gap between
+ * them is what a person needs to see. Activated with nothing answering is a
+ * fault; not activated with something answering is another manager holding
+ * this radio, which netcfgd declines to take rather than fighting over.
+ */
+int ncfg_wifi_radios(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const ncfg_observed_t *observed, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * Start the backends one interface now wants, before answering.
+ *
+ * **A seam, and it is the half that makes activation truthful.** netcfgd
+ * applies nothing on a configuration change by itself -- `on_drift` defaults
+ * to `report` -- so activation used to leave a correct plan that nothing had
+ * run, and the operator got "cannot reach the supplicant" from the very next
+ * scan. Reported as "the buttons don't work properly", which is what a switch
+ * that changes a file and nothing else looks like.
+ *
+ * **Not the whole interface plan, and the reason is a failure.** It was the
+ * whole plan for a day; addressing is in that plan, and activating a radio ran
+ * `dhcpcd`, which cannot get a lease on a link with nothing behind it, so the
+ * activation *failed* -- handing netcfgd a radio was refused because DHCP had
+ * not finished on it. So an implementation restricts the plan to this
+ * interface and to **starting a supplicant**: `BackendStart` covers the DHCP
+ * client too, and filtering on the op alone still ran `dhcpcd`.
+ *
+ * It is a seam rather than a call because the plan restriction and the
+ * reconcile loop's executor are not in this port yet, and because a test that
+ * did this for real would start a supplicant on the developer's own radio.
+ * **Nothing to do is success**: the radio may already be up from a previous
+ * activation, and reporting that as a failure would make a switch complain
+ * about being already on.
+ */
+typedef int (*ncfg_wifi_apply_fn)(void *context, const char *interface, char *err,
+    size_t err_size);
+
+/*
+ * Take a radio on, or hand it back.
+ *
+ * Named rather than silent for an interface that is not a radio: activating
+ * `eth0` is a mistake worth a sentence, and the alternative is a `device`
+ * block that quietly does nothing. The answer is whether the *kernel* calls it
+ * a radio, read from the observation the state already holds.
+ *
+ * Activation writes the drop-in, reloads, and then **applies**, because a
+ * client that scans the moment it is told the radio is netcfgd's must not scan
+ * a radio with no supplicant. Handing one back writes nothing further: the
+ * reconcile loop takes the backend down on its own pass, and a synchronous
+ * stop here would disconnect an operator who had only meant to stop managing
+ * the interface.
+ *
+ * `apply` is required when activating and is refused when absent, rather than
+ * skipped -- a caller with no way to apply would be reproducing the defect
+ * above, silently.
+ */
+int ncfg_wifi_set_radio(ncfg_daemon_state_t *state, const char *interface, int activate,
+    ncfg_wifi_apply_fn apply, void *apply_context, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * `SCAN`, then `SCAN_RESULTS`.
+ *
+ * **Attached before `SCAN` is sent, and that order is the whole of it** (0194).
+ * The completion event only reaches connections that asked for events, and
+ * asking afterwards would race the scan finishing on a radio with little to
+ * look at. A failure to attach is not a failure to scan: what is lost is the
+ * wait, so the old behaviour returns -- results one scan out of date, said in
+ * `stale` rather than swallowed.
+ *
+ * **A switched-off radio cannot scan, so it is not asked to.** Without that
+ * check the scan is sent, the supplicant answers with a failure or nothing at
+ * all, and the report says the results are stale "because the supplicant could
+ * not scan (ret=-100)" -- a translation of ENETDOWN rather than the fact that
+ * somebody pressed the button. The cached results are still returned, because
+ * they are what the radio last saw.
+ */
+int ncfg_wifi_scan(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const ncfg_observed_t *observed, const char *interface, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * `STATUS`, resolved back to the document where possible.
+ *
+ * The kill switch is asked about here because **this is the command somebody
+ * runs when wifi is not working**, and a kill switch is one keystroke away on
+ * any laptop (0199).
+ *
+ * `not_trying` comes from `LIST_NETWORKS`, which is the only place the
+ * difference lives: `STATUS` describes the one association an interface has,
+ * so an interface with none reads `SCANNING` whether the supplicant is
+ * scanning hopefully or has given up on every network it was given. A failure
+ * to read it is not a failure of the status.
+ */
+int ncfg_wifi_status(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const ncfg_observed_t *observed, const char *interface, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * Join a network the configuration already describes.
+ *
+ * The lookup is what makes this mean "join one of these" rather than "join
+ * anything", and the refusal says so plainly or it reads as the network being
+ * missing rather than the name being unknown.
+ *
+ * `SELECT_NETWORK` rather than `ENABLE_NETWORK`: it disables the others, which
+ * is what "join this one" means. **OK to that command means the supplicant
+ * took it, not that anything joined** -- association, the key exchange and any
+ * EAP handshake all happen after it, and every way they fail arrives as an
+ * event (0197). So this attaches first and waits for the outcome.
+ *
+ * `secrets_dir` and `certs_dir` are the resolver's two halves and neither has
+ * a default here. `certs_dir` is where a stored certificate is materialised
+ * for the supplicant to open; a resolver that could read secrets but not write
+ * a certificate would join the same network from the command line and refuse
+ * it from a connect.
+ */
+int ncfg_wifi_connect(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const char *secrets_dir, const char *certs_dir, const char *interface, const char *wanted,
+    ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * Leave the current network without forgetting it.
+ *
+ * `DISCONNECT`, not `REMOVE_NETWORK`: the network stays configured and stays
+ * in the supplicant, so reconnecting does not need the credential resolved
+ * again -- and the next reconcile does not see a network missing and put it
+ * back, which would undo the disconnect a second later.
+ */
+int ncfg_wifi_disconnect(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const char *interface, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * Who is associated with an access point this machine runs.
+ *
+ * The `access_point` block is found first, and its absence is the answer
+ * rather than an error about a socket: an interface with no access point on it
+ * has no stations, and saying "no control socket" would send an operator
+ * looking for a broken hostapd that was never meant to exist.
+ *
+ * Whether the ACL names a station is answered **from the document rather than
+ * from hostapd**, deliberately: the document is the authority, and the
+ * difference between the two is the thing worth seeing -- a station connected
+ * *and* on a deny list means hostapd has not been told about a list that
+ * changed.
+ *
+ * The walk is `STA-FIRST` then `STA-NEXT <address>`, over hostapd's control
+ * socket, which is `wpa_ctrl` and so is the supplicant module's client.
+ * `hostapd.h` says that round trip was the half it did not carry; it is here
+ * because this is its only caller, and it moves down beside
+ * `ncfg_hostapd_parse_station` when a second one arrives. **Bounded rather
+ * than a loop**: hostapd walks its own list and terminates, but this is one
+ * daemon reading another's answers and a reply echoing an address back
+ * unchanged would spin for ever.
+ */
+int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
+    const char *interface, ncfg_buf_t *out, char *err, size_t err_size);
+
+/* ------------------------------------------------ adding a network (0117) */
+
+/* What protects a network this daemon is asked to write down. */
+typedef enum {
+	NCFG_WIFI_SECURITY_OPEN = 0,
+	NCFG_WIFI_SECURITY_PSK,
+	NCFG_WIFI_SECURITY_EAP
+} ncfg_wifi_security_t;
+
+/*
+ * The `network` block a `wifi_add` asks for, validated.
+ *
+ * **Every string is borrowed and lives only for the installer call** -- some
+ * point into the request and some into the caller's own stack -- so an
+ * implementation copies anything it keeps. There is nothing to free.
+ *
+ * `ca_cert` and `client_cert` are already in their `@secret:<name>` form,
+ * which is **the one place the socket's names turn into configuration and the
+ * only form they can take**: a request carries a *name*, the configuration
+ * written from it says `@secret:<name>`, and the compiler lowers that to a
+ * stored source and never to a path. A caller cannot reach the path form from
+ * here because there is nothing to write it in.
+ */
+typedef struct {
+	const char          *id;
+	ncfg_ssid_t          ssid;
+	int                  hidden;
+	ncfg_optint_t        metric;
+	ncfg_wifi_security_t security;
+	/* `psk`: the generation to pin, or NULL for both. */
+	const char          *proto;
+	/* `eap`: peap, ttls, tls or pwd. NULL for the other two. */
+	const char          *method;
+	const char          *identity;
+	const char          *anonymous_identity;
+	const char          *phase2;
+	const char          *ca_cert;
+	const char          *client_cert;
+} ncfg_wifi_profile_t;
+
+/*
+ * Write the block and store the credential.
+ *
+ * **A seam, because `netcfgd_host::wifi_profile` is not in this port yet.**
+ * The write, the credential, the 0700 directory and the compile-it-back check
+ * are that module's and are shared with `ncfg wifi add` -- two implementations
+ * of "what a `network` block looks like" is the drift this tree keeps finding
+ * -- so this port refuses to grow a second one and names the gap instead.
+ *
+ * **The credential is passed by count and is never copied here.** A
+ * `ncfg_proto_str_t` points into the decoded line, so handing over the bytes
+ * and the length means the passphrase exists in exactly one place for exactly
+ * as long as the line does. NULL for a network that carries none; a `tls`
+ * network's private key travels this way too, which is why the length is not
+ * assumed to be small.
+ */
+typedef int (*ncfg_wifi_install_fn)(void *context, const ncfg_wifi_profile_t *profile,
+    const char *credential, size_t credential_length, char *err, size_t err_size);
+
+/*
+ * Add a wireless network to the configuration, for a client that cannot write
+ * the file itself (0117).
+ *
+ * The request carries typed fields and never config text, so the daemon
+ * renders the block and **this function's shape is what bounds the
+ * privilege**: there is no field here that could name a hook, a path or a
+ * `run_as`, and a hook's `run_as` defaults to root.
+ *
+ * Named `configure_network` in the Rust and not `add_network`, because
+ * `ncfg_supplicant_add_network` already means something different one layer
+ * down -- telling a running supplicant about a network. This writes a config
+ * file.
+ *
+ * What it refuses, before anything is written: an ssid that is not lowercase
+ * hex of 0 to 32 octets; an ssid that is not text with no `id` to name it by,
+ * since a label is a filename and this will not invent one -- and **an ssid or
+ * an `id` carrying a NUL**, which the Rust refuses a layer down in `usable_id`
+ * as a control character and which here has to be refused before the value
+ * exists, because a counted string with a NUL in it cannot become a C string
+ * without becoming a shorter one nobody asked for; an `id` a
+ * `network` block already uses, because a second block with the same label is
+ * a compile error that would break every interface on the machine to add one
+ * network; a `proto` beside an `eap` block, since `proto` pins the generation
+ * protecting a passphrase and an enterprise network negotiates its own; a
+ * `proto` with no passphrase; a `proto` that is neither `wpa2` nor `wpa3`; an
+ * EAP method netcfgd does not implement, named rather than silently accepted
+ * because the supplicant would refuse the network later and say so only in its
+ * log; and an enterprise network with no `identity`.
+ *
+ * **A `metric` outside `u32` is refused here**, which the Rust does at the
+ * decode: its request type says `Option<u32>` and serde will not build one out
+ * of range, while `ncfg_proto_int_t` carries whatever integer arrived.
+ */
+int ncfg_wifi_configure_network(const ncfg_document_t *document,
+    const ncfg_proto_wifi_add_t *wanted, ncfg_wifi_install_fn install, void *install_context,
+    ncfg_buf_t *out, char *err, size_t err_size);
 
 #endif /* NCFG_DAEMON_H */
