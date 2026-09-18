@@ -198,6 +198,60 @@ const char *ncfg_interface_kind_name(int kind)
 }
 
 /*
+ * The word a tunnel encapsulation goes on the wire as.
+ *
+ * **The document's spelling and the kernel's are the same word**, deliberately
+ * rather than by luck: `TunnelKind::name` in the Rust is documented as "the
+ * kernel's name for this link kind" and serde's `snake_case` of the variant
+ * produces the identical string, so the model holds one table and the executor
+ * reads it. A second list here -- or in `src/apply/` -- is how a `gretap`
+ * comes to mean one thing on the way out and another on the way back in, which
+ * is what `ops.h` refuses to have happen to a mode number.
+ *
+ * NULL outside the set, `value.h`'s convention.
+ */
+const char *ncfg_tunnel_kind_name(int kind)
+{
+	return ncfg_field_enum_name(&tunnel_kind_set, kind);
+}
+
+/*
+ * The number the kernel wants in `IFLA_BOND_MODE`.
+ *
+ * `ncfg_bond_mode_t`'s order **is** the kernel's numbering -- `src/observe/
+ * build.c` already reads a kernel mode back by indexing `bond_mode_words` with
+ * it -- so this is that fact written down once and bounded, not a second
+ * table. -1 for a value outside the set, which is a mode this build has no
+ * word for and must not send as some other mode.
+ */
+int ncfg_bond_mode_number(int mode)
+{
+	if (!ncfg_field_enum_name(&bond_mode_set, mode)) {
+		return -1;
+	}
+	return mode;
+}
+
+/*
+ * The number the kernel wants in `IFLA_MACVLAN_MODE`.
+ *
+ * **Flags, not an enumeration**: the kernel numbers the modes 1, 2, 4, 8 and
+ * 16 and its validator refuses anything else, so 0 for the first mode and 3
+ * for the fourth are `EINVAL` rather than a mode nobody meant. The document's
+ * order is private, vepa, bridge, passthru, which is the same order, so the
+ * mapping is a shift -- and 16, the `source` mode netcfgd cannot express, is
+ * outside the set and answers -1 here as it reads back as no mode at all in
+ * `src/observe/build.c`.
+ */
+int ncfg_macvlan_mode_number(int mode)
+{
+	if (!ncfg_field_enum_name(&macvlan_mode_set, mode)) {
+		return -1;
+	}
+	return 1 << mode;
+}
+
+/*
  * Whether at most one of this kind may appear on one interface.
  *
  * Two DHCP clients on one link is always a bug, so it is refused at compile
@@ -899,20 +953,22 @@ static int base64_value(char digit, unsigned *out)
 	return 1;
 }
 
-static int public_key_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
+int ncfg_key_parse(const char *text, size_t length, unsigned char out[NCFG_KEY_LEN], char *err,
     size_t err_size)
 {
-	unsigned char *key = field;
-	size_t         length = 0;
-	const char    *text = ncfg_json_string(doc, node, &length);
-	unsigned       accumulator = 0;
-	unsigned       bits = 0;
-	size_t         written = 0;
-	size_t         i;
+	unsigned accumulator = 0;
+	unsigned bits = 0;
+	size_t   written = 0;
+	size_t   i;
 
+	if (!out) {
+		ncfg_error_set(err, err_size, "there is nowhere to put a key");
+		return 0;
+	}
+	memset(out, 0, NCFG_KEY_LEN);
 	/* 44 characters, the last of which is the one pad: 32 octets is not a
 	 * multiple of three, which is where the single `=` comes from. */
-	if (!text || length != 44u || text[43] != '=') {
+	if (!text || length != NCFG_KEY_TEXT_LEN || text[43] != '=') {
 		ncfg_error_set(err, err_size,
 		    "a key is 44 characters of base64 ending in `=`, and this one is %zu",
 		    text ? length : (size_t)0);
@@ -922,6 +978,9 @@ static int public_key_read(const ncfg_json_doc_t *doc, uint32_t node, void *fiel
 		unsigned digit = 0;
 
 		if (!base64_value(text[i], &digit)) {
+			/* The character is named and the key is not: a private key
+			 * that failed to parse is still a private key, and the one
+			 * byte that is wrong is what an operator needs. */
 			ncfg_error_set(err, err_size, "a key is base64, and `%c` is not", text[i]);
 			return 0;
 		}
@@ -929,20 +988,29 @@ static int public_key_read(const ncfg_json_doc_t *doc, uint32_t node, void *fiel
 		bits += 6u;
 		if (bits >= 8u) {
 			bits -= 8u;
-			if (written < 32u) {
-				key[written++] = (unsigned char)((accumulator >> bits) & 0xffu);
+			if (written < NCFG_KEY_LEN) {
+				out[written++] = (unsigned char)((accumulator >> bits) & 0xffu);
 			}
 		}
 	}
 	/* The low two bits of the last character are not decoded. A key that sets
 	 * them is still a valid key -- `wg` emits them -- so they are ignored
 	 * rather than refused, and the re-rendering clears them. */
-	if (written != 32u) {
+	if (written != NCFG_KEY_LEN) {
 		ncfg_error_set(err, err_size, "a key decodes to 32 octets, and this one to %zu",
 		    written);
 		return 0;
 	}
 	return 1;
+}
+
+static int public_key_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
+    size_t err_size)
+{
+	size_t      length = 0;
+	const char *text = ncfg_json_string(doc, node, &length);
+
+	return ncfg_key_parse(text, text ? length : 0, field, err, err_size);
 }
 
 static void public_key_write(ncfg_json_writer_t *writer, const void *field)

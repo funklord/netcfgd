@@ -168,6 +168,23 @@ typedef struct {
 	 * different fact from one that came back empty.
 	 */
 	size_t                  dropped;
+	/*
+	 * The errno the kernel refused this request with, or 0 where it did not.
+	 *
+	 * **Set by `ncfg_netlink_collect_batch` and by nothing else**, because it
+	 * is the batch path an executor sends through. A caller that has to tell
+	 * `EEXIST` from `EPERM` cannot do it from the sentence: `ncfg_netlink_fail`
+	 * renders one string, and reading a decision back out of the words of a
+	 * message is what `config.h` forbids by name. So the number survives
+	 * beside the sentence rather than instead of it.
+	 *
+	 * It exists for the handful of ops whose idempotence *is* an errno --
+	 * `EEXIST` from a rule that is already installed, `ENOENT` from a qdisc
+	 * that is already gone, `EINVAL` from a replace that would change a
+	 * qdisc's kind (`qdisc.h` says what to do about that one). Anything else
+	 * is a failure and stays one.
+	 */
+	int                     refused;
 } ncfg_netlink_reply_t;
 
 /* Release the payloads and leave the reply usable and empty. Freeing one that

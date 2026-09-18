@@ -64,6 +64,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
+#include "ncfg/secrets.h"
 
 /* ------------------------------------------------------------------------ *
  * The seam
@@ -389,6 +390,42 @@ void ncfg_kernel_free(ncfg_kernel_t *kernel);
  * drops inside one call.
  */
 void ncfg_kernel_set_hooks(ncfg_kernel_t *kernel, const ncfg_hook_ref_t *hooks, size_t count);
+
+/*
+ * The document being applied, borrowed for the executor's life.
+ *
+ * Needed because six ops carry a device's *name* and nothing else --
+ * `link.set_bridge`, `link.set_bond`, `link.set_macvlan`, `link.set_tunnel`,
+ * `link.set_vxlan` and `wg.set_device`. What they change is the document's,
+ * and a plan that carried it would put a WireGuard private key reference,
+ * every peer's public key and every allowed prefix into
+ * `/run/netcfgd/plan.last.json` for no gain -- constraint 5 applied to a plan,
+ * which is the same reason `hook.run` carries a path and not a hash.
+ *
+ * **Without one those six refuse by name**, rather than configuring a device
+ * with nothing: a bridge re-stated from an empty block is a bridge with every
+ * setting at the kernel's default, reported as a successful apply.
+ *
+ * Borrowed rather than copied, which is `ncfg_kernel_set_hooks`' rule and
+ * `plan.h`'s: **the executor must not outlive the document.**
+ */
+void ncfg_kernel_set_document(ncfg_kernel_t *kernel, const ncfg_document_t *document);
+
+/*
+ * Where `file` secrets live, for the two ops that load key material.
+ *
+ * `wg.set_device` resolves a private key and `wg.set_peers` resolves a
+ * preshared key per peer; both arrive as `ncfg_secret_ref_t` in the document,
+ * and resolving one reads a file, a keyring or a subprocess. NULL -- which is
+ * the default -- means the machine's own directory, which is what `secrets.h`
+ * reads a NULL `secrets_dir` as.
+ *
+ * A setter rather than an environment variable, for `contention.h`'s reason: a
+ * test that forgot to set a variable would read the developer's real secrets
+ * directory, and one that forgets an argument does not compile. Borrowed, and
+ * the resolver must outlive the executor.
+ */
+void ncfg_kernel_set_secrets(ncfg_kernel_t *kernel, const ncfg_secret_resolver_t *resolver);
 
 /* Fill in the seam. `out` borrows `kernel` and must not outlive it. */
 void ncfg_kernel_executor(ncfg_kernel_t *kernel, ncfg_executor_t *out);

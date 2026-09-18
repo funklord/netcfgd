@@ -491,6 +491,7 @@ static absorb_t absorb_batch(ncfg_netlink_reply_t *reply, const uint8_t *bytes, 
 				/* The first errno any message replied with. One
 				 * failure means the whole transaction was rolled
 				 * back, so the first is the cause. */
+				reply->refused = (int)code;
 				(void)ncfg_netlink_fail(err, err_size,
 				    refused_request(&message), (int)code);
 				return ABSORB_BAD;
