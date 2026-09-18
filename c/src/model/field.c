@@ -871,6 +871,12 @@ static int omit(const ncfg_field_t *field, const void *base)
 {
 	const void *slot = member_at_const(base, field->offset);
 
+	/* A field whose Rust counterpart has no `skip_serializing_if` is written
+	 * as `null` when it is absent, so it is never omitted. See
+	 * NCFG_FF_NULL_ABSENT. */
+	if (field->flags & NCFG_FF_NULL_ABSENT) {
+		return 0;
+	}
 	switch (field->kind) {
 	case NCFG_F_BOOL: {
 		int value;
@@ -945,7 +951,13 @@ static void write_one(const ncfg_field_t *field, ncfg_json_writer_t *writer, con
 		ncfg_optint_t value;
 
 		memcpy(&value, slot, sizeof(value));
-		ncfg_json_write_int(writer, value.value);
+		/* Absent reaches here only for a field that is written rather than
+		 * omitted, which is what `null` spells. */
+		if (value.has) {
+			ncfg_json_write_int(writer, value.value);
+		} else {
+			ncfg_json_write_null(writer);
+		}
 		break;
 	}
 	case NCFG_F_STR:
