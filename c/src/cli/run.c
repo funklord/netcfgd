@@ -90,7 +90,6 @@ static int not_in_this_wave(const char *verb, const char *needs)
 
 /* What the loader and the observer are called, so the two sentences agree. */
 #define NEEDS_OBSERVER   "the netlink dump the observer is built from"
-#define NEEDS_PROVENANCE "the provenance table, which 0263 does not port"
 #define NEEDS_WRITERS    "the settings writer that puts a drop-in where netcfgd reads it"
 
 /*
@@ -662,10 +661,13 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		return command_show(options);
 	}
 	if (strcmp(command, "explain") == 0) {
-		/* 0263 does not port the provenance side table -- a second record of
-		 * the document is a second thing that has to go on agreeing with it --
-		 * and `explain` is what reads it. */
-		return not_in_this_wave("explain", NEEDS_PROVENANCE);
+		/* The reason here used to be the provenance table, and that is no
+		 * longer what is missing: `explain.h` is ported, it takes a
+		 * `ncfg_provenance_t` exactly as the Rust takes a `&Provenance`, and
+		 * it says in its own output when it was given an empty one. What it
+		 * still needs is the same thing `status` and `plan` need -- the verb's
+		 * first step is a local observation. */
+		return not_in_this_wave("explain", NEEDS_OBSERVER);
 	}
 	if (strcmp(command, "control") == 0) {
 		return subcommand(ncfg_cli_control, options, positional, count);
