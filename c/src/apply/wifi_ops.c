@@ -26,6 +26,8 @@
  */
 #include "ncfg/service.h"
 
+#include "service_internal.h"
+
 #include "ncfg/base.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/log.h"
@@ -186,37 +188,83 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
  * What the document says about one radio
  * ------------------------------------------------------------------------ */
 
-/* The device block for a name, or NULL. */
-static const ncfg_device_t *device_named(const ncfg_document_t *document, const char *name)
+/*
+ * The two lookups, and the answer built out of them.
+ *
+ * **Not static, and `service_internal.h` says why**: the driver a supplicant
+ * is *started* with and the population it is then *given* are one decision,
+ * and making it twice is a supplicant that comes up and never authenticates.
+ * They live here rather than beside the launch because this is the file that
+ * does the populating.
+ */
+const ncfg_eap_config_t *ncfg_service_dot1x_on(const ncfg_document_t *document,
+    const char *iface)
 {
 	size_t i;
 
-	if (!document || !name) {
+	if (!document || !iface) {
 		return NULL;
 	}
-	for (i = 0; i < document->device_count; i++) {
-		if (document->devices[i].name && strcmp(document->devices[i].name, name) == 0) {
-			return &document->devices[i];
+	for (i = 0; i < document->interface_count; i++) {
+		if (document->interfaces[i].name &&
+		    strcmp(document->interfaces[i].name, iface) == 0) {
+			return document->interfaces[i].dot1x;
 		}
 	}
 	return NULL;
 }
 
-/* The interface block for a name, or NULL. */
-static const ncfg_interface_t *interface_named(const ncfg_document_t *document, const char *name)
+const ncfg_wifi_device_policy_t *ncfg_service_wifi_on(const ncfg_document_t *document,
+    const char *device)
 {
 	size_t i;
 
-	if (!document || !name) {
+	if (!document || !device) {
 		return NULL;
 	}
-	for (i = 0; i < document->interface_count; i++) {
-		if (document->interfaces[i].name &&
-		    strcmp(document->interfaces[i].name, name) == 0) {
-			return &document->interfaces[i];
+	for (i = 0; i < document->device_count; i++) {
+		if (document->devices[i].name && strcmp(document->devices[i].name, device) == 0) {
+			return document->devices[i].wifi;
 		}
 	}
 	return NULL;
+}
+
+int ncfg_service_supplicant_driver(const ncfg_document_t *document, const char *iface,
+    const char **out, char *err, size_t err_size)
+{
+	if (!out) {
+		ncfg_error_set(err, err_size, "a driver was asked for with nowhere to put it");
+		return 0;
+	}
+	if (!document) {
+		ncfg_error_set(err, err_size,
+		    "a supplicant on %s needs the document the plan was built from to know "
+		    "which driver to start it with, and this executor was given none; `%s` "
+		    "and `%s` are not interchangeable and there is nothing to guess from",
+		    iface ? iface : "?", NCFG_SUPPLICANT_DRIVER_WIRED,
+		    NCFG_SUPPLICANT_DRIVER_RADIO);
+		return 0;
+	}
+	/* `dot1x` first, which is `ncfg_plan_radio_supplicant`'s order: an
+	 * interface carrying that block has said what its supplicant is for, and
+	 * the radio arm there returns without planning anything for it. */
+	if (ncfg_service_dot1x_on(document, iface)) {
+		*out = NCFG_SUPPLICANT_DRIVER_WIRED;
+		return 1;
+	}
+	if (ncfg_service_wifi_on(document, iface)) {
+		*out = NCFG_SUPPLICANT_DRIVER_RADIO;
+		return 1;
+	}
+	ncfg_error_set(err, err_size,
+	    "the document this plan was built from describes %s as neither a wired 802.1X "
+	    "port nor a radio -- it carries no `interface %s { dot1x { } }` and no `device "
+	    "%s { wifi { } }` -- so netcfgd will not pick a supplicant driver for it: `%s` "
+	    "on a radio and `%s` on a wired port both start and never authenticate",
+	    iface ? iface : "?", iface ? iface : "?", iface ? iface : "?",
+	    NCFG_SUPPLICANT_DRIVER_WIRED, NCFG_SUPPLICANT_DRIVER_RADIO);
+	return 0;
 }
 
 /*
@@ -230,15 +278,15 @@ static const ncfg_interface_t *interface_named(const ncfg_document_t *document, 
 static void radio_policy(const ncfg_document_t *document, const char *device, int *mac_policy,
     int *randomise, int *joins)
 {
-	const ncfg_device_t *found = device_named(document, device);
+	const ncfg_wifi_device_policy_t *found = ncfg_service_wifi_on(document, device);
 
 	*mac_policy = NCFG_MAC_POLICY_PERMANENT;
 	*randomise = 0;
 	*joins = 1;
-	if (found && found->wifi) {
-		*mac_policy = found->wifi->mac_policy;
-		*randomise = found->wifi->scan_randomization;
-		*joins = found->wifi->autoconnect;
+	if (found) {
+		*mac_policy = found->mac_policy;
+		*randomise = found->scan_randomization;
+		*joins = found->autoconnect;
 	}
 }
 
@@ -355,7 +403,7 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
     size_t err_size)
 {
 	ncfg_supplicant_client_t *client;
-	const ncfg_interface_t   *interface;
+	const ncfg_eap_config_t  *dot1x;
 	char                      command[96];
 	char                      detail[NCFG_ERROR_MAX];
 	int                       mac_policy;
@@ -404,12 +452,16 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 	 * A wired 802.1X port is a different population rather than a smaller one:
 	 * it has exactly one thing to authenticate with and uses `IEEE8021X`, while
 	 * a radio gets every network in the document and chooses among them.
+	 *
+	 * **The same lookup the driver came from**, which is the whole of
+	 * `service_internal.h`: this branch and `-Dwired` have to agree, and they
+	 * agree by being one question rather than two that match today.
 	 */
-	interface = interface_named(service->document, device);
-	if (interface && interface->dot1x) {
+	dot1x = ncfg_service_dot1x_on(service->document, device);
+	if (dot1x) {
 		uint32_t slot = 0;
-		int      ok = ncfg_supplicant_configure_wired(client, interface->dot1x,
-		    service->secrets, &slot, detail, sizeof(detail));
+		int      ok = ncfg_supplicant_configure_wired(client, dot1x, service->secrets,
+		    &slot, detail, sizeof(detail));
 
 		if (!ok) {
 			ncfg_error_set(err, err_size, "could not configure 802.1X on %s: %s",

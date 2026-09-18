@@ -206,17 +206,27 @@ typedef struct {
 	 * passphrase. */
 	const ncfg_secret_resolver_t *secrets;
 	/*
-	 * The three daemons, by path.
+	 * The four daemons, by path.
 	 *
 	 * NULL means "find the conventional name", which `ncfg_hostapd_start`,
-	 * `ncfg_ra_start` and `ncfg_openvpn_start` each do for a daemon and which
-	 * `backend_internal.h` records the cost of for a test: 20 of 45 checks in
-	 * the Rust's live openvpn script were silently exercising the machine's own
-	 * openvpn. **A test passes a program it wrote.**
+	 * `ncfg_ra_start`, `ncfg_openvpn_start` and `ncfg_supplicant_start` each do
+	 * for a daemon and which `backend_internal.h` records the cost of for a
+	 * test: 20 of 45 checks in the Rust's live openvpn script were silently
+	 * exercising the machine's own openvpn. **A test passes a program it
+	 * wrote.**
+	 *
+	 * `supplicant_program` in particular is the seam the Rust spells
+	 * `NCFG_WPA_SUPPLICANT`, and its own comment says what the absence cost:
+	 * the fixed directories were searched before `PATH`, so on any machine
+	 * that has `wpa_supplicant` installed -- which is every machine this runs
+	 * on -- a test could not put a stand-in in front of it, and the one thing
+	 * that function does was only ever exercised by hand. Here it is an
+	 * argument rather than a variable, for this header's reason.
 	 */
 	const char *hostapd_program;
 	const char *radvd_program;
 	const char *openvpn_program;
+	const char *supplicant_program;
 	/* Where a resolver configuration is delivered. */
 	ncfg_dns_targets_t dns;
 	/*
@@ -501,11 +511,17 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
  * Start one backend on one interface.
  *
  * **Already running is success and nothing is started.** netcfgd's own daemon
- * is identified by a path it chose -- `ncfg_ra_running_pid` and
- * `ncfg_openvpn_running_pid` both check `/proc/<pid>/cmdline` against it -- so
- * this is a claim about netcfgd's own process rather than a search for
- * something that looks like one. Without it a second apply of a converged
- * machine starts a second daemon beside the first.
+ * is identified by a path it chose -- `ncfg_ra_running_pid`,
+ * `ncfg_openvpn_running_pid` and `ncfg_supplicant_running_pid` all check
+ * `/proc/<pid>/cmdline` against it -- so this is a claim about netcfgd's own
+ * process rather than a search for something that looks like one. Without it a
+ * second apply of a converged machine starts a second daemon beside the first.
+ *
+ * **A supplicant is also populated here**, which is the one start that is not
+ * finished when the process is up: a freshly launched supplicant holds nothing
+ * (0015), so `ncfg_service_set_profiles` runs inside this call and a
+ * population that failed fails the start. Reporting a start done while the
+ * supplicant knows no networks is reporting a port authenticated that is not.
  */
 int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const char *iface,
     char *err, size_t err_size);

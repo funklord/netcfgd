@@ -46,6 +46,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
@@ -916,6 +917,217 @@ int ncfg_supplicant_add_network(ncfg_supplicant_client_t *client,
  */
 int ncfg_supplicant_configure_wired(ncfg_supplicant_client_t *client,
     const ncfg_eap_config_t *eap, const ncfg_secret_resolver_t *resolver, uint32_t *id_out,
+    char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Launching one
+ * ------------------------------------------------------------------------ *
+ *
+ * THE MARK, AND WHY IT IS THE PID FILE'S OWN PATH
+ *   `process.h` states the rule and this module is the example its own header
+ *   quotes: a process is netcfgd's when it carries, **as a whole `argv`
+ *   element**, an absolute path netcfgd composed out of its own run directory
+ *   and one interface -- and when it belongs to root or to whoever is asking.
+ *   netcfgd starts its supplicant with `-P <run>/supplicant/<iface>.pid`, so
+ *   that path is in `/proc/<pid>/cmdline` for as long as the process lives.
+ *
+ *   **That is udhcpc's arrangement exactly, and deliberately not dhcpcd's.**
+ *   The four marks that already exist are the generated configuration radvd is
+ *   started with (`ncfg_ra_running_pid`), the management socket a tunnel is
+ *   started with (`ncfg_openvpn_running_pid`), the pid file udhcpc is started
+ *   with (`ncfg_dhcp_running_pid`) and dhcpcd's three-valued answer over its
+ *   own control socket (`ncfg_dhcpcd_whose`). Only the last of those is a
+ *   different *mechanism*, and it exists because dhcpcd calls `setproctitle`
+ *   and destroys its own argv. `wpa_supplicant` does not: it re-execs nothing
+ *   and rewrites nothing, so the cheaper mark survives and this module reads
+ *   it the way the first three do. A fifth spelling would be a fifth chance
+ *   for two of them to disagree about what ownership is.
+ *
+ *   **Whose a *stranger's* supplicant is comes from the socket, not the
+ *   process**, and that is the one place this differs from the three above. A
+ *   supplicant nobody marked is not thereby somebody's: it may be a dead one's
+ *   leftover socket file. So the question "is another manager running one
+ *   here?" is asked by connecting -- `ncfg_supplicant_answers` -- and only a
+ *   socket that answers is a manager to decline in favour of.
+ *
+ * ADOPTION IS THE ORDINARY CASE AND NOT THE EXCEPTIONAL ONE
+ *   `RuntimeDirectory=netcfgd` empties `/run/netcfgd` on every daemon stop
+ *   while `KillMode=process` deliberately leaves the supplicant running
+ *   (0134), so **the pid file is an index into a fact rather than the fact
+ *   itself** and losing it happens on every restart. Decision 0140 is what
+ *   that cost when the recovery was missing: netcfgd refused its own child for
+ *   ever, naming `NetworkManager`, while two supplicants and two DHCP clients
+ *   fought over one radio. `ncfg_supplicant_adopt` is the recovery -- find the
+ *   process by the mark it still carries and write the pid back down -- and
+ *   adopting rather than restarting is what keeps the association 0134 wanted
+ *   kept.
+ *
+ * WHAT IS NOT ON THE COMMAND LINE
+ *   No configuration file, and not an empty one: 0015 makes the supplicant
+ *   hold no state, `-C` supplies the control interface, and a file that does
+ *   not exist cannot be edited by anything else. `update_config 0` is set on
+ *   the running instance instead, because there is no flag for it -- see
+ *   `ncfg_service_set_profiles`, which is what fills a supplicant netcfgd has
+ *   just started.
+ */
+
+/* Long enough for a run directory, `supplicant/` and `<iface>.pid`. */
+#define NCFG_SUPPLICANT_PATH_MAX 512
+
+/*
+ * Room for the vector below and its terminator: the program, `-B`,
+ * `-D<driver>`, `-s`, `-i`, the interface, `-C`, the directory, `-P` and the
+ * pid file.
+ */
+#define NCFG_SUPPLICANT_ARGV_MAX 12
+
+/*
+ * The two drivers, which are a property of the interface rather than a
+ * preference.
+ *
+ * A wired port authenticating with 802.1X needs `wired` -- bare EAPOL with no
+ * WPA handshake around it -- and a radio needs `nl80211`. **Guessing wrong
+ * produces a supplicant that starts and never authenticates**, which is the
+ * worst available outcome: everything looks configured and the port stays
+ * blocked. `wext` is behind `nl80211` for a kernel whose driver has no
+ * `cfg80211` support, which is what the Rust sends and is kept.
+ */
+#define NCFG_SUPPLICANT_DRIVER_RADIO "nl80211,wext"
+#define NCFG_SUPPLICANT_DRIVER_WIRED "wired"
+
+/*
+ * `<run>/supplicant/<iface>.pid` -- where a supplicant netcfgd started records
+ * its pid, and the mark it carries in its own `argv`.
+ *
+ * One function because the writer, the reader and the `-P` argument are three
+ * views of one path, which is `ncfg_dhcp_pid_path`'s reason: three spellings
+ * is how two of them come to disagree, and a disagreement here is silent --
+ * every lookup answers "not running" and netcfgd starts a second supplicant
+ * beside the first.
+ */
+int ncfg_supplicant_pid_path(const char *run, const char *iface, char *out, size_t out_size,
+    char *err, size_t err_size);
+
+/*
+ * `<run>/supplicant/<iface>.log` -- where the launch's two output streams go.
+ *
+ * **Not where the supplicant logs.** `-s` sends everything after the fork to
+ * syslog, which is the Rust's own hard-won flag: a daemonised
+ * `wpa_supplicant` that was not told to use syslog writes to a stdout nothing
+ * reads, and every association failure, authentication error and disconnect
+ * reason is simply gone. This file holds what it said *before* it forked,
+ * which is where "it would not start" is written.
+ */
+int ncfg_supplicant_log_path(const char *run, const char *iface, char *out, size_t out_size,
+    char *err, size_t err_size);
+
+/*
+ * A command line, built rather than written out at the call site.
+ *
+ * `ncfg_dhcp_args_t`'s arrangement and its reason: the alternative is an
+ * `argv[10]` filled by index inside a function that also forks, and the flags
+ * then have nowhere to be asserted. **`argv` borrows every string but the
+ * driver**, which is formatted into this struct so that nothing points at a
+ * local that has gone.
+ */
+typedef struct {
+	const char *argv[NCFG_SUPPLICANT_ARGV_MAX];
+	size_t      count;
+	/* `-D<driver>`, one argument as `wpa_supplicant` spells it. */
+	char        driver[32];
+} ncfg_supplicant_args_t;
+
+/*
+ * What netcfgd starts `wpa_supplicant` with.
+ *
+ * `-B` daemonises, `-s` sends its log to syslog, `-i` names the interface,
+ * `-C` is the control directory and `-P` is the pid file that is also the
+ * mark. There is deliberately no `-c`: see the note above.
+ */
+int ncfg_supplicant_arguments(const char *program, const char *driver, const char *iface,
+    const char *dir, const char *pid_path, ncfg_supplicant_args_t *out, char *err,
+    size_t err_size);
+
+/*
+ * The pid of a supplicant of netcfgd's, if it is still there.
+ *
+ * `ncfg_dhcp_running_pid`'s rule with this module's marker: the pid file
+ * netcfgd named on the command line, and `/proc/<pid>/cmdline` checked for
+ * that same path as a whole argument. 0 covers every way of not knowing -- no
+ * file, no number in it, no such process, or a process that is somebody
+ * else's.
+ */
+pid_t ncfg_supplicant_running_pid(const char *run, const char *iface);
+
+/*
+ * Take back a supplicant netcfgd started and lost the record of.
+ *
+ * `ncfg_dhcp_adopt` with one addition: **the process must also be answering
+ * its control socket**, which is the Rust's filter and is not caution for its
+ * own sake. A supplicant that holds its socket and answers nothing is
+ * netcfgd's by every marker and no use to it, and writing the pid down would
+ * claim a radio that netcfgd cannot drive -- where `ncfg_supplicant_start`'s
+ * next question, "is somebody else answering here?", is the one that decides
+ * whether the radio may be taken at all.
+ *
+ * 1 with `*pid_out` set to the pid adopted, 1 with `*pid_out` 0 where there
+ * was nothing to adopt -- which is not a failure and is the ordinary answer --
+ * and 0 with a sentence where the record could not be written. A record that
+ * cannot be kept **is** a failure here, for `ncfg_dhcp_adopt`'s reason: the
+ * next pass would find no record, adopt again, and go on adopting for ever.
+ */
+int ncfg_supplicant_adopt(const char *run, const char *dir, const char *iface, pid_t *pid_out,
+    char *err, size_t err_size);
+
+/*
+ * Start one, adopt one, or say why neither is possible.
+ *
+ * In order, because the order is the whole of it:
+ *
+ *   1. **One netcfgd's own record already names is already running**, and
+ *      starting a second is what this exists to prevent. Asked first because
+ *      it is the state a converged machine is in on every reconcile.
+ *   2. **One carrying the mark with no record left is adopted**, which is 0140
+ *      and is what a restart produces.
+ *   3. **One answering that carries no mark is somebody else's**, and netcfgd
+ *      declines the radio rather than binding a second supplicant to the same
+ *      path. Two supplicants on one radio drop the association, which takes
+ *      the address and the default route with it -- measured, and it is the
+ *      whole of the fault 0140 reports.
+ *   4. **A socket file with nothing behind it is stale** and is removed, since
+ *      the next supplicant could not bind it otherwise. That is 0080's case
+ *      and is exactly the one step 3 must not swallow.
+ *
+ * `program` NULL means "find the conventional name", which is
+ * `ncfg_hostapd_start`'s convention: `/usr/sbin` is searched first because it
+ * is not on a non-root `PATH` on Debian. **A test passes a program it wrote**,
+ * and nothing here reads an environment variable to decide -- the Rust's
+ * `NCFG_WPA_SUPPLICANT` exists because its search had no other seam.
+ */
+int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
+    const char *driver, const char *program, char *err, size_t err_size);
+
+/*
+ * Stop netcfgd's own supplicant on one interface.
+ *
+ * **Through its control socket, never by signalling a process found by name**,
+ * which is 0014's rule: an operator's own `wpa_supplicant` is an ordinary
+ * thing to have and would be reached along with netcfgd's.
+ *
+ * Nothing listening is the state this was asked to produce, so that is
+ * success -- but **only nothing listening**. A supplicant that has bound its
+ * socket and gone silent fails here, which is 0109's shape and is kept in step
+ * with the access point's stop deliberately: they are one mechanism, and
+ * fixing one of them would leave the other saying a daemon had stopped while
+ * it was still holding the radio.
+ *
+ * The pid file goes either way (0080): `wpa_supplicant` removes its own on a
+ * clean exit, one that was killed leaves it, and a stale file would have the
+ * next observation asking about a pid that belongs to somebody else by then.
+ *
+ * `patience_ms` of 0 is `NCFG_SUPPLICANT_IMPATIENT_MS`.
+ */
+int ncfg_supplicant_stop(const char *run, const char *dir, const char *iface, int patience_ms,
     char *err, size_t err_size);
 
 #endif /* NCFG_SUPPLICANT_H */
