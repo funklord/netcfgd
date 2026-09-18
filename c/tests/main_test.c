@@ -16,19 +16,21 @@
  *   back, and would then resolve a name on whatever network this machine is
  *   on. `portal_test.c` drives the helper properly, in children of its own.
  *
- * WHY THE REFUSAL IS CHECKED AGAINST `daemon.h`
- *   `netcfgd` will not start, and it says so by naming the seam it is waiting
- *   for: `ncfg_daemon_answer_fn`. A sentence naming a symbol is only worth
- *   more than a vague one for as long as the symbol is spelt that way, and
- *   nothing in a string literal goes red when a type is renamed. So the header
- *   is read at run time and the name is looked up in it. A header that cannot
- *   be found fails rather than passing over an empty comparison, which is the
- *   shape `cli_test.c` uses for the same kind of check.
+ * WHY THE ONE THING THIS FILE MAY NOT DO IS CHECKED RATHER THAN AGREED
+ *   `netcfgd` used to refuse to start, which is what made calling its entry
+ *   point from here harmless. It starts now: it binds a control socket, takes
+ *   the apply lock and begins reconciling. So the rule is that this file calls
+ *   `ncfg_main_netcfgd_parse` and never `ncfg_main_netcfgd`, and the rule
+ *   enforces itself -- this file reads its own source and refuses to contain
+ *   the call, and reads `main_internal.h` to check that the assembly has no
+ *   other name to reach it by. A comment asking the next person to remember is
+ *   not a guard; it is a note next to the thing that went wrong.
  */
 #include "../src/main/main_internal.h"
 
 #include "ncfg/base.h"
 #include "ncfg/cli.h"
+#include "ncfg/document.h"
 #include "ncfg/config.h"
 #include "ncfg/log.h"
 #include "ncfg/portal.h"
@@ -189,31 +191,6 @@ static char *read_source(const char *relative)
 	return NULL;
 }
 
-/*
- * The first `ncfg_`-shaped word in a sentence, into `out`.
- *
- * What a refusal names has to be pulled out of the refusal, not written down
- * beside it: a second copy here would agree with a stale sentence for ever.
- * Returns 0 where the sentence carries no such word, which is itself a finding.
- */
-static int identifier_in(const char *sentence, char *out, size_t out_size)
-{
-	const char *at = strstr(sentence, "ncfg_");
-	size_t      taken = 0;
-
-	if (!at || out_size == 0u) {
-		return 0;
-	}
-	while (taken + 1u < out_size && (at[taken] == '_' ||
-	    (at[taken] >= 'a' && at[taken] <= 'z') || (at[taken] >= 'A' && at[taken] <= 'Z') ||
-	    (at[taken] >= '0' && at[taken] <= '9'))) {
-		out[taken] = at[taken];
-		taken++;
-	}
-	out[taken] = '\0';
-	return taken > 5u;
-}
-
 /* ------------------------------------------------------------------------ *
  * The dispatch
  * ------------------------------------------------------------------------ */
@@ -372,10 +349,9 @@ static int run_netcfgd(const char *one, const char *two)
 	 * process, which is what the multi-call shape is for and is right for
 	 * everything below. It is also one wiring commit away from starting a
 	 * network configuration daemon inside `make check`, on a machine with a
-	 * real network -- the one this suite is developed on. Today the entry
-	 * point refuses before it opens anything, so calling it is harmless;
-	 * "harmless today" is exactly the property that stops being true without
-	 * anybody editing this file.
+	 * real network -- the one this suite is developed on. That stopped being
+	 * hypothetical the day the assembly was written: the entry point now binds
+	 * a control socket, takes the apply lock and reconciles.
 	 *
 	 * So the parse is a function of its own and this calls that. A parse that
 	 * says nothing follows returns the terminal exit code; a command line
@@ -570,111 +546,230 @@ static void a_wrong_command_line_is_refused_by_name(void)
 	    "and an option name it repeats back cannot drive a terminal either");
 }
 
+
+/* ------------------------------------------------------------------------ *
+ * Where a daemon would read, write and listen
+ * ------------------------------------------------------------------------ */
+
 /*
- * It refuses to start, and the name it refuses with is a name something has.
+ * The four paths, resolved the way every other caller resolves them.
  *
- * A daemon that started and refused everything would be worse than this in
- * the specific way 0263 keeps refusing: with no answer seam it binds the
- * control socket, lets a client through authorization and then says `error` to
- * every request -- which an operator reads as a request the daemon did not
- * recognise rather than as a daemon that cannot act.
+ * Worth a check rather than taken on trust because the Rust wrote the same
+ * defaults out as literal text beside the constants holding them, and the help
+ * was the copy nobody recompiled. Here they are `config.h`'s and `state.h`'s
+ * own answers, called -- so what this asserts is that they were called.
  */
-static void it_refuses_to_start_and_names_the_seam(void)
+static void the_paths_are_the_ones_every_other_caller_resolves(void)
 {
-	const char *printed;
-	const char *waits = ncfg_main_netcfgd_waits_for();
-	char        identifier[64];
-	char       *header;
-	int         code;
+	struct ncfg_main_options options;
+	ncfg_main_where_t        where;
+	char                     err[NCFG_ERROR_MAX];
+
+	memset(&options, 0, sizeof(options));
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)),
+	    "an empty command line resolves to somewhere");
+	check(strcmp(where.config, NCFG_CONFIG_DIR_DEFAULT) == 0,
+	    "the configuration directory is the one the help names");
+	check(strcmp(where.factory, NCFG_FACTORY_DIR_DEFAULT) == 0, "and so is the factory one");
+	check(strcmp(where.run, NCFG_RUN_DIR_DEFAULT) == 0, "and so is the run directory");
+	/*
+	 * The socket is `netcfgd.sock` under the run directory and is written down
+	 * in exactly one place. The help says so too, which is the pair that would
+	 * otherwise drift.
+	 */
+	check(strcmp(where.socket, NCFG_RUN_DIR_DEFAULT "/netcfgd.sock") == 0,
+	    "and the socket is under the run directory, as the help says");
+	check(strstr(ncfg_main_netcfgd_usage(), "/netcfgd.sock") != NULL,
+	    "and the help says the same thing this resolved");
+	/*
+	 * And the two credential directories, which are under the directories this
+	 * daemon was given rather than under `/etc` and `/run`. A daemon pointed at
+	 * a scratch tree that read the machine's real credentials would be the
+	 * `testdir.h` hazard with the defaults moved one layer up.
+	 */
+	check(strcmp(where.secrets, NCFG_CONFIG_DIR_DEFAULT "/secrets") == 0,
+	    "the secrets directory is under the configuration directory in force");
+	check(strcmp(where.certs, NCFG_RUN_DIR_DEFAULT "/certs") == 0,
+	    "and the certificate directory is under the run directory in force");
+
+	/* What was typed wins over the environment and over the default. */
+	options.config_dir = "/tmp/not-a-real-config";
+	options.run_dir = "/tmp/not-a-real-run";
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
+	    strcmp(where.config, "/tmp/not-a-real-config") == 0,
+	    "what was typed wins over the default");
+	check(strcmp(where.socket, "/tmp/not-a-real-run/netcfgd.sock") == 0,
+	    "and the socket follows the run directory it was given");
+	check(strcmp(where.secrets, "/tmp/not-a-real-config/secrets") == 0 &&
+	    strcmp(where.certs, "/tmp/not-a-real-run/certs") == 0,
+	    "and so do both credential directories, rather than staying on the defaults");
 
 	/*
-	 * The refusal on its own, not through the entry point. Two facts that a
-	 * single exit code used to conflate: that an empty command line parses
-	 * and leaves nothing to do, and that this build then refuses. The first
-	 * is `WOULD_START` below; this is the second.
+	 * **The remote socket is beside the socket, not under the run
+	 * directory.** A second netcfgd told to listen elsewhere would otherwise
+	 * put its remote socket back in `/run/netcfgd`, which is the one place it
+	 * must not write.
 	 */
-	capture_begin(STDERR_FILENO);
-	code = ncfg_main_netcfgd_refuse();
-	printed = capture_end(STDERR_FILENO);
+	options.socket = "/tmp/elsewhere/ctl.sock";
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
+	    strcmp(where.socket, "/tmp/elsewhere/ctl.sock") == 0,
+	    "an explicit socket path is kept as it was typed");
+	check(strcmp(where.remote_socket, "/tmp/elsewhere/remote.sock") == 0,
+	    "and the remote socket is beside it rather than under the run directory");
 
-	check(code == NCFG_MAIN_EXIT_FAILED, "the refusal exits 1 rather than running");
-	check(run_netcfgd(NULL, NULL) == WOULD_START,
-	    "and an empty command line is what reaches it, having parsed");
-
-	/*
-	 * **And this file may not call the entry point, checked rather than
-	 * agreed.** Everything above runs the daemon's command line inside the
-	 * test process. Today that is harmless because the entry point refuses
-	 * before it opens anything -- and "harmless today" stops being true the
-	 * day somebody writes the assembly, without touching this file. What
-	 * would happen then is a network configuration daemon starting inside
-	 * `make check`, on whatever workstation ran it.
-	 *
-	 * So the rule is that tests call `_parse` and `_refuse`, and this is the
-	 * rule enforcing itself. A comment asking the next person to remember is
-	 * not a guard; it is a note next to the thing that went wrong.
-	 */
+	/* A path that does not fit is refused rather than truncated: a daemon
+	 * whose configuration directory is a prefix of the one somebody named is
+	 * worse than one that will not start. */
 	{
-		char *own = read_source("tests/main_test.c");
-		char  forbidden[64];
+		char long_one[NCFG_MAIN_PATH_MAX + 32];
 
-		/*
-		 * Joined here rather than written out, because the first version of
-		 * this check failed against a file that does not make the call: the
-		 * needle was a literal, so the check found *itself*. A test that reads
-		 * its own source has to be written so that saying what it forbids is
-		 * not doing it.
-		 */
-		(void)snprintf(forbidden, sizeof(forbidden), "%s(count, argv)", "ncfg_main_netcfgd");
-		check(own != NULL, "this file can read itself");
-		if (own) {
-			check(strstr(own, forbidden) == NULL,
-			    "and no check here starts the daemon by calling its entry point");
-			free(own);
-		}
+		memset(long_one, 'x', sizeof(long_one));
+		long_one[0] = '/';
+		long_one[sizeof(long_one) - 1u] = '\0';
+		memset(&options, 0, sizeof(options));
+		options.socket = long_one;
+		err[0] = '\0';
+		check(!ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)),
+		    "a path that does not fit is refused rather than cut down");
+		check(strstr(err, "does not fit") != NULL, "and says so");
 	}
-	check(strncmp(printed, "netcfgd: ", 9) == 0, "the refusal says which program is speaking");
-	check(strstr(printed, waits) != NULL, "and names the seam it is waiting for");
-	check(strstr(printed, "the netlink socket") != NULL,
-	    "and the descriptors this program would own, which are its own half");
-	check(strstr(printed, "the reconcile pass") != NULL,
-	    "and says what is already here, so it does not read as an unwritten port");
+	check(!ncfg_main_netcfgd_where(NULL, &where, err, sizeof(err)),
+	    "and there is nothing to resolve without a command line");
+}
 
-	/* The same for a command line that parsed perfectly: the refusal is the
-	 * program's state, not a reaction to the arguments. */
-	check(run_netcfgd("--no-apply-on-start", "--poll-config") == WOULD_START,
-	    "and a command line it understood reaches the same refusal");
+/* ------------------------------------------------------------------------ *
+ * The policy the sockets are bound under
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The control policy is **copied**, and the copy outlives the document.
+ *
+ * `ncfg_daemon_serve_t` borrows the policies and they must outlive the server,
+ * while `state->desired` is replaced by every reload -- so a socket pointed at
+ * the document's own block would read freed memory the first time somebody
+ * wrote in the configuration directory. The document is freed here before the
+ * copy is read, and ASan is the assertion.
+ */
+static void the_control_policy_is_copied_and_outlives_its_document(void)
+{
+	ncfg_main_policy_t policy;
+	ncfg_document_t   *document;
+	char               text[512];
+	char               err[NCFG_ERROR_MAX];
+
+	err[0] = '\0';
+	check(ncfg_main_policy_copy(NULL, &policy, err, sizeof(err)),
+	    "a machine with no compiled configuration still has a policy");
+	check(policy.control.observe.kind == NCFG_PRINCIPAL_ROOT &&
+	    policy.control.wifi.kind == NCFG_PRINCIPAL_ROOT &&
+	    policy.control.admin.kind == NCFG_PRINCIPAL_ROOT,
+	    "and it is root everywhere, which is the safe reading of a file that would "
+	    "not compile");
+	check(!ncfg_main_remote_is_open(&policy.remote),
+	    "with nothing open to anything off this machine");
+	ncfg_main_policy_free(&policy);
+
+	(void)snprintf(text, sizeof(text),
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{\"control\":"
+	    "{\"observe\":{\"group\":\"netdev\"},\"wifi\":\"any\"},\"remote\":"
+	    "{\"observe\":true,\"agent\":{\"user\":\"agent\"}}},"
+	    "\"devices\":[],\"interfaces\":[],\"networks\":[]}");
+	err[0] = '\0';
+	document = ncfg_document_read(text, strlen(text), err, sizeof(err));
+	if (!document) {
+		detail("the policy fixture did not read", err);
+		check(0, "the policy fixture reads");
+		return;
+	}
+	err[0] = '\0';
+	check(ncfg_main_policy_copy(document, &policy, err, sizeof(err)),
+	    "a document's control policy is copied");
+	ncfg_document_free(document);
+
+	check(policy.control.observe.kind == NCFG_PRINCIPAL_GROUP &&
+	    policy.control.observe.name && strcmp(policy.control.observe.name, "netdev") == 0,
+	    "and the copy is readable after the document it came from is gone");
+	check(policy.control.wifi.kind == NCFG_PRINCIPAL_ANY,
+	    "with every tier carried over, not just the first");
+	check(ncfg_main_remote_is_open(&policy.remote),
+	    "a remote policy that opens one tier is open");
+	check(policy.remote.agent.name && strcmp(policy.remote.agent.name, "agent") == 0,
+	    "and the agent it names comes across too");
+	ncfg_main_policy_free(&policy);
+	ncfg_main_policy_free(&policy);
+	check(1, "and freeing it twice is nothing");
+
+	{
+		ncfg_remote_policy_t shut;
+
+		memset(&shut, 0, sizeof(shut));
+		check(!ncfg_main_remote_is_open(&shut),
+		    "a remote policy that opens nothing is not open");
+		check(!ncfg_main_remote_is_open(NULL), "and neither is none at all");
+		shut.admin = 1;
+		check(ncfg_main_remote_is_open(&shut),
+		    "one that opens only admin is open, which is the arm a two-tier check "
+		    "would miss");
+	}
+}
+
+/* ------------------------------------------------------------------------ *
+ * The one thing this file may not do
+ * ------------------------------------------------------------------------ */
+
+/*
+ * **The tests may not start the daemon, checked rather than agreed.**
+ *
+ * Everything above runs the daemon's command line inside the test process.
+ * That was harmless while the entry point refused to start; it is not now.
+ * What would happen is a network configuration daemon binding a control
+ * socket, taking the apply lock and reconciling, inside `make check`, on
+ * whatever workstation ran it.
+ *
+ * Two things stop that and neither is a comment. This file does not call the
+ * entry point, which it checks by reading itself; and the assembly behind the
+ * entry point is `static`, so there is no second name to reach it by, which it
+ * checks by reading the header that would have to declare one.
+ */
+static void nothing_here_can_start_a_daemon(void)
+{
+	char *own = read_source("tests/main_test.c");
+	char *header = read_source("src/main/main_internal.h");
+	char *source = read_source("src/main/daemon_main.c");
+	char  forbidden[64];
 
 	/*
-	 * And the symbol it names is still spelt that way where it is declared.
-	 * Nothing in a string literal goes red when a type is renamed, so a
-	 * refusal sending somebody to look up a seam would go on sending them
-	 * there after the name had gone.
-	 *
-	 * The name is taken **out of the sentence** rather than written here a
-	 * second time. Spelling it in the test would check that two literals in
-	 * this repository agree and nothing else -- the rename would move the
-	 * header and the refusal would keep its stale name, which is exactly the
-	 * case this exists to catch.
+	 * Joined here rather than written out, because the first version of this
+	 * check failed against a file that does not make the call: the needle was
+	 * a literal, so the check found *itself*. A test that reads its own source
+	 * has to be written so that saying what it forbids is not doing it.
 	 */
-	if (!identifier_in(waits, identifier, sizeof(identifier))) {
-		detail("the refusal carries no ncfg_ name at all", waits);
-		check(0, "the refusal names the seam as an identifier");
-		return;
+	(void)snprintf(forbidden, sizeof(forbidden), "%s(count, argv)", "ncfg_main_netcfgd");
+	check(own != NULL, "this file can read itself");
+	if (own) {
+		check(strstr(own, forbidden) == NULL,
+		    "and no check here starts the daemon by calling its entry point");
+		free(own);
 	}
-	check(1, "the refusal names the seam as an identifier");
-	header = read_source("include/ncfg/daemon.h");
-	if (!header) {
-		check(0, "the daemon's header can be read");
-		return;
+
+	check(header != NULL, "the header that declares this program's parts can be read");
+	if (header) {
+		/* The assembly has no declaration, so nothing outside its own file can
+		 * name it -- which is a stronger guarantee than a rule about what a
+		 * test calls, because it is the linker's rather than a reader's. */
+		check(strstr(header, "ncfg_main_netcfgd_start") == NULL,
+		    "and the assembly is not declared anywhere a test could reach it");
+		free(header);
 	}
-	if (!strstr(header, identifier)) {
-		detail("the refusal sends a reader to look up", identifier);
-		detail("and daemon.h declares nothing by that name", NULL);
+	check(source != NULL, "and the daemon's own source can be read");
+	if (source) {
+		check(strstr(source, "static int start(const options_t *options)") != NULL,
+		    "and the assembly it holds is static, which is what makes that true");
+		free(source);
 	}
-	check(strstr(header, identifier) != NULL,
-	    "and daemon.h declares something under exactly that name");
-	free(header);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -732,6 +827,48 @@ static void the_statuses_are_three_different_things(void)
 	    "the two programs agree about what success is");
 }
 
+/*
+ * This build does not reconcile, and the reason is not the assembly.
+ *
+ * Every piece of the daemon's assembly has checks. What stops it running is
+ * one fact underneath: the executor writes no `netcfgd:` alternative name on a
+ * created link and nothing folds an apply into `owned.json`, so
+ * `ncfg_observe_link_ownership` -- which decides netcfgd's own links by
+ * exactly those two things -- would answer "somebody else's" about every link
+ * this build made, for ever.
+ *
+ * `ncfg apply` refuses at the terminal for that reason, and `on_drift =
+ * reconcile` is the default, so a daemon that started would be an apply nobody
+ * typed. The rule the socket's own refusal states is that one build must not
+ * refuse an apply at a terminal and accept one over a socket; a timer is no
+ * different.
+ *
+ * This check is here so the guard cannot be deleted quietly. When the marking
+ * and the record land it goes, deliberately, in the same change.
+ */
+static void this_build_does_not_reconcile(void)
+{
+	char *source = read_source("src/apply/kernel_link.c");
+	char *main_source = read_source("src/main/daemon_main.c");
+
+	check(!ncfg_main_netcfgd_may_reconcile(),
+	    "this build does not reconcile, and says so rather than starting");
+	if (source) {
+		check(strstr(source, "ALT_IFNAME") == NULL && strstr(source, "altname") == NULL,
+		    "  and the reason still holds: no created link is marked as netcfgd's");
+		free(source);
+	} else {
+		check(0, "  and the reason still holds: no created link is marked as netcfgd's");
+	}
+	if (main_source) {
+		check(strstr(main_source, "may_reconcile()") != NULL,
+		    "  and the entry point still asks before it starts anything");
+		free(main_source);
+	} else {
+		check(0, "  and the entry point still asks before it starts anything");
+	}
+}
+
 int main(void)
 {
 	const char *dir = testdir_make("main");
@@ -739,13 +876,16 @@ int main(void)
 	(void)snprintf(capture_file, sizeof(capture_file), "%s/printed", dir);
 
 	the_name_chooses_the_program();
+	this_build_does_not_reconcile();
 	neither_name_says_what_the_names_are();
 	the_name_it_repeats_cannot_drive_a_terminal();
 	every_option_in_the_help_text_is_parsed();
 	the_help_text_carries_the_real_defaults();
 	the_version_agrees_with_the_client();
 	a_wrong_command_line_is_refused_by_name();
-	it_refuses_to_start_and_names_the_seam();
+	the_paths_are_the_ones_every_other_caller_resolves();
+	the_control_policy_is_copied_and_outlives_its_document();
+	nothing_here_can_start_a_daemon();
 	the_probe_child_needs_a_url();
 	the_statuses_are_three_different_things();
 

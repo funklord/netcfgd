@@ -870,18 +870,52 @@ static void a_plan_says_what_and_why(const char *document_text, size_t document_
 	 * empty string would make "the document says nothing" and "the document
 	 * says the empty string" the same line.
 	 */
-	line(printed, "  1  link.create k-bond  kind: bond (was <absent>)",
+	/*
+	 * **The subject was `k-bond` and moved when the planner stopped planning
+	 * a creation it cannot carry out.** A bond, a macvlan and a tunnel are
+	 * refused by `ncfg_apply_supported`, so `plan/link.c` declines them by
+	 * name rather than emitting an action that must fail -- and the witness's
+	 * `k-bond` is exactly that. What these four checks are about is the
+	 * *rendering*: three right-aligned columns, the field that differs, and
+	 * `<absent>` for a field that is not there. Any action shows that, so the
+	 * subject moved to the first one the plan still carries rather than the
+	 * checks being deleted.
+	 */
+	line(printed, "  1  link.create k-bridge  kind: bridge (was <absent>)",
 	    "an action says what it does, to what, and which field differs");
-	line(printed, " 21  link.up t-geneve  link: up (was down)",
-	    "and the id stays in its column past nine");
+	{
+		/*
+		 * **The property, not a particular action.** This named one by id and
+		 * broke twice in one afternoon as the planner grew passes -- each
+		 * time for a reason that had nothing to do with what it checks, which
+		 * is that the id column stays three wide once the ids reach two
+		 * digits. A check that has to be edited whenever unrelated work lands
+		 * is one that gets edited without being read.
+		 */
+		const char *at = printed;
+		int         aligned = 0;
 
-	line(printed, "refused: link.set_mtu on k-bond -- nfs depends on it",
+		while (at && *at) {
+			if (at[0] == ' ' && at[1] >= '1' && at[1] <= '9' && at[2] >= '0' &&
+			    at[2] <= '9' && at[3] == ' ' && at[4] == ' ') {
+				aligned = 1;
+				break;
+			}
+			at = strchr(at, '\n');
+			if (at) {
+				at++;
+			}
+		}
+		check(aligned, "and the id stays in its column past nine");
+	}
+
+	line(printed, "refused: link.set_mtu on k-bridge -- nfs depends on it",
 	    "a refusal names the op, the interface and the guard");
-	line(printed, "         would have been: link.set_mtu k-bond  mtu: 1400 (was <absent>)",
+	line(printed, "         would have been: link.set_mtu k-bridge  mtu: 1400 (was <absent>)",
 	    "and says what is not happening, so the reader knows what was lost");
 	/* A refusal the operator cannot act on is just a complaint, so the
 	 * override is quoted verbatim rather than described. */
-	line(printed, "         to allow it:     ncfg apply --allow-disruption k-bond",
+	line(printed, "         to allow it:     ncfg apply --allow-disruption k-bridge",
 	    "and quotes the exact invocation that consents to it");
 
 	check(strstr(printed, "warning: d-0: ") != NULL,

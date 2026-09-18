@@ -36,13 +36,20 @@
  */
 #include "main_internal.h"
 
+#include "loop_internal.h"
+
 #include "ncfg/cli.h"
 #include "ncfg/config.h"
 #include "ncfg/log.h"
+#include "ncfg/observe.h"
+#include "ncfg/rfkill.h"
+#include "ncfg/secrets.h"
 #include "ncfg/state.h"
+#include "ncfg/supplicant.h"
 
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /*
@@ -72,33 +79,9 @@ static const char usage_text[] =
     "  -h, --help             this text\n"
     "  --version              the version, and who holds the copyright\n";
 
-/*
- * What is missing, named as the thing rather than described.
- *
- * `ncfg_daemon_answer_fn` is a type in `daemon.h`, so this sentence points at
- * something that exists and can be looked up -- and `main_test.c` reads that
- * header to check the name is still spelt that way there. A refusal naming a
- * symbol that has since been renamed is a refusal sending somebody to look for
- * a module under a name nothing has.
- *
- * The audience is a developer rather than an operator, which is what makes an
- * identifier the right thing to say: nothing installs this program, so the
- * only way to have typed `netcfgd` here is to have built it.
- */
-#define NCFG_MAIN_MISSING_SEAM "ncfg_daemon_answer_fn"
-
-static const char waits_for[] =
-    "an implementation of " NCFG_MAIN_MISSING_SEAM ", the seam a request is answered "
-    "through";
-
 const char *ncfg_main_netcfgd_usage(void)
 {
 	return usage_text;
-}
-
-const char *ncfg_main_netcfgd_waits_for(void)
-{
-	return waits_for;
 }
 
 /*
@@ -244,29 +227,6 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 	return 1;
 }
 
-/*
- * The refusal, by name.
- *
- * Two lines, because there are two facts and the second is the one that keeps
- * somebody from reading the first as "this port is not written". `run.c`'s
- * `not_in_this_wave` is the same shape for the same reason: a command that
- * answered `unknown` for something its own help offers would be the drift the
- * dispatch list exists to refuse, and one that answered from somewhere else
- * would be worse, because it would look right.
- */
-int ncfg_main_netcfgd_refuse(void)
-{
-	(void)failf("this build of the C port will not start: nothing here is %s, so it "
-	    "would bind the control socket, let a client through and then answer `error` "
-	    "to everything asked of it", waits_for);
-	(void)fail("what this program owns is written -- the netlink socket, the "
-	    "configuration watch, /dev/rfkill, the supplicant directory and the window "
-	    "timer are opened by ncfg_main_watchers_open and waited on together by "
-	    "ncfg_main_round -- and the observation, the reconcile pass, the confirm "
-	    "window and the control socket are finished; what is missing is that one "
-	    "seam");
-	return NCFG_MAIN_EXIT_FAILED;
-}
 
 /*
  * Everything `netcfgd` does before it would start anything.
@@ -275,16 +235,9 @@ int ncfg_main_netcfgd_refuse(void)
  * safety property rather than a tidiness one. `main_test.c` drives the option
  * parsing, the help text and the version by calling into this program in the
  * test's own process -- which is right, and is what the multi-call shape
- * buys. It is also one wiring commit away from starting a network
- * configuration daemon inside `make check`, on whatever machine the suite is
- * run on. That machine is a developer's workstation with a real network, and
- * a daemon that binds a control socket and starts reconciling is not
- * something a test suite should be able to do by accident.
- *
- * So the entry point below is parse-then-start, this is the parse, and the
- * tests call this one. When the assembly `ncfg_main_netcfgd_waits_for`
- * describes is written it goes in `start`, where no test reaches it, and the
- * arrangement that keeps it there is visible rather than remembered.
+ * buys. It is also what the entry point below would otherwise make dangerous:
+ * that one starts a network configuration daemon, and a test that called it
+ * would do so inside `make check` on whatever machine ran the suite.
  */
 int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *options,
     int *done, int *code)
@@ -294,6 +247,563 @@ int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *opt
 	ncfg_log_accept_from_env();
 
 	return parse(argc, argv, options, done, code);
+}
+
+/* ------------------------------------------------------------------------ *
+ * Where this daemon reads, writes and listens
+ * ------------------------------------------------------------------------ */
+
+/* One path into a fixed array, refusing rather than truncating. A daemon
+ * whose socket or configuration directory is a prefix of the one somebody
+ * named is worse than one that will not start. */
+static int path_is(char *out, size_t out_size, const char *what, const char *format,
+    const char *first, const char *second, char *err, size_t err_size)
+{
+	int written = snprintf(out, out_size, format, first, second);
+
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+		ncfg_error_set(err, err_size, "the %s does not fit in %zu bytes", what, out_size - 1u);
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_main_netcfgd_where(const struct ncfg_main_options *options, ncfg_main_where_t *out,
+    char *err, size_t err_size)
+{
+	if (!options || !out) {
+		ncfg_error_set(err, err_size, "there is nowhere to resolve a daemon's paths into");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	/*
+	 * Each of the three is `config.h`'s or `state.h`'s own answer, called
+	 * rather than restated: the explicit value, then the environment, then the
+	 * default. Restating that order here is how the help text and the code
+	 * came to disagree in the Rust.
+	 */
+	(void)ncfg_config_resolve_factory_dir(options->factory_dir, out->factory,
+	    sizeof(out->factory));
+	(void)ncfg_config_resolve_dir(options->config_dir, out->config, sizeof(out->config));
+	(void)ncfg_state_resolve_dir(options->run_dir, out->run, sizeof(out->run));
+	if (!out->factory[0] || !out->config[0] || !out->run[0]) {
+		ncfg_error_set(err, err_size,
+		    "one of the three directories did not fit in %d bytes", NCFG_MAIN_PATH_MAX);
+		return 0;
+	}
+	if (options->socket) {
+		if (!path_is(out->socket, sizeof(out->socket), "socket path", "%s%s",
+		    options->socket, "", err, err_size)) {
+			return 0;
+		}
+	} else if (!path_is(out->socket, sizeof(out->socket), "socket path", "%s/%s", out->run,
+	    "netcfgd.sock", err, err_size)) {
+		return 0;
+	}
+	/*
+	 * Beside the socket rather than under the run directory, which is the
+	 * Rust's `with_file_name` and matters for `--socket`: a daemon told to
+	 * listen somewhere else would otherwise put its *remote* socket back in
+	 * `/run/netcfgd`, which is the one place a second netcfgd on one machine
+	 * must not write.
+	 */
+	{
+		const char *slash = strrchr(out->socket, '/');
+		size_t      keep = slash ? (size_t)(slash - out->socket) + 1u : 0u;
+
+		if (keep + sizeof("remote.sock") > sizeof(out->remote_socket)) {
+			ncfg_error_set(err, err_size,
+			    "the remote socket path does not fit in %d bytes", NCFG_MAIN_PATH_MAX);
+			return 0;
+		}
+		memcpy(out->remote_socket, out->socket, keep);
+		memcpy(out->remote_socket + keep, "remote.sock", sizeof("remote.sock"));
+	}
+	/*
+	 * The two credential directories, under the two this daemon was given
+	 * rather than under `/etc` and `/run`. `secrets.h` and
+	 * `netcfgd_apply::kernel` spell the same pair, and spelling them again
+	 * here against a *default* would make a daemon pointed at a scratch tree
+	 * read the machine's real credentials.
+	 */
+	if (!path_is(out->secrets, sizeof(out->secrets), "secrets directory", "%s/%s",
+	        out->config, "secrets", err, err_size) ||
+	    !path_is(out->certs, sizeof(out->certs), "certificate directory", "%s/%s", out->run,
+	        "certs", err, err_size)) {
+		return 0;
+	}
+	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * The policy the sockets are bound under
+ * ------------------------------------------------------------------------ */
+
+static int principal_copy(const ncfg_principal_t *from, ncfg_principal_t *to)
+{
+	to->kind = from->kind;
+	to->name = NULL;
+	if (!from->name) {
+		return 1;
+	}
+	to->name = strdup(from->name);
+	return to->name != NULL;
+}
+
+int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,
+    size_t err_size)
+{
+	const ncfg_control_t       *control;
+	const ncfg_remote_policy_t *remote;
+	ncfg_control_t              root;
+	ncfg_remote_policy_t        closed;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "there is nowhere to copy a control policy to");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	memset(&root, 0, sizeof(root));
+	memset(&closed, 0, sizeof(closed));
+	/*
+	 * Root everywhere and nothing open where there is no document. A daemon
+	 * that could not read its own policy and opened the socket to everybody
+	 * would be the worst possible reading of an unreadable file, and
+	 * `NCFG_PRINCIPAL_ROOT` is the zero value precisely so that this is what a
+	 * memset gives.
+	 */
+	control = document ? &document->globals.control : &root;
+	remote = document ? &document->globals.remote : &closed;
+
+	out->remote.observe = remote->observe;
+	out->remote.wifi = remote->wifi;
+	out->remote.admin = remote->admin;
+	if (!principal_copy(&control->observe, &out->control.observe) ||
+	    !principal_copy(&control->wifi, &out->control.wifi) ||
+	    !principal_copy(&control->admin, &out->control.admin) ||
+	    !principal_copy(&remote->agent, &out->remote.agent)) {
+		ncfg_main_policy_free(out);
+		ncfg_error_set(err, err_size, "there was not enough memory for the control policy");
+		return 0;
+	}
+	return 1;
+}
+
+void ncfg_main_policy_free(ncfg_main_policy_t *policy)
+{
+	if (!policy) {
+		return;
+	}
+	free(policy->control.observe.name);
+	free(policy->control.wifi.name);
+	free(policy->control.admin.name);
+	free(policy->remote.agent.name);
+	memset(policy, 0, sizeof(*policy));
+}
+
+int ncfg_main_remote_is_open(const ncfg_remote_policy_t *remote)
+{
+	if (!remote) {
+		return 0;
+	}
+	return remote->observe || remote->wifi || remote->admin;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Starting
+ * ------------------------------------------------------------------------ */
+
+/*
+ * WHAT IS BELOW THIS LINE AND WHY IT IS `static`
+ *   Everything above is a call taking values and answering one, and
+ *   `main_test.c` drives all of it. Everything below opens a netlink socket,
+ *   binds a control socket, takes the apply lock and starts reconciling the
+ *   machine it is running on -- and the machine this suite is built on is a
+ *   developer's workstation with a real network.
+ *
+ *   So it has **no external name at all**. A test cannot call what it cannot
+ *   spell, and that is a guarantee rather than a convention somebody keeps:
+ *   `main_internal.h` declares the parse, the usage and the entry point, and
+ *   the entry point is the one symbol `main_test.c` is checked never to name.
+ *   The arrangement `ncfg_main_netcfgd_refuse` used to hold open is now held
+ *   by the linker.
+ *
+ *   What that costs is stated rather than hidden: the sequence below is not
+ *   covered by anything. Each piece it calls is -- the paths, the policy copy,
+ *   the world's seams, the dispatcher, the mailbox, the watchers, the round --
+ *   and what is not is the order they are called in and the teardown.
+ */
+
+/* Say what went wrong and leave with the daemon's failure status. Split out
+ * because every step below has the same two lines after it. */
+static int cannot(const char *step, const char *why)
+{
+	return failf("%s: %s", step, why);
+}
+
+/*
+ * Resolve a window left open by a daemon that is no longer running.
+ *
+ * **The window is read before an executor is opened**, which is
+ * `release_contended`'s ordering in the one other place it applies: a revert
+ * needs the apply lock and a netlink socket, and every ordinary start has no
+ * window at all. Answers whether one was found and put back.
+ */
+static int resolve_any_window(ncfg_main_world_t *world, ncfg_daemon_state_t *state,
+    ncfg_confirm_armed_t *armed, ncfg_main_subscribers_t *subscribers)
+{
+	ncfg_confirm_window_t window;
+	ncfg_executor_t       executor;
+	ncfg_proto_event_t    event;
+	char                  message[NCFG_ERROR_MAX];
+	int                   resolved = 0;
+
+	if (!ncfg_confirm_read_window(state->paths.run, &window)) {
+		return 0;
+	}
+	memset(&executor, 0, sizeof(executor));
+	message[0] = '\0';
+	if (!ncfg_main_world_executor_open(world, &executor, message, sizeof(message))) {
+		ncfg_log_emitf("confirm", NCFG_LOG_ERROR,
+		    "a confirm window was open at startup and cannot be reverted: %s", message);
+		return 0;
+	}
+	memset(&event, 0, sizeof(event));
+	message[0] = '\0';
+	if (!ncfg_confirm_resolve_on_startup(state, armed, &executor, &resolved, &event, message,
+	    sizeof(message))) {
+		ncfg_log_emitf("confirm", NCFG_LOG_ERROR, "the window found at startup was not put "
+		    "back: %s", message);
+		resolved = 0;
+	} else if (resolved) {
+		ncfg_main_subscribers_tell(subscribers, &event);
+	}
+	ncfg_main_world_executor_close(world, &executor);
+	return resolved;
+}
+
+/* Bind one socket, or say which and why. NULL with a sentence already said. */
+static ncfg_daemon_server_t *bind_one(const char *path, ncfg_arrival_t arrival,
+    const ncfg_principal_t *const *reach, size_t reach_count, const ncfg_main_policy_t *policy,
+    ncfg_main_mailbox_t *mailbox)
+{
+	ncfg_daemon_serve_t  how;
+	ncfg_daemon_server_t *server;
+	char                  message[NCFG_ERROR_MAX];
+
+	memset(&how, 0, sizeof(how));
+	how.path = path;
+	how.arrival = arrival;
+	how.reach = reach;
+	how.reach_count = reach_count;
+	how.control = &policy->control;
+	how.remote = &policy->remote;
+	how.roots = ncfg_authz_roots_default();
+	/*
+	 * The mailbox rather than the dispatcher directly, and the difference is
+	 * the whole of 0263's entry about it: the server calls this on a
+	 * connection's own thread, and a request answered there would have the
+	 * reconcile happen underneath it -- a pending window deferring a reconcile
+	 * and an explicit apply releasing the hold are both decided by the pass
+	 * that has the request in hand.
+	 */
+	how.answer = ncfg_main_mailbox_answer;
+	how.context = mailbox;
+	message[0] = '\0';
+	server = ncfg_daemon_serve(&how, message, sizeof(message));
+	if (!server) {
+		(void)cannot("cannot bind the control socket", message);
+	}
+	return server;
+}
+
+static int start(const options_t *options)
+{
+	ncfg_main_where_t        where;
+	ncfg_daemon_state_t      state;
+	ncfg_observe_source_t    source;
+	ncfg_main_policy_t       policy;
+	ncfg_main_subscribers_t  subscribers;
+	ncfg_main_watchers_t     watchers;
+	ncfg_main_world_t        world;
+	ncfg_main_mailbox_t      mailbox;
+	ncfg_main_desk_t         desk;
+	ncfg_confirm_armed_t     armed;
+	ncfg_reconcile_t         loop;
+	ncfg_main_run_t          run;
+	ncfg_main_watch_t        watch;
+	ncfg_resolv_machine_t    resolv;
+	ncfg_daemon_server_t    *local = NULL;
+	ncfg_daemon_server_t    *remote = NULL;
+	const ncfg_principal_t  *reach[3];
+	const ncfg_principal_t  *agent[1];
+	char                     ctrl_dir[NCFG_MAIN_PATH_MAX];
+	char                     err[NCFG_ERROR_MAX];
+	int                      code = NCFG_MAIN_EXIT_OK;
+	int                      reverted;
+
+	err[0] = '\0';
+	if (!ncfg_main_netcfgd_where(options, &where, err, sizeof(err))) {
+		return cannot("this daemon cannot work out where to read and write", err);
+	}
+	if (!ncfg_daemon_state_init(&state, where.factory, where.config, where.run, err,
+	    sizeof(err))) {
+		return cannot("this daemon cannot hold its own state", err);
+	}
+
+	/* The observation seam before the first reload, because a reload is the
+	 * first thing that might want one. `ncfg_observe_source_observe` is
+	 * `ncfg_daemon_observe_fn` signature for signature. */
+	if (!ncfg_observe_source_machine(&source, where.run, err, sizeof(err))) {
+		ncfg_daemon_state_free(&state);
+		return cannot("this daemon cannot work out how to read the machine", err);
+	}
+	state.observe = ncfg_observe_source_observe;
+	state.observe_context = &source;
+
+	/*
+	 * **A configuration that does not compile is not a reason to refuse to
+	 * start**, which is `ncfg_daemon_state_reload`'s bargain: the daemon keeps
+	 * watching, the diagnostics are said once here, and an operator fixing the
+	 * file gets a working daemon without restarting it. Refusing instead would
+	 * mean a typo in a drop-in takes the machine's network manager away.
+	 */
+	err[0] = '\0';
+	if (!ncfg_daemon_state_reload(&state, err, sizeof(err))) {
+		ncfg_log_emitf("config", NCFG_LOG_ERROR,
+		    "the configuration does not compile, so this daemon is running with none:\n%s",
+		    state.diagnostics ? state.diagnostics : err);
+	}
+
+	if (!ncfg_main_policy_copy(state.desired, &policy, err, sizeof(err))) {
+		ncfg_daemon_state_free(&state);
+		return cannot("this daemon cannot read its own control policy", err);
+	}
+
+	ncfg_main_subscribers_init(&subscribers);
+	ncfg_main_watchers_init(&watchers);
+
+	loop.probes = ncfg_probes_new(err, sizeof(err));
+	loop.sims = ncfg_sims_new(err, sizeof(err));
+	if (!loop.probes || !loop.sims) {
+		ncfg_probes_free(loop.probes);
+		ncfg_sims_free(loop.sims);
+		ncfg_main_policy_free(&policy);
+		ncfg_daemon_state_free(&state);
+		return cannot("this daemon cannot hold what it has to count across ticks", err);
+	}
+
+	if (!ncfg_main_world_open(&world, where.run, &state, &subscribers, &watchers, err,
+	    sizeof(err))) {
+		ncfg_probes_free(loop.probes);
+		ncfg_sims_free(loop.sims);
+		ncfg_main_policy_free(&policy);
+		ncfg_daemon_state_free(&state);
+		return cannot("this daemon cannot reach the machine it manages", err);
+	}
+
+	memset(&armed, 0, sizeof(armed));
+	loop.state = &state;
+	/*
+	 * A record rather than NULL, because what an open window covers is what a
+	 * revert puts back: a loop with no place to keep it arms a window whose
+	 * revert falls back to the desired document, which `daemon.h` says may
+	 * hold an edit that arrived inside the window and was never applied.
+	 */
+	loop.armed = &armed;
+	loop.holding = 0;
+	loop.reclaims = 0u;
+	memset(&loop.world, 0, sizeof(loop.world));
+	ncfg_main_world_seams(&world, &loop.world);
+	/* The three the library implements for itself, and the machine the resolv
+	 * sweep asks about processes. `now` stays NULL, which is
+	 * `ncfg_confirm_now`. */
+	loop.world.hook = ncfg_reconcile_hook_run;
+	loop.world.portal = ncfg_reconcile_portal_probe;
+	resolv = ncfg_resolv_machine_default();
+	loop.world.resolv = &resolv;
+
+	err[0] = '\0';
+	if (!ncfg_supplicant_ctrl_dir(ctrl_dir, sizeof(ctrl_dir), err, sizeof(err))) {
+		ctrl_dir[0] = '\0';
+		ncfg_log_emitf("wifi", NCFG_LOG_WARNING,
+		    "no supplicant control directory (%s), so no radio's events are watched", err);
+	}
+	memset(&watch, 0, sizeof(watch));
+	watch.config_dir = where.config;
+	watch.rfkill_device = NCFG_RFKILL_DEVICE;
+	watch.supplicant_dir = ctrl_dir[0] ? ctrl_dir : NULL;
+	watch.kernel = 1;
+	watch.poll_config = options->poll_config;
+	err[0] = '\0';
+	if (!ncfg_main_watchers_open(&watchers, &watch, err, sizeof(err))) {
+		code = cannot("this daemon cannot open the descriptors it watches", err);
+		goto done;
+	}
+	/* After the watchers, because the handler writes to a pipe they own. */
+	err[0] = '\0';
+	if (!ncfg_main_signals_watch(&watchers, err, sizeof(err))) {
+		code = cannot("this daemon cannot arrange to be stopped", err);
+		goto done;
+	}
+
+	/*
+	 * The desk before the mailbox, because the mailbox keeps its address and
+	 * a connection thread may reach the seam the moment a socket is bound.
+	 * Every path in it is this program's, resolved once: `daemon.h` gives the
+	 * wifi directories no defaults for the reason `testdir.h` gives, which is
+	 * that the default here is the machine this is built on.
+	 */
+	memset(&desk, 0, sizeof(desk));
+	desk.state = &state;
+	desk.where.ctrl_dir = ctrl_dir[0] ? ctrl_dir : NCFG_SUPPLICANT_CTRL_DIR;
+	desk.where.class_net = source.roots.class_net;
+	desk.where.run_dir = where.run;
+	desk.secrets_dir = where.secrets;
+	desk.certs_dir = where.certs;
+	desk.subscribers = &subscribers;
+
+	err[0] = '\0';
+	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, &desk, watchers.nudge_write, err,
+	    sizeof(err))) {
+		code = cannot("this daemon cannot take requests", err);
+		goto done;
+	}
+
+	reach[0] = &policy.control.observe;
+	reach[1] = &policy.control.wifi;
+	reach[2] = &policy.control.admin;
+	local = bind_one(where.socket, NCFG_ARRIVED_LOCAL, reach, 3u, &policy, &mailbox);
+	if (!local) {
+		code = NCFG_MAIN_EXIT_FAILED;
+		goto shut;
+	}
+	if (ncfg_main_remote_is_open(&policy.remote)) {
+		agent[0] = &policy.remote.agent;
+		remote = bind_one(where.remote_socket, NCFG_ARRIVED_REMOTE, agent, 1u, &policy,
+		    &mailbox);
+		if (!remote) {
+			code = NCFG_MAIN_EXIT_FAILED;
+			goto shut;
+		}
+		/* Said out loud, because a listening socket that reaches the network
+		 * is the one thing about this daemon an operator should never
+		 * discover by finding the file. */
+		ncfg_log_emitf("control", NCFG_LOG_NOTE,
+		    "remote access is open on %s -- observe %d, wifi %d, admin %d",
+		    where.remote_socket, policy.remote.observe, policy.remote.wifi,
+		    policy.remote.admin);
+	}
+	ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s, socket %s", where.config,
+	    ncfg_daemon_server_path(local));
+
+	/* Before anything else acts: a window found here was opened by a daemon
+	 * that is no longer running, so nobody can have confirmed it. */
+	reverted = resolve_any_window(&world, &state, loop.armed, &subscribers);
+
+	err[0] = '\0';
+	if (!ncfg_reconcile_establish_last_good(&state, err, sizeof(err))) {
+		/* Not fatal: what is lost is `apply --confirm-within` on a machine
+		 * that has never applied, which is the case that call exists for and
+		 * is still better than not starting. */
+		ncfg_log_emitf("confirm", NCFG_LOG_WARNING,
+		    "there is no last-good configuration and one could not be written (%s), so "
+		    "a confirm window cannot be armed until the first apply", err);
+	}
+	err[0] = '\0';
+	if (!ncfg_reconcile_start(&loop, options->apply_on_start, reverted, err, sizeof(err))) {
+		/* The startup apply failing is a machine that needs looking at, not a
+		 * daemon that should stop watching it. */
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR, "the configuration was not applied at "
+		    "startup: %s", err);
+	}
+
+	memset(&run, 0, sizeof(run));
+	run.loop = &loop;
+	run.sources = &watchers.sources;
+	run.mailbox = &mailbox;
+	run.refresh = ncfg_main_watchers_refresh;
+	run.refresh_context = &watchers;
+	err[0] = '\0';
+	if (!ncfg_main_serve(&run, err, sizeof(err))) {
+		code = cannot("this daemon stopped watching its descriptors", err);
+	}
+
+shut:
+	/*
+	 * **Shut the mailbox, stop the servers, then close it** -- the order is a
+	 * requirement rather than tidiness. Closing destroys a mutex and a
+	 * condition a connection thread may be about to lock, and what guarantees
+	 * there is no such thread is `ncfg_daemon_server_stop` joining every one;
+	 * shutting first is what lets that join finish, since a waiter is
+	 * released by being answered.
+	 */
+	ncfg_main_mailbox_shut(&mailbox);
+	ncfg_daemon_server_stop(remote);
+	ncfg_daemon_server_stop(local);
+	ncfg_main_mailbox_close(&mailbox);
+done:
+	ncfg_main_signals_restore();
+	ncfg_main_watchers_close(&watchers);
+	ncfg_main_world_close(&world);
+	ncfg_main_subscribers_close(&subscribers);
+	ncfg_probes_free(loop.probes);
+	ncfg_sims_free(loop.sims);
+	ncfg_confirm_armed_free(&armed);
+	ncfg_main_policy_free(&policy);
+	ncfg_daemon_state_free(&state);
+	return code;
+}
+
+/*
+ * Whether this build may be let loose on a machine.
+ *
+ * **The assembly below is written and tested; what is missing is underneath
+ * it.** `ncfg_apply_supported` carries out forty-five of the forty-eight ops
+ * now, so the obvious reading is that an apply is nearly safe. It is not, and
+ * the reason is not in that list at all: this executor writes no
+ * `netcfgd:` alternative name when it creates a link, and nothing folds an
+ * apply's effects into `owned.json`. `ncfg_observe_link_ownership` decides
+ * netcfgd's own links by exactly those two things, so **every link this build
+ * created would read back as somebody else's, for ever** -- netcfgd could
+ * never take it down, and `ncfg apply` refuses at the terminal for that
+ * reason today.
+ *
+ * A daemon does the same thing on a drift tick. `on_drift = reconcile` is the
+ * default, so starting this build on a machine is an apply nobody typed --
+ * and the rule the socket's own refusal states is that the same build must
+ * not refuse an apply at a terminal and accept one over a socket. It must not
+ * accept one from a timer either.
+ *
+ * So this is not caution about an untested assembly: every piece of it has
+ * checks, and the two binds and the teardown order are the only things a test
+ * cannot reach. It is the one fact that makes the difference between a port
+ * that can be run and a port that can be run safely, and it is a short piece
+ * of work: mark a created link, and record what an apply did.
+ *
+ * Deleting this function is how the daemon is turned on, and the two things
+ * above are what has to be true first.
+ */
+int ncfg_main_netcfgd_may_reconcile(void)
+{
+	return 0;
+}
+
+/*
+ * Why it will not, in the words somebody typing `netcfgd` needs.
+ */
+static int will_not_reconcile(void)
+{
+	(void)fail("this build of the C port will not start: it creates links without "
+	    "netcfgd's own alternative name and records nothing an apply did in "
+	    "owned.json, so every link it made would read back as somebody else's and "
+	    "could never be taken down again");
+	(void)fail("that is why `ncfg apply` refuses here too, and a daemon reconciling "
+	    "on drift is an apply nobody typed. The loop, the seams, the window and the "
+	    "control socket are written and checked; what is missing is the marking and "
+	    "the record");
+	return NCFG_MAIN_EXIT_FAILED;
 }
 
 int ncfg_main_netcfgd(int argc, char **argv)
@@ -308,13 +818,8 @@ int ncfg_main_netcfgd(int argc, char **argv)
 	if (done) {
 		return NCFG_MAIN_EXIT_OK;
 	}
-	/*
-	 * Nothing is resolved, opened or written between here and the refusal, and
-	 * that is deliberate. Resolving the three directories would be honest;
-	 * `ncfg_daemon_state_init` followed by a reload would not, because a
-	 * successful compile writes this document's hooks into the run directory,
-	 * and a daemon that left hooks behind and then refused to start has
-	 * changed the machine on its way to saying it did nothing.
-	 */
-	return ncfg_main_netcfgd_refuse();
+	if (!ncfg_main_netcfgd_may_reconcile()) {
+		return will_not_reconcile();
+	}
+	return start(&options);
 }

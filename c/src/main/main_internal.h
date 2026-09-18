@@ -40,10 +40,13 @@
  *       to no name at all rather than to the directory above it.
  *     * The version and the copyright are `cli.h`'s constants, read rather
  *       than restated.
- *     * `netcfgd` refuses to start by name, and says which seam it waits for.
+ *     * `netcfgd` starts here and the assembly is `static`, so that no test in
+ *       this tree can reach it.
  */
 #ifndef NCFG_MAIN_INTERNAL_H
 #define NCFG_MAIN_INTERNAL_H
+
+#include "ncfg/document.h"
 
 #include <stddef.h>
 
@@ -137,9 +140,12 @@ int ncfg_main_miscalled(const char *called_as);
 /*
  * `netcfgd`, from `argv`.
  *
- * Parses the command line, answers `--help` and `--version`, and then refuses
- * to start by name: see `ncfg_main_netcfgd_waits_for`. Everything it parses is
- * real and everything it would do with it is not here yet.
+ * Parses the command line, answers `--help` and `--version`, and then starts:
+ * the state, the observation seam, the descriptors, the control socket, the
+ * request dispatcher and the reconcile loop, in that order, until a signal
+ * stops it. The assembly itself is `static` in `daemon_main.c` and has no
+ * external name, which is what keeps it out of reach of a test -- see the
+ * note above `ncfg_main_netcfgd_parse`.
  */
 int ncfg_main_netcfgd(int argc, char **argv);
 
@@ -148,9 +154,15 @@ int ncfg_main_netcfgd(int argc, char **argv);
  *
  * `main_test.c` calls this rather than the entry point above, and the reason
  * is a hazard rather than a preference: the tests run this program in their
- * own process, and the day the assembly behind `ncfg_main_netcfgd_waits_for`
- * is written, calling the entry point from a test would start a network
- * configuration daemon inside `make check` on whoever's machine ran it.
+ * own process, and the entry point now **starts a network configuration
+ * daemon** -- it binds a control socket, takes the apply lock and begins
+ * reconciling. Calling it from a test would do that inside `make check`, on
+ * whoever's machine ran it.
+ *
+ * Two things keep that from happening and neither is a comment. The assembly
+ * is `static`, so no test can name it; and the entry point is the only way to
+ * reach it, so `main_test.c` reads its own source and refuses to contain a
+ * call to that one symbol.
  *
  * `options_t` is this directory's own type, which is why this is here and not
  * in a public header: nothing outside `src/main/` has any business parsing
@@ -177,35 +189,102 @@ int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *opt
     int *code);
 
 /*
- * The refusal itself: the two lines and the status, with nothing before them.
+ * How long a path this program keeps.
  *
- * Reachable on its own so that a test can assert what it says without running
- * the entry point that would one day start a daemon -- and so that the two
- * questions stay apart, which they were not when one call answered both. "The
- * command line parsed" and "this build refuses to start" are different facts
- * and a single exit code conflated them.
- *
- * When the assembly is written this function goes, and the checks that assert
- * it go with it. That is the intended way for it to end.
+ * Four of them are directories somebody named on a command line or in the
+ * environment, and one is a socket beside the run directory. Generous rather
+ * than `PATH_MAX`, which is not a real bound on Linux and would put five
+ * kilobytes on a stack for no reason.
  */
-int ncfg_main_netcfgd_refuse(void);
+#define NCFG_MAIN_PATH_MAX 512
+
+/*
+ * Where this daemon reads, writes and listens, resolved once.
+ *
+ * **Once, at startup, rather than per use**, which is
+ * `ncfg_observe_source_machine`'s rule applied to the rest of the program: a
+ * daemon that re-read `$NCFG_CONFIG_DIR` on every reload would answer
+ * differently depending on what had happened to the environment since it
+ * started, and nothing would say so.
+ */
+typedef struct {
+	char factory[NCFG_MAIN_PATH_MAX];
+	char config[NCFG_MAIN_PATH_MAX];
+	char run[NCFG_MAIN_PATH_MAX];
+	char socket[NCFG_MAIN_PATH_MAX];
+	/* Beside the socket, and bound only where the configuration opens remote
+	 * access. See `ncfg_main_remote_is_open`. */
+	char remote_socket[NCFG_MAIN_PATH_MAX];
+	/* Where the `file` provider looks, which is `secrets.h`'s default spelled
+	 * against this daemon's own configuration directory rather than against
+	 * `/etc`. A daemon pointed at a scratch tree must not read the machine's
+	 * real credentials. */
+	char secrets[NCFG_MAIN_PATH_MAX];
+	/* Where a stored certificate is materialised for a supplicant to open.
+	 * `NULL` there means the resolver refuses rather than choosing, so this is
+	 * resolved here or nothing 802.1X works. */
+	char certs[NCFG_MAIN_PATH_MAX];
+} ncfg_main_where_t;
+
+/*
+ * Resolve the four directories and the two socket paths from a command line.
+ *
+ * The explicit value, then the environment, then the default -- which is
+ * `config.h`'s and `state.h`'s own order, called rather than restated. The
+ * socket defaults to `netcfgd.sock` under the run directory, which is the one
+ * place that name is written down here.
+ *
+ * 0 with a sentence where something did not fit, naming which. Truncating
+ * would put a daemon's socket or its configuration somewhere nobody asked for,
+ * which is worse than refusing to start.
+ */
+int ncfg_main_netcfgd_where(const struct ncfg_main_options *options, ncfg_main_where_t *out,
+    char *err, size_t err_size);
+
+/*
+ * The control policy the sockets are bound under, owned by this program.
+ *
+ * **A copy and not a borrow**, and the reason is a lifetime the server cannot
+ * see: `ncfg_daemon_serve_t` borrows the policies and they must outlive the
+ * server, while `state->desired` is *replaced* by every reload. Pointing the
+ * socket at the document's own block would leave it reading freed memory the
+ * first time somebody wrote in the configuration directory.
+ *
+ * It also means the socket's permissions do not follow a reload, which is the
+ * Rust's behaviour as well -- it clones the policy before binding -- and is
+ * worth knowing rather than discovering: opening `control { observe = "any" }`
+ * takes effect when the daemon is restarted.
+ */
+typedef struct {
+	ncfg_control_t       control;
+	ncfg_remote_policy_t remote;
+} ncfg_main_policy_t;
+
+/*
+ * Take a copy of a document's control policy, or the default where there is
+ * none.
+ *
+ * The default is every tier root, which is what a machine with no compiled
+ * configuration must get: a daemon that could not read its own policy and
+ * opened the socket to everybody would be the worst possible reading of an
+ * unreadable file.
+ */
+int ncfg_main_policy_copy(const ncfg_document_t *document, ncfg_main_policy_t *out, char *err,
+    size_t err_size);
+
+/* The one free for it. Freeing one never filled in is nothing. */
+void ncfg_main_policy_free(ncfg_main_policy_t *policy);
+
+/* Whether a remote policy opens anything at all. A remote socket is bound only
+ * where it does, because a listening socket that reaches the network is the
+ * one thing about this daemon an operator should never find by accident. */
+int ncfg_main_remote_is_open(const ncfg_remote_policy_t *remote);
 
 /* The usage text, so that a test can walk it against the arms that dispatch
  * it -- `run.c` and `cli_test.c` do the same thing for `ncfg`, and for the
  * same reason: `reload` drifted for a milestone because nothing compared the
  * two lists. */
 const char *ncfg_main_netcfgd_usage(void);
-
-/*
- * What `netcfgd` is waiting for, named as a symbol rather than described.
- *
- * It names `ncfg_daemon_answer_fn`, which is a type in `daemon.h`, so the
- * refusal points at something a reader can look up -- and `main_test.c` reads
- * that header to check the name is still spelt that way there. A refusal
- * naming a symbol that has since been renamed sends somebody looking for a
- * module under a name nothing has.
- */
-const char *ncfg_main_netcfgd_waits_for(void);
 
 /*
  * `netcfgd-probe`, from `argv`.
@@ -218,3 +297,12 @@ const char *ncfg_main_netcfgd_waits_for(void);
 int ncfg_main_probe(int argc, char **argv);
 
 #endif /* NCFG_MAIN_INTERNAL_H */
+
+/*
+ * Whether this build may reconcile a machine, which today is no.
+ *
+ * Reachable on its own so a test can assert the refusal without running the
+ * entry point that would otherwise start a daemon. `daemon_main.c` carries the
+ * reasoning and the two things that have to be true before it answers yes.
+ */
+int ncfg_main_netcfgd_may_reconcile(void);
