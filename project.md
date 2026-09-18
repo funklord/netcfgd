@@ -9499,6 +9499,99 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.170 The port links, and what linking it measured
+
+`c/` had no `main` until today. The library built and the suite passed, so
+nothing had ever been linked as the thing this is meant to become -- and a
+symbol no binary needs is a symbol whose cost nobody has checked.
+
+    stripped   NEEDED
+    441,336    libc.so.6                                          c/netcfgd
+    2,972,192  libncursesw, libtinfo, libgcc_s, libc              Rust netcfgd
+
+**The comparison is not like-for-like and is not offered as one.** This
+build's planner is four passes of thirty; the executor accepts thirteen ops of
+forty-eight and refuses the other thirty-five by name; the daemon runtime is
+unreachable code; `--json`, the `network`-block writer, `ncfg reset` and
+provenance recording are absent; six of eleven observation passes are
+deferred. Three of the Rust's four libraries are ncurses and the unwinder,
+which the port gives up deliberately rather than beats. The figure is worth
+recording because a port with no linked artefact has no size at all, not
+because it has won anything.
+
+One image under two names, `ncfg` a symlink to `netcfgd`, made in the build
+tree rather than only on install -- otherwise `./ncfg` here runs the daemon
+under a client's arguments. `src/main/` is the one directory held out of the
+source wildcard: a library never exits, and a `main` inside `libncfg.a` would
+be a program in the archive that rule is enforced by.
+
+**And `make -C c test` did not depend on the program.** So `make check` would
+have stayed green through a port that no longer links -- the one thing nothing
+else looks at, on the day it first existed. Now it does, proved by renaming
+`main`.
+
+The daemon refuses by name rather than starting: nothing implements
+`ncfg_daemon_observe_fn`, so the loop would watch a machine it cannot see, and
+a daemon reporting a converged machine because it cannot look at one is worse
+than one that will not start. It resolves no path and opens nothing before
+refusing, which is deliberate -- a successful reload writes this document's
+hooks into the run directory, and a daemon that left hooks behind on its way
+to saying it did nothing has changed the machine. The test pulls the
+identifier out of that sentence and looks it up in `daemon.h`, so a rename
+turns the refusal red rather than leaving it pointing at nothing.
+
+### Two more defects, one of which sharpens 10.169's
+
+**`Kernel::new()` takes a seven-dump snapshot of the machine to build a
+name-to-index map.** `kernel.rs` calls `snapshot_with` and uses exactly
+`snapshot.links`; the address dump, the route dump, the `AF_BRIDGE` link dump,
+the qdisc dump, the per-hook filter dumps and the rule dump are all issued and
+discarded unread. `index_of` does it again on any miss, which is once per link
+a plan creates and then addresses.
+
+Measured on this machine, read-only: the link dump is 9,088 bytes in 6
+payloads; the other five together are 1,948 bytes in 30 payloads -- five extra
+round trips and a second machine-wide walk of the routing table per executor
+open. On a router with a real routing table the route dump dominates by orders
+of magnitude.
+
+That is what makes it worth more than its own size. §10.169 records that
+`release_contended` opens an executor every five seconds on any machine
+running a backend. **It is not a lock and a socket every five seconds. It is
+six unnecessary machine-wide netlink dumps every five seconds, holding the
+lock `ncfg apply` waits on.**
+
+**And a dead arm, found by measuring rather than reading.**
+`Qdisc::redirects_on` special-cases `ENOENT` and `EINVAL` as "there are none"
+and propagates everything else with `?`. On the 6.12 kernel this tree builds
+on, a `RTM_GETTFILTER` dump aimed at an interface with no ingress qdisc *and*
+one aimed at an ifindex that does not exist both come back as an **empty dump,
+not an error**. So the arm that exists to be forgiving is unreachable, and
+what is left is a `?` that ends the entire observation because one interface's
+filter dump failed. The C counts such a failure and carries on.
+
+### What the sanitizers caught that the tests did not
+
+Two of the collector's twenty sabotages were caught by ASan alone -- a link
+record leaked when a push was refused, and alternative names never freed --
+and UBSan caught three `qsort(NULL, 0, ...)` calls during the writing, which
+are undefined even with no elements and which a quiet machine reaches with
+three empty arrays.
+
+Two more sabotages only became catchable after the breakage exposed a weak
+test: the ceiling fixture's links owned nothing, so a leak there was
+invisible, and the redirect and VLAN fixtures arrived already sorted, so the
+sorts were doing nothing observable. Both tests were strengthened rather than
+the result accepted, which is the distinction §*Judging evidence* turns on.
+
+**And two breakages caught nothing, reported as such.** Replacing a wire walk
+with a hardcoded header offset is genuinely equivalent for those requests and
+buys no coverage -- the walk stays because it is the wire layer's own parser
+rather than a second opinion. Deleting the socket timeout in
+`ncfg_observe_collect` is invisible to a suite that opens no socket, and its
+failure mode is a privileged daemon wedged for ever. Saying that is better
+than a check that does not exist.
+
 ## 10.169 Five more, from the reconcile loop, `explain` and the portal check
 
 The wave that ported `netcfgd-daemon/src/lib.rs`, `ncfg explain`, the portal
