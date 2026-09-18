@@ -9499,6 +9499,142 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.167 Two half-claims, one in a test and one in a document
+
+The round that ported configuration loading and the daemon's front half. Both
+of the round's own faults are the same shape, and neither is a coding mistake:
+each is a check that looked like it covered something and covered half of it.
+
+**A test that asserted the write and not the read.** `confirm_default` is the
+one field this model writes as `null` rather than omitting, because the Rust it
+has to match writes it that way. The writer was taught that; the test that went
+in with the writer asserted the bytes and stopped. The reader was never taught
+the other half, so a document stating no confirm window -- **nearly every
+document, `/run/netcfgd/desired.json` among them** -- was written correctly and
+refused on the way back in with "not a whole number". It survived two commits
+and was found by the only caller that both writes that file and reads it again.
+
+A round trip is the whole claim. Half of one passes just as loudly, and passes
+for two commits.
+
+**A table nothing could compare.** `doc/socket-protocol.md` §4 tells an
+implementer who may ask for what. It listed 23 requests; `tier_of` classifies
+32. Missing: the five listings, `radio_set`, and the three that write a profile
+or a probe. The prose bullets under the table described every one of them
+correctly, which is what let the table be read past -- including by me, two days
+earlier, adding `hook_list` to it without noticing it was short by nine.
+
+Section 2 of that document names three things that hold it honest, and **none
+of them can see a tier**: the frozen witness pins bytes, the round trip pins
+shapes, the member table pins members. The only check was a person reading two
+files side by side. `tool/tier_table_gate.py` reads the wire names from the
+witness's own table, the tiers from `tier_of`'s arms and the table from the
+document, and requires agreement in both directions, with a floor on both
+extractions so a renamed function cannot report success over nothing. Each of
+its five failure modes was made to happen before it went in.
+
+**And a sanitizer target that failed in the binary that was succeeding.**
+`make -C c SANITIZE=1 test` had been red for the whole suite because
+`shed_test` gives up uid 0, which clears the process' dumpable flag, so LSan
+can no longer read its own `/proc` to stop the world. The file's header already
+explained it and offered an environment variable to whoever ran it by hand --
+which nobody does, so 41 other binaries reported through a target that failed.
+A full shed now leaves by `_exit`, which reaches no `atexit` handler, after an
+explicit flush. With that, the C suite is clean under ASan and UBSan: 42
+binaries, no findings.
+
+The modules themselves: configuration loading and writing, profiles and the
+fold (137 checks), and the daemon's authorization, peers, privilege and server
+(168 checks across two binaries). The daemon's reconcile half -- confirm
+windows, probes, sims, the resolv guard, wifi -- is named in 0263 rather than
+stubbed, because a stub that answers is worse than a symbol that is missing.
+
+## 10.165 A removal verified against a configuration the machine does not have
+
+Found while porting `config.rs`, and reproduced rather than read.
+
+`install_drop_in` carries a comment headed **"With the profile, not without
+it."** It is one of this document's own fixes: the function used to verify a
+write through `load_layered`, which does not read the selected profile's
+directory, so `ncfg profile set` wrote a selection, compiled a configuration
+that excluded the very profile it had just chosen, and reported success.
+
+`remove_drop_in` is 370 lines further down the same file and still calls
+`load_layered`. The fix was applied to the write path and not to the delete
+path beside it.
+
+What that costs, reproduced against a scratch tree with `NCFG_CONFIG_DIR`
+pointing nowhere near `/etc`: a base selecting the `office` profile, a drop-in
+defining `interface eth0`, and a profile carrying `override interface eth0`.
+Removing the drop-in is verified against base-plus-`conf.d` alone, where the
+`override` is not present to be orphaned, so it compiles and the removal is
+**accepted** -- and the machine's real configuration then does not:
+
+    remove_drop_in said: Ok(true) -- accepted
+    .../profile/office/20-eth.conf:1:10: `override interface eth0` has nothing
+    to override
+
+`ncfg config rm` reports success and the next reload is where the operator
+finds out. The refusal that should have fired is already written four lines
+below -- *"removing that would stop the configuration compiling, so it was put
+back"* -- with the restore that goes with it. The code is right; it is looking
+at the wrong document.
+
+**The general shape, and it is the one this document keeps arriving at.** A fix
+that lands on one of a pair leaves the pair disagreeing, and nothing here could
+see it: the two functions are checked by different tests, neither compares them,
+and the comment explaining the hazard sits in the function that no longer has
+it. The C port has both paths loading with the profile, and a case naming this.
+
+## 10.166 Two findings that were not, and why saying so is worth the lines
+
+Both were queued as defects from the port's notes. Neither survived being
+checked, and the checking is the point: a report that is not verified before it
+is written is how a document becomes a list of things somebody once suspected.
+
+**The eleventh `NoHooks` site is genuinely unreachable, and 0258 was right.**
+The port's notes had it that `config.rs::write_profile_snapshot` compiles its
+proof with `NoHooks` at line 2776, so `ncfg profile save` would fail on any
+machine with a hook, with a message blaming the snapshot. It does compile with
+`NoHooks`, and the conclusion is still wrong. Hooks exist on exactly two block
+types -- `interface.rs` and `wifi.rs` carry `hooks: Vec<HookRef>` and nothing
+else does -- and the renderer refuses both, pushing `"interface {name}: hooks"`
+and `"{whose}: hooks"` into `missing`. `render` runs 35 lines before the
+compile and returns through `?`. So reaching the `NoHooks` site requires a
+document with no hook, which is exactly the case where `NoHooks` behaves
+identically to `UnwrittenHooks`. The two conditions are mutually exclusive.
+[0258](doc/decision/0258-a-hook-is-shell-and-the-window-can-write-it.md) said
+"one in `profile save` that the renderer makes unreachable" and that is
+accurate.
+
+*One boundary, reasoned rather than reproduced, and marked as such because the
+distinction is the whole of §Judging evidence.* The proof compile reads the
+**disk** while the render reads `running`, the document the daemon has. Where
+disk carries a hook that `running` does not -- an edited drop-in not yet
+reloaded -- render succeeds and the compile fails, `after` is `None`, and the
+operator gets "that is a fault in the snapshot rather than in your
+configuration; please report it" with no difference appended, because
+`difference` is only called when `after` is `Some`. The save is refused either
+way and refusing is right in that window; what the sink costs there is the
+explanation, not the outcome.
+
+**`Peer::groups` is not lying about what empty means.** The note had its doc
+comment claiming to tell "could not read" from "in no group" when the type
+cannot. The comment reads: *"Empty means 'could not tell', not 'none' -- the
+caller must treat that as no group membership rather than as membership in
+nothing, which are the same thing here only because both deny."* The first
+clause is loose -- empty arrives from an unreadable `/proc`, from a uid
+mismatch against a recycled pid, and from a `Groups:` line that is genuinely
+empty -- but the sentence ends by saying the two are the same thing and that
+both deny, which is the behaviour and is correct. A comment that states its
+consequence accurately is not a defect, and filing it as one would have cost a
+reader the time to rediscover that it is fine.
+
+The C port's `daemon.h` keeps the two outcomes separate anyway, because there
+the group file is an argument and a test can produce each case on purpose --
+which the Rust cannot, since it reads `/etc/group` from a constant and its own
+tests say so twice.
+
 ## 10.164 Three DNS renderers with no test, two of them the disclosing kind
 
 `netcfgd-dns`'s `render.rs` publishes five renderers. Its test module exercises
