@@ -1240,6 +1240,35 @@ const ncfg_observed_link_t *ncfg_observed_link(const ncfg_observed_t *observed,
 const ncfg_delegation_t *ncfg_observed_delegation(const ncfg_observed_t *observed,
     const char *interface);
 
+/*
+ * The block a prefix reference resolves to, as a prefix rather than an address
+ * in it.
+ *
+ * `@pd:wan0`, an index and a subnet selector become `2001:db8:1:2::/64` --
+ * `ncfg_address_from_delegation`'s arithmetic with `::/64` as the suffix,
+ * which is what the LAN's own address used with a host part instead. Answers 1
+ * and fills `out` (`NCFG_ADDRESS_MAX`), or 0 where the delegation has not
+ * arrived, does not carry that index, or the suffix cannot be carved out of
+ * it.
+ *
+ * **Here rather than in whichever module wanted it first, and that is the same
+ * argument `ncfg_dns_scopes_of` is here for.** The planner resolves references
+ * to decide what to advertise; the daemon resolves them again to fill
+ * `ncfg_service_advertise_t`, because a delegation arrives after the document
+ * does and no op can carry the answer. Two spellings of it disagree about what
+ * a router announces to every host on the wire, which is not a difference
+ * anything downstream could notice.
+ *
+ * **Zero, not a refusal, for a delegation that has not arrived.** That is the
+ * ordinary state of a machine between starting a DHCPv6 client and the lease
+ * landing, and a router started with the prefixes that did resolve is the
+ * Rust's answer as well. A suffix that cannot be carved out is a configuration
+ * fault rather than something to wait for, and it is reported where a plan can
+ * put a sentence in front of the operator -- not here.
+ */
+int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_ref_t *reference,
+    char *out, size_t out_size);
+
 /* What was last delivered for a DNS scope. */
 const ncfg_dns_policy_t *ncfg_observed_dns_for(const ncfg_observed_t *observed,
     const char *scope);
