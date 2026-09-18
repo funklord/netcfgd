@@ -724,7 +724,17 @@ typedef struct {
 	uint8_t        scope;
 } ncfg_route_record_t;
 
-/* One VLAN on one bridge port, as the kernel reports it. */
+/*
+ * One VLAN on one bridge port, as the kernel reports it.
+ *
+ * **`_record_t`, like the address and the route above it, because
+ * `document.h` has an `ncfg_bridge_vlan_t` of its own** -- the *desired* VLAN,
+ * which carries no interface index and holds its id as the model's `int64_t`.
+ * Both names described the same words and neither could be included beside the
+ * other, which nothing noticed until a module needed a rule from one and a
+ * VLAN from the other. An executor is exactly that module, so the collision
+ * was renamed out before one arrived rather than worked around inside it.
+ */
 typedef struct {
 	uint32_t index;
 	uint16_t vid;
@@ -732,17 +742,17 @@ typedef struct {
 	int      pvid;
 	/* Egress leaves without a tag. */
 	int      untagged;
-} ncfg_bridge_vlan_t;
+} ncfg_bridge_vlan_record_t;
 
 /* The VLANs of one bridge message: a port with four arrives as one link with
  * four attributes. */
 typedef struct {
-	ncfg_bridge_vlan_t *items;
+	ncfg_bridge_vlan_record_t *items;
 	size_t              count;
 	size_t              capacity;
-} ncfg_bridge_vlans_t;
+} ncfg_bridge_vlan_records_t;
 
-void ncfg_bridge_vlans_free(ncfg_bridge_vlans_t *vlans);
+void ncfg_bridge_vlan_records_free(ncfg_bridge_vlan_records_t *vlans);
 
 /*
  * Release what a link record owns, and leave it empty.
@@ -815,7 +825,7 @@ int ncfg_dump_route(const void *payload, size_t length, ncfg_route_record_t *out
  * each; expanding them here means everything above works in single VLANs and
  * never has to know ranges exist.
  */
-int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans_t *out,
+int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlan_records_t *out,
     char *err, size_t err_size);
 
 /*
