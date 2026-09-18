@@ -8,28 +8,24 @@
  *   the parse -- the daemon does not start -- and that is said by name rather
  *   than by starting and doing nothing.
  *
- *   **The first missing piece is the observation seam.** `ncfg_daemon_state_t`
- *   reaches the kernel through `ncfg_daemon_observe_fn` and nothing outside
- *   `tests/` implements one. The dumps underneath it landed in this same wave
- *   -- `ncfg_observe_collect` performs the round and `ncfg_observe_build`
- *   turns it into a model -- so what is missing is the call that composes
- *   them, reads the recorded prior out of the run directory, and hands back an
- *   observation the daemon owns. Installing nothing is not an option that
- *   fails safely: `ncfg_reconcile_pass` would run on every tick, report no
- *   drift because it can see none, and answer `ncfg plan` with an empty plan.
- *   A daemon that reports a converged machine because it cannot look at one is
- *   worse than a daemon that will not start, and it is worse in the specific
- *   way 0263 keeps refusing -- an answer nobody can tell from a true one.
+ *   **Two of the three pieces this refusal used to name have landed.** The
+ *   observation is composed by `ncfg_observe_source_observe`, which is
+ *   `ncfg_daemon_observe_fn` signature for signature; and this program's own
+ *   half -- the netlink socket, the configuration watch, `/dev/rfkill`, the
+ *   supplicant directory and the commit-confirm window's timer -- is opened by
+ *   `ncfg_main_watchers_open` and waited on together by `ncfg_main_round`.
+ *   See `loop_internal.h`.
  *
- *   **The second is this program's own half, and it is named here because
- *   this is where it would live.** 0263 says the watchers are not ported and
- *   the wake is: `ncfg_reconcile_wake_t` is what crosses into the loop, and
- *   whoever owns the netlink socket, the configuration watch, `/dev/rfkill`,
- *   the supplicant directory and the window timer goes on owning them. That
- *   owner is a `main`. `ncfg_daemon_serve` is finished and would be bound from
- *   here too; the loop that collapses a burst of wakes into one pass, drives
- *   `ncfg_reconcile_pass` and hands the waiting requests to
- *   `ncfg_daemon_answer_fn` is the work this directory still owes.
+ *   **What is left is the request dispatcher.** Nothing under `c/src/`
+ *   implements `ncfg_daemon_answer_fn`: `server.c` holds the type and
+ *   `answer.c` writes the three responses the authorization path decides for
+ *   itself, and that is all. Starting anyway is not an option that fails
+ *   safely -- the daemon would bind the control socket, accept connections,
+ *   pass authorization and then answer `error` to every request, which an
+ *   operator reads as a request the daemon did not recognise rather than as a
+ *   daemon that cannot act. It is the same thing 0263 keeps refusing: an
+ *   answer nobody can tell from a true one, arriving on the socket somebody
+ *   reaches for when the network is already broken.
  *
  * WHY THE USAGE TEXT IS BUILT FROM THE CONSTANTS
  *   The Rust writes `default /etc/netcfgd, or $NCFG_CONFIG_DIR` as literal
@@ -79,7 +75,7 @@ static const char usage_text[] =
 /*
  * What is missing, named as the thing rather than described.
  *
- * `ncfg_daemon_observe_fn` is a type in `daemon.h`, so this sentence points at
+ * `ncfg_daemon_answer_fn` is a type in `daemon.h`, so this sentence points at
  * something that exists and can be looked up -- and `main_test.c` reads that
  * header to check the name is still spelt that way there. A refusal naming a
  * symbol that has since been renamed is a refusal sending somebody to look for
@@ -89,11 +85,11 @@ static const char usage_text[] =
  * identifier the right thing to say: nothing installs this program, so the
  * only way to have typed `netcfgd` here is to have built it.
  */
-#define NCFG_MAIN_OBSERVE_SEAM "ncfg_daemon_observe_fn"
+#define NCFG_MAIN_MISSING_SEAM "ncfg_daemon_answer_fn"
 
 static const char waits_for[] =
-    "an implementation of " NCFG_MAIN_OBSERVE_SEAM ", the seam an observation is "
-    "built through";
+    "an implementation of " NCFG_MAIN_MISSING_SEAM ", the seam a request is answered "
+    "through";
 
 const char *ncfg_main_netcfgd_usage(void)
 {
@@ -142,14 +138,7 @@ static int failf(const char *format, ...)
  * reason -- there is no free to forget and no copy that can disagree with what
  * was typed.
  */
-typedef struct {
-	const char *config_dir;
-	const char *factory_dir;
-	const char *run_dir;
-	const char *socket;
-	int         apply_on_start;
-	int         poll_config;
-} options_t;
+/* The type is `main_internal.h`'s, so `main_test.c` can hold one. */
 
 /*
  * Whether anything follows, and what it is.
@@ -265,15 +254,46 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
  * dispatch list exists to refuse, and one that answered from somewhere else
  * would be worse, because it would look right.
  */
-static int will_not_start(void)
+int ncfg_main_netcfgd_refuse(void)
 {
-	(void)failf("this build of the C port will not start: nothing here is %s, so the "
-	    "loop would watch a machine it cannot see", waits_for);
-	(void)fail("the dumps under it landed in this wave and the reconcile pass, the "
-	    "confirm window and the control socket are finished; what is missing is that "
-	    "seam and the descriptors this program would own -- the netlink socket, the "
-	    "configuration watch, /dev/rfkill and the window timer");
+	(void)failf("this build of the C port will not start: nothing here is %s, so it "
+	    "would bind the control socket, let a client through and then answer `error` "
+	    "to everything asked of it", waits_for);
+	(void)fail("what this program owns is written -- the netlink socket, the "
+	    "configuration watch, /dev/rfkill, the supplicant directory and the window "
+	    "timer are opened by ncfg_main_watchers_open and waited on together by "
+	    "ncfg_main_round -- and the observation, the reconcile pass, the confirm "
+	    "window and the control socket are finished; what is missing is that one "
+	    "seam");
 	return NCFG_MAIN_EXIT_FAILED;
+}
+
+/*
+ * Everything `netcfgd` does before it would start anything.
+ *
+ * **Split out so that the tests never call the other half**, and that is a
+ * safety property rather than a tidiness one. `main_test.c` drives the option
+ * parsing, the help text and the version by calling into this program in the
+ * test's own process -- which is right, and is what the multi-call shape
+ * buys. It is also one wiring commit away from starting a network
+ * configuration daemon inside `make check`, on whatever machine the suite is
+ * run on. That machine is a developer's workstation with a real network, and
+ * a daemon that binds a control socket and starts reconciling is not
+ * something a test suite should be able to do by accident.
+ *
+ * So the entry point below is parse-then-start, this is the parse, and the
+ * tests call this one. When the assembly `ncfg_main_netcfgd_waits_for`
+ * describes is written it goes in `start`, where no test reaches it, and the
+ * arrangement that keeps it there is visible rather than remembered.
+ */
+int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *options,
+    int *done, int *code)
+{
+	/* Before the parse, because a level that arrives late cannot filter what
+	 * happened early -- and startup is exactly when somebody turns this up. */
+	ncfg_log_accept_from_env();
+
+	return parse(argc, argv, options, done, code);
 }
 
 int ncfg_main_netcfgd(int argc, char **argv)
@@ -282,11 +302,7 @@ int ncfg_main_netcfgd(int argc, char **argv)
 	int       done = 0;
 	int       code = NCFG_MAIN_EXIT_OK;
 
-	/* Before the parse, because a level that arrives late cannot filter what
-	 * happened early -- and startup is exactly when somebody turns this up. */
-	ncfg_log_accept_from_env();
-
-	if (!parse(argc, argv, &options, &done, &code)) {
+	if (!ncfg_main_netcfgd_parse(argc, argv, &options, &done, &code)) {
 		return code;
 	}
 	if (done) {
@@ -300,5 +316,5 @@ int ncfg_main_netcfgd(int argc, char **argv)
 	 * and a daemon that left hooks behind and then refused to start has
 	 * changed the machine on its way to saying it did nothing.
 	 */
-	return will_not_start();
+	return ncfg_main_netcfgd_refuse();
 }

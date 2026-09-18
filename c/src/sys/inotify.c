@@ -146,6 +146,11 @@ void ncfg_inotify_close(ncfg_inotify_t *inotify)
 	inotify->fd = -1;
 }
 
+int ncfg_inotify_descriptor(const ncfg_inotify_t *inotify)
+{
+	return inotify ? inotify->fd : -1;
+}
+
 int ncfg_inotify_watch(const ncfg_inotify_t *inotify, const char *path, uint32_t mask,
     int *wd, char *err, size_t err_size)
 {

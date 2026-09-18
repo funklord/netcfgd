@@ -244,6 +244,11 @@ void ncfg_netlink_close(ncfg_netlink_t *netlink)
 	netlink->fd = -1;
 }
 
+int ncfg_netlink_descriptor(const ncfg_netlink_t *netlink)
+{
+	return netlink ? netlink->fd : -1;
+}
+
 int ncfg_netlink_set_timeout(const ncfg_netlink_t *netlink, long seconds, char *err,
     size_t err_size)
 {

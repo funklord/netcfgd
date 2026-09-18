@@ -143,6 +143,17 @@ int ncfg_inotify_open(ncfg_inotify_t *inotify, char *err, size_t err_size);
 void ncfg_inotify_close(ncfg_inotify_t *inotify);
 
 /*
+ * The descriptor, for a caller that multiplexes several of them.
+ *
+ * -1 where nothing is open. `ncfg_inotify_wait` is a `poll` of one, which is
+ * the right shape for a watcher of its own and the wrong one for a daemon
+ * watching five things at once: `src/main/`'s loop waits on all of them
+ * together and then reads whichever became ready. So it needs the integer,
+ * and taking it from the struct would make the struct public.
+ */
+int ncfg_inotify_descriptor(const ncfg_inotify_t *inotify);
+
+/*
  * Watch a directory, and hand back the watch descriptor.
  *
  * A path that does not exist is a refusal and not a fatal one: a config
@@ -240,6 +251,19 @@ void ncfg_watch_close(ncfg_watch_t *watch);
 
 /* Which mechanism is in use. */
 ncfg_watch_mechanism_t ncfg_watch_mechanism(const ncfg_watch_t *watch);
+
+/*
+ * The descriptor a caller may wait on, or -1.
+ *
+ * **-1 is the polling mechanism and is not a failure**: there is nothing to
+ * wait on, because the question is answered by walking the filesystem. A
+ * caller multiplexing several sources therefore has two shapes to carry -- a
+ * descriptor it polls, and a watcher it asks -- and `ncfg_watch_wait` with a
+ * zero timeout is the second, which is why that call takes a timeout at all.
+ * Collapsing the two by inventing a descriptor here would mean a pipe nobody
+ * writes to and a fall-back that never reports anything.
+ */
+int ncfg_watch_descriptor(const ncfg_watch_t *watch);
 
 /*
  * Wait up to `timeout_ms` for a change.

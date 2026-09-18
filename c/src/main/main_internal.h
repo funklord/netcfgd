@@ -143,6 +143,53 @@ int ncfg_main_miscalled(const char *called_as);
  */
 int ncfg_main_netcfgd(int argc, char **argv);
 
+/*
+ * The same, stopping before anything would be started.
+ *
+ * `main_test.c` calls this rather than the entry point above, and the reason
+ * is a hazard rather than a preference: the tests run this program in their
+ * own process, and the day the assembly behind `ncfg_main_netcfgd_waits_for`
+ * is written, calling the entry point from a test would start a network
+ * configuration daemon inside `make check` on whoever's machine ran it.
+ *
+ * `options_t` is this directory's own type, which is why this is here and not
+ * in a public header: nothing outside `src/main/` has any business parsing
+ * the daemon's command line.
+ */
+/*
+ * What `netcfgd`'s command line parsed into.
+ *
+ * Here rather than in `daemon_main.c` because `main_test.c` holds one to drive
+ * the parse without running the program -- see `ncfg_main_netcfgd_parse`.
+ * Nothing here is owned: every string points into `argv`, which outlives the
+ * parse, which is `options.c`'s rule for `ncfg` and holds for the same reason.
+ */
+typedef struct ncfg_main_options {
+	const char *config_dir;
+	const char *factory_dir;
+	const char *run_dir;
+	const char *socket;
+	int         apply_on_start;
+	int         poll_config;
+} options_t;
+
+int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *options, int *done,
+    int *code);
+
+/*
+ * The refusal itself: the two lines and the status, with nothing before them.
+ *
+ * Reachable on its own so that a test can assert what it says without running
+ * the entry point that would one day start a daemon -- and so that the two
+ * questions stay apart, which they were not when one call answered both. "The
+ * command line parsed" and "this build refuses to start" are different facts
+ * and a single exit code conflated them.
+ *
+ * When the assembly is written this function goes, and the checks that assert
+ * it go with it. That is the intended way for it to end.
+ */
+int ncfg_main_netcfgd_refuse(void);
+
 /* The usage text, so that a test can walk it against the arms that dispatch
  * it -- `run.c` and `cli_test.c` do the same thing for `ncfg`, and for the
  * same reason: `reload` drifted for a milestone because nothing compared the
@@ -152,7 +199,7 @@ const char *ncfg_main_netcfgd_usage(void);
 /*
  * What `netcfgd` is waiting for, named as a symbol rather than described.
  *
- * It names `ncfg_daemon_observe_fn`, which is a type in `daemon.h`, so the
+ * It names `ncfg_daemon_answer_fn`, which is a type in `daemon.h`, so the
  * refusal points at something a reader can look up -- and `main_test.c` reads
  * that header to check the name is still spelt that way there. A refusal
  * naming a symbol that has since been renamed sends somebody looking for a

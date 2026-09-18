@@ -18,7 +18,7 @@
  *
  * WHY THE REFUSAL IS CHECKED AGAINST `daemon.h`
  *   `netcfgd` will not start, and it says so by naming the seam it is waiting
- *   for: `ncfg_daemon_observe_fn`. A sentence naming a symbol is only worth
+ *   for: `ncfg_daemon_answer_fn`. A sentence naming a symbol is only worth
  *   more than a vague one for as long as the symbol is spelt that way, and
  *   nothing in a string literal goes red when a type is renamed. So the header
  *   is read at run time and the name is looked up in it. A header that cannot
@@ -341,11 +341,22 @@ static void the_name_it_repeats_cannot_drive_a_terminal(void)
 
 /* A command line, built where a test needs one. Nothing is owned: these point
  * at literals that outlive the call, which is what `argv` does. */
+/*
+ * What `run_netcfgd` answers for a command line that parsed and left something
+ * to do. No real exit status is 120, and a test that expects it is saying "the
+ * parse got this far", which is the whole of what a test may ask for here.
+ */
+#define WOULD_START 120
+
 static int run_netcfgd(const char *one, const char *two)
 {
-	char *argv[3];
-	int   count = 1;
+	char                     *argv[3];
+	int                       count = 1;
+	struct ncfg_main_options  options;
+	int                       done = 0;
+	int                       code = NCFG_MAIN_EXIT_OK;
 
+	memset(&options, 0, sizeof(options));
 	argv[0] = (char *)(uintptr_t)(const void *)"netcfgd";
 	argv[1] = NULL;
 	argv[2] = NULL;
@@ -355,7 +366,26 @@ static int run_netcfgd(const char *one, const char *two)
 	if (two) {
 		argv[count++] = (char *)(uintptr_t)(const void *)two;
 	}
-	return ncfg_main_netcfgd(count, argv);
+	/*
+	 * **`_parse`, never `ncfg_main_netcfgd`, and that is a safety rule rather
+	 * than a style one.** This runs the daemon's entry point inside the test
+	 * process, which is what the multi-call shape is for and is right for
+	 * everything below. It is also one wiring commit away from starting a
+	 * network configuration daemon inside `make check`, on a machine with a
+	 * real network -- the one this suite is developed on. Today the entry
+	 * point refuses before it opens anything, so calling it is harmless;
+	 * "harmless today" is exactly the property that stops being true without
+	 * anybody editing this file.
+	 *
+	 * So the parse is a function of its own and this calls that. A parse that
+	 * says nothing follows returns the terminal exit code; a command line
+	 * that would have gone on to start something returns
+	 * `WOULD_START`, which is a value no real run produces.
+	 */
+	if (!ncfg_main_netcfgd_parse(count, argv, &options, &done, &code)) {
+		return code;
+	}
+	return done ? NCFG_MAIN_EXIT_OK : WOULD_START;
 }
 
 
@@ -528,7 +558,8 @@ static void a_wrong_command_line_is_refused_by_name(void)
 	printed = capture_end(STDERR_FILENO);
 	check(strstr(printed, "unknown option") == NULL,
 	    "a value that looks like a flag is a value, not an unknown option");
-	check(code == NCFG_MAIN_EXIT_FAILED, "and the command line then reaches the refusal");
+	check(code == WOULD_START,
+	    "and the command line parses, with the flag taken as the value it was put after");
 
 	/* An escape sequence in an option name is an option name somebody chose,
 	 * and it reaches the same terminal `argv[0]` does. */
@@ -542,11 +573,11 @@ static void a_wrong_command_line_is_refused_by_name(void)
 /*
  * It refuses to start, and the name it refuses with is a name something has.
  *
- * A daemon that started and silently did nothing would be worse than this in
- * the specific way 0263 keeps refusing: `ncfg_reconcile_pass` with no observe
- * seam runs on every tick, reports no drift because it can see none, and
- * answers `ncfg plan` with an empty plan -- which a reader cannot tell from a
- * converged machine.
+ * A daemon that started and refused everything would be worse than this in
+ * the specific way 0263 keeps refusing: with no answer seam it binds the
+ * control socket, lets a client through authorization and then says `error` to
+ * every request -- which an operator reads as a request the daemon did not
+ * recognise rather than as a daemon that cannot act.
  */
 static void it_refuses_to_start_and_names_the_seam(void)
 {
@@ -556,11 +587,52 @@ static void it_refuses_to_start_and_names_the_seam(void)
 	char       *header;
 	int         code;
 
+	/*
+	 * The refusal on its own, not through the entry point. Two facts that a
+	 * single exit code used to conflate: that an empty command line parses
+	 * and leaves nothing to do, and that this build then refuses. The first
+	 * is `WOULD_START` below; this is the second.
+	 */
 	capture_begin(STDERR_FILENO);
-	code = run_netcfgd(NULL, NULL);
+	code = ncfg_main_netcfgd_refuse();
 	printed = capture_end(STDERR_FILENO);
 
-	check(code == NCFG_MAIN_EXIT_FAILED, "with nothing to do it exits 1 rather than running");
+	check(code == NCFG_MAIN_EXIT_FAILED, "the refusal exits 1 rather than running");
+	check(run_netcfgd(NULL, NULL) == WOULD_START,
+	    "and an empty command line is what reaches it, having parsed");
+
+	/*
+	 * **And this file may not call the entry point, checked rather than
+	 * agreed.** Everything above runs the daemon's command line inside the
+	 * test process. Today that is harmless because the entry point refuses
+	 * before it opens anything -- and "harmless today" stops being true the
+	 * day somebody writes the assembly, without touching this file. What
+	 * would happen then is a network configuration daemon starting inside
+	 * `make check`, on whatever workstation ran it.
+	 *
+	 * So the rule is that tests call `_parse` and `_refuse`, and this is the
+	 * rule enforcing itself. A comment asking the next person to remember is
+	 * not a guard; it is a note next to the thing that went wrong.
+	 */
+	{
+		char *own = read_source("tests/main_test.c");
+		char  forbidden[64];
+
+		/*
+		 * Joined here rather than written out, because the first version of
+		 * this check failed against a file that does not make the call: the
+		 * needle was a literal, so the check found *itself*. A test that reads
+		 * its own source has to be written so that saying what it forbids is
+		 * not doing it.
+		 */
+		(void)snprintf(forbidden, sizeof(forbidden), "%s(count, argv)", "ncfg_main_netcfgd");
+		check(own != NULL, "this file can read itself");
+		if (own) {
+			check(strstr(own, forbidden) == NULL,
+			    "and no check here starts the daemon by calling its entry point");
+			free(own);
+		}
+	}
 	check(strncmp(printed, "netcfgd: ", 9) == 0, "the refusal says which program is speaking");
 	check(strstr(printed, waits) != NULL, "and names the seam it is waiting for");
 	check(strstr(printed, "the netlink socket") != NULL,
@@ -570,11 +642,8 @@ static void it_refuses_to_start_and_names_the_seam(void)
 
 	/* The same for a command line that parsed perfectly: the refusal is the
 	 * program's state, not a reaction to the arguments. */
-	capture_begin(STDERR_FILENO);
-	code = run_netcfgd("--no-apply-on-start", "--poll-config");
-	printed = capture_end(STDERR_FILENO);
-	check(code == NCFG_MAIN_EXIT_FAILED, "and a command line it understood does not start it");
-	check(strstr(printed, waits) != NULL, "with the same sentence");
+	check(run_netcfgd("--no-apply-on-start", "--poll-config") == WOULD_START,
+	    "and a command line it understood reaches the same refusal");
 
 	/*
 	 * And the symbol it names is still spelt that way where it is declared.

@@ -32,6 +32,19 @@ ncfg_watch_mechanism_t ncfg_watch_mechanism(const ncfg_watch_t *watch)
 	return watch ? watch->mechanism : NCFG_WATCH_POLLING;
 }
 
+int ncfg_watch_descriptor(const ncfg_watch_t *watch)
+{
+	/* Asked of the mechanism rather than of the descriptor, because a polling
+	 * watcher leaves `inotify.fd` at -1 for the same reason a failed open
+	 * would: answering from the field alone would say "nothing is open" about
+	 * a watcher that is working perfectly, which is true and useless. The
+	 * mechanism is the fact a caller is asking about. */
+	if (!watch || watch->mechanism != NCFG_WATCH_INOTIFY) {
+		return -1;
+	}
+	return ncfg_inotify_descriptor(&watch->inotify);
+}
+
 static void marks_free(ncfg_watch_marks_t *marks)
 {
 	size_t at;

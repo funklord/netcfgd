@@ -67,6 +67,11 @@ void ncfg_rfkill_close(ncfg_rfkill_t *rfkill)
 	rfkill->fd = -1;
 }
 
+int ncfg_rfkill_descriptor(const ncfg_rfkill_t *rfkill)
+{
+	return rfkill ? rfkill->fd : -1;
+}
+
 int ncfg_rfkill_parse(const void *record, size_t length, ncfg_rfkill_event_t *out,
     char *err, size_t err_size)
 {

@@ -655,6 +655,24 @@ void ncfg_supplicant_client_free(ncfg_supplicant_client_t *client);
 const char *ncfg_supplicant_client_interface(const ncfg_supplicant_client_t *client);
 
 /*
+ * The descriptor, for a caller that multiplexes several of them.
+ *
+ * -1 where there is none. `ncfg_supplicant_next_event` takes a timeout because
+ * a caller watching several radios wants a short one -- which is a round of
+ * short waits, one per radio, and is what the Rust's watcher thread does. A
+ * daemon that already waits on netlink, the configuration and `/dev/rfkill`
+ * together has a better answer: put these descriptors in the same `poll` and
+ * read only the radio that spoke. So the integer is needed, and the struct
+ * stays opaque.
+ *
+ * **For waiting on, and for nothing else.** A read taken anywhere but
+ * `ncfg_supplicant_next_event` would be a second place that has to know an
+ * event from a reply, which is the classic `wpa_supplicant` client bug this
+ * module exists to hold in one file.
+ */
+int ncfg_supplicant_client_descriptor(const ncfg_supplicant_client_t *client);
+
+/*
  * Send a command and read its reply.
  *
  * A `FAIL` reply is not a failure here -- it is
@@ -700,6 +718,13 @@ int ncfg_supplicant_attach(ncfg_supplicant_client_t *client, char *err, size_t e
  * failure -- which is why the timeout is an argument: a caller polling several
  * interfaces wants a short one, and one waiting on a single radio wants a long
  * one rather than a spin. Replies are skipped rather than returned.
+ */
+/*
+ * `timeout_ms` must be at least 1 and a smaller one is refused by name.
+ * `SO_RCVTIMEO` of `{0, 0}` is the kernel's "no deadline at all", so zero --
+ * the value a caller reads as "do not block" -- is the one that blocks for
+ * ever, and on a single-threaded daemon that is a wedge rather than a slow
+ * path.
  */
 int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
     ncfg_supplicant_event_t *out, int *got, char *err, size_t err_size);
