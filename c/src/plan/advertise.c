@@ -41,26 +41,14 @@
 
 #include <string.h>
 
-/* The prefix a reference resolves to, as the block rather than an address in
- * it: the same arithmetic the LAN's own address used, with `::/64` as the
- * suffix. Answers 0 where the delegation has not arrived or does not carry
- * that index, which is how a reference contributes nothing rather than
- * something wrong. */
+/* `observed.h`'s, now that the daemon resolves the same references to fill an
+ * executor's `advertising`. Kept as a name here so the pass below reads as it
+ * did, and so the one place this file could disagree with the daemon about
+ * what a router announces does not exist. */
 static int resolve(const ncfg_builder_t *builder, const ncfg_prefix_ref_t *reference, char *out,
     size_t out_size)
 {
-	const ncfg_delegation_t *delegation =
-	    ncfg_observed_delegation(builder->observed, reference->source);
-
-	if (!delegation) {
-		return 0;
-	}
-	if (reference->index < 0 ||
-	    (uint64_t)reference->index >= (uint64_t)delegation->prefix_count) {
-		return 0;
-	}
-	return ncfg_address_from_delegation(delegation->prefixes[(size_t)reference->index],
-	    reference->subnet, "::/64", out, out_size, NULL, 0);
+	return ncfg_observed_prefix_of(builder->observed, reference, out, out_size);
 }
 
 /* Whether any of the policy's references names a delegation that has arrived

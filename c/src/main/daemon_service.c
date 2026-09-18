@@ -22,12 +22,18 @@
  *   resolver's delivery targets, **every** DNS scope, dhcpcd's machine paths
  *   and the per-interface route metrics.
  *
- *   Left as it was, so that the op refuses by name: `advertising`, because
- *   resolving `@pd:wan0` is `derive_from_delegation`'s arithmetic and `value.h`
- *   has no port of it -- `explain.c` already spells a private copy and says so,
- *   and a second one here would be the third reading of one rule; and
- *   `tunnels`, because an openvpn configuration file is a path nothing composes
- *   yet. `backend.start` on a radvd or an openvpn interface says exactly that.
+ *   Left as it was, so that the op refuses by name: `tunnels`, because an
+ *   openvpn configuration file is a path nothing composes yet.
+ *   `backend.start` on an openvpn interface says exactly that.
+ *
+ *   **`advertising` was on that list for a reason that was not true.** The
+ *   comment said the arithmetic had no port in `value.h`; it has had
+ *   `ncfg_address_from_delegation` since the planner needed it, and the
+ *   resolution built on it is `ncfg_observed_prefix_of`, which the planner's
+ *   own `advertise` pass calls. The claim was inherited from an older
+ *   `service.h` and repeated here without being checked. Both are corrected,
+ *   and this resolves the references through the same function the planner
+ *   does -- which is the whole reason it was lifted into `observed.h`.
  *
  *   The four programs are the world's, and a daemon leaves them NULL, which
  *   means "find the conventional name". For a daemon that is right rather than
@@ -109,6 +115,123 @@ size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_
 		}
 		out[taken].iface = interface->name;
 		out[taken].metric = metric;
+		taken++;
+	}
+	return taken;
+}
+
+/* ------------------------------------------------------------------------ *
+ * What an interface advertises
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The IPv6 nameservers of this interface's own `dns` block, for `RDNSS`.
+ *
+ * **Its own block and not its DNS scope**, which is the Rust's choice and is
+ * right: a scope absorbs what a lease handed out, and what an RA announces is
+ * what this machine is offering the LAN. Announcing the upstream's resolvers to
+ * every host on a downstream network is not the same statement at all.
+ *
+ * IPv6 only, because an RA is an IPv6 message and `RDNSS` carries v6 addresses.
+ * A v4 server in the block is not an error -- the resolver delivery uses it --
+ * it simply has nowhere to go here.
+ */
+static size_t servers_of(const ncfg_interface_t *interface, const char **out, size_t out_max,
+    size_t *missed)
+{
+	size_t taken = 0;
+	size_t i;
+
+	if (!interface->dns) {
+		return 0;
+	}
+	for (i = 0; i < interface->dns->server_count; i++) {
+		const char    *addr = interface->dns->servers[i].addr;
+		ncfg_address_t parsed;
+
+		if (!addr || !ncfg_address_parse(addr, &parsed, NULL, 0) || !parsed.is_ipv6) {
+			continue;
+		}
+		if (taken == out_max) {
+			if (missed) {
+				(*missed)++;
+			}
+			continue;
+		}
+		out[taken++] = addr;
+	}
+	return taken;
+}
+
+size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, size_t *missed)
+{
+	size_t taken = 0;
+	size_t i;
+
+	if (missed) {
+		*missed = 0;
+	}
+	if (!world || !desired) {
+		return 0;
+	}
+	for (i = 0; i < desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &desired->interfaces[i];
+		const ncfg_device_t    *device;
+		size_t                  prefixes = 0;
+		size_t                  which;
+
+		if (!interface->advertise) {
+			continue;
+		}
+		/* An unmanaged device is not netcfgd's to run a daemon on, which is
+		 * the same question `ncfg_dns_scopes_of` asks and for the same reason:
+		 * `backend.start` names the interface, but nothing between here and
+		 * the executor asks whether netcfgd manages it. */
+		device = ncfg_document_device(desired, interface->name);
+		if (device && !device->managed) {
+			continue;
+		}
+		if (taken == (size_t)NCFG_MAIN_ADVERTISE_MAX) {
+			if (missed) {
+				(*missed)++;
+			}
+			continue;
+		}
+		for (which = 0; which < interface->advertise->prefix_count; which++) {
+			char *room = world->advertise_text[taken][prefixes];
+
+			if (prefixes == (size_t)NCFG_MAIN_ADVERTISE_PREFIX_MAX) {
+				if (missed) {
+					(*missed)++;
+				}
+				continue;
+			}
+			if (!ncfg_observed_prefix_of(observed, &interface->advertise->prefixes[which],
+			    room, (size_t)NCFG_ADDRESS_MAX)) {
+				continue;
+			}
+			world->advertise_prefixes[taken][prefixes] = room;
+			prefixes++;
+		}
+		/*
+		 * Nothing resolved, so there is nothing to announce. Left out rather
+		 * than entered with an empty list: `ncfg_ra_start` refuses a router
+		 * with no prefix, and an entry here would turn that refusal into one
+		 * about an empty list instead of the sentence
+		 * `ncfg_service_backend_start` gives, which names the interface.
+		 */
+		if (prefixes == 0u) {
+			continue;
+		}
+		world->advertising[taken].iface = interface->name;
+		world->advertising[taken].policy = interface->advertise;
+		world->advertising[taken].prefixes = world->advertise_prefixes[taken];
+		world->advertising[taken].prefix_count = prefixes;
+		world->advertising[taken].servers = world->advertise_servers[taken];
+		world->advertising[taken].server_count = servers_of(interface,
+		    world->advertise_servers[taken], (size_t)NCFG_MAIN_ADVERTISE_SERVER_MAX,
+		    missed);
 		taken++;
 	}
 	return taken;
@@ -199,6 +322,24 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 		    "client's own default rather than the metric written down", missed,
 		    NCFG_MAIN_METRICS_MAX);
 	}
+	missed = 0;
+	world->advertise_count = ncfg_main_advertising_of(world, desired, observed, &missed);
+	world->service.advertising = world->advertising;
+	world->service.advertise_count = world->advertise_count;
+	if (missed > 0u) {
+		/*
+		 * Louder than the metrics' overflow, and that is the difference
+		 * between them: a client with no `-m` takes its own default and works,
+		 * while a router announcing part of a prefix list announces something
+		 * nobody wrote to every host on the wire.
+		 */
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+		    "%zu interface(s), prefix(es) or nameserver(s) of this configuration did "
+		    "not fit in what an executor can advertise (%d interfaces of %d prefixes "
+		    "and %d servers), so a router advertisement would carry less than the "
+		    "configuration asks for", missed, NCFG_MAIN_ADVERTISE_MAX,
+		    NCFG_MAIN_ADVERTISE_PREFIX_MAX, NCFG_MAIN_ADVERTISE_SERVER_MAX);
+	}
 	return 1;
 }
 
@@ -210,5 +351,6 @@ void ncfg_main_service_release(ncfg_main_world_t *world)
 	ncfg_dns_scopes_free(world->scopes);
 	world->scopes = NULL;
 	world->metric_count = 0;
+	world->advertise_count = 0;
 	memset(&world->service, 0, sizeof(world->service));
 }

@@ -1237,6 +1237,176 @@ static void an_associated_radio_takes_its_networks_metric(void)
 }
 
 /* ------------------------------------------------------------------------ *
+ * What an interface advertises
+ * ------------------------------------------------------------------------ */
+
+/*
+ * A delegation on `wan0`, which is where `lan0`'s `advertise` block points.
+ * The reference's arithmetic is checked at the rule in `plan_addressing_test`;
+ * what these cases are about is whether the daemon resolves the *same* thing
+ * the planner does, and what it does when nothing resolves.
+ */
+#define WORLD_DELEGATION \
+	"\"delegations\":[{\"interface\":\"wan0\",\"prefixes\":[\"2001:db8:0:100::/56\"]}]"
+
+#define WORLD_ADVERTISING \
+	"\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"}}]," \
+	"\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[]," \
+	"\"dns\":{\"mode\":\"write_resolv_conf\",\"servers\":[" \
+	"{\"addr\":\"2001:db8:0:101::1\"},{\"addr\":\"10.0.0.53\"}]}," \
+	"\"advertise\":{\"backend\":\"radvd\"," \
+	"\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}]"
+
+static void what_an_interface_advertises_is_resolved_for_the_executor(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/advertise-run", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of(WORLD_ADVERTISING);
+	state.observed = observed_of("\"links\":[]," WORLD_DELEGATION);
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	world.advertise_count = ncfg_main_advertising_of(&world, state.desired, state.observed,
+	    NULL);
+
+	check(world.advertise_count == 1u, "an interface with an `advertise` block gets an entry");
+	check(world.advertise_count == 1u && world.advertising[0].iface &&
+	    strcmp(world.advertising[0].iface, "lan0") == 0 &&
+	    world.advertising[0].policy == state.desired->interfaces[0].advertise,
+	    "  naming the interface, with the document's own policy borrowed");
+	/*
+	 * Subnet 1 of `2001:db8:0:100::/56`, as the block rather than an address
+	 * in it -- the same arithmetic the LAN's own address used with a host part
+	 * instead. Checked by value here and not only by "something resolved",
+	 * because the thing that goes wrong quietly is announcing the *wrong*
+	 * prefix to every host on the wire, not announcing none.
+	 */
+	check(world.advertise_count == 1u && world.advertising[0].prefix_count == 1u &&
+	    world.advertising[0].prefixes[0] &&
+	    strcmp(world.advertising[0].prefixes[0], "2001:db8:0:101::/64") == 0,
+	    "  and the prefix its reference resolves to, as a block and not a host");
+	/*
+	 * `RDNSS` carries IPv6, so the v4 server in the same block has nowhere to
+	 * go here. It is not an error -- the resolver delivery uses it -- and the
+	 * check is that it is dropped rather than rendered into a message that
+	 * cannot hold it.
+	 */
+	check(world.advertise_count == 1u && world.advertising[0].server_count == 1u &&
+	    world.advertising[0].servers[0] &&
+	    strcmp(world.advertising[0].servers[0], "2001:db8:0:101::1") == 0,
+	    "  and the IPv6 nameservers of its own dns block, for RDNSS, without the v4 one");
+	ncfg_main_world_close(&world);
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+}
+
+static void a_delegation_that_has_not_arrived_advertises_nothing(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+	size_t              missed = 99;
+
+	(void)snprintf(run, sizeof(run), "%s/advertise-waiting", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of(WORLD_ADVERTISING);
+	/* The lease has not landed. On any machine with a DHCPv6 client this is
+	 * the state between starting it and the prefix arriving. */
+	state.observed = observed_of("\"links\":[]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	world.advertise_count = ncfg_main_advertising_of(&world, state.desired, state.observed,
+	    &missed);
+	/*
+	 * **No entry, rather than an entry with an empty list.** `ncfg_ra_start`
+	 * refuses a router with no prefix, and a router advertising itself with no
+	 * network on it is worse than one that has not started -- every host on
+	 * the wire takes a default route to a machine that cannot forward for
+	 * them. `backend.start` refuses by name instead.
+	 */
+	check(world.advertise_count == 0u,
+	    "an interface whose delegation has not arrived gets no entry at all");
+	/* And it is not counted as something that did not fit: nothing was
+	 * dropped for want of room, so an error about capacity would send an
+	 * operator looking at the wrong thing. */
+	check(missed == 0u, "  and that is not reported as an overflow, which it is not");
+	ncfg_main_world_close(&world);
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+}
+
+static void an_unmanaged_device_is_not_advertised_on(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/advertise-unmanaged", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of(
+	    "\"devices\":[{\"name\":\"lan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"managed\":false}],"
+	    "\"interfaces\":[{\"name\":\"lan0\",\"addressing\":[],"
+	    "\"advertise\":{\"backend\":\"radvd\","
+	    "\"prefixes\":[{\"source\":\"wan0\",\"index\":0,\"subnet\":1}]}}]");
+	state.observed = observed_of("\"links\":[]," WORLD_DELEGATION);
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	world.advertise_count = ncfg_main_advertising_of(&world, state.desired, state.observed,
+	    NULL);
+	/* The same question `ncfg_dns_scopes_of` asks, and for its reason: nothing
+	 * between here and the executor asks whether netcfgd manages the
+	 * interface a `backend.start` names. */
+	check(world.advertise_count == 0u,
+	    "an unmanaged device is not one netcfgd starts a router advertisement daemon on");
+	ncfg_main_world_close(&world);
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+}
+
+static void the_planner_and_the_daemon_resolve_one_reference_the_same_way(void)
+{
+	ncfg_prefix_ref_t reference;
+	ncfg_observed_t  *observed = observed_of("\"links\":[]," WORLD_DELEGATION);
+	char              mine[NCFG_ADDRESS_MAX];
+	char              theirs[NCFG_ADDRESS_MAX];
+
+	memset(&reference, 0, sizeof(reference));
+	reference.source = (char *)(uintptr_t)"wan0";
+	reference.index = 0;
+	reference.subnet = 1;
+	/*
+	 * **One function, asked twice** -- which is the whole of what lifting it
+	 * into `observed.h` bought. Before, `plan/advertise.c` had a private
+	 * `resolve` and this would have been a second copy; the one place two
+	 * copies could disagree is what a router puts on the wire, and nothing
+	 * downstream of that can notice.
+	 */
+	check(ncfg_observed_prefix_of(observed, &reference, mine, sizeof(mine)) &&
+	    strcmp(mine, "2001:db8:0:101::/64") == 0,
+	    "a reference resolves to the block its subnet selector names");
+	reference.index = 7;
+	check(!ncfg_observed_prefix_of(observed, &reference, theirs, sizeof(theirs)),
+	    "and an index the lease does not carry resolves to nothing, not to something wrong");
+	reference.index = 0;
+	reference.source = (char *)(uintptr_t)"nosuch";
+	check(!ncfg_observed_prefix_of(observed, &reference, theirs, sizeof(theirs)),
+	    "and so does a source no delegation is held for");
+	check(!ncfg_observed_prefix_of(NULL, &reference, theirs, sizeof(theirs)),
+	    "and a machine nothing has observed resolves nothing rather than walking a NULL");
+	ncfg_observed_free(observed);
+}
+
+/* ------------------------------------------------------------------------ *
  * Giving a contended radio back
  * ------------------------------------------------------------------------ */
 
@@ -1529,6 +1699,10 @@ int main(void)
 	the_service_carries_every_scope_and_not_the_one_the_op_names();
 	the_route_metric_a_dhcp_client_is_started_with();
 	an_associated_radio_takes_its_networks_metric();
+	what_an_interface_advertises_is_resolved_for_the_executor();
+	a_delegation_that_has_not_arrived_advertises_nothing();
+	an_unmanaged_device_is_not_advertised_on();
+	the_planner_and_the_daemon_resolve_one_reference_the_same_way();
 	a_radio_is_not_given_back_by_taking_the_apply_lock_to_find_out();
 	what_a_contention_check_is_made_about();
 	an_index_that_does_not_fit_is_not_a_claim();

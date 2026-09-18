@@ -112,17 +112,25 @@
  * What one interface advertises, resolved.
  *
  * **The prefixes are an argument rather than something this resolves**, and
- * that is a divergence recorded in 0263. The Rust resolves `@pd:wan0` at the
- * moment of the start, which is right -- a delegation arrives after the
- * document does -- but the arithmetic it uses is `netcfgd-model`'s
- * `derive_from_delegation`, which `value.h` has no port of. `explain.c`
- * already spells a private copy and says so; a second private copy here would
- * be the third reading of one rule, and the one place they could disagree is
- * what a router announces to every host on the wire.
+ * that is a divergence recorded in 0263 -- but not the one this comment used
+ * to give. It said the arithmetic had no port, naming
+ * `derive_from_delegation`; `value.h` has had `ncfg_address_from_delegation`
+ * since the planner needed it, and `ncfg_observed_prefix_of` is the resolution
+ * built on it, which the planner's `advertise` pass and the daemon both call.
+ * There is one reading of the rule, not three.
+ *
+ * The divergence that is real is **when** it is resolved. The Rust resolves at
+ * the moment of the start, reading the delegations off disk; this resolves
+ * when the executor is opened, which is once per apply. A delegation landing
+ * between those two points is announced a pass later. That is the price of the
+ * prefixes being a value the caller owns, and it is a pass rather than a
+ * lease: the alternative is an executor that reaches the filesystem, which is
+ * what this header's whole seam exists to prevent.
  *
  * So whoever holds the delegations resolves them and hands the result over.
  * An interface with no entry is a refusal naming it, never a router
- * advertising nothing.
+ * advertising nothing -- and an interface whose references have not resolved
+ * yet is one of those, deliberately.
  */
 typedef struct {
 	const char        *iface;

@@ -51,6 +51,7 @@
 #include "ncfg/rfkill.h"
 #include "ncfg/secrets.h"
 #include "ncfg/service.h"
+#include "ncfg/value.h"
 #include "ncfg/supplicant.h"
 #include "ncfg/watch.h"
 
@@ -947,6 +948,22 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  */
 #define NCFG_MAIN_METRICS_MAX 32
 
+/*
+ * How many interfaces one executor can advertise on, and how many prefixes and
+ * nameservers each of those carries.
+ *
+ * Bounded for the claims' reason -- a configuration must not decide the size of
+ * a per-apply allocation -- and small because each of these is a physical LAN
+ * with a router advertisement daemon on it. **What did not fit is a refusal
+ * rather than a quiet omission**, which is the opposite of the metrics' answer
+ * and is deliberate: a DHCP client without its `-m` still works, while a router
+ * that announces three of an operator's four prefixes is announcing something
+ * nobody wrote, to every host on the wire, with nothing saying so.
+ */
+#define NCFG_MAIN_ADVERTISE_MAX          8
+#define NCFG_MAIN_ADVERTISE_PREFIX_MAX   8
+#define NCFG_MAIN_ADVERTISE_SERVER_MAX   4
+
 /* How long an executor waits for the apply lock before giving up, which is
  * the Rust's `APPLY_PATIENCE`: long enough for an ordinary apply, which is a
  * few netlink calls and whatever a hook does, and short enough that a wedged
@@ -1036,6 +1053,25 @@ typedef struct {
 	ncfg_dns_scopes_t            *scopes;
 	ncfg_service_client_metric_t  metrics[NCFG_MAIN_METRICS_MAX];
 	size_t                        metric_count;
+	/*
+	 * What each advertising interface announces, resolved.
+	 *
+	 * Three arrays rather than one, because `ncfg_service_advertise_t` holds
+	 * two borrowed lists and somebody has to own what they point at. The text
+	 * is written into this world's own storage: a resolved prefix exists
+	 * nowhere else -- it is arithmetic over a delegation and a selector -- so
+	 * unlike every other member of the service it cannot be a borrow from the
+	 * document.
+	 */
+	ncfg_service_advertise_t      advertising[NCFG_MAIN_ADVERTISE_MAX];
+	size_t                        advertise_count;
+	char                          advertise_text[NCFG_MAIN_ADVERTISE_MAX]
+	                                            [NCFG_MAIN_ADVERTISE_PREFIX_MAX]
+	                                            [NCFG_ADDRESS_MAX];
+	const char                   *advertise_prefixes[NCFG_MAIN_ADVERTISE_MAX]
+	                                                [NCFG_MAIN_ADVERTISE_PREFIX_MAX];
+	const char                   *advertise_servers[NCFG_MAIN_ADVERTISE_MAX]
+	                                               [NCFG_MAIN_ADVERTISE_SERVER_MAX];
 	/* How long to wait for the apply lock. A field so that a test does not
 	 * have to wait thirty seconds to see the refusal. */
 	long                     patience_ms;
@@ -1211,6 +1247,30 @@ size_t ncfg_main_claims_of(const ncfg_daemon_state_t *state, ncfg_interface_clai
  */
 size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_t *observed,
     ncfg_service_client_metric_t *out, size_t out_max, size_t *missed);
+
+/*
+ * What each advertising interface announces, resolved into the world's own
+ * storage.
+ *
+ * Fills `world->advertising` and points `world->service` at it. A prefix
+ * reference is resolved through `ncfg_observed_prefix_of` -- the same function
+ * the planner's `advertise` pass uses, so the two cannot disagree about what a
+ * router puts on the wire.
+ *
+ * **An interface whose references all resolve to nothing gets no entry**, and
+ * `backend.start` then refuses it by name. That is the state of a machine
+ * between starting a DHCPv6 client and the lease landing; a radvd started with
+ * no prefix advertises a router and no network, which is worse than one that
+ * has not started. The planner has already warned about the reference.
+ *
+ * Answers how many interfaces were taken, and counts in `*missed` (which may
+ * be NULL) those that had something to advertise and did not fit -- in the
+ * interfaces, the prefixes or the servers. A caller says that out loud: unlike
+ * a route metric, a partly-advertised prefix list is wrong rather than
+ * defaulted.
+ */
+size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, size_t *missed);
 
 /*
  * Fill in everything the fourteen service-side ops need, from one world.

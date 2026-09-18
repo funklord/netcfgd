@@ -37,6 +37,8 @@
  */
 #include "ncfg/observed.h"
 
+#include "ncfg/value.h"
+
 #include "ncfg/base.h"
 
 #include <stdio.h>
@@ -334,6 +336,34 @@ const ncfg_delegation_t *ncfg_observed_delegation(const ncfg_observed_t *observe
 		}
 	}
 	return NULL;
+}
+
+int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_ref_t *reference,
+    char *out, size_t out_size)
+{
+	const ncfg_delegation_t *delegation;
+
+	if (!reference || !out || out_size == 0u) {
+		return 0;
+	}
+	out[0] = '\0';
+	delegation = ncfg_observed_delegation(observed, reference->source);
+	if (!delegation) {
+		return 0;
+	}
+	if (reference->index < 0 ||
+	    (uint64_t)reference->index >= (uint64_t)delegation->prefix_count) {
+		return 0;
+	}
+	/*
+	 * `::/64` as the suffix, so what comes back is the block and not a host in
+	 * it. The sentence a failure would carry is dropped on purpose: the two
+	 * callers want "did this resolve", and the one that owes the operator an
+	 * explanation is the planner, which says it about the reference rather
+	 * than about the arithmetic.
+	 */
+	return ncfg_address_from_delegation(delegation->prefixes[(size_t)reference->index],
+	    reference->subnet, "::/64", out, out_size, NULL, 0);
 }
 
 const ncfg_dns_policy_t *ncfg_observed_dns_for(const ncfg_observed_t *observed,

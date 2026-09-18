@@ -9515,6 +9515,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.190 A blocker that was not one, repeated because nobody read it
+
+`advertising` was left NULL in 10.189 on the strength of a comment in
+`service.h`: that resolving `@pd:wan0` needs `derive_from_delegation` and
+*"`value.h` has no port of it"*, so a copy here would be the third reading of
+one rule. I repeated that sentence into `daemon_service.c` and into the commit
+message without checking it.
+
+**It is false, and `value.h` says so in bold.**
+`ncfg_address_from_delegation` has been there since the planner needed it, with
+its own header paragraph beginning *"This is `netcfgd_model::derive_from_delegation`"*
+and naming its two callers. The `service.h` comment predates that port and was
+never revisited. Nothing was blocked; the work was one composition function.
+
+**So the round is the composition, plus the lift the old comment was right
+about.** `plan/advertise.c` had a private `resolve`, and the daemon needed the
+same six lines, which really would have been a second reading -- of the
+*resolution*, not of the arithmetic. It is `ncfg_observed_prefix_of` in
+`observed.h` now; the planner's `resolve` is a call to it, and
+`ncfg_main_advertising_of` is the other caller. Proved shared rather than
+claimed: one sabotage -- `::/64` changed to `::1/64`, so a reference resolves
+to a host instead of the block -- turns **both** the planner's idempotence case
+and the daemon's value case red.
+
+What the entry carries, matching the Rust: the document's policy borrowed, the
+prefixes each reference resolves to, and the **interface's own `dns` block's**
+IPv6 servers for `RDNSS` -- its own block and not its DNS scope, because a
+scope absorbs what a lease handed out and announcing the upstream's resolvers
+to a downstream LAN is a different statement. The v4 servers in that block are
+dropped here and still used by the delivery.
+
+**An interface whose references have not resolved gets no entry**, and
+`backend.start` refuses it by name. A radvd with no prefix advertises a router
+and no network, so every host on the wire takes a default route to a machine
+that cannot forward for them -- worse than a daemon that did not start. That is
+also not counted as an overflow, which it is not, and there is a check for the
+distinction.
+
+**The overflow is an error and not a warning**, unlike the route metrics' in
+10.189. A DHCP client with no `-m` takes its own default and works; a router
+announcing three of four prefixes announces something nobody wrote.
+
+**The real divergence, now that the false one is gone.** The Rust resolves the
+prefixes at the moment of the start, reading delegations off disk; this
+resolves when the executor is opened, once per apply. A delegation landing
+between those two points is announced a pass later. The alternative is an
+executor that reaches the filesystem, which is what `service.h`'s seam exists
+to prevent, so the pass of latency is the price and it is recorded rather than
+hidden.
+
+6,262 checks. Four sabotages caught: an entry with nothing resolved, a v4
+server reaching `RDNSS`, a host address in place of the block, and the
+unmanaged-device skip.
+
+**The lesson is [[verify-worker-claims]] pointed at myself.** The comment was
+not a worker's; it was in the tree, it was specific, and it named a function.
+That is exactly the shape of claim that gets repeated. `value.h` was one grep
+away.
+
 ## 10.189 The executor gets its other half, and four sentences that had to move
 
 `ncfg_kernel_set_service` had no caller outside the tests, which is the one
