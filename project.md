@@ -9499,6 +9499,451 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.177 A check that could not fail, and a claim four waves outlived
+
+Two faults in this port's own record-keeping, both found by the wave that
+closed the daemon's gaps, and both the same shape as the defects this
+document keeps finding in the Rust.
+
+### The guard over the wrong file
+
+`netcfgd` refuses to start, and the check meant to keep it that way read
+`c/src/apply/kernel_link.c` and asserted no alternative name appeared in it.
+**`create_link` has never been in that file** -- it is `kernel.c`'s, and
+`kernel_link.c` holds the five `link.set_*` ops. So the marking could have
+landed in any form, and the check would have gone on passing green.
+
+It was the single check standing between this port's daemon and a live
+machine, and it was a gate over a file that could not contain what it was
+looking for -- *"a gate over an empty file list reports success exactly as
+loudly as a real pass"*, written by the same hand that wrote the gate. It now
+asserts behaviour instead: that `ncfg_owned_absorb` records a created link,
+and that `ncfg_apply_supported` still refuses a bond create. Both halves were
+sabotaged and both go red.
+
+**The lesson is narrower than "be careful".** A check that greps a source file
+for the *absence* of something is asserting a negative about a location, and it
+is only as good as the guess about where the thing would go. A check that calls
+the function and reads the answer has no such guess in it. Where a negative has
+to be asserted, the file has to be the one that would have to change -- and
+that is worth confirming rather than assuming, because it is exactly the
+assumption nothing else tests.
+
+### "Thirteen ops of forty-eight", asserted
+
+`ncfg apply`'s refusal named a count of executor ops. Four waves later the
+executor carried every op kind and refused only by *kind* -- a `link.create`
+for a vlan, a bond, a macvlan, a tunnel or a tun, and `backend.start` for the
+backend kinds `src/backend/` does not carry. The number was false in two source
+files and a decision record, **and asserted by a check in `cli_test.c`**, which
+is what made correcting it a four-file sweep rather than an edit.
+
+A refusal that cites a figure has to be swept whenever the figure moves, and an
+assertion on the figure makes that mandatory rather than optional -- which is
+either a ratchet or a tax depending on whether the figure is the point. Here it
+was not: what a reader needs from that sentence is which *shape* of thing is
+missing. The check asserts the shape now.
+
+### And one the two halves disagreed about
+
+`ncfg_apply_supported` answered that a `tun` was creatable while
+`ncfg_kernel_newlink_of` refused one -- a tun is made through `/dev/net/tun`
+rather than by a netlink message, which that function says in as many words.
+
+That function's contract is to be **the** list of what this build can carry
+out, asked once by `execute` before anything is done, so that a plan carrying
+something impossible is refused before the machine is touched rather than
+halfway through changing it. The planner declines a device by asking exactly
+that question (10.172). A yes here that becomes a no at execution puts the
+refusal back in the middle of the plan, which is the failure the ordering
+exists to prevent. It refuses a tun by name now; `tun.h` carries
+`ncfg_tun_create` and nothing calls it, so closing it is wiring.
+
+## 10.176 A monitor stream that has gone still holds a connection slot
+
+Found by wiring `monitor` in the C port -- the one step `server.c` owed -- which
+meant reading the Rust's arrangement line by line rather than around it.
+
+In `crates/netcfgd-daemon/src/server.rs`:
+
+* line 110, `connections.take()` yields a `Slot` that moves into the
+  connection's thread; its `Drop` is the only thing that frees it, so the slot
+  is held for exactly as long as that thread runs;
+* lines 348-385, a `Request::Monitor` is checked with the loop, then the thread
+  sends `Command::Subscribe` and blocks in `for event in incoming`, forwarding
+  events and returning only when that channel's `SyncSender` is dropped;
+* `lib.rs:280` pushes the sender into `subscribers`, and `server.rs:427` --
+  `broadcast`'s `retain` -- is the only thing that ever drops one, and only
+  where `try_send` fails.
+
+So a client that subscribes and then hangs up is not noticed at all until
+something is announced. The channel is between two threads inside the daemon
+and takes the event happily; the socket error only appears in `write_message`,
+which is reached only when an event arrives.
+
+**§10.169 records the subscriber vector filling this way. The connection slot
+is the sharper half and is not recorded**: what a held slot costs is not one
+client's event list but everybody's control socket. `MAX_CONNECTIONS` is 64.
+
+The cost, stated as a sequence. `monitor` needs only the `observe` tier, which
+`control { observe = "any" }` -- the shape `debian/postinst` suggests -- opens
+to every local user. Sixty-four connections, each sending
+`{"request":"monitor"}` and closing, take every slot; on a converged machine
+that announces nothing they are never released, and `ncfg reload`, `ncfg apply`
+and `ncfg status` are all answered "too many connections, 64 are open", for
+root as much as for anybody. That is the denial 0183 added `FIRST_REQUEST` to
+close, arriving through a request that clears the deadline on its way past.
+The constant's own comment says what it does not cover -- *"a caller that sends
+one valid request and then idles still holds its slot ... the cap remains what
+bounds the damage"* -- and it is about a client that is still there, not one
+that has gone.
+
+**Read rather than reproduced, and that is the constraint rather than the
+confidence.** netcfgd is running on this machine and its network is live, so
+nothing here started a second daemon or spoke to the real one's socket. The
+mechanism is four lines in two files and none of it is conditional.
+
+The C port does not have it. `server.c` hands the connection to the loop and
+the connection thread returns, so the slot goes back at once --
+`daemon_test.c` asserts `ncfg_daemon_server_open` falls to zero while the
+stream is still live and carrying events. What a dead subscriber costs there is
+one entry in a list bounded at `NCFG_MAIN_SUBSCRIBERS_MAX`, with the
+seventeenth `monitor` refused by a sentence rather than by silence.
+
+## 10.175 The three verbs that removed nothing, and what writing them found
+
+The wave that gave `ncfg wifi add`, `ncfg wifi forget` and `ncfg reset` a
+writer. Two of them needed `netcfgd_host::wifi_profile` -- 810 lines that 0263
+named twice as the gap, once for the CLI and once for the daemon's
+`ncfg_wifi_install_fn` seam -- and the third is `netcfgd-cli`'s own and had no
+module at all. Five defects in the Rust, three of them reproduced against the
+shipped binary, and all three of those are in `ncfg reset`.
+
+### `ncfg reset` says it removed files it has not removed, and stops half way
+
+`command_reset` prints the whole list under the word `removed` **before** the
+loop that removes anything, and that loop stops at the first failure with `?`.
+So a reset that cannot finish has already told the operator that every file is
+gone.
+
+Reproduced against `target/release/ncfg`, as a user who can write the config
+directory and not `conf.d`:
+
+    removed .../etc/netcfgd.conf
+    removed .../etc/conf.d/10-site.conf
+    removed .../etc/conf.d/20-more.conf
+
+    note: ... holds no factory config, so this leaves netcfgd with no
+    configuration at all. ...
+    ncfg: .../etc/conf.d/10-site.conf: Permission denied (os error 13)
+
+`netcfgd.conf` was removed; both drop-ins are still there. The machine is now
+running on a configuration nobody wrote -- the base file gone, the overrides
+that layered on it left -- and the list above says the opposite. The error line
+names one file and nothing says which of the three it got to.
+
+The C prints `would remove` for the whole list in both modes, because at that
+point nothing has been, and `removed <path>` one at a time as each file
+actually goes; a failure names the path, the kernel's reason, and how many of
+how many had already gone.
+
+### The guard against resetting into the factory layer is blind to a symlink
+
+`config_dir == factory_dir` compares two `PathBuf`s, which is component-wise --
+so a trailing slash is seen through and nothing else is. The comment on that
+guard says what it is for: "Reachable by a misconfigured unit file rather than
+by a typo, which is exactly when nobody is watching."
+
+Reproduced with `--config-dir` pointing at a symlink to the factory directory:
+
+    removed .../link/netcfgd.conf
+    removed .../link/conf.d/00-image.conf
+
+    2 files remain, from .../real
+
+The two files it reports as remaining are the two it had just deleted, and the
+factory layer -- the thing being reset *to*, and on an image the only copy --
+is gone. The C resolves both names before comparing them and compares what
+they resolved to.
+
+### `ncfg reset` ignores an argument, and empties the machine anyway
+
+The dispatch is `"reset" => command_reset(&options)`: every positional
+argument is dropped. `ncfg reset office --yes` -- somebody reaching for
+`profile unset`, or mistyping a verb that does take a name -- removes the
+whole writable layer and says nothing about the word it did not understand.
+Reproduced; the run printed two `removed` lines and exited 0. This is the
+wrong verb to be relaxed about an argument nobody can act on, and the C
+refuses one.
+
+### Every credential outlives the reset, and nothing says so
+
+`reset` removes `writable_files` and nothing else, so `<config_dir>/secrets`
+survives whole -- and the configuration that referred to those names does not.
+That is exactly the fault `secrets_view` exists to surface, "a credential still
+on the machine after whatever wanted it was deleted", manufactured by the one
+verb whose own note says it leaves netcfgd "with no configuration at all".
+
+Not removing them is right: a private key nobody has a copy of cannot be got
+back (0042), and this command was not asked to. Saying nothing is the part that
+is wrong, and it is one line. The C counts them and says where they are.
+
+### The round trip that says it checks the SSID does not look at it
+
+`wifi_profile::compiles_back` is the check that makes `install` more than a
+write, and its own comment states the two things it covers: "a label the lexer
+reads differently from the way it was written, and **an SSID whose hex form did
+not round-trip**". Nothing in the function reads `network.ssid`. What it
+compares is whether the network exists, whether it is secured, and -- for an
+enterprise network only -- five fields. The hidden flag, the metric, the WPA
+generation and which credential the block ends up referring to are compared by
+nothing at all.
+
+`render` writes `ssid = "<hex>"` only when the SSID is not exactly the label,
+which is the separate-`--id` case, so the claim is about the one path that is
+not covered by the label check either. This is 10.160's shape one layer down --
+a renderer with nothing comparing what went in against what came out -- and
+10.162's shape exactly: a comment that describes what the code does not do.
+
+The C's round trip compares every field the block can carry, and the install is
+therefore the comparison. Measured by sabotage: removing any one rendered key
+-- `ssid`, `hidden`, `metric`, `proto`, `phase2`, any of the enterprise five --
+turns the install into a refusal naming that field, where before the sabotage
+it succeeded.
+
+### The two writers of `/etc/netcfgd` verify against different configurations
+
+`config::install_drop_in` compiles the result back **with the selected
+profile**, and 0263 records why: without it "`ncfg profile set` wrote a
+selection, compiled a configuration that excluded the very profile it had just
+chosen, and reported success". `wifi_profile::compiles_back` is the other
+writer of that directory and still calls `load_layered`, which is the
+unprofiled loader.
+
+Recorded as a finding rather than a reproduction: on a profiled machine every
+path that would show it is closed by something else first -- the CLI's own
+duplicate check uses the profiled document, the daemon's uses its desired
+state, and a profile whose `override` names a block the base has not written
+yet does not compile before `wifi add` runs at all. What is left is a check
+that verifies a configuration the machine does not load, which is the thing the
+other site was fixed for. The C uses the profiled loader at both.
+
+## 10.174 The flag that was refused, and what answering it found
+
+The wave that made `--json` work at the six verbs `run.c` refused it at. The
+refusal's own words were the specification -- *a flag silently ignored is worse
+than one refused, because somebody who passed `--json` and got a table would
+read the table as the machine-readable form* -- and holding the Rust to that
+sentence found three places where its `--json` does exactly that, one of them
+on the verb where it costs the most.
+
+### `ncfg apply --json` prints nothing at all for an empty plan
+
+`crates/netcfgd-cli/src/lib.rs:717-726`:
+
+```quote from=crates/netcfgd-cli/src/lib.rs
+	if plan.is_empty() {
+		if !options.json {
+			if plan.was_refused() || plan.strands_credentials() {
+				print_refusals(&plan);
+				print_stranded(&plan);
+			} else {
+				sayln!("nothing to do");
+			}
+		}
+		return Ok(outcome(&plan));
+	}
+```
+
+Every other `--json` path in that file prints a document. This one prints zero
+bytes, and it is the ordinary case: an empty plan is what a converged machine
+produces, which is what `ncfg apply` produces every time after the first. So
+`ncfg apply --json | jq .` fails with "unexpected end of input" on a machine
+with nothing wrong with it, and a script that reads the output to decide
+anything cannot tell that from a binary that died before it printed.
+
+**Cost, and why it is not merely untidy.** The contract a `--json` flag makes
+is that stdout is one value; the whole reason for reaching for it is that the
+human form cannot be parsed. An empty stdout is not a value, so every caller
+has to special-case the success path -- and a caller that does not, treats a
+converged machine as a failed command.
+
+### And the refusals and the strandings are not in the machine form at all
+
+Twenty lines below, `lib.rs:762-765`:
+
+```quote from=crates/netcfgd-cli/src/lib.rs
+	if !options.json {
+		print_refusals(&plan);
+		print_stranded(&plan);
+	}
+```
+
+The journal `--json` prints (`lib.rs:742-745`) is `{"records":[...]}`: what ran
+and what it did. It has no member for an action a guard stopped and none for a
+credential left behind. So the two exit codes that exist precisely because a
+script must be able to act on them differently -- 3 for a refusal, 4 for a
+stranding, and §10's own argument for why they are separate is that the
+remedies differ -- arrive under `--json` with **no words anywhere** saying
+which interface, which guard, or what to re-run. On a non-empty plan the
+script gets a journal that is silent about them; on an empty one, by the arm
+above, it gets nothing.
+
+That is the same fact the CLI states about a daemon's refusal and states well:
+*the sentence names the tier that would have been needed; replacing it with
+wording of your own throws away the part that says what to do about it.* Here
+the wording is not replaced, it is dropped.
+
+**Reproduction, and why it was not run here.** A `guard = "..."` on an
+interface the plan wants to take down, then `ncfg apply --json`: exit 3, empty
+stdout. It is not reproduced against this machine and must not be -- `ncfg
+apply` is the one verb in the program that changes the network, this is the
+developer's own workstation, and the arm under test is reached after the apply
+lock is taken and the hooks are written. The safe half of the contrast is
+`ncfg plan --json` on the same configuration, which prints the refusal and the
+stranding as members of the plan document, because `doc/schema/plan.json` has
+`refusals` and `stranded` in it. The plan can say it and the apply cannot.
+
+### `--json` is accepted and ignored at seven verbs
+
+`wifi activate`, `wifi deactivate`, `wifi connect` and `wifi disconnect`
+(`lib.rs:1039-1060`, the `Answer::Ok` arm, which reaches `sayln!` with no test
+of `options.json`), and `reload`, `confirm` and `revert` (`command_reload` and
+its two neighbours, which never read the field). Each prints its sentence for a
+person -- `joined \`home\` on wlan0`, `reloaded; the configuration compiles` --
+and exits 0.
+
+This is the fault the six refusals in the port's `run.c` existed to prevent,
+arriving through the verbs nobody had looked at, and the cost is the one that
+refusal names: a caller that passes `--json` to everything it runs gets prose
+from seven verbs and a document from six, with nothing distinguishing them but
+knowing the list. Reproduced by reading; `ncfg reload --json` against a daemon
+is safe to run and prints the sentence, but the port's own verb is where it was
+measured, because the three simple verbs were ignoring the flag here too --
+they were never among the six that refused it, and closing that was part of
+this wave.
+
+### What the port does instead, and the one addition it makes
+
+`--json` prints the payload the control socket carries and never the
+`"response"` tag, at every verb that renders something; a verb whose whole
+answer is `ok` prints `{"ok":true}`; `ncfg monitor --json` prints the line the
+daemon sent without parsing it. Each is argued in
+[0263](doc/decision/0263-the-c-port.md), and the agreement with the socket is
+not a promise: `cli_test.c` takes each `{"response":...}` line out of
+`doc/schema/socket.json`, decodes it through `proto.h`, writes it back through
+the CLI's writer and compares it against that same line with its tag cut off
+mechanically. Nothing in those checks knows what the members are called.
+
+The one member the port adds is `total` on an explanation, and it is there for
+this section's own reason: the text form ends with "showing 256 of 1202" where
+`NCFG_EXPLAIN_FACTS_MAX` bit, and a machine form that dropped the count would
+be the one place `--json` says less than the table.
+
+### Two sabotages that caught nothing, and where the hole is
+
+`ncfg status --json` and `ncfg plan --json` are the two arms no check drives.
+Each one's next step is `ncfg_observe_current`, a netlink dump of the machine
+the suite is built on, and `cli_test.c`'s rule is that nothing in it touches
+that machine -- the developer's real network is on it. So degrading
+`command_status`'s call into the observation writer, and printing the two human
+notes beside `command_plan`'s JSON document, were both made and neither went
+red.
+
+What stands in their place is a source-level check that the refusal is gone and
+that those arms call `ncfg_observed_write` and `ncfg_plan_write` -- whose output
+is pinned against `doc/schema/observed.json` and `doc/schema/plan.json` by
+`observed_test.c` and `plan_test.c`. It is named in the test as the weaker
+check it is. **What it cannot see is an arm that renders the right document and
+prints it wrongly**, and closing that needs the observation behind a seam the
+way the daemon's is, which is `run.c` deliberately not having one: it calls
+`ncfg_observe_current` so that the CLI and the daemon cannot assemble one
+sequence two ways.
+
+## 10.173 The link that is not a netlink message is not marked either
+
+The wave that closed the two facts keeping the C daemon's guard shut: a created
+link now carries netcfgd's alternative name, and what an apply did is folded
+into `owned.json`. One defect in the Rust, one observation beside it, and one
+of the port's own guards that could never have fired.
+
+### A tun or tap device netcfgd creates wears no mark
+
+`crates/netcfgd-apply/src/kernel.rs:1207-1212`. `Op::LinkCreate` opens with the
+one kind that is not an `RTM_NEWLINK`:
+
+```quote from=crates/netcfgd-apply/src/kernel.rs
+if let netcfgd_model::InterfaceKind::Tun(config) = kind.as_ref() {
+	create_tun(name, config)?;
+	self.effects.created_links.push(name.clone());
+	self.indices.clear();
+	return Ok(());
+}
+```
+
+The `return` at line 1211 is twenty lines above the block at 1231 that adds
+`netcfgd:<name>` as an alternative name, and `create_tun`
+(`kernel.rs:2402`) does not add one either -- it is three ioctls and nothing
+else. So every other virtual link netcfgd makes carries 0136's mark and a tun
+or a tap does not.
+
+**The cost is exactly what 0136 exists to prevent, scoped to one kind.** 0135
+and 0136 are one argument in two halves: ownership must not live only in
+`/run`, because `/run` is a tmpfs and a restart empties it. An address and a
+route survive that on the kernel's protocol number; a link has no protocol
+field, which is why it was given a name instead. A tun device therefore has
+its ownership recorded in `created_links` and nowhere else -- which is the
+state every link was in before 0136, and which 0136 was written because it was
+not good enough.
+
+Reproduction: a `device tap0 { tun { mode = "tap" } }`, `ncfg apply`, then
+`ip -d link show tap0` -- every other kind shows `altname netcfgd:<name>` and
+this shows none. Restart netcfgd, which empties `/run/netcfgd`; `ncfg status`
+now reports `tap0` as `unknown` rather than `ours`, and
+`ncfg_ownership_may_remove` says no. Take the device out of the configuration
+and netcfgd will not delete it, on that boot or on any later one -- the
+persistent device stays on the machine with nothing able to remove it but a
+person with `ip link delete`.
+
+It is one day old: 0254 added the arm on 2026-09-17. The port is not affected
+and cannot be: `ncfg_kernel_newlink_of` refuses a tun by name, so the C has one
+create path and `create_link` marks what it made after the acknowledgement.
+
+### And a mark that could not be written says nothing at all
+
+Beside it, in the block the tun arm skips:
+
+```quote from=crates/netcfgd-apply/src/kernel.rs
+if let Some(altname) = netcfgd_model::route::netcfgd_altname(name) {
+	if let Ok(index) = self.index_of(name) {
+```
+
+The two conditions have no `else`. A name `netcfgd_altname` will not build, or
+an index lookup that fails on a link created a moment earlier, both leave the
+link unmarked with nothing in the log -- while the `Err` arm *inside* them is
+careful to warn twice and say what was lost. Not reported as a defect on its
+own, because neither branch has a reproduction: the length check cannot fail
+for a name the kernel has accepted, and the lookup follows a successful create.
+It is recorded because it is the same silence in the same nine lines as the one
+above, and because the port answers it -- `mark_as_ours` warns on every way of
+not marking, having one place where all of them meet.
+
+### A guard of the port's own that could not have gone red
+
+`main_test.c` pinned the daemon's refusal to its stated reason by asserting
+that `src/apply/kernel_link.c` mentioned no alternative name. `create_link` has
+never been in that file -- it is `kernel.c`'s, and `kernel_link.c` is the five
+`link.set_*` ops -- so the grep would have gone on passing however the marking
+landed. The check that replaced it asserts the two closed facts closed, by
+behaviour where it can (`ncfg_owned_absorb` claims a created link) and by
+reading `kernel.c` for the definition **and the call** where it cannot, plus
+the reason that still stands, and it was proved by sabotage both ways.
+
+**The shape is §10.166's and worth the lines for the same reason.** A guard
+aimed at the wrong file is not a weak guard, it is an absent one wearing a
+guard's name -- and this one was load-bearing: it was the single check standing
+between the port's daemon and a machine somebody works over.
+
 ## 10.172 Four more, and what the halves found when they met
 
 The wave that closed the planner's gaps and the executor's. Four defects in

@@ -146,29 +146,40 @@ taken.
   "already defined; first defined at conf.d/10-office.conf:3" is the whole
   point of the redefinition check.
 * **`NCFG_DIAGS_MAX` bounds lowering too**, with `total` counting past it.
-* **No provenance side table, and `ncfg explain` says so rather than going
-  quiet.** `compile_with_provenance` is not ported: nothing in `src/compile/`
-  records an entry, because a side table nobody reads is a second thing that
-  has to go on agreeing with the document. `state.h` declares the table and
-  reads and writes `provenance.json` regardless, since that file's *shape* is
-  something this port reads whoever wrote it.
+* **The provenance side table is produced, and the type stays in `state.h`.**
+  This entry said for four waves that `compile_with_provenance` was not ported
+  and that nothing in `src/compile/` recorded an entry. That has stopped being
+  true: `ncfg_compile_with_provenance` and `ncfg_lower_with_provenance` are the
+  Rust's two calls, `ncfg_compile` is the same pipeline with nowhere to put the
+  table, and the lowering records the eleven kinds of entry the Rust records --
+  the interface block, its `mtu`, `addressing[<index>]`, `routes[<destination>]`,
+  `preference`, `guard` and `dns`, and `rule.<id>`, `access_point.<id>`,
+  `network.<id>` and `linkset.<name>`.
 
-  `ncfg explain` **is** in this wave, and it is the command that exists to
-  answer where a value came from -- so this is the whole of its subject rather
-  than a detail of it. It takes the table as an argument exactly as the Rust
-  does and is complete the day lowering starts recording one; until then every
-  lookup misses. **An explanation whose every lookup missed against an empty
-  table says so, in its own output, as its first fact**, and names no file and
-  no line anywhere. The alternative is an answer that silently stops naming
-  files, which a reader cannot tell from a configuration that has nothing to
-  name -- and an `explain` that invented a position would be worse than one
-  that says it does not know. It is the *first* fact for the reason the radio
-  fact comes before the addresses: a caveat about what an answer cannot contain
-  is worth nothing printed after the answer. Where the table has entries and
-  this field is not among them, nothing is said: that is a gap in a table
-  rather than the absence of one, and a blanket claim about it would be wrong.
-  Both directions are tested, including that the notice disappears the moment
-  a table with one entry is handed in.
+  **The type is still declared in `state.h` and not in the compiler**, where
+  the Rust keeps it. `state.h` already argued for that as the shape of a file
+  this port reads whoever wrote it, and the argument is stronger now that
+  something here writes one: two definitions of one file format is how a reader
+  and a writer come to disagree about a member name, and the compiler including
+  `state.h` costs one include against a second `Entry`.
+
+  `ncfg explain` **is** the command that exists to answer where a value came
+  from, so this is the whole of its subject rather than a detail of it. It
+  takes the table as an argument exactly as the Rust does. **An explanation
+  whose every lookup missed against an empty table says so, in its own output,
+  as its first fact**, and names no file and no line anywhere. The alternative
+  is an answer that silently stops naming files, which a reader cannot tell
+  from a configuration that has nothing to name -- and an `explain` that
+  invented a position would be worse than one that says it does not know. It is
+  the *first* fact for the reason the radio fact comes before the addresses: a
+  caveat about what an answer cannot contain is worth nothing printed after the
+  answer. Where the table has entries and this field is not among them, nothing
+  is said: that is a gap in a table rather than the absence of one, and a
+  blanket claim about it would be wrong. Both directions are tested, and the
+  fourth case is the one the producer made possible: the other three build a
+  table by hand and so say nothing about whether anything produces one keyed
+  the way `explain` asks, which is the seam where a full table and a silent
+  notice could still name no file at all.
 * **The linkset cycle walk is bounded**, and the bound is published so a test
   cannot spell the number itself. The Rust's recursion terminates on its own,
   which bounds its depth by the number of sets -- a bound on paper rather than
@@ -666,9 +677,11 @@ taken.
   2,972,192, with one `NEEDED` entry -- `libc.so.6` -- where the Rust has
   four. **Neither number is a like-for-like comparison and the entry says so
   rather than leaving it to be read as one**: this build's planner is four
-  passes of thirty, its executor takes thirteen ops of forty-eight, the daemon
+  passes of thirty, its executor refuses a handful of ops by kind, the daemon
   runtime is unreachable code, `--json` and the `network`-block writer are not
-  ported, and nothing records provenance. Three of the Rust's four libraries
+  ported. The figure also predates the provenance producer, which is a page of
+  `src/compile/` the measurement did not include. Three of the Rust's four
+  libraries
   are ncurses and its unwinder, which the port gives up deliberately (see
   `ncfg tui` above) rather than beats. The figure is worth recording because a
   port with no linked artefact has no size at all, and a symbol no binary
@@ -1031,7 +1044,7 @@ taken.
   * the planner is four passes of thirty, so a plan from this build is not the
     whole change and an apply would converge part of a machine and report
     having converged it;
-  * the executor takes thirteen ops of forty-eight and refuses the rest **as
+  * the executor carries every op kind and refuses a few by kind **as
     the plan runs**: `ncfg_apply_supported` is asked by `execute`, one action
     at a time, and `ncfg_apply` stops at the first failure, so a plan mixing
     a supported op with an unsupported one changes the machine and stops
@@ -1600,6 +1613,368 @@ taken.
   moved, which is the arrangement working -- "nothing is silently ignored" is a
   property the table exists to pin, and a table nobody updates is the one thing
   that could let an op move without being noticed.
+
+* **A created link wears `NCFG_OBSERVE_ALTNAME_PREFIX`, and the prefix is read
+  from `observe.h` rather than written again.** That header asked for exactly
+  this in as many words, and the reason is the one failure the whole mechanism
+  has: netcfgd stamping one spelling and reading back another makes every link
+  it creates foreign to it, for ever. The marking is built in `kernel_link.c`
+  and sent by `create_link` after the acknowledgement and never before it -- a
+  mark on a link the kernel refused to create would be aimed at whatever else
+  holds the name. A refusal is a **warning and not a failed create**, which is
+  the Rust's arrangement and its reason: an alternative name shares the lookup
+  namespace with a real one, so `EEXIST` is possible, and a kernel too old for
+  `RTM_NEWLINKPROP` refuses it outright. Neither is a reason to fail a link
+  that was made perfectly well, and `ncfg_observe_link_ownership` is additive
+  -- a recorded link with no marker is still ours.
+* **The fold into `owned.json` takes the plan and the journal, not an effect
+  list.** The Rust accumulates an `Effects` struct inside `KernelExecutor` and
+  the daemon calls `OwnedState::absorb` on it. Here the effect of an action
+  **is** the action: every member of that struct this record can carry is a
+  pure function of the op that produced it. So there is no second aggregate to
+  build, free and keep in step -- and, which is the point, the fold is driven
+  through `ncfg_executor_t` like everything else and is checked against the
+  recorder with no socket, no privilege and no interface. An accumulator inside
+  the real executor would put the one piece of bookkeeping that decides what
+  netcfgd may later delete behind a live netlink socket. This closes the two
+  entries above that deferred it -- *`plan.last.json` and the fold into
+  `owned.json` are deferred here as they are for the revert path* -- for the
+  fold; the journal writer is still deferred and is now the whole of it.
+* **A revert is recorded by reading the outcome, not by watching the executor.**
+  `ncfg_apply_record` folds the **inverse** for every record
+  `ncfg_apply_revert` marked `NCFG_OUTCOME_REVERTED`, so the claim leaves with
+  the object; a record whose inverse failed stays `done` and is folded again,
+  which is the honest answer, that change being still in effect. **The Rust
+  reaches the same answer by a different route and it was checked rather than
+  assumed**: its revert runs the inverses through the very executor it absorbs
+  afterwards, so their removals are already in the effect list. What made the
+  route matter here is that `ncfg_apply_revert` is a library call taking a
+  plan, a journal and an executor -- no run directory, no effects -- which is
+  precisely why 0263 deferred the fold on that path above. Folding one journal
+  twice is therefore deliberate and safe, every rule replacing or removing
+  before it adds.
+* **Removals are not hoisted before additions; the plan's order is the order.**
+  `OwnedState::absorb` applies every removal first "so that replacing an
+  address in one plan leaves exactly one record, not zero", which is a
+  correction for having lost the order on the way into the effect list --
+  and it inverts the one case it does not cover: an apply that added an object
+  and then removed it ends with the record claiming it. Folding the actions in
+  plan order needs no correction and has no such case, the plan order being the
+  execution order. Not reported as a defect in the Rust: nothing in that
+  planner emits the pair, so it is a shape rather than a reproduction.
+* **A hook's state is recorded because the hook ran.** The Rust pushes the
+  effect *before* running it, so a script it refused to run -- a content hash
+  that did not match the approved one -- is recorded as having been told, and
+  the event is silently lost. Here a refusal is a failed action and folds
+  nothing. The case the Rust's own comment is about, an event hook retried on
+  every reconcile for ever, is closed either way: a hook that ran and exited
+  non-zero is `NCFG_HOOK_NOTED`, which is a successful action.
+* **What an apply saw is not folded, only what it did.** `observed_running` is
+  the one member of `Effects` that is not an effect at all -- it is what the
+  *observation* found running, and it is what clears a backend's restart count
+  (0079). A start and a stop are folded here; the clearing belongs to whoever
+  composes the observation and is named rather than quietly missing.
+  `applied_dns` has nowhere to go for the reason `state.h` already gives: the
+  DNS scopes and the backends are deferred in this build because their element
+  types are the observed model's and its field tables are static.
+* **The fold happens under the apply lock, before the executor is closed.**
+  `ncfg_owned_update` takes `owned.lock` of its own, so the file cannot be
+  interleaved either way; the apply lock is what makes the read, the change and
+  the write describe one machine rather than two applies' worth of it. A plan
+  with an empty journal does not enter `ncfg_owned_update` at all, so a pass
+  that changed nothing does not rewrite a file another writer is in the middle
+  of.
+* **`netcfgd` still will not start, and the reason is no longer ownership.**
+  Both facts the guard named are closed and `ncfg_main_netcfgd_may_reconcile`
+  still answers 0. What is left is underneath it and is not `src/main/`'s: the
+  planner holds ten kinds of configuration block and warns per block rather
+  than acting (`warn_unported` in `src/plan/build.c` is the list); an op this
+  executor cannot carry out is refused **while the plan is running**, so a plan
+  mixing one with a supported op changes the machine and stops halfway; and
+  `plan.last.json` is still not written, so a plan that stopped halfway leaves
+  nothing under `/run` saying where. `main_test.c` asserts the two closed facts
+  closed and the executor's mid-plan refusal still true, so the check moves
+  with the sentence in both directions -- the version before it grepped
+  `kernel_link.c` for an alternative name, and `create_link` has never been in
+  that file, so it could not have gone red however the marking landed.
+
+* **A recorded position's file name comes from beside the span, never out of
+  it.** *Spans carry no source id*, above, is what forces this: the Rust asks
+  `sources.name(span.source)` and the C has no such member to ask. What it has
+  instead is the name merge already put beside every item and every block, so
+  `ncfg_record` **takes the name as an argument** rather than reading the
+  lowering context's. That is not fussiness: `ctx->source` is a *moving*
+  variable, reassigned per item as a block is walked, so a record taken after
+  the walk would name whichever file the block's last item came from. Today
+  those are the same file for every block but `global`, which records nothing
+  -- so the explicit argument is a hazard closed before it is reachable rather
+  than a defect fixed, and the sabotage that swapped it back caught nothing and
+  is reported as having caught nothing.
+* **The key is spelled at the site that records it, not through a helper.**
+  The Rust has `interface_path` and `field_path`, which return `String`s; the
+  C equivalent would allocate for every field of every compile to produce a
+  string used once. `ncfg_record`'s format argument *is* the helper, and what
+  holds the eleven sites to one spelling is a test that asserts each key
+  literally against a compiled fixture -- the consumer's spellings, taken from
+  `explain.c` rather than from memory. A key spelled differently is the one
+  failure `explain` cannot see: every lookup misses while the table is
+  non-empty, so the notice is correctly silent and no fact names a file.
+* **`Provenance::under` is not ported.** The Rust's prefix iterator exists for
+  "explaining a whole interface at once" and nothing in either program calls
+  it. A lookup this port has no caller for is a second thing that has to go on
+  agreeing with the writer.
+* **The table is bounded at `NCFG_PROVENANCE_MAX`, and there is no count past
+  it.** The parser's arrangement applied to the other list a compile produces,
+  and for the same reason: its length is chosen by whoever writes the
+  configuration directory, and a daemon re-reads that directory whenever
+  anything in it changes. What is deliberately missing is the `total` that
+  `NCFG_DIAGS_MAX` and `NCFG_DRIFT_MAX` carry beside them -- the count would
+  have to live in `ncfg_provenance_t`, whose members are the members of
+  `provenance.json`, and adding one would be a second definition of a file
+  format this port reads whoever wrote it. A caller that wants to know compares
+  `count` against the bound. What a short table costs is a gap per field, which
+  is the state `explain` is already written and tested for.
+* **A key too long to build is not recorded at all.** Not truncated, which
+  would put a path in the table that belongs to no field and looks exactly like
+  a field nobody wrote. It is reachable: a `rule` label is the operator's text
+  and `rule.<id>` is as long as that label.
+* **A refused compile hands back an empty table, not a partial one.** The Rust
+  returns `Err` and the half-filled `Provenance` is dropped with the stack
+  frame; in C the table is the caller's own structure and survives the call, so
+  emptying it is a step rather than a consequence. It is not a nicety: the
+  caller that asks for one is the caller that writes `provenance.json` beside a
+  document, and a table of paths into a document nobody got would be read
+  against the document from the compile before it.
+* **`ncfg explain` is still not wired, and `run.c`'s stub still says the table
+  is empty because nothing fills one in.** That sentence has stopped being
+  true. `src/cli/` belongs to another worker in this wave; the correction is
+  one comment and is named here rather than taken.
+
+* **`--json` prints the payload and never the response envelope**, at every
+  verb that renders something. *The port links* above counts `--json` among
+  what was not ported when the binary was first measured, and `run.c` refused
+  the flag at six verbs by name; both were true because there was no writer
+  for a protocol answer. There is one now (`src/cli/json.c`), and the size
+  entry stands as the measurement it was rather than being edited. What the
+  writer writes is the members the control socket
+  carries beside its `"response"` tag with the tag left off. The tag cannot be
+  universal: `ncfg status --json` and `ncfg plan --json` are computed here
+  rather than received, and their shapes are already frozen as
+  `doc/schema/observed.json` and `doc/schema/plan.json`, neither of which has
+  a `"response"` member. Tagging only the socket-answered verbs would be two
+  rules for one flag. So there is none anywhere, and `cli_test.c` proves the
+  agreement the other way round: each `{"response":...}` line of
+  `doc/schema/socket.json` is decoded by `proto.h`, written back by the CLI's
+  writer and compared against that same line with its tag cut off
+  mechanically. A member renamed at either end is red.
+* **The radios and the modems keep the object the socket wraps them in.** The
+  Rust prints `serde_json::to_string(&radios)` and `(&modems)` -- bare arrays
+  -- while printing an object for the scan, the radio status and the station
+  list, which is `Response`'s wrapper surviving in three places and not in
+  two. A bare array cannot grow a fact beside it, and `wifi_scan` already
+  carries `stale` beside its list. One shape for all five is also one thing
+  for a caller to learn.
+* **A verb whose whole answer is `ok` prints `{"ok":true}`.** The payload rule
+  above would make it `{}`, `{"response":"ok"}` carrying nothing beside its
+  tag, which tells a script nothing the exit status had not. `ok` is the
+  protocol's own word for the fact -- a `reloaded` event spells it exactly so.
+  This covers `wifi activate`, `deactivate`, `connect`, `disconnect`,
+  `reload`, `confirm` and `revert`; **the Rust prints its human sentence for
+  all seven and ignores the flag**, which is the fault the six refusals in
+  `run.c` existed to prevent, arriving through the verbs nobody had looked at.
+  The last three were not among those six and were ignoring it here too.
+* **`ncfg explain --json` carries `total` beside its facts.** The socket's
+  `explanation` response is `{"subject", "facts"}` and the Rust's
+  `Explanation` has no bound to report; this port's is bounded at
+  `NCFG_EXPLAIN_FACTS_MAX` and the text form ends with "showing 256 of 1202"
+  when it bites. A machine-readable form that dropped the count would be the
+  one place `--json` says less than the table, which is what the flag exists
+  to avoid. It is written always rather than only when the bound bites, so a
+  reader compares it against the length of `facts` instead of having to know
+  the member is sometimes absent. It is an addition to a shape `proto.h`
+  reads strictly, so it is said here: an `explanation` **response** is
+  unchanged and still carries neither.
+* **`ncfg monitor --json` prints the line the daemon sent, decoded by
+  nobody.** The one `--json` in this program that switches a rendering off
+  rather than a writer on, and the Rust's own arrangement for the same reason:
+  an event is already one JSON value on a line. Re-composing one from
+  `ncfg_proto_event_t` would drop every member this build has never heard of,
+  on the one verb whose whole argument for existing is that it does not
+  swallow what it cannot name -- so the line is not even parsed first.
+* **A name that is not valid UTF-8 fails the command rather than the
+  program.** *The JSON writer refuses a string that is not valid UTF-8*, above,
+  says what the writer does; this is what a CLI does with that refusal. It is
+  reachable rather than theoretical: the JSON *reader* does not check a
+  string's bytes, so a stray octet inside a `name` or a `configured` travels
+  from a daemon into a decoded answer intact, and `ncfg explain`'s subject
+  comes straight off `argv`. Nothing at all is printed -- `ncfg_buf_t` hands
+  out the empty string for a buffer that failed, so a caller that printed
+  anyway would emit half an object that looks whole -- and the sentence names
+  the rule and points at the same command without the flag, which has no such
+  rule because a table is text for a terminal. Driven end to end in
+  `cli_test.c` against a fake daemon whose answer carries the octet.
+* **`ncfg plan --json` prints the plan and neither note under it.** The
+  empty-configuration note and the contention warning are sentences addressed
+  to a person and are facts about the machine rather than members of the plan;
+  printing them beside the document would put two lines that are not JSON on a
+  stream that promised to be one value. The Rust skips them here too, which is
+  the one place its `--json` handling is what this port would have chosen.
+* **The subcommands that write still ignore `--json`, in both programs.**
+  `ncfg wifi add`, `wifi forget`, `reset`, `control`, `config`, `profile` and
+  `secret` each answer 1 or 0 and print their own sentences as they go, so the
+  flag cannot be closed at the dispatch the way the seven `ok` verbs were --
+  `say_json_ok` after one of them would print prose and then a document. It is
+  named here rather than left as a gap somebody rediscovers: what it needs is
+  the human lines behind the same test inside each writer, which is those
+  files' work and not `run.c`'s. The Rust is in exactly this state and has
+  been since the flag existed.
+* **`ncfg show` takes no `--json` and never did.** It prints the document
+  canonically whatever is passed, in both programs, because the document *is*
+  the answer -- `doc/schema/document.json` is that output. Named here so that
+  a reader counting the verbs that honour the flag does not read its absence
+  as the omission the entries above are closing.
+
+* **The `network` block writer is one module with two callers, and
+  `ncfg_wifi_install_fn` has an implementation.** This record named the gap
+  twice -- once as the seam the daemon's `wifi_add` handler was given because
+  `netcfgd_host::wifi_profile` was not ported, and once as the reason `ncfg
+  wifi add` and `ncfg wifi forget` were refusals. `wifi_profile.h` is that
+  module, `ncfg_wifi_profile_installer` is the seam's one implementation, and
+  the profile type is `daemon.h`'s rather than a second spelling of the same
+  fields. The seam stays a seam: `daemon.h` may not depend on the host module,
+  and a test of what a request is allowed to say should not have to write a
+  file to reach it.
+* **The round trip after an install compares every field the block can carry.**
+  The Rust compares whether the network is there, whether it is secured, and
+  the five enterprise fields -- while its own comment says the check covers "an
+  SSID whose hex form did not round-trip", which nothing in it reads. The
+  hidden flag, the metric, the WPA generation and which credential the block
+  refers to are compared by nothing. Here all of them are, so the install *is*
+  the comparison 10.160 found missing one layer up, and sabotaging any one
+  rendered key turns a success into a refusal naming that field.
+* **The install verifies through the loader that reads the selected profile.**
+  `install_drop_in` was fixed to do that and this second writer of the same
+  directory was not, so on a profiled machine the Rust checks a configuration
+  the machine does not load. Both use the profiled loader here.
+* **A credential carrying a NUL is refused, and so is an empty one.** Nothing
+  downstream can carry a NUL -- the supplicant's control socket is lines,
+  hostapd's file is lines, and anything treating the value as a C string stores
+  the part before it, silently. Rust's `&str` may hold one and only the PSK
+  path looks. The empty case is `ncfg_secret_store_put`'s rule applied at the
+  other door into the same directory.
+* **`ncfg wifi add` loads the configuration once.** The Rust loads it twice --
+  `current` reads the layered sources to ask whether there is anything at all,
+  then `compile` reads them again with the profile -- so the question "is there
+  a configuration" is answered against a different source set from the one the
+  answer is built from. One walk cannot disagree with itself.
+* **`ncfg reset` compares its two directories resolved, not as text.** The
+  Rust's `PathBuf` comparison is component-wise, which sees a trailing slash
+  through and nothing else; a symlink walks straight past it, and the run that
+  does removes the factory layer and then reports those same files as the ones
+  that remain. Measured. Where a name does not resolve it is compared as it
+  stands, which is right for the only case that produces: a directory that is
+  not there has no files to delete and none to protect.
+* **`ncfg reset` refuses an argument rather than ignoring one.** The Rust's
+  dispatch drops every positional here, so `ncfg reset office --yes` empties
+  the writable layer and says nothing about the word it did not understand.
+  Measured. This is the wrong verb to be relaxed about an argument nobody can
+  act on.
+* **`ncfg reset` says `would remove` before, and `removed` after.** The Rust
+  prints the whole list under the word `removed` and *then* runs the loop that
+  removes, which stops at the first failure -- so a reset that could not finish
+  has already told the operator that every file is gone, with the one that
+  stopped it named in a sentence underneath a list saying otherwise. Measured:
+  the base file gone, both drop-ins left, and three lines claiming all three.
+  Here the whole list is `would remove` in both modes, because at that point
+  nothing has been, and each `removed` line is printed once that file is
+  actually gone; a failure names the path, the kernel's reason, and how many of
+  how many had already gone. **The root case is not covered by a test and says
+  so in the test rather than being counted**: `unlink` is not stopped by a
+  directory's mode for this process, so a suite running as root cannot drive
+  it.
+* **`ncfg reset` counts the credentials that outlive it.** The Rust removes
+  `writable_files` and nothing else, so the credential store survives whole
+  while everything that referred to it goes -- which is the fault a credential
+  listing exists to surface, manufactured by the one verb that empties the
+  configuration. Not removing them is right (0042) and saying nothing is not,
+  so the count and the directory are printed. Its note also says "the next
+  reconcile or apply" where the Rust says "the next apply": a machine whose
+  `on_drift` is `reconcile` does not wait to be asked.
+* **`not_in_this_wave` and `NEEDS_WRITERS` are gone from `run.c`.** These three
+  verbs were their last callers. That is what `NEEDS_OBSERVER` did before them
+  and for the reason written there -- a refusal naming a module that is present
+  is worse than one naming a module that is absent, because it looks right --
+  and the next verb to need one writes the sentence it needs.
+
+* **A `monitor` is handed over, and the entry above saying nothing hands one
+  over is spent.** `server.c` takes `NCFG_PROTO_REQ_MONITOR` after the
+  authorization gate and before anything else, exactly as it takes `hello`, and
+  the reason is structural rather than a preference: `ncfg_daemon_answer_fn` is
+  given a request and a buffer and **no descriptor**, so there is nothing it
+  could hand over. That is why the Rust special-cases `monitor` in its server
+  too, beside the loop it gives the stream to, rather than in the dispatcher
+  behind it. The seam is `ncfg_daemon_stream_fn`, a second member of
+  `ncfg_daemon_serve_t` sharing the one `context` -- two contexts would be two
+  implementations of the daemon's state with nothing keeping them in step, and
+  the Rust sends a request and a subscription down the same channel for the
+  same reason. `ncfg_main_answer_unported` keeps a row for `monitor`, now
+  `hello`'s row one step further out: reaching the dispatcher with one is a bug
+  in the server.
+* **The subscription crosses to the loop through the mailbox, which is what
+  makes "the subscriber list holds no lock" true.** That claim was already
+  written in `loop_internal.h` and was worth nothing while nothing added a
+  subscriber: the list is only safe unlocked because every call on it -- the
+  pass announcing through it and this one adding to it -- happens on the loop's
+  thread. So `ncfg_main_mailbox_stream` parks the connection's thread exactly as
+  a request does and the descriptor is handed to the seam from inside
+  `ncfg_main_mailbox_settle`. A waiting subscription carries **no request**, so
+  `ncfg_main_mailbox_take` never puts one in the array the pass reads; and a
+  slot not in use holds `stream_fd` of -1 rather than 0, because zero is a
+  descriptor and a request slot misread as a stream would subscribe this
+  process' standard input. It settles **after** the pass rather than before,
+  which is the Rust's order and the right one: a client that asks to watch is
+  told what happens next, not about a pass that was already running when it
+  asked.
+* **What is handed over is a `dup`, and the connection thread then ends rather
+  than parking on the connection.** The sketch this was written from said park;
+  three things say otherwise and the first decides it. `ncfg_main_subscribers_add`
+  puts the descriptor in non-blocking mode -- it must, the loop writing events
+  from the thread that reconciles -- and `O_NONBLOCK` belongs to the open file
+  description, which a `dup` *shares*: a parked `recv` on the connection would
+  return `EAGAIN` at once, for ever, which is a thread spinning at 100% CPU for
+  as long as somebody is watching. Second, a parked thread holds one of
+  `NCFG_DAEMON_MAX_CONNECTIONS` for the life of a stream measured in hours.
+  Third, there is nothing worth learning from that side: end of stream on the
+  read half is **not** proof the client has gone, since a client may
+  `shutdown(SHUT_WR)` once it has asked and go on reading for hours -- so the
+  only reliable signal that a subscriber is gone is a write that fails, and that
+  belongs to whoever writes. The copy is what makes the hand-over unambiguous:
+  each side closes exactly what it opened, where handing over the connection's
+  own number would have two owners closing one descriptor, which is how a daemon
+  comes to write one client's events into another client's socket.
+* **A hand-over that is refused leaves the descriptor with the caller**, which
+  is `ncfg_main_subscribers_add`'s rule carried up through two layers: the seam
+  answers 0 with a sentence, the server closes its copy and sends that sentence
+  back as an `error`, and the connection goes on serving -- a refusal being an
+  answer. A refusal that had closed the copy *and* left the seam holding the
+  number is the double close this whole arrangement exists to avoid, so both
+  halves are checked, including that a refused `monitor` leaks no descriptor.
+* **The Rust's monitor thread holds a connection slot until something is
+  announced, and this one does not.** The defect is reported in project.md
+  10.176 and the divergence is the shape that avoids it: `handle` blocks in
+  `for event in incoming` for the life of the stream, so a client that
+  subscribes and hangs up holds one of sixty-four slots until the next
+  broadcast -- which on a converged machine never comes. Here the slot goes back
+  the moment the descriptor is handed over, and what a dead subscriber costs is
+  one entry in a list bounded at `NCFG_MAIN_SUBSCRIBERS_MAX` rather than a share
+  of the control socket. **What is left is named rather than claimed away**: a
+  hung-up subscriber is still only found by the write that fails, so on a
+  machine that announces nothing at all up to sixteen dead streams can sit in
+  the list and the seventeenth `monitor` is refused -- bounded, and with a
+  sentence saying so, where the Rust's is a `Vec` with no bound and says
+  nothing. Closing that last gap means the loop watching the subscriber
+  descriptors for `POLLHUP`, which is a `prune` in `daemon_world.c` and belongs
+  to whoever owns that file next.
 
 ## What is not being decided here
 
