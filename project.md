@@ -9499,6 +9499,33 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.157 An attribute length that truncates, found by porting it
+
+`AttrBuf::push` in `crates/netcfgd-sys/src/wire.rs` computes the attribute
+length as a `usize` and casts it to `u16` under
+`#[allow(clippy::cast_possible_truncation)]`. A value of 65,532 bytes or more
+therefore produces an attribute whose header claims a handful of bytes, with
+the rest of the value sitting where the next attribute's header should be --
+a malformed message rather than a refusal.
+
+**It is reachable.** `wg.rs` pushes a whole peer set as one attribute:
+`attrs.push(WGDEVICE_A_PEERS | NLA_F_NESTED, peers.as_bytes())`. A peer costs
+something like 60 to 120 bytes depending on how many allowed prefixes it
+carries, so a WireGuard device somewhere between five hundred and a thousand
+peers crosses the line -- which is an ordinary size for a hub. The nested
+allowed-prefix list inside one peer has the same shape one level down.
+
+Found while porting the module to C, by a worker that had to decide what the
+C encoder should do with a value that long and went looking for what the Rust
+does. **That is the argument for the port producing findings rather than only
+code**: the cast is suppressed by name in the source, so nothing was going to
+notice it from the inside, and no test covers a value near the bound.
+
+Not fixed here. It belongs on `master` rather than on the port's branch, it
+wants a test that builds a peer set past the bound, and the fix is a decision
+between refusing the push and splitting the message -- which is netlink's own
+answer for a dump and may be this one's too.
+
 ## 10.156 A test that disarms the process it shares
 
 Two symptoms in `netcfgd-sys`, neither mentioning its cause: **thirty seconds**

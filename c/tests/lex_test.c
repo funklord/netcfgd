@@ -337,7 +337,7 @@ int main(void)
 
 		if (token_at("mtu = 1500\n", 0u, &token)) {
 			check(token.span.offset == 0u && token.span.length == 3u
-				&& token.span.line == 1u && token.span.column == 1u,
+			    && token.span.line == 1u && token.span.column == 1u,
 			    "a token's span covers exactly the token");
 			ncfg_token_free(&token);
 		} else {
@@ -345,7 +345,7 @@ int main(void)
 		}
 		if (token_at("mtu = 1500\n", 2u, &token)) {
 			check(token.span.offset == 6u && token.span.length == 4u
-				&& token.span.column == 7u,
+			    && token.span.column == 7u,
 			    "and the next one starts where it starts");
 			ncfg_token_free(&token);
 		} else {
@@ -355,7 +355,7 @@ int main(void)
 		 * is what makes the second line's first column one again. */
 		if (token_at("a\nbb\n", 2u, &token)) {
 			check(token.span.line == 2u && token.span.column == 1u
-				&& token.span.offset == 2u,
+			    && token.span.offset == 2u,
 			    "a newline starts a line and resets the column");
 			ncfg_token_free(&token);
 		} else {
@@ -363,7 +363,7 @@ int main(void)
 		}
 		if (token_at("a\n", 2u, &token)) {
 			check(token.kind == NCFG_TOKEN_EOF && token.span.length == 0u
-				&& token.span.offset == 2u,
+			    && token.span.offset == 2u,
 			    "end of input has a position and no width");
 			ncfg_token_free(&token);
 		} else {
@@ -389,7 +389,7 @@ int main(void)
 		 * error rather than a name, and a float refused rather than
 		 * lexed as something. */
 		check(lex_fails(".42 { }\n", message, sizeof(message), &span)
-			&& says(message, "unexpected character"),
+		    && says(message, "unexpected character"),
 		    "a bare dot is not a name");
 		check(span.offset == 0u && span.line == 1u && span.column == 1u,
 		    "and the complaint points at the dot");
@@ -452,18 +452,18 @@ int main(void)
 			check(0, "and so does the smallest, which has no positive twin");
 		}
 		check(lex_fails("9223372036854775808", message, sizeof(message), &span)
-			&& says(message, "does not fit in 64 bits"),
+		    && says(message, "does not fit in 64 bits"),
 		    "one past it does not, and says so");
 		/* Refused by name here rather than as a stray `.` on the next
 		 * token, where the message would be about punctuation instead
 		 * of about the rule. */
 		check(lex_fails("mtu = 15.5\n", message, sizeof(message), &span)
-			&& says(message, "integers"),
+		    && says(message, "integers"),
 		    "a float is refused in the words of the rule");
 		check(span.offset == 6u && span.column == 7u,
 		    "pointing at the number rather than at the dot");
 		check(lex_fails("mtu = -\n", message, sizeof(message), &span)
-			&& says(message, "expected digits after `-`"),
+		    && says(message, "expected digits after `-`"),
 		    "a minus with nothing after it is not a number");
 	}
 
@@ -481,7 +481,7 @@ int main(void)
 		/* A string spans lines because the netifrc spelling puts
 		 * several routes in one value, one per line. */
 		if (token_at("routes = \"default via 192.0.2.1\nvia 192.0.2.2\"\n", 2u,
-			&token)) {
+		    &token)) {
 			check(text_is(&token, "default via 192.0.2.1\nvia 192.0.2.2"),
 			    "a string runs across lines, newline and all");
 			ncfg_token_free(&token);
@@ -490,7 +490,7 @@ int main(void)
 		}
 		if (token_at("\"\"", 0u, &token)) {
 			check(token.kind == NCFG_TOKEN_STRING && text_is(&token, "")
-				&& token.text_length == 0u,
+			    && token.text_length == 0u,
 			    "an empty string is a value, not a failure");
 			ncfg_token_free(&token);
 		} else {
@@ -506,16 +506,16 @@ int main(void)
 			check(0, "a string carries non-ASCII through unchanged");
 		}
 		check(lex_fails("\"\xff\"", message, sizeof(message), &span)
-			&& says(message, "not valid UTF-8"),
+		    && says(message, "not valid UTF-8"),
 		    "but a byte that is not text is refused");
 		/* An overlong encoding decodes to a character it is not
 		 * spelled as, which is how a value that was checked becomes a
 		 * different value once something downstream decodes it. */
 		check(lex_fails("\"\xc0\xaf\"", message, sizeof(message), &span)
-			&& says(message, "not valid UTF-8"),
+		    && says(message, "not valid UTF-8"),
 		    "and so is a second spelling of an ASCII character");
 		check(lex_fails("\"a\\q\"", message, sizeof(message), &span)
-			&& says(message, "unknown escape `\\q`"),
+		    && says(message, "unknown escape `\\q`"),
 		    "an escape that is not one of the four is named");
 		check(span.offset == 3u && span.length == 1u,
 		    "and pointed at, rather than the string as a whole");
@@ -527,13 +527,13 @@ int main(void)
 	 * would send the reader to a line that is not the mistake. */
 	{
 		check(lex_fails("interface eth0 {\n\tconfig = \"dhcp\n\tmtu = 1500\n}\n",
-			  message, sizeof(message), &span)
-			&& says(message, "unterminated string"),
+		      message, sizeof(message), &span)
+		    && says(message, "unterminated string"),
 		    "an unterminated string is refused");
 		check(span.line == 2u && span.column == 11u,
 		    "at the opening quote, not where the lexer stopped");
 		check(lex_fails("\"a\\", message, sizeof(message), &span)
-			&& says(message, "unterminated string"),
+		    && says(message, "unterminated string"),
 		    "and a file ending inside an escape is the same fault");
 	}
 
@@ -552,7 +552,7 @@ int main(void)
 		ncfg_lexer_init(&lexer, source, sizeof(source) - 1u);
 		for (i = 0; i < 3; i++) {
 			if (!ncfg_lexer_next(&lexer, &token, nul_message,
-				sizeof(nul_message))) {
+			    sizeof(nul_message))) {
 				break;
 			}
 			if (i == 2) {
@@ -572,12 +572,12 @@ int main(void)
 		ncfg_lexer_t lexer;
 
 		if (hook_body_of(hook_plain, &body, &length, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			check(body
-				&& strcmp(body,
-				       "\t\tlogger -t netcfgd \"eth0 is up with "
-				       "$NCFG_ADDRESSES\"\n")
-				    == 0,
+			    && strcmp(body,
+			           "\t\tlogger -t netcfgd \"eth0 is up with "
+			           "$NCFG_ADDRESSES\"\n")
+			        == 0,
 			    "a hook body is shell, kept exactly as written");
 			check(length == strlen(body ? body : ""),
 			    "and its length is the bytes it holds");
@@ -592,7 +592,7 @@ int main(void)
 		 * an `interface` block is written indented. */
 		body = NULL;
 		if (hook_body_of(hook_tab_closed, &body, NULL, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			check(body && strcmp(body, "\techo hi\n") == 0,
 			    "a closing brace indented with a tab still closes it");
 			free(body);
@@ -602,7 +602,7 @@ int main(void)
 
 		body = NULL;
 		if (hook_body_of(hook_trailing_space, &body, NULL, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			check(body && strcmp(body, "echo hi\n") == 0,
 			    "and so does one with whitespace after it");
 			free(body);
@@ -621,7 +621,7 @@ int main(void)
 		 * one-line form, which is the next case. */
 		body = NULL;
 		if (hook_body_of(hook_shell_function, &body, NULL, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			check(body && strcmp(body, "\tgreet() {\n\techo hello\n") == 0,
 			    "a shell function's own brace ends the body early");
 			free(body);
@@ -631,9 +631,9 @@ int main(void)
 
 		body = NULL;
 		if (hook_body_of(hook_one_line_function, &body, NULL, message,
-			sizeof(message), &lexer)) {
+		    sizeof(message), &lexer)) {
 			check(body
-				&& strcmp(body, "\tgreet() { echo hello; }\n\tgreet\n") == 0,
+			    && strcmp(body, "\tgreet() { echo hello; }\n\tgreet\n") == 0,
 			    "while the one-line form the manual gives survives");
 			free(body);
 		} else {
@@ -644,7 +644,7 @@ int main(void)
 		 * what follows a hook has to lex as configuration again. */
 		body = NULL;
 		if (hook_body_of(hook_then_more, &body, NULL, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			ncfg_token_t token;
 
 			free(body);
@@ -661,7 +661,7 @@ int main(void)
 
 		body = NULL;
 		if (hook_body_of(hook_unterminated, &body, NULL, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			free(body);
 			check(0, "a hook body with no closing line is refused");
 			check(0, "naming where the body began");
@@ -678,7 +678,7 @@ int main(void)
 		body = NULL;
 		length = 1u;
 		if (hook_body_of(hook_empty, &body, &length, message, sizeof(message),
-			&lexer)) {
+		    &lexer)) {
 			check(body && body[0] == '\0' && length == 0u,
 			    "an empty hook body is empty rather than absent");
 			free(body);
