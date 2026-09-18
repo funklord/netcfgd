@@ -960,6 +960,30 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  * that announces three of an operator's four prefixes is announcing something
  * nobody wrote, to every host on the wire, with nothing saying so.
  */
+/*
+ * How many openvpn tunnels one executor carries resolved credentials for.
+ *
+ * Bounded for the claims' reason, and small because each of these is a tunnel
+ * with a process behind it. **What did not fit is a refusal**, as with the
+ * advertisements and for the same reason: a tunnel started without the
+ * password its document names does not come up, and it is better to say so
+ * than to start one that will sit retrying.
+ */
+#define NCFG_MAIN_TUNNELS_MAX            8
+
+/*
+ * How long a path this file composes.
+ *
+ * `main_internal.h` has `NCFG_MAIN_PATH_MAX` for the same purpose and the same
+ * number, and this is deliberately not that one: the two headers are
+ * independent -- the loop owns descriptors and the other decides an exit
+ * status -- and including that one here to borrow a constant would couple them
+ * for the sake of four characters. The composers this bounds all refuse rather
+ * than truncate, so the two numbers agreeing is a convenience and not a
+ * requirement.
+ */
+#define NCFG_MAIN_LOOP_PATH_MAX          512
+
 #define NCFG_MAIN_ADVERTISE_MAX          8
 #define NCFG_MAIN_ADVERTISE_PREFIX_MAX   8
 #define NCFG_MAIN_ADVERTISE_SERVER_MAX   4
@@ -1072,6 +1096,23 @@ typedef struct {
 	                                                [NCFG_MAIN_ADVERTISE_PREFIX_MAX];
 	const char                   *advertise_servers[NCFG_MAIN_ADVERTISE_MAX]
 	                                               [NCFG_MAIN_ADVERTISE_SERVER_MAX];
+	/*
+	 * Each tunnel, with its credentials resolved.
+	 *
+	 * **The passwords are the one thing this struct holds that has to be
+	 * destroyed rather than dropped.** `ncfg_secret_free` wipes the bytes
+	 * before freeing, which `secrets.h` argues for at length: the buffer is
+	 * netcfgd's until the last instant, and clearing it shortens the window in
+	 * which a core dump or a later allocation of the same block carries a
+	 * passphrase. So they are owned here, by the world, and released with the
+	 * rest of the service -- which means an executor's close wipes them, once
+	 * per apply, rather than leaving them resident for the life of the daemon.
+	 */
+	ncfg_service_tunnel_t         tunnels[NCFG_MAIN_TUNNELS_MAX];
+	size_t                        tunnel_count;
+	ncfg_secret_t                *tunnel_passwords[NCFG_MAIN_TUNNELS_MAX];
+	char                          tunnel_reports[NCFG_MAIN_TUNNELS_MAX]
+	                                            [NCFG_MAIN_LOOP_PATH_MAX];
 	/* How long to wait for the apply lock. A field so that a test does not
 	 * have to wait thirty seconds to see the refusal. */
 	long                     patience_ms;
@@ -1271,6 +1312,28 @@ size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_
  */
 size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
     const ncfg_observed_t *observed, size_t *missed);
+
+/*
+ * Each openvpn tunnel the document declares, with its credentials resolved.
+ *
+ * Fills `world->tunnels` and the passwords beside them. The `.ovpn` and the
+ * username are borrowed from the document; the password is resolved through
+ * the world's own secret resolver and **owned by the world**, because
+ * `ncfg_secret_free` wipes it and nothing else would.
+ *
+ * **A tunnel whose password cannot be resolved gets no entry**, and
+ * `backend.start` then refuses it by name. Starting openvpn without the
+ * credential its document names produces a daemon that authenticates, fails,
+ * and retries -- `--auth-retry` decides for how long -- which reads to an
+ * operator as a network problem rather than as a secret netcfgd could not
+ * read. A tunnel that authenticates without one is not this case: it names no
+ * password and gets an entry with none.
+ *
+ * Answers how many were taken, counting in `*missed` (which may be NULL) those
+ * that had credentials and did not fit.
+ */
+size_t ncfg_main_tunnels_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    size_t *missed);
 
 /*
  * Fill in everything the fourteen service-side ops need, from one world.

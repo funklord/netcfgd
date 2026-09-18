@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.192 The service context is complete, and the refusal is about the planner now
+
+The last unresolved member of `ncfg_service_t` was `tunnels`:
+`ncfg_main_tunnels_of` fills it from the document's openvpn devices -- the
+`.ovpn` and the username borrowed, the password resolved through the world's
+own secret resolver, and the report file composed from `state.h`'s path.
+
+**The passwords are the one thing the world holds that has to be destroyed
+rather than dropped.** `ncfg_secret_free` wipes the bytes before freeing, which
+`secrets.h` argues for at length, so they are owned by the world and released
+with the rest of the service -- meaning an executor's close takes a credential
+out of this process' memory once per apply instead of leaving it resident for
+the life of the daemon. A tunnel whose password cannot be resolved gets **no
+entry**, so `backend.start` refuses it by name: starting openvpn without the
+credential its document names produces a daemon that authenticates, fails and
+retries, which reads to an operator as a network problem rather than as a
+secret netcfgd could not read. "Names none" and "names one that failed" are
+different answers and both have a check.
+
+`ncfg_state_report_path` is the third lift-on-second-caller of this campaign,
+after the DNS scope rule and the prefix resolution. `<run>/reported/<iface>`
+was `ncfg_dhcp_report_path`, where the first caller needed it; a tunnel's
+`--route-up` writes the same file for the same reader, and
+`ncfg_state_read_reports` is the other half -- a writer that composed the path
+for itself is a report written where nothing looks for it.
+
+**So the refusals move a fourth time, and this time away from the executor
+entirely.** Every member of the service context is resolved; the fourteen ops
+that are not netlink are carried out rather than refused. What is left is the
+planner, which does not read every block a document can carry.
+
+**And the block list comes out of `may_reconcile`'s comment rather than being
+corrected.** It named ten blocks; most had landed while the sentence sat
+unchanged, so a reader was being told a pass was missing that had been there
+for waves. Rather than write today's list and wait for it to rot the same way,
+it now points at `warn_unported` and the per-pass held-block warnings -- which
+stay current by a rule that cannot rot, because a pass landing takes its
+warning out in the same commit. That is 10.177's lesson about counts applied to
+a list.
+
+**Two things caught by the work rather than by a check.**
+
+`ncfg_main_tunnels_of` read `world->service.secrets`, which
+`ncfg_main_service_of` sets -- so its answer depended on the order of
+assignments inside its caller, and every password came back unresolved when the
+test called it directly. Worse, the refusal path made that look like a missing
+credential rather than a bug. It reads `world->secrets` now, which is the
+world's own and does not depend on who called it.
+
+And **the stale-binary trap caught me again**: adding fields to
+`ncfg_main_world_t` and running `make -j8` linked objects compiled against two
+different struct layouts, and `world_test` segfaulted at `-Os` while passing
+under both `DEBUG=1` and `SANITIZE=1`. Twenty minutes went into bisecting a bug
+that was not there. `c/Makefile` has no header dependencies and this is written
+down in three places, including this session's own memory file. **After editing
+a header, `make clean`.**
+
+6,286 checks across 95 binaries. Four sabotages caught: an entry for a tunnel
+whose password failed, the report path losing its `reported/` component, the
+passwords not wiped on release, and the unmanaged-device skip.
+
 ## 10.191 `running` stops being a memory and becomes a fact
 
 `ncfg_observed_backend_t::running` has always said of itself that it is *a fact

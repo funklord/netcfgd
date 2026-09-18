@@ -17,6 +17,7 @@
 #include "ncfg/base.h"
 
 #include <dirent.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -448,6 +449,38 @@ static int gather_fragments(const char *run_dir, gathered_t **at, size_t *count,
 		ncfg_error_set(err, err_size, "out of memory reading the interface reports");
 	}
 	return ok;
+}
+
+int ncfg_state_report_path(const char *run_dir, const char *interface, char *out,
+    size_t out_size, char *err, size_t err_size)
+{
+	int written;
+
+	if (!run_dir || !run_dir[0] || !interface || !interface[0] || !out || out_size == 0u) {
+		ncfg_error_set(err, err_size,
+		    "a report path needs a run directory and an interface to name");
+		return 0;
+	}
+	/*
+	 * A name with a separator in it would escape the directory the reader
+	 * walks, which is the same guard every other path composer in this port
+	 * applies. An interface name cannot contain one; a caller passing
+	 * something that is not an interface name is the case this refuses.
+	 */
+	if (strchr(interface, '/') != NULL || strcmp(interface, ".") == 0 ||
+	    strcmp(interface, "..") == 0) {
+		ncfg_error_set(err, err_size,
+		    "`%s` cannot name a report: it is not one path component", interface);
+		return 0;
+	}
+	written = snprintf(out, out_size, "%s/reported/%s", run_dir, interface);
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+		ncfg_error_set(err, err_size, "the report path for %s does not fit in %zu bytes",
+		    interface, out_size - 1u);
+		return 0;
+	}
+	return 1;
 }
 
 int ncfg_state_read_reports(const char *run_dir, ncfg_observed_report_t **out, size_t *count_out,
