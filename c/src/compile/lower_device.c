@@ -917,6 +917,13 @@ int ncfg_lower_device(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
 			} else if (is_structural_key(key)) {
 				lower_structural_key(ctx, &device, assignment);
 			} else if (strcmp(key, "mtu") == 0) {
+				/* Recorded on the device and keyed under the interface: the MTU
+				 * describes the adapter and moved here with 0155 pass 1a, while
+				 * the name the key is built from is the one `explain` is asked
+				 * about. A value that quietly stopped being explainable would
+				 * be the feature failing silently. */
+				ncfg_record(ctx, ctx->source, assignment->span, "interfaces[%s].mtu",
+				    device.name);
 				ncfg_as_u32_opt(ctx, assignment->value, &device.mtu);
 			} else if (strcmp(key, "mac") == 0) {
 				free(device.mac);

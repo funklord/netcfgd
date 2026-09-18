@@ -409,7 +409,7 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 
 	if (strcmp(key, "config") == 0) {
 		ncfg_lower_config(ctx, assignment->value, &interface->addressing,
-		    &interface->addressing_count);
+		    &interface->addressing_count, interface->name);
 		return;
 	}
 	if (strcmp(key, "routes") == 0) {
@@ -437,6 +437,11 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 					break;
 				}
 				*slot = route;
+				/* Keyed by destination rather than by index, which is what lets
+				 * the key survive `ncfg_document_canonicalize` sorting the
+				 * routes -- and what `explain.c` asks for. */
+				ncfg_record(ctx, ctx->source, lines.at[i].span, "interfaces[%s].routes[%s]",
+				    interface->name, route.destination);
 			}
 		}
 		ncfg_words_free(&lines);
@@ -462,6 +467,8 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 		return;
 	}
 	if (strcmp(key, "preference") == 0) {
+		ncfg_record(ctx, ctx->source, assignment->span, "interfaces[%s].preference",
+		    interface->name);
 		ncfg_as_u32_opt(ctx, assignment->value, &interface->preference);
 		return;
 	}
@@ -540,6 +547,8 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 		if (!reason) {
 			return;
 		}
+		ncfg_record(ctx, ctx->source, assignment->span, "interfaces[%s].guard",
+		    interface->name);
 		if (!interface->guard) {
 			interface->guard = calloc(1, sizeof(*interface->guard));
 			if (!interface->guard) {
@@ -555,6 +564,10 @@ static void lower_interface_key(ncfg_lower_ctx_t *ctx, ncfg_interface_t *interfa
 	if (strcmp(key, "dns") == 0 || strcmp(key, "dns_search") == 0 ||
 	    strcmp(key, "dns_mode") == 0 || strcmp(key, "dns_domains") == 0) {
 		*dns_touched = 1;
+		/* All four keys record the one path, and the first of them wins once
+		 * the table is canonicalised -- which is right: what a reader is sent
+		 * to is where this interface's DNS policy started being written. */
+		ncfg_record(ctx, ctx->source, assignment->span, "interfaces[%s].dns", interface->name);
 		ncfg_lower_dns_key(ctx, dns, assignment);
 		return;
 	}

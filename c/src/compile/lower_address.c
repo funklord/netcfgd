@@ -504,7 +504,7 @@ refused:
  * ------------------------------------------------------------------------ */
 
 void ncfg_lower_config(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value,
-    ncfg_address_source_t **list, size_t *count)
+    ncfg_address_source_t **list, size_t *count, const char *owner)
 {
 	ncfg_words_t lines;
 	entry_t     *entries = NULL;
@@ -601,6 +601,10 @@ void ncfg_lower_config(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value,
 				break;
 			}
 			*slot = built;
+			if (owner) {
+				ncfg_record(ctx, ctx->source, entries[i].span,
+				    "interfaces[%s].addressing[%zu]", owner, *count - 1u);
+			}
 		}
 	}
 	entries_free(entries, entry_count);

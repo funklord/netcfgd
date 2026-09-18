@@ -55,6 +55,7 @@
 #include "ncfg/document.h"
 #include "ncfg/lex.h"
 #include "ncfg/parse.h"
+#include "ncfg/state.h"
 
 /*
  * One parsed file, with the name it came from.
@@ -220,5 +221,75 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
  */
 ncfg_document_t *ncfg_compile(const ncfg_source_t *sources, size_t count,
     const ncfg_hook_sink_t *hooks, ncfg_lower_diags_t *diags, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Where each field came from
+ * ------------------------------------------------------------------------ */
+
+/*
+ * How many positions one compile records.
+ *
+ * `state.h` says why the table is a side table and not part of the document.
+ * What it does not say is that the compiler is the only thing that decides how
+ * large one gets, and that the input deciding it is a directory an edit can
+ * grow -- so this is `NCFG_DIAGS_MAX`'s arrangement applied to the other list
+ * lowering produces. Past it nothing more is recorded, which leaves exactly
+ * the state `explain.h` already describes and tests: a table with entries that
+ * does not cover every field, where the gap is per field and no blanket claim
+ * is made about it.
+ *
+ * It is deliberately far past any real configuration -- a machine with two
+ * hundred interfaces records something like six entries each -- and it is
+ * **published so that a test cannot spell the number itself**, which is the
+ * linkset walk's rule and right for the same reason.
+ *
+ * A caller that wants to know whether it was reached compares
+ * `provenance->count` against it; there is no `total` beside the count,
+ * because the count lives in a file whose members are the Rust's and adding
+ * one would be a second definition of that format.
+ */
+#define NCFG_PROVENANCE_MAX 4096u
+
+/*
+ * Lower, and record where each field was written.
+ *
+ * `provenance` may be NULL, which is `ncfg_lower` exactly. Otherwise it is
+ * filled in and left **empty on any failure**, since a table describing a
+ * document that was never handed over is a table pointing at fields nothing
+ * has. Hand in one that is empty, or one that has been freed: whatever is in
+ * it when a lowering fails goes with the failure.
+ *
+ * The entries are in the order lowering reached them and are not yet
+ * canonical: `ncfg_compile_with_provenance` is what orders them, for the same
+ * reason it canonicalises the document.
+ */
+ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size);
+
+/*
+ * `ncfg_compile`, and the side table `ncfg explain` names a file and a line
+ * out of.
+ *
+ * This is `compile_with_provenance` in the Rust, and `ncfg_compile` is the
+ * same call with nowhere to put the table -- one pipeline rather than two, so
+ * that the two cannot come to disagree about what a compile is.
+ *
+ * **The keys are the dotted paths the planner and `explain` already use**, and
+ * that is a contract rather than a convention: a table keyed differently is
+ * worse than no table, because every lookup would miss while the table looked
+ * full. They are `interfaces[<name>]` and its fields, and `rule.<id>`,
+ * `access_point.<id>`, `network.<id>` and `linkset.<name>` for the blocks that
+ * have one name and no fields recorded.
+ *
+ * The table is canonicalised here -- ordered by path, first record for a path
+ * kept -- so that two compiles of one configuration produce one file, which is
+ * the whole reason the positions are not in the document.
+ *
+ * `provenance` may be NULL, which is `ncfg_compile`.
+ */
+ncfg_document_t *ncfg_compile_with_provenance(const ncfg_source_t *sources, size_t count,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size);
 
 #endif /* NCFG_LOWER_H */
