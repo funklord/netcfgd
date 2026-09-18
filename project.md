@@ -9499,6 +9499,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.163 A passphrase in a diagnostic, and the redaction that hid it
+
+**The one thing the design exists to prevent.** A credential is a reference
+everywhere it can be -- `@secret:name` in the document, in the rendered
+profile, on the socket -- and where the material has to exist it is resolved
+late and never written down. `Setting::redacted` is that rule at the last
+boundary: the line sent to the supplicant carries the passphrase, and the line
+*reported* carries `<redacted>`.
+
+It is undone one format string later, in the same sentence.
+
+`Client::command` (`client.rs:649`) builds its error out of the line it sent:
+
+    format!("`{command}` answered {other:?} rather than OK")
+
+and `add_network` (`lib.rs:145`) reports that error beside the redacted form of
+the same line:
+
+    format!("{} was refused: {error}", setting.redacted(id))
+
+So what reaches the operator is
+
+    SET_NETWORK 0 psk <redacted> was refused: `SET_NETWORK 0 psk
+    "the real passphrase"` answered FAIL rather than OK
+
+`configure_wired` (`lib.rs:332`) has the identical shape for an 802.1X
+password, and `Client::request`'s timeout path (`client.rs:559`) formats the
+command into `no reply to ...` the same way. The error is an `io::Error`
+returned out of the backend, so where it ends up is wherever the caller puts
+it -- a log line, a journal, a client's screen.
+
+**Reachable by a supplicant that says no**, which is not exotic: a passphrase
+the supplicant refuses as too short, a key type the build does not support, a
+`SET_NETWORK` that fails for any reason at all. And by a timeout.
+
+**Why nothing caught it.** The redaction has a test; the composed sentence does
+not. `tests/live/fake_supplicant.py` cuts credentials out of its own log, which
+is the right instinct -- but it cannot report how many times it *saw* one, so
+no test on that side can tell a redaction that works from a message that was
+never sent. The C's fake counts the crossings in a file it never writes the
+value into and asserts the count, which is what makes its sweep evidence rather
+than an absence.
+
+**The C closes it structurally rather than by discipline**: a command may be
+sent under one string and reported under another, so the reported form is the
+only one a diagnostic can reach. A rule that every call site has to remember is
+a rule that one call site will forget, and this is what that looks like.
+
 ## 10.162 A comment that forbids what the code does
 
 `with_metric` fills a route's absent metric from an interface's preference.
