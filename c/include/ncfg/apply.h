@@ -393,4 +393,246 @@ void ncfg_kernel_set_hooks(ncfg_kernel_t *kernel, const ncfg_hook_ref_t *hooks, 
 /* Fill in the seam. `out` borrows `kernel` and must not outlive it. */
 void ncfg_kernel_executor(ncfg_kernel_t *kernel, ncfg_executor_t *out);
 
+/* ------------------------------------------------------------------------ *
+ * What else on the machine is touching the network
+ * ------------------------------------------------------------------------ */
+
+/*
+ * TWO DAEMONS ON ONE INTERFACE IS THE FAILURE THIS PROJECT IS ARRANGED AGAINST
+ *   netcfgd would otherwise simply join the fight: it applies its
+ *   configuration, `NetworkManager` applies its own a second later, and the
+ *   operator watches an address appear and disappear with neither tool saying
+ *   why.
+ *
+ *   Detection is by the files these daemons leave in `/run`, not by D-Bus:
+ *   D-Bus is the dependency 0014 declined to take, and the files are the only
+ *   per-interface evidence available -- which is the part that matters, since
+ *   netcfgd and `NetworkManager` can share a machine perfectly well as long as
+ *   they do not share a device.
+ *
+ *   **A process name is consulted as well, and only for liveness.**
+ *   `NetworkManager.service` has no `RuntimeDirectory=` and no `ExecStop=`, so
+ *   its device files outlive it with `managed=true` still in them, and netcfgd
+ *   declined a radio on behalf of a daemon systemd had already stopped --
+ *   leaving a machine with no network manager at all (0145). So: **the file
+ *   says which interfaces, and a live process says the claim is current.**
+ *   Neither is sufficient alone.
+ *
+ *   netcfgd never acts on what it finds here. It reports, and the operator
+ *   decides -- the same posture as a guard or a drift report. The one caller
+ *   that does act stops **netcfgd's own** backend and nothing else.
+ *
+ * WHERE THIS DIVERGES FROM THE RUST
+ *   * **Where to look is an argument, not an environment variable.** The Rust
+ *     reads `NCFG_RUN_ROOT` and `NCFG_PROC` so that its tests can point it
+ *     somewhere safe; here the paths are a struct the caller fills, and
+ *     `ncfg_contention_machine` is the one place `/run` and `/proc` are
+ *     written down. A test that forgot to set a variable would read the
+ *     developer's real `/run`; a test that forgets an argument does not
+ *     compile.
+ *   * **`/proc` is walked once per call rather than once per daemon.** The
+ *     Rust asks `daemon_is_running` separately for `NetworkManager` and for
+ *     `systemd-networkd`, which is two full scans of `/proc` on every
+ *     reconcile tick. One walk answers both questions.
+ */
+
+/* An interface netcfgd claims, and the kernel index it claims it by.
+ *
+ * By index because every daemon here keys its state that way -- an interface
+ * can be renamed and the index cannot. */
+typedef struct {
+	const char *name;
+	uint32_t    index;
+} ncfg_interface_claim_t;
+
+/* The longest a remedy command gets once the device name is in it. */
+#define NCFG_REMEDY_MAX 160
+
+/* Another daemon that claims interfaces netcfgd also claims. */
+typedef struct {
+	/* What to call it, as the operator would. Static; not freed. */
+	const char *name;
+	/* The interfaces of netcfgd's that it also manages, sorted. Owned. */
+	char      **interfaces;
+	size_t      interface_count;
+	/* How to hand a device over, with `{}` where its name goes. Static. */
+	const char *remedy;
+} ncfg_contender_t;
+
+/* Every daemon found claiming something. `ncfg_contenders_free` is the one
+ * `free` for the whole aggregate, and freeing one never filled in is nothing. */
+typedef struct {
+	ncfg_contender_t *at;
+	size_t            count;
+} ncfg_contenders_t;
+
+/*
+ * Where the evidence is read from.
+ *
+ * `run_root_is_the_machines` is the question `/run` alone cannot answer:
+ * every daemon here keys its state by kernel index, and **an index means
+ * nothing outside the network namespace that issued it**. `/run` is a mount
+ * rather than a namespace, so a netcfgd in a private network namespace that
+ * can still see the host's `/run` reads the host's files and matches them
+ * against its own indices -- which collide immediately, both numberings
+ * starting at 1. Measured: `tests/live/hwsim.sh` puts two simulated radios in
+ * a private namespace where the station is index 3, and on the host index 3
+ * was the operator's real `wlp0s20f3` with `managed=true`, so netcfgd refused
+ * to start a supplicant on a radio `NetworkManager` had never heard of.
+ *
+ * So where this is set, the namespace is checked and a `/run` written from
+ * another one claims nothing. Where it is clear -- a fixture, or a container
+ * with state of its own that somebody pointed netcfgd at on purpose -- the
+ * question does not arise and no check is made.
+ */
+typedef struct {
+	/* Where the other daemons' state lives. */
+	const char *run_root;
+	/* Where to look for running processes. */
+	const char *proc_root;
+	int         run_root_is_the_machines;
+} ncfg_contention_where_t;
+
+/*
+ * The machine this process is running on: `/run`, `/proc`, and its own
+ * namespace.
+ *
+ * The two paths are written down here and nowhere else, so that a test can
+ * assert what the daemon reads by reading this rather than by letting anything
+ * go near it.
+ */
+void ncfg_contention_machine(ncfg_contention_where_t *out);
+
+/*
+ * Which other daemons claim any of `claims`.
+ *
+ * `out` is filled in on success and is empty where nothing was found, which is
+ * the ordinary answer on the ordinary machine. 0 with a sentence is an
+ * allocation failure and nothing else: a `/run` that is not there, a file that
+ * cannot be read and a `/proc` that will not answer are all ordinary states
+ * with their own documented readings, not failures to report.
+ */
+int ncfg_contenders_find(const ncfg_contention_where_t *where,
+    const ncfg_interface_claim_t *claims, size_t claim_count, ncfg_contenders_t *out, char *err,
+    size_t err_size);
+
+/* Release what it holds and leave it usable and empty. */
+void ncfg_contenders_free(ncfg_contenders_t *found);
+
+/*
+ * The command that hands one device over, with the name filled in.
+ *
+ * Filled in rather than left as a placeholder: an operator who has to work out
+ * what `DEV` stands for is an operator who might use the wrong name, and the
+ * whole point of the message is that they act on it.
+ *
+ * `out` is `NCFG_REMEDY_MAX` bytes. 0 where it would not fit, which leaves
+ * `out` empty rather than half a command.
+ */
+int ncfg_contender_remedy_for(const ncfg_contender_t *contender, const char *interface, char *out,
+    size_t out_size);
+
+/*
+ * One message per contender, for a plan warning or a startup line.
+ *
+ * Appended to `buf`, which is `buf.h`'s arrangement and is here for its
+ * reason: this text is composed from interface names and grows with them, and
+ * a message a daemon builds has to be bounded somewhere the caller can see.
+ * 0 with a sentence where the buffer would not take it.
+ */
+int ncfg_contender_describe(const ncfg_contender_t *contender, ncfg_buf_t *buf, char *err,
+    size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Asking a running dhcpcd which configuration file it was started with
+ * ------------------------------------------------------------------------ */
+
+/*
+ * **THE ONE BACKEND WHOSE MARK CANNOT BE READ FROM THE PROCESS**
+ *   netcfgd recovers its supplicant, and its udhcpc, by finding a path it
+ *   chose as a whole `argv` element (0140). dhcpcd calls `setproctitle` and
+ *   destroys both: measured, `/proc/<pid>/cmdline` reads
+ *   `dhcpcd: wlp0s20f3 [ip4]`, and the environment block comes back 4494 bytes
+ *   of NUL. Nothing netcfgd passed survives in the process image.
+ *
+ *   What does survive is dhcpcd's own memory of its `-f` argument, which it
+ *   recites verbatim -- symlink and all, with no `realpath` -- to anyone who
+ *   asks `--getconfigfile` on its control socket. So netcfgd starts dhcpcd
+ *   with a `-f` under its own run directory and asks for it back (0143).
+ *
+ * THREE THINGS MEASURED THAT THE OBVIOUS IMPLEMENTATION GETS WRONG
+ *   * **The privileged socket, not the unprivileged one.** dhcpcd 10.5.0
+ *     removed `<iface>-4.unpriv.sock` outright -- "a breaking ABI change" in
+ *     its own commit message -- and Debian sid ships 10.5.2. netcfgd is root,
+ *     so the privileged socket is available on every version that has a socket
+ *     at all, and answers this command identically.
+ *   * **The length prefix is a native `size_t`.** dhcpcd's `control.c` writes
+ *     `iov[0].iov_len = sizeof(size_t)`: eight bytes on amd64, **four** on
+ *     32-bit ARM, and big-endian on a big-endian MIPS. Parsing it as a
+ *     little-endian `uint64_t` works on the developer's machine and on nothing
+ *     else this targets, so the reply's *tail* is read instead.
+ *   * **An unknown command does not fail, it hangs.** `--getinterfaces`,
+ *     `--isprivileged` and a bare `-q` were each measured to produce no reply
+ *     *and no close*, past a four-second wait, on both sockets. A probe
+ *     without a deadline is a daemon that stops reconciling.
+ */
+
+/* The longest reply worth reading: a path, so `PATH_MAX` and a little. This is
+ * the cap that stands in for the length prefix netcfgd deliberately does not
+ * parse. */
+#define NCFG_DHCPCD_REPLY_MAX 4200
+
+/*
+ * How long to wait for a reply.
+ *
+ * Generous rather than tuned. The command is answered by dhcpcd's separate
+ * `[control proxy]` process, which replied in 0.00s even with the main dhcpcd
+ * stopped with `SIGSTOP` -- only stopping *every* dhcpcd process silenced it.
+ * So the deadline exists for the wedged case, not the ordinary one, and
+ * waiting longer buys nothing but a slower refusal.
+ */
+#define NCFG_DHCPCD_DEADLINE_MILLISECONDS 250
+
+/*
+ * The path out of one control-socket reply, into `out`.
+ *
+ * The frame is a native-width length then a NUL-terminated string, and netcfgd
+ * parses only the second half: the last run of printable bytes. A filesystem
+ * path holds no NUL and no control character, dhcpcd sends exactly one string,
+ * and the prefix is binary -- so the tail is the answer whatever width the
+ * prefix had.
+ *
+ * **It must be an absolute path, and that is a divergence from the Rust.**
+ * There, a read that arrived holding only the length prefix answers with the
+ * prefix's low byte, which is printable for any ordinary path: 34 bytes gives
+ * `22 00 00 00 00 00 00 00`, and the answer is `"`. That is the very defect
+ * the tail rule replaced, coming back through a short read -- and a caller
+ * comparing it against netcfgd's own `-f` reads it as somebody else's dhcpcd.
+ * A reply that is not an absolute path terminated by a byte below `0x20` is
+ * not an answer, and `ncfg_dhcpcd_config_file_of` reads again rather than
+ * believing it.
+ *
+ * 1 with the path in `out`, 0 where there is no answer in these bytes.
+ */
+int ncfg_dhcpcd_control_payload(const void *bytes, size_t length, char *out, size_t out_size);
+
+/*
+ * The configuration file a running dhcpcd was started with. The caller frees
+ * it.
+ *
+ * `NULL` covers every way of not knowing: no socket, nothing listening, a
+ * version that does not answer, a reply that does not parse, or the deadline.
+ * **`NULL` is not "somebody else's"** -- it is "netcfgd could not tell", and
+ * the caller must treat the two differently, which is 0074's rule and 0141's
+ * default.
+ *
+ * No error buffer, for `process.h`'s reason: none of the ways of not knowing
+ * is a sentence an operator reads, and a lookup that reported them all as
+ * failures is a lookup whose return value stops being checked.
+ *
+ * `family` is dhcpcd's, `4` or `6`, and is the second half of the socket's
+ * name.
+ */
+char *ncfg_dhcpcd_config_file_of(const char *run_dir, const char *interface, const char *family);
+
 #endif /* NCFG_APPLY_H */
