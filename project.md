@@ -9499,6 +9499,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.161 What porting the compiler found in it
+
+`lower.rs` is 5,166 lines and the largest file in the project. Porting it meant
+reading every one with a reason to disagree, and seven things came back. Four
+are verified here by reading the source:
+
+* **An out-of-range number is dropped silently, at six keys.**
+  `as_u32(&value, diags).and_then(|n| u16::try_from(n).ok())` yields `None` on
+  overflow and only one of the six sites says anything about it. So
+  `listen_port = 70000` compiles to a WireGuard device with **no listen port
+  and no diagnostic**, and the same shape covers a peer's `keepalive`, a
+  bridge's `priority`, a vxlan's `port`, an access point's `channel` and a
+  tunnel's `ttl`. That is section 2's silent field-drop, in the language rather
+  than in the document.
+* **`vlan id`'s diagnostic and its check disagree.** The message says *"vlan id
+  must be between 0 and 4095"* and the test is `u16::try_from`, so `id = 5000`
+  compiles and the kernel refuses it at apply time, with an errno rather than a
+  name. The `bridge_vlans` reader a few hundred lines away gets it right --
+  `first == 0 || last > 4094`, with the reserved id named -- which is what
+  makes this a slip rather than a decision.
+* **A `probe` block with no `command` vanishes.** `let command = command?;`
+  returns `None` with no diagnostic, so `probe { interval = 30 }` compiles to
+  an interface with no probe and nothing said -- on the feature whose whole
+  point is that a link that looks up may not be.
+* **Six doc comments are attached to the wrong function, and two are
+  duplicated on one line.** Line 1921 reads `/// The band key, checked here
+  rather than at render time./// The band key, checked here rather than at
+  render time.` The paragraph documenting `expand_ingress_shapers` sits above
+  `fn declares`, `expand_members`' sits above `fn lower_linkset`, and neither
+  of those two functions has a comment of its own any more. The file was
+  reordered and its comments were not.
+
+Two more were reported and not independently checked: a rule's `from`/`to`
+accept any string, because `canonical_address(&text).unwrap_or(text)` keeps a
+non-address unchanged, so `from = "wombat"` compiles where every other
+address-shaped key is checked at the line; and an `access_control { }` with
+neither `deny` nor `allow` is accepted and produces nothing, which is the empty
+*block* arriving by the same code path as the empty *list* that is deliberate.
+
+The seventh was mine to fix and is fixed: `tool/example_gate.py`'s header said
+**two** blocks are expected not to compile alone and then named three. The list
+was right, the prose was stale, and I read past it twice while editing that
+file.
+
+**The port is now a review of the Rust that nobody budgeted for.** Twenty-odd
+findings across `10.157` to here, none from a reviewer, all from somebody
+trying to make the same thing work twice.
+
 ## 10.160 Five fields `ncfg profile save` drops without saying so
 
 The renderer's own discipline is in its header: **what cannot be written is

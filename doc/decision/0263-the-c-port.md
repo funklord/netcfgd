@@ -127,6 +127,35 @@ taken.
   makes the question impossible; in C it is real, and every repair -- raw
   bytes, `\u00XX` per byte, U+FFFD -- puts a value in front of somebody that
   nobody typed.
+* **A netlink datagram that did not come from the kernel is dropped and
+  counted.** The Rust checks no sender at all. Dropping rather than failing is
+  the deliberate half: failing would hand the same local process a way to end
+  any dump with one packet.
+* **A nest carries `NLA_F_NESTED`.** The Rust sets it on one nest of many.
+  `VETH_INFO_PEER` is the exception and is written unflagged, because its value
+  is an `ifinfomsg` with a list after it rather than an attribute list.
+* **Narrowing is checked rather than cast**, everywhere the model's `int64_t`
+  meets a kernel field, with the field named in the refusal.
+* **The renderer writes five fields the Rust silently drops** (10.160) and
+  refuses `dhcp`'s modifiers by name, since the language takes none.
+* **A WireGuard peer set too large for one attribute is split**, which is what
+  `linux/wireguard.h` says to do and what `wg(8)` does; the Rust truncates the
+  length instead (10.157). One peer too large for one attribute is refused.
+* **Lowering diagnostics carry the file name.** A span still carries no source
+  id, because a parse is one file -- but merge sees several at once, and
+  "already defined; first defined at conf.d/10-office.conf:3" is the whole
+  point of the redefinition check.
+* **`NCFG_DIAGS_MAX` bounds lowering too**, with `total` counting past it.
+* **No provenance side table.** `compile_with_provenance` is not ported;
+  `ncfg explain` is not in this wave, and a side table nobody reads is a second
+  thing that has to go on agreeing with the document.
+* **The linkset cycle walk is bounded**, and the bound is published so a test
+  cannot spell the number itself. The Rust's recursion terminates on its own,
+  which bounds its depth by the number of sets -- a bound on paper rather than
+  on the stack, on input an unprivileged edit can produce.
+* **Five `observed` structs are strict about unknown members** where the Rust
+  marks every other one and not those; that reads as an omission rather than a
+  decision, and the strict direction is the one section 2 argues for.
 
 ## What is not being decided here
 
