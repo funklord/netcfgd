@@ -83,6 +83,28 @@ static const char *base;
  * Fixtures
  * ------------------------------------------------------------------------ */
 
+/*
+ * A run directory and **nothing else**, which is what a test must point a
+ * world at.
+ *
+ * Every other member of `ncfg_main_world_where_t` is somewhere the daemon
+ * *writes*: `/proc`, the supplicant's control sockets, the machine's secrets.
+ * Filling them in from `ncfg_service_machine` would let a case here change the
+ * network of the workstation this suite is built on -- which is the reason
+ * `service.h` gives for nothing in it having a default, and the reason the
+ * cases below assert refusals by name rather than writes that worked.
+ *
+ * A static, so a caller may pass it straight into the call.
+ */
+static const ncfg_main_world_where_t *where_of(const char *run_dir)
+{
+	static ncfg_main_world_where_t where;
+
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run_dir;
+	return &where;
+}
+
 static ncfg_document_t *document_of(const char *body)
 {
 	char             text[4096];
@@ -819,14 +841,14 @@ static void the_seams_a_world_fills_in(void)
 
 	memset(&state, 0, sizeof(state));
 	err[0] = '\0';
-	check(ncfg_main_world_open(&world, base, &state, NULL, NULL, err, sizeof(err)),
+	check(ncfg_main_world_open(&world, where_of(base), &state, NULL, NULL, err, sizeof(err)),
 	    "a world opens over a run directory");
 	check(!ncfg_main_world_open(&world, NULL, &state, NULL, NULL, err, sizeof(err)),
 	    "and one with nowhere to take the apply lock is refused");
 
 	memset(&seams, 0, sizeof(seams));
 	err[0] = '\0';
-	(void)ncfg_main_world_open(&world, base, &state, NULL, NULL, err, sizeof(err));
+	(void)ncfg_main_world_open(&world, where_of(base), &state, NULL, NULL, err, sizeof(err));
 	ncfg_main_world_seams(&world, &seams);
 	check(seams.context == &world, "the context every seam shares is the world");
 	check(seams.executor_open && seams.executor_close && seams.announce &&
@@ -887,7 +909,7 @@ static void an_executor_takes_the_apply_lock_before_anything_else(void)
 
 	memset(&state, 0, sizeof(state));
 	err[0] = '\0';
-	(void)ncfg_main_world_open(&world, run, &state, NULL, NULL, err, sizeof(err));
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
 	/* Short, so that the refusal is a check rather than thirty seconds of the
 	 * suite. The field exists for exactly this. */
 	world.patience_ms = 50;
@@ -936,6 +958,281 @@ static void the_hooks_an_executor_is_given(void)
 
 	check(ncfg_main_hooks_of(NULL, room, 4u, &missed) == 0u && missed == 0u,
 	    "and a document that does not compile has no hooks rather than no answer");
+	ncfg_document_free(document);
+}
+
+/* ------------------------------------------------------------------------ *
+ * The half of an executor that is not netlink
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `ncfg_kernel_set_service` had no caller outside the tests, so fourteen of the
+ * forty-eight ops refused on every apply -- `dns.apply`, the four sysctls, the
+ * hostname, the six wifi ops and the three backend verbs. These cases are that
+ * seam being wired, and the shape of every one of them is the same: the
+ * refusal must stop naming *the missing context* and start naming the one
+ * thing that is really missing.
+ *
+ * **Every path is the test's own, and none is filled in from a constant.**
+ * `ncfg_main_world_where_t` says why at length; the short version is that this
+ * suite is built on a workstation whose network is live, and `where_of` above
+ * hands a world a run directory and nothing else precisely so that a case that
+ * forgot to point somewhere safe refuses rather than writes.
+ */
+
+/* One op through an open executor, answering its refusal. `message` is the
+ * caller's and is filled either way. */
+static int execute_through(ncfg_main_world_t *world, const ncfg_op_t *op, char *message,
+    size_t message_size)
+{
+	ncfg_executor_t executor;
+	char            err[NCFG_ERROR_MAX];
+	int             ran;
+
+	memset(&executor, 0, sizeof(executor));
+	err[0] = '\0';
+	message[0] = '\0';
+	if (!ncfg_main_world_executor_open(world, &executor, err, sizeof(err))) {
+		/* The open's own sentence, unprefixed. `message_size` is the size an
+		 * executor's refusal is written into, so anything added in front of
+		 * one truncates the tail -- which is exactly where these sentences
+		 * name the file or the root that was missing. */
+		(void)snprintf(message, message_size, "%s", err);
+		return 0;
+	}
+	ran = executor.execute && executor.execute(executor.state, op, message, message_size);
+	ncfg_main_world_executor_close(world, &executor);
+	return ran;
+}
+
+static void an_executor_now_carries_a_service_context(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	ncfg_op_t           op;
+	char                message[NCFG_ERROR_MAX];
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/service-context", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[],\"interfaces\":[{\"name\":\"eth0\"}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_SYSCTL_SET_FORWARDING;
+	op.u.forwarding.iface = "eth0";
+	op.u.forwarding.enabled = 1;
+	check(!execute_through(&world, &op, message, sizeof(message)),
+	    "a sysctl still fails where this world was pointed at no proc root");
+	/*
+	 * The whole point of the wiring, and the reason this is checked by the
+	 * words rather than by the return: before it, every one of these fourteen
+	 * ops came back with "this executor was given no service context to do it
+	 * with", which reads as *netcfgd cannot do this* when the truth is *this
+	 * daemon was not told where*. One is a port that has not got there and the
+	 * other is a path somebody has to fill in.
+	 */
+	check(strstr(message, "no service context") == NULL,
+	    "and the refusal no longer says the executor was given no service context");
+	check(strstr(message, "proc") != NULL || strstr(message, "root") != NULL,
+	    "it names the root it was not given instead");
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void a_sysctl_is_written_where_the_world_was_pointed(void)
+{
+	ncfg_main_world_t       world;
+	ncfg_main_world_where_t where;
+	ncfg_daemon_state_t     state;
+	ncfg_op_t               op;
+	char                    message[NCFG_ERROR_MAX];
+	char                    err[NCFG_ERROR_MAX];
+	char                    run[512];
+	char                    proc[512];
+	char                    path[1024];
+	char                   *held;
+
+	(void)snprintf(run, sizeof(run), "%s/sysctl-run", base);
+	testdir_mkdirp(run);
+	(void)snprintf(proc, sizeof(proc), "%s/sysctl-proc", base);
+	(void)snprintf(path, sizeof(path), "%s/sys/net/ipv4/conf/eth0", proc);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/sys/net/ipv4/conf/eth0/forwarding", proc);
+	(void)testdir_write(path, "0\n", 2u);
+	(void)snprintf(path, sizeof(path), "%s/sys/net/ipv6/conf/eth0", proc);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/sys/net/ipv6/conf/eth0/forwarding", proc);
+	(void)testdir_write(path, "0\n", 2u);
+
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run;
+	where.proc_root = proc;
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[],\"interfaces\":[{\"name\":\"eth0\"}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, &where, &state, NULL, NULL, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_SYSCTL_SET_FORWARDING;
+	op.u.forwarding.iface = "eth0";
+	op.u.forwarding.enabled = 1;
+	if (!execute_through(&world, &op, message, sizeof(message))) {
+		detail("the sysctl was refused", message);
+		check(0, "a world given a proc root carries the sysctl out");
+	} else {
+		check(1, "a world given a proc root carries the sysctl out");
+	}
+	(void)snprintf(path, sizeof(path), "%s/sys/net/ipv4/conf/eth0/forwarding", proc);
+	held = testdir_read(path, NULL);
+	/*
+	 * Read back off the tree rather than trusted from the return, and read at
+	 * the path the *observer* uses -- `service.h` says that pairing is the
+	 * only way "the write landed where the observation looks" is a checked
+	 * property rather than two paths spelled twice.
+	 */
+	check(held && strcmp(held, "1") == 0, "  and the value is in the tree, where the observer reads");
+	free(held);
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void the_service_carries_every_scope_and_not_the_one_the_op_names(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	ncfg_executor_t     executor;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/scopes-run", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[],\"interfaces\":["
+	    "{\"name\":\"eth0\",\"dns\":{\"mode\":\"write_resolv_conf\","
+	    "\"servers\":[{\"addr\":\"10.0.0.53\"}]}},"
+	    "{\"name\":\"eth1\",\"dns\":{\"mode\":\"write_resolv_conf\","
+	    "\"servers\":[{\"addr\":\"10.0.1.53\"}]}}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	memset(&executor, 0, sizeof(executor));
+	check(ncfg_main_world_executor_open(&world, &executor, err, sizeof(err)),
+	    "an executor opens over a document with two DNS scopes");
+	/*
+	 * A `dns.apply` names one scope and a delivery writes the resolver file
+	 * whole, so a service holding only what the op carries would write a file
+	 * with one interface's servers in it. That is the Rust's recorded defect;
+	 * this is the daemon end of the same check `dns_scopes_test.c` makes at
+	 * the rule.
+	 */
+	check(world.service.dns_scope_count == 2u,
+	    "and it was given both of them, not the one a dns.apply would name");
+	check(world.service.document == state.desired,
+	    "and the document itself, for what an op names rather than carries");
+	ncfg_main_world_executor_close(&world, &executor);
+	check(world.service.dns_scope_count == 0u,
+	    "closing it gives the scopes back, because the next document may not be this one");
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void the_route_metric_a_dhcp_client_is_started_with(void)
+{
+	ncfg_document_t             *document = document_of(
+	    "\"devices\":[],\"interfaces\":["
+	    "{\"name\":\"eth0\",\"preference\":100},"
+	    "{\"name\":\"eth1\"},"
+	    "{\"name\":\"wlan0\",\"preference\":600}]");
+	ncfg_observed_t             *observed;
+	ncfg_service_client_metric_t room[4];
+	ncfg_service_client_metric_t one[1];
+	size_t                       missed = 99;
+	size_t                       taken;
+
+	if (!document) {
+		check(0, "the metric fixture reads");
+		return;
+	}
+	/* `networks` is `document_of`'s empty list, so the association below finds
+	 * no metric and the rule falls through to the preference. The case that
+	 * needs a network carrying one is the second half. */
+	observed = observed_of("\"links\":[]");
+	taken = ncfg_main_metrics_of(document, observed, room,
+	    sizeof(room) / sizeof(room[0]), &missed);
+	check(taken == 2u && missed == 0u,
+	    "an interface with a preference has a metric and one without has none");
+	check(taken == 2u && strcmp(room[0].iface, "eth0") == 0 && room[0].metric.value == 100 &&
+	    strcmp(room[1].iface, "wlan0") == 0 && room[1].metric.value == 600,
+	    "  and each is the interface's own, in the document's order");
+	/*
+	 * Past the bound they are counted rather than dropped in silence -- the
+	 * hooks' arrangement, and here it matters for the same reason: a client
+	 * that did not fit starts with no `-m` and takes dhcpcd's default of 1003
+	 * on a configuration that said 100, which is a route metric that quietly
+	 * stopped being honoured.
+	 */
+	missed = 99;
+	taken = ncfg_main_metrics_of(document, observed, one, 1u, &missed);
+	check(taken == 1u && missed == 1u, "one that does not fit is counted, not dropped quietly");
+	check(ncfg_main_metrics_of(NULL, observed, room, 4u, &missed) == 0u && missed == 0u,
+	    "and a document that does not compile has no metrics rather than no answer");
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+}
+
+static void an_associated_radio_takes_its_networks_metric(void)
+{
+	char             text[2048];
+	char             message[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_service_client_metric_t room[4];
+	size_t                       taken;
+
+	/*
+	 * The half of `effective_metric` an executor cannot answer for itself: the
+	 * radio's association is in the observation and the number is on the
+	 * *network*, not on the interface. Measured on a veth with a real server,
+	 * a client started from the document alone took dhcpcd's 1003 on a
+	 * configuration whose network said 100.
+	 */
+	(void)snprintf(text, sizeof(text),
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{},"
+	    "\"networks\":[{\"id\":\"cafe\",\"security\":{\"type\":\"open\"},"
+	    "\"metric\":100},"
+	    "{\"id\":\"plain\",\"security\":{\"type\":\"open\"}}],"
+	    "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\",\"preference\":600}]}");
+	message[0] = '\0';
+	document = ncfg_document_read(text, strlen(text), message, sizeof(message));
+	if (!document) {
+		detail("the association fixture did not read", message);
+		check(0, "the association fixture reads");
+		return;
+	}
+	observed = observed_of("\"links\":[{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,"
+	    "\"up\":true,\"carrier\":true,\"ownership\":\"unknown\","
+	    "\"network\":\"cafe\"}]");
+	taken = ncfg_main_metrics_of(document, observed, room, 4u, NULL);
+	check(taken == 1u && room[0].metric.value == 100,
+	    "a radio associated to a network carrying a metric takes the network's");
+	ncfg_observed_free(observed);
+
+	/*
+	 * **And a network with no metric of its own falls through to the
+	 * preference rather than erasing it.** That is what `or` means in the
+	 * rule, and getting it wrong drops an operator's number because they also
+	 * named an SSID.
+	 */
+	observed = observed_of("\"links\":[{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,"
+	    "\"up\":true,\"carrier\":true,\"ownership\":\"unknown\","
+	    "\"network\":\"plain\"}]");
+	taken = ncfg_main_metrics_of(document, observed, room, 4u, NULL);
+	check(taken == 1u && room[0].metric.value == 600,
+	    "and one associated to a network with no metric keeps the interface's preference");
+	ncfg_observed_free(observed);
 	ncfg_document_free(document);
 }
 
@@ -1000,7 +1297,7 @@ static void a_radio_is_not_given_back_by_taking_the_apply_lock_to_find_out(void)
 		return;
 	}
 	err[0] = '\0';
-	(void)ncfg_main_world_open(&world, run, &state, NULL, NULL, err, sizeof(err));
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
 	world.patience_ms = 50;
 	/* `/run` and `/proc` of this test's own, never the machine's. The struct
 	 * is the argument for exactly this reason: a test that forgot an
@@ -1154,7 +1451,7 @@ static void an_index_that_does_not_fit_is_not_a_claim(void)
 	state.observed->links[0].index = (int64_t)4294967296LL;
 
 	err[0] = '\0';
-	(void)ncfg_main_world_open(&world, run, &state, NULL, NULL, err, sizeof(err));
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
 	world.patience_ms = 50;
 	world.contention.run_root = run_root;
 	world.contention.proc_root = proc_root;
@@ -1188,7 +1485,7 @@ static void a_daemon_that_runs_nothing_is_holding_nothing(void)
 	make_dir(run);
 	memset(&state, 0, sizeof(state));
 	err[0] = '\0';
-	(void)ncfg_main_world_open(&world, run, &state, NULL, NULL, err, sizeof(err));
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
 	world.patience_ms = 50;
 
 	err[0] = '\0';
@@ -1227,6 +1524,11 @@ int main(void)
 	the_seams_a_world_fills_in();
 	an_executor_takes_the_apply_lock_before_anything_else();
 	the_hooks_an_executor_is_given();
+	an_executor_now_carries_a_service_context();
+	a_sysctl_is_written_where_the_world_was_pointed();
+	the_service_carries_every_scope_and_not_the_one_the_op_names();
+	the_route_metric_a_dhcp_client_is_started_with();
+	an_associated_radio_takes_its_networks_metric();
 	a_radio_is_not_given_back_by_taking_the_apply_lock_to_find_out();
 	what_a_contention_check_is_made_about();
 	an_index_that_does_not_fit_is_not_a_claim();

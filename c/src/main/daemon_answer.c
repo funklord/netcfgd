@@ -197,11 +197,12 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		 * `ncfg_apply_write_journal` now publishes -- each of which is on its
 		 * own enough, said in one sentence rather than two: this is a refusal
 		 * an operator reads on a socket, not the decision record. */
-		return "this build of netcfgd will not apply: its executor refuses every op "
-		    "that needs a service context -- `dns.apply`, the four sysctls, the six "
-		    "wifi ops and all three backend verbs -- because nothing outside the "
-		    "tests installs one, so an apply would bring up links and addresses and "
-		    "then decline to start a single backend";
+		return "this build of netcfgd will not apply: its executor carries the "
+		    "service half now, but a router advertisement daemon's prefixes and an "
+		    "openvpn tunnel's configuration file are arguments this daemon does not "
+		    "compose yet, so a plan touching either stops part way -- and the "
+		    "liveness pass is not ported, so `running` in an observation is a memory "
+		    "of having started something rather than a fact about a process";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:

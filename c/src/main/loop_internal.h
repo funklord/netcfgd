@@ -44,10 +44,13 @@
 #define NCFG_MAIN_LOOP_INTERNAL_H
 
 #include "ncfg/daemon.h"
+#include "ncfg/dhcp.h"
 #include "ncfg/lock.h"
 #include "ncfg/netlink.h"
 #include "ncfg/proto.h"
 #include "ncfg/rfkill.h"
+#include "ncfg/secrets.h"
+#include "ncfg/service.h"
 #include "ncfg/supplicant.h"
 #include "ncfg/watch.h"
 
@@ -925,6 +928,25 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  */
 #define NCFG_MAIN_CLAIMS_MAX 32
 
+/*
+ * How many interfaces one executor carries a resolved DHCP route metric for.
+ *
+ * `ncfg_service_client_metric_t` says why this is a list the caller resolved
+ * rather than a field the executor reads: half the rule is
+ * `netcfgd_model::wifi::effective_metric`'s and half of *that* is in the
+ * observation, so an executor holding only the document cannot answer it. The
+ * bound is the claims' and for its reason -- a handful on any machine, and a
+ * configuration naming a thousand interfaces must not make a per-apply
+ * allocation the operator's to choose.
+ *
+ * **What did not fit is a client started with no `-m`, which is not a
+ * refusal**: no metric is an ordinary document, and dhcpcd's own default is
+ * what an interface that named no preference gets anyway. So the overflow is
+ * said out loud rather than left to be noticed as a route metric that quietly
+ * stopped being honoured.
+ */
+#define NCFG_MAIN_METRICS_MAX 32
+
 /* How long an executor waits for the apply lock before giving up, which is
  * the Rust's `APPLY_PATIENCE`: long enough for an ordinary apply, which is a
  * few netlink calls and whatever a hook does, and short enough that a wedged
@@ -948,8 +970,34 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  * `ncfg_main_world_close` is its one free.
  */
 typedef struct {
-	/* Where `apply.lock` is. Borrowed, and it outlives this. */
+	/* Where `apply.lock` is, and the other three the service half writes
+	 * through. Borrowed, and they outlive this. */
 	const char              *run_dir;
+	const char              *proc_root;
+	const char              *supplicant_dir;
+	/* The three files a delivery writes, as the world was given them. Absent
+	 * refuses `dns.apply` by name rather than reaching for the machine's. */
+	const char              *resolv_conf;
+	const char              *dnsmasq_conf;
+	const char              *unbound_conf;
+	/* And what a DHCP client is started with, as the world was given it. */
+	ncfg_dhcp_machine_t      dhcp;
+	/* The four daemons, as the world was given them. NULL is the conventional
+	 * name, which is a daemon's answer and never a test's. */
+	const char              *hostapd_program;
+	const char              *radvd_program;
+	const char              *openvpn_program;
+	const char              *supplicant_program;
+	/*
+	 * What resolves a credential hostapd or the supplicant is given.
+	 *
+	 * A value rather than a pointer because it is two borrowed paths and
+	 * `secrets.h` says a constructor for that would be ceremony. Left zero
+	 * where the caller named no directories, and `ncfg_service_t` then refuses
+	 * the two ops that need one by name rather than sending an empty
+	 * passphrase.
+	 */
+	ncfg_secret_resolver_t   secrets;
 	/*
 	 * What the executor is given to check a hook against, and the document it
 	 * was read from. Borrowed: `apply.h` says an executor must not outlive
@@ -974,18 +1022,103 @@ typedef struct {
 	int                      open;
 	ncfg_hook_ref_t          hooks[NCFG_MAIN_HOOKS_MAX];
 	size_t                   hook_count;
+	/*
+	 * And the other half of what an open executor is given: everything the
+	 * fourteen ops that are not netlink need and no op carries.
+	 *
+	 * Built at open and cleared at close, alongside the hooks and for the same
+	 * reason -- `service.h` says the document must outlive the executor, and
+	 * open-to-close is inside one call of the pass. `scopes` and `metrics` are
+	 * what the service borrows and this struct owns: the DNS scope list is an
+	 * aggregate with a free of its own, and the metrics are a flat array.
+	 */
+	ncfg_service_t                service;
+	ncfg_dns_scopes_t            *scopes;
+	ncfg_service_client_metric_t  metrics[NCFG_MAIN_METRICS_MAX];
+	size_t                        metric_count;
 	/* How long to wait for the apply lock. A field so that a test does not
 	 * have to wait thirty seconds to see the refusal. */
 	long                     patience_ms;
 } ncfg_main_world_t;
 
 /*
+ * Where one world reaches the machine.
+ *
+ * A struct rather than five arguments, and **nothing in it has a default**,
+ * which is `ncfg_service_t`'s bargain taken at the layer above: the machine
+ * this is built on is a workstation whose network is live, and a member this
+ * filled in from a constant would make the difference between a test and an
+ * outage a variable somebody remembered to set. A member left NULL refuses the
+ * ops that need it, by name. `main_internal.h`'s `ncfg_main_where_t` is what a
+ * daemon resolves these from; a test points them at a directory it made.
+ */
+typedef struct {
+	/* Where `apply.lock` and netcfgd's own runtime state are. Required. */
+	const char *run_dir;
+	/* Where `sys/net/...` and `sys/kernel/hostname` are. NULL refuses the four
+	 * sysctl ops and `hostname.set`. */
+	const char *proc_root;
+	/* Where the supplicant's control sockets are. NULL refuses the wifi ops. */
+	const char *supplicant_dir;
+	/* Where the `file` secret provider looks, and where a stored certificate
+	 * is materialised. NULL each, and `secrets.h` says they mean different
+	 * things: no `secrets_dir` is the module's own default, and no
+	 * `materialise_dir` is a refusal rather than a directory invented. */
+	const char *secrets_dir;
+	const char *certs_dir;
+	/*
+	 * The three files a resolver configuration is delivered into.
+	 *
+	 * **Here rather than taken from `dns.h`'s constants inside the world**,
+	 * and that is not symmetry for its own sake: those constants are
+	 * `/etc/resolv.conf` and the two forwarder configurations of the machine
+	 * this suite is built on, whose network is live. A world that spelled them
+	 * itself would hand every test that opens an executor a `dns.apply` that
+	 * rewrites the workstation's own resolver. Left NULL the op refuses by
+	 * name, which is what a test wants and what `service.h` asks for.
+	 *
+	 * `run_dir` is not among them: the record of what was delivered goes
+	 * beside everything else this daemon writes, so the world uses its own.
+	 */
+	const char *resolv_conf;
+	const char *dnsmasq_conf;
+	const char *unbound_conf;
+	/*
+	 * What a DHCP client needs from the machine: the shipped hook, dhcpcd's
+	 * own run directory and what `-f` points at, plus the three programs.
+	 *
+	 * The same argument as the three above, and it is the sharpest case of it.
+	 * `ncfg_dhcp_machine` fills this with the real hook and leaves the
+	 * programs NULL, which means "find `dhcpcd` on `PATH`" -- so a world that
+	 * called it itself would give every test that opens an executor a
+	 * `backend.start` able to launch a real DHCP client on a real interface of
+	 * the workstation this suite runs on. Left zero, the op refuses by name.
+	 */
+	ncfg_dhcp_machine_t dhcp;
+	/*
+	 * The four daemons, by path.
+	 *
+	 * NULL means "find the conventional name", which is **right for a daemon
+	 * and wrong for a test**, and that asymmetry is why they are here rather
+	 * than left to whatever the world would choose. `service.h` records what
+	 * the absence of this seam cost the Rust: 20 of 45 checks in its live
+	 * openvpn script were silently exercising the machine's own openvpn,
+	 * because the fixed directories were searched before `PATH` and nothing
+	 * could be put in front. A test passes a program it wrote.
+	 */
+	const char *hostapd_program;
+	const char *radvd_program;
+	const char *openvpn_program;
+	const char *supplicant_program;
+} ncfg_main_world_where_t;
+
+/*
  * Point one at a machine. Opens nothing: an executor is per operation.
  *
- * `run_dir` and `state` are borrowed and must outlive this. `subscribers` may
- * be NULL.
+ * `where`, everything it points at, and `state` are borrowed and must outlive
+ * this. `subscribers` may be NULL.
  */
-int ncfg_main_world_open(ncfg_main_world_t *world, const char *run_dir,
+int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t *where,
     const ncfg_daemon_state_t *state, ncfg_main_subscribers_t *subscribers,
     ncfg_main_watchers_t *watchers, char *err, size_t err_size);
 
@@ -1054,6 +1187,49 @@ int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state,
  */
 size_t ncfg_main_claims_of(const ncfg_daemon_state_t *state, ncfg_interface_claim_t *out,
     size_t out_max);
+
+/* ------------------------------------------------------------------------ *
+ * The half of an executor that is not netlink -- daemon_service.c
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The DHCP route metric of each interface that has one, resolved.
+ *
+ * `netcfgd_model::wifi::effective_metric`: *the network's `metric` where the
+ * radio is associated to one that carries it, and the interface's own
+ * `preference` otherwise.* Half of it comes from the observation, which is why
+ * the executor cannot answer it -- measured on a veth with a real server, a
+ * client started from the document alone took dhcpcd's default of 1003 on a
+ * configuration whose network said 100, and kept it across a switch to a
+ * network saying 400.
+ *
+ * An interface with neither is left out, and a client then starts with no
+ * `-m`: that is dhcpcd's own default and the honest answer for a document that
+ * named no preference. Answers how many were taken, up to `out_max`, and
+ * counts what did not fit in `*missed` (which may be NULL). The names are
+ * borrowed from the document and live as long as it does.
+ */
+size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_t *observed,
+    ncfg_service_client_metric_t *out, size_t out_max, size_t *missed);
+
+/*
+ * Fill in everything the fourteen service-side ops need, from one world.
+ *
+ * The world owns what this borrows -- the scope list and the metric array are
+ * its fields -- so this is not a constructor so much as the joining of things
+ * already resolved, and `ncfg_main_service_release` is what undoes it.
+ *
+ * **A failure here is not a failure to open an executor.** Every member that
+ * could not be resolved is left as it was, and `ncfg_service_t` refuses the
+ * ops that needed it by name; the alternative is a daemon that cannot bring up
+ * a link because it could not work out a route metric. What went wrong is
+ * logged and 0 comes back for a caller that wants to say so.
+ */
+int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size);
+
+/* Release what `ncfg_main_service_of` allocated and zero the service. Calling
+ * it on a world that never built one is nothing. */
+void ncfg_main_service_release(ncfg_main_world_t *world);
 
 /*
  * The hooks of a document, flattened into `out`.

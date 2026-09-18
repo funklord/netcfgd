@@ -183,20 +183,11 @@ static void remove_under(const char *path, int depth)
 }
 
 /* `mkdir -p`, for the fixture trees. The paths are all under `base`. */
+/* `testdir.h`'s, now that world_test builds the same shape of tree. Kept as a
+ * name here so the fixtures below read as they did. */
 static void make_tree(const char *path)
 {
-	char   copy[1024];
-	size_t i;
-
-	(void)snprintf(copy, sizeof(copy), "%s", path);
-	for (i = 1u; copy[i] != '\0'; i++) {
-		if (copy[i] == '/') {
-			copy[i] = '\0';
-			(void)mkdir(copy, 0700);
-			copy[i] = '/';
-		}
-	}
-	(void)mkdir(copy, 0700);
+	testdir_mkdirp(path);
 }
 
 static long long now_ms(void)

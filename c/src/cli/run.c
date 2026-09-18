@@ -1207,16 +1207,20 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  * something under it is unported but that everything under it is unported in a
  * way an apply cannot survive.** Four facts, each of which is on its own enough:
  *
- *   * **The planner is four passes of thirty** (`src/plan/build.c` says so at
- *     the top). A plan from this build is not the whole change, so an apply
- *     would converge part of a machine and report having converged it. The
- *     planner warns by name about every block it is holding -- which is what
- *     makes `ncfg plan` honest and is exactly what an apply would act past.
+ *   * **The planner does not read every block a document can carry.** A plan
+ *     from this build is not the whole change, so an apply would converge part
+ *     of a machine and report having converged it. `warn_unported` in
+ *     `src/plan/build.c` is the list, and it is named here rather than counted
+ *     for the reason every other figure in this file was un-counted: a number
+ *     has to be swept whenever a pass lands, and the ones that were written
+ *     down here went stale inside a wave. The list is the thing a reader needs
+ *     and it changes only when the fact does.
  *   * **The executor refuses what it cannot do while the plan is running,
  *     rather than before it.** It carries every op kind now; what it refuses
  *     is by *kind* -- a `link.create` for a physical device, a pppoe session
- *     or an openvpn tunnel, and `backend.start` for the six backend kinds
- *     `src/backend/` does not carry. `ncfg_apply_supported` is asked by
+ *     or an openvpn tunnel, and `backend.start` for four of the nine backend
+ *     kinds -- measured by asking `ncfg_apply_supported` about each, rather
+ *     than by counting the arms that refuse. `ncfg_apply_supported` is asked by
  *     `execute`, one action at a time, and `ncfg_apply` stops at the first
  *     failure -- so a plan mixing a supported op with an unsupported one
  *     changes the machine and then stops halfway. A sweep of the plan before
@@ -1251,11 +1255,13 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  */
 static int command_apply(void)
 {
-	(void)failf("`ncfg apply` is not in this wave of the C port: its executor refuses "
-	    "every op that needs a service context -- `dns.apply`, the four sysctls, the "
-	    "six wifi ops and all three backend verbs -- because nothing outside the tests "
-	    "installs one. An apply would bring up links and addresses and then decline to "
-	    "start a single backend.");
+	(void)failf("`ncfg apply` is not in this wave of the C port, and what is missing "
+	    "is this command rather than anything it would call: there is no apply path "
+	    "here at all. Nothing takes the apply lock, opens an executor or carries a "
+	    "plan out. The executor's own half that is not netlink is written and the "
+	    "daemon installs it, so the sentence that used to stand here -- that nothing "
+	    "outside the tests gives an executor a service context -- has stopped being "
+	    "true.");
 	(void)fail("It also has nothing to record with and nothing to revert with: the "
 	    "fold into owned.json and the `" NCFG_OBSERVE_ALTNAME_PREFIX "` mark a created "
 	    "link wears are written, and this command has no apply path to reach either "

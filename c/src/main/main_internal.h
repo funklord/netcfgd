@@ -224,6 +224,22 @@ typedef struct {
 	 * `NULL` there means the resolver refuses rather than choosing, so this is
 	 * resolved here or nothing 802.1X works. */
 	char certs[NCFG_MAIN_PATH_MAX];
+	/*
+	 * Where the four sysctls and the hostname are, and where the supplicant's
+	 * control sockets are.
+	 *
+	 * Here rather than left to `ncfg_service_machine` for that header's stated
+	 * reason: nothing in `ncfg_service_t` has a default, because the machine
+	 * this is built on has a live network and a default would make the
+	 * difference between a test and an outage a variable somebody remembered
+	 * to set. Resolved through the module that owns each file --
+	 * `ncfg_observe_roots_default` reads the sysctls this daemon writes, and
+	 * `ncfg_supplicant_ctrl_dir` owns the sockets -- so the pair that has to
+	 * agree is one answer rather than two spellings, and both honour the same
+	 * environment override a test points at a directory it made.
+	 */
+	char proc[NCFG_MAIN_PATH_MAX];
+	char supplicant[NCFG_MAIN_PATH_MAX];
 } ncfg_main_where_t;
 
 /*
