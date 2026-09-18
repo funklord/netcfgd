@@ -604,6 +604,23 @@ int main(int argc, char **argv)
 		if (document && ncfg_document_write(document, &written, err, sizeof(err))) {
 			check(strstr(ncfg_buf_text(&written), "\"confirm_default\":null") != NULL,
 			    "a confirm window nobody stated is written as null, not omitted");
+			/* **And read back.** The first version of this check asserted the
+			 * write and stopped, so the reader went two commits not knowing
+			 * that `null` means absent -- and a document stating no window,
+			 * which is nearly every document, could not be read by the
+			 * reader that had just written it. A round trip is the whole
+			 * claim; half of one is how this got in. */
+			{
+				ncfg_document_t *back = ncfg_document_read(
+				    ncfg_buf_text(&written), written.length, err, sizeof(err));
+
+				check(back != NULL, "and read back by the reader that wrote it");
+				if (back) {
+					check(!back->globals.confirm_default.has,
+					    "with the window still absent rather than zero");
+					ncfg_document_free(back);
+				}
+			}
 		} else {
 			check(0, "a document with nothing stated can be written");
 		}
