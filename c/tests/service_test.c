@@ -564,11 +564,15 @@ static void the_fourteen_are_supported(void)
 	};
 	static const int carried[] = {
 		NCFG_BACKEND_ACCESS_POINT, NCFG_BACKEND_ROUTER_ADVERT, NCFG_BACKEND_OPENVPN,
-		NCFG_BACKEND_DHCP4
+		NCFG_BACKEND_DHCP4,
+		/* The launcher landed, so a supplicant answers both verbs. The whole
+		 * of it is `supplicant_launch_test.c`; what belongs here is that the
+		 * single list of what this build carries out now says so. */
+		NCFG_BACKEND_SUPPLICANT
 	};
 	static const int refused_kinds[] = {
-		NCFG_BACKEND_DHCP6, NCFG_BACKEND_SUPPLICANT, NCFG_BACKEND_PPPOE,
-		NCFG_BACKEND_WIREGUARD, NCFG_BACKEND_DNS
+		NCFG_BACKEND_DHCP6, NCFG_BACKEND_PPPOE, NCFG_BACKEND_WIREGUARD,
+		NCFG_BACKEND_DNS
 	};
 	char   message[NCFG_ERROR_MAX];
 	size_t i;
@@ -600,7 +604,8 @@ static void the_fourteen_are_supported(void)
 			all = 0;
 		}
 	}
-	check(all, "an access point, a radvd, an openvpn and a DHCPv4 client are carried out");
+	check(all,
+	    "an access point, a radvd, an openvpn, a DHCPv4 client and a supplicant are carried out");
 
 	/*
 	 * **The DHCPv6 half answers differently for the two verbs, and that is the

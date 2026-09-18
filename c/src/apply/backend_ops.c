@@ -3,14 +3,30 @@
  * and delivering a resolver configuration.
  *
  * WHAT THIS BUILD CARRIES, AND WHAT IT REFUSES
- *   Four of the nine backend kinds have a module under `src/backend/`:
+ *   Five of the nine backend kinds have a module under `src/backend/`:
  *   `ncfg_hostapd_start`, `ncfg_ra_start`/`_reload`/`_stop`,
- *   `ncfg_openvpn_start`/`_stop` and `ncfg_dhcp_start`/`_stop`. Those are the
- *   ones this executes. A supplicant and a PPPoE session are each started by
- *   code that is not ported, and both are **refused by name** rather than
- *   reported as done -- an executor that answered success for a client it did
- *   not start would have the planner satisfied about a machine with no
- *   address.
+ *   `ncfg_openvpn_start`/`_stop`, `ncfg_dhcp_start`/`_stop` and
+ *   `ncfg_supplicant_start`/`_stop`. Those are the ones this executes. A
+ *   PPPoE session is started by code that is not ported and is **refused by
+ *   name** rather than reported as done -- an executor that answered success
+ *   for a session it did not start would have the planner satisfied about a
+ *   machine with no address.
+ *
+ * STARTING A SUPPLICANT IS THE ONE START THAT IS NOT FINISHED WHEN IT RETURNS
+ *   A supplicant that has just been launched knows nothing, by design (0015),
+ *   and **filling it is part of starting it** rather than a later reconcile's
+ *   work: a plan that reported success while leaving an empty supplicant would
+ *   be reporting that a port is authenticated when it is not, and that a radio
+ *   holds credentials it was never given. So the arm below calls
+ *   `ncfg_service_set_profiles` -- the same op `wifi.set_profiles` carries out
+ *   -- and a population that failed fails the start. That is the Rust's
+ *   arrangement, where `populate_supplicant` is called from the `backend.start`
+ *   arm and from the `WifiSetProfiles` arm and from nowhere else.
+ *
+ *   Which driver it is launched with comes from the same document lookup the
+ *   population branches on. `service_internal.h` says why that matters: a
+ *   radio started `-Dwired`, or a wired port started `-Dnl80211`, comes up and
+ *   never authenticates, and nothing downstream can tell.
  *
  *   **The DHCPv6 half is a start this build refuses and a stop it carries**,
  *   which is not an accident of the porting order. Which v6 client can serve a
@@ -46,6 +62,8 @@
  *   looks like one.
  */
 #include "ncfg/service.h"
+
+#include "service_internal.h"
 
 #include "ncfg/base.h"
 #include "ncfg/dhcp.h"
@@ -112,6 +130,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	case NCFG_BACKEND_ROUTER_ADVERT:
 	case NCFG_BACKEND_OPENVPN:
 	case NCFG_BACKEND_DHCP4:
+	case NCFG_BACKEND_SUPPLICANT:
 		return 1;
 	case NCFG_BACKEND_DHCP6:
 		/*
@@ -130,18 +149,6 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 		    "which the plain backend path does not carry -- dhcpcd never reports a "
 		    "prefix to a script and only odhcp6c can, so netcfgd will not pick one "
 		    "here. A DHCPv4 client on %s is started normally", name, iface, iface);
-		return 0;
-	case NCFG_BACKEND_SUPPLICANT:
-		/*
-		 * The distinction is worth the sentence: `supplicant.h` is a complete
-		 * *client*, so everything netcfgd asks a running supplicant is ported
-		 * -- `wifi.set_profiles` below is one of them. What is missing is the
-		 * launcher, which is a different thing from the socket.
-		 */
-		ncfg_error_set(err, err_size,
-		    "%s on %s needs a `wpa_supplicant` to be launched and adopted; this "
-		    "build talks to one that is already running and cannot start one",
-		    name, iface);
 		return 0;
 	case NCFG_BACKEND_PPPOE:
 		ncfg_error_set(err, err_size,
@@ -352,6 +359,60 @@ static int start_dhcp(const ncfg_service_t *service, const char *run_dir, const 
 	return ncfg_dhcp_start(run_dir, iface, &metric, &service->dhcp, err, err_size);
 }
 
+/* Where the control sockets are, or a refusal naming what is missing.
+ *
+ * `service.h`'s bargain: nothing here has a default and nothing here reads the
+ * environment, because a default is how the difference between a check and an
+ * outage becomes a variable somebody remembered to set. The wifi ops ask this
+ * of themselves in `supplicant_context`; both verbs below need it too. */
+static int supplicant_dir_of(const ncfg_service_t *service, const char *doing, const char *iface,
+    const char **out, char *err, size_t err_size)
+{
+	if (!service->supplicant_dir || service->supplicant_dir[0] == '\0') {
+		ncfg_error_set(err, err_size,
+		    "%s on %s needs to be told where the supplicant control sockets are; this "
+		    "build has no default for it, because a default is how a check comes to "
+		    "start a supplicant on the machine's own radio", doing, iface);
+		return 0;
+	}
+	*out = service->supplicant_dir;
+	return 1;
+}
+
+/* Start a supplicant, or adopt the one already there, and give it its
+ * networks.
+ *
+ * **Nothing is asked here about whether one is running**, unlike the three
+ * above. That question has two halves for a supplicant -- a pid file with a
+ * mark in it and a control socket that answers -- and `ncfg_supplicant_start`
+ * asks both as its first steps, because the answer decides between adopting
+ * and spawning rather than merely between starting and not. That is
+ * `start_dhcp`'s arrangement and its reason. */
+static int start_supplicant(const ncfg_service_t *service, const char *run_dir,
+    const char *iface, char *err, size_t err_size)
+{
+	const char *dir;
+	const char *driver;
+
+	if (!supplicant_dir_of(service, "backend.start", iface, &dir, err, err_size) ||
+	    !ncfg_service_supplicant_driver(service->document, iface, &driver, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_supplicant_start(run_dir, dir, iface, driver, service->supplicant_program, err,
+	    err_size)) {
+		return 0;
+	}
+	/*
+	 * **Filling it is part of starting it.** See the note at the top: a
+	 * supplicant that has just started holds nothing, and reporting the start
+	 * as done would report a port authenticated that is not. A failure here is
+	 * a failed start even though a process is now running -- which is the Rust's
+	 * behaviour too, and is the honest one: the action did not achieve what it
+	 * said, and `backend.stop` is what takes the process away.
+	 */
+	return ncfg_service_set_profiles(service, iface, err, err_size);
+}
+
 static int start_tunnel(const ncfg_service_t *service, const char *run_dir, const char *iface,
     char *err, size_t err_size)
 {
@@ -387,8 +448,9 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_tunnel(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP4:
 		return start_dhcp(service, run_dir, iface, err, err_size);
-	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_SUPPLICANT:
+		return start_supplicant(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_PPPOE:
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
@@ -497,6 +559,7 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 {
 	const ncfg_service_tunnel_t *tunnel;
 	const char                  *run_dir;
+	const char                  *supplicant_dir;
 
 	if (!run_dir_of(service, "backend.stop", iface, &run_dir, err, err_size)) {
 		return 0;
@@ -530,6 +593,24 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		    kind == NCFG_BACKEND_DHCP4 ? NCFG_DHCP_FAMILY_V4 : NCFG_DHCP_FAMILY_V6,
 		    &service->dhcp, err, err_size);
 	case NCFG_BACKEND_SUPPLICANT:
+		/*
+		 * Through its own control socket, never by signalling a process found
+		 * by name -- 0014's rule, which the tunnel above states and which
+		 * `process.h` names this daemon in: an operator's own
+		 * `wpa_supplicant` is an ordinary thing to have, and it would be
+		 * reached along with netcfgd's.
+		 *
+		 * **This is the inverse `backend.start` declares**, which is why it is
+		 * carried rather than left: `service.h` says a start inverts to a stop
+		 * on the same kind and interface, and an inverse the executor refuses
+		 * is a revert that silently skips an op.
+		 */
+		if (!supplicant_dir_of(service, "backend.stop", iface, &supplicant_dir, err,
+		    err_size)) {
+			return 0;
+		}
+		return ncfg_supplicant_stop(run_dir, supplicant_dir, iface, service->patience_ms,
+		    err, err_size);
 	case NCFG_BACKEND_PPPOE:
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
