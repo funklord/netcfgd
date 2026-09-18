@@ -9540,6 +9540,82 @@ to saying it did nothing has changed the machine. The test pulls the
 identifier out of that sentence and looks it up in `daemon.h`, so a rename
 turns the refusal red rather than leaving it pointing at nothing.
 
+### Three from the loop, and the first is a backstop that switches itself off
+
+**`ticked` is never set on a machine the kernel is talking to.** There are two
+producers of `Command::Tick`: the netlink watcher's `Ok(false)` arm, which
+fires only when *its own socket* times out, and `next_command`'s
+`recv_timeout`, which restarts on every command that arrives. So on a machine
+reporting a link, address or route change at least every five seconds -- a
+router, a lease renewing, a link flapping, an interface with RA churn -- the
+watcher never times out, the channel is never quiet, and `ticked` is never set
+at all.
+
+`should_resolve_window(confirm_expired, ticked)` is `confirm_expired ||
+ticked`. So on such a machine the only thing that can close a commit-confirm
+window is the timer thread -- and **0234 is the record of that thread's spawn
+failure being discarded, with the tick added as the mitigation.** The
+mitigation is off on exactly the machine that is busiest. Drift correction is
+unaffected; what is lost is the window. Read out of the source, not measured:
+starting this daemon is not a thing to do on this workstation. The C measures
+its deadline from the top of each round, so the tick happens on schedule
+however loud the machine is.
+
+**The control socket's permissions are frozen at startup.** `bind_sockets` is
+called once, before the loop, and `apply_policy_permissions` sets the socket's
+mode and group from the policy as it was then. `reload_configuration`
+recompiles and rebinds nothing, while authorization re-reads the policy from
+`state.desired` per request -- so the two halves disagree after any reload. An
+operator runs `ncfg control set --observe group:netcfgd`, which
+`debian/postinst` prints as the documented way out of the root-only default,
+and `ncfg control show` reports it correctly while the socket stays `0600`.
+The caller cannot connect to be told yes. Pointed the other way, closing
+remote access by editing and reloading leaves `remote.sock` bound and
+reachable until the daemon restarts -- and 0128's whole argument is that "a
+socket that does not exist is one nothing can reach through", which holds only
+for the document the daemon started with.
+
+**And the roam watcher reads the supplicant control directory four times a
+second, for ever.** The outer loop sleeps a second only when nothing is
+attached; with a radio attached each pass is a `read_dir`, a `stat` per radio
+and a 250ms `next_event` per radio. Same family as the apply-lock and the
+seven-dump findings: work done for ever to discover that nothing has changed.
+The port watches the directory with inotify and scans when it says something
+moved.
+
+### Three latent defects in the port itself
+
+Worth recording separately, because the C is the code with a future and these
+were found by using it rather than by reading it.
+
+**A supplicant timeout of zero blocked for ever.** `SO_RCVTIMEO` of `{0, 0}`
+is the kernel's "no deadline at all", so the one argument a caller reads as
+"do not block" is the one that blocks, and a negative was clamped into it. No
+caller passed zero -- `wait_for_scan` guards above it and the loop's drain
+passes 1 -- so it was purely latent, which is when it is cheapest to close.
+Both are refused by name now. **The sabotage is the argument**: putting the
+clamp back does not turn a check red, it hangs the test binary until something
+outside kills it. That is also what it would look like on a machine, where the
+thing that stopped is netcfgd's reconcile loop and nothing is in the log.
+
+**`main_test.c` ran the daemon's entry point in its own process.** Harmless
+today, because the entry point refuses before it opens anything -- and one
+wiring commit from starting a network configuration daemon inside `make
+check`, on a developer's workstation, without that file being touched. The
+parse is now a function of its own, the refusal is reachable on its own, the
+tests call those two, and a check reads the file to keep it that way. That
+check failed on its first run by finding its own string literal, so the needle
+is joined at run time; a test that reads its own source has to be written so
+that saying what it forbids is not doing it.
+
+**`ncfg_provenance_canonicalize` left "which duplicate wins" to the libc.**
+The rule is that the first entry for a path wins -- the base rather than the
+override -- and `qsort` is not stable. It now sorts an index of pointers into
+an array `qsort` never moves, so two pointers still say which arrived first.
+The check pins the surviving file and line, and **passes against the old
+code**: glibc's `qsort` is a merge sort and kept these two in order, so it was
+right by luck and would have been wrong elsewhere.
+
 ### Two more defects, one of which sharpens 10.169's
 
 **`Kernel::new()` takes a seven-dump snapshot of the machine to build a
@@ -9569,6 +9645,95 @@ one aimed at an ifindex that does not exist both come back as an **empty dump,
 not an error**. So the arm that exists to be forgiving is unreachable, and
 what is left is a `?` that ends the entire observation because one interface's
 filter dump failed. The C counts such a failure and carries on.
+
+### The call that was missing between the kernel and an observation
+
+`collect`, `build`, `augment_host` and `derive` all landed in this wave and
+nothing joined them, so `ncfg_daemon_observe_fn` had no implementation and five
+verbs refused with a sentence about a netlink dump that now exists.
+`src/observe/current.c` is the join: `ncfg_observe_current_from` takes the dump
+seam, `ncfg_observe_current` opens a socket of its own, and
+`ncfg_observe_source_t` is what the daemon's seam carries -- a run directory,
+the three roots and the round of dumps, resolved once. It is in the observe
+module rather than in `src/main/` or the CLI because both callers need it and a
+second copy is how two readers of one thing come to disagree; the Rust's
+`netcfgd_host::prior_state` carries that reason above it for the same pair.
+
+**Four of the five verbs are wired and `ncfg apply` is refused, by name.**
+`status`, `plan`, `explain` and `wait-online` read the machine and print, and
+everything under each is ported. `apply` changes it, and four things under it
+are not: a planner that is four passes of thirty, an executor that takes
+thirteen ops of forty-eight and refuses the rest *while the plan runs*, no fold
+into `owned.json`, and no window. The third is the one that decided it -- a
+link this build creates wears no `netcfgd:` alternative name and appears in no
+record, so netcfgd could never delete it again. 0263 carries the argument.
+
+**Twelve sabotages, and one that caught nothing on its own.** Clearing the
+hand-over of the hook state gave ASan a use-after-free; dropping the borrowed
+origin list turned `dhcp4` into the tag's `static`; skipping `augment_host` lost
+the hostname; skipping `derive` lost the inventory, the verdict and the linkset;
+dropping `*out = NULL` left a pointer in a failed observation; skipping the
+delegations and reports emptied both; drifting the adapter's signature failed
+the build at the line that assigns it to `ncfg_daemon_observe_fn`; pointing the
+`apply` arm at a generic refusal took seven checks with it; restoring the false
+sentence and unwiring `status` each took one; typing `30` into the help while
+the constant said 45 took the pairing check.
+
+**Leaking the whole capture on the success path was caught by no named check.**
+LeakSanitizer names it, so `make -C c SANITIZE=1 test` is red -- but nothing in
+the suite is, and the plain `make -C c test` is green. Reported rather than
+papered over: the tests assert what an observation contains, and there is no
+assertion a test can make about memory the composition should have given back.
+
+### Three more, from joining the observer to the command line
+
+**A local `ncfg apply` prints that a confirm window opened and opens none.**
+`crates/netcfgd-plan/src/lib.rs:1524` emits `Op::CommitArm` whenever
+`confirm_window(desired, options)` answers -- which is the caller's
+`--confirm-within` *or* the document's `globals.confirm_default`, that fallback
+being 0094's fix. `crates/netcfgd-apply/src/kernel.rs:1911` executes it as
+`Ok(())`, correctly, because the window belongs to whoever owns the timer
+afterwards. On the local path nobody does: `command_apply`
+(`crates/netcfgd-cli/src/lib.rs:633`) routes to the daemon **only** when
+`options.confirm` is set, and otherwise builds a plan, runs it, and prints
+every journal record -- including `ok   commit.arm  globals.confirm_default:
+90s (was <absent>)`. Reproduced as far as a read-only machine allows: with
+`global { confirm = 90 }` in a scratch config directory, `ncfg plan` answers
+
+    0  commit.arm  globals.confirm_default: 90s (was <absent>)
+
+and the rest follows from the two source lines above. The cost is the exact
+shape 0094 was written about, one layer further out: an operator who wrote
+`confirm = 90` believing every apply had a safety net is now *told* by the
+apply's own output that it did, and there is no window, no timer and no
+revert. 0094 made the number reach the plan; nothing made it reach a clock on
+the path that does not ask the daemon.
+
+**`ncfg wait-online` can fail on a machine that is online, and say so in the
+same sentence.** `crates/netcfgd-cli/src/lib.rs:1764` observes and checks; line
+1773, after the deadline, observes **again** to build the report. Between the
+two the machine can come online -- at boot the last 250ms is exactly when a
+DHCP lease lands -- and the second observation is used only for the detail
+string, never for the verdict. The failure then reads `still not online after
+30s: 2 address(es) outside loopback and a default route`, which is the
+condition `is_online` tests, stated as the reason for failing it. The cost is
+`network-online.target` going red on a machine that is up, which is the one
+decision that unit exists to make, plus a second full compile and a second
+seven-dump round on the tick the machine is busiest. The C reports the last
+observation the loop actually gave up on.
+
+**`ncfg status` and `ncfg wait-online` swallow a configuration that does not
+compile.** `observe_with_document` (`crates/netcfgd-cli/src/lib.rs:1667`) is
+`compile(options).ok()`, so the diagnostics go nowhere and the listing prints
+as though the desired half of the answer were merely empty. `ncfg status` is
+the first thing somebody runs when the machine is wrong, and it is the one
+command that will not mention that the file they just edited does not parse --
+`ncfg explain` prints them and `ncfg plan` fails on them. The same call is on
+`wait-online`'s path, where it also means the whole configuration directory is
+re-read and re-compiled every 250ms for the length of the timeout: 120 full
+loads of `/etc/netcfgd` on a thirty-second boot wait, for a document that is
+used only to classify links. The C prints the diagnostics and compiles once,
+before the loop.
 
 ### What the sanitizers caught that the tests did not
 
