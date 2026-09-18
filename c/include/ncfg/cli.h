@@ -27,13 +27,13 @@
  *   which.
  *
  * WHAT IS IN THIS WAVE AND WHAT IS NOT
- *   0263 puts `cli` last because it depends on everything. Two of the things
- *   it depends on are not ported yet -- the loader that turns `/etc/netcfgd`
- *   into a source set, and the observer that turns netlink into an
- *   `ncfg_observed_t` -- so the verbs that begin with a local compile or a
- *   local observation (`status`, `plan`, `show`, `apply`, `explain`,
- *   `control`, `config`, `profile`, `secret`, `reset`, `wait-online`, `wifi
- *   add`, `wifi forget`) have no source to read from and are not wired.
+ *   0263 puts `cli` last because it depends on everything. The loader and the
+ *   observer that the verbs beginning with a local compile or a local
+ *   observation are built on have landed since, and so has the `network` block
+ *   writer the last three were waiting for: `ncfg wifi add`, `ncfg wifi forget`
+ *   and `ncfg reset` are wired. What is left unwired is named at its own arm in
+ *   `run.c` rather than in a list here, because a list of absences in a header
+ *   is the thing that goes on saying a module is missing after it lands.
  *
  *   **Their output is still ported and still tested**, because the output is
  *   the part that is expensive to rediscover: `ncfg_cli_print_status`,
@@ -46,11 +46,13 @@
  *   command must not do.
  *
  * WHERE THE C DIVERGES FROM THE RUST, DELIBERATELY
- *   * **`--json` is not in this wave.** The Rust hands `serde_json` the typed
- *     value; the C has a writer for a document, an observation and a plan and
- *     none for a protocol response. A verb given `--json` refuses and says so.
- *     Printing the human form while accepting the flag would be the fault the
- *     unknown-option arm exists to prevent, one level up.
+ *   * **`--json` prints the payload and never the response envelope**, where
+ *     the Rust prints whatever `serde_json` makes of the value it happens to
+ *     hold -- an object for a scan, a bare array for the radios and the
+ *     modems, and nothing at all for the verbs that answer `ok`. One rule
+ *     here: the answer's own object, compact, on one line. *The same answers,
+ *     as JSON* below says where each member name comes from and why the tag
+ *     is not among them.
  *   * **A repeatable option has a ceiling** (`NCFG_CLI_LIST_MAX`). Rust grows
  *     a `Vec`; a C parser that did would be allocating on a command line, and
  *     0263's buffer rule is that text with no ceiling is text a caller chooses
@@ -68,6 +70,7 @@
 #define NCFG_CLI_H
 
 #include "ncfg/document.h"
+#include "ncfg/explain.h"
 #include "ncfg/observed.h"
 #include "ncfg/plan.h"
 #include "ncfg/proto.h"
@@ -393,6 +396,96 @@ void ncfg_cli_print_modems(const ncfg_proto_modem_t *modems, size_t count);
  * more useful than one that refuses to parse it.
  */
 void ncfg_cli_print_event(const ncfg_proto_event_t *event, const char *raw, size_t raw_length);
+
+/* ------------------------------------------------------------------------ *
+ * The same answers, as JSON
+ * ------------------------------------------------------------------------ *
+ *
+ * WHAT `--json` PRINTS, AND WHY IT IS NOT THE RESPONSE ENVELOPE
+ *   One object per answer, compact, on one line, rendered into a buffer the
+ *   caller prints -- a library never prints. What the object holds is the
+ *   *payload*: the members the control socket carries beside its `"response"`
+ *   tag, with the tag itself left off.
+ *
+ *   The tag is left off because three of the seven answers are computed here
+ *   rather than received, and two of those already have their shapes frozen:
+ *   `doc/schema/observed.json` is what `ncfg status --json` prints and
+ *   `doc/schema/plan.json` is what `ncfg plan --json` prints, and neither
+ *   witness carries a `"response"` member. Tagging the socket-answered verbs
+ *   and not the local ones would be two rules for one flag; tagging all of
+ *   them would put `ncfg status --json` at odds with the witness that pins
+ *   the observation. So there is no envelope anywhere -- and every member
+ *   name, every spelling and every omission below comes from
+ *   `doc/schema/socket.json`, which `cli_test.c` reads back line by line.
+ *
+ *   **An optional member that is absent is absent, not null.** `name` is
+ *   missing from a scan entry whose octets are not text, `stale` is missing
+ *   from a scan that is fresh, and `cycle_pending` is missing from a modem
+ *   that is not switching. Writing `null` instead would be a third answer on
+ *   a socket that already has three, and the witness does not have one.
+ *
+ * WHAT HAPPENS TO A NAME THAT IS NOT VALID UTF-8
+ *   The JSON writer refuses it rather than repairing it (0263), so each of
+ *   these answers 0 with a sentence and leaves the buffer empty -- never half
+ *   an answer that looks whole. It is reachable: the JSON *reader* does not
+ *   check a string's bytes, so a stray octet inside a `name` or a `configured`
+ *   travels from the daemon into a decoded answer intact, and `subject` comes
+ *   straight off `argv`. The caller says so and prints nothing; the same
+ *   command without `--json` still renders it, because the table is text for
+ *   a terminal and this is a document for a program.
+ */
+
+/* What a scan found: `interface`, `access_points`, and `stale` when it is. */
+int ncfg_cli_json_scan(const ncfg_proto_scan_t *scan, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/* What one radio is doing, and what it has stopped trying. */
+int ncfg_cli_json_wifi_status(const ncfg_proto_wifi_status_t *state, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/* Who is on an access point, and which way the list reads. */
+int ncfg_cli_json_stations(const ncfg_proto_stations_t *report, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * The radios, and the modems: each wrapped in the object the socket wraps it
+ * in rather than written as a bare array.
+ *
+ * The Rust prints `[...]` for these two and an object for the three above it,
+ * which is a divergence recorded in 0263: a bare array cannot grow a fact
+ * beside it, and `wifi_scan` already carries `stale` beside its list. One
+ * shape for all five is also one thing for a caller to learn.
+ */
+int ncfg_cli_json_radios(const ncfg_proto_radio_t *radios, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
+int ncfg_cli_json_modems(const ncfg_proto_modem_t *modems, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
+/*
+ * An explanation: `subject`, `facts`, and `total`.
+ *
+ * `total` is this port's, and 0263 records it: the socket's `explanation`
+ * carries the facts and no count, because the Rust's `Explanation` has no
+ * bound to report. This one does -- `NCFG_EXPLAIN_FACTS_MAX` -- and the text
+ * form ends with "showing 256 of 1202" when it bites. A machine-readable form
+ * that dropped the count would be the one place `--json` says less than the
+ * table, which is the fault this flag exists to avoid. It is written always
+ * rather than only when it bites, so that a reader compares it against the
+ * length of `facts` instead of having to know the member is sometimes there.
+ */
+int ncfg_cli_json_explanation(const ncfg_explanation_t *explanation, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * `{"ok":true}` -- the whole answer of a verb whose answer is that it worked.
+ *
+ * `{"response":"ok"}` carries nothing beside its tag, so the payload rule
+ * above would make this `{}`, which tells a script nothing it did not already
+ * know from the exit status. `ok` is the protocol's own word for this fact --
+ * a `reloaded` event spells it exactly so -- and a verb that printed a
+ * sentence under `--json` would be the flag silently ignored.
+ */
+int ncfg_cli_json_ok(ncfg_buf_t *out, char *err, size_t err_size);
 
 /* ------------------------------------------------------------------------ *
  * The socket conversation
@@ -829,6 +922,33 @@ int ncfg_cli_config(const ncfg_cli_options_t *options, const char **positional, 
 
 /* `ncfg profile get|list|set|save|unset`: which set of drop-ins (0151). */
 int ncfg_cli_profile(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/*
+ * `ncfg wifi add SSID`: one `network` block and its credential.
+ *
+ * The same shape as the four above and for the same reason, although the verb
+ * sits under `ncfg wifi`: it writes the configuration, so it takes the
+ * daemon-then-directory route and answers a sentence rather than an exit
+ * status. `positional` is what followed `add`.
+ */
+int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/* `ncfg wifi forget ID`: the same write backwards, credential included. */
+int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positional,
+    size_t count, char *err, size_t err_size);
+
+/*
+ * `ncfg reset`: discard the writable configuration layer.
+ *
+ * **The one verb here that only removes**, and the only one that is not a
+ * write in the sense above: there is no daemon route, because what gates it is
+ * the filesystem -- the configuration directory is root's, and anybody who can
+ * delete these files can edit them. It prints what it would do and does
+ * nothing unless `--yes`.
+ */
+int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size);
 
 /* `ncfg secret set`: store a credential the configuration refers to (0075). */

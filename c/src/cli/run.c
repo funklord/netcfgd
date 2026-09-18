@@ -81,43 +81,65 @@ static int failf(const char *format, ...)
 }
 
 /*
- * A verb whose module has not landed, saying which one.
+ * `not_in_this_wave` stood here, with `NEEDS_WRITERS` beside it: a refusal
+ * that named the module a verb was waiting for -- "the settings writer that
+ * puts a drop-in where netcfgd reads it" -- for the three that had none, `wifi
+ * add`, `wifi forget` and `reset`. `wifi_profile.h` and `reset.c` landed and
+ * they were its last callers, so both are gone rather than left pointing at
+ * something that exists. That is what `NEEDS_OBSERVER` did before them and for
+ * the reason written there: a refusal naming a module that is present is worse
+ * than one naming a module that is absent, because it looks right. The next
+ * verb to need one writes the sentence it needs.
  *
- * **Named rather than hidden.** A command that answered `unknown command` for
- * something the usage text offers would be the drift this file exists to
- * refuse; one that answered from a different source -- the last observation in
- * `/run`, say -- would be worse, because it would look right.
+ * The three are dispatch arms now. `reset` reaches the adapter every write
+ * verb goes through; the two under `ncfg wifi` carry their own error buffer
+ * where they are dispatched, because that adapter is defined below
+ * `command_wifi` and the local it would be declared over is called
+ * `subcommand` too.
  */
-static int not_in_this_wave(const char *verb, const char *needs)
+
+/*
+ * One JSON document on stdout, or the sentence saying why there is not one.
+ *
+ * **`--json` is answered rather than ignored**, which is what this arm used to
+ * refuse it for: somebody who passed the flag and got a table would read the
+ * table as the machine-readable form. Every verb below that renders something
+ * now renders it both ways, and `cli.h` says what the object holds.
+ *
+ * **Nothing is printed when the render failed**, and that is the whole reason
+ * this is one function rather than three lines repeated. `ncfg_buf_t` hands
+ * out the empty string for a buffer that failed rather than the part that
+ * fitted, so a caller that printed anyway would emit `{` and a newline and
+ * exit 0 -- half a document that looks whole, which is the failure mode the
+ * buffer's rule exists for. The refusal a reader actually meets here is the
+ * JSON writer's: a name that is not valid UTF-8 is refused rather than
+ * repaired (0263), because every repair -- the raw bytes, `\u00XX` per byte,
+ * U+FFFD -- puts a value in front of somebody that nobody typed. So the
+ * sentence says what could not be written and points at the form that can
+ * still show it, which is the table.
+ */
+static int say_json(const ncfg_buf_t *rendered, int wrote, const char *err)
 {
-	return failf("`ncfg %s` is not in this wave of the C port: it needs %s, which is "
-	    "not ported yet", verb, needs);
+	if (!wrote) {
+		return failf("%s.\nnothing is printed rather than a document with a value in "
+		    "it that nobody typed; the same command without `--json` renders it as "
+		    "text", err);
+	}
+	ncfg_out_line(ncfg_buf_text(rendered));
+	return NCFG_CLI_EXIT_OK;
 }
 
-/*
- * What the writers are called, so the sentences that name them agree.
- *
- * `NEEDS_OBSERVER` stood beside this and said "the netlink dump the observer is
- * built from". That landed, so the sentence stopped being true and the constant
- * is gone rather than left pointing at something that exists -- a refusal naming
- * a module that is present is worse than one naming a module that is absent,
- * because it looks right. What each of the five verbs it covered does now is
- * decided one at a time, further down.
- */
-#define NEEDS_WRITERS    "the settings writer that puts a drop-in where netcfgd reads it"
-
-/*
- * `--json` is not in this wave, and is refused rather than ignored.
- *
- * A flag silently ignored is the fault the parser's unknown-option arm exists
- * to prevent, one level up: somebody who passed `--json` and got a table would
- * read the table as the machine-readable form.
- */
-static int json_not_in_this_wave(void)
+/* `{"ok":true}`, for a verb whose whole answer is that it worked. */
+static int say_json_ok(void)
 {
-	return fail("`--json` is not in this wave of the C port: there is no writer here "
-	    "for the daemon's answers yet, and printing the human form while accepting "
-	    "the flag would be a flag silently ignored");
+	ncfg_buf_t buf;
+	char       err[NCFG_ERROR_MAX];
+	int        code;
+
+	ncfg_buf_init(&buf, 0);
+	code = say_json(&buf, ncfg_cli_json_ok(&buf, err, sizeof(err)), err);
+	ncfg_buf_free(&buf);
+	return code;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -297,6 +319,9 @@ static int radio_set(const ncfg_cli_options_t *options, const char *subcommand,
 	if (code != NCFG_CLI_EXIT_OK) {
 		return code;
 	}
+	if (options->json) {
+		return say_json_ok();
+	}
 	if (activate) {
 		ncfg_out_writef("netcfgd manages `%s` now, and will run a supplicant on it. "
 		    "`ncfg wifi scan %s` should find something\n", interface, interface);
@@ -333,14 +358,18 @@ static int command_wifi(const ncfg_cli_options_t *options, const char **position
 	 * both need the loader, and neither needs a daemon -- which is the point,
 	 * since a machine with no network yet is a machine where nothing else is
 	 * running either. */
-	if (strcmp(subcommand, "add") == 0) {
-		return not_in_this_wave("wifi add", NEEDS_WRITERS);
-	}
-	if (strcmp(subcommand, "forget") == 0) {
-		return not_in_this_wave("wifi forget", NEEDS_WRITERS);
-	}
-	if (options->json) {
-		return json_not_in_this_wave();
+	if (strcmp(subcommand, "add") == 0 || strcmp(subcommand, "forget") == 0) {
+		char err[NCFG_ERROR_MAX];
+		int  wrote;
+
+		err[0] = '\0';
+		wrote = strcmp(subcommand, "add") == 0
+		    ? ncfg_cli_wifi_add(options, positional + 1, count - 1, err, sizeof(err))
+		    : ncfg_cli_wifi_forget(options, positional + 1, count - 1, err, sizeof(err));
+		if (wrote) {
+			return NCFG_CLI_EXIT_OK;
+		}
+		return fail(err[0] != '\0' ? err : "it did not say what went wrong");
 	}
 
 	memset(&request, 0, sizeof(request));
@@ -380,6 +409,9 @@ static int command_wifi(const ncfg_cli_options_t *options, const char **position
 	if (request.kind == NCFG_PROTO_REQ_WIFI_DISCONNECT) {
 		code = ask_for_ok(options, &request);
 		if (code == NCFG_CLI_EXIT_OK) {
+			if (options->json) {
+				return say_json_ok();
+			}
 			ncfg_out_line("disconnected");
 		}
 		return code;
@@ -387,6 +419,9 @@ static int command_wifi(const ncfg_cli_options_t *options, const char **position
 	if (request.kind == NCFG_PROTO_REQ_WIFI_CONNECT) {
 		code = ask_for_ok(options, &request);
 		if (code == NCFG_CLI_EXIT_OK) {
+			if (options->json) {
+				return say_json_ok();
+			}
 			/* **It has joined by the time this prints.** Since 0197 the
 			 * daemon waits for the association and reports what happened, so
 			 * a failure arrives as an error and never reaches here. The old
@@ -399,6 +434,47 @@ static int command_wifi(const ncfg_cli_options_t *options, const char **position
 	}
 
 	if (!ask_or_fail(options, &request, &message, &code)) {
+		return code;
+	}
+	/*
+	 * **The same answer, rendered twice, from the same decoded structure.**
+	 * Not two requests and not two readers: what the daemon sent is already an
+	 * `ncfg_proto_*` value by this point, so the table and the document are two
+	 * spellings of one thing rather than two ideas of what was asked.
+	 */
+	if (options->json) {
+		ncfg_buf_t buf;
+		char       said[NCFG_ERROR_MAX];
+		int        wrote = 0;
+
+		ncfg_buf_init(&buf, 0);
+		switch (message.u.response.kind) {
+		case NCFG_PROTO_RESP_WIFI_SCAN:
+			wrote = ncfg_cli_json_scan(&message.u.response.u.wifi_scan, &buf, said,
+			    sizeof(said));
+			break;
+		case NCFG_PROTO_RESP_WIFI_STATUS:
+			wrote = ncfg_cli_json_wifi_status(&message.u.response.u.wifi_status,
+			    &buf, said, sizeof(said));
+			break;
+		case NCFG_PROTO_RESP_AP_STATIONS:
+			wrote = ncfg_cli_json_stations(&message.u.response.u.ap_stations, &buf,
+			    said, sizeof(said));
+			break;
+		case NCFG_PROTO_RESP_RADIOS:
+			wrote = ncfg_cli_json_radios(message.u.response.u.radios.items,
+			    message.u.response.u.radios.count, &buf, said, sizeof(said));
+			break;
+		default:
+			(void)ncfg_cli_describe_answer(&message.u.response, said, sizeof(said));
+			code = failf("the daemon sent %s", said);
+			ncfg_buf_free(&buf);
+			ncfg_proto_message_free(&message);
+			return code;
+		}
+		code = say_json(&buf, wrote, said);
+		ncfg_buf_free(&buf);
+		ncfg_proto_message_free(&message);
 		return code;
 	}
 	switch (message.u.response.kind) {
@@ -446,9 +522,6 @@ static int command_modem(const ncfg_cli_options_t *options, const char **positio
 		return failf("unknown modem subcommand `%s`; `ncfg modem` and `ncfg modem "
 		    "status` both report what each modem is on", positional[0]);
 	}
-	if (options->json) {
-		return json_not_in_this_wave();
-	}
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_MODEM_LIST;
 	if (!ask_or_fail(options, &request, &message, &code)) {
@@ -459,6 +532,19 @@ static int command_modem(const ncfg_cli_options_t *options, const char **positio
 
 		code = failf("the daemon sent %s",
 		    ncfg_cli_describe_answer(&message.u.response, what, sizeof(what)));
+		ncfg_proto_message_free(&message);
+		return code;
+	}
+	if (options->json) {
+		ncfg_buf_t buf;
+		char       said[NCFG_ERROR_MAX];
+		int        wrote;
+
+		ncfg_buf_init(&buf, 0);
+		wrote = ncfg_cli_json_modems(message.u.response.u.modems.items,
+		    message.u.response.u.modems.count, &buf, said, sizeof(said));
+		code = say_json(&buf, wrote, said);
+		ncfg_buf_free(&buf);
 		ncfg_proto_message_free(&message);
 		return code;
 	}
@@ -474,13 +560,17 @@ static int command_monitor(const ncfg_cli_options_t *options)
 	char path[NCFG_CLI_TEXT_MAX];
 	char err[NCFG_ERROR_MAX];
 
-	if (options->json) {
-		return json_not_in_this_wave();
-	}
 	if (!socket_for(options, path, sizeof(path))) {
 		return fail("the run directory makes a socket path too long to connect to");
 	}
-	if (!ncfg_cli_stream(path, err, sizeof(err))) {
+	/*
+	 * **The only `--json` here that writes nothing.** An event arrives as one
+	 * JSON value on a line and that is already the machine-readable form, so
+	 * the flag switches the rendering off rather than switching a writer on --
+	 * which is also what keeps an event this build has never heard of whole,
+	 * the one property `ncfg monitor` is argued for on.
+	 */
+	if (!ncfg_cli_stream(path, options->json, err, sizeof(err))) {
 		return fail(err);
 	}
 	return NCFG_CLI_EXIT_OK;
@@ -505,6 +595,17 @@ static int command_simple(const ncfg_cli_options_t *options, ncfg_proto_request_
 	request.kind = kind;
 	code = ask_for_ok(options, &request);
 	if (code == NCFG_CLI_EXIT_OK) {
+		/*
+		 * **These three were ignoring `--json`, and the Rust still does.**
+		 * They were not among the six arms that refused it, which made them
+		 * the one place left where the flag was accepted and changed nothing
+		 * -- a script that asked for a document and got "reloaded; the
+		 * configuration compiles" is the fault those six refusals existed to
+		 * prevent, arriving through the verbs nobody had looked at.
+		 */
+		if (options->json) {
+			return say_json_ok();
+		}
 		ncfg_out_line(said);
 	}
 	return code;
@@ -660,10 +761,8 @@ static int command_status(const ncfg_cli_options_t *options)
 	char             err[NCFG_ERROR_MAX];
 	ncfg_document_t *document;
 	ncfg_observed_t *observed = NULL;
+	int              code = NCFG_CLI_EXIT_OK;
 
-	if (options->json) {
-		return json_not_in_this_wave();
-	}
 	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
 	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
@@ -673,10 +772,26 @@ static int command_status(const ncfg_cli_options_t *options)
 	 * a file is the product. A `/run` that will not take it is not a failure
 	 * of the command -- the listing the operator asked for is on stdout. */
 	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));
-	ncfg_cli_print_status(observed);
+	if (options->json) {
+		/*
+		 * **The file that was just written, on stdout**, and deliberately the
+		 * same writer: `observed.json` under the run directory and this are
+		 * one document, and a second spelling of it so that a pipe looks
+		 * different from a file is the drift 0263 spends its length refusing.
+		 * `doc/schema/observed.json` is the witness for both.
+		 */
+		ncfg_buf_t buf;
+
+		ncfg_buf_init(&buf, 0);
+		code = say_json(&buf, ncfg_observed_write(observed, &buf, err, sizeof(err)),
+		    err);
+		ncfg_buf_free(&buf);
+	} else {
+		ncfg_cli_print_status(observed);
+	}
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);
-	return NCFG_CLI_EXIT_OK;
+	return code;
 }
 
 /*
@@ -805,10 +920,8 @@ static int command_plan(const ncfg_cli_options_t *options)
 	ncfg_observed_t    *observed = NULL;
 	ncfg_plan_options_t how;
 	ncfg_plan_t        *plan;
+	int                 code = NCFG_CLI_EXIT_OK;
 
-	if (options->json) {
-		return json_not_in_this_wave();
-	}
 	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
 	if (!document) {
 		return fail(err);
@@ -828,13 +941,30 @@ static int command_plan(const ncfg_cli_options_t *options)
 		ncfg_document_free(document);
 		return fail(err);
 	}
-	ncfg_cli_print_plan(plan);
-	note_empty_config(options);
-	warn_about_contention(document, observed);
+	if (options->json) {
+		/*
+		 * **The plan alone, and neither note under it.** The empty-config
+		 * note and the contention warning are sentences addressed to a person
+		 * -- one says where to write a first configuration, the other says
+		 * another daemon is fighting for an interface -- and both are facts
+		 * about the machine rather than members of the plan. Printing them
+		 * beside a JSON document would put two lines that are not JSON on a
+		 * stream that promised to be one value. The Rust skips them here too.
+		 */
+		ncfg_buf_t buf;
+
+		ncfg_buf_init(&buf, 0);
+		code = say_json(&buf, ncfg_plan_write(plan, &buf, err, sizeof(err)), err);
+		ncfg_buf_free(&buf);
+	} else {
+		ncfg_cli_print_plan(plan);
+		note_empty_config(options);
+		warn_about_contention(document, observed);
+	}
 	ncfg_plan_free(plan);
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);
-	return NCFG_CLI_EXIT_OK;
+	return code;
 }
 
 /*
@@ -882,10 +1012,6 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 		return fail("explain what? try `ncfg explain interface eth0`, `ncfg explain "
 		    "address eth0 10.0.0.1/24`, or `ncfg explain route eth0 default`");
 	}
-	if (options->json) {
-		return json_not_in_this_wave();
-	}
-
 	/*
 	 * Compiled fresh rather than read from `/run`, so the answer describes the
 	 * configuration as it is now and not as it was when something last wrote
@@ -909,9 +1035,28 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 		return fail(err);
 	}
 	ncfg_buf_init(&rendered, 0);
-	wrote = ncfg_explanation_render(explanation, &rendered, err, sizeof(err));
-	if (wrote) {
-		ncfg_out_write(ncfg_buf_text(&rendered));
+	if (options->json) {
+		/*
+		 * **The one answer here whose JSON is not what the socket sends.** An
+		 * `explanation` response carries the facts and no count, because the
+		 * Rust has no bound to report; this one is bounded at
+		 * `NCFG_EXPLAIN_FACTS_MAX`, and the text form ends with "showing 256
+		 * of 1202" when it bites. `cli.h` argues the extra member.
+		 *
+		 * **And the subject came off `argv`**, which is where the UTF-8
+		 * refusal is actually met: `ncfg explain interface $'\xff'` reaches
+		 * here with a name no JSON string may hold, and what it gets is a
+		 * sentence rather than a document with a name in it nobody typed.
+		 */
+		wrote = ncfg_cli_json_explanation(explanation, &rendered, err, sizeof(err));
+		if (wrote) {
+			ncfg_out_line(ncfg_buf_text(&rendered));
+		}
+	} else {
+		wrote = ncfg_explanation_render(explanation, &rendered, err, sizeof(err));
+		if (wrote) {
+			ncfg_out_write(ncfg_buf_text(&rendered));
+		}
 	}
 	ncfg_buf_free(&rendered);
 	ncfg_explanation_free(explanation);
@@ -1049,21 +1194,24 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  *     would converge part of a machine and report having converged it. The
  *     planner warns by name about every block it is holding -- which is what
  *     makes `ncfg plan` honest and is exactly what an apply would act past.
- *   * **The executor takes thirteen ops of forty-eight and refuses the rest
- *     while the plan is running.** `ncfg_apply_supported` is asked by
- *     `execute`, one action at a time, and `ncfg_apply` stops at the first
- *     failure -- so a plan mixing a supported op with an unsupported one
+ *   * **The executor refuses what it cannot do while the plan is running,
+ *     rather than before it.** It carries every op kind now; what it refuses
+ *     is by *kind* -- a `link.create` for a vlan, a bond, a macvlan, a tunnel
+ *     or a tun, and `backend.start` for the six backend kinds `src/backend/`
+ *     does not carry. `ncfg_apply_supported` is asked by `execute`, one
+ *     action at a time, and `ncfg_apply` stops at the first failure -- so a
+ *     plan mixing a supported op with an unsupported one
  *     changes the machine and then stops halfway. A sweep of the plan before
  *     the first action would fix the *order* of that refusal and nothing else,
  *     which is why it is not what this arm does.
- *   * **Nothing folds what an apply did into `owned.json`**, which 0263 defers
- *     by name: the executor seam reports no effects. Addresses and routes
- *     survive that because the kernel carries netcfgd's tag on them; a **link
- *     does not**. `create_link` does not add the `netcfgd:` alternative name
- *     0136 gives every link netcfgd makes, and nothing records the name either,
- *     so a bridge this build created would read back as `unknown` for ever and
- *     netcfgd could never delete it again. That is a change to somebody's
- *     machine that this port has no way to undo.
+ *   * **Nothing under `ncfg` folds what an apply did into `owned.json`.** The
+ *     fold itself has landed -- `ncfg_apply_record` takes a plan and a journal
+ *     and is what the daemon's own apply paths call -- and the mark 0136 gives
+ *     every link netcfgd creates is written by `create_link` now, so a link
+ *     this build makes reads back as `ours` twice over. What is absent is this
+ *     command: there is no apply path here to call either of them from, and a
+ *     `ncfg apply` that changed a machine and recorded nothing would leave
+ *     exactly the objects netcfgd may never remove again.
  *   * **There is no confirm window.** `ncfg_plan_confirm_window` answers from
  *     `global { confirm = ... }` as well as from `--confirm-within`, so a plan
  *     here carries `commit.arm` -- and the executor does nothing for it,
@@ -1078,18 +1226,17 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  */
 static int command_apply(void)
 {
-	(void)failf("`ncfg apply` is not in this wave of the C port: the observer it was "
-	    "waiting for landed, and the planner and the executor beneath it did not. The "
-	    "planner is four passes of thirty and the executor carries thirteen ops of "
-	    "forty-eight, refusing the rest as the plan runs rather than before it -- so an "
-	    "apply would change the machine and stop halfway through a plan that was never "
-	    "the whole change.");
-	(void)fail("It also has nothing to record with and nothing to revert with: no "
-	    "effect an apply had is folded into owned.json, a link this build created would "
-	    "wear no `" NCFG_OBSERVE_ALTNAME_PREFIX "` alternative name and appear in no "
-	    "record -- netcfgd could never delete it again -- and a `commit.arm` this plan "
-	    "carries arms no window, so a change that cut the machine off would not come "
-	    "back.");
+	(void)failf("`ncfg apply` is not in this wave of the C port: its planner holds ten "
+	    "kinds of configuration block and warns about each rather than acting on it, and "
+	    "its executor refuses an op it cannot carry out while the plan is running rather "
+	    "than before it -- so an apply would change part of a machine, or stop halfway "
+	    "through changing it, and report neither.");
+	(void)fail("It also has nothing to record with and nothing to revert with: the "
+	    "fold into owned.json and the `" NCFG_OBSERVE_ALTNAME_PREFIX "` mark a created "
+	    "link wears are written, and this command has no apply path to reach either "
+	    "from -- so an object it installed would be one netcfgd may never remove again "
+	    "-- while a `commit.arm` this plan carries arms no window here, so a change "
+	    "that cut the machine off would not come back.");
 	return fail("`ncfg plan` is the half that is ported: it reads the same "
 	    "configuration against the same machine, names every block this build is "
 	    "holding and not acting on, and changes nothing.");
@@ -1177,9 +1324,10 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		return subcommand(ncfg_cli_secret, options, positional, count);
 	}
 	/* `reset` is `netcfgd-cli`'s own `lib.rs` rather than one of the four
-	 * modules above, and is not ported. */
+	 * modules above, so it is `reset.c` here -- and it goes through the same
+	 * adapter, because it answers a sentence like the rest of them. */
 	if (strcmp(command, "reset") == 0) {
-		return not_in_this_wave("reset", NEEDS_WRITERS);
+		return subcommand(ncfg_cli_reset, options, positional, count);
 	}
 	if (strcmp(command, "wait-online") == 0) {
 		return command_wait_online(options, positional, count);

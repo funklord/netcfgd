@@ -1748,10 +1748,20 @@ static void apply_is_refused_and_says_what_it_is_waiting_for(void)
 	const char *said = ran(argv, 2, &code);
 
 	check(code == NCFG_CLI_EXIT_FAILED, "`ncfg apply` is refused");
-	check(strstr(said, "four passes of thirty") != NULL,
-	    "  naming the planner that is a quarter of one");
-	check(strstr(said, "thirteen ops of forty-eight") != NULL,
-	    "  and the executor that carries a quarter of those");
+	/*
+	 * **Counted, not numbered.** These two named a number of planner passes
+	 * and a number of executor ops, and both had stopped being true by the
+	 * time the wave that made them true landed -- the executor carries every
+	 * op kind now and refuses by kind instead. A refusal that cites a figure
+	 * has to be swept whenever the figure moves, and a check asserting the
+	 * figure is what makes the sweep mandatory rather than optional. What
+	 * matters to somebody reading the refusal is which shape of thing is
+	 * missing, so that is what is asserted.
+	 */
+	check(strstr(said, "holds ten kinds of configuration block") != NULL,
+	    "  naming the blocks the planner is holding rather than acting on");
+	check(strstr(said, "refuses an op it cannot carry out") != NULL,
+	    "  and the executor refusing what it cannot do");
 	check(strstr(said, "rather than before it") != NULL,
 	    "  and that the refusal for an op it cannot do comes mid-plan");
 	check(strstr(said, "owned.json") != NULL,
@@ -1767,30 +1777,24 @@ static void apply_is_refused_and_says_what_it_is_waiting_for(void)
  * The four that read the machine are wired, each checked at the last refusal
  * before the kernel.
  *
- * `status` and `plan` refuse `--json` first; `explain` parses its subject
- * first; `wait-online` parses its argument first. Reaching any of those four
- * sentences proves the arm is no longer `not_in_this_wave`, which is the whole
- * claim -- and `current_test.c` is where the observation underneath them is
- * driven.
+ * `explain` parses its subject first and `wait-online` parses its argument
+ * first, so reaching either sentence proves the arm is no longer
+ * `not_in_this_wave` -- and `current_test.c` is where the observation
+ * underneath them is driven.
+ *
+ * **`status` and `plan` used to be checked here and are not any more.** What
+ * proved them was the refusal they gave `--json` before doing anything else,
+ * and that refusal is gone: the flag is answered now. Nothing else stands
+ * between those two arms and a netlink dump of the machine this suite is
+ * built on, which this file does not touch. `no_arm_refuses_the_flag_any_more`
+ * is what is left of the claim, and says so about itself.
  */
 static void the_four_that_read_the_machine_are_wired(void)
 {
-	char       *status[] = { (char *)"ncfg", (char *)"status", (char *)"--json" };
-	char       *plan[] = { (char *)"ncfg", (char *)"plan", (char *)"--json" };
 	char       *explain[] = { (char *)"ncfg", (char *)"explain" };
 	char       *wait[] = { (char *)"ncfg", (char *)"wait-online", (char *)"soon" };
 	int         code = 0;
 	const char *said;
-
-	said = ran(status, 3, &code);
-	check(strstr(said, "`--json` is not in this wave") != NULL &&
-	    strstr(said, "not in this wave of the C port: it needs") == NULL,
-	    "`ncfg status` reaches its own arm rather than a refusal for the verb");
-
-	said = ran(plan, 3, &code);
-	check(strstr(said, "`--json` is not in this wave") != NULL &&
-	    strstr(said, "not in this wave of the C port: it needs") == NULL,
-	    "and so does `ncfg plan`");
 
 	said = ran(explain, 2, &code);
 	check(strstr(said, "explain what?") != NULL,
@@ -1819,12 +1823,588 @@ static void the_wait_default_is_written_down_once(void)
 	    "  and it is NetworkManager-wait-online.service's thirty seconds");
 }
 
+/* ------------------------------------------------------------------------ *
+ * `--json`
+ * ------------------------------------------------------------------------ *
+ *
+ * WHY THE SUBJECT IS `doc/schema/socket.json` AND NOT A STRING WRITTEN HERE
+ *   `--json` prints the payload of the answer the daemon sends, with the
+ *   `"response"` member left off (`cli.h` argues why). That makes the witness
+ *   the whole specification: a line out of it, decoded by `proto.h` and
+ *   written back by `cli.h`, has to be that line again. A case spelling the
+ *   expected object here instead would be this file agreeing with itself, and
+ *   would pass over the day the daemon renames a member.
+ *
+ *   The expected text is derived from the witness rather than typed: the tag
+ *   is cut off the front mechanically, so nothing in these checks knows what
+ *   the members are called.
+ */
+
+/* The witness line beginning with `head`, copied out whole. */
+static int witness_line(const char *text, const char *head, char *out, size_t out_size)
+{
+	size_t      wanted = strlen(head);
+	const char *at = text;
+
+	while (at && *at) {
+		const char *end = strchr(at, '\n');
+		size_t      run = end ? (size_t)(end - at) : strlen(at);
+
+		if (run >= wanted && memcmp(at, head, wanted) == 0) {
+			if (run >= out_size) {
+				return 0;
+			}
+			memcpy(out, at, run);
+			out[run] = '\0';
+			return 1;
+		}
+		if (!end) {
+			return 0;
+		}
+		at = end + 1;
+	}
+	return 0;
+}
+
+/*
+ * The same line with its `"response":"..."` member removed, which is what
+ * `--json` prints.
+ *
+ * Cut mechanically rather than by knowing where the members end: the tag is
+ * always the first member, so this is "past the name, past the comma". A
+ * response that carries nothing else -- `{"response":"ok"}` -- reduces to
+ * `{}`, which is exactly why `ncfg_cli_json_ok` exists and does not print it.
+ */
+static int payload_of(const char *line, char *out, size_t out_size)
+{
+	static const char tag[] = "{\"response\":\"";
+	const char       *close;
+
+	if (strncmp(line, tag, sizeof(tag) - 1u) != 0) {
+		return 0;
+	}
+	close = strchr(line + sizeof(tag) - 1u, '"');
+	if (!close) {
+		return 0;
+	}
+	if (close[1] == '}') {
+		return snprintf(out, out_size, "{}") < (int)out_size;
+	}
+	if (close[1] != ',') {
+		return 0;
+	}
+	return snprintf(out, out_size, "{%s", close + 2) < (int)out_size;
+}
+
+/* One witness response, decoded and written back through the CLI's writers. */
+static void json_is_the_witness(const char *socket_text, const char *head, const char *what)
+{
+	char                 line[8192];
+	char                 wanted[8192];
+	char                 err[NCFG_ERROR_MAX];
+	ncfg_proto_message_t message;
+	ncfg_buf_t           buf;
+	int                  wrote = 0;
+	int                  same;
+
+	if (!witness_line(socket_text, head, line, sizeof(line)) ||
+	    !payload_of(line, wanted, sizeof(wanted))) {
+		/* A head that matches nothing would otherwise be a vacuous pass: the
+		 * comparison would simply not happen and the suite would be green. */
+		check(0, what);
+		detail("no witness line begins", head);
+		return;
+	}
+	if (!ncfg_proto_response_read(line, strlen(line), &message, err, sizeof(err)) ||
+	    message.kind != NCFG_PROTO_MESSAGE_RESPONSE) {
+		check(0, what);
+		detail("the witness did not decode", err);
+		return;
+	}
+	ncfg_buf_init(&buf, 0);
+	switch (message.u.response.kind) {
+	case NCFG_PROTO_RESP_WIFI_SCAN:
+		wrote = ncfg_cli_json_scan(&message.u.response.u.wifi_scan, &buf, err,
+		    sizeof(err));
+		break;
+	case NCFG_PROTO_RESP_WIFI_STATUS:
+		wrote = ncfg_cli_json_wifi_status(&message.u.response.u.wifi_status, &buf, err,
+		    sizeof(err));
+		break;
+	case NCFG_PROTO_RESP_AP_STATIONS:
+		wrote = ncfg_cli_json_stations(&message.u.response.u.ap_stations, &buf, err,
+		    sizeof(err));
+		break;
+	case NCFG_PROTO_RESP_RADIOS:
+		wrote = ncfg_cli_json_radios(message.u.response.u.radios.items,
+		    message.u.response.u.radios.count, &buf, err, sizeof(err));
+		break;
+	case NCFG_PROTO_RESP_MODEMS:
+		wrote = ncfg_cli_json_modems(message.u.response.u.modems.items,
+		    message.u.response.u.modems.count, &buf, err, sizeof(err));
+		break;
+	default:
+		ncfg_error_set(err, sizeof(err), "this test has no writer for that answer");
+		break;
+	}
+	same = wrote && strcmp(ncfg_buf_text(&buf), wanted) == 0;
+	check(same, what);
+	if (!same) {
+		detail("wanted", wanted);
+		detail("got", wrote ? ncfg_buf_text(&buf) : err);
+	}
+	ncfg_buf_free(&buf);
+	ncfg_proto_message_free(&message);
+}
+
+/*
+ * Every answer `--json` renders is the witness with its tag cut off.
+ *
+ * Seven lines rather than five: the two `wifi_scan` shapes differ by `stale`
+ * and the two `wifi_status` shapes differ by `blocked` and by having no
+ * `not_trying` at all, and an optional member that is written when it should
+ * be absent is the way a writer of a skip-when-empty format goes wrong.
+ */
+static void the_json_form_is_the_witness_with_its_tag_removed(const char *socket_text)
+{
+	json_is_the_witness(socket_text,
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[{",
+	    "a scan as JSON is the wire's scan without its tag");
+	json_is_the_witness(socket_text,
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[]",
+	    "  and a stale scan still says why it is the previous one");
+	json_is_the_witness(socket_text,
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"COMPLETED\"",
+	    "a radio status carries what it has stopped trying");
+	json_is_the_witness(socket_text,
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"SCANNING\"",
+	    "  and one with nothing to say omits those members rather than nulling them");
+	json_is_the_witness(socket_text, "{\"response\":\"radios\"",
+	    "the radios keep the object the socket wraps them in");
+	json_is_the_witness(socket_text, "{\"response\":\"ap_stations\"",
+	    "a station list carries the policy its `listed` column is read under");
+	json_is_the_witness(socket_text, "{\"response\":\"modems\"",
+	    "and a modem that is not switching says nothing about switching");
+}
+
+/*
+ * An explanation as JSON, which is the one shape that is not the socket's.
+ *
+ * `total` is this port's and 0263 records it: the text form ends with "showing
+ * 256 of 1202" where `NCFG_EXPLAIN_FACTS_MAX` bit, and a machine-readable form
+ * that dropped the count would be the one place `--json` says less than the
+ * table. The expected object is still the witness's -- the member is appended
+ * to it here, so the subject, the facts and their spellings are not this
+ * file's idea of them.
+ */
+static void an_explanation_says_how_many_facts_there_were(const char *socket_text)
+{
+	char                line[4096];
+	char                wanted[4096];
+	char                err[NCFG_ERROR_MAX];
+	char                subject[] = "eth0";
+	char                topic[] = "desired";
+	char                statement[] = "static 192.0.2.1/24";
+	char                source[] = "netcfgd.conf:3";
+	ncfg_explain_fact_t fact;
+	ncfg_explanation_t  explanation;
+	ncfg_buf_t          buf;
+	size_t              end;
+
+	if (!witness_line(socket_text, "{\"response\":\"explanation\"", line, sizeof(line)) ||
+	    !payload_of(line, wanted, sizeof(wanted))) {
+		check(0, "the explanation witness can be read");
+		return;
+	}
+	end = strlen(wanted);
+	if (end == 0u || wanted[end - 1u] != '}') {
+		check(0, "the explanation witness is an object");
+		return;
+	}
+	(void)snprintf(wanted + end - 1u, sizeof(wanted) - (end - 1u), ",\"total\":1}");
+
+	fact.topic = topic;
+	fact.detail = statement;
+	fact.source = source;
+	explanation.subject = subject;
+	explanation.facts = &fact;
+	explanation.count = 1u;
+	explanation.total = 1u;
+
+	ncfg_buf_init(&buf, 0);
+	{
+		int same = ncfg_cli_json_explanation(&explanation, &buf, err, sizeof(err)) &&
+		    strcmp(ncfg_buf_text(&buf), wanted) == 0;
+
+		check(same, "an explanation is the socket's facts with a count beside them");
+		if (!same) {
+			detail("wanted", wanted);
+			detail("got", ncfg_buf_text(&buf));
+		}
+	}
+	ncfg_buf_free(&buf);
+
+	/* The case the member exists for: more facts than were kept. A reader
+	 * compares `total` against the length of `facts` and sees the difference,
+	 * which is what the last line of the text form says in words. */
+	explanation.total = 1202u;
+	ncfg_buf_init(&buf, 0);
+	check(ncfg_cli_json_explanation(&explanation, &buf, err, sizeof(err)) &&
+	    strstr(ncfg_buf_text(&buf), "\"total\":1202") != NULL,
+	    "  and a bounded one says how many there were, not how many it kept");
+	ncfg_buf_free(&buf);
+
+	/* A fact from nowhere nameable has no `source`, absent rather than null:
+	 * absent, null and empty are three answers on this socket. */
+	fact.source = NULL;
+	explanation.total = 1u;
+	ncfg_buf_init(&buf, 0);
+	check(ncfg_cli_json_explanation(&explanation, &buf, err, sizeof(err)) &&
+	    strstr(ncfg_buf_text(&buf), "source") == NULL,
+	    "  and a fact with no place to point at omits `source` rather than nulling it");
+	ncfg_buf_free(&buf);
+}
+
+/*
+ * A name that is not valid UTF-8 is refused, and nothing is printed.
+ *
+ * Reachable rather than theoretical: the JSON *reader* does not check a
+ * string's bytes, so a stray octet inside a `name` travels from the daemon
+ * into a decoded answer intact -- and 0263 refuses to repair it, because the
+ * raw bytes, `\u00XX` per byte and U+FFFD each put a value in front of
+ * somebody that nobody typed.
+ *
+ * **The buffer is checked as well as the answer.** `ncfg_buf_t` hands out the
+ * empty string for a buffer that failed rather than the part that fitted, and
+ * a caller that printed anyway would emit half an object that looks whole.
+ */
+static void a_name_that_is_not_text_is_refused_rather_than_repaired(void)
+{
+	static const char       latin1[] = { 'c', 'a', 'f', (char)0xe9 };
+	ncfg_proto_scan_entry_t point;
+	ncfg_proto_scan_t       scan;
+	ncfg_buf_t              buf;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&point, 0, sizeof(point));
+	point.bssid = ncfg_proto_str("00:11:22:33:44:55");
+	point.frequency = 2412;
+	point.signal = -40;
+	point.ssid = ncfg_proto_str("636166e9");
+	point.name.bytes = latin1;
+	point.name.length = sizeof(latin1);
+
+	memset(&scan, 0, sizeof(scan));
+	scan.interface = ncfg_proto_str("wlan0");
+	scan.access_points = &point;
+	scan.access_point_count = 1u;
+
+	err[0] = '\0';
+	ncfg_buf_init(&buf, 0);
+	check(!ncfg_cli_json_scan(&scan, &buf, err, sizeof(err)),
+	    "a name that is not UTF-8 is refused rather than repaired");
+	check(strstr(err, "not UTF-8") != NULL, "  and the sentence says which rule it broke");
+	check(strcmp(ncfg_buf_text(&buf), "") == 0,
+	    "  and nothing is left in the buffer, not the part that fitted");
+	detail("said", err);
+	ncfg_buf_free(&buf);
+
+	/* The hex form is the canonical identity and is always text, so the same
+	 * access point still renders once the unrepairable half is absent -- which
+	 * is what the daemon does with it, and why `name` is optional at all. */
+	point.name = ncfg_proto_str_none();
+	ncfg_buf_init(&buf, 0);
+	check(ncfg_cli_json_scan(&scan, &buf, err, sizeof(err)) &&
+	    strstr(ncfg_buf_text(&buf), "\"ssid\":\"636166e9\"") != NULL &&
+	    strstr(ncfg_buf_text(&buf), "\"name\"") == NULL,
+	    "  and the same access point still renders by the identity that is not text");
+	ncfg_buf_free(&buf);
+}
+
+/* ------------------------------------------------------------------------ *
+ * `--json` through the program, against a fake daemon
+ * ------------------------------------------------------------------------ */
+
+/* One run of the program, with what it printed on stdout. */
+static const char *ran_printing(char **argv, int argc, int *code)
+{
+	const char *printed;
+
+	complaint_begin();
+	capture_begin();
+	*code = ncfg_cli_main(argc, argv);
+	printed = capture_end();
+	(void)complaint_end();
+	return printed;
+}
+
+/*
+ * The same, with a fake daemon on the socket the run directory implies.
+ *
+ * `--run-dir` rather than the default, for the reason at the top of this file:
+ * the machine this builds on has a real netcfgd on it, configuring somebody's
+ * actual network, and a test that reached `/run/netcfgd/netcfgd.sock` would be
+ * talking to it.
+ */
+static const char *answered(const char *answer, char **argv, int argc, int *code)
+{
+	char        path[320];
+	const char *printed;
+	pid_t       child;
+	int         listener = -1;
+
+	(void)snprintf(path, sizeof(path), "%s/netcfgd.sock", testdir_path);
+	(void)unlink(path);
+	child = fake_daemon(path, answer, &listener);
+	if (child < 0) {
+		*code = -1;
+		return "";
+	}
+	printed = ran_printing(argv, argc, code);
+	(void)waitpid(child, NULL, 0);
+	(void)close(listener);
+	(void)unlink(path);
+	return printed;
+}
+
+/*
+ * Each verb that renders an answer renders it both ways, from one request.
+ *
+ * Driven through `ncfg_cli_main` rather than by calling the writers, because
+ * what is being asserted is the arm: these six used to refuse the flag, and a
+ * check against the writer alone would stay green over an arm that still did.
+ * The table is asserted beside every one of them, because the fault the flag
+ * exists to avoid is a table printed where a document was asked for -- and a
+ * document printed where a table was asked for is the same fault backwards.
+ */
+static void every_verb_that_renders_answers_json_too(const char *socket_text)
+{
+	char       *radios[] = { (char *)"ncfg", (char *)"wifi", (char *)"radios",
+		(char *)"--run-dir", testdir_path, (char *)"--json" };
+	char       *table[] = { (char *)"ncfg", (char *)"wifi", (char *)"radios",
+		(char *)"--run-dir", testdir_path };
+	char       *modem[] = { (char *)"ncfg", (char *)"modem", (char *)"--run-dir",
+		testdir_path, (char *)"--json" };
+	char       *scan[] = { (char *)"ncfg", (char *)"wifi", (char *)"scan",
+		(char *)"wlan0", (char *)"--run-dir", testdir_path, (char *)"--json" };
+	char       *reload[] = { (char *)"ncfg", (char *)"reload", (char *)"--run-dir",
+		testdir_path, (char *)"--json" };
+	char        line[8192];
+	char        wanted[8192];
+	char        sent[8194];
+	const char *printed;
+	int         code = -1;
+
+	if (!witness_line(socket_text, "{\"response\":\"radios\"", line, sizeof(line)) ||
+	    !payload_of(line, wanted, sizeof(wanted))) {
+		check(0, "the radios witness can be read");
+		return;
+	}
+	/* The framer wants a whole line: a witness read without its newline would
+	 * arrive as a message cut in half, which is a different check. */
+	(void)snprintf(sent, sizeof(sent), "%s\n", line);
+	printed = answered(sent, radios, 6, &code);
+	check(code == NCFG_CLI_EXIT_OK && has_line(printed, wanted),
+	    "`ncfg wifi radios --json` prints the answer as one object");
+	if (!has_line(printed, wanted)) {
+		detail("wanted", wanted);
+		detail("got", printed);
+	}
+
+	printed = answered(sent, table, 5, &code);
+	check(code == NCFG_CLI_EXIT_OK && !has_line(printed, wanted) &&
+	    strstr(printed, "wlan0") != NULL,
+	    "  and without the flag the same request still prints the table");
+
+	if (witness_line(socket_text, "{\"response\":\"modems\"", line, sizeof(line)) &&
+	    payload_of(line, wanted, sizeof(wanted))) {
+		(void)snprintf(sent, sizeof(sent), "%s\n", line);
+		printed = answered(sent, modem, 5, &code);
+		check(code == NCFG_CLI_EXIT_OK && has_line(printed, wanted),
+		    "`ncfg modem --json` prints the modems as one object");
+	} else {
+		check(0, "the modems witness can be read");
+	}
+
+	if (witness_line(socket_text,
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[{", line,
+	    sizeof(line)) && payload_of(line, wanted, sizeof(wanted))) {
+		(void)snprintf(sent, sizeof(sent), "%s\n", line);
+		printed = answered(sent, scan, 7, &code);
+		check(code == NCFG_CLI_EXIT_OK && has_line(printed, wanted),
+		    "`ncfg wifi scan wlan0 --json` prints the scan as one object");
+	} else {
+		check(0, "the scan witness can be read");
+	}
+
+	/*
+	 * **`reload` was never one of the six that refused the flag**, which made
+	 * it the place `--json` was still accepted and ignored: a script asking
+	 * for a document got "reloaded; the configuration compiles". The payload
+	 * rule alone would make this `{}` -- `{"response":"ok"}` carries nothing
+	 * beside its tag -- so it is `{"ok":true}`, which is a fact a script can
+	 * act on and the protocol's own word for it.
+	 */
+	printed = answered("{\"response\":\"ok\"}\n", reload, 5, &code);
+	check(code == NCFG_CLI_EXIT_OK && has_line(printed, "{\"ok\":true}"),
+	    "a verb whose whole answer is `ok` says so as an object");
+	check(!has_line(printed, "reloaded; the configuration compiles"),
+	    "  rather than the sentence it prints for a person");
+
+	printed = answered("{\"response\":\"ok\"}\n", reload, 4, &code);
+	check(code == NCFG_CLI_EXIT_OK && has_line(printed, "reloaded; the configuration "
+	    "compiles"), "  and the sentence is still what it prints without the flag");
+}
+
+/*
+ * A refusal the writer makes, met through the program.
+ *
+ * The daemon's line carries a raw octet inside a JSON string, which the reader
+ * passes through and the writer will not emit. What that must produce is a
+ * sentence and an empty stdout -- and the same command without the flag must
+ * still answer, because the table is text for a terminal and has no such rule.
+ */
+static void a_scan_that_cannot_be_written_says_so_and_prints_nothing(void)
+{
+	static const char answer[] =
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":"
+	    "[{\"bssid\":\"00:11:22:33:44:55\",\"frequency\":2412,\"signal\":-40,"
+	    "\"secured\":false,\"owe\":false,\"enterprise\":false,\"ssid\":\"6361ff\","
+	    "\"name\":\"ca\xff\"}]}\n";
+	char       *json[] = { (char *)"ncfg", (char *)"wifi", (char *)"scan",
+		(char *)"wlan0", (char *)"--run-dir", testdir_path, (char *)"--json" };
+	const char *printed;
+	const char *said;
+	int         code = 0;
+
+	printed = answered(answer, json, 7, &code);
+	said = complained ? complained : "";
+	check(code == NCFG_CLI_EXIT_FAILED, "a scan that cannot be written as JSON fails");
+	check(strcmp(printed, "") == 0, "  and prints nothing at all on stdout");
+	check(strstr(said, "not UTF-8") != NULL, "  and says which rule the answer broke");
+	check(strstr(said, "without `--json`") != NULL,
+	    "  and points at the form that can still show it");
+	detail("said", said);
+
+	printed = answered(answer, json, 6, &code);
+	check(code == NCFG_CLI_EXIT_OK && strstr(printed, "2412 MHz") != NULL,
+	    "  and the table prints the same access point, having no such rule");
+}
+
+/*
+ * `ncfg monitor --json` is the line the daemon sent, decoded by nobody.
+ *
+ * The one `--json` in this program that switches a rendering off rather than a
+ * writer on. An event is already one JSON value on a line; composing one back
+ * from `ncfg_proto_event_t` would drop every member this build has never heard
+ * of, on the one verb whose argument for existing is that it does not swallow
+ * what it cannot name.
+ */
+static void a_monitor_in_json_is_the_line_the_daemon_sent(const char *socket_text)
+{
+	char       *json[] = { (char *)"ncfg", (char *)"monitor", (char *)"--run-dir",
+		testdir_path, (char *)"--json" };
+	char        stream[4096];
+	char        observed[2048];
+	const char *printed;
+	int         code = -1;
+
+	if (!witness_line(socket_text, "{\"event\":\"observed\"", observed,
+	    sizeof(observed))) {
+		check(0, "the observed-event witness can be read");
+		return;
+	}
+	(void)snprintf(stream, sizeof(stream), "%s\n{\"event\":\"nothing-this-build-knows\","
+	    "\"detail\":\"kept whole\"}\n", observed);
+
+	printed = answered(stream, json, 5, &code);
+	check(code == NCFG_CLI_EXIT_OK && has_line(printed, observed),
+	    "`ncfg monitor --json` prints the event line as it arrived");
+	check(has_line(printed, "{\"event\":\"nothing-this-build-knows\",\"detail\":\"kept "
+	    "whole\"}"), "  including one this build has never heard of, whole");
+	if (!has_line(printed, observed)) {
+		detail("wanted", observed);
+		detail("got", printed);
+	}
+
+	printed = answered(stream, json, 4, &code);
+	check(code == NCFG_CLI_EXIT_OK && has_line(printed, "observed  eth0 gained an "
+	    "address"), "  and without the flag it is the sentence a person reads");
+}
+
+/*
+ * No arm refuses the flag any more, said against the source.
+ *
+ * `status`, `plan` and `explain` answer it from a document this test cannot
+ * reach: each one's next step is `ncfg_observe_current`, which is a netlink
+ * dump of the machine the suite is built on -- and this file's rule is that
+ * nothing here touches that machine. So what is checked is that the refusal is
+ * gone and that those three arms call the writers whose output is pinned
+ * elsewhere: `observed_test.c` and `plan_test.c` hold `ncfg_observed_write`
+ * and `ncfg_plan_write` against `doc/schema/`, and the check above holds the
+ * explanation's shape against `doc/schema/socket.json`.
+ *
+ * It is a weaker check than the ones above it and is named as one. What it
+ * cannot see is an arm that renders the right document and prints it wrongly.
+ */
+static void no_arm_refuses_the_flag_any_more(void)
+{
+	static const char *const roots[] = { "../src/cli/run.c", "src/cli/run.c",
+		"../../src/cli/run.c" };
+	char  *source = NULL;
+	size_t root;
+
+	for (root = 0; root < sizeof(roots) / sizeof(roots[0]) && !source; root++) {
+		FILE *file = fopen(roots[root], "rb");
+		long  size;
+
+		if (!file) {
+			continue;
+		}
+		(void)fseek(file, 0, SEEK_END);
+		size = ftell(file);
+		(void)fseek(file, 0, SEEK_SET);
+		if (size >= 0) {
+			source = malloc((size_t)size + 1);
+			if (source) {
+				source[fread(source, 1, (size_t)size, file)] = '\0';
+			}
+		}
+		(void)fclose(file);
+	}
+	check(source != NULL, "the dispatcher's source can be read");
+	if (!source) {
+		return;
+	}
+	check(strstr(source, "json_not_in_this_wave") == NULL,
+	    "no arm still refuses `--json`");
+	check(strstr(source, "ncfg_observed_write(observed") != NULL,
+	    "  `ncfg status --json` writes the observation `/run` gets");
+	check(strstr(source, "ncfg_plan_write(plan") != NULL,
+	    "  `ncfg plan --json` writes the plan `doc/schema/plan.json` pins");
+	check(strstr(source, "ncfg_cli_json_explanation(explanation") != NULL,
+	    "  and `ncfg explain --json` writes the explanation");
+	/*
+	 * The vacuous-pass guard: a file read short reads as a file with nothing
+	 * objectionable in it, and one of the four checks above is an absence.
+	 * `dispatch` is looked for rather than a sentence, because a sentence is
+	 * what a wave deletes -- the guard that first stood here named the
+	 * refusals that remain, and removing refusals is what this port is
+	 * spending itself on. One of the two it named has already gone.
+	 */
+	check(strstr(source, "static int dispatch(") != NULL,
+	    "  and the file was read to the end, the dispatcher being near it");
+	free(source);
+}
+
 int main(void)
 {
 	char *observed_text;
 	char *document_text;
+	char *socket_text;
 	size_t observed_length = 0;
 	size_t document_length = 0;
+	size_t socket_length = 0;
 
 	(void)testdir_make("cli");
 	(void)snprintf(capture_file, sizeof(capture_file), "%s/out", testdir_path);
@@ -1847,6 +2427,17 @@ int main(void)
 	a_kind_the_kernel_gave_wins_over_the_name();
 	online_means_a_global_address_and_a_default_route();
 	a_number_is_rendered_in_the_units_it_is_in();
+
+	socket_text = witness("socket.json", &socket_length);
+	if (!socket_text) {
+		check(0, "the socket witness can be opened");
+	} else {
+		the_json_form_is_the_witness_with_its_tag_removed(socket_text);
+		an_explanation_says_how_many_facts_there_were(socket_text);
+		every_verb_that_renders_answers_json_too(socket_text);
+		a_monitor_in_json_is_the_line_the_daemon_sent(socket_text);
+	}
+	free(socket_text);
 
 	observed_text = witness("observed.json", &observed_length);
 	document_text = witness("document.json", &document_length);
@@ -1876,6 +2467,10 @@ int main(void)
 	the_socket_lives_under_the_run_directory();
 	the_conversation_is_one_request_and_one_answer();
 	an_event_is_one_line();
+
+	a_name_that_is_not_text_is_refused_rather_than_repaired();
+	no_arm_refuses_the_flag_any_more();
+	a_scan_that_cannot_be_written_says_so_and_prints_nothing();
 
 	free(captured);
 	free(complained);
