@@ -283,6 +283,16 @@ static void stop_ours(void)
 		if (ours[at] <= 0) {
 			continue;
 		}
+		/*
+		 * **The group before the pid**, which a `SIGKILL` makes necessary: a
+		 * `SIGTERM` is forwarded by anything in front of the real process and
+		 * a `SIGKILL` is not, so killing a `timeout` on its own leaves what it
+		 * was bounding reparented to init. Every pid here leads a group of its
+		 * own -- the ones this file forked put themselves in one before the
+		 * exec, and the ones read out of netcfgd's pid files called `setsid`
+		 * -- so this reaches that group and nothing else.
+		 */
+		(void)kill(-ours[at], SIGKILL);
 		(void)kill(ours[at], SIGKILL);
 		/* Reaped where it happens to be a child of this process, and
 		 * harmlessly refused where it is not. */
@@ -750,6 +760,18 @@ static void a_marked_process_that_answers_nothing_is_not_adopted(void)
 	    sizeof(message)) && adopted == 0,
 	    "  and is still not adopted, because nothing answers on that interface");
 	check(!testdir_exists(path), "  so no record claiming it was written");
+	/*
+	 * **The group, and then the pid.** `timeout` runs the shell as its own
+	 * child, so a `SIGKILL` to `timeout` alone leaves that shell running and
+	 * reparented to init -- which is `process.h`'s sentence about a hook
+	 * exactly, and was measured here: a run left `sh -c 'sleep 60'` holding
+	 * this very marker with a ppid of 1. The bound held and it went at its
+	 * own `sleep`, but a fixture that relies on that is one that can be left
+	 * running. The child put itself in a group of its own before the exec, so
+	 * this is still the pid this file recorded rather than a name or a
+	 * pattern.
+	 */
+	(void)kill(-child, SIGKILL);
 	(void)kill(child, SIGKILL);
 	(void)waitpid(child, NULL, 0);
 }
