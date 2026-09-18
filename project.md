@@ -12174,6 +12174,41 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.158 A payload that is not strict, and a document that says it is
+
+`doc/socket-protocol.md` section 7 states the rule plainly: *"Unknown members
+are refused on a request, in the envelope as well as the payload."* The
+envelope half is true. The payload half has a hole, and the document does not
+mention it.
+
+`Request::Explain`'s `subject` is `Subject`, an **internally-tagged** enum, and
+serde refuses `deny_unknown_fields` on that representation -- the same
+limitation section 7 already records for the envelope, which is why
+`Request::members()` exists. Every other request payload in
+`crates/netcfgd-proto/src/lib.rs` carries the attribute; this one cannot.
+
+**Measured against the running daemon rather than read off the source**, which
+is what turned it from a code-reading claim into a fact:
+
+    {"request":"status","bogus":1}
+      -> {"response":"error","message":"unknown member `bogus` on this request"}
+
+    {"request":"explain","subject":{"subject":"interface","name":"wlp0s20f3",
+                                    "bogus":1}}
+      -> {"response":"explanation", ...}   accepted, and answered
+
+Found by the C port, which has no serde and therefore no such limitation: its
+member table refuses the unknown member inside `subject` as the document says
+it should, so the C is stricter than the Rust in exactly one place. That
+divergence is listed in 0263.
+
+Two ways to close it and they are not equivalent: give `Subject` a hand-written
+`Deserialize` that refuses what it does not know, which makes the document true
+again; or write the exception into section 7, which makes the document honest
+and leaves a client able to send a member the daemon ignores. The first is what
+the rule was for. Not decided here, and not on this branch -- it is `master`'s
+code and `master`'s document.
+
 ## 10.157 An attribute length that truncates, found by porting it
 
 `AttrBuf::push` in `crates/netcfgd-sys/src/wire.rs` computes the attribute
