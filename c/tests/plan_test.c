@@ -1719,11 +1719,12 @@ static void nothing_the_document_asks_for_is_passed_over_in_silence(void)
 	    "a qdisc block is acted on rather than named");
 	check(plan && !warned_about(plan, "a `rule` block") && has_name(plan, "rule.add"),
 	    "a rule block is acted on rather than named");
-	/* The Rust's own sentence for this one, unchanged: it is the product's gap
-	 * rather than the port's. */
-	check(plan && warned_about(plan,
-	    "link-local addressing is accepted but not yet applied by this build"),
-	    "and link-local keeps the sentence the Rust says about it");
+	/* The product's gap rather than the port's -- and the sentence now says
+	 * that instead of contradicting it. It used to be the Rust's own, which
+	 * promises "not yet applied by **this build**"; `plan_gaps_test.c` carries
+	 * the case that checks the whole of the replacement. */
+	check(plan && warned_about(plan, "nothing acts on it in the Rust either"),
+	    "and link-local is marked as nobody's gap rather than as this port's");
 	release(plan, document, observed);
 }
 
@@ -1774,9 +1775,58 @@ static void an_absent_optional_member_is_written_as_null(void)
 	release(plan, document, observed);
 }
 
+/*
+ * A warning too long to print says it was cut.
+ *
+ * **`vsnprintf` truncates in silence and no test can see it.** A warning
+ * written past `NCFG_ERROR_MAX` reaches an operator stopped at 511 characters
+ * -- one reached one as "...still means t" -- and every check on it passed,
+ * because each fragment asserted sat before the cut. The sabotage that should
+ * have reddened those checks reddened none, which is how it was found.
+ *
+ * So this asserts the *end* of the sentence, which is the only place the
+ * failure shows. A check on the beginning of a truncated warning is a check
+ * that cannot fail.
+ */
+static void a_warning_too_long_to_print_says_it_was_cut(void)
+{
+	char         err[NCFG_ERROR_MAX];
+	char         big[900];
+	ncfg_plan_t *plan = ncfg_plan_new(err, sizeof(err));
+	static const char marker[] = " [cut: this warning is longer than netcfgd prints]";
+	size_t       at;
+
+	for (at = 0; at < sizeof(big) - 1u; at++) {
+		big[at] = 'x';
+	}
+	big[sizeof(big) - 1u] = '\0';
+	if (!plan) {
+		check(0, "a plan to warn on");
+		return;
+	}
+	ncfg_plan_warnf(plan, "eth0", "%s", big);
+	check(plan->warning_count == 1u, "an over-long warning is still kept");
+	if (plan->warning_count == 1u) {
+		const char *said = plan->warnings[0].message;
+		size_t      length = strlen(said);
+
+		check(length == NCFG_ERROR_MAX - 1u, "and is as long as netcfgd prints");
+		/* **At the end, not merely present.** A marker anywhere in the
+		 * sentence would be satisfied by one the caller happened to write;
+		 * the property is that the *last* thing an operator reads says the
+		 * rest is missing. Asserted by address from the end, which is the
+		 * only place a truncation shows. */
+		check(length > sizeof(marker) &&
+		    strcmp(said + length - (sizeof(marker) - 1u), marker) == 0,
+		    "and its last words say it was cut rather than stopping mid-word");
+	}
+	ncfg_plan_free(plan);
+}
+
 int main(void)
 {
 	the_frozen_witness();
+	a_warning_too_long_to_print_says_it_was_cut();
 	the_op_vocabulary();
 	what_counts_as_disruptive();
 	the_model_values_a_plan_embeds();

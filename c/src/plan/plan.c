@@ -550,14 +550,41 @@ void ncfg_plan_warn(ncfg_plan_t *plan, const char *interface, const char *messag
 	plan->warning_count++;
 }
 
+/*
+ * A warning that did not fit says so, rather than stopping mid-word.
+ *
+ * **`vsnprintf` truncates in silence, and a test cannot see it.** A warning
+ * written past `NCFG_ERROR_MAX` reaches an operator cut at 511 characters --
+ * measured, one reached one as "...still means t" -- and every check on it
+ * passed, because each fragment asserted sat before the cut. A sabotage that
+ * should have turned those checks red turned none, which is how it was found.
+ *
+ * So the last thing an over-long warning carries is a marker saying it was
+ * cut. That is worse than a warning that fits and much better than one that
+ * looks whole: a reader who sees the marker knows to go and look, where a
+ * reader of a sentence ending mid-word does not know whether netcfgd stopped
+ * or the terminal did.
+ *
+ * Not a refusal, because a warning is what a plan says when it cannot act and
+ * dropping it would lose the only notice there is. Not a bigger buffer,
+ * because the next sentence would grow into that one too.
+ */
 void ncfg_plan_warnf(ncfg_plan_t *plan, const char *interface, const char *format, ...)
 {
+	static const char cut[] = " [cut: this warning is longer than netcfgd prints]";
 	char    message[NCFG_ERROR_MAX];
 	va_list args;
+	int     wanted;
 
 	va_start(args, format);
-	(void)vsnprintf(message, sizeof(message), format, args);
+	wanted = vsnprintf(message, sizeof(message), format, args);
 	va_end(args);
+	if (wanted >= (int)sizeof(message)) {
+		/* Room for the marker is taken from the end of what did fit, which is
+		 * the half a reader is least likely to need -- the subject is at the
+		 * front of every sentence this file writes. */
+		(void)memcpy(&message[sizeof(message) - sizeof(cut)], cut, sizeof(cut));
+	}
 	ncfg_plan_warn(plan, interface, message);
 }
 
