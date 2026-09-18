@@ -171,13 +171,15 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		    "`ncfg plan` and `ncfg explain` read the machine themselves and need no "
 		    "daemon";
 	case NCFG_PROTO_REQ_MONITOR:
-		/* The subscriber list and the event encoder are both written and the
-		 * loop announces through them; what is missing is the one step that
-		 * hands a subscribed connection's descriptor to the loop, which is
-		 * `server.c`'s and is the Rust's arrangement too. */
-		return "this build of netcfgd cannot stream events: it announces them to every "
-		    "subscriber it has, and the control socket does not yet hand a subscribed "
-		    "connection over, so it can never have one";
+		/* Never reaches the seam either, and for `hello`'s reason one step
+		 * further out: the answer to `monitor` is the connection itself, and
+		 * this seam is handed a request and a buffer and no descriptor at
+		 * all. `server.c` takes it after the gate and hands it to
+		 * `ncfg_daemon_stream_fn`, which is the Rust's arrangement too. Named
+		 * here anyway, because a kind with no row is a kind nothing walks. */
+		return "`monitor` is taken by the control socket itself, which hands the "
+		    "connection to the event stream; reaching this is a bug in the server "
+		    "rather than in the request";
 	case NCFG_PROTO_REQ_WIFI_ADD:
 	case NCFG_PROTO_REQ_WIFI_FORGET:
 		return "this build of netcfgd cannot write a `network` block: the profile "
@@ -190,14 +192,16 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
-		/* 0263's four facts about `ncfg apply`, each of which is on its own
-		 * enough, said in one sentence rather than four: this is a refusal an
+		/* 0263's facts about `ncfg apply` that are still facts -- the two it
+		 * named about ownership are closed -- each of which is on its own
+		 * enough, said in one sentence rather than three: this is a refusal an
 		 * operator reads on a socket, not the decision record. */
-		return "this build of netcfgd will not apply: its planner is four passes of "
-		    "thirty, its executor takes thirteen ops of forty-eight and stops at the "
-		    "first it will not take, nothing folds what an apply did into owned.json, "
-		    "and there is no confirm window -- so an apply would change the machine, "
-		    "report success and leave nothing able to undo it";
+		return "this build of netcfgd will not apply: its planner holds ten kinds of "
+		    "configuration block and warns about each rather than acting on it, its "
+		    "executor refuses an op it cannot carry out while the plan is running and "
+		    "stops at the first it will not take, and no plan.last.json is written -- "
+		    "so an apply would converge part of a machine, or stop halfway through "
+		    "changing it, and leave nothing under /run saying where";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
@@ -554,4 +558,43 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		    "refusal");
 		return 0;
 	}
+}
+
+/*
+ * What `monitor` does, once the socket has let it through.
+ *
+ * WHY IT IS HERE RATHER THAN IN `server.c`
+ *   The same reason the arms above are: that file owns sockets and threads,
+ *   and what a request *means* is this one's. What `monitor` means is one
+ *   line -- the connection joins the list an announcement is written to.
+ *
+ * WHY IT IS SAFE TO TOUCH THAT LIST FROM HERE
+ *   Because this does not run on the connection's thread. It is reached
+ *   through `ncfg_main_mailbox_stream`, which parks the connection and hands
+ *   the descriptor over from inside `ncfg_main_mailbox_settle` -- so every
+ *   call on the subscriber list, the pass announcing through it and this one
+ *   adding to it, happens on the loop's thread, which is what lets that list
+ *   hold no lock.
+ */
+int ncfg_main_stream(void *context, int fd, char *err, size_t err_size)
+{
+	ncfg_main_desk_t *desk = context;
+
+	if (!desk || !desk->subscribers) {
+		/*
+		 * Refused rather than accepted and dropped. A daemon assembled
+		 * without a subscriber list would otherwise take the connection,
+		 * close nothing, and leave a client watching a socket that will never
+		 * carry a line -- which is indistinguishable from a quiet machine.
+		 */
+		ncfg_error_set(err, err_size,
+		    "this daemon has nowhere to put a subscribed connection, so it would "
+		    "never be told anything");
+		return 0;
+	}
+	/* The list's own rules from here: it takes the descriptor, puts it in
+	 * non-blocking mode so that a client which stopped reading cannot stop
+	 * the daemon reconciling, and refuses past its bound with a sentence the
+	 * server sends back. */
+	return ncfg_main_subscribers_add(desk->subscribers, fd, err, err_size);
 }

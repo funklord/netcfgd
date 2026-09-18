@@ -116,8 +116,10 @@ static void nudge(int fd)
 }
 
 int ncfg_main_mailbox_open(ncfg_main_mailbox_t *mailbox, ncfg_daemon_answer_fn answer,
-    void *answer_context, int wake, char *err, size_t err_size)
+    ncfg_daemon_stream_fn stream, void *answer_context, int wake, char *err, size_t err_size)
 {
+	size_t at;
+
 	if (!mailbox) {
 		ncfg_error_set(err, err_size, "a mailbox needs somewhere to be");
 		return 0;
@@ -125,7 +127,14 @@ int ncfg_main_mailbox_open(ncfg_main_mailbox_t *mailbox, ncfg_daemon_answer_fn a
 	memset(mailbox, 0, sizeof(*mailbox));
 	mailbox->wake = wake;
 	mailbox->answer = answer;
+	mailbox->stream = stream;
 	mailbox->answer_context = answer_context;
+	/* Spelled out rather than left to the `memset`, because zero is a
+	 * descriptor: a slot whose `stream_fd` read as 0 would be a subscription
+	 * to this process' standard input that nobody asked for. */
+	for (at = 0; at < (size_t)NCFG_MAIN_PENDING_MAX; at++) {
+		mailbox->at[at].stream_fd = -1;
+	}
 	if (pthread_mutex_init(&mailbox->lock, NULL) != 0) {
 		ncfg_error_set(err, err_size, "the request mailbox could not take a lock");
 		return 0;
@@ -186,58 +195,52 @@ void ncfg_main_mailbox_close(ncfg_main_mailbox_t *mailbox)
 	memset(mailbox, 0, sizeof(*mailbox));
 }
 
-int ncfg_main_mailbox_answer(void *context, const ncfg_proto_request_t *request,
-    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+/*
+ * A free slot, with the mailbox's lock **still held** -- or NULL with the lock
+ * released and a sentence written.
+ *
+ * The asymmetry is spelled here because it is the kind that gets missed: the
+ * caller fills the slot it is given and unlocks, and does nothing at all where
+ * it is given NULL.
+ *
+ * Both kinds of waiter -- a request and a subscription -- meet these same two
+ * walls, and a wall said in two places is a wall said two ways.
+ */
+static ncfg_main_waiting_t *slot_to_wait_in(ncfg_main_mailbox_t *mailbox, char *err,
     size_t err_size)
 {
-	ncfg_main_mailbox_t *mailbox = context;
-	ncfg_main_waiting_t *slot = NULL;
-	size_t               at;
-	int                  result;
+	size_t at;
 
-	if (!mailbox || !request) {
-		ncfg_error_set(err, err_size, "this daemon has no way to act on a request");
-		return 0;
-	}
-	if (!ncfg_main_request_waits(request)) {
-		ncfg_error_set(err, err_size, "this daemon has no way to act on a request");
-		return 0;
-	}
 	(void)pthread_mutex_lock(&mailbox->lock);
 	if (mailbox->shut) {
 		(void)pthread_mutex_unlock(&mailbox->lock);
 		ncfg_error_set(err, err_size, "%s", shutting_down);
-		return 0;
+		return NULL;
 	}
 	for (at = 0; at < (size_t)NCFG_MAIN_PENDING_MAX; at++) {
 		if (!mailbox->at[at].in_use) {
-			slot = &mailbox->at[at];
-			break;
+			return &mailbox->at[at];
 		}
 	}
-	if (!slot) {
-		(void)pthread_mutex_unlock(&mailbox->lock);
-		/*
-		 * Refused rather than queued or waited for, which is the same bargain
-		 * `NCFG_DAEMON_MAX_CONNECTIONS` takes: a queue that grows because the
-		 * loop is slow is a daemon that answers nothing while looking busy,
-		 * and every client on the other end is holding a connection open
-		 * waiting for it. The sentence says what happened and what to do.
-		 */
-		ncfg_error_set(err, err_size,
-		    "%d requests are already waiting for this daemon's loop; try again",
-		    NCFG_MAIN_PENDING_MAX);
-		return 0;
-	}
-	memset(slot, 0, sizeof(*slot));
-	slot->request = request;
-	slot->peer = peer;
-	slot->arrival = arrival;
-	slot->out = out;
-	slot->err = err;
-	slot->err_size = err_size;
-	slot->in_use = 1;
 	(void)pthread_mutex_unlock(&mailbox->lock);
+	/*
+	 * Refused rather than queued or waited for, which is the same bargain
+	 * `NCFG_DAEMON_MAX_CONNECTIONS` takes: a queue that grows because the
+	 * loop is slow is a daemon that answers nothing while looking busy, and
+	 * every client on the other end is holding a connection open waiting for
+	 * it. The sentence says what happened and what to do.
+	 */
+	ncfg_error_set(err, err_size,
+	    "%d requests are already waiting for this daemon's loop; try again",
+	    NCFG_MAIN_PENDING_MAX);
+	return NULL;
+}
+
+/* Wake the loop and wait for it, then give the slot back. Called with the lock
+ * released and a filled slot in hand. */
+static int wait_for_the_loop(ncfg_main_mailbox_t *mailbox, ncfg_main_waiting_t *slot)
+{
+	int result;
 
 	/* Outside the lock, because a write is a syscall and the loop has to be
 	 * able to take this lock to answer. */
@@ -255,9 +258,74 @@ int ncfg_main_mailbox_answer(void *context, const ncfg_proto_request_t *request,
 		(void)pthread_cond_wait(&mailbox->settled, &mailbox->lock);
 	}
 	result = slot->result;
+	/* A slot nobody is in holds no descriptor, which is what lets every walk
+	 * below read `stream_fd` without also asking whether the slot is live. */
+	slot->stream_fd = -1;
 	slot->in_use = 0;
 	(void)pthread_mutex_unlock(&mailbox->lock);
 	return result;
+}
+
+int ncfg_main_mailbox_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_main_mailbox_t *mailbox = context;
+	ncfg_main_waiting_t *slot;
+
+	if (!mailbox || !request) {
+		ncfg_error_set(err, err_size, "this daemon has no way to act on a request");
+		return 0;
+	}
+	if (!ncfg_main_request_waits(request)) {
+		ncfg_error_set(err, err_size, "this daemon has no way to act on a request");
+		return 0;
+	}
+	slot = slot_to_wait_in(mailbox, err, err_size);
+	if (!slot) {
+		return 0;
+	}
+	memset(slot, 0, sizeof(*slot));
+	slot->request = request;
+	slot->peer = peer;
+	slot->arrival = arrival;
+	slot->out = out;
+	slot->err = err;
+	slot->err_size = err_size;
+	slot->stream_fd = -1;
+	slot->in_use = 1;
+	(void)pthread_mutex_unlock(&mailbox->lock);
+
+	return wait_for_the_loop(mailbox, slot);
+}
+
+int ncfg_main_mailbox_stream(void *context, int fd, char *err, size_t err_size)
+{
+	ncfg_main_mailbox_t *mailbox = context;
+	ncfg_main_waiting_t *slot;
+
+	if (!mailbox || fd < 0) {
+		ncfg_error_set(err, err_size, "this daemon has no way to take a subscription");
+		return 0;
+	}
+	slot = slot_to_wait_in(mailbox, err, err_size);
+	if (!slot) {
+		return 0;
+	}
+	memset(slot, 0, sizeof(*slot));
+	/*
+	 * No request and no buffer. `ncfg_main_mailbox_take` skips a slot with no
+	 * request, which is what keeps a subscription out of the array the pass
+	 * reads -- a `monitor` is not something to reconcile against, and one
+	 * copied in as a request with a zeroed kind would read as a `hello`.
+	 */
+	slot->err = err;
+	slot->err_size = err_size;
+	slot->stream_fd = fd;
+	slot->in_use = 1;
+	(void)pthread_mutex_unlock(&mailbox->lock);
+
+	return wait_for_the_loop(mailbox, slot);
 }
 
 size_t ncfg_main_mailbox_take(ncfg_main_mailbox_t *mailbox, ncfg_proto_request_t *out,
@@ -307,13 +375,27 @@ void ncfg_main_mailbox_settle(ncfg_main_mailbox_t *mailbox)
 		ncfg_buf_t                 *out;
 		char                       *err;
 		size_t                      err_size;
+		int                         stream_fd;
 		int                         result;
 
 		(void)pthread_mutex_lock(&mailbox->lock);
-		if (!slot->in_use || !slot->taken || slot->answered) {
+		if (!slot->in_use || slot->answered) {
 			(void)pthread_mutex_unlock(&mailbox->lock);
 			continue;
 		}
+		/*
+		 * A request is answered only once the round has *taken* it, because
+		 * the whole point of the mailbox is that the pass sees it first. A
+		 * subscription is not taken by anything -- it never reaches the pass
+		 * -- so it is marked here, under the lock, for the same reason a
+		 * taken request is safe to work on outside it.
+		 */
+		if (slot->stream_fd < 0 && !slot->taken) {
+			(void)pthread_mutex_unlock(&mailbox->lock);
+			continue;
+		}
+		slot->taken = 1;
+		stream_fd = slot->stream_fd;
 		request = slot->request;
 		peer = slot->peer;
 		arrival = slot->arrival;
@@ -329,7 +411,22 @@ void ncfg_main_mailbox_settle(ncfg_main_mailbox_t *mailbox)
 		 */
 		(void)pthread_mutex_unlock(&mailbox->lock);
 
-		if (mailbox->answer) {
+		if (stream_fd >= 0) {
+			if (mailbox->stream) {
+				result = mailbox->stream(mailbox->answer_context, stream_fd, err,
+				    err_size);
+			} else {
+				/*
+				 * Named, and the descriptor left alone. A refusal that had
+				 * closed it would be this loop reaching into a connection it
+				 * had just told the server it was not taking.
+				 */
+				ncfg_error_set(err, err_size,
+				    "this build has no implementation of ncfg_daemon_stream_fn, so "
+				    "nothing here can take a subscribed connection");
+				result = 0;
+			}
+		} else if (mailbox->answer) {
 			result = mailbox->answer(mailbox->answer_context, request, peer, arrival, out,
 			    err, err_size);
 		} else {

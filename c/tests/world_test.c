@@ -27,6 +27,13 @@
  *       for, because the loop writes from the thread that reconciles;
  *     * and that a short write is a dropped subscriber and not a retry, since
  *       half a line on the wire makes the next event read as its tail.
+ *
+ *   The last of them is the wire rather than a piece of it: a real control
+ *   socket in this test's own directory, a `monitor` from a real client, the
+ *   mailbox carrying the descriptor across to the loop's thread, and an
+ *   announcement coming back out on the client's socket. Every piece above can
+ *   be correct while nothing is connected -- which is what this port had until
+ *   the hand-over landed, a subscriber list that was always empty.
  */
 #include "../src/main/loop_internal.h"
 
@@ -43,11 +50,14 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 static int failures;
@@ -530,6 +540,177 @@ static void the_list_is_bounded_and_says_so(void)
 }
 
 /* ------------------------------------------------------------------------ *
+ * A `monitor`, all the way through
+ * ------------------------------------------------------------------------ */
+
+/* A client on a socket this test bound. Retried on the accept backlog rather
+ * than assumed, the way `daemon_test.c` does it and for its reason: the
+ * listener is up before `ncfg_daemon_serve` returns, so a refusal here would
+ * read as something else entirely. */
+static int connect_to(const char *path)
+{
+	struct sockaddr_un address;
+	int                at;
+
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", path);
+	for (at = 0; at < 200; at++) {
+		int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+		if (fd < 0) {
+			return -1;
+		}
+		if (connect(fd, (const struct sockaddr *)&address, (socklen_t)sizeof(address)) == 0) {
+			return fd;
+		}
+		(void)close(fd);
+		(void)poll(NULL, 0, 5);
+	}
+	return -1;
+}
+
+/* One line from a descriptor, without its newline, or 0. Bounded by the
+ * buffer; nothing here sends a long line. */
+static int line_from(int fd, char *out, size_t out_size)
+{
+	size_t at = 0;
+
+	while (at + 1u < out_size) {
+		char    one;
+		ssize_t got = recv(fd, &one, 1u, 0);
+
+		if (got <= 0) {
+			break;
+		}
+		if (one == '\n') {
+			out[at] = '\0';
+			return 1;
+		}
+		out[at] = one;
+		at++;
+	}
+	out[at] = '\0';
+	return 0;
+}
+
+/*
+ * A `monitor` becomes a subscriber, and an announcement reaches the client.
+ *
+ * **Every other check in this file drives one piece.** This one drives the
+ * wire: a real unix socket, a real connection thread, the mailbox that carries
+ * the descriptor across to the loop's thread, the desk that puts it in the
+ * list, and an announcement that comes back out on the client's own socket.
+ * Each piece can be correct while the wire is not connected -- which is what
+ * this port had until now, a subscriber list that was always empty and a
+ * `monitor` that refused by saying so.
+ *
+ * The test's own thread is the loop: it calls `ncfg_main_mailbox_settle`,
+ * which is what a round does after its pass.
+ */
+static void a_monitor_becomes_a_subscriber_and_is_told(void)
+{
+	ncfg_main_subscribers_t subscribers;
+	ncfg_main_desk_t        desk;
+	ncfg_main_mailbox_t     mailbox;
+	ncfg_daemon_serve_t     how;
+	ncfg_control_t          control;
+	ncfg_remote_policy_t    remote;
+	ncfg_daemon_server_t   *server;
+	/* Exactly what a unix socket path may be, which is also what keeps this
+	 * from being a buffer the compiler cannot prove the copy below fits in. */
+	char                    path[sizeof(((struct sockaddr_un *)0)->sun_path)];
+	char                    err[NCFG_ERROR_MAX];
+	char                    line[1024];
+	struct timeval          deadline;
+	int                     fd = -1;
+	int                     at;
+
+	ncfg_main_subscribers_init(&subscribers);
+	memset(&desk, 0, sizeof(desk));
+	desk.subscribers = &subscribers;
+	err[0] = '\0';
+	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, ncfg_main_stream, &desk, -1, err,
+	    sizeof(err))) {
+		check(0, "a mailbox wired to the desk that holds the subscriber list");
+		return;
+	}
+
+	memset(&control, 0, sizeof(control));
+	control.observe.kind = NCFG_PRINCIPAL_ANY;
+	control.wifi.kind = NCFG_PRINCIPAL_ANY;
+	control.admin.kind = NCFG_PRINCIPAL_ANY;
+	memset(&remote, 0, sizeof(remote));
+	memset(&how, 0, sizeof(how));
+	(void)snprintf(path, sizeof(path), "%s/monitor.sock", base);
+	how.path = path;
+	how.arrival = NCFG_ARRIVED_LOCAL;
+	how.control = &control;
+	how.remote = &remote;
+	how.answer = ncfg_main_mailbox_answer;
+	how.stream = ncfg_main_mailbox_stream;
+	how.context = &mailbox;
+	err[0] = '\0';
+	server = ncfg_daemon_serve(&how, err, sizeof(err));
+	if (!server) {
+		check(0, "a control socket in this test's own directory");
+		detail("because", err);
+		ncfg_main_mailbox_close(&mailbox);
+		return;
+	}
+	fd = connect_to(path);
+	if (fd < 0) {
+		check(0, "a client connects to it");
+		ncfg_daemon_server_stop(server);
+		ncfg_main_mailbox_close(&mailbox);
+		return;
+	}
+	/* A deadline, so that an announcement which never arrives is a failed
+	 * check rather than a suite that hangs on a socket nobody will write to. */
+	deadline.tv_sec = 5;
+	deadline.tv_usec = 0;
+	(void)setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &deadline, (socklen_t)sizeof(deadline));
+	check(send(fd, "{\"request\":\"monitor\"}\n", 22u, MSG_NOSIGNAL) == 22,
+	    "a client asks to watch");
+
+	/* The loop's half, driven by hand. Bounded, so a hand-over that never
+	 * happens fails this rather than hanging the suite. */
+	for (at = 0; at < 2000 && subscribers.count == 0u; at++) {
+		ncfg_main_mailbox_settle(&mailbox);
+		if (subscribers.count == 0u) {
+			(void)poll(NULL, 0, 1);
+		}
+	}
+	check(subscribers.count == 1u,
+	    "and the connection arrives in the subscriber list, which is the wire this "
+	    "whole arrangement is");
+
+	told(&subscribers, "two links moved");
+	check(line_from(fd, line, sizeof(line)) &&
+	        strstr(line, "\"event\":\"observed\"") != NULL &&
+	        strstr(line, "two links moved") != NULL,
+	    "an announcement reaches the client that asked for it");
+	detail("event", line);
+
+	/*
+	 * And a client that goes away is dropped on the next announcement rather
+	 * than written to for ever. This is the C half of the Rust's 10.169: there
+	 * the list is a `Vec` with no bound, pruned only inside a broadcast, so a
+	 * quiet machine accumulates them without limit. Here the pruning is the
+	 * same and the list cannot grow past `NCFG_MAIN_SUBSCRIBERS_MAX`.
+	 */
+	(void)close(fd);
+	told(&subscribers, "and now nobody is listening");
+	check(subscribers.count == 0u && subscribers.dropped == 1u,
+	    "a client that hung up is dropped as the next event is written, and counted");
+
+	ncfg_main_mailbox_shut(&mailbox);
+	ncfg_daemon_server_stop(server);
+	ncfg_main_mailbox_close(&mailbox);
+	ncfg_main_subscribers_close(&subscribers);
+}
+
+/* ------------------------------------------------------------------------ *
  * The world
  * ------------------------------------------------------------------------ */
 
@@ -944,6 +1125,7 @@ int main(void)
 	a_subscriber_that_stopped_reading_is_dropped_not_waited_for();
 	a_line_that_only_half_fitted_drops_the_subscriber();
 	the_list_is_bounded_and_says_so();
+	a_monitor_becomes_a_subscriber_and_is_told();
 	the_seams_a_world_fills_in();
 	an_executor_takes_the_apply_lock_before_anything_else();
 	the_hooks_an_executor_is_given();
