@@ -9499,6 +9499,40 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.160 Five fields `ncfg profile save` drops without saying so
+
+The renderer's own discipline is in its header: **what cannot be written is
+refused by name, never dropped**, because a profile that comes back missing a
+setting is a machine that comes back missing it. The field-walking audit
+recorded in this document closed that once already -- a `device` whose only
+setting was `on_unmanage` vanished entirely, a wireless network lost its
+`bssid` pins and its own addressing.
+
+Five more have appeared since, and they were measured rather than guessed. For
+each, the configuration language accepts the key -- `lower.rs` has an arm for
+it -- and `render.rs` mentions it **zero times**:
+
+| field | decision | what a saved profile loses |
+|---|---|---|
+| `EapConfig::domain_suffix_match` | 0206 | the name check on the server certificate |
+| `RemotePolicy::agent` | 0159 | the remote socket's mode and group |
+| `Globals::connectivity` | 0243 | the `ignore` list, which *replaces* the default |
+| `Slaac::privacy` | | RFC 4941 temporary addresses |
+| `Dhcp6::prefix_delegation` | | the delegation request and its hints |
+
+**Two of them are weaker than a lost setting.** Without
+`domain_suffix_match`, `ca_cert` alone accepts any certificate the pinned
+issuer signed -- which is what that key was added to stop -- so a machine
+restored from a saved profile authenticates a network it would have refused.
+And `agent` decides who may reach the remote socket: unwritten it is root, so
+an operator who opened it to a group finds it closed after a restore, which at
+least fails loudly in the other direction.
+
+Found by the C port, whose renderer writes all five and refuses `dhcp`'s
+modifiers by name because the language takes none. Not fixed on `master`: the
+repair is five small additions plus the test that walks every field, and it
+belongs with whoever settles the other findings in 10.159.
+
 ## 10.159 What the port has found in the Rust so far
 
 Porting a module means reading every line of it with a reason to disagree,
