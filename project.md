@@ -9499,6 +9499,35 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.164 Three DNS renderers with no test, two of them the disclosing kind
+
+`netcfgd-dns`'s `render.rs` publishes five renderers. Its test module exercises
+two: `resolv_conf` and `resolvconf_blob`. `dnsmasq_conf`, `unbound_conf` and
+`scopes_json` are mentioned **zero times** -- counted, not estimated.
+
+The two that matter are the scope-capable ones. A resolver that understands
+scopes is the whole of decision 0007: `server=/corp.example/192.0.2.53` sends
+queries for one suffix to one resolver, and if the suffix is lost the line
+becomes `server=192.0.2.53`, which sends *every* query there -- or, the other
+way round, sends an internal name to a public resolver. That is not a
+degradation, it is the disclosure the scoped modes exist to prevent, and
+nothing in the suite would have noticed it.
+
+`scopes_json` is the third, and it is a documented wire format: `project.md`
+records a third party writing a script against it. Its control-character
+escaping had no test either.
+
+Found by porting them, which is the only reading anybody had given that file in
+a while. The C has whole-text assertions for all three, the exclusive and
+non-exclusive forms among them, so the shapes are pinned on one side at least.
+
+**The pattern across 10.159 to here is worth naming.** A port does not find
+defects because the porter is clever; it finds them because porting is the only
+activity that reads every line with a reason to disagree. Six of the findings so
+far are in code with no test at all, four are comments the code stopped
+obeying, and one -- the passphrase in a diagnostic -- is a rule kept in three
+places and forgotten in the fourth.
+
 ## 10.163 A passphrase in a diagnostic, and the redaction that hid it
 
 **The one thing the design exists to prevent.** A credential is a reference
