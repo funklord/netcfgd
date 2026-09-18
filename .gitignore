@@ -18,6 +18,13 @@ client/.build-flags
 client/tests/client_test
 gui/build/
 gui/build-*/
+
+# The C port builds in place too, one object beside each source and one test
+# binary per module. Named by shape rather than by module: the tree grows a
+# module at a time and a list here would be one more thing to remember.
+c/src/*/*.o
+c/*.a
+c/tests/*_test
 gui/tests/build/
 # The live GUI probe builds beside its own project file, which is in a
 # subdirectory so that `make -C gui test` does not discover and run it without
