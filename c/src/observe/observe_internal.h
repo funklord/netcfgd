@@ -13,6 +13,8 @@
 #include <stdint.h>
 
 #include "ncfg/base.h"
+#include "ncfg/netlink.h"
+#include "ncfg/observe.h"
 
 /* A copy of `text`, or NULL. A NULL argument copies the empty string, because
  * every caller here is filling in a model field whose Rust counterpart is a
@@ -46,5 +48,35 @@ void observe_names_free(char **names, size_t count);
  * an observation and a planner would compare against it for ever.
  */
 int observe_widen(uint64_t value, const char *what, int64_t *out, char *err, size_t err_size);
+
+/*
+ * A netfilter socket for the nftables round, and the exchange that speaks to
+ * it.
+ *
+ * Internal because both callers are in this module and the pair they produce
+ * is one public argument: `ncfg_observe_netfilter` opens one for a single
+ * read, `ncfg_observe_current` opens one beside the route socket for a whole
+ * observation. 0 is a machine with no nftables, which is a note rather than a
+ * failure and is said there -- the socket is left closed and the caller asks
+ * nothing.
+ */
+int observe_netfilter_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out);
+
+/*
+ * A generic netlink socket for the offloads round, and the exchange that
+ * speaks to it.
+ *
+ * Internal for `observe_netfilter_open`'s reason, and the two are deliberately
+ * the same shape: `ncfg_observe_offloads` opens one for a single read,
+ * `ncfg_observe_current` opens one beside the other two for a whole
+ * observation. 0 is a machine whose netlink this process may not open, which
+ * is a note rather than a failure and is said there -- the socket is left
+ * closed and the caller asks nothing.
+ *
+ * **The protocol, not the family.** Every generic netlink family shares one
+ * socket, so this is the seam the two WireGuard passes `observe.h` still
+ * defers will ask their family over rather than a fourth one.
+ */
+int observe_genl_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out);
 
 #endif /* NCFG_OBSERVE_INTERNAL_H */

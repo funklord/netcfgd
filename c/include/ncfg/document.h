@@ -788,6 +788,26 @@ const char *ncfg_tunnel_kind_name(int kind);
 int ncfg_bond_mode_number(int mode);
 int ncfg_macvlan_mode_number(int mode);
 
+/*
+ * The ethertype the kernel wants in `IFLA_VLAN_PROTOCOL`, or -1 outside the set.
+ *
+ * **Published late, and the reason it was not is worth keeping.** 0263 records
+ * it as deliberately absent -- `link.set_vlan` is not an op, so nothing needed
+ * it. `link.create` for a vlan does, and that is the whole of what changed: a
+ * vlan's id and tag protocol are fixed at creation (the kernel's
+ * `vlan_changelink` reads neither), so creation is the *only* place either one
+ * can be stated, and a vlan netcfgd cannot create is a vlan netcfgd can never
+ * have. The alternative was a two-entry table in `src/apply/`, which is what
+ * the paragraph above refuses for a mode.
+ *
+ * An `int` rather than a `uint16_t` for the same reason a mode number is one:
+ * -1 is a protocol outside the set, and a plausible ethertype for a protocol
+ * that is not one is worse than no ethertype. `src/observe/build.c` reads the
+ * same two numbers the other way, which is the reader this writer has to agree
+ * with.
+ */
+int ncfg_vlan_protocol_ethertype(int protocol);
+
 /* ------------------------------------------------------------------------ *
  * Per-device policy
  * ------------------------------------------------------------------------ */
@@ -876,6 +896,65 @@ typedef struct {
 	int           rx_checksum;
 	int           tx_checksum;
 } ncfg_link_settings_t;
+
+/*
+ * The five offloads netcfgd manages, as one closed set.
+ *
+ * An enumerator rather than five call sites naming five struct members,
+ * because two modules have to walk the same five in the same order: the
+ * planner turns each into a `link.set_offloads`, and `src/observe/offloads.c`
+ * reads the kernel's active features back and keeps the ones this set can
+ * express. A loop over an enum is a loop neither of them can write a
+ * different length.
+ */
+typedef enum {
+	NCFG_OFFLOAD_GRO,
+	NCFG_OFFLOAD_GSO,
+	NCFG_OFFLOAD_TSO,
+	NCFG_OFFLOAD_RX_CHECKSUM,
+	NCFG_OFFLOAD_TX_CHECKSUM
+} ncfg_offload_field_t;
+
+/* How many there are, so a caller can walk them without a terminator. */
+#define NCFG_OFFLOAD_FIELD_COUNT 5u
+
+/*
+ * The kernel's own feature names one offload field covers.
+ *
+ * **The model owns the numbering**, which is `ncfg_bond_mode_number`'s rule
+ * with strings instead of numbers and is the same rule for the same reason:
+ * the writer is `src/plan/offload.c`, which turns a field into a features
+ * message, and the reader that has to agree with it is
+ * `src/observe/offloads.c`, which fills `ncfg_observed_link_t.offloads` with
+ * exactly these strings. Two lists of feature names in two places is how a
+ * feature comes to be turned on under one spelling and read back under
+ * another -- and since a name absent from a device's active set means "off",
+ * a disagreement is not a failure anywhere: it is an offload planned on every
+ * pass for ever.
+ *
+ * **One field is several features.** Transmit checksumming is three, because a
+ * driver offers whichever of them its hardware has -- so "on" for such a field
+ * means *any* of them and "off" means *all* of them, which is what
+ * `ethtool -K dev tx on|off` does.
+ *
+ * The names rather than the kernel's bit indices, which are not stable across
+ * versions and are not a wire contract; `ethtool.h` says why at length.
+ *
+ * `count` is filled in with how many there are, and NULL with a `count` of 0
+ * is a field outside the set -- `ncfg_tunnel_kind_name`'s convention.
+ */
+const char *const *ncfg_offload_field_names(int field, size_t *count);
+
+/*
+ * What an `ethtool` block asks of one offload field.
+ *
+ * `NCFG_TOGGLE_UNMANAGED` for a field the document does not state and for a
+ * field outside the set, which are the same instruction: leave it alone. Here
+ * rather than in the planner so that the enumerator and the member it names
+ * are decided in one place -- a second mapping would be free to disagree about
+ * which member `NCFG_OFFLOAD_TSO` reads, and nothing would fail to compile.
+ */
+int ncfg_link_settings_offload(const ncfg_link_settings_t *settings, int field);
 
 /*
  * How a device is identified. Every present field must match.

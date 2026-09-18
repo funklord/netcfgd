@@ -33,29 +33,70 @@
  *   takes its root as an argument.
  *
  * WHAT THIS PORT DOES NOT CARRY YET, SAID OUT LOUD
- *   `host.rs` has eleven passes. Six of them need a module that has not
- *   landed, and they are **deferred rather than dropped** -- naming them here
- *   is cheaper than rediscovering that an observation is quietly missing half
- *   of itself:
+ *   `host.rs`'s `augment` calls eleven passes by name, beside the four small
+ *   readers this port has -- the sysctls, the hostname, rfkill and Bluetooth --
+ *   and `derive`. **This entry said for several waves that six of the eleven
+ *   were deferred, while naming nine and while every one of them was.**
+ *   Counted against the tree instead: seven are deferred, four are here, and
+ *   the reason most of them are deferred has now moved twice -- once because
+ *   the blockers that were written down had been overtaken, and once because
+ *   the record they actually waited on arrived. Each is named below with what
+ *   it waits on **today**, because a list nobody re-checks is worse than none:
+ *   it is addressed to somebody who cannot check it (project.md 10.180,
+ *   10.182, 10.183).
  *
- *     * the supplicant round trip (`ask_supplicants`), an access point's
- *       station lists and the passphrase comparison, a tunnel's configuration
- *       hash and a router advertisement daemon's prefixes -- each waits on the
- *       backend module that speaks to the daemon in question;
- *     * `read_backend_liveness`, which needs `netcfgd-apply`'s map from a
- *       backend kind to the pid file it wrote. `ncfg_process_pid_of` is
- *       already here; the map is not;
- *     * `read_offloads`, `read_netfilter` and `read_wireguard_keys`, which are
- *       netlink round trips rather than file reads. ethtool.h, nft.h and wg.h
- *       build the messages, and `ncfg_observe_collect_from` now owns a socket
- *       for the round -- so what is missing is the three passes themselves
- *       rather than somewhere to send them. Two of the three need a second
- *       socket in any case: ethtool and WireGuard speak generic netlink, which
- *       `ncfg_netlink_open_protocol` says cannot share a route socket.
+ *     * **Six walk `observed.backends`, and that list is no longer always
+ *       empty.** `ask_supplicants`, `read_access_control`, `read_advertised`,
+ *       `read_secret_currency`, `read_tunnel_currency` and
+ *       `read_backend_liveness` each iterate it. It is filled from the prior
+ *       state and from nowhere else, and `ncfg_owned_state_t` now carries
+ *       `backends` -- so the blocker this entry named twice is gone and these
+ *       six are writable rather than waiting. Five of them are simply not
+ *       written yet, each being a round trip to the daemon it asks.
+ *     * `read_backend_liveness` is the one of the six with a blocker left, and
+ *       it is not the record. It needs a backend kind mapped to the pid file
+ *       and the `argv` marker netcfgd started that daemon with -- the Rust's
+ *       `netcfgd_apply::backend_pid_file`, seven kinds in one function. This
+ *       port has five per-module answers instead (`ncfg_ra_running_pid`,
+ *       `ncfg_openvpn_running_pid`, `ncfg_dhcp_running_pid` and two pid-path
+ *       calls beside them), no single map, and every one of them reaches
+ *       `/proc` at a fixed path through `process.h` -- which is that module's
+ *       right and **this** module's rule broken, since every root a pass reads
+ *       under is a parameter here. Until that pass lands, `running` in an
+ *       observation is netcfgd's memory rather than a fact about a process,
+ *       which is what stops 0079's third clear (`apply.h`, project.md 10.183).
+ *     * `read_resolv_currency` walks `observed.dns`, which the record now
+ *       carries too -- but only carries: nothing in this build *writes* a
+ *       delivered scope into it, because `dns.apply` is the one op that is not
+ *       its own effect. `apply.h` has the argument and `dns.h` names the
+ *       producer that would close it, a reader of `<run>/dns/`.
  *
- *   What is here is the whole of `lib.rs`, the file-reading half of `host.rs`
- *   -- the sysctls, the hostname, rfkill and Bluetooth -- and the whole of
- *   `derive`.
+ *   `read_netfilter`, `read_offloads`, `read_wireguard_keys` and
+ *   `read_wireguard_currency` **are** ported, as `ncfg_observe_netfilter_from`,
+ *   `ncfg_observe_offloads_from`, `ncfg_observe_wireguard_from` and
+ *   `ncfg_observe_wireguard_currency`: they are the four whose input comes
+ *   from the kernel and from the store rather than from the record, and whose
+ *   answers the planner already reads. See the note above each for what its
+ *   absence cost -- the first two the same cost, one field apart, and the
+ *   WireGuard pair a different one, which is said where they are declared.
+ *
+ *   **One input of the fourth is not written by this build.** The currency
+ *   question compares a digest of what the store holds now against a digest of
+ *   what netcfgd loaded, and the second is a record under `/run` that the
+ *   executor writes when the kernel accepts a key. `apply/kernel_genl.c` does
+ *   not write it yet, so `key_matches` and `preshared_matches` come back absent
+ *   on a real machine until it does -- which is a question left unanswered
+ *   rather than answered wrongly, and is the one shape the planner is built to
+ *   do nothing about. `ncfg_observe_wg_key_record_path` and
+ *   `ncfg_observe_wg_preset_record_path` are declared here so that the writer,
+ *   when it lands, names the file through them rather than spelling the path a
+ *   second time: `NCFG_OBSERVE_ALTNAME_PREFIX` above is the same arrangement
+ *   for the same reason, and two spellings of one path is a reader looking
+ *   where nothing was written.
+ *
+ *   What is here is the whole of `lib.rs`, the four file readers of `host.rs`,
+ *   the nftables round, the offloads round, the WireGuard round, and the whole
+ *   of `derive`.
  *
  * WHERE THIS DIVERGES FROM THE RUST, ON PURPOSE
  *   0263 collects the port's divergences; these are this module's.
@@ -94,6 +135,10 @@
 #include "ncfg/qdisc.h"
 #include "ncfg/radio.h"
 #include "ncfg/rule.h"
+/* For `ncfg_secret_resolver_t`, which the WireGuard currency question takes.
+ * The store is an argument to this module and never a default it reaches for
+ * -- see that call. */
+#include "ncfg/secrets.h"
 
 /* ------------------------------------------------------------------------ *
  * The marks netcfgd stamps, and the one this port had to spell first
@@ -741,6 +786,245 @@ int ncfg_observe_augment_host(ncfg_observed_t *observed, const ncfg_observe_root
     char *err, size_t err_size);
 
 /* ------------------------------------------------------------------------ *
+ * The NAT this machine has, netcfgd's and anybody else's
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Fill in `nat` and `nat_conflicts` from a round of nftables dumps.
+ *
+ * **Its own exchange, because nftables is its own protocol.** `collect.c`'s
+ * seven dumps go over `NETLINK_ROUTE`; these two go over
+ * `NCFG_NFT_NETLINK_PROTOCOL`, which is a different socket, so this is a
+ * second `ncfg_observe_kernel_t` rather than an eighth dump in the first
+ * round. The seam is the same one and for the same reason: the cases that
+ * matter here -- a rule from a table netcfgd does not own, a chain dump with a
+ * payload in it that will not read, a kernel that answers nothing at all --
+ * are not cases a kernel produces on demand.
+ *
+ * **What its absence cost, said once here.** `nat` is what netcfgd's own table
+ * masquerades now, and the planner compares the document against it; with
+ * nothing filling it the comparison was against an empty list, so a machine
+ * whose NAT was already right was planned a `nat.replace` on every pass and
+ * never converged -- and the op's *inverse* is that same list, so a revert
+ * would have removed the table rather than putting back what was there.
+ * `nat_conflicts` is decision 0022's other half: a second table doing source
+ * NAT at the same hook double-translates, and netcfgd reports it and touches
+ * nothing.
+ *
+ * **A kernel that will not answer is not a failure.** No `nf_tables`, a
+ * netlink this process may not ask, and a machine where netcfgd never
+ * installed a table are the same answer to a planner -- no NAT is installed --
+ * which is what `observed.h` says where the field is declared. Both lists come
+ * back empty and a note says which it was. `kernel` may itself be NULL, which
+ * is the seam left out: the lists are cleared and nothing is asked.
+ *
+ * 0 with a sentence is a fault in netcfgd rather than in the machine: an
+ * allocation that failed, a request this port could not build, or netcfgd's
+ * own chain holding more masquerade rules than an observation carries.
+ */
+int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
+/*
+ * The same, opening and closing a netfilter socket of its own.
+ *
+ * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
+ * socket that will not open is the commonest way a kernel says it has no
+ * nftables, so it is a note and an empty answer rather than a refusal.
+ */
+int ncfg_observe_netfilter(ncfg_observed_t *observed, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * Which driver offloads each interface has on
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Fill in each link's `offloads` from one `FEATURES_GET` per interface.
+ *
+ * **A third exchange, because ethtool is a third protocol.** It is a generic
+ * netlink family, and `netlink.h` says a family id resolved on one socket is
+ * meaningless on another -- so this is neither an eighth dump on the route
+ * socket nor a third question on the netfilter one. The seam is named for the
+ * protocol rather than for the family: one generic netlink socket carries
+ * every family, and the two WireGuard passes above will ask theirs over this
+ * one rather than open a fourth.
+ *
+ * **One request per link and no dump**, because ethtool has none: its messages
+ * are per-device by construction. A handful of round trips on a laptop and a
+ * few dozen on a router, each costing microseconds.
+ *
+ * **What its absence cost, said once here.** `link.set_offloads` is planned by
+ * comparing the document's `ethtool` block against this list, and with nothing
+ * filling it the comparison was against an empty one: a machine whose offloads
+ * were already right was planned a `link.set_offloads` on every pass and never
+ * converged, and the op's inverse -- built out of the same list -- would have
+ * turned every named feature off rather than putting back what was there. That
+ * is `ncfg_observe_netfilter_from`'s paragraph one field along, and it is the
+ * same paragraph because it was the same defect.
+ *
+ * **Only the names the model can express**, which is `ncfg_offload_field_names`
+ * and nothing else: a device reports dozens and `observed.h` says where the
+ * field is declared why storing all of them would be a page of driver detail
+ * in `/run` for five fields. The list comes back sorted and without repeats, so
+ * two observations of one machine compare equal.
+ *
+ * **What `ACTIVE` does not say.** The reply also carries `WANTED` and
+ * `NOCHANGE`, and this reads neither -- so a feature the device forces on is
+ * reported on although a `link.set_offloads` cannot move it, and the planner
+ * asks again on every pass. Measured on a live machine; project.md 10.185 has
+ * it, and closing it needs a third state on this field rather than a change
+ * here.
+ *
+ * **A kernel or a device that will not answer is not a failure.** A kernel
+ * older than 5.6 has no `ethtool` family; a device with no ethtool operations
+ * answers `EOPNOTSUPP`, which is most virtual interfaces; a container's
+ * netlink may be denied. All three leave a list empty, which `observed.h`
+ * already says means off or unsupported, and a note says which it was.
+ * `genl` may itself be NULL, which is the seam left out: every list is cleared
+ * and nothing is asked.
+ *
+ * 0 with a sentence is an allocation that failed, and nothing else.
+ */
+int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
+/*
+ * The same, opening and closing a generic netlink socket of its own.
+ *
+ * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
+ * socket that will not open is a note and an empty answer rather than a
+ * refusal.
+ */
+int ncfg_observe_offloads(ncfg_observed_t *observed, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * What each WireGuard device is running, and whether it is current
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Fill in each WireGuard link's device state from one `GET_DEVICE` per
+ * interface.
+ *
+ * **The offloads round's socket, a second family on it.** `wireguard` is
+ * another generic netlink family, so this takes the same `genl` exchange
+ * rather than a fourth socket -- which is why `observe_genl_open` is named for
+ * the protocol. The family id is resolved once per observation, and **only
+ * where a link of kind `wireguard` exists**: a machine with none makes no
+ * controller request at all, on every tick, for ever.
+ *
+ * **Nothing observed here is secret, and the asymmetry is the kernel's.** A
+ * `GET_DEVICE` reports the public key it derived from the private one and
+ * never the private one; a peer's preshared key comes back as 32 zero octets,
+ * which `sys/wg.c` reads as a boolean and drops. `private_key_loaded` is asked
+ * as "does the kernel report a public key", which is the only reason that key
+ * is reported at all.
+ *
+ * **What its absence cost is not what NAT's or the offloads' was.** Those two
+ * filled a list the planner compared against, so an empty one planned the same
+ * op for ever. `ncfg_plan_wireguard` returns without planning anything for a
+ * link with no `wireguard` observation at all, so what this pass was missing
+ * bought the opposite failure: an edited listen port, an edited mark, a
+ * rotated key and a **deleted peer** each planned nothing whatever, on a
+ * tunnel that looked configured (0054).
+ *
+ * **So a device that could not be read stays NULL rather than becoming an
+ * empty one.** A device the kernel would not answer for, a family that would
+ * not resolve and a reply that would not read all leave `link->wireguard` at
+ * NULL, which the model already means "not observed" by -- an observed device
+ * with no key is present with `public_key.has` clear. Reporting one as the
+ * other would tell the planner every peer was missing and have it replace a
+ * peer list it never saw, which is a working tunnel rebuilt from a guess. That
+ * is the one place this pass reads an absence differently from
+ * `ncfg_observe_netfilter_from`, which is right to call a socket it could not
+ * open "no NAT installed".
+ *
+ * `genl` may itself be NULL, which is the seam left out: every link's
+ * observation is cleared and nothing is asked.
+ *
+ * 0 with a sentence is an allocation that failed, and nothing else.
+ */
+int ncfg_observe_wireguard_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
+/*
+ * The same, opening and closing a generic netlink socket of its own.
+ *
+ * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
+ * socket that will not open is a note and nothing observed rather than a
+ * refusal.
+ */
+int ncfg_observe_wireguard(ncfg_observed_t *observed, char *err, size_t err_size);
+
+/*
+ * Whether the key each device is running is the key its configuration names.
+ *
+ * **A currency question, not an observation of a secret.** The kernel reports
+ * the public key it derived and nothing that could be compared against a
+ * private one, and deriving a public key from the store's would mean
+ * curve25519 -- which project.md carried for a long time as the reason a
+ * rotated key could not be noticed. It is not the reason: netcfgd hashes the
+ * key it loaded when the kernel accepted it and writes the digest under
+ * `/run`, this hashes what the store holds now, and what comes out of the
+ * comparison is a boolean. Decision 0052's shape, which 0053 and 0055 already
+ * use for an access point's passphrase and a tunnel's configuration file.
+ *
+ * **A digest of a WireGuard key is not a way back to one**: it is 32 octets of
+ * kernel randomness, with no dictionary and no structure to attack -- which is
+ * why the same technique would be a poor answer for a passphrase. The record
+ * is netcfgd's to write 0600; nothing here writes one, and what leaves this
+ * call is `key_matches` and `preshared_matches` and nothing else. No key, no
+ * digest and nothing else that would identify one reaches an error buffer, a
+ * log line or the observation written to `/run`.
+ *
+ * **Absent is not false, in either answer.** A device netcfgd never
+ * configured, a `/run` cleared under a running daemon, a peer with no record
+ * and a secret that will not resolve all leave the question unanswered -- and
+ * an unanswered question is not a reason to rekey a working tunnel, which is
+ * why `plan/wireguard.c` reads `has` before `value`.
+ *
+ * `secrets` of NULL is the seam left out and means the question is not asked;
+ * it never means the machine's own store. An observer that reached
+ * `NCFG_SECRETS_DIR_DEFAULT` for itself would read the developer's real
+ * credentials the first time a test forgot to override it, which is this
+ * header's rule about the three roots pointed at the one directory where it
+ * matters most. `desired` of NULL and an empty `run_dir` are the same "nothing
+ * to ask", and both are ordinary.
+ *
+ * 0 with a sentence only where there is no observation to write into.
+ */
+int ncfg_observe_wireguard_currency(ncfg_observed_t *observed, const char *run_dir,
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, char *err,
+    size_t err_size);
+
+/*
+ * Where netcfgd records which key it loaded into a device, and which preshared
+ * key each of its peers was given.
+ *
+ * `<run>/wireguard/<iface>.key.sha256` and `<run>/wireguard/<iface>.psk.sha256`,
+ * which are the Rust's two spellings. Declared here rather than beside the
+ * writer because **there is no writer yet**: `NCFG_OBSERVE_ALTNAME_PREFIX`
+ * above is the same arrangement for the same reason, and the point of both is
+ * that the half which lands second uses the spelling the first agreed to
+ * rather than writing the string again.
+ *
+ * The preshared record is one line per peer that has one, `<public key in
+ * base64> <digest>`, keyed by the only name the kernel and the document share.
+ *
+ * `out_size` should be `NCFG_OBSERVE_WG_RECORD_PATH_MAX`. 1 with the path; 0
+ * with a sentence for a run directory or an interface that was not given, or a
+ * join that did not fit -- `err` may be NULL, which every caller here uses,
+ * because a path that did not fit names some other file rather than a longer
+ * version of this one and the answer is the same either way: no record.
+ */
+#define NCFG_OBSERVE_WG_RECORD_PATH_MAX (NCFG_OBSERVE_RUN_DIR_MAX + 256u)
+
+int ncfg_observe_wg_key_record_path(const char *run_dir, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size);
+
+int ncfg_observe_wg_preset_record_path(const char *run_dir, const char *iface, char *out,
+    size_t out_size, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
  * The answers that are computed rather than read
  * ------------------------------------------------------------------------ */
 
@@ -825,10 +1109,10 @@ int ncfg_observe_derive(ncfg_observed_t *observed, const ncfg_document_t *docume
  * in on one side and not the other.
  *
  * The order is `netcfgd_observe::current`'s with `derive` after it: the
- * kernel, then what netcfgd wrote down, then the files the kernel cannot
- * answer for, then the answers computed from all three. **`derive` is inside
- * rather than left to the caller** because a caller that forgot it gets an
- * observation with no link inventory, no linkset choices and no connectivity
+ * kernel, then what netcfgd wrote down, then the nftables round, then the
+ * files the kernel cannot answer for, then the answers computed from all four.
+ * **`derive` is inside rather than left to the caller** because a caller that
+ * forgot it gets an observation with no link inventory, no linkset choices and no connectivity
  * rung -- and that is not an error, it reads as a machine that has none of
  * those things. The daemon calls `ncfg_observe_derive` a second time once the
  * probe verdicts are stamped on, which is what that function's own comment
@@ -847,12 +1131,35 @@ int ncfg_observe_derive(ncfg_observed_t *observed, const ncfg_document_t *docume
  * case: `ncfg status` on a machine whose configuration has stopped compiling
  * still observes the kernel, and is exactly when somebody runs it.
  *
+ * `netfilter` and `genl` are the second and third exchanges -- the ones
+ * `ncfg_observe_netfilter_from` and `ncfg_observe_offloads_from` take -- and
+ * **either may be NULL, which is that seam left out**: everything else is
+ * observed and the NAT lists, or every link's offloads, come back empty. A
+ * test that is not about NAT or about offloads installs nothing, which is
+ * `ncfg_reconcile_world_t`'s bargain -- and a test that is about one installs
+ * a replay rather than reaching a kernel.
+ *
+ * **Three arguments and not one**, though all three are the same type: they
+ * are three protocols on three sockets, a test drives them one at a time, and
+ * a struct holding all three would be a fourth thing to keep in step with the
+ * source below, which already holds them.
+ *
+ * `secrets` is the store the WireGuard currency question is asked of, and
+ * **NULL is the seam left out rather than the machine's own store**: an
+ * observer that reached `NCFG_SECRETS_DIR_DEFAULT` for itself would read the
+ * developer's real credentials the first time a test forgot to override it.
+ * It is the only argument here that is not a socket or a path to read under,
+ * and it is one for the reason every root is: nothing in this module resolves
+ * where to look.
+ *
  * 1 with a fresh observation in `*out`, which the caller frees with
  * `ncfg_observed_free`; 0 with a sentence and `*out` NULL.
  */
-int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *run_dir,
-    const ncfg_observe_roots_t *roots, const ncfg_document_t *desired, ncfg_observed_t **out,
-    char *err, size_t err_size);
+int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
+    const ncfg_observe_kernel_t *netfilter, const ncfg_observe_kernel_t *genl,
+    const char *run_dir, const ncfg_observe_roots_t *roots,
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size);
 
 /*
  * The same, opening and closing a socket of its own.
@@ -862,7 +1169,8 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *r
  * caller for ever and this one has no caller to have decided otherwise.
  */
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
-    const ncfg_document_t *desired, ncfg_observed_t **out, char *err, size_t err_size);
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size);
 
 /*
  * Everything an observation needs that `ncfg_daemon_observe_fn` cannot carry.
@@ -881,6 +1189,18 @@ int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
 typedef struct {
 	/* Where `owned.json`, `prefixes/` and the reports are. */
 	char                  run_dir[NCFG_OBSERVE_RUN_DIR_MAX];
+	/*
+	 * Where the `file` provider looks, for the one question an observation
+	 * asks the store: whether a WireGuard device is running the key its
+	 * configuration names.
+	 *
+	 * **Empty means the question is not asked.** It is storage rather than a
+	 * pointer for `run_dir`'s reason, and it has no default for
+	 * `ncfg_observe_wireguard_currency`'s: this is where `--config-dir` ends
+	 * up, and a source that invented `/etc/netcfgd/secrets` would read the
+	 * machine's real credentials on a daemon pointed somewhere else.
+	 */
+	char                  secrets_dir[NCFG_OBSERVE_ROOT_MAX];
 	/* `/sys/class/net`, `/proc` and `/sys`. */
 	ncfg_observe_roots_t  roots;
 	/*
@@ -899,6 +1219,29 @@ typedef struct {
 	 * process on the developer's machine, and this one reads.
 	 */
 	ncfg_observe_kernel_t kernel;
+	/*
+	 * The nftables round, which is a socket of a different protocol.
+	 *
+	 * Read the same way as `kernel` and with one difference that is the whole
+	 * of the divergence: an exchange of NULL **here alone** means "do not
+	 * ask". On the machine path both sockets are this module's to open, so a
+	 * source with neither exchange installed asks the kernel both questions;
+	 * a source that has been given a route exchange has been given a machine
+	 * a test made up, and opening a real netfilter socket beside it would be
+	 * the one half of that observation that reached the developer's own
+	 * ruleset.
+	 */
+	ncfg_observe_kernel_t netfilter;
+	/*
+	 * The offloads round, which is a socket of a third protocol.
+	 *
+	 * Read exactly as `netfilter` is, and absent for the same reason: an
+	 * exchange of NULL here means "do not ask", so a source that has been
+	 * given a route exchange -- a machine a test made up -- does not have one
+	 * half of its observation reach the developer's own network card. On the
+	 * machine path all three sockets are this module's to open.
+	 */
+	ncfg_observe_kernel_t genl;
 } ncfg_observe_source_t;
 
 /*
@@ -909,9 +1252,15 @@ typedef struct {
  * `NCFG_RUN_DIR`, then the default. `ncfg_contention_machine` is the same
  * shape for the same reason: one place where `/run`, `/proc` and `/sys` are
  * written down.
+ *
+ * **`secrets_dir` has no such answer and may not acquire one.** NULL leaves
+ * the WireGuard currency question unasked, which is what a caller that does
+ * not know where the store is should get; a default here would be this module
+ * deciding where the machine's credentials live, which is `--config-dir`'s
+ * decision and nobody else's. A name too long to hold is the same as none.
  */
-int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir, char *err,
-    size_t err_size);
+int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir,
+    const char *secrets_dir, char *err, size_t err_size);
 
 /*
  * One observation, through a source.

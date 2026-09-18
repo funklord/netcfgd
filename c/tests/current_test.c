@@ -36,18 +36,29 @@
 #include "ncfg/buf.h"
 #include "ncfg/daemon.h"
 #include "ncfg/document.h"
+#include "ncfg/ethtool.h"
+#include "ncfg/genl.h"
 #include "ncfg/netlink.h"
+#include "ncfg/nft.h"
 #include "ncfg/observed.h"
 #include "ncfg/state.h"
 #include "ncfg/wire.h"
 
 #include "testdir.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+
+/* The kernel headers `nft.h` deliberately does not pull in: this file builds
+ * the bytes an nftables kernel would send. */
+#include <linux/genetlink.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter/nf_tables.h>
+#include <linux/netfilter/nfnetlink.h>
 
 static int failures;
 
@@ -158,6 +169,121 @@ static void append_route(ncfg_buf_t *out, uint32_t index, const char *gateway)
 	append_message(out, RTM_NEWROUTE, &body, &attrs);
 	ncfg_buf_free(&body);
 	ncfg_buf_free(&attrs);
+}
+
+/* ------------------------------------------------------------------------ *
+ * And the bytes an nftables kernel would send
+ * ------------------------------------------------------------------------ */
+
+/* A payload the caller already has, with a header put in front of it. The
+ * rule below is taken out of a transaction nft.c built, so what has to be
+ * appended is bytes rather than a body and its attributes. */
+static void append_payload(ncfg_buf_t *out, uint16_t kind, const void *payload, size_t length)
+{
+	ncfg_buf_t body;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_add(&body, payload, length);
+	append_message(out, kind, &body, NULL);
+	ncfg_buf_free(&body);
+}
+
+static uint16_t nft_type(uint16_t kind)
+{
+	return (uint16_t)(((unsigned)NFNL_SUBSYS_NFTABLES << 8) | (unsigned)kind);
+}
+
+/* nftables integers are big-endian, which is the opposite of every other
+ * integer in this port -- so this is deliberately not `ncfg_wire_attr_put_u32`,
+ * which would agree with a broken decoder. nft_test.c says the same thing
+ * where it builds the same attribute. */
+static void put_be32(ncfg_buf_t *out, uint16_t kind, uint32_t value)
+{
+	uint32_t wire = htonl(value);
+
+	ncfg_wire_attr_put(out, kind, &wire, sizeof(wire));
+}
+
+static void put_nfgenmsg(ncfg_buf_t *out, uint8_t family)
+{
+	uint16_t res_id = 0;
+
+	ncfg_buf_add(out, &family, sizeof(family));
+	ncfg_buf_add_char(out, 0);
+	ncfg_buf_add(out, &res_id, sizeof(res_id));
+}
+
+/*
+ * One masquerade rule, **as nft.c writes one**.
+ *
+ * Built by `ncfg_nft_build_replace_nat` and picked out of the transaction by
+ * asking the reader which message it accepts, rather than by index. A
+ * hand-written rule here would be a second encoder with no tests of its own,
+ * and the day the expressions change it is the fixture that would be believed
+ * -- which is `collect_test.c`'s rule about the traffic-control fixtures,
+ * applied to the one dump whose shape a writer in this tree decides.
+ */
+static void append_uplink_rule(ncfg_buf_t *out, const char *iface)
+{
+	const char          *uplinks[1];
+	ncfg_buf_t           transaction;
+	ncfg_nft_batch_t     batch;
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  message;
+	char                 name[NCFG_NFT_IFNAME_MAX];
+	char                 err[NCFG_ERROR_MAX];
+	int                  found = 0;
+
+	uplinks[0] = iface;
+	ncfg_buf_init(&transaction, 0);
+	if (!ncfg_nft_build_replace_nat(&transaction, 1, 0, uplinks, 1, &batch, err,
+	    sizeof(err))) {
+		out->failed = 1;
+		ncfg_buf_free(&transaction);
+		return;
+	}
+	ncfg_wire_messages_start(&walk, transaction.data, transaction.length);
+	while (ncfg_wire_messages_next(&walk, &message, NULL, 0) == NCFG_WIRE_OK) {
+		if (!ncfg_nft_rule_uplink(message.payload, message.payload_length, name,
+		    sizeof(name), NULL, 0)) {
+			continue;
+		}
+		append_payload(out, nft_type(NFT_MSG_NEWRULE), message.payload,
+		    message.payload_length);
+		found = 1;
+	}
+	if (!found) {
+		out->failed = 1;
+	}
+	ncfg_buf_free(&transaction);
+}
+
+/* One chain, which is a shape no writer in this tree produces -- netcfgd
+ * creates exactly one chain and this fixture is mostly about somebody else's.
+ * `hook` of -1 is a regular chain, which has neither a type nor a hook. */
+static void append_chain(ncfg_buf_t *out, const char *table, const char *name,
+    const char *kind, int hook)
+{
+	ncfg_buf_t payload;
+	ncfg_buf_t attrs;
+	ncfg_buf_t nest;
+
+	ncfg_buf_init(&payload, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_buf_init(&nest, 0);
+	ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, table);
+	ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, name);
+	if (hook >= 0) {
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TYPE, kind);
+		put_be32(&nest, NFTA_HOOK_HOOKNUM, (uint32_t)hook);
+		ncfg_wire_attr_put_nested(&attrs, NFTA_CHAIN_HOOK, &nest);
+	}
+	put_nfgenmsg(&payload, NFPROTO_INET);
+	ncfg_buf_add(&payload, attrs.data, attrs.length);
+	append_payload(out, nft_type(NFT_MSG_NEWCHAIN), payload.data, payload.length);
+	ncfg_buf_free(&nest);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&payload);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -338,13 +464,17 @@ static void put(const char *path, const char *contents)
  */
 static void write_the_record(void)
 {
-	ncfg_owned_state_t  owned;
-	ncfg_owned_object_t address;
-	char               *created[1];
-	char                err[NCFG_ERROR_MAX];
+	ncfg_owned_state_t      owned;
+	ncfg_owned_object_t     address;
+	ncfg_observed_backend_t backend;
+	ncfg_applied_dns_t      scope;
+	char                   *created[1];
+	char                    err[NCFG_ERROR_MAX];
 
 	memset(&owned, 0, sizeof(owned));
 	memset(&address, 0, sizeof(address));
+	memset(&backend, 0, sizeof(backend));
+	memset(&scope, 0, sizeof(scope));
 	created[0] = (char *)"br0";
 	address.interface = (char *)"eth0";
 	address.key = (char *)"192.0.2.10/24";
@@ -353,6 +483,21 @@ static void write_the_record(void)
 	owned.created_link_count = 1u;
 	owned.addresses = &address;
 	owned.address_count = 1u;
+	/*
+	 * The two lists the record grew, and they are here because this is the
+	 * seam they travel through: `read_record` hands them to the prior and
+	 * `build` hands them to the observation. Neither was in the record at all
+	 * for several waves, so `observed.backends` and `observed.dns` were empty
+	 * on every machine and six observation passes had nothing to walk.
+	 */
+	backend.kind = (int)NCFG_BACKEND_DHCP4;
+	backend.interface = (char *)"eth0";
+	backend.running = 1;
+	owned.backends = &backend;
+	owned.backend_count = 1u;
+	scope.scope = (char *)"eth0";
+	owned.dns = &scope;
+	owned.dns_count = 1u;
 	if (!ncfg_owned_note_hook_state(&owned, "eth0", NCFG_HOOK_PHASE_POST_UP, "ran")) {
 		printf("current_test: could not note a hook state\n");
 		exit(1);
@@ -361,12 +506,16 @@ static void write_the_record(void)
 		printf("current_test: could not write the record: %s\n", err);
 		exit(1);
 	}
-	/* Only the hook state was allocated here; the other three are this
+	/* Only the hook state was allocated here; the other five are this
 	 * function's own storage and the record must not be asked to free them. */
 	owned.created_links = NULL;
 	owned.created_link_count = 0;
 	owned.addresses = NULL;
 	owned.address_count = 0;
+	owned.backends = NULL;
+	owned.backend_count = 0;
+	owned.dns = NULL;
+	owned.dns_count = 0;
 	ncfg_owned_free(&owned);
 }
 
@@ -464,7 +613,7 @@ static void the_whole_of_an_observation(void)
 	queue_machine(&script, &machine);
 	kernel_of(&kernel, &replay, &script);
 
-	if (!check(ncfg_observe_current_from(&kernel, run_dir, &roots, NULL, &observed, err,
+	if (!check(ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, &roots, NULL, NULL, &observed, err,
 	    sizeof(err)), "the kernel, the record and the files become one observation") ||
 	    !observed) {
 		detail("it said", err);
@@ -498,6 +647,12 @@ static void the_whole_of_an_observation(void)
 	}
 	check(observed->hook_state_count == 1u,
 	    "build: the hook state the record carried was handed over");
+	check(observed->backend_count == 1u && observed->backends[0].interface &&
+	    strcmp(observed->backends[0].interface, "eth0") == 0,
+	    "and the backend, which is the list six observation passes walk");
+	check(observed->dns_count == 1u && observed->dns[0].scope &&
+	    strcmp(observed->dns[0].scope, "eth0") == 0,
+	    "and the delivered dns scope, which is what stops a re-delivery every pass");
 	check(observed->delegation_count == 1u,
 	    "and the delegated prefix, which is in no dump and in no owned.json");
 	check(observed->report_count == 1u, "and what a helper reported about wan0");
@@ -551,13 +706,13 @@ static void the_document_is_wanted_and_not_required(void)
 	memset(&script, 0, sizeof(script));
 	queue_machine(&script, &machine);
 	kernel_of(&kernel, &replay, &script);
-	check(ncfg_observe_current_from(&kernel, run_dir, &roots, document, &with, err,
+	check(ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, &roots, NULL, document, &with, err,
 	    sizeof(err)), "an observation taken against a document");
 
 	memset(&script, 0, sizeof(script));
 	queue_machine(&script, &machine);
 	kernel_of(&kernel, &replay, &script);
-	check(ncfg_observe_current_from(&kernel, run_dir, &roots, NULL, &without, err,
+	check(ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, &roots, NULL, NULL, &without, err,
 	    sizeof(err)), "and one taken with no document at all");
 
 	/*
@@ -603,7 +758,7 @@ static void a_round_that_goes_wrong(void)
 	kernel_of(&kernel, &replay, &script);
 
 	err[0] = '\0';
-	check(!ncfg_observe_current_from(&kernel, run_dir, &roots, NULL, &observed, err,
+	check(!ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, &roots, NULL, NULL, &observed, err,
 	    sizeof(err)), "a dump that fails fails the observation");
 	check(observed == NULL, "and nothing is left in the caller's pointer");
 	check(err[0] != '\0', "and it says what went wrong");
@@ -623,17 +778,17 @@ static void the_arguments_that_are_refused(void)
 
 	memset(&script, 0, sizeof(script));
 	kernel_of(&kernel, &replay, &script);
-	check(!ncfg_observe_current_from(&kernel, run_dir, &roots, NULL, NULL, NULL, 0),
+	check(!ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, &roots, NULL, NULL, NULL, NULL, 0),
 	    "an observation with nowhere to put it is refused");
-	check(!ncfg_observe_current_from(NULL, run_dir, &roots, NULL, &observed, NULL, 0),
+	check(!ncfg_observe_current_from(NULL, NULL, NULL, run_dir, &roots, NULL, NULL, &observed, NULL, 0),
 	    "and one with no round of dumps");
-	check(!ncfg_observe_current_from(&kernel, NULL, &roots, NULL, &observed, NULL, 0),
+	check(!ncfg_observe_current_from(&kernel, NULL, NULL, NULL, &roots, NULL, NULL, &observed, NULL, 0),
 	    "and one with no run directory to read the record out of");
-	check(!ncfg_observe_current_from(&kernel, run_dir, NULL, NULL, &observed, NULL, 0),
+	check(!ncfg_observe_current_from(&kernel, NULL, NULL, run_dir, NULL, NULL, NULL, &observed, NULL, 0),
 	    "and one with no roots to read under");
-	check(!ncfg_observe_current(run_dir, &roots, NULL, NULL, NULL, 0),
+	check(!ncfg_observe_current(run_dir, &roots, NULL, NULL, NULL, NULL, 0),
 	    "the socket form refuses the same way");
-	check(!ncfg_observe_source_machine(NULL, run_dir, NULL, 0),
+	check(!ncfg_observe_source_machine(NULL, run_dir, NULL, NULL, 0),
 	    "and a source with nowhere to put it");
 	check(!ncfg_observe_source_observe(NULL, NULL, &observed, NULL, 0),
 	    "an observer installed with no source is refused");
@@ -735,7 +890,7 @@ static void a_source_pointed_at_this_machine(void)
 		check(0, "the fixture roots can be put in the environment");
 		return;
 	}
-	check(ncfg_observe_source_machine(&source, run_dir, err, sizeof(err)),
+	check(ncfg_observe_source_machine(&source, run_dir, NULL, err, sizeof(err)),
 	    "a source is resolved for this machine");
 	check(strcmp(source.run_dir, run_dir) == 0,
 	    "the run directory it was handed is the one it holds");
@@ -746,7 +901,7 @@ static void a_source_pointed_at_this_machine(void)
 
 	/* And with nothing named, the default -- asserted by reading the constant
 	 * rather than by letting anything go near it. */
-	check(ncfg_observe_source_machine(&source, NULL, err, sizeof(err)) &&
+	check(ncfg_observe_source_machine(&source, NULL, NULL, err, sizeof(err)) &&
 	    strcmp(source.run_dir, NCFG_RUN_DIR_DEFAULT) == 0,
 	    "and with no run directory named, state.h's default");
 	(void)unsetenv(NCFG_OBSERVE_PROC_ROOT_ENV);
@@ -774,7 +929,7 @@ static void the_live_check(void)
 		check(1, "the live observation is skipped; set NCFG_OBSERVE_LIVE=1 to run it");
 		return;
 	}
-	if (!check(ncfg_observe_source_machine(&source, NULL, err, sizeof(err)),
+	if (!check(ncfg_observe_source_machine(&source, NULL, NULL, err, sizeof(err)),
 	    "a source for this machine")) {
 		return;
 	}
@@ -793,11 +948,431 @@ static void the_live_check(void)
 	ncfg_observed_free(observed);
 }
 
+/* ------------------------------------------------------------------------ *
+ * The nftables round
+ * ------------------------------------------------------------------------ */
+
+/* A queue of nftables answers, and the seam over it. Two questions are asked
+ * in a fixed order -- the rules first, then the chains -- so what is queued
+ * first is what the uplinks are read from. */
+typedef struct {
+	script_t              script;
+	ncfg_observe_replay_t replay;
+	ncfg_observe_kernel_t kernel;
+	ncfg_buf_t            rules;
+	ncfg_buf_t            chains;
+} nft_t;
+
+static void nft_init(nft_t *nft)
+{
+	memset(nft, 0, sizeof(*nft));
+	ncfg_buf_init(&nft->rules, 0);
+	ncfg_buf_init(&nft->chains, 0);
+}
+
+static void nft_ready(nft_t *nft)
+{
+	queue(&nft->script, &nft->rules);
+	queue(&nft->script, &nft->chains);
+	kernel_of(&nft->kernel, &nft->replay, &nft->script);
+}
+
+static void nft_free(nft_t *nft)
+{
+	ncfg_buf_free(&nft->rules);
+	ncfg_buf_free(&nft->chains);
+}
+
+/* What the observation says about NAT, given one machine and one ruleset. */
+static ncfg_observed_t *observed_with(script_t *script, const machine_t *machine, nft_t *nft,
+    const char *what)
+{
+	ncfg_observe_replay_t replay;
+	ncfg_observe_kernel_t kernel;
+	ncfg_observe_roots_t  roots = fixture_roots();
+	ncfg_observed_t      *observed = NULL;
+	char                  err[NCFG_ERROR_MAX];
+
+	memset(script, 0, sizeof(*script));
+	queue_machine(script, machine);
+	kernel_of(&kernel, &replay, script);
+	err[0] = '\0';
+	if (!check(ncfg_observe_current_from(&kernel, nft ? &nft->kernel : NULL, NULL, run_dir, &roots, NULL,
+	    NULL, &observed, err, sizeof(err)), what)) {
+		detail("it said", err);
+		return NULL;
+	}
+	return observed;
+}
+
+static int names_are(char *const *names, size_t count, const char *joined)
+{
+	char written[256];
+	size_t at;
+	size_t length = 0;
+
+	written[0] = '\0';
+	for (at = 0; at < count && length < sizeof(written); at++) {
+		length += (size_t)snprintf(written + length, sizeof(written) - length, "%s%s",
+		    length ? " " : "", names[at] ? names[at] : "(null)");
+	}
+	return strcmp(written, joined) == 0;
+}
+
+/*
+ * The uplinks netcfgd's table masquerades, and the tables that fight it.
+ *
+ * **Sorted and deduplicated is the assertion rather than a tidiness.** The
+ * planner sorts the document's uplinks and compares the two lists in order, so
+ * an observation in the kernel's order would differ from a machine that is
+ * already right -- and `nat.replace` would be planned on every pass for ever,
+ * which is exactly what an empty list did before this pass existed.
+ */
+static void the_nat_the_kernel_holds(void)
+{
+	machine_t        machine;
+	script_t         script;
+	nft_t            nft;
+	ncfg_observed_t *observed;
+
+	machine_init(&machine);
+	nft_init(&nft);
+	/* Out of order and with a repeat, which is what a kernel is free to
+	 * send: a rule is identified by a handle and nothing sorts them. */
+	append_uplink_rule(&nft.rules, "wan1");
+	append_uplink_rule(&nft.rules, "wan0");
+	append_uplink_rule(&nft.rules, "wan0");
+	append_done(&nft.rules);
+	append_chain(&nft.chains, "fw4", "srcnat", "nat", NF_INET_POST_ROUTING);
+	append_chain(&nft.chains, NCFG_NFT_TABLE, NCFG_NFT_CHAIN, "nat", NF_INET_POST_ROUTING);
+	append_chain(&nft.chains, "fw4", "srcnat_lan", "nat", NF_INET_POST_ROUTING);
+	append_chain(&nft.chains, "dockerish", "prerouting", "nat", NF_INET_PRE_ROUTING);
+	append_chain(&nft.chains, "fw4", "helper", "nat", -1);
+	append_done(&nft.chains);
+	nft_ready(&nft);
+
+	observed = observed_with(&script, &machine, &nft, "the nftables round joins the round of dumps");
+	if (observed) {
+		check(observed->nat_count == 2u &&
+		    names_are(observed->nat, observed->nat_count, "wan0 wan1"),
+		    "the uplinks netcfgd masquerades are read back, sorted and deduplicated");
+		check(observed->nat_conflict_count == 1u &&
+		    names_are(observed->nat_conflicts, observed->nat_conflict_count, "fw4"),
+		    "one conflicting table is named once however many chains it has");
+	}
+	ncfg_observed_free(observed);
+	nft_free(&nft);
+	machine_free(&machine);
+}
+
+/*
+ * The three ways a chain is not a conflict, each of which would be a warning
+ * an operator cannot act on.
+ *
+ * netcfgd's own chain is the one that would be reported on every machine
+ * netcfgd manages; a `nat` chain at prerouting is destination NAT and
+ * translates nothing on the way out; a regular chain has no hook at all. They
+ * are asserted together because a check that only had the first would pass
+ * with the hook comparison inverted.
+ */
+static void the_chains_that_are_not_a_conflict(void)
+{
+	machine_t        machine;
+	script_t         script;
+	nft_t            nft;
+	ncfg_observed_t *observed;
+
+	machine_init(&machine);
+	nft_init(&nft);
+	append_done(&nft.rules);
+	append_chain(&nft.chains, NCFG_NFT_TABLE, NCFG_NFT_CHAIN, "nat", NF_INET_POST_ROUTING);
+	append_chain(&nft.chains, "fw4", "mangle", "filter", NF_INET_POST_ROUTING);
+	append_chain(&nft.chains, "fw4", "dstnat", "nat", NF_INET_PRE_ROUTING);
+	append_chain(&nft.chains, "fw4", "helper", "nat", -1);
+	append_done(&nft.chains);
+	nft_ready(&nft);
+
+	observed = observed_with(&script, &machine, &nft,
+	    "a machine whose only source NAT is netcfgd's own");
+	if (observed) {
+		check(observed->nat_conflict_count == 0u,
+		    "netcfgd's own chain, a filter chain, a prerouting one and a regular one "
+		    "are no conflict");
+		check(observed->nat_count == 0u,
+		    "and a table with no rules in it masquerades nothing");
+	}
+	ncfg_observed_free(observed);
+	nft_free(&nft);
+	machine_free(&machine);
+}
+
+/*
+ * A kernel that will not answer is not a failure, and neither is a seam that
+ * was never installed.
+ *
+ * No `nf_tables`, a netlink this process may not ask and a machine where
+ * netcfgd never installed a table are one answer to a planner -- no NAT is
+ * installed -- which is what `observed.h` says where the field is declared. An
+ * observation refused over it would be a `ncfg status` that fails on a kernel
+ * built without a feature nobody asked for.
+ */
+static void a_kernel_that_will_not_answer(void)
+{
+	machine_t        machine;
+	script_t         script;
+	nft_t            nft;
+	ncfg_observed_t *observed;
+
+	machine_init(&machine);
+	nft_init(&nft);
+	memset(&nft.script, 0, sizeof(nft.script));
+	queue_failure(&nft.script, EPERM);
+	queue_failure(&nft.script, EPERM);
+	kernel_of(&nft.kernel, &nft.replay, &nft.script);
+
+	observed = observed_with(&script, &machine, &nft,
+	    "a netfilter socket that refuses does not fail the observation");
+	if (observed) {
+		check(observed->nat_count == 0u && observed->nat_conflict_count == 0u,
+		    "and reports no NAT installed and no conflicting table");
+		check(observed->link_count == 2u,
+		    "while the rest of the machine is observed as usual");
+	}
+	ncfg_observed_free(observed);
+
+	observed = observed_with(&script, &machine, NULL,
+	    "and a caller that installed no netfilter seam at all");
+	if (observed) {
+		check(observed->nat_count == 0u && observed->nat_conflict_count == 0u,
+		    "asks nothing and says so with two empty lists");
+	}
+	ncfg_observed_free(observed);
+	nft_free(&nft);
+	machine_free(&machine);
+}
+
+/*
+ * A payload that will not read is skipped, and an answer past the ceiling is
+ * refused.
+ *
+ * The two halves are the same distinction `collect.c` draws and are drawn
+ * differently here on purpose: a rule netcfgd did not write is an ordinary
+ * answer to a dump the kernel was asked to filter and is counted, while a
+ * chain holding more masquerade rules than an observation carries is input to
+ * a planner and is refused with a sentence. A truncated list would plan a
+ * machine back to a state nobody asked for.
+ */
+static void a_payload_that_will_not_read_and_an_answer_too_large(void)
+{
+	machine_t             machine;
+	script_t              script;
+	nft_t                 nft;
+	ncfg_observe_replay_t replay;
+	ncfg_observe_kernel_t kernel;
+	ncfg_observe_roots_t  roots = fixture_roots();
+	ncfg_observed_t      *observed = NULL;
+	char                  err[NCFG_ERROR_MAX];
+
+	machine_init(&machine);
+	nft_init(&nft);
+	/* A chain record where a rule was asked for: the reader refuses it,
+	 * because a rule netcfgd did not write is not netcfgd's to describe. */
+	append_chain(&nft.rules, "fw4", "srcnat", "nat", NF_INET_POST_ROUTING);
+	append_uplink_rule(&nft.rules, "wan0");
+	append_done(&nft.rules);
+	append_done(&nft.chains);
+	nft_ready(&nft);
+
+	observed = observed_with(&script, &machine, &nft,
+	    "a dump carrying a payload that is not a masquerade rule");
+	if (observed) {
+		check(observed->nat_count == 1u &&
+		    names_are(observed->nat, observed->nat_count, "wan0"),
+		    "the rule that reads is kept and the one that does not is skipped");
+	}
+	ncfg_observed_free(observed);
+	observed = NULL;
+	nft_free(&nft);
+
+	/* And the ceiling, which is a field so that a test can reach it: the
+	 * kernel will not produce an oversized answer on demand. */
+	nft_init(&nft);
+	append_uplink_rule(&nft.rules, "wan0");
+	append_uplink_rule(&nft.rules, "wan1");
+	append_done(&nft.rules);
+	append_done(&nft.chains);
+	nft_ready(&nft);
+	nft.kernel.records_max = 1u;
+
+	memset(&script, 0, sizeof(script));
+	queue_machine(&script, &machine);
+	kernel_of(&kernel, &replay, &script);
+	err[0] = '\0';
+	check(!ncfg_observe_current_from(&kernel, &nft.kernel, NULL, run_dir, &roots, NULL, NULL, &observed,
+	    err, sizeof(err)), "more masquerade rules than an observation holds is refused");
+	check(observed == NULL, "and nothing is left in the caller's pointer");
+	check(strstr(err, "1") != NULL, "and the refusal names the number");
+	nft_free(&nft);
+	machine_free(&machine);
+}
+
+/* ------------------------------------------------------------------------ *
+ * The offloads round
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The third seam, checked here for the reason the second one is: what
+ * `observe_offloads_test.c` cannot see is whether the pass is *called*.
+ *
+ * It drives `ncfg_observe_offloads_from` directly, so deleting the one line in
+ * `ncfg_observe_current_from` that reaches it would leave every one of its
+ * cases green and every machine reporting no offload on anything -- which is
+ * exactly the state this wave found. That line is what this asserts, and it is
+ * the one property that belongs in this file rather than that one.
+ */
+
+/* Any runtime id but zero, which `ncfg_genl_build_request` refuses. */
+#define ETHTOOL_FAMILY_ID 23u
+
+/* The first kernel feature name of one offload field, from the model's table
+ * rather than spelled again here. */
+static const char *offload_name(int field)
+{
+	size_t             count = 0;
+	const char *const *names = ncfg_offload_field_names(field, &count);
+
+	return (names && count > 0) ? names[0] : "";
+}
+
+/* What the controller answers a `GETFAMILY` for `ethtool` with. */
+static void append_ethtool_family(ncfg_buf_t *out)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	uint16_t           id = ETHTOOL_FAMILY_ID;
+
+	header.cmd = CTRL_CMD_NEWFAMILY;
+	header.version = 2;
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put(&attrs, CTRL_ATTR_FAMILY_ID, &id, sizeof(id));
+	ncfg_wire_attr_put_str(&attrs, CTRL_ATTR_FAMILY_NAME, NCFG_ETHTOOL_FAMILY);
+	append_message(out, GENL_ID_CTRL, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/* One `FEATURES_GET` reply naming one active feature, or none. The bitset
+ * carries `NOMASK` because `ACTIVE` is a list; `ethtool.h` says what reading
+ * the other form as one would mean. */
+static void append_active(ncfg_buf_t *out, const char *device, const char *feature)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	ncfg_buf_t         nest;
+	ncfg_buf_t         bitset;
+	ncfg_buf_t         bits;
+
+	header.cmd = ETHTOOL_MSG_FEATURES_GET_REPLY;
+	header.version = 1;
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_buf_init(&nest, 0);
+	ncfg_buf_init(&bits, 0);
+	ncfg_buf_init(&bitset, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_str(&nest, ETHTOOL_A_HEADER_DEV_NAME, device);
+	ncfg_wire_attr_put_nested(&attrs, ETHTOOL_A_FEATURES_HEADER, &nest);
+	if (feature) {
+		ncfg_buf_t bit;
+
+		ncfg_buf_init(&bit, 0);
+		ncfg_wire_attr_put_str(&bit, ETHTOOL_A_BITSET_BIT_NAME, feature);
+		ncfg_wire_attr_put_nested(&bits, ETHTOOL_A_BITSET_BITS_BIT, &bit);
+		ncfg_buf_free(&bit);
+	}
+	ncfg_wire_attr_put(&bitset, ETHTOOL_A_BITSET_NOMASK, NULL, 0);
+	ncfg_wire_attr_put_nested(&bitset, ETHTOOL_A_BITSET_BITS, &bits);
+	ncfg_wire_attr_put_nested(&attrs, ETHTOOL_A_FEATURES_ACTIVE, &bitset);
+	append_message(out, ETHTOOL_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&nest);
+	ncfg_buf_free(&bits);
+	ncfg_buf_free(&bitset);
+}
+
+static void the_offloads_the_kernel_reports(void)
+{
+	machine_t                   machine;
+	script_t                    script;
+	script_t                    asked;
+	ncfg_observe_replay_t       replay;
+	ncfg_observe_replay_t       genl_replay;
+	ncfg_observe_kernel_t       kernel;
+	ncfg_observe_kernel_t       genl;
+	ncfg_observe_roots_t        roots = fixture_roots();
+	ncfg_buf_t                  family;
+	ncfg_buf_t                  first;
+	ncfg_buf_t                  second;
+	ncfg_observed_t            *observed = NULL;
+	const ncfg_observed_link_t *link;
+	char                        err[NCFG_ERROR_MAX];
+
+	machine_init(&machine);
+	ncfg_buf_init(&family, 0);
+	ncfg_buf_init(&first, 0);
+	ncfg_buf_init(&second, 0);
+	append_ethtool_family(&family);
+	/* One request per interface, in the order the observation holds them --
+	 * **sorted by name**, which is `br0` and then `eth0` rather than the order
+	 * the link dump was written in. The first answer carries no active
+	 * feature, which is what keeps this a check about which answer reached
+	 * which link rather than about whether any answer arrived at all. */
+	append_active(&first, "br0", NULL);
+	append_active(&second, "eth0", offload_name(NCFG_OFFLOAD_GRO));
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &first);
+	queue(&asked, &second);
+	kernel_of(&genl, &genl_replay, &asked);
+
+	memset(&script, 0, sizeof(script));
+	queue_machine(&script, &machine);
+	kernel_of(&kernel, &replay, &script);
+	err[0] = '\0';
+	if (!check(ncfg_observe_current_from(&kernel, NULL, &genl, run_dir, &roots, NULL, NULL,
+	    &observed, err, sizeof(err)),
+	    "the offloads round joins the round of dumps")) {
+		detail("it said", err);
+	}
+	link = observed ? ncfg_observed_link(observed, "eth0") : NULL;
+	check(link && link->offload_count == 1u && link->offloads[0] &&
+	    strcmp(link->offloads[0], offload_name(NCFG_OFFLOAD_GRO)) == 0,
+	    "and a composed observation carries what ethtool said about each link");
+	link = observed ? ncfg_observed_link(observed, "br0") : NULL;
+	check(link && link->offload_count == 0u,
+	    "the interface whose answer named nothing carries nothing");
+	ncfg_observed_free(observed);
+	ncfg_buf_free(&family);
+	ncfg_buf_free(&first);
+	ncfg_buf_free(&second);
+	machine_free(&machine);
+}
+
 int main(void)
 {
 	make_fixture();
 
 	the_whole_of_an_observation();
+	the_nat_the_kernel_holds();
+	the_offloads_the_kernel_reports();
+	the_chains_that_are_not_a_conflict();
+	a_kernel_that_will_not_answer();
+	a_payload_that_will_not_read_and_an_answer_too_large();
 	the_document_is_wanted_and_not_required();
 	a_round_that_goes_wrong();
 	the_arguments_that_are_refused();
