@@ -82,17 +82,12 @@ int ncfg_plan_names(const char *const *list, size_t count, const char *name)
 	return 0;
 }
 
+/* `document.h`'s, because the DNS scope rule and the daemon ask the same
+ * question and a scan spelled once per asker is three NULL handlings. Kept as a
+ * name here so the planner's callers read as the planner's. */
 const ncfg_device_t *ncfg_plan_device(const ncfg_document_t *desired, const char *name)
 {
-	size_t i;
-
-	for (i = 0; i < desired->device_count; i++) {
-		if (desired->devices[i].name && name &&
-		    strcmp(desired->devices[i].name, name) == 0) {
-			return &desired->devices[i];
-		}
-	}
-	return NULL;
+	return ncfg_document_device(desired, name);
 }
 
 const ncfg_interface_t *ncfg_plan_interface(const ncfg_document_t *desired, const char *name)

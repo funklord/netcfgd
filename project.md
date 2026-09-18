@@ -9515,6 +9515,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.188 The DNS scope rule leaves the planner, on its own terms
+
+`plan/host_wide.c` carried the rule that says which scopes a machine has, and
+its header carried the condition for moving it: *"This port has one caller for
+it so far ... It belongs beside `ncfg_dns_flatten` in `dns.h`, and the second
+caller takes this one rather than writing a third."* The daemon is the second
+caller -- `ncfg_service_t::dns_scopes` is the same list, and the executor needs
+it because a delivery writes the resolver file whole. So the rule moved to
+`ncfg_dns_scopes_of` in `src/backend/dns/scopes.c` and the planner asks it.
+
+**This is the Rust's recorded defect and the reason the condition was written
+down at all.** The planner learned that a lease contributes nameservers (0006
+rule 4) and the executor went on building its list from the document alone, so
+the plan said `dns.apply` and the delivery wrote a `resolv.conf` with nothing
+in it. `dns_scopes_test.c` now has the check that makes the trap concrete
+rather than remembered: a document whose host scope is converged and whose
+`eth0` scope is not produces **one** `dns.apply` and **two** scopes, so an
+executor reading the op it was handed drops one of them.
+
+**The move cost an arena.** The old rule interned its merged policies into the
+plan, because the plan was where its one caller kept everything; a rule with
+two callers cannot borrow one caller's arena. `ncfg_dns_scopes_t` owns its own
+-- a list of blocks and one loop, which is `ncfg_plan_t`'s arrangement -- and
+borrows the document where nothing had to be merged, which is the sentence
+`dns.h` now makes and `dns_scopes_test.c` checks **by pointer**, because a copy
+and a borrow are indistinguishable by value.
+
+That in turn needed `ncfg_plan_adopt`. A `dns.apply` op borrows the policy, so
+the scope list has to outlive the plan; the arena frees flat blocks with `free`
+and an aggregate holding its own arena cannot go in it. The plan takes the
+whole object with its release instead, at the top of `ncfg_plan_dns` rather
+than the bottom -- every early return below would otherwise have to remember
+it, which is the shape of leak this file has had before.
+
+**What stayed in the planner is what is about plans**: whether a delivery is
+worth making, which scopes have departed, the warning that says why nothing is
+written. The daemon asks the same question without inheriting an opinion.
+
+**A check that passed for the wrong reason, caught by sabotage.** The first
+draft of "a scope borrows where it did not have to merge" asserted it of the
+`globals` scope -- which is pushed straight from the document and never reaches
+the merging branch at all. Removing that branch entirely left the check green.
+It is two interfaces and a lease on one of them now, and the sabotage goes red.
+The three sabotages that proved the move behaviour-preserving were each caught
+by the *existing* cases in `plan_addressing_test.c`: the unmanaged-device skip,
+the canonical spelling of a reported server, and the host's mode filling in a
+scope that states none.
+
+`ncfg_document_device` came out of the same change. "Is this device managed" is
+asked by the planner, by the scope rule and by the daemon, and a scan spelled
+once per asker is three NULL handlings; `ncfg_plan_device` is a call to it now.
+
+**One Rust test is flaky and is recorded rather than fixed**, which is this
+branch's standing rule:
+`netcfgd-daemon`'s `probe::tests::require_lease_false_runs_the_probe_with_no_lease_at_all`
+failed once inside a full `make check` and passed alone and on the next full
+run, against a tree with no Rust change in it. Order- or parallelism-dependent,
+in code being deprecated.
+
 ## 10.187 What the port is waiting for, in one place
 
 Written because this document has had six sentences corrected this week for

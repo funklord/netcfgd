@@ -59,6 +59,40 @@ static void *keep(ncfg_plan_t *plan, void *block)
 	return block;
 }
 
+int ncfg_plan_adopt(ncfg_plan_t *plan, void *owned, void (*release)(void *owned))
+{
+	ncfg_plan_adopted_t *grown;
+	size_t               wanted;
+
+	if (!plan || !owned || !release) {
+		/* Nothing to record, and nothing that could be released either: a
+		 * caller with no release has handed over something this cannot free,
+		 * which is the one case where refusing without freeing is right. */
+		if (plan) {
+			plan->failed = 1;
+		}
+		return 0;
+	}
+	if (plan->adopted_count == plan->adopted_capacity) {
+		wanted = plan->adopted_capacity ? plan->adopted_capacity * 2u : 4u;
+		grown = realloc(plan->adopted, wanted * sizeof(*grown));
+		if (!grown) {
+			/* The caller stopped owning it at the call, so this owns it now
+			 * and there is nowhere to put it. Freeing here is what keeps that
+			 * one sentence true on both paths. */
+			release(owned);
+			plan->failed = 1;
+			return 0;
+		}
+		plan->adopted = grown;
+		plan->adopted_capacity = wanted;
+	}
+	plan->adopted[plan->adopted_count].owned = owned;
+	plan->adopted[plan->adopted_count].release = release;
+	plan->adopted_count++;
+	return 1;
+}
+
 /*
  * Room for one more element of `*array`, which the plan owns.
  *
@@ -447,6 +481,16 @@ void ncfg_plan_free(ncfg_plan_t *plan)
 	if (!plan) {
 		return;
 	}
+	/*
+	 * The adopted before the arena, and in reverse: an aggregate's release
+	 * walks its own memory, and the arena holds nothing it points at -- but
+	 * the order costs nothing and the other one is the order in which a
+	 * dependency between two adopted things would go wrong silently.
+	 */
+	for (i = plan->adopted_count; i-- > 0;) {
+		plan->adopted[i].release(plan->adopted[i].owned);
+	}
+	free(plan->adopted);
 	for (i = 0; i < plan->owned_count; i++) {
 		free(plan->owned[i]);
 	}

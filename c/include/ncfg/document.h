@@ -1601,6 +1601,21 @@ ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, 
 void ncfg_document_free(ncfg_document_t *document);
 
 /*
+ * The device block of that name, or NULL where the document has none.
+ *
+ * A linear scan, and here rather than in whichever module wanted it first:
+ * "is this device managed" is asked by the planner, by the DNS scope rule and
+ * by the daemon, and a lookup spelled once per asker is three places to get
+ * the NULL handling wrong. The document's own lists are this header's to walk.
+ *
+ * **A device and an interface of one name are two blocks**, and a document may
+ * have either without the other. An interface with no device block is the
+ * ordinary case and it is managed, so a NULL answer here must not be read as
+ * "unmanaged" -- every caller asks `device && !device->managed`.
+ */
+const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const char *name);
+
+/*
  * Put every list in its declared order.
  *
  * Sorting is by the key the schema names -- interfaces by name, networks by
