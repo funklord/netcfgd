@@ -71,7 +71,12 @@ typedef enum {
 typedef struct {
 	ncfg_json_type_t type;
 	/* Members of an object carry the key they were reached by; elements of an
-	 * array and the root do not. Both point into the document's text. */
+	 * array and the root do not, and say so with `key_offset` set to
+	 * `NCFG_JSON_NONE`. **Not a zero offset**: the parser packs the strings it
+	 * keeps from the front of its buffer, so the first key in the document
+	 * sits at zero -- and not a zero length either, since `{"":1}` is a member
+	 * reached by an empty name. `ncfg_json_key` answers this question without
+	 * the caller having to know any of it. */
 	uint32_t key_offset;
 	uint32_t key_length;
 	/* Strings: the unescaped bytes. Numbers: the text as it arrived, converted
@@ -128,6 +133,25 @@ uint32_t ncfg_json_count(const ncfg_json_doc_t *doc, uint32_t index);
  * Returns NULL for anything that is not a string.
  */
 const char *ncfg_json_string(const ncfg_json_doc_t *doc, uint32_t index, size_t *length_out);
+
+/*
+ * The name a member was reached by, counted rather than terminated.
+ *
+ * **The one question this reader could not answer.** A node carries
+ * `key_offset` and `key_length` and the header above says both index the
+ * document's text -- and nothing handed that text out, so a caller refusing an
+ * unknown member could not say which member it refused. Two independent
+ * modules of the C port hit it within a day of each other and each worked
+ * around it by deriving the base of the text from a member whose value is a
+ * string, then proving the derivation against a key whose spelling was already
+ * certain. Both were careful and neither should have had to be.
+ *
+ * NULL for an element of an array or for the root, which are reached by
+ * position and have no name. The bytes live as long as the document and are
+ * not NUL-terminated: like every string here, they sit end to end in one
+ * buffer, so a `strlen` on them runs into the next member.
+ */
+const char *ncfg_json_key(const ncfg_json_doc_t *doc, uint32_t index, size_t *length_out);
 
 /*
  * A string compared against a C string. The comparison every caller wants and

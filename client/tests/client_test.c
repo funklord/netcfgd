@@ -358,6 +358,63 @@ static void fake_daemon(int fd)
  *   The daemon answers the first request with a refusal, which is netcfgd
  *   talking and leaves the connection good. Then it goes away, which is not.
  */
+/*
+ * A member's name, back out of the reader.
+ *
+ * WHY THIS EXISTS
+ *   The node has carried `key_offset` and `key_length` since the reader was
+ *   written and nothing handed the text out, so a caller refusing a member it
+ *   did not know could not say which one. Two modules of the C port hit it
+ *   within a day and each derived the base of the text by arithmetic on a
+ *   member whose value was a string, then proved the derivation before
+ *   trusting it. Careful, and neither should have had to be.
+ */
+static void a_member_can_be_asked_its_own_name(void)
+{
+	static const char line[] = "{\"response\":\"ok\",\"\":1,\"list\":[7,8]}";
+	char err[NCFG_ERROR_MAX];
+	ncfg_json_doc_t *doc = ncfg_json_parse(line, strlen(line), err, sizeof(err));
+	uint32_t root;
+	uint32_t member;
+	size_t length = 0;
+	const char *name;
+
+	if (!doc) {
+		ok("a document with an empty key parses", 0, err);
+		return;
+	}
+	ok("a document with an empty key parses", 1, NULL);
+	root = ncfg_json_root(doc);
+
+	member = ncfg_json_member(doc, root, "response");
+	name = ncfg_json_key(doc, member, &length);
+	ok("a member knows the name it was reached by",
+	   name && length == 8u && memcmp(name, "response", 8u) == 0, NULL);
+
+	/* **The empty key is why this is not a length test.** `{"":1}` is valid
+	 * JSON, its member is reached by "", and a reader that told "no key" from
+	 * "empty key" by the length would call that member nameless. */
+	member = ncfg_json_member(doc, root, "");
+	name = ncfg_json_key(doc, member, &length);
+	ok("and an empty name is a name rather than an absence",
+	   name != NULL && length == 0u, NULL);
+
+	/* Reached by position, so there is nothing to give back. */
+	member = ncfg_json_at(doc, ncfg_json_member(doc, root, "list"), 1u);
+	length = 99u;
+	name = ncfg_json_key(doc, member, &length);
+	ok("an element of an array has no name", name == NULL && length == 0u, NULL);
+	ok("and neither has the root", ncfg_json_key(doc, root, NULL) == NULL, NULL);
+
+	/* The bytes are counted, not terminated: they sit end to end with every
+	 * other string in one buffer, so a `strlen` here runs into the next one. */
+	name = ncfg_json_key(doc, ncfg_json_member(doc, root, "list"), &length);
+	ok("a name is counted rather than terminated",
+	   name && length == 4u && memcmp(name, "list", 4u) == 0 && name[4] != '\0', NULL);
+
+	ncfg_json_free(doc);
+}
+
 static void a_refusal_is_not_a_dead_socket(void)
 {
 	struct sockaddr_un address;
@@ -2185,6 +2242,7 @@ int main(int argc, char **argv)
 	reader_refuses();
 	quoting_escapes_what_it_must();
 	connection_reads_lines_however_they_arrive();
+	a_member_can_be_asked_its_own_name();
 	a_refusal_is_not_a_dead_socket();
 	a_refusal_is_an_answer_not_a_failure();
 	a_plan_becomes_a_model();

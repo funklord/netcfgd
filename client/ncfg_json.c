@@ -70,7 +70,13 @@ static uint32_t new_node(parser_t *p, ncfg_json_type_t type)
 	ncfg_json_node_t *node = &p->doc->nodes[index];
 
 	node->type = type;
-	node->key_offset = 0;
+	/* `NCFG_JSON_NONE`, not zero: the parser unescapes in place and packs the
+	 * strings it keeps from the front of the buffer, so offset zero is where
+	 * the *first* key in the document lands. A reader that took zero for
+	 * "reached by position" would call that member nameless -- which is what
+	 * `ncfg_json_key`'s first version did, caught by its own test on the
+	 * first member of the first object it was given. */
+	node->key_offset = NCFG_JSON_NONE;
 	node->key_length = 0;
 	node->value_offset = 0;
 	node->value_length = 0;
@@ -651,6 +657,28 @@ const char *ncfg_json_string(const ncfg_json_doc_t *doc, uint32_t index, size_t 
 		*length_out = node->value_length;
 	}
 	return doc->text + node->value_offset;
+}
+
+const char *ncfg_json_key(const ncfg_json_doc_t *doc, uint32_t index, size_t *length_out)
+{
+	const ncfg_json_node_t *node = ncfg_json_node(doc, index);
+
+	if (length_out) {
+		*length_out = 0;
+	}
+	/* **The sentinel, not the length and not a zero offset.** An empty key is
+	 * a name a document can carry -- `{"":1}` is valid JSON and its member is
+	 * reached by "" -- so a zero length says nothing about whether there was a
+	 * key. Nor does a zero offset: the parser packs the strings it keeps from
+	 * the front of its buffer, so the first key in the document sits at zero.
+	 * `NCFG_JSON_NONE` is what a node reached by position carries. */
+	if (!node || node->key_offset == NCFG_JSON_NONE) {
+		return NULL;
+	}
+	if (length_out) {
+		*length_out = node->key_length;
+	}
+	return doc->text + node->key_offset;
 }
 
 int ncfg_json_string_equals(const ncfg_json_doc_t *doc, uint32_t index, const char *other)
