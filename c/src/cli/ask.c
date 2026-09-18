@@ -256,55 +256,32 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
 /*
  * One line per event on a monitor stream.
  *
- * The unrecognised case prints the line whole rather than refusing it: a
- * monitor that shows an event it does not know is more useful than one that
- * stops, and a newer daemon must not make an older `ncfg monitor` useless for
- * the events it does understand.
+ * The five sentences themselves are `ncfg_cli_event_text`'s, not a second copy
+ * of them -- the TUI needs the same text in a buffer and two lists of one
+ * thing have drifted in this tree before.
+ *
+ * **What is not shared is the passthrough, and that is deliberate.** An event
+ * this build does not recognise is printed whole rather than refused, so that
+ * a newer daemon does not make an older `ncfg monitor` useless for the events
+ * it does understand -- and "whole" means up to `NCFG_PROTO_MAX_LINE`, which
+ * is a megabyte. `ncfg_cli_event_text` composes into a caller's buffer, so
+ * routing that case through it would have quietly cut the line to whatever the
+ * buffer was: the one arm whose entire purpose is not to lose anything would
+ * have been the one that lost the most. So the recognised kinds go through the
+ * shared renderer and the raw line is still streamed.
+ *
+ * The buffer holds the longest bounded sentence: `drift` is three
+ * `NCFG_CLI_TEXT_MAX` fields and a dozen characters of frame.
  */
 void ncfg_cli_print_event(const ncfg_proto_event_t *event, const char *raw, size_t raw_length)
 {
-	char summary[NCFG_CLI_TEXT_MAX];
-	char interface[NCFG_CLI_TEXT_MAX];
-	char action[NCFG_CLI_TEXT_MAX];
+	char text[4u * NCFG_CLI_TEXT_MAX];
 
-	if (!event) {
+	if (!event || event->kind >= NCFG_PROTO_EVENT_COUNT) {
 		ncfg_out_writef("%.*s\n", (int)raw_length, raw ? raw : "");
 		return;
 	}
-	switch (event->kind) {
-	case NCFG_PROTO_EVENT_OBSERVED:
-		ncfg_out_writef("observed  %s\n",
-		    ncfg_cli_text(event->summary, summary, sizeof(summary)));
-		return;
-	case NCFG_PROTO_EVENT_RELOADED:
-		if (event->ok) {
-			ncfg_out_line("reloaded  the configuration compiled");
-		} else {
-			ncfg_out_writef("reloaded  FAILED\n%s\n",
-			    ncfg_cli_text(event->diagnostics, summary, sizeof(summary)));
-		}
-		return;
-	case NCFG_PROTO_EVENT_DRIFT:
-		ncfg_out_writef("drift     %s: %s (%s)\n",
-		    ncfg_cli_text(event->interface, interface, sizeof(interface)),
-		    ncfg_cli_text(event->summary, summary, sizeof(summary)),
-		    ncfg_cli_text(event->action, action, sizeof(action)));
-		return;
-	case NCFG_PROTO_EVENT_CONFIRM_ARMED:
-		ncfg_out_writef("confirm   window open for %llds\n", (long long)event->seconds);
-		return;
-	case NCFG_PROTO_EVENT_CONFIRM_RESOLVED:
-		if (event->confirmed) {
-			ncfg_out_line("confirm   confirmed; the change stands");
-		} else {
-			ncfg_out_line("confirm   reverted to the last-good configuration");
-		}
-		return;
-	case NCFG_PROTO_EVENT_COUNT:
-	default:
-		ncfg_out_writef("%.*s\n", (int)raw_length, raw ? raw : "");
-		return;
-	}
+	ncfg_out_writef("%s\n", ncfg_cli_event_text(event, raw, raw_length, text, sizeof(text)));
 }
 
 int ncfg_cli_stream(const char *socket_path, char *err, size_t err_size)

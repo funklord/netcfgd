@@ -1537,6 +1537,31 @@ static void an_event_is_one_line(void)
 	printed = capture_end();
 	line(printed, "{\"event\":\"something-new\"}",
 	    "and an event this build does not know is shown whole rather than dropped");
+
+	/*
+	 * **And "whole" means whole.** The five sentences above are rendered by
+	 * `ncfg_cli_event_text`, which composes into a caller's buffer, and the
+	 * obvious tidy-up is to route this arm through it too. That would cut the
+	 * line to the buffer: measured, a 4096-byte event came back at 511. The
+	 * one arm whose entire purpose is to lose nothing would have lost the
+	 * most, and it would have looked like a two-line simplification. So this
+	 * arm still streams, and this check is what says so.
+	 */
+	{
+		char big[4096];
+		size_t at;
+
+		for (at = 0; at < sizeof(big); at++) {
+			big[at] = 'x';
+		}
+		capture_begin();
+		ncfg_cli_print_event(NULL, big, sizeof(big));
+		printed = capture_end();
+		check(strlen(printed) == sizeof(big) + 1,
+		    "an unknown event longer than any render buffer arrives whole");
+		check(strlen(printed) > 4u * 512u,
+		    "  and past the buffer the recognised kinds are rendered in");
+	}
 }
 
 int main(void)
