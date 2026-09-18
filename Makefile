@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: example deb apk apk-source apk-container all check check-ci build test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -110,7 +110,7 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage
+                 example adapters gui linkage c-test
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -295,6 +295,13 @@ client/tests/client_test: FORCE
 # Found when two new assertions about the link and network conversion passed
 # locally and left `make check` completely unmoved. `client/Makefile` has had
 # the target the whole time; only the wiring was missing.
+# The C port's own suite, one binary per module. Here rather than left to be
+# run by hand because 0263 gives the port a rule -- a module lands with its
+# tests or it has not landed -- and a suite nobody runs is how that rule
+# becomes a sentence in a document.
+c-test:
+	@$(MAKE) --no-print-directory -C c test
+
 client-test: client/tests/client_test
 	@$(MAKE) --no-print-directory -C client test
 
@@ -1138,6 +1145,10 @@ packaging:
 	@# shell it cannot kill as a group. Both cost thirty seconds a run and
 	@# said nothing about the cause. 0262.
 	@python3 tool/disarm_gate.py
+	@# Every module of the C port is reached by a test. 0263 says a module
+	@# whose tests are to follow has not been ported; this is that sentence
+	@# with something behind it.
+	@python3 tool/c_tests_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the
@@ -1277,7 +1288,7 @@ packaging:
 # was written. `adapters` and `helpers` were both outside it -- the same shape
 # as the unsafe-policy gate globbing only `crates/*` and missing a whole backend
 # for a milestone.
-ASCII_PATHS  = crates backend adapter helper tests Cargo.toml Makefile
+ASCII_PATHS  = crates backend adapter helper tests c client Cargo.toml Makefile
 # `netcfgd-*` catches an installed helper, which is a script with no extension
 # because it ends up on a PATH. Filtering by extension alone would have skipped
 # the entire helpers directory while appearing to cover it.
@@ -1300,6 +1311,7 @@ ASCII_PATHS  = crates backend adapter helper tests Cargo.toml Makefile
 # dash in it holds none -- so exactly the files this gate exists to catch are
 # still read.
 ASCII_KINDS  = -I --include='*.rs' --include='*.toml' --include='*.sh' \
+	--include='*.c' --include='*.h' \
 	--include='netcfgd-*' --exclude-dir=target
 
 ascii:
