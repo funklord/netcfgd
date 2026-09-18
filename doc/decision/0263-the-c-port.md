@@ -719,7 +719,182 @@ taken.
   somebody is a `main`. `ncfg_daemon_serve` is finished and would be bound
   from here; the loop that collapses a burst of wakes into one pass, drives
   `ncfg_reconcile_pass` and hands the waiting requests to
-  `ncfg_daemon_answer_fn` is what `src/main/` still owes.
+  `ncfg_daemon_answer_fn` was what `src/main/` still owed. **It is written**,
+  and the entries below it are what writing it diverged on.
+
+* **Four watcher threads and a sleeping timer become one `poll`.** The Rust
+  says of itself that the reason was preference rather than `unsafe` (0235),
+  and names what the threads cost: 0233 lost the loop's heartbeat when one
+  returned, and 0234 found five spawns whose failure nothing reported. Both
+  are faults a single loop does not have, and neither could have happened
+  without the threads. So there are no threads here, no channel and no mutex
+  between the watchers: `ncfg_main_round` waits on every descriptor at once
+  and reads whichever became ready. The **workers** are untouched and remain
+  threads for the reason that comment gives -- a client connection blocks on a
+  reader that may stop reading -- which is why the request path below is a
+  rendezvous rather than a call.
+* **The split is the same one `reconcile.c` makes, one layer out.**
+  `daemon_wake.c` is what the loop decides and every call in it takes values
+  and answers one: what a `revents` mask means, what `poll`'s return meant,
+  how long to wait, whether a source that has failed keeps its place, which
+  wake a ready descriptor folds into, whether a round is worth a pass, whether
+  a `CONNECTED` is a roam. It opens nothing. `daemon_loop.c` is the order, and
+  the `poll` is the only thing in it that needs a live descriptor.
+  `daemon_watchers.c` is the five real sources and is the only file that opens
+  anything. What that buys is the list this port has not had before: a
+  descriptor that hangs up, one that is not open, one that will not be read, a
+  burst of fifty, a burst that never ends, `EINTR`, and a signal arriving
+  between the check and the wait are each a check rather than a paragraph.
+* **The backstop is measured from the top of the round, not from the last
+  message.** The Rust has two producers of `Command::Tick` and neither fires
+  on a machine the kernel is talking to: the netlink watcher sends one only
+  when its own socket *times out*, and `next_command`'s `recv_timeout`
+  restarts on every command that arrives. So on a machine reporting a link,
+  address or route change at least every five seconds -- a router, a lease
+  renewing, a link flapping -- `ticked` is never set at all, and `ticked` is
+  half of `should_resolve_window`: a confirm window whose timer thread failed
+  to start has nothing left to close it, which is 0234's mitigation switched
+  off by exactly the machine that is busiest. Here the deadline is computed
+  once per round and each wait is `ncfg_main_timeout_until`'s answer for what
+  is left of it, so the tick happens on schedule however loud the machine
+  is. A deadline already past is
+  a wait of **zero and never a negative number**, which `poll` would read as
+  "no timeout": that is the one arithmetic slip here that would stop a daemon
+  dead, on exactly the quiet machine the backstop exists for.
+* **A source that cannot answer is taken out of the set, and the drop is said
+  out loud.** `POLLHUP` and `POLLNVAL` are answered at once and with no
+  patience, because a hung-up descriptor is ready every single time it is
+  polled -- so "give it another round" is a busy loop with a counter in it,
+  and that is the ordinary way a daemon comes to spin at 100% CPU while still
+  answering clients. `POLLERR` is given `NCFG_MAIN_SOURCE_PATIENCE` looks,
+  since a read is what clears a queued error, and so is a drain that failed.
+  The Rust has no equivalent because each of its watchers is a thread that
+  returns; what it does instead is exactly what 0233 cost, and the log line
+  here says what is no longer being watched rather than leaving a daemon that
+  looks identical to one with nothing to watch.
+* **`POLLIN` is answered before `POLLHUP`.** A writer that queued bytes and
+  then closed sets both, and the order decides whether the last records are
+  read or thrown away with the descriptor -- for `/dev/rfkill` that is the
+  switch being flipped as the device went away. The hang-up is not lost by
+  waiting: it is still there on the next look, with nothing behind it.
+  `POLLNVAL` is the one exception and is answered first, since there is
+  nothing to read from a descriptor this process does not have.
+* **The burst collapse is bounded.** Collapsing is the point -- bringing an
+  interface up produces a run of netlink messages and re-reading once per
+  message would make the daemon's cost scale with the kernel's chattiness --
+  but "keep collapsing while anything is ready" has no floor: one descriptor
+  that is permanently readable means the pass never runs at all, and a daemon
+  that stopped reconciling while spinning is the worst of both. So
+  `NCFG_MAIN_DRAIN_ROUNDS` bounds it and whatever is left is the next round's,
+  which is microseconds away. The bound is published so a test cannot spell
+  the number itself.
+* **The window's timer is a `timerfd` and not a thread that sleeps.** 0234 is
+  the reason and it is the strongest one in this file: `spawn_expiry_timer`
+  discarded the result of `spawn`, so a timer that could not start left a
+  window open for ever -- the failure commit-confirm exists to prevent,
+  arriving through the mechanism meant to prevent it. A descriptor cannot
+  half-start, an arming that fails says so, and the tick asks the window
+  anyway. A window of no seconds is armed one nanosecond out rather than
+  `{0,0}`, which *disarms* a timerfd rather than firing it.
+* **A signal is a byte on a pipe in the same `poll`, not a flag.** A handler
+  that sets a flag races the loop, which checks the flag and then sleeps five
+  seconds in `poll` with the flag already set; a byte in a descriptor cannot
+  be missed by a wait that descriptor is part of. `write` is what a handler
+  may call, the write is non-blocking so a full pipe cannot hold one, and
+  `errno` is put back -- the syscall a handler here interrupts is the `poll`
+  the whole daemon sleeps in, whose `EINTR` is read out of exactly that
+  variable. The Rust installs no handler at all and is killed where it stands,
+  which is what leaves two reply sockets behind on every restart (0193).
+* **`EINTR` is asked again with what is left of the same deadline.** Not a
+  failure, which is 0233, and not a fresh five seconds, which would let a
+  machine generating signals hold the backstop off indefinitely -- netcfgd
+  forks a child every time it runs a hook. It cannot spin: every one of them
+  is a signal that really arrived, and the wait that follows is shorter each
+  time until it is zero.
+* **`ENOBUFS` is deliberately not told apart from an ordinary change.**
+  `ncfg_netlink_change_from` already decides what a gap means -- it is a
+  change, because the daemon re-reads the machine rather than applying deltas
+  -- and the only thing a second decision could do differently is re-read the
+  machine, which one change already causes. A loop that distinguished them
+  would be a second answer to a question that module owns, and the bytes are
+  thrown away either way. What the loop must not do is treat the failing
+  receive as fatal, which is the arm that would make a daemon go deaf exactly
+  when the most is happening.
+* **The supplicants are descriptors in the same `poll`, and the control
+  directory is watched.** The Rust's roam watcher is a thread that reads the
+  directory, `stat`s each radio and waits 250ms on each in turn, which on a
+  machine with one radio is a `read_dir` of that directory four times a
+  second for the life of the daemon. Here the directory has an inotify watch
+  whose only job is to end the wait promptly, the scan happens when it says
+  something moved, and each attached radio's socket is polled with everything
+  else. The identity check (0240), the reply-socket filter (0112), the
+  impatient connect (0114) and the `ATTACH` failure being said out loud (0225)
+  are all carried across unchanged.
+* **A radio is drained only after `poll` has said there is something there.**
+  `ncfg_supplicant_next_event` sets `SO_RCVTIMEO` from its argument, and a
+  timeout of zero is `{0,0}`, which the kernel reads as *no deadline at all*
+  -- a blocking read on the daemon's only thread. The supplicant's own scan
+  wait already steps around this and says so; here the wait is what makes the
+  deadline moot and the argument is one millisecond rather than zero, so that
+  a race between the two costs a millisecond rather than the daemon.
+  `ncfg_rfkill_next` and `ncfg_netlink_wait_for_change` are called under the
+  same rule and for the same reason.
+* **The roams a round carries are bounded, with the rest counted.** Two roams
+  are two events, which is what `daemon.h` says about the list travelling
+  beside the wake, so they are not collapsed -- but a radio flapping must not
+  make one round's allocation the operator's to choose. `NCFG_MAIN_ROAMS_MAX`
+  with a missed count is `NCFG_DRIFT_MAX`'s bargain: a number an operator has
+  to interpret is better than a station that moved and nothing anywhere
+  saying so.
+* **A request crosses to the loop through a mailbox and is answered after the
+  pass.** The Rust queues every request into the channel the watchers feed and
+  serves them in the loop body, which is what keeps one thread inside the
+  daemon's state; here the server is a thread per connection and calls
+  `ncfg_daemon_answer_fn` with its own lock held, so the seam the loop
+  installs parks the connection's thread, the round takes the request, drives
+  `ncfg_reconcile_pass` with it and only then hands it to the answer seam.
+  The order is the point rather than a consequence: a pending window defers
+  the reconcile and an explicit apply releases the `--no-apply-on-start` hold,
+  and a request answered first would have the change applied underneath it,
+  with the window covering nothing. The server's lock means exactly one
+  request can be inside the seam at a time, so `NCFG_MAIN_PENDING_MAX` is
+  margin rather than a capacity; a mailbox that filled anyway **refuses by
+  name** and one that is shut **answers every waiter** rather than leaving a
+  connection thread parked for the life of the process.
+* **The configuration watch may have no descriptor, and that is a shape rather
+  than a failure.** `--poll-config` answers by walking the filesystem, so
+  `ncfg_watch_descriptor` is -1 and the loop *asks* that source once a round
+  instead of waiting on it. Inventing a pipe nobody writes to would make the
+  two mechanisms look alike and leave the fall-back reporting nothing for
+  ever, which is what `watch.h` says it exists to prevent.
+* **Five modules grew a descriptor accessor, and they are named here because
+  the loop is their only caller.** `ncfg_netlink_descriptor`,
+  `ncfg_watch_descriptor`, `ncfg_inotify_descriptor`,
+  `ncfg_rfkill_descriptor` and `ncfg_supplicant_client_descriptor`. Each of
+  those modules waits on its own descriptor with a `poll` of one, which is
+  right for a watcher whose whole job is that one thing and wrong for a daemon
+  watching seven at once; and each says `fd` is private, so reaching into the
+  struct from `src/main/` would have made every field it has reachable by the
+  same route. Each accessor's comment says it is for waiting on and for
+  nothing else: the reads stay in the module that owns the sender check, the
+  `ENOBUFS` rule and the difference between an event and a reply.
+* **A source with no drain has its readiness taken as the whole of its news**,
+  which is the one shape in this file that a caller can get wrong: nothing
+  reads the descriptor, so it stays ready and fills every look of the burst.
+  It is bounded rather than forbidden, because forbidding it would mean the
+  loop deciding what a caller may watch.
+* **`netcfgd` still will not start, and the seam it names has changed.** The
+  observation composition landed in the same wave --
+  `ncfg_observe_source_observe` is `ncfg_daemon_observe_fn` signature for
+  signature -- and the descriptors
+  are this entry's subject, so what is left is the request dispatcher:
+  **nothing in `c/src/` implements `ncfg_daemon_answer_fn`**. A daemon that
+  bound the control socket and answered `error` to every request would be
+  worse than one that will not start, in the way this record keeps refusing --
+  an operator's `ncfg apply` reaching a daemon that cannot act, and a refusal
+  that reads as a request the daemon did not recognise. `main_test.c` pulls
+  the identifier out of the sentence and looks it up in `daemon.h`, so the
+  check moves with the name.
 
 * **The round of dumps is taken through a seam, and the seam has two
   implementations in the library.** `snapshot_with` takes a `&mut Netlink` and
@@ -801,6 +976,114 @@ taken.
   a kernel can report an ingress hook on interface zero and the builder is
   what refuses to aim a dump at it. `collect_test.c` holds both bodies to the
   builders' own bytes, so the day a builder changes the proof moves with it.
+
+* **The composition is one call, and both halves of the program take it.**
+  `netcfgd_observe::current` is the Rust's, and `netcfgd_host::prior_state`
+  beside it carries the reason in as many words -- one function so the two
+  callers cannot disagree about whether the delegations are included. That
+  reason is the port's too and is stronger here, because the C splits what the
+  Rust does not: `augment` and `derive` are separate calls, the prior is
+  assembled out of three files rather than one, and two of its six aggregate
+  lists are *handed over* rather than copied. Written out at each call site
+  that is a dozen lines with an ownership rule in the middle, twice.
+  `ncfg_observe_current_from` takes the dump seam, `ncfg_observe_current`
+  opens a socket of its own, and both end in `derive` -- which the Rust's
+  `current` does not, its daemon calling `host::derive` a few lines later.
+  Folding it in is what stops a caller shipping an observation with no link
+  inventory and no connectivity rung, neither of which is an error and both of
+  which read as a machine that has none.
+* **Something implements `ncfg_daemon_observe_fn` now**, so the entry above
+  about `netcfgd` refusing to start by naming that symbol is, from this wave,
+  about the descriptors alone. `ncfg_observe_source_t` is what the seam's
+  `void *` carries -- a run directory, the three roots and the round of dumps
+  -- and `ncfg_observe_source_machine` resolves the first two **once**, which
+  is `ncfg_observe_roots_default`'s rule applied one layer up: a seam that
+  read the environment on every tick would answer differently depending on
+  what had happened to `NCFG_PROC_ROOT` since the daemon started. The source
+  carries the dump seam as well, and an absent one means this machine's own
+  socket -- the choice `ncfg_observe_collect` already offers beside
+  `ncfg_observe_collect_from`, and deliberately not `ncfg_resolv_machine_t`'s
+  no-default rule: that sweep's default ends in a signal to a process on the
+  developer's machine, and this one reads. What it buys is that the seam the
+  daemon installs is the seam a test drives, rather than a second path that
+  only ever runs against a live kernel.
+* **A report or a delegated prefix that cannot be read fails the
+  observation, and an unreadable `owned.json` does not.** The Rust cannot
+  express the difference: `read_reports` and `read_delegations` return a `Vec`
+  and swallow whatever went wrong. Here `ncfg_owned_read` still fails open --
+  its own comment argues it, and the worst case is netcfgd under-claiming what
+  is its own, which is the safe direction -- while the other two carry
+  addressing a bearer or a DHCPv6 client negotiated and netcfgd did not. That
+  appears in no kernel dump, so an observation missing it is the case
+  `NCFG_OBSERVE_RECORDS_MAX` refuses a truncated dump for: a planner reading a
+  machine that looks emptier than it is.
+* **What a round of dumps counted is said rather than left in the capture.**
+  `skipped`, `redirects_unreadable` and `dropped` exist so that a dump which
+  came back empty having discarded three datagrams is a different fact from
+  one that came back empty; the composition is the first caller in a position
+  to say so, and a count nothing ever reads is a field with no reader. A
+  warning each, through `log.h`, which `libncfg` may call.
+* **`ncfg status`, `ncfg plan`, `ncfg explain` and `ncfg wait-online` are
+  wired; `ncfg apply` is refused by name.** The four read the machine and
+  print. The fifth changes it, and the refusal is a decision rather than a gap
+  -- four facts, each of which is on its own enough:
+
+  * the planner is four passes of thirty, so a plan from this build is not the
+    whole change and an apply would converge part of a machine and report
+    having converged it;
+  * the executor takes thirteen ops of forty-eight and refuses the rest **as
+    the plan runs**: `ncfg_apply_supported` is asked by `execute`, one action
+    at a time, and `ncfg_apply` stops at the first failure, so a plan mixing
+    a supported op with an unsupported one changes the machine and stops
+    halfway. A sweep before the first action would fix the *order* of that
+    refusal and none of the rest;
+  * nothing folds what an apply did into `owned.json` -- deferred by name
+    above, the executor seam reporting no effects. Addresses and routes
+    survive that because the kernel carries netcfgd's tag; **a link does
+    not.** `create_link` adds no `NCFG_OBSERVE_ALTNAME_PREFIX` alternative
+    name and nothing records the name either, so a bridge this build created
+    reads back `unknown` for ever and netcfgd can never delete it. That is a
+    change to somebody's machine this port has no way to undo;
+  * there is no confirm window. `ncfg_plan_confirm_window` answers from
+    `global { confirm = ... }` as well as from `--confirm-within`, so a plan
+    here carries `commit.arm` -- and the executor correctly does nothing for
+    it, arming belonging to whoever owns the timer afterwards. Nothing here
+    does, so an apply that cut the machine off would say a window was open
+    and never revert.
+
+  `ncfg plan` is offered in the refusal instead, because it is the same
+  document against the same observation with every held block named, and it
+  changes nothing.
+* **`run.c` no longer says it is waiting for the observer, and the constant
+  that said so is deleted rather than left pointing at something.** Five arms
+  shared `NEEDS_OBSERVER`; the dump it named landed in this wave, and a
+  refusal naming a module that is present is worse than one naming a module
+  that is absent, because it looks right. `cli_test.c` reads `run.c` for that
+  sentence, which is the same check that walks the usage against the dispatch.
+  The `explain` entry above says the stub "should now name the observer rather
+  than the provenance table"; it names neither, the verb being wired -- and it
+  is handed an empty table, so its first fact is the notice that entry
+  describes.
+* **`ncfg status` prints the diagnostics of a configuration that will not
+  compile, and answers anyway.** The Rust calls `compile(options).ok()` there
+  and a broken configuration produces a status listing with no hint that the
+  desired half of the answer is missing. The exit status stays 0: the question
+  asked was about the kernel and the kernel answered.
+* **`ncfg wait-online` compiles the configuration once, before the loop.** The
+  Rust's loop calls `observe_with_document`, which compiles the directory on
+  every iteration -- every configuration file read four times a second for the
+  length of a DHCP timeout, with the diagnostics of a config that does not
+  compile printed just as often into a boot log nobody is watching. The
+  document is there only so the observation is the one `ncfg status` would
+  show, and it does not move while the machine comes up.
+* **`ncfg wait-online`'s default is pasted into the help from the constant
+  behind it**, which is `daemon_main.c`'s rule and the reason is the same: the
+  Rust writes `30 by default` as literal text beside a `DEFAULT_WAIT_ONLINE`
+  holding the same number, and the help is the copy nobody recompiles.
+* **A contention warning skips an interface whose kernel index does not fit.**
+  0263's narrowing rule where the model's `int64_t` meets a field the width of
+  the kernel's, pointed at a claim: truncating would match a contender against
+  an interface nobody named, which is worse than not asking about it.
 
 ## What is not being decided here
 
