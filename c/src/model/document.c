@@ -252,6 +252,110 @@ int ncfg_macvlan_mode_number(int mode)
 }
 
 /*
+ * The ethertype the kernel wants in `IFLA_VLAN_PROTOCOL`.
+ *
+ * **Not an ordinal and not a flag bit**, unlike the two above: it is the
+ * ethertype an 802.1Q or an 802.1ad tag carries, which the kernel reads
+ * big-endian and refuses at any other value -- so there is nothing here to
+ * derive and the two numbers are written out.
+ *
+ * No `default:`, which is `apply.c`'s rule and for its reason: a protocol
+ * added to the enum makes this fail to compile rather than quietly answering
+ * -1 for a tag the document can express. -1 for a value outside the set, which
+ * is `ncfg_bond_mode_number`'s convention and means a protocol this build must
+ * not send as some other protocol.
+ */
+int ncfg_vlan_protocol_ethertype(int protocol)
+{
+	switch ((ncfg_vlan_protocol_t)protocol) {
+	case NCFG_VLAN_PROTOCOL_DOT1Q:
+		return 0x8100;
+	case NCFG_VLAN_PROTOCOL_DOT1AD:
+		return 0x88a8;
+	}
+	return -1;
+}
+
+/*
+ * The kernel's own feature names, per offload field.
+ *
+ * **One table, in the model, for the two modules that must agree on it.** It
+ * lived privately in `src/plan/offload.c` while the planner was the only
+ * caller, above a comment saying the second caller takes this one rather than
+ * writing its own; `src/observe/offloads.c` is that caller, and this is the
+ * move that comment asked for rather than the copy it refused. `interface.rs`
+ * keeps it in the model in the Rust for the same reason and says so: the
+ * planner needs it and the planner is pure.
+ *
+ * `static const char *const` per field rather than one flattened array with
+ * offsets, so that the length of each is the array's own and cannot be got
+ * wrong by a second constant.
+ */
+static const char *const offload_gro[] = { "rx-gro" };
+static const char *const offload_gso[] = { "tx-generic-segmentation" };
+static const char *const offload_tso[] = { "tx-tcp-segmentation" };
+static const char *const offload_rx_checksum[] = { "rx-checksum" };
+static const char *const offload_tx_checksum[] = { "tx-checksum-ip-generic",
+	"tx-checksum-ipv4", "tx-checksum-ipv6" };
+
+#define OFFLOAD_NAMES(array) \
+	do { \
+		*count = sizeof(array) / sizeof((array)[0]); \
+		return array; \
+	} while (0)
+
+/*
+ * No `default:`, which is `apply.c`'s rule and for its reason: a field added
+ * to the enum makes this fail to compile rather than quietly answering "no
+ * names", which downstream reads as an offload nobody manages.
+ */
+const char *const *ncfg_offload_field_names(int field, size_t *count)
+{
+	size_t ignored = 0;
+
+	if (!count) {
+		count = &ignored;
+	}
+	*count = 0;
+	switch ((ncfg_offload_field_t)field) {
+	case NCFG_OFFLOAD_GRO:
+		OFFLOAD_NAMES(offload_gro);
+	case NCFG_OFFLOAD_GSO:
+		OFFLOAD_NAMES(offload_gso);
+	case NCFG_OFFLOAD_TSO:
+		OFFLOAD_NAMES(offload_tso);
+	case NCFG_OFFLOAD_RX_CHECKSUM:
+		OFFLOAD_NAMES(offload_rx_checksum);
+	case NCFG_OFFLOAD_TX_CHECKSUM:
+		OFFLOAD_NAMES(offload_tx_checksum);
+	}
+	return NULL;
+}
+
+/* The member of the `ethtool` block one field names. Absent settings are
+ * `NCFG_TOGGLE_UNMANAGED`, which is what the whole block being absent means
+ * too. */
+int ncfg_link_settings_offload(const ncfg_link_settings_t *settings, int field)
+{
+	if (!settings) {
+		return NCFG_TOGGLE_UNMANAGED;
+	}
+	switch ((ncfg_offload_field_t)field) {
+	case NCFG_OFFLOAD_GRO:
+		return settings->gro;
+	case NCFG_OFFLOAD_GSO:
+		return settings->gso;
+	case NCFG_OFFLOAD_TSO:
+		return settings->tso;
+	case NCFG_OFFLOAD_RX_CHECKSUM:
+		return settings->rx_checksum;
+	case NCFG_OFFLOAD_TX_CHECKSUM:
+		return settings->tx_checksum;
+	}
+	return NCFG_TOGGLE_UNMANAGED;
+}
+
+/*
  * Whether at most one of this kind may appear on one interface.
  *
  * Two DHCP clients on one link is always a bug, so it is refused at compile

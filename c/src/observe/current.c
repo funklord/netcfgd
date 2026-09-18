@@ -16,15 +16,20 @@
  *   `ncfg_observe_prior_t` says it: the name lists are borrowed and six
  *   aggregate lists are handed over. So the record read from `owned.json` goes
  *   on owning its five interface-name lists and its two object lists for the
- *   length of the `build`, and hands its restart tally and its hook state
- *   *away* -- which means clearing them on this side, or the record's free and
- *   the observation's free are two frees of one array. The moves are together
- *   in `read_record` and nowhere else for that reason.
+ *   length of the `build`, and hands away four of its own -- the backends, the
+ *   restart tally, the delivered DNS scopes and the hook state -- which means
+ *   clearing each on this side, or the record's free and the observation's
+ *   free are two frees of one array. The moves are together in `read_record`
+ *   and nowhere else for that reason.
  */
 #include "ncfg/observe.h"
 
+#include "observe_internal.h"
+
 #include "ncfg/log.h"
 #include "ncfg/state.h"
+
+#include <stdio.h>
 
 #include <stdlib.h>
 #include <string.h>
@@ -109,18 +114,6 @@ static int read_record(const char *run_dir, record_t *record, ncfg_observe_prior
 	if (!ncfg_owned_read(run_dir, &record->owned, err, err_size)) {
 		return 0;
 	}
-	/*
-	 * Said once, here, because this is the one place that reads the record on
-	 * behalf of somebody who is not going to write it back. `state.h` keeps
-	 * the flag as well as the log line precisely so a caller can act on it;
-	 * this caller cannot, and what it owes instead is not to let the fact go
-	 * past in silence.
-	 */
-	if (record->owned.carried_more) {
-		ncfg_log_emitf("observe", NCFG_LOG_WARNING,
-		    "the ownership record carries members this build cannot read, so the "
-		    "backends and the DNS scopes in it are not in this observation");
-	}
 	if (!borrow_objects(record->owned.addresses, record->owned.address_count,
 	    &record->addresses, "address(es)", err, err_size)) {
 		return 0;
@@ -149,16 +142,26 @@ static int read_record(const char *run_dir, record_t *record, ncfg_observe_prior
 	prior->ingress_count = record->owned.ingress_count;
 
 	/*
-	 * Handed over, and cleared on this side in the same two lines.
+	 * Handed over, and cleared on this side in the same two lines each.
 	 *
-	 * `backends` and `dns` are the other two of the six and stay empty: they
-	 * are not members of `ncfg_owned_state_t` at all in this build, which is
-	 * what `carried_more` reports having met in a file somebody else wrote.
+	 * All six of them now. `backends` and `dns` were the two the record did
+	 * not carry, so this hand-over was two lists short and `observed.backends`
+	 * and `observed.dns` were empty on every machine -- which is what left six
+	 * observation passes with nothing to walk and made the planner ask for a
+	 * DNS delivery it had already made, for ever (project.md 10.183).
 	 */
+	prior->backends = record->owned.backends;
+	prior->backend_count = record->owned.backend_count;
+	record->owned.backends = NULL;
+	record->owned.backend_count = 0;
 	prior->backend_restarts = record->owned.backend_restarts;
 	prior->backend_restart_count = record->owned.backend_restart_count;
 	record->owned.backend_restarts = NULL;
 	record->owned.backend_restart_count = 0;
+	prior->dns = record->owned.dns;
+	prior->dns_count = record->owned.dns_count;
+	record->owned.dns = NULL;
+	record->owned.dns_count = 0;
 	prior->hook_state = record->owned.hook_state;
 	prior->hook_state_count = record->owned.hook_state_count;
 	record->owned.hook_state = NULL;
@@ -203,9 +206,11 @@ static void note_the_round(const ncfg_observe_capture_t *capture)
 	}
 }
 
-int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *run_dir,
-    const ncfg_observe_roots_t *roots, const ncfg_document_t *desired, ncfg_observed_t **out,
-    char *err, size_t err_size)
+int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
+    const ncfg_observe_kernel_t *netfilter, const ncfg_observe_kernel_t *genl,
+    const char *run_dir, const ncfg_observe_roots_t *roots,
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size)
 {
 	ncfg_observe_capture_t capture;
 	record_t               record;
@@ -255,7 +260,35 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *r
 		return 0;
 	}
 
-	if (!ncfg_observe_augment_host(observed, roots, err, err_size) ||
+	/*
+	 * The nftables round and the offloads round before the files and after
+	 * the record, in that order, which is where `augment` has the two of them
+	 * -- `read_netfilter` then `read_offloads`. Nothing between them reads
+	 * what any of them writes -- `derive` asks about neither NAT nor
+	 * offloads -- so the position is the Rust's rather than load-bearing;
+	 * what *is* load-bearing is that both come before the refusal below, so a
+	 * round that failed costs the observation rather than leaving half of one
+	 * behind.
+	 *
+	 * The offloads round is after `build` and not inside it for a reason that
+	 * is load-bearing: it writes one list per *link*, so it needs the link
+	 * table `build` produced to know which devices to ask about. The
+	 * WireGuard round is the same shape on the same socket, and asks nothing
+	 * at all where no link is one.
+	 *
+	 * **The currency question is the one order here that is load-bearing.**
+	 * It fills in `key_matches` on the device states the round before it
+	 * produced, so a machine whose generic netlink could not be read has
+	 * nothing for it to write into -- which is right, and is why it walks the
+	 * observation rather than the document. `augment` has the two in this
+	 * order for the same reason (`host.rs:61-62`).
+	 */
+	if (!ncfg_observe_netfilter_from(netfilter, observed, err, err_size) ||
+	    !ncfg_observe_offloads_from(genl, observed, err, err_size) ||
+	    !ncfg_observe_wireguard_from(genl, observed, err, err_size) ||
+	    !ncfg_observe_wireguard_currency(observed, run_dir, secrets, desired, err,
+	    err_size) ||
+	    !ncfg_observe_augment_host(observed, roots, err, err_size) ||
 	    !ncfg_observe_derive(observed, desired, err, err_size)) {
 		/*
 		 * **Half an observation is not a smaller answer to the same
@@ -273,10 +306,17 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel, const char *r
 }
 
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
-    const ncfg_document_t *desired, ncfg_observed_t **out, char *err, size_t err_size)
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size)
 {
 	ncfg_netlink_t        netlink;
+	ncfg_netlink_t        netfilter;
+	ncfg_netlink_t        generic;
 	ncfg_observe_kernel_t kernel;
+	ncfg_observe_kernel_t nft;
+	ncfg_observe_kernel_t genl;
+	int                   have_nft;
+	int                   have_genl;
 	int                   ok;
 
 	if (!out) {
@@ -300,13 +340,32 @@ int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
 	memset(&kernel, 0, sizeof(kernel));
 	kernel.exchange = ncfg_observe_exchange_socket;
 	kernel.context = &netlink;
-	ok = ncfg_observe_current_from(&kernel, run_dir, roots, desired, out, err, err_size);
+	/*
+	 * And the netfilter socket beside it, which is a second protocol rather
+	 * than a second question on the first. One that will not open is the
+	 * commonest way a kernel says it has no nftables, so the observation goes
+	 * on without it and reports no NAT installed -- which is what a planner
+	 * does with "no table" anyway.
+	 */
+	have_nft = observe_netfilter_open(&netfilter, &nft);
+	/*
+	 * And the generic netlink socket beside those two, which is a third
+	 * protocol again. One that will not open costs this observation every
+	 * link's offloads and nothing else, which `ncfg_observe_offloads_from`
+	 * says is one of the three ordinary ways a machine declines to answer
+	 * that question.
+	 */
+	have_genl = observe_genl_open(&generic, &genl);
+	ok = ncfg_observe_current_from(&kernel, have_nft ? &nft : NULL,
+	    have_genl ? &genl : NULL, run_dir, roots, secrets, desired, out, err, err_size);
+	ncfg_netlink_close(&generic);
+	ncfg_netlink_close(&netfilter);
 	ncfg_netlink_close(&netlink);
 	return ok;
 }
 
-int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir, char *err,
-    size_t err_size)
+int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir,
+    const char *secrets_dir, char *err, size_t err_size)
 {
 	if (!out) {
 		ncfg_error_set(err, err_size, "a source was asked for with nowhere to put it");
@@ -314,13 +373,30 @@ int ncfg_observe_source_machine(ncfg_observe_source_t *out, const char *run_dir,
 	}
 	memset(out, 0, sizeof(*out));
 	(void)ncfg_state_resolve_dir(run_dir, out->run_dir, sizeof(out->run_dir));
+	/*
+	 * **An argument, and nothing is invented where it is absent.** The run
+	 * directory has a resolver of its own because `state.h` owns that
+	 * question; where the secrets are is `--config-dir`'s answer, and a
+	 * source that reached `NCFG_SECRETS_DIR_DEFAULT` for itself would read
+	 * the machine's real credentials on a daemon that had been pointed
+	 * somewhere else entirely. A name too long for this is the same as none:
+	 * the currency question goes unanswered, which is a question left open
+	 * rather than one answered wrongly.
+	 */
+	if (secrets_dir && secrets_dir[0] &&
+	    (size_t)snprintf(out->secrets_dir, sizeof(out->secrets_dir), "%s", secrets_dir) >=
+	    sizeof(out->secrets_dir)) {
+		out->secrets_dir[0] = '\0';
+	}
 	return ncfg_observe_roots_default(&out->roots, err, err_size);
 }
 
 int ncfg_observe_source_observe(void *context, const ncfg_document_t *desired,
     ncfg_observed_t **out, char *err, size_t err_size)
 {
-	const ncfg_observe_source_t *source = context;
+	const ncfg_observe_source_t  *source = context;
+	const ncfg_secret_resolver_t *store;
+	ncfg_secret_resolver_t        secrets;
 
 	if (!out) {
 		ncfg_error_set(err, err_size,
@@ -334,10 +410,31 @@ int ncfg_observe_source_observe(void *context, const ncfg_document_t *desired,
 		    "run directory to read the record out of");
 		return 0;
 	}
+	/*
+	 * The store the currency question is asked of, or none.
+	 *
+	 * Empty means the question is not asked, which
+	 * `ncfg_observe_wireguard_currency` reads as "nothing to ask" rather than
+	 * as an answer. `materialise_dir` stays NULL for `secrets.h`'s reason:
+	 * nothing in an observation writes a file, so a resolver here that could
+	 * would carry a capability it has no use for.
+	 */
+	memset(&secrets, 0, sizeof(secrets));
+	secrets.secrets_dir = source->secrets_dir[0] ? source->secrets_dir : NULL;
+	store = source->secrets_dir[0] ? &secrets : NULL;
 	if (!source->kernel.exchange) {
-		return ncfg_observe_current(source->run_dir, &source->roots, desired, out, err,
-		    err_size);
+		return ncfg_observe_current(source->run_dir, &source->roots, store, desired, out,
+		    err, err_size);
 	}
-	return ncfg_observe_current_from(&source->kernel, source->run_dir, &source->roots,
-	    desired, out, err, err_size);
+	/*
+	 * A source with a route exchange installed is a machine a test made up,
+	 * and its netfilter and generic netlink seams are whatever that test
+	 * installed -- absent, which asks nothing, or a replay. Opening a real
+	 * socket for either here would be the half of that observation that
+	 * reached the developer's own ruleset, or their own network card.
+	 */
+	return ncfg_observe_current_from(&source->kernel,
+	    source->netfilter.exchange ? &source->netfilter : NULL,
+	    source->genl.exchange ? &source->genl : NULL, source->run_dir, &source->roots,
+	    store, desired, out, err, err_size);
 }

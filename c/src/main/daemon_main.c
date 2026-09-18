@@ -563,7 +563,12 @@ static int start(const options_t *options)
 	/* The observation seam before the first reload, because a reload is the
 	 * first thing that might want one. `ncfg_observe_source_observe` is
 	 * `ncfg_daemon_observe_fn` signature for signature. */
-	if (!ncfg_observe_source_machine(&source, where.run, err, sizeof(err))) {
+	/* The store as well as the run directory, because an observation asks it
+	 * one question: whether a WireGuard device is running the key its
+	 * configuration names. `where.secrets` is under the directory this daemon
+	 * was *given*, which is the reason that pair is resolved there and not
+	 * from a default. */
+	if (!ncfg_observe_source_machine(&source, where.run, where.secrets, err, sizeof(err))) {
 		ncfg_daemon_state_free(&state);
 		return cannot("this daemon cannot work out how to read the machine", err);
 	}
@@ -792,10 +797,13 @@ done:
  *     nobody who is reading.
  *   * **An op this executor cannot carry out is refused while the plan is
  *     running.** `ncfg_apply_supported` is asked by `execute`, one action at a
- *     time -- a `link.create` for a vlan, a bond, a macvlan or a tunnel, and a
- *     `backend.start` for six of the nine backend kinds -- and `ncfg_apply`
- *     stops at the first failure. A plan mixing a supported op with an
- *     unsupported one therefore changes the machine and stops halfway.
+ *     time -- a `link.create` for a physical device, a pppoe session or an
+ *     openvpn tunnel, and a `backend.start` for six of the nine backend kinds
+ *     -- and `ncfg_apply` stops at the first failure. A plan mixing a
+ *     supported op with an unsupported one therefore changes the machine and
+ *     stops halfway. The link half of that list used to name a vlan, a bond, a
+ *     macvlan and a tunnel; all four are created now, and the three left are
+ *     ones `plan/link.c` declines by an earlier arm of its own.
  * The third fact that used to be here is closed too: `plan.last.json` is
  * written, by `ncfg_apply_write_journal`, after every apply and every revert,
  * so a plan that stopped halfway says under `/run` where it stopped. What is

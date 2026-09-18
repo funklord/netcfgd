@@ -728,15 +728,33 @@ static int command_show(const ncfg_cli_options_t *options)
  * one: somebody runs `ncfg status` because something is wrong, and a
  * configuration that has stopped compiling is exactly when.
  */
-static int observe_now(const char *run_dir, const ncfg_document_t *desired,
-    ncfg_observed_t **out, char *err, size_t err_size)
+static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
+    const ncfg_document_t *desired, ncfg_observed_t **out, char *err, size_t err_size)
 {
-	ncfg_observe_roots_t roots;
+	ncfg_observe_roots_t   roots;
+	ncfg_secret_resolver_t secrets;
+	char                   secrets_dir[NCFG_CLI_TEXT_MAX];
 
 	if (!ncfg_observe_roots_default(&roots, err, err_size)) {
 		return 0;
 	}
-	return ncfg_observe_current(run_dir, &roots, desired, out, err, err_size);
+	/*
+	 * The one question an observation asks the secret store, and it is asked
+	 * **under the directory this invocation was given** rather than under a
+	 * default: `--config-dir` is the whole of how somebody points `ncfg` at a
+	 * tree that is not the machine's, and a status listing that read
+	 * `/etc/netcfgd/secrets` anyway would be reading credentials nobody
+	 * pointed it at. A name that does not fit leaves the question unasked,
+	 * which is the honest answer rather than a wrong one.
+	 */
+	memset(&secrets, 0, sizeof(secrets));
+	if (options && options->config_dir && options->config_dir[0] &&
+	    (size_t)snprintf(secrets_dir, sizeof(secrets_dir), "%s/secrets",
+	    options->config_dir) < sizeof(secrets_dir)) {
+		secrets.secrets_dir = secrets_dir;
+	}
+	return ncfg_observe_current(run_dir, &roots, secrets.secrets_dir ? &secrets : NULL,
+	    desired, out, err, err_size);
 }
 
 /*
@@ -764,7 +782,7 @@ static int command_status(const ncfg_cli_options_t *options)
 	int              code = NCFG_CLI_EXIT_OK;
 
 	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
-	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
 		return fail(err);
 	}
@@ -926,7 +944,7 @@ static int command_plan(const ncfg_cli_options_t *options)
 	if (!document) {
 		return fail(err);
 	}
-	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
 		return fail(err);
 	}
@@ -1024,7 +1042,7 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 		(void)fprintf(stderr, "ncfg: the configuration does not compile, so this "
 		    "explains what the machine is doing and not what was asked for\n");
 	}
-	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
 		return fail(err);
 	}
@@ -1122,7 +1140,7 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
 		struct timespec now;
 		ncfg_observed_t *observed = NULL;
 
-		if (observe_now(run_dir, document, &observed, err, sizeof(err))) {
+		if (observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 			online = ncfg_cli_is_online(observed);
 			ncfg_observed_free(last);
 			last = observed;
@@ -1196,14 +1214,21 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  *     makes `ncfg plan` honest and is exactly what an apply would act past.
  *   * **The executor refuses what it cannot do while the plan is running,
  *     rather than before it.** It carries every op kind now; what it refuses
- *     is by *kind* -- a `link.create` for a vlan, a bond, a macvlan, a tunnel
- *     or a tun, and `backend.start` for the six backend kinds `src/backend/`
- *     does not carry. `ncfg_apply_supported` is asked by `execute`, one
- *     action at a time, and `ncfg_apply` stops at the first failure -- so a
- *     plan mixing a supported op with an unsupported one
+ *     is by *kind* -- a `link.create` for a physical device, a pppoe session
+ *     or an openvpn tunnel, and `backend.start` for the six backend kinds
+ *     `src/backend/` does not carry. `ncfg_apply_supported` is asked by
+ *     `execute`, one action at a time, and `ncfg_apply` stops at the first
+ *     failure -- so a plan mixing a supported op with an unsupported one
  *     changes the machine and then stops halfway. A sweep of the plan before
  *     the first action would fix the *order* of that refusal and nothing else,
  *     which is why it is not what this arm does.
+ *
+ *     **The link half of that list is shorter than it was** -- a vlan, a bond,
+ *     a macvlan and a tunnel are created now that `document.h` publishes the
+ *     last of the four numberings -- and the three left are each covered by an
+ *     earlier arm of `plan/link.c`, so nothing a document can express reaches
+ *     this refusal through the planner any more. The `backend.start` half is
+ *     what keeps the sentence true.
  *   * **Nothing under `ncfg` folds what an apply did into `owned.json`.** The
  *     fold itself has landed -- `ncfg_apply_record` takes a plan and a journal
  *     and is what the daemon's own apply paths call -- and the mark 0136 gives
