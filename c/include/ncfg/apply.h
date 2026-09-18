@@ -292,15 +292,34 @@ size_t ncfg_apply_revert(const ncfg_plan_t *plan, ncfg_journal_t *journal,
  *   accumulator inside the real executor would put the one piece of bookkeeping
  *   that decides what netcfgd may later delete behind a live netlink socket.
  *
- * WHAT IS NOT FOLDED, AND IT IS NOT AN OMISSION
- *   Two members of the Rust's `Effects` are not a function of any op.
- *   `applied_dns` is what `deliver` wrote, and `observed_running` is what the
- *   *observation* saw rather than what the apply did. Neither has anywhere to
- *   go: `state.h` says the backends and the DNS scopes are deferred in this
- *   build because their element types are the observed model's and its field
- *   tables are static. `backend_restarts` **is** carried, so a start and a stop
- *   are folded; what is missing is only the clearing a live backend would do,
- *   and that belongs to whoever composes the observation.
+ * WHAT IS NOT FOLDED, AND WHY EACH ONE IS NOT
+ *   Two members of the Rust's `Effects` are still not a function of any op, and
+ *   the record now has somewhere to put both -- `state.h` carries `backends`
+ *   and `dns`. What stops each is different and worth keeping apart.
+ *
+ *   **`applied_dns` is not the op.** `dns.apply` names one scope, and
+ *   `ncfg_service_dns_apply` delivers *every* scope its context carries
+ *   whatever the op says -- so the op is not the effect here, which is the one
+ *   condition the argument above rests on. Recording the op's own scope alone
+ *   would leave a scope that has left the document recorded for ever, and the
+ *   planner asks for a re-delivery on every pass while that entry stands. It
+ *   would also need a deep copy of an `ncfg_dns_policy_t`, which exists nowhere
+ *   in this port and which `observe.h` says is deliberate. So the record
+ *   **carries** `dns` -- a file another netcfgd wrote round-trips through this
+ *   build instead of losing it -- and nothing here fills it. The producer that
+ *   would is a reader of `<run>/dns/`, which `dns.h` already promises and which
+ *   is that module's work.
+ *
+ *   **`observed_running` is what the observation saw**, and the clear it drives
+ *   belongs to whoever composes one. `backend_restarts` and `backends` are both
+ *   carried, so a start and a stop are folded into each; what is missing is the
+ *   clearing a *live* backend would do -- and it is missing because in this
+ *   build `running` in the record is netcfgd's memory rather than an
+ *   observation. Clearing on that would clear every count on every pass and
+ *   0079's cap would never bite at all, which is worse than the cap never
+ *   lifting. It waits on the liveness pass, and that waits on this port having
+ *   a backend-kind-to-pid-file map at all; see `observe.h` and project.md
+ *   10.183.
  *
  * 1, or 0 where the record could not grow -- which is an allocation failure and
  * nothing to do with the machine.

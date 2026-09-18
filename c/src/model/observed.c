@@ -1408,3 +1408,160 @@ int ncfg_observed_write_canonical(ncfg_observed_t *observed, ncfg_buf_t *buf, ch
 	ncfg_observed_canonicalize(observed);
 	return ncfg_observed_write(observed, buf, err, err_size);
 }
+
+/* ------------------------------------------------------------------------ *
+ * Two of these lists, published for the ownership record
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `owned.json` carries a backend list and a DNS scope list of exactly the
+ * shapes above, because it is where the observation's own two come *from*.
+ * These six calls are that, and they exist so that `src/host/state.c` reads
+ * and writes them through the tables here rather than through a second copy:
+ * a DNS policy codec written twice is the duplication 0263 forbids, and the
+ * half that drifts is whichever one nobody is looking at.
+ *
+ * The element tables stay private. What is published is the list walk, which
+ * is a loop rather than a codec -- `ncfg_type_read`, `ncfg_type_write` and
+ * `ncfg_type_free` were already published for exactly this reason.
+ */
+static int read_elements(const ncfg_type_t *type, size_t element_size,
+    const ncfg_json_doc_t *doc, uint32_t node, void **out, size_t *count_out, char *err,
+    size_t err_size)
+{
+	const ncfg_json_node_t *array = ncfg_json_node(doc, node);
+	uint32_t                child;
+	size_t                  count;
+	size_t                  index = 0;
+	char                   *items;
+
+	*out = NULL;
+	*count_out = 0;
+	if (!array || array->type != NCFG_JSON_ARRAY) {
+		ncfg_error_set(err, err_size, "the %ss of this record are not a list", type->what);
+		return 0;
+	}
+	count = array->child_count;
+	if (count == 0) {
+		return 1;
+	}
+	items = calloc(count, element_size);
+	if (!items) {
+		ncfg_error_set(err, err_size, "out of memory reading %zu recorded %s(s)", count,
+		    type->what);
+		return 0;
+	}
+	/*
+	 * Both handed to the caller before an element is read, so that a failure
+	 * half way leaves a list the caller's own free walk can still take apart
+	 * -- `read_list` in `field.c` does the same thing for the same reason.
+	 */
+	*out = items;
+	*count_out = count;
+	for (child = array->first_child; child != NCFG_JSON_NONE; index++) {
+		const ncfg_json_node_t *element = ncfg_json_node(doc, child);
+		void                   *slot = items + index * element_size;
+
+		if (!element || index >= count) {
+			ncfg_error_set(err, err_size,
+			    "the %ss of this record are a list that changed under the reader",
+			    type->what);
+			return 0;
+		}
+		if (!ncfg_type_init(type, slot)) {
+			ncfg_error_set(err, err_size, "out of memory reading a recorded %s",
+			    type->what);
+			return 0;
+		}
+		if (!ncfg_type_read(type, doc, child, slot, err, err_size)) {
+			return 0;
+		}
+		child = element->next_sibling;
+	}
+	return 1;
+}
+
+static void write_elements(const ncfg_type_t *type, size_t element_size,
+    ncfg_json_writer_t *writer, const void *items, size_t count)
+{
+	size_t index;
+
+	ncfg_json_write_array_begin(writer);
+	for (index = 0; items && index < count; index++) {
+		const char *slot = (const char *)items + index * element_size;
+
+		ncfg_json_write_object_begin(writer);
+		ncfg_type_write(type, writer, slot);
+		ncfg_json_write_object_end(writer);
+	}
+	ncfg_json_write_array_end(writer);
+}
+
+static void free_elements(const ncfg_type_t *type, size_t element_size, void *items, size_t count)
+{
+	size_t index;
+
+	for (index = 0; items && index < count; index++) {
+		ncfg_type_free(type, (char *)items + index * element_size);
+	}
+	free(items);
+}
+
+int ncfg_observed_backends_read(const ncfg_json_doc_t *doc, uint32_t node,
+    ncfg_observed_backend_t **out, size_t *count_out, char *err, size_t err_size)
+{
+	if (!doc || !out || !count_out) {
+		ncfg_error_set(err, err_size, "a backend list was asked for with nowhere to put it");
+		return 0;
+	}
+	return read_elements(&observed_backend_type, sizeof(ncfg_observed_backend_t), doc, node,
+	    (void **)out, count_out, err, err_size);
+}
+
+void ncfg_observed_backends_write(ncfg_json_writer_t *writer,
+    const ncfg_observed_backend_t *backends, size_t count)
+{
+	if (!writer) {
+		return;
+	}
+	write_elements(&observed_backend_type, sizeof(*backends), writer, backends, count);
+}
+
+void ncfg_observed_backends_free(ncfg_observed_backend_t *backends, size_t count)
+{
+	free_elements(&observed_backend_type, sizeof(*backends), backends, count);
+}
+
+void ncfg_observed_backend_free(ncfg_observed_backend_t *backend)
+{
+	if (!backend) {
+		return;
+	}
+	ncfg_type_free(&observed_backend_type, backend);
+}
+
+int ncfg_applied_dns_read(const ncfg_json_doc_t *doc, uint32_t node, ncfg_applied_dns_t **out,
+    size_t *count_out, char *err, size_t err_size)
+{
+	if (!doc || !out || !count_out) {
+		ncfg_error_set(err, err_size,
+		    "a list of delivered dns scopes was asked for with nowhere to put it");
+		return 0;
+	}
+	return read_elements(&applied_dns_type, sizeof(ncfg_applied_dns_t), doc, node, (void **)out,
+	    count_out, err, err_size);
+}
+
+void ncfg_applied_dns_write(ncfg_json_writer_t *writer, const ncfg_applied_dns_t *dns,
+    size_t count)
+{
+	if (!writer) {
+		return;
+	}
+	write_elements(&applied_dns_type, sizeof(*dns), writer, dns, count);
+}
+
+void ncfg_applied_dns_free(ncfg_applied_dns_t *dns, size_t count)
+{
+	free_elements(&applied_dns_type, sizeof(*dns), dns, count);
+}

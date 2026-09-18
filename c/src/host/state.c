@@ -108,10 +108,12 @@ void ncfg_owned_free(ncfg_owned_state_t *owned)
 		free(owned->routes[i].key);
 	}
 	free(owned->routes);
+	ncfg_observed_backends_free(owned->backends, owned->backend_count);
 	for (i = 0; i < owned->backend_restart_count; i++) {
 		free(owned->backend_restarts[i].interface);
 	}
 	free(owned->backend_restarts);
+	ncfg_applied_dns_free(owned->dns, owned->dns_count);
 	ncfg_host_strings_free(owned->forwarding, owned->forwarding_count);
 	ncfg_host_strings_free(owned->privacy, owned->privacy_count);
 	ncfg_host_strings_free(owned->accept_ra, owned->accept_ra_count);
@@ -438,16 +440,18 @@ static int read_hook_state(const ncfg_json_doc_t *doc, uint32_t node,
 }
 
 /*
- * Every member `owned.json` may carry.
+ * Every member `owned.json` may carry, in the order the Rust's derive writes
+ * them.
  *
- * The two at the end are the ones this build cannot represent; they are in the
- * list so that meeting one is not "unknown member" -- which would discard the
- * whole record -- and are counted so the caller can be told. See `state.h`.
+ * The whole set, which is the Rust's `deny_unknown_fields`: a member that is
+ * not here was written by something this build does not understand, and
+ * guessing at it is how a downgrade adopts a record it cannot describe. Two of
+ * these -- `backends` and `dns` -- were listed here and read by nothing for
+ * several waves; `state.h` says what that cost.
  */
 static const char *const owned_members[] = { "boot", "created_links", "addresses", "routes",
-	"backend_restarts", "forwarding", "privacy", "accept_ra", "hook_state", "qdisc",
-	"ingress" };
-static const char *const owned_deferred[] = { "backends", "dns" };
+	"backends", "backend_restarts", "dns", "forwarding", "privacy", "accept_ra", "hook_state",
+	"qdisc", "ingress" };
 
 static int read_owned_text(const char *text, size_t length, ncfg_owned_state_t *out)
 {
@@ -475,14 +479,6 @@ static int read_owned_text(const char *text, size_t length, ncfg_owned_state_t *
 		for (i = 0; i < sizeof(owned_members) / sizeof(owned_members[0]); i++) {
 			known = known || key_is(doc, child, owned_members[i]);
 		}
-		for (i = 0; i < sizeof(owned_deferred) / sizeof(owned_deferred[0]); i++) {
-			if (key_is(doc, child, owned_deferred[i])) {
-				known = 1;
-				if (ncfg_json_count(doc, child) > 0u) {
-					out->carried_more = 1;
-				}
-			}
-		}
 		if (!known) {
 			ok = 0;
 		}
@@ -504,10 +500,22 @@ static int read_owned_text(const char *text, size_t length, ncfg_owned_state_t *
 	if (ok && member != NCFG_JSON_NONE) {
 		ok = read_objects(doc, member, &out->routes, &out->route_count);
 	}
+	member = ncfg_json_member(doc, root, "backends");
+	if (ok && member != NCFG_JSON_NONE) {
+		/* The model's own table, through the call `observed.h` publishes for
+		 * this file. A refusal here still hands back whatever it had read, so
+		 * `ncfg_owned_free` below takes it apart. */
+		ok = ncfg_observed_backends_read(doc, member, &out->backends, &out->backend_count,
+		    NULL, 0);
+	}
 	member = ncfg_json_member(doc, root, "backend_restarts");
 	if (ok && member != NCFG_JSON_NONE) {
 		ok = read_restarts(doc, member, &out->backend_restarts,
 		    &out->backend_restart_count);
+	}
+	member = ncfg_json_member(doc, root, "dns");
+	if (ok && member != NCFG_JSON_NONE) {
+		ok = ncfg_applied_dns_read(doc, member, &out->dns, &out->dns_count, NULL, 0);
 	}
 	member = ncfg_json_member(doc, root, "forwarding");
 	if (ok && member != NCFG_JSON_NONE) {
@@ -573,11 +581,6 @@ int ncfg_owned_read(const char *run_dir, ncfg_owned_state_t *out, char *err, siz
 		    "somebody else's and be left alone. Written by a newer netcfgd, most "
 		    "likely. Removing the file makes this quiet; the record rebuilds on the "
 		    "next apply", path);
-	} else if (out->carried_more) {
-		ncfg_log_emitf("state", NCFG_LOG_WARNING,
-		    "%s records backends or DNS scopes, which this build cannot carry: writing "
-		    "the record back will drop them. See the note in state.h -- they arrive "
-		    "when the observed model exports those two types", path);
 	}
 	free(text);
 
@@ -676,6 +679,11 @@ int ncfg_owned_write(const char *run_dir, const ncfg_owned_state_t *owned, char 
 	write_strings(&writer, "created_links", owned->created_links, owned->created_link_count);
 	write_objects(&writer, "addresses", owned->addresses, owned->address_count);
 	write_objects(&writer, "routes", owned->routes, owned->route_count);
+	/* Through the model's tables, for the reason `owned_members` gives: the
+	 * reader above and this writer are the same two calls pointed opposite
+	 * ways, so a member added to either element type is added to both. */
+	ncfg_json_write_key(&writer, "backends");
+	ncfg_observed_backends_write(&writer, owned->backends, owned->backend_count);
 	ncfg_json_write_key(&writer, "backend_restarts");
 	ncfg_json_write_array_begin(&writer);
 	for (i = 0; i < owned->backend_restart_count; i++) {
@@ -691,6 +699,8 @@ int ncfg_owned_write(const char *run_dir, const ncfg_owned_state_t *owned, char 
 		ncfg_json_write_array_end(&writer);
 	}
 	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_key(&writer, "dns");
+	ncfg_applied_dns_write(&writer, owned->dns, owned->dns_count);
 	write_strings(&writer, "forwarding", owned->forwarding, owned->forwarding_count);
 	write_strings(&writer, "privacy", owned->privacy, owned->privacy_count);
 	write_strings(&writer, "accept_ra", owned->accept_ra, owned->accept_ra_count);

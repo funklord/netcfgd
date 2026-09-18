@@ -930,14 +930,17 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 }
 
 /*
- * A link whose kind needs the model's numbering is refused rather than half
- * made.
+ * Which kinds this build can bring into being, one row per kind.
  *
- * `ops.h` says why the numbering belongs with the model: two lists of four
- * numbers in two places is how a mode comes to mean one thing on the way out
- * and another on the way back in. `document.h` is final and carries no such
- * function, so the honest answer here is a refusal that says so -- not a table
- * written in the module least likely to be read when the first one changes.
+ * **The four that used to be refused for wanting a number are made now.** A
+ * VLAN's ethertype, a bond's mode, a macvlan's mode and a tunnel's kind word
+ * are the model's numbering, and `ops.h`'s rule was never that they cannot be
+ * sent -- it is that `src/apply/` may not keep a second copy. `document.h`
+ * publishes all four, so `ncfg_kernel_newlink_of` reads them and the refusals
+ * are gone with the rule intact.
+ *
+ * **What this table is for is that a kind cannot change sides unasked.** It
+ * has caught that once already, on the row below that says so.
  */
 static void a_link_whose_kind_needs_the_models_numbering_is_refused(void)
 {
@@ -962,10 +965,18 @@ static void a_link_whose_kind_needs_the_models_numbering_is_refused(void)
 		 * kind cannot change sides unasked.
 		 */
 		{ NCFG_KIND_TUN, 1, "a tun" },
-		{ NCFG_KIND_VLAN, 0, "a vlan" },
-		{ NCFG_KIND_BOND, 0, "a bond" },
-		{ NCFG_KIND_MACVLAN, 0, "a macvlan" },
-		{ NCFG_KIND_TUNNEL, 0, "a tunnel" },
+		/*
+		 * **The four the model's numbering used to hold back.** Each is a
+		 * netlink message like any other now; what made them wait was that
+		 * `document.h` published no conversion, and it publishes all four.
+		 * A bond is the one whose two routes differ -- creation always
+		 * carries its mode, a bond being made having no members yet, while
+		 * `link.set_bond` carries one only when the planner says it may.
+		 */
+		{ NCFG_KIND_VLAN, 1, "a vlan" },
+		{ NCFG_KIND_BOND, 1, "a bond" },
+		{ NCFG_KIND_MACVLAN, 1, "a macvlan" },
+		{ NCFG_KIND_TUNNEL, 1, "a tunnel" },
 		{ NCFG_KIND_PHYSICAL, 0, "a physical device" },
 		{ NCFG_KIND_PPPOE, 0, "a pppoe session" },
 		{ NCFG_KIND_OPENVPN, 0, "an openvpn tunnel" }
@@ -1043,24 +1054,23 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		ncfg_reason_t reason;
 
 		/*
-		 * **`wg.set_peers` was the example here, then the DHCP client, and
-		 * both are carried out now** -- so the subject moves again rather than
-		 * the check being deleted: what it asserts is that a refusal says
-		 * *what* is missing, and that property outlives any particular op.
-		 * `backend.start` on a supplicant is the launcher, which is a
-		 * different thing from the control-socket client `supplicant.h`
-		 * already carries. When that lands, this check moves again -- and if
-		 * it has nowhere to move to, the port is finished.
+		 * **`wg.set_peers` was the example here, then the DHCP client, then
+		 * the supplicant's launcher, and all three are carried out now** -- so
+		 * the subject moves again rather than the check being deleted: what it
+		 * asserts is that a refusal says *what* is missing, and that property
+		 * outlives any particular op. A PPPoE session is a `pppd`, which is
+		 * the next launcher with no port. When that lands, this check moves
+		 * again -- and if it has nowhere to move to, the port is finished.
 		 */
 		memset(&reason, 0, sizeof(reason));
-		reason.interface = "wlan0";
-		reason.field = "backend.supplicant";
+		reason.interface = "ppp0";
+		reason.field = "backend.pppoe";
 		reason.desired = "running";
 		reason.observed = "<absent>";
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_BACKEND_START;
-		op.u.backend.kind = (int)NCFG_BACKEND_SUPPLICANT;
-		op.u.backend.iface = "wlan0";
+		op.u.backend.kind = (int)NCFG_BACKEND_PPPOE;
+		op.u.backend.iface = "ppp0";
 		(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
 
 		/* The double refuses exactly what `ncfg_apply_supported` refuses,
@@ -1074,7 +1084,7 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		    "an op this build cannot carry out fails its action rather than passing");
 		message[0] = '\0';
 		check(!ncfg_apply_supported(&op, message, sizeof(message)) &&
-		    strstr(message, "backend.start") && strstr(message, "wpa_supplicant"),
+		    strstr(message, "backend.start") && strstr(message, "pppd"),
 		    "and the refusal says what is missing, not just that it is missing");
 	} else {
 		check(0, "an op this build cannot carry out fails its action rather than passing");
@@ -1881,10 +1891,56 @@ static void the_folding_rules(void)
 	(void)ncfg_owned_absorb(&owned, &op);
 	check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 2,
 	    "a backend started twice without staying up is counted twice (0079)");
+	/*
+	 * **The tally and the list are two answers to two questions**, and the
+	 * second is the one the whole observation hangs off: `observed.backends`
+	 * is filled from this record and from nowhere else, so a start that
+	 * counted a restart and recorded no backend left six observation passes
+	 * with an empty list to walk (project.md 10.183).
+	 */
+	check(owned.backend_count == 1u && owned.backends[0].kind == (int)NCFG_BACKEND_DHCP4 &&
+	    owned.backends[0].interface && strcmp(owned.backends[0].interface, "eth0") == 0,
+	    "  and the backend itself is in the record, once for two starts");
+	check(owned.backend_count == 1u && owned.backends[0].running,
+	    "  as running, which is netcfgd's memory of having started it (0078)");
+	check(owned.backend_count == 1u && !owned.backends[0].answering.has,
+	    "  and answering absent, because nothing asked it anything");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = (int)NCFG_BACKEND_DHCP6;
+	op.u.backend.iface = "eth0";
+	check(ncfg_owned_absorb(&owned, &op) && owned.backend_count == 2u,
+	    "  a second kind on one interface is a second backend, not the same one");
+	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_BACKEND_STOP;
+	op.u.backend.kind = (int)NCFG_BACKEND_DHCP4;
+	op.u.backend.iface = "eth0";
 	(void)ncfg_owned_absorb(&owned, &op);
-	check(owned.backend_restart_count == 0u,
-	    "  and a deliberate stop clears the count, the document having stopped asking");
+	check(owned.backend_restart_count == 1u &&
+	    owned.backend_restarts[0].kind == (int)NCFG_BACKEND_DHCP6,
+	    "  and a deliberate stop clears that count, the document having stopped asking");
+	check(owned.backend_count == 1u && owned.backends[0].kind == (int)NCFG_BACKEND_DHCP6,
+	    "  and takes that backend out, leaving the other kind alone");
+	/*
+	 * **The absence is the claim.** A record that outlived the daemon it
+	 * describes would have netcfgd believe it may stop whatever next answers
+	 * on that interface -- `link.delete`'s rule, one layer up.
+	 */
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.backend_count == 1u,
+	    "  and stopping one that is already gone is nothing, so a journal folds twice");
+
+	/*
+	 * `dns.apply` records nothing, and that is decided rather than missed.
+	 * The executor delivers every scope its context carries whatever this op
+	 * names, so the op is not the effect -- `apply.h` has the argument, and
+	 * this pins the behaviour so that a wave which closes it has to come here.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_DNS_APPLY;
+	op.u.dns.scope = "globals";
+	check(ncfg_owned_absorb(&owned, &op) && owned.dns_count == 0u,
+	    "a dns.apply folds nothing, being the one op that is not its own effect");
 
 	ncfg_owned_free(&owned);
 }

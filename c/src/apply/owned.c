@@ -22,6 +22,9 @@
  *   the Rust's `Effects` that this record can carry is a pure function of the
  *   op that produced it, so the op is the effect and the fold is checkable
  *   against the recorder rather than against a kernel.
+ *
+ *   `dns.apply` is the one op that is **not** its own effect, and it is the one
+ *   member of the record nothing here folds. See the case below.
  */
 #include "ncfg/apply.h"
 
@@ -122,6 +125,89 @@ static int object_put(ncfg_owned_object_t **list, size_t *count, const char *int
 /* ------------------------------------------------------------------------ *
  * Backends that will not stay up
  * ------------------------------------------------------------------------ */
+
+/*
+ * The backend netcfgd started, remembered -- or the one it stopped, forgotten.
+ *
+ * **`running` is set and is a memory rather than an observation**, which is
+ * 0078's distinction and the whole reason `answering` is a separate field: what
+ * this records is that netcfgd started the daemon and has not stopped it. A
+ * process being there is a different question, and nothing in this build asks
+ * it yet -- see `ncfg_owned_absorb`.
+ *
+ * Everything else about the entry is absent, which is the Rust's `absorb`
+ * exactly: an access point's station lists, a client's metric, a tunnel's
+ * digest and a daemon's prefixes are read live by observation passes, never
+ * recorded, and `observed.h`'s field tables leave every one of them out of the
+ * file when it is absent. So what goes to disk is `{kind, interface, running}`,
+ * which is what a Rust netcfgd writes for a backend it has just started.
+ */
+static size_t backend_at(const ncfg_owned_state_t *owned, int kind, const char *interface)
+{
+	size_t at;
+
+	for (at = 0; at < owned->backend_count; at++) {
+		if (owned->backends[at].kind == kind && owned->backends[at].interface && interface &&
+		    strcmp(owned->backends[at].interface, interface) == 0) {
+			return at;
+		}
+	}
+	return owned->backend_count;
+}
+
+static int backend_started(ncfg_owned_state_t *owned, int kind, const char *interface)
+{
+	ncfg_observed_backend_t *grown;
+	char                    *name;
+
+	if (!interface) {
+		return 0;
+	}
+	if (backend_at(owned, kind, interface) != owned->backend_count) {
+		/* Already recorded, which is the ordinary case for a start that
+		 * adopted the daemon already there. Folding the same journal twice
+		 * must write the same file, so this is not an append. */
+		return 1;
+	}
+	name = strdup(interface);
+	grown = realloc(owned->backends, (owned->backend_count + 1u) * sizeof(*owned->backends));
+	if (grown) {
+		/* `ncfg_owned_note_hook_state`'s arrangement and for its reason: the
+		 * old array is gone whichever way this goes, so the record takes the
+		 * new one before anything can return. */
+		owned->backends = grown;
+	}
+	if (!name || !grown) {
+		free(name);
+		return 0;
+	}
+	memset(&owned->backends[owned->backend_count], 0, sizeof(*owned->backends));
+	owned->backends[owned->backend_count].kind = kind;
+	owned->backends[owned->backend_count].interface = name;
+	owned->backends[owned->backend_count].running = 1;
+	owned->backend_count++;
+	return 1;
+}
+
+/*
+ * A stop takes the entry out, and its **absence** is what the record says.
+ *
+ * The same rule `link.delete` follows: a record that outlived the thing it
+ * describes is a claim on whatever next takes that name, and here the name is
+ * one interface and one kind of daemon.
+ */
+static void backend_stopped(ncfg_owned_state_t *owned, int kind, const char *interface)
+{
+	size_t at = backend_at(owned, kind, interface);
+
+	if (at == owned->backend_count) {
+		return;
+	}
+	ncfg_observed_backend_free(&owned->backends[at]);
+	memmove(&owned->backends[at], &owned->backends[at + 1u],
+	    (owned->backend_count - at - 1u) * sizeof(*owned->backends));
+	owned->backend_count--;
+}
 
 /*
  * A start that has not yet been seen to work, counted (0079).
@@ -290,9 +376,15 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 		return ncfg_owned_note_hook_state(owned, op->u.hook.iface, op->u.hook.phase,
 		    op->u.hook.value);
 	case NCFG_OP_BACKEND_START:
-		return restart_counted(owned, op->u.backend.kind, op->u.backend.iface);
+		/* The tally first, so that a start which cannot be recorded does not
+		 * leave a backend in the record with no count beside it. */
+		if (!restart_counted(owned, op->u.backend.kind, op->u.backend.iface)) {
+			return 0;
+		}
+		return backend_started(owned, op->u.backend.kind, op->u.backend.iface);
 	case NCFG_OP_BACKEND_STOP:
 		restart_cleared(owned, op->u.backend.kind, op->u.backend.iface);
+		backend_stopped(owned, op->u.backend.kind, op->u.backend.iface);
 		return 1;
 	/*
 	 * The rest change the machine and leave nothing this record answers a
@@ -302,9 +394,12 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 	 *
 	 *   * `backend.reload` neither starts nor stops anything, so it neither
 	 *     counts a restart nor clears one;
-	 *   * `dns.apply` **is** recorded in the Rust and cannot be here: the
-	 *     scopes are one of the two members `state.h` defers, their element
-	 *     type being the observed model's;
+	 *   * `dns.apply` **is** recorded in the Rust and is not here, and the
+	 *     record does now carry `dns`. What stops the fold is that the op is
+	 *     not the effect: `ncfg_service_dns_apply` delivers every scope its
+	 *     context carries whatever this op names, so folding the op's own
+	 *     scope would strand a departed one in the record for ever.
+	 *     `apply.h` has the whole argument;
 	 *   * the three commit ops are markers in the plan rather than changes to
 	 *     the machine, which is why the executor does nothing for them either.
 	 */

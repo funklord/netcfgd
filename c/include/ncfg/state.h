@@ -39,18 +39,23 @@
  *   of it -- and the one case where that silence was wrong is now loud: see
  *   `ncfg_owned_read`.
  *
- * WHAT THIS MODULE DOES NOT CARRY YET, SAID OUT LOUD
- *   `owned.json` has two members this build can neither read nor write: the
- *   backends netcfgd started and the DNS scopes it delivered. Their element
- *   types are the observed model's (`ncfg_observed_backend_t`,
- *   `ncfg_applied_dns_t`), whose readers and writers are the field tables in
- *   `src/model/observed.c` -- and those are static. A second copy of a DNS
- *   policy codec here is exactly the duplication 0263 forbids, and it would be
- *   a hundred lines that drift. So they are **deferred, not dropped**:
- *   `ncfg_owned_read` says so through the log when it meets a file that
- *   carries them, because a record silently losing which daemons netcfgd
- *   started is the unsafe direction. They arrive when the model exports those
- *   two types, which is one line in a file this module does not own.
+ * THE TWO MEMBERS THAT WERE DEFERRED, AND ARE NOT ANY MORE
+ *   `owned.json` carries the backends netcfgd started and the DNS scopes it
+ *   delivered, and for several waves this build could neither read nor write
+ *   them: their element types are the observed model's
+ *   (`ncfg_observed_backend_t`, `ncfg_applied_dns_t`) and its field tables are
+ *   static, so a record meeting them said so through the log and dropped them
+ *   on the way back out. What that cost was not the record -- it was
+ *   everything downstream of it. `observed.backends` and `observed.dns` are
+ *   filled **from this file and from nowhere else**, so both were empty on
+ *   every machine: six observation passes had nothing to walk, and the
+ *   planner's DNS comparison ran against an empty list and emitted a
+ *   `dns.apply` on every pass for ever (project.md 10.182, 10.183).
+ *
+ *   They are here now, read and written through
+ *   `ncfg_observed_backends_read` and `ncfg_applied_dns_read` -- the model's
+ *   own tables, published rather than copied, because a second DNS policy
+ *   codec in this module is exactly the duplication 0263 forbids.
  *
  *   The journal of the last apply (`plan.last.json`) is `netcfgd-apply`'s type
  *   and landed with that module, and `OwnedState::absorb` -- the fold of an
@@ -165,11 +170,33 @@ typedef struct {
 	/* Routes netcfgd installed. */
 	ncfg_owned_object_t *routes;
 	size_t               route_count;
+	/*
+	 * Backends netcfgd started.
+	 *
+	 * **A memory rather than an observation**, which is 0078's distinction and
+	 * is why every entry here has `running` set: it says netcfgd started the
+	 * daemon and has not stopped it, not that a process is there. Whoever
+	 * composes an observation is what turns the first into the second; until
+	 * something does, see `ncfg_owned_absorb` for what that costs.
+	 */
+	ncfg_observed_backend_t *backends;
+	size_t                   backend_count;
 	/* Starts of a backend that did not stay up. Cleared the moment it is seen
 	 * running, so a tunnel up for a week carries nothing from an incident last
 	 * month (0079). */
 	ncfg_backend_restart_t *backend_restarts;
 	size_t                  backend_restart_count;
+	/*
+	 * DNS scopes netcfgd delivered, and what it delivered.
+	 *
+	 * What the planner compares the document against, so that an already
+	 * applied policy is not applied again. **Replaced rather than merged** on
+	 * a fold: a delivery writes the resolver file whole, so a scope absent
+	 * from one is absent from the file and a record saying otherwise is simply
+	 * wrong.
+	 */
+	ncfg_applied_dns_t *dns;
+	size_t              dns_count;
 	/* Interfaces netcfgd turned IP forwarding on for. */
 	char **forwarding;
 	size_t forwarding_count;
@@ -189,14 +216,6 @@ typedef struct {
 	/* Interfaces netcfgd installed an ingress redirect on. */
 	char **ingress;
 	size_t ingress_count;
-	/*
-	 * Whether the file this was read from carried members this build cannot
-	 * carry -- the backends and the DNS scopes; see the header comment.
-	 * Reported rather than hidden, and the reason it is a field as well as a
-	 * log line is that a caller about to write the record back is the one that
-	 * would lose them.
-	 */
-	int carried_more;
 } ncfg_owned_state_t;
 
 /* Free everything it holds, leaving it usable and empty. */
@@ -406,11 +425,13 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
 /*
  * Write the observed model.
  *
- * The whole-host file only. **The per-link projections are deferred**, for the
- * reason the header comment gives about `owned.json`: one of those files is
- * `{link, addresses on it, routes on it}` and assembling it needs the observed
- * model's own writers, which are not exported. `observed.json` itself goes
- * through `ncfg_observed_write_canonical`, which is.
+ * The whole-host file only. **The per-link projections are deferred**, and it
+ * is the reason `owned.json`'s two lists were: one of those files is `{link,
+ * addresses on it, routes on it}` and assembling it needs three more of the
+ * observed model's writers, which are still private -- the two the record
+ * needed are published and the rest are not, because publishing a table
+ * nothing calls is a table nothing checks. `observed.json` itself goes through
+ * `ncfg_observed_write_canonical`, which is public.
  */
 int ncfg_state_write_observed(const char *run_dir, ncfg_observed_t *observed, char *err,
     size_t err_size);

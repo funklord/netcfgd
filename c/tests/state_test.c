@@ -256,6 +256,192 @@ static void a_record_that_will_not_parse_is_discarded_rather_than_fatal(const ch
 	(void)unlink(join(run_dir, "owned.json"));
 }
 
+/* ------------------------------------------------- backends and dns scopes */
+
+/*
+ * The witness, and it is this machine's own.
+ *
+ * `/run/netcfgd/owned.json` on the workstation this port is written on is
+ * written by the Rust netcfgd that is actually running here, and what is below
+ * is its shape with the names changed: member for member, in the order serde's
+ * derive emits them, with a backend as `{kind, interface, running}` and a scope
+ * as `{scope, policy}`. **The two members in the middle are the ones this build
+ * used to drop.** It read them as "known but unrepresentable", warned, and
+ * wrote the record back without them -- so a C netcfgd taking over from a Rust
+ * one forgot which daemons were up and which resolver policy had been
+ * delivered, and the planner re-delivered every scope on every pass for ever
+ * (project.md 10.183).
+ */
+static const char THE_RECORD_A_RUST_NETCFGD_WROTE[] =
+    "{\n"
+    "  \"boot\": \"\",\n"
+    "  \"created_links\": [],\n"
+    "  \"addresses\": [],\n"
+    "  \"routes\": [],\n"
+    "  \"backends\": [\n"
+    "    {\n"
+    "      \"kind\": \"supplicant\",\n"
+    "      \"interface\": \"wlan9\",\n"
+    "      \"running\": true\n"
+    "    },\n"
+    "    {\n"
+    "      \"kind\": \"dhcp4\",\n"
+    "      \"interface\": \"wlan9\",\n"
+    "      \"running\": true\n"
+    "    }\n"
+    "  ],\n"
+    "  \"backend_restarts\": [],\n"
+    "  \"dns\": [\n"
+    "    {\n"
+    "      \"scope\": \"globals\",\n"
+    "      \"policy\": {\n"
+    "        \"mode\": \"write_resolv_conf\",\n"
+    "        \"servers\": [],\n"
+    "        \"search\": [],\n"
+    "        \"domains\": [],\n"
+    "        \"options\": []\n"
+    "      }\n"
+    "    },\n"
+    "    {\n"
+    "      \"scope\": \"wlan9\",\n"
+    "      \"policy\": {\n"
+    "        \"mode\": \"write_resolv_conf\",\n"
+    "        \"servers\": [\n"
+    "          {\n"
+    "            \"addr\": \"192.0.2.1\"\n"
+    "          }\n"
+    "        ],\n"
+    "        \"search\": [\n"
+    "          \"example.test\"\n"
+    "        ],\n"
+    "        \"domains\": [],\n"
+    "        \"options\": []\n"
+    "      }\n"
+    "    }\n"
+    "  ],\n"
+    "  \"forwarding\": [],\n"
+    "  \"privacy\": [],\n"
+    "  \"accept_ra\": [],\n"
+    "  \"hook_state\": [],\n"
+    "  \"qdisc\": [],\n"
+    "  \"ingress\": []\n"
+    "}\n";
+
+static void the_backends_and_scopes_a_rust_netcfgd_recorded(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+	ncfg_owned_state_t back;
+	char *written;
+	size_t length = 0;
+
+	memset(&owned, 0, sizeof(owned));
+	memset(&back, 0, sizeof(back));
+	check(testdir_write(join(run_dir, "owned.json"), THE_RECORD_A_RUST_NETCFGD_WROTE,
+	    sizeof(THE_RECORD_A_RUST_NETCFGD_WROTE) - 1u),
+	    "a record in the shape this machine's own netcfgd writes");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.backend_count == 2u,
+	    "is read with both the backends it names");
+	check(owned.backend_count == 2u && owned.backends[0].kind == NCFG_BACKEND_SUPPLICANT &&
+	    strcmp(owned.backends[0].interface, "wlan9") == 0 && owned.backends[0].running &&
+	    owned.backends[1].kind == NCFG_BACKEND_DHCP4,
+	    "in the order the file holds them, kind, interface and running each");
+	/* **Absent is not false**, and the file is what says so: `answering` has
+	 * no place in this record at all, and reading it as `false` would put a
+	 * warning on every daemon netcfgd has ever started. */
+	check(owned.backend_count == 2u && !owned.backends[0].answering.has,
+	    "and a question the record does not answer is left unanswered, not answered no");
+	check(owned.dns_count == 2u && strcmp(owned.dns[0].scope, "globals") == 0 &&
+	    strcmp(owned.dns[1].scope, "wlan9") == 0,
+	    "and both delivered scopes, in the order the file holds them");
+	check(owned.dns_count == 2u && owned.dns[1].policy.server_count == 1u &&
+	    strcmp(owned.dns[1].policy.servers[0].addr, "192.0.2.1") == 0 &&
+	    owned.dns[1].policy.search_count == 1u &&
+	    strcmp(owned.dns[1].policy.search[0], "example.test") == 0,
+	    "with the whole policy under each, through the model's own table");
+
+	/*
+	 * And back out. This is the half that mattered: a read-modify-write is
+	 * what every apply does, so a member read and not written is a member the
+	 * first apply after a version change deletes.
+	 */
+	check(ncfg_owned_write(run_dir, &owned, message, sizeof(message)),
+	    "the record is written back");
+	written = testdir_read(join(run_dir, "owned.json"), &length);
+	check(written && strstr(written, "\"supplicant\"") && strstr(written, "\"192.0.2.1\"") &&
+	    strstr(written, "\"example.test\""),
+	    "and what went to disk still carries the backends and the scopes");
+	/*
+	 * **In the place serde's derive puts them**, which is the witness this
+	 * fixture was taken from: `backends` after `routes`, `dns` after
+	 * `backend_restarts`. Nothing reading JSON depends on the order -- what
+	 * does is the person running `diff` between a Rust netcfgd's record and a
+	 * C one's, which is the only instrument that has ever caught a member
+	 * this port put in the wrong place.
+	 */
+	check(written && strstr(written, "\"routes\"") && strstr(written, "\"backends\"") &&
+	    strstr(written, "\"backend_restarts\"") && strstr(written, "\"dns\"") &&
+	    strstr(written, "\"forwarding\"") &&
+	    strstr(written, "\"routes\"") < strstr(written, "\"backends\"") &&
+	    strstr(written, "\"backends\"") < strstr(written, "\"backend_restarts\"") &&
+	    strstr(written, "\"backend_restarts\"") < strstr(written, "\"dns\"") &&
+	    strstr(written, "\"dns\"") < strstr(written, "\"forwarding\""),
+	    "each in the place the Rust's derive writes it, so the two files diff");
+	free(written);
+	check(ncfg_owned_read(run_dir, &back, message, sizeof(message)) &&
+	    back.backend_count == 2u && back.dns_count == 2u &&
+	    back.dns[1].policy.server_count == 1u,
+	    "which reads back as itself, so a round trip loses nothing");
+	ncfg_owned_free(&owned);
+	ncfg_owned_free(&back);
+	(void)unlink(join(run_dir, "owned.json"));
+}
+
+static void a_backend_this_build_cannot_describe_is_refused(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+	static const char stranger[] = "{\"forwarding\":[\"eth0\"],\"backends\":[{\"kind\":"
+	    "\"dhcp4\",\"interface\":\"eth0\",\"running\":true,\"something_new\":1}]}";
+	static const char bad_kind[] = "{\"forwarding\":[\"eth0\"],\"backends\":[{\"kind\":"
+	    "\"teleport\",\"interface\":\"eth0\",\"running\":true}]}";
+	static const char half_a_list[] = "{\"dns\":[{\"scope\":\"globals\",\"policy\":"
+	    "{\"mode\":\"write_resolv_conf\"}},{\"scope\":\"eth0\"}]}";
+
+	/* `deny_unknown_fields`, one level down, and it comes from the model's
+	 * table rather than from a second list here -- which is the whole reason
+	 * the table is what this module reads through. */
+	check(testdir_write(join(run_dir, "owned.json"), stranger, sizeof(stranger) - 1u),
+	    "a backend carrying a member this build has never heard of");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.forwarding_count == 0u && owned.backend_count == 0u,
+	    "discards the whole record rather than adopting a daemon it cannot describe");
+	ncfg_owned_free(&owned);
+
+	check(testdir_write(join(run_dir, "owned.json"), bad_kind, sizeof(bad_kind) - 1u),
+	    "and a kind outside the set is the same answer");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.forwarding_count == 0u && owned.backend_count == 0u,
+	    "rather than a backend of some kind netcfgd would then try to stop");
+	ncfg_owned_free(&owned);
+
+	/*
+	 * **A list that failed half way is still a list**, which is what the
+	 * reader promises and what the free below has to be able to take apart:
+	 * the first scope here reads, the second does not, and the array was
+	 * allocated for both. Under the sanitizer this is the case that says so.
+	 */
+	check(testdir_write(join(run_dir, "owned.json"), half_a_list,
+	    sizeof(half_a_list) - 1u),
+	    "a dns list whose second scope is not a scope at all");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.dns_count == 0u,
+	    "is discarded whole, and what had been read is freed rather than stranded");
+	ncfg_owned_free(&owned);
+	(void)unlink(join(run_dir, "owned.json"));
+}
+
 static void two_writers_of_one_file_do_not_share_a_temporary(const char *run_dir)
 {
 	char message[NCFG_ERROR_MAX] = "";
@@ -726,6 +912,8 @@ int main(void)
 	a_record_from_another_boot_is_discarded(run_dir);
 	a_record_with_no_boot_recorded_is_kept(run_dir);
 	a_record_that_will_not_parse_is_discarded_rather_than_fatal(run_dir);
+	the_backends_and_scopes_a_rust_netcfgd_recorded(run_dir);
+	a_backend_this_build_cannot_describe_is_refused(run_dir);
 	two_writers_of_one_file_do_not_share_a_temporary(run_dir);
 	two_updaters_do_not_lose_each_others_records(run_dir);
 	provenance_round_trips(run_dir);

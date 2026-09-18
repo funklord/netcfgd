@@ -66,6 +66,7 @@
 
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/json_write.h"
 #include "ncfg/value.h"
 
 /* ------------------------------------------------------------------------ *
@@ -1022,6 +1023,38 @@ typedef struct {
 	char             *scope; /* an interface name, or `globals` */
 	ncfg_dns_policy_t policy;
 } ncfg_applied_dns_t;
+
+/*
+ * The two lists above, read and written on their own.
+ *
+ * **`owned.json` carries both, and this is where they come from.** The record
+ * is what fills `backends` and `dns` in an observation -- nothing else does --
+ * so `state.h` needs a reader and a writer for exactly these two element
+ * types, and a second copy of either in that module would be a DNS policy
+ * codec written twice. The field tables stay private here; what travels is the
+ * list walk.
+ *
+ * The reader hands back a list the caller frees with the matching call, and it
+ * does so **even when it fails part way**: a half-read list is still a list,
+ * and leaving it unreachable would be the leak a refusal is supposed to avoid.
+ * `node` is the array; anything else is refused with a sentence.
+ */
+int ncfg_observed_backends_read(const ncfg_json_doc_t *doc, uint32_t node,
+    ncfg_observed_backend_t **out, size_t *count_out, char *err, size_t err_size);
+void ncfg_observed_backends_write(ncfg_json_writer_t *writer,
+    const ncfg_observed_backend_t *backends, size_t count);
+void ncfg_observed_backends_free(ncfg_observed_backend_t *backends, size_t count);
+/* Free what one backend holds, leaving it usable and empty. Here as well as the
+ * list's free because a caller taking one entry *out* of a list cannot use the
+ * list's -- that one frees the array too. `ncfg_state_report_free` is beside
+ * `ncfg_state_reports_free` for the same reason. */
+void ncfg_observed_backend_free(ncfg_observed_backend_t *backend);
+
+int ncfg_applied_dns_read(const ncfg_json_doc_t *doc, uint32_t node, ncfg_applied_dns_t **out,
+    size_t *count_out, char *err, size_t err_size);
+void ncfg_applied_dns_write(ncfg_json_writer_t *writer, const ncfg_applied_dns_t *dns,
+    size_t count);
+void ncfg_applied_dns_free(ncfg_applied_dns_t *dns, size_t count);
 
 /*
  * What one event hook on one interface was last told.
