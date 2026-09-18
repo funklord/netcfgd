@@ -207,6 +207,65 @@ static inline int planfix_warned(const ncfg_plan_t *plan, const char *fragment)
 	return 0;
 }
 
+/* The whole warning that contains this text, so a check can look at the rest of
+ * it rather than only at the fragment it matched on. */
+static inline const char *planfix_warning_with(const ncfg_plan_t *plan, const char *fragment)
+{
+	size_t i;
+
+	for (i = 0; plan && i < plan->warning_count; i++) {
+		if (plan->warnings[i].message && strstr(plan->warnings[i].message, fragment)) {
+			return plan->warnings[i].message;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Whether a message arrived whole, checked by its **last** words.
+ *
+ * `ncfg_plan_warnf` formats into `NCFG_ERROR_MAX` and marks what it had to cut
+ * at the *end*, so a check asserting a fragment near the front of a long
+ * warning cannot fail -- the front is the half a cut keeps. That is
+ * `evidence.md`'s shape, and it is how the first draft of a warning here
+ * reached an operator as "still means t" with every check on it green.
+ *
+ * **Here rather than in one test file**, because three of them now assert the
+ * tail of a sentence that goes through `ncfg_plan_warn_unbuilt`: that helper
+ * appends 196 characters after whatever the caller wrote, so every warning
+ * routed through it is a sentence whose end is the part at risk.
+ */
+static inline int planfix_whole(const char *message, const char *ending)
+{
+	size_t length;
+	size_t tail;
+
+	if (!message) {
+		return 0;
+	}
+	length = strlen(message);
+	tail = strlen(ending);
+	return length >= tail && length < NCFG_ERROR_MAX &&
+	    strcmp(message + (length - tail), ending) == 0;
+}
+
+/*
+ * The whole of what `ncfg_plan_warn_unbuilt` appends, so that asserting it as a
+ * message's tail proves two things at once: that the block was marked as
+ * nobody's gap rather than as this port's, and that the whole of the sentence
+ * fitted.
+ *
+ * **All of it, not its last few words.** The first draft of this macro was
+ * "still means this when the code arrives" -- which is the tail of the sentence
+ * `warn_unbuilt` *replaced* as well as of the one it writes, so a check using
+ * it passed against a warning that had gone back to promising a release of this
+ * port. Found by sabotage: putting the old wording back turned nothing red.
+ */
+#define PLANFIX_UNBUILT_TAIL \
+	". That is not this port catching up: nothing acts on it in the Rust either, " \
+	"so there is nothing to wait for. The block is kept so a configuration written " \
+	"now still means this when the code arrives"
+
 /* Whether any warning, reason or refusal anywhere in the plan contains this
  * text. What a secret must never appear in. */
 static inline int planfix_mentions(const ncfg_plan_t *plan, const char *fragment)

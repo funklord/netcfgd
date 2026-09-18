@@ -601,27 +601,27 @@ static void a_client_the_document_no_longer_asks_for_is_stopped(void)
 	planfix_release(plan, document, observed);
 
 	/*
-	 * **A backend no pass here starts is not one this pass may stop.** The
-	 * access point and the two tunnels are started by passes this build does
-	 * not have, so answering "the document does not ask for this" about them
-	 * would stop something netcfgd never started and start nothing in its
-	 * place.
+	 * **A backend no pass here starts is not one this pass may stop.** The two
+	 * tunnels are started by passes this build does not have, so answering
+	 * "the document does not ask for this" about them would stop something
+	 * netcfgd never started and start nothing in its place.
 	 *
-	 * The supplicant used to be in that list and is not any more: `dot1x.c`
-	 * starts one, so this build decides about one. A **radio's** supplicant is
-	 * still started by nothing here, which is the arm that keeps the rule safe
-	 * -- so the case is now that a radio's is left alone, and
-	 * `plan_gaps_test.c` walks the rest of the rule.
+	 * The supplicant used to be in that list and is not any more, in two
+	 * steps: `dot1x.c` took the wired half, and this case asserted that a
+	 * **radio's** was left alone because nothing here started one. `radio.c`
+	 * starts one now, so the case has turned into the ordinary shape -- a
+	 * radio whose document still asks for a supplicant keeps it, by the same
+	 * rule that would start one. `plan_radio_test.c` walks the rest.
 	 */
 	plan = plan_of("{}",
 	    "\"devices\":[{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
 	    "\"wifi\":{}}],"
 	    "\"interfaces\":[{\"name\":\"wlan0\",\"addressing\":[]}]",
-	    "\"links\":[" LINK_UP("wlan0") "],"
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "],"
 	    "\"backends\":[{\"kind\":\"supplicant\",\"interface\":\"wlan0\",\"running\":true}]",
 	    &document, &observed);
 	check(plan && !has_name(plan, "backend.stop"),
-	    "and a radio's supplicant, which this build cannot start, is not one it stops");
+	    "and a radio's supplicant, which this build starts, is not one it stops either");
 	planfix_release(plan, document, observed);
 }
 
