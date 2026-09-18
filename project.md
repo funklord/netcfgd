@@ -9515,6 +9515,750 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.187 What the port is waiting for, in one place
+
+Written because this document has had six sentences corrected this week for
+saying something nobody re-checked, and the list of what is left had become
+the same kind of claim: repeated from wave to wave, never re-derived. This is
+the derivation, as of 2026-09-18, and the next wave should re-derive it rather
+than quote it.
+
+### The one thing between this build and a machine
+
+**`ncfg_kernel_set_service` has no caller outside the tests.** Every op that
+goes through `ncfg_service_t` -- `dns.apply`, the four sysctls, the six wifi
+ops, and all three backend verbs -- is refused at run time for want of a
+context, and refused by a sentence that names the context rather than the op.
+So the supplicant launcher, the DHCP client, hostapd's start and the DNS
+delivery are all written, tested and unreachable, and none of the four
+refusals an operator would read says so.
+
+That is one wiring job in `src/main/`, and it is why `netcfgd` still will not
+start. Nothing else on this list blocks a machine.
+
+### What the planner still carries without acting
+
+Two, and both are the product's rather than this port's: **link-local
+addressing**, whose arm in the Rust is the same warning, and a **`network`
+block's** addressing, routes, `dns` and hooks, which §10.180 settled. The
+third, `metric`, is a real port gap and is deferred for a reason worth keeping
+-- `effective_metric`'s observation half reads a field nothing fills, so a
+producer written today would return `interface->preference` for every
+interface on every machine. It would look like the rule and be the bug.
+
+### What the observer does not do
+
+Seven of eleven passes. Six read `observed.backends`, which the record now
+carries but which nothing fills until `read_backend_liveness` lands -- and
+that one is held by `process.h` reaching `/proc` at a fixed path, which
+`observe.h`'s own rule forbids an observation pass. The seventh,
+`read_resolv_currency`, reads `observed.dns`, which is carried and not folded
+for the reason §10.183 gives.
+
+### What is written and cannot be reached
+
+`apply/kernel_genl.c` does not write the WireGuard key record, so
+`key_matches` is absent on every real machine -- unanswered rather than
+answered wrongly, which is the one shape the planner does nothing about.
+
+### What is deliberately not being done
+
+The NetworkManager adapter, which
+[0264](doc/decision/0264-the-library-the-bus-already-brought.md) settles and
+defers. `ncfg reset`'s partial-failure path, which cannot be driven as root.
+0079's third restart-count clear, which §10.183 shows is unsafe with the input
+available. And the `WANTED`/`ACTIVE` offload disagreement of §10.185, which
+needs a third state neither language's model has anywhere to put.
+
+### The residue nobody owns
+
+`request_parts` exists five times -- four under `src/observe/` and one in
+`src/apply/kernel_genl.c` -- each differing only in the noun in its refusal.
+`family_of` twice. None is wrong; all five are a chance to drift, and the
+shared pair belongs in `observe_internal.h`. A harmonizing pass over files
+that three waves were writing in at once is not a thing to do mid-wave, which
+is why it is here instead of done.
+
+## 10.186 The launcher, and the driver two halves of the Rust disagree about
+
+`ncfg_supplicant_start` and `ncfg_supplicant_stop` land as
+`c/src/backend/supplicant/launch.c`, and `ncfg_service_backend_supported` stops
+refusing a supplicant. That refusal was the last executor gap between a WPA
+laptop and a plan that is already right about it -- §10.183's wave made the
+planner emit `backend.start` for a radio's supplicant and for a `dot1x` port,
+and the executor declined it with "needs a `wpa_supplicant` to be launched and
+adopted".
+
+**The mark is the pid file's own path, and that is udhcpc's arrangement rather
+than dhcpcd's.** netcfgd starts the supplicant with
+`-P <run>/supplicant/<iface>.pid`, so that absolute path -- one netcfgd
+composed out of its own run directory and one interface -- sits in
+`/proc/<pid>/cmdline` for as long as the process lives, and
+`ncfg_supplicant_running_pid` is `ncfg_dhcp_running_pid` with that marker.
+Four marks existed before this: radvd's generated configuration, a tunnel's
+management socket, udhcpc's pid file, and dhcpcd's three-valued answer over its
+own control socket. Only the last is a different *mechanism*, and it is one
+because dhcpcd calls `setproctitle` and destroys its own argv. `wpa_supplicant`
+does not, so the cheaper mark survives and no fifth spelling of ownership was
+invented. Adoption is 0140's, unchanged: `RuntimeDirectory=netcfgd` empties
+`/run/netcfgd` on every daemon stop while `KillMode=process` leaves the
+supplicant running, so losing the handle is what a restart does rather than
+what a fault does.
+
+**What is new is where a stranger's supplicant is identified.** For the other
+four, a process either carries netcfgd's mark or it does not. Here a process
+carrying no mark is not thereby somebody else's -- it may be a dead one's
+leftover socket file -- so the question is asked of the socket: one that
+answers is a manager still running and the radio is declined; one that does
+not is 0080's stale file and is cleared. Getting that the wrong way round is
+the whole of the measured fault in 0140, in both directions at once.
+
+### Three things in the Rust, and the first is the expensive one
+
+**The driver and the population read different sources, and a `dot1x` block on
+a radio makes them disagree.** `start_supplicant` picks `-Dwired` against
+`-Dnl80211,wext` from **sysfs** -- `netcfgd_sys::radio::is_wireless`,
+`crates/netcfgd-apply/src/kernel.rs:4427` -- and `populate_supplicant` picks
+between `configure_wired` and the radio's networks from the **document**,
+`kernel.rs:706`, by looking the interface up in `self.dot1x`. Those are two
+answers to one question.
+
+    device "wlan0" { }
+    interface "wlan0" { dot1x { method = "peap" identity = "..." } }
+
+compiles, plans a supplicant through `plan_dot1x`, and starts it with
+`-Dnl80211,wext` because the kernel says the interface is wireless -- and then
+sends it `key_mgmt = IEEE8021X` because the document says the port does 802.1X.
+`supplicant.h` already records what that combination is worth: *"a network the
+supplicant accepts and never authenticates with, which is the worst available
+outcome -- everything looks configured and the port stays blocked."* Nothing
+downstream can tell, because each half is doing exactly what it was asked.
+
+Not observed on a machine here, and it does not need to be: the two readings
+are in the source and the document that separates them compiles. The C asks
+once -- `ncfg_service_supplicant_driver`, built out of the two lookups
+`ncfg_service_set_profiles` branches on -- so the driver and the population
+cannot part company. **Found by sabotage rather than by reading**: swapping the
+two lookups over in the C turned no check red, because no fixture had an
+interface that was both, and the check that exists now was written to close
+that.
+
+**`start_supplicant` asks whether one is already running only if the socket
+file is there.** `kernel.rs:4307` is `if dir.join(iface).exists() { ... }`, and
+the `pid_of` check, the adoption and the refusal all live inside it. So a live
+supplicant of netcfgd's whose socket file has gone -- removed by hand, by a
+`tmpfiles` rule over `/run/wpa_supplicant`, or by anything else -- is not
+noticed at all: the arm falls through and spawns a second `wpa_supplicant` with
+the same `-P` path. The second overwrites the pid file, the first becomes
+permanently unreachable, and two supplicants on one radio is exactly the state
+0140 reports costing a machine its network. Reproduction:
+`rm /run/wpa_supplicant/wlan0` on a machine netcfgd is managing, and reconcile.
+`ncfg_supplicant_start` asks `ncfg_supplicant_running_pid` first and
+unconditionally, which is `ncfg_dhcp_start`'s own first step.
+
+**The 0125 guard fails open when it cannot read an ifindex.** `start_supplicant`
+builds its claim list at `kernel.rs:4283`:
+
+    std::fs::read_to_string(radio::class_net().join(iface).join("ifindex"))
+        .ok()
+        .and_then(|text| text.trim().parse::<u32>().ok())
+        .map(|index| vec![(iface.to_owned(), index)])
+        .unwrap_or_default();
+
+and then asks `contention::contenders(&claimed)`. An empty claim list has no
+contenders, so a read that failed is indistinguishable from *nobody else claims
+this radio* -- and the guard whose absence let netcfgd start a supplicant on an
+interface NetworkManager was actively using, one second before the association
+collapsed and the address and default route went with it, is simply skipped.
+`unwrap_or_default` is the whole of it and nothing says so. The direction is
+wrong for what the guard is: `ncfg_process_shares_network_namespace` in this
+port states the rule -- the two defaults point opposite ways because the costs
+do -- and this is the one that should fail closed.
+
+Reproduction: point `NCFG_SYS_CLASS_NET` at a directory with no `ifindex` for
+the interface, which is what a fixture does, and netcfgd starts a supplicant
+whatever else is on the radio. Cost: the guard is inert in exactly the
+environment the live suite runs in, so no test on that side can tell a guard
+that works from one that was never reached.
+
+### What this wave does not close
+
+`ncfg_kernel_set_service` has no caller outside the tests. The daemon builds
+its executor with `ncfg_kernel_new` and `ncfg_kernel_set_hooks` and nothing
+else, so every op in `service.h` -- `dns.apply`, the four sysctls, the six wifi
+ops and all three backend verbs -- is refused by name at run time for want of a
+context. Removing the supplicant's refusal from `ncfg_apply_supported`
+therefore makes `ncfg diff` and a dry run right about a WPA laptop and does not
+on its own bring one up. Named here for §10.183's reason: so that nobody reads
+"the launcher landed" as "a WPA laptop comes up". Wiring the context is a
+`src/main/` wave and is the next one worth taking.
+
+## 10.185 The offloads nobody had ever read back, and what the kernel says besides
+
+`read_offloads` is ported, `c/src/observe/offloads.c`. §10.182 judged it the
+cheapest of the ten deferred passes and named the one thing in its way: the
+kernel's feature names per model field existed once in this port, privately in
+`c/src/plan/offload.c`, above a comment saying the second caller takes that
+table rather than writing its own.
+
+### Where the table went, and why it is the model's
+
+`document.h`, as `ncfg_offload_field_names`, beside `ncfg_bond_mode_number` --
+whose paragraph already states the rule and the reason: **the model owns a
+numbering two modules must agree on**, and `src/apply/` may not keep tables of
+its own because "two lists of four numbers in two places is how a mode comes to
+mean one thing on the way out and another on the way back in". This is that
+sentence with strings instead of numbers, and the failure is quieter: a name
+absent from a device's active set reads as *off*, so a disagreement between the
+writer and the reader is not an error anywhere -- it is an offload turned on,
+read back as off, and turned on again on every pass for ever.
+
+`ncfg_link_settings_offload` moved with it, because an enumerator whose mapping
+onto a member of `ncfg_link_settings_t` lived in the planner would be a second
+opinion that nothing fails to compile over. The Rust reached the same place
+first and says why: `netcfgd_model::interface::offload_names` is in the model
+"because the planner needs them and the planner is pure". Nothing under
+`src/plan/` or `src/observe/` spells a feature name now; three literals in
+`plan_tc_test.c` are what pin the spellings, and sabotaging the table proves it
+-- changing `rx-gro` or dropping one of transmit checksumming's three turns
+`plan_tc_test.c` red and leaves `observe_offloads_test.c` green, because the
+latter derives every expectation from the table under test.
+
+### The convergence, which is §10.182's NAT sentence one field along
+
+`c/src/plan/offload.c` compares the document's `ethtool` block against
+`ncfg_observed_link_t.offloads`, and nothing filled it. So a machine whose
+offloads already agreed was planned a `link.set_offloads` on every pass, and the
+op's *inverse* -- built out of that same empty list -- would have turned every
+named feature **off** rather than putting back what was there.
+
+`observe_offloads_test.c` shows it from kernel bytes through the planner and in
+both directions: the same document against the same links plans nothing when the
+observation is taken and one `link.set_offloads` when the seam is left out. One
+direction alone would pass just as loudly over a planner that had stopped
+planning anything.
+
+The seam is a third `ncfg_observe_kernel_t` on `ncfg_observe_current_from`,
+named `genl` for the protocol rather than `ethtool` for the family -- one
+generic netlink socket carries every family, and the two WireGuard passes took
+this one in the same wave rather than opening a fourth (§10.184). 0263 carries
+the divergences.
+
+### One defect in the Rust, and this port inherits it
+
+**The planner writes `WANTED` and the observer reads `ACTIVE`, and the kernel
+does not promise they agree.** `crates/netcfgd-sys/src/ethtool.rs:125`'s
+`set_features` sends a mask bitset into `ETHTOOL_A_FEATURES_WANTED`;
+`crates/netcfgd-observe/src/host.rs:1125`'s `read_offloads` reads
+`ETHTOOL_A_FEATURES_ACTIVE` (`ethtool.rs:89`) and nothing else; and
+`crates/netcfgd-plan/src/lib.rs:4445` compares the document against what the
+second produced. A feature the device forces on cannot be moved by the first and
+goes on being reported by the second, so `link.set_offloads` is planned, sent,
+acknowledged, and planned again -- on every reconcile, for ever, with a journal
+entry each time.
+
+**Measured on this workstation, read-only**, with one `FEATURES_GET` per device
+and nothing sent that changes anything. The reply carries four bitsets and both
+languages read one of them:
+
+    lo        ACTIVE   ... rx-checksum ...        (rx-checksum is on)
+              WANTED   ... no rx-checksum ...     (nothing asked for it)
+              NOCHANGE vlan-challenged            (and it is not listed here)
+
+`rx-checksum` is *active* on `lo`, `docker0` and both WireGuard devices on this
+machine while being *absent from what was wanted* -- which is the state a
+refused set leaves behind, sitting there before anything was applied. So the
+reproduction needs no write: a document saying `rx_checksum = off` on any of
+those four interfaces plans the op, the kernel takes the request into `WANTED`
+and leaves `ACTIVE` alone, and the next observation reports it on again. The
+same holds in the other direction for a feature fixed off.
+
+Cost: a netlink write and a journal line per reconcile per affected interface,
+for ever, on a machine that reports itself unconverged and can never converge.
+It is invisible today in the Rust only because `ethtool` blocks are rare.
+
+**The port inherits it, and this wave is what makes it reachable here.** Before
+the observation existed the C compared against an empty list, which made
+`rx_checksum = off` look converged by accident and `= on` loop instead; now the
+comparison is real and the loop is the kernel's fixed features rather than the
+missing observation. The fix is a reader for `ETHTOOL_A_FEATURES_NOCHANGE` -- or
+for `WANTED` beside `ACTIVE` -- and a model that can say "asked for and refused"
+rather than only "on" and "off"; `ncfg_observed_link_t.offloads` is a list of
+names in both languages and has nowhere to put the third state. That is a change
+to the model and to both planners, so it is recorded here and in 0263 rather
+than made in an observation pass.
+
+## 10.184 The store the daemon was pointed at, and the one it reads
+
+The two WireGuard observation passes are ported, which §10.182 judged a wave of
+their own because they need a generic netlink socket and, for the second of
+them, the secret store. The socket half stopped being a blocker when the
+offloads round opened one (§10.185); the store half is what this section is
+about, because reading it turned up the one defect in the Rust that this port
+does not inherit.
+
+### `--config-dir` does not reach the secret store
+
+`netcfgd --config-dir /srv/test` compiles `/srv/test/*.conf`, and then resolves
+every `@secret:NAME` in it under **`/etc/netcfgd/secrets`**.
+
+`crates/netcfgd-apply/src/kernel.rs:4176` is the whole of it:
+
+    pub fn secrets_dir() -> std::path::PathBuf {
+    	std::env::var_os("NCFG_CONFIG_DIR").map_or_else(
+    		|| std::path::PathBuf::from(netcfgd_secret::DEFAULT_SECRETS_DIR),
+    		|dir| std::path::PathBuf::from(dir).join("secrets"),
+    	)
+    }
+
+The environment variable, or the default, and nothing else. The flag is parsed
+(`netcfgd-daemon/src/lib.rs:171`) and resolved into the directory the
+configuration is read from (`:191`), and no path leads from there to this
+function. Four call sites take it: the executor's resolver
+(`kernel.rs:4202`, which is what loads a WireGuard private key and an 802.1X
+credential into the kernel and into a supplicant) and three passes in the
+observer -- `read_wireguard_currency` (`observe/host.rs:197`),
+`read_secret_currency` (`:483`) and `read_tunnel_currency` (`:676`).
+
+Read out of the source rather than run: starting a second netcfgd against this
+workstation's real `/etc/netcfgd/secrets` to watch it read the wrong directory
+is not a thing to do for a fact the two files settle between them.
+
+**What it costs has two shapes and the quiet one is worse.** On a machine with
+no `/etc/netcfgd/secrets`, every secret fails to resolve and the operator is
+told to run `ncfg secret set` -- which writes into a directory this daemon is
+not reading either, so the advice is wrong and following it does not help. On a
+machine that has both, netcfgd loads **the other tree's key** into the device
+the scratch tree's configuration describes, and `read_wireguard_currency` then
+reports that key as current, because both halves of its comparison came from
+the store the flag did not move. That is a tunnel coming up to the wrong peer,
+reported as correct.
+
+**The port does not inherit it**, and by two separate mechanisms rather than
+one. `c/src/main/daemon_main.c:330` builds the secrets directory as
+`where.config + "/secrets"` -- under the directory the daemon was *given* --
+with a comment that already says why. And the observer does not resolve the
+question at all: the store is a `ncfg_secret_resolver_t *` argument to
+`ncfg_observe_current_from`, stored on `ncfg_observe_source_t`, and NULL means
+the currency question goes unasked rather than the machine's own store being
+read. That is `observe.h`'s rule about every root being a parameter, pointed at
+the one directory where getting it wrong reads somebody's credentials.
+
+### What the observation is for, which is not the convergence NAT had
+
+§10.182 and §10.183 both end in the same sentence: a list nothing filled made
+the planner compare against an empty one, so a machine that was already right
+was planned the same op on every pass and never converged. **The WireGuard
+passes are the other failure.** `ncfg_plan_wireguard` returns without planning
+anything for a link whose `wireguard` observation is absent, and nothing filled
+one in -- so an edited listen port, an edited mark, a rotated private key and a
+**deleted peer** each planned nothing whatever, on a tunnel that looked
+configured. Decision 0054 is dated, its planner has been complete for waves,
+and none of it had ever run against a device.
+
+Both directions are now checked in `c/tests/observe_wireguard_test.c`: a device
+observed exactly as the document describes it plans nothing, an edited port
+plans one `wg.set_device`, and the same document against an observation with
+the device unobserved plans nothing at all -- which is what the last several
+waves would have printed.
+
+**And the absent seam is read differently here than in the two passes beside
+it, deliberately.** A netfilter socket that will not open is honestly "no NAT
+is installed"; an empty offload list is honestly "off or unsupported". A
+WireGuard device that could not be read is **not** a device with no peers, and
+reporting it as one hands the planner an empty peer list to correct with
+`WGDEVICE_F_REPLACE_PEERS`. So every way the read can fail leaves
+`link->wireguard` at NULL, which the model already distinguishes from an
+observed device with no key. 0263 carries it as a divergence because the
+neighbouring passes take the opposite direction and the difference is not
+visible from either.
+
+### One input of it is not written by this build
+
+The currency question compares a digest of what the store holds now against a
+digest of what netcfgd loaded when the kernel accepted it, and the second is a
+0600 record under `/run` that the executor writes. `apply/kernel_genl.c` does
+not write one, so `key_matches` and `preshared_matches` are absent on every
+real machine until it does. That is a question left unanswered rather than
+answered wrongly -- `plan/wireguard.c` reads `has` before `value` for exactly
+this reason, and an unanswered question rekeys nothing -- but it is the pass'
+remaining half and it is one function in the executor:
+`ncfg_observe_wg_key_record_path` and `ncfg_observe_wg_preset_record_path` are
+published so that whoever writes it names the file through them rather than
+spelling the path a second time.
+
+### A digest is not a way back to a key, and is still kept out of everything
+
+The technique is 0052's, which compares a digest for an access point's
+passphrase, and the argument for using it on a private key is that 32 octets of
+kernel randomness have no dictionary and no structure to attack -- which is
+also why it would be a poor answer for a passphrase. That makes the record safe
+to write; it does not make a digest safe to *print*, because it identifies the
+key it was taken of well enough for anyone reading a journal to tell which key
+a device is running. So neither the material nor a digest of it reaches an
+error buffer, a log line or the observation written to `/run`, and the test
+sweeps a canary through all three rather than asserting it.
+
+**The sweep was vacuous in half when it was first written**, which is worth
+recording because it is `evidence.md`'s shape and it was invisible: the
+canary's digest was a constant computed for an earlier spelling of the canary
+string, so the half of the sweep that looks for a digest could not have found
+one. It was caught by sabotage -- emitting the digest to a log deliberately and
+watching nothing go red -- and not by reading the test.
+
+## 10.183 The record was the keystone, and two things downstream of it had never converged
+
+§10.182 counted the observer's passes and found that what blocks six of them is
+not a backend module but `owned.json`: `observed.backends` is filled from the
+ownership record and from nowhere else, and `ncfg_owned_state_t` had no member
+for it. This wave is that member, and the one beside it.
+
+`c/include/ncfg/state.h` now carries `backends` and `dns`; `c/src/host/state.c`
+reads and writes both; `c/src/observe/current.c` hands both to the prior beside
+the restart tally and the hook state, which makes its "six aggregate lists are
+handed over" true for the first time -- it was handing over four; and
+`c/src/apply/owned.c` folds a `backend.start` into the list as well as into the
+tally, and a `backend.stop` out of it.
+
+**The element types are the model's and are still written in one place.** The
+readers and writers `state.c` needs are `observed.c`'s own field tables, and a
+second copy of a DNS policy codec in `src/host/` is exactly what 0263 forbids.
+So `observed.h` publishes six calls -- a read, a write and a free for each of
+the two lists -- and what they publish is the **list walk**, which is a loop.
+The element tables stay private, and `ncfg_type_read`, `ncfg_type_write` and
+`ncfg_type_free` were already public because a caller like this was expected.
+
+`carried_more` is gone with the deferral. It was the flag `ncfg_owned_read` set
+when it met a member it could not carry and the warning `current.c` printed
+about it; there is nothing left for either to report, and a flag that always
+reads false is one whose next reader believes something.
+
+### The witness is this machine's own `/run`
+
+The Rust netcfgd is running on the workstation this port is written on, so the
+file that had to be agreed with was sitting there:
+
+    {"boot": ..., "created_links": [], "addresses": [], "routes": [],
+     "backends": [{"kind": "supplicant", "interface": "...", "running": true},
+                  {"kind": "dhcp4",      "interface": "...", "running": true}],
+     "backend_restarts": [],
+     "dns": [{"scope": "globals", "policy": {"mode": "write_resolv_conf",
+              "servers": [], "search": [], "domains": [], "options": []}},
+             ...],
+     "forwarding": [], ...}
+
+Member for member and in that order: `backends` after `routes`, `dns` after
+`backend_restarts`. **A backend entry is three fields**, which is the part that
+could have been got wrong from the struct alone -- `ObservedBackend` has twelve,
+and the other nine are read live by observation passes, never recorded, and
+carry `skip_serializing_if`. The C writes the same three because the field table
+omits an absent option, and `state_test.c` pins the *order* of the record's own
+members as well as their contents, because the only instrument that has ever
+caught a member in the wrong place is somebody running `diff` between a Rust
+record and a C one.
+
+### Two things downstream had never converged, and one of them is the NAT defect again
+
+§10.182's `read_netfilter` entry found that a machine whose NAT was already
+right was planned a `nat.replace` on every pass, because the list the planner
+compared against was empty and nothing filled it. **`observed.dns` is the same
+shape, and `dns.h` says so above the function that exists to prevent it**: "a
+plan could not tell an already-applied policy from an unapplied one, and every
+run would emit a `dns.apply` -- which would fail the plan-idempotence gate."
+`c/src/plan/host_wide.c:487` compares each desired scope against
+`ncfg_observed_dns_for`, which reads `observed->dns`, which came from the record
+and was therefore always empty. So every scope differed on every pass, for ever.
+
+The other is the six observation passes, which now have a list to walk.
+
+### What is still not done, and why each
+
+**`dns` is carried and not folded.** The fold's whole argument is that the op
+*is* the effect; `dns.apply` is the one op where that is false, because
+`ncfg_service_dns_apply` delivers every scope its context carries whatever the
+op names while the planner emits an op only for a scope that differs. Neither
+of the two rules that could be written from the ops converges: recording the
+op's own scope leaves a departed scope in the record for ever and the planner
+re-delivers on every pass while it stands, and replacing the list from the ops
+drops the scopes that did not differ so the two states alternate. It would also
+want a deep copy of an `ncfg_dns_policy_t`, which `observe.h` says this port
+deliberately does not have. What the carrying buys on its own is not small: a
+record another netcfgd wrote round-trips instead of being silently emptied,
+which is the thing `carried_more` existed to warn about. The producer that
+closes it is a reader of `<run>/dns/<scope>.conf`, which `dns.h` already
+promises the observer does and nothing does; that file is a rendered resolver
+blob with comments rather than a policy, and stale scopes are never removed
+from the directory, so it is a wave rather than a line.
+
+**0079's third clear is still not written, and the reason has moved again.**
+§10.182 found it had neither an output nor an input and said both close on the
+record carrying backends. The output half did. The input half did not: the clear
+fires for a backend *seen running*, and `running` in this record is netcfgd's
+memory of having started the daemon -- 0078's whole distinction. Clearing on
+that would clear every count on every pass and the cap would never bite at all:
+the defect would go from "a backend that failed five times is never started
+again" to "a backend that fails for ever is started for ever", which is the
+thing 0079 was written to stop, measured at 181 starts in twelve seconds.
+
+So it waits on `read_backend_liveness`, which waits on something smaller than a
+module and larger than a line: a **backend kind mapped to a pid file and an
+`argv` marker**. The Rust has one function for it,
+`netcfgd_apply::backend_pid_file` (`crates/netcfgd-apply/src/kernel.rs:3311`),
+covering seven kinds. This port has five per-module answers -- `ncfg_ra_running_
+pid`, `ncfg_openvpn_running_pid`, `ncfg_dhcp_running_pid` and two pid-path calls
+-- with different arities (a DHCP client's pid path needs the *program*, because
+which client is running is a property of the machine) and no map over them. And
+every one of them reaches `/proc` at a fixed path through `process.h`, which is
+that module's subject and `observe.h`'s rule broken: every root an observation
+pass reads under is a parameter there. Threading a `/proc` root through
+`process.h` and five backend modules is that module's wave, not this one's.
+
+### One defect in the Rust, found while agreeing with it
+
+**A `dns.apply` the executor was never given a context for records the wrong
+thing, and the record is what the next plan is compared against.**
+`crates/netcfgd-apply/src/kernel.rs:1593` falls back to the op's single scope
+when `self.dns_scopes` is empty -- a caller that did not use `with_context` --
+and `crates/netcfgd-host/src/state.rs:571` then **replaces** `owned.dns` with
+what that delivery reported. The comment at `:578` says the cost of the fallback
+is "one extra delivery on the next pass, never a wrong file". It is not: the
+fallback delivers one scope, `deliver` writes the resolver file *whole* from the
+scopes it was given, and the replace then records that one scope as the entire
+applied set. Every other scope is gone from both the file and the record at
+once.
+
+Reproduction, read out of the source rather than run: build a `KernelExecutor`
+with `KernelExecutor::open()` and no `with_context`, hand it a plan carrying one
+`Op::DnsApply` for scope `globals` on a host that also has a per-interface
+scope, and `absorb` the effects. `/etc/resolv.conf` holds the global scope
+alone and `owned.dns` is `[{scope: "globals", ...}]`. Not run here -- it writes
+this workstation's real `resolv.conf`, and the two lines settle it between them.
+
+Cost: the comment is the reason nobody has to check the fallback path, and it is
+the half that is wrong. The C inherits none of it, because the C does not fold
+`dns` at all; when it does, the rule has to be "what was delivered" rather than
+"what this op named", and that is the same distinction.
+
+## 10.182 The observer's deferred passes, counted instead of remembered
+
+§10.170 gave, among the reasons the size comparison is not like-for-like, that
+"six of eleven observation passes are deferred". Nobody had checked that
+sentence against `c/src/observe/` for several waves — the observer gained
+`collect.c` and `current.c` in the meantime — and `observe.h` carried the same
+number above a list that named **nine**. So the figure disagreed with its own
+list, in the same file, and neither was right.
+
+Counted against the tree, pass by pass. `host.rs`'s `augment`
+(`crates/netcfgd-observe/src/host.rs:40`) calls eleven passes by name, beside
+four small file readers and `derive`:
+
+    the four readers    the sysctls, the hostname, rfkill, Bluetooth
+                                                   ported, c/src/observe/host.c
+    derive                                         ported, c/src/observe/derive.c
+    read_netfilter                                 ported by this wave
+    the other ten of the eleven                    deferred
+
+**None of the eleven was ported when that sentence was written**, so the
+figure was not five out by half a wave's work: the true one was *eleven of
+eleven deferred*, and after this wave it is *ten of eleven*. Corrected in
+place, above.
+
+**Two waves later it is seven of eleven**, and this is the last time the number
+is written here. `read_offloads` landed as `c/src/observe/offloads.c` (§10.185)
+and `read_wireguard_keys` and `read_wireguard_currency` landed together as
+`c/src/observe/wireguard.c`, which is the wave this section predicted: a
+generic netlink socket, and the secret store for the second of them. What is
+left deferred is the six that walk `observed.backends` and the one that walks
+`observed.dns`.
+
+**The count lives in `observe.h`'s list and nowhere else from here on.** That
+is this section's own subject applied to itself: a number kept in two documents
+is a number that goes stale in one of them, and the whole of what went wrong
+the first time was a figure copied into a second place and never re-derived.
+The list in the header is beside the code it counts, so a pass landing is the
+same edit as the count moving; a reader wanting the figure reads it there.
+
+### The reason the ten are deferred is not the reason that was written down
+
+`observe.h` said the supplicant round trip, the station lists, the passphrase
+comparison, the tunnel hash and the advertised prefixes "each waits on the
+backend module that speaks to the daemon in question", and that
+`read_backend_liveness` waits on a map from a backend kind to a pid file.
+**Every one of those modules has since landed** — `c/src/backend/{supplicant,
+hostapd,openvpn,ra,dhcp}/`, with `ncfg_ra_pid_path`, `ncfg_hostapd_pid_path`,
+`ncfg_dhcp_pid_path` and `ncfg_dhcp_started_metric` all public — so the stated
+blocker is gone and the passes are still not writable.
+
+What actually blocks six of them is one line further down: every one of
+`ask_supplicants`, `read_access_control`, `read_advertised`,
+`read_secret_currency`, `read_tunnel_currency` and `read_backend_liveness`
+walks `observed.backends`, **and in this build that list is always empty.**
+`ncfg_observe_build` takes it from the prior state and from nowhere else
+(`c/src/observe/build.c:880`), the prior takes it from `owned.json`, and
+`ncfg_owned_state_t` has no `backends` member at all —
+`c/src/host/state.c:450` lists `backends` and `dns` as the two the format
+defers, and `c/src/observe/current.c:156` says so where the hand-over would
+be. A pass written today would walk an empty list for ever, on every machine.
+
+`read_resolv_currency` is the same shape one field along: it walks
+`observed.dns`, which is the other list the record does not carry.
+
+`read_offloads` is blocked by something smaller and easier to lift: the
+kernel's feature names per model field exist once in this port, privately in
+`c/src/plan/offload.c:49`, whose own comment says the second caller takes that
+table rather than writing its own — and the observer is that second caller.
+Publishing it is a header change in the planner's module. The ethtool messages
+themselves are already built by `ethtool.h`. **Lifted since**: the table is
+`ncfg_offload_field_names` in `document.h`, the pass is
+`c/src/observe/offloads.c`, and nothing under `src/plan/` or `src/observe/`
+spells a feature name any more. See the note at the end of this entry.
+
+The two WireGuard passes need a generic-netlink socket, which
+`ncfg_netlink_open_protocol` says cannot share the route socket, and the
+currency half needs the secret store to compare a digest against.
+
+### So what this wave ported is the one pass that had an input and a reader
+
+`read_netfilter` reads the kernel rather than the record, and the planner
+already asks for both of its answers: `c/src/plan/nat.c:155` compares the
+document's uplinks against `observed->nat` and `:169` makes that same list the
+inverse of the op. With nothing filling it the comparison was against an empty
+list, so **a machine whose NAT was already right was planned a `nat.replace`
+on every pass and never converged**, and a revert would have removed the table
+rather than putting back what was there. `nat_conflicts` is 0022's
+double-translation check, which `c/src/plan/nat.c:89` warns from and which had
+nothing to warn about.
+
+It is `ncfg_observe_netfilter_from`, a second `ncfg_observe_kernel_t` over
+`NETLINK_NETFILTER`, wired into `ncfg_observe_current_from` between the record
+and the file readers. 0263 carries the divergences.
+
+### Two things this was asked to re-check, and both answers moved
+
+**Nothing clears a backend restart count from an observation, and now there is
+a second reason.** `c/src/apply/owned.c:145` increments on a `backend.start`
+and `:178` drops the entry on a `backend.stop`; `c/include/ncfg/apply.h:301`
+says the third of 0079's three clears — the backend being seen running — is
+"what belongs to whoever composes the observation", and nothing composes it.
+The count is read by `c/src/plan/backend.c:83` through
+`ncfg_observed_backend_restarts`, so a backend that failed five times and then
+came up and stayed up would never be started again after its next crash. The
+half that had not been noticed is that the clear has no *input* either: it
+needs to know which backends are running, which is `read_backend_liveness`,
+which is one of the six above. Both halves close on the record carrying
+backends, and neither closes before it.
+
+**`ncfg_observe_augment_host` covers the four file readers and nothing else.**
+`c/src/observe/host.c:544`: the three sysctls per link, the hostname, each
+radio's rfkill switch and the Bluetooth adapters — `host.rs:41-52`. What it
+does not cover is the eleven, for the reasons above, and it does not `derive`,
+which is deliberate and is the one case where the C splits what the Rust joins.
+Of the parts it leaves out, `read_netfilter` was the only one anything in this
+port could consume, which is why it is the one that was written.
+
+### One defect in the Rust, found by porting the pass
+
+**The double-NAT check is blind to a table wearing netcfgd's own name in
+another family.** `crates/netcfgd-observe/src/host.rs:1160` filters the
+conflicting chains with `chain.table != netcfgd_sys::nft::TABLE` — a **name**
+comparison — while the same crate decides whether netcfgd's table exists with
+`table.name == TABLE && table.family == NFPROTO_INET`
+(`crates/netcfgd-sys/src/nft.rs:298`). The two disagree because
+`ChainRecord` (`nft.rs:108-117`) carries no family at all, where `TableRecord`
+(`:100`) does.
+
+So a source-NAT chain in `ip netcfgd` or `ip6 netcfgd` — a table that is *not*
+netcfgd's by netcfgd's own identity rule, and which nothing stops an operator,
+an older netcfgd or another tool from creating — is filtered out of
+`nat_conflicts` by the name match and never reported. Reproduction, read out of
+the source rather than measured: `nft add table ip netcfgd` and a
+`type nat hook postrouting` chain in it, beside netcfgd's own `inet netcfgd`,
+and `ncfg status` goes on saying there is no conflicting table while both
+chains translate. Not run here — adding a table to this workstation's live
+firewall to watch a report stay empty is not a thing to do for a fact the two
+comparisons already settle in the source.
+
+Cost: 0022's whole conflict check, at exactly the one table name netcfgd's
+documentation tells operators about, so the blind spot is where a collision is
+most likely rather than least. The port inherits it because
+`ncfg_nft_chain_t` inherited the shape; 0263 records that as a named
+non-divergence rather than a quiet copy, since closing it is an `nft.h` change
+and not the observer's to make.
+
+### The shape, which is §10.180's from the other side
+
+§10.180 was three warnings that told an operator to wait for something that had
+already arrived or was never coming. This is the same failure in a header
+comment and in this document, with one part worse: the count was not merely
+overtaken, it never matched the list underneath it, and it was copied into a
+second document without being re-derived. The blockers beside it *were*
+overtaken, one backend module at a time, by waves that had no reason to look at
+this sentence. Nothing in the code was wrong either time. What had rotted was
+the sentence — and a wrong count in a record about what is missing is worse
+than no count, because it is the number the next person plans a wave from.
+
+## 10.181 A restart that names an empty field, and a copy that turned out not to be one
+
+Found porting the access point's half of the planner: `backend.start` for
+hostapd as a radio's prerequisite, the restart an edited identity costs, and
+the teardown rule beside the start.
+
+**One defect, in the reason a band change gives.**
+`crates/netcfgd-plan/src/lib.rs:6165-6190`, the `band` arm of
+`restart_if_identity_changed`. It compares the *derived* band --
+`effective_band(access_point.band, access_point.channel)` against what the file
+records -- and then reports `access_point.band.clone().unwrap_or_default()` as
+the desired value. For the case the arm exists to catch, the document states no
+band at all, so `unwrap_or_default()` is the empty string.
+
+Reproduced by probing the fixture that already covers the behaviour
+(`crates/netcfgd-plan/tests/fixtures.rs:9288`, an access point started with
+`band = "5"` and no channel, whose `band` line is then deleted). The test
+asserts the field and never the values; printing them gives:
+
+    restarted=true field=access_point.band|desired=""
+
+The plan renders a reason as `field: desired (was observed)`, so the one line
+an operator reads to find out why every station on the radio was just
+deauthenticated is
+
+    backend.stop wlan0  access_point.band:  (was 5)
+
+**The cost is that it names neither of the two values in play.** The document
+says nothing, so the stated band is not informative; the value that caused the
+restart is `2.4`, which is what an undeclared band with no channel to infer
+from resolves to, and it appears nowhere. The two arms either side got this
+right for the same reason and by deliberate effort -- `channel` renders
+`<absent>` rather than a bare `0`, and `regdom` uppercases before printing so
+that the printed value is the compared one -- and 0222 records both of those
+being paid for. This arm was written in the same pass and was missed because
+the fixture pins the field name only.
+
+The C prints the effective band. 0263 records the divergence.
+
+### And one that was measured and is not a defect
+
+`netcfgd_model::security::key_mgmt_of` documents itself as the single spelling
+of `wpa_key_mgmt` because "two crates have to agree on it", and names
+`netcfgd-hostapd` as the writer -- which does not call it:
+`backend/netcfgd-hostapd/src/render.rs` pushes `WPA-PSK`, `SAE`,
+`WPA-PSK SAE` and `OWE` as four literals. That reads exactly like the
+`effective_band` hazard the model exists to prevent, so it was tested rather
+than reported: changing `PskProto::Wpa2 => "WPA-PSK"` to a different string and
+running `cargo test -p netcfgd-plan -p netcfgd-hostapd -p netcfgd-observe`
+fails three plan fixtures, because those fixtures pin the literal on the
+observation side instead of deriving it. The renderer's own tests pin it on the
+other side. So the two copies are held together by two independent literals per
+generation plus a round-trip test through the real renderer for `Wpa2Wpa3` and
+for open (`crates/netcfgd-observe/src/host.rs:1224`), and a drift needs a
+deliberate edit in two places rather than one.
+
+Worth writing down because the doc comment is misleading and the next reader
+will reach for the same conclusion: the function is the *model's* spelling and
+the renderer's agreement with it is checked, but not by calling it. The C does
+call it from both sides, which is the arrangement the comment describes.
+
+
 ## 10.180 Three warnings that told an operator to wait for nothing
 
 Found by asking, before writing anything, which of the blocks this port still
@@ -10540,8 +11284,10 @@ symbol no binary needs is a symbol whose cost nobody has checked.
 build's planner is four passes of thirty; the executor accepts thirteen ops of
 forty-eight and refuses the other thirty-five by name; the daemon runtime is
 unreachable code; `--json`, the `network`-block writer, `ncfg reset` and
-provenance recording are absent; six of eleven observation passes are
-deferred. Three of the Rust's four libraries are ncurses and the unwinder,
+provenance recording are absent; seven of eleven observation passes are
+deferred (this said "six", and every one of the eleven was deferred on the day
+it was written; §10.182 counts them, and says where the figure has moved
+since). Three of the Rust's four libraries are ncurses and the unwinder,
 which the port gives up deliberately rather than beats. The figure is worth
 recording because a port with no linked artefact has no size at all, not
 because it has won anything.
