@@ -403,6 +403,556 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
  */
 const char *ncfg_cli_socket_path(const char *run_dir, char *out, size_t out_size);
 
+/*
+ * One event as the line a monitor shows.
+ *
+ * The same five sentences `ncfg_cli_print_event` prints, composed into a
+ * caller's buffer instead of stdout, because the TUI's event pane needs the
+ * text and a pane may not print. `raw` is the line the event arrived on and is
+ * used whole for a kind this build does not recognise -- a monitor that shows
+ * an event it does not know is more useful than one that refuses to parse it.
+ *
+ * Writes into `out` and returns it. An event whose rendering carries a newline
+ * -- `reloaded FAILED` is the one -- keeps it, and the caller decides what a
+ * line is; the TUI folds it, since a pane row is a row.
+ */
+const char *ncfg_cli_event_text(const ncfg_proto_event_t *event, const char *raw,
+    size_t raw_length, char *out, size_t out_size);
+
+/* ------------------------------------------------------------------------ *
+ * `ncfg tui`: the full-screen client
+ * ------------------------------------------------------------------------ *
+ *
+ * WHAT DRAWS IT, AND WHY IT IS NOT ncurses
+ *   The Rust binds ncurses through `netcfgd-sys::curses` behind a default-on
+ *   cargo feature, which is the one thing `ncfg` links beyond libc. C has no
+ *   feature gate here -- `c/Makefile` builds every source under `src/` into one
+ *   archive -- so linking it would make ncurses a **mandatory** dependency of a
+ *   binary that has none, and constraint 3 is one of the claims this project
+ *   is trying to prove. So the escapes are written here: the subset section 7.2
+ *   already promises and nothing more, and 0263's divergence list says what the
+ *   subset does not do.
+ *
+ * WHAT IS PURE AND WHAT TOUCHES THE TERMINAL
+ *   **Everything named below is a function of the answers and the keystrokes,
+ *   and writes into an `ncfg_buf_t`.** A test that needs a terminal is a test
+ *   that does not run, so `tui.c` has no syscall in it at all: the frame,
+ *   escapes included, is composed into a buffer that a test reads. `tui_term.c`
+ *   is the only file that opens a descriptor, and the only thing it adds is
+ *   putting those bytes where a person can see them.
+ */
+
+/* Which pane is showing. `COUNT` is the bound an exhaustive walk uses, in
+ * place of the `match` the Rust is checked for. */
+typedef enum {
+	NCFG_TUI_PANE_DEVICES = 0,
+	NCFG_TUI_PANE_WIFI,
+	NCFG_TUI_PANE_CLIENTS,
+	NCFG_TUI_PANE_PLAN,
+	NCFG_TUI_PANE_EVENTS,
+	NCFG_TUI_PANE_COUNT
+} ncfg_tui_pane_t;
+
+/* The word on the tab bar, or NULL outside the set. */
+const char *ncfg_tui_pane_title(ncfg_tui_pane_t pane);
+
+/*
+ * How many events to keep, and how long one may be.
+ *
+ * A screenful on a tall terminal, and bounded because this runs for days on a
+ * server and the ring is in RAM. The per-line ceiling is `buf.h`'s rule in a
+ * ring: the text came off a socket and its length is whoever is on the other
+ * end's choice.
+ */
+#define NCFG_TUI_EVENT_HISTORY 200
+#define NCFG_TUI_EVENT_MAX     512
+
+/*
+ * How many rows one pane may produce, and how wide a line may be.
+ *
+ * `NCFG_DIAGS_MAX`'s shape: the rows past the ceiling are counted rather than
+ * pretended away, so `total` says how many there were. The Rust grows a `Vec`,
+ * which is right in a renderer that cannot be handed a hostile answer and
+ * wrong in one that reads a socket -- a scan in a block of flats is fifty
+ * networks and nothing bounds what a daemon may send.
+ */
+#define NCFG_TUI_ROWS_MAX  256
+#define NCFG_TUI_WIDTH_MAX 512
+
+/*
+ * The narrowest terminal this composes for.
+ *
+ * The Rust's `max(20)`: a window narrower than this gets lines fitted to 20
+ * columns and lets the terminal wrap them, rather than arithmetic that
+ * underflows on the way to a negative width.
+ */
+#define NCFG_TUI_WIDTH_MIN 20
+
+/*
+ * The width [`ncfg_tui_last_row`] counts rows at.
+ *
+ * Any value gives the same count -- `fit` truncates and pads and never wraps,
+ * so a pane produces one line per thing it has to say whatever the terminal is
+ * -- so this is the terminal everybody has rather than a number with meaning.
+ */
+#define NCFG_TUI_ROW_COUNT_WIDTH 80
+
+/* An interface name, a `network` block's id, and the status line. */
+#define NCFG_TUI_NAME_MAX    64
+#define NCFG_TUI_MESSAGE_MAX 512
+
+/*
+ * What a line in a pane stands for.
+ *
+ * Two kinds and a nothing, because the wifi pane shows two: the radios netcfgd
+ * could be given, and the networks it can see with the ones it has. `c` acts
+ * on the selected **row** rather than on the pane -- activating a radio and
+ * joining a network are the same intent ("use this one"), so making them the
+ * same key is the honest arrangement rather than a shortcut.
+ */
+typedef enum {
+	/* A heading, a blank, or an explanation. `c` does nothing. */
+	NCFG_TUI_ROW_NOTHING = 0,
+	/* A radio, by interface name, that `c` would activate. */
+	NCFG_TUI_ROW_RADIO,
+	/* A network, by its index in the scan, that `c` would join. */
+	NCFG_TUI_ROW_NETWORK
+} ncfg_tui_row_kind_t;
+
+typedef struct {
+	ncfg_tui_row_kind_t kind;
+	char                interface[NCFG_TUI_NAME_MAX];
+	size_t              entry;
+} ncfg_tui_row_t;
+
+/*
+ * One pane's worth of lines, and what each line is about.
+ *
+ * The text is one `ncfg_buf_t` with the lines end to end, and the index is an
+ * **offset** rather than a pointer because the buffer moves as it grows. A
+ * buffer that failed hands out the empty string, so every line of a failed
+ * render reads empty rather than pointing into freed memory -- which is the
+ * same promise `ncfg_buf_text` makes and the reason it is worth making here.
+ */
+typedef struct {
+	ncfg_buf_t     text;
+	size_t         offsets[NCFG_TUI_ROWS_MAX];
+	ncfg_tui_row_t rows[NCFG_TUI_ROWS_MAX];
+	/* Lines kept, and lines there were. They differ only at the ceiling. */
+	size_t         count;
+	size_t         total;
+} ncfg_tui_lines_t;
+
+void ncfg_tui_lines_init(ncfg_tui_lines_t *lines);
+void ncfg_tui_lines_free(ncfg_tui_lines_t *lines);
+
+/* Line `at`, never NULL: the empty string past the end or on a failed buffer. */
+const char *ncfg_tui_line(const ncfg_tui_lines_t *lines, size_t at);
+
+/* What line `at` is about. Never NULL; a row past the end is `NOTHING`. */
+const ncfg_tui_row_t *ncfg_tui_row(const ncfg_tui_lines_t *lines, size_t at);
+
+/*
+ * One answer from the daemon, kept for as long as the pane draws it.
+ *
+ * `present` rather than a NULL pointer because the message is held by value:
+ * an answer nobody asked for yet, an answer that was a refusal, and an answer
+ * that arrived are three states, and a refusal leaves its sentence on the
+ * status line rather than a half-filled struct behind it.
+ */
+typedef struct {
+	int                  present;
+	ncfg_proto_message_t message;
+} ncfg_tui_answer_t;
+
+void ncfg_tui_answer_free(ncfg_tui_answer_t *answer);
+
+/*
+ * Everything drawn, refetched when a pane is entered or `r` is pressed.
+ *
+ * Fields are public because the panes are pure functions of them and a test
+ * drives them directly -- which is the whole reason this shape exists.
+ */
+typedef struct {
+	ncfg_tui_pane_t   pane;
+	size_t            selected;
+	/* The last error or confirmation, shown on the status line until the next
+	 * action replaces it. */
+	char              message[NCFG_TUI_MESSAGE_MAX];
+	ncfg_tui_answer_t status;
+	ncfg_tui_answer_t plan;
+	ncfg_tui_answer_t scan;
+	/* The radios this machine has, and what netcfgd is doing about each.
+	 * Fetched with the scan rather than once at startup: a USB radio can be
+	 * plugged in while the pane is open, and a list taken at startup would go
+	 * on saying it is not there. */
+	ncfg_tui_answer_t radios;
+	ncfg_tui_answer_t stations;
+	/* A ring, oldest at `event_first`. Each line is owned. */
+	char             *events[NCFG_TUI_EVENT_HISTORY];
+	size_t            event_first;
+	size_t            event_count;
+	/* Emphasis is reverse video, which every terminal back to a VT100 has.
+	 * `$NO_COLOR` turns even that off, and this is that answer read once
+	 * rather than an environment lookup inside a renderer. */
+	int               no_color;
+} ncfg_tui_t;
+
+void ncfg_tui_init(ncfg_tui_t *tui);
+void ncfg_tui_free(ncfg_tui_t *tui);
+
+/*
+ * Take a decoded message as the answer to a pane's question.
+ *
+ * A refusal is an answer: the daemon's sentence goes to the status line and
+ * the pane keeps drawing whatever it had, which is the Rust's `fetch`. Returns
+ * 1 where the answer was kept, 0 where it was a refusal or the wrong shape --
+ * in both cases with the sentence already on `tui->message`.
+ *
+ * **It consumes the message either way**, and leaves it zeroed, so a caller
+ * has nothing to free and no way to free something now owned here.
+ */
+int ncfg_tui_answer_take(ncfg_tui_t *tui, ncfg_tui_answer_t *answer,
+    ncfg_proto_message_t *message);
+
+/* The same, from the bytes of one response line. */
+int ncfg_tui_answer_read(ncfg_tui_t *tui, ncfg_tui_answer_t *answer, const char *line,
+    size_t length);
+
+/* Add one line to the ring, dropping the oldest where it is full. */
+void ncfg_tui_event_push(ncfg_tui_t *tui, const char *line);
+
+/* Event `at`, oldest first. Never NULL. */
+const char *ncfg_tui_event(const ncfg_tui_t *tui, size_t at);
+
+/* ------------------------------------------- what the panes draw */
+
+/* The tab bar, fitted to `width`. */
+void ncfg_tui_tabs(const ncfg_tui_t *tui, size_t width, ncfg_buf_t *out);
+
+/*
+ * Whichever pane's content is showing, with what each line is about.
+ *
+ * `out` is initialised here rather than by the caller, so a list is never
+ * filled twice without being freed; the caller frees it with
+ * `ncfg_tui_lines_free` when it has read what it wanted.
+ */
+void ncfg_tui_body(const ncfg_tui_t *tui, size_t width, ncfg_tui_lines_t *out);
+
+/*
+ * The index of the last row the current pane draws.
+ *
+ * Asked of `ncfg_tui_body`, which is what the renderer draws, so the two
+ * cannot disagree about how many rows there are -- the alternative is a second
+ * count per pane, and five of those would drift the first time a pane grew a
+ * heading.
+ */
+size_t ncfg_tui_last_row(const ncfg_tui_t *tui);
+
+/*
+ * The whole frame for a terminal of this size, escapes included.
+ *
+ * **A buffer rather than a descriptor, which is the point.** Everything a test
+ * needs to know -- which row is highlighted, what each row says, that no row
+ * is wider than the window -- is in these bytes, and nothing has to own a
+ * terminal to read them. `tui_term.c` writes the result and adds nothing.
+ */
+void ncfg_tui_frame(const ncfg_tui_t *tui, size_t rows, size_t columns, ncfg_buf_t *out);
+
+/* The footer, always on screen, and what `?` adds to it. */
+const char *ncfg_tui_keys(void);
+const char *ncfg_tui_help(void);
+
+/* ------------------------------------------- what a keystroke means */
+
+/*
+ * The keys above 255, decoded from the bytes rather than from terminfo.
+ *
+ * Only the two that are bound. An escape sequence this does not know reads as
+ * `OTHER` and does nothing, rather than being mapped to the wrong action --
+ * which is the failure a hand-maintained table has and terminfo does not, and
+ * the reason the set is kept to what is used.
+ */
+#define NCFG_TUI_KEY_OTHER 0x100
+#define NCFG_TUI_KEY_UP    0x101
+#define NCFG_TUI_KEY_DOWN  0x102
+
+/*
+ * Three outcomes, not two.
+ *
+ * `PARTIAL` is an escape sequence that has begun and not finished, and one
+ * boolean cannot tell it from "there is nothing here". Folding them is how a
+ * lone `ESC` either blocks for ever or eats the next keystroke.
+ */
+typedef enum {
+	NCFG_TUI_INPUT_NONE = 0,
+	NCFG_TUI_INPUT_READY,
+	NCFG_TUI_INPUT_PARTIAL
+} ncfg_tui_input_t;
+
+/*
+ * Decode the first key in `bytes`.
+ *
+ * `used_out` says how many bytes it took, so a burst is decoded one key at a
+ * time from the same buffer. A `PARTIAL` consumes nothing and asks for more.
+ */
+ncfg_tui_input_t ncfg_tui_key_decode(const char *bytes, size_t length, int *key_out,
+    size_t *used_out);
+
+/*
+ * What a key asks the caller to do, once the state machine has moved.
+ *
+ * **The Rust's `App::key` does the socket work itself**, which makes the
+ * keymap untestable without a daemon. Here the keystroke moves the state and
+ * names an intent, and `tui_term.c` is what talks -- so a test can assert what
+ * every key does to every pane with no socket anywhere.
+ */
+typedef enum {
+	/* Redraw and nothing else. */
+	NCFG_TUI_ACT_NONE = 0,
+	NCFG_TUI_ACT_QUIT,
+	NCFG_TUI_ACT_REFRESH,
+	NCFG_TUI_ACT_APPLY,
+	NCFG_TUI_ACT_CONFIRM,
+	NCFG_TUI_ACT_REVERT,
+	/* `c`: activate the selected radio, or join the selected network. */
+	NCFG_TUI_ACT_USE
+} ncfg_tui_action_t;
+
+ncfg_tui_action_t ncfg_tui_key(ncfg_tui_t *tui, int key);
+
+/*
+ * The first interface whose observed link looks like a radio.
+ *
+ * From the status answer rather than from the config, because the pane is
+ * drawing what the machine has. Returns 1 with the name in `out`.
+ */
+int ncfg_tui_radio(const ncfg_tui_t *tui, char *out, size_t out_size);
+
+typedef enum {
+	NCFG_TUI_USE_NOTHING = 0,
+	NCFG_TUI_USE_RADIO,
+	NCFG_TUI_USE_NETWORK
+} ncfg_tui_use_kind_t;
+
+typedef struct {
+	ncfg_tui_use_kind_t kind;
+	/* The radio to hand over, or the radio to join on. */
+	char                interface[NCFG_TUI_NAME_MAX];
+	/* `NETWORK` only: the `network` block's id. */
+	char                network[NCFG_TUI_NAME_MAX];
+} ncfg_tui_use_t;
+
+/*
+ * What `c` would do to the selected line.
+ *
+ * **The selected *line* rather than the selected entry.** The wifi pane groups
+ * radios under a network, so the nth line stopped being the nth scan entry;
+ * indexing the entries by the line joins whatever network happens to sit at
+ * that position, which is the worst kind of bug a list can have -- it does
+ * something, confidently, to the wrong thing. `ncfg_tui_body` says what each
+ * line stands for and this reads that.
+ *
+ * Returns 1 with a decision, which may be `NOTHING`. Returns 0 with a sentence
+ * for the boundary a person should be told about rather than refused at:
+ * decision 0013's, a network the configuration does not describe.
+ */
+int ncfg_tui_use(const ncfg_tui_t *tui, ncfg_tui_use_t *out, char *err, size_t err_size);
+
+/*
+ * `ncfg tui`, from the options: the terminal, the socket and the loop.
+ *
+ * Returns the process's exit code. Refuses before touching the terminal where
+ * standard input is not one, and where the daemon cannot be reached -- a
+ * machine with no daemon gets a sentence rather than a cleared screen and a
+ * sentence.
+ */
+int ncfg_tui_run(const ncfg_cli_options_t *options);
+
+/* ------------------------------------------------------------------------ *
+ * The verbs that change the configuration
+ * ------------------------------------------------------------------------ *
+ *
+ * WHY THEY RETURN 1 AND 0 RATHER THAN AN EXIT CODE
+ *   The Rust's four `run` functions return `Result<ExitCode, String>`, and
+ *   every `Ok` arm in all four is `ExitCode::SUCCESS` -- the code carries
+ *   nothing the `Result` does not. So they are 0263's convention exactly: 1,
+ *   or 0 with a sentence the dispatch prints as `ncfg: ...`. What they print
+ *   on the way to succeeding goes through `ncfg_out_*` like every other
+ *   output here.
+ *
+ * WHAT `positional` IS
+ *   What was left after the option walk, with the verb itself already off the
+ *   front: `ncfg profile save office` arrives as `{"save", "office"}`. Nothing
+ *   in it is owned -- every string points into `argv`.
+ *
+ * THE ORDER EVERY ONE OF THEM TAKES
+ *   **The daemon first, and the directory only when nothing is listening.**
+ *   0127 makes netcfgd the only writer of `/etc/netcfgd`, which is root's and
+ *   which a client is not; the local route is for the machine being configured
+ *   before netcfgd runs on it. A write refused locally says both halves --
+ *   what the filesystem said, *and* that there was no daemon to ask -- because
+ *   a reader told only the first goes looking for a mode to change when
+ *   starting netcfgd would have done.
+ */
+
+/* `ncfg control show|set`: who may ask netcfgd for what (0118). */
+int ncfg_cli_control(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/* `ncfg config put|rm`: configuration netcfgd stores on a client's behalf. */
+int ncfg_cli_config(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/* `ncfg profile get|list|set|save|unset`: which set of drop-ins (0151). */
+int ncfg_cli_profile(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/* `ncfg secret set`: store a credential the configuration refers to (0075). */
+int ncfg_cli_secret(const ncfg_cli_options_t *options, const char **positional, size_t count,
+    char *err, size_t err_size);
+
+/*
+ * What arrived when something else was expected, in one phrase.
+ *
+ * "a journal", "a profile list", "an error: ...". **Here rather than at each
+ * call site**, because a client that quietly treats an unexpected answer as
+ * success is the bug this project keeps refusing to write, and the sentence
+ * that says what did arrive is the one somebody reports.
+ *
+ * Writes into `out` where it needs to and returns either it or a literal, so
+ * the result is always printable.
+ */
+const char *ncfg_cli_describe_answer(const ncfg_proto_response_t *response, char *out,
+    size_t out_size);
+
+/*
+ * Where this invocation's daemon socket would be.
+ *
+ * `--run-dir`, then `NCFG_RUN_DIR`, then the default, and `netcfgd.sock` under
+ * it. NULL where the run directory makes a path too long to connect to, which
+ * is refused rather than truncated: a shortened unix address connects to a
+ * different path that may well exist.
+ */
+const char *ncfg_cli_daemon_socket(const ncfg_cli_options_t *options, char *out, size_t out_size);
+
+/*
+ * Whether there is something at that path to talk to.
+ *
+ * **Existence, and not "is it a socket"**, which is the question the Rust asks
+ * and the branch every write verb takes. A stale plain file at the path is
+ * then a failed connection with a sentence naming it, rather than a silent
+ * fall back to writing `/etc/netcfgd` directly -- which on a machine that
+ * *does* run netcfgd is the one thing 0127 says a client must not do.
+ */
+int ncfg_cli_daemon_listening(const char *socket_path);
+
+/*
+ * One request whose whole answer is `ok`.
+ *
+ * **A refusal and a transport failure are one arm on purpose**: both are a
+ * sentence naming what went wrong, and no caller does anything different for
+ * having been told which layer produced it. A refusal arrives unwrapped,
+ * because it names the tier that would have been needed (0013) and that is the
+ * part which says what to do. Anything else is named with
+ * `ncfg_cli_describe_answer`, since a client that quietly treats an unexpected
+ * answer as success is the bug this project keeps refusing to write.
+ */
+int ncfg_cli_ask_ok(const char *socket_path, const ncfg_proto_request_t *request, char *err,
+    size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * The pieces of `ncfg control` that are worth asserting on their own
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `root`, `any`, `user:NAME` or `group:NAME`, and back again.
+ *
+ * Four shapes, deliberately, and no expression language: every authorisation
+ * system that grew one did so a reasonable extension at a time and ended up as
+ * something operators copy from forums without understanding.
+ *
+ * **These are the model's in the Rust and cannot be here.** `document.h` is
+ * final and carries neither, and the two implementations that exist -- the
+ * lowerer's and the renderer's -- are `static` inside modules whose context
+ * this has none of. So the rule is spelled once, here, and `cli_control_test.c`
+ * asserts the round trip against what a rendered configuration file says: a
+ * third spelling of `group:NAME` is exactly the drift 0263 refuses.
+ *
+ * The parse fills a principal the caller zeroed and hands it a name the caller
+ * frees; the render writes into `out` and returns it.
+ */
+int ncfg_cli_principal_parse(const char *text, ncfg_principal_t *out, char *err, size_t err_size);
+const char *ncfg_cli_principal_render(const ncfg_principal_t *principal, char *out,
+    size_t out_size);
+
+/*
+ * The drop-in `ncfg control set` writes when no file defines `global` yet.
+ *
+ * A comment saying what it is and how to be rid of it, then the block.
+ * Deleting the file restores the default, which is root only -- so the text is
+ * ordinary netcfgd configuration an operator can read, diff and commit.
+ */
+void ncfg_cli_control_render(const ncfg_control_t *control, ncfg_buf_t *out);
+
+/*
+ * The same policy put into the `global` block of a file that already has one.
+ *
+ * A drop-in cannot do this: section 3 makes `override global` replace the
+ * block *whole*, so a policy written that way silently takes every other
+ * global setting with it -- measured, and it turned a machine's DNS mode from
+ * `write_resolv_conf` into `none`.
+ *
+ * Text in, text out, and nothing else touched: an existing `control` block is
+ * replaced in place and a missing one is inserted before the closing brace,
+ * with the indentation the file already uses. **The proof that this did not
+ * eat anything is in the caller**, which compiles before and after and refuses
+ * to keep a result that differs anywhere but the control policy -- which is
+ * why this is a function with a name and a test rather than a step inside one.
+ *
+ * Initialises `out`, which the caller frees either way. Returns 1, or 0 with a
+ * sentence.
+ */
+int ncfg_cli_control_splice(const char *text, const ncfg_control_t *control, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
+/*
+ * One line of the privileged helper's protocol, and the whole grammar it has.
+ *
+ * [0120]: the red frame around an editor is a claim that something on the
+ * other side of a process boundary holds root. This parser is what is on the
+ * other side, so what matters is not that `set` works -- it is that nothing
+ * else does, and that a refusal happens before anything is written. That is a
+ * claim about a parser and is asserted as one, which is why this is reachable
+ * without starting a helper.
+ *
+ * `set observe wifi admin`, three principals, nothing else. Returns 1 with the
+ * file it wrote in `path_out`, or 0 with a sentence and nothing written.
+ */
+int ncfg_cli_control_command(const char *line, const ncfg_cli_options_t *options, char *path_out,
+    size_t path_size, char *err, size_t err_size);
+
+/*
+ * A credential from the terminal with echo off, or from a redirect whole.
+ *
+ * **A terminal gives one line; a redirect gives a file**, and taking the first
+ * line of a redirect is the defect this carries a test for: `ncfg secret set
+ * corp-ca < corp.pem` stored the twenty-seven bytes `-----BEGIN
+ * CERTIFICATE-----` and nothing else, and the only symptom was an association
+ * failing with nothing from netcfgd. One trailing line terminator is stripped
+ * and no other whitespace is, because a passphrase may legitimately end in a
+ * space.
+ *
+ * On a terminal the prompt goes to standard error, echo is off for exactly as
+ * long as the read takes, and the termination signals are blocked for exactly
+ * that long -- so `^C` arrives after the terminal is restored rather than
+ * instead of it.
+ *
+ * `*out` is the caller's to free, and is worth wiping before it is freed.
+ * Returns 1, or 0 with a sentence that never contains what was typed.
+ */
+int ncfg_cli_read_secret(const char *prompt, char **out, char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * The program
  * ------------------------------------------------------------------------ */
