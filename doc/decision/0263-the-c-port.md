@@ -99,6 +99,35 @@ shipped a configuration key spelled the model's way rather than the language's
 -- `wire_guard` for `wireguard`, `open_vpn` for `openvpn` -- and each compiled
 into a block with the feature silently missing.
 
+## Where the C differs from the Rust, on purpose
+
+A port whose divergences live in module headers is a port nobody can answer
+"is this the same program?" about. They are listed here instead, as they are
+taken.
+
+* **The parser keeps 64 diagnostics and counts the rest.** The Rust keeps
+  every one, which is right in a test harness and wrong in a daemon: a
+  diagnostic per token is a file-sized allocation bought with a malformed
+  file, and nobody reads the sixty-fifth. `total` carries how many there were,
+  so the fact is not lost -- and a client that shows "64 of 100" is showing
+  more than one that shows a hundred nobody scrolls through. Tested at the
+  boundary.
+* **Spans carry no source id.** The Rust's `Span` names which file; the C
+  lexer is handed one file's bytes and the caller knows which, so the name
+  arrives when a diagnostic is rendered. One position type, used by both
+  modules, rather than two spellings of it -- which is how a caret ends up
+  under the wrong column.
+* **A diagnostic's help line is joined to its message with a colon.** Rust
+  carries them apart and renders them on two lines; the C has one sentence and
+  one buffer, which `NCFG_ERROR_MAX` is sized for.
+* **The walks in the wire layer return three outcomes, not two.** `OK`, `END`
+  and `BAD`: one boolean cannot tell "nothing more" from "malformed", and
+  folding them is the confusion that module exists to refuse.
+* **The JSON writer refuses a string that is not valid UTF-8.** Rust's `&str`
+  makes the question impossible; in C it is real, and every repair -- raw
+  bytes, `\u00XX` per byte, U+FFFD -- puts a value in front of somebody that
+  nobody typed.
+
 ## What is not being decided here
 
 Whether the C replaces the Rust, and when. Nothing in `c/` is installed, the
