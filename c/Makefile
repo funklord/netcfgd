@@ -35,7 +35,11 @@ LIB = libncfg.a
 # file is not copied: two readers of one format is how the GUI and the CLI
 # came to disagree about an access point's name, and this port is not starting
 # a second copy of anything it can share.
-SRCS = $(wildcard src/*/*.c) ../client/ncfg_json.c
+# `src/*/*/*.c` is the backends: one directory per daemon under `src/backend/`,
+# because four of them share a shape and a flat `src/backend/` would put
+# `render.c` there four times. The wildcard is two deep for the same reason it
+# is one deep -- the directory is the list.
+SRCS = $(wildcard src/*/*.c) $(wildcard src/*/*/*.c) ../client/ncfg_json.c
 OBJS = $(patsubst %.c,%.o,$(SRCS))
 
 TEST_SRCS = $(wildcard tests/*_test.c)
