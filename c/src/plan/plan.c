@@ -21,6 +21,8 @@
  */
 #include "ncfg/plan.h"
 
+#include "plan_internal.h"
+
 #include "ncfg/base.h"
 
 #include <stdarg.h>
@@ -148,6 +150,80 @@ const ncfg_route_t *ncfg_plan_intern_route(ncfg_plan_t *plan, const ncfg_route_t
 	copy->destination = (char *)(uintptr_t)ncfg_plan_intern(plan, route->destination);
 	copy->via = (char *)(uintptr_t)ncfg_plan_intern(plan, route->via);
 	copy->src = (char *)(uintptr_t)ncfg_plan_intern(plan, route->src);
+	return copy;
+}
+
+const ncfg_routing_rule_t *ncfg_plan_intern_rule(ncfg_plan_t *plan, const ncfg_routing_rule_t *rule)
+{
+	ncfg_routing_rule_t *copy;
+
+	if (!rule || plan->failed) {
+		return NULL;
+	}
+	copy = calloc(1u, sizeof(*copy));
+	if (!keep(plan, copy)) {
+		return NULL;
+	}
+	*copy = *rule;
+	/* The five strings a rule carries. Cast away const on the way in because
+	 * the model's own type owns them; the plan's copy owns its own. */
+	copy->id = (char *)(uintptr_t)ncfg_plan_intern(plan, rule->id);
+	copy->from = (char *)(uintptr_t)ncfg_plan_intern(plan, rule->from);
+	copy->to = (char *)(uintptr_t)ncfg_plan_intern(plan, rule->to);
+	copy->iif = (char *)(uintptr_t)ncfg_plan_intern(plan, rule->iif);
+	copy->oif = (char *)(uintptr_t)ncfg_plan_intern(plan, rule->oif);
+	return copy;
+}
+
+ncfg_dns_policy_t *ncfg_plan_intern_dns_policy(ncfg_plan_t *plan, const ncfg_dns_policy_t *policy,
+    size_t extra_servers, size_t extra_search)
+{
+	ncfg_dns_policy_t *copy;
+	size_t             servers;
+	size_t             search;
+
+	if (plan->failed) {
+		return NULL;
+	}
+	copy = calloc(1u, sizeof(*copy));
+	if (!keep(plan, copy)) {
+		return NULL;
+	}
+	if (policy) {
+		*copy = *policy;
+	}
+	/*
+	 * Only the two lists a merge appends to are re-allocated; everything else
+	 * stays exactly the borrow it was. A scope whose servers came straight off
+	 * the document never reaches here at all -- `build_scope` hands the
+	 * document's policy back -- so the copy exists precisely because these two
+	 * lists are about to be something neither the document nor the observation
+	 * holds.
+	 */
+	servers = copy->server_count + extra_servers;
+	search = copy->search_count + extra_search;
+	if (servers != 0u) {
+		ncfg_dns_server_t *room = calloc(servers, sizeof(*room));
+
+		if (!keep(plan, room)) {
+			return NULL;
+		}
+		if (copy->server_count != 0u) {
+			memcpy(room, copy->servers, copy->server_count * sizeof(*room));
+		}
+		copy->servers = room;
+	}
+	if (search != 0u) {
+		char **room = calloc(search, sizeof(*room));
+
+		if (!keep(plan, room)) {
+			return NULL;
+		}
+		if (copy->search_count != 0u) {
+			memcpy(room, copy->search, copy->search_count * sizeof(*room));
+		}
+		copy->search = room;
+	}
 	return copy;
 }
 
