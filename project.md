@@ -9499,6 +9499,165 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.168 What porting the daemon's second half and the command line found
+
+Six workers, five modules, 12,420 lines of C and 867 checks. The suite is 56
+binaries and 3,842 checks, clean under ASan and UBSan with no findings. What
+follows is what the port found in the Rust while reading it. Five of the eight
+were reproduced rather than argued, and the reproductions are named.
+
+### A probe that talks too much takes the link away
+
+`netcfgd-daemon/src/probe.rs`, `run()`. Standard error is piped and read
+**only** inside the arm that runs after the child has exited. A child that
+writes past the 64 KiB pipe buffer blocks in `write(2)` and therefore cannot
+exit, so the loop runs to the deadline, kills it, and returns "no answer within
+Ns, so it was killed". The timeout branch never reads the pipe either, so the
+program's own words are discarded with it.
+
+Measured against a standalone transcription of `run()`, not argued from the
+source:
+
+| stderr written | result |
+|---|---|
+| 65,536 bytes | ok, 51 ms |
+| 70,400 bytes | **failed, 5.02 s, "no answer within 5s"** |
+
+**What it costs is the default route.** `probe_failing` is
+`reachable == Some(false)`; the planner then takes the early return at
+`plan_route` and warns *"{name}'s probe says it is not reaching anything, so
+its routes are not installed"*, and `advance_failed_sims` cycles a modem to its
+next SIM source on the same evidence. The verbosity that triggers it --
+`curl -v`, a script under `set -x`, `ping` on a link already dropping packets
+-- is precisely what somebody adds while debugging a link they suspect, so it
+arrives at the worst moment and `probe_detail` sends them to look at their own
+script. `DETAIL_MAX`'s comment anticipates that "a script can write without
+end", and then nothing reads it.
+
+### A confirm window that records a configuration nobody has run
+
+`confirm_window` writes `state.desired` as the new last-good. Twenty lines away
+in `state.rs`, `Armed::document` says in bold: **"Not `state.desired`, which
+moves under the window."** The loop reloads on any config change (`lib.rs`,
+unconditional) and defers only the *apply* (`defers_to_a_window`), so an edit
+made inside an open window becomes `desired` and is never applied. Confirm
+after such an edit and `/run/netcfgd-confirm/last-good.json` holds a
+configuration the machine has never been in -- the safety net for the next
+change, pointing somewhere nobody has run. `revert` was given the armed record
+for exactly this reason. `confirm` was not.
+
+### A typo that takes the machine off its profile
+
+Reproduced against `target/release/ncfg` in a scratch tree:
+
+    $ ncfg profile get                 -> office
+    $ ncfg config rm never-existed
+      the `office` profile was folded into your configuration and no profile
+      is chosen now; what is running has not changed
+      a drop-in called `never-existed` is not in .../etc          rc=0
+    $ ncfg profile get                 -> no profile chosen
+
+`with_profile_taken_off` folds the profile into `conf.d` before every settings
+write and undoes the fold only when the write returns `Err`. `remove_named`
+answers "absent is success", so a removal of nothing neither fails nor writes,
+and the fold stands. What is running does not move, which is what makes it
+quiet: what moves is the answer `profile get` gives, after a typo, at exit
+status 0.
+
+### A removal, and a control policy, each checked against the wrong document
+
+`remove_drop_in` is §10.165 and is reproduced there. Beside it,
+`ncfg control set` writes the machine's control policy **into the factory
+image**: `defines_global` searches the layered set factory-first and splices
+into the first file carrying a `global` block. Reproduced -- the block landed
+in the image's file and `/etc` stayed empty. On a read-only root, the case the
+factory layer exists for, that is a write error about a file the operator never
+named; on a writable one the policy lives in the image and leaves with the next
+package upgrade, while `ncfg control show` reports it correctly until then.
+
+And the scanner behind that splice is `str::find` with no notion of a string or
+a comment, so a `global` block containing a comment that mentions a block makes
+the span run to the end of `global`. The invariant puts the file back, so
+nothing is lost but the command -- with three diagnostics blaming the
+operator's file for keys `ncfg` itself wrote. It is the command `debian/postinst`
+prints and the only documented way out of the root-only default.
+
+### The diagnostic command is the least diagnostic one
+
+`why_no_supplicant` names the foreign supplicant holding a radio and names the
+units to stop. It is consulted by `scan` and by nothing else: `status`,
+`connect_to` and `disconnect` each fall back to the control socket's own
+sentence, which that function's doc comment says "cannot answer this and should
+not try". And `status` is the only wireless verb with no `check_backend`, so on
+an `iwd` device it opens a `wpa_supplicant` socket netcfgd deliberately never
+started. `wifi.rs` calls `status` "the command somebody runs when wifi is not
+working"; it is the one verb that withholds the diagnosis netcfgd has already
+computed. Both are pinned by name in `daemon_wifi_test.c`, so the checks go red
+the day somebody fixes them.
+
+### A method that reached the bus by accident
+
+`adapter/netcfgd-nm/src/settings.rs`: `writable()` sits inside the
+`#[zbus::interface]` block rather than the plain `impl` beside it, so zbus
+exports it. The bus policy opens that interface to `context="default"`, and it
+is the only method there that authorizes nobody -- `Update` and `Delete` both
+call `caller_uid` and `may_write`. Any local process can ask whether
+`/etc/netcfgd/conf.d/nm-<sanitised>.conf` exists, which enumerates the networks
+the shim has written. No traversal: `path_for` maps everything outside
+`[A-Za-z0-9._-]` to `_`. Real NetworkManager has no such method, so it is also
+a difference a client introspecting the shim can see.
+
+### Two smaller ones, and a help text that promises a verb
+
+The TUI's scroll offset is computed from the length of the content rather than
+the height of the window, so on any pane of 22 to 64 lines nothing scrolls,
+nothing past the last drawn row is highlighted, and `c` acts on the invisible
+selected line -- which `wifi_rows`' own comment calls "the worst kind of bug a
+list can have: it does something, confidently, to the wrong thing". `KEYS` is
+81 characters and is truncated to `... q qui` at 80 columns.
+
+And `ncfg --help` offers `ncfg secret rm`, which does not exist, while
+`SecretDelete` is in the protocol at the `admin` tier, served by the daemon,
+and **sent by the GUI** -- so the window can remove a credential and the
+command line cannot.
+
+### The gate that agreed with itself
+
+`tool/dbus_policy_gate.py` printed "18 interfaces, all granted" while knowing a
+different eighteen: it counted an interface the shim only *calls*, and it could
+not see `org.netcfgd.Compat` at all, which was consequently absent from the bus
+policy. Two errors cancelling in a total is what a count cannot show. Fixed to
+read the attribute that decides the matter; the corrected gate asked for the
+missing grant on its first run. This is §*Judging evidence* exactly: the count
+was never the thing that was wrong.
+
+### What the sabotage passes found that the code review did not
+
+Two breakages caught nothing alone -- the deadline's `TERM` at the process
+group and the `KILL` after it, which are redundant by design, so each survived
+while the other still killed the grandchild. Only breaking both together went
+red. Getting there found `end_it` returning early once the leader was reaped,
+skipping the group kill entirely; it now always sends it, and waits with
+`WNOWAIT` first so the leader stays a zombie and its pid -- which *is* the
+group id about to be signalled -- cannot be recycled onto somebody else's
+group.
+
+A TUI mutation escaped one of its two checks because `strstr` found the text
+under a different interface; the check now addresses the row by number. And one
+worker's own harness counted a check whose output went into a capture file, so
+a failure was invisible: results now go through a descriptor duplicated before
+any capture.
+
+### The tree, and what a shared one costs
+
+Twelve build objects under `c/src/backend/` were tracked in git, because
+`.gitignore` said `c/src/*/*.o` and the Makefile's `SRCS` is two levels deep.
+`make -C c clean` therefore deleted tracked files. Three of the six workers
+reported link failures from a half-sanitized archive, and two declined to run
+`clean` at all and built in private copies instead -- which is the right
+instinct and cost them a full rebuild each. Fixed, and the pattern now mirrors
+the Makefile's and says why.
+
 ## 10.167 Two half-claims, one in a test and one in a document
 
 The round that ported configuration loading and the daemon's front half. Both

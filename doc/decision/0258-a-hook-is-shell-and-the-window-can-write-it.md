@@ -91,6 +91,40 @@ refuses a document with hooks before the comparison is reached. Changing
 correct code in a passing test to match a fix elsewhere is how a fix becomes a
 sweep.
 
+### Amendment, 2026-09-18: that count was wrong, and a count is what it was for
+
+**There are fifteen, not four.** Counted mechanically, outside
+`netcfgd-compile` where `NoHooks` is defined: fourteen in test code and one in
+production. The paragraph above missed `config.rs`'s own seven test sites,
+`netcfgd-daemon/src/wifi.rs:1078` and `:1166`, `netcfgd-cli/src/secret.rs:300`
+and `netcfgd-cli/src/wifi.rs:984`. Found by the C port, which had to choose a
+sink at every site it wrote and therefore read every site the Rust has.
+
+**The two claims it makes are both still true**, which is exactly what makes
+the miscount worth an amendment rather than a correction in place. None of the
+eleven it missed refuses anything today -- every one is a fixture with no hook
+in it -- and the `profile save` site really is unreachable: hooks exist on two
+block types, `interface.rs` and `wifi.rs`, the renderer refuses both into
+`missing`, and it runs before the compile and returns through `?`. Reaching
+that site requires a document with no hook, which is the one case where the two
+sinks agree. The conclusions were right and the enumeration behind them was not
+checked.
+
+**What the miscount costs is the only thing this paragraph was for.** A reader
+asking "where else is this?" -- which is the question a record like this exists
+to answer -- is told four places and finds four, and eleven more are not
+looked at. That is worse than no list, because a list invites the search to
+stop. The fixtures are hook-free today and nothing compels them to stay that
+way: a probe test that gains a hook fails with a sentence about hooks rather
+than about probes, in a file whose subject is neither.
+
+**And "changing correct code in a passing test to match a fix elsewhere is how
+a fix becomes a sweep" is still the right instinct and is not a reason to leave
+these.** The sink at a compile-to-read site is not correct code that happens to
+pass; it is the wrong answer to the question the site asks, surviving because
+the fixture never asks it. The C port passes the unwritten sink at every one of
+its own, and each says which question it is asking.
+
 ## Two fields nobody can set, and a manual that said otherwise
 
 `HookRef::run_as` and `HookRef::timeout` are in the model, and the hook runner
