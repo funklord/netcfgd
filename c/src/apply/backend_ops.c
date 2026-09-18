@@ -3,14 +3,24 @@
  * and delivering a resolver configuration.
  *
  * WHAT THIS BUILD CARRIES, AND WHAT IT REFUSES
- *   Three of the nine backend kinds have a module under `src/backend/`:
- *   `ncfg_hostapd_start`, `ncfg_ra_start`/`_reload`/`_stop` and
- *   `ncfg_openvpn_start`/`_stop`. Those are the three this executes. A DHCP
- *   client, a DHCPv6 client, a supplicant and a PPPoE session are each started
- *   by code that is not ported, and every one of them is **refused by name**
- *   rather than reported as done -- an executor that answered success for a
- *   DHCP client it did not start would have the planner satisfied about a
- *   machine with no address.
+ *   Four of the nine backend kinds have a module under `src/backend/`:
+ *   `ncfg_hostapd_start`, `ncfg_ra_start`/`_reload`/`_stop`,
+ *   `ncfg_openvpn_start`/`_stop` and `ncfg_dhcp_start`/`_stop`. Those are the
+ *   ones this executes. A supplicant and a PPPoE session are each started by
+ *   code that is not ported, and both are **refused by name** rather than
+ *   reported as done -- an executor that answered success for a client it did
+ *   not start would have the planner satisfied about a machine with no
+ *   address.
+ *
+ *   **The DHCPv6 half is a start this build refuses and a stop it carries**,
+ *   which is not an accident of the porting order. Which v6 client can serve a
+ *   document is decided by whether that document asked for a delegated prefix
+ *   -- odhcp6c can report one and dhcpcd measurably cannot (0050) -- and a
+ *   plain `backend.start` carries neither the request nor an odhcp6c. The Rust
+ *   refuses it in exactly the same words at the same point. Stopping is a
+ *   different question and is answerable: `dhcpcd -6 -k` and an odhcp6c's
+ *   recorded pid are both this module's, so a v6 client that is running can be
+ *   stopped whoever started it.
  *
  *   `ncfg_service_backend_supported` is that list, asked by
  *   `ncfg_apply_supported`, so "what can this carry out?" stays a value a test
@@ -38,6 +48,7 @@
 #include "ncfg/service.h"
 
 #include "ncfg/base.h"
+#include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
 #include "ncfg/observed.h"
@@ -100,13 +111,25 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	case NCFG_BACKEND_ACCESS_POINT:
 	case NCFG_BACKEND_ROUTER_ADVERT:
 	case NCFG_BACKEND_OPENVPN:
-		return 1;
 	case NCFG_BACKEND_DHCP4:
+		return 1;
 	case NCFG_BACKEND_DHCP6:
+		/*
+		 * Stopping one is answerable and starting one is not. See the note at
+		 * the top: which v6 client can serve a document turns on whether it
+		 * asked for a delegated prefix, and a plain `backend.start` carries
+		 * neither that request nor the odhcp6c it would need -- so a document
+		 * that asked for one would get a client that takes the lease and
+		 * reports nothing (0050).
+		 */
+		if (op->kind == NCFG_OP_BACKEND_STOP) {
+			return 1;
+		}
 		ncfg_error_set(err, err_size,
-		    "%s on %s needs a DHCP client to be started, marked and adopted again "
-		    "after a restart, and none of `src/backend/` carries one in this build",
-		    name, iface);
+		    "%s on %s needs to know whether the document asked for a delegated prefix, "
+		    "which the plain backend path does not carry -- dhcpcd never reports a "
+		    "prefix to a script and only odhcp6c can, so netcfgd will not pick one "
+		    "here. A DHCPv4 client on %s is started normally", name, iface, iface);
 		return 0;
 	case NCFG_BACKEND_SUPPLICANT:
 		/*
@@ -290,6 +313,45 @@ static int start_advertising(const ncfg_service_t *service, const char *run_dir,
 	    service->radvd_program, err, err_size);
 }
 
+/* The metric this interface's client is started with, or absent.
+ *
+ * `ncfg_service_client_metric_t` says why this is a list the caller resolved
+ * rather than a field read out of the document: half the rule lives in the
+ * observation, and an executor that rebuilt it from the document alone missed
+ * `network { metric = N }` on every wifi lease. An interface with no entry is
+ * a client started with no `-m`, which is not a refusal. */
+static ncfg_optint_t client_metric_on(const ncfg_service_t *service, const char *iface)
+{
+	ncfg_optint_t none;
+	size_t        i;
+
+	none.has = 0;
+	none.value = 0;
+	for (i = 0; i < service->client_metric_count; i++) {
+		if (service->client_metrics[i].iface &&
+		    strcmp(service->client_metrics[i].iface, iface) == 0) {
+			return service->client_metrics[i].metric;
+		}
+	}
+	return none;
+}
+
+/* Start a DHCPv4 client, or adopt the one already there.
+ *
+ * **Nothing is asked here about whether one is running**, unlike the three
+ * above. That question has two halves for a DHCP client -- a pid file with a
+ * mark in it and a control socket reciting one -- and `ncfg_dhcp_start` asks
+ * both as its first two steps, because the answer decides between adopting and
+ * spawning rather than merely between starting and not. Asking a third time
+ * here would be a second spelling of one rule. */
+static int start_dhcp(const ncfg_service_t *service, const char *run_dir, const char *iface,
+    char *err, size_t err_size)
+{
+	ncfg_optint_t metric = client_metric_on(service, iface);
+
+	return ncfg_dhcp_start(run_dir, iface, &metric, &service->dhcp, err, err_size);
+}
+
 static int start_tunnel(const ncfg_service_t *service, const char *run_dir, const char *iface,
     char *err, size_t err_size)
 {
@@ -324,6 +386,7 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 	case NCFG_BACKEND_OPENVPN:
 		return start_tunnel(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP4:
+		return start_dhcp(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_SUPPLICANT:
 	case NCFG_BACKEND_PPPOE:
@@ -457,6 +520,15 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		    err_size);
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_DHCP6:
+		/*
+		 * The family is not optional and is not guessed: dhcpcd's pid file
+		 * carries it, and a `-k` without one reports a client stopped that is
+		 * still renewing the lease and holding the address (0070). The op's
+		 * kind is what says which, which is the one place the two are joined.
+		 */
+		return ncfg_dhcp_stop(run_dir, iface,
+		    kind == NCFG_BACKEND_DHCP4 ? NCFG_DHCP_FAMILY_V4 : NCFG_DHCP_FAMILY_V6,
+		    &service->dhcp, err, err_size);
 	case NCFG_BACKEND_SUPPLICANT:
 	case NCFG_BACKEND_PPPOE:
 	case NCFG_BACKEND_WIREGUARD:
