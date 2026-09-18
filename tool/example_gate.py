@@ -23,8 +23,8 @@ Saying so here rather than letting the gate's name imply otherwise: a check
 that is trusted for more than it does is worse than no check, because the next
 person stops reading the file by hand.
 
-TWO BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
-skipped by pattern, so that a third joining them is a failure:
+THREE BLOCKS ARE EXPECTED NOT TO COMPILE ALONE, and they are named rather than
+skipped by pattern, so that a fourth joining them is a failure:
 
   - `override interface` needs the block it overrides.
   - one `interface eth0` carries a per-interface `dns` scope with routing
@@ -35,7 +35,7 @@ skipped by pattern, so that a third joining them is a failure:
 	interface this configuration does not describe answers "disconnected" for
 	ever with nothing saying why.
 
-Both are correct as documentation and meaningless in isolation. A gate that
+Each is correct as documentation and meaningless in isolation. A gate that
 silently tolerated "anything that does not compile" would tolerate the next
 real error too.
 """
