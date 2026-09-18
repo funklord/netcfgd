@@ -21,6 +21,16 @@
  *     same directory, which is what a resolved comparison buys over the text
  *     one -- and an argument it cannot place.
  *
+ *   * **What does `--json` say, and what must it never say?** One object, on
+ *     one line, at the end -- and the list of removals is written from what
+ *     `unlink` actually returned. A dry run's document has `would_remove` and
+ *     no `removed` member at all; a run that removed has `removed` and no
+ *     `would_remove`. project.md section 10.175 is why that is asserted as an
+ *     absence rather than only as a presence: the Rust prints `removed` over the
+ *     whole list before the loop that removes anything, and a document
+ *     claiming a removal is worse than a sentence doing it because a script
+ *     believes it.
+ *
  * NOTHING OUTSIDE ITS OWN DIRECTORY
  *   Every directory here is under one `mkdtemp` tree and is passed explicitly.
  *   This verb removes files, so that is not a convention here but the whole
@@ -165,6 +175,24 @@ static void fixture(int with_factory)
 		(void)testdir_write(in(in(factory_dir, "conf.d"), "00-image.conf"),
 		    "global { }\n", 11u);
 	}
+}
+
+/*
+ * Whether what was printed is one JSON object and nothing else.
+ *
+ * The contract `--json` makes is that stdout is one value, so a prose line
+ * that survived beside the document is a failure of the flag rather than an
+ * untidiness -- and it is the failure this wave exists to close, since the
+ * verbs here print as they go.
+ */
+static int one_json_line(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	if (length < 3u || text[0] != '{' || text[length - 1u] != '\n') {
+		return 0;
+	}
+	return strchr(text, '\n') == text + length - 1u && text[length - 2u] == '}';
 }
 
 /* Whether `text` has a line exactly equal to `wanted`. */
@@ -405,6 +433,152 @@ static void a_removal_that_could_not_happen(void)
 	    "  the file it could not remove is still there");
 }
 
+/* ------------------------------------------------------------------------ *
+ * What `--json` says, and the word it must not use
+ * ------------------------------------------------------------------------ */
+
+/*
+ * A dry run's document predicts and never reports.
+ *
+ * The `removed` member is asserted **absent**, not empty: this is project.md
+ * section 10.175 in a document, and the Rust's own failure was that the word
+ * appeared over a list of files that were still on disk.
+ */
+static void a_dry_run_says_would_remove_and_never_removed(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+	int         ok;
+
+	(void)fprintf(report, "\n-- `--json` on a run that attempts nothing\n");
+	fixture(1);
+	options.yes = 0;
+	options.json = 1;
+	ok = reset(err, sizeof(err));
+	printed = captured ? captured : "";
+	check(ok, err[0] ? err : "a dry run with --json succeeds");
+	check(one_json_line(printed), "it prints one object on one line and nothing else");
+	check(strstr(printed, "\"would_remove\":[") != NULL,
+	    "  the paths are under `would_remove`, which is a prediction");
+	check(strstr(printed, "\"removed\"") == NULL,
+	    "  and there is no `removed` member at all, not an empty one");
+	check(strstr(printed, "netcfgd.conf") != NULL &&
+	    strstr(printed, "10-site.conf") != NULL && strstr(printed, "20-more.conf") != NULL,
+	    "  the list is the loader's, same as the table's");
+	check(strstr(printed, "notes.txt") == NULL,
+	    "  and nothing that is not configuration");
+	check(strstr(printed, "\"factory_remaining\":1") != NULL,
+	    "  what would be left is counted");
+	check(strstr(printed, "\"credentials_remaining\":1") != NULL,
+	    "  and so are the credentials that outlive it");
+	check(strstr(printed, "would remove ") == NULL &&
+	    strstr(printed, "add --yes") == NULL,
+	    "  and not one line of the table survived beside the document");
+	check(testdir_exists(in(config_dir, "netcfgd.conf")) &&
+	    testdir_exists(in(in(config_dir, "conf.d"), "10-site.conf")),
+	    "  and every file is still there");
+	options.json = 0;
+}
+
+/* A run that removed reports, from what `unlink` answered, and predicts nothing. */
+static void a_run_with_yes_reports_what_unlink_returned(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+	int         ok;
+
+	(void)fprintf(report, "\n-- `--json` on a run that removed\n");
+	fixture(1);
+	options.yes = 1;
+	options.json = 1;
+	ok = reset(err, sizeof(err));
+	printed = captured ? captured : "";
+	check(ok, err[0] ? err : "a reset with --yes and --json succeeds");
+	check(one_json_line(printed), "it prints one object on one line and nothing else");
+	check(strstr(printed, "\"removed\":[") != NULL,
+	    "  the paths are under `removed`, which is a record");
+	check(strstr(printed, "\"would_remove\"") == NULL,
+	    "  and the prediction is not beside it: one is a record and the other a guess");
+	check(!testdir_exists(in(config_dir, "netcfgd.conf")) &&
+	    !testdir_exists(in(in(config_dir, "conf.d"), "10-site.conf")),
+	    "  and every path it named is off the disk");
+	check(testdir_exists(in(in(config_dir, "conf.d"), "notes.txt")) &&
+	    testdir_exists(in(in(config_dir, "secrets"), "vpn")) &&
+	    testdir_exists(in(in(factory_dir, "conf.d"), "00-image.conf")),
+	    "  and what the verb leaves is still left");
+
+	/* Nothing to do, and the empty list is the prediction rather than a claim
+	 * that a removal of nothing happened. */
+	ok = reset(err, sizeof(err));
+	printed = captured ? captured : "";
+	check(ok && one_json_line(printed) && strstr(printed, "\"would_remove\":[]") != NULL &&
+	    strstr(printed, "\"removed\"") == NULL,
+	    "a second run says it would remove nothing, and claims no removal");
+	options.json = 0;
+	options.yes = 0;
+}
+
+/*
+ * A machine with no factory layer says so as a number.
+ *
+ * The table spends a paragraph on it; the document has to carry the same fact
+ * or the flag says less than the text, which is what it exists to avoid.
+ */
+static void an_empty_factory_layer_is_a_count(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+
+	(void)fprintf(report, "\n-- the machine that is emptied rather than restored\n");
+	fixture(0);
+	options.yes = 0;
+	options.json = 1;
+	(void)reset(err, sizeof(err));
+	printed = captured ? captured : "";
+	check(strstr(printed, "\"factory_remaining\":0") != NULL,
+	    "nothing would remain, said as a number a script can act on");
+	check(strstr(printed, "no configuration at all") == NULL,
+	    "  and the paragraph addressed to a person is not on the stream");
+	options.json = 0;
+}
+
+/*
+ * A removal the filesystem refuses prints no document at all.
+ *
+ * Half an answer is the one that gets parsed, so the verb answers 0 and its
+ * sentence carries how many of how many had gone. Driven only where the mode
+ * can refuse this process; running as root there is no way to make `unlink`
+ * fail from inside a test, and saying so beats counting a check that inspected
+ * nothing.
+ */
+static void a_refused_removal_prints_nothing(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+	int         ok;
+
+	(void)fprintf(report, "\n-- `--json` where a removal is refused part way\n");
+	if (geteuid() == 0) {
+		note("not driven: this process is root, and `unlink` is not stopped by the "
+		    "mode that would refuse anybody else");
+		return;
+	}
+	fixture(1);
+	options.yes = 1;
+	options.json = 1;
+	(void)chmod(in(config_dir, "conf.d"), 0500);
+	ok = reset(err, sizeof(err));
+	printed = captured ? captured : "";
+	(void)chmod(in(config_dir, "conf.d"), 0755);
+	check(!ok, "a reset that could not finish fails");
+	check(printed[0] == '\0',
+	    "  and prints nothing at all rather than a document about a partial run");
+	check(strstr(err, "still there") != NULL,
+	    "  the sentence carries how much had gone and how much had not");
+	options.json = 0;
+	options.yes = 0;
+}
+
 /* ================================================================== main */
 
 int main(void)
@@ -442,6 +616,10 @@ int main(void)
 	what_is_left_is_said_before_it_happens();
 	what_yes_removes_and_what_it_leaves();
 	a_removal_that_could_not_happen();
+	a_dry_run_says_would_remove_and_never_removed();
+	a_run_with_yes_reports_what_unlink_returned();
+	an_empty_factory_layer_is_a_count();
+	a_refused_removal_prints_nothing();
 
 	free(captured);
 	testdir_remove(testdir_path);

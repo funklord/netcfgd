@@ -32,7 +32,11 @@
  *   spelling of `group:NAME` is exactly the drift 0263 refuses.
  *
  * WHERE THIS DIVERGES FROM THE RUST
- *   Both entries are in 0263's list. In short: the scanner that finds a block
+ *   `--json` is answered rather than accepted and ignored, which is the third
+ *   entry and is `subcommand_internal.h`'s rule; the object is the three
+ *   tiers, and `set` puts the file it wrote beside them.
+ *
+ *   Both the others are in 0263's list. In short: the scanner that finds a block
  *   skips strings and comments, because the Rust's does not and a `#` comment
  *   containing `control {` inside the `global` block made this command refuse
  *   itself; and the file to splice into is looked for in the writable layer
@@ -931,12 +935,66 @@ static void print_tiers(const ncfg_control_t *control)
 	    ncfg_cli_principal_render(&control->admin, rendered, sizeof(rendered)));
 }
 
+/*
+ * The policy as one object: the three tiers, and the file where one was
+ * written.
+ *
+ * **The tiers are the whole answer.** `print_tiers` prints exactly these three
+ * and everything under it is advice addressed to a person -- what root-only
+ * means for a client, and that a named group's member has to log in again. A
+ * reader of the document has the three principals in front of it and does not
+ * need to be told that three `root`s are root-only.
+ *
+ * The principal is rendered with `ncfg_cli_principal_render`, which is the one
+ * spelling of `group:NAME` this file exists to keep singular -- a document
+ * that spelled it a fourth way would be the drift 0263 refuses, in the one
+ * output a script parses.
+ *
+ * `path` is written by `set` and not by `show`: it is what this run wrote, not
+ * a property of the policy, and `show` compiles the whole layered
+ * configuration rather than reading one file.
+ */
+static int say_control(const ncfg_control_t *control, const char *path, char *err,
+    size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	char               rendered[NCFG_CLI_TEXT_MAX];
+	size_t             which;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	if (path) {
+		ncfg_json_write_member_string(&writer, "path", path);
+	}
+	/* `tier_of` and `tier_names`, so that the document, the rendered block and
+	 * the helper's grammar cannot come to disagree about the order or the
+	 * spelling of a tier. */
+	for (which = 0; which < sizeof(tier_names) / sizeof(tier_names[0]); which++) {
+		ncfg_json_write_member_string(&writer, tier_names[which],
+		    ncfg_cli_principal_render(tier_of(control, which), rendered,
+		        sizeof(rendered)));
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the control policy", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
+
 static int show(const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
 	ncfg_document_t *document = ncfg_cli_compile_to_read(options, err, err_size);
+	int              ok;
 
 	if (!document) {
 		return 0;
+	}
+	if (options->json) {
+		ok = say_control(&document->globals.control, NULL, err, err_size);
+		ncfg_document_free(document);
+		return ok;
 	}
 	print_tiers(&document->globals.control);
 	/* The socket's mode follows the policy, and an operator reading this is
@@ -1024,6 +1082,12 @@ static int set(const ncfg_cli_options_t *options, char *err, size_t err_size)
 	if (!write_policy(&control, options, path, sizeof(path), err, err_size)) {
 		control_reset(&control);
 		return 0;
+	}
+	if (options->json) {
+		int ok = say_control(&control, path, err, err_size);
+
+		control_reset(&control);
+		return ok;
 	}
 	ncfg_out_line(path);
 	report(&control);

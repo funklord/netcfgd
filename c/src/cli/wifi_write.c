@@ -21,6 +21,12 @@
  *   somebody else wrote.
  *
  * WHERE THIS DIVERGES FROM THE RUST
+ *   `--json` is answered rather than accepted and ignored at both verbs, which
+ *   is `subcommand_internal.h`'s rule. `add` prints what it wrote, whether the
+ *   network is secured and which radio it took; `forget` prints which
+ *   credentials went and which stayed -- and both leave out, on the daemon
+ *   route, every member the daemon's `ok` does not answer.
+ *
  *   0263's list has the whole of each. In short: the configuration is loaded
  *   once rather than twice; the block's every field is compared after the
  *   write rather than the enterprise five; and `forget` says how many
@@ -591,9 +597,9 @@ static int read_credential(const char *id, const ncfg_cli_wifi_t *wanted, char *
  * add` asked for in so many words. A command that takes hardware silently is
  * one whose next surprise is worse.
  */
-static void say_activated(const char *interface)
+static void say_activated(const ncfg_cli_options_t *options, const char *interface)
 {
-	if (interface && interface[0]) {
+	if (!options->json && interface && interface[0]) {
 		ncfg_out_writef("activated `%s`: netcfgd manages that radio now, which is what "
 		    "lets it join anything. `ncfg wifi deactivate %s` hands it back\n",
 		    interface, interface);
@@ -614,8 +620,65 @@ static int any_radio_block(const ncfg_document_t *document)
 	return 0;
 }
 
+/*
+ * What `ncfg wifi add` did, as one object.
+ *
+ * `id` is the handle every other `ncfg wifi` verb takes, so it is the member a
+ * script keeps. `secured` is the socket's own word for the fact the open-network
+ * warning is about -- a scan entry carries it -- so the flag and the scan agree
+ * on what to call it.
+ *
+ * `file` and `secret` are the two paths this process wrote, named as
+ * `ncfg_wifi_installed_t` names them, and both are **absent on the daemon
+ * route**: netcfgd chose where its copies went and 0127's rule is that handing
+ * a path back invites a client to keep it. `secret` is a path and never a
+ * value; the credential this command read is in that file and in nothing this
+ * program prints.
+ *
+ * `activated` is the radio that was handed over, absent where none was -- a
+ * bigger change than the network that prompted it, and the text says so for
+ * that reason.
+ *
+ * `usable` is the "nothing will use it yet" line: whether anything in this
+ * configuration can join what was just added. It is **absent on the daemon
+ * route**, where this process never compiled the document and so never looked;
+ * `false` there would be a finding nobody made.
+ */
+static int say_added(const ncfg_wifi_installed_t *written, const char *id,
+    const ncfg_cli_wifi_t *wanted, const int *usable, const char *activated, char *err,
+    size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "id", id);
+	ncfg_json_write_member_bool(&writer, "secured", !wanted->open);
+	ncfg_json_write_member_bool(&writer, "daemon", written == NULL);
+	if (written && written->file) {
+		ncfg_json_write_member_string(&writer, "file", written->file);
+	}
+	if (written && written->secret) {
+		ncfg_json_write_member_string(&writer, "secret", written->secret);
+	}
+	if (activated && activated[0]) {
+		ncfg_json_write_member_string(&writer, "activated", activated);
+	}
+	if (usable) {
+		ncfg_json_write_member_bool(&writer, "usable", *usable);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the network that was added", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
+
 static void report(const ncfg_wifi_installed_t *written, const char *id,
-    const ncfg_cli_wifi_t *wanted, const ncfg_document_t *before, const char *activated)
+    const ncfg_cli_wifi_t *wanted, const ncfg_document_t *before, const char *activated,
+    const ncfg_cli_options_t *options)
 {
 	ncfg_out_writef("wrote %s\n", written->file ? written->file : "");
 	if (written->secret) {
@@ -631,7 +694,7 @@ static void report(const ncfg_wifi_installed_t *written, const char *id,
 	 * that compiles either does something or says it does not -- applied to
 	 * the file this just wrote.
 	 */
-	say_activated(activated);
+	say_activated(options, activated);
 	if (!any_radio_block(before) && !(activated && activated[0])) {
 		ncfg_out_line("nothing will use it yet: no device in this configuration has a "
 		    "`wifi` block, and no radio was activated for it");
@@ -721,8 +784,8 @@ static void ssid_hex(const ncfg_ssid_t *ssid, char *out, size_t out_size)
  * exactly as it does when this command writes the file itself (0117).
  */
 static int add_over_socket(const char *socket_path, const ncfg_wifi_profile_t *profile,
-    const char *credential, const ncfg_cli_wifi_t *wanted, const char *activated, char *err,
-    size_t err_size)
+    const char *credential, const ncfg_cli_wifi_t *wanted, const char *activated,
+    const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
 	ncfg_proto_request_t request;
 	char                 hex[NCFG_SSID_MAX_LEN * 2u + 1u];
@@ -771,7 +834,12 @@ static int add_over_socket(const char *socket_path, const ncfg_wifi_profile_t *p
 	if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
 		return 0;
 	}
-	say_activated(activated);
+	say_activated(options, activated);
+	if (options->json) {
+		/* No paths and no `usable`: netcfgd chose where both files went and
+		 * this process never compiled the document to see what could join. */
+		return say_added(NULL, profile->id, wanted, NULL, activated, err, err_size);
+	}
 	ncfg_out_writef("added `%s` through netcfgd\n", profile->id);
 	ncfg_out_line("the configuration is root's, so this went to the daemon rather than "
 	    "straight to a file");
@@ -938,8 +1006,8 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 		goto done;
 	}
 	if (listening) {
-		ok = add_over_socket(socket_path, &profile, credential, wanted, hand_over, err,
-		    err_size);
+		ok = add_over_socket(socket_path, &profile, credential, wanted, hand_over, options,
+		    err, err_size);
 		goto done;
 	}
 	if (!ncfg_wifi_profile_install(config_dir, factory_dir, &profile, credential,
@@ -947,7 +1015,13 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 		ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
 		goto done;
 	}
-	report(&written, id, wanted, document, hand_over);
+	if (options->json) {
+		int usable = any_radio_block(document) || (hand_over[0] != '\0');
+
+		ok = say_added(&written, id, wanted, &usable, hand_over, err, err_size);
+		goto done;
+	}
+	report(&written, id, wanted, document, hand_over, options);
 	ncfg_out_writef("nothing is listening on %s, so this was written directly\n",
 	    socket_path);
 	ok = 1;
@@ -964,6 +1038,55 @@ done:
 /* ------------------------------------------------------------------------ *
  * `ncfg wifi forget`
  * ------------------------------------------------------------------------ */
+
+/*
+ * What `ncfg wifi forget` did, as one object.
+ *
+ * `removed` and `kept` are the credentials, by name, and they are the reason
+ * this verb says more than "forgotten": a credential outliving what wanted it
+ * is a fault an operator cannot see from here, and one shared with an access
+ * point stays behind. The names are `ncfg_wifi_forgotten_t`'s own.
+ *
+ * **Both are absent on the daemon route, never empty.** The daemon answers
+ * `ok` and says nothing about credentials, so an empty list there would be
+ * this command reporting that none went when it has no idea -- which is
+ * project.md section 10.175's shape in a document rather than in a sentence. An
+ * empty list on the local route means the loop ran and found none.
+ */
+static int say_forgotten(const char *id, const ncfg_wifi_forgotten_t *forgotten, char *err,
+    size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	size_t             at;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "id", id);
+	ncfg_json_write_member_bool(&writer, "daemon", forgotten == NULL);
+	if (forgotten) {
+		ncfg_json_write_key(&writer, "removed");
+		ncfg_json_write_array_begin(&writer);
+		for (at = 0; at < forgotten->removed_count; at++) {
+			ncfg_json_write_string(&writer,
+			    forgotten->removed[at] ? forgotten->removed[at] : "");
+		}
+		ncfg_json_write_array_end(&writer);
+		ncfg_json_write_key(&writer, "kept");
+		ncfg_json_write_array_begin(&writer);
+		for (at = 0; at < forgotten->kept_count; at++) {
+			ncfg_json_write_string(&writer,
+			    forgotten->kept[at] ? forgotten->kept[at] : "");
+		}
+		ncfg_json_write_array_end(&writer);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the network that was forgotten", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
 
 int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positional,
     size_t count, char *err, size_t err_size)
@@ -1000,6 +1123,9 @@ int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positio
 		if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
 			return 0;
 		}
+		if (options->json) {
+			return say_forgotten(positional[0], NULL, err, err_size);
+		}
 		ncfg_out_writef("netcfgd forgot `%s`\n", positional[0]);
 		return 1;
 	}
@@ -1013,6 +1139,10 @@ int ncfg_cli_wifi_forget(const ncfg_cli_options_t *options, const char **positio
 	if (!ncfg_wifi_profile_forget(config_dir, factory_dir, document, positional[0], &forgotten,
 	        &denied, said, sizeof(said))) {
 		ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
+		goto done;
+	}
+	if (options->json) {
+		ok = say_forgotten(positional[0], &forgotten, err, err_size);
 		goto done;
 	}
 	ncfg_out_writef("forgot `%s`\n", positional[0]);

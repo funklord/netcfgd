@@ -35,8 +35,23 @@
  *   Each is argued at the code. In short: the two directories are compared
  *   after resolving them rather than as text; an argument is refused rather
  *   than ignored; "removed" is printed after the file is gone rather than
- *   before the loop that removes it; and the credentials that outlive the
- *   reset are counted.
+ *   before the loop that removes it; the credentials that outlive the reset
+ *   are counted; and `--json` is answered rather than accepted and ignored.
+ *
+ * WHAT `--json` PRINTS, AND THE ONE THING IT MUST NOT SAY
+ *   One object, at the end, built from what happened rather than from what was
+ *   about to. **`removed` is written only from the paths `unlink` returned 0
+ *   for**, and `would_remove` -- the prediction -- is written only on a run
+ *   that attempted nothing. The two never appear together, because one is a
+ *   record and the other is a guess, and a document that carried both would be
+ *   asking a reader to tell them apart by name. project.md section 10.175 is the
+ *   whole reason: the Rust prints the word `removed` over the list before the
+ *   loop, and a script believes a document in a way nobody believes a sentence.
+ *
+ *   A run that stops part way prints **no document at all** -- the verb answers
+ *   0 and the sentence carries which file stopped it and how many of how many
+ *   had gone, which is `say_json`'s rule for a render that failed and is right
+ *   here for the same reason: half an answer is the one that gets parsed.
  */
 #include "subcommand_internal.h"
 
@@ -111,10 +126,9 @@ static long stored_credentials(const char *config_dir)
 
 /* What remains after this, said before it happens rather than discovered by
  * the next apply tearing everything down. */
-static void say_what_is_left(const char *config_dir, const char *factory_dir, size_t factory)
+static void say_what_is_left(const char *config_dir, const char *factory_dir, size_t factory,
+    long credentials)
 {
-	long credentials;
-
 	ncfg_out_line("");
 	if (factory == 0) {
 		/*
@@ -131,7 +145,6 @@ static void say_what_is_left(const char *config_dir, const char *factory_dir, si
 		ncfg_out_writef("%zu file%s remain%s, from %s\n", factory, factory == 1u ? "" : "s",
 		    factory == 1u ? "s" : "", factory_dir);
 	}
-	credentials = stored_credentials(config_dir);
 	if (credentials > 0) {
 		/*
 		 * **Not removed, and said rather than left to be found.** A stored
@@ -148,6 +161,54 @@ static void say_what_is_left(const char *config_dir, const char *factory_dir, si
 	}
 }
 
+/*
+ * The document, written from what happened.
+ *
+ * `attempted` says which of the two lists this is: 0 means nothing was tried,
+ * so the paths are a prediction and go under `would_remove`; 1 means the loop
+ * ran and `done` of them came back from `unlink` successfully, so exactly those
+ * go under `removed`. **There is no call shape that writes a path under
+ * `removed` without a successful `unlink` behind it**, which is the property
+ * project.md section 10.175 costs a machine's configuration when it is missing.
+ *
+ * `credentials_remaining` is absent where the store could not be listed, not
+ * zero: the text prints nothing in that case for the same reason, and a `0`
+ * would be this command reporting an emptiness it never looked at.
+ */
+static int say_reset(const char *config_dir, const char *factory_dir, char *const *doomed,
+    size_t doomed_count, int attempted, size_t done, size_t factory_count, long credentials,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	size_t             at;
+	size_t             listed = attempted ? done : doomed_count;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "config_dir", config_dir);
+	ncfg_json_write_member_string(&writer, "factory_dir", factory_dir);
+	ncfg_json_write_key(&writer, attempted ? "removed" : "would_remove");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0; at < listed; at++) {
+		ncfg_json_write_string(&writer, doomed[at] ? doomed[at] : "");
+	}
+	ncfg_json_write_array_end(&writer);
+	/* How much of a factory layer is left, which is the difference between a
+	 * machine being restored and one being emptied. Zero is the case the text
+	 * spends a paragraph on. */
+	ncfg_json_write_member_int(&writer, "factory_remaining", (int64_t)factory_count);
+	if (credentials >= 0) {
+		ncfg_json_write_member_int(&writer, "credentials_remaining", (int64_t)credentials);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "what the reset did", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
+
 int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, size_t count,
     char *err, size_t err_size)
 {
@@ -159,6 +220,7 @@ int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, s
 	size_t  factory_count = 0;
 	size_t  at;
 	size_t  removed = 0;
+	long    credentials;
 	int     ok = 1;
 
 	/*
@@ -193,11 +255,19 @@ int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, s
 		ncfg_config_paths_free(doomed, doomed_count);
 		return 0;
 	}
+	credentials = stored_credentials(config_dir);
 	if (doomed_count == 0) {
-		ncfg_out_writef("nothing to reset: %s holds no config\n", config_dir);
+		if (options->json) {
+			/* An empty `would_remove` rather than an empty `removed`: nothing
+			 * was attempted, and the two lists mean different things. */
+			ok = say_reset(config_dir, factory_dir, doomed, 0u, 0, 0u, factory_count,
+			    credentials, err, err_size);
+		} else {
+			ncfg_out_writef("nothing to reset: %s holds no config\n", config_dir);
+		}
 		ncfg_config_paths_free(doomed, doomed_count);
 		ncfg_config_paths_free(factory, factory_count);
-		return 1;
+		return ok;
 	}
 
 	/*
@@ -208,20 +278,29 @@ int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, s
 	 * named in a sentence underneath a list saying otherwise. What each file
 	 * actually became is said below, as it happens.
 	 */
-	for (at = 0; at < doomed_count; at++) {
-		ncfg_out_writef("would remove %s\n", doomed[at]);
+	if (!options->json) {
+		for (at = 0; at < doomed_count; at++) {
+			ncfg_out_writef("would remove %s\n", doomed[at]);
+		}
+		say_what_is_left(config_dir, factory_dir, factory_count, credentials);
 	}
-	say_what_is_left(config_dir, factory_dir, factory_count);
 
 	if (!options->yes) {
-		ncfg_out_line("");
-		ncfg_out_line("nothing was removed; add --yes to do it");
+		if (options->json) {
+			ok = say_reset(config_dir, factory_dir, doomed, doomed_count, 0, 0u,
+			    factory_count, credentials, err, err_size);
+		} else {
+			ncfg_out_line("");
+			ncfg_out_line("nothing was removed; add --yes to do it");
+		}
 		ncfg_config_paths_free(doomed, doomed_count);
 		ncfg_config_paths_free(factory, factory_count);
-		return 1;
+		return ok;
 	}
 
-	ncfg_out_line("");
+	if (!options->json) {
+		ncfg_out_line("");
+	}
 	for (at = 0; at < doomed_count; at++) {
 		if (unlink(doomed[at]) != 0) {
 			/*
@@ -239,7 +318,20 @@ int ncfg_cli_reset(const ncfg_cli_options_t *options, const char **positional, s
 			break;
 		}
 		removed++;
-		ncfg_out_writef("removed %s\n", doomed[at]);
+		if (!options->json) {
+			ncfg_out_writef("removed %s\n", doomed[at]);
+		}
+	}
+	/*
+	 * **Only on a run that finished.** A reset that stopped part way has
+	 * already set `err`, and printing a document beside it would be a value on
+	 * stdout for a command that exits non-zero -- the sentence carries the
+	 * count, which is the half a reader needs and the half the Rust's list
+	 * contradicted.
+	 */
+	if (ok && options->json) {
+		ok = say_reset(config_dir, factory_dir, doomed, doomed_count, 1, removed,
+		    factory_count, credentials, err, err_size);
 	}
 	ncfg_config_paths_free(doomed, doomed_count);
 	ncfg_config_paths_free(factory, factory_count);
