@@ -1149,6 +1149,10 @@ packaging:
 	@# whose tests are to follow has not been ported; this is that sentence
 	@# with something behind it.
 	@python3 tool/c_tests_gate.py
+	@# And every public header in one file. `tun.h` declared an enum `document.h`
+	@# already had, so any translation unit including both failed to compile --
+	@# and none did, so the module built and its tests passed.
+	@python3 tool/headers_compose_gate.py
 	@# A doc comment written twice on one line, which an edit that pastes over
 	@# itself leaves behind and nothing else notices. Four of the wrong-item
 	@# kind turned up in one day; this covers the half that needs no judgement.
