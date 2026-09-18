@@ -868,11 +868,22 @@ static void a_hook_is_not_undone_and_a_revert_is_not_repeated(void)
  */
 static void every_op_is_either_executed_or_refused_by_name(void)
 {
-	static const ncfg_op_kind_t executed[] = { NCFG_OP_LINK_DELETE, NCFG_OP_LINK_SET_MTU,
-		NCFG_OP_LINK_SET_MAC, NCFG_OP_LINK_SET_MASTER, NCFG_OP_LINK_UNSET_MASTER,
-		NCFG_OP_LINK_UP, NCFG_OP_LINK_DOWN, NCFG_OP_ADDR_ADD, NCFG_OP_ADDR_DEL,
-		NCFG_OP_ROUTE_ADD, NCFG_OP_ROUTE_DEL, NCFG_OP_HOOK_RUN, NCFG_OP_COMMIT_ARM,
-		NCFG_OP_COMMIT_CONFIRM, NCFG_OP_COMMIT_REVERT };
+	/*
+	 * **The list names what is refused, and it used to name what was carried
+	 * out.** It was inverted when the two executor halves landed and the
+	 * fifteen became forty-five: a list of what works grows with every wave
+	 * and has to be edited by whoever adds an op, which is the edit most
+	 * easily forgotten. A list of what does not works the other way -- it
+	 * shrinks, and the day it empties this check becomes "everything is
+	 * carried out", which is the end state the port is for.
+	 *
+	 * These three are refused for a zero-initialised op because kind 0 is the
+	 * DHCP client, which no backend in `src/backend/` carries. `link.create`
+	 * answers differently depending on what is being created and is checked
+	 * on its own below.
+	 */
+	static const ncfg_op_kind_t refused[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
+		NCFG_OP_BACKEND_RELOAD };
 	int    every_refusal_names_its_op = 1;
 	int    every_op_answered = 1;
 	size_t kind;
@@ -882,16 +893,16 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 		ncfg_op_t   op;
 		char        message[NCFG_ERROR_MAX];
 		const char *name;
-		int         wanted = 0;
+		int         wanted = 1;
 		int         answered;
 		size_t      i;
 
 		memset(&op, 0, sizeof(op));
 		op.kind = (int)kind;
 		name = ncfg_op_name(&op);
-		for (i = 0; i < sizeof(executed) / sizeof(executed[0]); i++) {
-			if ((size_t)executed[i] == kind) {
-				wanted = 1;
+		for (i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
+			if ((size_t)refused[i] == kind) {
+				wanted = 0;
 			}
 		}
 		/* `link.create` is the one whose answer depends on what is being
@@ -1019,14 +1030,23 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		ncfg_op_t     op;
 		ncfg_reason_t reason;
 
+		/*
+		 * **`wg.set_peers` was the example here and is carried out now**, so
+		 * the subject moved to one that is still refused rather than the check
+		 * being deleted: what it asserts is that a refusal says *what* is
+		 * missing, and that property outlives any particular op. `backend.start`
+		 * with the zero kind is the DHCP client, which no backend in
+		 * `src/backend/` carries. When that lands, this check moves again --
+		 * and if it has nowhere to move to, the port is finished.
+		 */
 		memset(&reason, 0, sizeof(reason));
-		reason.interface = "wg0";
-		reason.field = "wireguard.peers";
-		reason.desired = "1 peer";
+		reason.interface = "eth0";
+		reason.field = "backend.dhcp4";
+		reason.desired = "running";
 		reason.observed = "<absent>";
 		memset(&op, 0, sizeof(op));
-		op.kind = NCFG_OP_WG_SET_PEERS;
-		op.u.wg_peers.iface = "wg0";
+		op.kind = NCFG_OP_BACKEND_START;
+		op.u.backend.iface = "eth0";
 		(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
 
 		/* The double refuses exactly what `ncfg_apply_supported` refuses,
@@ -1036,11 +1056,11 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		message[0] = '\0';
 		(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 		failure = ncfg_journal_failure(&journal);
-		check(failure && failure->op && strcmp(failure->op, "wg.set_peers") == 0,
+		check(failure && failure->op && strcmp(failure->op, "backend.start") == 0,
 		    "an op this build cannot carry out fails its action rather than passing");
 		message[0] = '\0';
 		check(!ncfg_apply_supported(&op, message, sizeof(message)) &&
-		    strstr(message, "wg.set_peers") && strstr(message, "generic netlink"),
+		    strstr(message, "backend.start") && strstr(message, "DHCP client"),
 		    "and the refusal says what is missing, not just that it is missing");
 	} else {
 		check(0, "an op this build cannot carry out fails its action rather than passing");

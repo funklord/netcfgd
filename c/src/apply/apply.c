@@ -21,6 +21,7 @@
 #include "ncfg/apply.h"
 
 #include "ncfg/base.h"
+#include "ncfg/service.h"
 
 #include <string.h>
 
@@ -114,13 +115,14 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
  */
 int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 {
-	const char *name;
-
 	if (!op) {
 		ncfg_error_set(err, err_size, "there is no op to carry out");
 		return 0;
 	}
-	name = ncfg_op_name(op);
+	/* No `name` held here any more: every refusal left in this function names
+	 * its subject itself -- `creatable` names the device and the kind, and
+	 * `ncfg_service_backend_supported` names the backend. An arm that needs
+	 * `ncfg_op_name(op)` again takes it where it uses it. */
 	switch ((ncfg_op_kind_t)op->kind) {
 	case NCFG_OP_LINK_CREATE:
 		return creatable(op->u.link_create.kind, op->u.link_create.name, err, err_size);
@@ -148,81 +150,63 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_COMMIT_CONFIRM:
 	case NCFG_OP_COMMIT_REVERT:
 		return 1;
+	/*
+	 * The service-side ops: a daemon started or stopped, a control socket
+	 * written to, a file under `/proc`, a resolver configuration delivered.
+	 * `service.h` is what carries them out, and the three backend ops ask it
+	 * which *kinds* it can carry -- the same shape `creatable` has above, and
+	 * for the same reason: three of the nine backends have a module under
+	 * `src/backend/` and the rest do not.
+	 */
 	case NCFG_OP_BACKEND_START:
 	case NCFG_OP_BACKEND_STOP:
 	case NCFG_OP_BACKEND_RELOAD:
-		ncfg_error_set(err, err_size,
-		    "%s needs a DHCP client, a supplicant or a PPP daemon to be started and "
-		    "adopted, and none of that is ported in this build", name);
-		return 0;
+		return ncfg_service_backend_supported(op, err, err_size);
 	case NCFG_OP_WIFI_SET_PROFILES:
 	case NCFG_OP_WIFI_ASSOCIATE:
 	case NCFG_OP_WIFI_DISASSOCIATE:
+	case NCFG_OP_WIFI_SET_REGDOM:
 	case NCFG_OP_ACCESS_CONTROL_ADD:
 	case NCFG_OP_ACCESS_CONTROL_DEL:
-		ncfg_error_set(err, err_size,
-		    "%s is carried out over the supplicant's or the access point's control "
-		    "socket, which is not ported in this build", name);
-		return 0;
-	case NCFG_OP_WIFI_SET_REGDOM:
-	case NCFG_OP_WG_SET_DEVICE:
-	case NCFG_OP_WG_SET_PEERS:
-		ncfg_error_set(err, err_size,
-		    "%s goes over generic netlink, and this executor holds an rtnetlink "
-		    "socket only", name);
-		return 0;
-	case NCFG_OP_NAT_REPLACE:
-		ncfg_error_set(err, err_size,
-		    "%s replaces an nftables table, which needs a NETLINK_NETFILTER socket "
-		    "this executor does not open", name);
-		return 0;
-	case NCFG_OP_LINK_SET_OFFLOADS:
-		ncfg_error_set(err, err_size,
-		    "%s needs the `ethtool` generic netlink family, which this executor "
-		    "does not open", name);
-		return 0;
-	case NCFG_OP_BRIDGE_VLAN_ADD:
-	case NCFG_OP_BRIDGE_VLAN_DEL:
+	case NCFG_OP_DNS_APPLY:
+	case NCFG_OP_SYSCTL_SET_FORWARDING:
+	case NCFG_OP_SYSCTL_SET_PRIVACY:
+	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
+	case NCFG_OP_HOSTNAME_SET:
+		return 1;
+	/*
+	 * The rest of the kernel-side ops: the five kind blocks, the offloads,
+	 * the bridge VLANs, the two WireGuard halves, the rules, traffic control
+	 * and the one nftables table netcfgd owns. `src/apply/kernel_*.c` carries
+	 * each of them out, and `kernel_internal.h` says what a builder may and
+	 * may not do.
+	 *
+	 * **Three of them reach a protocol this executor's socket does not
+	 * speak** -- WireGuard and the offloads are generic netlink, and the NAT
+	 * table is `NETLINK_NETFILTER`. That is not a reason to refuse them: the
+	 * arm opens the socket it needs and closes it again, which `kernel_genl.c`
+	 * argues for at length. It is a reason the refusals that used to be here
+	 * named a socket rather than a missing implementation, and both are gone.
+	 */
 	case NCFG_OP_LINK_SET_BOND:
 	case NCFG_OP_LINK_SET_BRIDGE:
 	case NCFG_OP_LINK_SET_MACVLAN:
 	case NCFG_OP_LINK_SET_TUNNEL:
 	case NCFG_OP_LINK_SET_VXLAN:
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:
+	case NCFG_OP_LINK_SET_OFFLOADS:
+	case NCFG_OP_BRIDGE_VLAN_ADD:
+	case NCFG_OP_BRIDGE_VLAN_DEL:
+	case NCFG_OP_WG_SET_DEVICE:
+	case NCFG_OP_WG_SET_PEERS:
 	case NCFG_OP_RULE_ADD:
 	case NCFG_OP_RULE_DEL:
-		/*
-		 * Every one of these has a builder in `ops.h` and none of them is
-		 * planned by this build, so executing them would be untested code on a
-		 * path nothing reaches -- with the machine on the other end of it. The
-		 * planner names each by hand in a warning; when a pass lands, its arm
-		 * moves up in the same commit.
-		 */
-		ncfg_error_set(err, err_size,
-		    "%s is not planned by this build, so it is not executed by it either; "
-		    "the planner warns by name about the block that asks for it", name);
-		return 0;
 	case NCFG_OP_QDISC_SET:
 	case NCFG_OP_QDISC_RESET:
 	case NCFG_OP_INGRESS_REDIRECT:
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
-		ncfg_error_set(err, err_size,
-		    "%s is traffic control, which is a second rtnetlink vocabulary this "
-		    "build does not speak", name);
-		return 0;
-	case NCFG_OP_SYSCTL_SET_FORWARDING:
-	case NCFG_OP_SYSCTL_SET_PRIVACY:
-	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
-	case NCFG_OP_HOSTNAME_SET:
-		ncfg_error_set(err, err_size,
-		    "%s writes to /proc or to the host's name rather than to netlink, and "
-		    "that is not ported in this build", name);
-		return 0;
-	case NCFG_OP_DNS_APPLY:
-		ncfg_error_set(err, err_size,
-		    "%s delivers a resolver configuration, which is a backend rather than a "
-		    "netlink message and is not ported in this build", name);
-		return 0;
+	case NCFG_OP_NAT_REPLACE:
+		return 1;
 	}
 	ncfg_error_set(err, err_size, "an op this build does not know cannot be carried out");
 	return 0;

@@ -600,6 +600,29 @@ typedef struct {
 	ncfg_optint_t port;
 } ncfg_vxlan_config_t;
 
+/* A Curve25519 key: 32 octets, and the 44 characters of base64 one is written
+ * as -- 32 is not a multiple of three, which is where the single `=` comes
+ * from. */
+#define NCFG_KEY_LEN 32u
+#define NCFG_KEY_TEXT_LEN 44u
+
+/*
+ * The 32 octets a key's base64 spells, into `out`.
+ *
+ * The one decoder, public because a private key arrives as *text* from
+ * `secrets.h` while a public key arrives as *JSON* from the document, and two
+ * base64 readers of one format is how the two halves of one program come to
+ * disagree about a key -- which is exactly what `public_key`'s comment below
+ * says the octets exist to prevent.
+ *
+ * `length` is the text's, not counting a terminator. **The refusal never
+ * quotes the value**: a private key that failed to parse is still a private
+ * key, so the sentence names the offending character or the length and
+ * nothing else. `out` is zeroed on a refusal rather than left half decoded.
+ */
+int ncfg_key_parse(const char *text, size_t length, unsigned char out[NCFG_KEY_LEN], char *err,
+    size_t err_size);
+
 typedef struct {
 	char             *name; /* local label, and the sorting key */
 	/*
@@ -610,7 +633,7 @@ typedef struct {
 	 * four significant bits -- and two spellings must compare equal for a plan
 	 * to tell "unchanged" from "different".
 	 */
-	unsigned char     public_key[32];
+	unsigned char     public_key[NCFG_KEY_LEN];
 	ncfg_secret_ref_t *preshared_key;
 	char             *endpoint;
 	char            **allowed_ips;
@@ -741,6 +764,29 @@ typedef struct {
 /* The document's word for a kind, which is not always the language's. NULL
  * outside the set. */
 const char *ncfg_interface_kind_name(int kind);
+
+/*
+ * The word a tunnel encapsulation goes on the wire as, or NULL outside the set.
+ *
+ * The document's spelling and the kernel's `IFLA_INFO_KIND` are the same word,
+ * deliberately -- see the definition. The executor reads this rather than
+ * keeping a list of seven names of its own.
+ */
+const char *ncfg_tunnel_kind_name(int kind);
+
+/*
+ * A mode as the kernel numbers it, or -1 outside the set.
+ *
+ * **The model owns the numbering**, which is the rule `ops.h` states and the
+ * reason `src/apply/` may not keep tables of its own: "two lists of four
+ * numbers in two places is how a mode comes to mean one thing on the way out
+ * and another on the way back in", and the reader that has to agree with the
+ * writer is `src/observe/`, which is already here. A bond's number is its own
+ * ordinal; a macvlan's is a flag bit, and 16 -- the `source` mode netcfgd
+ * cannot express -- is outside the set in both directions.
+ */
+int ncfg_bond_mode_number(int mode);
+int ncfg_macvlan_mode_number(int mode);
 
 /* ------------------------------------------------------------------------ *
  * Per-device policy

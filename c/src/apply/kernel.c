@@ -24,10 +24,13 @@
  */
 #include "ncfg/apply.h"
 
+#include "kernel_internal.h"
+
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/netlink.h"
 #include "ncfg/ops.h"
+#include "ncfg/service.h"
 #include "ncfg/value.h"
 #include "ncfg/wire.h"
 
@@ -42,6 +45,16 @@ struct ncfg_kernel {
 	/* Borrowed from the document; see `ncfg_kernel_set_hooks`. */
 	const ncfg_hook_ref_t *hooks;
 	size_t                 hook_count;
+	/* Where the fourteen ops that are not netlink get what they need.
+	 * Borrowed; see `ncfg_kernel_set_service`. NULL refuses each of them by
+	 * name rather than by dereferencing it. */
+	const ncfg_service_t  *service;
+	/* Borrowed from the caller; see `ncfg_kernel_set_document`. NULL refuses
+	 * the six ops whose settings live in it, by name. */
+	const ncfg_document_t *document;
+	/* Where `file` secrets live. NULL means the machine's own directory, which
+	 * is what `secrets.h` reads a NULL `secrets_dir` as. */
+	const ncfg_secret_resolver_t *secrets;
 };
 
 /* How long a request waits for the kernel before it is a failure rather than a
@@ -87,6 +100,20 @@ void ncfg_kernel_set_hooks(ncfg_kernel_t *kernel, const ncfg_hook_ref_t *hooks, 
 	}
 }
 
+void ncfg_kernel_set_document(ncfg_kernel_t *kernel, const ncfg_document_t *document)
+{
+	if (kernel) {
+		kernel->document = document;
+	}
+}
+
+void ncfg_kernel_set_secrets(ncfg_kernel_t *kernel, const ncfg_secret_resolver_t *resolver)
+{
+	if (kernel) {
+		kernel->secrets = resolver;
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * Talking to the socket
  * ------------------------------------------------------------------------ */
@@ -112,6 +139,15 @@ static uint32_t index_of(const char *name, char *err, size_t err_size)
 		return 0;
 	}
 	return (uint32_t)index;
+}
+
+/* `ncfg_kernel_index_fn`'s shape over this file's own lookup. A wrapper rather
+ * than a second `if_nametoindex`, so the sentence an operator reads about a
+ * name that is not an interface is written in one place. */
+static uint32_t resolve_index(void *context, const char *name, char *err, size_t err_size)
+{
+	(void)context;
+	return index_of(name, err, err_size);
 }
 
 /*
@@ -152,108 +188,6 @@ static int send_built(ncfg_kernel_t *kernel, const ncfg_buf_t *message, uint32_t
  * Links
  * ------------------------------------------------------------------------ */
 
-/*
- * The model's kind as the wire layer wants it.
- *
- * Only the kinds that need no numbering the model does not carry -- `apply.c`'s
- * `creatable` is where that boundary is drawn and why, and it has already been
- * asked by the time this runs. This is the conversion, not the decision.
- */
-static int newlink_of(const ncfg_op_t *op, ncfg_ops_newlink_t *out, char *err, size_t err_size)
-{
-	const ncfg_interface_kind_t *kind = op->u.link_create.kind;
-	const char                  *name = op->u.link_create.name;
-
-	memset(out, 0, sizeof(*out));
-	switch ((ncfg_interface_kind_tag_t)kind->kind) {
-	case NCFG_KIND_BRIDGE:
-		/*
-		 * The link and nothing else. A bridge takes no settings at creation --
-		 * the kernel would accept `IFLA_INFO_DATA` there, but changing them
-		 * later has to be a separate `RTM_NEWLINK` anyway, and having one path
-		 * rather than two is what stops the create case and the
-		 * correct-an-existing-bridge case drifting apart (0057).
-		 */
-		out->kind = NCFG_OPS_LINK_BRIDGE;
-		return 1;
-	case NCFG_KIND_DUMMY:
-		out->kind = NCFG_OPS_LINK_DUMMY;
-		return 1;
-	case NCFG_KIND_IFB:
-		out->kind = NCFG_OPS_LINK_IFB;
-		return 1;
-	case NCFG_KIND_WIREGUARD:
-		out->kind = NCFG_OPS_LINK_WIREGUARD;
-		return 1;
-	case NCFG_KIND_VETH:
-		out->kind = NCFG_OPS_LINK_VETH;
-		out->veth.peer = kind->veth.peer;
-		if (!out->veth.peer) {
-			ncfg_error_set(err, err_size, "%s is a veth with no peer named", name);
-			return 0;
-		}
-		return 1;
-	case NCFG_KIND_VRF:
-		out->kind = NCFG_OPS_LINK_VRF;
-		if (kind->vrf.table < 0 || kind->vrf.table > (int64_t)0xffffffff) {
-			ncfg_error_set(err, err_size,
-			    "%s asks for routing table %lld, which is not a table number",
-			    name, (long long)kind->vrf.table);
-			return 0;
-		}
-		out->vrf.table = (uint32_t)kind->vrf.table;
-		return 1;
-	case NCFG_KIND_VXLAN:
-		out->kind = NCFG_OPS_LINK_VXLAN;
-		if (kind->vxlan.id < 0 || kind->vxlan.id > 0xffffff) {
-			ncfg_error_set(err, err_size,
-			    "%s asks for VNI %lld, which does not fit the 24 bits a VXLAN "
-			    "network identifier has", name, (long long)kind->vxlan.id);
-			return 0;
-		}
-		out->vxlan.id = (uint32_t)kind->vxlan.id;
-		out->vxlan.port = kind->vxlan.port;
-		/* Resolved here rather than carried as a name, because the kernel
-		 * wants an index and the underlay may have been created earlier in
-		 * this same plan. */
-		if (kind->vxlan.parent) {
-			uint32_t parent = index_of(kind->vxlan.parent, err, err_size);
-
-			if (parent == 0) {
-				return 0;
-			}
-			out->vxlan.parent.has = 1;
-			out->vxlan.parent.value = (int64_t)parent;
-		}
-		if (kind->vxlan.local &&
-		    !ncfg_wire_ip_parse(kind->vxlan.local, &out->vxlan.local, err, err_size)) {
-			return 0;
-		}
-		if (kind->vxlan.remote &&
-		    !ncfg_wire_ip_parse(kind->vxlan.remote, &out->vxlan.remote, err, err_size)) {
-			return 0;
-		}
-		return 1;
-	case NCFG_KIND_TUN:
-	case NCFG_KIND_PHYSICAL:
-	case NCFG_KIND_PPPOE:
-	case NCFG_KIND_OPENVPN:
-	case NCFG_KIND_VLAN:
-	case NCFG_KIND_BOND:
-	case NCFG_KIND_MACVLAN:
-	case NCFG_KIND_TUNNEL:
-		break;
-	}
-	/*
-	 * Unreachable through `execute`, which asks `ncfg_apply_supported` first.
-	 * Said rather than left as a fall-through, so that a second caller finds a
-	 * sentence instead of a link half made.
-	 */
-	ncfg_error_set(err, err_size,
-	    "%s is a kind this executor does not build a netlink message for", name);
-	return 0;
-}
-
 static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_t err_size)
 {
 	ncfg_ops_newlink_t link;
@@ -261,7 +195,14 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 	uint32_t           seq;
 	int                built;
 
-	if (!newlink_of(op, &link, err, err_size)) {
+	/* `ncfg_kernel_newlink_of`, in `kernel_link.c`, and **not a conversion of
+	 * this file's own**: the five `link.set_*` ops need the identical nest,
+	 * and decision 0057 is about exactly that -- two encoders for one kind is
+	 * how the create path and the correct-an-existing path come to disagree
+	 * about what a setting is. This file used to hold a private one serving
+	 * creation alone. */
+	if (!ncfg_kernel_newlink_of(op->u.link_create.kind, op->u.link_create.name,
+	    resolve_index, NULL, &link, err, err_size)) {
 		return 0;
 	}
 	seq = ncfg_netlink_take_seq(&kernel->socket);
@@ -607,7 +548,8 @@ static int run_hook(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_
 
 static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 {
-	ncfg_kernel_t *kernel = state;
+	ncfg_kernel_t      *kernel = state;
+	ncfg_kernel_world_t world;
 
 	if (!kernel || !op) {
 		ncfg_error_set(err, err_size, "there is no executor or no op");
@@ -619,6 +561,11 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	if (!ncfg_apply_supported(op, err, err_size)) {
 		return 0;
 	}
+	memset(&world, 0, sizeof(world));
+	world.socket = &kernel->socket;
+	world.document = kernel->document;
+	world.secrets = kernel->secrets;
+	world.resolve = resolve_index;
 	switch ((ncfg_op_kind_t)op->kind) {
 	case NCFG_OP_LINK_CREATE:
 		return create_link(kernel, op, err, err_size);
@@ -657,46 +604,76 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_COMMIT_CONFIRM:
 	case NCFG_OP_COMMIT_REVERT:
 		return 1;
-	/* Every one of these was refused above, and is listed so that `-Wswitch`
-	 * can notice an op added to the taxonomy and not answered here. */
+	/*
+	 * The fourteen that change a machine by other means. One arm each rather
+	 * than a shared one, because `-Wswitch` only earns its keep if every op is
+	 * written out -- and `ncfg_service_execute` is the same dispatch again, so
+	 * a shared arm here would hide which of them this file believes it hands
+	 * over. `service` may be NULL, which that call refuses by name.
+	 */
 	case NCFG_OP_BACKEND_START:
 	case NCFG_OP_BACKEND_STOP:
 	case NCFG_OP_BACKEND_RELOAD:
-	case NCFG_OP_BRIDGE_VLAN_ADD:
-	case NCFG_OP_BRIDGE_VLAN_DEL:
 	case NCFG_OP_WIFI_SET_PROFILES:
 	case NCFG_OP_WIFI_ASSOCIATE:
 	case NCFG_OP_WIFI_DISASSOCIATE:
 	case NCFG_OP_WIFI_SET_REGDOM:
 	case NCFG_OP_ACCESS_CONTROL_ADD:
 	case NCFG_OP_ACCESS_CONTROL_DEL:
+	case NCFG_OP_DNS_APPLY:
+	case NCFG_OP_SYSCTL_SET_FORWARDING:
+	case NCFG_OP_SYSCTL_SET_PRIVACY:
+	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
+	case NCFG_OP_HOSTNAME_SET:
+		return ncfg_service_execute(kernel->service, op, err, err_size);
+	/*
+	 * The eighteen that are netlink but not this file's. `kernel_internal.h`
+	 * says why they are split off: what each of them gets wrong is the bytes,
+	 * so each is a builder a test drives and an arm that sends what it built.
+	 * One `world` for all of them, filled once below.
+	 */
 	case NCFG_OP_LINK_SET_BOND:
 	case NCFG_OP_LINK_SET_BRIDGE:
 	case NCFG_OP_LINK_SET_MACVLAN:
 	case NCFG_OP_LINK_SET_TUNNEL:
 	case NCFG_OP_LINK_SET_VXLAN:
+		return ncfg_kernel_link_kind_op(&world, op, err, err_size);
+	case NCFG_OP_LINK_SET_IPV6_TOKEN:
+		return ncfg_kernel_token_op(&world, op, err, err_size);
+	case NCFG_OP_BRIDGE_VLAN_ADD:
+		return ncfg_kernel_bridge_vlan_op(&world, op, 1, err, err_size);
+	case NCFG_OP_BRIDGE_VLAN_DEL:
+		return ncfg_kernel_bridge_vlan_op(&world, op, 0, err, err_size);
 	case NCFG_OP_WG_SET_DEVICE:
 	case NCFG_OP_WG_SET_PEERS:
-	case NCFG_OP_DNS_APPLY:
+		return ncfg_kernel_wg_op(&world, op, err, err_size);
 	case NCFG_OP_LINK_SET_OFFLOADS:
-	case NCFG_OP_LINK_SET_IPV6_TOKEN:
+		return ncfg_kernel_offloads_op(&world, op, err, err_size);
 	case NCFG_OP_RULE_ADD:
+		return ncfg_kernel_rule_op(&world, op, 1, err, err_size);
 	case NCFG_OP_RULE_DEL:
+		return ncfg_kernel_rule_op(&world, op, 0, err, err_size);
 	case NCFG_OP_QDISC_SET:
 	case NCFG_OP_QDISC_RESET:
+		return ncfg_kernel_qdisc_op(&world, op, err, err_size);
 	case NCFG_OP_INGRESS_REDIRECT:
+		return ncfg_kernel_ingress_op(&world, op, 1, err, err_size);
 	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
-	case NCFG_OP_SYSCTL_SET_FORWARDING:
-	case NCFG_OP_SYSCTL_SET_PRIVACY:
-	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
-	case NCFG_OP_HOSTNAME_SET:
+		return ncfg_kernel_ingress_op(&world, op, 0, err, err_size);
 	case NCFG_OP_NAT_REPLACE:
-		break;
+		return ncfg_kernel_nat_op(&world, op, err, err_size);
 	}
 	ncfg_error_set(err, err_size,
 	    "%s passed the list of what this build executes and reached no arm; "
 	    "that is a defect in the executor, not in the plan", ncfg_op_name(op));
 	return 0;
+}
+
+void ncfg_kernel_set_service(ncfg_kernel_t *kernel, const ncfg_service_t *service)
+{
+	if (kernel) {
+		kernel->service = service;
+	}
 }
 
 void ncfg_kernel_executor(ncfg_kernel_t *kernel, ncfg_executor_t *out)
