@@ -1977,7 +1977,7 @@ fn lower_regdom(regdom: &mut Option<String>, assignment: &Assignment, diags: &mu
 	);
 }
 
-/// The `band` key, checked here rather than at render time./// The `band` key, checked here rather than at render time.
+/// The `band` key, checked here rather than at render time.
 ///
 /// **It used to be `as_string`, so any text compiled.** The renderer decides
 /// what a band means, and it refused an unknown one with a good message --
@@ -2015,7 +2015,7 @@ fn lower_band(band: &mut Option<String>, assignment: &Assignment, diags: &mut Di
 	}
 }
 
-/// The `mac_policy` key. Its own function only because the enum arm made/// The `mac_policy` key. Its own function only because the enum arm made
+/// The `mac_policy` key. Its own function only because the enum arm made
 /// [`lower_wifi_device`] longer than the style allows.
 fn lower_mac_policy(
 	policy: &mut WifiDevicePolicy,
