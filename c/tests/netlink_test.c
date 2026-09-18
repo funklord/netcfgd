@@ -999,7 +999,7 @@ int main(void)
 		ncfg_buf_t          body;
 		ncfg_buf_t          buffer;
 		ncfg_wire_message_t message;
-		ncfg_bridge_vlans_t vlans;
+		ncfg_bridge_vlan_records_t vlans;
 		struct bridge_vlan_info one;
 		struct bridge_vlan_info begin;
 		struct bridge_vlan_info end;
@@ -1035,8 +1035,8 @@ int main(void)
 		    "and the range expanded from its ends");
 		check(vlans.count == 5u && vlans.items[4].index == 7u,
 		    "each carrying the interface it is on");
-		ncfg_bridge_vlans_free(&vlans);
-		ncfg_bridge_vlans_free(&vlans);
+		ncfg_bridge_vlan_records_free(&vlans);
+		ncfg_bridge_vlan_records_free(&vlans);
 		check(vlans.count == 0 && vlans.items == NULL, "and freeing it twice is nothing");
 		ncfg_buf_free(&spec);
 		ncfg_buf_free(&attrs);
@@ -1058,7 +1058,7 @@ int main(void)
 		    ncfg_dump_bridge_vlans(message.payload, message.payload_length, &vlans, err,
 		    sizeof(err)) && vlans.count == 1u && vlans.items[0].vid == 10u,
 		    "a range that never ended is its first entry alone");
-		ncfg_bridge_vlans_free(&vlans);
+		ncfg_bridge_vlan_records_free(&vlans);
 		ncfg_buf_free(&spec);
 		ncfg_buf_free(&attrs);
 		ncfg_buf_free(&body);
@@ -1076,7 +1076,7 @@ int main(void)
 		    ncfg_dump_bridge_vlans(message.payload, message.payload_length, &vlans, err,
 		    sizeof(err)) && vlans.count == 0u,
 		    "and a link with no AF_SPEC has no VLANs, which is not a failure");
-		ncfg_bridge_vlans_free(&vlans);
+		ncfg_bridge_vlan_records_free(&vlans);
 		ncfg_buf_free(&attrs);
 		ncfg_buf_free(&body);
 		ncfg_buf_free(&buffer);
@@ -1211,7 +1211,7 @@ int main(void)
 			ncfg_link_record_t    link;
 			ncfg_address_record_t address;
 			ncfg_route_record_t   route;
-			ncfg_bridge_vlans_t   vlans;
+			ncfg_bridge_vlan_records_t   vlans;
 
 			if (at) {
 				memcpy(copy, ones, at);
@@ -1225,7 +1225,7 @@ int main(void)
 			(void)ncfg_dump_address(copy, at, &address, NULL, 0);
 			(void)ncfg_dump_route(copy, at, &route, NULL, 0);
 			if (ncfg_dump_bridge_vlans(copy, at, &vlans, NULL, 0)) {
-				ncfg_bridge_vlans_free(&vlans);
+				ncfg_bridge_vlan_records_free(&vlans);
 			}
 			free(copy);
 		}
@@ -1233,14 +1233,14 @@ int main(void)
 
 		{
 			ncfg_link_record_t  link;
-			ncfg_bridge_vlans_t vlans;
+			ncfg_bridge_vlan_records_t vlans;
 
 			(void)ncfg_dump_link(zeros, sizeof(zeros), &link, NULL, 0);
 			ncfg_link_record_free(&link);
 			(void)ncfg_dump_link(counted, sizeof(counted), &link, NULL, 0);
 			ncfg_link_record_free(&link);
 			if (ncfg_dump_bridge_vlans(zeros, sizeof(zeros), &vlans, NULL, 0)) {
-				ncfg_bridge_vlans_free(&vlans);
+				ncfg_bridge_vlan_records_free(&vlans);
 			}
 			check(1, "and so do an all-zero message and a self-describing one");
 		}

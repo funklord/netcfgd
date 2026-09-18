@@ -937,7 +937,7 @@ int ncfg_route_record_destination(const ncfg_route_record_t *record, char *out, 
 /* Bridge VLANs.                                                            */
 /* ------------------------------------------------------------------------ */
 
-void ncfg_bridge_vlans_free(ncfg_bridge_vlans_t *vlans)
+void ncfg_bridge_vlan_records_free(ncfg_bridge_vlan_records_t *vlans)
 {
 	if (!vlans) {
 		return;
@@ -948,12 +948,12 @@ void ncfg_bridge_vlans_free(ncfg_bridge_vlans_t *vlans)
 	vlans->capacity = 0;
 }
 
-static int push_vlan(ncfg_bridge_vlans_t *vlans, const ncfg_bridge_vlan_t *one, char *err,
+static int push_vlan(ncfg_bridge_vlan_records_t *vlans, const ncfg_bridge_vlan_record_t *one, char *err,
     size_t err_size)
 {
 	if (vlans->count == vlans->capacity) {
 		size_t              wanted = vlans->capacity ? vlans->capacity * 2u : 8u;
-		ncfg_bridge_vlan_t *grown = realloc(vlans->items, wanted * sizeof(*grown));
+		ncfg_bridge_vlan_record_t *grown = realloc(vlans->items, wanted * sizeof(*grown));
 
 		if (!grown) {
 			ncfg_error_set(err, err_size, "no memory for %zu bridge VLANs", wanted);
@@ -972,8 +972,8 @@ static int push_vlan(ncfg_bridge_vlans_t *vlans, const ncfg_bridge_vlan_t *one, 
  * last one by bytes rather than by set membership. */
 static int compare_vlans(const void *left, const void *right)
 {
-	const ncfg_bridge_vlan_t *one = left;
-	const ncfg_bridge_vlan_t *two = right;
+	const ncfg_bridge_vlan_record_t *one = left;
+	const ncfg_bridge_vlan_record_t *two = right;
 
 	if (one->index != two->index) {
 		return one->index < two->index ? -1 : 1;
@@ -990,13 +990,13 @@ static int compare_vlans(const void *left, const void *right)
 	return 0;
 }
 
-int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans_t *out,
+int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlan_records_t *out,
     char *err, size_t err_size)
 {
 	ncfg_wire_ifinfo_t info;
 	ncfg_wire_attrs_t  area;
 	ncfg_wire_attrs_t  spec;
-	ncfg_bridge_vlan_t start;
+	ncfg_bridge_vlan_record_t start;
 	uint32_t           index;
 	int                found = 0;
 	int                in_range = 0;
@@ -1025,7 +1025,7 @@ int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans
 	}
 	for (;;) {
 		ncfg_wire_attr_t   attr;
-		ncfg_bridge_vlan_t record;
+		ncfg_bridge_vlan_record_t record;
 		uint16_t           flags;
 		ncfg_wire_step_t   step = ncfg_wire_attrs_next(&spec, &attr, err, err_size);
 
@@ -1033,7 +1033,7 @@ int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans
 			break;
 		}
 		if (step == NCFG_WIRE_BAD) {
-			ncfg_bridge_vlans_free(out);
+			ncfg_bridge_vlan_records_free(out);
 			return 0;
 		}
 		if (attr.kind != IFLA_BRIDGE_VLAN_INFO || attr.length < 4u) {
@@ -1063,18 +1063,18 @@ int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans
 
 			in_range = 0;
 			for (vid = start.vid; vid <= record.vid; vid++) {
-				ncfg_bridge_vlan_t one = start;
+				ncfg_bridge_vlan_record_t one = start;
 
 				one.vid = (uint16_t)vid;
 				if (!push_vlan(out, &one, err, err_size)) {
-					ncfg_bridge_vlans_free(out);
+					ncfg_bridge_vlan_records_free(out);
 					return 0;
 				}
 			}
 			continue;
 		}
 		if (!push_vlan(out, &record, err, err_size)) {
-			ncfg_bridge_vlans_free(out);
+			ncfg_bridge_vlan_records_free(out);
 			return 0;
 		}
 	}
@@ -1084,7 +1084,7 @@ int ncfg_dump_bridge_vlans(const void *payload, size_t length, ncfg_bridge_vlans
 		 * the conservative reading, since inventing 4094 VLANs would have
 		 * netcfgd delete them. */
 		if (!push_vlan(out, &start, err, err_size)) {
-			ncfg_bridge_vlans_free(out);
+			ncfg_bridge_vlan_records_free(out);
 			return 0;
 		}
 	}
