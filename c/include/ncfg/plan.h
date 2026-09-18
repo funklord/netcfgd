@@ -428,6 +428,12 @@ typedef struct {
  */
 typedef struct ncfg_plan ncfg_plan_t;
 
+/* One aggregate the plan releases with its own free. See `ncfg_plan_adopt`. */
+typedef struct {
+	void *owned;
+	void (*release)(void *owned);
+} ncfg_plan_adopted_t;
+
 struct ncfg_plan {
 	ncfg_action_t   *actions;
 	size_t           action_count;
@@ -450,6 +456,18 @@ struct ncfg_plan {
 	void   **owned;
 	size_t   owned_count;
 	size_t   owned_capacity;
+	/*
+	 * And what does not fit that, because it has a free of its own.
+	 *
+	 * The arena above is a list of flat blocks and one loop over `free` is the
+	 * whole of its argument. An aggregate that owns an arena itself cannot go
+	 * in it -- freeing the outer block would strand everything inside -- so it
+	 * is adopted with its release instead. See `ncfg_plan_adopt`, which says
+	 * why anything needs adopting at all.
+	 */
+	ncfg_plan_adopted_t *adopted;
+	size_t               adopted_count;
+	size_t               adopted_capacity;
 	/* Set by the first allocation failure and never cleared, so a caller may
 	 * build a whole plan and check once -- `ncfg_buf_t`'s discipline. */
 	int      failed;
@@ -488,6 +506,28 @@ typedef struct {
 ncfg_plan_t *ncfg_plan_new(char *err, size_t err_size);
 
 void ncfg_plan_free(ncfg_plan_t *plan);
+
+/*
+ * Hand the plan something to release when it is freed.
+ *
+ * **For what an action borrows and no arena can hold.** Interning covers every
+ * string and every flat struct an op names, and the one thing it does not cover
+ * is a DNS policy whose server list was merged from an observation: the op
+ * borrows the policy, `ncfg_dns_scopes_of` owns it along with the arena its
+ * strings came out of, and that arena has a free of its own. Without this the
+ * scope list would have to outlive the plan at every call site, which is a rule
+ * the type cannot state and every caller would have to remember.
+ *
+ * Adopting a pointer twice would free it twice, so a caller hands each over
+ * once and stops owning it -- including on the failure path: this releases
+ * `owned` itself when it has nowhere to record it, so a caller never has to ask
+ * which of the two of them is holding it.
+ *
+ * `release` is called with `owned` exactly once, at `ncfg_plan_free`, in the
+ * reverse of the order things were adopted. Answers 0 with the plan's sticky
+ * failure set where there was no room.
+ */
+int ncfg_plan_adopt(ncfg_plan_t *plan, void *owned, void (*release)(void *owned));
 
 /*
  * Append an action, copying everything it names into the plan.

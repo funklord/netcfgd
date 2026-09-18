@@ -2167,6 +2167,21 @@ void ncfg_document_free(ncfg_document_t *document)
 	free(document);
 }
 
+const ncfg_device_t *ncfg_document_device(const ncfg_document_t *document, const char *name)
+{
+	size_t i;
+
+	if (!document || !name) {
+		return NULL;
+	}
+	for (i = 0; i < document->device_count; i++) {
+		if (document->devices[i].name && strcmp(document->devices[i].name, name) == 0) {
+			return &document->devices[i];
+		}
+	}
+	return NULL;
+}
+
 ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, size_t err_size)
 {
 	ncfg_json_doc_t *json = ncfg_json_parse(text, length, err, err_size);
