@@ -354,6 +354,49 @@ int main(int argc, char **argv)
 		    "so the language's spelling is refused where the document's belongs");
 	}
 
+	/* ---- the four numberings the executor may not keep a copy of ---- */
+	{
+		/*
+		 * **The model owns these and `src/apply/` reads them**, which is
+		 * `ops.h`'s rule: "two lists of four numbers in two places is how a
+		 * mode comes to mean one thing on the way out and another on the way
+		 * back in". The reader that has to agree with that writer is
+		 * `src/observe/build.c`, which indexes the same tables -- so the
+		 * numbers are asserted here as literals, because the enum is C's and
+		 * the number is the kernel's and nothing but a test holds them
+		 * together.
+		 */
+		check(ncfg_bond_mode_number(NCFG_BOND_MODE_BALANCE_RR) == 0 &&
+		    ncfg_bond_mode_number(NCFG_BOND_MODE_IEEE_8023AD) == 4 &&
+		    ncfg_bond_mode_number(-1) == -1,
+		    "a bonding mode is its own ordinal, and nothing outside the set");
+		/* Flags, not an enumeration: the kernel numbers these 1, 2, 4, 8 and
+		 * 16, and 16 is the `source` mode netcfgd cannot express. */
+		check(ncfg_macvlan_mode_number(NCFG_MACVLAN_MODE_PRIVATE) == 1 &&
+		    ncfg_macvlan_mode_number(NCFG_MACVLAN_MODE_BRIDGE) == 4 &&
+		    ncfg_macvlan_mode_number(NCFG_MACVLAN_MODE_PASSTHRU) == 8 &&
+		    ncfg_macvlan_mode_number(4) == -1,
+		    "and a macvlan mode is a flag bit rather than an ordinal");
+		check(ncfg_tunnel_kind_name(NCFG_TUNNEL_KIND_GRETAP) != NULL &&
+		    strcmp(ncfg_tunnel_kind_name(NCFG_TUNNEL_KIND_GRETAP), "gretap") == 0 &&
+		    ncfg_tunnel_kind_name(-1) == NULL,
+		    "a tunnel's encapsulation is the kernel's own word");
+		/*
+		 * **The last of the four, and the one published late.** 0263 records
+		 * it as deliberately absent -- `link.set_vlan` is not an op -- and
+		 * `link.create` for a vlan is the caller that reason did not cover.
+		 * The two values are the only two the kernel accepts in
+		 * `IFLA_VLAN_PROTOCOL`; `src/observe/build.c` reads the same pair the
+		 * other way, and a third spelling in `src/apply/` is what this
+		 * function exists to make unnecessary.
+		 */
+		check(ncfg_vlan_protocol_ethertype(NCFG_VLAN_PROTOCOL_DOT1Q) == 0x8100 &&
+		    ncfg_vlan_protocol_ethertype(NCFG_VLAN_PROTOCOL_DOT1AD) == 0x88a8 &&
+		    ncfg_vlan_protocol_ethertype(2) == -1 &&
+		    ncfg_vlan_protocol_ethertype(-1) == -1,
+		    "and a vlan tag protocol is an ethertype, with -1 outside the set");
+	}
+
 	/* ---- validation ---- */
 	{
 		check(refused_saying(DOCUMENT_HEAD "\"devices\":[],\"interfaces\":"

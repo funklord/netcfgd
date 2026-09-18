@@ -140,6 +140,23 @@ static uint16_t u16_of(const ncfg_wire_attrs_t *area, uint16_t kind, int *found)
 	return *found ? value : 0;
 }
 
+/*
+ * An attribute that is two bytes of *network* order.
+ *
+ * Read byte by byte rather than through `ncfg_wire_attr_u16`, which is
+ * `ops_test.c`'s rule and for its reason: the whole point of an ethertype
+ * field is that it is not the host's order, so comparing a native read would
+ * pass on a little-endian machine with the encoder broken.
+ */
+static int be16_is(const ncfg_wire_attrs_t *area, uint16_t kind, uint16_t value)
+{
+	ncfg_wire_attr_t attr;
+
+	return find(area, kind, &attr) && attr.length == 2u &&
+	    attr.value[0] == (uint8_t)(value >> 8) &&
+	    attr.value[1] == (uint8_t)(value & 0xffu);
+}
+
 static uint8_t u8_of(const ncfg_wire_attrs_t *area, uint16_t kind, int *found)
 {
 	ncfg_wire_attr_t attr;
@@ -191,6 +208,15 @@ static int kind_nest(const ncfg_buf_t *buf, char *word, size_t word_size,
 	ncfg_wire_attr_t    attr;
 
 	word[0] = '\0';
+	/* **Emptied before anything can fail.** A caller writes
+	 * `kind_nest(...) && u16_of(&data, ...)`, and the `&&` that protects the
+	 * read protects it only while the caller remembers to write it. A walk
+	 * over an empty area answers "not found" for everything, which is the
+	 * answer a failed parse should give; a walk over stack garbage crashes,
+	 * and a check that crashes takes every check after it with it. Found by
+	 * sabotage: a builder made to refuse a vlan ended the suite six checks
+	 * before the one that would have caught it. */
+	ncfg_wire_attrs_start(data, NULL, 0);
 	if (!first_message(buf, &message) ||
 	    !attrs_after(&message, NCFG_WIRE_IFINFO_LEN, &attrs) ||
 	    !find(&attrs, IFLA_LINKINFO, &attr)) {
@@ -203,6 +229,18 @@ static int kind_nest(const ncfg_buf_t *buf, char *word, size_t word_size,
 	}
 	nested(&attr, data);
 	return 1;
+}
+
+/* The attributes beside the kind nest rather than inside it. `IFLA_IFNAME` is
+ * here, and so is `IFLA_LINK` -- which two kinds read and three do not, which
+ * is the distinction `ops.h` paid for twice. */
+static int outer_attrs(const ncfg_buf_t *buf, ncfg_wire_attrs_t *out)
+{
+	ncfg_wire_message_t message;
+
+	/* Emptied first, for `kind_nest`'s reason. */
+	ncfg_wire_attrs_start(out, NULL, 0);
+	return first_message(buf, &message) && attrs_after(&message, NCFG_WIRE_IFINFO_LEN, out);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -393,8 +431,8 @@ static void check_hints(void)
  */
 typedef struct {
 	ncfg_document_t document;
-	ncfg_device_t   devices[5];
-	char            names[5][8];
+	ncfg_device_t   devices[6];
+	char            names[6][8];
 } fixture_t;
 
 static void fixture_build(fixture_t *fixture)
@@ -438,6 +476,15 @@ static void fixture_build(fixture_t *fixture)
 	fixture->devices[4].kind.kind = NCFG_KIND_MACVLAN;
 	fixture->devices[4].kind.macvlan.mode = NCFG_MACVLAN_MODE_BRIDGE;
 	fixture->devices[4].kind.macvlan.parent = (char *)(uintptr_t)"eth1";
+
+	(void)snprintf(fixture->names[5], sizeof(fixture->names[5]), "v42");
+	fixture->devices[5].name = fixture->names[5];
+	fixture->devices[5].kind.kind = NCFG_KIND_VLAN;
+	fixture->devices[5].kind.vlan.parent = (char *)(uintptr_t)"eth0";
+	fixture->devices[5].kind.vlan.id = 42;
+	/* 802.1ad rather than the default, so that a protocol the encoder ignored
+	 * would show as 0x8100 rather than as the value that was asked for. */
+	fixture->devices[5].kind.vlan.protocol = NCFG_VLAN_PROTOCOL_DOT1AD;
 
 	fixture->document.devices = fixture->devices;
 	fixture->document.device_count = COUNT(fixture->devices);
@@ -625,6 +672,241 @@ static void check_vxlan(const fixture_t *fixture)
 	ncfg_buf_free(&message);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Bringing a link into being
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The two calls `create_link` makes, in that order and with nothing between
+ * them.
+ *
+ * What `kernel.c` adds around this pair is a sequence number, a send and
+ * `mark_as_ours`, and not one of the three is a byte of the message -- so a
+ * creation is testable here to the field, on a workstation whose own network
+ * must not be touched. The seam is the same `resolve` table every other check
+ * uses, which is what makes a parent's index a fixture rather than whatever
+ * this machine happens to be running.
+ */
+static int build_creation(const fixture_t *fixture, const char *name, int want,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	const ncfg_interface_kind_t *kind;
+	ncfg_ops_newlink_t           link;
+
+	ncfg_buf_init(out, 0);
+	kind = ncfg_kernel_kind_of(&fixture->document, name, want, err, err_size);
+	if (!kind || !ncfg_kernel_newlink_of(kind, name, resolve, NULL, &link, err, err_size)) {
+		return 0;
+	}
+	return ncfg_ops_create_link(out, 9u, name, &link, err, err_size);
+}
+
+/* The same, with the refusal printed. A creation that failed says why in one
+ * sentence, and the checks below it then read as the consequences of that one
+ * sentence rather than as six independent mysteries. */
+static int made(const fixture_t *fixture, const char *name, int want, ncfg_buf_t *out,
+    const char *what)
+{
+	char err[NCFG_ERROR_MAX];
+	int  built;
+
+	err[0] = '\0';
+	built = build_creation(fixture, name, want, out, err, sizeof(err));
+	check(built, what);
+	if (!built) {
+		printf("    %s\n", err[0] ? err : "it did not say why");
+	}
+	return built;
+}
+
+/*
+ * The four kinds `link.create` learned when the model published the last of
+ * its numberings.
+ *
+ * **Each of the four was refused for wanting a number, and none of them keeps
+ * one here.** A bond's mode is `ncfg_bond_mode_number`, a macvlan's is
+ * `ncfg_macvlan_mode_number`, a tunnel's kind word is `ncfg_tunnel_kind_name`
+ * and a VLAN's ethertype is `ncfg_vlan_protocol_ethertype` -- all four in
+ * `document.h`, which is the reader `src/observe/build.c` shares. The values
+ * are asserted rather than the attributes' presence, because a table copied
+ * into this directory would produce a message of exactly the right shape and
+ * the wrong meaning.
+ *
+ * **And where the parent goes is asserted in both directions.** A VLAN and a
+ * macvlan take it as the outer `IFLA_LINK`; a tunnel and a VXLAN read it only
+ * inside their own nest and ignore the outer one. `ops.h` records that the
+ * wrong spelling was accepted and did nothing for as long as those kinds have
+ * existed, so the absence is checked as well as the presence.
+ */
+static void check_creations(const fixture_t *fixture)
+{
+	ncfg_buf_t          message;
+	ncfg_wire_message_t parsed;
+	ncfg_wire_attrs_t   outer;
+	ncfg_wire_attrs_t   data;
+	ncfg_wire_attr_t    attr;
+	char                word[32];
+	char                text[32];
+	int                 found = 0;
+
+	/* ---- a vlan ---- */
+	(void)made(fixture, "v42", NCFG_KIND_VLAN, &message,
+	    "a vlan is a link this build brings into being");
+	check(first_message(&message, &parsed) && parsed.header.kind == RTM_NEWLINK &&
+	    (parsed.header.flags & (NLM_F_CREATE | NLM_F_EXCL)) == (NLM_F_CREATE | NLM_F_EXCL) &&
+	    (parsed.header.flags & NLM_F_ACK) != 0,
+	    "  as an acknowledged RTM_NEWLINK that insists the name is free");
+	check(outer_attrs(&message, &outer) &&
+	    strcmp(text_of(&outer, IFLA_IFNAME, text, sizeof(text)), "v42") == 0,
+	    "  carrying the name the document gave it");
+	check(kind_nest(&message, word, sizeof(word), &data) && strcmp(word, "vlan") == 0,
+	    "  and a `vlan` kind nest");
+	check(u16_of(&data, IFLA_VLAN_ID, &found) == 42u && found,
+	    "  the tag, which the kernel reads as an integer");
+	/*
+	 * **802.1ad is 0x88a8 and it goes out big-endian.** The kernel knows two
+	 * ethertypes and rejects the byte-swapped values outright, so a native
+	 * write is a vlan that refuses to be created -- or, on a big-endian
+	 * machine, one that works by luck. The fixture is deliberately not the
+	 * default protocol, so an encoder that dropped the field would read back
+	 * as 0x8100 rather than as nothing.
+	 */
+	check(be16_is(&data, IFLA_VLAN_PROTOCOL, 0x88a8u),
+	    "  and 802.1ad as the ethertype 0x88a8, big-endian");
+	check(u32_of(&outer, IFLA_LINK, &found) == 13u && found,
+	    "  with the parent in the outer IFLA_LINK, which is where a vlan's is read");
+	ncfg_buf_free(&message);
+
+	/* ---- a bond ---- */
+	(void)made(fixture, "bond0", NCFG_KIND_BOND, &message,
+	    "a bond is a link this build brings into being");
+	check(kind_nest(&message, word, sizeof(word), &data) && strcmp(word, "bond") == 0,
+	    "  carrying a `bond` kind nest");
+	/*
+	 * **The mode is here, and on `link.set_bond` it may not be.** The kernel
+	 * takes a mode only on a bond with no members; a bond being created has
+	 * none, which is the one moment that is guaranteed, so the creation nest
+	 * always carries it while `ncfg_ops_set_bond_attrs` takes an optional one.
+	 * `check_bond` above asserts the other half of that sentence.
+	 */
+	check(u8_of(&data, IFLA_BOND_MODE, &found) == 4u && found,
+	    "  with 802.3ad as the kernel's mode 4, which a creation may always state");
+	check(u32_of(&data, IFLA_BOND_MIIMON, &found) == 100u && found,
+	    "  and the monitoring interval beside it");
+	ncfg_buf_free(&message);
+
+	/* ---- a macvlan ---- */
+	(void)made(fixture, "mv0", NCFG_KIND_MACVLAN, &message,
+	    "a macvlan is a link this build brings into being");
+	check(kind_nest(&message, word, sizeof(word), &data) && strcmp(word, "macvlan") == 0,
+	    "  carrying a `macvlan` kind nest");
+	check(u32_of(&data, IFLA_MACVLAN_MODE, &found) == 4u && found,
+	    "  with `bridge` as the flag bit 4 rather than as an ordinal");
+	check(outer_attrs(&message, &outer) && u32_of(&outer, IFLA_LINK, &found) == 14u && found,
+	    "  and its parent in the outer IFLA_LINK, as a vlan's is");
+	ncfg_buf_free(&message);
+
+	/* ---- a tunnel ---- */
+	(void)made(fixture, "gre0", NCFG_KIND_TUNNEL, &message,
+	    "a tunnel is a link this build brings into being");
+	check(kind_nest(&message, word, sizeof(word), &data) && strcmp(word, "gre") == 0,
+	    "  under the kind word the model spells, not one written here");
+	check(find(&data, IFLA_GRE_LOCAL, &attr) && find(&data, IFLA_GRE_REMOTE, &attr),
+	    "  with both endpoints inside the nest");
+	check(u8_of(&data, IFLA_GRE_TTL, &found) == 64u && found, "  and the outer TTL");
+	/*
+	 * Asserted as an absence, which is the half a present-attribute check
+	 * cannot see: `ipgre_netlink_parms` reads the parent out of the nest and
+	 * nothing reads `tb[IFLA_LINK]`, so the outer spelling is accepted and
+	 * does nothing at all.
+	 */
+	check(outer_attrs(&message, &outer) && !find(&outer, IFLA_LINK, &attr),
+	    "  and nothing in the outer IFLA_LINK, which a tunnel does not read");
+	ncfg_buf_free(&message);
+}
+
+/*
+ * What this build says it can create, and what it can actually build.
+ *
+ * **This is 10.177's defect asked of every kind rather than of one.** A `tun`
+ * was reported creatable by `ncfg_apply_supported` while
+ * `ncfg_kernel_newlink_of` refused one, and the cost is specific: that
+ * function is *the* list, asked once by `execute` before anything is done, so
+ * a yes that becomes a no at execution puts the refusal back into the middle
+ * of a plan -- which is the failure the ordering exists to prevent, and which
+ * the planner then reproduces because it asks the same question.
+ *
+ * The two halves are read through their real entry points rather than through
+ * a list written here, so neither can be satisfied by a table that agrees with
+ * itself. The kind blocks are filled in well enough to succeed on their own
+ * merits: what is being compared is the *kind*, and a macvlan refused for
+ * having no parent would make this pass for the wrong reason.
+ */
+static void check_supported_matches_the_builders(void)
+{
+	static const struct {
+		int         kind;
+		const char *what;
+	} kinds[] = {
+		{ NCFG_KIND_PHYSICAL, "a physical device" }, { NCFG_KIND_BRIDGE, "a bridge" },
+		{ NCFG_KIND_BOND, "a bond" }, { NCFG_KIND_VLAN, "a vlan" },
+		{ NCFG_KIND_VXLAN, "a vxlan" }, { NCFG_KIND_WIREGUARD, "a wireguard link" },
+		{ NCFG_KIND_PPPOE, "a pppoe session" }, { NCFG_KIND_OPENVPN, "an openvpn tunnel" },
+		{ NCFG_KIND_DUMMY, "a dummy" }, { NCFG_KIND_VETH, "a veth" },
+		{ NCFG_KIND_VRF, "a vrf" }, { NCFG_KIND_MACVLAN, "a macvlan" },
+		{ NCFG_KIND_TUNNEL, "a tunnel" }, { NCFG_KIND_TUN, "a tun" },
+		{ NCFG_KIND_IFB, "an ifb" }
+	};
+	int    agree = 1;
+	size_t i;
+
+	for (i = 0; i < COUNT(kinds); i++) {
+		ncfg_interface_kind_t kind;
+		ncfg_ops_newlink_t    link;
+		ncfg_tun_spec_t       spec;
+		ncfg_op_t             op;
+		char                  err[NCFG_ERROR_MAX];
+		int                   answered;
+		int                   built;
+
+		memset(&kind, 0, sizeof(kind));
+		kind.kind = kinds[i].kind;
+		kind.veth.peer = (char *)(uintptr_t)"peer0";
+		kind.vrf.table = 10;
+		kind.vlan.parent = (char *)(uintptr_t)"eth0";
+		kind.vlan.id = 10;
+		kind.vlan.protocol = NCFG_VLAN_PROTOCOL_DOT1Q;
+		kind.macvlan.parent = (char *)(uintptr_t)"eth0";
+		kind.macvlan.mode = NCFG_MACVLAN_MODE_BRIDGE;
+		kind.bond.mode = NCFG_BOND_MODE_ACTIVE_BACKUP;
+		kind.tunnel.mode = NCFG_TUNNEL_KIND_GRE;
+		kind.tun.mode = NCFG_TUN_MODE_TUN;
+
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_CREATE;
+		op.u.link_create.name = "x0";
+		op.u.link_create.kind = &kind;
+		answered = ncfg_apply_supported(&op, NULL, 0);
+		/*
+		 * The two paths `create_link` chooses between, asked in the order it
+		 * asks them: a tun comes from an ioctl and has no `RTM_NEWLINK` at
+		 * all, and every other kind that can be made is a netlink message.
+		 */
+		built = ncfg_kernel_tun_spec_of(&kind, "x0", NULL, NULL, &spec, NULL, 0) ||
+		    ncfg_kernel_newlink_of(&kind, "x0", resolve, NULL, &link, NULL, 0);
+		if (answered != built) {
+			printf("    %s: the list says %s and the builder says %s\n", kinds[i].what,
+			    answered ? "yes" : "no", built ? "yes" : "no");
+			err[0] = '\0';
+			(void)ncfg_apply_supported(&op, err, sizeof(err));
+			printf("      %s\n", err);
+			agree = 0;
+		}
+	}
+	check(agree,
+	    "every kind this build says it can create is one it can build, and no other");
+}
+
 static void check_kind_refusals(const fixture_t *fixture)
 {
 	fixture_t  broken;
@@ -674,38 +956,76 @@ static void check_kind_refusals(const fixture_t *fixture)
 	    "an underlay the kernel does not have is refused by name");
 	ncfg_buf_free(&message);
 
+	/*
+	 * **A vlan, with each of the three things that can be wrong with one.**
+	 * The kind is built now rather than refused by name, so what is left to
+	 * check is the per-*device* refusals -- which are about a document rather
+	 * than about this build, and which is the distinction `apply.c` draws
+	 * between what `ncfg_apply_supported` answers and what a builder does.
+	 */
+	fixture_build(&broken);
+	broken.devices[5].kind.vlan.parent = NULL;
+	ncfg_buf_init(&message, 0);
+	err[0] = '\0';
+	check(!ncfg_kernel_build_kind(&message, 1u, 20u, "v42", &broken.devices[5].kind, resolve,
+	    NULL, err, sizeof(err)) && strstr(err, "parent") != NULL,
+	    "a vlan with no parent is refused rather than sent");
+	ncfg_buf_free(&message);
+
+	fixture_build(&broken);
+	broken.devices[5].kind.vlan.id = 4096;
+	ncfg_buf_init(&message, 0);
+	err[0] = '\0';
+	/* Truncating 4096 to 0 would make a device that tags nothing and reads
+	 * back as a vlan on the native VLAN, which is not a mistake an operator
+	 * can see -- so it is checked, as a VNI past 24 bits is above. */
+	check(!ncfg_kernel_build_kind(&message, 1u, 20u, "v42", &broken.devices[5].kind, resolve,
+	    NULL, err, sizeof(err)) && strstr(err, "twelve bits") != NULL,
+	    "a vlan id past twelve bits is refused rather than truncated");
+	ncfg_buf_free(&message);
+
+	fixture_build(&broken);
+	broken.devices[5].kind.vlan.protocol = 7;
+	ncfg_buf_init(&message, 0);
+	err[0] = '\0';
+	/* `ncfg_vlan_protocol_ethertype` answers -1 outside the set and this
+	 * refuses on it, rather than casting: an ethertype the kernel does not
+	 * know is a bare `EINVAL` for the whole message. */
+	check(!ncfg_kernel_build_kind(&message, 1u, 20u, "v42", &broken.devices[5].kind, resolve,
+	    NULL, err, sizeof(err)) && strstr(err, "ethertype") != NULL,
+	    "a tag protocol outside the model's set is refused, not cast");
+	ncfg_buf_free(&message);
+
+	fixture_build(&broken);
+	broken.devices[1].kind.bond.mode = 99;
+	ncfg_buf_init(&message, 0);
+	err[0] = '\0';
+	/* The same number, through the other of the bond's two routes: this one is
+	 * `ncfg_kernel_newlink_of`'s and the one below is `ncfg_kernel_build_bond`'s,
+	 * and both read `ncfg_bond_mode_number`. */
+	check(!ncfg_kernel_build_kind(&message, 1u, 12u, "bond0", &broken.devices[1].kind,
+	    resolve, NULL, err, sizeof(err)) && strstr(err, "bonding mode") != NULL,
+	    "a bonding mode outside the set is refused on the creation path too");
+	ncfg_buf_free(&message);
+
 	{
-		ncfg_interface_kind_t      vlan;
+		ncfg_interface_kind_t      absent;
 		ncfg_ops_newlink_t         link;
 
 		/*
-		 * The one conversion refuses a bond and a VLAN by name, each for its
-		 * own reason -- a bond's settings are a message of their own because
-		 * the kernel takes a mode only on a bond with no members, and a
-		 * VLAN's ethertype is a model numbering `document.h` does not yet
-		 * publish. Checked here because `link.create` reaches the same
-		 * function, and a silent fall-through would be a link half made.
+		 * The kinds the one conversion still refuses by name, and the reason
+		 * is no longer a numbering: a physical device is one netcfgd
+		 * configures and cannot make, and a kind block that is not there at
+		 * all arrives from a plan, which is data that came over a socket.
 		 */
-		memset(&vlan, 0, sizeof(vlan));
-		vlan.kind = NCFG_KIND_VLAN;
+		memset(&absent, 0, sizeof(absent));
+		absent.kind = NCFG_KIND_PHYSICAL;
 		err[0] = '\0';
-		check(!ncfg_kernel_newlink_of(&vlan, "v10", resolve, NULL, &link, err,
-		    sizeof(err)) && strstr(err, "ethertype") != NULL,
-		    "a vlan is refused by name rather than built without its ethertype");
-		memset(&vlan, 0, sizeof(vlan));
-		vlan.kind = NCFG_KIND_BOND;
-		err[0] = '\0';
-		check(!ncfg_kernel_newlink_of(&vlan, "bond0", resolve, NULL, &link, err,
-		    sizeof(err)) && strstr(err, "no members") != NULL,
-		    "and a bond is refused, its settings being a message of their own");
-		memset(&vlan, 0, sizeof(vlan));
-		vlan.kind = NCFG_KIND_PHYSICAL;
-		err[0] = '\0';
-		check(!ncfg_kernel_newlink_of(&vlan, "eth0", resolve, NULL, &link, err,
-		    sizeof(err)), "and a physical device, which netcfgd configures and cannot make");
+		check(!ncfg_kernel_newlink_of(&absent, "eth0", resolve, NULL, &link, err,
+		    sizeof(err)), "a physical device is refused, netcfgd configuring and not making one");
 		err[0] = '\0';
 		check(!ncfg_kernel_newlink_of(NULL, "eth0", resolve, NULL, &link, err,
-		    sizeof(err)), "and a kind block that is not there at all");
+		    sizeof(err)), "and so is a kind block that is not there at all");
 	}
 
 	fixture_build(&broken);
@@ -714,7 +1034,7 @@ static void check_kind_refusals(const fixture_t *fixture)
 	err[0] = '\0';
 	check(!ncfg_kernel_build_bond(&message, 1u, 12u, "bond0", &broken.devices[1].kind, 1, err,
 	    sizeof(err)) && strstr(err, "bonding mode") != NULL,
-	    "a bonding mode outside the model's set is refused, not cast");
+	    "and on the correct-an-existing path, which is the other builder");
 	ncfg_buf_free(&message);
 }
 
@@ -1753,6 +2073,8 @@ int main(void)
 	check_bond(&fixture);
 	check_macvlan_and_tunnel(&fixture);
 	check_vxlan(&fixture);
+	check_creations(&fixture);
+	check_supported_matches_the_builders();
 	check_kind_refusals(&fixture);
 	check_token();
 	check_bridge_vlan();

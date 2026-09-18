@@ -921,16 +921,22 @@ static void this_build_does_not_reconcile(void)
 	 * What stops it now, checked rather than described. `ncfg_apply_supported`
 	 * is asked by `execute` one action at a time and `ncfg_apply` stops at the
 	 * first failure, so an op it refuses is a plan that changes a machine and
-	 * stops halfway -- and a `link.create` for a bond is one of them.
+	 * stops halfway -- and a `link.create` for a pppoe session is one of them.
+	 *
+	 * **The subject was a bond and had to move**, which is this check working
+	 * rather than rotting: a bond is created now that `document.h` publishes
+	 * its mode number. What is wanted here is a kind that is refused for a
+	 * reason no numbering can close -- a pppoe session is brought up by a
+	 * helper process, and this build starts none.
 	 */
 	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_LINK_CREATE;
-	op.u.link_create.name = "bond0";
+	op.u.link_create.name = "ppp0";
 	{
-		static ncfg_interface_kind_t bond;
+		static ncfg_interface_kind_t pppoe;
 
-		bond.kind = (int)NCFG_KIND_BOND;
-		op.u.link_create.kind = &bond;
+		pppoe.kind = (int)NCFG_KIND_PPPOE;
+		op.u.link_create.kind = &pppoe;
 	}
 	message[0] = '\0';
 	check(!ncfg_apply_supported(&op, message, sizeof(message)) && message[0] != '\0',
@@ -983,6 +989,33 @@ static void this_build_does_not_reconcile(void)
 			    "  and marks the device it made, which the Rust's own tun arm does not");
 		} else {
 			check(0, "  and marks the device it made, which the Rust's own tun arm does not");
+		}
+		/*
+		 * **And the other arm, which nothing looked at.** The check above was
+		 * narrowed to `create_tun`'s body precisely because `mark_as_ours` is
+		 * called from the netlink path too -- and then nobody asserted the
+		 * netlink path. A sabotage that deleted the call from `create_link`
+		 * and left `create_tun` alone went green across the whole suite,
+		 * which is the same gap 10.177 records one arm to the left: a check
+		 * that narrows to avoid a false pass has to leave something covering
+		 * what it narrowed away from.
+		 *
+		 * It matters as much as the tun's. 0136 gives every link netcfgd
+		 * creates an alternative name because a link has no protocol field to
+		 * carry ownership in; without the mark, ownership lives only in
+		 * `/run`, and a restart that loses it leaves a device netcfgd may
+		 * never take down again. Four more kinds are created through this arm
+		 * than were last wave, so it carries more than it did.
+		 */
+		if (source) {
+			const char *body = strstr(source, "static int create_link");
+			const char *ends = body ? strstr(body, "\ntypedef int (*link_builder_t)") : NULL;
+			const char *marks = body ? strstr(body, "mark_as_ours(kernel,") : NULL;
+
+			check(body && ends && marks && marks < ends,
+			    "  and so does the netlink arm, which four more kinds now reach");
+		} else {
+			check(0, "  and so does the netlink arm, which four more kinds now reach");
 		}
 		free(source);
 	}
