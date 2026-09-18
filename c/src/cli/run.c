@@ -39,47 +39,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* What arrived when something else was expected, in the Rust's words. */
-static const char *describe_answer(const ncfg_proto_response_t *response, char *out,
-    size_t out_size)
-{
-	switch (response->kind) {
-	case NCFG_PROTO_RESP_OK:
-		return "ok";
-	case NCFG_PROTO_RESP_JOURNAL:
-		return "a journal";
-	case NCFG_PROTO_RESP_WIFI_SCAN:
-		return "a scan";
-	case NCFG_PROTO_RESP_WIFI_STATUS:
-		return "a radio status";
-	case NCFG_PROTO_RESP_AP_STATIONS:
-		return "a station list";
-	case NCFG_PROTO_RESP_RADIOS:
-		return "a radio list";
-	case NCFG_PROTO_RESP_MODEMS:
-		return "a modem list";
-	case NCFG_PROTO_RESP_PROFILES:
-		return "a profile list";
-	case NCFG_PROTO_RESP_ERROR: {
-		char message[NCFG_CLI_TEXT_MAX];
-
-		(void)snprintf(out, out_size, "an error: %s",
-		    ncfg_cli_text(response->u.error.message, message, sizeof(message)));
-		return out;
-	}
-	default:
-		/*
-		 * The Rust prints the raw JSON here, truncated -- it decodes into a
-		 * narrow mirror and has nothing else to say about a kind outside it.
-		 * This module decodes every kind, so the tag is the honest and
-		 * shorter answer; a whole document in a diagnostic is not a
-		 * diagnostic either way.
-		 */
-		(void)snprintf(out, out_size, "an unexpected answer: %s",
-		    ncfg_proto_response_name(response->kind));
-		return out;
-	}
-}
+/*
+ * `describe_answer` lived here as a `static` copy of the table in `client.c`,
+ * which is the same ten cases written twice. This tree has been bitten by two
+ * lists of one thing more than once, and the copy was checked against the
+ * public one case by case before it was deleted: they agreed exactly, which is
+ * the only reason this is a deletion rather than a reconciliation.
+ */
 
 /* `ncfg: <sentence>` on stderr, which is what this program has always said. */
 static int fail(const char *message)
@@ -215,7 +181,7 @@ static int ask_for_ok(const ncfg_cli_options_t *options, const ncfg_proto_reques
 		char what[NCFG_CLI_SENTENCE_MAX];
 
 		code = failf("the daemon sent %s",
-		    describe_answer(&message.u.response, what, sizeof(what)));
+		    ncfg_cli_describe_answer(&message.u.response, what, sizeof(what)));
 		ncfg_proto_message_free(&message);
 		return code;
 	}
@@ -440,7 +406,7 @@ static int command_wifi(const ncfg_cli_options_t *options, const char **position
 		char what[NCFG_CLI_SENTENCE_MAX];
 
 		code = failf("the daemon sent %s",
-		    describe_answer(&message.u.response, what, sizeof(what)));
+		    ncfg_cli_describe_answer(&message.u.response, what, sizeof(what)));
 		ncfg_proto_message_free(&message);
 		return code;
 	}
@@ -479,7 +445,7 @@ static int command_modem(const ncfg_cli_options_t *options, const char **positio
 		char what[NCFG_CLI_SENTENCE_MAX];
 
 		code = failf("the daemon sent %s",
-		    describe_answer(&message.u.response, what, sizeof(what)));
+		    ncfg_cli_describe_answer(&message.u.response, what, sizeof(what)));
 		ncfg_proto_message_free(&message);
 		return code;
 	}
@@ -634,6 +600,27 @@ static int command_show(const ncfg_cli_options_t *options)
  * The program
  * ------------------------------------------------------------------------ */
 
+/*
+ * The four subcommands that write, which share a shape `dispatch` does not.
+ *
+ * Each answers 1 or 0 with a sentence, because that is `base.h`'s convention
+ * and they are library calls before they are commands. `dispatch` answers an
+ * exit status. One adapter rather than four copies of the same `err` buffer:
+ * the buffer is the part that is easy to get subtly wrong, and a wrong one is
+ * a command that fails silently.
+ */
+static int subcommand(int (*run)(const ncfg_cli_options_t *, const char **, size_t,
+    char *, size_t), const ncfg_cli_options_t *options, const char **positional, size_t count)
+{
+	char err[NCFG_ERROR_MAX];
+
+	err[0] = '\0';
+	if (run(options, positional, count, err, sizeof(err))) {
+		return NCFG_CLI_EXIT_OK;
+	}
+	return fail(err[0] != '\0' ? err : "it did not say what went wrong");
+}
+
 /* Which verb, once the options are off the front. */
 static int dispatch(const char *command, const ncfg_cli_options_t *options,
     const char **positional, size_t count)
@@ -680,16 +667,28 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		 * and `explain` is what reads it. */
 		return not_in_this_wave("explain", NEEDS_PROVENANCE);
 	}
-	if (strcmp(command, "control") == 0 || strcmp(command, "config") == 0 ||
-	    strcmp(command, "profile") == 0 || strcmp(command, "secret") == 0 ||
-	    strcmp(command, "reset") == 0) {
-		return not_in_this_wave(command, NEEDS_WRITERS);
+	if (strcmp(command, "control") == 0) {
+		return subcommand(ncfg_cli_control, options, positional, count);
+	}
+	if (strcmp(command, "config") == 0) {
+		return subcommand(ncfg_cli_config, options, positional, count);
+	}
+	if (strcmp(command, "profile") == 0) {
+		return subcommand(ncfg_cli_profile, options, positional, count);
+	}
+	if (strcmp(command, "secret") == 0) {
+		return subcommand(ncfg_cli_secret, options, positional, count);
+	}
+	/* `reset` is `netcfgd-cli`'s own `lib.rs` rather than one of the four
+	 * modules above, and is not ported. */
+	if (strcmp(command, "reset") == 0) {
+		return not_in_this_wave("reset", NEEDS_WRITERS);
 	}
 	if (strcmp(command, "wait-online") == 0) {
 		return not_in_this_wave("wait-online", NEEDS_OBSERVER);
 	}
 	if (strcmp(command, "tui") == 0) {
-		return fail("this build has no TUI");
+		return ncfg_tui_run(options);
 	}
 
 	return failf("unknown command `%s`; try `ncfg --help`", command);
