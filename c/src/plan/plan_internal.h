@@ -43,10 +43,22 @@ void ncfg_plan_write_wg_peer(ncfg_json_writer_t *writer, const ncfg_wg_peer_t *p
 void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer,
     const ncfg_interface_kind_t *kind);
 
-/* The one word set this module owns that neither `value.h` nor `document.h`
- * publishes and that an op writes directly. Checked against the frozen
- * witness like every other spelling here. */
+/* The word sets this module owns that neither `value.h` nor `document.h`
+ * publishes. The first is what an op writes directly; the other three are what
+ * the kind and qdisc passes compare a document's closed set against, since the
+ * observer reports the kernel's answer as the document's word. All four are
+ * checked against the frozen witness like every other spelling here. */
 const char *ncfg_plan_acl_policy_word(int policy);
+const char *ncfg_plan_bond_mode_word(int mode);
+const char *ncfg_plan_macvlan_mode_word(int mode);
+const char *ncfg_plan_qdisc_kind_word(int kind);
+
+/* A Curve25519 key's base64, and a buffer that holds one. 32 octets is 44
+ * characters and a terminator; 32 is not a multiple of three, which is where
+ * the single `=` comes from. A buffer that could truncate is refused rather
+ * than truncated into. */
+#define NCFG_PLAN_KEY_TEXT_MAX 45u
+void ncfg_plan_render_key(const unsigned char *key, char *out, size_t out_size);
 
 /* ------------------------------------------------------------------------ *
  * The builder
@@ -204,6 +216,108 @@ void ncfg_plan_route(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_route_t *route, const ncfg_plan_ids_t *base);
 void ncfg_plan_teardown(ncfg_builder_t *builder);
 
+/*
+ * The three sysctls that are properties of an interface rather than addressing
+ * actions, and the two whole-host passes.
+ *
+ * `ncfg_plan_accept_ra` runs **before the link attributes**, and that is not
+ * tidiness: `link.up` is where the kernel decides whether to solicit a router
+ * at all, and it does not solicit on an interface whose advertisements it
+ * would ignore. Writing `accept_ra` afterwards leaves the interface waiting
+ * for the router's own unsolicited timer -- 14.2 seconds against a dnsmasq set
+ * to five, and minutes on a real network. Decision 0073.
+ */
+void ncfg_plan_accept_ra(ncfg_builder_t *builder);
+void ncfg_plan_privacy(ncfg_builder_t *builder);
+void ncfg_plan_forwarding(ncfg_builder_t *builder);
+void ncfg_plan_dns(ncfg_builder_t *builder);
+void ncfg_plan_hostname(ncfg_builder_t *builder);
+
+/*
+ * What a device's `kind` says about itself, corrected on one that exists.
+ *
+ * **Creation is not enough and that is the whole subject.** A bridge's `stp`,
+ * a bond's `miimon`, a tunnel's endpoints and a WireGuard device's peer list
+ * are all sent inside `link.create` -- so on a device the kernel already has,
+ * editing any of them planned nothing and changed nothing (0054, 0057). Each
+ * pass reads the kind's own observation, compares only what the document
+ * states, and says what the kernel will not take rather than planning an
+ * action that must fail.
+ *
+ * Driven from the device list rather than the interface list: what netcfgd
+ * creates is stated on the device, and a bridge port or an `ifb` need not have
+ * an `interface` block at all.
+ */
+void ncfg_plan_wireguard(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_bridge(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_bond(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_macvlan(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_tunnel(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_vxlan(ncfg_builder_t *builder, const ncfg_device_t *device);
+void ncfg_plan_bridge_vlans(ncfg_builder_t *builder, const ncfg_device_t *device);
+
+/*
+ * The driver, traffic-control and wireless passes, each over the whole
+ * document.
+ *
+ * `ncfg_plan_ingress` runs **after** `ncfg_plan_qdisc`, so the `ifb` exists
+ * and is shaped before anything is pointed at it: traffic redirected onto a
+ * device with no shaper is traffic that is not being shaped, which is worse
+ * than not redirecting it at all.
+ */
+void ncfg_plan_offloads(ncfg_builder_t *builder);
+void ncfg_plan_rules(ncfg_builder_t *builder);
+void ncfg_plan_qdisc(ncfg_builder_t *builder);
+void ncfg_plan_ingress(ncfg_builder_t *builder);
+void ncfg_plan_wifi(ncfg_builder_t *builder);
+void ncfg_plan_access_control(ncfg_builder_t *builder);
+
+/*
+ * A copy of `rule` the plan owns, strings and all.
+ *
+ * `ncfg_plan_intern_route`'s shape and here for the same reason a merged DNS
+ * scope needs one: a `rule.del` for something only the *kernel* has is built
+ * out of the observation, which the plan may not borrow from -- `plan.h`'s
+ * borrow is from the document. The rules a document states are passed through
+ * unchanged and stay borrowed.
+ */
+const ncfg_routing_rule_t *ncfg_plan_intern_rule(ncfg_plan_t *plan,
+    const ncfg_routing_rule_t *rule);
+
+/*
+ * Start the helper that serves an addressing source, and stop the ones the
+ * document no longer asks for.
+ *
+ * `field` is the dotted path the reason carries, so an operator told a client
+ * was started because of `addressing[1]` can go and look at the right line.
+ */
+void ncfg_plan_backend(ncfg_builder_t *builder, const char *name, int kind, const char *field,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+void ncfg_plan_teardown_backends(ncfg_builder_t *builder);
+
+/*
+ * The address a `delegated` source names, resolved against the observation.
+ *
+ * Two callers, which is the whole reason it is here: the forward pass adds the
+ * address, and the teardown asks whether an address it is about to remove is
+ * this one. A second answer to that question is a plan that adds an address
+ * and deletes it again on every reconcile.
+ */
+void ncfg_plan_delegated(ncfg_builder_t *builder, const ncfg_interface_t *interface, size_t index,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+int ncfg_plan_delegated_address(const ncfg_builder_t *builder,
+    const ncfg_address_source_t *source, char *out, size_t out_size, char *err, size_t err_size);
+
+/*
+ * How many times netcfgd starts a backend that does not stay up before it
+ * stops trying.
+ *
+ * A daemon that dies as fast as netcfgd starts it produced 181 starts in
+ * twelve seconds -- measured, with a fake that lived for half a second
+ * (0079). Published so a test cannot spell the number itself.
+ */
+#define NCFG_PLAN_RESTART_LIMIT 5
+
 /* Whether this interface's link is one the passes may plan against at all:
  * absent hardware and a declined create are both "nothing will bring this into
  * being", and planning for either fills a plan with actions that must fail. */
@@ -216,6 +330,42 @@ int ncfg_plan_link_is_plannable(const ncfg_builder_t *builder, const char *name)
 /* Whether `candidate` falls inside the subnet `network/prefix`, where both are
  * written as CIDR and as a bare address. Ordering rule 4's whole question. */
 int ncfg_plan_subnet_contains(const char *network_cidr, const char *candidate);
+
+/*
+ * Whether two addresses are the same address.
+ *
+ * **Compared the way the model compares and never the way the text reads.**
+ * The document's addresses come through the compiler's `canonical_address`
+ * already; an address this planner *derives* is rendered by `value.h` and so
+ * does too -- but the question is asked against the kernel's own spelling, and
+ * a comparison that happened to work for one pair is the defect 10.169
+ * records: one address written twice reads as two, and the plan installs it
+ * again for ever. Text equality is the answer only where neither side parses,
+ * which is where there is nothing better to say.
+ */
+int ncfg_plan_address_equal(const char *left, const char *right);
+
+/* Record an `addr.add` so ordering rule 4 can find it. The address must
+ * outlive the plan -- the document's own, or one interned into it. */
+void ncfg_plan_note_added(ncfg_builder_t *builder, const char *interface, const char *address,
+    uint32_t id);
+
+/*
+ * A copy of `policy` the plan owns, with room for `extra` servers and search
+ * suffixes appended by the caller.
+ *
+ * `ncfg_plan_intern_route`'s shape, and here for the reason plan.h gives for
+ * *not* copying a DNS policy: a policy that came straight off the document is
+ * borrowed, and a plan must not outlive the document anyway. A **merged**
+ * scope is neither the document's nor the observer's -- it is the document's
+ * servers with a lease's appended -- so it has to be somebody's, and the plan
+ * is the only thing on the right side of every one of those lifetimes.
+ *
+ * Shallow: every string is still the document's or the observation's, which is
+ * the same borrow the policy itself would have been.
+ */
+ncfg_dns_policy_t *ncfg_plan_intern_dns_policy(ncfg_plan_t *plan, const ncfg_dns_policy_t *policy,
+    size_t extra_servers, size_t extra_search);
 
 /* Whether a desired route is the one the kernel already holds. */
 int ncfg_plan_route_matches(const ncfg_route_t *desired, const ncfg_observed_route_t *observed);

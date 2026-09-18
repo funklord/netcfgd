@@ -30,6 +30,7 @@
 #define NCFG_VALUE_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /* ------------------------------------------------------------------------ *
  * Addresses
@@ -118,6 +119,35 @@ int ncfg_address_render(const ncfg_address_t *address, char *out, size_t out_siz
  */
 int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *err,
     size_t err_size);
+
+/*
+ * The address a delegated prefix, a subnet selector and a suffix produce.
+ *
+ * **This is `netcfgd_model::derive_from_delegation`**, and it is here rather
+ * than in one of its callers because there are now two of them: `ncfg explain`
+ * has to follow the indirection to say where an address came from, and the
+ * planner has to resolve it twice -- once to add the address and once to
+ * answer "is this one still wanted?" in the teardown. A second copy of this
+ * arithmetic is a plan that adds an address and deletes it again for ever,
+ * which is the one failure `plan.h` is arranged to make impossible. 0263
+ * named `value.h` as where it belongs and said the second caller takes it.
+ *
+ * `subnet` is `ncfg_prefix_ref_t.subnet`, passed as a number because this
+ * header is below `document.h` and stays there -- the model's small values do
+ * not depend on the document that is built out of them.
+ *
+ * Bit arithmetic on the sixteen octets rather than on a 128-bit integer, which
+ * C does not have: the prefix keeps its own top bits, the subnet selector is
+ * shifted so its last bit lands on the sub-prefix boundary, and the suffix
+ * contributes everything below that boundary.
+ *
+ * `out` must hold `NCFG_ADDRESS_MAX`. Every refusal names what did not fit,
+ * because the planner puts the sentence in front of the operator: a suffix
+ * that cannot be carved out of the delegation is a configuration that will
+ * never produce an address, and "nothing happened" is not an answer to it.
+ */
+int ncfg_address_from_delegation(const char *delegation, int64_t subnet, const char *suffix,
+    char *out, size_t out_size, char *err, size_t err_size);
 
 /* ------------------------------------------------------------------------ *
  * Hardware addresses

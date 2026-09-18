@@ -252,6 +252,29 @@ uint32_t ncfg_builder_push(ncfg_builder_t *builder, const ncfg_op_t *op,
 	    ncfg_plan_names(builder->unmanaged, builder->unmanaged_count, interface)) {
 		return NCFG_PLAN_NO_ACTION;
 	}
+	/*
+	 * **And the same for a device this plan declined to create**, for the
+	 * reason the paragraph above gives: a pass added later would not know to
+	 * ask. `link.create` for a bond, a macvlan or a tunnel is refused by this
+	 * build's executor -- `ncfg_kernel_newlink_of` builds no nest for them --
+	 * so the creation pass says so and notes the name, and every action
+	 * against that name afterwards is one that must fail.
+	 *
+	 * Found by the frozen witness: `k-bond` is a bond, is not observed, and
+	 * collected a `bridge.vlan.add`, two sysctls, a `qdisc.set`, an
+	 * `ingress.redirect` and a `dns.apply` -- eighteen actions against a
+	 * device nothing would bring into existence, planned again on every
+	 * reconcile. The passes that emitted them are driven from the document
+	 * rather than through `ncfg_plan_interface_contents`, which does ask, so
+	 * each of them would have had to ask separately and one of them always
+	 * forgets.
+	 *
+	 * Silently, like the one above and for the same reason: the creation pass
+	 * has already said why, once, naming the device.
+	 */
+	if (interface && ncfg_plan_names(builder->declined, builder->declined_count, interface)) {
+		return NCFG_PLAN_NO_ACTION;
+	}
 	if (refused(builder, op, reason)) {
 		/* Nothing is emitted, so nothing downstream can depend on it. The
 		 * refusal carries what would have happened. */
@@ -351,15 +374,16 @@ static void warn_unported(ncfg_builder_t *builder)
 		for (j = 0; j < interface->addressing_count; j++) {
 			switch (interface->addressing[j].kind) {
 			case NCFG_ADDRESS_SOURCE_STATIC:
-				break;
-			/* The Rust plans no addressing action for SLAAC either -- the
-			 * kernel builds the address itself -- but it does plan the two
-			 * sysctls that decide whether the kernel listens at all, and
-			 * those passes are not here. */
+			/* SLAAC plans no addressing action -- the kernel builds the
+			 * address itself -- and the two sysctls that decide whether it
+			 * listens at all are `sysctl.c`'s, planned per interface rather
+			 * than per source. DHCP starts a client and `delegated` resolves
+			 * against the observation; both are acted on in
+			 * `ncfg_plan_source`. */
 			case NCFG_ADDRESS_SOURCE_SLAAC:
-				warn_block(builder, interface->name,
-				    "a `slaac` addressing source, whose `accept_ra` and privacy "
-				    "sysctls");
+			case NCFG_ADDRESS_SOURCE_DHCP4:
+			case NCFG_ADDRESS_SOURCE_DHCP6:
+			case NCFG_ADDRESS_SOURCE_DELEGATED:
 				break;
 			case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
 				/* The Rust's own sentence, unchanged: this one is not the
@@ -367,17 +391,6 @@ static void warn_unported(ncfg_builder_t *builder)
 				ncfg_plan_warn(builder->plan, interface->name,
 				    "link-local addressing is accepted but not yet applied by "
 				    "this build");
-				break;
-			case NCFG_ADDRESS_SOURCE_DHCP4:
-			case NCFG_ADDRESS_SOURCE_DHCP6:
-				warn_block(builder, interface->name,
-				    "a DHCP addressing source, and the client that would serve "
-				    "it");
-				break;
-			case NCFG_ADDRESS_SOURCE_DELEGATED:
-				warn_block(builder, interface->name,
-				    "a `delegated` addressing source, and the prefix it derives "
-				    "from");
 				break;
 			case NCFG_ADDRESS_SOURCE_REPORTED:
 				warn_block(builder, interface->name,
@@ -388,17 +401,11 @@ static void warn_unported(ncfg_builder_t *builder)
 				break;
 			}
 		}
-		if (interface->dns) {
-			warn_block(builder, interface->name, "a `dns` block");
-		}
 		if (interface->advertise) {
 			warn_block(builder, interface->name, "an `advertise` block");
 		}
 		if (interface->dot1x) {
 			warn_block(builder, interface->name, "a `dot1x` block");
-		}
-		if (interface->forwarding.has) {
-			warn_block(builder, interface->name, "a `forwarding` setting");
 		}
 		if (interface->nat.has && interface->nat.value) {
 			warn_block(builder, interface->name, "a `nat` setting");
@@ -415,39 +422,14 @@ static void warn_unported(ncfg_builder_t *builder)
 	for (i = 0; i < desired->device_count; i++) {
 		const ncfg_device_t *device = &desired->devices[i];
 
-		if (device->wifi) {
-			warn_block(builder, device->name,
-			    "a `wifi` block, and the supplicant that would serve it");
-		}
 		if (device->modem) {
 			warn_block(builder, device->name, "a `modem` block");
-		}
-		if (device->link_settings) {
-			warn_block(builder, device->name, "an `ethtool` block");
-		}
-		if (device->qdisc) {
-			warn_block(builder, device->name, "a `qdisc` block");
-		}
-		if (device->ingress_redirect) {
-			warn_block(builder, device->name, "an ingress redirect");
-		}
-		if (device->bridge_vlan_count != 0u) {
-			warn_block(builder, device->name, "a port VLAN list");
 		}
 		if (!device->managed && device->on_unmanage == NCFG_ON_UNMANAGE_CLEAR) {
 			warn_block(builder, device->name,
 			    "`on_unmanage = \"clear\"`, which would empty the device of "
 			    "everything netcfgd owns; this build leaves it instead");
 		}
-	}
-	if (desired->rule_count != 0u) {
-		warn_block(builder, NULL, "a `rule` block");
-	}
-	if (desired->access_point_count != 0u) {
-		warn_block(builder, NULL, "an `access_point` block");
-	}
-	if (desired->network_count != 0u) {
-		warn_block(builder, NULL, "a `network` block");
 	}
 	if (desired->bluetooth_count != 0u) {
 		warn_block(builder, NULL, "a `bluetooth` block");
@@ -456,13 +438,6 @@ static void warn_unported(ncfg_builder_t *builder)
 		warn_block(builder, NULL,
 		    "a `linkset`, whose choice would decide which member's routes are "
 		    "installed");
-	}
-	if (desired->globals.dns.mode.mode != NCFG_DNS_MODE_NONE ||
-	    desired->globals.dns.server_count != 0u) {
-		warn_block(builder, NULL, "a global `dns` block");
-	}
-	if (desired->globals.hostname_policy.kind != NCFG_HOSTNAME_POLICY_NONE) {
-		warn_block(builder, NULL, "a hostname policy");
 	}
 }
 
@@ -583,17 +558,89 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	for (i = 0; i < desired->device_count; i++) {
 		ncfg_plan_link_creation(&builder, &desired->devices[i]);
 	}
+	/*
+	 * Before the attributes pass, and that is not tidiness: `link.up` is where
+	 * the kernel decides whether to solicit a router at all, and it does not
+	 * solicit on an interface whose advertisements it would ignore. Writing
+	 * `accept_ra` afterwards leaves the interface waiting for the router's own
+	 * unsolicited timer -- 14.2 seconds against a dnsmasq set to five, and
+	 * minutes on a real network. Decision 0073.
+	 */
+	ncfg_plan_accept_ra(&builder);
 	for (i = 0; i < desired->interface_count; i++) {
 		ncfg_plan_link_attributes(&builder, &desired->interfaces[i]);
 	}
 	for (i = 0; i < desired->device_count; i++) {
-		uint32_t enslaved = ncfg_plan_master(&builder, desired->devices[i].name);
+		uint32_t enslaved;
+
+		/*
+		 * **A device that will never exist gets no configuration either.**
+		 * `link_is_plannable` already answers this for the addressing and
+		 * routing passes: a link that is observed is plannable, and one that
+		 * is absent by decision -- a `pppoe`, an `openvpn`, absent hardware,
+		 * or a kind the creation pass declined because this build cannot
+		 * create it -- is not.
+		 *
+		 * The passes below are driven from the *device* list rather than the
+		 * interface list, deliberately: a bridge port or an `ifb` often has no
+		 * `interface` block, and the Rust's equivalent reaches them only
+		 * through one, which is a defect this port does not have (project.md
+		 * 10.170). That is right, and it meant these passes were the only ones
+		 * asking nothing about whether the device can exist. Measured against
+		 * the frozen witness: `k-bond` is a bond, is not observed, and cannot
+		 * be created by this build, and it still collected a `bridge.vlan.add`
+		 * -- an action that must fail, planned again on every reconcile.
+		 */
+		if (!ncfg_plan_link_is_plannable(&builder, desired->devices[i].name)) {
+			continue;
+		}
+		enslaved = ncfg_plan_master(&builder, desired->devices[i].name);
 
 		ncfg_plan_device_up(&builder, &desired->devices[i], enslaved);
+		/*
+		 * What the `kind` says about itself, in this loop rather than the
+		 * interface walk below: a WireGuard device's port and peers, a
+		 * bridge's own settings and a port's VLANs are properties of the
+		 * link, and half of the devices that have them -- a bridge port, an
+		 * `ifb` -- will never have an `interface` block to be walked.
+		 *
+		 * After the enslavement, so a port's VLANs are set on a port that is
+		 * already in its bridge: the kernel answers `EOPNOTSUPP` otherwise.
+		 */
+		ncfg_plan_wireguard(&builder, &desired->devices[i]);
+		ncfg_plan_bridge(&builder, &desired->devices[i]);
+		ncfg_plan_bond(&builder, &desired->devices[i]);
+		ncfg_plan_macvlan(&builder, &desired->devices[i]);
+		ncfg_plan_tunnel(&builder, &desired->devices[i]);
+		ncfg_plan_vxlan(&builder, &desired->devices[i]);
+		ncfg_plan_bridge_vlans(&builder, &desired->devices[i]);
 	}
 	for (i = 0; i < desired->interface_count; i++) {
 		ncfg_plan_interface_contents(&builder, &desired->interfaces[i]);
 	}
+
+	/*
+	 * The host's own configuration, after everything that could change what it
+	 * is derived from. The DNS scopes read a lease's nameservers, and the two
+	 * remaining sysctls are per-interface settings that nothing above depends
+	 * on -- `accept_ra` is the one that had to run early, and it did.
+	 */
+	ncfg_plan_dns(&builder);
+	/*
+	 * The driver, the traffic control and the wireless half, each over the
+	 * whole document and none of them derived from anything above. The
+	 * redirect follows the qdisc so the `ifb` it points at is shaped before
+	 * anything arrives on it.
+	 */
+	ncfg_plan_offloads(&builder);
+	ncfg_plan_rules(&builder);
+	ncfg_plan_qdisc(&builder);
+	ncfg_plan_ingress(&builder);
+	ncfg_plan_forwarding(&builder);
+	ncfg_plan_privacy(&builder);
+	ncfg_plan_hostname(&builder);
+	ncfg_plan_wifi(&builder);
+	ncfg_plan_access_control(&builder);
 
 	/*
 	 * Teardown comes last, so a change to an address is make-before-break: the

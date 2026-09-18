@@ -90,6 +90,32 @@ static int text_equal(const char *left, const char *right)
 }
 
 /*
+ * Whether two addresses are the same address.
+ *
+ * **The way the model compares, never the way the text reads.** An address
+ * this planner derives is rendered by `value.h` and the kernel prints its own
+ * spelling of whatever was installed, and the two agree -- but agreeing by
+ * construction is not the same as being compared, and 10.169 is what that
+ * costs: one address written twice reads as two, and the plan installs it
+ * again on every run. Text equality is the answer only where neither side
+ * parses, which is where there is nothing better to say.
+ */
+int ncfg_plan_address_equal(const char *left, const char *right)
+{
+	char first[NCFG_ADDRESS_MAX];
+	char second[NCFG_ADDRESS_MAX];
+
+	if (!left || !right) {
+		return left == right;
+	}
+	if (!ncfg_address_canonical(left, first, sizeof(first), NULL, 0) ||
+	    !ncfg_address_canonical(right, second, sizeof(second), NULL, 0)) {
+		return strcmp(left, right) == 0;
+	}
+	return strcmp(first, second) == 0;
+}
+
+/*
  * Whether a desired route is the one the kernel already holds.
  *
  * The table defaults on both sides, because a document that says nothing and a
@@ -150,15 +176,23 @@ static ncfg_route_t with_metric(const ncfg_route_t *route, const ncfg_interface_
 	return copy;
 }
 
-/* Whether this interface has a source whose value comes from outside the
- * document, and which this build does not resolve. */
+/*
+ * Whether this interface has a source whose value comes from outside the
+ * document, and which this build does not resolve.
+ *
+ * **`delegated` used to be in this list and is not any more**, which is the
+ * whole of what porting that source changed here: the value still comes from
+ * outside the document, but `ncfg_plan_delegated_address` now resolves it, so
+ * the teardown can answer "is this address wanted?" instead of declining to
+ * ask. `reported` is the one left, and it stays until the pass that reads a
+ * report lands.
+ */
 static int takes_unresolved_source(const ncfg_interface_t *interface)
 {
 	size_t i;
 
 	for (i = 0; i < interface->addressing_count; i++) {
-		if (interface->addressing[i].kind == NCFG_ADDRESS_SOURCE_DELEGATED ||
-		    interface->addressing[i].kind == NCFG_ADDRESS_SOURCE_REPORTED) {
+		if (interface->addressing[i].kind == NCFG_ADDRESS_SOURCE_REPORTED) {
 			return 1;
 		}
 	}
@@ -181,11 +215,31 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	size_t                       i;
 
 	/*
-	 * Only the static source is planned here. Every other one is named by
+	 * Three sources are planned from here and each goes where its work is.
+	 *
+	 * SLAAC is deliberately not one of them and is not a gap either: given a
+	 * router advertisement the kernel builds the address itself, so there is
+	 * no addressing action to plan. What netcfgd owns there is two sysctls,
+	 * and they are properties of the interface rather than of this source --
+	 * `sysctl.c` writes both. Every source still not planned is named by
 	 * `warn_unported`, with the block it is about, so a plan from this build
 	 * is never quieter than the configuration it was given.
 	 */
-	if (source->kind != NCFG_ADDRESS_SOURCE_STATIC) {
+	switch (source->kind) {
+	case NCFG_ADDRESS_SOURCE_STATIC:
+		break;
+	case NCFG_ADDRESS_SOURCE_DHCP4:
+		ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_DHCP4,
+		    ncfg_plan_internf(builder->plan, "addressing[%zu]", index), base, out);
+		return;
+	case NCFG_ADDRESS_SOURCE_DHCP6:
+		ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_DHCP6,
+		    ncfg_plan_internf(builder->plan, "addressing[%zu]", index), base, out);
+		return;
+	case NCFG_ADDRESS_SOURCE_DELEGATED:
+		ncfg_plan_delegated(builder, interface, index, base, out);
+		return;
+	default:
 		return;
 	}
 	address = source->static_address.address;
@@ -221,20 +275,31 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 		return;
 	}
 	ncfg_plan_ids_push(builder->plan, out, id);
-	{
-		ncfg_plan_added_t *grown = realloc(builder->added,
-		    (builder->added_count + 1u) * sizeof(*builder->added));
+	ncfg_plan_note_added(builder, interface->name, address, id);
+}
 
-		if (!grown) {
-			builder->plan->failed = 1;
-			return;
-		}
-		builder->added = grown;
-		grown[builder->added_count].interface = interface->name;
-		grown[builder->added_count].address = address;
-		grown[builder->added_count].id = id;
-		builder->added_count++;
+/*
+ * Record an `addr.add` so ordering rule 4 can find it.
+ *
+ * Its own function because there are two callers -- a static address and one
+ * derived from a delegation -- and a route waiting for the address that covers
+ * its gateway has no business knowing which of the two put it there.
+ */
+void ncfg_plan_note_added(ncfg_builder_t *builder, const char *interface, const char *address,
+    uint32_t id)
+{
+	ncfg_plan_added_t *grown = realloc(builder->added,
+	    (builder->added_count + 1u) * sizeof(*builder->added));
+
+	if (!grown) {
+		builder->plan->failed = 1;
+		return;
 	}
+	builder->added = grown;
+	grown[builder->added_count].interface = interface;
+	grown[builder->added_count].address = address;
+	grown[builder->added_count].id = id;
+	builder->added_count++;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -459,9 +524,27 @@ static void teardown_addresses(ncfg_builder_t *builder)
 		if (interface) {
 			for (j = 0; j < interface->addressing_count; j++) {
 				const ncfg_address_source_t *source = &interface->addressing[j];
+				char                         derived[NCFG_ADDRESS_MAX];
 
 				if (source->kind == NCFG_ADDRESS_SOURCE_STATIC &&
 				    text_equal(source->static_address.address, seen->address)) {
+					wanted = 1;
+					break;
+				}
+				/*
+				 * **A derived address is as wanted as a literal one.** The
+				 * document holds a reference rather than the value, so
+				 * answering the question means resolving it again -- and a
+				 * teardown that skipped that would delete the address the same
+				 * plan had just added, on every reconcile, for ever. That is
+				 * the property `plan.h` calls load-bearing, and it is why the
+				 * resolution is one function two passes call rather than two
+				 * that agree today.
+				 */
+				if (source->kind == NCFG_ADDRESS_SOURCE_DELEGATED &&
+				    ncfg_plan_delegated_address(builder, source, derived,
+				        sizeof(derived), NULL, 0) &&
+				    ncfg_plan_address_equal(derived, seen->address)) {
 					wanted = 1;
 					break;
 				}
@@ -517,9 +600,21 @@ static void teardown_links(ncfg_builder_t *builder)
 	}
 }
 
+/*
+ * Rule 7: teardown is the reverse of dependency order -- routes, then
+ * addresses, then backends, then links.
+ *
+ * The backends go between the addresses and the links because a client is
+ * stopped after what it installed has been withdrawn and before the link it
+ * was running on can go: stopping it first would leave netcfgd removing a
+ * lease's address while the client that holds it is still there to put it
+ * back, and stopping it last would mean signalling a process whose interface
+ * had already been deleted.
+ */
 void ncfg_plan_teardown(ncfg_builder_t *builder)
 {
 	teardown_routes(builder);
 	teardown_addresses(builder);
+	ncfg_plan_teardown_backends(builder);
 	teardown_links(builder);
 }

@@ -381,6 +381,110 @@ int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *e
 	return ncfg_address_render(&address, out, out_size, err, err_size);
 }
 
+/* The top `length` bits of a 128-bit big-endian value, and nothing below. */
+static void keep_top_bits(unsigned char *bytes, unsigned int length)
+{
+	unsigned int i;
+
+	for (i = 0; i < 128u; i++) {
+		if (i >= length) {
+			bytes[i / 8u] = (unsigned char)(bytes[i / 8u] & ~(0x80u >> (i % 8u)));
+		}
+	}
+}
+
+int ncfg_address_from_delegation(const char *delegation, int64_t subnet, const char *suffix,
+    char *out, size_t out_size, char *err, size_t err_size)
+{
+	ncfg_address_t block;
+	ncfg_address_t host;
+	ncfg_address_t derived;
+	unsigned int   spare;
+	unsigned int   bit;
+
+	if (!delegation || !suffix) {
+		ncfg_error_set(err, err_size, "a delegated address needs both a prefix and a suffix");
+		return 0;
+	}
+	if (!ncfg_address_parse(delegation, &block, NULL, 0) || !block.is_ipv6 ||
+	    !block.has_prefix) {
+		ncfg_error_set(err, err_size, "`%s` is not an IPv6 prefix", delegation);
+		return 0;
+	}
+	if (!ncfg_address_parse(suffix, &host, NULL, 0) || !host.is_ipv6 || !host.has_prefix) {
+		ncfg_error_set(err, err_size,
+		    "`%s` is not an IPv6 address with a prefix length", suffix);
+		return 0;
+	}
+	/*
+	 * A sub-prefix has to be at least as long as the block it is carved from.
+	 * Equal is legal and means the whole delegation, so only shorter is
+	 * refused -- and it is worth refusing loudly: it would silently widen the
+	 * interface's route to cover addresses the ISP did not give this machine.
+	 */
+	if (host.prefix < block.prefix) {
+		ncfg_error_set(err, err_size,
+		    "a /%u cannot be carved out of a /%u; the suffix's prefix length must be at "
+		    "least as long as the delegation's",
+		    host.prefix, block.prefix);
+		return 0;
+	}
+	if (subnet < 0 || subnet > 0xffff) {
+		ncfg_error_set(err, err_size,
+		    "a subnet selector of %lld is outside the 0 to 65535 a prefix reference "
+		    "carries",
+		    (long long)subnet);
+		return 0;
+	}
+	spare = host.prefix - block.prefix;
+	/*
+	 * The bound is on the value rather than on the shift. Sixteen spare bits
+	 * is already every selector a `u16` can hold, and computing `1 << spare`
+	 * to compare against is how the same check in another language ends up
+	 * shifting by more than the width of what it is shifting.
+	 */
+	if (spare < 16u && (uint64_t)subnet >= ((uint64_t)1 << spare)) {
+		ncfg_error_set(err, err_size,
+		    "subnet %lld does not fit: a /%u delegation split into /%u blocks has %llu of "
+		    "them",
+		    (long long)subnet, block.prefix, host.prefix, (unsigned long long)1 << spare);
+		return 0;
+	}
+
+	derived = block;
+	/* Clear anything below the delegation's own length. An ISP that hands out
+	 * `2001:db8:1234:5678::/56` -- and they do -- would otherwise contribute
+	 * bits that belong to nobody. */
+	keep_top_bits(derived.bytes, block.prefix);
+	for (bit = 0; bit < 16u; bit++) {
+		unsigned int at;
+
+		if (((uint64_t)subnet >> bit & 1u) == 0u) {
+			continue;
+		}
+		/* Unreachable while the fit check above holds, and kept because what
+		 * it guards is an index into the sixteen octets: a selector bit that
+		 * fell above the sub-prefix boundary would be written outside them. */
+		if (bit + 1u > host.prefix) {
+			ncfg_error_set(err, err_size,
+			    "subnet %lld does not fit inside a /%u", (long long)subnet, host.prefix);
+			return 0;
+		}
+		at = host.prefix - 1u - bit;
+		derived.bytes[at / 8u] = (unsigned char)(derived.bytes[at / 8u] | (0x80u >> (at % 8u)));
+	}
+	/* The host part is whatever the suffix sets below the sub-prefix. */
+	for (bit = host.prefix; bit < 128u; bit++) {
+		if ((host.bytes[bit / 8u] & (0x80u >> (bit % 8u))) != 0u) {
+			derived.bytes[bit / 8u] =
+			    (unsigned char)(derived.bytes[bit / 8u] | (0x80u >> (bit % 8u)));
+		}
+	}
+	derived.has_prefix = 1;
+	derived.prefix = host.prefix;
+	return ncfg_address_render(&derived, out, out_size, err, err_size);
+}
+
 /* ------------------------------------------------------------------------ *
  * Hardware addresses
  * ------------------------------------------------------------------------ */

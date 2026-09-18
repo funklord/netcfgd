@@ -15,6 +15,9 @@
  */
 #include "plan_internal.h"
 
+#include "ncfg/apply.h"
+#include "ncfg/base.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -114,6 +117,50 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 		ncfg_builder_note_string(builder, &builder->declined, &builder->declined_count,
 		    device->name);
 		return;
+	}
+	/*
+	 * **A kind the executor cannot create must not be planned**, which is the
+	 * rule the arm above states and did not cover. `ncfg_apply_supported`
+	 * refuses `link.create` for a bond, a macvlan, a tunnel and a vlan --
+	 * `ncfg_kernel_newlink_of` builds no nest for them -- so emitting one puts
+	 * an action in the plan that fails on every apply, for ever, while `ncfg
+	 * plan` goes on listing it as work to do. That is the non-convergence this
+	 * file's neighbours each carry an arm to prevent.
+	 *
+	 * **Last of the arms, deliberately.** Every one above refuses a kind for a
+	 * reason of its own and says it in its own words -- a physical device that
+	 * is not plugged in, a veth whose peer name is taken. Asking the executor
+	 * first would answer all of them with one generic sentence, which a test
+	 * caught: `eth9` stopped being reported as "no such device is present" and
+	 * started being reported as a kind this build cannot create, which is true
+	 * and is not what the operator needs to read.
+	 *
+	 * It became reachable when the planner learned to configure these kinds:
+	 * the `link.set_bond` and `link.set_macvlan` passes make such a document
+	 * worth writing, and until then nothing produced one. The `set_*` ops are
+	 * still planned for a device that already exists, which is the case that
+	 * works -- what is refused here is bringing one into being.
+	 *
+	 * The warning goes when `newlink_of` grows the nest; nothing else has to
+	 * change, because this asks the executor rather than keeping its own list.
+	 */
+	{
+		ncfg_op_t probe;
+		char      why[NCFG_ERROR_MAX];
+
+		memset(&probe, 0, sizeof(probe));
+		probe.kind = NCFG_OP_LINK_CREATE;
+		probe.u.link_create.name = device->name;
+		probe.u.link_create.kind = &device->kind;
+		why[0] = '\0';
+		if (!ncfg_apply_supported(&probe, why, sizeof(why))) {
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "%s is configured but this build cannot create it: %s", device->name,
+			    why);
+			ncfg_builder_note_string(builder, &builder->declined,
+			    &builder->declined_count, device->name);
+			return;
+		}
 	}
 
 	memset(&op, 0, sizeof(op));

@@ -12,12 +12,13 @@
  *   * **Every failure is sticky**, `ncfg_buf_t`'s discipline: a run of twenty
  *     appends is checked once, at the end, and a half-built explanation is
  *     never handed out.
- *   * **Two rules are spelled here that belong elsewhere**, each because this
- *     port has one caller for them so far. `takes_reports` is
- *     `netcfgd-plan`'s and this build's planner keeps it private;
- *     `derive_from_delegation` is `netcfgd-model`'s and `value.h` has no port
- *     of it. Each says so at its definition, and the second caller takes this
- *     one rather than writing its own.
+ *   * **One rule is spelled here that belongs elsewhere**, because this port
+ *     has one caller for it so far: `takes_reports` is `netcfgd-plan`'s and
+ *     this build's planner keeps it private. It says so at its definition, and
+ *     the second caller takes this one rather than writing its own.
+ *     `derive_from_delegation` was the other, and is no longer here: the
+ *     planner became its second caller, so it is `ncfg_address_from_delegation`
+ *     in `value.h` where 0263 said it belonged.
  */
 #include "ncfg/explain.h"
 
@@ -350,98 +351,6 @@ static const ncfg_observed_report_t *report_for(const ncfg_document_t *desired,
 		}
 	}
 	return NULL;
-}
-
-/* The top `length` bits of a 128-bit big-endian value, and nothing below. */
-static void keep_top_bits(unsigned char *bytes, unsigned int length)
-{
-	unsigned int i;
-
-	for (i = 0; i < 128u; i++) {
-		if (i >= length) {
-			bytes[i / 8u] = (unsigned char)(bytes[i / 8u] & ~(0x80u >> (i % 8u)));
-		}
-	}
-}
-
-/*
- * The address a delegated prefix and a suffix produce.
- *
- * **This is `netcfgd_model::derive_from_delegation`**, which `value.h` has no
- * port of. It is here because `explain` cannot follow the indirection without
- * it -- an address netcfgd derived itself would otherwise explain as "the
- * configuration does not ask for this address", which is the defect the
- * delegated arm exists to close. It belongs in `value.h` beside
- * `ncfg_address_canonical`, and the second caller takes this one.
- *
- * Bit arithmetic on the sixteen octets rather than on a 128-bit integer, which
- * C does not have: the prefix keeps its own top bits, the subnet selector is
- * shifted so its last bit lands on the sub-prefix boundary, and the suffix
- * contributes everything below that boundary.
- *
- * Returns 0 for anything malformed, which is every refusal the Rust spells out
- * as a sentence -- nothing here reports one, because the only caller is asking
- * "is this that address" and a malformed pair is simply not.
- */
-static int derive_from_delegation(const char *delegation, const ncfg_prefix_ref_t *reference,
-    const char *suffix, char *out, size_t out_size)
-{
-	ncfg_address_t block;
-	ncfg_address_t host;
-	ncfg_address_t derived;
-	unsigned int   spare;
-	unsigned int   bit;
-
-	if (!delegation || !suffix) {
-		return 0;
-	}
-	if (!ncfg_address_parse(delegation, &block, NULL, 0) || !block.is_ipv6 || !block.has_prefix) {
-		return 0;
-	}
-	if (!ncfg_address_parse(suffix, &host, NULL, 0) || !host.is_ipv6 || !host.has_prefix) {
-		return 0;
-	}
-	/* A sub-prefix has to be at least as long as the block it is carved from.
-	 * Shorter would silently widen the interface's route to cover addresses
-	 * the ISP did not give this machine. */
-	if (host.prefix < block.prefix) {
-		return 0;
-	}
-	if (reference->index < 0 || reference->subnet < 0 || reference->subnet > 0xffff) {
-		return 0;
-	}
-	spare = host.prefix - block.prefix;
-	if (spare < 16u && (uint64_t)reference->subnet >= ((uint64_t)1 << spare)) {
-		return 0;
-	}
-
-	derived = block;
-	/* Clear anything below the delegation's own length. An ISP that hands out
-	 * `2001:db8:1234:5678::/56` -- and they do -- would otherwise contribute
-	 * bits that belong to nobody. */
-	keep_top_bits(derived.bytes, block.prefix);
-	for (bit = 0; bit < 16u; bit++) {
-		unsigned int at;
-
-		if (((uint64_t)reference->subnet >> bit & 1u) == 0u) {
-			continue;
-		}
-		if (bit + 1u > host.prefix) {
-			return 0;
-		}
-		at = host.prefix - 1u - bit;
-		derived.bytes[at / 8u] = (unsigned char)(derived.bytes[at / 8u] | (0x80u >> (at % 8u)));
-	}
-	/* The host part is whatever the suffix sets below the sub-prefix. */
-	for (bit = host.prefix; bit < 128u; bit++) {
-		if ((host.bytes[bit / 8u] & (0x80u >> (bit % 8u))) != 0u) {
-			derived.bytes[bit / 8u] =
-			    (unsigned char)(derived.bytes[bit / 8u] | (0x80u >> (bit % 8u)));
-		}
-	}
-	derived.has_prefix = 1;
-	derived.prefix = host.prefix;
-	return ncfg_address_render(&derived, out, out_size, NULL, 0);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -855,8 +764,14 @@ static int indirect_source(const ncfg_document_t *desired, const ncfg_observed_t
 		    (size_t)delegated->prefix.index >= delegation->prefix_count) {
 			continue;
 		}
-		if (!derive_from_delegation(delegation->prefixes[(size_t)delegated->prefix.index],
-		    &delegated->prefix, delegated->suffix, derived, sizeof(derived))) {
+		/* A malformed pair is simply not this address, so the sentence the
+		 * derivation would give is dropped here. The planner is the caller
+		 * that shows it, because there the same configuration is what will
+		 * never produce an address at all. */
+		if (!ncfg_address_from_delegation(
+		        delegation->prefixes[(size_t)delegated->prefix.index],
+		        delegated->prefix.subnet, delegated->suffix, derived, sizeof(derived), NULL,
+		        0)) {
 			continue;
 		}
 		if (!same_address(derived, address)) {

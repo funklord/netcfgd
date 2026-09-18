@@ -55,6 +55,11 @@ static const char *const tunnel_kind_words[] = { "gre", "gretap", "ip6gre", "ipi
 	"ip6tnl", "geneve" };
 static const char *const tun_mode_words[] = { "tun", "tap" };
 static const char *const acl_policy_words[] = { "deny", "allow" };
+/* The kernel's own scheduler names, which is why a `qdisc.set` carries the
+ * word rather than the number: `tc` and `/proc/net` both spell them this
+ * way, and the executor sends `IFLA_INFO_KIND` as text. */
+static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
+	"noqueue" };
 
 #define COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
@@ -69,6 +74,32 @@ static const char *word_of(const char *const *words, size_t count, int value)
 const char *ncfg_plan_acl_policy_word(int policy)
 {
 	return word_of(acl_policy_words, COUNT(acl_policy_words), policy);
+}
+
+/*
+ * Three more of this file's sets, read rather than written.
+ *
+ * They are here rather than in the passes that compare against them for the
+ * reason the paragraph above gives: a second table for a set somebody else
+ * owns is how this project twice compiled a block whose feature was silently
+ * missing. The planner's kind passes compare a document's mode against the
+ * observer's word for the kernel's, and the qdisc pass puts the document's
+ * scheduler in an op as a string -- so all three need the word and none of
+ * them may spell it.
+ */
+const char *ncfg_plan_bond_mode_word(int mode)
+{
+	return word_of(bond_mode_words, COUNT(bond_mode_words), mode);
+}
+
+const char *ncfg_plan_macvlan_mode_word(int mode)
+{
+	return word_of(macvlan_mode_words, COUNT(macvlan_mode_words), mode);
+}
+
+const char *ncfg_plan_qdisc_kind_word(int kind)
+{
+	return word_of(qdisc_kind_words, COUNT(qdisc_kind_words), kind);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -139,12 +170,20 @@ static void member_strings(ncfg_json_writer_t *writer, const char *name, char *c
 static const char base64_alphabet[] =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
-static void write_key(ncfg_json_writer_t *writer, const unsigned char *key)
+void ncfg_plan_render_key(const unsigned char *key, char *out, size_t out_size)
 {
-	char   text[45];
 	size_t at = 0;
 	size_t i;
 
+	if (out_size < NCFG_PLAN_KEY_TEXT_MAX) {
+		/* A buffer that could truncate is refused rather than truncated
+		 * into, which is `ncfg_address_render`'s rule: half a key still
+		 * looks like one. */
+		if (out_size != 0u) {
+			out[0] = '\0';
+		}
+		return;
+	}
 	for (i = 0; i < 32u; i += 3u) {
 		size_t   have = 32u - i < 3u ? 32u - i : 3u;
 		unsigned block = 0;
@@ -154,11 +193,18 @@ static void write_key(ncfg_json_writer_t *writer, const unsigned char *key)
 			block |= (unsigned)key[i + j] << (16u - 8u * (unsigned)j);
 		}
 		for (j = 0; j < 4u; j++) {
-			text[at++] = j < have + 1u ?
+			out[at++] = j < have + 1u ?
 			    base64_alphabet[(block >> (18u - 6u * (unsigned)j)) & 0x3fu] : '=';
 		}
 	}
-	text[at] = '\0';
+	out[at] = '\0';
+}
+
+static void write_key(ncfg_json_writer_t *writer, const unsigned char *key)
+{
+	char text[NCFG_PLAN_KEY_TEXT_MAX];
+
+	ncfg_plan_render_key(key, text, sizeof(text));
 	ncfg_json_write_string(writer, text);
 }
 
