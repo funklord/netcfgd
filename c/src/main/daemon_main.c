@@ -830,11 +830,11 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start: its planner carries a `network` "
-	    "block's addressing and an `access_point` block's configuration without acting "
-	    "on either, and its executor refuses a `link.create` it cannot carry out while "
-	    "the plan is running rather than before it -- so a reconcile would converge part "
-	    "of a machine, or stop halfway through changing it, and report neither to anybody");
+	(void)fail("this build of the C port will not start: its executor refuses every "
+	    "op that needs a service context -- `dns.apply`, the four sysctls, the six "
+	    "wifi ops and all three backend verbs -- because nothing outside the tests "
+	    "installs one. A reconcile would bring up links and addresses and then decline "
+	    "to start a single backend, on a machine whose wifi and DHCP both need one");
 	(void)fail("`ncfg apply` is refused here for the same reasons, and a daemon "
 	    "reconciling on drift is an apply nobody typed. The loop, the seams, the "
 	    "window, the control socket, the mark on a link this build creates and the "

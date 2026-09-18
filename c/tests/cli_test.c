@@ -1768,13 +1768,27 @@ static void apply_is_refused_and_says_what_it_is_waiting_for(void)
 	 * asserted now is which blocks are held, because that is what a reader
 	 * needs and it changes only when the fact does.
 	 */
-	check(strstr(said, "`network` block's addressing") != NULL &&
-	    strstr(said, "`access_point` block's configuration") != NULL,
-	    "  naming the blocks the planner is holding rather than acting on");
-	check(strstr(said, "refuses a `link.create` it cannot carry out") != NULL,
-	    "  and the executor refusing what it cannot do");
-	check(strstr(said, "rather than before it") != NULL,
-	    "  and that the refusal for an op it cannot do comes mid-plan");
+	/*
+	 * **Named, not counted -- and now named after two names went stale.** This
+	 * asserted a count of blocks, then the two blocks that count resolved to,
+	 * and both were false within a wave: the `access_point` half was closed by
+	 * the pass that plans hostapd, and the `network` half was never this
+	 * port's gap at all (10.180). What is asserted now is the mechanism --
+	 * every op needing a service context is refused because nothing installs
+	 * one -- which stops being true only when somebody writes that caller,
+	 * which is the event this sentence exists to wait for.
+	 */
+	check(strstr(said, "needs a service context") != NULL,
+	    "  naming the one thing that refuses every backend");
+	check(strstr(said, "nothing outside the tests installs one") != NULL,
+	    "  and that nothing installs one, which is what a reader has to fix");
+	/* The consequence, which is what an operator needs from the sentence: not
+	 * that something is missing, but what a machine would look like if this
+	 * ran anyway. The mid-plan clause this replaced described a refusal that
+	 * can no longer fire -- nothing plans a `link.create` the executor
+	 * declines, because the planner asks it first. */
+	check(strstr(said, "decline to start a single backend") != NULL,
+	    "  and what a machine would look like if it ran anyway");
 	check(strstr(said, "owned.json") != NULL,
 	    "  and that nothing records what an apply did");
 	check(strstr(said, NCFG_OBSERVE_ALTNAME_PREFIX) != NULL,
