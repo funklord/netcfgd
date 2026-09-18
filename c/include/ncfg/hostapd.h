@@ -257,6 +257,27 @@ int ncfg_hostapd_pid_path(const char *run, const char *device, char *out, size_t
     char *err, size_t err_size);
 
 /*
+ * Whether netcfgd's own hostapd is running on this device, and its pid.
+ *
+ * The sixth answer to one question, written last and for the reason the
+ * comment above `ncfg_hostapd_start_args` gives: **an access point was the one
+ * backend netcfgd could never tell had died.** Without it the liveness pass
+ * has five kinds and a hole, `running: true` stays the only account of a
+ * daemon that crashed an hour ago, and 0079's restart cannot fire for it
+ * (0110).
+ *
+ * **The pid file's own path is the marker**, which is the strongest kind:
+ * netcfgd chose it, it names the device, and `-P` puts it in hostapd's command
+ * line. That is `ncfg_dhcp_running_pid`'s arrangement and the supplicant's
+ * (0080); radvd and openvpn use a generated configuration and a management
+ * socket instead, for want of a `-P`. 0 covers every way of not knowing -- no
+ * file, no number in it, no such process, or a process that is somebody
+ * else's -- and the ownership rule itself is `ncfg_process_pid_of`'s, written
+ * once rather than in each of the six places that needed it.
+ */
+pid_t ncfg_hostapd_running_pid(const char *run, const char *device);
+
+/*
  * Write the configuration for one access point, and say where it went.
  *
  * **Mode 0600, set on the open handle before a byte is written**, because the
