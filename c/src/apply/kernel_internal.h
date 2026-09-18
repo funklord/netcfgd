@@ -117,6 +117,40 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
     size_t err_size);
 
 /*
+ * The alternative name netcfgd marks a link it creates with, into `out`.
+ *
+ * `NCFG_OBSERVE_ALTNAME_PREFIX` and the link's own name, and the prefix is
+ * **read from `observe.h` rather than written again** -- that header says why
+ * in as many words: two spellings of one marker means netcfgd stamps one and
+ * looks for the other, and every link it creates becomes foreign to it.
+ *
+ * A name that would not fit `NCFG_WIRE_ALT_IFNAME_MAX` is refused rather than
+ * cut short, which cannot happen for a name the kernel has already accepted as
+ * an interface name -- 8 bytes of prefix and at most 15 of name against a
+ * limit of 128 -- and is checked rather than reasoned about, because the caller
+ * treats a marker it cannot *write* as non-fatal and must treat one it cannot
+ * *build* the same way. `out` is left empty on a refusal, so half a marker
+ * cannot be sent.
+ */
+int ncfg_kernel_altname_of(const char *link, char *out, size_t out_size, char *err,
+    size_t err_size);
+
+/*
+ * The `RTM_NEWLINKPROP` that marks a link netcfgd has just created.
+ *
+ * Decision 0136, which is 0002's argument applied to the one object kind with
+ * no protocol field to stamp: a link's ownership would otherwise live only in
+ * `/run`, and a restart deletes that. `ncfg_observe_link_ownership` is the
+ * reader, and it answers `ours` for a link carrying this prefix.
+ *
+ * A builder rather than a send, which is this header's rule: what is worth
+ * checking is the bytes, and `apply_kernel_test.c` walks them back with the
+ * wire layer rather than reaching a kernel.
+ */
+int ncfg_kernel_build_altname(ncfg_buf_t *out, uint32_t seq, uint32_t index, const char *name,
+    char *err, size_t err_size);
+
+/*
  * A bridge's own settings, re-sent to a bridge that already exists.
  *
  * Through `ncfg_ops_set_bridge_attrs`, which is the encoder `link.create`

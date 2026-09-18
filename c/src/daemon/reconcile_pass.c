@@ -27,11 +27,12 @@
  * records the step it was called for, and the assertion is the list.
  *
  * WHAT IS DEFERRED HERE, RATHER THAN QUIETLY MISSING
- *   Folding an apply's effects into `owned.json` and writing
- *   `plan.last.json`. Both are named in 0263 for the revert path and both are
- *   absent here for the same reason: the executor seam reports no effects, so
- *   there is nothing to fold, and the journal writer wants a run directory
- *   half of which this port does not yet write.
+ *   Writing `plan.last.json`. The fold into `owned.json` beside it in 0263 is
+ *   no longer deferred -- `ncfg_apply_record` takes the plan and the journal
+ *   rather than an effect list, so there was never an effect list to wait for
+ *   -- and it runs under the apply lock, before the executor is closed. The
+ *   journal *writer* still wants a run directory half of which this port does
+ *   not yet write, which is the whole of what is left.
  *
  *   The `cycle` option a plan is built with. `ncfg_plan_options_t` has none
  *   yet, so this build's planner emits no link cycle for a modem that has
@@ -245,6 +246,34 @@ static void remember(const char *run_dir, tellings_t *told)
 		    "what the %s hooks were told could not be recorded (%s), so they may "
 		    "fire again",
 		    ncfg_hook_phase_name((ncfg_hook_phase_t)told->phase), message);
+	}
+}
+
+/*
+ * Fold what an apply just did into `owned.json`.
+ *
+ * **Under the apply lock, which is why it is here and not after the close.**
+ * `ncfg_owned_update` takes `owned.lock` of its own, so the file cannot be
+ * interleaved either way -- but the apply lock is what makes the read, the
+ * change and the write describe one machine rather than two applies' worth of
+ * it.
+ *
+ * A failure is a note rather than a refusal, which is `remember`'s bargain
+ * above and is the same one: the run directory is derived and disposable. What
+ * it costs is larger here and is said, because an object netcfgd installed and
+ * did not record is one it will decline to remove later -- the safe direction,
+ * and still a machine that drifts.
+ */
+static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
+    const ncfg_journal_t *journal)
+{
+	char message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	if (!ncfg_apply_record(run_dir, plan, journal, message, sizeof(message))) {
+		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
+		    "what this apply did could not be recorded (%s), so netcfgd will not "
+		    "claim those objects as its own", message);
 	}
 }
 
@@ -799,6 +828,7 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
 	(void)ncfg_apply(restricted, &executor, &journal, message, sizeof(message));
+	record_what_ran(loop->state->paths.run, restricted, &journal);
 	close_executor(&loop->world, &executor);
 
 	guard_resolv(loop, restricted, report);
@@ -1044,6 +1074,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	record_what_ran(loop->state->paths.run, plan, &journal);
 	close_executor(&loop->world, &executor);
 
 	if (ncfg_journal_failure(&journal)) {

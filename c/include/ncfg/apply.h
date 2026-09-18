@@ -65,6 +65,7 @@
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
 #include "ncfg/secrets.h"
+#include "ncfg/state.h"
 
 /* ------------------------------------------------------------------------ *
  * The seam
@@ -267,6 +268,79 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
  */
 size_t ncfg_apply_revert(const ncfg_plan_t *plan, ncfg_journal_t *journal,
     const ncfg_executor_t *executor);
+
+/* ------------------------------------------------------------------------ *
+ * What an apply did, folded into the ownership record
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Fold one action that reached the machine into `owned.json`'s record.
+ *
+ * WHY THIS IS AN OP AND NOT AN EFFECT LIST
+ *   The Rust accumulates an `Effects` struct inside `KernelExecutor` as it
+ *   goes, and the daemon calls `OwnedState::absorb` on it afterwards. Here the
+ *   effect of an action **is** the action: every member of that struct which
+ *   this record can carry is a pure function of the op that produced it -- a
+ *   created link is the op's name, an added address is the op's interface and
+ *   CIDR with `static` for its origin, a forwarding sysctl is the op's
+ *   interface and its boolean. So there is no second aggregate to build, to
+ *   free and to keep in step with the record it folds into.
+ *
+ *   What that buys is the property this module exists for: the fold is driven
+ *   through `ncfg_executor_t` like everything else, so **it is checked against
+ *   the recorder and needs no socket, no privilege and no interface.** An
+ *   accumulator inside the real executor would put the one piece of bookkeeping
+ *   that decides what netcfgd may later delete behind a live netlink socket.
+ *
+ * WHAT IS NOT FOLDED, AND IT IS NOT AN OMISSION
+ *   Two members of the Rust's `Effects` are not a function of any op.
+ *   `applied_dns` is what `deliver` wrote, and `observed_running` is what the
+ *   *observation* saw rather than what the apply did. Neither has anywhere to
+ *   go: `state.h` says the backends and the DNS scopes are deferred in this
+ *   build because their element types are the observed model's and its field
+ *   tables are static. `backend_restarts` **is** carried, so a start and a stop
+ *   are folded; what is missing is only the clearing a live backend would do,
+ *   and that belongs to whoever composes the observation.
+ *
+ * 1, or 0 where the record could not grow -- which is an allocation failure and
+ * nothing to do with the machine.
+ */
+int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op);
+
+/*
+ * Fold everything this journal says reached the machine into `owned.json`.
+ *
+ * **Driven by the journal rather than by the plan**, which is
+ * `ncfg_apply_revert`'s rule and is here for a sharper reason: an action that
+ * failed or never ran changed nothing, and recording it would have netcfgd
+ * claim an address it never installed -- and ownership is what decides whether
+ * it may later withdraw one.
+ *
+ * `NCFG_OUTCOME_REVERTED` folds the action's **inverse** instead, which is what
+ * lets a revert be recorded at all here. The Rust reaches the same answer by a
+ * different route -- its revert runs the inverses through the executor it will
+ * absorb afterwards, so their removals are in the effect list -- but
+ * `ncfg_apply_revert` is a library call taking a plan, a journal and an
+ * executor, with no run directory and no effects, which is exactly why 0263
+ * deferred the fold on that path. Reading the outcome is what closes it: what
+ * is in effect now is the inverse, so that is what the record says, and a
+ * record whose inverse failed stays `done` -- the honest answer, since that
+ * change is still in effect.
+ *
+ * Folding the same journal twice is deliberate and safe: every rule in
+ * `ncfg_owned_absorb` replaces or removes before it adds, so a second fold of a
+ * record that has not moved writes the same file again.
+ *
+ * Read-modify-written under `owned.lock` through `ncfg_owned_update`, because
+ * two processes write this file -- `ncfg apply` and the daemon -- and a lost
+ * update here **puts back** a record the other one had just removed.
+ *
+ * A plan with nothing to record does not write: `ncfg_owned_update` is not even
+ * entered, so a pass that changed nothing does not rewrite a file another
+ * writer is in the middle of.
+ */
+int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
+    const ncfg_journal_t *journal, char *err, size_t err_size);
 
 /*
  * Whether this build can carry this op out, and the sentence if it cannot.

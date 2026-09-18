@@ -63,8 +63,34 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 	case NCFG_KIND_VETH:
 	case NCFG_KIND_VRF:
 	case NCFG_KIND_VXLAN:
-	case NCFG_KIND_TUN:
 		return 1;
+	case NCFG_KIND_TUN:
+		/*
+		 * **Refused here because the executor refuses it there.** A `tun` is
+		 * made through `/dev/net/tun` rather than by a netlink message, which
+		 * `ncfg_kernel_newlink_of` says in as many words and acts on -- so
+		 * this list answered yes and `create_link` then had no path for it.
+		 *
+		 * That is the one thing this function must never do. Its whole
+		 * contract is to be *the* list of what this build can carry out,
+		 * asked once before anything is done, so that a plan carrying
+		 * something impossible is refused before the machine is touched
+		 * rather than halfway through changing it -- and the planner declines
+		 * a device by asking exactly this question. A yes here that becomes a
+		 * no at execution puts the refusal back in the middle of the plan,
+		 * which is the failure the ordering exists to prevent.
+		 *
+		 * `tun.h` is ported and `ncfg_tun_create` is written, so closing this
+		 * is wiring rather than design: `create_link` gains a `tun` arm, this
+		 * case returns 1 again, and the planner stops declining it. Until
+		 * then the honest answer is the one the executor would give.
+		 */
+		ncfg_error_set(err, err_size,
+		    "creating a %s link (%s) goes through /dev/net/tun rather than a netlink "
+		    "message, and this build's executor has no path for it -- `tun.h` carries "
+		    "`ncfg_tun_create` and nothing calls it yet",
+		    word ? word : "link", name ? name : "?");
+		return 0;
 	case NCFG_KIND_WIREGUARD:
 		/*
 		 * The link only. Everything that makes it a tunnel -- the key, the

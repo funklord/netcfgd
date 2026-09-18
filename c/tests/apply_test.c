@@ -41,6 +41,7 @@
 #include "ncfg/hooks.h"
 #include "ncfg/observed.h"
 #include "ncfg/plan.h"
+#include "ncfg/state.h"
 #include "ncfg/value.h"
 
 #include "tempdir.h"
@@ -1516,6 +1517,418 @@ static void nothing_here_falls_over_on_an_empty_argument(void)
 	ncfg_kernel_free(NULL);
 }
 
+
+/* ------------------------------------------------------------------------ *
+ * What an apply did, folded into the ownership record
+ * ------------------------------------------------------------------------ */
+
+/*
+ * WHY THIS IS THE SECTION THE DAEMON'S GUARD TURNED ON
+ *   `owned.json` is not a log. Every entry in it is netcfgd's answer to "may I
+ *   take this away?", and that answer is what `ncfg_ownership_may_remove`
+ *   gates every teardown on. Until this landed the answer was no, for ever,
+ *   about every object an apply installed -- and about a link the kernel mark
+ *   could not rescue either.
+ *
+ *   None of it needs a kernel: the fold is a function of the plan and the
+ *   journal, so the recorder produces the journal and a directory this test
+ *   made holds the file.
+ */
+
+/* One op, built on the stack, with no inverse. */
+static void put(ncfg_plan_t *plan, const ncfg_op_t *op)
+{
+	ncfg_reason_t reason;
+
+	memset(&reason, 0, sizeof(reason));
+	reason.field = "fixture";
+	(void)ncfg_plan_add(plan, op, &reason, NULL, 0, NULL);
+}
+
+static void addr_op(ncfg_op_t *op, int kind, const char *iface, const char *addr)
+{
+	memset(op, 0, sizeof(*op));
+	op->kind = kind;
+	if (kind == NCFG_OP_ADDR_ADD) {
+		op->u.addr_add.iface = iface;
+		op->u.addr_add.addr = addr;
+	} else {
+		op->u.addr_del.iface = iface;
+		op->u.addr_del.addr = addr;
+	}
+}
+
+/* The record as it is on disk, read back through the module that writes it. */
+static int read_back(const char *run_dir, ncfg_owned_state_t *out)
+{
+	char message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	memset(out, 0, sizeof(*out));
+	return ncfg_owned_read(run_dir, out, message, sizeof(message));
+}
+
+static int has_string(char *const *list, size_t count, const char *wanted)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		if (list[at] && strcmp(list[at], wanted) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static const ncfg_owned_object_t *object_named(const ncfg_owned_object_t *list, size_t count,
+    const char *interface, const char *key)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		if (list[at].interface && list[at].key &&
+		    strcmp(list[at].interface, interface) == 0 && strcmp(list[at].key, key) == 0) {
+			return &list[at];
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Only what reached the machine is claimed.
+ *
+ * The three outcomes are the subject rather than the one: an action that failed
+ * or never ran changed nothing, and a record claiming it would have netcfgd
+ * withdraw an address it never installed. So the recorder is told to fail in
+ * the middle of a plan of four, and the file afterwards holds exactly the two
+ * that ran.
+ */
+static void only_what_ran_is_claimed(char *run_dir)
+{
+	ncfg_plan_t       *plan;
+	ncfg_executor_t    executor;
+	recorder_t         recorder;
+	ncfg_journal_t     journal;
+	ncfg_owned_state_t owned;
+	ncfg_op_t          op;
+	ncfg_route_t       route;
+	char               message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	plan = ncfg_plan_new(message, sizeof(message));
+	if (!plan) {
+		check(0, "only the actions that ran are claimed in owned.json");
+		return;
+	}
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "br0";
+	put(plan, &op);
+	addr_op(&op, NCFG_OP_ADDR_ADD, "br0", "10.0.0.1/24");
+	put(plan, &op);
+	/* The third fails, so this and the fourth change nothing. */
+	addr_op(&op, NCFG_OP_ADDR_ADD, "br0", "10.0.0.2/24");
+	put(plan, &op);
+	memset(&route, 0, sizeof(route));
+	route.destination = LIT("default");
+	route.via = LIT("10.0.0.254");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_ROUTE_ADD;
+	op.u.route.iface = "br0";
+	op.u.route.route = &route;
+	put(plan, &op);
+
+	recorder_init(&recorder, &executor);
+	recorder.fail_at = 2;
+	recorder.failure = "the double was told to fail here";
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+
+	message[0] = '\0';
+	check(ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message)),
+	    "what an apply did is folded into owned.json");
+	if (read_back(run_dir, &owned)) {
+		check(has_string(owned.created_links, owned.created_link_count, "br0"),
+		    "  the link it created is netcfgd's, so netcfgd may take it down again");
+		check(object_named(owned.addresses, owned.address_count, "br0",
+		    "10.0.0.1/24") != NULL,
+		    "  and the address that went on before the failure is claimed");
+		check(object_named(owned.addresses, owned.address_count, "br0",
+		    "10.0.0.2/24") == NULL,
+		    "  the one whose action failed is not claimed");
+		check(owned.route_count == 0u,
+		    "  and neither is the route that never ran at all");
+		{
+			const ncfg_owned_object_t *one = object_named(owned.addresses,
+			    owned.address_count, "br0", "10.0.0.1/24");
+
+			check(one && one->origin == (int)NCFG_ORIGIN_STATIC,
+			    "  an address netcfgd installs is `static`, which every teardown "
+			    "gates on");
+		}
+		ncfg_owned_free(&owned);
+	} else {
+		check(0, "  the link it created is netcfgd's, so netcfgd may take it down again");
+		check(0, "  and the address that went on before the failure is claimed");
+		check(0, "  the one whose action failed is not claimed");
+		check(0, "  and neither is the route that never ran at all");
+		check(0, "  an address netcfgd installs is `static`, which every teardown "
+		    "gates on");
+	}
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+/*
+ * A revert takes the claims back.
+ *
+ * `ncfg_apply_revert` marks every record whose inverse ran, and the same fold
+ * run again folds the **inverse** for those -- so an address a window installed
+ * stops being netcfgd's the moment it is withdrawn. Without it the file would
+ * go on claiming every object a window that closed unconfirmed has given back,
+ * and netcfgd would believe it owns an address that is not there.
+ *
+ * Driven on the record written by the check above, which is what makes it a
+ * removal rather than an empty file that happens to look right. And the second
+ * fold re-folds the first check's records, which is the idempotence the
+ * arrangement depends on: it is asserted rather than assumed, by checking that
+ * what the revert did not touch is still there afterwards.
+ */
+static void a_revert_takes_the_claims_back(char *run_dir)
+{
+	ncfg_plan_t       *plan;
+	ncfg_executor_t    executor;
+	recorder_t         recorder;
+	ncfg_journal_t     journal;
+	ncfg_owned_state_t owned;
+	ncfg_op_t          op;
+	ncfg_op_t          inverse;
+	ncfg_reason_t      reason;
+	char               message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	plan = ncfg_plan_new(message, sizeof(message));
+	if (!plan) {
+		check(0, "a revert takes back what the apply claimed");
+		return;
+	}
+	memset(&reason, 0, sizeof(reason));
+	reason.field = "fixture";
+	addr_op(&op, NCFG_OP_ADDR_ADD, "br0", "10.0.0.9/24");
+	addr_op(&inverse, NCFG_OP_ADDR_DEL, "br0", "10.0.0.9/24");
+	(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, &inverse);
+
+	recorder_init(&recorder, &executor);
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(object_named(owned.addresses, owned.address_count, "br0",
+		    "10.0.0.9/24") != NULL,
+		    "an address a window installed is claimed while the window is open");
+		ncfg_owned_free(&owned);
+	} else {
+		check(0, "an address a window installed is claimed while the window is open");
+	}
+
+	check(ncfg_apply_revert(plan, &journal, &executor) == 1u, "  the window closes unconfirmed");
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(object_named(owned.addresses, owned.address_count, "br0",
+		    "10.0.0.9/24") == NULL,
+		    "  and the claim leaves with the address the revert withdrew");
+		/* And nothing else moved: the earlier check's records are untouched,
+		 * which is what a fold that only ever adds could not promise. */
+		check(has_string(owned.created_links, owned.created_link_count, "br0"),
+		    "  while what the revert did not touch is still netcfgd's");
+		ncfg_owned_free(&owned);
+	} else {
+		check(0, "  and the claim leaves with the address the revert withdrew");
+		check(0, "  while what the revert did not touch is still netcfgd's");
+	}
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+/*
+ * The rules that are not "add a name to a list".
+ *
+ * Each of these is a rule the Rust wrote down once and this port had to spell
+ * again, and each is the kind that is wrong in a direction nobody notices:
+ *
+ *   * switching a sysctl **off** drops the record rather than storing false --
+ *     the question is "is this ours to undo", and once undone the answer is no;
+ *   * `accept_ra`'s off is the value `1`, the kernel's own default (0073), not
+ *     false -- so a write of 1 must drop the record and a write of 2 must keep
+ *     it;
+ *   * a deleted link stops being netcfgd's, because a record outliving its
+ *     device is a claim on whatever next takes that name;
+ *   * an event hook remembers what it was told, once per interface and phase,
+ *     and only for the two phases that carry a value.
+ *
+ * Driven against `ncfg_owned_absorb` directly, because what is being checked is
+ * one rule per op and a plan would only add noise between the two.
+ */
+static void the_folding_rules(void)
+{
+	ncfg_owned_state_t owned;
+	ncfg_op_t          op;
+
+	memset(&owned, 0, sizeof(owned));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_SYSCTL_SET_FORWARDING;
+	op.u.forwarding.iface = "eth0";
+	op.u.forwarding.enabled = 1;
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(has_string(owned.forwarding, owned.forwarding_count, "eth0"),
+	    "an interface netcfgd switched forwarding on for is recorded");
+	op.u.forwarding.enabled = 0;
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.forwarding_count == 0u,
+	    "  and switching it back off drops the record rather than storing false");
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_SYSCTL_SET_ACCEPT_RA;
+	op.u.accept_ra.iface = "eth0";
+	op.u.accept_ra.value = 2;
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(has_string(owned.accept_ra, owned.accept_ra_count, "eth0"),
+	    "accept_ra is recorded where netcfgd set it to 2");
+	op.u.accept_ra.value = 1;
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.accept_ra_count == 0u,
+	    "  and handing the interface back is the value 1, not false (0073)");
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_QDISC_SET;
+	op.u.qdisc.iface = "eth0";
+	(void)ncfg_owned_absorb(&owned, &op);
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_QDISC_RESET;
+	op.u.iface.iface = "eth0";
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.qdisc_count == 0u, "a qdisc set and then reset leaves no claim behind");
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "br0";
+	(void)ncfg_owned_absorb(&owned, &op);
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.created_link_count == 1u,
+	    "a link created twice is recorded once, so folding a journal again is safe");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_DELETE;
+	op.u.named.name = "br0";
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.created_link_count == 0u,
+	    "  and deleting it takes the record away, so the name is nobody's claim");
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_HOOK_RUN;
+	op.u.hook.iface = "eth0";
+	op.u.hook.phase = (int)NCFG_HOOK_PHASE_LEASE;
+	op.u.hook.path = "/run/lease";
+	op.u.hook.value = "10.0.0.5/24";
+	(void)ncfg_owned_absorb(&owned, &op);
+	op.u.hook.value = "10.0.0.6/24";
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.hook_state_count == 1u && owned.hook_state[0].value &&
+	    strcmp(owned.hook_state[0].value, "10.0.0.6/24") == 0,
+	    "a hook remembers what it was told last, one record per interface and phase");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_HOOK_RUN;
+	op.u.hook.iface = "eth0";
+	op.u.hook.phase = (int)NCFG_HOOK_PHASE_PRE_UP;
+	op.u.hook.path = "/run/pre";
+	check(ncfg_owned_absorb(&owned, &op) && owned.hook_state_count == 1u,
+	    "  and a lifecycle phase carries no value, so it remembers nothing");
+	/*
+	 * **With a value on it, which the planner never puts there.** Checked
+	 * anyway, because the phase test and the value test are two rules and a
+	 * fixture that only ever exercises the second cannot tell them apart: the
+	 * record's own type says `lease` and `carrier` are the two phases that
+	 * have a value, and the two things that read it compare nothing else. A
+	 * row for a third phase would be one nobody ever looks at and one nothing
+	 * ever takes out.
+	 */
+	op.u.hook.value = "up";
+	check(ncfg_owned_absorb(&owned, &op) && owned.hook_state_count == 1u,
+	    "  and a value on a phase that has none is not remembered either");
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = (int)NCFG_BACKEND_DHCP4;
+	op.u.backend.iface = "eth0";
+	(void)ncfg_owned_absorb(&owned, &op);
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 2,
+	    "a backend started twice without staying up is counted twice (0079)");
+	op.kind = NCFG_OP_BACKEND_STOP;
+	(void)ncfg_owned_absorb(&owned, &op);
+	check(owned.backend_restart_count == 0u,
+	    "  and a deliberate stop clears the count, the document having stopped asking");
+
+	ncfg_owned_free(&owned);
+}
+
+/* A plan that changed nothing does not rewrite the file. */
+static void an_empty_journal_writes_nothing(char *run_dir)
+{
+	ncfg_plan_t   *plan;
+	ncfg_journal_t journal;
+	char           message[NCFG_ERROR_MAX];
+	char           path[600];
+	struct stat    before;
+	struct stat    after;
+
+	message[0] = '\0';
+	plan = ncfg_plan_new(message, sizeof(message));
+	ncfg_journal_init(&journal);
+	(void)snprintf(path, sizeof(path), "%s/owned.json", run_dir);
+	if (!plan || stat(path, &before) != 0) {
+		check(0, "a plan with nothing in it does not rewrite the record");
+		ncfg_plan_free(plan);
+		return;
+	}
+	message[0] = '\0';
+	check(ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message)) &&
+	    stat(path, &after) == 0 && before.st_ino == after.st_ino,
+	    "a plan with nothing in it does not rewrite the record");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+static void what_an_apply_did_is_recorded(void)
+{
+	char run_dir[512];
+
+	if (!tempdir_make("apply-owned", run_dir, sizeof(run_dir))) {
+		check(0, "a directory for the ownership record");
+		return;
+	}
+	only_what_ran_is_claimed(run_dir);
+	a_revert_takes_the_claims_back(run_dir);
+	an_empty_journal_writes_nothing(run_dir);
+	the_folding_rules();
+
+	/* Named, never swept: this directory is one this test made, and the two
+	 * files in it are the two it wrote. */
+	{
+		char path[600];
+
+		(void)snprintf(path, sizeof(path), "%s/owned.json", run_dir);
+		(void)unlink(path);
+		(void)snprintf(path, sizeof(path), "%s/owned.lock", run_dir);
+		(void)unlink(path);
+		(void)rmdir(run_dir);
+	}
+}
+
 int main(void)
 {
 	a_plan_is_carried_out_in_the_order_it_was_planned();
@@ -1538,6 +1951,8 @@ int main(void)
 	an_op_this_build_cannot_do_fails_its_action();
 
 	the_journal_is_written_as_the_file_carries_it();
+
+	what_an_apply_did_is_recorded();
 
 	a_failure_vetoes_only_in_the_phases_that_can_veto();
 	the_hook_runner();

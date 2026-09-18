@@ -39,6 +39,8 @@
 #include "ncfg/genl.h"
 #include "ncfg/netlink.h"
 #include "ncfg/nft.h"
+#include "ncfg/observe.h"
+#include "ncfg/observed.h"
 #include "ncfg/ops.h"
 #include "ncfg/plan.h"
 #include "ncfg/qdisc.h"
@@ -1470,6 +1472,113 @@ static void check_nat(void)
 	}
 }
 
+
+/* ------------------------------------------------------------------------ *
+ * The mark a created link wears
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `link.create` stamps the link as netcfgd's, and the proof goes all the way
+ * round without a kernel.
+ *
+ * **Why this one is worth the length.** A link has no protocol field, so this
+ * alternative name is the only mark it can carry (0136), and
+ * `ncfg_observe_link_ownership` is the reader that decides from it whether
+ * netcfgd may ever take the link down again. A stamp that went out under a
+ * spelling the reader does not recognise is indistinguishable, from inside
+ * either half, from a stamp that works -- so the last check below builds the
+ * message, walks the name back out of the bytes and hands *that* to the
+ * reader. Nothing in between is spelled twice, and the prefix is spelled in
+ * neither half: it comes from `observe.h`.
+ *
+ * `ncfg_ops_add_altname` already has its own bytes checked in `ops_test.c` --
+ * the `RTM_NEWLINKPROP` nest and the `NLA_F_NESTED` that message type insists
+ * on are that file's subject and are not asserted a second time here. What is
+ * checked here is what *this* module puts into it.
+ */
+static void check_mark(void)
+{
+	char             altname[NCFG_WIRE_ALT_IFNAME_MAX];
+	char             err[NCFG_ERROR_MAX];
+	char             expected[NCFG_WIRE_ALT_IFNAME_MAX];
+	char             too_long[NCFG_WIRE_ALT_IFNAME_MAX + 8];
+	ncfg_buf_t       buf;
+	ncfg_wire_message_t message;
+	ncfg_wire_attrs_t attrs;
+	ncfg_wire_attrs_t props;
+	ncfg_wire_attr_t  attr;
+
+	(void)snprintf(expected, sizeof(expected), "%sbr0", NCFG_OBSERVE_ALTNAME_PREFIX);
+	err[0] = '\0';
+	check(ncfg_kernel_altname_of("br0", altname, sizeof(altname), err, sizeof(err)) &&
+	    strcmp(altname, expected) == 0,
+	    "a created link's mark is observe.h's prefix and the link's own name");
+
+	err[0] = '\0';
+	altname[0] = 'x';
+	check(!ncfg_kernel_altname_of("", altname, sizeof(altname), err, sizeof(err)) &&
+	    altname[0] == '\0' && err[0] != '\0',
+	    "a link with no name is refused, and nothing half-built is left behind");
+
+	memset(too_long, 'a', sizeof(too_long) - 1u);
+	too_long[sizeof(too_long) - 1u] = '\0';
+	err[0] = '\0';
+	altname[0] = 'x';
+	check(!ncfg_kernel_altname_of(too_long, altname, sizeof(altname), err, sizeof(err)) &&
+	    altname[0] == '\0',
+	    "  and so is a name the prefix would push past ALTIFNAMSIZ");
+
+	/*
+	 * The message. `RTM_NEWLINKPROP` rather than an attribute on an ordinary
+	 * `RTM_NEWLINK`, which the kernel ignores -- `ops.h` says so and this is
+	 * the caller that depends on it.
+	 */
+	ncfg_buf_init(&buf, 0);
+	err[0] = '\0';
+	if (ncfg_kernel_build_altname(&buf, 7u, 4u, "br0", err, sizeof(err)) &&
+	    first_message(&buf, &message) &&
+	    attrs_after(&message, NCFG_WIRE_IFINFO_LEN, &attrs) &&
+	    find(&attrs, IFLA_PROP_LIST, &attr)) {
+		char back[NCFG_WIRE_ALT_IFNAME_MAX];
+		char *names[1];
+
+		check(message.header.kind == RTM_NEWLINKPROP,
+		    "the mark is RTM_NEWLINKPROP, which is the only message that adds one");
+		check(message.header.seq == 7u,
+		    "  at the sequence number its acknowledgement will be waited on under");
+		nested(&attr, &props);
+		(void)text_of(&props, IFLA_ALT_IFNAME, back, sizeof(back));
+		check(strcmp(back, expected) == 0,
+		    "  and the name in the bytes is the one netcfgd looks for");
+		/*
+		 * The round trip, and the only check here that is about both halves
+		 * at once: the name the *builder* produced, read back out of the wire
+		 * and handed to the observer's judgement.
+		 */
+		names[0] = back;
+		check(ncfg_observe_link_ownership(names, 1u, 0) == NCFG_OWNERSHIP_OURS,
+		    "  and a link wearing exactly those bytes reads back as netcfgd's own");
+	} else {
+		check(0, "the mark is RTM_NEWLINKPROP, which is the only message that adds one");
+		check(0, "  at the sequence number its acknowledgement will be waited on under");
+		check(0, "  and the name in the bytes is the one netcfgd looks for");
+		check(0, "  and a link wearing exactly those bytes reads back as netcfgd's own");
+	}
+	ncfg_buf_free(&buf);
+
+	/* And the marker is not the whole name: a link renamed after netcfgd made
+	 * it still matches, which is `link_ownership`'s prefix rule and is why the
+	 * builder may put the name in at all. */
+	{
+		char *names[1];
+
+		names[0] = expected;
+		check(ncfg_observe_link_ownership(names, 1u, 0) == NCFG_OWNERSHIP_OURS &&
+		    ncfg_observe_link_ownership(names, 0u, 0) == NCFG_OWNERSHIP_UNKNOWN,
+		    "an unmarked, unrecorded link stays unknown rather than becoming foreign");
+	}
+}
+
 int main(void)
 {
 	fixture_t fixture;
@@ -1493,6 +1602,7 @@ int main(void)
 	check_wireguard();
 	check_endpoints();
 	check_nat();
+	check_mark();
 
 	if (failures) {
 		printf("apply_kernel_test: %d check(s) failed\n", failures);
