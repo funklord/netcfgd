@@ -15,6 +15,15 @@
  *   result and read a value out of it, rather than asserting that a particular
  *   file appeared.
  *
+ * WHAT `--json` IS ASSERTED ABOUT
+ *   One object per command, on one line, and not a word of the table beside
+ *   it. The five `profile` subcommands answer in `chosen`, which is the
+ *   socket's own word for the fact, so `set --json` and `get --json` print the
+ *   same member -- and a machine with no profile prints an object with no
+ *   `chosen` in it rather than a name for a state that has none. `config rm`
+ *   says whether anything was there, and says it **only** on the route that
+ *   could tell.
+ *
  * WHAT THIS DOES NOT DO
  *   **Nothing talks to the running daemon.** Every fixture names its own
  *   config, factory and run directories; the one case that needs a listener
@@ -268,6 +277,22 @@ static int run_config(const char **positional, size_t count, char *err, size_t e
 	ok = ncfg_cli_config(&options, positional, count, err, err_size);
 	(void)capture_end();
 	return ok;
+}
+
+/*
+ * Whether what was printed is one JSON object and nothing else.
+ *
+ * `--json` promises stdout is one value, and these verbs print as they go --
+ * so a sentence surviving beside the document is the flag half-answered.
+ */
+static int one_json_line(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	if (length < 3u || text[0] != '{' || text[length - 1u] != '\n') {
+		return 0;
+	}
+	return strchr(text, '\n') == text + length - 1u && text[length - 2u] == '}';
 }
 
 /* A drop-in to hand `ncfg config put`, written where this test can read it. */
@@ -854,6 +879,256 @@ static void saving_over_a_profile_needs_saying_so(void)
 	reset();
 }
 
+/* ------------------------------------------------------------------------ *
+ * `--json`
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The four subcommands whose answer is which profile the machine is on.
+ *
+ * `chosen` absent is the whole of "no profile chosen": 0151 says an absent
+ * selection and the shipped do-nothing profile are different states, so a name
+ * for the first would be the one thing the text form refuses to print.
+ */
+static void json_answers_every_profile_subcommand_in_one_word(void)
+{
+	const char *positional[2];
+	const char *printed;
+	char        err[NCFG_ERROR_MAX];
+
+	reset();
+	options.json = 1;
+
+	positional[0] = "get";
+	check(run_profile(positional, 1u, err, sizeof(err)), "`profile get --json` runs");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	line(printed, "{}", "  and a machine with nothing chosen has no `chosen` member");
+	check(strstr(printed, "no profile chosen") == NULL,
+	    "  never the sentence, which would be prose on a stream promising a value");
+
+	positional[0] = "set";
+	positional[1] = "office";
+	check(run_profile(positional, 2u, err, sizeof(err)), "`profile set --json` runs");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	line(printed, "{\"chosen\":\"office\",\"daemon\":false}",
+	    "  it says what is chosen now and which route the write took");
+	check(strstr(printed, "ncfg plan") == NULL && strstr(printed, "confirm-within") == NULL,
+	    "  and the advice addressed to a person is not a member of the answer");
+	check(strstr(printed, "nothing is listening") == NULL,
+	    "  nor the sentence naming the socket, which `daemon` carries as a fact");
+
+	positional[0] = "get";
+	check(run_profile(positional, 1u, err, sizeof(err)), "`profile get --json` runs again");
+	printed = captured ? captured : "";
+	line(printed, "{\"chosen\":\"office\"}",
+	    "  and reads back the same member `set` wrote, in the same word");
+
+	positional[0] = "unset";
+	check(run_profile(positional, 1u, err, sizeof(err)), "`profile unset --json` runs");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	line(printed, "{\"daemon\":false}",
+	    "  with no `chosen`, which is exactly what `get` prints afterwards");
+	check(strstr(printed, "called `none`") == NULL,
+	    "  and not the sentence saying the default is not a profile called `none`");
+
+	positional[0] = "get";
+	(void)run_profile(positional, 1u, err, sizeof(err));
+	printed = captured ? captured : "";
+	line(printed, "{}", "  and `get` agrees with it, by construction rather than by wording");
+
+	options.json = 0;
+	reset();
+}
+
+/* The listing is the socket's `profiles` payload, member for member. */
+static void json_list_is_the_socket_payload_with_the_tag_off(void)
+{
+	const char *positional[2];
+	const char *printed;
+	char        err[NCFG_ERROR_MAX];
+	char        path[512];
+
+	reset();
+	(void)mkdir(factory_dir, 0755);
+	(void)snprintf(path, sizeof(path), "%s/profile", factory_dir);
+	(void)mkdir(path, 0755);
+	(void)snprintf(path, sizeof(path), "%s/profile/shipped", factory_dir);
+	(void)mkdir(path, 0755);
+
+	options.json = 1;
+	positional[0] = "set";
+	positional[1] = "office";
+	(void)run_profile(positional, 2u, err, sizeof(err));
+	positional[0] = "list";
+	check(run_profile(positional, 1u, err, sizeof(err)), "`profile list --json` runs");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	check(strstr(printed, "\"profiles\":[") != NULL,
+	    "  the list is wrapped in the object the socket wraps it in, not a bare array");
+	check(strstr(printed, "{\"name\":\"office\",\"shipped\":false}") != NULL,
+	    "  an operator's own profile is `shipped:false`");
+	check(strstr(printed, "{\"name\":\"shipped\",\"shipped\":true}") != NULL,
+	    "  and one from the image is `shipped:true`, which is the table's column");
+	check(strstr(printed, "\"chosen\":\"office\"") != NULL,
+	    "  and the `*` the table puts against a row is `chosen` here");
+	check(strstr(printed, "(shipped)") == NULL && strstr(printed, "(yours)") == NULL,
+	    "  with no row of the table left on the stream");
+
+	options.json = 0;
+	reset();
+}
+
+/*
+ * `config put` and `config rm`, and the member the daemon route must not have.
+ *
+ * A `removed` of `false` on a route that cannot tell would be project.md
+ * section 10.175's shape in a document: an absent file is success over the
+ * socket, and the text says so plainly for that reason.
+ */
+static void json_says_what_a_drop_in_write_did(void)
+{
+	const char *positional[3];
+	const char *printed;
+	char        source[512];
+	char        expected[512];
+	char        wanted[600];
+	char        err[NCFG_ERROR_MAX];
+
+	reset();
+	options.json = 1;
+	positional[0] = "put";
+	positional[1] = "site";
+	positional[2] = drop_in_file("site.conf", "interface eth1 {\n\tconfig = \"dhcp\"\n}\n",
+	    source, sizeof(source));
+	check(run_config(positional, 3u, err, sizeof(err)), "`config put --json` runs");
+	printed = captured ? captured : "";
+	if (err[0] != '\0') {
+		detail("said", err);
+	}
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	(void)snprintf(expected, sizeof(expected), "%s/conf.d/site.conf", config_dir);
+	(void)snprintf(wanted, sizeof(wanted),
+	    "{\"name\":\"site\",\"daemon\":false,\"path\":\"%s\"}", expected);
+	line(printed, wanted, "  the name netcfgd files it under, the route, and the file");
+	check(strstr(printed, "nothing is listening") == NULL &&
+	    strstr(printed, "wrote ") == NULL,
+	    "  and neither sentence the table prints is beside it");
+
+	positional[0] = "rm";
+	check(run_config(positional, 2u, err, sizeof(err)), "`config rm --json` runs");
+	printed = captured ? captured : "";
+	line(printed, "{\"name\":\"site\",\"daemon\":false,\"removed\":true}",
+	    "  and a removal that removed something says so");
+
+	check(run_config(positional, 2u, err, sizeof(err)), "`config rm --json` runs again");
+	printed = captured ? captured : "";
+	line(printed, "{\"name\":\"site\",\"daemon\":false,\"removed\":false}",
+	    "  and one that removed nothing says that, which the table says in words");
+
+	/* The fold is a second thing that happened to the machine, and it is a
+	 * member for the same reason the table gives it a sentence. */
+	positional[0] = "set";
+	positional[1] = "office";
+	(void)run_profile(positional, 2u, err, sizeof(err));
+	positional[0] = "put";
+	positional[1] = "site";
+	positional[2] = source;
+	check(run_config(positional, 3u, err, sizeof(err)),
+	    "a settings write on a machine that is on a profile");
+	printed = captured ? captured : "";
+	if (err[0] != '\0') {
+		detail("said", err);
+	}
+	check(strstr(printed, "\"folded\":\"office\"") != NULL,
+	    "  says which profile it folded in, which is 0151's whole rule");
+	check(chosen_is(NULL), "  and the machine really is off it");
+
+	options.json = 0;
+	reset();
+}
+
+/*
+ * The daemon route leaves out every member it cannot answer.
+ *
+ * `ok` is the whole of what netcfgd sends back, so a `removed` here would be
+ * this command reporting a fact nobody established -- an absent file is
+ * success over the socket, which is why the table's sentence is deliberately
+ * plain. Nor a `path`: netcfgd chose where the drop-in went and 0127's rule is
+ * that handing one back invites a client to keep it.
+ */
+static void json_over_the_socket_omits_what_ok_does_not_say(void)
+{
+	struct sockaddr_un address;
+	const char        *positional[2];
+	const char        *printed;
+	char               socket_path[512];
+	char               err[NCFG_ERROR_MAX];
+	pid_t              child;
+	int                listener;
+
+	reset();
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/netcfgd.sock", run_dir);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	if (strlen(socket_path) >= sizeof(address.sun_path)) {
+		check(0, "the fixture's socket path fits in a unix address");
+		return;
+	}
+	memcpy(address.sun_path, socket_path, strlen(socket_path));
+	listener = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (listener < 0 ||
+	    bind(listener, (const struct sockaddr *)&address, sizeof(address)) < 0 ||
+	    listen(listener, 1) < 0) {
+		check(0, "a fake daemon can be bound");
+		if (listener >= 0) {
+			(void)close(listener);
+		}
+		return;
+	}
+	child = fork();
+	if (child == 0) {
+		int fd = accept(listener, NULL, NULL);
+
+		if (fd >= 0) {
+			char got[8192];
+
+			(void)recv(fd, got, sizeof(got), 0);
+			(void)send(fd, "{\"response\":\"ok\"}\n", 18u, MSG_NOSIGNAL);
+			(void)close(fd);
+		}
+		(void)close(listener);
+		_exit(0);
+	}
+	if (child < 0) {
+		check(0, "a fake daemon can be started");
+		(void)close(listener);
+		(void)unlink(socket_path);
+		return;
+	}
+
+	options.json = 1;
+	positional[0] = "rm";
+	positional[1] = "site";
+	check(run_config(positional, 2u, err, sizeof(err)), "`config rm --json` over the socket");
+	printed = captured ? captured : "";
+	(void)waitpid(child, NULL, 0);
+	(void)close(listener);
+	(void)unlink(socket_path);
+
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	line(printed, "{\"name\":\"site\",\"daemon\":true}",
+	    "  the route, and nothing the daemon's `ok` does not answer");
+	check(strstr(printed, "\"removed\"") == NULL,
+	    "  no `removed`, because an absent file is success there and it cannot tell");
+	check(strstr(printed, "\"path\"") == NULL,
+	    "  and no path, because netcfgd chose where its copy went");
+	options.json = 0;
+	reset();
+}
+
 static void an_unknown_subcommand_is_named(void)
 {
 	const char *positional[1];
@@ -896,6 +1171,10 @@ int main(void)
 	list_reports_both_layers_and_who_owns_a_name();
 	the_set_change_save_workflow_keeps_what_is_running();
 	saving_over_a_profile_needs_saying_so();
+	json_answers_every_profile_subcommand_in_one_word();
+	json_list_is_the_socket_payload_with_the_tag_off();
+	json_says_what_a_drop_in_write_did();
+	json_over_the_socket_omits_what_ok_does_not_say();
 	an_unknown_subcommand_is_named();
 
 	fixture_remove();

@@ -18,6 +18,16 @@
  *   nothing will print the value. So `ncfg_cli_read_secret` is reachable on its
  *   own and every shape of input has a case.
  *
+ * WHAT `--json` IS ASSERTED ABOUT
+ *   The same rule, one layer stricter. A document is a worse place to leak a
+ *   credential than a sentence, because a script writes what it reads into a
+ *   log -- so the sentinel is swept through the `--json` output too, and the
+ *   sweep is proved non-vacuous by reading the value back out of the file it
+ *   was meant for in the same case. The object carries `name` and `used_by`
+ *   spelled as `doc/schema/socket.json` spells them, and **`used_by` is absent
+ *   rather than empty where the configuration could not be compiled**: the two
+ *   are different answers and the text distinguishes them.
+ *
  * WHAT THIS DOES NOT DO
  *   **Nothing touches the machine's own configuration.** `/etc/netcfgd/secrets`
  *   on the machine this builds on holds this developer's real credentials; every
@@ -138,6 +148,21 @@ static int has_line(const char *text, const char *wanted)
 		at = end + 1;
 	}
 	return 0;
+}
+
+/*
+ * Whether what was printed is one JSON object and nothing else.
+ *
+ * `--json` promises stdout is one value, and this verb prints as it goes.
+ */
+static int one_json_line(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	if (length < 3u || text[0] != '{' || text[length - 1u] != '\n') {
+		return 0;
+	}
+	return strchr(text, '\n') == text + length - 1u && text[length - 2u] == '}';
 }
 
 static void line(const char *text, const char *wanted, const char *what)
@@ -529,6 +554,184 @@ static void a_config_that_does_not_compile_still_stores_the_secret(void)
 }
 
 /*
+ * The document, and the canary swept through it.
+ *
+ * Three shapes of `used_by` in one case, because the difference between them
+ * is the whole reason the member is written the way it is: a name nothing
+ * refers to gets `[]` from a configuration that compiled, a name something
+ * refers to gets the blocks, and a configuration that would not compile gets
+ * **no member at all** -- the text says nothing there too, and an empty list
+ * would be this command reporting an emptiness it never looked at.
+ */
+static void json_says_what_was_stored_and_never_the_value(void)
+{
+	const char *positional[2];
+	const char *printed;
+	char        err[NCFG_ERROR_MAX];
+	char        path[512];
+	char        wanted[700];
+	char       *stored;
+
+	fixture(base_config);
+	options.json = 1;
+	positional[0] = "set";
+	positional[1] = "vpn";
+	(void)snprintf(path, sizeof(path), "%s/secrets/vpn", config_dir);
+
+	stdin_is(sentinel, strlen(sentinel));
+	err[0] = '\0';
+	capture_begin();
+	check(ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "`secret set vpn --json` stores a credential");
+	printed = capture_end();
+	stdin_is_empty_again();
+	if (err[0] != '\0') {
+		detail("said", err);
+	}
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	(void)snprintf(wanted, sizeof(wanted),
+	    "{\"name\":\"vpn\",\"path\":\"%s\",\"replaced\":false,\"daemon\":false,"
+	    "\"used_by\":[]}", path);
+	line(printed, wanted,
+	    "  the name, where the `file` provider will look, and that nothing refers to it");
+	check(strstr(printed, "stored ") == NULL && strstr(printed, "(0600)") == NULL &&
+	    strstr(printed, "note:") == NULL,
+	    "  and not one line of the table survived beside it");
+
+	/*
+	 * **Non-vacuity.** The sweep below means nothing unless the value really
+	 * travelled through this command, so it is read back out of the file it
+	 * was meant for, byte for byte, first.
+	 */
+	stored = testdir_read(path, NULL);
+	check(stored != NULL && strcmp(stored, sentinel) == 0,
+	    "  the value is in the file it was meant for, byte for byte");
+	free(stored);
+	check(printed[0] != '\0', "  and the sweep has something to sweep");
+	check(strstr(printed, sentinel) == NULL, "  and the document does not carry it");
+	check(strstr(err, sentinel) == NULL, "  nor the error buffer");
+
+	/* `--replace` is the other value of the member the text says in a word. */
+	options.replace = 1;
+	stdin_is(sentinel, strlen(sentinel));
+	capture_begin();
+	check(ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "`--replace` overwrites it");
+	printed = capture_end();
+	stdin_is_empty_again();
+	options.replace = 0;
+	check(strstr(printed, "\"replaced\":true") != NULL,
+	    "  and the document says `replaced`, which is the fact a reader wants");
+	check(strstr(printed, sentinel) == NULL, "  still with no value anywhere in it");
+	reset();
+
+	/* A configuration that names it: the blocks, spelled as the table spells
+	 * them. */
+	fixture("interface eth0 {\n\tconfig = \"dhcp\"\n}\n"
+	    "device dsl0 {\n\tpppoe {\n\t\tparent = \"eth0\"\n\t\tusername = \"user\"\n"
+	    "\t\tpassword = \"@secret:vpn\"\n\t}\n}\n");
+	options.json = 1;
+	stdin_is(sentinel, strlen(sentinel));
+	capture_begin();
+	check(ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "a credential the configuration names is stored");
+	printed = capture_end();
+	stdin_is_empty_again();
+	check(strstr(printed, "\"used_by\":[\"") != NULL && strstr(printed, "dsl0") != NULL,
+	    "  and `used_by` names the block, in the socket's own word for it");
+	check(strstr(printed, sentinel) == NULL, "  and still never the value");
+	detail("document", printed);
+	reset();
+
+	/* A configuration that does not compile: no member at all. */
+	fixture("interface eth0 { nonsense = 1 }\n");
+	options.json = 1;
+	stdin_is(sentinel, strlen(sentinel));
+	capture_begin();
+	check(ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "a configuration that does not compile does not stop the write");
+	printed = capture_end();
+	stdin_is_empty_again();
+	check(testdir_exists(path), "  and the credential is there");
+	check(strstr(printed, "\"used_by\"") == NULL,
+	    "  with no `used_by` at all, because nothing could be read to look in");
+	check(strstr(printed, "\"name\":\"vpn\"") != NULL,
+	    "  and the rest of the answer is still an answer");
+	check(strstr(printed, sentinel) == NULL, "  and still never the value");
+	options.json = 0;
+	reset();
+	fixture(base_config);
+}
+
+/*
+ * A name that is not valid UTF-8 fails the command and prints nothing.
+ *
+ * 0263's rule reaching a verb that writes. The JSON writer refuses the string
+ * rather than repairing it -- every repair puts a value in front of somebody
+ * that nobody typed -- and `ncfg_buf_t` hands out the empty string for a
+ * buffer that failed, so a caller that printed anyway would emit half an
+ * object that looks whole.
+ *
+ * **The credential is on disk when this fails**, which is why the sentence has
+ * to say that what stopped is the rendering: a reader told only that a
+ * document could not be written concludes the write did not happen and stores
+ * the value somewhere else.
+ */
+static void a_name_that_is_not_utf8_fails_the_rendering_and_not_the_write(void)
+{
+	const char *positional[2];
+	const char *printed;
+	char        name[8];
+	char        path[512];
+	char        err[NCFG_ERROR_MAX];
+
+	fixture(base_config);
+	/* One stray octet in the middle, which is the shape that arrives off a
+	 * command line rather than a shape anybody types. */
+	(void)snprintf(name, sizeof(name), "vp?n");
+	name[2] = (char)0xffu;
+	options.json = 1;
+	positional[0] = "set";
+	positional[1] = name;
+	stdin_is(sentinel, strlen(sentinel));
+	err[0] = '\0';
+	capture_begin();
+	check(!ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "a name that is not valid UTF-8 fails the command under `--json`");
+	printed = capture_end();
+	stdin_is_empty_again();
+	check(printed[0] == '\0',
+	    "  and nothing at all is printed, never half an object that looks whole");
+	check(strstr(err, "not UTF-8") != NULL,
+	    "  the sentence names the rule that stopped it");
+	check(strstr(err, "already done what it was asked") != NULL,
+	    "  and says the command happened, so nobody stores the value twice");
+	check(strstr(err, "without `--json`") != NULL,
+	    "  and points at the form that has no such rule");
+	check(strstr(err, sentinel) == NULL, "  and still never the value");
+	(void)snprintf(path, sizeof(path), "%s/secrets/%s", config_dir, name);
+	check(testdir_exists(path),
+	    "  and the credential really is on disk, which is what makes that clause true");
+
+	/* Without the flag the same name renders, because a table is text for a
+	 * terminal and has no such rule. */
+	options.json = 0;
+	options.replace = 1;
+	stdin_is(sentinel, strlen(sentinel));
+	err[0] = '\0';
+	capture_begin();
+	check(ncfg_cli_secret(&options, positional, 2u, err, sizeof(err)),
+	    "and the same command without `--json` succeeds");
+	printed = capture_end();
+	stdin_is_empty_again();
+	options.replace = 0;
+	check(strstr(printed, "replaced ") != NULL, "  printing the table it always did");
+	check(strstr(printed, sentinel) == NULL, "  and still never the value");
+	(void)unlink(path);
+	reset();
+}
+
+/*
  * There is no `ncfg secret get`, and that is the point.
  *
  * The whole of a secret reference is that the value travels to the backend that
@@ -584,6 +787,8 @@ int main(void)
 	what_it_writes_is_readable_by_nobody_else();
 	the_report_says_what_refers_to_the_name();
 	a_config_that_does_not_compile_still_stores_the_secret();
+	json_says_what_was_stored_and_never_the_value();
+	a_name_that_is_not_utf8_fails_the_rendering_and_not_the_write();
 	there_is_no_way_to_read_one_back();
 
 	{

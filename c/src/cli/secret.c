@@ -31,6 +31,15 @@
  *   own tests is a fixture with no hooks in it.
  *
  * WHERE THIS DIVERGES FROM THE RUST
+ *   `--json` is answered rather than accepted and ignored. The object is the
+ *   socket's `secrets` element for this name -- `name` and `used_by`, spelled
+ *   as `doc/schema/socket.json` spells them -- with the path and whether
+ *   something was overwritten beside it, because the text says both and a flag
+ *   that said less than the table would be the thing the flag exists to avoid.
+ *   **`used_by` is absent where the configuration could not be compiled**,
+ *   never `[]`: the text says nothing there, and an empty list would be this
+ *   command claiming that nothing refers to a name it was unable to look for.
+ *
  *   One entry in 0263: a local write that fails carries the "and there was no
  *   daemon to ask" half whichever way it failed, because `ncfg_secret_store_put`
  *   is the one door into the store and does not report `denied` -- and
@@ -241,32 +250,93 @@ static int secret_path(const char *config_dir, const char *name, char *out, size
  * written either way, and an operator storing a credential before writing the
  * block that names it is the ordinary order to do things in.
  */
-static void report(const char *path, const char *name, int replacing,
-    const ncfg_cli_options_t *options)
+/*
+ * What was stored, and what refers to it, as one object.
+ *
+ * **Never the value and never its length**, which is `secrets.h`'s rule and is
+ * the reason this file exists in the shape it does; a document is a worse place
+ * to break it than a sentence, because a script writes what it reads to a log.
+ * The members are the name, where the `file` provider will look, whether
+ * something was overwritten, and which blocks refer to the name.
+ *
+ * `name` and `used_by` are `doc/schema/socket.json`'s spellings for exactly
+ * these two facts, taken rather than invented. `stored` is that element's third
+ * member and is **not** written: on this verb it would be the constant `true`,
+ * since the file has just been written, and a member that cannot carry a fact
+ * is noise in every document a caller ever reads.
+ *
+ * `used_by` is written as an empty list where the configuration compiled and
+ * named nothing, and left out entirely where it could not be compiled -- the
+ * two are different answers and the text distinguishes them too, by printing
+ * the note in one case and saying nothing in the other.
+ */
+static int say_secret(const char *name, const char *path, int replacing, int daemon, int looked,
+    char *const *users, size_t count, char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	size_t             which;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "name", name);
+	ncfg_json_write_member_string(&writer, "path", path);
+	ncfg_json_write_member_bool(&writer, "replaced", replacing);
+	ncfg_json_write_member_bool(&writer, "daemon", daemon);
+	if (looked) {
+		ncfg_json_write_key(&writer, "used_by");
+		ncfg_json_write_array_begin(&writer);
+		for (which = 0; which < count; which++) {
+			ncfg_json_write_string(&writer, users[which] ? users[which] : "");
+		}
+		ncfg_json_write_array_end(&writer);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the stored credential", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
+
+static int report(const char *path, const char *name, int replacing, int daemon,
+    const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
 	char              ignored[NCFG_ERROR_MAX];
 	ncfg_document_t  *document;
 	char            **users = NULL;
 	size_t            count = 0;
 	size_t            which;
+	int               looked = 0;
 	ncfg_buf_t        listed;
 
-	ncfg_out_writef("%s %s (0600)\n", replacing ? "replaced" : "stored", path);
+	if (!options->json) {
+		ncfg_out_writef("%s %s (0600)\n", replacing ? "replaced" : "stored", path);
+	}
 
 	document = ncfg_cli_compile_to_read(options, ignored, sizeof(ignored));
-	if (!document) {
-		return;
-	}
-	if (!ncfg_secret_referring_to(document, name, &users, &count, ignored, sizeof(ignored))) {
+	if (document) {
+		looked = ncfg_secret_referring_to(document, name, &users, &count, ignored,
+		    sizeof(ignored));
 		ncfg_document_free(document);
-		return;
 	}
-	ncfg_document_free(document);
+	if (options->json) {
+		int ok = say_secret(name, path, replacing, daemon, looked, users, count, err,
+		    err_size);
+
+		if (looked) {
+			ncfg_secret_names_free(users, count);
+		}
+		return ok;
+	}
+	if (!looked) {
+		return 1;
+	}
 	if (count == 0) {
 		ncfg_out_writef("note: nothing in the configuration refers to `@secret:%s` yet\n",
 		    name);
 		ncfg_secret_names_free(users, count);
-		return;
+		return 1;
 	}
 	ncfg_buf_init(&listed, 0);
 	for (which = 0; which < count; which++) {
@@ -278,6 +348,7 @@ static void report(const char *path, const char *name, int replacing,
 	ncfg_out_writef("used by: %s\n", ncfg_buf_text(&listed));
 	ncfg_buf_free(&listed);
 	ncfg_secret_names_free(users, count);
+	return 1;
 }
 
 static int set(const char **rest, size_t count, const ncfg_cli_options_t *options, char *err,
@@ -379,8 +450,7 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 		if (!stored) {
 			return 0;
 		}
-		report(path, name, replacing, options);
-		return 1;
+		return report(path, name, replacing, 1, options, err, err_size);
 	}
 
 	stored = ncfg_secret_store_put(config_dir, name, value, options->replace, NULL, said,
@@ -394,8 +464,7 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 		ncfg_cli_refused_locally(1, said, socket_path, err, err_size);
 		return 0;
 	}
-	report(path, name, replacing, options);
-	return 1;
+	return report(path, name, replacing, 0, options, err, err_size);
 }
 
 /*

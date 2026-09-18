@@ -19,6 +19,11 @@
  *   asked for.
  *
  * WHERE THIS DIVERGES FROM THE RUST
+ *   `--json` is answered rather than accepted and ignored, at all five
+ *   subcommands. `list` prints the socket's own `profiles` payload; the other
+ *   four print `chosen`, which is that payload's word for the same fact, so a
+ *   script reads one member name whichever it ran.
+ *
  *   `ncfg profile set` writes its selection through `ncfg_profile_set`, which
  *   is `config.h`'s one spelling of `global { profile = "..." }` and validates
  *   the name against the rule that covers both halves of what a profile name
@@ -189,12 +194,62 @@ static int active(const ncfg_cli_options_t *options, char **chosen_out, char *er
  * The subcommands
  * ------------------------------------------------------------------------ */
 
+/*
+ * `chosen`, which is the socket's own word for this fact and is the same word
+ * in all four subcommands that have it.
+ *
+ * **Absent where none is chosen, never null and never a name.** The socket's
+ * `profiles` response skips `chosen` when nothing is selected, and the text
+ * form here is careful for the same reason 0151 gives: an absent selection and
+ * the shipped do-nothing profile are different states, so a document that said
+ * `"none"` would be the one sentence this verb refuses to print, spelled as
+ * JSON. `{}` is therefore the honest answer for a machine with no profile, and
+ * it is what `unset` prints as well -- the two agree by construction.
+ */
+static void member_chosen(ncfg_json_writer_t *writer, const char *chosen)
+{
+	if (chosen) {
+		ncfg_json_write_member_string(writer, "chosen", chosen);
+	}
+}
+
+/* One object, finished and printed, for the subcommands whose answer is which
+ * profile the machine is on and which route the answer took. */
+static int say_chosen(const char *chosen, const int *daemon, const char *path, char *err,
+    size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	member_chosen(&writer, chosen);
+	if (daemon) {
+		ncfg_json_write_member_bool(&writer, "daemon", *daemon);
+	}
+	if (path) {
+		ncfg_json_write_member_string(&writer, "path", path);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the chosen profile", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
+
 static int get(const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
 	char *chosen = NULL;
+	int   ok;
 
 	if (!active(options, &chosen, err, err_size)) {
 		return 0;
+	}
+	if (options->json) {
+		ok = say_chosen(chosen, NULL, NULL, err, err_size);
+		free(chosen);
+		return ok;
 	}
 	/* **Not a profile called "none".** 0151: an absent selection and the
 	 * shipped do-nothing profile are different states, and printing one name
@@ -202,6 +257,47 @@ static int get(const ncfg_cli_options_t *options, char *err, size_t err_size)
 	ncfg_out_line(chosen ? chosen : "no profile chosen");
 	free(chosen);
 	return 1;
+}
+
+/*
+ * The socket's `profiles` payload, member for member.
+ *
+ * `doc/schema/socket.json` carries
+ * `{"profiles":[{"name","shipped"}],"chosen":"office"}`, and this is that with
+ * the `"response"` tag left off -- the same rule `json.c` follows for the five
+ * answers it renders, applied to the one this verb computes locally when no
+ * daemon answers. The `*` the table puts against the chosen row is `chosen`
+ * here, which is why the mark does not need a member of its own.
+ *
+ * The list is written even when it is empty, because the protocol always sends
+ * it: "this machine has no profiles" is a list of none, not an absence, and
+ * the table says it in words for the same reason.
+ */
+static int say_profiles(const listing_t *found, const char *chosen, char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	size_t             which;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_key(&writer, "profiles");
+	ncfg_json_write_array_begin(&writer);
+	for (which = 0; which < found->count; which++) {
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "name",
+		    found->entries[which].name ? found->entries[which].name : "");
+		ncfg_json_write_member_bool(&writer, "shipped", found->entries[which].shipped);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	member_chosen(&writer, chosen);
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, "the profile list", err, err_size);
+	ncfg_buf_free(&out);
+	return ok;
 }
 
 static int list(const ncfg_cli_options_t *options, char *err, size_t err_size)
@@ -219,6 +315,13 @@ static int list(const ncfg_cli_options_t *options, char *err, size_t err_size)
 		listing_free(&found);
 		free(chosen);
 		return 0;
+	}
+	if (options->json) {
+		int ok = say_profiles(&found, chosen, err, err_size);
+
+		listing_free(&found);
+		free(chosen);
+		return ok;
 	}
 	if (found.count == 0) {
 		ncfg_out_line("no profiles; a profile is a directory under `profile/`");
@@ -285,7 +388,13 @@ static int save(const char **rest, size_t count, const ncfg_cli_options_t *optio
 			return 0;
 		}
 		/* No path: netcfgd chose where it went, and 0127's rule is that
-		 * handing one back invites a client to keep it. */
+		 * handing one back invites a client to keep it. The document leaves
+		 * `path` out for that reason rather than for want of one. */
+		if (options->json) {
+			int daemon = 1;
+
+			return say_chosen(rest[0], &daemon, NULL, err, err_size);
+		}
 		ncfg_out_writef("netcfgd saved `%s` and is running it\n", rest[0]);
 		return 1;
 	}
@@ -309,6 +418,13 @@ static int save(const char **rest, size_t count, const ncfg_cli_options_t *optio
 	if (!wrote) {
 		ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
 		return 0;
+	}
+	if (options->json) {
+		int daemon = 0;
+		int ok = say_chosen(rest[0], &daemon, path, err, err_size);
+
+		free(path);
+		return ok;
 	}
 	ncfg_out_writef("wrote %s\n", path ? path : "");
 	ncfg_out_writef("`%s` is now the profile in use\n", rest[0]);
@@ -338,6 +454,7 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 	char        said[NCFG_ERROR_MAX];
 	listing_t   found;
 	const char *name;
+	int         daemon = 0;
 	int         denied = 0;
 
 	if (count == 0) {
@@ -406,6 +523,7 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 		if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
 			return 0;
 		}
+		daemon = 1;
 	} else {
 		(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
 		(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
@@ -415,8 +533,21 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 			ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
 			return 0;
 		}
-		ncfg_out_writef("nothing is listening on %s, so this was written directly\n",
-		    socket_path);
+		if (!options->json) {
+			ncfg_out_writef("nothing is listening on %s, so this was written "
+			    "directly\n", socket_path);
+		}
+	}
+	/*
+	 * **The advice is not in the document.** `ncfg plan` and `ncfg apply
+	 * --confirm-within` are what a person should do next, and they are the
+	 * same two commands whatever the answer is -- a member repeating them on
+	 * every switch would be text addressed to somebody who is not reading, on
+	 * a stream that promised one value. This is `ncfg plan --json`'s own rule
+	 * for the two notes under a plan.
+	 */
+	if (options->json) {
+		return say_chosen(name, &daemon, NULL, err, err_size);
 	}
 	ncfg_out_writef("profile is now `%s`\n", name);
 	/* Said because a profile switch is the change most likely to need it: it is
@@ -429,10 +560,26 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 
 static int unset(const ncfg_cli_options_t *options, char *err, size_t err_size)
 {
-	if (!ncfg_cli_remove_named(NCFG_PROFILE_DROP_IN, "a chosen profile", options, err,
+	ncfg_cli_wrote_t wrote = { 0, 0, NULL, NULL };
+	int              ok;
+
+	if (!ncfg_cli_remove_named(NCFG_PROFILE_DROP_IN, "a chosen profile", options, &wrote, err,
 	    err_size)) {
+		ncfg_cli_wrote_free(&wrote);
 		return 0;
 	}
+	/*
+	 * **`chosen` is absent, which is the whole answer.** The sentence exists
+	 * to say that the state afterwards is the default and not a profile called
+	 * `none`; the document says the same thing by not having the member, and a
+	 * `ncfg profile get --json` straight afterwards prints the same object.
+	 */
+	if (options->json) {
+		ok = say_chosen(NULL, &wrote.daemon, NULL, err, err_size);
+		ncfg_cli_wrote_free(&wrote);
+		return ok;
+	}
+	ncfg_cli_wrote_free(&wrote);
 	ncfg_out_line("no profile is chosen now, which is the default rather than a profile "
 	    "called `none`");
 	return 1;

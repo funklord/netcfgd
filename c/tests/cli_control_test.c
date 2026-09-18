@@ -676,6 +676,88 @@ static void set_writes_the_drop_in_it_owns_and_reports_the_path(void)
 	fixture_clear();
 }
 
+/*
+ * Whether what was printed is one JSON object and nothing else.
+ *
+ * The contract `--json` makes is that stdout is one value, so a prose line
+ * surviving beside the document is the flag being half-answered rather than an
+ * untidiness -- and these verbs print as they go, which is why it is checked.
+ */
+static int one_json_line(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	if (length < 3u || text[0] != '{' || text[length - 1u] != '\n') {
+		return 0;
+	}
+	return strchr(text, '\n') == text + length - 1u && text[length - 2u] == '}';
+}
+
+/*
+ * `--json` at both subcommands: the three tiers, and the file `set` wrote.
+ *
+ * The principal is rendered by `ncfg_cli_principal_render`, so the document
+ * and the configuration file spell `group:NAME` the same way by construction
+ * -- a fourth spelling in the one output a script parses is exactly the drift
+ * this file's other cases exist to prevent.
+ */
+static void json_prints_the_tiers_and_nothing_addressed_to_a_person(void)
+{
+	ncfg_cli_options_t        options;
+	const ncfg_cli_options_t *base;
+	const char               *positional[1];
+	const char               *printed;
+	char                      expected[512];
+	char                      wanted[600];
+	char                      err[NCFG_ERROR_MAX];
+
+	fixture(&base, base_config);
+	options = *base;
+	options.json = 1;
+	positional[0] = "show";
+	capture_begin();
+	check(ncfg_cli_control(&options, positional, 1u, err, sizeof(err)),
+	    "`control show --json` runs");
+	printed = capture_end();
+	check(one_json_line(printed), "  it prints one object on one line and nothing else");
+	line(printed, "{\"observe\":\"root\",\"wifi\":\"root\",\"admin\":\"root\"}",
+	    "  the three tiers, in the order the block writes them");
+	check(strstr(printed, "every tier is root") == NULL,
+	    "  and the paragraph explaining root-only is not on the stream");
+	check(strstr(printed, "\"path\"") == NULL,
+	    "  and `show` names no file: it compiled the whole layered configuration");
+
+	options.control.observe = "group:netcfgd";
+	positional[0] = "set";
+	capture_begin();
+	check(ncfg_cli_control(&options, positional, 1u, err, sizeof(err)),
+	    "`control set --json` runs");
+	printed = capture_end();
+	check(one_json_line(printed), "  it prints one object on one line and nothing else");
+	(void)snprintf(expected, sizeof(expected), "%s/conf.d/00-control.conf", config_dir);
+	(void)snprintf(wanted, sizeof(wanted), "\"path\":\"%s\"", expected);
+	check(strstr(printed, wanted) != NULL,
+	    "  and names the drop-in it wrote, which the table printed on its own line");
+	check(testdir_exists(expected), "  and the file is there");
+	check(strstr(printed, "\"observe\":\"group:netcfgd\"") != NULL,
+	    "  the tier that was named is spelled as the renderer spells it");
+	check(strstr(printed, "\"wifi\":\"root\"") != NULL,
+	    "  and one that was not is left alone");
+	check(strstr(printed, "netcfgd applies this") == NULL &&
+	    strstr(printed, "log out") == NULL,
+	    "  and what an operator still has to do is not a member of the answer");
+
+	/* Read back through the flag as well, so the write and the read agree
+	 * about the spelling rather than about the table's columns. */
+	positional[0] = "show";
+	capture_begin();
+	(void)ncfg_cli_control(&options, positional, 1u, err, sizeof(err));
+	printed = capture_end();
+	check(strstr(printed, "\"observe\":\"group:netcfgd\"") != NULL,
+	    "  and `control show --json` reads back what `set --json` wrote");
+	fixture_clear();
+}
+
 static void set_with_no_tier_named_refuses(void)
 {
 	const ncfg_cli_options_t *options;
@@ -989,6 +1071,7 @@ int main(void)
 
 	show_prints_three_tiers_and_says_what_root_only_means();
 	set_writes_the_drop_in_it_owns_and_reports_the_path();
+	json_prints_the_tiers_and_nothing_addressed_to_a_person();
 	set_with_no_tier_named_refuses();
 	an_unknown_subcommand_is_named_and_helper_is_not_offered();
 	a_global_block_in_the_writable_layer_is_edited_in_place();

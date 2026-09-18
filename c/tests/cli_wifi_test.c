@@ -25,7 +25,14 @@
  *     printed on standard output, and this process' whole standard error. The
  *     sweep is checked for being vacuous: the canary has to be in the secret
  *     file byte for byte, or nothing was written and its absence elsewhere
- *     proves nothing.
+ *     proves nothing. **The `--json` cases are inside that sweep**, because
+ *     `capture_end` feeds every capture into it -- a document is a worse place
+ *     to leak a credential than a sentence, since a script writes what it
+ *     reads into a log.
+ *   * **`--json` answers rather than being accepted and ignored.** One object
+ *     per command, on one line, with the paths this process wrote and the
+ *     radio it took -- and, on the daemon route, without the members an `ok`
+ *     does not answer.
  *
  * NOTHING OUTSIDE ITS OWN DIRECTORY, AND NOTHING ON THE MACHINE
  *   The configuration, factory and run directories are all under one `mkdtemp`
@@ -49,7 +56,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* A legal WPA2 passphrase, distinctive enough that finding it anywhere is
@@ -188,9 +198,14 @@ static void stdin_is(const char *text)
 /* Everything a case here can have written, taken away by name. */
 static void fresh_tree(void)
 {
+	/* `radio-<interface>.conf` is what `ncfg_wifi_radio_drop_in` composes, and
+	 * the two names that were here before it -- `50-wifi-wlan0.conf` and its
+	 * neighbour -- matched nothing, so a radio handed over by one case stayed
+	 * handed over for every case after it. That is why the `--json` case below
+	 * can assert `activated` at all. */
 	static const char *const files[] = { "wifi-Cafe.conf", "wifi-Office.conf",
-		"wifi-Corp.conf", "wifi-Hidden.conf", "10-theirs.conf", "50-wifi-wlan0.conf",
-		"50-wifi-wlan1.conf" };
+		"wifi-Corp.conf", "wifi-Hidden.conf", "10-theirs.conf", "radio-wlan0.conf",
+		"radio-wlan1.conf" };
 	static const char *const secrets[] = { "Cafe", "Office", "Corp", "Hidden", "shared" };
 	size_t at;
 
@@ -259,6 +274,21 @@ static int forget(const char *id, char *err, size_t err_size)
 	(void)capture_end();
 	(void)kept(err);
 	return ok;
+}
+
+/*
+ * Whether what was printed is one JSON object and nothing else.
+ *
+ * `--json` promises stdout is one value, and these verbs print as they go.
+ */
+static int one_json_line(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	if (length < 3u || text[0] != '{' || text[length - 1u] != '\n') {
+		return 0;
+	}
+	return strchr(text, '\n') == text + length - 1u && text[length - 2u] == '}';
 }
 
 /*
@@ -576,6 +606,198 @@ static void forgetting_what_was_added(void)
 }
 
 /* ------------------------------------------------------------------------ *
+ * `--json`
+ * ------------------------------------------------------------------------ */
+
+/*
+ * What `add` and `forget` say as a document, and what they leave out.
+ *
+ * `secret` is a **path**. The value is in the file it names and in nothing
+ * this program prints, which is the rule the canary sweep at the end of this
+ * file proves rather than states -- and these captures are inside that sweep.
+ */
+static void json_says_what_was_written_and_what_was_forgotten(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+	char        wanted[700];
+	char       *body;
+	int         ok;
+
+	(void)fprintf(report, "\n-- `--json`, at both verbs\n");
+	fresh_tree();
+	nothing_asked_for();
+	options.json = 1;
+	options.wifi.interface = "wlan0";
+	ok = add("Office", err, sizeof(err));
+	check(ok, err[0] ? err : "`wifi add --json` adds a secured network");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	check(strstr(printed, "\"id\":\"Office\"") != NULL,
+	    "  the id, which is the handle every other `ncfg wifi` verb takes");
+	check(strstr(printed, "\"secured\":true") != NULL,
+	    "  `secured`, spelled as a scan entry spells it");
+	check(strstr(printed, "\"daemon\":false") != NULL, "  and which route the write took");
+	(void)snprintf(wanted, sizeof(wanted), "\"file\":\"%s\"",
+	    in(in(config_dir, "conf.d"), "wifi-Office.conf"));
+	check(strstr(printed, wanted) != NULL, "  the block it wrote, by path");
+	(void)snprintf(wanted, sizeof(wanted), "\"secret\":\"%s\"",
+	    in(in(config_dir, "secrets"), "Office"));
+	check(strstr(printed, wanted) != NULL, "  and the credential file, also by path");
+	check(strstr(printed, "\"activated\":\"wlan0\"") != NULL,
+	    "  the radio it took, which is a bigger change than the network");
+	check(strstr(printed, "\"usable\":true") != NULL,
+	    "  and whether anything in this configuration can join it");
+	check(strstr(printed, "wrote ") == NULL && strstr(printed, "mode 0600") == NULL &&
+	    strstr(printed, "ncfg plan") == NULL,
+	    "  with not one line of the table beside it");
+
+	/* Non-vacuity for this case's own share of the sweep: the value really
+	 * travelled, and it is in the file the document named. */
+	body = testdir_read(in(in(config_dir, "secrets"), "Office"), NULL);
+	check(body && strcmp(body, CANARY) == 0,
+	    "  the passphrase is in the file the document points at, byte for byte");
+	free(body);
+	check(printed[0] != '\0', "  and the document is not empty, so its sweep is not vacuous");
+	check(strstr(printed, CANARY) == NULL, "  and the document does not carry the value");
+	check(strstr(err, CANARY) == NULL, "  nor the error buffer");
+
+	ok = forget("Office", err, sizeof(err));
+	check(ok, err[0] ? err : "`wifi forget --json` takes it away again");
+	printed = captured ? captured : "";
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	check(strstr(printed, "{\"id\":\"Office\",\"daemon\":false,\"removed\":[\"Office\"],"
+	    "\"kept\":[]}") != NULL,
+	    "  naming the credential that went and the empty list of those that stayed");
+	check(strstr(printed, "forgot `") == NULL,
+	    "  with no sentence beside it");
+	check(!testdir_exists(in(in(config_dir, "conf.d"), "wifi-Office.conf")) &&
+	    !testdir_exists(in(in(config_dir, "secrets"), "Office")),
+	    "  and both files really are gone");
+
+	/* An open network has no credential, and `secured` is the member that says
+	 * what the warning says. */
+	nothing_asked_for();
+	options.json = 1;
+	options.wifi.open = 1;
+	options.wifi.interface = "wlan0";
+	ok = add("Cafe", err, sizeof(err));
+	check(ok, err[0] ? err : "`wifi add --open --json` adds an open network");
+	printed = captured ? captured : "";
+	check(strstr(printed, "\"secured\":false") != NULL,
+	    "  `secured` is false, which is what the `no security` warning says");
+	check(strstr(printed, "\"secret\"") == NULL,
+	    "  and there is no credential file to name");
+	check(strstr(printed, "no security") == NULL,
+	    "  with the warning itself not on the stream");
+	options.json = 0;
+	memset(&options.wifi, 0, sizeof(options.wifi));
+	fresh_tree();
+}
+
+/*
+ * A daemon that answers `ok` once, in a directory this test made.
+ *
+ * **Nothing here reaches the netcfgd that is running on this machine**: the
+ * socket is bound under the fixture's own run directory, which is the one the
+ * options name, and it is unlinked again in the same case. The child is waited
+ * for by the pid recorded here and by nothing else.
+ */
+static pid_t fake_daemon;
+static int   fake_listener = -1;
+static char  fake_socket[512];
+
+static int fake_daemon_start(void)
+{
+	struct sockaddr_un address;
+
+	(void)snprintf(fake_socket, sizeof(fake_socket), "%s/netcfgd.sock", run_dir);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	if (strlen(fake_socket) >= sizeof(address.sun_path)) {
+		return 0;
+	}
+	memcpy(address.sun_path, fake_socket, strlen(fake_socket));
+	fake_listener = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fake_listener < 0 ||
+	    bind(fake_listener, (const struct sockaddr *)&address, sizeof(address)) < 0 ||
+	    listen(fake_listener, 1) < 0) {
+		if (fake_listener >= 0) {
+			(void)close(fake_listener);
+			fake_listener = -1;
+		}
+		return 0;
+	}
+	fake_daemon = fork();
+	if (fake_daemon == 0) {
+		int fd = accept(fake_listener, NULL, NULL);
+
+		if (fd >= 0) {
+			char got[8192];
+
+			(void)recv(fd, got, sizeof(got), 0);
+			(void)send(fd, "{\"response\":\"ok\"}\n", 18u, MSG_NOSIGNAL);
+			(void)close(fd);
+		}
+		(void)close(fake_listener);
+		_exit(0);
+	}
+	if (fake_daemon < 0) {
+		(void)close(fake_listener);
+		fake_listener = -1;
+		(void)unlink(fake_socket);
+		return 0;
+	}
+	return 1;
+}
+
+static void fake_daemon_stop(void)
+{
+	if (fake_daemon > 0) {
+		(void)waitpid(fake_daemon, NULL, 0);
+		fake_daemon = 0;
+	}
+	if (fake_listener >= 0) {
+		(void)close(fake_listener);
+		fake_listener = -1;
+	}
+	(void)unlink(fake_socket);
+}
+
+/*
+ * The daemon route leaves out the members an `ok` does not answer.
+ *
+ * netcfgd says nothing about which credentials it removed, so an empty
+ * `removed` here would be this command reporting that none went when it has no
+ * idea -- project.md section 10.175's shape in a document rather than in a
+ * sentence.
+ */
+static void json_over_the_socket_omits_what_ok_does_not_say(void)
+{
+	char        err[NCFG_ERROR_MAX];
+	const char *printed;
+
+	(void)fprintf(report, "\n-- `--json` where netcfgd took the write\n");
+	fresh_tree();
+	if (!fake_daemon_start()) {
+		check(0, "a fake daemon can be started under the fixture's run directory");
+		return;
+	}
+	options.json = 1;
+	check(forget("Office", err, sizeof(err)), "`wifi forget --json` over the socket");
+	printed = captured ? captured : "";
+	fake_daemon_stop();
+	check(one_json_line(printed), "  one object on one line and nothing else");
+	check(strstr(printed, "{\"id\":\"Office\",\"daemon\":true}") != NULL,
+	    "  the id and the route, and nothing else");
+	check(strstr(printed, "\"removed\"") == NULL && strstr(printed, "\"kept\"") == NULL,
+	    "  neither credential list, because the daemon's `ok` says nothing about them");
+	check(strstr(printed, "netcfgd forgot") == NULL,
+	    "  and not the sentence either");
+	options.json = 0;
+}
+
+/* ------------------------------------------------------------------------ *
  * The canary
  * ------------------------------------------------------------------------ */
 
@@ -674,6 +896,8 @@ int main(void)
 	what_adding_a_secured_network_writes();
 	a_passphrase_the_supplicant_would_refuse();
 	forgetting_what_was_added();
+	json_says_what_was_written_and_what_was_forgotten();
+	json_over_the_socket_omits_what_ok_does_not_say();
 
 	(void)fflush(stderr);
 	sweep = testdir_read(stderr_path, NULL);

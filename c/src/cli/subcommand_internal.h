@@ -27,6 +27,7 @@
 #include "cli_internal.h"
 
 #include "ncfg/document.h"
+#include "ncfg/json_write.h"
 #include "ncfg/proto.h"
 
 #include <stddef.h>
@@ -74,18 +75,94 @@ ncfg_document_t *ncfg_cli_compile_to_read(const ncfg_cli_options_t *options, cha
  * ------------------------------------------------------------------------ */
 
 /*
+ * What a drop-in write actually did, for the verb that has to say it.
+ *
+ * **Here because a command prints one document and the shared helper is not
+ * the command.** `ncfg config rm` and `ncfg profile unset` both go through
+ * `ncfg_cli_remove_named`, and their answers are not the same answer: one is
+ * about a drop-in by name, the other is about which profile the machine is on.
+ * A helper that wrote a document of its own would put two values on a stream
+ * that promised one, so it hands the facts back and the verb composes.
+ *
+ * `daemon` is the route: netcfgd took the write, so nothing was written here
+ * and `path` is absent. `removed` is `ncfg_cli_remove_named`'s alone and is
+ * meaningless on the daemon route -- an absent file is success there and the
+ * answer cannot tell the two apart, which is why the caller must not report it
+ * when `daemon` is set.
+ */
+typedef struct {
+	int   daemon;
+	int   removed;
+	char *path;
+	char *folded;
+} ncfg_cli_wrote_t;
+
+void ncfg_cli_wrote_free(ncfg_cli_wrote_t *wrote);
+
+/*
  * Store one drop-in: the daemon when it is listening, the directory when it is
  * not.
  *
  * `subject` is how the file is named back to the reader, since "the profile
  * `office`" means something to somebody that `90-profile` does not.
+ *
+ * `wrote` may be NULL where the caller has nothing to say about the route. The
+ * human lines are printed here as they always were, and not at all under
+ * `--json`; see `ncfg_cli_say_json`.
  */
 int ncfg_cli_put_text(const char *name, const char *text, int replace, const char *subject,
-    const ncfg_cli_options_t *options, char *err, size_t err_size);
+    const ncfg_cli_options_t *options, ncfg_cli_wrote_t *wrote, char *err, size_t err_size);
 
 /* Take one away, by the same daemon-then-directory rule. */
 int ncfg_cli_remove_named(const char *name, const char *subject,
-    const ncfg_cli_options_t *options, char *err, size_t err_size);
+    const ncfg_cli_options_t *options, ncfg_cli_wrote_t *wrote, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * `--json` at a verb that writes
+ * ------------------------------------------------------------------------ *
+ *
+ * WHY THESE SIX DO IT THEMSELVES AND THE RENDERERS DO NOT
+ *   0263 closed `--json` at the dispatch for every verb that renders one
+ *   answer, and named this as the part it could not: these print their own
+ *   sentences as they go, so `say_json_ok` after one of them would put prose
+ *   and then a document on one stream. The flag is therefore a test at each
+ *   line, inside the verb -- the human form and the document are the two arms
+ *   of one `if`, so a line added to either side has the other in front of it.
+ *
+ * WHAT THE OBJECT HOLDS
+ *   `cli.h`'s rule, unchanged: the payload, compact, one line, no `"response"`
+ *   envelope, an optional member absent rather than null. Where the socket
+ *   already names a fact these verbs report -- `chosen` for a profile,
+ *   `used_by` for a credential, `secured` for a network -- that spelling is
+ *   taken rather than invented, so `ncfg profile set --json` and `ncfg profile
+ *   get --json` answer in the same word.
+ *
+ *   **An absent member is "not known", never "none".** These verbs have two
+ *   routes and the daemon route cannot answer everything the local one can: it
+ *   does not say which credentials it removed, whether a file had been there,
+ *   or whether anything in the configuration can use what was just added. A
+ *   member written as an empty list on the route that looked and omitted on
+ *   the route that could not is the only shape that does not invite a script
+ *   to read silence as a finding.
+ */
+
+/*
+ * One document on stdout, or 0 with the sentence saying why there is not one.
+ *
+ * `run.c`'s `say_json` for the verbs that answer 1 or 0 with an `err` rather
+ * than an exit code. **Nothing is printed when the render failed**, for that
+ * one's reason: `ncfg_buf_t` hands out the empty string for a buffer that
+ * failed rather than the part that fitted, so a caller that printed anyway
+ * would emit half a document that looks whole.
+ *
+ * **And the sentence says the command already happened**, which `run.c`'s does
+ * not need to: these six write before they answer, so a reader told only that
+ * a document could not be rendered would conclude the write did not happen and
+ * do it again somewhere else. The refusal a caller meets here is a name off
+ * `argv` that is not valid UTF-8.
+ */
+int ncfg_cli_say_json(const ncfg_json_writer_t *writer, const char *what, char *err,
+    size_t err_size);
 
 /*
  * Say the other half when a local write was refused.
