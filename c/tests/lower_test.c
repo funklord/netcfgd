@@ -38,6 +38,7 @@
 #include "ncfg/document.h"
 #include "ncfg/lower.h"
 #include "ncfg/parse.h"
+#include "ncfg/state.h"
 #include "ncfg/value.h"
 
 #include <stdio.h>
@@ -136,7 +137,8 @@ static char said[8192];
  * is the recording one unless `sink` says otherwise; `hooks_seen` is reset on
  * every call so a case can look at what its own hooks did.
  */
-static ncfg_document_t *build(const fixture_t *files, size_t count, const ncfg_hook_sink_t *sink)
+static ncfg_document_t *build_recording(const fixture_t *files, size_t count,
+    const ncfg_hook_sink_t *sink, ncfg_provenance_t *provenance)
 {
 	ncfg_source_t      sources[4];
 	ncfg_ast_file_t   *trees[4] = { NULL, NULL, NULL, NULL };
@@ -170,8 +172,8 @@ static ncfg_document_t *build(const fixture_t *files, size_t count, const ncfg_h
 		sources[i].file = trees[i];
 	}
 
-	document = ncfg_compile(sources, count, sink ? sink : &recording_sink, &diags, err,
-	    sizeof(err));
+	document = ncfg_compile_with_provenance(sources, count, sink ? sink : &recording_sink,
+	    provenance, &diags, err, sizeof(err));
 	for (i = 0; i < diags.count; i++) {
 		char line[NCFG_ERROR_MAX + 64];
 
@@ -191,6 +193,13 @@ done:
 		ncfg_ast_file_free(trees[i]);
 	}
 	return document;
+}
+
+/* Compile with nowhere to put the positions, which is what every case but the
+ * provenance ones wants. */
+static ncfg_document_t *build(const fixture_t *files, size_t count, const ncfg_hook_sink_t *sink)
+{
+	return build_recording(files, count, sink, NULL);
 }
 
 /* One file, called `netcfgd.conf`, which is what most cases need. */
@@ -2137,6 +2146,377 @@ static void ownership_cases(void)
 	ncfg_ast_file_free(tree);
 }
 
+
+/* ------------------------------------------------------------------------ *
+ * Where each field was written
+ *
+ * The producer half of `ncfg explain`. What these cases hold the lowering to
+ * is not that it records *something* but that it records **the key the
+ * consumer asks for**: `explain.c` builds `interfaces[eth0].addressing[0]` and
+ * looks it up, so a table keyed any other way is worse than no table -- every
+ * lookup misses while the table looks full, and the notice that would have
+ * said "no positions here" is gone because the table is not empty.
+ *
+ * The file name is the other half. `lex.h`'s span carries no source id (0263),
+ * so the name cannot come out of the span the way the Rust's does; it comes
+ * from beside it, out of the merged item or the merged block. The two-file
+ * fixture is what makes that assertable rather than assumed.
+ * ------------------------------------------------------------------------ */
+
+/* The one fixture the key case reads, with a field of every recorded kind. */
+static const char *const provenance_main =
+    "device eth0 {\n"
+    "\tmtu = 1400\n"
+    "}\n"
+    "interface eth0 {\n"
+    "\tconfig = [\"10.0.0.2/24\", \"10.0.0.3/24\"]\n"
+    "\troutes = [\"default via 10.0.0.1\", \"192.168.9.0/24 via 10.0.0.9\"]\n"
+    "\tguard = \"the office link\"\n"
+    "\tpreference = 10\n"
+    "\tdns = \"10.0.0.1\"\n"
+    "}\n"
+    "rule \"r1\" {\n"
+    "\tpriority = 100\n"
+    "\tfrom = \"10.0.0.0/8\"\n"
+    "\tlookup = 100\n"
+    "}\n"
+    "linkset \"office\" {\n"
+    "\tmembers = \"eth0\"\n"
+    "}\n"
+    "access_point \"Home\" {\n"
+    "\tdevice = \"wlan0\"\n"
+    "\tchannel = 36\n"
+    "\tband = \"5\"\n"
+    "\twifi { psk = \"@secret:ap\" }\n"
+    "}\n";
+
+/* And a drop-in, so that "which file" has an answer that can be wrong. */
+static const char *const provenance_dropin =
+    "interface eth1 {\n"
+    "\tconfig = \"dhcp\"\n"
+    "}\n";
+
+/* `file:line:column` for `path`, or a sentence saying it is not there. */
+static const char *located(const ncfg_provenance_t *provenance, const char *path)
+{
+	static char where[NCFG_ERROR_MAX];
+	const ncfg_provenance_entry_t *entry = ncfg_provenance_lookup(provenance, path);
+
+	if (!entry) {
+		(void)snprintf(where, sizeof(where), "<nothing recorded>");
+		return where;
+	}
+	ncfg_provenance_location(entry, where, sizeof(where));
+	return where;
+}
+
+static void at(const ncfg_provenance_t *provenance, const char *path, const char *expected)
+{
+	char what[160];
+
+	(void)snprintf(what, sizeof(what), "%s is at %s", path, expected);
+	check(strcmp(located(provenance, path), expected) == 0, what);
+	if (strcmp(located(provenance, path), expected) != 0) {
+		printf("    got %s\n", located(provenance, path));
+	}
+}
+
+static void the_keys_are_the_ones_explain_asks_for(void)
+{
+	fixture_t         files[2];
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+	size_t            i;
+	int               ordered = 1;
+
+	files[0].name = "netcfgd.conf";
+	files[0].text = provenance_main;
+	files[1].name = "conf.d/10-lan.conf";
+	files[1].text = provenance_dropin;
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(files, 2u, NULL, &provenance);
+	if (!document) {
+		check(0, "a configuration with a field of every recorded kind compiles");
+		printf("    %s", said);
+		ncfg_provenance_free(&provenance);
+		return;
+	}
+
+	/* The interface block, which is what `explain` looks up first and the one
+	 * entry whose file name comes from the block rather than from an item. */
+	at(&provenance, "interfaces[eth0]", "netcfgd.conf:4:1");
+	/* The MTU is recorded on the `device` block and keyed under the interface
+	 * (0155 pass 1a), which is the one key whose two halves come from
+	 * different blocks -- and exactly what `explain.c` asks for. */
+	at(&provenance, "interfaces[eth0].mtu", "netcfgd.conf:2:2");
+	/* Per entry rather than per assignment: two addresses on one line are two
+	 * fields, and a reader sent to the line learns which line and not which
+	 * address. */
+	at(&provenance, "interfaces[eth0].addressing[0]", "netcfgd.conf:5:12");
+	at(&provenance, "interfaces[eth0].addressing[1]", "netcfgd.conf:5:27");
+	/* Keyed by destination, because `ncfg_document_canonicalize` sorts routes
+	 * and an index would name whichever one sorted into that slot. */
+	at(&provenance, "interfaces[eth0].routes[default]", "netcfgd.conf:6:12");
+	at(&provenance, "interfaces[eth0].routes[192.168.9.0/24]", "netcfgd.conf:6:36");
+	at(&provenance, "interfaces[eth0].guard", "netcfgd.conf:7:2");
+	at(&provenance, "interfaces[eth0].preference", "netcfgd.conf:8:2");
+	at(&provenance, "interfaces[eth0].dns", "netcfgd.conf:9:2");
+	/* The four blocks that have a name and no recorded fields. */
+	at(&provenance, "rule.r1", "netcfgd.conf:11:1");
+	at(&provenance, "linkset.office", "netcfgd.conf:16:1");
+	at(&provenance, "access_point.Home", "netcfgd.conf:19:1");
+
+	/* And the drop-in's own file, which is the whole of what a span with no
+	 * source id costs: the name travels beside the position or not at all. */
+	at(&provenance, "interfaces[eth1]", "conf.d/10-lan.conf:1:1");
+	at(&provenance, "interfaces[eth1].addressing[0]", "conf.d/10-lan.conf:2:11");
+
+	/* Fourteen and no more, so that a key quietly added or dropped is a failed
+	 * check rather than a table nobody counted. */
+	check(provenance.count == 14u, "the table holds exactly the fourteen positions above");
+
+	for (i = 1u; i < provenance.count; i++) {
+		if (strcmp(provenance.entries[i - 1u].path, provenance.entries[i].path) >= 0) {
+			ordered = 0;
+		}
+	}
+	check(ordered, "and is ordered by path, so two compiles give one file");
+
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+}
+
+/*
+ * Four keys write one path, and the first of them is what a reader is sent to.
+ *
+ * `dns`, `dns_search`, `dns_mode` and `dns_domains` are one policy, and the
+ * position worth having is where that policy started being written rather than
+ * wherever the last of them happens to sit. `ncfg_provenance_canonicalize`
+ * keeps the first record for a path and `state.h` says why; this is the case
+ * that would notice if it stopped.
+ */
+static void repeated_records_for_one_path_keep_the_first(void)
+{
+	fixture_t         file;
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+	size_t            i;
+	size_t            seen = 0;
+
+	file.name = "netcfgd.conf";
+	file.text = "interface eth0 {\n"
+	            "\tconfig = \"dhcp\"\n"
+	            "\tdns_mode = \"resolvconf\"\n"
+	            "\tdns_search = \"example.com\"\n"
+	            "\tdns = \"10.0.0.1\"\n"
+	            "}\n";
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(&file, 1u, NULL, &provenance);
+	if (!document) {
+		check(0, "an interface writing its DNS policy four ways compiles");
+		printf("    %s", said);
+		ncfg_provenance_free(&provenance);
+		return;
+	}
+	for (i = 0; i < provenance.count; i++) {
+		if (strcmp(provenance.entries[i].path, "interfaces[eth0].dns") == 0) {
+			seen++;
+		}
+	}
+	check(seen == 1u, "four DNS keys leave one entry, not four");
+	at(&provenance, "interfaces[eth0].dns", "netcfgd.conf:3:2");
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+}
+
+/*
+ * A `network` block's addressing is recorded under no path at all.
+ *
+ * It has one: `interfaces[...]` names an interface, and a wireless profile is
+ * not one. Recording it under the network's own name would be a key nothing
+ * looks up, which is the cheaper half of the same mistake -- so the block is
+ * recorded and its addressing is not, which is the Rust's arrangement.
+ */
+static void a_network_records_its_name_and_not_its_addressing(void)
+{
+	fixture_t         file;
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+	size_t            i;
+	int               stray = 0;
+
+	file.name = "netcfgd.conf";
+	file.text = "network \"office\" {\n"
+	            "\tconfig = \"10.0.0.2/24\"\n"
+	            "\twifi {\n"
+	            "\t\tpsk = \"@secret:office\"\n"
+	            "\t}\n"
+	            "}\n";
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(&file, 1u, NULL, &provenance);
+	if (!document) {
+		check(0, "a network block compiles");
+		printf("    %s", said);
+		ncfg_provenance_free(&provenance);
+		return;
+	}
+	at(&provenance, "network.office", "netcfgd.conf:1:1");
+	for (i = 0; i < provenance.count; i++) {
+		if (strncmp(provenance.entries[i].path, "interfaces[", 11u) == 0) {
+			stray = 1;
+		}
+	}
+	check(!stray, "and its addressing is under no interface path");
+	check(provenance.count == 1u, "so the block's name is the only thing recorded");
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+}
+
+/*
+ * A configuration that was refused leaves nothing behind.
+ *
+ * Half a table for a document nobody got is a set of paths into nothing, and
+ * the caller that asked is the one that would write it to `/run` beside a
+ * document from the compile before.
+ */
+static void a_refused_configuration_records_no_positions(void)
+{
+	fixture_t         file;
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+
+	file.name = "netcfgd.conf";
+	/* The interface lowers and records, and the unknown block after it is what
+	 * refuses the compile -- so this is a table that really was filled in and
+	 * then given up, rather than one that was never written to. */
+	file.text = "interface eth0 {\n"
+	            "\tconfig = \"dhcp\"\n"
+	            "}\n"
+	            "nonsense \"x\" {\n"
+	            "}\n";
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(&file, 1u, NULL, &provenance);
+	check(document == NULL, "a configuration with an unknown block is refused");
+	check(provenance.count == 0u, "and the positions it had already recorded are given up");
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+}
+
+/*
+ * The table is bounded and the configuration is not.
+ *
+ * `NCFG_PROVENANCE_MAX` is the other list a compile produces whose length is
+ * chosen by whoever writes the directory. Past it nothing more is recorded and
+ * **the compile is unaffected**, which is the half worth pinning: a bound that
+ * refused the configuration would make a large machine uncompilable to buy an
+ * explanation nobody asked for. The bound is read from the header rather than
+ * spelled here, so a test cannot go on passing against a number that moved.
+ */
+static void the_table_is_bounded_and_the_configuration_is_not(void)
+{
+	/* Two entries per interface -- the block and its one addressing entry --
+	 * so this asks for a quarter more than the bound allows. */
+	const size_t      wanted = (NCFG_PROVENANCE_MAX / 2u) + (NCFG_PROVENANCE_MAX / 8u);
+	fixture_t         file;
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+	char             *text;
+	size_t            at_byte = 0;
+	size_t            i;
+
+	text = malloc(wanted * 48u + 1u);
+	if (!text) {
+		check(0, "the bound fixture could be built");
+		return;
+	}
+	for (i = 0; i < wanted; i++) {
+		at_byte += (size_t)snprintf(text + at_byte, wanted * 48u + 1u - at_byte,
+		    "interface eth%zu { config = \"dhcp\" }\n", i);
+	}
+	file.name = "netcfgd.conf";
+	file.text = text;
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(&file, 1u, NULL, &provenance);
+	if (!document) {
+		check(0, "a configuration with more fields than the table holds still compiles");
+		printf("    %s", said);
+		ncfg_provenance_free(&provenance);
+		free(text);
+		return;
+	}
+	check(document->interface_count == wanted,
+	    "a configuration past the position bound compiles whole");
+	check(provenance.count == NCFG_PROVENANCE_MAX,
+	    "and the table stops at NCFG_PROVENANCE_MAX rather than growing with it");
+	/* What a short table costs is a gap per field, which is the state
+	 * `explain.h` already describes: the first interface is still located and
+	 * the last simply is not. */
+	check(ncfg_provenance_lookup(&provenance, "interfaces[eth0]") != NULL,
+	    "what it did record is still there");
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+	free(text);
+}
+
+/*
+ * A key too long to spell records nothing, rather than the part that fitted.
+ *
+ * A truncated key is the one failure the consumer cannot see: `explain` asks
+ * for the whole path, misses, and says nothing -- because the table has
+ * entries, so the "no positions in this build" notice is correctly silent. A
+ * missing entry reads as a field nobody wrote; a truncated one reads the same
+ * way and has quietly claimed a path belonging to nothing.
+ */
+static void a_key_that_does_not_fit_is_not_recorded_by_halves(void)
+{
+	fixture_t         file;
+	ncfg_provenance_t provenance;
+	ncfg_document_t  *document;
+	char              text[1024];
+	char              label[512];
+	size_t            i;
+	int               stray = 0;
+
+	for (i = 0; i < sizeof(label) - 1u; i++) {
+		label[i] = 'r';
+	}
+	label[sizeof(label) - 1u] = '\0';
+	(void)snprintf(text, sizeof(text),
+	    "rule \"%s\" { priority = 100; from = \"10.0.0.0/8\"; lookup = 100 }\n"
+	    "interface eth0 { config = \"dhcp\" }\n",
+	    label);
+	file.name = "netcfgd.conf";
+	file.text = text;
+	memset(&provenance, 0, sizeof(provenance));
+	document = build_recording(&file, 1u, NULL, &provenance);
+	if (!document) {
+		check(0, "a rule with a very long name compiles");
+		printf("    %s", said);
+		ncfg_provenance_free(&provenance);
+		return;
+	}
+	for (i = 0; i < provenance.count; i++) {
+		if (strncmp(provenance.entries[i].path, "rule.", 5u) == 0) {
+			stray = 1;
+		}
+	}
+	check(!stray, "a key too long to spell records nothing rather than a prefix of itself");
+	check(ncfg_provenance_lookup(&provenance, "interfaces[eth0]") != NULL,
+	    "and the fields around it are recorded as usual");
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+}
+
+static void provenance_cases(void)
+{
+	the_keys_are_the_ones_explain_asks_for();
+	repeated_records_for_one_path_keep_the_first();
+	a_network_records_its_name_and_not_its_addressing();
+	a_refused_configuration_records_no_positions();
+	the_table_is_bounded_and_the_configuration_is_not();
+	a_key_that_does_not_fit_is_not_recorded_by_halves();
+}
+
 int main(void)
 {
 	addressing_cases();
@@ -2156,6 +2536,7 @@ int main(void)
 	diagnostic_cases();
 	ownership_cases();
 	example_cases();
+	provenance_cases();
 
 	if (failures) {
 		printf("\n%d check(s) failed\n", failures);

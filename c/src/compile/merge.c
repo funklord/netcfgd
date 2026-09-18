@@ -117,6 +117,57 @@ void ncfg_diag(ncfg_lower_ctx_t *ctx, ncfg_span_t span, const char *format, ...)
 	diags->count++;
 }
 
+/*
+ * The longest dotted path one field's key can be.
+ *
+ * `explain.c` forms its keys in `NCFG_EXPLAIN_SUBJECT_MAX + 64` bytes, which
+ * is 192, and a subject longer than that is refused before a lookup happens.
+ * So anything that module can *ask* for fits here with room over, and a key
+ * this refuses to build is one nothing would have looked up.
+ */
+#define PROVENANCE_PATH_MAX 256u
+
+void ncfg_record(ncfg_lower_ctx_t *ctx, const char *source, ncfg_span_t span, const char *format,
+    ...)
+{
+	char    path[PROVENANCE_PATH_MAX];
+	char    err[NCFG_ERROR_MAX];
+	va_list args;
+	int     written;
+
+	if (!ctx->provenance || ctx->failed || !source) {
+		return;
+	}
+	/*
+	 * Past the bound nothing more is recorded. `lower.h` has the argument:
+	 * this is the other list a compile produces whose length is the
+	 * operator's to choose, and what a short table costs is exactly the state
+	 * `explain.h` already describes -- a gap per field, and no blanket claim
+	 * about a table that has entries.
+	 */
+	if (ctx->provenance->count >= NCFG_PROVENANCE_MAX) {
+		return;
+	}
+
+	va_start(args, format);
+	written = vsnprintf(path, sizeof(path), format, args);
+	va_end(args);
+	/*
+	 * A key that did not fit records nothing rather than the part that did.
+	 * A truncated key is the one failure the consumer cannot see: the lookup
+	 * misses while the table looks full, which reads as a field nobody wrote
+	 * rather than as a position nobody kept.
+	 */
+	if (written < 0 || (size_t)written >= sizeof(path)) {
+		return;
+	}
+
+	if (!ncfg_provenance_record(ctx->provenance, path, source, (int64_t)span.line,
+	    (int64_t)span.column, err, sizeof(err))) {
+		ncfg_lower_oom(ctx);
+	}
+}
+
 char *ncfg_dup(ncfg_lower_ctx_t *ctx, const char *text)
 {
 	char  *copy;

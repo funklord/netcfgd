@@ -443,8 +443,11 @@ static void lower_network_key(ncfg_lower_ctx_t *ctx, ncfg_wifi_network_t *networ
 	int         flag;
 
 	if (strcmp(key, "config") == 0) {
+		/* No owner: nothing keys a `network` block's addressing, and a path
+		 * under `interfaces[...]` would name an interface this list is not
+		 * on. */
 		ncfg_lower_config(ctx, assignment->value, &network->addressing,
-		    &network->addressing_count);
+		    &network->addressing_count, NULL);
 		return;
 	}
 	if (strcmp(key, "routes") == 0) {

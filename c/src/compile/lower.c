@@ -493,6 +493,13 @@ static int remember(ncfg_lower_ctx_t *ctx, deferred_t **list, size_t *count, con
 ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t *hooks,
     ncfg_lower_diags_t *diags, char *err, size_t err_size)
 {
+	return ncfg_lower_with_provenance(merged, hooks, NULL, diags, err, err_size);
+}
+
+ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size)
+{
 	ncfg_lower_ctx_t ctx;
 	/* `(member, master, where the master's block is)`, so a conflict points at
 	 * the line that declared the membership rather than at the top of a
@@ -514,8 +521,10 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.diags = diags;
 	ctx.hooks = hooks ? hooks : ncfg_hook_sink_refusing();
+	ctx.provenance = provenance;
 	ctx.document = ncfg_document_new(err, err_size);
 	if (!ctx.document) {
+		ncfg_provenance_free(provenance);
 		return NULL;
 	}
 
@@ -589,6 +598,10 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 			if (!ncfg_lower_interface(&ctx, block, &interface)) {
 				continue;
 			}
+			/* `block->source` rather than `ctx.source`, which the walk over the
+			 * block's items has just moved: see `ncfg_record`. */
+			ncfg_record(&ctx, block->source, block->block->span, "interfaces[%s]",
+			    interface.name);
 			{
 				ncfg_interface_t *slot = ncfg_push(&ctx, &ctx.document->interfaces,
 				    &ctx.document->interface_count, sizeof(*slot));
@@ -603,6 +616,7 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 			if (!ncfg_lower_rule(&ctx, block, &rule)) {
 				continue;
 			}
+			ncfg_record(&ctx, block->source, block->block->span, "rule.%s", rule.id);
 			{
 				ncfg_routing_rule_t *slot = ncfg_push(&ctx, &ctx.document->rules,
 				    &ctx.document->rule_count, sizeof(*slot));
@@ -617,6 +631,8 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 			if (!ncfg_lower_access_point(&ctx, block, &access_point)) {
 				continue;
 			}
+			ncfg_record(&ctx, block->source, block->block->span, "access_point.%s",
+			    access_point.id);
 			{
 				ncfg_access_point_t *slot = ncfg_push(&ctx, &ctx.document->access_points,
 				    &ctx.document->access_point_count, sizeof(*slot));
@@ -631,6 +647,7 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 			if (!ncfg_lower_network(&ctx, block, &network)) {
 				continue;
 			}
+			ncfg_record(&ctx, block->source, block->block->span, "network.%s", network.id);
 			{
 				ncfg_wifi_network_t *slot = ncfg_push(&ctx, &ctx.document->networks,
 				    &ctx.document->network_count, sizeof(*slot));
@@ -645,6 +662,7 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 			if (!ncfg_lower_linkset(&ctx, block, &set)) {
 				continue;
 			}
+			ncfg_record(&ctx, block->source, block->block->span, "linkset.%s", set.name);
 			/* Checked after the loop rather than here: a member may name a
 			 * block that has not been read yet, and refusing a forward
 			 * reference would make the answer depend on which drop-in the
@@ -677,13 +695,22 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 	deferred_free(shapers, shaper_count);
 	deferred_free(linksets, linkset_count);
 
+	/*
+	 * A table for a document nobody gets is a table of paths into nothing, so
+	 * either failure empties it. It is the caller's own structure and it is
+	 * left usable rather than merely emptied -- `ncfg_provenance_free` is
+	 * `base.h`'s one-free-per-aggregate, and freeing one never filled in is
+	 * nothing.
+	 */
 	if (ctx.failed) {
 		ncfg_document_free(ctx.document);
+		ncfg_provenance_free(provenance);
 		ncfg_error_set(err, err_size, "out of memory compiling the configuration");
 		return NULL;
 	}
 	if (ncfg_diags_any(&ctx)) {
 		ncfg_document_free(ctx.document);
+		ncfg_provenance_free(provenance);
 		ncfg_error_set(err, err_size, "%s",
 		    (diags && diags->count) ? diags->at[0].message : "the configuration was refused");
 		return NULL;
@@ -698,6 +725,13 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 ncfg_document_t *ncfg_compile(const ncfg_source_t *sources, size_t count,
     const ncfg_hook_sink_t *hooks, ncfg_lower_diags_t *diags, char *err, size_t err_size)
 {
+	return ncfg_compile_with_provenance(sources, count, hooks, NULL, diags, err, err_size);
+}
+
+ncfg_document_t *ncfg_compile_with_provenance(const ncfg_source_t *sources, size_t count,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size)
+{
 	ncfg_lower_diags_t  local = { 0 };
 	ncfg_lower_diags_t *kept = diags ? diags : &local;
 	ncfg_merged_t      *merged = NULL;
@@ -705,12 +739,28 @@ ncfg_document_t *ncfg_compile(const ncfg_source_t *sources, size_t count,
 	size_t              i;
 
 	if (!ncfg_merge(sources, count, &merged, kept, err, err_size)) {
+		ncfg_provenance_free(provenance);
 		ncfg_lower_diags_free(&local);
 		return NULL;
 	}
-	document = ncfg_lower(merged, hooks, kept, err, err_size);
+	document = ncfg_lower_with_provenance(merged, hooks, provenance, kept, err, err_size);
 	ncfg_merged_free(merged);
 	if (!document) {
+		ncfg_lower_diags_free(&local);
+		return NULL;
+	}
+	/*
+	 * Ordered by path with the first record for a path kept, which is what
+	 * makes two compiles of one configuration produce one `provenance.json` --
+	 * the whole reason the positions are a side table rather than fields of
+	 * the document. Canonicalising the table before the document, as the Rust
+	 * does, because the two are independent: the document's own walk sorts
+	 * interfaces, routes and members, and touches neither an addressing list
+	 * nor anything a key is built from.
+	 */
+	if (provenance && !ncfg_provenance_canonicalize(provenance, err, err_size)) {
+		ncfg_provenance_free(provenance);
+		ncfg_document_free(document);
 		ncfg_lower_diags_free(&local);
 		return NULL;
 	}
@@ -755,6 +805,7 @@ ncfg_document_t *ncfg_compile(const ncfg_source_t *sources, size_t count,
 		ctx.source = count ? sources[0].name : NULL;
 		ncfg_diag(&ctx, start, "%s", err);
 		ncfg_document_free(document);
+		ncfg_provenance_free(provenance);
 		ncfg_lower_diags_free(&local);
 		return NULL;
 	}

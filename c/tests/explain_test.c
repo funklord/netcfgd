@@ -13,7 +13,11 @@
  *       no line, and it is *gone* the moment a table with an entry is handed
  *       in -- which is what stops it becoming a line nobody reads. The third
  *       case is the one that matters: an interface the configuration never
- *       mentions asks for no position, so it gets no caveat either.
+ *       mentions asks for no position, so it gets no caveat either. The
+ *       fourth runs the compiler: the other three build a table by hand and
+ *       so say nothing about whether anything produces one keyed the way this
+ *       module asks, which is the seam where a full table and a silent notice
+ *       could still name no file at all.
  *     * **A report spelled another way still explains.** The Rust compares the
  *       report's text against the kernel's spelling of it, and the two are one
  *       address written twice. The planner has the same comparison and pays
@@ -36,7 +40,9 @@
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
 #include "ncfg/explain.h"
+#include "ncfg/lower.h"
 #include "ncfg/observed.h"
+#include "ncfg/parse.h"
 #include "ncfg/proto.h"
 #include "ncfg/state.h"
 
@@ -622,6 +628,120 @@ static void a_table_with_an_entry_names_the_file_and_the_line(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * And the compiler that fills one in, against the same explanation.
+ *
+ * The two cases above hand in a table built by hand, which proves what
+ * `explain` does with one and nothing about whether anything produces one it
+ * can read. **A table keyed differently is worse than no table**: every lookup
+ * misses while the table is non-empty, so the notice is correctly silent and
+ * the answer names no file -- the exact failure both halves were written to
+ * prevent, arriving through the seam between them.
+ *
+ * So this compiles real text through `ncfg_compile_with_provenance` and
+ * explains against what came out. It is the only case here that runs the
+ * compiler, and it runs it on a string: no file, no socket, no kernel.
+ */
+static ncfg_document_t *compiled_of(const char *text, ncfg_provenance_t *provenance)
+{
+	ncfg_source_t      source;
+	ncfg_ast_file_t   *tree = NULL;
+	ncfg_diags_t       parse_diags = { 0 };
+	ncfg_lower_diags_t diags = { 0 };
+	ncfg_document_t   *document;
+	char               message[NCFG_ERROR_MAX];
+
+	if (!ncfg_parse(text, strlen(text), &tree, &parse_diags, message, sizeof(message))) {
+		printf("  fixture did not parse: %s\n", message);
+		ncfg_diags_free(&parse_diags);
+		return NULL;
+	}
+	ncfg_diags_free(&parse_diags);
+	source.name = "/etc/netcfgd/conf.d/10-lan.conf";
+	source.file = tree;
+	document = ncfg_compile_with_provenance(&source, 1u, ncfg_hook_sink_refusing(), provenance,
+	    &diags, message, sizeof(message));
+	if (!document) {
+		printf("  fixture did not compile: %s\n", message);
+	}
+	ncfg_lower_diags_free(&diags);
+	/* The document copies every string it keeps, so the tree has no reader
+	 * left once the compile is over. */
+	ncfg_ast_file_free(tree);
+	return document;
+}
+
+static void the_compilers_own_table_is_the_one_explain_reads(void)
+{
+	static const char *const text = "device eth0 {\n"
+	                                "\tmtu = 1400\n"
+	                                "}\n"
+	                                "interface eth0 {\n"
+	                                "\tconfig = \"10.0.0.1/24\"\n"
+	                                "\tguard = \"the office link\"\n"
+	                                "}\n";
+	ncfg_provenance_t    provenance;
+	ncfg_provenance_t    empty;
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed = observed_of("\"links\":[" LINK_UP("eth0") "]");
+	ncfg_proto_subject_t subject = about_interface("eth0");
+	char                 message[NCFG_ERROR_MAX];
+	ncfg_explanation_t  *explanation;
+
+	memset(&provenance, 0, sizeof(provenance));
+	memset(&empty, 0, sizeof(empty));
+	document = compiled_of(text, &provenance);
+	if (!document) {
+		check(0, "a configuration compiles with the positions beside it");
+		ncfg_provenance_free(&provenance);
+		ncfg_observed_free(observed);
+		return;
+	}
+	check(provenance.count > 0u, "a configuration compiles with the positions beside it");
+
+	explanation = ncfg_explain(&subject, document, observed, &provenance, message,
+	    sizeof(message));
+	if (explanation) {
+		/* One per key `declared` builds, and each is the line somebody wrote
+		 * rather than the top of the block: the interface, the MTU that moved
+		 * to the device, the addressing entry and the guard. */
+		check(names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:4:1"),
+		    "the compiler's own table locates the interface block");
+		check(names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:2:2"),
+		    "  and the mtu, which is written in the device block");
+		check(names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:5:11"),
+		    "  and the addressing entry, by the position of the entry");
+		check(names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:6:2"),
+		    "  and the guard");
+		check(!has_topic(explanation, "provenance"),
+		    "and the notice is gone, because this build's compiler does record them");
+	} else {
+		check(0, "the compiler's own table locates the interface block");
+	}
+	ncfg_explanation_free(explanation);
+
+	/*
+	 * And the other direction, against the same document: a caller with no
+	 * table still gets the caveat. This is what stops the notice from being
+	 * deleted along with the reason it was written -- it has to go on
+	 * appearing for an explanation that genuinely cannot locate anything.
+	 */
+	explanation = ncfg_explain(&subject, document, observed, &empty, message, sizeof(message));
+	if (explanation) {
+		check(says(explanation, "provenance", "records no file positions"),
+		    "and the same document with no table still says it can locate nothing");
+		check(!names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:4:1"),
+		    "  and names no file, having been given none");
+	} else {
+		check(0, "and the same document with no table still says it can locate nothing");
+	}
+	ncfg_explanation_free(explanation);
+
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+	ncfg_observed_free(observed);
+}
+
 /* ------------------------------------------------------------------------ *
  * Where the C answers something the Rust gets wrong
  * ------------------------------------------------------------------------ */
@@ -984,6 +1104,7 @@ int main(void)
 	explaining_without_a_configuration_still_answers();
 	an_empty_table_is_said_rather_than_left_to_be_noticed();
 	a_table_with_an_entry_names_the_file_and_the_line();
+	the_compilers_own_table_is_the_one_explain_reads();
 	a_report_spelled_another_way_is_still_the_same_address();
 	the_ownership_of_the_second_address_is_about_the_second_address();
 	an_explanation_is_bounded_and_says_how_many_there_were();

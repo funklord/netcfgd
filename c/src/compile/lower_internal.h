@@ -83,6 +83,9 @@ typedef struct {
 	ncfg_lower_diags_t     *diags;
 	const ncfg_hook_sink_t *hooks;
 	ncfg_document_t        *document;
+	/* Where each field was written, or NULL for a caller that wants none.
+	 * Appended to by `ncfg_record` and by nothing else. */
+	ncfg_provenance_t      *provenance;
 	/* Set by the first allocation failure and never cleared. */
 	int                     failed;
 } ncfg_lower_ctx_t;
@@ -101,6 +104,34 @@ void ncfg_diag(ncfg_lower_ctx_t *ctx, ncfg_span_t span, const char *format, ...)
 /* Whether any diagnostic has been reported, which is what decides whether the
  * document is handed over. */
 int ncfg_diags_any(const ncfg_lower_ctx_t *ctx);
+
+/* ------------------------------------------------------------------------ *
+ * Where a field was written
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Record that the field at `format` was written at `span`, in `source`.
+ *
+ * Nothing happens where the context was given no table, which is the ordinary
+ * case: `ncfg_compile` asks for none and pays one NULL test per field for it.
+ *
+ * **`source` is an argument and is deliberately not read from the context.**
+ * `lex.h`'s span carries no source id (0263), so the file name has to come
+ * from beside the span rather than out of it -- and `ctx->source` is a
+ * *moving* variable, reassigned per item as a block is walked. A record taken
+ * after that walk would name whichever file the block's last item came from,
+ * which on a `global` folded out of two drop-ins is a different file from the
+ * one the block was opened in. So the caller passes the name it means:
+ * `block->source` where the block is the subject, `ctx->source` where the item
+ * being lowered is.
+ *
+ * A path that does not fit the buffer records nothing rather than a truncated
+ * key: a key spelled wrong is a lookup that misses while the table looks full,
+ * which is the one failure `explain` cannot see. So is the bound:
+ * `NCFG_PROVENANCE_MAX` entries and no more.
+ */
+void ncfg_record(ncfg_lower_ctx_t *ctx, const char *source, ncfg_span_t span, const char *format,
+    ...);
 
 /* ------------------------------------------------------------------------ *
  * Allocation
@@ -311,9 +342,23 @@ void ncfg_lower_bridge_vlans(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry,
 
 int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
     ncfg_interface_t *out);
-/* One entry of a `config` value, appended to `list`. */
+/*
+ * One entry of a `config` value, appended to `list`.
+ *
+ * `owner` is the interface the list belongs to, and each entry's position is
+ * recorded under `interfaces[<owner>].addressing[<index>]`. It is NULL for a
+ * list that is not an interface's -- a `network` block's -- which records
+ * nothing, because nothing looks an addressing entry up by any other path.
+ *
+ * **The index is safe to key by only because `ncfg_document_canonicalize`
+ * leaves `addressing` in the order it was written.** It sorts routes, hooks,
+ * members and stations; this one list it deliberately does not, and that is
+ * what makes `addressing[0]` mean the same entry in the table and in the
+ * document a reader is holding. A route is keyed by its destination for the
+ * other half of the same reason.
+ */
 void ncfg_lower_config(ncfg_lower_ctx_t *ctx, const ncfg_ast_value_t *value,
-    ncfg_address_source_t **list, size_t *count);
+    ncfg_address_source_t **list, size_t *count, const char *owner);
 /* One entry of a `routes` value. */
 int ncfg_lower_route(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry, ncfg_route_t *out);
 /* A hook body, through the sink. Appends to `list` or reports why not. */
