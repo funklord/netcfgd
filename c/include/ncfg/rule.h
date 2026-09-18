@@ -9,9 +9,7 @@
  *   which already carries `ncfg_ops_rule_t` and the two messages that install
  *   and remove one; a decoder in netlink.h would make netlink.h depend on the
  *   model's idea of a rule, which is the one thing that header says it does
- *   not do. It also could not be there today: netlink.h and document.h declare
- *   one type name between them, so a header that needs ops.h cannot include
- *   netlink.h at all -- see `NCFG_RULE_NAME_MAX` below.
+ *   not do.
  *
  * WHY A RECORD AND A SPEC, WHEN THE RUST HAS ONE TYPE
  *   `rule.rs` uses `RuleRecord` in both directions deliberately: a rule netcfgd
@@ -51,16 +49,20 @@
 #include "ncfg/wire.h"
 
 /*
- * `IFNAMSIZ`, which netlink.h already spells `NCFG_LINK_NAME_MAX`.
+ * `IFNAMSIZ`, borrowed from netlink.h rather than spelled again.
  *
- * Written out again rather than borrowed, and not by choice: netlink.h and
- * document.h cannot both be included, because each declares a type called
- * `ncfg_bridge_vlan_t` -- the kernel's observed VLAN in one and the document's
- * desired VLAN in the other -- and this header needs ops.h, which brings
- * document.h. The collision is reported rather than worked around anywhere but
- * here; when it is settled, this constant should become netlink.h's.
+ * It was spelled again here for one day, and the note said why: netlink.h and
+ * document.h each declared a type called `ncfg_bridge_vlan_t` -- the kernel's
+ * observed VLAN in one, the document's desired VLAN in the other -- so a
+ * header needing ops.h, which brings document.h, could not include netlink.h
+ * at all. The worker who hit that reported it rather than renaming somebody
+ * else's type, which is what got it fixed: the kernel's is
+ * `ncfg_bridge_vlan_record_t` now, beside the address and route records, and a
+ * translation unit including both headers compiles.
  */
-#define NCFG_RULE_NAME_MAX 16u
+#include "ncfg/netlink.h"
+
+#define NCFG_RULE_NAME_MAX NCFG_LINK_NAME_MAX
 
 /*
  * Length of `struct fib_rule_hdr`.
