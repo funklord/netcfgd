@@ -22,7 +22,13 @@ gui/build-*/
 # The C port builds in place too, one object beside each source and one test
 # binary per module. Named by shape rather than by module: the tree grows a
 # module at a time and a list here would be one more thing to remember.
+# Two levels, because `c/Makefile`'s own SRCS is two levels: the backends are
+# `src/backend/<daemon>/*.c`, one directory per daemon, and their objects land
+# beside them. This said one level until twelve backend objects were committed
+# as source -- `make -C c clean` then deleted tracked files, and every build
+# left the tree dirty for whoever else was working in it.
 c/src/*/*.o
+c/src/*/*/*.o
 c/*.a
 c/tests/*_test
 gui/tests/build/
