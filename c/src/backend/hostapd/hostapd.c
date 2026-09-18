@@ -8,6 +8,8 @@
  */
 #include "ncfg/hostapd.h"
 
+#include "ncfg/process.h"
+
 #include "../backend_internal.h"
 #include "ncfg/base.h"
 
@@ -67,6 +69,19 @@ int ncfg_hostapd_pid_path(const char *run, const char *device, char *out, size_t
     char *err, size_t err_size)
 {
 	return ncfg_backend_path(out, out_size, run, "hostapd", device, ".pid", err, err_size);
+}
+
+pid_t ncfg_hostapd_running_pid(const char *run, const char *device)
+{
+	char pid_file[NCFG_HOSTAPD_PATH_MAX];
+
+	if (!ncfg_hostapd_pid_path(run, device, pid_file, sizeof(pid_file), NULL, 0)) {
+		return 0;
+	}
+	/* The pid file's own path is the marker, because `-P` puts it in hostapd's
+	 * `argv`: netcfgd chose the path and it names the device, so an operator's
+	 * own hostapd cannot match it. */
+	return ncfg_process_pid_of(pid_file, pid_file);
 }
 
 char *ncfg_hostapd_binary(void)

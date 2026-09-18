@@ -283,11 +283,20 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	 * observation rather than the document. `augment` has the two in this
 	 * order for the same reason (`host.rs:61-62`).
 	 */
+	/*
+	 * **The liveness round is before `derive` and that is load-bearing.** It
+	 * can only clear `running`, and `derive` reads the backend list to answer
+	 * what this machine is doing -- so running it afterwards would leave one
+	 * pass's conclusions drawn from a daemon the next pass knows is dead. It
+	 * is after the record for the same reason the others are: the list it
+	 * corrects is what `build` took out of the record.
+	 */
 	if (!ncfg_observe_netfilter_from(netfilter, observed, err, err_size) ||
 	    !ncfg_observe_offloads_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wireguard_from(genl, observed, err, err_size) ||
 	    !ncfg_observe_wireguard_currency(observed, run_dir, secrets, desired, err,
 	    err_size) ||
+	    !ncfg_observe_backend_liveness(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_augment_host(observed, roots, err, err_size) ||
 	    !ncfg_observe_derive(observed, desired, err, err_size)) {
 		/*

@@ -1,0 +1,448 @@
+/*
+ * liveness_test.c -- whether netcfgd can tell that a daemon it started has
+ * died.
+ *
+ * WHAT THESE CASES DRIVE
+ *   `ncfg_observe_backend_liveness` against real processes, because the
+ *   question it answers is about `/proc` and the module that reads `/proc` does
+ *   so at a fixed path on purpose -- `process.h` spends its header on why
+ *   finding a process is a security property and not a lookup. So there is no
+ *   tree to point this at, and a fake would prove the fake. Each case starts a
+ *   child carrying the marker netcfgd would have given it, writes the pid file
+ *   netcfgd would have written, and asks.
+ *
+ * WHAT MAKES THAT SAFE TO RUN ON A WORKSTATION WITH A LIVE NETWORK
+ *   Every child is `timeout 20 sh -c 'sleep 20'` in a process group of its own,
+ *   carrying a path under this test's own temporary directory. It configures
+ *   nothing, it is bounded twice -- by `timeout` and by the `sleep` -- and the
+ *   reaper below kills **the group before the pid**, because a `SIGKILL` to
+ *   `timeout` alone leaves the shell it was bounding reparented to init. That
+ *   is this suite's own measured lesson rather than a precaution
+ *   (`supplicant_launch_test.c`, project.md).
+ *
+ *   The markers are absolute paths under the temporary directory, so nothing
+ *   the machine is really running can match one and nothing here can match
+ *   something the machine is really running. The user's own `wpa_supplicant`
+ *   carries `/run/netcfgd/supplicant/wlp0s20f3.pid`; these carry
+ *   `/tmp/netcfgd-liveness-XXXX/...`.
+ */
+#include "ncfg/observe.h"
+
+#include "ncfg/base.h"
+#include "ncfg/hostapd.h"
+#include "ncfg/process.h"
+#include "ncfg/supplicant.h"
+
+#include "testdir.h"
+
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+static int checks;
+static int failures;
+
+static void check(int condition, const char *what)
+{
+	checks++;
+	printf("%-72s %s\n", what, condition ? "ok" : "FAILED");
+	if (!condition) {
+		failures++;
+	}
+}
+
+static const char *base;
+static char        run_dir[512];
+
+/* Every child this file started, by pid, so the reaper names them rather than
+ * matching a pattern. */
+#define LIVENESS_CHILDREN_MAX 8
+static pid_t children[LIVENESS_CHILDREN_MAX];
+static size_t child_count;
+
+static long long now_ms(void)
+{
+	struct timespec when;
+
+	(void)clock_gettime(CLOCK_MONOTONIC, &when);
+	return (long long)when.tv_sec * 1000 + when.tv_nsec / 1000000;
+}
+
+static void pause_briefly(void)
+{
+	struct timespec nap = { 0, 5 * 1000 * 1000 };
+
+	(void)nanosleep(&nap, NULL);
+}
+
+/*
+ * A bounded child carrying `marker` as a whole `argv` element.
+ *
+ * `timeout` and the `sleep` are both twenty seconds, so the process goes away
+ * on its own if this file's reaper never runs at all. Waits for the marker to
+ * really be in the command line rather than sleeping a fixed time -- an exec
+ * is not instant and a fixed sleep is either flaky or slow.
+ */
+static pid_t marked_child(const char *marker)
+{
+	pid_t     child = fork();
+	long long deadline;
+
+	if (child < 0) {
+		return 0;
+	}
+	if (child == 0) {
+		const char *argv[9];
+
+		(void)setpgid(0, 0);
+		argv[0] = "timeout";
+		argv[1] = "-k";
+		argv[2] = "2";
+		argv[3] = "20";
+		argv[4] = "sh";
+		argv[5] = "-c";
+		argv[6] = "sleep 20";
+		argv[7] = marker;
+		argv[8] = NULL;
+		execvp("timeout", (char *const *)(const void *)argv);
+		_exit(127);
+	}
+	(void)setpgid(child, child);
+	if (child_count < (size_t)LIVENESS_CHILDREN_MAX) {
+		children[child_count++] = child;
+	}
+	deadline = now_ms() + 3000;
+	while (now_ms() < deadline && ncfg_process_pid_by_marker(marker) <= 0) {
+		pause_briefly();
+	}
+	return child;
+}
+
+/* The group before the pid: `timeout` runs the shell as its own child, so a
+ * `SIGKILL` to `timeout` alone leaves that shell reparented to init. */
+static void reap(void)
+{
+	size_t at;
+
+	for (at = 0; at < child_count; at++) {
+		if (children[at] <= 0) {
+			continue;
+		}
+		(void)kill(-children[at], SIGKILL);
+		(void)kill(children[at], SIGKILL);
+		(void)waitpid(children[at], NULL, 0);
+		children[at] = 0;
+	}
+	child_count = 0;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Fixtures
+ * ------------------------------------------------------------------------ */
+
+/* One observation holding one backend record, as the prior state would. */
+static ncfg_observed_t *observed_with(int kind, const char *iface, int running)
+{
+	char             text[1024];
+	char             message[NCFG_ERROR_MAX];
+	ncfg_observed_t *observed;
+
+	(void)snprintf(text, sizeof(text),
+	    "{\"links\":[],\"backends\":[{\"kind\":\"%s\",\"interface\":\"%s\","
+	    "\"running\":%s,\"answering\":true}]}",
+	    ncfg_backend_kind_name(kind), iface, running ? "true" : "false");
+	message[0] = '\0';
+	observed = ncfg_observed_read(text, strlen(text), message, sizeof(message));
+	if (!observed) {
+		printf("  fixture observation did not read: %s\n", message);
+	}
+	return observed;
+}
+
+/* Write the pid file netcfgd would have written for a supplicant. */
+static int record_supplicant(const char *iface, pid_t pid, char *path, size_t path_size)
+{
+	char dir[640];
+	char text[32];
+
+	(void)snprintf(dir, sizeof(dir), "%s/supplicant", run_dir);
+	testdir_mkdirp(dir);
+	if (!ncfg_supplicant_pid_path(run_dir, iface, path, path_size, NULL, 0)) {
+		return 0;
+	}
+	(void)snprintf(text, sizeof(text), "%d\n", (int)pid);
+	return testdir_write(path, text, strlen(text));
+}
+
+/* ------------------------------------------------------------------------ *
+ * The cases
+ * ------------------------------------------------------------------------ */
+
+static void a_daemon_that_is_still_there_stays_running(void)
+{
+	char             marker[512];
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_SUPPLICANT, "wlan-alive", 1);
+	pid_t            child;
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for a live daemon reads");
+		return;
+	}
+	/*
+	 * The pid file has to exist before the child, because the marker *is* the
+	 * pid file's path -- that is `ncfg_supplicant_running_pid`'s rule and the
+	 * strongest kind of mark: netcfgd chose the path and it names the
+	 * interface.
+	 */
+	if (!ncfg_supplicant_pid_path(run_dir, "wlan-alive", marker, sizeof(marker), NULL, 0)) {
+		check(0, "the supplicant's mark could be named");
+		ncfg_observed_free(observed);
+		return;
+	}
+	child = marked_child(marker);
+	check(child > 0 && record_supplicant("wlan-alive", child, marker, sizeof(marker)),
+	    "a child carrying netcfgd's mark is running and recorded");
+	message[0] = '\0';
+	check(ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message)),
+	    "the liveness round runs");
+	check(observed->backend_count == 1u && observed->backends[0].running,
+	    "  and a daemon that is still there is left running");
+	check(observed->backend_count == 1u && observed->backends[0].answering.has &&
+	    observed->backends[0].answering.value,
+	    "  with what it last answered untouched, which is a different question");
+	ncfg_observed_free(observed);
+	reap();
+}
+
+static void a_daemon_that_has_died_stops_being_running(void)
+{
+	char             marker[512];
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_SUPPLICANT, "wlan-dead", 1);
+	char             text[32];
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for a dead daemon reads");
+		return;
+	}
+	if (!ncfg_supplicant_pid_path(run_dir, "wlan-dead", marker, sizeof(marker), NULL, 0)) {
+		check(0, "the mark for a dead daemon could be named");
+		ncfg_observed_free(observed);
+		return;
+	}
+	/*
+	 * **A pid file outliving the process it names is the whole case.** This is
+	 * exactly what a crash leaves behind, and it is why the record alone could
+	 * never answer: the file is there, the number in it is a real number, and
+	 * nothing is running under it. A pid nothing owns rather than a live one
+	 * belonging to somebody else -- 1 would be `init` and would test the
+	 * ownership rule instead of this one.
+	 */
+	{
+		char dir[640];
+
+		(void)snprintf(dir, sizeof(dir), "%s/supplicant", run_dir);
+		testdir_mkdirp(dir);
+		(void)snprintf(text, sizeof(text), "%d\n", 0x7ffffff0);
+		(void)testdir_write(marker, text, strlen(text));
+	}
+	message[0] = '\0';
+	check(ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message)),
+	    "the liveness round runs over a pid file that outlived its process");
+	check(observed->backend_count == 1u && !observed->backends[0].running,
+	    "  and `running` stops being netcfgd's memory of having started it");
+	/*
+	 * 0078 keeps `running` and `answering` apart because a wedged daemon holds
+	 * its pid and serves nobody. The converse is not a question anybody can
+	 * ask: a process that is gone is not answering, and a stale `true` here
+	 * would let a later pass conclude that a dead hostapd is serving its LAN.
+	 */
+	check(observed->backend_count == 1u && observed->backends[0].answering.has &&
+	    !observed->backends[0].answering.value,
+	    "  and what it last answered goes with it, because nothing gone is answering");
+	ncfg_observed_free(observed);
+}
+
+static void it_only_ever_clears(void)
+{
+	char             marker[512];
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_SUPPLICANT, "wlan-notmine", 0);
+	pid_t            child;
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for a record saying `not running` reads");
+		return;
+	}
+	if (!ncfg_supplicant_pid_path(run_dir, "wlan-notmine", marker, sizeof(marker), NULL, 0)) {
+		check(0, "the mark for an unrecorded daemon could be named");
+		ncfg_observed_free(observed);
+		return;
+	}
+	child = marked_child(marker);
+	(void)record_supplicant("wlan-notmine", child, marker, sizeof(marker));
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	/*
+	 * **A live process carrying the mark, and the record still says no.** The
+	 * record is netcfgd's account of what *it* started; a process netcfgd did
+	 * not start is not netcfgd's, whatever its command line says. Setting
+	 * `running` here would make the observation a scan of the machine, and the
+	 * planner would then stop a daemon netcfgd never started.
+	 */
+	check(observed->backend_count == 1u && !observed->backends[0].running,
+	    "a live process carrying the mark does not make a record say `running`");
+	ncfg_observed_free(observed);
+	reap();
+}
+
+static void a_client_netcfgd_gave_no_pid_file_is_left_alone(void)
+{
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_DHCP4, "eth-dhcpcd", 1);
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for a dhcpcd client reads");
+		return;
+	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	/*
+	 * **The case that would have taken a working machine's network down.**
+	 * dhcpcd is the default client on a Debian machine and netcfgd gives it no
+	 * pid file at all, so "no pid file" means *netcfgd cannot ask* rather than
+	 * *the client is gone*. Clearing here would report every dhcpcd lease on
+	 * the machine as dead, and the planner would restart a client that is
+	 * running -- taking the lease down to do it. `dhcp.h` says the question for
+	 * one of those is `ncfg_dhcpcd_whose`, which needs paths a pass is not
+	 * given.
+	 */
+	check(observed->backend_count == 1u && observed->backends[0].running,
+	    "a DHCP client with no pid file of netcfgd's is unanswerable, not dead");
+	ncfg_observed_free(observed);
+}
+
+static void a_kind_that_is_not_a_process_is_left_alone(void)
+{
+	ncfg_observed_t *wireguard = observed_with(NCFG_BACKEND_WIREGUARD, "wg0", 1);
+	ncfg_observed_t *dns = observed_with(NCFG_BACKEND_DNS, "globals", 1);
+	char             message[NCFG_ERROR_MAX];
+
+	if (!wireguard || !dns) {
+		check(0, "the fixtures for the two kinds that are not processes read");
+		ncfg_observed_free(wireguard);
+		ncfg_observed_free(dns);
+		return;
+	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(wireguard, run_dir, message, sizeof(message));
+	(void)ncfg_observe_backend_liveness(dns, run_dir, message, sizeof(message));
+	/* WireGuard is a kernel device and DNS is a file delivered to somebody
+	 * else's daemon. Neither has a pid, so "no process found" is not a fact
+	 * about either of them. */
+	check(wireguard->backend_count == 1u && wireguard->backends[0].running,
+	    "a WireGuard record is not cleared by looking for a process it never had");
+	check(dns->backend_count == 1u && dns->backends[0].running,
+	    "and neither is a DNS one, which is a file rather than a daemon");
+	ncfg_observed_free(wireguard);
+	ncfg_observed_free(dns);
+}
+
+static void an_access_point_can_be_asked_at_last(void)
+{
+	char             marker[512];
+	char             dir[640];
+	char             text[32];
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_ACCESS_POINT, "wlan-ap", 1);
+	pid_t            child;
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed) {
+		check(0, "the fixture for an access point reads");
+		return;
+	}
+	/*
+	 * **The sixth answer, and the one that did not exist.** `hostapd.h` said an
+	 * access point was the one backend netcfgd could never tell had died, so
+	 * `running: true` was the only account of a daemon that crashed an hour
+	 * ago and 0079's restart could not fire for it. `-P` puts the pid file's
+	 * path in hostapd's own `argv`, which is what makes this answerable at all.
+	 */
+	if (!ncfg_hostapd_pid_path(run_dir, "wlan-ap", marker, sizeof(marker), NULL, 0)) {
+		check(0, "the access point's mark could be named");
+		ncfg_observed_free(observed);
+		return;
+	}
+	child = marked_child(marker);
+	(void)snprintf(dir, sizeof(dir), "%s/hostapd", run_dir);
+	testdir_mkdirp(dir);
+	(void)snprintf(text, sizeof(text), "%d\n", (int)child);
+	(void)testdir_write(marker, text, strlen(text));
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(child > 0 && observed->backend_count == 1u && observed->backends[0].running,
+	    "an access point that is still there is left running");
+	reap();
+
+	/* And the same record once it is gone, which is the half that never had an
+	 * answer before. */
+	(void)snprintf(text, sizeof(text), "%d\n", 0x7ffffff0);
+	(void)testdir_write(marker, text, strlen(text));
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(observed->backend_count == 1u && !observed->backends[0].running,
+	    "  and one that has died is finally noticed, which is 0079's precondition");
+	ncfg_observed_free(observed);
+}
+
+static void the_round_refuses_what_it_cannot_be_asked(void)
+{
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_SUPPLICANT, "wlan0", 1);
+	char             message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	check(!ncfg_observe_backend_liveness(NULL, run_dir, message, sizeof(message)) &&
+	    message[0] != '\0',
+	    "no observation at all is refused with a sentence");
+	message[0] = '\0';
+	check(observed && !ncfg_observe_backend_liveness(observed, NULL, message,
+	    sizeof(message)) && strstr(message, "run directory") != NULL,
+	    "and so is a round with no run directory, naming what was missing");
+	ncfg_observed_free(observed);
+}
+
+int main(void)
+{
+	const char *made = testdir_make("liveness");
+
+	base = made;
+	(void)snprintf(run_dir, sizeof(run_dir), "%s/run", base);
+	testdir_mkdirp(run_dir);
+	printf("== liveness_test in %s\n", base);
+
+	a_daemon_that_is_still_there_stays_running();
+	a_daemon_that_has_died_stops_being_running();
+	it_only_ever_clears();
+	a_client_netcfgd_gave_no_pid_file_is_left_alone();
+	a_kind_that_is_not_a_process_is_left_alone();
+	an_access_point_can_be_asked_at_last();
+	the_round_refuses_what_it_cannot_be_asked();
+
+	/* Named pids, never a pattern: another session's `sleep` is not this
+	 * file's to kill. */
+	reap();
+	testdir_remove(made);
+
+	printf("liveness_test: %d check(s)\n", checks);
+	if (failures == 0) {
+		printf("liveness_test: all checks passed\n");
+	} else {
+		printf("liveness_test: %d check(s) failed\n", failures);
+	}
+	return failures == 0 ? 0 : 1;
+}

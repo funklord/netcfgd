@@ -879,20 +879,18 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start. Its executor now carries the "
-	    "half that is not netlink -- `dns.apply` over every scope the machine has, the "
-	    "four sysctls, the hostname, the six wifi ops and `backend.start` for five of "
-	    "the nine backend kinds -- but two of those five refuse on arrival: a router "
-	    "advertisement daemon's prefixes and an openvpn tunnel's configuration file are "
-	    "arguments this daemon does not compose yet. A machine that advertises a prefix "
-	    "or holds a tunnel would have its plan stop at the first of them, part "
-	    "converged");
-	(void)fail("and netcfgd cannot yet tell that a backend it started has died: the "
-	    "liveness pass is not ported, so `running` in an observation is this daemon's "
-	    "memory of having started something rather than a fact about a process. A "
-	    "reconcile on a timer would act on that memory. `ncfg apply` is refused here "
-	    "for the same two reasons, and a daemon reconciling on drift is an apply "
-	    "nobody typed");
+	(void)fail("this build of the C port will not start. Its executor carries the half "
+	    "that is not netlink -- `dns.apply` over every scope the machine has, the four "
+	    "sysctls, the hostname, the six wifi ops and `backend.start` for five of the "
+	    "nine backend kinds -- but one of those five refuses on arrival: an openvpn "
+	    "tunnel's configuration file is an argument this daemon does not compose yet, "
+	    "so a machine holding a tunnel would have its plan stop there, part converged, "
+	    "with the links and addresses in front of it already changed");
+	(void)fail("`ncfg apply` is refused here for the same reason, and a daemon "
+	    "reconciling on drift is an apply nobody typed. What this build has stopped "
+	    "waiting for is the liveness round: `running` in an observation is a fact "
+	    "about a process now rather than this daemon's memory of having started one, "
+	    "and a daemon it started and lost is noticed");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 

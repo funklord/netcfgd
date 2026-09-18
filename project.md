@@ -9515,6 +9515,70 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.191 `running` stops being a memory and becomes a fact
+
+`ncfg_observed_backend_t::running` has always said of itself that it is *a fact
+about a process: something is there under that pid*. It was not. The backend
+list is filled from the prior state and from nowhere else, so `running: true`
+was netcfgd's memory of having started something: a daemon that crashed an hour
+ago stayed running for ever, and 0079's restart could not fire, because the cap
+counts starts of something the record already says is up. That is the trap a
+worker refused to walk into earlier in this campaign, and it was right --
+clearing on `running` without a liveness answer turns "never started again"
+into "started for ever".
+
+`ncfg_observe_backend_liveness` is the pass, in `src/observe/liveness.c`, run
+before `derive` -- load-bearing, because `derive` reads the backend list and
+would otherwise draw conclusions from a daemon the next pass knows is dead.
+
+**It only ever clears.** The record is netcfgd's account of what *it* started; a
+process netcfgd did not start is not netcfgd's whatever its command line says,
+which is what `process.h` spends its header on. Setting `running` here would
+make the observation a scan of the machine, and the planner would then stop a
+daemon netcfgd never started. There is a check that a live process carrying the
+mark still leaves a `running: false` record alone.
+
+**The sixth answer had to be written.** Five modules already answered "is mine
+running on this interface" with the marker each chose; hostapd had a pid path
+and no `running_pid`, which is exactly what `hostapd.h` had been saying for
+three waves -- *an access point is the one backend netcfgd can never tell has
+died*. `ncfg_hostapd_running_pid` is six lines on the same rule, and the pass's
+mapping is a switch over the taxonomy with no `default:`, so a kind added later
+fails to compile rather than falling quietly into "cannot answer".
+
+**The case that would have taken a working machine's network down.** A DHCP
+kind is asked through `ncfg_dhcp_running_pid`, which needs the client's name
+because the pid file lives in a directory named after it. Neither `udhcpc` nor
+`busybox` answering had to mean *unanswerable* and not *dead* -- because dhcpcd
+is the default client on a Debian machine and netcfgd gives it no pid file at
+all. Clearing there would report every dhcpcd lease on the machine as dead, and
+the planner would restart a client that is running, taking the lease down to do
+it. There is a check for it, and a sabotage that flips it goes red.
+
+`answering` is cleared alongside `running`, which is not tidying: 0078 keeps the
+two apart because a wedged daemon holds its pid and serves nobody, but the
+converse is not a question anybody can ask, and a stale `true` would let a pass
+conclude that a dead hostapd is serving its LAN.
+
+**The `/proc` this reads under is still not a parameter**, which is `observe.h`'s
+own rule broken and is recorded rather than worked around: the answers come
+from `process.h`, where finding a process is a security property, and a second
+reader taking a root would be two answers to who owns a pid. What it costs is
+that `liveness_test.c` starts real children -- `timeout 20 sh -c 'sleep 20'` in
+a group of its own, carrying a marker under the test's own temporary directory,
+reaped by group-then-pid -- rather than pointing at a tree it made. No process
+of the machine's can match a marker under `/tmp/netcfgd-liveness-XXXX`, and
+none of these matched the user's real `wpa_supplicant`.
+
+Four sabotages caught: the pass setting `running` as well as clearing it, a
+DHCP client with no pid file called dead, hostapd losing its answer again, and
+`answering` left stale on a daemon that is gone.
+
+6,277 checks across 95 binaries. The refusals in `daemon_main.c` and
+`daemon_answer.c` move again -- the liveness half of both sentences is gone,
+and what is left of the executor's is one argument: an openvpn tunnel's
+configuration file.
+
 ## 10.190 A blocker that was not one, repeated because nobody read it
 
 `advertising` was left NULL in 10.189 on the strength of a comment in

@@ -51,20 +51,27 @@
  *       `read_backend_liveness` each iterate it. It is filled from the prior
  *       state and from nowhere else, and `ncfg_owned_state_t` now carries
  *       `backends` -- so the blocker this entry named twice is gone and these
- *       six are writable rather than waiting. Five of them are simply not
- *       written yet, each being a round trip to the daemon it asks.
- *     * `read_backend_liveness` is the one of the six with a blocker left, and
- *       it is not the record. It needs a backend kind mapped to the pid file
- *       and the `argv` marker netcfgd started that daemon with -- the Rust's
- *       `netcfgd_apply::backend_pid_file`, seven kinds in one function. This
- *       port has five per-module answers instead (`ncfg_ra_running_pid`,
- *       `ncfg_openvpn_running_pid`, `ncfg_dhcp_running_pid` and two pid-path
- *       calls beside them), no single map, and every one of them reaches
- *       `/proc` at a fixed path through `process.h` -- which is that module's
- *       right and **this** module's rule broken, since every root a pass reads
- *       under is a parameter here. Until that pass lands, `running` in an
- *       observation is netcfgd's memory rather than a fact about a process,
- *       which is what stops 0079's third clear (`apply.h`, project.md 10.183).
+ *       six are writable rather than waiting.
+ *     * `read_backend_liveness` **is written**, as
+ *       `ncfg_observe_backend_liveness`. What it waited on was a backend kind
+ *       mapped to the pid file and the `argv` marker netcfgd started that
+ *       daemon with -- the Rust's `netcfgd_apply::backend_pid_file`, seven
+ *       kinds in one function. This port has the per-module answers instead,
+ *       one per marker, and the missing sixth (`ncfg_hostapd_running_pid`)
+ *       landed with the pass; the mapping is a switch over the taxonomy with
+ *       no `default:`. So `running` is a fact about a process rather than
+ *       netcfgd's memory of having started one, and 0079's third clear has its
+ *       precondition (`apply.h`, project.md 10.183, 10.191).
+ *
+ *       **The `/proc` it reads under is still not a parameter**, which is this
+ *       module's rule broken and is recorded rather than worked around: the
+ *       answers come from `process.h`, where finding a process is a security
+ *       property, and a second reader taking a root would be two answers to
+ *       who owns a pid. What it costs is that `liveness_test.c` starts real
+ *       children instead of pointing at a tree it made.
+ *
+ *       The four remaining are simply not written yet, each being a round trip
+ *       to the daemon it asks.
  *     * `read_resolv_currency` walks `observed.dns`, which the record now
  *       carries too -- but only carries: nothing in this build *writes* a
  *       delivered scope into it, because `dns.apply` is the one op that is not
@@ -1168,6 +1175,48 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
  * for the same reason that call gives: a receive with no timeout wedges the
  * caller for ever and this one has no caller to have decided otherwise.
  */
+/*
+ * Ask each backend netcfgd believes it is running whether it still is.
+ *
+ * **`running` in an observation was netcfgd's memory, and this makes it a
+ * fact** -- which is what the field has claimed to be all along: *a fact about
+ * a process: something is there under that pid*. The record is filled from the
+ * prior state, so a daemon that crashed an hour ago went on being reported as
+ * running for ever, and 0079's restart could not fire because the cap counts
+ * starts of something the record says is already up.
+ *
+ * **It only ever clears.** A backend the record does not have is not invented
+ * here: the record is netcfgd's account of what it started, and a process
+ * netcfgd did not start is not netcfgd's whatever its command line says. So
+ * this can disprove `running` and never assert it, and a kind it cannot answer
+ * for is left exactly as it was.
+ *
+ * Five of the nine kinds carry a handle netcfgd chose and can be answered:
+ * a supplicant and an access point by the pid file `-P` names, a router
+ * advertisement daemon by its generated configuration, a tunnel by its
+ * management socket, and a DHCP client by the pid file `-p` names.
+ * **`dhcpcd` cannot be**, and that is `dhcp.h`'s sentence rather than a gap
+ * here: it has no pid file of netcfgd's and no mark in its process image, so
+ * `ncfg_dhcpcd_whose` is the question to ask about one. PPPoE, WireGuard and
+ * DNS are not processes this port starts.
+ *
+ * **The `/proc` this reads under is not a parameter, and that is a divergence
+ * from every other pass in this header.** The handle answers come from
+ * `process.h`, which reaches `/proc` at a fixed path -- that module's right,
+ * and this module's rule broken. What it costs is that a test cannot point
+ * this at a tree it made; what it does *not* cost is testability, because the
+ * backends' own tests already prove this shape by starting real children
+ * carrying real markers, which is what `liveness_test.c` does. Recorded rather
+ * than worked around: a second `/proc` reader taking a root would be two
+ * answers to who owns a pid, and that one is a security property.
+ *
+ * Answers 1 always, unless there is nothing to walk. Nothing here can fail in
+ * a way that should cost the observation: not knowing whether a daemon is
+ * alive is an answer, and it is the one already in the record.
+ */
+int ncfg_observe_backend_liveness(ncfg_observed_t *observed, const char *run_dir, char *err,
+    size_t err_size);
+
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
     ncfg_observed_t **out, char *err, size_t err_size);
