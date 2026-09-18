@@ -66,31 +66,25 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 		return 1;
 	case NCFG_KIND_TUN:
 		/*
-		 * **Refused here because the executor refuses it there.** A `tun` is
-		 * made through `/dev/net/tun` rather than by a netlink message, which
-		 * `ncfg_kernel_newlink_of` says in as many words and acts on -- so
-		 * this list answered yes and `create_link` then had no path for it.
+		 * **Yes again, and the wiring behind it is what makes that honest.** A
+		 * `tun` is made through `/dev/net/tun` rather than by a netlink
+		 * message, so `ncfg_kernel_newlink_of` refuses one and always will --
+		 * there is no nest to build. `create_link` takes the kind before it
+		 * builds anything and hands a tun to `ncfg_tun_create` instead, which
+		 * is the call `tun.h` was written for and which nothing used to make.
 		 *
-		 * That is the one thing this function must never do. Its whole
-		 * contract is to be *the* list of what this build can carry out,
-		 * asked once before anything is done, so that a plan carrying
-		 * something impossible is refused before the machine is touched
-		 * rather than halfway through changing it -- and the planner declines
-		 * a device by asking exactly this question. A yes here that becomes a
-		 * no at execution puts the refusal back in the middle of the plan,
-		 * which is the failure the ordering exists to prevent.
-		 *
-		 * `tun.h` is ported and `ncfg_tun_create` is written, so closing this
-		 * is wiring rather than design: `create_link` gains a `tun` arm, this
-		 * case returns 1 again, and the planner stops declining it. Until
-		 * then the honest answer is the one the executor would give.
+		 * This case answered 0 for one wave and the reason mattered: this
+		 * function's whole contract is to be *the* list of what this build can
+		 * carry out, asked once before anything is done, so that a plan
+		 * carrying something impossible is refused before the machine is
+		 * touched rather than halfway through changing it. A yes here that
+		 * became a no at execution put the refusal back in the middle of the
+		 * plan, which is the failure the ordering exists to prevent -- so it
+		 * said no while the executor would have. Both halves say yes now, and
+		 * the planner follows by asking this question rather than keeping a
+		 * list of its own.
 		 */
-		ncfg_error_set(err, err_size,
-		    "creating a %s link (%s) goes through /dev/net/tun rather than a netlink "
-		    "message, and this build's executor has no path for it -- `tun.h` carries "
-		    "`ncfg_tun_create` and nothing calls it yet",
-		    word ? word : "link", name ? name : "?");
-		return 0;
+		return 1;
 	case NCFG_KIND_WIREGUARD:
 		/*
 		 * The link only. Everything that makes it a tunnel -- the key, the

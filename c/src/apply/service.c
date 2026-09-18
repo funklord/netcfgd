@@ -47,6 +47,12 @@ void ncfg_service_machine(ncfg_service_t *out)
 	out->dns.dnsmasq_conf = NCFG_DNSMASQ_CONF;
 	out->dns.unbound_conf = NCFG_UNBOUND_CONF;
 	out->dns.run_dir = NCFG_RUN_DIR_DEFAULT;
+	/* And the DHCP client's, which `dhcp.h` owns for the same reason: the hook
+	 * netcfgd ships, dhcpcd's own run directory -- which is dhcpcd's and not
+	 * netcfgd's, and is why a mark is still readable when `/run/netcfgd` has
+	 * gone -- and the operator's configuration that `-f` points at. The three
+	 * programs stay NULL, which means "find the conventional name". */
+	ncfg_dhcp_machine(&out->dhcp);
 }
 
 int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, char *err,

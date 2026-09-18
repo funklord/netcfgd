@@ -81,6 +81,7 @@
 #include <stddef.h>
 
 #include "ncfg/apply.h"
+#include "ncfg/dhcp.h"
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
@@ -154,6 +155,30 @@ typedef struct {
 } ncfg_service_tunnel_t;
 
 /*
+ * The route metric one interface's DHCP client is started with.
+ *
+ * **Resolved by the caller rather than read out of the document here**, which
+ * is `ncfg_service_advertise_t`'s arrangement and is here for a measured
+ * reason: the rule is `netcfgd_model::wifi::effective_metric`'s -- *the
+ * network's `metric` where the radio is associated to one that carries it, and
+ * the interface's own `preference` otherwise* -- and half of it comes from the
+ * observation rather than from the document. The Rust built this list from
+ * `interface.preference` alone and so missed `network { metric = N }`
+ * entirely: measured on a veth with a real server, the lease's route carried
+ * 1003, dhcpcd's own default, on a document whose network said 100, and it
+ * stayed 1003 across a switch to a network saying 400. An executor holding
+ * only the document cannot answer it, so it does not try.
+ *
+ * An interface with no entry starts a client with no `-m`, which is the
+ * client's own default and the honest answer for a document that named no
+ * preference. It is **not** a refusal: no metric is an ordinary document.
+ */
+typedef struct {
+	const char   *iface;
+	ncfg_optint_t metric;
+} ncfg_service_client_metric_t;
+
+/*
  * Everything the service-side ops need and no op carries.
  *
  * Borrowed throughout and there is no free: every member points at something
@@ -216,6 +241,21 @@ typedef struct {
 	const ncfg_service_tunnel_t *tunnels;
 	size_t                       tunnel_count;
 	/*
+	 * What a DHCP client needs from the machine: the three programs, the
+	 * shipped hook, dhcpcd's own run directory and what `-f` points at.
+	 *
+	 * A struct rather than five members here because they are one subject and
+	 * `dhcp.h` owns it -- and because `ncfg_dhcp_machine` is the one place
+	 * this machine's answers are written down, exactly as
+	 * `ncfg_service_machine` is for everything else in this header. Left zero,
+	 * a DHCP start refuses by name rather than reaching for `/run/dhcpcd` and
+	 * `/usr/libexec`.
+	 */
+	ncfg_dhcp_machine_t dhcp;
+	/* What each interface's client is started with, resolved. */
+	const ncfg_service_client_metric_t *client_metrics;
+	size_t                              client_metric_count;
+	/*
 	 * How long a control socket gets. 0 means `NCFG_SUPPLICANT_IMPATIENT_MS`.
 	 *
 	 * An argument because a test drives a fake that is deliberately silent and
@@ -227,11 +267,11 @@ typedef struct {
 /*
  * The machine's own paths, in one place.
  *
- * Fills `run_dir`, `proc_root` and `supplicant_dir` with this machine's, and
+ * Fills `run_dir`, `proc_root` and `supplicant_dir` with this machine's,
  * `dns.resolv_conf`, `dns.dnsmasq_conf`, `dns.unbound_conf` and `dns.run_dir`
- * with `dns.h`'s. Everything else is left as it was, since a document, a
- * resolver and a program list are the caller's and there is no machine-wide
- * answer for them.
+ * with `dns.h`'s, and `dhcp` with `ncfg_dhcp_machine`'s. Everything else is
+ * left as it was, since a document, a resolver and a program list are the
+ * caller's and there is no machine-wide answer for them.
  *
  * **Nothing in this project calls it from a test to write anything.** It
  * exists so that the paths a daemon would use are a value a check can read.

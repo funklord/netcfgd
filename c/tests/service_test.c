@@ -563,11 +563,12 @@ static void the_fourteen_are_supported(void)
 		NCFG_OP_SYSCTL_SET_ACCEPT_RA, NCFG_OP_HOSTNAME_SET
 	};
 	static const int carried[] = {
-		NCFG_BACKEND_ACCESS_POINT, NCFG_BACKEND_ROUTER_ADVERT, NCFG_BACKEND_OPENVPN
+		NCFG_BACKEND_ACCESS_POINT, NCFG_BACKEND_ROUTER_ADVERT, NCFG_BACKEND_OPENVPN,
+		NCFG_BACKEND_DHCP4
 	};
 	static const int refused_kinds[] = {
-		NCFG_BACKEND_DHCP4, NCFG_BACKEND_DHCP6, NCFG_BACKEND_SUPPLICANT,
-		NCFG_BACKEND_PPPOE, NCFG_BACKEND_WIREGUARD, NCFG_BACKEND_DNS
+		NCFG_BACKEND_DHCP6, NCFG_BACKEND_SUPPLICANT, NCFG_BACKEND_PPPOE,
+		NCFG_BACKEND_WIREGUARD, NCFG_BACKEND_DNS
 	};
 	char   message[NCFG_ERROR_MAX];
 	size_t i;
@@ -599,7 +600,29 @@ static void the_fourteen_are_supported(void)
 			all = 0;
 		}
 	}
-	check(all, "an access point, a radvd and an openvpn can be started and stopped");
+	check(all, "an access point, a radvd, an openvpn and a DHCPv4 client are carried out");
+
+	/*
+	 * **The DHCPv6 half answers differently for the two verbs, and that is the
+	 * decision rather than an oversight.** Which v6 client can serve a
+	 * document turns on whether it asked for a delegated prefix -- odhcp6c can
+	 * report one and dhcpcd measurably cannot (0050) -- and a plain
+	 * `backend.start` carries neither the request nor an odhcp6c. Stopping is
+	 * a different question and is answerable: `dhcpcd -6 -k` and an odhcp6c's
+	 * recorded pid are both this build's.
+	 */
+	{
+		ncfg_op_t start = backend_op(NCFG_OP_BACKEND_START, NCFG_BACKEND_DHCP6, "eth0");
+		ncfg_op_t stop = backend_op(NCFG_OP_BACKEND_STOP, NCFG_BACKEND_DHCP6, "eth0");
+
+		message[0] = '\0';
+		refused(ncfg_apply_supported(&start, message, sizeof(message)), message,
+		    "delegated prefix",
+		    "starting a DHCPv6 client is refused, naming what the op does not carry");
+		message[0] = '\0';
+		check(ncfg_apply_supported(&stop, message, sizeof(message)),
+		    "and stopping one is carried out, which is a question this build can answer");
+	}
 
 	for (i = 0; i < sizeof(refused_kinds) / sizeof(refused_kinds[0]); i++) {
 		ncfg_op_t op = backend_op(NCFG_OP_BACKEND_START, refused_kinds[i], "eth0");
@@ -662,6 +685,20 @@ static void the_machines_paths_are_one_place(void)
 	    strcmp(where.dns.dnsmasq_conf, NCFG_DNSMASQ_CONF) == 0 &&
 	    strcmp(where.dns.unbound_conf, NCFG_UNBOUND_CONF) == 0,
 	    "and the resolver's three targets are dns.h's");
+	/* And the DHCP client's, which `dhcp.h` owns: the hook netcfgd ships, the
+	 * run directory that is dhcpcd's rather than netcfgd's, and the operator's
+	 * configuration that `-f` points at. Asserted by reading the constants,
+	 * because the alternative is letting something write there. */
+	check(where.dhcp.hook != NULL &&
+	    strcmp(where.dhcp.hook, NCFG_DHCP_HOOK_DEFAULT) == 0 &&
+	    where.dhcp.dhcpcd_run_dir != NULL &&
+	    strcmp(where.dhcp.dhcpcd_run_dir, NCFG_DHCPCD_RUN_DIR_DEFAULT) == 0 &&
+	    where.dhcp.dhcpcd_config != NULL &&
+	    strcmp(where.dhcp.dhcpcd_config, NCFG_DHCPCD_CONFIG_DEFAULT) == 0,
+	    "the hook, dhcpcd's own run directory and the operator's config are dhcp.h's");
+	check(where.dhcp.dhcpcd_program == NULL && where.dhcp.udhcpc_program == NULL &&
+	    where.dhcp.busybox_program == NULL && where.dhcp.patience_ms == 0,
+	    "  with the three clients left to be found, which is what a daemon means");
 	check(where.document == NULL && where.secrets == NULL && where.hostapd_program == NULL,
 	    "a document, a resolver and a program have no machine-wide answer and are left");
 }
