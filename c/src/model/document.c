@@ -1912,7 +1912,12 @@ static const ncfg_field_t globals_fields[] = {
 	{ .name = "on_drift_default", .kind = NCFG_F_ENUM, .choices = &drift_policy_set,
 	    .fallback = NCFG_DRIFT_POLICY_RECONCILE,
 	    .offset = offsetof(ncfg_globals_t, on_drift_default) },
+	/* The one field in the model whose Rust counterpart has no
+	 * `skip_serializing_if`, so it is written as `null` rather than omitted.
+	 * The witness states a window, so only a comparison against the installed
+	 * Rust on a machine that states none could have found it. */
 	{ .name = "confirm_default", .kind = NCFG_F_OPT_INT, R_U32,
+	    .flags = NCFG_FF_NULL_ABSENT,
 	    .offset = offsetof(ncfg_globals_t, confirm_default) },
 	{ .name = "networking", .kind = NCFG_F_ENUM, .choices = &networking_set,
 	    .fallback = NCFG_NETWORKING_ON, .offset = offsetof(ncfg_globals_t, networking) },

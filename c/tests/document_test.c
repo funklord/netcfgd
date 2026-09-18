@@ -588,6 +588,29 @@ int main(int argc, char **argv)
 		}
 	}
 
+	/* **The member the witness cannot check.** `confirm_default` is the only
+	 * `Option` in the model without `skip_serializing_if`, so the Rust writes
+	 * `null` for it on a machine that states no window -- and the witness
+	 * states 90, so its absent form appears nowhere in the file every other
+	 * check here is made against. Found by running this writer beside the
+	 * installed Rust `ncfg show`. */
+	{
+		char err[NCFG_ERROR_MAX];
+		ncfg_document_t *document = ncfg_document_new(err, sizeof(err));
+		ncfg_buf_t written;
+
+		ncfg_buf_init(&written, 0u);
+		check(document != NULL, "a document with nothing stated can be made");
+		if (document && ncfg_document_write(document, &written, err, sizeof(err))) {
+			check(strstr(ncfg_buf_text(&written), "\"confirm_default\":null") != NULL,
+			    "a confirm window nobody stated is written as null, not omitted");
+		} else {
+			check(0, "a document with nothing stated can be written");
+		}
+		ncfg_buf_free(&written);
+		ncfg_document_free(document);
+	}
+
 	if (failures == 0) {
 		printf("document_test: all checks passed\n");
 	} else {

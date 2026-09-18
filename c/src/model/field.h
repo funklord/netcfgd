@@ -92,6 +92,25 @@ typedef enum {
 #define NCFG_FF_OMIT_ZERO  0x10u
 
 /*
+ * Write `null` where the value is absent, rather than leaving the member out.
+ *
+ * **Exactly one field in the model wants this**, and the reason is serde's:
+ * an `Option` carries `skip_serializing_if` or it does not, and
+ * `Globals::confirm_default` is the only one in `netcfgd-model` that does not
+ * -- measured across every `Option` field in that crate, not assumed. So the
+ * Rust writes `"confirm_default": null` on a machine that states no window,
+ * which is nearly every machine, and this engine omitted the member instead.
+ *
+ * The witness could not catch it: `doc/schema/document.json` states a window
+ * of 90, so the field's *absent* form appears nowhere in the file that
+ * everything else here is checked against. It was found by running the C
+ * `ncfg show` beside the installed Rust one against this machine's own
+ * configuration -- which is the only check that had both the absent case and
+ * something to compare it with.
+ */
+#define NCFG_FF_NULL_ABSENT 0x20u
+
+/*
  * A closed set of words.
  *
  * Either a table of names here, or the pair of functions `value.h` already
