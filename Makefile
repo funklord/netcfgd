@@ -1153,6 +1153,10 @@ packaging:
 	@# itself leaves behind and nothing else notices. Four of the wrong-item
 	@# kind turned up in one day; this covers the half that needs no judgement.
 	@python3 tool/doc_comment_gate.py
+	@# Section 4 of the socket protocol against `tier_of`. The table said 23
+	@# requests while the code classified 32, and section 2's three honest
+	@# things see bytes, shapes and members -- never a tier.
+	@python3 tool/tier_table_gate.py
 	@# The shim's bus policy against the interfaces the shim serves. A missing
 	@# entry is a client method call denied at run time, and only where
 	@# NetworkManager's own policy file is absent -- which is the machine the

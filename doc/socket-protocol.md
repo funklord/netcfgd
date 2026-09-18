@@ -139,9 +139,17 @@ reach.
 
 | Tier | Requests |
 |---|---|
-| `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list` |
-| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget` |
-| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list` |
+| `observe` | `hello`, `status`, `plan`, `show`, `explain`, `monitor`, `wifi_status`, `ap_stations`, `config_list`, `radios`, `probe_list`, `profile_list`, `modem_list`, `secret_list` |
+| `wifi` | `wifi_scan`, `wifi_connect`, `wifi_disconnect`, `wifi_add`, `wifi_forget`, `radio_set` |
+| `admin` | `apply`, `confirm`, `revert`, `reload`, `config_put`, `secret_put`, `config_delete`, `secret_delete`, `hook_list`, `profile_set`, `profile_save`, `probe_put` |
+
+**All thirty-two, and it stayed at twenty-three for a long time.** The nine
+that were missing -- the five listings, `radio_set`, and the three that write a
+profile or a probe -- were classified in `authorize.rs` and absent from this
+table, while the prose bullets below described them correctly. Section 2's
+"three things that hold this honest" cover none of it: the witness pins bytes
+rather than tiers, so nothing compared the two. `tool/tier_table_gate.py` does
+now.
 
 Two placements are deliberate and worth knowing, because both look wrong at
 first glance:
