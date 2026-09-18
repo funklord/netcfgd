@@ -498,6 +498,8 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_plan_ids_t             base = { NULL, 0, 0 };
 	ncfg_plan_ids_t             up_deps = { NULL, 0, 0 };
 	ncfg_plan_ids_t             addressing = { NULL, 0, 0 };
+	ncfg_plan_ids_t             authentication = { NULL, 0, 0 };
+	ncfg_plan_ids_t             source_base = { NULL, 0, 0 };
 	ncfg_op_t                   op;
 	ncfg_op_t                   inverse;
 	ncfg_reason_t               reason;
@@ -571,12 +573,42 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 		(void)plan_disable(builder, interface, &base, &disabled);
 	}
 
+	/*
+	 * 802.1X comes before addressing, not after. A port that has not
+	 * authenticated drops everything, so a DHCP client started first would
+	 * spend its whole backoff sequence talking to a switch that is not
+	 * listening -- and then report a failure whose real cause is two steps
+	 * earlier. Decision 0008 puts wired 802.1X on the same supplicant as wifi,
+	 * so this is the same op either way.
+	 *
+	 * The addressing waits on it and the routes do not, which is the Rust's
+	 * split: a route is installed against an interface rather than negotiated
+	 * over it.
+	 */
+	ncfg_plan_dot1x(builder, interface, &base, &authentication);
+	ncfg_plan_ids_extend(builder->plan, &source_base, &base);
+	ncfg_plan_ids_extend(builder->plan, &source_base, &authentication);
 	for (i = 0; i < interface->addressing_count; i++) {
-		ncfg_plan_source(builder, interface, i, &base, &addressing);
+		ncfg_plan_source(builder, interface, i, &source_base, &addressing);
 	}
-	for (i = 0; i < interface->route_count; i++) {
-		ncfg_plan_route(builder, interface, &interface->routes[i], &base);
+	/* The document's routes and the report's, through the one function that
+	 * answers what the list is -- the teardown asks the same one, so the two
+	 * cannot disagree and plan a route that is installed and withdrawn on
+	 * alternate reconciles. */
+	{
+		ncfg_plan_routes_t routes;
+
+		ncfg_plan_routes_for(builder, interface, &routes);
+		for (i = 0; i < routes.count; i++) {
+			ncfg_plan_route(builder, interface, &routes.routes[i], &base);
+		}
+		ncfg_plan_routes_free(&routes);
 	}
+
+	/* What this interface tells the hosts behind it, after the addressing it
+	 * waits on: a router advertising a prefix it does not itself hold is
+	 * advertising a route to nowhere. */
+	ncfg_plan_advertise(builder, interface, &base, &addressing);
 
 	/*
 	 * Rule 6: post_up runs after the last addressing action completes -- and
@@ -596,4 +628,6 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_plan_ids_free(&base);
 	ncfg_plan_ids_free(&up_deps);
 	ncfg_plan_ids_free(&addressing);
+	ncfg_plan_ids_free(&authentication);
+	ncfg_plan_ids_free(&source_base);
 }

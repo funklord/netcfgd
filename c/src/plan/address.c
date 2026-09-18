@@ -176,29 +176,6 @@ static ncfg_route_t with_metric(const ncfg_route_t *route, const ncfg_interface_
 	return copy;
 }
 
-/*
- * Whether this interface has a source whose value comes from outside the
- * document, and which this build does not resolve.
- *
- * **`delegated` used to be in this list and is not any more**, which is the
- * whole of what porting that source changed here: the value still comes from
- * outside the document, but `ncfg_plan_delegated_address` now resolves it, so
- * the teardown can answer "is this address wanted?" instead of declining to
- * ask. `reported` is the one left, and it stays until the pass that reads a
- * report lands.
- */
-static int takes_unresolved_source(const ncfg_interface_t *interface)
-{
-	size_t i;
-
-	for (i = 0; i < interface->addressing_count; i++) {
-		if (interface->addressing[i].kind == NCFG_ADDRESS_SOURCE_REPORTED) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
 /* ------------------------------------------------------------------------ *
  * Forward: addresses
  * ------------------------------------------------------------------------ */
@@ -215,7 +192,7 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	size_t                       i;
 
 	/*
-	 * Three sources are planned from here and each goes where its work is.
+	 * Four sources are planned from here and each goes where its work is.
 	 *
 	 * SLAAC is deliberately not one of them and is not a gap either: given a
 	 * router advertisement the kernel builds the address itself, so there is
@@ -238,6 +215,9 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 		return;
 	case NCFG_ADDRESS_SOURCE_DELEGATED:
 		ncfg_plan_delegated(builder, interface, index, base, out);
+		return;
+	case NCFG_ADDRESS_SOURCE_REPORTED:
+		ncfg_plan_reported(builder, interface, index, base, out);
 		return;
 	default:
 		return;
@@ -319,6 +299,18 @@ void ncfg_plan_route(ncfg_builder_t *builder, const ncfg_interface_t *interface,
 	uint32_t                    up;
 	size_t                      i;
 
+	/*
+	 * **A linkset is using something else, so this link is a spare.** The
+	 * set's whole meaning is that one member carries traffic at a time, and a
+	 * spare that keeps a default route at a worse metric is not a spare -- it
+	 * is a second path the kernel falls back to without anything having
+	 * decided that it works. Being in a set is the opt-in here, exactly as
+	 * `preference` is for the two rules below.
+	 */
+	if (ncfg_plan_standby_of(builder, interface->name, NULL, NULL)) {
+		ncfg_plan_standby_warn(builder, interface->name);
+		return;
+	}
 	/*
 	 * A route down a cable that is not plugged in is a black hole, and a lower
 	 * metric would make the kernel prefer it over the wifi that works. So an
@@ -427,20 +419,6 @@ static void teardown_routes(ncfg_builder_t *builder)
 		}
 		interface = ncfg_plan_interface(builder->desired, seen->interface);
 		if (interface) {
-			/*
-			 * An interface whose routes come partly from a report is one this
-			 * build cannot answer "is this wanted?" for, and a teardown that
-			 * guessed would delete the route the next apply puts back. Left
-			 * alone, and said.
-			 */
-			if (takes_unresolved_source(interface)) {
-				ncfg_plan_warnf(builder->plan, interface->name,
-				    "%s takes addresses or routes from outside the document, "
-				    "which this build does not read, so nothing of netcfgd's is "
-				    "withdrawn from it",
-				    interface->name);
-				continue;
-			}
 			link = ncfg_observed_link(builder->observed, interface->name);
 			/*
 			 * A route on an interface that has lost carrier stops being
@@ -457,16 +435,41 @@ static void teardown_routes(ncfg_builder_t *builder)
 			} else if (interface->preference.has && link && link->reachable.has &&
 			    !link->reachable.value) {
 				wanted = 0;
+			} else if (ncfg_plan_standby_of(builder, interface->name, NULL, NULL)) {
+				/*
+				 * A linkset is using something else, so this link's routes
+				 * stop being wanted -- the same sentence `ncfg_plan_route`
+				 * says about adding them, and the half that makes a set
+				 * actually switch over: withholding alone leaves the route
+				 * that was installed before the set changed its mind.
+				 */
+				wanted = 0;
 			} else {
-				for (j = 0; j < interface->route_count; j++) {
+				/*
+				 * **The report's routes count as wanted alongside the
+				 * document's**, and through the same function the forward pass
+				 * uses: the document names a source and the value comes from
+				 * the report, so a check that read only `interface->routes`
+				 * would delete the default route the same plan had just added,
+				 * on every reconcile, for ever.
+				 *
+				 * And when the bearer drops, the report stops naming the
+				 * gateway, this stops being true, and the route goes -- the
+				 * same withdrawal the address gets, for the same reason.
+				 */
+				ncfg_plan_routes_t routes;
+
+				ncfg_plan_routes_for(builder, interface, &routes);
+				for (j = 0; j < routes.count; j++) {
 					ncfg_route_t candidate =
-					    with_metric(&interface->routes[j], interface);
+					    with_metric(&routes.routes[j], interface);
 
 					if (ncfg_plan_route_matches(&candidate, seen)) {
 						wanted = 1;
 						break;
 					}
 				}
+				ncfg_plan_routes_free(&routes);
 			}
 		}
 		if (wanted) {
@@ -518,9 +521,6 @@ static void teardown_addresses(ncfg_builder_t *builder)
 			continue;
 		}
 		interface = ncfg_plan_interface(builder->desired, seen->interface);
-		if (interface && takes_unresolved_source(interface)) {
-			continue;
-		}
 		if (interface) {
 			for (j = 0; j < interface->addressing_count; j++) {
 				const ncfg_address_source_t *source = &interface->addressing[j];
@@ -545,6 +545,25 @@ static void teardown_addresses(ncfg_builder_t *builder)
 				    ncfg_plan_delegated_address(builder, source, derived,
 				        sizeof(derived), NULL, 0) &&
 				    ncfg_plan_address_equal(derived, seen->address)) {
+					wanted = 1;
+					break;
+				}
+				/*
+				 * **And a reported address is as wanted as a literal one**,
+				 * for the reason the arm above exists: the document names a
+				 * source rather than a value, so answering the question means
+				 * reading the report again. Without this the same plan would
+				 * add the address and delete it, for ever.
+				 *
+				 * It is also rule 7 for this source, pointed the other way. A
+				 * bearer that goes down empties the report, the address stops
+				 * being wanted here, and the teardown removes it -- which is
+				 * right, because unlike a lease there is no client holding it
+				 * and no backend to restart.
+				 */
+				if (source->kind == NCFG_ADDRESS_SOURCE_REPORTED &&
+				    ncfg_plan_reported_holds(builder->observed, seen->interface,
+				        seen->address)) {
 					wanted = 1;
 					break;
 				}

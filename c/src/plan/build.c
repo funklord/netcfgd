@@ -247,9 +247,16 @@ uint32_t ncfg_builder_push(ncfg_builder_t *builder, const ncfg_op_t *op,
 	 * Silently, because the warning that explains it is emitted once per
 	 * device up front. One warning naming the device beats three naming each
 	 * action it did not take.
+	 *
+	 * **The one exemption is `on_unmanage = "clear"`, and only while the
+	 * teardown is running.** That policy says the desired state is that
+	 * netcfgd owns nothing on the device, so what it left behind has to come
+	 * off -- and the forward passes must still be stopped, or the plan would
+	 * add an address and remove it again in the same breath, for ever.
 	 */
 	if (interface &&
-	    ncfg_plan_names(builder->unmanaged, builder->unmanaged_count, interface)) {
+	    ncfg_plan_names(builder->unmanaged, builder->unmanaged_count, interface) &&
+	    !(builder->tearing_down && ncfg_plan_clearing(builder, interface))) {
 		return NCFG_PLAN_NO_ACTION;
 	}
 	/*
@@ -327,6 +334,24 @@ static void warn_unmanaged(ncfg_builder_t *builder)
 		if (device->managed || !ncfg_plan_interface(builder->desired, device->name)) {
 			continue;
 		}
+		if (ncfg_plan_clearing(builder, device->name)) {
+			/*
+			 * The other policy, and a different sentence rather than the same
+			 * one with a clause bolted on: what is left behind is the whole
+			 * difference between them, and an operator reading "netcfgd will
+			 * not touch it" about a device it is about to empty has been told
+			 * the opposite of what the plan does.
+			 */
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "`%s` is `managed = false` with `on_unmanage = \"clear\"`: netcfgd "
+			    "removes everything it owns on it -- addresses and routes carrying "
+			    "its tag, backends it started, and the credentials those hold -- and "
+			    "then leaves it alone. Anything it did not put there is left exactly "
+			    "as it is. The plan above is what is left to remove; an empty one "
+			    "means it is done",
+			    device->name);
+			continue;
+		}
 		/*
 		 * Named specifically rather than as "left as it is", because three of
 		 * the things left behind hold credentials: a WireGuard private key
@@ -346,12 +371,33 @@ static void warn_unmanaged(ncfg_builder_t *builder)
 	}
 }
 
-/* One sentence per block this build reads and does not act on. */
-static void warn_block(ncfg_builder_t *builder, const char *interface, const char *block)
+/*
+ * One sentence per block that nothing acts on, in either language.
+ *
+ * **There was a `warn_block` beside this one and it has gone, which is worth a
+ * paragraph rather than a silent deletion.** It said "this build of the planner
+ * does not act on it", which is a promise: it tells an operator that a later
+ * release will, and that waiting is the right response. Every arm that made
+ * that promise has now been kept -- `reported`, `nat` and `ipv6_token` were the
+ * last three, and each is a pass -- so the function was left with no callers,
+ * which is a warning at the full set and, worse, an invitation for the next arm
+ * to reach for a sentence whose promise nobody has checked.
+ *
+ * A feature the Rust has not built either is not a port gap at all, and telling
+ * somebody to wait for something that is not coming is worse than saying
+ * nothing: they keep the block, re-read the release notes, and are still
+ * holding a configuration that means nothing. So a block gets this sentence
+ * once it has been checked against `crates/` and *not* found there, and the
+ * wording below is the Rust's own, which says the same thing about itself. A
+ * block that is a real port gap gets a sentence naming what is missing, in the
+ * arm itself, where a reader can check it against the pass that will fill it.
+ */
+static void warn_unbuilt(ncfg_builder_t *builder, const char *interface, const char *block)
 {
 	ncfg_plan_warnf(builder->plan, interface,
-	    "%s is carried in the document and this build of the planner does not act on it, "
-	    "so nothing in the plan above is about it",
+	    "%s. That is not this port catching up: nothing acts on it in the Rust either, "
+	    "so there is nothing to wait for. The block is kept so a configuration written "
+	    "now still means this when the code arrives",
 	    block);
 }
 
@@ -384,6 +430,12 @@ static void warn_unported(ncfg_builder_t *builder)
 			case NCFG_ADDRESS_SOURCE_DHCP4:
 			case NCFG_ADDRESS_SOURCE_DHCP6:
 			case NCFG_ADDRESS_SOURCE_DELEGATED:
+			/* `reported` is acted on in `ncfg_plan_reported`, which also
+			 * synthesises the routes a report implies; the two warnings it
+			 * emits are about a report that has not arrived or says the link
+			 * is down, which are facts about the machine rather than about
+			 * this build. */
+			case NCFG_ADDRESS_SOURCE_REPORTED:
 				break;
 			case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
 				/* The Rust's own sentence, unchanged: this one is not the
@@ -392,52 +444,36 @@ static void warn_unported(ncfg_builder_t *builder)
 				    "link-local addressing is accepted but not yet applied by "
 				    "this build");
 				break;
-			case NCFG_ADDRESS_SOURCE_REPORTED:
-				warn_block(builder, interface->name,
-				    "a `reported` addressing source, and the addresses and "
-				    "routes a report carries");
-				break;
 			default:
 				break;
 			}
 		}
-		if (interface->advertise) {
-			warn_block(builder, interface->name, "an `advertise` block");
-		}
-		if (interface->dot1x) {
-			warn_block(builder, interface->name, "a `dot1x` block");
-		}
-		if (interface->nat.has && interface->nat.value) {
-			warn_block(builder, interface->name, "a `nat` setting");
-		}
-		if (interface->ipv6_token) {
-			warn_block(builder, interface->name, "an `ipv6_token`");
-		}
 		if (interface->probe) {
-			warn_block(builder, interface->name,
-			    "a `probe` block, whose answer would decide whether this "
-			    "interface's routes are installed");
+			ncfg_plan_warnf(builder->plan, interface->name,
+			    "a `probe` block is run by the daemon rather than by the planner, "
+			    "so no action in the plan above is about it -- and its answer is "
+			    "acted on here: an interface with a `preference` whose probe says "
+			    "it is reaching nothing does not get its routes, and loses the "
+			    "ones it has");
 		}
 	}
 	for (i = 0; i < desired->device_count; i++) {
 		const ncfg_device_t *device = &desired->devices[i];
 
 		if (device->modem) {
-			warn_block(builder, device->name, "a `modem` block");
-		}
-		if (!device->managed && device->on_unmanage == NCFG_ON_UNMANAGE_CLEAR) {
-			warn_block(builder, device->name,
-			    "`on_unmanage = \"clear\"`, which would empty the device of "
-			    "everything netcfgd owns; this build leaves it instead");
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "a `modem` block is read by the daemon's SIM selection rather "
+			    "than by the planner, so no action in the plan above is about it. "
+			    "What is missing here is only the other half of a switch: a plan "
+			    "cannot yet be asked to cycle the link, so a modem that has moved "
+			    "to another SIM source gets no `link.down` and no `link.up`, and "
+			    "the `pre_up` hook that drives the mux does not fire");
 		}
 	}
 	if (desired->bluetooth_count != 0u) {
-		warn_block(builder, NULL, "a `bluetooth` block");
-	}
-	if (desired->linkset_count != 0u) {
-		warn_block(builder, NULL,
-		    "a `linkset`, whose choice would decide which member's routes are "
-		    "installed");
+		warn_unbuilt(builder, NULL,
+		    "a `bluetooth` block: nothing pairs the device, connects it, or brings "
+		    "a `pan` link up");
 	}
 }
 
@@ -539,6 +575,18 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	builder.options = options;
 
 	prepare(&builder);
+	/*
+	 * Before the warnings, because the sentence an operator reads about an
+	 * unmanaged device depends on which of the two policies it carries, and
+	 * before every pass, because `ncfg_builder_push` asks.
+	 */
+	ncfg_plan_clearing_collect(&builder);
+	/*
+	 * And before anything that plans a route: a set's choice cannot change
+	 * inside one plan, and asking `ncfg_linkset_choose` per route would make
+	 * planning cost scale with the number of routes an operator wrote.
+	 */
+	ncfg_plan_standby_collect(&builder);
 	warn_unmanaged(&builder);
 	warn_unported(&builder);
 	plan_commit_arm(&builder);
@@ -633,12 +681,23 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * anything arrives on it.
 	 */
 	ncfg_plan_offloads(&builder);
+	/* After the offloads and before the rules, which is the Rust's position
+	 * for it. Nothing here depends on that order: a token is a property of one
+	 * interface and is gated on its creation like every other link
+	 * attribute. */
+	ncfg_plan_ipv6_token(&builder);
 	ncfg_plan_rules(&builder);
 	ncfg_plan_qdisc(&builder);
 	ncfg_plan_ingress(&builder);
 	ncfg_plan_forwarding(&builder);
 	ncfg_plan_privacy(&builder);
 	ncfg_plan_hostname(&builder);
+	/* The one nftables table, after the forwarding sysctls it depends on for
+	 * its effect and before the teardown, which is where the Rust puts it. The
+	 * dependency is on the machine rather than in the plan -- translating
+	 * without forwarding does nothing, and the pass warns where the document
+	 * asks for one and not the other. */
+	ncfg_plan_nat(&builder);
 	ncfg_plan_wifi(&builder);
 	ncfg_plan_access_control(&builder);
 
@@ -647,9 +706,18 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * new address is in place before the old one goes. On a machine being
 	 * reconfigured over the network that ordering is the difference between a
 	 * brief overlap and a lockout.
+	 *
+	 * Bracketed, because this is the only window in which a device carrying
+	 * `on_unmanage = "clear"` is out of the document and an action against it
+	 * is let through. Both are true together or neither is: a filter with no
+	 * exemption removes nothing, and an exemption with no filter leaves the
+	 * teardown reading the device as wanted.
 	 */
+	ncfg_plan_clearing_begin(&builder);
 	ncfg_plan_teardown(&builder);
+	ncfg_plan_clearing_end(&builder);
 
+	ncfg_plan_standby_free(&builder);
 	free(builder.guards);
 	free(builder.gates);
 	free(builder.enslavements);

@@ -12,13 +12,16 @@
  *   * **Every failure is sticky**, `ncfg_buf_t`'s discipline: a run of twenty
  *     appends is checked once, at the end, and a half-built explanation is
  *     never handed out.
- *   * **One rule is spelled here that belongs elsewhere**, because this port
- *     has one caller for it so far: `takes_reports` is `netcfgd-plan`'s and
- *     this build's planner keeps it private. It says so at its definition, and
- *     the second caller takes this one rather than writing its own.
- *     `derive_from_delegation` was the other, and is no longer here: the
- *     planner became its second caller, so it is `ncfg_address_from_delegation`
- *     in `value.h` where 0263 said it belonged.
+ *   * **Nothing is spelled here that belongs elsewhere any more.** Two rules
+ *     were, each because this port had one caller for it: `takes_reports` and
+ *     `derive_from_delegation`. Both have their second caller now -- the
+ *     planner reads a report and resolves a delegation -- so they are
+ *     `ncfg_plan_takes_reports` in `plan.h` and `ncfg_address_from_delegation`
+ *     in `value.h`, where 0263 said each belonged. The Rust makes the first of
+ *     them public from `netcfgd-plan` for exactly this reason: an explanation
+ *     and a planner that disagreed about which reports are believed would
+ *     answer "the configuration does not ask for it" about a route netcfgd
+ *     installed itself.
  */
 #include "ncfg/explain.h"
 
@@ -305,35 +308,6 @@ static int same_address(const char *one, const char *other)
 	return strcmp(first, second) == 0;
 }
 
-/*
- * Whether netcfgd believes a report about this interface.
- *
- * **This is `netcfgd_plan::takes_reports`**, which the Rust calls from here so
- * that the explanation and the planner cannot disagree about which reports are
- * believed. This build's planner keeps the rule private -- it holds `reported`
- * addressing rather than acting on it -- so the rule is spelled here. It
- * belongs in `plan.h` beside `ncfg_plan_build`, and the second caller takes
- * this one rather than writing a third.
- */
-static int takes_reports(const ncfg_document_t *document, const ncfg_interface_t *interface)
-{
-	const ncfg_device_t *device;
-	size_t               i;
-
-	for (i = 0; i < interface->addressing_count; i++) {
-		if (interface->addressing[i].kind == NCFG_ADDRESS_SOURCE_REPORTED) {
-			return 1;
-		}
-	}
-	/* The kind comes from the device of the same name since 0155 pass 1b;
-	 * absent means physical, which takes no reports. */
-	device = device_named(document, interface->name);
-	if (!device) {
-		return 0;
-	}
-	return device->kind.kind == NCFG_KIND_OPENVPN || device->kind.kind == NCFG_KIND_PPPOE;
-}
-
 /* The report for an interface the document gave netcfgd a reason to believe. */
 static const ncfg_observed_report_t *report_for(const ncfg_document_t *desired,
     const ncfg_observed_t *observed, const char *interface)
@@ -341,7 +315,7 @@ static const ncfg_observed_report_t *report_for(const ncfg_document_t *desired,
 	const ncfg_interface_t *declared_interface = interface_named(desired, interface);
 	size_t                  i;
 
-	if (!declared_interface || !takes_reports(desired, declared_interface)) {
+	if (!declared_interface || !ncfg_plan_takes_reports(desired, declared_interface)) {
 		return NULL;
 	}
 	for (i = 0; i < observed->report_count; i++) {
