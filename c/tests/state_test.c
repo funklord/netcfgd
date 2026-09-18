@@ -1,0 +1,724 @@
+/*
+ * state_test.c -- the run directory, and the four defects that shaped it.
+ *
+ * WHAT THESE CASES ARE FOR
+ *   * **A record from another boot is discarded, and one with no boot is
+ *     kept.** Every object a stale record names is gone, and anything that has
+ *     taken the same name since would be adopted by a claim that never applied
+ *     to it (0138). The round trip matters as much as the discard: the write
+ *     stamps the boot itself, so a caller cannot forget to -- and a record that
+ *     forgot would be one the read cannot judge, failing open. An *unstamped*
+ *     record is from a netcfgd that predates the field, and discarding it would
+ *     throw ownership away for a reason unrelated to a reboot.
+ *   * **A record that will not parse is discarded and said out loud** (0189).
+ *     This is a downgrade's most likely shape. Measured before it: the daemon
+ *     started, stayed configured, and said nothing at all.
+ *   * **Two writers of one file must not share a temporary.** `owned.json` is
+ *     written by `ncfg apply` and by the daemon, and every temporary used to be
+ *     `<name>.tmp` -- one path for everyone. Interleaved, the second writer's
+ *     bytes land under the first writer's rename and the loser renames a file
+ *     that is no longer there. **Processes rather than threads here**, because
+ *     that is the arrangement the defect actually has.
+ *   * **Two updaters must not lose each other's changes.** Worse than "one
+ *     change does not stick": a fold adds only what *this* apply did, so a pass
+ *     with nothing of its own writes back everything it read, and a stale read
+ *     therefore **restores** a record the other process had just dropped.
+ *     Ownership is what decides whether netcfgd may reset a qdisc or delete a
+ *     link, so a restored record is the unsafe direction. Deterministic: both
+ *     sides hold their change open long enough that an unlocked implementation
+ *     must interleave.
+ *
+ *   The report cases are the contract's own, and `THE_DOCUMENTED_EXAMPLE` is
+ *   verbatim from `doc/interface-report.md`. **If this file and that document
+ *   ever disagree, the document is right**: it is what somebody else wrote
+ *   their helper against.
+ *
+ * NOTHING OUTSIDE ITS OWN DIRECTORY
+ *   The real daemon is running on this machine with `/run/netcfgd` full of its
+ *   real state. Every path here is under one `mkdtemp` directory, the run
+ *   directory is passed explicitly everywhere, and the default is checked by
+ *   reading the constant rather than by writing to it.
+ */
+#include "ncfg/base.h"
+#include "ncfg/document.h"
+#include "ncfg/observed.h"
+#include "ncfg/state.h"
+
+#include "testdir.h"
+
+#include <errno.h>
+#include <signal.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
+
+static int failures;
+
+static void check(int condition, const char *what)
+{
+	printf("%-64s %s\n", what, condition ? "ok" : "FAILED");
+	if (!condition) {
+		failures++;
+	}
+}
+
+static char *join(const char *dir, const char *leaf)
+{
+	static char out[512];
+
+	(void)snprintf(out, sizeof(out), "%s/%s", dir, leaf);
+	return out;
+}
+
+static void sleep_ms(long milliseconds)
+{
+	struct timespec wanted;
+
+	wanted.tv_sec = milliseconds / 1000;
+	wanted.tv_nsec = (milliseconds % 1000) * 1000000L;
+	(void)nanosleep(&wanted, NULL);
+}
+
+/* Wait for one child, with a ceiling: nothing here takes more than a second
+ * when it works, and a blocking wait on a child that wedged would hold the
+ * whole suite. */
+static int wait_for(pid_t child)
+{
+	int rounds;
+
+	for (rounds = 0; rounds < 300; rounds++) {
+		int status = 0;
+		pid_t got = waitpid(child, &status, WNOHANG);
+
+		if (got == child) {
+			return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+		}
+		if (got < 0 && errno != EINTR) {
+			return 0;
+		}
+		sleep_ms(20);
+	}
+	(void)kill(child, SIGKILL);
+	(void)waitpid(child, NULL, 0);
+	return 0;
+}
+
+/* ----------------------------------------------------------- the run directory */
+
+static void the_run_directory_is_chosen_in_one_order(void)
+{
+	char out[256];
+
+	(void)unsetenv(NCFG_RUN_DIR_ENV);
+	check(strcmp(ncfg_state_resolve_dir(NULL, out, sizeof(out)), NCFG_RUN_DIR_DEFAULT) == 0,
+	    "with nothing said, the run directory is the default");
+	(void)setenv(NCFG_RUN_DIR_ENV, "/tmp/netcfgd-not-written-to", 1);
+	check(strcmp(ncfg_state_resolve_dir(NULL, out, sizeof(out)),
+	    "/tmp/netcfgd-not-written-to") == 0,
+	    "the environment overrides it, which is what a second netcfgd needs");
+	check(strcmp(ncfg_state_resolve_dir("/tmp/netcfgd-asked-for", out, sizeof(out)),
+	    "/tmp/netcfgd-asked-for") == 0,
+	    "and an explicit one overrides both");
+	(void)unsetenv(NCFG_RUN_DIR_ENV);
+	/* Nothing above wrote anywhere: the names are resolved, not used. */
+}
+
+/* --------------------------------------------------------------- the record */
+
+static void the_record_round_trips(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+	ncfg_owned_state_t back;
+	size_t capacity = 0;
+	char *now = ncfg_state_boot_id();
+
+	memset(&owned, 0, sizeof(owned));
+	memset(&back, 0, sizeof(back));
+	check(ncfg_owned_remember(&owned.forwarding, &owned.forwarding_count, "eth0", 1),
+	    "an interface netcfgd switched forwarding on for is remembered");
+	check(ncfg_owned_remember(&owned.forwarding, &owned.forwarding_count, "eth1", 1) &&
+	    owned.forwarding_count == 2u, "and so is a second");
+	/* **Switching one off drops the record rather than storing false**: the
+	 * question is "is this ours to undo later", and once it has been undone
+	 * the answer is no. */
+	check(ncfg_owned_remember(&owned.forwarding, &owned.forwarding_count, "eth0", 0) &&
+	    owned.forwarding_count == 1u && strcmp(owned.forwarding[0], "eth1") == 0,
+	    "switching one off drops its record rather than storing a false");
+
+	owned.addresses = calloc(1u, sizeof(*owned.addresses));
+	owned.addresses[0].interface = strdup("eth1");
+	owned.addresses[0].key = strdup("10.0.0.5/24");
+	owned.addresses[0].origin = NCFG_ORIGIN_DHCP4;
+	owned.address_count = 1u;
+	(void)capacity;
+	check(ncfg_owned_note_hook_state(&owned, "eth1", NCFG_HOOK_PHASE_LEASE, "10.0.0.5/24") &&
+	    ncfg_owned_note_hook_state(&owned, "eth1", NCFG_HOOK_PHASE_LEASE, "10.0.0.6/24") &&
+	    owned.hook_state_count == 1u &&
+	    strcmp(owned.hook_state[0].value, "10.0.0.6/24") == 0,
+	    "a hook's last word replaces the one before it rather than joining it");
+
+	check(ncfg_owned_write(run_dir, &owned, message, sizeof(message)),
+	    "the record is written");
+	check(ncfg_owned_read(run_dir, &back, message, sizeof(message)) &&
+	    back.forwarding_count == 1u && strcmp(back.forwarding[0], "eth1") == 0 &&
+	    back.address_count == 1u && back.addresses[0].origin == NCFG_ORIGIN_DHCP4 &&
+	    strcmp(back.addresses[0].key, "10.0.0.5/24") == 0 &&
+	    back.hook_state_count == 1u && back.hook_state[0].phase == NCFG_HOOK_PHASE_LEASE,
+	    "and comes back as itself");
+	check(!now || (back.boot && strcmp(back.boot, now) == 0),
+	    "stamped with this boot by the write, so no caller can forget to");
+	free(now);
+	ncfg_owned_free(&owned);
+	ncfg_owned_free(&back);
+}
+
+static void a_record_from_another_boot_is_discarded(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+	char *now = ncfg_state_boot_id();
+	static const char forged[] = "{\"boot\":\"00000000-0000-0000-0000-000000000000\","
+	    "\"forwarding\":[\"eth0\"]}";
+
+	if (!now) {
+		/* Saying so beats a green result that inspected nothing. */
+		printf("no boot id on this kernel; the discard was not exercised\n");
+		return;
+	}
+	free(now);
+	check(testdir_write(join(run_dir, "owned.json"), forged, sizeof(forged) - 1u),
+	    "a record that says it was written during another boot");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.forwarding_count == 0u,
+	    "names objects that no longer exist, so it is discarded whole");
+	ncfg_owned_free(&owned);
+}
+
+static void a_record_with_no_boot_recorded_is_kept(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+	static const char old[] = "{\"forwarding\":[\"eth0\"],\"created_links\":[],"
+	    "\"addresses\":[],\"routes\":[],\"privacy\":[],\"qdisc\":[],\"ingress\":[]}";
+
+	check(testdir_write(join(run_dir, "owned.json"), old, sizeof(old) - 1u),
+	    "a record from a netcfgd that predates the boot field");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.forwarding_count == 1u && strcmp(owned.forwarding[0], "eth0") == 0,
+	    "is kept: an unknown boot means do not judge, never discard");
+	ncfg_owned_free(&owned);
+}
+
+static int push_qdisc(ncfg_owned_state_t *owned, void *context)
+{
+	size_t capacity = owned->qdisc_count;
+
+	(void)capacity;
+	return ncfg_owned_remember(&owned->qdisc, &owned->qdisc_count, (const char *)context, 1);
+}
+
+static void a_record_that_will_not_parse_is_discarded_rather_than_fatal(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_owned_state_t owned;
+
+	check(testdir_write(join(run_dir, "owned.json"), "this is not json\n", 17u),
+	    "a record a newer netcfgd wrote and this one cannot read");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.address_count == 0u,
+	    "is the empty default rather than a refusal to start");
+	ncfg_owned_free(&owned);
+
+	/* Which is what stops a bad file being permanent: the next apply writes a
+	 * good one. */
+	check(ncfg_owned_update(run_dir, push_qdisc, (void *)"eth0", message, sizeof(message)),
+	    "and an update over it still writes one");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.qdisc_count == 1u && strcmp(owned.qdisc[0], "eth0") == 0,
+	    "which reads back");
+	ncfg_owned_free(&owned);
+
+	/* A member this build has never heard of is the same case: guessing at it
+	 * is how a downgrade adopts an object it cannot describe. */
+	check(testdir_write(join(run_dir, "owned.json"),
+	    "{\"forwarding\":[\"eth0\"],\"something_new\":[1]}", 41u),
+	    "a record carrying a member this build does not know");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.forwarding_count == 0u,
+	    "is discarded rather than half-read");
+	ncfg_owned_free(&owned);
+	(void)unlink(join(run_dir, "owned.json"));
+}
+
+static void two_writers_of_one_file_do_not_share_a_temporary(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	const char *path = join(run_dir, "contended.json");
+	char *own_path = strdup(path);
+	char *body = malloc(64u * 1024u);
+	pid_t children[2];
+	int which;
+	int all = 1;
+	char *final_text;
+	size_t length = 0;
+
+	if (!body || !own_path) {
+		check(0, "the fixture could be allocated");
+		free(body);
+		free(own_path);
+		return;
+	}
+	for (which = 0; which < 2; which++) {
+		fflush(NULL);
+		children[which] = fork();
+		if (children[which] == 0) {
+			int round;
+
+			memset(body, which ? 'b' : 'a', 64u * 1024u);
+			for (round = 0; round < 200; round++) {
+				char mine[NCFG_ERROR_MAX] = "";
+
+				if (!ncfg_write_atomically(own_path, body, 64u * 1024u, 0666u, mine,
+				    sizeof(mine))) {
+					_exit(1);
+				}
+			}
+			_exit(0);
+		}
+		if (children[which] < 0) {
+			check(0, "the writers could be started");
+			free(body);
+			free(own_path);
+			return;
+		}
+	}
+	for (which = 0; which < 2; which++) {
+		all = wait_for(children[which]) && all;
+	}
+	check(all, "two processes writing one file never fail each other");
+
+	final_text = testdir_read(own_path, &length);
+	/* And the survivor is one of them whole, never a mixture. */
+	check(final_text && length == 64u * 1024u &&
+	    (final_text[0] == 'a' || final_text[0] == 'b') &&
+	    final_text[length - 1u] == final_text[0],
+	    "and what is left is one writer's content, never a mixture");
+	free(final_text);
+	free(body);
+	(void)unlink(own_path);
+	free(own_path);
+	(void)message;
+}
+
+static int push_slowly(ncfg_owned_state_t *owned, void *context)
+{
+	if (!ncfg_owned_remember(&owned->qdisc, &owned->qdisc_count, (const char *)context, 1)) {
+		return 0;
+	}
+	/* Long enough that an unlocked reader has certainly read, and short enough
+	 * that a person waits for it. */
+	sleep_ms(150);
+	return 1;
+}
+
+static void two_updaters_do_not_lose_each_others_records(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	static const char *const names[2] = { "veth0", "veth1" };
+	ncfg_owned_state_t owned;
+	pid_t children[2];
+	int which;
+	int all = 1;
+
+	(void)unlink(join(run_dir, "owned.json"));
+	for (which = 0; which < 2; which++) {
+		fflush(NULL);
+		children[which] = fork();
+		if (children[which] == 0) {
+			char mine[NCFG_ERROR_MAX] = "";
+
+			_exit(ncfg_owned_update(run_dir, push_slowly, (void *)names[which], mine,
+			    sizeof(mine)) ? 0 : 1);
+		}
+		if (children[which] < 0) {
+			check(0, "the updaters could be started");
+			return;
+		}
+	}
+	for (which = 0; which < 2; which++) {
+		all = wait_for(children[which]) && all;
+	}
+	check(all, "two processes updating the record both succeed");
+	check(ncfg_owned_read(run_dir, &owned, message, sizeof(message)) &&
+	    owned.qdisc_count == 2u,
+	    "and neither loses the other's: an update was not put back over");
+	ncfg_owned_free(&owned);
+	(void)unlink(join(run_dir, "owned.json"));
+	(void)unlink(join(run_dir, "owned.lock"));
+}
+
+/* ------------------------------------------------------------- provenance */
+
+static void provenance_round_trips(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_provenance_t provenance;
+	ncfg_provenance_t back;
+	char where[256];
+
+	memset(&provenance, 0, sizeof(provenance));
+	memset(&back, 0, sizeof(back));
+	check(ncfg_state_read_provenance(run_dir, &back, message, sizeof(message)) &&
+	    back.count == 0u,
+	    "an absent provenance table is empty, not a failure");
+	ncfg_provenance_free(&back);
+
+	(void)ncfg_provenance_record(&provenance, "interfaces[eth0].mtu",
+	    "/etc/netcfgd/conf.d/10-lan.conf", 4, 2, message, sizeof(message));
+	(void)ncfg_provenance_record(&provenance, "globals.on_drift",
+	    "/etc/netcfgd/netcfgd.conf", 9, 1, message, sizeof(message));
+	/* The first entry for a path wins: an explanation naming the later one
+	 * would send a reader to the override rather than to what produced the
+	 * value. */
+	(void)ncfg_provenance_record(&provenance, "globals.on_drift", "/etc/netcfgd/later.conf",
+	    99, 1, message, sizeof(message));
+	check(ncfg_state_write_provenance(run_dir, &provenance, message, sizeof(message)),
+	    "the provenance table is written");
+	check(provenance.count == 2u &&
+	    strcmp(provenance.entries[0].path, "globals.on_drift") == 0,
+	    "sorted by path and with one entry per path, so the file is stable");
+	check(ncfg_state_read_provenance(run_dir, &back, message, sizeof(message)) &&
+	    back.count == 2u,
+	    "and read back");
+	ncfg_provenance_location(ncfg_provenance_lookup(&back, "interfaces[eth0].mtu"), where,
+	    sizeof(where));
+	check(strcmp(where, "/etc/netcfgd/conf.d/10-lan.conf:4:2") == 0,
+	    "`ncfg explain` can name a file and a line without recompiling");
+	ncfg_provenance_free(&provenance);
+	ncfg_provenance_free(&back);
+}
+
+/* ------------------------------------------------------- the desired document */
+
+static ncfg_document_t *two_interfaces(void)
+{
+	char message[NCFG_ERROR_MAX];
+	ncfg_document_t *document = ncfg_document_new(message, sizeof(message));
+
+	if (!document) {
+		printf("could not make a document: %s\n", message);
+		exit(1);
+	}
+	document->interfaces = calloc(2u, sizeof(*document->interfaces));
+	if (!document->interfaces) {
+		exit(1);
+	}
+	document->interface_count = 2u;
+	/* Deliberately out of order, so that the canonicalisation the write does
+	 * is what the projections are named from. */
+	document->interfaces[0].name = strdup("wlan0");
+	document->interfaces[0].enabled = 1;
+	document->interfaces[1].name = strdup("eth0");
+	document->interfaces[1].enabled = 1;
+	return document;
+}
+
+static void the_desired_document_and_its_projections(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_document_t *document = two_interfaces();
+	char *whole;
+	char *one;
+	size_t length = 0;
+	char *desired_dir = strdup(join(run_dir, "desired"));
+	char *stale = strdup(join(desired_dir, "gone.json"));
+
+	check(mkdir(desired_dir, 0755) == 0 && testdir_write(stale, "{}", 2u),
+	    "a projection for an interface the configuration no longer has");
+
+	check(ncfg_state_write_desired(run_dir, document, message, sizeof(message)),
+	    "the desired document is written");
+	whole = testdir_read(join(run_dir, "desired.json"), &length);
+	check(whole && strstr(whole, "\"eth0\"") && strstr(whole, "\"wlan0\""),
+	    "and carries both interfaces");
+	free(whole);
+
+	one = testdir_read(join(desired_dir, "eth0.json"), &length);
+	/* `cat /run/netcfgd/desired/eth0.json` answers a question about one
+	 * interface without a reader having to find it inside the whole file --
+	 * and the slice is proved to be that interface before it is written. */
+	check(one && strstr(one, "\"name\":\"eth0\"") && !strstr(one, "wlan0"),
+	    "each interface has a file of its own, carrying itself and nothing else");
+	free(one);
+	one = testdir_read(join(desired_dir, "wlan0.json"), &length);
+	check(one && strstr(one, "\"name\":\"wlan0\"") && !strstr(one, "eth0"),
+	    "for every interface, not only the first");
+	free(one);
+
+	check(!testdir_exists(stale),
+	    "and a projection the configuration dropped is removed, not left claiming");
+	ncfg_document_free(document);
+
+	/* No interfaces, no directory: the filesystem reflects use, not
+	 * capability. */
+	document = ncfg_document_new(message, sizeof(message));
+	check(ncfg_state_write_desired(run_dir, document, message, sizeof(message)) &&
+	    !testdir_exists(join(desired_dir, "eth0.json")),
+	    "a document with no interfaces leaves no projections behind");
+	ncfg_document_free(document);
+	(void)rmdir(desired_dir);
+	free(stale);
+	free(desired_dir);
+}
+
+static void the_observation_is_written_whole(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_observed_t *observed = ncfg_observed_new(message, sizeof(message));
+	char *whole;
+
+	check(observed && ncfg_state_write_observed(run_dir, observed, message, sizeof(message)),
+	    "the observation is written whole");
+	whole = testdir_read(join(run_dir, "observed.json"), NULL);
+	/* The per-link projections are deferred, and `state.h` says why: one of
+	 * those files is a link with the addresses and routes on it, and
+	 * assembling it needs the observed model's own writers. */
+	check(whole && whole[0] == '{', "and is a document a reader can `cat`");
+	free(whole);
+	ncfg_observed_free(observed);
+	(void)unlink(join(run_dir, "observed.json"));
+}
+
+/* ----------------------------------------------------------- the reports */
+
+/* Verbatim from `doc/interface-report.md`. If the two disagree, the document
+ * is right. */
+static const char THE_DOCUMENTED_EXAMPLE[] =
+    "# wwan0, connected 2026-07-31T14:02:11Z via three.co.uk\n"
+    "address=10.64.1.23/30\n"
+    "gateway=10.64.1.24\n"
+    "dns=8.8.8.8\n"
+    "dns=2001:4860:4860::8888\n";
+
+static int parsed(const char *body, ncfg_observed_report_t *out)
+{
+	char message[NCFG_ERROR_MAX] = "";
+
+	return ncfg_state_parse_report("wwan0", body, strlen(body), out, message,
+	    sizeof(message));
+}
+
+static void the_report_format_is_the_contract(void)
+{
+	ncfg_observed_report_t report;
+
+	check(parsed(THE_DOCUMENTED_EXAMPLE, &report) &&
+	    report.address_count == 1u && strcmp(report.addresses[0], "10.64.1.23/30") == 0 &&
+	    report.gateway_count == 1u && strcmp(report.gateways[0], "10.64.1.24") == 0 &&
+	    report.nameserver_count == 2u && strcmp(report.nameservers[0], "8.8.8.8") == 0 &&
+	    strcmp(report.nameservers[1], "2001:4860:4860::8888") == 0,
+	    "the documented example parses to what it says");
+	ncfg_state_report_free(&report);
+
+	/* **Unknown keys are ignored, and that is a promise the contract makes.**
+	 * A reader that refused here would break every helper the day it learned a
+	 * new field. */
+	check(parsed("mtu=1428\noperator=three.co.uk\naddress=10.0.0.1/32\nsignal=-71\n",
+	    &report) && report.address_count == 1u && report.gateway_count == 0u,
+	    "a key netcfgd does not know yet does not cost the rest of the report");
+	ncfg_state_report_free(&report);
+
+	/* A bearer that came up with a usable v4 address and a mangled v6 one
+	 * should still get the v4. Losing the file over one line is the failure
+	 * that leaves somebody with no connectivity and no explanation. */
+	check(parsed("address=10.0.0.1/32\nthis is not a key=value line at all\n"
+	    "gateway=\naddress=\n\ndns=1.1.1.1\n", &report) &&
+	    report.address_count == 1u && report.gateway_count == 0u &&
+	    report.nameserver_count == 1u,
+	    "a bad line does not discard the good ones, and an empty value is not one");
+	ncfg_state_report_free(&report);
+
+	check(parsed("  # a comment, indented\n\t address = 10.0.0.1/32 \t\n\n#dns=8.8.8.8\n",
+	    &report) && report.address_count == 1u &&
+	    strcmp(report.addresses[0], "10.0.0.1/32") == 0 && report.nameserver_count == 0u,
+	    "comments and whitespace are what the document says they are");
+	ncfg_state_report_free(&report);
+
+	/* Distinct from no file at all only in that somebody said so, which is
+	 * exactly the distinction the contract asks helpers to make. */
+	check(parsed("", &report) && strcmp(report.interface, "wwan0") == 0 &&
+	    report.address_count == 0u,
+	    "an empty report is a bearer that is down");
+	ncfg_state_report_free(&report);
+
+	check(parsed("dns=9.9.9.9\ndns=1.1.1.1\ndns=8.8.8.8\n", &report) &&
+	    report.nameserver_count == 3u && strcmp(report.nameservers[0], "9.9.9.9") == 0 &&
+	    strcmp(report.nameservers[2], "8.8.8.8") == 0,
+	    "repeats keep the order they were written in");
+	ncfg_state_report_free(&report);
+
+	check(parsed("route=10.0.0.0/8 via 10.8.0.1\nroute=192.168.5.0/24\n", &report) &&
+	    report.route_count == 2u &&
+	    strcmp(report.routes[0].destination, "10.0.0.0/8") == 0 &&
+	    report.routes[0].via && strcmp(report.routes[0].via, "10.8.0.1") == 0 &&
+	    report.routes[1].via == NULL,
+	    "a route is read the way a config file spells one");
+	ncfg_state_report_free(&report);
+
+	/* Not refused: `metric 50` silently ignored would be a route with a metric
+	 * netcfgd chose and an operator thought they had. */
+	check(parsed("route=10.0.0.0/8 metric 50\nroute=10.1.0.0/16 via 10.8.0.1 metric 50\n"
+	    "route=10.2.0.0/16 via\nroute=10.3.0.0/16 via 10.8.0.1\n", &report) &&
+	    report.route_count == 1u &&
+	    strcmp(report.routes[0].destination, "10.3.0.0/16") == 0,
+	    "a route line the contract does not define is skipped, not half-applied");
+	ncfg_state_report_free(&report);
+
+	/* One card and one source rather than a list: a second line is a writer
+	 * correcting itself within one file. */
+	check(parsed("iccid=8944\nsim=first\niccid=8945\n", &report) &&
+	    report.iccid && strcmp(report.iccid, "8945") == 0 &&
+	    report.sim && strcmp(report.sim, "first") == 0,
+	    "the card and its source take the last word, where every other key adds");
+	ncfg_state_report_free(&report);
+}
+
+static void two_clients_on_one_interface_keep_both_their_answers(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_observed_report_t *reports = NULL;
+	size_t count = 0;
+	char *fragments = strdup(join(run_dir, "reported.d/wan0"));
+
+	check(ncfg_state_read_reports("/nonexistent/netcfgd-test-run-dir", &reports, &count,
+	    message, sizeof(message)) && count == 0u,
+	    "a machine with nothing reporting reports nothing");
+
+	check(mkdir(join(run_dir, "reported"), 0755) == 0 &&
+	    mkdir(join(run_dir, "reported.d"), 0755) == 0 && mkdir(fragments, 0755) == 0,
+	    "a v4 client's single file and a v6 client's fragment");
+	(void)testdir_write(join(run_dir, "reported/wan0"),
+	    "address=192.0.2.10/24\ndns=8.8.8.8\n", 34u);
+	/* The contract tells every writer to stage in the same directory and
+	 * rename over the target, so the half-written file it exists to hide is
+	 * sitting right here -- and it was read as a report for an interface named
+	 * after the temporary file (0113). */
+	(void)testdir_write(join(run_dir, "reported/.wan0.tmp"), "address=10.9.9.9/32\n", 20u);
+	(void)testdir_write(join(fragments, "dhcpcd6"),
+	    "dns=2001:4860:4860::8888\nsearch=example.net\n", 43u);
+	(void)testdir_write(join(fragments, ".dhcpcd6.tmp"), "dns=9.9.9.9\n", 12u);
+
+	check(ncfg_state_read_reports(run_dir, &reports, &count, message, sizeof(message)) &&
+	    count == 1u,
+	    "one interface, one report, whichever files it was assembled from");
+	check(count == 1u && reports[0].nameserver_count == 2u &&
+	    strcmp(reports[0].nameservers[0], "8.8.8.8") == 0 &&
+	    strcmp(reports[0].nameservers[1], "2001:4860:4860::8888") == 0,
+	    "the single file first and the fragments after, so v4 precedes v6 every boot");
+	check(count == 1u && reports[0].address_count == 1u && reports[0].search_count == 1u,
+	    "and everything else merges rather than the last writer winning");
+	ncfg_state_reports_free(reports, count);
+
+	/* `readdir` order is the filesystem's. A nameserver list that came back
+	 * differently between boots would make a plan differ from the last one for
+	 * a reason nobody could see. */
+	(void)unlink(join(run_dir, "reported/wan0"));
+	(void)unlink(join(fragments, "dhcpcd6"));
+	(void)testdir_write(join(fragments, "zzz"), "dns=3.3.3.3\n", 12u);
+	(void)testdir_write(join(fragments, "aaa"), "dns=1.1.1.1\n", 12u);
+	(void)testdir_write(join(fragments, "mmm"), "dns=2.2.2.2\n", 12u);
+	reports = NULL;
+	count = 0;
+	check(ncfg_state_read_reports(run_dir, &reports, &count, message, sizeof(message)) &&
+	    count == 1u && reports[0].nameserver_count == 3u &&
+	    strcmp(reports[0].nameservers[0], "1.1.1.1") == 0 &&
+	    strcmp(reports[0].nameservers[2], "3.3.3.3") == 0,
+	    "fragments are read in name order, whatever order the directory holds");
+	/* A v6-only network has no DHCPv4 client, so nothing writes the single
+	 * file -- and a reader that walked `reported/` and decorated what it found
+	 * would report nothing at all for exactly that machine (0086). */
+	check(count == 1u && strcmp(reports[0].interface, "wan0") == 0,
+	    "an interface with only fragments is still an interface");
+	ncfg_state_reports_free(reports, count);
+
+	(void)unlink(join(fragments, "zzz"));
+	(void)unlink(join(fragments, "aaa"));
+	(void)unlink(join(fragments, "mmm"));
+	(void)unlink(join(fragments, ".dhcpcd6.tmp"));
+	(void)unlink(join(run_dir, "reported/.wan0.tmp"));
+	(void)rmdir(fragments);
+	(void)rmdir(join(run_dir, "reported.d"));
+	(void)rmdir(join(run_dir, "reported"));
+	free(fragments);
+}
+
+static void the_delegations_a_client_reported(const char *run_dir)
+{
+	char message[NCFG_ERROR_MAX] = "";
+	ncfg_delegation_t *delegations = NULL;
+	size_t count = 0;
+	char *dir = strdup(join(run_dir, "prefixes"));
+
+	check(ncfg_state_read_delegations(run_dir, &delegations, &count, message,
+	    sizeof(message)) && count == 0u,
+	    "a machine that is not a router has no delegations and that is not an error");
+
+	(void)mkdir(dir, 0755);
+	(void)testdir_write(join(dir, "wan0"),
+	    "# what the lease said\n2001:db8:1::/64\n\n2001:db8:2::/64\n", 55u);
+	/* An empty file means the lease expired and the hook recorded that, which
+	 * differs from no file at all only in that it says so deliberately. */
+	(void)testdir_write(join(dir, "wan1"), "", 0u);
+	(void)testdir_write(join(dir, ".wan2.tmp"), "2001:db8:9::/64\n", 16u);
+
+	check(ncfg_state_read_delegations(run_dir, &delegations, &count, message,
+	    sizeof(message)) && count == 2u,
+	    "one delegation per interface, and a staging file is not one");
+	check(count == 2u && strcmp(delegations[0].interface, "wan0") == 0 &&
+	    delegations[0].prefix_count == 2u &&
+	    strcmp(delegations[0].prefixes[0], "2001:db8:1::/64") == 0,
+	    "comments and blank lines are ignored, and the order is the lease's");
+	check(count == 2u && delegations[1].prefix_count == 0u,
+	    "and an expired lease is an interface with no prefixes");
+	ncfg_state_delegations_free(delegations, count);
+
+	(void)unlink(join(dir, "wan0"));
+	(void)unlink(join(dir, "wan1"));
+	(void)unlink(join(dir, ".wan2.tmp"));
+	(void)rmdir(dir);
+	free(dir);
+}
+
+int main(void)
+{
+	const char *run_dir = testdir_make("state");
+
+	printf("== state_test in %s\n", run_dir);
+	the_run_directory_is_chosen_in_one_order();
+	the_record_round_trips(run_dir);
+	a_record_from_another_boot_is_discarded(run_dir);
+	a_record_with_no_boot_recorded_is_kept(run_dir);
+	a_record_that_will_not_parse_is_discarded_rather_than_fatal(run_dir);
+	two_writers_of_one_file_do_not_share_a_temporary(run_dir);
+	two_updaters_do_not_lose_each_others_records(run_dir);
+	provenance_round_trips(run_dir);
+	the_desired_document_and_its_projections(run_dir);
+	the_observation_is_written_whole(run_dir);
+	the_report_format_is_the_contract();
+	two_clients_on_one_interface_keep_both_their_answers(run_dir);
+	the_delegations_a_client_reported(run_dir);
+	testdir_remove(run_dir);
+
+	if (failures == 0) {
+		printf("state_test: all checks passed\n");
+	} else {
+		printf("state_test: %d check(s) failed\n", failures);
+	}
+	return failures == 0 ? 0 : 1;
+}
