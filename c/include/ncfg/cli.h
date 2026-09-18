@@ -290,6 +290,29 @@ int ncfg_cli_is_radio(const char *kind, const char *name);
  */
 int ncfg_cli_is_online(const ncfg_observed_t *observed);
 
+/*
+ * How long `ncfg wait-online` waits when nobody says.
+ *
+ * Thirty seconds, which is what `NetworkManager-wait-online.service` uses:
+ * long enough for DHCP on a slow switch with spanning tree, short enough that
+ * a machine with no network still finishes booting.
+ *
+ * **The usage text is pasted together from this rather than restating it**,
+ * which is `daemon_main.c`'s rule for the daemon's defaults and is here for
+ * the same reason: the Rust writes `30 by default` as literal text beside a
+ * `DEFAULT_WAIT_ONLINE` that holds the same number, and the help is the copy
+ * nobody recompiles. `NCFG_CLI_SPELL` is the two-step stringify every C
+ * project writes once -- one step expands the macro, the second turns it into
+ * a literal, and doing it in one gives the macro's own name. **Spelled
+ * `SPELL` rather than `TEXT`** because this file already has two meanings for
+ * that word -- `ncfg_cli_text` converts a counted protocol string and
+ * `NCFG_CLI_TEXT_MAX` is how long one may be -- and a third is how a reader
+ * comes to believe a stringify is a length.
+ */
+#define NCFG_CLI_SPELL_(value) #value
+#define NCFG_CLI_SPELL(value) NCFG_CLI_SPELL_(value)
+#define NCFG_CLI_WAIT_ONLINE_DEFAULT 30
+
 /* A duration a person reads at a glance rather than a seconds count. */
 const char *ncfg_cli_duration(int64_t seconds, char *out, size_t out_size);
 

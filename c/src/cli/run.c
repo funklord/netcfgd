@@ -26,18 +26,24 @@
  */
 #include "cli_internal.h"
 
+#include "ncfg/apply.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/config.h"
+#include "ncfg/explain.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
 #include "ncfg/log.h"
+#include "ncfg/observe.h"
+#include "ncfg/plan.h"
 #include "ncfg/state.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /*
  * `describe_answer` lived here as a `static` copy of the table in `client.c`,
@@ -88,8 +94,16 @@ static int not_in_this_wave(const char *verb, const char *needs)
 	    "not ported yet", verb, needs);
 }
 
-/* What the loader and the observer are called, so the two sentences agree. */
-#define NEEDS_OBSERVER   "the netlink dump the observer is built from"
+/*
+ * What the writers are called, so the sentences that name them agree.
+ *
+ * `NEEDS_OBSERVER` stood beside this and said "the netlink dump the observer is
+ * built from". That landed, so the sentence stopped being true and the constant
+ * is gone rather than left pointing at something that exists -- a refusal naming
+ * a module that is present is worse than one naming a module that is absent,
+ * because it looks right. What each of the five verbs it covered does now is
+ * decided one at a time, further down.
+ */
 #define NEEDS_WRITERS    "the settings writer that puts a drop-in where netcfgd reads it"
 
 /*
@@ -596,6 +610,492 @@ static int command_show(const ncfg_cli_options_t *options)
 }
 
 /* ------------------------------------------------------------------------ *
+ * The verbs that begin with a local observation
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Read the machine.
+ *
+ * `ncfg_observe_current` is the whole of it -- the round of dumps, the record
+ * in the run directory, the files the kernel cannot answer for and the derived
+ * answers -- and the reason this program calls that rather than the four
+ * underneath it is the reason it exists: the daemon takes the same observation
+ * on every tick, and two assemblies of one sequence is how the two would come
+ * to disagree about what netcfgd can see.
+ *
+ * `desired` may be NULL, and here that is not a failure mode but the ordinary
+ * one: somebody runs `ncfg status` because something is wrong, and a
+ * configuration that has stopped compiling is exactly when.
+ */
+static int observe_now(const char *run_dir, const ncfg_document_t *desired,
+    ncfg_observed_t **out, char *err, size_t err_size)
+{
+	ncfg_observe_roots_t roots;
+
+	if (!ncfg_observe_roots_default(&roots, err, err_size)) {
+		return 0;
+	}
+	return ncfg_observe_current(run_dir, &roots, desired, out, err, err_size);
+}
+
+/*
+ * `ncfg status`: what the machine is doing.
+ *
+ * **The document is wanted and not required.** It reaches the observation
+ * through `ncfg_observe_derive`, which needs it to classify links the way the
+ * configuration names them and to judge connectivity by the policy it states;
+ * without one the links are classified by their kernel kind and the default
+ * policy applies, which is a smaller answer rather than a wrong one.
+ *
+ * **The diagnostics are printed where the Rust swallows them.** `compile` there
+ * is called through `.ok()` and a configuration that does not compile produces
+ * a status listing with no hint that the desired half of the answer is missing.
+ * This prints them and then answers anyway, which is `explain`'s arrangement in
+ * the Rust already -- and the exit status stays 0, because the question asked
+ * was about the kernel and the kernel answered.
+ */
+static int command_status(const ncfg_cli_options_t *options)
+{
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	ncfg_observed_t *observed = NULL;
+
+	if (options->json) {
+		return json_not_in_this_wave();
+	}
+	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	/* As every path that observes does: answering "why is it like this?" from
+	 * a file is the product. A `/run` that will not take it is not a failure
+	 * of the command -- the listing the operator asked for is on stdout. */
+	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));
+	ncfg_cli_print_status(observed);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+	return NCFG_CLI_EXIT_OK;
+}
+
+/*
+ * Say that the configuration directory is empty, where that explains the plan.
+ *
+ * A bare `nothing to do` is ambiguous in the one case it matters: somebody who
+ * pointed `--config-dir` at the wrong directory gets the same two words as
+ * somebody whose machine genuinely has nothing to change. So the fact is a note
+ * under the answer rather than instead of one.
+ *
+ * Unreadable rather than empty is silent, and `compile_config` has already
+ * failed with the real error by then -- a second, vaguer sentence about the
+ * same directory helps nobody.
+ */
+static void note_empty_config(const ncfg_cli_options_t *options)
+{
+	char                  config_dir[NCFG_CLI_TEXT_MAX];
+	char                  factory_dir[NCFG_CLI_TEXT_MAX];
+	char                  err[NCFG_ERROR_MAX];
+	ncfg_config_sources_t sources = { NULL, 0, 0 };
+
+	(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
+	(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
+	    sizeof(factory_dir));
+	if (!ncfg_config_load_with_profile(factory_dir, config_dir, &sources, err, sizeof(err))) {
+		ncfg_config_sources_free(&sources);
+		return;
+	}
+	if (sources.count == 0) {
+		ncfg_out_line("");
+		ncfg_out_writef("there is no configuration in %s, so netcfgd manages nothing "
+		    "here.\n", config_dir);
+		ncfg_out_line("`ncfg wifi add SSID` writes the first one; doc/first-run.md has "
+		    "the");
+		ncfg_out_line("wired case.");
+	}
+	ncfg_config_sources_free(&sources);
+}
+
+/*
+ * Say so if another daemon manages an interface this plan touches.
+ *
+ * After the plan rather than as a plan warning: it is not a fact about the
+ * plan, which is correct either way. It is a fact about the machine that makes
+ * the plan unlikely to stick.
+ */
+static void warn_about_contention(const ncfg_document_t *document,
+    const ncfg_observed_t *observed)
+{
+	ncfg_contention_where_t where;
+	ncfg_interface_claim_t *claims;
+	ncfg_contenders_t       found;
+	char                    err[NCFG_ERROR_MAX];
+	size_t                  count = 0;
+	size_t                  at;
+
+	if (!document || document->interface_count == 0) {
+		return;
+	}
+	claims = calloc(document->interface_count, sizeof(*claims));
+	if (!claims) {
+		return;
+	}
+	for (at = 0; at < document->interface_count; at++) {
+		const ncfg_observed_link_t *link =
+		    ncfg_observed_link(observed, document->interfaces[at].name);
+
+		/*
+		 * Only the ones the machine actually has. A claim carries a kernel
+		 * index, and an interface the document names and the kernel does not
+		 * has none to compare against.
+		 *
+		 * **The index is checked rather than cast**, which is 0263's narrowing
+		 * rule where the model's `int64_t` meets a field the width of the
+		 * kernel's. An index outside the range is skipped rather than
+		 * truncated: a claim carrying the low half of somebody else's number
+		 * would match a contender against an interface nobody named.
+		 */
+		if (link && link->index > 0 && link->index <= (int64_t)UINT32_MAX) {
+			claims[count].name = document->interfaces[at].name;
+			claims[count].index = (uint32_t)link->index;
+			count++;
+		}
+	}
+	memset(&found, 0, sizeof(found));
+	ncfg_contention_machine(&where);
+	if (count > 0 && ncfg_contenders_find(&where, claims, count, &found, err, sizeof(err))) {
+		for (at = 0; at < found.count; at++) {
+			ncfg_buf_t said;
+
+			ncfg_buf_init(&said, 0);
+			if (ncfg_contender_describe(&found.at[at], &said, err, sizeof(err))) {
+				ncfg_out_line("");
+				ncfg_out_writef("warning: %s\n", ncfg_buf_text(&said));
+			}
+			ncfg_buf_free(&said);
+		}
+	}
+	ncfg_contenders_free(&found);
+	free(claims);
+}
+
+/*
+ * What the planner is told, from what was typed.
+ *
+ * `revert_to` is deliberately absent: it is the hash of the document a window
+ * would revert to, and this build arms no window. `ncfg_plan_confirm_window`
+ * still answers from `global { confirm = ... }`, so the plan says a window
+ * would be armed -- which is true of the plan and, in this build, of nothing
+ * that happens afterwards. It is one more reason `apply` is refused below.
+ */
+static void plan_options_of(const ncfg_cli_options_t *options, ncfg_plan_options_t *out)
+{
+	memset(out, 0, sizeof(*out));
+	out->confirm_window = options->confirm;
+	out->allow_disruption = options->allow_disruption.items;
+	out->allow_disruption_count = options->allow_disruption.count;
+}
+
+/* `ncfg plan`: what would change, changing nothing. */
+static int command_plan(const ncfg_cli_options_t *options)
+{
+	char                run_dir[NCFG_CLI_TEXT_MAX];
+	char                err[NCFG_ERROR_MAX];
+	ncfg_document_t    *document;
+	ncfg_observed_t    *observed = NULL;
+	ncfg_plan_options_t how;
+	ncfg_plan_t        *plan;
+
+	if (options->json) {
+		return json_not_in_this_wave();
+	}
+	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	if (!document) {
+		return fail(err);
+	}
+	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	/* Even a plan writes what it decided and what it saw. */
+	(void)ncfg_state_write_desired(run_dir, document, err, sizeof(err));
+	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));
+
+	plan_options_of(options, &how);
+	plan = ncfg_plan_build(document, observed, &how, err, sizeof(err));
+	if (!plan) {
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	ncfg_cli_print_plan(plan);
+	note_empty_config(options);
+	warn_about_contention(document, observed);
+	ncfg_plan_free(plan);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+	return NCFG_CLI_EXIT_OK;
+}
+
+/*
+ * `ncfg explain`: why is it like this?
+ *
+ * **Deliberately not routed through the daemon.** Design section 4.4 makes
+ * daemon-optional a property rather than a fallback, and this is exactly the
+ * command somebody reaches for when things are broken -- which is when a daemon
+ * is least likely to be running.
+ *
+ * **The provenance table handed in is empty, and that is not an omission being
+ * papered over.** 0263 does not port `compile_with_provenance`: nothing in
+ * `src/compile/` records an entry, because a side table nobody reads is a
+ * second thing that has to go on agreeing with the document. So every lookup
+ * misses, and `ncfg_explain` says so as the first fact of its own output rather
+ * than quietly naming no files -- which a reader could not tell from a
+ * configuration that has nothing to name. The day lowering records a table this
+ * passes it instead, and the notice disappears by itself.
+ */
+static int command_explain(const ncfg_cli_options_t *options, const char **positional,
+    size_t count)
+{
+	char                 run_dir[NCFG_CLI_TEXT_MAX];
+	char                 err[NCFG_ERROR_MAX];
+	ncfg_proto_subject_t subject;
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed = NULL;
+	ncfg_explanation_t  *explanation;
+	ncfg_buf_t           rendered;
+	int                  wrote;
+
+	memset(&subject, 0, sizeof(subject));
+	if (count == 2 && strcmp(positional[0], "interface") == 0) {
+		subject.kind = NCFG_PROTO_SUBJECT_INTERFACE;
+		subject.name = ncfg_proto_str(positional[1]);
+	} else if (count == 3 && strcmp(positional[0], "address") == 0) {
+		subject.kind = NCFG_PROTO_SUBJECT_ADDRESS;
+		subject.interface = ncfg_proto_str(positional[1]);
+		subject.address = ncfg_proto_str(positional[2]);
+	} else if (count == 3 && strcmp(positional[0], "route") == 0) {
+		subject.kind = NCFG_PROTO_SUBJECT_ROUTE;
+		subject.interface = ncfg_proto_str(positional[1]);
+		subject.destination = ncfg_proto_str(positional[2]);
+	} else {
+		return fail("explain what? try `ncfg explain interface eth0`, `ncfg explain "
+		    "address eth0 10.0.0.1/24`, or `ncfg explain route eth0 default`");
+	}
+	if (options->json) {
+		return json_not_in_this_wave();
+	}
+
+	/*
+	 * Compiled fresh rather than read from `/run`, so the answer describes the
+	 * configuration as it is now and not as it was when something last wrote
+	 * there. One that no longer compiles is reported as such and the
+	 * observation half of the answer is given anyway -- it is worth having on
+	 * its own, and this is the command for the moment it is all there is.
+	 */
+	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	if (!document) {
+		(void)fprintf(stderr, "ncfg: the configuration does not compile, so this "
+		    "explains what the machine is doing and not what was asked for\n");
+	}
+	if (!observe_now(run_dir, document, &observed, err, sizeof(err))) {
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	explanation = ncfg_explain(&subject, document, observed, NULL, err, sizeof(err));
+	if (!explanation) {
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	ncfg_buf_init(&rendered, 0);
+	wrote = ncfg_explanation_render(explanation, &rendered, err, sizeof(err));
+	if (wrote) {
+		ncfg_out_write(ncfg_buf_text(&rendered));
+	}
+	ncfg_buf_free(&rendered);
+	ncfg_explanation_free(explanation);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+	return wrote ? NCFG_CLI_EXIT_OK : fail(err);
+}
+
+/*
+ * `ncfg wait-online [SECONDS]`.
+ *
+ * **This exists because netcfgd's selector masks the other ones.** Every
+ * network manager ships a wait-online helper and `network-online.target` means
+ * nothing without one, so until this there was nothing in their place (0190).
+ *
+ * A local observation rather than a request to the daemon, deliberately: this
+ * runs while the machine is still coming up, and a helper that needed the
+ * control socket to be listening could not report on the seconds before it is.
+ * A failure to observe is not a failure to be online for the same reason -- the
+ * netlink socket can be refused at exactly that moment -- so the loop keeps
+ * going and the deadline is what ends it.
+ *
+ * **The configuration is compiled once, before the loop, where the Rust
+ * recompiles inside it.** The document is here only so the observation is the
+ * one `ncfg status` would show; recompiling the directory every 250ms for the
+ * length of a DHCP timeout is a read of every configuration file forty times a
+ * second, and the diagnostics of a config that does not compile would be
+ * printed just as often into a boot log nobody is watching.
+ */
+static int command_wait_online(const ncfg_cli_options_t *options, const char **positional,
+    size_t count)
+{
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	long             seconds = NCFG_CLI_WAIT_ONLINE_DEFAULT;
+	struct timespec  deadline;
+	struct timespec  pause;
+	int              online = 0;
+	ncfg_observed_t *last = NULL;
+
+	if (count > 0) {
+		char *end = NULL;
+
+		errno = 0;
+		seconds = strtol(positional[0], &end, 10);
+		if (errno != 0 || !end || *end != '\0' || end == positional[0] || seconds < 0) {
+			return failf("`%.*s` is not a number of seconds",
+			    (int)NCFG_CLI_TEXT_MAX, positional[0]);
+		}
+	}
+	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+
+	if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) {
+		ncfg_document_free(document);
+		return fail("this machine has no monotonic clock to wait against");
+	}
+	deadline.tv_sec += (time_t)seconds;
+	pause.tv_sec = 0;
+	pause.tv_nsec = 250L * 1000L * 1000L;
+
+	for (;;) {
+		struct timespec now;
+		ncfg_observed_t *observed = NULL;
+
+		if (observe_now(run_dir, document, &observed, err, sizeof(err))) {
+			online = ncfg_cli_is_online(observed);
+			ncfg_observed_free(last);
+			last = observed;
+			if (online) {
+				break;
+			}
+		}
+		if (clock_gettime(CLOCK_MONOTONIC, &now) != 0 ||
+		    now.tv_sec > deadline.tv_sec ||
+		    (now.tv_sec == deadline.tv_sec && now.tv_nsec >= deadline.tv_nsec)) {
+			break;
+		}
+		(void)nanosleep(&pause, NULL);
+	}
+	ncfg_document_free(document);
+	if (online) {
+		ncfg_observed_free(last);
+		return NCFG_CLI_EXIT_OK;
+	}
+	/*
+	 * **Say which half is missing.** "Timed out" sends the reader to the wrong
+	 * place half the time, and this runs at boot where nobody is watching: the
+	 * journal line is the whole report. The observation reported on is the last
+	 * one that succeeded rather than a fresh one, which is what makes the
+	 * sentence describe the machine the loop actually gave up on.
+	 */
+	if (!last) {
+		return failf("still not online after %lds: the machine could not be observed "
+		    "at all. `ncfg status` says what each interface is doing, and `ncfg plan` "
+		    "says what netcfgd would still do about it", seconds);
+	}
+	{
+		size_t addresses = 0;
+		int    routed = 0;
+		size_t at;
+
+		for (at = 0; at < last->address_count; at++) {
+			if (last->addresses[at].interface &&
+			    strcmp(last->addresses[at].interface, "lo") != 0) {
+				addresses++;
+			}
+		}
+		for (at = 0; at < last->route_count; at++) {
+			if (last->routes[at].destination &&
+			    strcmp(last->routes[at].destination, "default") == 0) {
+				routed = 1;
+				break;
+			}
+		}
+		ncfg_observed_free(last);
+		return failf("still not online after %lds: %zu address(es) outside loopback "
+		    "and %s default route. `ncfg status` says what each interface is doing, "
+		    "and `ncfg plan` says what netcfgd would still do about it", seconds,
+		    addresses, routed ? "a" : "no");
+	}
+}
+
+/*
+ * `ncfg apply` is refused, and the refusal is the decision rather than a gap.
+ *
+ * The observer it was waiting for landed in this wave, so the sentence this arm
+ * used to carry is no longer true -- and `status`, `plan` and `explain` are
+ * wired on the strength of it. **This one is not, and the reason is not that
+ * something under it is unported but that everything under it is unported in a
+ * way an apply cannot survive.** Four facts, each of which is on its own enough:
+ *
+ *   * **The planner is four passes of thirty** (`src/plan/build.c` says so at
+ *     the top). A plan from this build is not the whole change, so an apply
+ *     would converge part of a machine and report having converged it. The
+ *     planner warns by name about every block it is holding -- which is what
+ *     makes `ncfg plan` honest and is exactly what an apply would act past.
+ *   * **The executor takes thirteen ops of forty-eight and refuses the rest
+ *     while the plan is running.** `ncfg_apply_supported` is asked by
+ *     `execute`, one action at a time, and `ncfg_apply` stops at the first
+ *     failure -- so a plan mixing a supported op with an unsupported one
+ *     changes the machine and then stops halfway. A sweep of the plan before
+ *     the first action would fix the *order* of that refusal and nothing else,
+ *     which is why it is not what this arm does.
+ *   * **Nothing folds what an apply did into `owned.json`**, which 0263 defers
+ *     by name: the executor seam reports no effects. Addresses and routes
+ *     survive that because the kernel carries netcfgd's tag on them; a **link
+ *     does not**. `create_link` does not add the `netcfgd:` alternative name
+ *     0136 gives every link netcfgd makes, and nothing records the name either,
+ *     so a bridge this build created would read back as `unknown` for ever and
+ *     netcfgd could never delete it again. That is a change to somebody's
+ *     machine that this port has no way to undo.
+ *   * **There is no confirm window.** `ncfg_plan_confirm_window` answers from
+ *     `global { confirm = ... }` as well as from `--confirm-within`, so a plan
+ *     here carries `commit.arm` -- and the executor does nothing for it,
+ *     correctly, because arming belongs to whoever owns the timer afterwards.
+ *     Nothing here does. An apply that cut the machine off would say a window
+ *     was open and never revert.
+ *
+ * So it says what it is waiting for, by name, and `ncfg plan` is offered
+ * because it is the half that is ported: the same document against the same
+ * observation, with every block this build is holding named, and nothing
+ * changed.
+ */
+static int command_apply(void)
+{
+	(void)failf("`ncfg apply` is not in this wave of the C port: the observer it was "
+	    "waiting for landed, and the planner and the executor beneath it did not. The "
+	    "planner is four passes of thirty and the executor carries thirteen ops of "
+	    "forty-eight, refusing the rest as the plan runs rather than before it -- so an "
+	    "apply would change the machine and stop halfway through a plan that was never "
+	    "the whole change.");
+	(void)fail("It also has nothing to record with and nothing to revert with: no "
+	    "effect an apply had is folded into owned.json, a link this build created would "
+	    "wear no `" NCFG_OBSERVE_ALTNAME_PREFIX "` alternative name and appear in no "
+	    "record -- netcfgd could never delete it again -- and a `commit.arm` this plan "
+	    "carries arms no window, so a change that cut the machine off would not come "
+	    "back.");
+	return fail("`ncfg plan` is the half that is ported: it reads the same "
+	    "configuration against the same machine, names every block this build is "
+	    "holding and not acting on, and changes nothing.");
+}
+
+/* ------------------------------------------------------------------------ *
  * The program
  * ------------------------------------------------------------------------ */
 
@@ -647,27 +1147,22 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 	}
 
 	/* The verbs whose first step is a local compile or a local observation.
-	 * Their output is ported and tested; what is missing is underneath them. */
+	 * Four of them read the machine and print, and are wired; the fifth
+	 * changes it, and `command_apply` is where that is argued out. */
 	if (strcmp(command, "status") == 0) {
-		return not_in_this_wave("status", NEEDS_OBSERVER);
+		return command_status(options);
 	}
 	if (strcmp(command, "plan") == 0) {
-		return not_in_this_wave("plan", NEEDS_OBSERVER);
+		return command_plan(options);
 	}
 	if (strcmp(command, "apply") == 0) {
-		return not_in_this_wave("apply", NEEDS_OBSERVER);
+		return command_apply();
 	}
 	if (strcmp(command, "show") == 0) {
 		return command_show(options);
 	}
 	if (strcmp(command, "explain") == 0) {
-		/* The reason here used to be the provenance table, and that is no
-		 * longer what is missing: `explain.h` is ported, it takes a
-		 * `ncfg_provenance_t` exactly as the Rust takes a `&Provenance`, and
-		 * it says in its own output when it was given an empty one. What it
-		 * still needs is the same thing `status` and `plan` need -- the verb's
-		 * first step is a local observation. */
-		return not_in_this_wave("explain", NEEDS_OBSERVER);
+		return command_explain(options, positional, count);
 	}
 	if (strcmp(command, "control") == 0) {
 		return subcommand(ncfg_cli_control, options, positional, count);
@@ -687,7 +1182,7 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		return not_in_this_wave("reset", NEEDS_WRITERS);
 	}
 	if (strcmp(command, "wait-online") == 0) {
-		return not_in_this_wave("wait-online", NEEDS_OBSERVER);
+		return command_wait_online(options, positional, count);
 	}
 	if (strcmp(command, "tui") == 0) {
 		return ncfg_tui_run(options);

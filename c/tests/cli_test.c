@@ -39,6 +39,7 @@
 #include "ncfg/base.h"
 #include "ncfg/config.h"
 #include "ncfg/log.h"
+#include "ncfg/observe.h"
 
 #include "testdir.h"
 
@@ -1564,6 +1565,226 @@ static void an_event_is_one_line(void)
 	}
 }
 
+/* ------------------------------------------------------------------------ *
+ * What each verb that waited on the observer does now
+ * ------------------------------------------------------------------------ *
+ *
+ * Five arms said `it needs the netlink dump the observer is built from`. That
+ * dump landed, so the sentence became false, and what replaces it is a
+ * decision per verb rather than one answer for all five. These are the checks
+ * that the decisions are the ones that were made.
+ *
+ * **Nothing here reads the kernel.** Each case reaches the arm through a
+ * refusal that comes before the observation would: a subject that is not one,
+ * a `--json` this wave does not carry, a number that is not a number, and --
+ * for `apply` -- the refusal itself.
+ */
+
+static int   saved_stderr = -1;
+static char  complaint_file[320];
+static char *complained;
+
+/* The same trick as `capture_begin`, pointed at descriptor 2. `run.c` writes
+ * every diagnostic straight to the stream rather than through `out.c`, which
+ * is 0261's rule, so being the reader is again the only honest way to read
+ * one. */
+static void complaint_begin(void)
+{
+	int fd;
+
+	(void)fflush(stderr);
+	saved_stderr = dup(STDERR_FILENO);
+	fd = open(complaint_file, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0 || saved_stderr < 0) {
+		printf("could not redirect stderr to %s\n", complaint_file);
+		exit(1);
+	}
+	(void)dup2(fd, STDERR_FILENO);
+	(void)close(fd);
+}
+
+static const char *complaint_end(void)
+{
+	FILE  *file;
+	long   size;
+	size_t got;
+
+	(void)fflush(stderr);
+	(void)dup2(saved_stderr, STDERR_FILENO);
+	(void)close(saved_stderr);
+	saved_stderr = -1;
+
+	free(complained);
+	complained = NULL;
+	file = fopen(complaint_file, "rb");
+	if (!file) {
+		return "";
+	}
+	(void)fseek(file, 0, SEEK_END);
+	size = ftell(file);
+	(void)fseek(file, 0, SEEK_SET);
+	if (size < 0) {
+		(void)fclose(file);
+		return "";
+	}
+	complained = malloc((size_t)size + 1);
+	if (!complained) {
+		(void)fclose(file);
+		return "";
+	}
+	got = fread(complained, 1, (size_t)size, file);
+	complained[got] = '\0';
+	(void)fclose(file);
+	return complained;
+}
+
+/* One run of the program, with what it said on stderr and what it left with. */
+static const char *ran(char **argv, int argc, int *code)
+{
+	complaint_begin();
+	*code = ncfg_cli_main(argc, argv);
+	return complaint_end();
+}
+
+/*
+ * The sentence that stopped being true is gone from the source.
+ *
+ * Read out of `run.c` rather than out of a constant, because the constant is
+ * what was deleted: a check naming it would not compile, and one naming
+ * nothing would pass. A refusal pointing at a module that is present is worse
+ * than one pointing at a module that is absent, because it looks right.
+ */
+static void the_sentence_that_stopped_being_true_is_gone(void)
+{
+	static const char *const roots[] = { "../src/cli/run.c", "src/cli/run.c",
+		"../../src/cli/run.c" };
+	char  *source = NULL;
+	size_t root;
+
+	for (root = 0; root < sizeof(roots) / sizeof(roots[0]) && !source; root++) {
+		FILE *file = fopen(roots[root], "rb");
+		long  size;
+
+		if (!file) {
+			continue;
+		}
+		(void)fseek(file, 0, SEEK_END);
+		size = ftell(file);
+		(void)fseek(file, 0, SEEK_SET);
+		if (size >= 0) {
+			source = malloc((size_t)size + 1);
+			if (source) {
+				source[fread(source, 1, (size_t)size, file)] = '\0';
+			}
+		}
+		(void)fclose(file);
+	}
+	check(source != NULL, "the dispatcher's source can be read");
+	if (!source) {
+		return;
+	}
+	check(strstr(source, "the netlink dump the observer is built from") == NULL,
+	    "no arm still says it is waiting for the observer, which landed");
+	/* The vacuous-pass guard: a file that failed to open reads as a file with
+	 * nothing objectionable in it. */
+	check(strstr(source, "not in this wave") != NULL,
+	    "  and the file was read, the refusals that remain being in it");
+	free(source);
+}
+
+/*
+ * `ncfg apply` is refused, and the refusal is specific enough to act on.
+ *
+ * **It is checked by running the program**, because what is being asserted is
+ * that nothing happens before the refusal: the arm is reached from `dispatch`
+ * with no compile, no observation and no socket in between, so a case that
+ * called a helper directly would be checking a different path from the one an
+ * operator takes.
+ *
+ * The four facts are each named because each on its own is the reason: a
+ * partial planner, an executor that refuses mid-plan, no ownership fold, and
+ * no window. The alternative-name prefix is spelled from `observe.h`'s
+ * constant rather than typed again, so a rename makes this red rather than
+ * leaving the sentence pointing at a marker nothing uses.
+ */
+static void apply_is_refused_and_says_what_it_is_waiting_for(void)
+{
+	char       *argv[] = { (char *)"ncfg", (char *)"apply" };
+	int         code = 0;
+	const char *said = ran(argv, 2, &code);
+
+	check(code == NCFG_CLI_EXIT_FAILED, "`ncfg apply` is refused");
+	check(strstr(said, "four passes of thirty") != NULL,
+	    "  naming the planner that is a quarter of one");
+	check(strstr(said, "thirteen ops of forty-eight") != NULL,
+	    "  and the executor that carries a quarter of those");
+	check(strstr(said, "rather than before it") != NULL,
+	    "  and that the refusal for an op it cannot do comes mid-plan");
+	check(strstr(said, "owned.json") != NULL,
+	    "  and that nothing records what an apply did");
+	check(strstr(said, NCFG_OBSERVE_ALTNAME_PREFIX) != NULL,
+	    "  and the marker a link it created would not wear");
+	check(strstr(said, "commit.arm") != NULL,
+	    "  and the window that would be armed by nobody");
+	check(strstr(said, "`ncfg plan`") != NULL, "  and offers the half that is ported");
+}
+
+/*
+ * The four that read the machine are wired, each checked at the last refusal
+ * before the kernel.
+ *
+ * `status` and `plan` refuse `--json` first; `explain` parses its subject
+ * first; `wait-online` parses its argument first. Reaching any of those four
+ * sentences proves the arm is no longer `not_in_this_wave`, which is the whole
+ * claim -- and `current_test.c` is where the observation underneath them is
+ * driven.
+ */
+static void the_four_that_read_the_machine_are_wired(void)
+{
+	char       *status[] = { (char *)"ncfg", (char *)"status", (char *)"--json" };
+	char       *plan[] = { (char *)"ncfg", (char *)"plan", (char *)"--json" };
+	char       *explain[] = { (char *)"ncfg", (char *)"explain" };
+	char       *wait[] = { (char *)"ncfg", (char *)"wait-online", (char *)"soon" };
+	int         code = 0;
+	const char *said;
+
+	said = ran(status, 3, &code);
+	check(strstr(said, "`--json` is not in this wave") != NULL &&
+	    strstr(said, "not in this wave of the C port: it needs") == NULL,
+	    "`ncfg status` reaches its own arm rather than a refusal for the verb");
+
+	said = ran(plan, 3, &code);
+	check(strstr(said, "`--json` is not in this wave") != NULL &&
+	    strstr(said, "not in this wave of the C port: it needs") == NULL,
+	    "and so does `ncfg plan`");
+
+	said = ran(explain, 2, &code);
+	check(strstr(said, "explain what?") != NULL,
+	    "`ncfg explain` with no subject says what a subject looks like");
+	check(strstr(said, "ncfg explain route eth0 default") != NULL,
+	    "  in the Rust's own three examples");
+
+	said = ran(wait, 3, &code);
+	check(code == NCFG_CLI_EXIT_FAILED &&
+	    strstr(said, "is not a number of seconds") != NULL,
+	    "`ncfg wait-online` refuses a count that is not one");
+}
+
+/*
+ * The default it waits for is the help's, and there is one of it.
+ *
+ * `daemon_main.c`'s rule applied to this program: the Rust writes `30 by
+ * default` in the help beside a constant holding the same number, and the help
+ * is the copy nobody recompiles.
+ */
+static void the_wait_default_is_written_down_once(void)
+{
+	check(strstr(ncfg_cli_usage(), NCFG_CLI_SPELL(NCFG_CLI_WAIT_ONLINE_DEFAULT) " by") !=
+	    NULL, "the wait-online default in the help is the constant behind it");
+	check(NCFG_CLI_WAIT_ONLINE_DEFAULT == 30,
+	    "  and it is NetworkManager-wait-online.service's thirty seconds");
+}
+
 int main(void)
 {
 	char *observed_text;
@@ -1573,9 +1794,14 @@ int main(void)
 
 	(void)testdir_make("cli");
 	(void)snprintf(capture_file, sizeof(capture_file), "%s/out", testdir_path);
+	(void)snprintf(complaint_file, sizeof(complaint_file), "%s/err", testdir_path);
 
 	every_command_in_the_help_text_is_dispatched();
 	the_version_surface_names_the_copyright_holder();
+	the_sentence_that_stopped_being_true_is_gone();
+	apply_is_refused_and_says_what_it_is_waiting_for();
+	the_four_that_read_the_machine_are_wired();
+	the_wait_default_is_written_down_once();
 
 	a_bare_dash_is_a_filename_and_not_an_option();
 	a_value_is_never_mistaken_for_a_subcommand();
@@ -1618,6 +1844,7 @@ int main(void)
 	an_event_is_one_line();
 
 	free(captured);
+	free(complained);
 	testdir_remove(testdir_path);
 
 	if (failures == 0) {
