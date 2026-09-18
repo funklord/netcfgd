@@ -999,6 +999,34 @@ static void events_and_replies_do_not_get_mixed_up(const char *dir)
 	check(ncfg_supplicant_ask(client, "STATUS", body, sizeof(body), message,
 	    sizeof(message)) && strstr(body, "wpa_state=COMPLETED") != NULL,
 	    "the answer to a command is the command's, not the event that overtook it");
+	/*
+	 * **Zero is refused, and it is the value that would have hung.** A
+	 * `SO_RCVTIMEO` of `{0, 0}` is the kernel's "no deadline at all", so the
+	 * argument a caller reads as "do not block" is the one that blocks for
+	 * ever -- and this is a single-threaded daemon's event drain. It used to
+	 * be reached by clamping a negative, too. There is no check here that
+	 * waits for the hang, for the obvious reason: the assertion is that the
+	 * call comes back refusing, which a hang cannot do.
+	 *
+	 * **Measured, by putting the clamp back**: this binary does not report a
+	 * failed check, it stops, and the run has to be killed from outside. That
+	 * is the whole argument for refusing rather than clamping -- the defect's
+	 * signature is a process that never finishes and says nothing, which is
+	 * also what it would look like on a machine, where the thing that stopped
+	 * is netcfgd's reconcile loop.
+	 */
+	message[0] = '\0';
+	got = 1;
+	check(!ncfg_supplicant_next_event(client, 0, &event, &got, message, sizeof(message)),
+	    "a timeout of zero is refused rather than waited on");
+	check(strstr(message, "at least 1ms") != NULL && strstr(message, "for ever") != NULL,
+	    "  and the refusal says why zero is the dangerous one");
+	check(got == 0, "  and nothing is reported as received");
+	message[0] = '\0';
+	check(!ncfg_supplicant_next_event(client, -250, &event, &got, message, sizeof(message)) &&
+	    strstr(message, "-250") != NULL,
+	    "a negative is refused by its own value rather than clamped into zero");
+
 	check(ncfg_supplicant_next_event(client, 500, &event, &got, message, sizeof(message)) &&
 	    !got, "and the event was consumed rather than left to be read as one later");
 

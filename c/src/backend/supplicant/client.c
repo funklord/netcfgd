@@ -324,6 +324,11 @@ const char *ncfg_supplicant_client_interface(const ncfg_supplicant_client_t *cli
 	return client ? client->interface : "";
 }
 
+int ncfg_supplicant_client_descriptor(const ncfg_supplicant_client_t *client)
+{
+	return client ? client->fd : -1;
+}
+
 int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const char *command,
     const char *label, char *body, size_t body_size, int *kind, char *err, size_t err_size)
 {
@@ -493,8 +498,25 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 		return 0;
 	}
 	*got = 0;
-	if (timeout_ms < 0) {
-		timeout_ms = 0;
+	/*
+	 * **A timeout of zero is refused rather than clamped, because zero is the
+	 * one value that means the opposite of what a caller would read it as.**
+	 * `SO_RCVTIMEO` of `{0, 0}` is the kernel's "no deadline at all", so a
+	 * caller asking for the shortest possible wait -- which is what the
+	 * header's "a caller polling several interfaces wants a short one" invites
+	 * -- would get `recv` blocking for ever. On the daemon's single thread
+	 * that is not a slow path, it is a wedge, and it would present as a
+	 * netcfgd that has stopped reconciling with nothing in the log.
+	 *
+	 * A negative used to be clamped to zero, which turned "I got the sign
+	 * wrong" into the same wedge. Both are now a sentence at the call site,
+	 * where the mistake is.
+	 */
+	if (timeout_ms < 1) {
+		ncfg_error_set(err, err_size,
+		    "an event needs a timeout of at least 1ms, not %d: zero is the kernel's "
+		    "\"no deadline\" and would wait for ever", timeout_ms);
+		return 0;
 	}
 	if (!set_deadline(client->fd, timeout_ms)) {
 		ncfg_error_set(err, err_size, "cannot put a deadline on the socket for %s: %s",

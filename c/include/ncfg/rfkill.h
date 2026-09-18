@@ -103,6 +103,17 @@ int ncfg_rfkill_open(ncfg_rfkill_t *rfkill, const char *path, char *err, size_t 
 void ncfg_rfkill_close(ncfg_rfkill_t *rfkill);
 
 /*
+ * The descriptor, for a caller that multiplexes several of them.
+ *
+ * -1 where nothing is open. `ncfg_rfkill_next` blocks, which is right for a
+ * reader whose whole job is this device and wrong for a daemon watching five
+ * things at once -- so the loop in `src/main/` waits on this integer with the
+ * others and calls `ncfg_rfkill_next` only once `poll` has said a record is
+ * there, which is the one arrangement in which that call cannot block.
+ */
+int ncfg_rfkill_descriptor(const ncfg_rfkill_t *rfkill);
+
+/*
  * The next event, blocking until one arrives.
  *
  * `*got` is 1 where an event came out and 0 at end of file, which for this

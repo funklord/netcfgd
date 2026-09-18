@@ -218,6 +218,22 @@ int ncfg_netlink_open_protocol(ncfg_netlink_t *netlink, int protocol, uint32_t g
 void ncfg_netlink_close(ncfg_netlink_t *netlink);
 
 /*
+ * The descriptor, for a caller that multiplexes several of them.
+ *
+ * -1 where nothing is open. The field above is private and this is the one
+ * thing outside this module that has a reason to know it: `src/main/`'s
+ * descriptor loop polls this socket beside the configuration watch,
+ * `/dev/rfkill` and a timer, and `poll` takes an integer. Reaching into the
+ * struct for it would make every field it has reachable by the same route.
+ *
+ * **It is for waiting on and for nothing else.** Everything that reads the
+ * socket goes through this module, because the sender check and the
+ * `ENOBUFS` rule live here and a second reader would be a second place they
+ * could be got wrong.
+ */
+int ncfg_netlink_descriptor(const ncfg_netlink_t *netlink);
+
+/*
  * Set how long a receive waits before giving up.
  *
  * Without this a lost message wedges the caller for ever, which on a daemon

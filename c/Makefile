@@ -136,10 +136,19 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK)
 tests/%_test: tests/%_test.c $(LIB)
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
-# The one test that links more than the library, because what it checks is not
-# in the library: the entry points are under `src/main/`, which `SRCS` holds
-# out. An explicit rule beats the pattern above it whatever the order.
+# The two tests that link more than the library, because what they check is not
+# in the library: the entry points and the descriptor loop are under
+# `src/main/`, which `SRCS` holds out. An explicit rule beats the pattern above
+# it whatever the order.
+#
+# `main_test` is the command line and the multi-call dispatch; `loop_test` is
+# the loop over the descriptors a daemon owns, which is that directory's work
+# for the reason 0263 gives -- a library never exits and never owns a `poll`
+# that decides when a process stops.
 tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB)
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+
+tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(LIB)
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
 # What this build made, by the same wildcard that made it -- and nothing by
