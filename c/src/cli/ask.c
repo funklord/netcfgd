@@ -284,7 +284,7 @@ void ncfg_cli_print_event(const ncfg_proto_event_t *event, const char *raw, size
 	ncfg_out_writef("%s\n", ncfg_cli_event_text(event, raw, raw_length, text, sizeof(text)));
 }
 
-int ncfg_cli_stream(const char *socket_path, char *err, size_t err_size)
+int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_size)
 {
 	ncfg_proto_request_t request;
 	ncfg_proto_framer_t  framer;
@@ -336,6 +336,18 @@ int ncfg_cli_stream(const char *socket_path, char *err, size_t err_size)
 				return 1;
 			}
 			return 0;
+		}
+		if (json) {
+			/*
+			 * The line as it arrived, decoded by nobody. See
+			 * `cli_internal.h`: a monitor is the one verb whose argument for
+			 * existing is that it does not swallow what it cannot name, and
+			 * a rendering from `ncfg_proto_event_t` would drop every member
+			 * this build has never heard of. It is not even parsed first --
+			 * a line that will not decode is a line a newer daemon sent.
+			 */
+			ncfg_cli_print_event(NULL, answer, length);
+			continue;
 		}
 		if (ncfg_proto_response_read(answer, length, &message, err, err_size)) {
 			if (message.kind == NCFG_PROTO_MESSAGE_EVENT) {

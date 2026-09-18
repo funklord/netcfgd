@@ -53,7 +53,15 @@ const char *ncfg_cli_text(ncfg_proto_str_t text, char *out, size_t out_size);
  * you leave running in another window and interrupt when you are done. It
  * returns 1 when the daemon stopped sending, which is an ordinary end and not
  * a failure, and 0 with a sentence otherwise.
+ *
+ * **`json` prints the line the daemon sent rather than a rendering of it**,
+ * which is the one place `--json` is a passthrough rather than a writer. The
+ * events are already JSON, one value per line, and `doc/schema/socket.json`
+ * pins the five shapes; re-composing them from `ncfg_proto_event_t` would
+ * drop every member this build does not know about, on the one verb whose
+ * whole argument for existing is that an event it does not recognise is
+ * printed rather than swallowed.
  */
-int ncfg_cli_stream(const char *socket_path, char *err, size_t err_size);
+int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_size);
 
 #endif /* NCFG_CLI_INTERNAL_H */
