@@ -14,6 +14,11 @@
  *                       `ncfg explain` can name one without recompiling.
  *   `owned.json`        what netcfgd installed and may therefore remove.
  *   `owned.lock`        never read and never renamed; see `ncfg_owned_update`.
+ *                       It guards `plan.last.json` as well, for the reason
+ *                       `ncfg_apply_write_journal` gives.
+ *   `plan.last.json`    what the last apply did, action by action, and where
+ *                       it stopped. Written by `ncfg_apply_write_journal` in
+ *                       `apply.h`; the type is that module's.
  *   `prefixes/<if>`     what a DHCPv6 client was delegated, one prefix a line.
  *   `reported/<if>` and `reported.d/<if>/<source>`
  *                       what something that is **not** netcfgd was given.
@@ -48,11 +53,15 @@
  *   two types, which is one line in a file this module does not own.
  *
  *   The journal of the last apply (`plan.last.json`) is `netcfgd-apply`'s type
- *   and lands with that module, and `OwnedState::absorb` -- the fold of an
- *   apply's effects into this record -- lands with it too, for the same
- *   reason: its argument is the effect list, which is apply's. The rules that
- *   fold depends on are here and tested: see `ncfg_owned_remember` and
- *   `ncfg_owned_note_hook_state`.
+ *   and landed with that module, and `OwnedState::absorb` -- the fold of an
+ *   apply's effects into this record -- landed with it too, for the same
+ *   reason: its argument is the effect list, which is apply's. So this
+ *   directory has a writer neither declared nor implemented here:
+ *   `ncfg_apply_write_journal` publishes `plan.last.json` through
+ *   `ncfg_write_atomically` and under `owned.lock`, which is the fold's lock
+ *   and is taken because the two files are the two halves of one statement
+ *   about one apply. The rules that fold depends on are here and tested: see
+ *   `ncfg_owned_remember` and `ncfg_owned_note_hook_state`.
  */
 #ifndef NCFG_STATE_H
 #define NCFG_STATE_H

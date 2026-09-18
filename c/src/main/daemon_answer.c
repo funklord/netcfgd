@@ -193,15 +193,15 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
 		/* 0263's facts about `ncfg apply` that are still facts -- the two it
-		 * named about ownership are closed -- each of which is on its own
-		 * enough, said in one sentence rather than three: this is a refusal an
-		 * operator reads on a socket, not the decision record. */
+		 * named about ownership are closed, and so is the third, the journal
+		 * `ncfg_apply_write_journal` now publishes -- each of which is on its
+		 * own enough, said in one sentence rather than two: this is a refusal
+		 * an operator reads on a socket, not the decision record. */
 		return "this build of netcfgd will not apply: its planner holds ten kinds of "
-		    "configuration block and warns about each rather than acting on it, its "
-		    "executor refuses an op it cannot carry out while the plan is running and "
-		    "stops at the first it will not take, and no plan.last.json is written -- "
-		    "so an apply would converge part of a machine, or stop halfway through "
-		    "changing it, and leave nothing under /run saying where";
+		    "configuration block and warns about each rather than acting on it, and "
+		    "its executor refuses an op it cannot carry out while the plan is running "
+		    "and stops at the first it will not take -- so an apply would converge "
+		    "part of a machine, or stop halfway through changing it";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:

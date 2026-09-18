@@ -59,6 +59,7 @@
 #include "ncfg/plan.h"
 #include "ncfg/qdisc.h"
 #include "ncfg/secrets.h"
+#include "ncfg/tun.h"
 #include "ncfg/wg.h"
 
 /* ------------------------------------------------------------------------ *
@@ -114,6 +115,39 @@ const ncfg_interface_kind_t *ncfg_kernel_kind_of(const ncfg_document_t *document
  */
 int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
     ncfg_kernel_index_fn resolve, void *context, ncfg_ops_newlink_t *out, char *err,
+    size_t err_size);
+
+/*
+ * The model's `tun` block as `tun.h` wants it: the one link kind that is not a
+ * netlink message at all.
+ *
+ * `ncfg_kernel_newlink_of` refuses a tun by name and goes on refusing it --
+ * there is no `RTM_NEWLINK` to build. What the executor needs instead is this
+ * conversion, and it is here beside that one for the reason that one is here:
+ * the model owns the numbering of a closed set, and a second reading of a
+ * `tun` block in `kernel.c` would be the second list this directory spends its
+ * comments refusing.
+ *
+ * **The owner and the group are the whole of what can go wrong, and they are
+ * why this is a builder rather than four lines inside the arm.** The document
+ * names a user and a group; the kernel takes a uid and a gid. The lookup is
+ * `ncfg_peer_user_id`/`ncfg_peer_group_id`, which read `/etc/passwd` and
+ * `/etc/group` as files for `daemon.h`'s reason -- NSS in a network daemon is
+ * a name resolved over the network to configure the network -- and both take
+ * the path, so `passwd_file` and `group_file` are passed through here. NULL is
+ * the machine's own, which is what every caller but a test hands it. A name
+ * with no entry is refused by name rather than falling back to root: the
+ * document asked for a device somebody other than root could attach to, and
+ * making it attachable by root alone is a quieter answer to a different
+ * question.
+ *
+ * `out->name` borrows `name`, so it must not outlive it. Nothing here opens
+ * `/dev/net/tun` or makes anything: that is `ncfg_tun_create`, one call later,
+ * which is what keeps every decision above testable on a machine that must not
+ * grow a device.
+ */
+int ncfg_kernel_tun_spec_of(const ncfg_interface_kind_t *kind, const char *name,
+    const char *passwd_file, const char *group_file, ncfg_tun_spec_t *out, char *err,
     size_t err_size);
 
 /*

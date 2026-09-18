@@ -115,6 +115,26 @@ const char *ncfg_main_readiness_name(ncfg_main_ready_t ready)
 	return "something this build has no word for";
 }
 
+int ncfg_main_subscriber_ended(short revents)
+{
+	/*
+	 * `POLLHUP`, `POLLERR` or `POLLNVAL`, and **`POLLIN` is not a reason to
+	 * keep one** -- which is where this parts company with
+	 * `ncfg_main_readiness` above. That function puts data first because a
+	 * source is drained by whoever owns it and its last records must not be
+	 * thrown away with the hang-up. Nothing drains a subscriber: it is written
+	 * to and never read. A client that closed leaves `POLLIN|POLLHUP` set
+	 * together and set for ever, so taking data first here would keep exactly
+	 * the descriptor this is asked about.
+	 *
+	 * `POLLNVAL` is in the set for the same reason it is first there: a
+	 * descriptor this process does not have is not one to go on writing to.
+	 * It cannot happen while the list owns every number it holds, and it is
+	 * answered rather than left to mean "still fine".
+	 */
+	return (revents & (POLLHUP | POLLERR | POLLNVAL)) != 0;
+}
+
 int ncfg_main_source_survives(ncfg_main_ready_t ready, unsigned failures)
 {
 	switch (ready) {

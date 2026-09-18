@@ -250,6 +250,42 @@ static void mark_as_ours(ncfg_kernel_t *kernel, const char *name)
 	    "  its ownership is recorded in owned.json instead, which a restart loses");
 }
 
+/*
+ * The one link kind that is not a netlink message.
+ *
+ * A tun or a tap comes from a `TUNSETIFF` ioctl on `/dev/net/tun` and has no
+ * `RTM_NEWLINK` at all -- `ncfg_kernel_newlink_of` says so and refuses one, so
+ * this arm is taken before the message is built rather than after the builder
+ * has declined. `tun.h` carries the ordering that makes the device survive the
+ * call and `ncfg_kernel_tun_spec_of` carries the conversion; what is left here
+ * is which of the two to call.
+ *
+ * **Marked exactly as every other created link is**, which is the divergence
+ * project.md 10.173 reports against the Rust: its `Op::LinkCreate` returns
+ * from the tun arm twenty lines above the block that adds `netcfgd:<name>` as
+ * an alternative name, so the one link kind whose ownership most needs the
+ * kernel's mark is the one kind that does not get it. `mark_as_ours` is the
+ * same call the netlink path makes, after the device exists and never before.
+ */
+static int create_tun(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_t err_size)
+{
+	ncfg_tun_spec_t spec;
+
+	/* NULL for both files is the machine's own `/etc/passwd` and `/etc/group`,
+	 * which is what an executor talking to a real kernel wants; the parameters
+	 * exist so that `apply_kernel_test.c` can resolve a name against a fixture
+	 * without a user having to exist on whoever's machine is building this. */
+	if (!ncfg_kernel_tun_spec_of(op->u.link_create.kind, op->u.link_create.name, NULL, NULL,
+	    &spec, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_tun_create(NCFG_TUN_CLONE_DEVICE, &spec, err, err_size)) {
+		return 0;
+	}
+	mark_as_ours(kernel, op->u.link_create.name);
+	return 1;
+}
+
 static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_t err_size)
 {
 	ncfg_ops_newlink_t link;
@@ -257,6 +293,10 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 	uint32_t           seq;
 	int                built;
 
+	if (op->u.link_create.kind &&
+	    op->u.link_create.kind->kind == (int)NCFG_KIND_TUN) {
+		return create_tun(kernel, op, err, err_size);
+	}
 	/* `ncfg_kernel_newlink_of`, in `kernel_link.c`, and **not a conversion of
 	 * this file's own**: the five `link.set_*` ops need the identical nest,
 	 * and decision 0057 is about exactly that -- two encoders for one kind is

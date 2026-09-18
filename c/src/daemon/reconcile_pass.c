@@ -27,12 +27,12 @@
  * records the step it was called for, and the assertion is the list.
  *
  * WHAT IS DEFERRED HERE, RATHER THAN QUIETLY MISSING
- *   Writing `plan.last.json`. The fold into `owned.json` beside it in 0263 is
- *   no longer deferred -- `ncfg_apply_record` takes the plan and the journal
- *   rather than an effect list, so there was never an effect list to wait for
- *   -- and it runs under the apply lock, before the executor is closed. The
- *   journal *writer* still wants a run directory half of which this port does
- *   not yet write, which is the whole of what is left.
+ *   **Not `plan.last.json` any more**, and not the fold beside it. Both run in
+ *   `record_what_ran`, under the apply lock and before the executor is closed,
+ *   and both are the same pair on the revert path in `confirm.c`. The fold was
+ *   never waiting on an effect list -- `ncfg_apply_record` takes the plan and
+ *   the journal -- and the journal writer was waiting on nothing but being
+ *   written.
  *
  *   The `cycle` option a plan is built with. `ncfg_plan_options_t` has none
  *   yet, so this build's planner emits no link cycle for a modem that has
@@ -274,6 +274,23 @@ static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
 		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
 		    "what this apply did could not be recorded (%s), so netcfgd will not "
 		    "claim those objects as its own", message);
+	}
+	/*
+	 * And the journal beside it, which is the file that answers *where an
+	 * apply stopped*. A reconcile has no terminal, so without this a pass that
+	 * halted at its third action leaves that fact in the log alone -- and the
+	 * Rust's own record of this says the log held two startup lines and
+	 * nothing else while `plan.last.json` named the cause exactly.
+	 *
+	 * After the fold rather than inside it: both take `owned.lock` and `flock`
+	 * is held by the open file description, so a call nested in the other's
+	 * critical section would be this process waiting on itself.
+	 */
+	message[0] = '\0';
+	if (!ncfg_apply_write_journal(run_dir, journal, message, sizeof(message))) {
+		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
+		    "the journal of this apply could not be written (%s), so nothing under "
+		    "the run directory says where it got to", message);
 	}
 }
 

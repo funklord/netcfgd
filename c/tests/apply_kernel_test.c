@@ -46,6 +46,7 @@
 #include "ncfg/qdisc.h"
 #include "ncfg/rule.h"
 #include "ncfg/secrets.h"
+#include "ncfg/tun.h"
 #include "ncfg/value.h"
 #include "ncfg/wg.h"
 #include "ncfg/wire.h"
@@ -1472,6 +1473,166 @@ static void check_nat(void)
 	}
 }
 
+/* ------------------------------------------------------------------------ *
+ * The one kind that is not a netlink message
+ * ------------------------------------------------------------------------ */
+
+/*
+ * A tun block converted, and never a device made.
+ *
+ * WHY THERE IS A CONVERSION AT ALL
+ *   `ncfg_kernel_newlink_of` refuses a tun and always will: there is no
+ *   `RTM_NEWLINK` for one. So `create_link` takes the kind first and hands a
+ *   tun to `ncfg_tun_create` instead, and everything that could be got wrong on
+ *   the way is in `ncfg_kernel_tun_spec_of` -- the mode, and the two names the
+ *   document gives that the kernel wants as numbers.
+ *
+ * WHAT IS NOT MADE, AND HOW THAT IS STILL A TEST
+ *   Nothing here opens `/dev/net/tun` and nothing here creates a device. This
+ *   suite runs on the machine netcfgd would configure, and a persistent tap
+ *   left behind by a test is a device on somebody's workstation that only
+ *   `ip link delete` removes. `tun_test.c` settled how to check the far half
+ *   without one -- an ordinary file as the clone device, so the open succeeds
+ *   and `TUNSETIFF` answers `ENOTTY` -- and the last check below joins the two
+ *   halves that way: the spec this module built is handed to the call the
+ *   executor hands it to, and the refusal names the device it was for.
+ *
+ *   The passwd and group files are the test's own for the same reason. A check
+ *   that resolved a real name would pass or fail depending on who is on the
+ *   machine that built it.
+ */
+static void check_tun(void)
+{
+	char                  dir[256];
+	char                  passwd[512];
+	char                  group[512];
+	char                  clone[512];
+	ncfg_interface_kind_t kind;
+	ncfg_tun_spec_t       spec;
+	ncfg_ops_newlink_t    link;
+	char                  err[NCFG_ERROR_MAX];
+	FILE                 *file;
+	int                   made;
+
+	if (!tempdir_make("apply-kernel-tun", dir, sizeof(dir))) {
+		check(0, "a directory for the tun fixture");
+		return;
+	}
+	(void)snprintf(passwd, sizeof(passwd), "%s/passwd", dir);
+	(void)snprintf(group, sizeof(group), "%s/group", dir);
+	(void)snprintf(clone, sizeof(clone), "%s/not-a-clone-device", dir);
+	file = fopen(passwd, "wb");
+	if (file) {
+		(void)fputs("root:x:0:0:root:/root:/bin/sh\n"
+		    "tunuser:x:4242:4242::/home/tunuser:/bin/sh\n", file);
+		(void)fclose(file);
+	}
+	file = fopen(group, "wb");
+	if (file) {
+		(void)fputs("root:x:0:\ntungroup:x:4343:tunuser\n", file);
+		(void)fclose(file);
+	}
+	check(file != NULL, "a passwd and a group file of the test's own");
+
+	memset(&kind, 0, sizeof(kind));
+	kind.kind = (int)NCFG_KIND_TUN;
+	kind.tun.mode = (int)NCFG_TUN_MODE_TAP;
+	kind.tun.owner = (char *)(uintptr_t)"tunuser";
+	kind.tun.group = (char *)(uintptr_t)"tungroup";
+
+	err[0] = '\0';
+	check(ncfg_kernel_tun_spec_of(&kind, "tap0", passwd, group, &spec, err, sizeof(err)),
+	    "a tun block becomes a spec");
+	check(spec.name && strcmp(spec.name, "tap0") == 0, "carrying the device's name");
+	/*
+	 * The mode, which is the one field that is silent when wrong: the kernel
+	 * registers one `rtnl_link_ops` for tun and tap alike, so a tap made as a
+	 * tun comes back from the observation as a `tun` either way and nothing
+	 * downstream notices the device is carrying IP packets where the document
+	 * asked for ethernet frames.
+	 */
+	check(spec.mode == NCFG_TUN_MODE_TAP, "and the mode the block asked for, not the other");
+	check(spec.has_owner && spec.owner == (uid_t)4242, "with the owner resolved to its id");
+	check(spec.has_group && spec.group == (gid_t)4343, "and the group to its own");
+
+	/* A device with neither may be attached to by root alone, which is the
+	 * kernel's default rather than something this invents -- so the absence has
+	 * to survive as an absence and not become a zero, which is root. */
+	kind.tun.owner = NULL;
+	kind.tun.group = NULL;
+	check(ncfg_kernel_tun_spec_of(&kind, "tun0", passwd, group, &spec, NULL, 0) &&
+	    !spec.has_owner && !spec.has_group,
+	    "a block naming neither asks for neither, rather than for uid 0");
+
+	/*
+	 * A name with no entry is refused rather than left off. The document asked
+	 * for a device somebody other than root could attach to; making it
+	 * attachable by root alone would be a quieter answer to a different
+	 * question, and whatever was going to open it would fail much later.
+	 */
+	kind.tun.owner = (char *)(uintptr_t)"nosuchuser";
+	err[0] = '\0';
+	check(!ncfg_kernel_tun_spec_of(&kind, "tap0", passwd, group, &spec, err, sizeof(err)) &&
+	    strstr(err, "nosuchuser") != NULL && strstr(err, "tap0") != NULL,
+	    "an owner this machine has no entry for is refused, naming both");
+	kind.tun.owner = NULL;
+	kind.tun.group = (char *)(uintptr_t)"nosuchgroup";
+	err[0] = '\0';
+	check(!ncfg_kernel_tun_spec_of(&kind, "tap0", passwd, group, &spec, err, sizeof(err)) &&
+	    strstr(err, "nosuchgroup") != NULL,
+	    "and so is a group, by its own name");
+	kind.tun.group = NULL;
+
+	/* A plan built from another document: the device is there and is something
+	 * else. `ncfg_kernel_kind_of` refuses the same way one layer down. */
+	kind.kind = (int)NCFG_KIND_BRIDGE;
+	err[0] = '\0';
+	check(!ncfg_kernel_tun_spec_of(&kind, "br0", passwd, group, &spec, err, sizeof(err)) &&
+	    strstr(err, "bridge") != NULL,
+	    "a kind that is not a tun is refused rather than made into one");
+	kind.kind = (int)NCFG_KIND_TUN;
+	err[0] = '\0';
+	check(!ncfg_kernel_tun_spec_of(NULL, "tap0", passwd, group, &spec, err, sizeof(err)) &&
+	    err[0] != '\0', "a creation with no kind at all is refused with a sentence");
+	check(!ncfg_kernel_tun_spec_of(&kind, "", passwd, group, &spec, NULL, 0),
+	    "as is one with no name, since a tun is created by name");
+	check(!ncfg_kernel_tun_spec_of(&kind, "tap0", passwd, group, NULL, NULL, 0),
+	    "as is one with nowhere to put the answer");
+
+	/*
+	 * And the boundary that makes the arm necessary: the netlink conversion
+	 * still refuses a tun, so a `create_link` that did not take the kind first
+	 * would refuse one *while the plan is running*.
+	 */
+	err[0] = '\0';
+	check(!ncfg_kernel_newlink_of(&kind, "tap0", resolve, NULL, &link, err, sizeof(err)) &&
+	    strstr(err, "tap0") != NULL,
+	    "and the netlink conversion still refuses a tun, which is why the arm is first");
+
+	/*
+	 * The two halves joined, with no device made anywhere. The clone device is
+	 * an ordinary file, so the open succeeds and `TUNSETIFF` answers `ENOTTY`:
+	 * what that proves is that the spec this module built is one
+	 * `ncfg_tun_create` accepts and carries the name into -- a spec whose name
+	 * or mode had been lost would be refused before the ioctl instead.
+	 */
+	made = open(clone, O_RDWR | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	if (made >= 0) {
+		(void)close(made);
+	}
+	check(made >= 0, "a file that is not a clone device, to ask through");
+	check(ncfg_kernel_tun_spec_of(&kind, "tap0", passwd, group, &spec, NULL, 0),
+	    "the spec is built again");
+	err[0] = '\0';
+	check(!ncfg_tun_create(clone, &spec, err, sizeof(err)) &&
+	    strstr(err, "TUNSETIFF") != NULL && strstr(err, "tap0") != NULL,
+	    "and reaches the ioctl the executor makes it with, naming the device");
+
+	(void)unlink(passwd);
+	(void)unlink(group);
+	(void)unlink(clone);
+	(void)rmdir(dir);
+}
 
 /* ------------------------------------------------------------------------ *
  * The mark a created link wears
@@ -1603,6 +1764,7 @@ int main(void)
 	check_endpoints();
 	check_nat();
 	check_mark();
+	check_tun();
 
 	if (failures) {
 		printf("apply_kernel_test: %d check(s) failed\n", failures);

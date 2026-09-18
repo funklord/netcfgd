@@ -878,13 +878,15 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 	 * shrinks, and the day it empties this check becomes "everything is
 	 * carried out", which is the end state the port is for.
 	 *
-	 * These three are refused for a zero-initialised op because kind 0 is the
-	 * DHCP client, which no backend in `src/backend/` carries. `link.create`
-	 * answers differently depending on what is being created and is checked
-	 * on its own below.
+	 * Only the reload is refused for a zero-initialised op now. Kind 0 is the
+	 * DHCP client, which `src/backend/dhcp/` carries -- so its start and its
+	 * stop have left this list, and what is left is the one a DHCP client
+	 * genuinely does not have: a reload is the client's own business, and
+	 * inventing one that stopped and started would hide that difference
+	 * behind a word. `link.create` answers differently depending on what is
+	 * being created and is checked on its own below.
 	 */
-	static const ncfg_op_kind_t refused[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
-		NCFG_OP_BACKEND_RELOAD };
+	static const ncfg_op_kind_t refused[] = { NCFG_OP_BACKEND_RELOAD };
 	int    every_refusal_names_its_op = 1;
 	int    every_op_answered = 1;
 	size_t kind;
@@ -951,6 +953,15 @@ static void a_link_whose_kind_needs_the_models_numbering_is_refused(void)
 		{ NCFG_KIND_VXLAN, 1, "a vxlan" },
 		{ NCFG_KIND_IFB, 1, "an ifb" },
 		{ NCFG_KIND_WIREGUARD, 1, "a wireguard link" },
+		/*
+		 * **The one kind that is not a netlink message, and the one row this
+		 * table did not have.** A tun is made through `/dev/net/tun`, so for
+		 * one wave this list answered no while `tun.h` carried the call that
+		 * makes one and nothing invoked it. Nothing here noticed either way,
+		 * which is the half worth fixing: the table's whole job is that a
+		 * kind cannot change sides unasked.
+		 */
+		{ NCFG_KIND_TUN, 1, "a tun" },
 		{ NCFG_KIND_VLAN, 0, "a vlan" },
 		{ NCFG_KIND_BOND, 0, "a bond" },
 		{ NCFG_KIND_MACVLAN, 0, "a macvlan" },
@@ -1032,22 +1043,24 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		ncfg_reason_t reason;
 
 		/*
-		 * **`wg.set_peers` was the example here and is carried out now**, so
-		 * the subject moved to one that is still refused rather than the check
-		 * being deleted: what it asserts is that a refusal says *what* is
-		 * missing, and that property outlives any particular op. `backend.start`
-		 * with the zero kind is the DHCP client, which no backend in
-		 * `src/backend/` carries. When that lands, this check moves again --
-		 * and if it has nowhere to move to, the port is finished.
+		 * **`wg.set_peers` was the example here, then the DHCP client, and
+		 * both are carried out now** -- so the subject moves again rather than
+		 * the check being deleted: what it asserts is that a refusal says
+		 * *what* is missing, and that property outlives any particular op.
+		 * `backend.start` on a supplicant is the launcher, which is a
+		 * different thing from the control-socket client `supplicant.h`
+		 * already carries. When that lands, this check moves again -- and if
+		 * it has nowhere to move to, the port is finished.
 		 */
 		memset(&reason, 0, sizeof(reason));
-		reason.interface = "eth0";
-		reason.field = "backend.dhcp4";
+		reason.interface = "wlan0";
+		reason.field = "backend.supplicant";
 		reason.desired = "running";
 		reason.observed = "<absent>";
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_BACKEND_START;
-		op.u.backend.iface = "eth0";
+		op.u.backend.kind = (int)NCFG_BACKEND_SUPPLICANT;
+		op.u.backend.iface = "wlan0";
 		(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
 
 		/* The double refuses exactly what `ncfg_apply_supported` refuses,
@@ -1061,7 +1074,7 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		    "an op this build cannot carry out fails its action rather than passing");
 		message[0] = '\0';
 		check(!ncfg_apply_supported(&op, message, sizeof(message)) &&
-		    strstr(message, "backend.start") && strstr(message, "DHCP client"),
+		    strstr(message, "backend.start") && strstr(message, "wpa_supplicant"),
 		    "and the refusal says what is missing, not just that it is missing");
 	} else {
 		check(0, "an op this build cannot carry out fails its action rather than passing");
@@ -1903,6 +1916,211 @@ static void an_empty_journal_writes_nothing(char *run_dir)
 	ncfg_plan_free(plan);
 }
 
+/*
+ * The journal reaches `<run_dir>/plan.last.json`, and holds what the renderer
+ * rendered.
+ *
+ * **This is the file that answers "where did it stop".** An apply halts at the
+ * first failure and marks everything after it skipped; a reconcile has no
+ * terminal to print that to, so without this the answer exists nowhere. The
+ * bytes themselves are the neighbouring check's subject -- what is asserted
+ * here is that they arrive, whole, at the path every reader is pointed at.
+ */
+static void the_journal_reaches_the_run_directory(const char *run_dir)
+{
+	char           path[600];
+	char           message[NCFG_ERROR_MAX];
+	ncfg_journal_t journal;
+	ncfg_record_t  record;
+	ncfg_buf_t     rendered;
+	char          *rendered_text = NULL;
+	char          *on_disk;
+	size_t         length = 0;
+	FILE          *file;
+	struct stat    first;
+	struct stat    second;
+
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", run_dir);
+
+	ncfg_journal_init(&journal);
+	memset(&record, 0, sizeof(record));
+	record.id = 0;
+	record.op = "link.up";
+	record.interface = "eth0";
+	record.outcome = NCFG_OUTCOME_DONE;
+	ncfg_journal_push(&journal, &record);
+	memset(&record, 0, sizeof(record));
+	record.id = 1;
+	record.op = "addr.add";
+	record.interface = "eth0";
+	record.outcome = NCFG_OUTCOME_FAILED;
+	record.error = "Cannot assign requested address";
+	ncfg_journal_push(&journal, &record);
+	memset(&record, 0, sizeof(record));
+	record.id = 2;
+	record.op = "route.add";
+	record.interface = "eth0";
+	record.outcome = NCFG_OUTCOME_SKIPPED;
+	ncfg_journal_push(&journal, &record);
+
+	ncfg_buf_init(&rendered, 0);
+	message[0] = '\0';
+	if (ncfg_journal_write(&journal, &rendered, message, sizeof(message))) {
+		rendered_text = ncfg_buf_take(&rendered, &length);
+	}
+	ncfg_buf_free(&rendered);
+
+	message[0] = '\0';
+	check(ncfg_apply_write_journal(run_dir, &journal, message, sizeof(message)),
+	    "the journal of an apply is written to the run directory");
+	on_disk = NULL;
+	file = fopen(path, "rb");
+	if (file) {
+		char   bytes[4096];
+		size_t got = fread(bytes, 1u, sizeof(bytes) - 1u, file);
+
+		bytes[got] = '\0';
+		on_disk = strdup(bytes);
+		(void)fclose(file);
+	}
+	check(on_disk != NULL, "  at plan.last.json, where every reader is pointed");
+	check(on_disk && rendered_text && strcmp(on_disk, rendered_text) == 0,
+	    "  holding exactly what the renderer rendered, and no more");
+	/* The action that failed, by name, is the whole reason the file exists:
+	 * an operator finding a half-configured machine reads this rather than
+	 * guessing from the log. */
+	check(on_disk && strstr(on_disk, "\"outcome\":\"failed\"") != NULL &&
+	    strstr(on_disk, "addr.add") != NULL,
+	    "  including which action stopped it, which is what the file is for");
+	check(on_disk && strstr(on_disk, "\"outcome\":\"skipped\"") != NULL,
+	    "  and what never ran behind it");
+
+	/*
+	 * An empty journal is written, where the *fold* beside it deliberately
+	 * does not write at all. Not an inconsistency: the record is a claim that
+	 * accumulates and must not be rewritten by a pass that did nothing, while
+	 * this file answers a question about the last apply -- and "it did
+	 * nothing" is that answer rather than the absence of one. A stale journal
+	 * left behind would be read as the last apply's, which is the failure.
+	 */
+	ncfg_journal_free(&journal);
+	ncfg_journal_init(&journal);
+	check(stat(path, &first) == 0, "  the file is there to be replaced");
+	message[0] = '\0';
+	check(ncfg_apply_write_journal(run_dir, &journal, message, sizeof(message)) &&
+	    stat(path, &second) == 0 && first.st_ino != second.st_ino,
+	    "an apply that did nothing replaces it rather than leaving the last one behind");
+	free(on_disk);
+	on_disk = NULL;
+	file = fopen(path, "rb");
+	if (file) {
+		char   bytes[256];
+		size_t got = fread(bytes, 1u, sizeof(bytes) - 1u, file);
+
+		bytes[got] = '\0';
+		on_disk = strdup(bytes);
+		(void)fclose(file);
+	}
+	check(on_disk && strcmp(on_disk, "{\"records\":[]}") == 0,
+	    "  and what it then holds says so rather than being empty or half a file");
+	free(on_disk);
+
+	/*
+	 * And it is written under `owned.lock`, which is the fold's lock and is
+	 * the one thing here the file's own contents cannot show. Asserted in a
+	 * directory nothing has locked yet, so the lock file's existence is this
+	 * call's doing and not a leftover: `ncfg_lock_take` creates it, and
+	 * nothing else in this test has been near it.
+	 *
+	 * What the lock buys is ordering between this file and `owned.json` --
+	 * they are two halves of one statement about one apply, and two processes
+	 * write both.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/locked", run_dir);
+	if (mkdir(path, 0700) == 0) {
+		char lock[700];
+
+		message[0] = '\0';
+		check(ncfg_apply_write_journal(path, &journal, message, sizeof(message)),
+		    "a journal is written into a directory nothing has locked");
+		(void)snprintf(lock, sizeof(lock), "%s/owned.lock", path);
+		check(stat(lock, &first) == 0,
+		    "  and owned.lock is there, so the write went under the fold's own lock");
+		(void)unlink(lock);
+		(void)snprintf(lock, sizeof(lock), "%s/plan.last.json", path);
+		(void)unlink(lock);
+		(void)rmdir(path);
+	} else {
+		check(0, "a directory nothing has locked could be made");
+		check(0, "  and owned.lock is there, so the write went under the fold's own lock");
+	}
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", run_dir);
+
+	/* The refusals, which are the shape every call in this header has. */
+	message[0] = '\0';
+	check(!ncfg_apply_write_journal(NULL, &journal, message, sizeof(message)) &&
+	    message[0] != '\0', "a write with no run directory is refused with a sentence");
+	check(!ncfg_apply_write_journal("", &journal, NULL, 0),
+	    "and so is one with an empty one, which would write into the working directory");
+	check(!ncfg_apply_write_journal(run_dir, NULL, NULL, 0),
+	    "and one with no journal at all");
+	/*
+	 * A run directory that cannot be made is a failure that is *reported*
+	 * rather than a file quietly not written. `state.h` calls the run
+	 * directory derived and disposable, which is why every caller logs this
+	 * and carries on -- but a caller can only do that if it is told.
+	 *
+	 * The unwritable path is inside this test's own directory, under a file
+	 * rather than a directory, so `mkdir` answers `ENOTDIR`. **A path outside
+	 * it would be made rather than refused**: `ncfg_lock_take` creates the
+	 * directory it is asked for, which is `ncfg_owned_update`'s behaviour too
+	 * -- so a check that handed this an absent absolute path would prove
+	 * nothing and would create that path on whoever ran the suite. Found by
+	 * writing it the wrong way round first.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/owned.json/run", run_dir);
+	message[0] = '\0';
+	check(!ncfg_apply_write_journal(path, &journal, message, sizeof(message)) &&
+	    message[0] != '\0',
+	    "and a run directory that cannot be made fails loudly rather than silently");
+
+	/*
+	 * And the other half of that, which is a different branch entirely: the
+	 * lock is taken, the directory is fine, and the **publish** is what fails.
+	 * A directory in the file's place is the cheapest way to produce it -- the
+	 * rename lands on a directory and cannot -- and it is inside this test's
+	 * own tree.
+	 *
+	 * Worth its own case because the two failures are far apart in the call:
+	 * a sabotage that made the write's result be ignored left every other
+	 * check here green, this one being the only thing between it and an apply
+	 * reporting a journal it did not write.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/blocked", run_dir);
+	if (mkdir(path, 0700) == 0) {
+		char occupied[700];
+
+		(void)snprintf(occupied, sizeof(occupied), "%s/plan.last.json", path);
+		if (mkdir(occupied, 0700) == 0) {
+			message[0] = '\0';
+			check(!ncfg_apply_write_journal(path, &journal, message,
+			    sizeof(message)) && message[0] != '\0',
+			    "a publish that could not happen is reported, not reported as done");
+			(void)rmdir(occupied);
+		} else {
+			check(0, "a directory could be put in the journal's place");
+		}
+		(void)snprintf(occupied, sizeof(occupied), "%s/owned.lock", path);
+		(void)unlink(occupied);
+		(void)rmdir(path);
+	} else {
+		check(0, "a directory could be put in the journal's place");
+	}
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", run_dir);
+	ncfg_journal_free(&journal);
+	free(rendered_text);
+}
+
 static void what_an_apply_did_is_recorded(void)
 {
 	char run_dir[512];
@@ -1914,6 +2132,7 @@ static void what_an_apply_did_is_recorded(void)
 	only_what_ran_is_claimed(run_dir);
 	a_revert_takes_the_claims_back(run_dir);
 	an_empty_journal_writes_nothing(run_dir);
+	the_journal_reaches_the_run_directory(run_dir);
 	the_folding_rules();
 
 	/* Named, never swept: this directory is one this test made, and the two
@@ -1924,6 +2143,8 @@ static void what_an_apply_did_is_recorded(void)
 		(void)snprintf(path, sizeof(path), "%s/owned.json", run_dir);
 		(void)unlink(path);
 		(void)snprintf(path, sizeof(path), "%s/owned.lock", run_dir);
+		(void)unlink(path);
+		(void)snprintf(path, sizeof(path), "%s/plan.last.json", run_dir);
 		(void)unlink(path);
 		(void)rmdir(run_dir);
 	}

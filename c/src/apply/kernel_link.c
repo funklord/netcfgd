@@ -40,6 +40,12 @@
 #include "kernel_internal.h"
 
 #include "ncfg/base.h"
+/* For `ncfg_peer_user_id` and `ncfg_peer_group_id`, which is where this
+ * project's one by-name lookup of a uid and a gid lives -- reading
+ * `/etc/passwd` and `/etc/group` as files rather than through NSS. The
+ * alternative was a second copy of that reader here, which is the duplication
+ * every other comment in this file refuses. */
+#include "ncfg/daemon.h"
 #include "ncfg/observe.h"
 #include "ncfg/wire.h"
 
@@ -304,6 +310,113 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 	    "%s is a %s, which this executor does not build a netlink message for",
 	    name ? name : "?", word ? word : "kind of its own");
 	return 0;
+}
+
+/* ------------------------------------------------------------------------ *
+ * The one kind that is not a netlink message
+ * ------------------------------------------------------------------------ */
+
+/*
+ * One id from a name, or a refusal that names both.
+ *
+ * A single helper for the two, because the pair differ only in which file and
+ * which call, and two copies of "a name the document gave that the machine has
+ * no entry for" is two sentences that would drift apart.
+ */
+static int id_of(int (*lookup)(const char *file, const char *name, unsigned long *out),
+    const char *file, const char *who, const char *what, const char *link,
+    unsigned long *out, char *err, size_t err_size)
+{
+	if (!lookup(file, who, out)) {
+		ncfg_error_set(err, err_size,
+		    "%s asks to be owned by the %s `%s`, and this machine has no such entry",
+		    link ? link : "?", what, who);
+		return 0;
+	}
+	return 1;
+}
+
+/* `ncfg_peer_user_id` and `ncfg_peer_group_id` through one signature, so that
+ * `id_of` can take either. A cast between function pointer types would be
+ * undefined behaviour the sanitizer is right to complain about. */
+static int user_id_of(const char *file, const char *name, unsigned long *out)
+{
+	uid_t id;
+
+	if (!ncfg_peer_user_id(file, name, &id)) {
+		return 0;
+	}
+	*out = (unsigned long)id;
+	return 1;
+}
+
+static int group_id_of(const char *file, const char *name, unsigned long *out)
+{
+	gid_t id;
+
+	if (!ncfg_peer_group_id(file, name, &id)) {
+		return 0;
+	}
+	*out = (unsigned long)id;
+	return 1;
+}
+
+int ncfg_kernel_tun_spec_of(const ncfg_interface_kind_t *kind, const char *name,
+    const char *passwd_file, const char *group_file, ncfg_tun_spec_t *out, char *err,
+    size_t err_size)
+{
+	unsigned long id;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "there is nowhere to put a tun description");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	if (!kind) {
+		ncfg_error_set(err, err_size, "%s carries no kind, so there is nothing to build",
+		    name ? name : "an unnamed link");
+		return 0;
+	}
+	if (kind->kind != (int)NCFG_KIND_TUN) {
+		/*
+		 * Refused rather than converted, which is `ncfg_kernel_kind_of`'s rule
+		 * one layer down: a device whose block is a different kind is a plan
+		 * built from another document, and making a tun out of whatever it
+		 * actually is would create the wrong device under the right name.
+		 */
+		ncfg_error_set(err, err_size,
+		    "%s is a %s rather than a tun, so it is not made through %s",
+		    name ? name : "?",
+		    ncfg_interface_kind_name(kind->kind) ? ncfg_interface_kind_name(kind->kind)
+		    : "kind of its own", NCFG_TUN_CLONE_DEVICE);
+		return 0;
+	}
+	if (!name || name[0] == '\0') {
+		ncfg_error_set(err, err_size, "a tun device is created by name and this op has none");
+		return 0;
+	}
+	out->name = name;
+	out->mode = (ncfg_tun_mode_t)kind->tun.mode;
+	/* The name is left for `ncfg_tun_request` to refuse, which is where the
+	 * kernel's sixteen-byte field is written down; checking it twice is two
+	 * places for the boundary to be off by one. */
+	if (kind->tun.owner) {
+		if (!id_of(user_id_of, passwd_file, kind->tun.owner, "user", name, &id, err,
+		    err_size)) {
+			return 0;
+		}
+		out->has_owner = 1;
+		out->owner = (uid_t)id;
+	}
+	if (kind->tun.group) {
+		if (!id_of(group_id_of, group_file, kind->tun.group, "group", name, &id, err,
+		    err_size)) {
+			return 0;
+		}
+		out->has_group = 1;
+		out->group = (gid_t)id;
+	}
+	return 1;
 }
 
 /* ------------------------------------------------------------------------ *

@@ -895,6 +895,29 @@ static void this_build_does_not_reconcile(void)
 	ncfg_owned_free(&owned);
 
 	/*
+	 * And the third, which was a reason of its own until this wave: an apply
+	 * that stopped halfway left nothing under `/run` saying where. The writer
+	 * exists and the pass reaches it -- `reconcile_test.c` drives a pass and
+	 * reads the file back, and this asserts the two facts that check cannot
+	 * see from inside: that the call is declared at all, and that the daemon's
+	 * pass is the file that makes it.
+	 */
+	message[0] = '\0';
+	check(!ncfg_apply_write_journal(NULL, NULL, message, sizeof(message)) &&
+	    message[0] != '\0',
+	    "  and the journal of an apply has a writer, which it did not");
+	{
+		char *pass = read_source("src/daemon/reconcile_pass.c");
+
+		/* The file that would have to change, which is 10.177's rule about
+		 * asserting a negative over a location: `record_what_ran` is
+		 * `reconcile_pass.c`'s and nowhere else. */
+		check(pass && strstr(pass, "ncfg_apply_write_journal(run_dir") != NULL,
+		    "  and the pass that reconciles a machine writes one");
+		free(pass);
+	}
+
+	/*
 	 * What stops it now, checked rather than described. `ncfg_apply_supported`
 	 * is asked by `execute` one action at a time and `ncfg_apply` stops at the
 	 * first failure, so an op it refuses is a plan that changes a machine and
@@ -912,6 +935,57 @@ static void this_build_does_not_reconcile(void)
 	message[0] = '\0';
 	check(!ncfg_apply_supported(&op, message, sizeof(message)) && message[0] != '\0',
 	    "  and the executor still refuses an op it cannot carry out, while a plan runs");
+
+	/*
+	 * The other half of that sentence, which is the one that can rot silently:
+	 * every kind this list says it *can* create must have a path in the
+	 * executor. A tun is the case where the two can disagree without anything
+	 * failing to compile -- `ncfg_kernel_newlink_of` refuses one by design, so
+	 * a `link.create` for a tun would be refused in the middle of a plan by
+	 * the very arrangement `ncfg_apply_supported` exists to prevent.
+	 *
+	 * Read from `kernel.c`, which is where `create_link` is. The file matters:
+	 * the check this replaced read `kernel_link.c`, which has never held
+	 * `create_link`, so it could not have gone red however the wiring landed.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "tap0";
+	{
+		static ncfg_interface_kind_t tun;
+		char                        *source = read_source("src/apply/kernel.c");
+
+		tun.kind = (int)NCFG_KIND_TUN;
+		op.u.link_create.kind = &tun;
+		check(ncfg_apply_supported(&op, NULL, 0),
+		    "  a tun is a kind this build says it can create");
+		check(source && strstr(source, "static int create_tun") != NULL &&
+		    strstr(source, "ncfg_tun_create(NCFG_TUN_CLONE_DEVICE") != NULL &&
+		    strstr(source, "create_tun(kernel,") != NULL,
+		    "  and `create_link` has the path that makes one, rather than saying so later");
+		/*
+		 * And that the path marks what it made, read **inside that function's
+		 * body** rather than anywhere in the file -- `mark_as_ours` is called
+		 * by the netlink path too, so a search of the whole file finds it
+		 * whether or not the tun arm reaches it. That is the Rust's defect
+		 * exactly (project.md 10.173): its tun arm returns twenty lines above
+		 * the block that marks a created link, so the one kind whose
+		 * ownership has nowhere else to live is the one kind without a mark.
+		 * A sabotage that deleted the call from `create_tun` alone went
+		 * unnoticed until this was narrowed to the body.
+		 */
+		if (source) {
+			const char *body = strstr(source, "static int create_tun");
+			const char *ends = body ? strstr(body, "static int create_link") : NULL;
+			const char *marks = body ? strstr(body, "mark_as_ours(kernel,") : NULL;
+
+			check(body && ends && marks && marks < ends,
+			    "  and marks the device it made, which the Rust's own tun arm does not");
+		} else {
+			check(0, "  and marks the device it made, which the Rust's own tun arm does not");
+		}
+		free(source);
+	}
 }
 
 int main(void)

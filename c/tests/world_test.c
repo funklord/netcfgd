@@ -539,6 +539,102 @@ static void the_list_is_bounded_and_says_so(void)
 	}
 }
 
+/*
+ * A stream whose client has gone is swept, on a machine that announces nothing.
+ *
+ * **This is the gap 0263 named and left open.** The only pruning there was
+ * happened inside a broadcast, and a converged machine broadcasts nothing --
+ * so a client that subscribed and hung up held one of sixteen places until
+ * something happened, which on the machine that most needs those places is
+ * never. Sixteen of them and the seventeenth `monitor` was refused over
+ * streams nobody was reading.
+ *
+ * Driven without an event of any kind, which is the whole point: nothing below
+ * writes a line, and the list still empties.
+ */
+static void a_stream_whose_client_has_gone_is_swept_without_an_event(void)
+{
+	ncfg_main_subscribers_t subscribers;
+	char                    buffer[512];
+	ssize_t                 got;
+	int                     first = -1;
+	int                     second = -1;
+	int                     third = -1;
+
+	ncfg_main_subscribers_init(&subscribers);
+	if (!pair_for(&subscribers, &first) || !pair_for(&subscribers, &second) ||
+	    !pair_for(&subscribers, &third)) {
+		return;
+	}
+	check(ncfg_main_subscribers_prune(&subscribers) == 0u && subscribers.count == 3u,
+	    "a sweep over three live streams drops none of them");
+
+	(void)close(first);
+	(void)close(third);
+	check(ncfg_main_subscribers_prune(&subscribers) == 2u,
+	    "the two whose client has gone are swept, with no event written anywhere");
+	check(subscribers.count == 1u, "and the one still there keeps its place");
+	check(subscribers.dropped == 2u,
+	    "counted exactly as a failed write is, being the same thing to this list");
+
+	/*
+	 * The one kept is the one that was kept, not merely "one of them". A sweep
+	 * that compacted wrongly would leave the right count over the wrong
+	 * descriptor -- and the way that shows is a client being told somebody
+	 * else's events, which is the failure the whole hand-over is shaped to
+	 * avoid.
+	 */
+	told(&subscribers, "eth0 up");
+	got = recv(second, buffer, sizeof(buffer) - 1u, MSG_DONTWAIT);
+	buffer[got > 0 ? (size_t)got : 0u] = '\0';
+	check(got > 0 && strstr(buffer, "eth0 up") != NULL,
+	    "and it is the survivor that is still being written to");
+
+	/*
+	 * **A client that sent bytes down its stream is not a client that has
+	 * gone**, and this is where the sweep's rule parts company with the source
+	 * set's. `ncfg_main_readiness` reads `POLLIN` as "there is something to
+	 * read" because somebody drains a source; nothing drains a subscriber, so
+	 * a sweep that borrowed that reading would keep every hung-up descriptor
+	 * (a close sets `POLLIN|POLLHUP`) and this one would be the only thing
+	 * telling the two apart.
+	 */
+	(void)send(second, "hello?\n", 7u, 0);
+	check(ncfg_main_subscribers_prune(&subscribers) == 0u && subscribers.count == 1u,
+	    "a client that sends something rude down the stream is not one that has gone");
+
+	ncfg_main_subscribers_close(&subscribers);
+	(void)close(second);
+
+	/* The empty list and the absent one, which is the seam's bargain: a run
+	 * with no subscriber list sweeps nothing rather than refusing. */
+	check(ncfg_main_subscribers_prune(&subscribers) == 0u, "sweeping an empty list is nothing");
+	check(ncfg_main_subscribers_prune(NULL) == 0u, "and so is sweeping no list at all");
+}
+
+/*
+ * What a `revents` means for a stream, as a value.
+ *
+ * Asserted here rather than only through a socket, because the case that
+ * matters cannot be produced reliably on one: `POLLIN|POLLHUP` together is
+ * what a client that wrote and then closed leaves behind, and getting a kernel
+ * to hold both at the moment a test looks is a race. The decision is a
+ * function taking a number, so it is checked as one.
+ */
+static void what_a_revents_means_for_a_stream(void)
+{
+	check(ncfg_main_subscriber_ended(POLLHUP), "a hang-up is a client that has gone");
+	check(ncfg_main_subscriber_ended(POLLERR), "so is an error queued on the stream");
+	check(ncfg_main_subscriber_ended(POLLNVAL), "and so is a descriptor this process lacks");
+	check(ncfg_main_subscriber_ended((short)(POLLIN | POLLHUP)),
+	    "and readable-and-hung-up is gone, which is where this differs from a source");
+	check(ncfg_main_readiness((short)(POLLIN | POLLHUP)) == NCFG_MAIN_READY_DATA,
+	    "  a source reads the same bits as data, because somebody drains a source");
+	check(!ncfg_main_subscriber_ended(POLLIN),
+	    "readable alone is a client talking, not a client leaving");
+	check(!ncfg_main_subscriber_ended(0), "and nothing at all is nothing at all");
+}
+
 /* ------------------------------------------------------------------------ *
  * A `monitor`, all the way through
  * ------------------------------------------------------------------------ */
@@ -1125,6 +1221,8 @@ int main(void)
 	a_subscriber_that_stopped_reading_is_dropped_not_waited_for();
 	a_line_that_only_half_fitted_drops_the_subscriber();
 	the_list_is_bounded_and_says_so();
+	a_stream_whose_client_has_gone_is_swept_without_an_event();
+	what_a_revents_means_for_a_stream();
 	a_monitor_becomes_a_subscriber_and_is_told();
 	the_seams_a_world_fills_in();
 	an_executor_takes_the_apply_lock_before_anything_else();

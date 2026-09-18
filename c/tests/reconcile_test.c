@@ -1132,6 +1132,81 @@ static void harness_stop(harness_t *harness)
 }
 
 /*
+ * A pass says under `/run` where it got to.
+ *
+ * **This is the one thing a reconcile cannot say any other way.** `ncfg apply`
+ * prints its journal to whoever typed it; a pass on the loop's own backstop
+ * has no terminal, so an apply that stopped at its second action leaves the
+ * fact in the log and nowhere else -- and the Rust's own record of this says
+ * the log held two startup lines and nothing at all while `plan.last.json`
+ * named the cause exactly.
+ *
+ * Driven through the pass rather than by calling the writer, which
+ * `apply_test.c` already does: what is checked here is that the pass reaches
+ * it, on the success path and on the failure path, with a run directory of
+ * this test's own and an executor that is a double.
+ */
+static void a_pass_says_under_run_where_it_got_to(const char *base)
+{
+	harness_t               harness;
+	ncfg_reconcile_wake_t   wake;
+	ncfg_reconcile_report_t report;
+	char                    path[640];
+	char                    err[NCFG_ERROR_MAX];
+	char                   *written;
+
+	if (!harness_start(&harness, base, "journal")) {
+		check(0, "a loop over directories of this test's own");
+		harness_stop(&harness);
+		return;
+	}
+	harness.state.desired = document_of(DRIFTING_DOCUMENT);
+	harness.state.observed = observed_of(DRIFTING_OBSERVED);
+	harness.state.observe = observe_fixture;
+	harness.machine.body = DRIFTING_OBSERVED;
+	harness.state.observe_context = &harness.machine;
+	if (!harness.state.desired || !harness.state.observed) {
+		check(0, "the drifting fixture reads");
+		harness_stop(&harness);
+		return;
+	}
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", harness.run);
+	check(!testdir_exists(path), "nothing has written a journal yet");
+
+	memset(&wake, 0, sizeof(wake));
+	ncfg_reconcile_collapse(&wake, NCFG_WOKE_TICK);
+	err[0] = '\0';
+	check(ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err)) && report.actions_done == 1u,
+	    "a pass that put one thing back runs");
+	written = testdir_read(path, NULL);
+	check(written != NULL, "and leaves a journal under the run directory");
+	check(written && strstr(written, "link.set_mtu") != NULL &&
+	    strstr(written, "\"outcome\":\"done\"") != NULL,
+	    "  naming what it did and that it stood");
+	free(written);
+
+	/*
+	 * And the half that matters more: a pass whose executor refused. The
+	 * machine is left part-configured and nobody was watching, so the file is
+	 * the only thing that says which action stopped it.
+	 */
+	harness.world.refuse = "link.set_mtu";
+	harness.world.count = 0;
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	written = testdir_read(path, NULL);
+	check(written && strstr(written, "\"outcome\":\"failed\"") != NULL,
+	    "a pass that stopped at an action says so in the file rather than only in the log");
+	check(written && strstr(written, "told to refuse") != NULL,
+	    "  carrying the executor's own sentence, which is what an operator reads next");
+	free(written);
+
+	harness_stop(&harness);
+}
+
+/*
  * The five orderings the Rust's comments call load-bearing, read back.
  *
  * Every one of them is a sentence there and none of them was a check: the
@@ -1854,6 +1929,7 @@ int main(void)
 	a_window_is_armed_only_over_a_change();
 
 	the_order_of_one_pass_is_the_contract(base);
+	a_pass_says_under_run_where_it_got_to(base);
 	a_held_loop_still_observes_and_still_reports(base);
 	a_roam_is_told_before_anything_looks(base);
 	a_byte_identical_rewrite_arms_nothing(base);

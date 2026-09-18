@@ -529,6 +529,7 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 	int                   drop[NCFG_MAIN_SOURCES_MAX];
 	size_t                request_count = 0;
 	size_t                dropped = 0;
+	size_t                pruned = 0;
 	unsigned              interrupted = 0;
 	unsigned              round;
 	uint64_t              deadline;
@@ -693,7 +694,29 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 		    (size_t)NCFG_MAIN_PENDING_MAX);
 	}
 
+	/*
+	 * Sweep the streams before the pass announces down them, not after.
+	 *
+	 * A subscriber whose client has gone is otherwise found only by a write
+	 * that fails, and a converged machine writes nothing -- so on the machine
+	 * that most needs the places in that list, nothing ever frees one. Here
+	 * rather than inside `ncfg_main_subscribers_tell` because that is the same
+	 * arrangement one layer down: a list swept only when it is written to is a
+	 * list nobody sweeps.
+	 *
+	 * Before the pass so that an event this round announces is not written to
+	 * a descriptor already known to be gone, and after the mailbox has been
+	 * emptied so that a `monitor` that arrived this round is in the list and
+	 * is swept with everything else -- it will not be found gone, having just
+	 * been handed over, and a sweep that skipped it would be a rule with an
+	 * exception in it.
+	 */
+	if (run->subscribers) {
+		pruned = ncfg_main_subscribers_prune(run->subscribers);
+	}
+
 	if (report) {
+		report->pruned = pruned;
 		report->wake = harvest.wake;
 		report->roam_count = harvest.roam_count;
 		report->roams_missed = harvest.roams_missed;
