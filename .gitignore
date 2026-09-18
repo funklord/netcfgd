@@ -31,6 +31,11 @@ c/src/*/*.o
 c/src/*/*/*.o
 c/*.a
 c/tests/*_test
+# The program the port links, and its second name. Two literal names rather
+# than a shape, because `c/` is a source directory and everything else in it is
+# tracked -- a pattern here would be a promise about whatever lands next.
+c/netcfgd
+c/ncfg
 gui/tests/build/
 # The live GUI probe builds beside its own project file, which is in a
 # subdirectory so that `make -C gui test` does not discover and run it without

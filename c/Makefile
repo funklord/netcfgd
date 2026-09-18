@@ -8,8 +8,8 @@
 #   module here is the better of the two.
 #
 # TARGETS
-#   make            -- the library
-#   make test       -- build and run every check under tests/
+#   make            -- the library, the program, and the program's second name
+#   make test       -- link the program and run every check under tests/
 #   make DEBUG=1    -- unoptimized and symbol-rich (-Og -g)
 #   make SANITIZE=1 -- ASan and UBSan, independent of DEBUG; combine freely
 #   make clean      -- objects and binaries
@@ -24,6 +24,28 @@
 #   working tree at once, and a listed source is a merge conflict per module
 #   for no benefit -- the directory *is* the list. `clean` removes what this
 #   build produced, by the same wildcard, and nothing else: see the target.
+#
+#   `src/main/` is the one directory held out of that list, and the reason is
+#   0263 rather than convenience: a library never exits, and a `main` inside
+#   `libncfg.a` would be a program in the archive that rule is enforced by.
+#   It is built into the program instead, and `main_test` links the parts of it
+#   that are not the entry point.
+#
+# WHY ONE PROGRAM CARRIES TWO NAMES
+#   `netcfgd` and `ncfg` share the model, the compiler, the planner, the
+#   executor and the netlink layer -- nearly everything either of them is.
+#   Built as two binaries the Rust measured 775 KB duplicated between them
+#   against a 2.89 MB install, and merging them is most of what took the
+#   install to 1.75 MB (0024). So the program is `netcfgd` and `ncfg` is a
+#   symlink to it, made here rather than only on install: a test or a person
+#   running `./ncfg` out of this directory would otherwise be running the
+#   daemon under a client's arguments. The Rust makes the same link, in the
+#   top-level Makefile's `ncfg-link`, for the same reason.
+#
+#   Nothing here is installed. 0263 is explicit that the packaging keeps
+#   shipping the Rust, so this program exists to be linked, measured and
+#   tested -- which is the first thing a port of a multi-call binary cannot do
+#   until it has a `main`.
 # =============================================================================
 
 CC ?= gcc
@@ -39,8 +61,20 @@ LIB = libncfg.a
 # because four of them share a shape and a flat `src/backend/` would put
 # `render.c` there four times. The wildcard is two deep for the same reason it
 # is one deep -- the directory is the list.
-SRCS = $(wildcard src/*/*.c) $(wildcard src/*/*/*.c) ../client/ncfg_json.c
+# `src/main/` is filtered out for the reason the header gives: what is under it
+# decides an exit status, and a library may not.
+SRCS = $(filter-out src/main/%,$(wildcard src/*/*.c)) $(wildcard src/*/*/*.c) \
+       ../client/ncfg_json.c
 OBJS = $(patsubst %.c,%.o,$(SRCS))
+
+# The program, its second name, and the entry points that make it one.
+PROGRAM       = netcfgd
+PROGRAM_LINK  = ncfg
+PROGRAM_SRCS  = $(wildcard src/main/*.c)
+PROGRAM_OBJS  = $(patsubst %.c,%.o,$(PROGRAM_SRCS))
+# What a test may link: the three programs' bodies without the one symbol it
+# cannot have twice. A test has its own `main`.
+PROGRAM_PARTS = $(filter-out src/main/main.o,$(PROGRAM_OBJS))
 
 TEST_SRCS = $(wildcard tests/*_test.c)
 TESTS = $(patsubst %.c,%,$(TEST_SRCS))
@@ -64,10 +98,19 @@ endif
 
 .PHONY: all test clean
 
-all: $(LIB)
+all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
 
 $(LIB): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
+
+# The library last on the line, because it is an archive: the objects that need
+# it are listed before it or the linker has already walked past what it wanted.
+$(PROGRAM): $(PROGRAM_OBJS) $(LIB)
+	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(LIB) $(LDFLAGS) -o $@
+
+# The second name, made rather than installed -- see the header.
+$(PROGRAM_LINK): $(PROGRAM)
+	ln -sf $(PROGRAM) $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -75,7 +118,13 @@ $(LIB): $(OBJS)
 # Each test is its own binary, and each is run. A suite that stops at the
 # first failure hides how much is broken, so every one runs and the target
 # fails at the end if any did.
-test: $(TESTS)
+# The program is a prerequisite, not a separate target somebody remembers.
+# `test` used to depend on the binaries under `tests/` alone, so `make check`
+# -- which reaches this through the top-level `c-test` -- would have stayed
+# green through a program that no longer links. Every object it needs is in
+# the library the tests already build, so the only thing this catches is the
+# link itself, which is exactly the thing nothing else looks at.
+test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK)
 	@fail=0; \
 	for one in $(TESTS); do \
 		echo "== $$one"; \
@@ -87,7 +136,15 @@ test: $(TESTS)
 tests/%_test: tests/%_test.c $(LIB)
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
+# The one test that links more than the library, because what it checks is not
+# in the library: the entry points are under `src/main/`, which `SRCS` holds
+# out. An explicit rule beats the pattern above it whatever the order.
+tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB)
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+
 # What this build made, by the same wildcard that made it -- and nothing by
-# pattern that this directory does not own.
+# pattern that this directory does not own. The program and its second name are
+# two literal names rather than a wildcard, because this directory is not one
+# whose contents a build produced.
 clean:
-	rm -f $(OBJS) $(LIB) $(TESTS)
+	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS)
