@@ -449,6 +449,49 @@ static void release_field(const ncfg_field_t *field, void *base)
 static int read_one(const ncfg_field_t *field, const ncfg_type_t *owner,
     const ncfg_json_doc_t *doc, uint32_t node, void *base, char *err, size_t err_size);
 
+/* Whether this kind of field can be absent, which is what a `null` says. */
+static int field_is_optional(const ncfg_field_t *field)
+{
+	switch (field->kind) {
+	case NCFG_F_OPT_BOOL:
+	case NCFG_F_OPT_INT:
+	case NCFG_F_OPT_ENUM:
+	case NCFG_F_STR:
+	case NCFG_F_OPT_STRUCT:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+/* Leave an optional field saying it was not there. */
+static void clear_optional(const ncfg_field_t *field, void *slot)
+{
+	switch (field->kind) {
+	case NCFG_F_OPT_BOOL: {
+		ncfg_optbool_t value = { 0, 0 };
+
+		memcpy(slot, &value, sizeof(value));
+		break;
+	}
+	case NCFG_F_OPT_INT:
+	case NCFG_F_OPT_ENUM: {
+		ncfg_optint_t value = { 0, 0 };
+
+		memcpy(slot, &value, sizeof(value));
+		break;
+	}
+	case NCFG_F_STR:
+	case NCFG_F_OPT_STRUCT:
+	default: {
+		void *nothing = NULL;
+
+		memcpy(slot, &nothing, sizeof(nothing));
+		break;
+	}
+	}
+}
+
 static int read_list(const ncfg_field_t *field, const ncfg_type_t *owner,
     const ncfg_json_doc_t *doc, uint32_t node, void *base, char *err, size_t err_size)
 {
@@ -617,6 +660,26 @@ static int read_one(const ncfg_field_t *field, const ncfg_type_t *owner,
 	char  what[160];
 
 	ncfg_error_set(what, sizeof(what), "`%s` of %s", field->name, owner->what);
+
+	/*
+	 * **`null` is how an absent optional arrives**, which is serde's rule for
+	 * every `Option<T>`: a member written as `null` reads back as `None`, and
+	 * the one field in this model that is *written* as null
+	 * (`confirm_default`, see NCFG_FF_NULL_ABSENT) could not otherwise be read
+	 * by the reader that wrote it. That was live for two commits: the writer
+	 * gained the flag and the reader was not taught the other half, so a
+	 * document stating no confirm window -- which is nearly every document --
+	 * failed to read back with "not a whole number". Found by the module that
+	 * writes `/run/netcfgd/desired.json` and reads it again.
+	 *
+	 * Handled once here rather than per arm: a null for a member this type
+	 * does not treat as optional still reaches its own reader and is refused
+	 * there, naming the type it wanted.
+	 */
+	if (ncfg_json_type(doc, node) == NCFG_JSON_NULL && field_is_optional(field)) {
+		clear_optional(field, slot);
+		return 1;
+	}
 
 	switch (field->kind) {
 	case NCFG_F_BOOL: {
