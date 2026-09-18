@@ -49,16 +49,26 @@
  *   `exec`ed image that has not spawned anything**, because a worker that sheds
  *   in a threaded process looks like it has disarmed one and has not.
  *
- * ONE THING TO KNOW BEFORE RUNNING THIS UNDER ASan
- *   As **root**, a sanitized build of this binary ends with
- *   `LeakSanitizer has encountered a fatal error` and an exit status of 1,
- *   after every check above has passed -- and the checks' own output is lost
- *   with it, because LSan dies without flushing stdio. Nothing here leaks: the
- *   leak check runs at exit, it stops the world to do it, and a process that
- *   has just given up uid 0 and every capability cannot do that to itself. It
- *   is this test succeeding that breaks it. `ASAN_OPTIONS=detect_leaks=0` is
- *   the answer for a root run; under `unshare -r`, where the shed reaches
- *   capabilities-only and uid 0 remains, the leak check runs normally.
+ * WHY IT LEAVES BY A DIFFERENT DOOR UNDER ASan
+ *   **A process that has fully shed cannot be leak-checked, and this one ends
+ *   by saying so rather than by dying.** LSan runs at exit and stops the world
+ *   to do it, which means reading `/proc/self/task` -- and a `setuid` away from
+ *   uid 0 clears the process' dumpable flag, so those files become root's and
+ *   this process is no longer allowed to read its own. As root, a sanitized
+ *   build therefore used to end with `LeakSanitizer has encountered a fatal
+ *   error` and status 1 **after every check above had passed**, taking the
+ *   checks' own output with it, because LSan dies without flushing stdio. It
+ *   was this test succeeding that broke it, and it broke `make SANITIZE=1 test`
+ *   for the whole suite: forty-one other binaries reported through a target
+ *   that failed.
+ *
+ *   So where the shed reached `NCFG_SHED_FULLY`, the exit is `_exit`, which
+ *   runs no `atexit` handler and so never reaches the leak check. What is given
+ *   up is real and is only what was never available: leak coverage of this one
+ *   binary on a root run. Under `unshare -r` the shed reaches capabilities-only,
+ *   uid 0 remains, the process stays dumpable, and the return is an ordinary
+ *   one with the leak check behind it. `ASAN_OPTIONS=detect_leaks=0` is no
+ *   longer needed for either.
  */
 #include "ncfg/base.h"
 #include "ncfg/process.h"
@@ -162,6 +172,18 @@ int main(void)
 		printf("shed_test: all checks passed\n");
 	} else {
 		printf("shed_test: %d check(s) failed\n", failures);
+	}
+
+	/* The header's last section. `_exit` skips every `atexit` handler, and
+	 * the one that matters is LSan's -- which would abort this process for
+	 * being unable to read its own `/proc` rather than for anything it
+	 * allocated. The flush is not optional: `_exit` does not do it, and
+	 * everything printed above is still in the buffer when stdout is a pipe.
+	 * Where nothing was shed there is nothing to work around, so that case
+	 * returns and keeps its leak check. */
+	if (reached == NCFG_SHED_FULLY) {
+		fflush(stdout);
+		_exit(failures == 0 ? 0 : 1);
 	}
 	return failures == 0 ? 0 : 1;
 }
