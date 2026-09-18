@@ -1407,6 +1407,195 @@ static void the_planner_and_the_daemon_resolve_one_reference_the_same_way(void)
 }
 
 /* ------------------------------------------------------------------------ *
+ * What a tunnel is started with
+ * ------------------------------------------------------------------------ */
+
+#define WORLD_TUNNEL_SECRET "s3cret-canary"
+
+/*
+ * An openvpn device whose password is a `file` secret.
+ *
+ * `%s` is the secret's name, so a case can point at one that is there and one
+ * that is not without a second fixture.
+ */
+#define WORLD_TUNNEL_FORMAT \
+	"\"devices\":[{\"name\":\"vpn0\",\"kind\":{\"kind\":\"open_vpn\"," \
+	"\"config\":\"/etc/netcfgd/work.ovpn\",\"username\":\"nabbe\"," \
+	"\"password\":{\"provider\":\"file\",\"name\":\"%s\"}}}]," \
+	"\"interfaces\":[{\"name\":\"vpn0\",\"addressing\":[]}]"
+
+/* A world pointed at a secrets directory of this test's own making. */
+static const ncfg_main_world_where_t *where_with_secrets(const char *run, const char *secrets)
+{
+	static ncfg_main_world_where_t where;
+
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run;
+	where.secrets_dir = secrets;
+	return &where;
+}
+
+static ncfg_document_t *tunnel_document(const char *secret_name)
+{
+	char body[1024];
+
+	(void)snprintf(body, sizeof(body), WORLD_TUNNEL_FORMAT, secret_name);
+	return document_of(body);
+}
+
+static void a_tunnels_password_is_resolved_and_owned_by_the_world(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+	char                secrets[512];
+	char                path[640];
+
+	(void)snprintf(run, sizeof(run), "%s/tunnel-run", base);
+	testdir_mkdirp(run);
+	(void)snprintf(secrets, sizeof(secrets), "%s/tunnel-secrets", base);
+	testdir_mkdirp(secrets);
+	(void)snprintf(path, sizeof(path), "%s/work-vpn", secrets);
+	(void)testdir_write(path, WORLD_TUNNEL_SECRET, strlen(WORLD_TUNNEL_SECRET));
+	/* The `file` provider refuses anything anybody else can read, which is its
+	 * whole point -- so the fixture has to be 0600 or this proves the refusal
+	 * instead of the resolution. */
+	(void)chmod(path, (mode_t)0600);
+
+	memset(&state, 0, sizeof(state));
+	state.desired = tunnel_document("work-vpn");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_with_secrets(run, secrets), &state, NULL, NULL,
+	    err, sizeof(err));
+	world.tunnel_count = ncfg_main_tunnels_of(&world, state.desired, NULL);
+
+	check(world.tunnel_count == 1u, "an openvpn device gets a tunnel entry");
+	check(world.tunnel_count == 1u && world.tunnels[0].iface &&
+	    strcmp(world.tunnels[0].iface, "vpn0") == 0 && world.tunnels[0].config &&
+	    strcmp(world.tunnels[0].config, "/etc/netcfgd/work.ovpn") == 0,
+	    "  naming the interface and the `.ovpn` the document points at, unread");
+	/*
+	 * **The check that stops the rest of this being vacuous.** If the material
+	 * never reached the struct, every assertion around it would pass while
+	 * proving nothing -- which is `secrets_test.c`'s own sentence about its
+	 * canary, and is the shape of empty gate `evidence.md` is about.
+	 */
+	check(world.tunnel_count == 1u && world.tunnels[0].password &&
+	    strcmp(world.tunnels[0].password, WORLD_TUNNEL_SECRET) == 0,
+	    "  and the password resolved out of the store, which is what makes this real");
+	check(world.tunnel_count == 1u && world.tunnels[0].username &&
+	    strcmp(world.tunnels[0].username, "nabbe") == 0,
+	    "  with the username borrowed from the document beside it");
+	/*
+	 * The report file is `<run>/reported/<iface>` -- `state.h`'s path, which
+	 * `ncfg_state_read_reports` is the other half of. A tunnel composing one
+	 * for itself is a report written where nothing looks for it.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/reported/vpn0", run);
+	check(world.tunnel_count == 1u && world.tunnels[0].report &&
+	    strcmp(world.tunnels[0].report, path) == 0,
+	    "  and the file its `--route-up` reports into, where the reader looks");
+
+	/*
+	 * **Released with the service, and wiped.** `ncfg_secret_free` clears the
+	 * bytes first, so an executor's close takes a credential out of this
+	 * process' memory once per apply rather than leaving it resident for the
+	 * life of the daemon. Checked by the count going to zero, because reading
+	 * the buffer afterwards is reading freed memory -- which is what the
+	 * sanitised build is for.
+	 */
+	ncfg_main_service_release(&world);
+	check(world.tunnel_count == 0u, "and closing an executor gives the credentials back");
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void a_password_that_cannot_be_read_starts_no_tunnel(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+	char                secrets[512];
+
+	(void)snprintf(run, sizeof(run), "%s/tunnel-missing", base);
+	testdir_mkdirp(run);
+	(void)snprintf(secrets, sizeof(secrets), "%s/tunnel-secrets", base);
+
+	memset(&state, 0, sizeof(state));
+	state.desired = tunnel_document("no-such-credential");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_with_secrets(run, secrets), &state, NULL, NULL,
+	    err, sizeof(err));
+	world.tunnel_count = ncfg_main_tunnels_of(&world, state.desired, NULL);
+	/*
+	 * **No entry, so `backend.start` refuses by name.** Starting openvpn
+	 * without the credential its document names produces a daemon that
+	 * authenticates, fails and retries -- which reads to an operator as a
+	 * network problem rather than as a secret netcfgd could not read.
+	 */
+	check(world.tunnel_count == 0u,
+	    "a tunnel whose password cannot be resolved gets no entry, so the start refuses");
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void a_tunnel_that_needs_no_password_still_starts(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/tunnel-open", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	/* Certificate-only authentication, which is the ordinary corporate
+	 * arrangement: the `.ovpn` carries the material and there is no password
+	 * to resolve. "Names none" and "names one that failed" must not be the
+	 * same answer. */
+	state.desired = document_of(
+	    "\"devices\":[{\"name\":\"vpn0\",\"kind\":{\"kind\":\"open_vpn\","
+	    "\"config\":\"/etc/netcfgd/certs.ovpn\"}}],"
+	    "\"interfaces\":[{\"name\":\"vpn0\",\"addressing\":[]}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	world.tunnel_count = ncfg_main_tunnels_of(&world, state.desired, NULL);
+	check(world.tunnel_count == 1u && world.tunnels[0].password == NULL,
+	    "a tunnel that authenticates without a password gets an entry carrying none");
+	ncfg_main_service_release(&world);
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+static void an_unmanaged_tunnel_is_not_netcfgds_to_start(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/tunnel-unmanaged", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of(
+	    "\"devices\":[{\"name\":\"vpn0\",\"kind\":{\"kind\":\"open_vpn\","
+	    "\"config\":\"/etc/netcfgd/work.ovpn\"},\"managed\":false}],"
+	    "\"interfaces\":[{\"name\":\"vpn0\",\"addressing\":[]}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+	world.tunnel_count = ncfg_main_tunnels_of(&world, state.desired, NULL);
+	/* The third pass to ask this question, after the DNS scopes and the
+	 * advertisements: `backend.start` names the interface and nothing between
+	 * here and the executor asks whether netcfgd manages it. */
+	check(world.tunnel_count == 0u,
+	    "an unmanaged device is not one netcfgd starts a tunnel on");
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+/* ------------------------------------------------------------------------ *
  * Giving a contended radio back
  * ------------------------------------------------------------------------ */
 
@@ -1703,6 +1892,10 @@ int main(void)
 	a_delegation_that_has_not_arrived_advertises_nothing();
 	an_unmanaged_device_is_not_advertised_on();
 	the_planner_and_the_daemon_resolve_one_reference_the_same_way();
+	a_tunnels_password_is_resolved_and_owned_by_the_world();
+	a_password_that_cannot_be_read_starts_no_tunnel();
+	a_tunnel_that_needs_no_password_still_starts();
+	an_unmanaged_tunnel_is_not_netcfgds_to_start();
 	a_radio_is_not_given_back_by_taking_the_apply_lock_to_find_out();
 	what_a_contention_check_is_made_about();
 	an_index_that_does_not_fit_is_not_a_claim();

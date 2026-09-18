@@ -197,12 +197,12 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		 * `ncfg_apply_write_journal` now publishes -- each of which is on its
 		 * own enough, said in one sentence rather than two: this is a refusal
 		 * an operator reads on a socket, not the decision record. */
-		return "this build of netcfgd will not apply: an openvpn tunnel's "
-		    "configuration file is an argument this daemon does not compose yet, so a "
-		    "plan that starts a tunnel stops part way, having brought up the links "
-		    "and addresses in front of it. The executor's service half and the "
-		    "liveness round are both written; what is left is this one argument and "
-		    "the blocks the planner still holds rather than acts on";
+		return "this build of netcfgd will not apply, and what is left is no longer "
+		    "in the executor: every member of its service context is resolved, so the "
+		    "fourteen ops that are not netlink are carried out rather than refused. "
+		    "What is left is the planner, which does not read every block a document "
+		    "can carry. `ncfg plan` names each one it is holding, against the same "
+		    "document and the same machine, and changes nothing";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:

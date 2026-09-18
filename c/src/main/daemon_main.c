@@ -835,24 +835,28 @@ done:
  * What is left is not bookkeeping and is not this directory's:
  *
  *   * **The planner still holds blocks rather than acting on them**, and warns
- *     by name for each one: `reported` addressing, `advertise`, `dot1x`, a
- *     `nat` setting, an `ipv6_token`, a `probe`, a `modem`, `on_unmanage =
- *     "clear"`, a `bluetooth` block and a `linkset` -- see `warn_unported` in
- *     `src/plan/build.c`, which is the list. A warning is what makes `ncfg
- *     plan` honest and is exactly what a reconcile on a timer would act past:
- *     it would converge part of a machine and report having converged it, to
- *     nobody who is reading.
+ *     by name for each one. **The list is not written here**, and that is the
+ *     lesson rather than laziness: it was written here once -- ten blocks --
+ *     and most of them landed while the sentence sat unchanged, so a reader
+ *     was told a pass was missing that had been there for waves. The list is
+ *     `warn_unported` in `src/plan/build.c` together with each pass's own
+ *     held-block warning, and it stays current by a rule that cannot rot: a
+ *     pass landing takes its warning out in the same commit.
+ *
+ *     A warning is what makes `ncfg plan` honest and is exactly what a
+ *     reconcile on a timer would act past: it would converge part of a
+ *     machine and report having converged it, to nobody who is reading.
  *   * **An op this executor cannot carry out is refused while the plan is
  *     running.** `ncfg_apply_supported` is asked by `execute`, one action at a
  *     time -- a `link.create` for a physical device, a pppoe session or an
  *     openvpn tunnel, and a `backend.start` for four of the nine backend
  *     kinds -- measured through `ncfg_apply_supported` rather than counted
- *     by reading its arms -- and `ncfg_apply` stops at the first failure.
- *     A plan mixing a
- *     supported op with an unsupported one therefore changes the machine and
- *     stops halfway. The link half of that list used to name a vlan, a bond, a
- *     macvlan and a tunnel; all four are created now, and the three left are
- *     ones `plan/link.c` declines by an earlier arm of its own.
+ *     by reading its arms -- and `ncfg_apply` stops at the first failure. A
+ *     plan mixing a supported op with an unsupported one therefore changes
+ *     the machine and stops halfway. The link half of that list used to name
+ *     a vlan, a bond, a macvlan and a tunnel; all four are created now, and
+ *     the three left are ones `plan/link.c` declines by an earlier arm of its
+ *     own.
  * The third fact that used to be here is closed too: `plan.last.json` is
  * written, by `ncfg_apply_write_journal`, after every apply and every revert,
  * so a plan that stopped halfway says under `/run` where it stopped. What is
@@ -879,18 +883,20 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start. Its executor carries the half "
-	    "that is not netlink -- `dns.apply` over every scope the machine has, the four "
-	    "sysctls, the hostname, the six wifi ops and `backend.start` for five of the "
-	    "nine backend kinds -- but one of those five refuses on arrival: an openvpn "
-	    "tunnel's configuration file is an argument this daemon does not compose yet, "
-	    "so a machine holding a tunnel would have its plan stop there, part converged, "
-	    "with the links and addresses in front of it already changed");
-	(void)fail("`ncfg apply` is refused here for the same reason, and a daemon "
-	    "reconciling on drift is an apply nobody typed. What this build has stopped "
-	    "waiting for is the liveness round: `running` in an observation is a fact "
-	    "about a process now rather than this daemon's memory of having started one, "
-	    "and a daemon it started and lost is noticed");
+	(void)fail("this build of the C port will not start, and what is left is no longer "
+	    "in the executor: every member of its service context is resolved now, so the "
+	    "fourteen ops that are not netlink are carried out rather than refused. What "
+	    "is left is the planner. It does not read every block a document can carry, "
+	    "and a reconcile on a timer would act past the ones it holds -- converging "
+	    "part of a machine and reporting that it had converged it, to nobody who is "
+	    "reading");
+	(void)fail("`ncfg plan` is the half that is honest about this: it names every "
+	    "block this build is holding and not acting on, against the same document and "
+	    "the same machine, and changes nothing. Run it and read the warnings; they "
+	    "are the list, and they stay current by a rule that cannot rot -- a pass "
+	    "landing takes its warning out in the same commit. `ncfg apply` is refused "
+	    "for the same reason, and a daemon reconciling on drift is an apply nobody "
+	    "typed");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 

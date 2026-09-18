@@ -10,6 +10,8 @@
  */
 #include "ncfg/dhcp.h"
 
+#include "ncfg/state.h"
+
 #include "../backend_internal.h"
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
@@ -140,10 +142,14 @@ int ncfg_dhcp_log_path(const char *run, const char *iface, const char *family, c
 	return ncfg_backend_path(out, out_size, run, "dhcp", iface, suffix, err, err_size);
 }
 
+/* `state.h`'s, now that a tunnel's `--route-up` writes the same file for the
+ * same reader. Kept as a name here because this module's callers ask it as a
+ * DHCP question, and because the reader -- `ncfg_state_read_reports` -- and
+ * every writer must compose one path rather than two. */
 int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t out_size,
     char *err, size_t err_size)
 {
-	return ncfg_backend_path(out, out_size, run, "reported", iface, NULL, err, err_size);
+	return ncfg_state_report_path(run, iface, out, out_size, err, err_size);
 }
 
 /* ------------------------------------------------------------------------ *

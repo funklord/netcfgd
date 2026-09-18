@@ -476,6 +476,26 @@ void ncfg_state_delegations_free(ncfg_delegation_t *delegations, size_t count);
  *
  * Sorted by interface. The caller frees with `ncfg_state_reports_free`.
  */
+/*
+ * `<run>/reported/<interface>` -- the single file a writer publishes a report
+ * into.
+ *
+ * **Here because it is the run directory's layout and not any one backend's.**
+ * It was `ncfg_dhcp_report_path`, which is where the first caller needed it;
+ * the second is a tunnel, whose `--route-up` script writes the same file for
+ * the same reader. A third spelling is what `ncfg_state_read_reports` is one
+ * half of -- the reader looks here, and a writer that composed the path for
+ * itself is a report written where nothing looks for it.
+ *
+ * The single file rather than a fragment under `reported.d/`, which is the
+ * distinction `ncfg_state_read_reports` documents: the fragments are for an
+ * interface with more than one writer, and a tunnel has one.
+ *
+ * Fills `out` and answers 1, or names what did not fit and answers 0.
+ */
+int ncfg_state_report_path(const char *run_dir, const char *interface, char *out,
+    size_t out_size, char *err, size_t err_size);
+
 int ncfg_state_read_reports(const char *run_dir, ncfg_observed_report_t **out, size_t *count_out,
     char *err, size_t err_size);
 void ncfg_state_reports_free(ncfg_observed_report_t *reports, size_t count);

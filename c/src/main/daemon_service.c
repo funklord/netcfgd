@@ -19,12 +19,15 @@
  *
  * WHAT IS RESOLVED HERE AND WHAT IS DELIBERATELY LEFT NULL
  *   Resolved: the three directories, the document, the secret resolver, the
- *   resolver's delivery targets, **every** DNS scope, dhcpcd's machine paths
- *   and the per-interface route metrics.
+ *   resolver's delivery targets, **every** DNS scope, dhcpcd's machine paths,
+ *   the per-interface route metrics, what each interface advertises, and each
+ *   tunnel with its credentials.
  *
- *   Left as it was, so that the op refuses by name: `tunnels`, because an
- *   openvpn configuration file is a path nothing composes yet.
- *   `backend.start` on an openvpn interface says exactly that.
+ *   **Nothing is left as it was.** This list has been two items and then one;
+ *   it is now none, and every member of `ncfg_service_t` is filled in -- the
+ *   last of them being an openvpn tunnel's `.ovpn`, its username and its
+ *   password, resolved through the world's own secret resolver and owned by
+ *   the world so that closing an executor wipes the credential.
  *
  *   **`advertising` was on that list for a reason that was not true.** The
  *   comment said the arithmetic had no port in `value.h`; it has had
@@ -52,6 +55,8 @@
 
 #include "ncfg/base.h"
 #include "ncfg/log.h"
+#include "ncfg/secrets.h"
+#include "ncfg/state.h"
 
 #include <string.h>
 
@@ -238,6 +243,109 @@ size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t 
 }
 
 /* ------------------------------------------------------------------------ *
+ * What a tunnel is started with
+ * ------------------------------------------------------------------------ */
+
+size_t ncfg_main_tunnels_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    size_t *missed)
+{
+	size_t taken = 0;
+	size_t i;
+
+	if (missed) {
+		*missed = 0;
+	}
+	if (!world || !desired) {
+		return 0;
+	}
+	for (i = 0; i < desired->device_count; i++) {
+		const ncfg_device_t         *device = &desired->devices[i];
+		const ncfg_openvpn_config_t *config;
+		ncfg_secret_t               *password = NULL;
+		char                         message[NCFG_ERROR_MAX];
+
+		if (device->kind.kind != NCFG_KIND_OPENVPN || !device->name) {
+			continue;
+		}
+		/* An unmanaged device is not netcfgd's to run a tunnel on, which is
+		 * the question `ncfg_dns_scopes_of` and `ncfg_main_advertising_of`
+		 * both ask here for the same reason. */
+		if (!device->managed) {
+			continue;
+		}
+		config = &device->kind.openvpn;
+		if (!config->config || !config->config[0]) {
+			/* A tunnel with no `.ovpn` is a document that names nothing to
+			 * start from. `backend.start` says so by name; an entry with a
+			 * NULL config would reach `ncfg_openvpn_start` instead, which is
+			 * one refusal further from the operator. */
+			continue;
+		}
+		if (taken == (size_t)NCFG_MAIN_TUNNELS_MAX) {
+			if (missed) {
+				(*missed)++;
+			}
+			continue;
+		}
+		if (config->password) {
+			/*
+			 * **The world's own resolver, not `world->service.secrets`.** The
+			 * service's copy is set by `ncfg_main_service_of`, so reading it
+			 * here would make this function's answer depend on the order of
+			 * assignments inside its caller -- which is how a helper comes to
+			 * work only when called from one place. It caught this: the test
+			 * calls this directly, every password came back unresolved, and
+			 * the refusal path made that look like a missing credential.
+			 */
+			const ncfg_secret_resolver_t *resolver =
+			    world->secrets.secrets_dir || world->secrets.materialise_dir ?
+			    &world->secrets : NULL;
+
+			message[0] = '\0';
+			password = ncfg_secret_resolve(resolver, config->password, NULL, message,
+			    sizeof(message));
+			if (!password) {
+				/*
+				 * **No entry, so the refusal names the tunnel.** Starting
+				 * openvpn without the credential its document names produces a
+				 * daemon that authenticates, fails and retries, which reads to
+				 * an operator as a network problem rather than as a secret
+				 * netcfgd could not read. The sentence carries no value and
+				 * `secrets.h` guarantees the resolver's does not either.
+				 */
+				ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+				    "the password for the tunnel on %s could not be resolved, so "
+				    "this executor will refuse to start it rather than start one "
+				    "that cannot authenticate: %s", device->name, message);
+				continue;
+			}
+		}
+		if (!ncfg_state_report_path(world->run_dir, device->name,
+		    world->tunnel_reports[taken], (size_t)NCFG_MAIN_LOOP_PATH_MAX, message,
+		    sizeof(message))) {
+			ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+			    "the tunnel on %s has nowhere to report what it was given: %s",
+			    device->name, message);
+			ncfg_secret_free(password);
+			continue;
+		}
+		world->tunnel_passwords[taken] = password;
+		world->tunnels[taken].iface = device->name;
+		world->tunnels[taken].config = config->config;
+		world->tunnels[taken].username = config->username;
+		/* `ncfg_secret_expose` is named so that every use of it is one grep
+		 * away. This is one of them: the value goes into a struct the executor
+		 * hands to `ncfg_openvpn_start`, which writes it to a file only it
+		 * knows the name of -- which is the arrangement that keeps it off a
+		 * command line. */
+		world->tunnels[taken].password = password ? ncfg_secret_expose(password) : NULL;
+		world->tunnels[taken].report = world->tunnel_reports[taken];
+		taken++;
+	}
+	return taken;
+}
+
+/* ------------------------------------------------------------------------ *
  * The whole context
  * ------------------------------------------------------------------------ */
 
@@ -323,6 +431,17 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 		    NCFG_MAIN_METRICS_MAX);
 	}
 	missed = 0;
+	world->tunnel_count = ncfg_main_tunnels_of(world, desired, &missed);
+	world->service.tunnels = world->tunnels;
+	world->service.tunnel_count = world->tunnel_count;
+	if (missed > 0u) {
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+		    "%zu tunnel(s) of this configuration did not fit in the %d an executor "
+		    "carries credentials for, so starting them will be refused rather than "
+		    "attempted without the passwords their documents name", missed,
+		    NCFG_MAIN_TUNNELS_MAX);
+	}
+	missed = 0;
 	world->advertise_count = ncfg_main_advertising_of(world, desired, observed, &missed);
 	world->service.advertising = world->advertising;
 	world->service.advertise_count = world->advertise_count;
@@ -345,9 +464,25 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 
 void ncfg_main_service_release(ncfg_main_world_t *world)
 {
+	size_t at;
+
 	if (!world) {
 		return;
 	}
+	/*
+	 * **The passwords first, and wiped.** `ncfg_secret_free` clears the bytes
+	 * before freeing, which is the whole reason the world owns these rather
+	 * than pointing at something the document holds: an executor's close wipes
+	 * a tunnel's credential once per apply, instead of leaving it resident for
+	 * the life of the daemon. The `ncfg_service_tunnel_t` beside it borrows
+	 * the exposed pointer, so the `memset` below is what stops it being read
+	 * after this.
+	 */
+	for (at = 0; at < world->tunnel_count; at++) {
+		ncfg_secret_free(world->tunnel_passwords[at]);
+		world->tunnel_passwords[at] = NULL;
+	}
+	world->tunnel_count = 0;
 	ncfg_dns_scopes_free(world->scopes);
 	world->scopes = NULL;
 	world->metric_count = 0;
