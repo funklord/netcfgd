@@ -622,25 +622,45 @@ static void a_converged_port_plans_nothing(void)
  *
  * **The two halves of this port met here and disagreed.** The planner learned
  * to configure a bond, a macvlan and a tunnel in the same wave the executor
- * learned the `link.set_*` family -- and `link.create` for those kinds is
- * still refused, because `ncfg_kernel_newlink_of` builds no nest for them.
- * Nothing connected the two, so a document naming a bond that does not exist
+ * learned the `link.set_*` family -- and `link.create` for those kinds was
+ * still refused, because `ncfg_kernel_newlink_of` built no nest for them.
+ * Nothing connected the two, so a document naming a bond that did not exist
  * yet planned a `link.create` that fails on every apply, for ever, while
  * `ncfg plan` went on listing it as work to do.
  *
  * That is the non-convergence the neighbouring arms in `plan/link.c` each
  * exist to prevent, and that file's own comment states the rule: planning an
- * action that must fail is worse than saying why it cannot be done. The
- * planner asks the executor rather than keeping a second list, so this check
- * goes green by itself on the day the nest is written.
+ * action that must fail is worse than saying why it cannot be done.
+ *
+ * **The bond and the macvlan have left this list, and so has the sentence they
+ * were caught by.** The nests are written, so the check went green by itself
+ * and the two kinds moved to the other half below -- and with them went the
+ * last kind a *document* could express that `ncfg_apply_supported` refuses.
+ * What it still refuses is a physical device, a pppoe session and an openvpn
+ * tunnel, and `plan/link.c` reaches an arm of its own for each of those first:
+ * a device that is not plugged in, and a link the daemon that dials it brings
+ * into existence. Those arms are earlier deliberately, each saying something
+ * the generic refusal cannot.
+ *
+ * So the executor probe is a backstop with nothing left to fire on, which is
+ * the right state for it rather than a reason to delete it: it is what covers
+ * the *next* kind to be held back, and the check that it is still consulted at
+ * all is the sibling below -- five kinds that went from declined to planned
+ * without `src/plan/` being touched.
+ *
+ * What this case asserts now is the property, not the sentence: a kind nothing
+ * here can bring into being is not planned as a creation, and the plan says so
+ * in somebody's words rather than staying silent.
  */
 static void a_kind_this_build_cannot_create_is_warned_about(void)
 {
 	static const char *const bodies[] = {
-		"{\"name\":\"new0\",\"kind\":{\"kind\":\"bond\",\"members\":[],"
-		"\"mode\":\"802.3ad\",\"miimon\":100}}",
-		"{\"name\":\"new0\",\"kind\":{\"kind\":\"macvlan\","
-		"\"parent\":\"eth0\",\"mode\":\"bridge\"}}"
+		"{\"name\":\"new0\",\"kind\":{\"kind\":\"pppoe\",\"parent\":\"eth0\","
+		"\"username\":\"alice\",\"password\":{\"provider\":\"file\",\"name\":\"dsl\"}}}",
+		/* `open_vpn` is the document's spelling and `openvpn` the configuration
+		 * language's -- `document.c` says so, and this is the model's side. */
+		"{\"name\":\"new0\",\"kind\":{\"kind\":\"open_vpn\","
+		"\"config\":\"/etc/openvpn/client.conf\"}}"
 	};
 	size_t i;
 
@@ -656,7 +676,7 @@ static void a_kind_this_build_cannot_create_is_warned_about(void)
 		}
 		check(planfix_count(plan, "link.create") == 0u,
 		    "a kind this build cannot create is not planned as a creation");
-		check(planfix_warned(plan, "cannot create it"),
+		check(planfix_warned(plan, "nothing here creates it"),
 		    "  and the plan says so rather than staying silent");
 		planfix_release(plan, document, observed);
 	}
@@ -674,25 +694,60 @@ static void a_kind_this_build_cannot_create_is_warned_about(void)
  * keeping a list of its own. This is the check that says so; if it goes red,
  * either the executor has stopped being able to make one or the planner has
  * grown the second list `plan/link.c`'s comment refuses.
+ *
+ * **Four more joined it the wave `link.create` learned the model's
+ * numbering**, and they are the four that were in the list above until then.
+ * Each is here for the same reason and proves the same thing twice over: the
+ * vlan, whose ethertype `document.h` had deliberately not published; the bond
+ * and the macvlan, whose modes it had; and the tunnel, whose kind word it had.
+ * Not one line of `src/plan/` moved for any of them.
  */
 static void a_kind_this_build_can_create_again_is_planned(void)
 {
-	ncfg_document_t *document = NULL;
-	ncfg_observed_t *observed = NULL;
-	ncfg_plan_t     *plan = planfix_plan(
-	    "{\"name\":\"tap0\",\"kind\":{\"kind\":\"tun\",\"mode\":\"tap\"}}",
-	    "", "", "", "\"links\":[]", &document, &observed);
+	static const struct {
+		const char *body;
+		const char *what;
+	} bodies[] = {
+		{ "{\"name\":\"tap0\",\"kind\":{\"kind\":\"tun\",\"mode\":\"tap\"}}", "a tun" },
+		{ "{\"name\":\"new0\",\"kind\":{\"kind\":\"bond\",\"members\":[],"
+		  "\"mode\":\"802.3ad\",\"miimon\":100}}", "a bond" },
+		{ "{\"name\":\"new0\",\"kind\":{\"kind\":\"macvlan\","
+		  "\"parent\":\"eth0\",\"mode\":\"bridge\"}}", "a macvlan" },
+		{ "{\"name\":\"new0\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"eth0\","
+		  "\"id\":42,\"protocol\":\"dot1ad\"}}", "a vlan" },
+		{ "{\"name\":\"new0\",\"kind\":{\"kind\":\"tunnel\",\"mode\":\"gre\","
+		  "\"local\":\"192.0.2.1\",\"remote\":\"192.0.2.2\"}}", "a tunnel" }
+	};
+	int    every_kind_planned = 1;
+	int    nothing_declined = 1;
+	size_t i;
 
-	if (!plan) {
-		check(0, "the tun fixture compiles");
+	for (i = 0; i < sizeof(bodies) / sizeof(bodies[0]); i++) {
+		ncfg_document_t *document = NULL;
+		ncfg_observed_t *observed = NULL;
+		ncfg_plan_t     *plan;
+
+		plan = planfix_plan(bodies[i].body, "", "", "", "\"links\":[]", &document,
+		    &observed);
+		if (!plan) {
+			check(0, "the fixture compiles");
+			planfix_release(plan, document, observed);
+			continue;
+		}
+		if (planfix_count(plan, "link.create") != 1u) {
+			printf("  %s is not planned as a creation\n", bodies[i].what);
+			every_kind_planned = 0;
+		}
+		if (planfix_warned(plan, "cannot create it")) {
+			printf("  %s is still being declined\n", bodies[i].what);
+			nothing_declined = 0;
+		}
 		planfix_release(plan, document, observed);
-		return;
 	}
-	check(planfix_count(plan, "link.create") == 1u,
-	    "a tun the executor can make again is planned as a creation");
-	check(!planfix_warned(plan, "cannot create it"),
+	check(every_kind_planned,
+	    "a kind the executor can make again is planned as a creation");
+	check(nothing_declined,
 	    "  and the planner has stopped declining it, without being told twice");
-	planfix_release(plan, document, observed);
 }
 
 int main(void)

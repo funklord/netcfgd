@@ -21,13 +21,16 @@
  *   disagree about what a forward delay is" -- so there is one, and it is
  *   here because this is the file with five of its six callers.
  *
- * THE NUMBERING IS THE MODEL'S AND THE REFUSALS SAY SO
- *   A bond mode, a macvlan mode and a tunnel's kind word are the model's
- *   numbering of a closed set. `document.h` publishes each -- the reader that
- *   has to agree with this writer is `src/observe/`, which reads the same
- *   tables -- and nothing in this directory keeps a list of its own. A VLAN's
- *   ethertype has no such accessor yet and a VLAN is therefore still refused
- *   by name rather than guessed at.
+ * THE NUMBERING IS THE MODEL'S AND NOTHING HERE KEEPS A SECOND COPY
+ *   A bond mode, a macvlan mode, a tunnel's kind word and a VLAN's ethertype
+ *   are the model's numbering of a closed set. `document.h` publishes each --
+ *   the reader that has to agree with this writer is `src/observe/`, which
+ *   reads the same tables -- and nothing in this directory keeps a list of its
+ *   own. The last of the four is `ncfg_vlan_protocol_ethertype`, published in
+ *   the wave `link.create` learned these kinds: 0263 had recorded it as
+ *   deliberately absent because `link.set_vlan` is not an op, and creating a
+ *   vlan is the caller that reason did not cover. A value outside a set is a
+ *   refusal naming the device, never a cast.
  *
  * WHOLE NESTS, NOT THE FIELD THAT MOVED
  *   `ops.h` measured this and it is not obvious: a request carrying only
@@ -275,26 +278,80 @@ int ncfg_kernel_newlink_of(const ncfg_interface_kind_t *kind, const char *name,
 			return 0;
 		}
 		return 1;
-	case NCFG_KIND_BOND:
+	case NCFG_KIND_BOND: {
 		/*
-		 * A bond's settings are not part of its kind: the kernel takes a
-		 * mode only on a bond with no members, so they go in their own
-		 * `RTM_NEWLINK` through `ncfg_kernel_build_bond` -- which is the
-		 * same split a bridge has and for a sharper reason.
+		 * **The mode goes in the creation nest, and the split with
+		 * `ncfg_kernel_build_bond` is not a contradiction.** The kernel takes
+		 * a mode only on a bond with no members -- and a bond being created
+		 * has none, by construction, which is the one moment the condition is
+		 * guaranteed. So this nest always carries it, while
+		 * `ncfg_ops_set_bond_attrs` takes an *optional* mode because the
+		 * correct-an-existing path meets bonds that already have members and
+		 * the planner tells it which.
+		 *
+		 * This arm is `link.create`'s alone: `ncfg_kernel_link_kind_op` sends
+		 * a `link.set_bond` through `ncfg_kernel_build_bond`, not through
+		 * here, precisely because that is the path where the mode may have to
+		 * be left out. Two builders, one *encoder* -- which is what 0057 asks
+		 * for; what it forbids is two answers to "what is a bond's mode", and
+		 * both of these read `ncfg_bond_mode_number`.
 		 */
-		ncfg_error_set(err, err_size,
-		    "a bond (%s) carries its mode and monitoring interval in a message of "
-		    "their own, because the kernel takes a mode only on a bond with no "
-		    "members", name ? name : "?");
-		return 0;
-	case NCFG_KIND_VLAN:
-		ncfg_error_set(err, err_size,
-		    "creating a vlan link (%s) needs the kernel's ethertype for its tag "
-		    "protocol, which belongs with the model and is not published by "
-		    "document.h; a second copy of it here is how a protocol comes to mean "
-		    "one thing on the way out and another on the way back in",
-		    name ? name : "?");
-		return 0;
+		int mode = ncfg_bond_mode_number(kind->bond.mode);
+
+		out->kind = NCFG_OPS_LINK_BOND;
+		if (mode < 0) {
+			ncfg_error_set(err, err_size,
+			    "%s asks for a bonding mode this build has no number for",
+			    name ? name : "?");
+			return 0;
+		}
+		out->bond.mode = (uint8_t)mode;
+		out->bond.miimon = kind->bond.miimon;
+		return 1;
+	}
+	case NCFG_KIND_VLAN: {
+		int           protocol = ncfg_vlan_protocol_ethertype(kind->vlan.protocol);
+		ncfg_optint_t parent;
+
+		out->kind = NCFG_OPS_LINK_VLAN;
+		if (protocol < 0) {
+			ncfg_error_set(err, err_size,
+			    "%s asks for a vlan tag protocol this build has no ethertype for",
+			    name ? name : "?");
+			return 0;
+		}
+		out->vlan.protocol = (uint16_t)protocol;
+		/*
+		 * Checked rather than cast, which is the port's rule wherever the
+		 * model's `int64_t` meets a kernel field. A tag holds twelve bits and
+		 * `vlan_validate` answers `ERANGE` above them; truncating 4096 to 0
+		 * would make a device that tags nothing and reads back as a vlan on
+		 * the native VLAN, which is not a mistake an operator can see.
+		 */
+		if (kind->vlan.id < 0 || kind->vlan.id > 4095) {
+			ncfg_error_set(err, err_size,
+			    "%s asks for vlan id %lld, and a tag holds twelve bits: 0 to 4095",
+			    name ? name : "?", (long long)kind->vlan.id);
+			return 0;
+		}
+		out->vlan.id = (uint16_t)kind->vlan.id;
+		/*
+		 * A vlan without a parent is not a vlan: it is a tag *on* something,
+		 * and the kernel answers a bare `EINVAL` for the whole message rather
+		 * than naming the missing link -- the same sentence a macvlan gets
+		 * above, for the same kernel behaviour.
+		 */
+		if (!kind->vlan.parent) {
+			ncfg_error_set(err, err_size,
+			    "%s is a vlan with no parent device named", name ? name : "?");
+			return 0;
+		}
+		if (!parent_index(kind->vlan.parent, resolve, context, &parent, err, err_size)) {
+			return 0;
+		}
+		out->vlan.parent = (uint32_t)parent.value;
+		return 1;
+	}
 	case NCFG_KIND_TUN:
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_PPPOE:

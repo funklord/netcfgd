@@ -632,27 +632,6 @@ static int plans(const ncfg_plan_t *plan, const char *op)
 	return 0;
 }
 
-/*
- * Whether the planner said it saw something it does not act on yet.
- *
- * **This build's planner carries no backends**, so `backend.start` and
- * `dns.apply` are not ops it can emit -- it emits a warning per block it is
- * holding and not acting on instead. So the two outcomes below are asserted at
- * the nearest thing this build can express, and each check says which op it
- * must become when the planner's backend half lands.
- */
-static int notices(const ncfg_plan_t *plan, const char *fragment)
-{
-	size_t at;
-
-	for (at = 0; at < plan->warning_count; at++) {
-		if (plan->warnings[at].message && strstr(plan->warnings[at].message, fragment)) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
 static void what_activation_writes_is_asked_of_the_planner(void)
 {
 	ncfg_buf_t            blocks;
@@ -723,12 +702,18 @@ static void what_activation_writes_is_asked_of_the_planner(void)
 		check(plan && plan->action_count > 0u && plans(plan, "link.up"),
 		    "activating a radio plans something, where the `device` block alone planned "
 		    "nothing");
-		/* The sentence narrowed when the wireless passes landed: the networks
-		 * are handed to a supplicant that is already running, and starting one
-		 * is still the backend pass's work. What is asserted is unchanged --
-		 * that the planner names the half of the `wifi` block it is holding. */
-		check(plan && notices(plan, "the supplicant that would serve `wlan0` is not started"),
-		    "  and the planner is holding the supplicant this build cannot yet start");
+		/*
+		 * **And the op itself, which is what 0263 said this check would become
+		 * the day the planner could emit one.** It asserted a warning for as
+		 * long as no pass started a supplicant: that the planner named the
+		 * half of the `wifi` block it was holding. `radio.c` starts one now, so
+		 * the nearest expressible outcome has been replaced by the outcome --
+		 * a radio the kernel reports and the document manages is what
+		 * activation is *for*, and a plan that does not start its supplicant is
+		 * the "cannot reach the supplicant" this whole case exists to prevent.
+		 */
+		check(plan && plans(plan, "backend.start"),
+		    "  and the supplicant activation exists to start is started");
 		/*
 		 * **The other half of the outcome, and it was missing for as long as
 		 * the block existed.** A lease's nameservers are offered to an

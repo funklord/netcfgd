@@ -32,17 +32,29 @@
 /*
  * Whether a link of this kind can be created here, and why not.
  *
- * **Four kinds are refused for one reason**, and it is worth the sentence: a
- * VLAN's ethertype, a bond's mode number, a macvlan's mode number and a
- * tunnel's kind word are the *model's* numbering of a closed set, not the wire
- * layer's. `ops.h` says so outright -- "two lists of four numbers in two
- * places is how a mode comes to mean one thing on the way out and another on
- * the way back in" -- and `document.h`, which is final and not this module's
- * to change, carries no function that converts them. Writing the tables here
- * would be creating exactly that second list, in the module least likely to be
- * read when the first one changes.
+ * **What is refused is what no netlink message and no ioctl in this build can
+ * make** -- a physical device, and the two that want a helper process. Nothing
+ * is refused any more for wanting a number, which is what four of these arms
+ * used to say.
  *
- * The kinds that need no such conversion are made normally.
+ * That reason was real while it lasted: a VLAN's ethertype, a bond's mode
+ * number, a macvlan's mode number and a tunnel's kind word are the *model's*
+ * numbering of a closed set, and `ops.h` says why they may not be written down
+ * a second time here -- "two lists of four numbers in two places is how a mode
+ * comes to mean one thing on the way out and another on the way back in". The
+ * answer was never to keep the table in `src/apply/`; it was for `document.h`
+ * to publish it, and it now publishes all four --
+ * `ncfg_bond_mode_number`, `ncfg_macvlan_mode_number`, `ncfg_tunnel_kind_name`
+ * and `ncfg_vlan_protocol_ethertype`. `ncfg_kernel_newlink_of` reads them and
+ * keeps no list of its own, so the refusals are gone and the rule they were
+ * protecting is intact.
+ *
+ * **This function and `ncfg_kernel_newlink_of` have to agree by kind**, which
+ * is what 10.177 is about and is why the arms below are a switch over the same
+ * tag that one is. What either may still refuse is a *device*: a vlan with no
+ * parent, a veth whose peer is unnamed, a tun whose owner is nobody on this
+ * machine. Those are refusals about a document rather than about this build,
+ * and they belong where the field is read.
  */
 static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *err,
     size_t err_size)
@@ -99,13 +111,19 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 	case NCFG_KIND_BOND:
 	case NCFG_KIND_MACVLAN:
 	case NCFG_KIND_TUNNEL:
-		ncfg_error_set(err, err_size,
-		    "creating a %s link (%s) needs the kernel's numbering for its mode, "
-		    "ethertype or kind word, which belongs with the model and is not in "
-		    "document.h; a second copy of it here is how a mode comes to mean one "
-		    "thing on the way out and another on the way back in",
-		    word ? word : "link", name ? name : "?");
-		return 0;
+		/*
+		 * **The four that were refused for wanting a number.** Each has its
+		 * nest in `ncfg_kernel_newlink_of` now, built from the model's table
+		 * rather than from one written here -- see the paragraph above.
+		 *
+		 * A bond is the one worth a second sentence, because its mode reaches
+		 * the kernel by two routes and they are not interchangeable. Creation
+		 * carries it, a bond with no members being the only state the kernel
+		 * accepts a mode in; `link.set_bond` carries it only when the planner
+		 * says the bond is still empty. Saying yes here is saying the
+		 * creation half works, and it is the half that always may.
+		 */
+		return 1;
 	case NCFG_KIND_PHYSICAL:
 		ncfg_error_set(err, err_size,
 		    "%s is a physical device: netcfgd configures one and cannot make one",

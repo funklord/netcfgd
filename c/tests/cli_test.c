@@ -871,17 +871,17 @@ static void a_plan_says_what_and_why(const char *document_text, size_t document_
 	 * says the empty string" the same line.
 	 */
 	/*
-	 * **The subject was `k-bond` and moved when the planner stopped planning
-	 * a creation it cannot carry out.** A bond, a macvlan and a tunnel are
-	 * refused by `ncfg_apply_supported`, so `plan/link.c` declines them by
-	 * name rather than emitting an action that must fail -- and the witness's
-	 * `k-bond` is exactly that. What these four checks are about is the
-	 * *rendering*: three right-aligned columns, the field that differs, and
-	 * `<absent>` for a field that is not there. Any action shows that, so the
-	 * subject moved to the first one the plan still carries rather than the
-	 * checks being deleted.
+	 * **The subject was `k-bond`, became `k-bridge`, and is `k-bond` again.**
+	 * It moved away when the planner stopped planning a creation the executor
+	 * refused, and it has moved back now that `ncfg_kernel_newlink_of` builds
+	 * a bond's nest: `plan/link.c` asks `ncfg_apply_supported` rather than
+	 * keeping a list, so the witness's bond is planned again without that file
+	 * being touched. What these four checks are about is the *rendering* --
+	 * three right-aligned columns, the field that differs, and `<absent>` for
+	 * a field that is not there -- and any action shows that, which is why the
+	 * subject follows the plan rather than the checks being deleted.
 	 */
-	line(printed, "  1  link.create k-bridge  kind: bridge (was <absent>)",
+	line(printed, "  1  link.create k-bond  kind: bond (was <absent>)",
 	    "an action says what it does, to what, and which field differs");
 	{
 		/*
