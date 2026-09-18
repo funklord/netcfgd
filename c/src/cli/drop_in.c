@@ -40,6 +40,11 @@
  *     path a caller named will read `/dev/zero` until the machine stops, and
  *     0263's buffer rule is that text with no ceiling is text somebody else
  *     chooses the size of.
+ *   * **`--json` is answered rather than accepted and ignored.** The Rust
+ *     prints its sentences here whatever the flag says. `subcommand_internal.h`
+ *     holds the rule the six writing verbs share; this file also holds the two
+ *     pieces they share to obey it, because the two write helpers below are
+ *     already here.
  */
 #include "subcommand_internal.h"
 
@@ -51,6 +56,54 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ------------------------------------------------------------------------ *
+ * What the six writing verbs share to answer `--json`
+ * ------------------------------------------------------------------------ */
+
+void ncfg_cli_wrote_free(ncfg_cli_wrote_t *wrote)
+{
+	if (!wrote) {
+		return;
+	}
+	free(wrote->path);
+	free(wrote->folded);
+	wrote->path = NULL;
+	wrote->folded = NULL;
+	wrote->daemon = 0;
+	wrote->removed = 0;
+}
+
+int ncfg_cli_say_json(const ncfg_json_writer_t *writer, const char *what, char *err,
+    size_t err_size)
+{
+	if (!ncfg_json_write_done(writer)) {
+		const char *why = ncfg_json_write_failure(writer);
+
+		/*
+		 * `run.c`'s sentence with one clause added, and the clause is the
+		 * difference between a verb that renders and a verb that writes.
+		 *
+		 * **What stopped is the rendering, not the command.** These six have
+		 * already written the file by the time the answer is composed, so a
+		 * reader told only "could not be written as JSON" concludes the
+		 * credential was not stored and writes it again somewhere else. A
+		 * name that is not valid UTF-8 is what is actually met here -- it
+		 * comes straight off `argv` -- and 0263's rule is that it fails the
+		 * command rather than being repaired, because every repair puts a
+		 * value in front of somebody that nobody typed.
+		 */
+		ncfg_error_set(err, err_size,
+		    "%s could not be written as JSON: %s.\nwhat stopped is the rendering and "
+		    "not the command, which has already done what it was asked -- and nothing "
+		    "is printed rather than a document with a value in it that nobody typed. "
+		    "The same command without `--json` renders the answer as text",
+		    what, why ? why : "it did not fit");
+		return 0;
+	}
+	ncfg_out_line(ncfg_buf_text(writer->buf));
+	return 1;
+}
 
 /* ------------------------------------------------------------------------ *
  * A person changed a setting, so the machine comes off its profile
@@ -120,7 +173,7 @@ static void put_profile_back(const char *config_dir, const char *folded, char *e
  * ------------------------------------------------------------------------ */
 
 int ncfg_cli_put_text(const char *name, const char *text, int replace, const char *subject,
-    const ncfg_cli_options_t *options, char *err, size_t err_size)
+    const ncfg_cli_options_t *options, ncfg_cli_wrote_t *wrote, char *err, size_t err_size)
 {
 	char  socket_path[NCFG_CLI_PATH_MAX];
 	char  config_dir[NCFG_CLI_PATH_MAX];
@@ -129,6 +182,10 @@ int ncfg_cli_put_text(const char *name, const char *text, int replace, const cha
 	char *folded = NULL;
 	char *path = NULL;
 	int   denied = 0;
+
+	if (wrote) {
+		memset(wrote, 0, sizeof(*wrote));
+	}
 
 	/*
 	 * **The daemon first, and the local write only when none is listening**,
@@ -153,7 +210,13 @@ int ncfg_cli_put_text(const char *name, const char *text, int replace, const cha
 		if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
 			return 0;
 		}
-		ncfg_out_writef("netcfgd stored %s and re-read its configuration\n", subject);
+		if (wrote) {
+			wrote->daemon = 1;
+		}
+		if (!options->json) {
+			ncfg_out_writef("netcfgd stored %s and re-read its configuration\n",
+			    subject);
+		}
 		return 1;
 	}
 
@@ -171,17 +234,24 @@ int ncfg_cli_put_text(const char *name, const char *text, int replace, const cha
 		free(folded);
 		return 0;
 	}
-	say_folded(folded);
-	free(folded);
-	ncfg_out_writef("wrote %s\n", path ? path : "");
-	ncfg_out_writef("nothing is listening on %s, so this was written directly\n",
-	    socket_path);
-	free(path);
+	if (!options->json) {
+		say_folded(folded);
+		ncfg_out_writef("wrote %s\n", path ? path : "");
+		ncfg_out_writef("nothing is listening on %s, so this was written directly\n",
+		    socket_path);
+	}
+	if (wrote) {
+		wrote->folded = folded;
+		wrote->path = path;
+	} else {
+		free(folded);
+		free(path);
+	}
 	return 1;
 }
 
 int ncfg_cli_remove_named(const char *name, const char *subject,
-    const ncfg_cli_options_t *options, char *err, size_t err_size)
+    const ncfg_cli_options_t *options, ncfg_cli_wrote_t *wrote, char *err, size_t err_size)
 {
 	char  socket_path[NCFG_CLI_PATH_MAX];
 	char  config_dir[NCFG_CLI_PATH_MAX];
@@ -190,6 +260,10 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 	char *folded = NULL;
 	int   removed = 0;
 	int   denied = 0;
+
+	if (wrote) {
+		memset(wrote, 0, sizeof(*wrote));
+	}
 
 	if (!ncfg_cli_daemon_socket(options, socket_path, sizeof(socket_path))) {
 		ncfg_error_set(err, err_size,
@@ -205,9 +279,14 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 		if (!ncfg_cli_ask_ok(socket_path, &request, err, err_size)) {
 			return 0;
 		}
+		if (wrote) {
+			wrote->daemon = 1;
+		}
 		/* Said plainly, because an absent file is success and somebody who
 		 * mistyped the name would otherwise read that as "removed". */
-		ncfg_out_writef("netcfgd no longer has %s\n", subject);
+		if (!options->json) {
+			ncfg_out_writef("netcfgd no longer has %s\n", subject);
+		}
 		return 1;
 	}
 
@@ -238,20 +317,77 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 		 * profile into `conf.d`, for a command that did nothing. */
 		put_profile_back(config_dir, folded, err, err_size);
 		free(folded);
-		ncfg_out_writef("%s is not in %s\n", subject, config_dir);
+		if (!options->json) {
+			ncfg_out_writef("%s is not in %s\n", subject, config_dir);
+		}
 		return 1;
 	}
-	say_folded(folded);
-	free(folded);
-	/* The same words the daemon path uses, because it is the same event and an
-	 * operator should not have to tell which route it took. */
-	ncfg_out_writef("netcfgd no longer has %s\n", subject);
+	if (!options->json) {
+		say_folded(folded);
+		/* The same words the daemon path uses, because it is the same event
+		 * and an operator should not have to tell which route it took. */
+		ncfg_out_writef("netcfgd no longer has %s\n", subject);
+	}
+	if (wrote) {
+		wrote->removed = 1;
+		wrote->folded = folded;
+	} else {
+		free(folded);
+	}
 	return 1;
 }
 
 /* ------------------------------------------------------------------------ *
  * `ncfg config put|rm`
  * ------------------------------------------------------------------------ */
+
+/*
+ * What a `config put` or `config rm` did, as one object.
+ *
+ * `name` because that is what netcfgd files a drop-in under and the only
+ * handle a script has on it afterwards; `daemon` because the two routes are a
+ * real difference -- one has already re-read the configuration and the other
+ * wrote a file that something will read later -- and it replaces the "nothing
+ * is listening on ... so this was written directly" sentence rather than
+ * dropping it. `path` is written only where this process wrote a file, which
+ * is 0127 in a member: the daemon chose where its copy went and handing that
+ * back invites a client to keep it.
+ *
+ * `removed` is the `rm` half and is **absent on the daemon route**, because an
+ * absent file is success there and the answer cannot tell "removed" from "was
+ * never there". The text says so in words -- "netcfgd no longer has ...", said
+ * plainly for exactly that reason -- and a `false` here would be a claim
+ * nobody made.
+ */
+static int say_drop_in(const char *name, const ncfg_cli_wrote_t *wrote, int is_removal,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	ncfg_buf_t         out;
+	int                ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_json_write_init(&writer, &out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "name", name);
+	ncfg_json_write_member_bool(&writer, "daemon", wrote->daemon);
+	if (wrote->path) {
+		ncfg_json_write_member_string(&writer, "path", wrote->path);
+	}
+	if (is_removal && !wrote->daemon) {
+		ncfg_json_write_member_bool(&writer, "removed", wrote->removed);
+	}
+	/* The fold is a second thing that happened to the machine, and the text
+	 * says it; absent where none was made. */
+	if (wrote->folded) {
+		ncfg_json_write_member_string(&writer, "folded", wrote->folded);
+	}
+	ncfg_json_write_object_end(&writer);
+	ok = ncfg_cli_say_json(&writer, is_removal ? "what was removed" : "what was stored", err,
+	    err_size);
+	ncfg_buf_free(&out);
+	return ok;
+}
 
 /*
  * Read the text a `put` is to send, into `out`.
@@ -329,9 +465,10 @@ static int blank(const char *text)
 static int put(const char **rest, size_t count, const ncfg_cli_options_t *options, char *err,
     size_t err_size)
 {
-	ncfg_buf_t text;
-	char       subject[NCFG_CLI_TEXT_MAX];
-	int        ok;
+	ncfg_buf_t       text;
+	ncfg_cli_wrote_t wrote = { 0, 0, NULL, NULL };
+	char             subject[NCFG_CLI_TEXT_MAX];
+	int              ok;
 
 	if (count == 0) {
 		ncfg_error_set(err, err_size,
@@ -359,15 +496,21 @@ static int put(const char **rest, size_t count, const ncfg_cli_options_t *option
 	}
 	(void)snprintf(subject, sizeof(subject), "`%.*s`", (int)NCFG_CLI_TEXT_MAX - 3, rest[0]);
 	ok = ncfg_cli_put_text(rest[0], ncfg_buf_text(&text), options->replace, subject, options,
-	    err, err_size);
+	    &wrote, err, err_size);
 	ncfg_buf_free(&text);
+	if (ok && options->json) {
+		ok = say_drop_in(rest[0], &wrote, 0, err, err_size);
+	}
+	ncfg_cli_wrote_free(&wrote);
 	return ok;
 }
 
 static int remove_one(const char **rest, size_t count, const ncfg_cli_options_t *options,
     char *err, size_t err_size)
 {
-	char subject[NCFG_CLI_SENTENCE_MAX];
+	ncfg_cli_wrote_t wrote = { 0, 0, NULL, NULL };
+	char             subject[NCFG_CLI_SENTENCE_MAX];
+	int              ok;
 
 	if (count == 0) {
 		ncfg_error_set(err, err_size,
@@ -376,7 +519,12 @@ static int remove_one(const char **rest, size_t count, const ncfg_cli_options_t 
 	}
 	(void)snprintf(subject, sizeof(subject), "a drop-in called `%.*s`",
 	    (int)NCFG_CLI_TEXT_MAX, rest[0]);
-	return ncfg_cli_remove_named(rest[0], subject, options, err, err_size);
+	ok = ncfg_cli_remove_named(rest[0], subject, options, &wrote, err, err_size);
+	if (ok && options->json) {
+		ok = say_drop_in(rest[0], &wrote, 1, err, err_size);
+	}
+	ncfg_cli_wrote_free(&wrote);
+	return ok;
 }
 
 int ncfg_cli_config(const ncfg_cli_options_t *options, const char **positional, size_t count,
