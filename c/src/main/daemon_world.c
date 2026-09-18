@@ -21,9 +21,11 @@
  *   every laptop with wifi -- it takes the global apply lock and a netlink
  *   socket every five seconds to discover there is nothing to give back,
  *   against the same lock `ncfg apply` waits on (0184, and project.md
- *   10.169). The same instinct is carried one step further here: this build's
- *   executor refuses `backend.stop` by name, and asking `ncfg_apply_supported`
- *   costs nothing, so the lock is not taken to be told that either.
+ *   10.169). The same instinct is carried one step further here: asking
+ *   `ncfg_apply_supported` costs nothing, so the lock is not taken to be
+ *   refused either -- and it is asked of the kinds that are actually running.
+ *   Asking it of a representative op is what made that guard unreachable for
+ *   as long as it existed; see `any_stop_is_supported`.
  *
  * THE SWEEP, WHICH IS THE OTHER HALF OF "A WRITE THAT FAILED"
  *   A subscriber used to be found dead only by writing to it, and a converged
@@ -371,11 +373,11 @@ size_t ncfg_main_hooks_of(const ncfg_document_t *document, ncfg_hook_ref_t *out,
 	return taken;
 }
 
-int ncfg_main_world_open(ncfg_main_world_t *world, const char *run_dir,
+int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t *where,
     const ncfg_daemon_state_t *state, ncfg_main_subscribers_t *subscribers,
     ncfg_main_watchers_t *watchers, char *err, size_t err_size)
 {
-	if (!world || !run_dir || !run_dir[0]) {
+	if (!world || !where || !where->run_dir || !where->run_dir[0]) {
 		ncfg_error_set(err, err_size,
 		    "a world needs somewhere to be and a run directory to take the apply lock "
 		    "in");
@@ -383,7 +385,25 @@ int ncfg_main_world_open(ncfg_main_world_t *world, const char *run_dir,
 	}
 	memset(world, 0, sizeof(*world));
 	ncfg_lock_init(&world->lock);
-	world->run_dir = run_dir;
+	world->run_dir = where->run_dir;
+	/*
+	 * The other four exactly as they were given, including absent. A default
+	 * spelled here would be `ncfg_service_t`'s bargain broken at the one layer
+	 * that could break it quietly: every one of these is a place this daemon
+	 * *writes*, and the machine it is built on has a live network.
+	 */
+	world->proc_root = where->proc_root;
+	world->supplicant_dir = where->supplicant_dir;
+	world->resolv_conf = where->resolv_conf;
+	world->dnsmasq_conf = where->dnsmasq_conf;
+	world->unbound_conf = where->unbound_conf;
+	world->dhcp = where->dhcp;
+	world->hostapd_program = where->hostapd_program;
+	world->radvd_program = where->radvd_program;
+	world->openvpn_program = where->openvpn_program;
+	world->supplicant_program = where->supplicant_program;
+	world->secrets.secrets_dir = where->secrets_dir;
+	world->secrets.materialise_dir = where->certs_dir;
 	world->state = state;
 	world->subscribers = subscribers;
 	world->watchers = watchers;
@@ -411,6 +431,10 @@ void ncfg_main_world_close(ncfg_main_world_t *world)
 		world->open = 0;
 	}
 	world->hook_count = 0;
+	/* Unconditionally, and not inside the branch above: a world that opened no
+	 * executor holds no scope list, and one whose open failed after the
+	 * service was built holds one with nothing to say it. */
+	ncfg_main_service_release(world);
 }
 
 void ncfg_main_world_seams(ncfg_main_world_t *world, ncfg_reconcile_world_t *out)
@@ -476,6 +500,26 @@ int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err
 			    NCFG_MAIN_HOOKS_MAX);
 		}
 	}
+	/*
+	 * And the half that is not netlink. Built here rather than at
+	 * `ncfg_main_world_open` because it borrows the document, and the document
+	 * is replaced by a reload: a service resolved once at startup would hold a
+	 * `dns_scopes` list and a metric table belonging to a configuration this
+	 * daemon has stopped believing in. Open-to-close is inside one call of the
+	 * pass, which is the window `service.h` says a borrow has to fit in.
+	 *
+	 * A failure to resolve it is not a failure to open: `ncfg_main_service_of`
+	 * says what each unresolved member costs and every one of them is an op
+	 * refused by name. An executor that could not be opened at all is a daemon
+	 * that cannot bring a link up, which is worse than one that cannot deliver
+	 * a resolver file and says so.
+	 */
+	if (!ncfg_main_service_of(world, err, err_size)) {
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "this executor's service context is incomplete, so some ops will refuse "
+		    "by name: %s", err);
+	}
+	ncfg_kernel_set_service(world->kernel, &world->service);
 	ncfg_kernel_executor(world->kernel, out);
 	world->open = 1;
 	return 1;
@@ -494,6 +538,7 @@ void ncfg_main_world_executor_close(void *context, ncfg_executor_t *executor)
 	ncfg_kernel_free(world->kernel);
 	world->kernel = NULL;
 	world->hook_count = 0;
+	ncfg_main_service_release(world);
 	/* The lock after the socket, which is the order the Rust's `Drop` gives
 	 * and is the one that matters: the lock covers the acting, so releasing it
 	 * while a socket is still open would let the next apply start against a
@@ -587,19 +632,63 @@ size_t ncfg_main_claims_of(const ncfg_daemon_state_t *state, ncfg_interface_clai
 	return taken;
 }
 
-/* Whether this build's executor would carry out a `backend.stop` at all, with
- * its own sentence. Asked before the lock for the reason the contenders are:
- * taking the apply lock to be refused is the cost this whole ordering is
- * about. */
-static int stop_is_supported(char *why, size_t why_size)
+/*
+ * Whether stopping what netcfgd runs on the contended interfaces is something
+ * this executor would carry out, with the sentence for the first one it would
+ * not. `*candidates` answers how many backends were asked about at all.
+ *
+ * Asked before the lock for the reason the contenders are: taking the apply
+ * lock to be refused is the cost this whole ordering is about.
+ *
+ * **Of the kinds that are actually running, and that is the correction.** It
+ * used to build one `backend.stop` carrying kind 0 and ask about that. Kind 0
+ * is `NCFG_BACKEND_DHCP4`, which `ncfg_service_backend_supported` has always
+ * answered yes for, so the guard said yes whatever the executor could really
+ * do and the branch under it could not be reached -- a check whose answer does
+ * not depend on the thing it checks, which is the shape this port has already
+ * found twice. A WireGuard device or a `pppd` session is refused by name, and
+ * an interface holding only those is now one the lock is not taken for.
+ */
+static int any_stop_is_supported(const ncfg_daemon_state_t *state,
+    const ncfg_contenders_t *found, size_t *candidates, char *why, size_t why_size)
 {
-	ncfg_op_t op;
+	size_t at;
 
-	memset(&op, 0, sizeof(op));
-	op.kind = NCFG_OP_BACKEND_STOP;
-	op.u.backend.kind = 0;
-	op.u.backend.iface = "";
-	return ncfg_apply_supported(&op, why, why_size);
+	*candidates = 0;
+	if (!state || !state->observed) {
+		return 0;
+	}
+	for (at = 0; at < found->count; at++) {
+		size_t which;
+
+		for (which = 0; which < found->at[at].interface_count; which++) {
+			const char *interface = found->at[at].interfaces[which];
+			size_t      i;
+
+			for (i = 0; interface && i < state->observed->backend_count; i++) {
+				const ncfg_observed_backend_t *backend =
+				    &state->observed->backends[i];
+				ncfg_op_t                      op;
+
+				if (!backend->running || !backend->interface ||
+				    strcmp(backend->interface, interface) != 0) {
+					continue;
+				}
+				(*candidates)++;
+				memset(&op, 0, sizeof(op));
+				op.kind = NCFG_OP_BACKEND_STOP;
+				op.u.backend.kind = backend->kind;
+				op.u.backend.iface = interface;
+				/* The first one that can be stopped is enough to make the
+				 * lock worth taking: `hand_back` asks again per backend
+				 * and says why for each one it cannot. */
+				if (ncfg_apply_supported(&op, why, why_size)) {
+					return 1;
+				}
+			}
+		}
+	}
+	return 0;
 }
 
 /* Stop every backend netcfgd runs on one interface, saying why each time. */
@@ -646,6 +735,7 @@ int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state,
 	ncfg_executor_t        executor;
 	char                   why[NCFG_ERROR_MAX];
 	size_t                 claim_count;
+	size_t                 candidates = 0;
 	size_t                 at;
 	int                    opened;
 
@@ -676,7 +766,17 @@ int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state,
 	}
 
 	why[0] = '\0';
-	if (!stop_is_supported(why, sizeof(why))) {
+	if (!any_stop_is_supported(state, &found, &candidates, why, sizeof(why))) {
+		if (candidates == 0u) {
+			/*
+			 * Nothing of netcfgd's is running on any contended interface, so
+			 * there is nothing to give back and nothing to say. Reachable
+			 * because the claims and this walk read the same observation at
+			 * two moments and a backend can stop between them.
+			 */
+			ncfg_contenders_free(&found);
+			return 1;
+		}
 		/*
 		 * Said once per contender and then given up on, rather than taking a
 		 * lock to be refused per backend. The operator still learns that

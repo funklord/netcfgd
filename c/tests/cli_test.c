@@ -1769,26 +1769,29 @@ static void apply_is_refused_and_says_what_it_is_waiting_for(void)
 	 * needs and it changes only when the fact does.
 	 */
 	/*
-	 * **Named, not counted -- and now named after two names went stale.** This
-	 * asserted a count of blocks, then the two blocks that count resolved to,
-	 * and both were false within a wave: the `access_point` half was closed by
-	 * the pass that plans hostapd, and the `network` half was never this
-	 * port's gap at all (10.180). What is asserted now is the mechanism --
-	 * every op needing a service context is refused because nothing installs
-	 * one -- which stops being true only when somebody writes that caller,
-	 * which is the event this sentence exists to wait for.
+	 * **Named, not counted -- and now named after three names went stale.**
+	 * This asserted a count of blocks, then the two blocks that count resolved
+	 * to, then the mechanism that every op needing a service context is
+	 * refused because nothing installs one. That last was written as the thing
+	 * that "stops being true only when somebody writes that caller, which is
+	 * the event this sentence exists to wait for" -- and the daemon is that
+	 * caller now, so the event happened and the sentence had to move again.
+	 *
+	 * What it names now is the one fact that cannot be closed by anything
+	 * *underneath* this command: `ncfg apply` has no apply path of its own.
+	 * The executor, its service half and the fold are all written; there is
+	 * nothing here that calls them. That stops being true when somebody
+	 * writes `command_apply`, which is the only event that can change it.
 	 */
-	check(strstr(said, "needs a service context") != NULL,
-	    "  naming the one thing that refuses every backend");
-	check(strstr(said, "nothing outside the tests installs one") != NULL,
-	    "  and that nothing installs one, which is what a reader has to fix");
+	check(strstr(said, "no apply path") != NULL,
+	    "  naming the thing that is missing, which is this command and not its parts");
+	check(strstr(said, "has stopped being true") != NULL,
+	    "  and saying out loud that the reason it used to give no longer holds");
 	/* The consequence, which is what an operator needs from the sentence: not
 	 * that something is missing, but what a machine would look like if this
-	 * ran anyway. The mid-plan clause this replaced described a refusal that
-	 * can no longer fire -- nothing plans a `link.create` the executor
-	 * declines, because the planner asks it first. */
-	check(strstr(said, "decline to start a single backend") != NULL,
-	    "  and what a machine would look like if it ran anyway");
+	 * ran anyway. */
+	check(strstr(said, "takes the apply lock") != NULL,
+	    "  and what it is that nothing here does");
 	check(strstr(said, "owned.json") != NULL,
 	    "  and that nothing records what an apply did");
 	check(strstr(said, NCFG_OBSERVE_ALTNAME_PREFIX) != NULL,

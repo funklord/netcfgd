@@ -40,6 +40,8 @@
 
 #include "ncfg/cli.h"
 #include "ncfg/config.h"
+#include "ncfg/dhcp.h"
+#include "ncfg/dns.h"
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/rfkill.h"
@@ -333,6 +335,33 @@ int ncfg_main_netcfgd_where(const struct ncfg_main_options *options, ncfg_main_w
 	        "certs", err, err_size)) {
 		return 0;
 	}
+	/*
+	 * And the two the service-side executor writes through, each asked of the
+	 * module that owns the files rather than spelled again here. The observer
+	 * reads the sysctls this daemon writes, so a second spelling of that root
+	 * is a value written where nothing looks for it; the supplicant's control
+	 * directory is `supplicant.h`'s for the same reason.
+	 *
+	 * `ncfg_observe_roots_default` answers three roots and only one of them is
+	 * this struct's business. Taking the whole answer and keeping one member is
+	 * still one reading of the environment rather than two -- and a daemon that
+	 * observed through one root and wrote through another is precisely the
+	 * failure this is arranged to make impossible.
+	 */
+	{
+		ncfg_observe_roots_t roots;
+
+		if (!ncfg_observe_roots_default(&roots, err, err_size)) {
+			return 0;
+		}
+		if (!path_is(out->proc, sizeof(out->proc), "proc root", "%s%s", roots.proc, "",
+		        err, err_size)) {
+			return 0;
+		}
+	}
+	if (!ncfg_supplicant_ctrl_dir(out->supplicant, sizeof(out->supplicant), err, err_size)) {
+		return 0;
+	}
 	return 1;
 }
 
@@ -535,6 +564,7 @@ static int start(const options_t *options)
 	ncfg_main_subscribers_t  subscribers;
 	ncfg_main_watchers_t     watchers;
 	ncfg_main_world_t        world;
+	ncfg_main_world_where_t  world_where;
 	ncfg_main_mailbox_t      mailbox;
 	ncfg_main_desk_t         desk;
 	ncfg_confirm_armed_t     armed;
@@ -607,7 +637,24 @@ static int start(const options_t *options)
 		return cannot("this daemon cannot hold what it has to count across ticks", err);
 	}
 
-	if (!ncfg_main_world_open(&world, where.run, &state, &subscribers, &watchers, err,
+	/* Zeroed first, so a member added to the seam later is absent -- which
+	 * `ncfg_main_world_where_t` says refuses the ops that need it by name --
+	 * rather than whatever was on the stack. */
+	memset(&world_where, 0, sizeof(world_where));
+	world_where.run_dir = where.run;
+	world_where.proc_root = where.proc;
+	world_where.supplicant_dir = where.supplicant;
+	world_where.secrets_dir = where.secrets;
+	world_where.certs_dir = where.certs;
+	/* The machine's three, which `dns.h` owns. This is the one caller that
+	 * should spell them: a daemon delivers to the machine it manages, and the
+	 * seam exists so that nothing else does it by accident. */
+	world_where.resolv_conf = NCFG_RESOLV_CONF;
+	world_where.dnsmasq_conf = NCFG_DNSMASQ_CONF;
+	world_where.unbound_conf = NCFG_UNBOUND_CONF;
+	/* And dhcpcd's, which `dhcp.h` owns for the same reason. */
+	ncfg_dhcp_machine(&world_where.dhcp);
+	if (!ncfg_main_world_open(&world, &world_where, &state, &subscribers, &watchers, err,
 	    sizeof(err))) {
 		ncfg_probes_free(loop.probes);
 		ncfg_sims_free(loop.sims);
@@ -798,8 +845,10 @@ done:
  *   * **An op this executor cannot carry out is refused while the plan is
  *     running.** `ncfg_apply_supported` is asked by `execute`, one action at a
  *     time -- a `link.create` for a physical device, a pppoe session or an
- *     openvpn tunnel, and a `backend.start` for six of the nine backend kinds
- *     -- and `ncfg_apply` stops at the first failure. A plan mixing a
+ *     openvpn tunnel, and a `backend.start` for four of the nine backend
+ *     kinds -- measured through `ncfg_apply_supported` rather than counted
+ *     by reading its arms -- and `ncfg_apply` stops at the first failure.
+ *     A plan mixing a
  *     supported op with an unsupported one therefore changes the machine and
  *     stops halfway. The link half of that list used to name a vlan, a bond, a
  *     macvlan and a tunnel; all four are created now, and the three left are
@@ -830,16 +879,20 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start: its executor refuses every "
-	    "op that needs a service context -- `dns.apply`, the four sysctls, the six "
-	    "wifi ops and all three backend verbs -- because nothing outside the tests "
-	    "installs one. A reconcile would bring up links and addresses and then decline "
-	    "to start a single backend, on a machine whose wifi and DHCP both need one");
-	(void)fail("`ncfg apply` is refused here for the same reasons, and a daemon "
-	    "reconciling on drift is an apply nobody typed. The loop, the seams, the "
-	    "window, the control socket, the mark on a link this build creates and the "
-	    "record of what an apply did are written and checked; what is missing is "
-	    "underneath them");
+	(void)fail("this build of the C port will not start. Its executor now carries the "
+	    "half that is not netlink -- `dns.apply` over every scope the machine has, the "
+	    "four sysctls, the hostname, the six wifi ops and `backend.start` for five of "
+	    "the nine backend kinds -- but two of those five refuse on arrival: a router "
+	    "advertisement daemon's prefixes and an openvpn tunnel's configuration file are "
+	    "arguments this daemon does not compose yet. A machine that advertises a prefix "
+	    "or holds a tunnel would have its plan stop at the first of them, part "
+	    "converged");
+	(void)fail("and netcfgd cannot yet tell that a backend it started has died: the "
+	    "liveness pass is not ported, so `running` in an observation is this daemon's "
+	    "memory of having started something rather than a fact about a process. A "
+	    "reconcile on a timer would act on that memory. `ncfg apply` is refused here "
+	    "for the same two reasons, and a daemon reconciling on drift is an apply "
+	    "nobody typed");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 

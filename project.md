@@ -9515,6 +9515,84 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.189 The executor gets its other half, and four sentences that had to move
+
+`ncfg_kernel_set_service` had no caller outside the tests, which is the one
+wiring job on 10.187's list that was blocking a machine rather than a feature.
+`src/main/daemon_service.c` is that caller: `ncfg_main_world_executor_open`
+builds an `ncfg_service_t` beside the hooks it already built, and closes it with
+them. Fourteen of the forty-eight ops stop refusing -- `dns.apply`, the four
+sysctls, `hostname.set`, the six wifi ops and the three backend verbs.
+
+**The daemon is still off.** `ncfg_main_netcfgd_may_reconcile` answers 0 and
+this change did not touch it. What moved is what the refusal *says*.
+
+**Every path is a seam, and that is the whole safety argument.** The first draft
+filled the service from `ncfg_service_machine`, `NCFG_RESOLV_CONF` and
+`ncfg_dhcp_machine` -- which is `/proc`, `/etc/resolv.conf`, the shipped dhcp
+hook, and three programs left NULL meaning *find `dhcpcd` on `PATH`*. Any test
+that opened an executor would then have held a `dns.apply` that rewrites the
+resolver of the workstation this suite is built on, and a `backend.start` able
+to launch a real DHCP client on a real interface of it. `service.h` says in as
+many words why nothing in it has a default; the world had one anyway, one layer
+up. `ncfg_main_world_where_t` carries all of them now, `where_of` in
+`world_test.c` hands a world a run directory and nothing else, and the one
+caller that spells the machine's answers is `daemon_main.c`.
+
+**`effective_metric` is closed** (`ncfg_main_metrics_of`): the network's metric
+where the radio is associated to one that carries it, and the interface's own
+`preference` otherwise. The `or` in that rule is load-bearing and has its own
+check -- a network with no metric falls through to the preference rather than
+erasing it, and getting that wrong drops an operator's number because they also
+named an SSID. Left unresolved, a DHCP client starts with no `-m` and takes
+dhcpcd's 1003 on a document that said 100, which is the Rust's measured defect.
+
+Left NULL deliberately, so the op refuses by name: `advertising`, because
+resolving `@pd:wan0` is `derive_from_delegation`'s arithmetic and `value.h` has
+no port of it -- `explain.c` already spells a private copy, and a second would
+be the third reading of one rule -- and `tunnels`, because nothing composes an
+openvpn configuration file yet.
+
+**A guard that could not fail, found while correcting a sentence about it.**
+`daemon_world.c`'s `stop_is_supported` asked `ncfg_apply_supported` about a
+`backend.stop` carrying kind 0. Kind 0 is `NCFG_BACKEND_DHCP4`, which is
+supported, so the answer was yes whatever the executor could really do and the
+twenty-five-line branch under it was unreachable for as long as it existed. It
+asks about the kinds actually running now, so an interface holding only a
+WireGuard device or a `pppd` session is one the apply lock is not taken for.
+This was not caused by the wiring; it was found because the file header's claim
+that *this build's executor refuses `backend.stop` by name* was the sentence
+being checked.
+
+**And two figures that were wrong, measured rather than re-read.** A throwaway
+program asked `ncfg_apply_supported` about all nine backend kinds under all
+three verbs: **start supported 5 and refused 4, stop 6 and 3, reload 1 and 8**.
+Both `daemon_main.c` and `cli/run.c` said `backend.start` refuses *six of the
+nine*. The planner count in `cli/run.c` -- "four passes of thirty" -- is the
+same shape of claim and is now named rather than counted, pointing at
+`warn_unported`, which is the list. **`build.c`'s own header still says "This is
+four of them" and that is stale**; it is left for whoever counts the passes
+properly rather than swept here on a guess.
+
+**The fourth rewrite of the refusal, and the one that was written to expect it.**
+`cli_test.c` asserted the mechanism *every op needing a service context is
+refused because nothing installs one*, with a comment saying it "stops being
+true only when somebody writes that caller, which is the event this sentence
+exists to wait for". The daemon is that caller. `ncfg apply`'s refusal now names
+the one fact nothing underneath it can close -- that there is no apply path in
+that command at all -- and says out loud that the reason it used to give has
+stopped holding.
+
+**A Rust test leaks a directory per run and is recorded, not fixed.**
+`netcfgd-sys`'s `a_pid_file_naming_another_user_is_refused` creates
+`/tmp/netcfgd-owner-<pid>` and never removes it; five had accumulated from this
+session's runs. Removed by name after checking each pid was gone. Fixing it does
+not help anyone reason about the C port, which is this branch's rule for Rust.
+
+6,251 checks across 94 binaries. Four sabotages of the wiring were each caught:
+the service not installed at all, the scopes not handed over, the metric rule's
+fall-through, and the service not released on close.
+
 ## 10.188 The DNS scope rule leaves the planner, on its own terms
 
 `plan/host_wide.c` carried the rule that says which scopes a machine has, and

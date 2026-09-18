@@ -121,6 +121,31 @@ static inline char *testdir_read(const char *path, size_t *length_out)
 	return body;
 }
 
+/*
+ * Make a directory and every parent of it, for a fixture tree.
+ *
+ * Here rather than in the file that wanted it first: three test files build a
+ * `proc` or a `run` tree now, and a `mkdir -p` written per file is three places
+ * to get the "already exists" case wrong. Errors are ignored exactly as a
+ * fixture wants them to be -- the check that follows fails on the file not
+ * being there, which is a better sentence than one about `mkdir`.
+ */
+static inline void testdir_mkdirp(const char *path)
+{
+	char   copy[1024];
+	size_t i;
+
+	(void)snprintf(copy, sizeof(copy), "%s", path);
+	for (i = 1u; copy[i] != '\0'; i++) {
+		if (copy[i] == '/') {
+			copy[i] = '\0';
+			(void)mkdir(copy, 0700);
+			copy[i] = '/';
+		}
+	}
+	(void)mkdir(copy, 0700);
+}
+
 /* Write one, for a fixture. Returns 1. */
 static inline int testdir_write(const char *path, const char *bytes, size_t length)
 {
