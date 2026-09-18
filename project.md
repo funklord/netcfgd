@@ -9499,6 +9499,45 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.162 A comment that forbids what the code does
+
+`with_metric` fills a route's absent metric from an interface's preference.
+Its own doc comment says why that must happen once:
+
+> It also has to happen in exactly one place, because the comparison that
+> decides "is this route already present" uses the metric and would loop
+> forever against a value computed differently on each side.
+
+There are two places. `plan_route` (lib.rs:4391) fills it from
+`self.effective_metric(interface, observed)`, which prefers the metric of the
+*wifi network the interface has joined*; `teardown_routes` (lib.rs:5645) fills
+it from `interface.preference`. So for an interface that states a `preference`
+and joins a network that states a different `metric`, the forward pass sees the
+installed route at the network's metric and adds nothing, while the teardown
+pass compares at the preference, matches nothing, and plans `route.del`. The
+next reconcile puts it back. **The loop the comment forbids, arriving by the
+route the comment describes**, and no fixture covers it.
+
+Not observed on this machine: its networks carry metrics and its radio states
+no `preference`, and the routes in question are the DHCP client's, which
+ownership keeps netcfgd's hands off anyway. What it wants is the shape from the
+example file -- a `preference` on the interface and a `metric` on the network --
+and a static route to hang it on.
+
+**And a vacuous fixture beside it.** A config address on an interface being
+disabled is withdrawn twice: `plan_disable` emits `addr.del`, and
+`teardown_addresses` independently decides the same address matches no static
+source and emits another. Both are idempotent, so the machine converges and one
+removal is merely described as two. The reason nobody has seen it is the
+fixture: `fixtures.rs:8618`'s
+`taking_an_interface_down_withdraws_its_addresses_first` sets `origin: None`,
+which is the single value that makes the teardown pass skip the address. The
+test that exists to cover the case is built out of the one input where the
+defect cannot appear.
+
+Both found by porting the planner, which is the third module in a row where
+the finding was in a comment the code had stopped obeying.
+
 ## 10.161 What porting the compiler found in it
 
 `lower.rs` is 5,166 lines and the largest file in the project. Porting it meant
