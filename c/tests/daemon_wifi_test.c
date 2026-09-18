@@ -723,7 +723,11 @@ static void what_activation_writes_is_asked_of_the_planner(void)
 		check(plan && plan->action_count > 0u && plans(plan, "link.up"),
 		    "activating a radio plans something, where the `device` block alone planned "
 		    "nothing");
-		check(plan && notices(plan, "a `wifi` block, and the supplicant that would serve it"),
+		/* The sentence narrowed when the wireless passes landed: the networks
+		 * are handed to a supplicant that is already running, and starting one
+		 * is still the backend pass's work. What is asserted is unchanged --
+		 * that the planner names the half of the `wifi` block it is holding. */
+		check(plan && notices(plan, "the supplicant that would serve `wlan0` is not started"),
 		    "  and the planner is holding the supplicant this build cannot yet start");
 		/*
 		 * **The other half of the outcome, and it was missing for as long as
@@ -737,8 +741,9 @@ static void what_activation_writes_is_asked_of_the_planner(void)
 		check(document && document->interface_count == 1u &&
 		    document->interfaces[0].dns != NULL,
 		    "  and the interface asks for the lease's nameservers, which is the other half");
-		check(plan && notices(plan, "a `dns` block is carried in the document"),
-		    "  which the planner sees, and will answer with `dns.apply` when it can");
+		check(plan && plans(plan, "dns.apply"),
+		    "  which the planner answers with `dns.apply`, the op 0263 said this would "
+		    "become");
 		ncfg_plan_free(plan);
 		ncfg_observed_free(observed);
 		ncfg_document_free(document);

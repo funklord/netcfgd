@@ -1085,6 +1085,522 @@ taken.
   the kernel's, pointed at a claim: truncating would match a contender against
   an interface nobody named, which is worse than not asking about it.
 
+* **The executor's service-side half is `service.h`, and every path it uses is
+  a member of one borrowed struct.** The Rust's `Kernel` reads
+  `NCFG_PROC_ROOT`, `NCFG_RESOLV_CONF`, `NCFG_DNSMASQ_CONF`, `NCFG_UNBOUND_CONF`
+  and `NCFG_WPA_CTRL_DIR` out of the environment, and `netcfgd-dns`'s own
+  comment says why those variables exist: *"a test very nearly rewrote this
+  machine's"*. `ncfg_service_t` carries `/run`, `/proc`, the supplicant control
+  directory, the resolver's three targets and the three daemons' programs, and
+  **none of them has a default** -- a member left NULL refuses the ops that
+  need it, by name. `ncfg_service_machine` is the one place the machine's own
+  paths are spelled, so a test asserts what a daemon would use by reading it,
+  and it takes each constant from the module that *reads* the same file
+  (`NCFG_OBSERVE_PROC_ROOT_DEFAULT`, `NCFG_RUN_DIR_DEFAULT`,
+  `NCFG_SUPPLICANT_CTRL_DIR`, `dns.h`'s three) rather than spelling a second.
+* **`ncfg_apply_supported` answers the three backend ops through
+  `ncfg_service_backend_supported`**, which is `creatable`'s shape applied to a
+  second family: the answer turns on the backend's *kind* as well as on the op.
+  Three of the nine kinds have a module under `src/backend/` and are carried
+  out -- an access point, a router advertisement daemon and an openvpn tunnel;
+  the DHCP clients, the supplicant and a PPPoE session are refused because the
+  *launcher* is not ported, and the refusal for a supplicant says so in as many
+  words, since `supplicant.h` is a complete client and everything netcfgd asks
+  a running one **is** ported. `backend.reload` is radvd's alone, which is the
+  Rust's arm too and 0026's reason: an access point's reload is a restart and a
+  deauthenticated LAN, and a reload that stopped and started would hide that
+  behind a word.
+* **`wifi.set_regdom` is executed, through the supplicant, and the Rust never
+  executes it at all.** `WifiSetRegdom` is an `Op` variant nothing constructs --
+  `netcfgd-plan/src/lib.rs` records it as one of three radio settings with no
+  consumer anywhere while the README advertises all three -- and this port's own
+  refusal used to say it "goes over generic netlink, and this executor holds an
+  rtnetlink socket only". `SET country <XX>` on the control socket is the route
+  `wpa_supplicant`'s own `country=` takes into `nl80211`, so it needs no second
+  netlink family; it does need a supplicant on the device, and says so where
+  there is none. The country is checked for being two ASCII letters and upper
+  cased before it is sent, because `SET` takes the rest of the line.
+* **`access_control.add` and `.del` read the list back before they write.**
+  The Rust sends `ADD_MAC` blind and its own comment claims the command is
+  idempotent; hostapd 2.10's `hostapd_add_acl_maclist` refuses a duplicate and
+  the socket answers `FAIL`, so the second apply of a converged machine fails
+  its plan. Here `<LIST> SHOW` is parsed with `ncfg_hostapd_parse_acl_show` --
+  the half `hostapd.h` says was missing was the round trip, and this is it --
+  and a station already where it should be costs one round trip and no command.
+  `tests/live/fake_hostapd.py` answers OK to a duplicate and says hostapd's are
+  idempotent; it is the fake that is wrong, and the in-C fake answers `FAIL` as
+  the source does.
+* **`wifi.associate` asks `STATUS` before it selects, and resolves a profile id
+  rather than a slot.** The op carries a `network` block's id because a plan is
+  written before anything is added to a supplicant and cannot name a slot, so
+  the SSID comes from the document -- or, for a network naming access points,
+  from the last scan through `ncfg_supplicant_pick_ssid` -- and
+  `LIST_NETWORKS` says which slot holds it. A radio already on that network is
+  left alone: re-selecting is a disassociation and a rejoin, which is an outage
+  produced by a plan that had nothing to do. The join is then waited for, since
+  `SELECT_NETWORK` answering `OK` means the supplicant accepted the command
+  (0197).
+* **Stopping an access point lives in `src/apply/` and belongs in
+  `src/backend/hostapd/`.** `hostapd.h` says its `stop` is not carried because
+  it speaks the control socket and that client is the supplicant module's; the
+  stop is written out of that client and hostapd's own path helpers, and this
+  entry is where it says so -- the same arrangement the three things in the
+  daemon's wifi module have, and the second caller takes it rather than writing
+  a third.
+* **A hostapd whose control socket is present and silent fails the stop, and
+  absence is the socket file not being there.** The Rust asks
+  `nothing_is_listening` of the error the connect failed with, forgiving
+  `ENOENT` *and* `ECONNREFUSED` -- the second being a socket file a dead
+  process left. `ncfg_supplicant_connect_within` releases the half-built client
+  before returning NULL and that release closes and unlinks, so `errno` at the
+  call site is the last of those calls rather than the connect's; the predicate
+  exists in `supplicant.h` and has no C caller for exactly that reason. So the
+  absence test here is the socket file, and the stricter half of 0109 is taken:
+  a hostapd killed outright needs one refused stop before its socket file goes,
+  against a silent success about an access point still on the air. The
+  generated configuration and the pid file are removed either way, which is the
+  half that matters most -- hostapd has no indirection for a passphrase.
+* **A router advertisement's prefixes are an argument, with no default.** The
+  Rust resolves `@pd:wan0` at the moment of the start, which is right -- a
+  delegation arrives after the document does -- using `netcfgd-model`'s
+  `derive_from_delegation`, which `value.h` has no port of and which `explain.c`
+  already spells a private copy of and says so. A second private copy here
+  would be the third reading of one rule, and the place the three could
+  disagree is what a router announces to every host on the wire. So
+  `ncfg_service_advertise_t` carries the resolved prefixes and the servers, and
+  an interface with no entry is a refusal naming it rather than a router
+  advertising nothing.
+* **`sysctl.set_accept_ra` refuses anything but 1 and 2, by name.** 0073 says
+  netcfgd writes `2` -- accept even while forwarding -- and `1`, the kernel's
+  own default, and never `0`, because switching advertisements off is a choice
+  no document here makes. The Rust's arm takes a `u8` and writes whatever
+  arrives; `ncfg_op_t` carries an `int64_t`, so the check lands where the value
+  is used and names the range.
+* **`hostname.set` refuses a name carrying a control byte rather than writing
+  it.** The kernel's file is one line, so a value with a newline in it sets the
+  hostname to the part before it while the document, the plan and the journal
+  all say the whole thing -- and every comparison afterwards plans the same
+  change again. Refused rather than trimmed: a name somebody typed that is not
+  the name they get is the quiet disagreement this project exists to refuse.
+* **`dns.apply` demands the run directory before it delivers anything.**
+  `ncfg_dns_deliver` ends in `ncfg_dns_record` itself, so nothing here writes
+  the record a second time -- that duplicate was in the first draft and was
+  found by sabotage rather than by reading, because removing it turned no check
+  red. What is this module's is the *order*: `deliver` writes `resolv.conf` and
+  only then discovers it has nowhere to record what it did, which leaves the
+  machine changed and the planner unable to tell, so every following apply asks
+  for the same delivery again.
+* **`wifi.set_profiles` does not read the `profiles` the op carries**, which is
+  the Rust's behaviour and is deliberate: the op names the device, and what
+  that device gets is every network in the document. Filtering here would make
+  the plan's list a second authority over the document's.
+
+* **`derive_from_delegation` is `value.h`'s now, and it carries a sentence.**
+  The entry above about `explain.c` said it belonged there and that the second
+  caller takes it; the planner is that caller, twice over -- the forward pass
+  resolves the reference to add the address and the teardown resolves it again
+  to answer "is this one still wanted?". A second copy of that arithmetic is a
+  plan that adds an address and deletes it again for ever, which is the
+  property `plan.h` calls load-bearing. `ncfg_address_from_delegation` takes
+  the subnet selector as a number rather than an `ncfg_prefix_ref_t`, because
+  `value.h` sits below `document.h` and stays there; and it answers 0 with a
+  sentence where the private copy answered 0 silently, since the planner puts
+  that sentence in front of an operator whose configuration will never produce
+  an address. `explain` passes NULL and drops it, a malformed pair being simply
+  not the address it was asking about.
+* **A merged DNS scope's policy is the plan's own, and it is the one exception
+  to `plan.h`'s borrow.** A policy that came off the document is borrowed as
+  that file says. A scope that merges a lease's nameservers into it is neither
+  the document's nor the observer's -- it is the document's servers with the
+  network's appended -- so it has to be somebody's, and the plan is the only
+  thing on the right side of every one of those lifetimes.
+  `ncfg_plan_intern_dns_policy` copies the struct and the two lists a merge
+  appends to and leaves every string borrowed, which is the same borrow the
+  policy itself would have been.
+* **The DNS scope list is the planner's, and it is a rule this port has one
+  caller for.** In the Rust it is `netcfgd_model::dns::scopes`, called by the
+  planner and by the executor, and its comment says why in as many words: the
+  planner learned that a report contributes nameservers and the executor went
+  on building its list from the document alone, so the plan said `dns.apply`
+  and the delivery wrote a `resolv.conf` with nothing in it. Here `dns.h` takes
+  a scope list from whoever delivers and nothing in `c/src/` composes one, so
+  the rule is spelled in `host_wide.c` where the only caller is. It belongs
+  beside `ncfg_dns_flatten`, it says so at its definition, and the second
+  caller takes this one rather than writing a third -- which is `explain.c`'s
+  arrangement for `takes_reports` and carries the same obligation.
+* **A nameserver a report named becomes the model's spelling of itself, and one
+  written as a prefix is dropped.** The Rust parses each into an `IpAddr`,
+  which does both by construction; in C the text survives the reader on
+  purpose, so one bad line does not discard a whole report, and this is where
+  it has to become an address. Canonical because the delivery records what it
+  wrote and the observer reads that record back: a server carried through in
+  the author's spelling compares unequal against netcfgd's own record of having
+  delivered it, and `dns.apply` is then planned on every single run. That is
+  10.169's defect one field over, and it is checked with a report naming
+  `2001:0DB8:0000::0053`.
+* **A DNS policy is compared by rendering it, not by walking it.** The
+  planner's own writer is what a plan and the record under `<run>/dns/` are
+  both made of, so a member added to `ncfg_dns_policy_t` and missed by the
+  comparison is impossible rather than unlikely -- a hand-written field walk
+  would be the third list to keep in step with the struct and the writer, and
+  the list maintained by hand is the one this project has already got wrong
+  twice. Two buffers that *failed* deliberately compare as different rather
+  than as equal: the cost of that direction is a delivery already in force
+  being written again, and the cost of the other is a machine whose resolver
+  was never configured reporting nothing to do.
+* **`backend.stop` is restricted to the two kinds this build starts.** The
+  Rust's `backend_wanted` is exhaustive over all nine and says why -- a wildcard
+  arm is what let the idempotence gate catch netcfgd starting something and
+  stopping it on the next reconcile, twice. That is right in a planner where
+  every pass that *starts* one exists. Here the supplicant, the access point,
+  the tunnels and the router advertisement daemon are started by passes this
+  build does not have, so answering "the document does not ask for this" about
+  them would stop something netcfgd never started and start nothing in its
+  place. It is the Rust's own excuse for `WireGuard` and `Dns` -- "not started
+  by the planner, so not stopped by it either" -- applied to the kinds this
+  port has not reached, and each becomes ordinary the day its pass lands.
+* **`backend.reload` has no producer in this half.** Its one caller in the Rust
+  is the router advertisement daemon being handed new prefixes, which is the
+  `advertise` block's pass and is still named by `warn_unported`. The verb is
+  in the taxonomy, the executor's answer to it is somebody else's, and nothing
+  here emits one.
+* **Teardown is four steps, and the backends go between the addresses and the
+  links.** Rule 7 is the reverse of dependency order and the Rust says so;
+  what the order buys here is specific: stopping a client before withdrawing
+  what it installed leaves netcfgd removing a lease's address while the process
+  holding it is still there to put it back, and stopping it after the links
+  means signalling a process whose interface has already been deleted.
+* **Three of `warn_unported`'s arms are gone and three checks moved with
+  them.** The `slaac` arm, the DHCP arm, the `delegated` arm, the interface
+  `dns` block, the `forwarding` setting, the global `dns` block and the
+  hostname policy are each acted on now, so each sentence came out in the same
+  change -- a warning that outlives the gap it describes is the other way this
+  goes wrong. The shared tests that asserted those sentences moved rather than
+  being deleted: `plan_test.c`'s DHCP case now asserts the `backend.start` it
+  was waiting for, and `daemon_wifi_test.c`'s asserts `dns.apply`, which is
+  exactly what the entry about the two ported activation tests said each would
+  become. `cli_test.c`'s column check names a later action id, the plan having
+  more in it.
+* **`plan_forwarding` has no unreadable-sysctl arm and the port keeps it that
+  way.** `plan_privacy` and `plan_accept_ra` both warn and skip where the
+  interface exists and the sysctl cannot be read, each saying that an action
+  planned before the thing that would make it succeed is a plan that never
+  converges; the forwarding pass renders `<unreadable>` into the reason and
+  plans the write anyway. It is carried across unchanged because the two halves
+  of a port that disagree about a case are worse than a port that disagrees
+  with nothing, and it is named here so the divergence is a decision when it is
+  taken rather than an omission that was never noticed. The cost is real on the
+  machines the other two arms were written for.
+
+* **The per-port VLAN pass is driven from the device list, and that is a
+  defect fixed rather than a preference.** The Rust calls
+  `plan_bridge_vlans` from `plan_interface_contents`, which walks
+  `desired.interfaces` -- so a port carrying `vlans` and **no `interface`
+  block** has never had them planned at all. That is the ordinary shape of a
+  trunk port: it carries no address and never will, which is the whole reason
+  0155 pass 1b made a device with no interface representable in the first
+  place. Every one of the Rust's four fixtures gives the port an
+  `interface lan1 { config = "null" }`, so nothing was looking. Here the pass
+  is called from the device walk, after `ncfg_plan_master` in the same
+  iteration, which also puts a port's VLANs after its own enslavement --
+  the kernel answers `EOPNOTSUPP` on a device in no bridge, and the Rust's
+  `base` never carried that edge either.
+* **A kind's endpoints are compared canonically, never as text.** The Rust
+  holds `Option<IpAddr>` on both sides and compares them structurally; the C
+  holds two strings, and *An address in an explanation is compared
+  canonically* above is the same rule for the same reason one layer down. It
+  reaches `ncfg_plan_address_equal` rather than `strcmp` for a tunnel's and a
+  VXLAN's `local` and `remote`, for a routing rule's `from` and `to`, and for
+  every `allowed_ips` prefix of a WireGuard peer. **The model's own readers
+  canonicalise, so a document and an observation that arrived as JSON cannot
+  express two spellings** -- which is why `plan_kind_test.c` edits the
+  observation after reading it, and says so: a producer that assembles the
+  struct itself, or a report that keeps the text somebody's shell script
+  wrote, is the door this guards.
+* **A WireGuard `allowed_ips` entry that will not parse is kept as written
+  rather than dropped.** The Rust's `filter_map` drops it, so a peer whose
+  prefixes hold something unparsable compares equal to a peer that holds
+  none -- and the remedy for a difference that is not seen is a tunnel whose
+  routes are silently not narrowed. Kept, sorted with the rest, and compared.
+* **A peer comparison that ran out of memory is a difference, not
+  agreement.** Rust cannot express the case; here the two comparable lists
+  carry a failure flag and an unanswered comparison answers "replace", which
+  is the direction that plans work rather than the one that silently skips
+  the only action the pass exists for.
+* **`wifi.set_profiles` is a pass of its own, driven from the observation's
+  backend list.** The Rust reaches it through `plan_backend`, which this
+  build does not have: the question it asks is about a supplicant that is
+  *running* and holding something other than the document, and that is a fact
+  the observation already carries. A radio with no supplicant is the backend
+  pass's business either way.
+* **An access point whose access control policy moved is reported rather
+  than restarted.** `macaddr_acl` cannot be changed over hostapd's control
+  socket, so the Rust stops the access point and starts it again; this build
+  plans no backend actions at all, and converging the station lists without
+  the restart would enforce the new list under the old default -- every
+  unlisted station accepted, reported as applied. So it is a sentence naming
+  both policies and nothing else, which is the same answer `unknown` already
+  gets and for the same reason. `restart_if_identity_changed` is not ported
+  for the same reason, and the `access_point` warning says so: an edited
+  SSID, band or channel is not noticed by this build.
+* **`wifi.associate`, `wifi.disassociate` and `wifi.set_regdom` are
+  constructed by nothing, here as in the Rust.** All three are in the
+  taxonomy because it is the vocabulary the socket speaks, and
+  `crates/netcfgd-plan/src/lib.rs` builds none of them -- so what came across
+  is `warn_wifi_device_policy` and `warn_regdom`, which say that a radio's
+  `regdom` and `powersave` reach nothing and that an access point's `regdom`
+  is the only one that becomes a `country_code`. Porting the ops instead
+  would have been inventing behaviour the Rust does not have.
+* **A `rule.del` for something only the kernel has is the plan's own.**
+  `plan.h` names a routing rule as one of the four values a plan borrows from
+  the document, which is right for the rules a document states and impossible
+  for one built out of the observation -- so `ncfg_plan_intern_rule` is
+  `ncfg_plan_intern_route`'s shape for the same reason, and the document's own
+  rules stay borrowed.
+* **The offload name table is spelled in the planner, and the second caller
+  takes this one.** It is `netcfgd_model::interface::offload_names`, and the
+  reader that has to agree with this writer is the observer's `read_offloads`,
+  which is not implemented in this build -- so it is beside its only caller,
+  with its own comment saying where it goes. Two lists of kernel feature names
+  in two places is how a feature comes to be turned on under one spelling and
+  read back under another.
+
+* **`netcfgd` starts.** The request dispatcher is written, so the entry above
+  about refusing to start by naming `ncfg_daemon_answer_fn` is spent: the
+  program resolves its paths, holds a state, installs the observation seam,
+  opens its descriptors, binds the control socket, runs the reconcile loop and
+  stops on a signal. **The refusal is not replaced by a weaker one** --
+  `ncfg_main_netcfgd_refuse` and `ncfg_main_netcfgd_waits_for` are deleted, and
+  what kept a test from starting a daemon is now the linker rather than a rule:
+  the assembly is a `static` function in `daemon_main.c` with no declaration
+  anywhere, so no test can name it, and `main_test.c` still reads its own
+  source to refuse a call to the one entry point that can. Both halves are
+  sabotaged and both go red.
+* **Fourteen of the thirty-two requests are answered and the other eighteen are
+  refused by name.** Nothing in `c/src/` encodes a `status`, `plan`,
+  `document`, `journal`, `explanation`, `secrets`, `modems`, `profiles`,
+  `configs`, `hooks` or `probes` response -- `proto.h` decodes every response
+  and encodes none, and each encoder belongs beside the request that produces
+  it. So those refuse, and **the refusal names the request and says what is
+  missing**, which is what keeps this from being the thing the old refusal
+  existed to prevent: an operator reads a bare `error` as a request the daemon
+  did not recognise. `ncfg_main_answer_unported` is that table, reachable on
+  its own so a test walks all thirty-two rather than the ones somebody wrote
+  out, and both directions are checked -- a kind the table calls unported must
+  refuse with its own name in the sentence, and a kind it calls answered must
+  not reach the arm that admits there is no arm.
+* **`apply`, `confirm` and `revert` are refused on the socket for the four
+  reasons `ncfg apply` is refused on the command line**, said in one sentence
+  rather than four. The same build must not refuse an apply to somebody at a
+  terminal and accept one over a socket.
+* **The world's four seams share one struct, because that seam has one
+  `void *`.** `ncfg_main_world_t` carries the apply lock and the kernel handle
+  an executor is, the roots a contention check reads, the subscriber list an
+  announcement goes to, and the watchers whose timer a window is armed on.
+  Written as four contexts they could not be installed at once --
+  `ncfg_reconcile_world_t::context` is shared by every member, and `expiry`
+  belongs to the watchers while `executor_open` belongs here, so a daemon would
+  have been choosing between arming a window on time and being able to change
+  the machine. What the sharing also buys is the ordering below being a
+  property of one function rather than a convention two of them keep: giving a
+  radio back opens an executor through the very calls the pass uses.
+* **Giving a contended radio back asks two questions before it takes the apply
+  lock**, where the Rust asks neither. The first is the Rust's own defect
+  (10.169): it opens an executor as soon as netcfgd runs any backend at all, so
+  every machine it manages takes the global apply lock and a netlink socket
+  every five seconds to discover there is nothing to give back, against the
+  lock `ncfg apply` waits on (0184). Here `ncfg_contenders_find` answers first.
+  The second is this build's: its executor refuses `backend.stop` by name, and
+  `ncfg_apply_supported` costs nothing to ask, so the lock is not taken to be
+  told that either -- what happens instead is a warning per contender naming
+  the remedy, which is the half of this that never needed an executor. The
+  proof is a measurement rather than a reading: `world_test.c` holds the apply
+  lock itself and asserts the pass still answers, which a pass that opened an
+  executor could not.
+* **An executor is one at a time, refused by name rather than attempted.**
+  `flock` is held by the open file description, so a second `open` in this same
+  process conflicts with the first -- the call would wait out the whole
+  patience and then report somebody else holding the lock, which is a sentence
+  naming the wrong machine.
+* **The executor's hooks are collected from the document into a bounded
+  array.** `ncfg_kernel_set_hooks` takes a flat list and the document keeps one
+  per interface and one per network, so somebody has to join them; without it
+  `ncfg_hook_run` refuses every hook for having nothing to check it against,
+  which is the safe direction and is also every hook in the configuration
+  silently not firing. Past `NCFG_MAIN_HOOKS_MAX` they are counted and said out
+  loud rather than dropped.
+* **The subscriber list is bounded, its descriptors are non-blocking, and a
+  short write drops the subscriber.** The Rust's is a `Vec` pruned only inside
+  a broadcast, and a converged machine broadcasts nothing -- which 10.169
+  already records. Bounding it matters for the same reason the refusal is an
+  answer: `monitor` needs only the `observe` tier, which
+  `control { observe = "any" }` opens to every local user. Non-blocking matters
+  because the loop writes from the thread that reconciles, so one blocking
+  `send` to a client that stopped reading is a daemon that stops correcting
+  drift for as long as the client feels like it. And a partial write is a
+  dropped subscriber rather than a retry, because what is then on the wire is
+  half a line and the next event is read as its tail.
+* **The event encoder is in `src/main/` rather than beside `answer.c`.** That
+  file holds the three responses the authorization path decides for itself; an
+  event is decided by the reconcile pass and written by the seam this directory
+  installs, so it lives with the announcement. `world_test.c` round-trips all
+  five kinds through `proto.h`'s own decoder rather than against a literal,
+  since a literal would agree with this encoder for ever, including about a
+  member name the decoder refuses.
+* **Nothing hands a subscribed connection to the loop yet, and `monitor` says
+  so.** The list, the encoder and the announcement are written and the pass
+  announces through them; what is missing is the one step in `server.c` that
+  gives the loop a connection's descriptor after a `monitor` passes
+  authorization, which is where the Rust does it too. Until then the list is
+  always empty, which `daemon.h` already calls an ordinary daemon with no
+  monitor attached -- and the refusal `monitor` gets names that gap rather than
+  reading as a request the daemon did not recognise.
+* **The control policy the sockets are bound under is a copy taken at
+  startup.** It has to be: `ncfg_daemon_serve_t` borrows the policies and they
+  must outlive the server, while `state->desired` is replaced by every reload,
+  so pointing the socket at the document's own block would read freed memory
+  the first time somebody wrote in the configuration directory. The Rust clones
+  it for the same reason. **What the copy costs is a defect in both** and is
+  written up in project.md 10.171: the socket's mode and group are decided once
+  and authorization follows the reload, so a widened policy is in force in the
+  daemon and unreachable through the file.
+* **A remote socket is bound beside the control socket, not under the run
+  directory.** The Rust's `with_file_name` says the same thing; spelling it as
+  `<run>/remote.sock` would put a second netcfgd's remote socket back in the
+  first one's directory, which is the one place it must not write.
+* **`netcfgd` will not refuse to start over a configuration that does not
+  compile.** The diagnostics are said once and the daemon runs with no desired
+  state, which is `ncfg_daemon_state_reload`'s bargain: an operator fixing the
+  file gets a working daemon without restarting it, and a typo in a drop-in
+  does not take the machine's network manager away.
+* **What the assembly is not covered by is named rather than left to be
+  assumed.** Every step it is made of is a call taking values and is tested --
+  the paths, the policy copy, the world's seams, the hook collection, the
+  claims a contention check is made about, the dispatcher, the mailbox, the
+  watchers and the round. What no test reaches is the order they are called in,
+  the two socket binds and the teardown, because reaching them means starting a
+  daemon on the machine the suite is built on. That is the residue, it is one
+  `static` function, and it has no name anything can call.
+
+* **Eighteen more kernel-side ops land, and three of them open a socket of
+  their own.** The five link-kind blocks, the IPv6 token, the offloads, the
+  two bridge VLAN ops, the two WireGuard halves, the two rule ops, the four
+  traffic-control ops and the NAT table. The executor holds an **rtnetlink**
+  socket, and `netlink.h` says what that means: a generic netlink family id
+  resolved on one socket is meaningless on another, and `NETLINK_NETFILTER` is
+  a third protocol again. So `wg.set_device`, `wg.set_peers`,
+  `link.set_offloads` and `nat.replace` each open what they need and close it
+  before the arm returns, rather than every executor carrying two more
+  descriptors and two cached family ids whether or not a plan has a WireGuard
+  device in it. That is `ncfg_contenders_find`'s lesson pointed the other way:
+  a machine with no WireGuard and no NAT now asks the controller nothing, and
+  nothing outlives the call. It costs one extra round trip per op on a plan
+  that has at most a handful of them.
+* **Each op is a builder and a two-line send, and the builders are what the
+  tests drive.** `apply_kernel_test.c` opens no socket and sends no byte: it
+  walks built messages back with the wire layer and asserts the fields. That is
+  `wire_test.c`'s standard and it is not a convenience here -- these ops attach
+  shapers to an uplink, install policy routing rules and load private keys, and
+  the machine the suite is built on is somebody's workstation.
+* **`newlink_of` moved out of `kernel.c` and is the one conversion.** It served
+  `link.create` alone and was private there; the five `link.set_*` ops need the
+  identical nest, and 0057's sentence about a bridge is true of every kind --
+  two encoders for one kind is how the create path and the correct-an-existing
+  path come to disagree about what a setting is. It is `ncfg_kernel_newlink_of`
+  in `src/apply/kernel_link.c` now, and `create_link` calls it. **This is the
+  one edit to `kernel.c` beyond moving cases**, and it is recorded here rather
+  than left to be found.
+* **The model publishes the three numberings the executor needs, and the key
+  decoder.** `ncfg_bond_mode_number`, `ncfg_macvlan_mode_number`,
+  `ncfg_tunnel_kind_name` and `ncfg_key_parse`, in `document.h`. `apply.c`'s
+  `creatable` says why they may not be written in `src/apply/`: "two lists of
+  four numbers in two places is how a mode comes to mean one thing on the way
+  out and another on the way back in", and the reader that has to agree with
+  this writer is `src/observe/build.c`, which already reads the model's tables.
+  So the numbering is published rather than copied. Two of them are not new
+  facts either -- a bond's mode number *is* its ordinal, which `build.c`
+  already relies on, and a macvlan's is a flag bit -- and this is where that is
+  written down once and bounded. `ncfg_key_parse` is the base64 reader
+  `document.c` already had privately: a private key arrives as text from
+  `secrets.h` while a public key arrives as JSON, and two readers of one format
+  is how the two halves of one program come to disagree about a key.
+  **`creatable`'s refusal for a macvlan and a tunnel now names a reason that
+  has stopped being true** -- nothing plans either, so the gate is still right
+  and its sentence is stale; that arm belongs to whoever owns `apply.c` next.
+  A VLAN's ethertype is deliberately *not* published, `link.set_vlan` not being
+  an op and nothing else needing it.
+* **`ncfg_netlink_reply_t` carries the errno the kernel refused with.**
+  `ncfg_netlink_fail` renders one string out of `strerror`, a name and a
+  clause, and reading a decision back out of the words of a message is what
+  `config.h` forbids by name -- so the number survives beside the sentence
+  rather than instead of it. It is set by `ncfg_netlink_collect_batch` and by
+  nothing else, because the batch path is the one an executor sends through.
+* **Idempotence is a list of errnos, and it is a value rather than a habit.**
+  `plan.h` asks that applying a plan twice produce an empty second plan, and
+  the executor's half of that is that the same op sent twice succeeds twice.
+  Most of these are idempotent by construction -- an attribute set is a set,
+  `NLM_F_REPLACE` replaces, a table is replaced whole -- and five are not:
+  `EEXIST` for a rule already installed and for an ingress hook already there,
+  `ENOENT` for a rule, a bridge VLAN, a root qdisc or an ingress hook already
+  gone. `ncfg_kernel_tolerates` is the single place any of that is compared,
+  so the test enumerates it; what it refuses is the general form, since
+  forgiving `EEXIST` everywhere would turn a `link.create` racing another
+  daemon into a silent success. The Rust forgives three of the five, each at
+  its own call site, and has no arm for a rule already installed or a bridge
+  VLAN already off the port.
+* **What an errno means *for an op* is a value too.** `ncfg_kernel_hint` is
+  the clause `netlink.h`'s general sentence cannot carry -- the bridge with no
+  VLAN filtering, the scheduler whose module would not load, the missing
+  `cls_matchall`, the four preconditions behind a token's bare `EINVAL`. A
+  value rather than a `format!` per arm, so that the reading cannot be
+  attached to one half of a pair and not the other.
+* **A rule selector written without a prefix length is a host selector.** `ip
+  rule from 10.0.0.5` means `/32` and `kernel.c`'s `route_of` already reads a
+  route destination that way. The Rust's `parse_cidr` requires the slash, so
+  `from = "10.0.0.5"` compiles, plans, and fails the apply -- see the defect
+  reported with this wave.
+* **A selector of the other family is refused by name, and so is a firewall
+  mask with no mark.** The kernel takes a rule's family from the message
+  header and reads the selector as that many bytes, so a mismatch is `EINVAL`
+  naming nothing; and a mask applied before the comparison, with no mark beside
+  it, selects packets marked zero. Neither is checked in the Rust. Both are
+  configuration mistakes somebody can fix in a second once told.
+* **The executor takes the document it is applying, and where secrets live.**
+  Six ops carry a device's name and nothing else, because what they change is
+  the document's and a plan that carried it would put a WireGuard key
+  reference, every peer's public key and every allowed prefix into
+  `plan.last.json`. `ncfg_kernel_set_document` is that, borrowed on
+  `ncfg_kernel_set_hooks`' terms -- and **without one those six refuse by
+  name** rather than configuring a bridge from an empty block, which would be
+  every setting at the kernel's default reported as a successful apply.
+  `ncfg_kernel_set_secrets` is a setter rather than an environment variable
+  for `contention.h`'s reason: a test that forgets a variable reads the
+  developer's real secrets directory, and one that forgets an argument does not
+  compile.
+* **`wg.set_device` refuses a private key reference the document does not
+  name.** The op carries the reference's *name* and the document carries its
+  provider, so both are needed; a document naming another is a plan built from
+  another document, and for a WireGuard device the wrong key is a tunnel that
+  comes up to the wrong peer rather than one that fails. The Rust reads the
+  whole configuration from the document and never compares the two.
+* **The executor declares which of its ops undoes which.** The inverse a revert
+  replays is the plan's and that does not change; what `ncfg_kernel_inverse_kind`
+  adds is the other half of the same sentence -- an op this build carries out
+  whose inverse it could not carry out is a change that cannot be taken back,
+  at the one moment that matters. The test walks the list against
+  `ncfg_apply_supported`. Six of the eighteen declare none, and that is not a
+  gap: they replace a *value*, so undoing one means re-stating what was there
+  before, which only the previous document holds -- `apply.h`'s "a declared
+  inverse carries the value it replaced". `qdisc.reset` is the inverse of
+  `qdisc.set` and deliberately not the other way round.
+* **`apply_test.c`'s list of what this build executes is now wrong for both
+  halves of the executor, and neither worker changed it.** That file is shared
+  and says so; its `executed[]` table still names fifteen ops, against a build
+  that carries out forty-four. The two checks it fails name every op that
+  moved, which is the arrangement working -- "nothing is silently ignored" is a
+  property the table exists to pin, and a table nobody updates is the one thing
+  that could let an op move without being noticed.
+
 ## What is not being decided here
 
 Whether the C replaces the Rust, and when. Nothing in `c/` is installed, the
