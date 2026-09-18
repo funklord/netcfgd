@@ -144,11 +144,22 @@ tests/%_test: tests/%_test.c $(LIB)
 # `main_test` is the command line and the multi-call dispatch; `loop_test` is
 # the loop over the descriptors a daemon owns, which is that directory's work
 # for the reason 0263 gives -- a library never exits and never owns a `poll`
-# that decides when a process stops.
+# that decides when a process stops. `world_test` and `answer_test` are the
+# other two halves of the same sentence.
 tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB)
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
 tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(LIB)
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+
+# The same two, for the same reason: the four seams a reconcile pass reaches
+# the machine through and the request dispatcher are `src/main/`'s work --
+# owning the apply lock, the netlink socket and the connections an event is
+# written to is what that directory is for.
+tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(LIB)
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+
+tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB)
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
 # What this build made, by the same wildcard that made it -- and nothing by

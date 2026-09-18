@@ -44,6 +44,7 @@
 #define NCFG_MAIN_LOOP_INTERNAL_H
 
 #include "ncfg/daemon.h"
+#include "ncfg/lock.h"
 #include "ncfg/netlink.h"
 #include "ncfg/proto.h"
 #include "ncfg/rfkill.h"
@@ -707,5 +708,306 @@ void ncfg_main_watchers_refresh(void *context, ncfg_main_sources_t *sources);
  */
 int  ncfg_main_signals_watch(ncfg_main_watchers_t *watchers, char *err, size_t err_size);
 void ncfg_main_signals_restore(void);
+
+/* ------------------------------------------------------------------------ *
+ * Who is listening -- daemon_world.c
+ * ------------------------------------------------------------------------ */
+
+/*
+ * How many monitor streams are carried at once.
+ *
+ * Generous for what subscribes -- a tray, a window, a TUI is three -- and a
+ * bound rather than a list that grows, for the reason the Rust's does not
+ * have one: `monitor` needs only the `observe` tier, which
+ * `control { observe = "any" }` opens to every local user, and the only
+ * pruning the Rust does is inside a broadcast. A converged machine broadcasts
+ * nothing, so a client that subscribes and hangs up sits in the list until
+ * something happens. Here the list cannot outgrow this, and the refusal to
+ * add a subscriber past it is an answer the caller can send.
+ */
+#define NCFG_MAIN_SUBSCRIBERS_MAX 16
+
+/*
+ * The descriptors an event is written to.
+ *
+ * **Every call on one of these happens on the loop's thread**, which is what
+ * lets it hold no lock: the pass announces from inside `ncfg_main_round`, and
+ * a subscription arrives the way every other request does -- through the
+ * mailbox, which hands it to the seam while the round is inside
+ * `ncfg_main_mailbox_settle`. That is the Rust's arrangement as well, where
+ * `Command::Subscribe` crosses the same channel the requests do.
+ *
+ * Each descriptor is this list's own: `ncfg_main_subscribers_add` is handed
+ * one to keep, and `ncfg_main_subscribers_close` closes every one. A caller
+ * that also holds the connection duplicates it first, so that the server
+ * closing a connection leaves this list writing to a descriptor it still owns
+ * -- which fails with `EPIPE` and drops the subscriber, rather than writing
+ * into whatever the number has since been reused for.
+ */
+typedef struct {
+	int    at[NCFG_MAIN_SUBSCRIBERS_MAX];
+	size_t count;
+	/* Subscribers dropped for refusing an event, over this list's life. For
+	 * a caller that wants to say so, and for a test that would otherwise have
+	 * to infer it from a count that went down. */
+	size_t dropped;
+} ncfg_main_subscribers_t;
+
+void ncfg_main_subscribers_init(ncfg_main_subscribers_t *subscribers);
+
+/*
+ * Take a descriptor to write events to. **It becomes this list's.**
+ *
+ * The descriptor is put in non-blocking mode, which is the property that
+ * matters: the loop writes from the thread that reconciles, so a client that
+ * stopped reading must not be able to stall the daemon. 0 with a sentence
+ * where the list is full or the descriptor could not be set, and the caller
+ * still owns it in that case -- a failed add that had closed it would leave a
+ * connection thread writing a refusal to a number it no longer has.
+ */
+int ncfg_main_subscribers_add(ncfg_main_subscribers_t *subscribers, int fd, char *err,
+    size_t err_size);
+
+/* Close every one and leave the list usable and empty. */
+void ncfg_main_subscribers_close(ncfg_main_subscribers_t *subscribers);
+
+/*
+ * Write one event to each, dropping the ones that would not take it.
+ *
+ * Encoded once rather than per subscriber. A descriptor that is full, that has
+ * gone or that took only part of the line is dropped: a partial line would
+ * frame as half a message and the next event would be read as its tail, so
+ * there is no "try again later" that a reader could survive. That is the
+ * Rust's `retain` over `try_send`, with the same reasoning and a different
+ * failure to detect.
+ */
+void ncfg_main_subscribers_tell(ncfg_main_subscribers_t *subscribers,
+    const ncfg_proto_event_t *event);
+
+/*
+ * One event as the JSON object a monitor stream carries, appended to `out`.
+ *
+ * `{"response":"event","event":"<kind>",...}` with the members that kind
+ * carries, which is `proto.h`'s decoder read backwards -- it decodes every
+ * response and encodes none, so an encoder belongs beside whatever produces
+ * the thing. This one produces events, so it is here. No newline: the caller
+ * frames it.
+ */
+int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * The world the pass reaches through -- daemon_world.c
+ * ------------------------------------------------------------------------ */
+
+/*
+ * How many hooks an executor is given to check a script against.
+ *
+ * `ncfg_kernel_set_hooks` takes a flat array and the document keeps one list
+ * per interface and one per network, so somebody has to join them. A hook that
+ * did not fit is not run -- `ncfg_hook_run` refuses where it has nothing to
+ * check against -- which is the safe direction, and the count that did not fit
+ * is said out loud rather than left to be noticed as a hook that stopped
+ * firing.
+ */
+#define NCFG_MAIN_HOOKS_MAX 64
+
+/*
+ * How many interfaces one contention check asks about.
+ *
+ * The claims are the interfaces netcfgd is running a backend on, which is a
+ * handful on any machine and is bounded here so that a configuration naming a
+ * thousand interfaces cannot make a per-tick allocation the operator's to
+ * choose. Past it the rest are not asked about, which is the same direction
+ * the narrowing skip takes: not asking is safer than asking wrongly.
+ */
+#define NCFG_MAIN_CLAIMS_MAX 32
+
+/* How long an executor waits for the apply lock before giving up, which is
+ * the Rust's `APPLY_PATIENCE`: long enough for an ordinary apply, which is a
+ * few netlink calls and whatever a hook does, and short enough that a wedged
+ * one is reported rather than inherited. */
+#define NCFG_MAIN_APPLY_PATIENCE_MS 30000
+
+/*
+ * What `ncfg_reconcile_world_t::context` carries.
+ *
+ * **One struct because that seam has one `void *` for every member**, and the
+ * four this program implements want different things: an executor wants the
+ * apply lock and a netlink socket, giving a contended radio back wants those
+ * *and* where to look for other daemons, and announcing wants the subscriber
+ * list. Written as three contexts they could not be installed at once; written
+ * as one they share the thing that actually needs sharing, which is the open
+ * executor -- giving a radio back opens one through the same two calls the
+ * pass does, so "ask who is contending before opening one" is a property of
+ * one function rather than a convention two of them keep.
+ *
+ * Treat every field as private. `ncfg_main_world_open` fills it and
+ * `ncfg_main_world_close` is its one free.
+ */
+typedef struct {
+	/* Where `apply.lock` is. Borrowed, and it outlives this. */
+	const char              *run_dir;
+	/*
+	 * What the executor is given to check a hook against, and the document it
+	 * was read from. Borrowed: `apply.h` says an executor must not outlive
+	 * the document, and open-to-close is inside one call of the pass.
+	 */
+	const ncfg_daemon_state_t *state;
+	/* Where a contention check reads. Resolved once, for
+	 * `ncfg_observe_source_machine`'s reason: a seam that read the
+	 * environment per tick would answer differently as the daemon ran. */
+	ncfg_contention_where_t  contention;
+	/* Who is listening. NULL is nobody, which is an ordinary daemon with no
+	 * monitor attached. */
+	ncfg_main_subscribers_t *subscribers;
+	/* Whose timer a window's expiry is armed on. NULL leaves the tick to
+	 * close a window, which costs seconds rather than the window. */
+	ncfg_main_watchers_t    *watchers;
+	/* What one open executor holds, and whether there is one. At most one at
+	 * a time: a second would ask `flock` for a lock this process already
+	 * holds on another description and wait out the whole patience for it. */
+	ncfg_lock_t              lock;
+	ncfg_kernel_t           *kernel;
+	int                      open;
+	ncfg_hook_ref_t          hooks[NCFG_MAIN_HOOKS_MAX];
+	size_t                   hook_count;
+	/* How long to wait for the apply lock. A field so that a test does not
+	 * have to wait thirty seconds to see the refusal. */
+	long                     patience_ms;
+} ncfg_main_world_t;
+
+/*
+ * Point one at a machine. Opens nothing: an executor is per operation.
+ *
+ * `run_dir` and `state` are borrowed and must outlive this. `subscribers` may
+ * be NULL.
+ */
+int ncfg_main_world_open(ncfg_main_world_t *world, const char *run_dir,
+    const ncfg_daemon_state_t *state, ncfg_main_subscribers_t *subscribers,
+    ncfg_main_watchers_t *watchers, char *err, size_t err_size);
+
+/* Release what it holds, including an executor left open by a failure path. */
+void ncfg_main_world_close(ncfg_main_world_t *world);
+
+/*
+ * Fill in the four seams this program implements, and the context.
+ *
+ * The other members -- the hook runner, the portal probe, the expiry timer,
+ * the clock and the resolv machine -- are the caller's, because each of them
+ * belongs to something else: two are the daemon module's own implementations
+ * and the third is the watchers'. `out` is not zeroed, so the caller fills it
+ * in whatever order it likes.
+ */
+void ncfg_main_world_seams(ncfg_main_world_t *world, ncfg_reconcile_world_t *out);
+
+/* `ncfg_reconcile_world_t::executor_open`. `context` is the world. */
+int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err,
+    size_t err_size);
+/* `ncfg_reconcile_world_t::executor_close`. */
+void ncfg_main_world_executor_close(void *context, ncfg_executor_t *executor);
+/* `ncfg_reconcile_world_t::announce`. Nothing where no list was given. */
+void ncfg_main_world_announce(void *context, const ncfg_proto_event_t *event);
+
+/*
+ * `ncfg_reconcile_world_t::expiry`, forwarded to the watchers' timer.
+ *
+ * **This is the clearest argument for one context struct.** That seam has one
+ * `void *` for all of its members, the timer is the watchers' and the executor
+ * is this file's -- so a world that did not carry the watchers could not have
+ * both installed at once, and a daemon would be choosing between arming a
+ * window on time and being able to change the machine.
+ */
+void ncfg_main_world_expiry(void *context, uint32_t seconds);
+
+/*
+ * `ncfg_reconcile_world_t::release_contended`.
+ *
+ * **It asks who is contending before it opens an executor**, which is 0263's
+ * divergence and 10.169's defect: the Rust opens one as soon as netcfgd runs
+ * any backend at all, so every laptop with wifi takes the global apply lock
+ * and a netlink socket every five seconds to find out there is nothing to give
+ * back. It also asks whether this build's executor can carry out the stop
+ * before taking the lock, which is the same ordering one step further.
+ */
+int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state, char *err,
+    size_t err_size);
+
+/*
+ * The interfaces netcfgd is running a backend on, as claims a contention check
+ * can be made with.
+ *
+ * Only those: a contended interface netcfgd is not touching is the ordinary
+ * coexistence case, and saying anything about it here would repeat the warning
+ * the plan already carries.
+ *
+ * **An interface whose kernel index does not fit is left out**, which is
+ * 0263's narrowing rule pointed at a claim: every daemon `contention` knows
+ * about keys its state by index, so a truncated one matches a contender
+ * against an interface nobody named -- and what netcfgd does about a match is
+ * stop its own backend. Not asking is the safe direction.
+ *
+ * Answers how many were taken, up to `out_max`. The names are borrowed from
+ * the document and live as long as it does.
+ */
+size_t ncfg_main_claims_of(const ncfg_daemon_state_t *state, ncfg_interface_claim_t *out,
+    size_t out_max);
+
+/*
+ * The hooks of a document, flattened into `out`.
+ *
+ * What did not fit is counted in `*missed`, which may be NULL. Interfaces
+ * first and then networks, which is the order the planner visits them in --
+ * this build emits `hook.run` for interface hooks only, and a network's are
+ * collected anyway so that the day the wifi passes land nothing has to
+ * remember to come back here.
+ */
+size_t ncfg_main_hooks_of(const ncfg_document_t *document, ncfg_hook_ref_t *out, size_t out_max,
+    size_t *missed);
+
+/* ------------------------------------------------------------------------ *
+ * What answers a request -- daemon_answer.c
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Everything the dispatcher needs, as `ncfg_daemon_answer_fn::context`.
+ *
+ * Borrowed, all of it. `where` is `daemon.h`'s three wifi directories, which
+ * have no defaults for that header's reason: the real netcfgd runs on the
+ * machine these tests are built on and its wifi is real.
+ */
+typedef struct {
+	ncfg_daemon_state_t     *state;
+	ncfg_wifi_where_t        where;
+	/* Where `@secret:` names resolve, and where a stored certificate is
+	 * materialised for a supplicant to open. Neither has a default. */
+	const char              *secrets_dir;
+	const char              *certs_dir;
+	/* Told when a reload is asked for and takes. NULL tells nobody. */
+	ncfg_main_subscribers_t *subscribers;
+} ncfg_main_desk_t;
+
+/*
+ * `ncfg_daemon_answer_fn`, to be installed in `ncfg_daemon_serve_t::answer`
+ * -- through `ncfg_main_mailbox_answer`, which is what parks the connection's
+ * thread until the loop has driven a pass with the request in hand.
+ *
+ * `context` is an `ncfg_main_desk_t *`. Every request kind is either answered
+ * or refused with a sentence naming it; there is no arm that says nothing.
+ */
+int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * Why this build cannot answer a request kind, or NULL where it can.
+ *
+ * Reachable on its own so that the whole table is a thing a test walks rather
+ * than thirty-two cases somebody remembers to write. **A refusal names the
+ * request and says what is missing**, because a daemon answering `error` with
+ * nothing in it reads as a request it did not recognise -- which is the
+ * confusion `daemon_main.c` refused to start over.
+ */
+const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind);
 
 #endif /* NCFG_MAIN_LOOP_INTERNAL_H */
