@@ -45,6 +45,24 @@
  *   wrote. A worker in this tree once matched on a binary path and killed 76
  *   netcfgd processes, 74 of them other people's.
  *
+ *   **The group is signalled before the pid, and a `SIGKILL` is why.** A
+ *   `SIGTERM` is forwarded by anything standing in front of the real process
+ *   and a `SIGKILL` is not, so killing a `timeout` on its own leaves what it
+ *   was bounding reparented to init -- which is `process.h`'s sentence about a
+ *   hook, and was measured here: a run left `sh -c 'sleep 60'` carrying this
+ *   file's own marker with a ppid of 1. It went at its own bound, which is the
+ *   difference between a residue and a leak, and the fixture should not have
+ *   been relying on that.
+ *
+ *   **What is left for up to one second is the backstop, on purpose.** The
+ *   reaper the wrapper starts is not torn down by pid: it wakes once a second,
+ *   sees that the record it was guarding has gone with the run, and exits.
+ *   Tearing it down by pid would mean signalling a process this file did not
+ *   fork and whose `sleep` would outlive the signal anyway. Nothing it holds
+ *   is a lock, a socket or a file, and nothing it can do after the run is
+ *   anything: the one pid it will ever signal is the one it read before the
+ *   directory was removed.
+ *
  * THE CANARY
  *   `secrets_test.c`'s proof, carried through a launch. One value is the
  *   passphrase of the radio's network **and** the 802.1X password of the
@@ -408,16 +426,25 @@ static void write_reaper(void)
 {
 	write_program(reaper,
 	    "#!/bin/sh\n"
-	    "waited=0\n"
-	    "pid=\n"
-	    "while [ \"$waited\" -lt 20 ] && [ -z \"$pid\" ]; do\n"
-	    "  pid=$(cat \"$NCFG_TEST_PIDFILE\" 2>/dev/null)\n"
-	    "  if [ -z \"$pid\" ]; then sleep 1; fi\n"
-	    "  waited=$((waited + 1))\n"
-	    "done\n"
+	    "# The pid, read once and not waited for. The wrapper does not start\n"
+	    "# this until the control socket is up and the supplicant writes its\n"
+	    "# pid before it binds, so a file that is not there now is one that\n"
+	    "# never will be -- or one a stop has already taken away, which is the\n"
+	    "# same answer. A grace period here would be a process sitting on a\n"
+	    "# directory the run has already removed, which is measured: it was\n"
+	    "# twenty seconds of one doing nothing.\n"
+	    "pid=$(cat \"$NCFG_TEST_PIDFILE\" 2>/dev/null)\n"
 	    "if [ -z \"$pid\" ]; then exit 0; fi\n"
+	    "# **The record going is the run being over**, and it is the condition\n"
+	    "# to watch rather than the pid alone: a stop takes the file away and a\n"
+	    "# finished run takes the whole directory, while `kill -0` against a\n"
+	    "# number that has been recycled goes on answering yes. Measured -- two\n"
+	    "# of these sat in this loop across three consecutive runs with the\n"
+	    "# supplicants they guarded long gone. Where the run really did die\n"
+	    "# without cleaning up, the file is still there and this still guards.\n"
 	    "waited=0\n"
 	    "while [ \"$waited\" -lt 300 ]; do\n"
+	    "  if [ ! -e \"$NCFG_TEST_PIDFILE\" ]; then exit 0; fi\n"
 	    "  if ! kill -0 \"$pid\" 2>/dev/null; then exit 0; fi\n"
 	    "  sleep 1\n"
 	    "  waited=$((waited + 1))\n"
