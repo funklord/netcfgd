@@ -135,21 +135,36 @@ static inline int testdir_write(const char *path, const char *bytes, size_t leng
 }
 
 /*
- * Remove everything under `path`, and `path` itself.
+ * One level, recursively, with a depth bound.
  *
- * Refuses anything that is not the directory this binary made, which is the
- * guard that makes the recursion defensible: an unset or mistyped path here
- * would otherwise be the classic way a clean step eats something it should
- * not.
+ * **This was three levels of hand-unrolled loops and a fixture four deep
+ * defeated it.** `cli_reset_test` builds `etc/profile/office/10-office.conf`;
+ * the innermost loop unlinked files three levels down, so the file at the
+ * fourth survived, so `office` could not be removed, so nothing above it
+ * could either. Every run left its whole tree behind -- one hundred and
+ * seventy of them accumulated in `/tmp` over a single day's work before
+ * anybody counted.
+ *
+ * The depth bound is what makes recursion here defensible rather than a
+ * second way to lose a filesystem: a directory tree arriving from a symlink
+ * loop or a fixture nobody meant to nest has an end. `NCFG_TESTDIR_MAX_DEPTH`
+ * is far deeper than any fixture and far shallower than anything that could
+ * run away, and reaching it says so rather than passing over it, because a
+ * remover that quietly gave up is exactly what produced the pile above.
+ *
+ * `lstat`, not `stat`: a symlink is unlinked as a symlink. Following one is
+ * how a remover bounded to its own directory reaches outside it.
  */
-static inline void testdir_remove(const char *path)
+#define NCFG_TESTDIR_MAX_DEPTH 16
+
+static inline void testdir_remove_within(const char *path, int depth)
 {
 	DIR *open_dir;
 	const struct dirent *found;
 
-	if (!path || !path[0] || !testdir_path[0] || strcmp(path, testdir_path) != 0) {
-		printf("refusing to remove `%s`, which is not the directory this test made\n",
-		    path ? path : "");
+	if (depth > NCFG_TESTDIR_MAX_DEPTH) {
+		printf("refusing to go deeper than %d levels under `%s`; something is "
+		    "wrong with the fixture\n", NCFG_TESTDIR_MAX_DEPTH, testdir_path);
 		return;
 	}
 	open_dir = opendir(path);
@@ -157,67 +172,42 @@ static inline void testdir_remove(const char *path)
 		return;
 	}
 	while ((found = readdir(open_dir)) != NULL) {
-		char child[512];
+		char child[1024];
 		struct stat about;
 
 		if (strcmp(found->d_name, ".") == 0 || strcmp(found->d_name, "..") == 0) {
 			continue;
 		}
-		(void)snprintf(child, sizeof(child), "%s/%s", path, found->d_name);
-		if (lstat(child, &about) != 0) {
+		if ((size_t)snprintf(child, sizeof(child), "%s/%s", path, found->d_name) >=
+		    sizeof(child)) {
+			printf("refusing to remove a path longer than %zu bytes under `%s`\n",
+			    sizeof(child), testdir_path);
 			continue;
 		}
-		if (S_ISDIR(about.st_mode)) {
-			/* One level of recursion by hand rather than through this
-			 * function, whose guard is about the top of the tree. The trees
-			 * these tests build are two deep: `desired/eth0.json`,
-			 * `reported.d/wan0/dhcpcd6`. */
-			DIR *nested = opendir(child);
-			const struct dirent *one;
-
-			if (nested) {
-				while ((one = readdir(nested)) != NULL) {
-					char deeper[1024];
-
-					if (strcmp(one->d_name, ".") == 0 ||
-					    strcmp(one->d_name, "..") == 0) {
-						continue;
-					}
-					(void)snprintf(deeper, sizeof(deeper), "%s/%s", child,
-					    one->d_name);
-					if (lstat(deeper, &about) == 0 &&
-					    S_ISDIR(about.st_mode)) {
-						char deepest[2048];
-						DIR *last = opendir(deeper);
-						const struct dirent *leaf;
-
-						if (!last) {
-							continue;
-						}
-						while ((leaf = readdir(last)) != NULL) {
-							if (strcmp(leaf->d_name, ".") == 0 ||
-							    strcmp(leaf->d_name, "..") == 0) {
-								continue;
-							}
-							(void)snprintf(deepest,
-							    sizeof(deepest), "%s/%s", deeper,
-							    leaf->d_name);
-							(void)unlink(deepest);
-						}
-						(void)closedir(last);
-						(void)rmdir(deeper);
-						continue;
-					}
-					(void)unlink(deeper);
-				}
-				(void)closedir(nested);
-			}
+		if (lstat(child, &about) == 0 && S_ISDIR(about.st_mode)) {
+			testdir_remove_within(child, depth + 1);
 			(void)rmdir(child);
 			continue;
 		}
 		(void)unlink(child);
 	}
 	(void)closedir(open_dir);
+}
+
+/*
+ * Refuses anything that is not the directory this binary made, which is the
+ * guard that makes the recursion defensible: an unset or mistyped path here
+ * would otherwise be the classic way a clean step eats something it should
+ * not.
+ */
+static inline void testdir_remove(const char *path)
+{
+	if (!path || !path[0] || !testdir_path[0] || strcmp(path, testdir_path) != 0) {
+		printf("refusing to remove `%s`, which is not the directory this test made\n",
+		    path ? path : "");
+		return;
+	}
+	testdir_remove_within(path, 0);
 	(void)rmdir(path);
 }
 
