@@ -731,6 +731,11 @@ static int start(const options_t *options)
 	run.loop = &loop;
 	run.sources = &watchers.sources;
 	run.mailbox = &mailbox;
+	/* The same list the world announces through and the desk subscribes to,
+	 * so that a stream the loop finds gone is one the pass stops writing to.
+	 * A second list would be a second answer to how many streams are open, and
+	 * the bound is what refuses the seventeenth `monitor`. */
+	run.subscribers = &subscribers;
 	run.refresh = ncfg_main_watchers_refresh;
 	run.refresh_context = &watchers;
 	err[0] = '\0';
@@ -791,9 +796,10 @@ done:
  *     `backend.start` for six of the nine backend kinds -- and `ncfg_apply`
  *     stops at the first failure. A plan mixing a supported op with an
  *     unsupported one therefore changes the machine and stops halfway.
- *   * **`plan.last.json` is still not written**, so an apply that stopped
- *     halfway leaves nothing under `/run` saying where it stopped. 0263 defers
- *     it beside the fold; the fold has landed and this has not.
+ * The third fact that used to be here is closed too: `plan.last.json` is
+ * written, by `ncfg_apply_write_journal`, after every apply and every revert,
+ * so a plan that stopped halfway says under `/run` where it stopped. What is
+ * left is the two above, and neither is bookkeeping.
  *
  * And the decision is the operator's rather than this function's. `on_drift =
  * reconcile` is the default, so starting this build on a machine is an apply
@@ -803,7 +809,7 @@ done:
  * a socket; it must not accept one from a timer either, and `ncfg apply` is
  * still refused.
  *
- * Deleting this function is how the daemon is turned on, and the three facts
+ * Deleting this function is how the daemon is turned on, and the two facts
  * above are what has to be answered first.
  */
 int ncfg_main_netcfgd_may_reconcile(void)

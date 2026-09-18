@@ -662,10 +662,44 @@ static void a_kind_this_build_cannot_create_is_warned_about(void)
 	}
 }
 
+/*
+ * And the other direction, which is the half that proves the question is being
+ * asked rather than the answer being memorised.
+ *
+ * A `tun` was in the list above for one wave: `ncfg_apply_supported` refused
+ * one because the executor had no path for it, so the planner declined the
+ * device and warned. The executor has a path now -- `create_link` hands a tun
+ * to `ncfg_tun_create` rather than building a netlink message -- and **nothing
+ * in `src/plan/` changed**, because that file asks the executor instead of
+ * keeping a list of its own. This is the check that says so; if it goes red,
+ * either the executor has stopped being able to make one or the planner has
+ * grown the second list `plan/link.c`'s comment refuses.
+ */
+static void a_kind_this_build_can_create_again_is_planned(void)
+{
+	ncfg_document_t *document = NULL;
+	ncfg_observed_t *observed = NULL;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"tap0\",\"kind\":{\"kind\":\"tun\",\"mode\":\"tap\"}}",
+	    "", "", "", "\"links\":[]", &document, &observed);
+
+	if (!plan) {
+		check(0, "the tun fixture compiles");
+		planfix_release(plan, document, observed);
+		return;
+	}
+	check(planfix_count(plan, "link.create") == 1u,
+	    "a tun the executor can make again is planned as a creation");
+	check(!planfix_warned(plan, "cannot create it"),
+	    "  and the planner has stopped declining it, without being told twice");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	every_bridge_setting_is_compared();
 	a_kind_this_build_cannot_create_is_warned_about();
+	a_kind_this_build_can_create_again_is_planned();
 	a_bridge_setting_the_document_omits_is_not_compared();
 	a_bond_mode_moves_on_a_bond_with_no_members();
 	a_bond_with_members_is_told_rather_than_tried();

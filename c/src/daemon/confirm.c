@@ -612,6 +612,19 @@ static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
 		    "what this apply did could not be recorded (%s), so netcfgd will not claim "
 		    "those objects as its own", message);
 	}
+	/*
+	 * And the journal, which on this path is the only record of a revert at
+	 * all: the inverses ran without anybody watching, and `plan.last.json` is
+	 * where somebody finding the machine afterwards reads which of them stood
+	 * and which did not. Sequential rather than nested, because both take
+	 * `owned.lock`.
+	 */
+	message[0] = '\0';
+	if (!ncfg_apply_write_journal(run_dir, journal, message, sizeof(message))) {
+		ncfg_log_emitf("confirm", NCFG_LOG_NOTE,
+		    "the journal of this apply could not be written (%s), so nothing under the "
+		    "run directory says where it got to", message);
+	}
 }
 
 static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executor_t *executor)

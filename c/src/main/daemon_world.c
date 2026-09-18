@@ -24,6 +24,17 @@
  *   10.169). The same instinct is carried one step further here: this build's
  *   executor refuses `backend.stop` by name, and asking `ncfg_apply_supported`
  *   costs nothing, so the lock is not taken to be told that either.
+ *
+ * THE SWEEP, WHICH IS THE OTHER HALF OF "A WRITE THAT FAILED"
+ *   A subscriber used to be found dead only by writing to it, and a converged
+ *   machine writes nothing -- so sixteen streams nobody was reading could hold
+ *   every place in the list until something happened, and refuse the
+ *   seventeenth `monitor` in the meantime. `ncfg_main_subscribers_prune` asks
+ *   `poll` about the list's own descriptors with no wait at all, once a round.
+ *   The decision it asks with is `daemon_wake.c`'s, like every other reading of
+ *   a `revents` in this program, and it is **not** the one a source gets: a
+ *   source's data wins over its hang-up because somebody drains it, and nothing
+ *   drains a subscriber.
  */
 #include "loop_internal.h"
 
@@ -32,6 +43,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -80,6 +92,61 @@ int ncfg_main_subscribers_add(ncfg_main_subscribers_t *subscribers, int fd, char
 	subscribers->at[subscribers->count] = fd;
 	subscribers->count++;
 	return 1;
+}
+
+size_t ncfg_main_subscribers_prune(ncfg_main_subscribers_t *subscribers)
+{
+	struct pollfd waiting[NCFG_MAIN_SUBSCRIBERS_MAX];
+	size_t        at;
+	size_t        kept = 0;
+	size_t        gone = 0;
+	int           answered;
+
+	if (!subscribers || subscribers->count == 0u) {
+		return 0;
+	}
+	for (at = 0; at < subscribers->count; at++) {
+		waiting[at].fd = subscribers->at[at];
+		/*
+		 * `POLLIN` is asked for so that `POLLHUP` is reported beside it rather
+		 * than instead of it -- and it is asked for on a descriptor nothing
+		 * reads, which is why `ncfg_main_subscriber_ended` may not read data as
+		 * a reason to keep one. `POLLERR` and `POLLHUP` arrive whatever is
+		 * requested.
+		 */
+		waiting[at].events = POLLIN;
+		waiting[at].revents = 0;
+	}
+	/*
+	 * Zero, never a wait. This runs on the loop's thread between the round's
+	 * own `poll` and the pass, and a sweep that could block would be the
+	 * daemon stopping to ask whether anybody had hung up.
+	 *
+	 * `EINTR` is not retried here for the same reason the timeout is zero:
+	 * what is lost is one sweep, and the next round is a tick away. Every
+	 * other failure means `poll` refused the whole set, and dropping sixteen
+	 * live streams because one call failed is the wrong direction -- a
+	 * subscriber kept is told one event too many, a subscriber dropped is a
+	 * client that silently stops hearing.
+	 */
+	answered = poll(waiting, (nfds_t)subscribers->count, 0);
+	if (answered <= 0) {
+		return 0;
+	}
+	for (at = 0; at < subscribers->count; at++) {
+		if (!ncfg_main_subscriber_ended(waiting[at].revents)) {
+			subscribers->at[kept] = subscribers->at[at];
+			kept++;
+			continue;
+		}
+		/* Ordinary, and not worth a line each on a machine where a tray
+		 * reconnects: the count is what a caller says it with, once. */
+		(void)close(subscribers->at[at]);
+		subscribers->dropped++;
+		gone++;
+	}
+	subscribers->count = kept;
+	return gone;
 }
 
 void ncfg_main_subscribers_close(ncfg_main_subscribers_t *subscribers)

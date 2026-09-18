@@ -572,6 +572,66 @@ static void a_descriptor_that_hung_up_is_dropped(void)
 	(void)close(reading);
 }
 
+/*
+ * A round sweeps the streams, on a machine where nothing at all happened.
+ *
+ * `world_test.c` checks what the sweep decides; what is checked here is that
+ * the loop reaches it -- and reaches it on the round that matters, which is
+ * the one with no event, no request and no pass. That is the machine 0263
+ * describes: converged, announcing nothing, with sixteen places in a list held
+ * by clients that have gone and the seventeenth `monitor` refused.
+ */
+static void a_round_sweeps_the_streams_even_when_nothing_happened(void)
+{
+	ncfg_main_sources_t      sources;
+	ncfg_main_subscribers_t  subscribers;
+	ncfg_main_run_t          run;
+	ncfg_main_round_report_t report;
+	char                     err[NCFG_ERROR_MAX];
+	int                      ends[2];
+	int                      live[2];
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, ends) != 0 ||
+	    socketpair(AF_UNIX, SOCK_STREAM, 0, live) != 0) {
+		check(0, "socket pairs for two streams");
+		return;
+	}
+	ncfg_main_subscribers_init(&subscribers);
+	err[0] = '\0';
+	if (!ncfg_main_subscribers_add(&subscribers, ends[1], err, sizeof(err)) ||
+	    !ncfg_main_subscribers_add(&subscribers, live[1], err, sizeof(err))) {
+		check(0, "two subscribers could be taken");
+		return;
+	}
+	ncfg_main_sources_init(&sources);
+	memset(&run, 0, sizeof(run));
+	run.sources = &sources;
+	run.subscribers = &subscribers;
+	run.ticks = fake_ticks;
+
+	clock_is_expired();
+	err[0] = '\0';
+	check(ncfg_main_round(&run, &report, err, sizeof(err)),
+	    "a round with nothing to watch and nothing to say runs");
+	check(report.pruned == 0u && subscribers.count == 2u,
+	    "and sweeps nothing while both clients are there");
+
+	/* The client leaves. Nothing announces, nothing is written, and no pass
+	 * runs -- which is exactly the machine where the old arrangement kept the
+	 * place for ever. */
+	(void)close(ends[0]);
+	clock_is_expired();
+	err[0] = '\0';
+	check(ncfg_main_round(&run, &report, err, sizeof(err)),
+	    "the next backstop round runs");
+	check(report.pruned == 1u && subscribers.count == 1u,
+	    "and the stream whose client has gone is swept, with nothing having happened");
+	check(!report.passed, "  on a round that ran no pass at all");
+
+	ncfg_main_subscribers_close(&subscribers);
+	(void)close(live[0]);
+}
+
 static void a_descriptor_that_is_not_open_is_dropped_at_once(void)
 {
 	ncfg_main_sources_t      sources;
@@ -2001,6 +2061,7 @@ int main(void)
 	a_burst_that_never_ends_still_lets_the_pass_run();
 	a_descriptor_that_hung_up_is_dropped();
 	a_descriptor_that_is_not_open_is_dropped_at_once();
+	a_round_sweeps_the_streams_even_when_nothing_happened();
 	a_source_that_will_not_be_read_loses_its_place();
 	a_signal_mid_wait_does_not_restart_the_backstop();
 

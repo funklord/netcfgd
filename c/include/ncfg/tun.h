@@ -67,6 +67,8 @@
 #include <sys/types.h>
 
 #include "ncfg/base.h"
+/* For `ncfg_tun_mode_t`, which is the model's. See below. */
+#include "ncfg/document.h"
 
 /* The clone device every tun and tap comes from. */
 #define NCFG_TUN_CLONE_DEVICE "/dev/net/tun"
@@ -81,13 +83,22 @@
  * kernel ignores. Checked against the libc's `sizeof` in tun.c. */
 #define NCFG_TUN_REQUEST_LEN 40u
 
-/* Whether the device carries IP packets or ethernet frames. */
-typedef enum {
-	/* Layer 3: IP packets, no ethernet header. */
-	NCFG_TUN_MODE_TUN = 0,
-	/* Layer 2: full ethernet frames. */
-	NCFG_TUN_MODE_TAP = 1
-} ncfg_tun_mode_t;
+/*
+ * Whether the device carries IP packets (`NCFG_TUN_MODE_TUN`) or ethernet
+ * frames (`NCFG_TUN_MODE_TAP`).
+ *
+ * **The type is `document.h`'s and this header includes it rather than
+ * spelling a second one.** It had its own, with the same two names and the
+ * same two values, and the two could never be included together: C makes an
+ * enumerator a redeclaration rather than a redefinition, so any translation
+ * unit that wanted the model and this module at once failed to compile. That
+ * was invisible while nothing called `ncfg_tun_create` -- `tun.c` and
+ * `tun_test.c` include this header alone -- and it is exactly the shape 0263
+ * refuses everywhere else: two definitions of one closed set is how a reader
+ * and a writer come to disagree about which number means which mode. The
+ * model owns the numbering of a closed set, as it does for a bond's mode and
+ * a tunnel's kind word, so the model is the one kept.
+ */
 
 /* The mode as the configuration language spells it -- which is the block's own
  * name, since `tun` and `tap` are two kinds to whoever writes one. NULL for a

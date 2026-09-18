@@ -343,6 +343,46 @@ int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
     const ncfg_journal_t *journal, char *err, size_t err_size);
 
 /*
+ * Publish the journal as `<run_dir>/plan.last.json`.
+ *
+ * **This is the file that answers "where did it stop".** An apply halts at the
+ * first failure and records everything after it as skipped; without this that
+ * answer exists only in whatever ran the apply -- and for the daemon that is
+ * nowhere, since a reconcile has no terminal. The Rust's daemon writes it after
+ * every apply, after every wifi apply and after every revert, and `ncfg apply`
+ * writes it too; this is the same call and the same moment.
+ *
+ * **Written under `owned.lock`, which the Rust does not do.** Its writer is an
+ * atomic rename and nothing else, so `plan.last.json` and `owned.json` can be
+ * replaced in either order by two writers -- and there are two: `ncfg apply`
+ * and the daemon. The two files are the two halves of one statement about one
+ * apply, so a reader that finds a journal claiming a link was created and a
+ * record that does not claim it has been handed two applies' worth of machine.
+ * The critical section is a render and a rename, which is the same cost
+ * `ncfg_owned_update` already pays.
+ *
+ * **So it must not be called from inside `ncfg_owned_update`'s change
+ * callback**, which would be the same process asking for a lock it holds --
+ * `flock` is owned by the open file description, so a second `open` in this
+ * process blocks against the first for ever. Every caller does the pair in
+ * sequence instead.
+ *
+ * **The run directory is created where it is not there**, which is
+ * `ncfg_owned_update`'s behaviour rather than a choice made here: both reach
+ * `ncfg_lock_take`, which makes the directory it is asked to put the lock in.
+ * So a wrong path is made rather than refused, and the refusals below are the
+ * ones a path that cannot be made produces.
+ *
+ * An empty journal is written, unlike the fold beside it, and the difference is
+ * not an inconsistency: the record is a claim that accumulates and must not be
+ * rewritten by a pass that did nothing, while this file is an answer about the
+ * *last* apply -- and "the last one did nothing" is that answer rather than the
+ * absence of one. It is what the Rust writes there too.
+ */
+int ncfg_apply_write_journal(const char *run_dir, const ncfg_journal_t *journal, char *err,
+    size_t err_size);
+
+/*
  * Whether this build can carry this op out, and the sentence if it cannot.
  *
  * The refusal names the op and says what is missing, because "not implemented"

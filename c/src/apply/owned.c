@@ -26,9 +26,22 @@
 #include "ncfg/apply.h"
 
 #include "ncfg/base.h"
+#include "ncfg/buf.h"
+#include "ncfg/lock.h"
+#include "ncfg/state.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Long enough for a run directory and the two leaf names below.
+ *
+ * A fixed buffer rather than an allocation, because the only thing that can
+ * overflow it is a run directory somebody set by hand, and a refusal naming the
+ * ceiling is a better answer than a `malloc` on a path that is already wrong.
+ */
+#define RUN_PATH_MAX 512
 
 /* ------------------------------------------------------------------------ *
  * The two object lists
@@ -425,4 +438,81 @@ int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
 		    "the record of what this apply did could not be built");
 	}
 	return 0;
+}
+
+/* ------------------------------------------------------------------------ *
+ * The journal of the last apply
+ * ------------------------------------------------------------------------ */
+
+/* `<run_dir>/<leaf>`, or 0 with a sentence where it would not fit. */
+static int run_path(char *out, size_t out_size, const char *run_dir, const char *leaf,
+    char *err, size_t err_size)
+{
+	int written = snprintf(out, out_size, "%s/%s", run_dir, leaf);
+
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+		ncfg_error_set(err, err_size,
+		    "this run directory's path for %s is longer than the %u bytes netcfgd "
+		    "builds one in", leaf, (unsigned)out_size);
+		return 0;
+	}
+	return 1;
+}
+
+int ncfg_apply_write_journal(const char *run_dir, const ncfg_journal_t *journal, char *err,
+    size_t err_size)
+{
+	char        path[RUN_PATH_MAX];
+	char        lock_path[RUN_PATH_MAX];
+	ncfg_lock_t lock;
+	ncfg_buf_t  text;
+	int         ok;
+
+	if (!run_dir || !run_dir[0] || !journal) {
+		ncfg_error_set(err, err_size,
+		    "writing the journal of the last apply needs a run directory and the "
+		    "journal");
+		return 0;
+	}
+	if (!run_path(path, sizeof(path), run_dir, "plan.last.json", err, err_size) ||
+	    !run_path(lock_path, sizeof(lock_path), run_dir, "owned.lock", err, err_size)) {
+		return 0;
+	}
+	/*
+	 * Rendered before the lock is taken, so that what is held is a rename and
+	 * nothing else. A journal is at most a plan's worth of records and the
+	 * buffer has a ceiling of its own, so this cannot grow with how long
+	 * somebody else waits.
+	 */
+	ncfg_buf_init(&text, 0);
+	if (!ncfg_journal_write(journal, &text, err, err_size) || ncfg_buf_failed(&text)) {
+		if (err && err_size && err[0] == '\0') {
+			ncfg_error_set(err, err_size,
+			    "the journal of this apply could not be rendered");
+		}
+		ncfg_buf_free(&text);
+		return 0;
+	}
+	/*
+	 * `owned.lock`, which is the fold's, for the reason `apply.h` gives: these
+	 * two files are the two halves of one statement about one apply, and two
+	 * processes write both. **A failure to take it is returned rather than
+	 * swallowed**, which is `ncfg_owned_update`'s rule -- writing anyway is the
+	 * behaviour the lock replaces.
+	 */
+	ncfg_lock_init(&lock);
+	if (!ncfg_lock_take(&lock, lock_path, err, err_size)) {
+		ncfg_buf_free(&text);
+		return 0;
+	}
+	/* 0644: `state.h` says everything under the run directory answers a
+	 * question without netcfgd running, and this is the file an operator is
+	 * sent to when an apply stopped somewhere. Nothing in it is a secret --
+	 * `apply.h` is why the six ops that would carry one take the device's name
+	 * instead. */
+	ok = ncfg_write_atomically(path, ncfg_buf_text(&text), text.length, 0644u, err, err_size);
+	ncfg_lock_release(&lock);
+	ncfg_buf_free(&text);
+	return ok;
 }

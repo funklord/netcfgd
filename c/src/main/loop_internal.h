@@ -269,6 +269,28 @@ const char       *ncfg_main_readiness_name(ncfg_main_ready_t ready);
  */
 int ncfg_main_source_survives(ncfg_main_ready_t ready, unsigned failures);
 
+/*
+ * Whether a *subscriber's* descriptor says the client has gone.
+ *
+ * **Not `ncfg_main_readiness`, and the difference is `POLLIN`.** A source is
+ * read by whoever owns it, so data has to win over the hang-up or a burst is
+ * dropped with its last records unread. A subscriber's descriptor is never
+ * read by anybody: events are written to it and nothing else. So `POLLIN` on
+ * one is either a client talking into a stream that does not listen, or the
+ * end of file a close leaves behind -- and a close sets `POLLIN|POLLHUP`
+ * together, for ever. Reading it the source's way would keep exactly the
+ * descriptor this exists to drop.
+ *
+ * Readable-only, with no hang-up and no error, is therefore **not** gone: it
+ * is somebody sending bytes down a stream, which is rude and not a reason to
+ * stop telling them what is happening.
+ *
+ * A value here rather than a condition in the loop, which is this file's rule:
+ * what a `revents` means is a decision, and the decisions live where they can
+ * be checked without a descriptor.
+ */
+int ncfg_main_subscriber_ended(short revents);
+
 /* What `poll` came back with. */
 typedef enum {
 	/* At least one descriptor has something to say. */
@@ -560,6 +582,10 @@ typedef struct {
 	/* Sources taken out of the set this round, and how many are left. */
 	size_t                  dropped;
 	size_t                  sources;
+	/* Subscribers whose client had gone, swept this round. Reported so that a
+	 * test can see the sweep happened rather than inferring it from a count
+	 * that went down for either of two reasons. */
+	size_t                  pruned;
 	/* Something asked the loop to stop. */
 	int                     stopping;
 	/* The pass ran, and what it did. */
@@ -576,10 +602,25 @@ typedef struct {
  * mailbox sees no requests; one with no `refresh` never looks for a new radio.
  * That is what lets a test install exactly the sources its case is about.
  */
+/* Declared further down, beside the calls on it -- this struct holds only a
+ * pointer, and moving the whole section up here to satisfy the compiler would
+ * put the list's rules a long way from the list. */
+typedef struct ncfg_main_subscribers ncfg_main_subscribers_t;
+
 typedef struct {
 	ncfg_reconcile_t    *loop;
 	ncfg_main_sources_t *sources;
 	ncfg_main_mailbox_t *mailbox;
+	/*
+	 * The streams events are written to, swept once a round for the ones
+	 * whose client has gone. NULL sweeps nothing, which is this struct's
+	 * bargain -- and is what a run with no `monitor` seam already has.
+	 *
+	 * The same list the world announces through, and it must be: two would be
+	 * two answers to how many streams are open, and the bound is the thing
+	 * that refuses the seventeenth.
+	 */
+	ncfg_main_subscribers_t *subscribers;
 	/*
 	 * Monotonic milliseconds. NULL is `CLOCK_MONOTONIC`.
 	 *
@@ -779,7 +820,7 @@ void ncfg_main_signals_restore(void);
  * -- which fails with `EPIPE` and drops the subscriber, rather than writing
  * into whatever the number has since been reused for.
  */
-typedef struct {
+typedef struct ncfg_main_subscribers {
 	int    at[NCFG_MAIN_SUBSCRIBERS_MAX];
 	size_t count;
 	/* Subscribers dropped for refusing an event, over this list's life. For
@@ -805,6 +846,32 @@ int ncfg_main_subscribers_add(ncfg_main_subscribers_t *subscribers, int fd, char
 
 /* Close every one and leave the list usable and empty. */
 void ncfg_main_subscribers_close(ncfg_main_subscribers_t *subscribers);
+
+/*
+ * Drop the subscribers whose far end has gone, and answer how many went.
+ *
+ * **The gap this closes is named in 0263 and is the list's own.** Until this
+ * existed the only pruning was inside `ncfg_main_subscribers_tell`, so a
+ * subscriber was found to be dead by a write to it failing -- and a converged
+ * machine announces nothing at all. A client that subscribed and hung up
+ * therefore held one of `NCFG_MAIN_SUBSCRIBERS_MAX` places until something
+ * happened, which on a quiet machine is never, and the seventeenth `monitor`
+ * was refused over sixteen streams nobody was reading.
+ *
+ * It asks `poll` with a zero timeout about its own descriptors rather than
+ * being handed a `revents` the loop gathered, and the reason is what a
+ * subscriber *is*: it has no drain, no kind and no place in the source set,
+ * so putting sixteen of them into the loop's own wait would make the daemon
+ * wake for a hang-up it can do nothing about beyond this. Once a round is
+ * enough -- the loop ticks at `NCFG_MAIN_TICK_MS` whatever else happens, so a
+ * dead stream is carried for at most one tick instead of for ever.
+ *
+ * Counted into `dropped` exactly as a failed write is, because from the list's
+ * point of view they are the same event: a subscriber that is no longer there.
+ * On the loop's thread like every other call on this list, which is what lets
+ * it hold no lock.
+ */
+size_t ncfg_main_subscribers_prune(ncfg_main_subscribers_t *subscribers);
 
 /*
  * Write one event to each, dropping the ones that would not take it.
