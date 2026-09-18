@@ -197,12 +197,11 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		 * `ncfg_apply_write_journal` now publishes -- each of which is on its
 		 * own enough, said in one sentence rather than two: this is a refusal
 		 * an operator reads on a socket, not the decision record. */
-		return "this build of netcfgd will not apply: its planner carries a `network` "
-		    "block's addressing and an `access_point` block's configuration without "
-		    "acting on either, and its executor refuses a `link.create` it cannot carry "
-		    "out while the plan is running and stops at the first it will not take -- "
-		    "so an apply would converge part of a machine, or stop halfway through "
-		    "changing it";
+		return "this build of netcfgd will not apply: its executor refuses every op "
+		    "that needs a service context -- `dns.apply`, the four sysctls, the six "
+		    "wifi ops and all three backend verbs -- because nothing outside the "
+		    "tests installs one, so an apply would bring up links and addresses and "
+		    "then decline to start a single backend";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
