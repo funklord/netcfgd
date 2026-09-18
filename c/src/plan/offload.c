@@ -32,34 +32,16 @@
 #include <string.h>
 
 /*
- * The kernel's own feature names, per model field.
+ * The kernel's own feature names, per model field, are `document.h`'s.
  *
- * **This belongs beside the model** -- it is `netcfgd_model::interface::
- * offload_names`, and the reader that has to agree with this writer is the
- * observer's `read_offloads`, which fills `ncfg_observed_link_t.offloads` with
- * exactly these strings. That seam is not implemented in this build, so the
- * planner is the only caller and the table is here rather than in a header
- * nothing else includes yet. **The second caller takes this one** rather than
- * writing its own: two lists of feature names in two places is how a feature
- * comes to be turned on under one spelling and read back under another.
- *
- * The names rather than the kernel's bit indices, which are not stable across
- * versions and are not a wire contract; `ethtool.h` says why at length.
+ * They lived here while the planner was the only caller, above a comment
+ * saying the second caller would take this table rather than write its own.
+ * `src/observe/offloads.c` is that caller -- it fills
+ * `ncfg_observed_link_t.offloads` with exactly these strings, which is what
+ * `held_on` below reads back -- so the table moved to the model, where
+ * `ncfg_bond_mode_number`'s paragraph already says why a numbering two modules
+ * must agree on belongs there. Nothing in this file names a feature any more.
  */
-static const char *const offload_gro[] = { "rx-gro" };
-static const char *const offload_gso[] = { "tx-generic-segmentation" };
-static const char *const offload_tso[] = { "tx-tcp-segmentation" };
-static const char *const offload_rx_checksum[] = { "rx-checksum" };
-static const char *const offload_tx_checksum[] = { "tx-checksum-ip-generic",
-	"tx-checksum-ipv4", "tx-checksum-ipv6" };
-
-typedef struct {
-	int                       toggle; /* ncfg_toggle_t */
-	const char *const        *names;
-	size_t                    name_count;
-} ncfg_offload_field_t;
-
-#define COUNT(array) (sizeof(array) / sizeof((array)[0]))
 
 /* Whether one kernel feature name is currently on. */
 static int held_on(const ncfg_observed_link_t *link, const char *name)
@@ -107,11 +89,24 @@ static const char *describe(ncfg_plan_t *plan, const ncfg_offload_t *features, s
 }
 
 /*
- * Say which half of an `ethtool` block is recognised and not applied.
+ * Say which half of an `ethtool` block is applied by nothing, and whose gap it
+ * is.
  *
  * Field by field rather than as one sentence, and only where the document
  * states the field: the offloads beside them *are* applied, and telling an
  * operator who wrote `gro = true` that their block is ignored would be false.
+ *
+ * **It used to end "not applied by this build", which is a promise nobody
+ * checked.** Settled against `crates/` the way 10.180 settled the last three:
+ * `crates/netcfgd-plan/src/lib.rs:714` is this same warning, field for field
+ * and almost word for word, and the encoder it is waiting on does not exist on
+ * either side -- `crates/netcfgd-sys/src/ethtool.rs` defines
+ * `ETHTOOL_MSG_FEATURES_GET` and `..._SET` and no other message at all, which
+ * is exactly what `ethtool.h` here carries. So an operator was being told to
+ * wait for a release, and the reason in the same sentence says why there will
+ * not be one until somebody can write to a real NIC. `warn_unbuilt` is what
+ * says that difference, and having it in one place is what stops this sentence
+ * going stale again.
  */
 static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
 {
@@ -119,6 +114,7 @@ static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
 	const char                 *stated[6];
 	size_t                      count = 0;
 	ncfg_buf_t                  buf;
+	ncfg_buf_t                  block;
 	size_t                      i;
 
 	if (settings->autoneg != NCFG_TOGGLE_UNMANAGED) {
@@ -146,12 +142,24 @@ static void warn_unapplied(ncfg_builder_t *builder, const ncfg_device_t *device)
 	for (i = 0; i < count; i++) {
 		ncfg_buf_addf(&buf, "%s%s", i ? "`, `" : "", stated[i]);
 	}
-	ncfg_plan_warnf(builder->plan, device->name,
-	    "`%s` in the ethtool block are recognised but not applied by this build. They "
-	    "can only be exercised against a physical NIC, and an encoder nobody has run "
+	/*
+	 * **The whole of it has to arrive**, and this one has no room to spare:
+	 * `ncfg_plan_warnf` formats into `NCFG_ERROR_MAX` and marks what it had to
+	 * cut, and all six fields plus `warn_unbuilt`'s tail is 481 of 512
+	 * characters. Nothing here varies -- the six names are literals and the
+	 * device is the warning's interface rather than part of the sentence -- so
+	 * that number is the worst case rather than a sample, and
+	 * `plan_gaps_test.c` asserts the last words of it.
+	 */
+	ncfg_buf_init(&block, 0);
+	ncfg_buf_addf(&block,
+	    "`%s` in the `ethtool` block %s recognised and applied by nothing: %s can "
+	    "only be exercised against a physical NIC, and an encoder nobody has run "
 	    "against one is how the last three netlink bugs here got in. The offloads are "
-	    "applied.",
-	    ncfg_buf_text(&buf));
+	    "applied",
+	    ncfg_buf_text(&buf), count == 1u ? "is" : "are", count == 1u ? "it" : "they");
+	ncfg_plan_warn_unbuilt(builder, device->name, ncfg_buf_text(&block));
+	ncfg_buf_free(&block);
 	ncfg_buf_free(&buf);
 }
 
@@ -169,7 +177,6 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 		const ncfg_device_t        *device = &builder->desired->devices[at];
 		const ncfg_link_settings_t *settings = device->link_settings;
 		const ncfg_observed_link_t *link;
-		ncfg_offload_field_t        fields[5];
 		ncfg_offload_t             *wanted;
 		ncfg_offload_t             *inverse_features;
 		ncfg_plan_ids_t             gate = { NULL, 0, 0 };
@@ -187,24 +194,11 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 		warn_unapplied(builder, device);
 		link = ncfg_observed_link(builder->observed, device->name);
 
-		fields[0].toggle = settings->gro;
-		fields[0].names = offload_gro;
-		fields[0].name_count = COUNT(offload_gro);
-		fields[1].toggle = settings->gso;
-		fields[1].names = offload_gso;
-		fields[1].name_count = COUNT(offload_gso);
-		fields[2].toggle = settings->tso;
-		fields[2].names = offload_tso;
-		fields[2].name_count = COUNT(offload_tso);
-		fields[3].toggle = settings->rx_checksum;
-		fields[3].names = offload_rx_checksum;
-		fields[3].name_count = COUNT(offload_rx_checksum);
-		fields[4].toggle = settings->tx_checksum;
-		fields[4].names = offload_tx_checksum;
-		fields[4].name_count = COUNT(offload_tx_checksum);
+		for (i = 0; i < NCFG_OFFLOAD_FIELD_COUNT; i++) {
+			size_t named = 0;
 
-		for (i = 0; i < COUNT(fields); i++) {
-			room += fields[i].name_count;
+			(void)ncfg_offload_field_names((int)i, &named);
+			room += named;
 		}
 		wanted = calloc(room, sizeof(*wanted));
 		inverse_features = calloc(room, sizeof(*inverse_features));
@@ -215,26 +209,33 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 			return;
 		}
 
-		for (i = 0; i < COUNT(fields); i++) {
-			int on;
-			int held = 0;
+		for (i = 0; i < NCFG_OFFLOAD_FIELD_COUNT; i++) {
+			const char *const *names;
+			size_t             named = 0;
+			int                toggle = ncfg_link_settings_offload(settings, (int)i);
+			int                on;
+			int                held = 0;
 
-			if (fields[i].toggle == NCFG_TOGGLE_UNMANAGED) {
+			if (toggle == NCFG_TOGGLE_UNMANAGED) {
 				continue;
 			}
-			on = fields[i].toggle == NCFG_TOGGLE_ON;
+			names = ncfg_offload_field_names((int)i, &named);
+			if (!names) {
+				continue;
+			}
+			on = toggle == NCFG_TOGGLE_ON;
 			/* "On" for a field covering several kernel features means any of
 			 * them; "off" means all of them. */
-			for (j = 0; j < fields[i].name_count; j++) {
-				if (held_on(link, fields[i].names[j])) {
+			for (j = 0; j < named; j++) {
+				if (held_on(link, names[j])) {
 					held = 1;
 				}
 			}
 			if (link && held == on) {
 				continue;
 			}
-			for (j = 0; j < fields[i].name_count; j++) {
-				wanted[count].name = fields[i].names[j];
+			for (j = 0; j < named; j++) {
+				wanted[count].name = names[j];
 				wanted[count].wanted = on;
 				count++;
 			}

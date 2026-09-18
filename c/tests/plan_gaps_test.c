@@ -1,6 +1,6 @@
 /*
  * plan_gaps_test.c -- the four blocks the planner used to warn about instead
- * of acting on, and the three it still warns about for a different reason.
+ * of acting on, and the ones it still warns about for a different reason.
  *
  * WHAT THIS FILE IS REALLY CHECKING
  *   `build.c`'s `warn_unported` held seven arms, each one a sentence telling
@@ -13,6 +13,12 @@
  *   block are read by the daemon rather than by the planner, and nothing in
  *   either language acts on a `bluetooth` block. Those three keep a warning
  *   and the warning had to stop claiming otherwise.
+ *
+ *   **A `network` block was the same question asked of five fields at once**,
+ *   and the answer was four one way and one the other: its addressing, its
+ *   routes, its `dns` policy and its hooks are read by nothing in either
+ *   language, and its `metric` is a real port gap. One sentence covering both
+ *   kinds could only be wrong about one of them, so there are two now.
  *
  *   **The wording is under test as much as the actions are, and that is the
  *   point rather than a flourish.** "This build of the planner does not act on
@@ -510,7 +516,7 @@ static void the_clearing_sentence_says_what_will_happen(void)
 }
 
 /* ------------------------------------------------------------------------ *
- * The three that are not port gaps
+ * The ones that are not port gaps
  * ------------------------------------------------------------------------ */
 
 static void a_bluetooth_block_is_not_something_to_wait_for(void)
@@ -581,6 +587,237 @@ static void a_modem_block_is_the_daemons_and_the_gap_is_named_exactly(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * Link-local addressing, which had the right judgement over the wrong sentence.
+ *
+ * The comment on the arm said in as many words that this is "the product's gap
+ * rather than the port's", and the sentence under it -- kept because it is the
+ * Rust's own -- told the operator their configuration was "not yet applied by
+ * **this build**". Both cannot be true, and a reader gets the one addressed to
+ * them. Re-checked against `crates/`: `lib.rs:4033` is the same warning on the
+ * same arm, and `AddressSource::LinkLocal` has no reader outside the model and
+ * the compiler in either language.
+ */
+static void link_local_addressing_is_not_something_to_wait_for(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(PORT_DEVICE,
+	    "{\"name\":\"eth0\",\"addressing\":[{\"source\":\"link_local\"}]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "nothing claims an RFC 3927 `169.254.0.0/16` address"),
+	    "link-local addressing is named by what nobody does with it");
+	check(planfix_whole(planfix_warning_with(plan, "link-local addressing is accepted"),
+	    PLANFIX_UNBUILT_TAIL),
+	    "and marked as nobody's gap, in a sentence that arrives whole");
+	check(plan && !planfix_warned(plan, "not yet applied by this build"),
+	    "and no longer as a release this port owes anybody");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * The half of an `ethtool` block nothing encodes, which is neither language's
+ * to have encoded.
+ *
+ * **The reason was in the sentence and the blame was not.** "Recognised but not
+ * applied by this build" sat immediately before the reason it will stay that
+ * way -- that ring sizes, link modes and wake-on-LAN can only be exercised
+ * against a physical NIC -- so the same sentence promised a release and
+ * explained why there is not one. `crates/netcfgd-sys/src/ethtool.rs` defines
+ * `ETHTOOL_MSG_FEATURES_GET` and `..._SET` and nothing else, which is what
+ * `c/include/ncfg/ethtool.h` carries: the encoder does not exist on either
+ * side.
+ *
+ * Six fields at once, because that is the longest this sentence gets and it is
+ * the case that runs into `NCFG_ERROR_MAX`.
+ */
+static void the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"},\"link_settings\":{"
+	    "\"autoneg\":\"on\",\"speed\":1000,\"duplex\":\"full\",\"wol\":\"g\","
+	    "\"rx_ring\":512,\"tx_ring\":512,\"gro\":\"on\"}}",
+	    "{\"name\":\"eth0\",\"addressing\":[]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+
+	check(plan && planfix_warned(plan,
+	    "`autoneg`, `speed`, `duplex`, `wol`, `rx_ring`, `tx_ring` in the `ethtool` block"),
+	    "every field the document stated is named, in the order the block lists them");
+	check(planfix_whole(planfix_warning_with(plan, "in the `ethtool` block"),
+	    PLANFIX_UNBUILT_TAIL),
+	    "and the whole of the longest form arrives, marked as nobody's gap");
+	check(plan && !planfix_warned(plan, "not applied by this build"),
+	    "and not as a release this port owes anybody");
+	/* That the sentence names only what was written, and that a block of
+	 * offloads alone says nothing at all, is `plan_tc_test.c`'s -- the pass
+	 * that owns the offloads owns the rule about naming them. What is here is
+	 * the part that file cannot see: whose gap the other half is. */
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
+ * A `network` block, which was four of one and one of the other
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The five things the wifi planner's own sentence named, and what each turned
+ * out to be.
+ *
+ * It said a network's "addressing, routes, `dns` policy, hooks and metric" were
+ * carried and not acted on by *this build of the planner*, which is the promise
+ * the whole of this file is about. Four of the five are not this port's to
+ * keep: nothing in either language reads a network's addressing, its routes or
+ * its `dns` policy -- the Rust's passes all read an *interface*'s, and
+ * `netcfgd_model::dns::scopes` builds its scope list from the globals and the
+ * interfaces -- and a hook on a network is run at no phase, which the Rust says
+ * itself in `warn_unfired_hooks`. The fifth, `metric`, really is missing here.
+ *
+ * So the wording is what these cases check, for the reason this file's header
+ * gives: a sentence that tells an operator to wait for a release is checkable
+ * only against whether there is a release to wait for.
+ */
+
+/* `warning_with` and `whole` used to stand here. They moved to `planfix.h`
+ * when two more files needed them: three warnings now go through
+ * `ncfg_plan_warn_unbuilt`, whose 196-character tail is what a cut takes
+ * first, so checking a sentence by its last words stopped being this file's
+ * private trick. */
+
+/*
+ * The widest id the model allows, because that is what these sentences have to
+ * fit around: an SSID is up to 32 octets, and a network naming one that is not
+ * valid text carries it as 64 hex characters. A case written with `office` in
+ * it would prove the wording fits for six.
+ */
+#define WIDEST_ID "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+#define STATED_NETWORK \
+	"{\"id\":\"" WIDEST_ID "\",\"security\":{\"type\":\"open\"}," \
+	"\"addressing\":[{\"source\":\"static\",\"address\":\"10.0.0.8/24\"}]," \
+	"\"routes\":[{\"destination\":\"default\",\"via\":\"10.0.0.254\"}]," \
+	"\"dns\":{\"servers\":[{\"addr\":\"10.0.0.1\"}]}," \
+	"\"hooks\":[{\"phase\":\"up\",\"path\":\"/run/netcfgd/hooks/o\",\"sha256\":\"ab\"}]}"
+
+static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "", STATED_NETWORK, "", "\"links\":[]",
+	    &document, &observed);
+
+	check(plan && planfix_warned(plan,
+	    "states addressing, `routes`, a `dns` policy and hooks"),
+	    "a network's four inert halves are named, and only the ones it states");
+	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
+	    "and reported as a product gap rather than as a port gap");
+	check(planfix_whole(planfix_warning_with(plan, "states addressing"),
+	    "still means this when the code arrives"),
+	    "and the whole sentence arrives, at the widest id the model allows");
+	/*
+	 * The two halves of the old sentence, each wrong on its own. The first
+	 * promised a later release; the second described the op rather than what
+	 * happens -- every network in the document reaches the supplicant, and its
+	 * metric with it, as `priority`.
+	 */
+	check(plan && !planfix_warned(plan, "this build of the planner does not act on them"),
+	    "and no longer as something a later build of this port will do");
+	check(plan && !planfix_warned(plan, "only the set of network ids"),
+	    "and no longer claims the supplicant is given nothing but the ids");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * The control, which is what keeps this quiet: the ordinary saved network --
+ * an SSID and a credential -- states none of these and must say nothing at
+ * all. `warn_device_policy` one function up has the same rule for the same
+ * reason, and the old sentence had no such guard: it fired on every document
+ * with a network in it.
+ */
+static void a_network_that_asks_for_none_of_it_says_nothing(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "",
+	    "{\"id\":\"home\",\"security\":{\"type\":\"open\"}}", "", "\"links\":[]",
+	    &document, &observed);
+
+	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
+	    "a network stating none of the inert halves is not warned about");
+	check(plan && !planfix_warned(plan, "does not apply it"),
+	    "and a network with no metric is not told about the metric that is missing");
+	check(plan && plan->warning_count == 0u, "and the plan carries no warning at all");
+	planfix_release(plan, document, observed);
+}
+
+/* One of the four, to prove the sentence names what was written rather than the
+ * list it was drawn from -- which is the failure the `ethtool` warning's own
+ * comment records and the reason it goes field by field. */
+static void only_the_half_a_network_states_is_named(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "",
+	    "{\"id\":\"cafe\",\"security\":{\"type\":\"open\"},"
+	    "\"dns\":{\"servers\":[{\"addr\":\"10.0.0.1\"}]}}", "", "\"links\":[]",
+	    &document, &observed);
+
+	check(plan && planfix_warned(plan,
+	    "`cafe` states a `dns` policy, and nothing applies it: netcfgd plans"),
+	    "a network stating one of the four is told about that one, in the singular");
+	check(plan && !planfix_warned(plan, "states addressing"),
+	    "and not about the three it did not write");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * `metric` is the one of the five that keeps the promise, and it has to name
+ * the passes that would keep it: `netcfgd_model::wifi::effective_metric` is the
+ * rule, the routes an interface declares are one half of applying it and a
+ * restart of a DHCP client started with the old value is the other, and neither
+ * is in this build. 0263 records both halves as deferred.
+ *
+ * And it says what the metric *does* reach, so an operator is not told a number
+ * they wrote is inert when it decides which network gets joined.
+ */
+static void a_networks_metric_is_this_ports_gap_and_names_what_is_missing(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "",
+	    "{\"id\":\"" WIDEST_ID "\",\"security\":{\"type\":\"open\"},\"metric\":100}", "",
+	    "\"links\":[]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "states `metric = 100`"),
+	    "a network's metric is named with the value the operator wrote");
+	check(planfix_whole(planfix_warning_with(plan, "states `metric = 100`"),
+	    "and a `linkset`'s choice"),
+	    "and the whole sentence arrives, at the widest id the model allows");
+	check(plan && planfix_warned(plan,
+	    "the routes an interface declares take that interface's own `preference` here"),
+	    "and the pass that would apply it is named");
+	check(plan && planfix_warned(plan, "restarts a DHCP client given the old one"),
+	    "and so is the second half, which is a restart rather than a route");
+	check(plan && planfix_warned(plan, "as the supplicant's `priority`"),
+	    "and what the metric does reach is said, so it is not reported as inert");
+	/*
+	 * **This one is honest about catching less than it looks like it does.**
+	 * Routing this sentence through `ncfg_plan_warn_unbuilt` -- the regression
+	 * it is written against -- was tried, and it was the check above that went
+	 * red rather than this one: that helper's 195-character tail cannot fit
+	 * after a sentence this long, so the marker it appends is truncated away
+	 * before this can see it. It bites only if somebody shortens the sentence
+	 * *and* mismarks it, which is a narrower future than it appears to guard.
+	 * Kept, because it costs a line and says which of the two shapes this
+	 * warning is; the check above is what does the work.
+	 */
+	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
+	    "and it is not marked as something nobody is going to write");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_prefix_that_has_not_arrived_starts_nothing();
@@ -604,8 +841,15 @@ int main(void)
 	the_clearing_sentence_says_what_will_happen();
 
 	a_bluetooth_block_is_not_something_to_wait_for();
+	link_local_addressing_is_not_something_to_wait_for();
+	the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for();
 	a_probe_block_is_the_daemons_and_its_answer_is_acted_on();
 	a_modem_block_is_the_daemons_and_the_gap_is_named_exactly();
+
+	what_a_network_states_and_nothing_reads_is_not_something_to_wait_for();
+	a_network_that_asks_for_none_of_it_says_nothing();
+	only_the_half_a_network_states_is_named();
+	a_networks_metric_is_this_ports_gap_and_names_what_is_missing();
 
 	printf("plan gaps: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

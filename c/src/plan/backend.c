@@ -10,15 +10,16 @@
  *   **The teardown answers only for the kinds something here starts, and that
  *   is the rule rather than the gap.** The Rust's `backend_wanted` is
  *   exhaustive over all nine, which is right in a planner where every pass
- *   that starts one exists; here the access point and the two tunnels are
- *   started by passes this build does not have, so answering "the document
- *   does not ask for this" about them would stop something netcfgd never
- *   started -- and on the next reconcile, start nothing in its place. That is
- *   the Rust's own reasoning for `WireGuard` and `Dns`, which it excuses for
- *   exactly this reason, applied to the kinds this port has not reached yet.
- *   Each becomes ordinary the day its pass lands, and two just have:
- *   `dot1x.c` starts a supplicant and `advertise.c` a router advertisement
- *   daemon, so both are decided about here now.
+ *   that starts one exists; here the two tunnels are started by passes this
+ *   build does not have, so answering "the document does not ask for this"
+ *   about them would stop something netcfgd never started -- and on the next
+ *   reconcile, start nothing in its place. That is the Rust's own reasoning
+ *   for `WireGuard` and `Dns`, which it excuses for exactly this reason,
+ *   applied to the kinds this port has not reached yet. Each becomes ordinary
+ *   the day its pass lands, and four have: `dot1x.c` starts a supplicant,
+ *   `radio.c` the same supplicant for the other reason, `advertise.c` a router
+ *   advertisement daemon and `access_point.c` a hostapd, so all four are
+ *   decided about here now.
  *
  *   **The supplicant's rule is the one to be careful with.** It is asked in
  *   `ncfg_plan_supplicant_wanted` rather than spelled here, beside the pass
@@ -26,9 +27,10 @@
  *   conditions that keep one have to stay the same: wrong in the permissive
  *   direction leaves a process nobody owns, and wrong in the other direction
  *   is netcfgd starting a supplicant and killing it on every reconcile for
- *   ever. A radio's supplicant is *wanted* there and started by nothing here,
- *   which is the arm that keeps this build from stopping one it cannot
- *   replace.
+ *   ever. A radio's supplicant used to be *wanted* there and started by
+ *   nothing here, which was the arm that kept this build from stopping one it
+ *   could not replace; `radio.c` starts one now, and that arm is the ordinary
+ *   shape -- one rule, asked by the pass and by this teardown.
  *
  * WHY A COUNT AND NOT A RETRY
  *   A daemon that dies as fast as netcfgd starts it produced 181 starts in
@@ -70,10 +72,12 @@ void ncfg_plan_backend(ncfg_builder_t *builder, const char *name, int kind, cons
 	uint32_t        id;
 
 	/*
-	 * Running is enough for this build. The Rust goes on to re-hand a running
+	 * Running is enough here. The Rust goes on to re-hand a running
 	 * *supplicant* its networks, which is the one backend whose contents can
-	 * go stale while the process stays up; nothing here starts a supplicant,
-	 * and a DHCP client's contents are its own lease.
+	 * go stale while the process stays up and which this build hands over in
+	 * `wifi.c` instead; a DHCP client's contents are its own lease, and an
+	 * access point cannot be handed anything at all -- what notices one
+	 * running the wrong thing is the restart in `access_point.c`.
 	 */
 	if (ncfg_observed_backend_running(builder->observed, kind, name)) {
 		return;
@@ -146,11 +150,17 @@ static int backend_wanted(const ncfg_builder_t *builder, const ncfg_observed_bac
 		/* Both blocks, because 0008 puts wired 802.1X on the same supplicant
 		 * as wifi and one process cannot be half wanted. */
 		*field = "wifi/dot1x";
-		return ncfg_plan_supplicant_wanted(builder->desired, backend->interface);
+		return ncfg_plan_supplicant_wanted(builder->desired, builder->observed,
+		    backend->interface);
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		*field = "advertise";
 		interface = ncfg_plan_interface(builder->desired, backend->interface);
 		return interface && interface->advertise;
+	case NCFG_BACKEND_ACCESS_POINT:
+		/* Asked in `ncfg_plan_access_point_wanted` for the supplicant's
+		 * reason, beside the pass that starts one. */
+		*field = "access_point";
+		return ncfg_plan_access_point_wanted(builder->desired, backend->interface);
 	default:
 		*field = "";
 		return 1;

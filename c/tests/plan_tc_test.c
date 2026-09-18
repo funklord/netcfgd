@@ -141,6 +141,11 @@ static void a_link_that_does_not_exist_yet_still_gets_its_offloads(void)
  * The half of an `ethtool` block that needs a physical NIC is named field by
  * field rather than as one blanket sentence -- an operator who set only `gro`
  * should not be told their configuration is ignored.
+ *
+ * **One field, so the sentence has to agree with itself about number.** It
+ * used to say "are recognised" of a single one, which read as a list where
+ * there was none; whose gap that half is, and that the whole of the longest
+ * form fits, is `plan_gaps_test.c`'s.
  */
 static void only_the_unapplied_ethtool_fields_are_named(void)
 {
@@ -149,15 +154,16 @@ static void only_the_unapplied_ethtool_fields_are_named(void)
 	ncfg_plan_t     *plan = one(ETHTOOL_DEVICE("\"gro\":\"on\",\"wol\":\"g\""),
 	    "\"links\":[" PLANFIX_LINK("eth0", ",\"offloads\":[]") "]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "`wol` in the ethtool block"),
-	    "a field that needs a physical NIC is named in the warning");
+	check(plan && planfix_warned(plan,
+	    "`wol` in the `ethtool` block is recognised and applied by nothing: it can"),
+	    "a field that needs a physical NIC is named, in the singular it was written in");
 	check(plan && !planfix_warned(plan, "`gro`"),
 	    "and the offload beside it, which is applied, is not");
 	planfix_release(plan, document, observed);
 
 	plan = one(ETHTOOL_DEVICE("\"gro\":\"on\""),
 	    "\"links\":[" PLANFIX_LINK("eth0", ",\"offloads\":[]") "]", &document, &observed);
-	check(plan && !planfix_warned(plan, "ethtool block"),
+	check(plan && !planfix_warned(plan, "`ethtool` block"),
 	    "and a block naming only offloads says nothing at all");
 	planfix_release(plan, document, observed);
 }

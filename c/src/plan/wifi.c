@@ -33,18 +33,37 @@
  *   document that went from `deny` to `allow` needs the access point
  *   restarted. Converging the lists without that would enforce the new list
  *   under the old default -- every unlisted station accepted, reported as
- *   applied. **This build plans no backend actions**, so it says so and
- *   converges nothing, which is the same answer `unknown` gets and for the
- *   same reason: emptying a list without knowing which one hostapd reads
+ *   applied. **This sentence used to end "and this build plans no backend
+ *   actions, so it says so and converges nothing"**, which `access_point.c`
+ *   made untrue: the restart is planned, and the lists are left to the hostapd
+ *   that comes back. What is still converged by nothing is the case below it,
+ *   where netcfgd has no record of which policy the running access point was
+ *   started with -- emptying a list without knowing which one hostapd reads
  *   either opens a network or closes it.
  *
- * THE THREE RADIO SETTINGS THAT REACH NOTHING
- *   `regdom` and `powersave` on a `device`'s `wifi` block have no consumer
- *   anywhere -- no planner reads them, no executor writes them, and
- *   `wifi.set_regdom` is an op nothing constructs. They are parsed, kept in
- *   the document and rendered back by `ncfg profile save`, which is the shape
- *   0061 exists to prevent. Said only where the document states them: a radio
- *   at its defaults is not asking for anything.
+ * THE TWO RADIO SETTINGS THAT REACH NOTHING, AND WHOSE GAP THEY ARE
+ *   `regdom` and `powersave` on a `device`'s `wifi` block are planned by
+ *   nothing: no pass reads either, and `wifi.set_regdom` is an op nothing
+ *   constructs. They are parsed, kept in the document and rendered back by
+ *   `ncfg profile save`, which is the shape 0061 exists to prevent. Said only
+ *   where the document states them: a radio at its defaults is not asking for
+ *   anything.
+ *
+ *   **This heading said THREE and named two**, which is 10.182's failure --
+ *   a count that never matched the list beneath it. The third was
+ *   `scan_randomization`, and it is the Rust's sentence rather than this
+ *   port's: this build writes it as the supplicant's `preassoc_mac_addr`
+ *   (`c/src/apply/wifi_ops.c:443` and
+ *   `c/src/backend/supplicant/network.c:749`), so naming it here would have
+ *   told an operator their setting was inert while netcfgd was applying it.
+ *
+ *   **And "no executor writes them" is the Rust's sentence too, and is false
+ *   here.** `ncfg_service_set_regdom` (`c/src/apply/wifi_ops.c:712`) sends
+ *   `SET country` to the supplicant and is tested; the Rust has no arm for
+ *   `WifiSetRegdom` at all and refuses it as "not implemented in this build"
+ *   (`crates/netcfgd-apply/src/kernel.rs:1919`). So this port is *ahead* on
+ *   the half that was copied across as a shared gap, and what is missing on
+ *   both sides is the producer. 0263 records it.
  */
 #include "plan_internal.h"
 
@@ -59,7 +78,8 @@
  * ------------------------------------------------------------------------ */
 
 /*
- * Say which radio settings this build stores and does not act on.
+ * Say which radio settings are stored and acted on by nothing, and whose gap
+ * that is.
  *
  * **The clause used to be fixed -- "nothing sets the regulatory domain or the
  * power-saving mode" -- and the first half was false.** hostapd's own
@@ -68,6 +88,25 @@
  * that nothing sets the domain in the same breath as starting the thing that
  * sets it (0221). So the reason is gathered beside the name, and the sentence
  * says it about the settings that were actually written.
+ *
+ * **What was still wrong is the frame the reasons sit in.** "Not acted on by
+ * this build ... when the code arrives" is 10.180's promise, and a radio's
+ * `regdom` and a `powersave` are the case that helper was published for:
+ * neither is read by any pass in either language. Settled against `crates/`
+ * field by field rather than assumed --
+ *
+ *   * `regdom`: `WifiSetRegdom` is an `Op` variant with no constructor
+ *     anywhere in `crates/`, which the Rust's own doc comment says of itself
+ *     at `crates/netcfgd-plan/src/lib.rs:749`. The access point's regdom is a
+ *     different field and does reach hostapd, which is what the reason below
+ *     now says in the same breath rather than leaving an operator to find out.
+ *   * `powersave`: outside the model and `lower.rs`, the only mention in
+ *     `crates/` is the matching warning at
+ *     `crates/netcfgd-plan/src/lib.rs:955`.
+ *
+ * So this is `warn_unbuilt`'s sentence, and the tail it supplies replaces the
+ * one that was written out here -- which is the point of having the sentence
+ * in one place: there is no second copy to go stale.
  */
 static void warn_device_policy(ncfg_builder_t *builder, const ncfg_device_t *device)
 {
@@ -77,12 +116,13 @@ static void warn_device_policy(ncfg_builder_t *builder, const ncfg_device_t *dev
 	size_t                           count = 0;
 	ncfg_buf_t                       names;
 	ncfg_buf_t                       reasons;
+	ncfg_buf_t                       block;
 	size_t                           i;
 
 	if (wifi->regdom) {
 		stated[count] = "`regdom`";
-		because[count] = "a radio's `regdom` reaches nothing, and an access point's is "
-		    "the only one this build writes -- as hostapd's `country_code`";
+		because[count] = "a radio's `regdom` is read by no pass, and an access "
+		    "point's is the only one netcfgd carries -- as hostapd's `country_code`";
 		count++;
 	}
 	if (wifi->powersave != NCFG_POWERSAVE_DEFAULT) {
@@ -101,11 +141,17 @@ static void warn_device_policy(ncfg_builder_t *builder, const ncfg_device_t *dev
 		ncfg_buf_addf(&names, "%s%s", i ? " and " : "", stated[i]);
 		ncfg_buf_addf(&reasons, "%s%s", i ? "; and " : "", because[i]);
 	}
-	ncfg_plan_warnf(builder->plan, device->name,
-	    "%s on %s %s understood and not acted on by this build: %s. The setting is kept, "
-	    "so a configuration written now still means this when the code arrives",
+	/* Both fields, the longest device name a kernel takes and `warn_unbuilt`'s
+	 * tail come to 442 of `NCFG_ERROR_MAX`, and `plan_wifi_test.c` asserts the
+	 * last words rather than a fragment near the front -- a check on the
+	 * subject of a sentence this long cannot fail, because the subject is the
+	 * half a cut keeps. */
+	ncfg_buf_init(&block, 0);
+	ncfg_buf_addf(&block, "%s on %s %s read and acted on by nothing: %s",
 	    ncfg_buf_text(&names), device->name, count == 1u ? "is" : "are",
 	    ncfg_buf_text(&reasons));
+	ncfg_plan_warn_unbuilt(builder, device->name, ncfg_buf_text(&block));
+	ncfg_buf_free(&block);
 	ncfg_buf_free(&names);
 	ncfg_buf_free(&reasons);
 }
@@ -157,10 +203,128 @@ static void warn_regdom(ncfg_builder_t *builder)
 		ncfg_plan_warnf(builder->plan, point->device,
 		    "`%s` names `regdom = \"%s\"` and the access point `%s` running on it names "
 		    "none, so nothing carries it to hostapd: a radio's `regdom` is stored and "
-		    "not acted on by this build, and an access point's is the only one that "
-		    "becomes a `country_code`. Write `regdom = \"%s\"` in the access point as "
-		    "well",
+		    "not acted on, and an access point's is the only one that becomes a "
+		    "`country_code`. Write `regdom = \"%s\"` in the access point as well",
 		    point->device, radio, point->id, radio);
+	}
+}
+
+/*
+ * What a `network` block states that no pass applies, told apart by whose gap
+ * it is.
+ *
+ * **One sentence used to cover five things and had the blame wrong for four of
+ * them.** It said a network's addressing, routes, `dns` policy, hooks and
+ * metric were "carried in the document and this build of the planner does not
+ * act on them", which reads as a port that has not caught up yet. Settled
+ * against `crates/` rather than assumed, one field at a time:
+ *
+ *   * **addressing, `routes` and a `dns` policy** are acted on by nothing in
+ *     either language. Every `.addressing` the Rust's planner and executor
+ *     read is an *interface*'s, and `netcfgd_model::dns::scopes` builds its
+ *     scope list from the globals and the interfaces alone. The only readers
+ *     on either side are the canonicaliser, which sorts and validates them,
+ *     and the renderer `ncfg profile save` writes them back through.
+ *   * **hooks** are run by nothing either, and the Rust says so itself:
+ *     `warn_unfired_hooks` warns per network that "a hook on a network is not
+ *     run by this build at any phase". This build collects a network's hooks
+ *     into the list an executor verifies a script's hash against, so that a
+ *     `hook.run` naming one could be carried out -- and no pass emits that op
+ *     for a network, which is the same state one step further on.
+ *   * **`metric` is the one real port gap of the five**, so it keeps the
+ *     promise and gets its own sentence naming what is missing. The Rust's
+ *     planner applies `netcfgd_model::wifi::effective_metric` to the routes an
+ *     interface declares and restarts a DHCP client that was started with the
+ *     old one; neither is here, and 0263 records the deferral on both halves.
+ *
+ * So the first four get `ncfg_plan_warn_unbuilt`'s sentence and the fifth does
+ * not, which is what 10.180 published that helper for: "this port has not got
+ * there yet" and "there is nothing to wait for" are the same sentence to a
+ * reader and different facts, and only one of them is worth waiting on.
+ *
+ * **The old clause's tail was false as well.** "Only the set of network ids is
+ * handed to a running supplicant" describes the op, which carries ids; what is
+ * handed over is every network in the document, read from the document the
+ * plan was built against -- and the metric among them, since
+ * `ncfg_supplicant_add_network` writes it as `priority`.
+ *
+ * Said only where a network states the thing, which is `warn_device_policy`'s
+ * rule one function up: a network that asks for none of this is not asking for
+ * anything, and a sentence on every saved SSID is noise rather than news.
+ */
+static void warn_networks_held(ncfg_builder_t *builder)
+{
+	size_t i;
+
+	for (i = 0; i < builder->desired->network_count; i++) {
+		const ncfg_wifi_network_t *network = &builder->desired->networks[i];
+		const char                *stated[4];
+		size_t                     count = 0;
+		ncfg_buf_t                 names;
+		ncfg_buf_t                 block;
+		size_t                     j;
+
+		if (network->addressing_count != 0u) {
+			stated[count] = "addressing";
+			count++;
+		}
+		if (network->route_count != 0u) {
+			stated[count] = "`routes`";
+			count++;
+		}
+		if (network->dns) {
+			stated[count] = "a `dns` policy";
+			count++;
+		}
+		if (network->hook_count != 0u) {
+			stated[count] = "hooks";
+			count++;
+		}
+		if (count != 0u) {
+			ncfg_buf_init(&names, 0);
+			for (j = 0; j < count; j++) {
+				ncfg_buf_addf(&names, "%s%s",
+				    j == 0u ? "" : (j + 1u == count ? " and " : ", "), stated[j]);
+			}
+			ncfg_buf_init(&block, 0);
+			/*
+			 * **Kept short enough that the whole of it arrives**, which is
+			 * not a matter of taste here: `ncfg_plan_warnf` formats into
+			 * `NCFG_ERROR_MAX` and says nothing when the sentence does not
+			 * fit, so a warning can be cut off mid-word and still be
+			 * reported as a warning. The first draft of this one was, at 511
+			 * of 512 characters -- the operator got "still means t". The id
+			 * is the part that can be long: an SSID is up to 32 octets and a
+			 * network that names one not valid as text carries it as 64 hex
+			 * characters, so that is the width this has to fit around and
+			 * `plan_gaps_test.c` checks it at exactly that width.
+			 */
+			ncfg_buf_addf(&block,
+			    "the `network` block `%s` states %s, and nothing applies %s: "
+			    "netcfgd plans addressing, routes, `dns` and hooks from an "
+			    "`interface` block, and a network's own only round-trip through "
+			    "`ncfg profile save`",
+			    network->id, ncfg_buf_text(&names), count == 1u ? "it" : "them");
+			ncfg_plan_warn_unbuilt(builder, NULL, ncfg_buf_text(&block));
+			ncfg_buf_free(&block);
+			ncfg_buf_free(&names);
+		}
+		if (network->metric.has) {
+			/* The one that is this port's to finish, so it says which two
+			 * passes would finish it rather than "not acted on" -- and, to the
+			 * same width as above, what the metric does reach, so a number an
+			 * operator wrote is not reported as inert when it decides which
+			 * network gets joined. */
+			ncfg_plan_warnf(builder->plan, NULL,
+			    "the `network` block `%s` states `metric = %lld`, and this build "
+			    "of the planner does not apply it: the routes an interface "
+			    "declares take that interface's own `preference` here, where the "
+			    "rule is the network's metric while the radio is associated to "
+			    "it, and no plan restarts a DHCP client given the old one. The "
+			    "metric does reach the join order, as the supplicant's "
+			    "`priority`, and a `linkset`'s choice",
+			    network->id, (long long)network->metric.value);
+		}
 	}
 }
 
@@ -184,27 +348,32 @@ static void warn_held(ncfg_builder_t *builder)
 			continue;
 		}
 		warn_device_policy(builder, device);
-		ncfg_plan_warnf(builder->plan, device->name,
-		    "the supplicant that would serve `%s` is not started by this build of the "
-		    "planner, which plans no backend actions at all: the configured networks "
-		    "are handed to one that is already running and to nothing else",
-		    device->name);
 	}
+	/*
+	 * **What used to stand in the loop above said the supplicant serving a
+	 * radio was not started by this build, which plans no backend actions at
+	 * all, and `radio.c` makes both halves untrue.** A supplicant is started
+	 * as the radio's prerequisite, kept while the document still asks for one
+	 * and stopped when it does not -- and the second half had already stopped
+	 * being true when `dot1x.c`, `advertise.c` and `access_point.c` landed.
+	 * What survives is the one arrangement in which nothing still happens, and
+	 * it is said where its own condition is checked rather than to every radio
+	 * on the machine.
+	 */
+	ncfg_plan_radio_warn(builder);
 	warn_regdom(builder);
-	if (builder->desired->network_count != 0u) {
-		ncfg_plan_warn(builder->plan, NULL,
-		    "a `network` block's addressing, routes, `dns` policy, hooks and metric are "
-		    "carried in the document and this build of the planner does not act on "
-		    "them; only the set of network ids is handed to a running supplicant");
-	}
-	if (builder->desired->access_point_count != 0u) {
-		ncfg_plan_warn(builder->plan, NULL,
-		    "an `access_point` block's ssid, band, channel, security and `regdom` are "
-		    "carried in the document and this build of the planner does not act on "
-		    "them -- nothing here starts, configures or restarts hostapd, so an edited "
-		    "identity is not noticed and only the station lists of an access point that "
-		    "is already running are converged");
-	}
+	warn_networks_held(builder);
+	/*
+	 * **What used to stand here said no access point was started, configured
+	 * or restarted, and `access_point.c` makes that untrue.** hostapd is
+	 * started as the radio's prerequisite, restarted when what it was started
+	 * with stops matching the document, and stopped when no block asks for it.
+	 * The half that is still true is narrower than a sentence about every
+	 * document: it is the one arrangement where nothing happens, and the two
+	 * places where netcfgd cannot see what a running access point holds. Each
+	 * is said where its own condition is checked rather than to everybody.
+	 */
+	ncfg_plan_access_point_warn(builder);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -234,9 +403,15 @@ static const ncfg_observed_backend_t *backend_of(const ncfg_observed_t *observed
  *
  * Driven from the observation's backend list rather than from the devices,
  * because what makes this actionable is a supplicant that is *running*: a
- * radio with none gets one from the backend pass, which is not in this build,
+ * radio with none gets one from `radio.c`, as the interface's prerequisite,
  * and a wired 802.1X port reaches the same supplicant by the same route
- * (0008). `ncfg_builder_push` drops anything on an unmanaged device, so the
+ * (0008). **A supplicant this plan starts is not one this pass hands anything
+ * to, and that is not a gap here**: filling a new supplicant is part of
+ * starting it, which the Rust does in its executor rather than its planner --
+ * `populate_supplicant`, called from the `backend.start` arm -- so this pass
+ * reads `networks_match` about processes that were already running when the
+ * machine was observed, which is every one it can say anything about.
+ * `ncfg_builder_push` drops anything on an unmanaged device, so the
  * `managed = false` rule is honoured without asking here.
  */
 static void plan_profiles(ncfg_builder_t *builder)
@@ -393,7 +568,19 @@ void ncfg_plan_access_control(ncfg_builder_t *builder)
 			continue;
 		}
 		running = backend_of(builder->observed, NCFG_BACKEND_ACCESS_POINT, device);
-		if (!running || !running->access_control) {
+		if (!running) {
+			continue;
+		}
+		/*
+		 * Before the station lists, because a restart makes them moot: the
+		 * access point comes back with the whole configuration rebuilt, and
+		 * converging a list on a hostapd that is about to be replaced is work
+		 * that fails or is undone.
+		 */
+		if (ncfg_plan_access_point_restart_identity(builder, point, running)) {
+			continue;
+		}
+		if (!running->access_control) {
 			continue;
 		}
 		live = running->access_control;
@@ -425,21 +612,14 @@ void ncfg_plan_access_control(ncfg_builder_t *builder)
 		} else {
 			/*
 			 * A policy change, which hostapd will not take over the control
-			 * socket. The Rust restarts the access point here; this build
-			 * plans no backend actions, so it says what is wrong and
-			 * converges nothing -- enforcing the new list under the old
-			 * default is the one outcome worse than doing nothing.
+			 * socket -- and converging the lists without it would enforce the
+			 * new list under the old default, so a document changed from
+			 * `deny` to `allow` would leave every unlisted station accepted,
+			 * reported as applied. The access point is restarted instead,
+			 * which is honest about what it costs.
 			 */
-			ncfg_plan_warnf(builder->plan, device,
-			    "the access control policy on %s is `%s` in the config and `%s` in "
-			    "the access point that is running, and hostapd only reads it at "
-			    "startup -- so its station lists are left alone. Restarting the "
-			    "access point is what applies it, and this build of the planner "
-			    "does not start, stop or restart a backend",
-			    device,
-			    wanted ? ncfg_plan_acl_policy_word(wanted->policy) : "<absent>",
-			    live->policy.kind == NCFG_OBSERVED_POLICY_SET ?
-			    ncfg_plan_acl_policy_word(live->policy.policy) : "<absent>");
+			ncfg_plan_access_point_restart_policy(builder, device, &live->policy,
+			    wanted);
 			continue;
 		}
 

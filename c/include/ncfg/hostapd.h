@@ -176,6 +176,23 @@ char *ncfg_hostapd_acl_contents(const ncfg_access_control_t *access_control, cha
 int ncfg_hostapd_policy_in(const char *contents, int *policy_out);
 
 /*
+ * The `wpa_key_mgmt` this security would be rendered with, or NULL where it has
+ * none -- an open network, and an access point using EAP, which is refused
+ * before anything is rendered.
+ *
+ * Public for the reason `ncfg_hostapd_effective_band` is, and it is the sharper
+ * case of the two. hostapd does not report its key management back, so the only
+ * account of the generation a running access point is offering is netcfgd's
+ * record of what it started -- and the planner restarts an access point whose
+ * document and record disagree. A second spelling of "WPA2" is therefore an
+ * access point stopped and started on every reconcile, for a document nobody
+ * has edited. The Rust keeps this in `netcfgd-model`; it moves there when the C
+ * model grows the rule, and a copy appearing there meanwhile is the failure
+ * this paragraph and the header's own exist to prevent.
+ */
+const char *ncfg_hostapd_key_mgmt_of(const ncfg_security_t *security);
+
+/*
  * The band a `hw_mode` came from, as the document spells it.
  *
  * NULL for anything this build does not render, which is the honest answer

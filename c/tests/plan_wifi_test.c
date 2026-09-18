@@ -116,10 +116,22 @@ static void nothing_is_handed_to_a_supplicant_that_is_not_running(void)
  * ------------------------------------------------------------------------ */
 
 /*
- * `regdom` and `powersave` on a radio have no consumer anywhere: no planner
- * reads them, no executor writes them, and `wifi.set_regdom` is an op nothing
- * constructs. They are parsed, kept and rendered back, which is the shape 0061
- * exists to prevent.
+ * `regdom` and `powersave` on a radio are read by no pass and reach nothing --
+ * `wifi.set_regdom` is an op nothing constructs, in either language. They are
+ * parsed, kept and rendered back, which is the shape 0061 exists to prevent.
+ *
+ * **And whose gap that is, is the part that was wrong.** The sentence ended
+ * "not acted on by this build ... when the code arrives", which is a promise
+ * that a later release of *this port* applies them. Settled against `crates/`:
+ * `WifiSetRegdom` has no constructor anywhere there either, and `powersave`'s
+ * only mention outside the model is the matching warning. So there is no
+ * release to wait for, and this goes through `ncfg_plan_warn_unbuilt` like the
+ * other blocks nobody is going to write.
+ *
+ * Checked by the sentence's **last** words rather than its first. It is 437
+ * characters at the widest device name a kernel takes, `ncfg_plan_warnf` marks
+ * what it cuts at the end, and a check on "`regdom` and `powersave` on wlan0"
+ * would go on passing through a cut that removed the whole of the marking.
  */
 static void the_radio_settings_that_reach_nothing_are_named(void)
 {
@@ -130,14 +142,31 @@ static void the_radio_settings_that_reach_nothing_are_named(void)
 	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]",
 	    &document, &observed);
 
-	check(plan && planfix_warned(plan, "`regdom` and `powersave` on wlan0 are understood"),
-	    "a radio's `regdom` and `powersave` are named as stored and not acted on");
+	check(plan && planfix_warned(plan,
+	    "`regdom` and `powersave` on wlan0 are read and acted on by nothing"),
+	    "a radio's `regdom` and `powersave` are named as stored and acted on by nothing");
+	check(planfix_whole(planfix_warning_with(plan, "are read and acted on by nothing"),
+	    PLANFIX_UNBUILT_TAIL),
+	    "and the whole of it arrives, marked as nobody's gap rather than this port's");
+	check(plan && planfix_warned(plan, "an access point's is the only one netcfgd carries"),
+	    "and the spelling that does reach hostapd is named in the same breath");
+	check(plan && !planfix_warned(plan, "not acted on by this build"),
+	    "and no longer as a release this port owes anybody");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO("\"backend\":\"auto\",\"regdom\":\"SE\""), "", "", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]",
+	    &document, &observed);
+	check(plan && planfix_warned(plan, "`regdom` on wlan0 is read and acted on by nothing"),
+	    "a radio naming one of the two is told about that one, in the singular");
+	check(plan && !planfix_warned(plan, "power-saving"),
+	    "and not about the one it did not write");
 	planfix_release(plan, document, observed);
 
 	plan = planfix_plan(RADIO("\"backend\":\"auto\""), "", "", "",
 	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]",
 	    &document, &observed);
-	check(plan && !planfix_warned(plan, "understood and not acted on by this build"),
+	check(plan && !planfix_warned(plan, "read and acted on by nothing"),
 	    "and a radio at its defaults is not asking for anything, so nothing is said");
 	planfix_release(plan, document, observed);
 }
@@ -283,10 +312,12 @@ static void an_unknown_policy_converges_nothing_and_says_so(void)
 
 /*
  * `macaddr_acl` cannot be changed over the control socket, so converging the
- * lists without a restart would enforce the new list under the old default. In
- * this build nothing restarts a backend, so the answer is a sentence.
+ * lists without a restart would enforce the new list under the old default --
+ * every unlisted station accepted, reported as applied. The restart that
+ * applies it instead is `access_point.c`'s and is checked there; what this
+ * file owes is the half it owns, which is that **nothing is converged here**.
  */
-static void a_policy_that_moved_converges_nothing_and_says_why(void)
+static void a_policy_that_moved_converges_no_station(void)
 {
 	ncfg_document_t *document;
 	ncfg_observed_t *observed;
@@ -298,8 +329,8 @@ static void a_policy_that_moved_converges_nothing_and_says_why(void)
 	    "\"backends\":[" ACCESS_POINT("\"access_control\":{\"policy\":{\"set\":\"deny\"},"
 	    "\"denied\":[],\"accepted\":[]}") "]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "hostapd only reads it at startup"),
-	    "a policy the document moved is reported rather than half-applied");
+	check(plan && planfix_warned(plan, "hostapd only reads at startup, so the access point is restarted"),
+	    "a policy the document moved is reported, and what the fix costs is said");
 	check(plan && !planfix_action(plan, "access_control.add"),
 	    "and no station is enforced under the wrong default");
 	planfix_release(plan, document, observed);
@@ -359,7 +390,7 @@ int main(void)
 	a_station_list_is_converged_in_both_directions();
 	the_list_the_policy_does_not_select_is_emptied_too();
 	an_unknown_policy_converges_nothing_and_says_so();
-	a_policy_that_moved_converges_nothing_and_says_why();
+	a_policy_that_moved_converges_no_station();
 	only_the_first_access_point_on_a_radio_is_converged();
 	an_access_point_that_already_agrees_plans_nothing();
 

@@ -208,6 +208,25 @@ const ncfg_device_t *ncfg_plan_device(const ncfg_document_t *desired, const char
 const ncfg_interface_t *ncfg_plan_interface(const ncfg_document_t *desired, const char *name);
 
 /*
+ * One sentence per block that nothing acts on **in either language**.
+ *
+ * "This build of the planner does not act on it" is a promise that a later
+ * release will, so it belongs to a real port gap and to nothing else. A block
+ * the Rust has not built either gets this instead, which says out loud that
+ * there is nothing to wait for. `build.c` carries the argument and the three
+ * warnings that made it necessary.
+ *
+ * `block` is the clause naming what is not acted on, with no trailing stop:
+ * the sentence that follows it is appended here, so the two halves cannot
+ * drift apart in one caller and not another.
+ *
+ * Not `static` in `build.c` any more, because the wifi passes have the same
+ * distinction to draw about a `network` block and a second copy of the
+ * sentence is a second thing to keep true.
+ */
+void ncfg_plan_warn_unbuilt(ncfg_builder_t *builder, const char *interface, const char *block);
+
+/*
  * The three shapes a reason comes in.
  *
  * Named constructors rather than four assignments at each of the call sites,
@@ -356,7 +375,56 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder);
  */
 void ncfg_plan_dot1x(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
-int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const char *name);
+int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const ncfg_observed_t *observed,
+    const char *name);
+
+/*
+ * The supplicant a wireless radio needs, and its half of the rule above.
+ *
+ * The same op as `dot1x.c`'s and in the same place in the order -- 0008 puts
+ * wired 802.1X and wifi on one supplicant -- so the two are one question to
+ * the teardown and `ncfg_plan_supplicant_wanted` asks this one.
+ *
+ * **Planned last of the prerequisites**, which is the Rust's order and not an
+ * arrangement of convenience: an interface carrying a `dot1x` block has
+ * already said what its supplicant is for, and a radio running an access point
+ * does not also join networks with the same interface. `radio.c` says what
+ * getting either backwards costs.
+ *
+ * `observed` is an argument because being a radio is two facts from two
+ * places: the `device` block says `managed` and that there is radio policy
+ * here, and only the kernel can say the interface is a radio at all.
+ */
+void ncfg_plan_radio_supplicant(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+int  ncfg_plan_radio_supplicant_wanted(const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, const char *name);
+void ncfg_plan_radio_warn(ncfg_builder_t *builder);
+
+/*
+ * The hostapd a radio runs, and whether a running one is still asked for.
+ *
+ * `dot1x.c`'s arrangement and for its reason: both halves of the rule in one
+ * file, because the conditions that start a backend and the conditions that
+ * keep one have to stay the same. Planned in the same place in the order as
+ * the supplicant -- before any address -- and `access_point.c` says what
+ * getting that backwards costs on a radio.
+ *
+ * The restart is here rather than beside the station lists because it is the
+ * same question: hostapd reads its file once and has no reload, so every
+ * change to an access point but its station lists is a stop and a start.
+ * `ncfg_plan_access_point_restart_identity` answers whether it planned one, so
+ * a caller can leave the lists alone -- an access point that is coming back
+ * rebuilds them from the file anyway.
+ */
+void ncfg_plan_access_point(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
+int  ncfg_plan_access_point_wanted(const ncfg_document_t *desired, const char *name);
+void ncfg_plan_access_point_warn(ncfg_builder_t *builder);
+int  ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
+    const ncfg_access_point_t *point, const ncfg_observed_backend_t *running);
+void ncfg_plan_access_point_restart_policy(ncfg_builder_t *builder, const char *device,
+    const ncfg_observed_policy_t *live, const ncfg_access_control_t *wanted);
 
 /*
  * What this interface tells the hosts behind it.

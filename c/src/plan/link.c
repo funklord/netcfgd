@@ -85,8 +85,8 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 		 * that pass is not in this build. */
 		ncfg_plan_warnf(builder->plan, device->name,
 		    "`%s` is brought into existence by the daemon that dials it, and this "
-		    "build of the planner does not start backends, so nothing here creates "
-		    "it or configures what would run over it",
+		    "build of the planner starts no `pppoe` or `openvpn` backend, so nothing "
+		    "here creates it or configures what would run over it",
 		    device->name);
 		return;
 	}
@@ -499,6 +499,8 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_plan_ids_t             up_deps = { NULL, 0, 0 };
 	ncfg_plan_ids_t             addressing = { NULL, 0, 0 };
 	ncfg_plan_ids_t             authentication = { NULL, 0, 0 };
+	ncfg_plan_ids_t             serving = { NULL, 0, 0 };
+	ncfg_plan_ids_t             joining = { NULL, 0, 0 };
 	ncfg_plan_ids_t             source_base = { NULL, 0, 0 };
 	ncfg_op_t                   op;
 	ncfg_op_t                   inverse;
@@ -586,8 +588,31 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	 * over it.
 	 */
 	ncfg_plan_dot1x(builder, interface, &base, &authentication);
+	/*
+	 * And the access point, in the same place and for a sharper version of the
+	 * same reason: hostapd puts the radio into AP mode, which is a mode change
+	 * the kernel takes only on a link that is down, so an address added first
+	 * is an address that may not survive the start. `access_point.c` has the
+	 * rest, including why one interface takes one prerequisite and not two.
+	 */
+	ncfg_plan_access_point(builder, interface, &base, &serving);
+	/*
+	 * And the radio that joins a network rather than offering one, last of the
+	 * three for the reason `radio.c` gives: an interface carrying a `dot1x`
+	 * block has already said what its supplicant is for, and a radio running
+	 * hostapd does not also join networks with the same interface. The three
+	 * calls in this order are what makes "one prerequisite per interface" true
+	 * -- the Rust returns at the first that applies, and each of these three
+	 * declines where an earlier one took it.
+	 */
+	ncfg_plan_radio_supplicant(builder, interface, &base, &joining);
 	ncfg_plan_ids_extend(builder->plan, &source_base, &base);
 	ncfg_plan_ids_extend(builder->plan, &source_base, &authentication);
+	ncfg_plan_ids_extend(builder->plan, &source_base, &serving);
+	/* The addressing waits on it for `dot1x.c`'s reason sharpened by one step:
+	 * a radio that has not associated carries nothing at all, so a DHCP client
+	 * started first talks to a network this machine has not joined. */
+	ncfg_plan_ids_extend(builder->plan, &source_base, &joining);
 	for (i = 0; i < interface->addressing_count; i++) {
 		ncfg_plan_source(builder, interface, i, &source_base, &addressing);
 	}
@@ -629,5 +654,7 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_plan_ids_free(&up_deps);
 	ncfg_plan_ids_free(&addressing);
 	ncfg_plan_ids_free(&authentication);
+	ncfg_plan_ids_free(&serving);
+	ncfg_plan_ids_free(&joining);
 	ncfg_plan_ids_free(&source_base);
 }

@@ -391,8 +391,13 @@ static void warn_unmanaged(ncfg_builder_t *builder)
  * wording below is the Rust's own, which says the same thing about itself. A
  * block that is a real port gap gets a sentence naming what is missing, in the
  * arm itself, where a reader can check it against the pass that will fill it.
+ *
+ * **Published in `plan_internal.h` rather than kept here**, because the wifi
+ * passes draw the same distinction about the four halves of a `network` block
+ * nothing reads, and the one thing that must not happen to this sentence is
+ * for there to be two of it.
  */
-static void warn_unbuilt(ncfg_builder_t *builder, const char *interface, const char *block)
+void ncfg_plan_warn_unbuilt(ncfg_builder_t *builder, const char *interface, const char *block)
 {
 	ncfg_plan_warnf(builder->plan, interface,
 	    "%s. That is not this port catching up: nothing acts on it in the Rust either, "
@@ -438,11 +443,24 @@ static void warn_unported(ncfg_builder_t *builder)
 			case NCFG_ADDRESS_SOURCE_REPORTED:
 				break;
 			case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
-				/* The Rust's own sentence, unchanged: this one is not the
-				 * port's gap but the product's. */
-				ncfg_plan_warn(builder->plan, interface->name,
-				    "link-local addressing is accepted but not yet applied by "
-				    "this build");
+				/*
+				 * **The judgement above this arm was right and the sentence
+				 * under it contradicted it.** "Not yet applied by this
+				 * build" is a promise that a later release applies it, and
+				 * the reason given for keeping the wording was that it is
+				 * the Rust's own -- which is the argument 10.180 says does
+				 * not settle anything, because the Rust's sentence is about
+				 * the Rust. Re-checked against `crates/` rather than
+				 * inherited: `crates/netcfgd-plan/src/lib.rs:4033` is this
+				 * same warning on this same arm, and outside the model and
+				 * the compiler `AddressSource::LinkLocal` has no reader in
+				 * either language. So there is no release to wait for, and
+				 * this is `warn_unbuilt`'s sentence rather than a promise.
+				 */
+				ncfg_plan_warn_unbuilt(builder, interface->name,
+				    "link-local addressing is accepted and no pass applies "
+				    "it: nothing claims an RFC 3927 `169.254.0.0/16` address "
+				    "on the interface");
 				break;
 			default:
 				break;
@@ -471,7 +489,7 @@ static void warn_unported(ncfg_builder_t *builder)
 		}
 	}
 	if (desired->bluetooth_count != 0u) {
-		warn_unbuilt(builder, NULL,
+		ncfg_plan_warn_unbuilt(builder, NULL,
 		    "a `bluetooth` block: nothing pairs the device, connects it, or brings "
 		    "a `pan` link up");
 	}

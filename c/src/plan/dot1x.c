@@ -21,14 +21,15 @@
  *   existed. Keeping both halves in one file is what makes "the same
  *   conditions" checkable by reading rather than by remembering.
  *
- *   The radio arm is the half this build does not start: nothing here brings a
- *   station's supplicant up, and answering "unwanted" about one would stop a
- *   radio netcfgd never started. It is the Rust's rule unchanged, and it
- *   becomes ordinary the day the wifi half of the backend pass lands.
+ *   **The radio arm used to be the half this build did not start**, so the
+ *   rule answered "wanted" about a supplicant nothing here would have brought
+ *   up -- the permissive direction, deliberately, since answering the other
+ *   way would have stopped one netcfgd never started. `radio.c` starts it now,
+ *   and the arm has become ordinary: it is a call to that file's half of this
+ *   rule, so the pass that starts a radio's supplicant and the rule that keeps
+ *   one are the same line of code rather than two that agree today.
  */
 #include "plan_internal.h"
-
-#include <string.h>
 
 void ncfg_plan_dot1x(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out)
@@ -39,27 +40,20 @@ void ncfg_plan_dot1x(ncfg_builder_t *builder, const ncfg_interface_t *interface,
 	ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_SUPPLICANT, "dot1x", base, out);
 }
 
-int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const char *name)
+int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const ncfg_observed_t *observed,
+    const char *name)
 {
 	const ncfg_interface_t *interface = ncfg_plan_interface(desired, name);
-	const ncfg_device_t    *device;
-	size_t                  i;
 
 	if (interface && interface->dot1x) {
 		return 1;
 	}
 	/*
-	 * A radio that has been given an access point is not a station, so a
-	 * supplicant left over from before the `access_point` block was written is
-	 * unwanted. Without this arm the two backends would each be started by the
-	 * pass that wants it and stopped by the pass that does not.
+	 * And the other reason one process is kept, asked of the file that starts
+	 * a supplicant for it rather than spelled again here. The access point's
+	 * arm is inside that answer, which is where it belongs: "this radio is
+	 * running hostapd instead" is a statement about the radio and not about
+	 * 802.1X.
 	 */
-	for (i = 0; i < desired->access_point_count; i++) {
-		if (desired->access_points[i].device && name &&
-		    strcmp(desired->access_points[i].device, name) == 0) {
-			return 0;
-		}
-	}
-	device = ncfg_plan_device(desired, name);
-	return device && device->managed && device->wifi;
+	return ncfg_plan_radio_supplicant_wanted(desired, observed, name);
 }
