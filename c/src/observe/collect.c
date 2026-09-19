@@ -437,44 +437,6 @@ static int ask(const round_t *round, uint16_t kind, uint16_t flags, const ncfg_b
 	return answered;
 }
 
-/*
- * A complete request message, taken apart into what the exchange takes.
- *
- * The two traffic-control dumps are built by `qdisc.h`, which writes a whole
- * message with its own header because that is what its other callers send; the
- * exchange writes a header itself, so what it needs is the body. Taking the
- * kind, the flags and the body **out of the message qdisc.c built** is what
- * keeps the ingress parent, the dump flags and the refusal of a zero index in
- * the one module that owns them -- spelling any of the three again here is how
- * a filter dump comes to be aimed at the wrong parent and report a machine with
- * no redirects on it.
- *
- * `body` is the caller's to have initialised and to free on either answer. The
- * sequence number the message carries is discarded with its header, which is
- * why every caller passes zero for it.
- */
-static int request_parts(const ncfg_buf_t *message, uint16_t *kind, uint16_t *flags,
-    ncfg_buf_t *body, char *err, size_t err_size)
-{
-	ncfg_wire_messages_t walk;
-	ncfg_wire_message_t  parsed;
-
-	ncfg_wire_messages_start(&walk, message->data, message->length);
-	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
-		ncfg_error_set(err, err_size,
-		    "a traffic control request this port built is not a netlink message");
-		return 0;
-	}
-	*kind = parsed.header.kind;
-	*flags = parsed.header.flags;
-	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
-	if (ncfg_buf_failed(body)) {
-		ncfg_error_set(err, err_size, "no room for a traffic control request");
-		return 0;
-	}
-	return 1;
-}
-
 /* ------------------------------------------------------------------------ *
  * The dumps
  * ------------------------------------------------------------------------ */
@@ -696,7 +658,7 @@ static int dump_qdiscs(round_t *round, char *err, size_t err_size)
 	ncfg_buf_init(&message, 0);
 	ncfg_buf_init(&body, 0);
 	if (!ncfg_qdisc_build_dump(&message, 0, err, err_size) ||
-	    !request_parts(&message, &kind, &flags, &body, err, err_size)) {
+	    !ncfg_wire_request_parts(&message, "traffic control", &kind, &flags, &body, err, err_size)) {
 		ncfg_buf_free(&message);
 		ncfg_buf_free(&body);
 		return 0;
@@ -776,7 +738,7 @@ static int dump_redirects_on(round_t *round, uint32_t index, char *err, size_t e
 	 * library never asserts.
 	 */
 	if (!ncfg_qdisc_build_filter_dump(&message, 0, index, why, sizeof(why)) ||
-	    !request_parts(&message, &kind, &flags, &body, why, sizeof(why))) {
+	    !ncfg_wire_request_parts(&message, "traffic control", &kind, &flags, &body, why, sizeof(why))) {
 		unreadable(round->capture, why);
 		ncfg_buf_free(&message);
 		ncfg_buf_free(&body);

@@ -82,46 +82,6 @@
 #include <string.h>
 
 /*
- * A complete request message, taken apart into what the exchange takes.
- *
- * `genl.h` and `ethtool.h` build whole messages because that is what their
- * other callers send, and the exchange writes a header of its own. Taking the
- * kind, the flags and the body out of what they built is what keeps the
- * controller's id, the family id, the command number and the device header in
- * the modules that own them; spelling any of them again here is how a request
- * comes to be aimed at another family and read as this one's. `collect.c` does
- * this to the two traffic-control requests and `netfilter.c` to the two
- * nftables ones -- three copies of a line that differs only in the noun in its
- * refusal, which is a tidy-up for whoever next touches all three rather than
- * one to make in a file two of them are being written in.
- *
- * `body` is the caller's to have initialised and to free on either answer. The
- * sequence number is discarded with the header, which is why every caller here
- * builds with zero.
- */
-static int request_parts(const ncfg_buf_t *message, uint16_t *kind, uint16_t *flags,
-    ncfg_buf_t *body, char *err, size_t err_size)
-{
-	ncfg_wire_messages_t walk;
-	ncfg_wire_message_t  parsed;
-
-	ncfg_wire_messages_start(&walk, message->data, message->length);
-	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
-		ncfg_error_set(err, err_size,
-		    "a generic netlink request this port built is not a netlink message");
-		return 0;
-	}
-	*kind = parsed.header.kind;
-	*flags = parsed.header.flags;
-	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
-	if (ncfg_buf_failed(body)) {
-		ncfg_error_set(err, err_size, "no room for a generic netlink request");
-		return 0;
-	}
-	return 1;
-}
-
-/*
  * Whether a kernel feature name is one the model can express.
  *
  * Derived from `ncfg_offload_field_names` rather than kept beside it, so this
@@ -178,7 +138,7 @@ static int family_of(const ncfg_observe_kernel_t *genl, ncfg_genl_family_t *fami
 	ncfg_buf_init(&message, 0);
 	ncfg_buf_init(&body, 0);
 	ok = ncfg_genl_getfamily_request(&message, NCFG_ETHTOOL_FAMILY, 0, why, why_size) &&
-	    request_parts(&message, &kind, &flags, &body, why, why_size);
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, why_size);
 	ncfg_buf_free(&message);
 	if (ok) {
 		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why,
@@ -230,7 +190,7 @@ static int active_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t
 	ncfg_buf_init(&message, 0);
 	ncfg_buf_init(&body, 0);
 	ok = ncfg_ethtool_features_get_request(&message, family, device, 0, why, why_size) &&
-	    request_parts(&message, &kind, &flags, &body, why, why_size);
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, why_size);
 	ncfg_buf_free(&message);
 	if (ok) {
 		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why,

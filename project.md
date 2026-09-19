@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.194 One request parser where there were five, and a question I did not answer
+
+`request_parts` was written five times -- `kernel_genl.c`, `offloads.c`,
+`netfilter.c`, `wireguard.c` and `collect.c` -- identical but for the noun in
+two refusals. `offloads.c`'s own comment named three of them and called it "a
+tidy-up for whoever next touches all three". It is `ncfg_wire_request_parts` in
+`wire.h` now, which is where taking a message this port built back apart
+belongs, and the noun is an argument.
+
+Five copies of a parser is four chances for one to stop agreeing with the wire
+format the other four read, and this is the step every generic-netlink and
+netfilter exchange in the port begins with. Proved shared rather than claimed:
+making the body carry the header as well turns the new `wire_test` case **and**
+`collect.c`'s two traffic-control dumps red together, and dropping the flags
+turns the new case and the qdisc dump red together.
+
+Net 22 lines fewer, and three doc comments that had been describing a function
+each file no longer has are gone rather than left pointing at nothing.
+
+## The offload disagreement is not mine to close
+
+`src/observe/offloads.c` reads `ACTIVE` and the executor writes `WANTED`, so a
+feature the device forces on is reported on although `link.set_offloads` cannot
+move it -- and a document naming it `off` plans that op **on every pass, for
+ever**. Measured on this machine: `rx-checksum` is in `ACTIVE` and absent from
+`WANTED` on the loopback, on `docker0` and on both WireGuard devices. The
+mirror case is the same shape: `WANTED` without `ACTIVE` is a feature asked for
+and not delivered, and a document naming it `on` plans it for ever too. It is
+the convergence failure this port has found in the NAT pass and twice in
+WireGuard.
+
+**I did not close it, and the reason is worth writing down rather than
+attempting.** The planner needs a third fact -- *this feature cannot be moved*
+-- and `offloads` is a list of names with no room for it. Both ways of giving
+it somewhere to live turned out to be decisions above this work:
+
+  * **A new field on `ncfg_observed_link_t`** changes `doc/schema/observed.json`,
+    which is a frozen witness both languages read. `ObservedLink` in
+    `crates/netcfgd-model/src/observed.rs` carries `deny_unknown_fields`, so the
+    Rust would reject the witness outright and its own test would fail. Closing
+    it in C alone is not possible; closing it in both is a schema change to the
+    on-disk format of the daemon currently managing this workstation.
+  * **A member outside the type table** -- filled by the offloads round, read by
+    the planner, never serialised -- avoids the schema entirely, but
+    `ncfg_observed_free` frees through `ncfg_type_free` and the table is the
+    only walk there is, so such a member would simply leak. Giving the model a
+    second free path is a change to how every observed type is released.
+
+Neither is a judgement call to make while porting a module, and the first
+touches a file the live daemon writes. Raised rather than decided.
+
+**And the flaky Rust test has a cause now.**
+`probe::tests::require_lease_false_runs_the_probe_with_no_lease_at_all` failed
+again inside a full `make check` and passed on the next run, and this time it
+printed one: `cannot run /tmp/ncfg-probe-lease-.../probe.sh: Text file busy (os
+error 26)`. `ETXTBSY` from `execve` is a writable descriptor still open on the
+script being run -- the test writes it and execs it, and under `cargo test`'s
+threads the close and the exec race. Recorded rather than fixed, which is this
+branch's rule for the Rust: it is a defect in a test of code being deprecated,
+and the cause is here for whoever schedules it.
+
 ## 10.193 The WireGuard record gets its writer, and a third base64 encoder
 
 `observe.h` declared `ncfg_observe_wg_key_record_path` and

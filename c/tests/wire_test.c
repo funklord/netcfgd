@@ -177,6 +177,78 @@ static ncfg_wire_step_t find_in(const ncfg_buf_t *buf, uint16_t kind, ncfg_wire_
 
 int main(void)
 {
+	/* A request this port built is taken apart into what an exchange takes. */
+	{
+		ncfg_wire_header_t header;
+		ncfg_buf_t         message;
+		ncfg_buf_t         body;
+		uint16_t           kind = 0;
+		uint16_t           flags = 0;
+		char               err[NCFG_ERROR_MAX];
+		static const unsigned char payload[] = { 0x11, 0x22, 0x33, 0x44 };
+
+		header.len = (uint32_t)(NCFG_WIRE_NLMSG_HDR_LEN + sizeof(payload));
+		header.kind = 0x2au;
+		header.flags = NLM_F_REQUEST | NLM_F_DUMP;
+		header.seq = 7u;
+		header.pid = 0;
+		ncfg_buf_init(&message, 0);
+		ncfg_wire_header_encode(&header, &message);
+		ncfg_buf_add(&message, payload, sizeof(payload));
+
+		ncfg_buf_init(&body, 0);
+		err[0] = '\0';
+		check(ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body,
+		    err, sizeof(err)), "a built request comes apart");
+		check(kind == 0x2au && flags == (NLM_F_REQUEST | NLM_F_DUMP),
+		    "  with the kind and the flags the builder put in its header");
+		/*
+		 * The body and **not** the header, which is the whole point: an
+		 * exchange writes a header of its own, so handing it the message
+		 * entire would put two headers on the wire and the kernel would read
+		 * the first sixteen bytes of netcfgd's request as its payload.
+		 */
+		check(body.length == sizeof(payload) &&
+		    memcmp(body.data, payload, sizeof(payload)) == 0,
+		    "  and the body alone, since the exchange writes a header itself");
+		ncfg_buf_free(&body);
+		ncfg_buf_free(&message);
+
+		/*
+		 * **The refusal names the kind of request, which is all that varied
+		 * between the five copies this replaced.** A reader needs to know that
+		 * netcfgd built something it cannot itself parse -- a fault here
+		 * rather than in the kernel -- and which of the exchanges did it.
+		 */
+		ncfg_buf_init(&message, 0);
+		ncfg_buf_add(&message, payload, 3u);
+		ncfg_buf_init(&body, 0);
+		err[0] = '\0';
+		check(!ncfg_wire_request_parts(&message, "nftables", &kind, &flags, &body, err,
+		    sizeof(err)) && strstr(err, "nftables") != NULL &&
+		    strstr(err, "this port built") != NULL,
+		    "something too short to be a message is refused, naming which request");
+		ncfg_buf_free(&body);
+		ncfg_buf_free(&message);
+
+		/* A body with no room left is the other refusal, and it says which
+		 * request as well: a caller building into a bounded buffer gets a
+		 * sentence rather than a short body it would send. */
+		ncfg_buf_init(&message, 0);
+		ncfg_wire_header_encode(&header, &message);
+		ncfg_buf_add(&message, payload, sizeof(payload));
+		ncfg_buf_init(&body, 2u);
+		err[0] = '\0';
+		check(!ncfg_wire_request_parts(&message, "traffic control", &kind, &flags, &body,
+		    err, sizeof(err)) && strstr(err, "traffic control") != NULL,
+		    "and a body with no room for it is refused, naming the request too");
+		ncfg_buf_free(&body);
+		ncfg_buf_free(&message);
+
+		check(!ncfg_wire_request_parts(NULL, "generic netlink", &kind, &flags, &body, err,
+		    sizeof(err)), "and there being no request at all is a refusal, not a walk");
+	}
+
 	/* A header round trips. */
 	{
 		ncfg_wire_header_t header;

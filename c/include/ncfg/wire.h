@@ -239,6 +239,36 @@ ncfg_wire_step_t ncfg_wire_messages_next(ncfg_wire_messages_t *walk, ncfg_wire_m
     char *err, size_t err_size);
 
 /*
+ * A request this port built, taken apart into what an exchange takes.
+ *
+ * `genl.h`, `nft.h`, `wg.h` and `qdisc.h` build whole messages, because that
+ * is what their other callers send; an exchange writes a header of its own and
+ * wants the kind, the flags and the body separately. Taking them back out is
+ * what keeps the family id, the command number and the device header inside
+ * the module that knows them, rather than having the caller rebuild the
+ * message a second way.
+ *
+ * **One function because it was written five times.** `kernel_genl.c`,
+ * `offloads.c`, `netfilter.c`, `wireguard.c` and `collect.c` each had an
+ * identical copy, differing only in the noun in two sentences -- which is
+ * `what`, and is the whole of what varied. Five copies of a parser is four
+ * chances for one of them to stop agreeing with the wire format the other four
+ * read, and this one is the step every generic-netlink and netfilter exchange
+ * in the port begins with.
+ *
+ * `what` names the kind of request for the two refusals, in the shape those
+ * sentences already used: "a %s request this port built is not a netlink
+ * message", and "no room for a %s request". A request that does not parse is a
+ * fault in netcfgd rather than in the kernel, and both sentences say so.
+ *
+ * `body` is appended to and its failure is sticky, so a caller may build into
+ * one it already holds. 1 with `kind`, `flags` and `body` filled; 0 with a
+ * sentence.
+ */
+int ncfg_wire_request_parts(const ncfg_buf_t *message, const char *what, uint16_t *kind,
+    uint16_t *flags, ncfg_buf_t *body, char *err, size_t err_size);
+
+/*
  * The attribute area of a message whose family struct is `body_length` long.
  *
  * Refuses a payload too short for the struct it claims to carry, which is the
