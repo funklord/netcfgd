@@ -4491,6 +4491,37 @@ impl Builder {
 					continue;
 				}
 				for name in names {
+					// **The ones the device will not move are left out, by
+					// name.** `ethtool -k` prints them `[fixed]`, and planning
+					// one is an action that must fail on every pass for ever:
+					// the executor writes the request, the kernel keeps what
+					// it had, the next observation reports the same thing and
+					// the planner asks again.
+					//
+					// Per kernel feature rather than per field, because a
+					// field can cover several and a device commonly fixes one
+					// of them -- a loopback holds `rx-checksum` and
+					// `tx-checksum-ip-generic` whatever it is asked, and
+					// dropping the whole field over that would stop netcfgd
+					// setting the ones it can.
+					if link.is_some_and(|link| is_fixed(link, name)) {
+						let state = if link.is_some_and(|link| held_on(link, name)) {
+							"on"
+						} else {
+							"off"
+						};
+						let device = interface.name.clone();
+						self.warn(
+							&device,
+							format!(
+								"{device} holds `{name}` {state} whatever it is \
+								 asked, so netcfgd is not asking: the device \
+								 reports it as fixed, and a `link.set_offloads` \
+								 for it would fail on every pass for ever"
+							),
+						);
+						continue;
+					}
 					wanted.push(((*name).to_owned(), on));
 				}
 			}
@@ -7067,6 +7098,16 @@ fn render_vlan(vlan: netcfgd_model::BridgeVlan) -> String {
 }
 
 /// Whether one kernel feature name is currently on.
+/// Whether a `link.set_offloads` could move this feature at all.
+///
+/// The device holds some regardless of what it is asked for -- `ethtool -k`
+/// prints them `[fixed]` -- and `ObservedLink::offloads_fixed` says how the
+/// observation knows. Planning one of those is an action that must fail, on
+/// every pass, for ever.
+fn is_fixed(link: &netcfgd_model::ObservedLink, name: &str) -> bool {
+	link.offloads_fixed.iter().any(|held| held == name)
+}
+
 fn held_on(link: &netcfgd_model::ObservedLink, name: &str) -> bool {
 	link.offloads.iter().any(|held| held == name)
 }

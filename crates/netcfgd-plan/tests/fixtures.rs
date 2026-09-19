@@ -47,6 +47,7 @@ fn link(name: &str) -> ObservedLink {
 		master: None,
 		parent: None,
 		offloads: Vec::new(),
+		offloads_fixed: Vec::new(),
 		ipv6_token: None,
 		qdisc: Some("noqueue".to_owned()),
 		qdisc_bandwidth_bits: None,
@@ -5407,6 +5408,132 @@ fn an_offload_already_correct_plans_nothing() {
 		!names(&plan).contains(&"link.set_offloads"),
 		"{:?}",
 		names(&plan)
+	);
+}
+
+/// A feature the device holds regardless of what it is asked for is not asked
+/// for.
+///
+/// `ethtool -k` prints these `[fixed]`. Planning one is an action that must
+/// fail on every pass, for ever: the executor writes the request, the kernel
+/// keeps what it had, the next observation reports the same thing and the
+/// planner asks again. Measured on a real machine -- a loopback holds
+/// `rx-checksum` and `tx-checksum-ip-generic` whatever it is asked.
+#[test]
+fn a_feature_the_device_holds_fixed_is_not_asked_for() {
+	let desired = document(
+		r#"
+		device eth0 {
+			ethtool { rx_checksum = "off" }
+		}
+		interface eth0 {
+			config  = "10.0.0.2/24"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec!["rx-checksum".to_owned()];
+		link.offloads_fixed = vec!["rx-checksum".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	// The convergence check: without the guard the document says `off`, the
+	// observation says on, and the difference is planned on every pass.
+	assert!(
+		!names(&plan).contains(&"link.set_offloads"),
+		"{:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings.iter().any(|warning| warning
+			.message
+			.contains("whatever it is asked, so netcfgd is not asking")),
+		"{:?}",
+		plan.warnings
+	);
+}
+
+/// The other features of one field are still asked for.
+///
+/// A field covers several kernel features because a driver offers whichever
+/// its hardware has, and a device commonly fixes one of them -- so the guard
+/// is per feature, or netcfgd would stop setting the ones it can.
+#[test]
+fn the_other_features_of_one_field_are_still_asked_for() {
+	let desired = document(
+		r#"
+		device eth0 {
+			ethtool { tx_checksum = "off" }
+		}
+		interface eth0 {
+			config  = "10.0.0.2/24"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = vec![
+			"tx-checksum-ip-generic".to_owned(),
+			"tx-checksum-ipv4".to_owned(),
+		];
+		link.offloads_fixed = vec!["tx-checksum-ip-generic".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	let Some(features) = plan.actions.iter().find_map(|action| match &action.op {
+		Op::LinkSetOffloads { features, .. } => Some(features),
+		_ => None,
+	}) else {
+		panic!("no link.set_offloads: {:?}", names(&plan));
+	};
+	assert!(
+		features.iter().any(|(name, _)| name == "tx-checksum-ipv4"),
+		"{features:?}"
+	);
+	assert!(
+		!features
+			.iter()
+			.any(|(name, _)| name == "tx-checksum-ip-generic"),
+		"{features:?}"
+	);
+}
+
+/// The mirror direction: asked for and never delivered.
+///
+/// `WANTED` without `ACTIVE`. It fails the same way as the forced-on case, so
+/// it gets the same answer -- without the guard a document saying `on` plans
+/// it on every pass for ever.
+#[test]
+fn a_feature_wanted_and_not_delivered_is_the_same_case() {
+	let desired = document(
+		r#"
+		device eth0 {
+			ethtool { gro = "on" }
+		}
+		interface eth0 {
+			config  = "10.0.0.2/24"
+		}
+		"#,
+	);
+	let mut observed = observed_with(&["eth0"]);
+	if let Some(link) = observed.links.iter_mut().find(|l| l.name == "eth0") {
+		link.offloads = Vec::new();
+		link.offloads_fixed = vec!["rx-gro".to_owned()];
+	}
+
+	let plan = plan(&desired, &observed, &PlanOptions::default());
+	assert!(
+		!names(&plan).contains(&"link.set_offloads"),
+		"{:?}",
+		names(&plan)
+	);
+	assert!(
+		plan.warnings.iter().any(|warning| warning
+			.message
+			.contains("holds `rx-gro` off whatever it is asked")),
+		"{:?}",
+		plan.warnings
 	);
 }
 

@@ -9515,6 +9515,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.198 The offload disagreement is closed, in both languages
+
+10.194 left this open because closing it needed a decision above the work: a
+new field on `ObservedLink` changes `doc/schema/observed.json`, which both
+languages read and the Rust reads with `deny_unknown_fields`. The holder said
+to fix it in both.
+
+**The defect.** The observer read the kernel's `ACTIVE` bitset and the executor
+wrote its `WANTED` one, so a feature the device holds regardless of what it is
+asked was reported on while a `link.set_offloads` could not move it -- and a
+document naming it `off` planned that op on every pass, for ever. The mirror
+case is the same shape: a feature wanted and never delivered made a document
+saying `on` plan it for ever. It is the convergence failure this port found in
+the NAT pass and twice in WireGuard.
+
+**The rule is `ACTIVE` disagreeing with `WANTED`, which is the condition rather
+than the cause.** `WANTED` is the bitset a `set_features` writes and `ACTIVE`
+is what the device is doing, so a name in one and not the other is a request
+that did not take. Whether the driver never supported it, forces it on, or the
+kernel never changes it, the planner's question is the same -- asking again
+will not help -- and `ethtool -k` prints exactly these as `[fixed]`, which is
+where the field's name comes from. `HW` and `NOCHANGE` say *why* and are
+deliberately not read: a reader that took them would be keeping two facts to
+decide one.
+
+**Measured on this workstation before the rule was chosen**, through the port's
+own reader rather than by reasoning: `lo` holds `rx-checksum` and
+`tx-checksum-ip-generic`; `wlp0s20f3` holds `rx-checksum`; `docker0`,
+`enp0s31f6` and both WireGuard devices hold nothing. That last part corrects
+10.185, which named `docker0` and the WireGuard devices -- today `rx-checksum`
+is not even active on them.
+
+**Both bitsets come out of one reply, not two round trips.** The kernel carries
+them in the same payload, and asking twice would let the machine change between
+them -- which is the one thing that would make "these disagree" say a request
+had not taken when it had.
+
+**The guard is per kernel feature, not per model field.** A field covers
+several features because a driver offers whichever its hardware has, and a
+device commonly fixes one of them: `lo` holds `tx-checksum-ip-generic` and
+would take `tx-checksum-ipv4`, so dropping the whole `tx_checksum` field would
+stop netcfgd setting what it can. The plan warns by name and says which way
+round the feature is stuck.
+
+**On the schema.** `offloads_fixed` is omitted when empty -- `NCFG_FF_OMIT_EMPTY`
+in C, `skip_serializing_if = "Vec::is_empty"` in Rust -- so every ordinary
+device writes nothing, and a record written before the field existed reads back
+as "none", which is the right answer for a question nobody asked. The witness
+carries it on one link so neither side can let it go quiet. A minor bump: a
+reader of the old shape still reads the new record.
+
+**A sabotage that caught nothing, and what it changed.** Dropping one direction
+from the Rust's reader turned nothing red, because `read_offloads` opens
+ethtool itself and has no seam -- where the C's reader is driven through a
+replay. The rule is now `fixed_features`, pure and separate from the round that
+fetches the bitsets, with its own tests; the netlink round stays untested there,
+as it already was. Six sabotages bite across the two languages: the planner
+ignoring the list (C and Rust), the reader keeping one direction (C and Rust),
+the `WANTED` merge removed (C), and the managed filter removed (Rust).
+
+C: 6,342 checks across 96 binaries. Rust: every suite green, `clippy`, `fmt`
+and the adapters with it.
+
 ## 10.197 The cycle option lands, and the last planner gap closes
 
 `ncfg_plan_options_t::cycle` is 0152's option half, and it was the last thing

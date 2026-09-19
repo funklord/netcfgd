@@ -174,8 +174,9 @@ static int family_of(const ncfg_observe_kernel_t *genl, ncfg_genl_family_t *fami
  * either answer -- a partial set is exactly what must not be stored, and
  * leaving it owned by one side keeps the failure path one line.
  */
-static int active_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
-    const char *device, ncfg_ethtool_names_t *out, char *why, size_t why_size)
+static int features_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *family,
+    const char *device, ncfg_ethtool_names_t *out, ncfg_ethtool_names_t *asked, char *why,
+    size_t why_size)
 {
 	ncfg_buf_t           message;
 	ncfg_buf_t           body;
@@ -186,6 +187,9 @@ static int active_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t
 	int                  ok;
 
 	memset(out, 0, sizeof(*out));
+	if (asked) {
+		memset(asked, 0, sizeof(*asked));
+	}
 	memset(&reply, 0, sizeof(reply));
 	ncfg_buf_init(&message, 0);
 	ncfg_buf_init(&body, 0);
@@ -205,8 +209,20 @@ static int active_of(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t
 		 * not a failure. `ncfg_ethtool_active_merge` says so, and folds
 		 * them in sorted and deduplicated.
 		 */
-		ok = ncfg_ethtool_active_merge(out, reply.items[at].bytes,
-		    reply.items[at].length, why, why_size);
+		ok = ncfg_ethtool_bitset_merge(out, reply.items[at].bytes,
+		    reply.items[at].length, NCFG_ETHTOOL_BITSET_ACTIVE, why, why_size);
+		/*
+		 * And what the device was last *asked* for, out of the same reply.
+		 * Two merges of one message rather than two round trips: the kernel
+		 * carries both bitsets in the payload already, and asking twice would
+		 * let the machine change between them -- which is the one thing that
+		 * would make the comparison below say a request did not take when it
+		 * had.
+		 */
+		if (ok && asked) {
+			ok = ncfg_ethtool_bitset_merge(asked, reply.items[at].bytes,
+			    reply.items[at].length, NCFG_ETHTOOL_BITSET_WANTED, why, why_size);
+		}
 	}
 	ncfg_netlink_reply_free(&reply);
 	return ok;
@@ -240,6 +256,77 @@ static int keep_managed(const ncfg_ethtool_names_t *active, ncfg_observed_link_t
 	return 1;
 }
 
+/* Whether a name is in a set the kernel handed back, which is sorted and
+ * deduplicated -- a plain walk, because these are five to a few dozen names. */
+static int names_has(const ncfg_ethtool_names_t *set, const char *name)
+{
+	size_t at;
+
+	for (at = 0; at < set->count; at++) {
+		if (set->items[at] && name && strcmp(set->items[at], name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * The features this device holds regardless of what it was asked for.
+ *
+ * **`ACTIVE` disagreeing with `WANTED` is the whole test**, and it is the
+ * condition rather than the cause: `WANTED` is the bitset a `set_features`
+ * writes and `ACTIVE` is what the device is doing, so a name in one and not
+ * the other is a request that did not take. Whether the driver never supported
+ * it, or forces it on, or the kernel never changes it, the planner's question
+ * is the same -- asking again will not help -- and `ethtool -k` prints exactly
+ * these as `[fixed]`.
+ *
+ * **Both directions, because they fail the same way.** A feature active and
+ * not wanted cannot be turned off; one wanted and not active cannot be turned
+ * on. Without this the first makes a document saying `off` plan
+ * `link.set_offloads` on every pass for ever, and the second does the same for
+ * a document saying `on` -- which is the shape of convergence failure this
+ * port has found in the NAT pass and twice in WireGuard.
+ *
+ * Only the names the model can express, like the active list beside it: a
+ * device reports dozens and `observed.h` says why storing all of them would be
+ * a page of driver detail in `/run` for five fields.
+ */
+static int keep_fixed(const ncfg_ethtool_names_t *active, const ncfg_ethtool_names_t *asked,
+    ncfg_observed_link_t *link, char *err, size_t err_size)
+{
+	char **kept = NULL;
+	size_t count = 0;
+	size_t at;
+
+	for (at = 0; at < active->count; at++) {
+		if (!managed(active->items[at]) || names_has(asked, active->items[at])) {
+			continue;
+		}
+		if (!observe_list_add(&kept, &count, active->items[at])) {
+			goto no_memory;
+		}
+	}
+	for (at = 0; at < asked->count; at++) {
+		if (!managed(asked->items[at]) || names_has(active, asked->items[at])) {
+			continue;
+		}
+		if (!observe_list_add(&kept, &count, asked->items[at])) {
+			goto no_memory;
+		}
+	}
+	observe_names_free(link->offloads_fixed, link->offloads_fixed_count);
+	link->offloads_fixed = kept;
+	link->offloads_fixed_count = count;
+	return 1;
+
+no_memory:
+	ncfg_error_set(err, err_size, "out of memory recording the offloads %s holds fixed",
+	    link->name ? link->name : "?");
+	observe_names_free(kept, count);
+	return 0;
+}
+
 /* Nothing is known about any device's offloads. Cleared rather than left, so a
  * second observation through a source without this seam does not carry the
  * first one's answer -- `netfilter.c`'s rule, for its reason. */
@@ -252,6 +339,10 @@ static void nothing_is_known(ncfg_observed_t *observed)
 		    observed->links[at].offload_count);
 		observed->links[at].offloads = NULL;
 		observed->links[at].offload_count = 0;
+		observe_names_free(observed->links[at].offloads_fixed,
+		    observed->links[at].offloads_fixed_count);
+		observed->links[at].offloads_fixed = NULL;
+		observed->links[at].offloads_fixed_count = 0;
 	}
 }
 
@@ -294,10 +385,11 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 	for (at = 0; at < observed->link_count; at++) {
 		ncfg_observed_link_t *link = &observed->links[at];
 		ncfg_ethtool_names_t  active;
+		ncfg_ethtool_names_t  asked;
 		int                   read;
 
 		why[0] = '\0';
-		read = active_of(genl, &family, link->name, &active, why, sizeof(why));
+		read = features_of(genl, &family, link->name, &active, &asked, why, sizeof(why));
 		if (!read) {
 			/*
 			 * Counted rather than fatal, and the whole device's answer
@@ -312,14 +404,18 @@ int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_
 			}
 			unreadable++;
 			ncfg_ethtool_names_free(&active);
+			ncfg_ethtool_names_free(&asked);
 			continue;
 		}
-		if (!keep_managed(&active, link, err, err_size)) {
+		if (!keep_managed(&active, link, err, err_size) ||
+		    !keep_fixed(&active, &asked, link, err, err_size)) {
 			ncfg_ethtool_names_free(&active);
+			ncfg_ethtool_names_free(&asked);
 			ncfg_genl_family_free(&family);
 			return 0;
 		}
 		ncfg_ethtool_names_free(&active);
+		ncfg_ethtool_names_free(&asked);
 	}
 	ncfg_genl_family_free(&family);
 	if (unreadable != 0) {

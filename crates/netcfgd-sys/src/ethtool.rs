@@ -87,6 +87,25 @@ impl Ethtool {
 	/// Returns the errno the kernel replied with. `EOPNOTSUPP` means the
 	/// device has no ethtool operations at all.
 	pub fn active_features(&mut self, device: &str) -> io::Result<Vec<String>> {
+		Ok(self.features(device)?.0)
+	}
+
+	/// What the device is doing, and what it was last asked for.
+	///
+	/// **Both out of one reply, not two round trips.** The kernel carries
+	/// `ACTIVE` and `WANTED` in the same payload, and asking twice would let
+	/// the machine change between them -- which is the one thing that would
+	/// make "these disagree, so a request did not take" say so when it had.
+	///
+	/// Where the two disagree the device holds the feature regardless of what
+	/// it is asked: `ethtool -k` prints those as `[fixed]`, and a
+	/// `link.set_offloads` for one fails on every pass for ever.
+	///
+	/// # Errors
+	///
+	/// Returns the errno the kernel replied with. `EOPNOTSUPP` means the
+	/// device has no ethtool operations at all.
+	pub fn features(&mut self, device: &str) -> io::Result<(Vec<String>, Vec<String>)> {
 		let replies = self.genl.request(
 			&self.family,
 			GenlHeader {
@@ -98,21 +117,33 @@ impl Ethtool {
 		)?;
 
 		let mut out = Vec::new();
+		let mut asked = Vec::new();
 		for payload in &replies {
-			let Some(active) = payload_attrs(payload)
-				.find(|attr| attr.kind & !NLA_F_NESTED == ETHTOOL_A_FEATURES_ACTIVE)
-			else {
-				continue;
-			};
 			// `ACTIVE` comes back as a no-mask bitset, which is a *list*: a
 			// bit that appears is on, and one that does not is off. Reading it
 			// as a mask bitset and looking for `BIT_VALUE` finds nothing and
-			// reports every feature disabled.
-			out.extend(listed_names(active.value));
+			// reports every feature disabled. `WANTED` is the same shape, and
+			// is the bitset `set_features` writes.
+			for (kind, into) in [
+				(ETHTOOL_A_FEATURES_ACTIVE, &mut out),
+				(ETHTOOL_A_FEATURES_WANTED, &mut asked),
+			] {
+				// A message about this device that does not carry this set
+				// adds nothing, and is not a failure: the kernel answers about
+				// some devices in more than one message and only one of them
+				// has it.
+				if let Some(set) =
+					payload_attrs(payload).find(|attr| attr.kind & !NLA_F_NESTED == kind)
+				{
+					into.extend(listed_names(set.value));
+				}
+			}
 		}
 		out.sort_unstable();
 		out.dedup();
-		Ok(out)
+		asked.sort_unstable();
+		asked.dedup();
+		Ok((out, asked))
 	}
 
 	/// Turn features on or off by name.

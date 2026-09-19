@@ -79,6 +79,9 @@
         "rx-checksum",
         "tx-checksum-ip-generic"
       ],
+      "offloads_fixed": [
+        "rx-checksum"
+      ],
       "ipv6_token": "::5",
       "qdisc": "cake",
       "qdisc_bandwidth_bits": 20000000,
@@ -165,6 +168,9 @@
       "offloads": [
         "rx-checksum",
         "tx-checksum-ip-generic"
+      ],
+      "offloads_fixed": [
+        "rx-checksum"
       ],
       "ipv6_token": "::5",
       "qdisc": "cake",
@@ -253,6 +259,9 @@
         "rx-checksum",
         "tx-checksum-ip-generic"
       ],
+      "offloads_fixed": [
+        "rx-checksum"
+      ],
       "ipv6_token": "::5",
       "qdisc": "cake",
       "qdisc_bandwidth_bits": 20000000,
@@ -339,6 +348,9 @@
       "offloads": [
         "rx-checksum",
         "tx-checksum-ip-generic"
+      ],
+      "offloads_fixed": [
+        "rx-checksum"
       ],
       "ipv6_token": "::5",
       "qdisc": "cake",

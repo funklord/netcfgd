@@ -1105,6 +1105,7 @@ mod tests {
 				master: None,
 				parent: None,
 				offloads: Vec::new(),
+				offloads_fixed: Vec::new(),
 				ipv6_token: None,
 				qdisc: None,
 				qdisc_bandwidth_bits: None,

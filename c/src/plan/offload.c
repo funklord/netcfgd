@@ -43,6 +43,31 @@
  * must agree on belongs there. Nothing in this file names a feature any more.
  */
 
+/*
+ * Whether a `link.set_offloads` could move this feature at all.
+ *
+ * The device holds some regardless of what it is asked for -- `ethtool -k`
+ * prints them `[fixed]` -- and `observed.h` says how the observation knows.
+ * Planning one of those is an action that must fail, on every pass, for ever:
+ * the executor writes the request, the kernel keeps what it had, the next
+ * observation reports the same thing and the planner asks again. That is the
+ * convergence failure 10.194 records and this is the guard that closes it.
+ */
+static int is_fixed(const ncfg_observed_link_t *link, const char *name)
+{
+	size_t i;
+
+	if (!link) {
+		return 0;
+	}
+	for (i = 0; i < link->offloads_fixed_count; i++) {
+		if (link->offloads_fixed[i] && strcmp(link->offloads_fixed[i], name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* Whether one kernel feature name is currently on. */
 static int held_on(const ncfg_observed_link_t *link, const char *name)
 {
@@ -234,7 +259,24 @@ void ncfg_plan_offloads(ncfg_builder_t *builder)
 			if (link && held == on) {
 				continue;
 			}
+			/*
+			 * **The ones the device will not move are left out, by name.**
+			 * Per kernel feature rather than per field, because a field can
+			 * cover several and a device commonly fixes one of them: `lo`
+			 * holds `rx-checksum` and `tx-checksum-ip-generic` whatever it is
+			 * asked, and dropping the whole `checksum` field over that would
+			 * stop netcfgd setting the ones it can.
+			 */
 			for (j = 0; j < named; j++) {
+				if (is_fixed(link, names[j])) {
+					ncfg_plan_warnf(builder->plan, device->name,
+					    "%s holds `%s` %s whatever it is asked, so netcfgd is "
+					    "not asking: the device reports it as fixed, and a "
+					    "`link.set_offloads` for it would fail on every pass "
+					    "for ever", device->name, names[j],
+					    held_on(link, names[j]) ? "on" : "off");
+					continue;
+				}
 				wanted[count].name = names[j];
 				wanted[count].wanted = on;
 				count++;

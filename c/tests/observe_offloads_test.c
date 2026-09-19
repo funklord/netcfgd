@@ -109,6 +109,34 @@ static void joined(const ncfg_observed_link_t *link, char *out, size_t out_size)
 	}
 }
 
+/* The fixed list a link carries, joined the same way. */
+static void joined_fixed(const ncfg_observed_link_t *link, char *out, size_t out_size)
+{
+	size_t at;
+	size_t length = 0;
+
+	out[0] = '\0';
+	for (at = 0; link && at < link->offloads_fixed_count && length < out_size; at++) {
+		length += (size_t)snprintf(out + length, out_size - length, "%s%s",
+		    length ? " " : "",
+		    link->offloads_fixed[at] ? link->offloads_fixed[at] : "(null)");
+	}
+}
+
+static int holds_fixed(const ncfg_observed_t *observed, const char *device,
+    const char *expected)
+{
+	const ncfg_observed_link_t *link = ncfg_observed_link(observed, device);
+	char                        written[256];
+
+	joined_fixed(link, written, sizeof(written));
+	if (strcmp(written, expected) == 0) {
+		return 1;
+	}
+	printf("  %s holds [%s] fixed; expected [%s]\n", device, written, expected);
+	return 0;
+}
+
 static int carries(const ncfg_observed_t *observed, const char *device, const char *expected)
 {
 	const ncfg_observed_link_t *link = ncfg_observed_link(observed, device);
@@ -167,15 +195,44 @@ static void append_family(ncfg_buf_t *out, const char *name, uint16_t id)
  * as a list would mean, and `ethtool_test.c` drives it; what matters here is
  * that this fixture writes the form a kernel writes.
  */
-static void append_features(ncfg_buf_t *out, const char *device, const char *const *names,
-    size_t count, int with_active)
+static void append_bitset(ncfg_buf_t *payload, int kind, const char *const *names, size_t count)
+{
+	ncfg_buf_t bitset;
+	ncfg_buf_t bits;
+	size_t     at;
+
+	ncfg_buf_init(&bits, 0);
+	for (at = 0; at < count; at++) {
+		ncfg_buf_t bit;
+
+		ncfg_buf_init(&bit, 0);
+		ncfg_wire_attr_put_str(&bit, ETHTOOL_A_BITSET_BIT_NAME, names[at]);
+		ncfg_wire_attr_put_nested(&bits, ETHTOOL_A_BITSET_BITS_BIT, &bit);
+		ncfg_buf_free(&bit);
+	}
+	ncfg_buf_init(&bitset, 0);
+	ncfg_wire_attr_put(&bitset, ETHTOOL_A_BITSET_NOMASK, NULL, 0);
+	ncfg_wire_attr_put_nested(&bitset, ETHTOOL_A_BITSET_BITS, &bits);
+	ncfg_wire_attr_put_nested(payload, (uint16_t)kind, &bitset);
+	ncfg_buf_free(&bits);
+	ncfg_buf_free(&bitset);
+}
+
+/*
+ * A reply carrying `ACTIVE` and, where `asked` is not NULL, `WANTED`.
+ *
+ * A real kernel carries both in the same payload, which is why the reader
+ * merges both out of one message rather than asking twice -- the machine could
+ * change between two requests, and a difference that appeared then would say a
+ * request had not taken when it had.
+ */
+static void append_features_asked(ncfg_buf_t *out, const char *device,
+    const char *const *names, size_t count, int with_active, const char *const *asked,
+    size_t asked_count)
 {
 	ncfg_genl_header_t header;
 	ncfg_buf_t         payload;
 	ncfg_buf_t         nest;
-	ncfg_buf_t         bitset;
-	ncfg_buf_t         bits;
-	size_t             at;
 
 	header.cmd = ETHTOOL_MSG_FEATURES_GET_REPLY;
 	header.version = 1;
@@ -185,25 +242,26 @@ static void append_features(ncfg_buf_t *out, const char *device, const char *con
 	ncfg_wire_attr_put_str(&nest, ETHTOOL_A_HEADER_DEV_NAME, device);
 	ncfg_wire_attr_put_nested(&payload, ETHTOOL_A_FEATURES_HEADER, &nest);
 	if (with_active) {
-		ncfg_buf_init(&bits, 0);
-		for (at = 0; at < count; at++) {
-			ncfg_buf_t bit;
-
-			ncfg_buf_init(&bit, 0);
-			ncfg_wire_attr_put_str(&bit, ETHTOOL_A_BITSET_BIT_NAME, names[at]);
-			ncfg_wire_attr_put_nested(&bits, ETHTOOL_A_BITSET_BITS_BIT, &bit);
-			ncfg_buf_free(&bit);
-		}
-		ncfg_buf_init(&bitset, 0);
-		ncfg_wire_attr_put(&bitset, ETHTOOL_A_BITSET_NOMASK, NULL, 0);
-		ncfg_wire_attr_put_nested(&bitset, ETHTOOL_A_BITSET_BITS, &bits);
-		ncfg_wire_attr_put_nested(&payload, ETHTOOL_A_FEATURES_ACTIVE, &bitset);
-		ncfg_buf_free(&bits);
-		ncfg_buf_free(&bitset);
+		append_bitset(&payload, ETHTOOL_A_FEATURES_ACTIVE, names, count);
+	}
+	if (asked) {
+		append_bitset(&payload, ETHTOOL_A_FEATURES_WANTED, asked, asked_count);
 	}
 	append_message(out, ETHTOOL_FAMILY_ID, &payload);
 	ncfg_buf_free(&nest);
 	ncfg_buf_free(&payload);
+}
+
+/*
+ * The same with no `WANTED` at all, which is what every case written before
+ * there was a second bitset expects: nothing was asked for, so everything
+ * active disagrees with it and is held fixed. Those cases assert `offloads`
+ * and say nothing about `offloads_fixed`, so that is left as it falls.
+ */
+static void append_features(ncfg_buf_t *out, const char *device, const char *const *names,
+    size_t count, int with_active)
+{
+	append_features_asked(out, device, names, count, with_active, NULL, 0u);
 }
 
 /* An `NLMSG_ERROR`: the negated errno, then the header of the request that drew
@@ -364,6 +422,81 @@ static void only_the_offloads_the_model_can_express(void)
 		    "the two the model manages are kept, sorted");
 		check(carries(observed, "eth1", ""),
 		    "and a device with nothing on carries nothing");
+	} else {
+		detail("it said", err);
+	}
+	ncfg_observed_free(observed);
+	ncfg_buf_free(&family);
+	ncfg_buf_free(&first);
+	ncfg_buf_free(&second);
+}
+
+/*
+ * What the device holds regardless of what it was asked for.
+ *
+ * `ACTIVE` disagreeing with `WANTED` is the whole test, and this drives both
+ * directions out of one reply because that is how a kernel sends them --
+ * asking twice would let the machine change between the two requests, which is
+ * the one thing that would make a difference appear where none was.
+ */
+static void what_the_device_holds_fixed_is_active_disagreeing_with_wanted(void)
+{
+	script_t              script;
+	ncfg_observe_replay_t replay;
+	ncfg_observe_kernel_t kernel;
+	ncfg_buf_t            family;
+	ncfg_buf_t            first;
+	ncfg_buf_t            second;
+	ncfg_observed_t      *observed = planfix_observed(MACHINE);
+	const char           *active[2];
+	const char           *asked[2];
+	char                  expected[128];
+	char                  err[NCFG_ERROR_MAX];
+
+	if (!check(observed != NULL, "the machine reads")) {
+		return;
+	}
+	/*
+	 * `eth0`: GRO is on and was asked for, so it moves. The transmit checksum
+	 * is on and was **not** asked for, so the device is holding it -- which is
+	 * a loopback's `rx-checksum` exactly, measured on this workstation.
+	 */
+	active[0] = name_of(NCFG_OFFLOAD_GRO);
+	active[1] = name_of(NCFG_OFFLOAD_TX_CHECKSUM);
+	asked[0] = name_of(NCFG_OFFLOAD_GRO);
+
+	memset(&script, 0, sizeof(script));
+	ncfg_buf_init(&family, 0);
+	ncfg_buf_init(&first, 0);
+	ncfg_buf_init(&second, 0);
+	append_family(&family, NCFG_ETHTOOL_FAMILY, ETHTOOL_FAMILY_ID);
+	append_features_asked(&first, "eth0", active, 2u, 1, asked, 1u);
+	/*
+	 * `eth1`: nothing is on and GRO **was** asked for -- the mirror direction,
+	 * a feature requested and never delivered. It fails the same way, so it is
+	 * the same answer.
+	 */
+	append_features_asked(&second, "eth1", NULL, 0u, 1, asked, 1u);
+	queue(&script, &family);
+	queue(&script, &first);
+	queue(&script, &second);
+	kernel_of(&kernel, &replay, &script);
+
+	err[0] = '\0';
+	if (check(ncfg_observe_offloads_from(&kernel, observed, err, sizeof(err)),
+	    "a round carrying both bitsets is read")) {
+		(void)snprintf(expected, sizeof(expected), "%s",
+		    name_of(NCFG_OFFLOAD_TX_CHECKSUM));
+		check(holds_fixed(observed, "eth0", expected),
+		    "a feature on and not asked for is one the device holds fixed");
+		(void)snprintf(expected, sizeof(expected), "%s %s", name_of(NCFG_OFFLOAD_GRO),
+		    name_of(NCFG_OFFLOAD_TX_CHECKSUM));
+		check(carries(observed, "eth0", expected),
+		    "  and it is still reported as on, which is what it is");
+		check(holds_fixed(observed, "eth1", name_of(NCFG_OFFLOAD_GRO)),
+		    "and one asked for and never delivered is held fixed the other way round");
+		check(carries(observed, "eth1", ""),
+		    "  and is not reported as on, because it is not");
 	} else {
 		detail("it said", err);
 	}
@@ -702,6 +835,7 @@ static void the_live_check(void)
 int main(void)
 {
 	only_the_offloads_the_model_can_express();
+	what_the_device_holds_fixed_is_active_disagreeing_with_wanted();
 	several_messages_about_one_device_fold_into_one_list();
 	a_device_the_kernel_refuses_does_not_cost_the_round();
 	a_machine_that_cannot_be_asked_is_not_a_failure();

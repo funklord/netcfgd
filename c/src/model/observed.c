@@ -802,6 +802,14 @@ static const ncfg_field_t observed_link_fields[] = {
 	{ .name = "offloads", .kind = NCFG_F_STR_LIST,
 	    .offset = offsetof(ncfg_observed_link_t, offloads),
 	    .count_offset = offsetof(ncfg_observed_link_t, offload_count) },
+	/* Omitted when empty, unlike `offloads` beside it: every ordinary device
+	 * holds nothing fixed, so writing it always would put an empty list on
+	 * every link of every observation for the few that do. That also makes a
+	 * record written before this field existed read back as "none", which is
+	 * the right answer for one nobody asked the question of. */
+	{ .name = "offloads_fixed", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_link_t, offloads_fixed),
+	    .count_offset = offsetof(ncfg_observed_link_t, offloads_fixed_count) },
 	{ .name = "ipv6_token", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_link_t, ipv6_token) },
 	{ .name = "qdisc", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_link_t, qdisc) },

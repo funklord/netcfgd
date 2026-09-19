@@ -189,6 +189,7 @@ fn observed_link(
 		// never deleted, which is the conservative direction.
 		// Filled in by `host::augment`, which is where the impure reads are.
 		offloads: Vec::new(),
+		offloads_fixed: Vec::new(),
 		ipv6_token: link.ipv6_token.map(|address| address.to_string()),
 		qdisc: root_qdisc(snapshot, link.index).map(|record| record.kind.clone()),
 		qdisc_ingress: root_qdisc(snapshot, link.index).is_some_and(|record| record.ingress),

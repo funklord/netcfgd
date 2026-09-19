@@ -266,29 +266,43 @@ static int listed_names(ncfg_ethtool_names_t *out, const ncfg_wire_attr_t *bitse
 	}
 }
 
-int ncfg_ethtool_active_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
-    char *err, size_t err_size)
+int ncfg_ethtool_bitset_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
+    ncfg_ethtool_bitset_t which, char *err, size_t err_size)
 {
 	ncfg_wire_attrs_t area;
-	ncfg_wire_attr_t  active;
+	ncfg_wire_attr_t  set;
 	ncfg_wire_step_t  step;
+	/* Initialised to the active set rather than left for the switch to fill,
+	 * so a value outside the enum reads the set every caller before the second
+	 * one wanted instead of whatever was on the stack. */
+	uint16_t          kind = (uint16_t)ETHTOOL_A_FEATURES_ACTIVE;
 
 	if (!out) {
 		ncfg_error_set(err, err_size, "a feature set needs somewhere to go");
 		return 0;
 	}
+	if (which == NCFG_ETHTOOL_BITSET_WANTED) {
+		kind = (uint16_t)ETHTOOL_A_FEATURES_WANTED;
+	}
 	if (!ncfg_genl_payload_attrs(payload, length, &area, err, err_size)) {
 		return 0;
 	}
-	step = ncfg_wire_attrs_find(&area, ETHTOOL_A_FEATURES_ACTIVE, &active, err, err_size);
+	step = ncfg_wire_attrs_find(&area, kind, &set, err, err_size);
 	if (step == NCFG_WIRE_BAD) {
 		return 0;
 	}
-	/* A message about this device that does not carry the active set adds
-	 * nothing. It is not a refusal: the kernel answers with more than one
-	 * message for some devices and only one of them has it. */
+	/* A message about this device that does not carry this set adds nothing.
+	 * It is not a refusal: the kernel answers with more than one message for
+	 * some devices and only one of them has it. */
 	if (step == NCFG_WIRE_END) {
 		return 1;
 	}
-	return listed_names(out, &active, err, err_size);
+	return listed_names(out, &set, err, err_size);
+}
+
+int ncfg_ethtool_active_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
+    char *err, size_t err_size)
+{
+	return ncfg_ethtool_bitset_merge(out, payload, length, NCFG_ETHTOOL_BITSET_ACTIVE, err,
+	    err_size);
 }

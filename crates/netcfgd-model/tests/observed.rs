@@ -201,6 +201,13 @@ fn maximal_link(name: &str, ownership: Ownership) -> ObservedLink {
 			"rx-checksum".to_owned(),
 			"tx-checksum-ip-generic".to_owned(),
 		],
+		// Set rather than empty, for this fixture's stated reason: the field
+		// carries `skip_serializing_if`, so an empty one is omitted and a
+		// field absent from the witness is the one that can go quiet
+		// unnoticed. A subset of `offloads` here, which is the commoner of the
+		// two directions -- a feature the device holds on whatever it is
+		// asked.
+		offloads_fixed: vec!["rx-checksum".to_owned()],
 		ipv6_token: Some("::5".to_owned()),
 		qdisc: Some("cake".to_owned()),
 		qdisc_bandwidth_bits: Some(20_000_000),
