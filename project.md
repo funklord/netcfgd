@@ -9515,6 +9515,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.195 Half a wifi metric, and the count that came out of `build.c`
+
+`address.c`'s `with_metric` filled a route's metric from
+`interface->preference` alone, and said so: *"This build has one answer,
+`interface->preference`, in both directions; see the port notes for where the
+Rust has two."* That was the gap. A radio associated to a network carrying
+`metric = N` installed its routes at the interface's preference instead, so an
+operator who ranked a network got the number they wrote on the interface and
+nothing said so.
+
+The rule is `ncfg_observed_effective_metric` now, beside
+`ncfg_observed_prefix_of` and for the same reason -- **three callers need one
+answer**. The planner fills a route's metric from it; the planner's *teardown*
+fills in the same value to decide whether a route it is looking at is one of
+these, and `with_metric`'s own comment says why that pair must agree, because a
+metric computed differently on each side makes the comparison never match and
+the plan loop for ever; and the daemon starts a DHCP client with `-m` from it.
+
+Proved shared rather than claimed: making the network's metric *replace* the
+preference instead of falling back to it turns the planner's case and the
+**daemon's** case red together, in two test binaries.
+
+**The fallback is the part that is easy to get wrong.** A network with no
+metric of its own leaves the preference exactly as it was; reading it as "the
+network's if there is a network" drops an operator's number because they also
+named an SSID. A route that states its own is overridden by neither. Both have
+checks.
+
+**And the gap warning is half a gap now, so it says which half.** What is left
+is a *re*start: a client already running keeps installing its lease's route at
+the old metric until something restarts it. The first draft of the new sentence
+was 649 characters at the widest network id, against a 511-character ceiling --
+so `ncfg_plan_warnf` truncated it and two existing checks went red, which is
+exactly the trap the comment above that warning records ("the operator got
+`still means t`"). Measured and trimmed to 461.
+
+**`build.c`'s own count is gone the same way `daemon_main.c`'s list went.** It
+said "the Rust planner is seven thousand lines and thirty passes; this is four
+of them", and it went on saying that while most of the rest landed. Counting
+the passes to correct it is what produced the stale number in the first place,
+and "pass" is not even a countable thing here -- 41 distinct `ncfg_plan_*`
+symbols are called from that file and some are helpers. So it names
+`warn_unported` and the per-pass warnings instead, which cannot rot because a
+pass landing takes its warning out in the same commit, and which `ncfg plan`
+prints off the operator's own machine.
+
+6,314 checks across 95 binaries. Three sabotages caught: the network's metric
+replacing rather than falling back, the planner going back to `preference`
+alone, and a route's own metric being overridden.
+
 ## 10.194 One request parser where there were five, and a question I did not answer
 
 `request_parts` was written five times -- `kernel_genl.c`, `offloads.c`,

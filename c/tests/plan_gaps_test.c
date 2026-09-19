@@ -795,11 +795,10 @@ static void a_networks_metric_is_this_ports_gap_and_names_what_is_missing(void)
 	check(planfix_whole(planfix_warning_with(plan, "states `metric = 100`"),
 	    "and a `linkset`'s choice"),
 	    "and the whole sentence arrives, at the widest id the model allows");
-	check(plan && planfix_warned(plan,
-	    "the routes an interface declares take that interface's own `preference` here"),
-	    "and the pass that would apply it is named");
-	check(plan && planfix_warned(plan, "restarts a DHCP client given the old one"),
-	    "and so is the second half, which is a restart rather than a route");
+	check(plan && planfix_warned(plan, "half of it is applied"),
+	    "and the half that is applied is said to be applied");
+	check(plan && planfix_warned(plan, "What is missing is a *re*start"),
+	    "and the half that is left is named, which is a restart rather than a route");
 	check(plan && planfix_warned(plan, "as the supplicant's `priority`"),
 	    "and what the metric does reach is said, so it is not reported as inert");
 	/*
@@ -815,6 +814,75 @@ static void a_networks_metric_is_this_ports_gap_and_names_what_is_missing(void)
 	 */
 	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
 	    "and it is not marked as something nobody is going to write");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * The half that is no longer a gap: a route takes the metric of the network
+ * the radio is associated to.
+ *
+ * **This is the check the warning above used to stand in for.** The rule is
+ * `ncfg_observed_effective_metric`'s and it has three callers -- this pass, the
+ * teardown arm that decides whether a route it sees is one of these, and the
+ * daemon starting a DHCP client with `-m`. Two readings of it make the
+ * comparison never match and the plan never converge, which is why the
+ * sabotage for this one turns more than one file red.
+ */
+static void a_route_takes_the_metric_of_the_network_it_is_associated_to(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t         *plan;
+	const ncfg_action_t *added;
+	const char          *iface =
+	    "{\"name\":\"wlan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"10.0.0.2/24\"}],\"preference\":600,"
+	    "\"routes\":[{\"destination\":\"default\",\"via\":\"10.0.0.1\"}]}";
+	const char      *device = "{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"}}";
+	const char      *associated =
+	    "\"links\":[{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"ownership\":\"unknown\",\"network\":\"cafe\"}]";
+
+	plan = planfix_plan(device, iface,
+	    "{\"id\":\"cafe\",\"security\":{\"type\":\"open\"},\"metric\":100}", "",
+	    associated, &document, &observed);
+	added = plan ? planfix_action(plan, "route.add") : NULL;
+	check(added && added->op.u.route.route && added->op.u.route.route->metric.has &&
+	    added->op.u.route.route->metric.value == 100,
+	    "a radio associated to a network carrying a metric routes at the network's");
+	check(added && added->op.u.route.route &&
+	    added->op.u.route.route->metric.value != 600,
+	    "  and not at the interface's preference, which is what it used to do");
+	planfix_release(plan, document, observed);
+
+	/*
+	 * **A network with no metric of its own leaves the preference alone.**
+	 * That is what the fallback means, and reading it as "the network's if
+	 * there is a network" drops an operator's number because they also named
+	 * an SSID.
+	 */
+	plan = planfix_plan(device, iface,
+	    "{\"id\":\"cafe\",\"security\":{\"type\":\"open\"}}", "", associated,
+	    &document, &observed);
+	added = plan ? planfix_action(plan, "route.add") : NULL;
+	check(added && added->op.u.route.route && added->op.u.route.route->metric.has &&
+	    added->op.u.route.route->metric.value == 600,
+	    "and a network with no metric of its own leaves the preference exactly as it was");
+	planfix_release(plan, document, observed);
+
+	/* A route that states its own is overridden by neither: what an operator
+	 * wrote on the route is the most specific thing there is. */
+	plan = planfix_plan(device,
+	    "{\"name\":\"wlan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"10.0.0.2/24\"}],\"preference\":600,"
+	    "\"routes\":[{\"destination\":\"default\",\"via\":\"10.0.0.1\","
+	    "\"metric\":7}]}",
+	    "{\"id\":\"cafe\",\"security\":{\"type\":\"open\"},\"metric\":100}", "",
+	    associated, &document, &observed);
+	added = plan ? planfix_action(plan, "route.add") : NULL;
+	check(added && added->op.u.route.route && added->op.u.route.route->metric.has &&
+	    added->op.u.route.route->metric.value == 7,
+	    "and a route that states its own metric is overridden by neither");
 	planfix_release(plan, document, observed);
 }
 
@@ -850,6 +918,7 @@ int main(void)
 	a_network_that_asks_for_none_of_it_says_nothing();
 	only_the_half_a_network_states_is_named();
 	a_networks_metric_is_this_ports_gap_and_names_what_is_missing();
+	a_route_takes_the_metric_of_the_network_it_is_associated_to();
 
 	printf("plan gaps: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

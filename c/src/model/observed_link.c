@@ -366,6 +366,37 @@ int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_r
 	    reference->subnet, "::/64", out, out_size, NULL, 0);
 }
 
+ncfg_optint_t ncfg_observed_effective_metric(const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, const ncfg_interface_t *interface)
+{
+	ncfg_optint_t               none;
+	const ncfg_observed_link_t *link;
+	size_t                      i;
+
+	memset(&none, 0, sizeof(none));
+	if (!interface) {
+		return none;
+	}
+	link = observed ? ncfg_observed_link(observed, interface->name) : NULL;
+	for (i = 0; desired && link && link->network && i < desired->network_count; i++) {
+		if (!desired->networks[i].id ||
+		    strcmp(desired->networks[i].id, link->network) != 0) {
+			continue;
+		}
+		/*
+		 * Falls back rather than replacing: a network with no metric of its
+		 * own leaves the preference exactly as it was. `break` and not
+		 * `return`, so the one network that matched decides and a later id
+		 * cannot.
+		 */
+		if (desired->networks[i].metric.has) {
+			return desired->networks[i].metric;
+		}
+		break;
+	}
+	return interface->preference;
+}
+
 const ncfg_dns_policy_t *ncfg_observed_dns_for(const ncfg_observed_t *observed,
     const char *scope)
 {

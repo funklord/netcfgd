@@ -3,12 +3,20 @@
  * order the passes run in.
  *
  * WHAT IS PORTED AND WHAT IS NOT
- *   The Rust planner is seven thousand lines and thirty passes. This is four
- *   of them -- link creation, link attributes, addressing and routes, and
- *   teardown -- and the rest is not here.
+ *   **Not a count, and that is deliberate.** This said "the Rust planner is
+ *   seven thousand lines and thirty passes; this is four of them", and it went
+ *   on saying it while most of the rest landed -- so a reader was told a pass
+ *   was missing that had been there for waves, which is the same way the block
+ *   list in `daemon_main.c` rotted (project.md 10.192).
  *
- *   **That is a hazard rather than a gap, and `warn_unported` below is what
- *   makes it one the operator can see.** The contract this module is written
+ *   `warn_unported` below and each pass's own held-block warning are the list,
+ *   and they cannot go stale for the reason the next paragraph gives: a pass
+ *   landing takes its warning out in the same commit. `ncfg plan` prints them,
+ *   which makes the answer something an operator reads off their own machine
+ *   rather than something written down here about somebody else's.
+ *
+ *   **What is not read is a hazard rather than a gap, and `warn_unported` is
+ *   what makes it one the operator can see.** The contract this module is written
  *   against says it in as many words: *a plan that omits something without
  *   saying so reports "nothing to do" about a config that asked for two
  *   things*. Decision 0061 is the same rule for a feature the Rust itself has

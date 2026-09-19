@@ -235,7 +235,10 @@ static void warn_regdom(ncfg_builder_t *builder)
  *     promise and gets its own sentence naming what is missing. The Rust's
  *     planner applies `netcfgd_model::wifi::effective_metric` to the routes an
  *     interface declares and restarts a DHCP client that was started with the
- *     old one; neither is here, and 0263 records the deferral on both halves.
+ *     old one. **The first half is here now**, as
+ *     `ncfg_observed_effective_metric`, which `address.c` fills a route's
+ *     metric from and the daemon starts a client with; the restart is not, and
+ *     0263 records the deferral on that half alone.
  *
  * So the first four get `ncfg_plan_warn_unbuilt`'s sentence and the fifth does
  * not, which is what 10.180 published that helper for: "this port has not got
@@ -310,19 +313,19 @@ static void warn_networks_held(ncfg_builder_t *builder)
 			ncfg_buf_free(&names);
 		}
 		if (network->metric.has) {
-			/* The one that is this port's to finish, so it says which two
-			 * passes would finish it rather than "not acted on" -- and, to the
-			 * same width as above, what the metric does reach, so a number an
-			 * operator wrote is not reported as inert when it decides which
-			 * network gets joined. */
+			/* The one that is this port's to finish, and it is now half
+			 * finished, so it says which half rather than "not acted on" --
+			 * and, to the same width as above, what the metric does reach, so a
+			 * number an operator wrote is not reported as inert when it decides
+			 * which network gets joined. */
 			ncfg_plan_warnf(builder->plan, NULL,
-			    "the `network` block `%s` states `metric = %lld`, and this build "
-			    "of the planner does not apply it: the routes an interface "
-			    "declares take that interface's own `preference` here, where the "
-			    "rule is the network's metric while the radio is associated to "
-			    "it, and no plan restarts a DHCP client given the old one. The "
-			    "metric does reach the join order, as the supplicant's "
-			    "`priority`, and a `linkset`'s choice",
+			    "the `network` block `%s` states `metric = %lld`, and half of it "
+			    "is applied: the routes this interface declares take it while the "
+			    "radio is associated here, and a DHCP client started now is given "
+			    "it. What is missing is a *re*start, so a client already running "
+			    "keeps installing its lease's route at the old metric. It also "
+			    "reaches the join order, as the supplicant's `priority`, and a "
+			    "`linkset`'s choice",
 			    network->id, (long long)network->metric.value);
 		}
 	}
