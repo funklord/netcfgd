@@ -87,19 +87,15 @@
  *   absence cost -- the first two the same cost, one field apart, and the
  *   WireGuard pair a different one, which is said where they are declared.
  *
- *   **One input of the fourth is not written by this build.** The currency
- *   question compares a digest of what the store holds now against a digest of
- *   what netcfgd loaded, and the second is a record under `/run` that the
- *   executor writes when the kernel accepts a key. `apply/kernel_genl.c` does
- *   not write it yet, so `key_matches` and `preshared_matches` come back absent
- *   on a real machine until it does -- which is a question left unanswered
- *   rather than answered wrongly, and is the one shape the planner is built to
- *   do nothing about. `ncfg_observe_wg_key_record_path` and
- *   `ncfg_observe_wg_preset_record_path` are declared here so that the writer,
- *   when it lands, names the file through them rather than spelling the path a
- *   second time: `NCFG_OBSERVE_ALTNAME_PREFIX` above is the same arrangement
- *   for the same reason, and two spellings of one path is a reader looking
- *   where nothing was written.
+ *   **The fourth's second input is written now.** The currency question
+ *   compares a digest of what the store holds against a digest of what netcfgd
+ *   loaded, and the second is a record under `/run` that the executor writes
+ *   when the kernel accepts a key. `apply/kernel_genl.c` writes it through
+ *   `ncfg_observe_wg_key_record_path` and `ncfg_observe_wg_preset_record_path`
+ *   -- which were declared here before there was a writer, so that the half
+ *   landing second would use the spelling the first agreed to rather than
+ *   composing the path again. `NCFG_OBSERVE_ALTNAME_PREFIX` above is the same
+ *   arrangement for the same reason.
  *
  *   What is here is the whole of `lib.rs`, the four file readers of `host.rs`,
  *   the nftables round, the offloads round, the WireGuard round, and the whole
@@ -1241,6 +1237,33 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
  * alive is an answer, and it is the one already in the record.
  */
 int ncfg_observe_backend_liveness(ncfg_observed_t *observed, const char *run_dir, char *err,
+    size_t err_size);
+
+/*
+ * What each running router advertisement daemon is announcing.
+ *
+ * Read back out of the configuration netcfgd generated for it, because radvd
+ * has no control socket: what it announces is whatever was in its file when it
+ * last read one, so the file **is** the record of what the daemon was given.
+ * `ncfg_ra_config_path` names it, rather than this composing the path a second
+ * time.
+ *
+ * **Without it `advertised` was always empty and the comparison never ran.**
+ * `plan/advertise.c` reads an empty list as "netcfgd cannot tell" rather than
+ * as "announcing nothing" -- deliberately, because the second reading plans a
+ * reload on every reconcile -- so nothing filling the list meant a renumbered
+ * prefix left radvd announcing the old block for ever, telling every host on
+ * the wire to use an address the upstream will not route. That is the mirror
+ * of the WireGuard defect 0054 left: a pass that plans nothing, ever.
+ *
+ * An unreadable or absent file leaves the list as it was, which says nothing,
+ * which is what the planner does nothing about. A file gone from under a
+ * daemon the record says is running is not evidence that the daemon is
+ * announcing nothing.
+ *
+ * Answers 1 unless there is nothing to walk or memory ran out.
+ */
+int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char *err,
     size_t err_size);
 
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,

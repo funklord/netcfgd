@@ -297,6 +297,7 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	    !ncfg_observe_wireguard_currency(observed, run_dir, secrets, desired, err,
 	    err_size) ||
 	    !ncfg_observe_backend_liveness(observed, run_dir, err, err_size) ||
+	    !ncfg_observe_advertised(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_augment_host(observed, roots, err, err_size) ||
 	    !ncfg_observe_derive(observed, desired, err, err_size)) {
 		/*
