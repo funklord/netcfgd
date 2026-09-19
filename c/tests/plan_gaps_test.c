@@ -773,16 +773,21 @@ static void only_the_half_a_network_states_is_named(void)
 }
 
 /*
- * `metric` is the one of the five that keeps the promise, and it has to name
- * the passes that would keep it: `netcfgd_model::wifi::effective_metric` is the
- * rule, the routes an interface declares are one half of applying it and a
- * restart of a DHCP client started with the old value is the other, and neither
- * is in this build. 0263 records both halves as deferred.
+ * `metric` no longer warns, because both halves of what it means are applied.
  *
- * And it says what the metric *does* reach, so an operator is not told a number
- * they wrote is inert when it decides which network gets joined.
+ * **This case used to assert the warning and now asserts its absence**, which
+ * is `build.c`'s rule rather than a deletion: a pass landing takes its warning
+ * out in the same commit, and a warning that outlives the gap it describes
+ * tells an operator a number they wrote is inert when it is not. The two
+ * halves are checked for real by the cases below -- a route taking the
+ * network's metric, and a client restarted when it is running with the old
+ * one.
+ *
+ * The other four of the five still warn, and they are `warn_unbuilt`'s: a
+ * network block's own addressing, routes, `dns` and hooks are read by nobody
+ * in either language.
  */
-static void a_networks_metric_is_this_ports_gap_and_names_what_is_missing(void)
+static void a_networks_metric_no_longer_warns_because_it_is_applied(void)
 {
 	ncfg_document_t *document;
 	ncfg_observed_t *observed;
@@ -790,30 +795,15 @@ static void a_networks_metric_is_this_ports_gap_and_names_what_is_missing(void)
 	    "{\"id\":\"" WIDEST_ID "\",\"security\":{\"type\":\"open\"},\"metric\":100}", "",
 	    "\"links\":[]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "states `metric = 100`"),
-	    "a network's metric is named with the value the operator wrote");
-	check(planfix_whole(planfix_warning_with(plan, "states `metric = 100`"),
-	    "and a `linkset`'s choice"),
-	    "and the whole sentence arrives, at the widest id the model allows");
-	check(plan && planfix_warned(plan, "half of it is applied"),
-	    "and the half that is applied is said to be applied");
-	check(plan && planfix_warned(plan, "What is missing is a *re*start"),
-	    "and the half that is left is named, which is a restart rather than a route");
-	check(plan && planfix_warned(plan, "as the supplicant's `priority`"),
-	    "and what the metric does reach is said, so it is not reported as inert");
+	check(plan && !planfix_warned(plan, "states `metric = 100`"),
+	    "a network's metric is not reported as a gap, because it is applied");
 	/*
-	 * **This one is honest about catching less than it looks like it does.**
-	 * Routing this sentence through `ncfg_plan_warn_unbuilt` -- the regression
-	 * it is written against -- was tried, and it was the check above that went
-	 * red rather than this one: that helper's 195-character tail cannot fit
-	 * after a sentence this long, so the marker it appends is truncated away
-	 * before this can see it. It bites only if somebody shortens the sentence
-	 * *and* mismarks it, which is a narrower future than it appears to guard.
-	 * Kept, because it costs a line and says which of the two shapes this
-	 * warning is; the check above is what does the work.
+	 * And nothing else started warning in its place. A network stating only a
+	 * metric states none of the four `warn_unbuilt` covers, so a plan built
+	 * from it should be quiet about this block entirely.
 	 */
-	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
-	    "and it is not marked as something nobody is going to write");
+	check(plan && !planfix_warned(plan, WIDEST_ID),
+	    "  and the block is not mentioned at all, since it states nothing else");
 	planfix_release(plan, document, observed);
 }
 
@@ -886,6 +876,172 @@ static void a_route_takes_the_metric_of_the_network_it_is_associated_to(void)
 	planfix_release(plan, document, observed);
 }
 
+/* ------------------------------------------------------------------------ *
+ * A client already running with the wrong metric
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The other half of what a network's `metric` means, and the half netcfgd
+ * cannot do by editing anything: the lease's own route is installed by the
+ * client from what it was started with, so the only way to move it is to start
+ * the client again.
+ */
+#define METRIC_DEVICE "{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"}}"
+#define METRIC_IFACE \
+	"{\"name\":\"wlan0\",\"addressing\":[{\"source\":\"dhcp4\"}]," \
+	"\"preference\":600}"
+#define METRIC_NETWORK \
+	"{\"id\":\"cafe\",\"security\":{\"type\":\"open\"},\"metric\":100}"
+#define METRIC_LINK \
+	"{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"unknown\",\"network\":\"cafe\"}"
+/* A lease route the kernel stamped with the DHCP protocol, at `metric`. */
+#define METRIC_LEASE_ROUTE(metric) \
+	"\"routes\":[{\"interface\":\"wlan0\",\"destination\":\"default\"," \
+	"\"via\":\"10.0.0.1\",\"metric\":" metric ",\"proto\":16," \
+	"\"ownership\":\"unknown\"}]"
+
+static void a_client_installing_the_old_metric_is_restarted(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(METRIC_DEVICE, METRIC_IFACE, METRIC_NETWORK, "",
+	    "\"links\":[" METRIC_LINK "],"
+	    "\"backends\":[{\"kind\":\"dhcp4\",\"interface\":\"wlan0\","
+	    "\"running\":true}]," METRIC_LEASE_ROUTE("600"), &document, &observed);
+
+	/*
+	 * The route says what the client *did*, which is the half that catches one
+	 * that ignored what it was told. 600 is the interface's preference, which
+	 * is what it would have been started with before the network was joined.
+	 */
+	check(plan && planfix_count(plan, "backend.stop") == 1u &&
+	    planfix_count(plan, "backend.start") == 1u,
+	    "a lease route carrying the old metric restarts the client, stop then start");
+	/*
+	 * **The edge, not just the order.** A first draft asserted only that the
+	 * stop came first in the list, and removing the dependency entirely left
+	 * that green -- the list order happens to be the push order. An executor
+	 * that reads `depends_on` and parallelises would have started a second
+	 * client beside the one being stopped, both retrying for ever.
+	 */
+	{
+		const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+		const ncfg_action_t *start = plan ? planfix_action(plan, "backend.start") : NULL;
+
+		check(stop && start && planfix_depends_on(start, stop->id),
+		    "  and the start waits on the stop by an edge, not by list order alone");
+	}
+	check(plan && position(plan, "backend.stop") < position(plan, "backend.start"),
+	    "  and the list order says the same, for an executor that reads no edges");
+	check(plan && planfix_warned(plan, "the lease is dropped for as long as the exchange"),
+	    "  and the cost is said out loud, since a restart takes the network away");
+	check(plan && planfix_warned(plan, "metric 100 rather than 600"),
+	    "  naming what is wanted and what is there, both read off the machine");
+	planfix_release(plan, document, observed);
+}
+
+static void a_client_started_with_the_old_metric_is_restarted_before_any_route(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	/*
+	 * **No route at all, which is the half the route cannot answer.** A client
+	 * that has not finished its first exchange has installed nothing, and
+	 * `started_metric` is read out of its own `argv` at the moment it started
+	 * -- so this is there at once and the route is not.
+	 */
+	ncfg_plan_t     *plan = planfix_plan(METRIC_DEVICE, METRIC_IFACE, METRIC_NETWORK, "",
+	    "\"links\":[" METRIC_LINK "],"
+	    "\"backends\":[{\"kind\":\"dhcp4\",\"interface\":\"wlan0\","
+	    "\"running\":true,\"started_metric\":600}]", &document, &observed);
+
+	check(plan && planfix_count(plan, "backend.stop") == 1u,
+	    "a client started with the old metric is restarted before it has routed");
+	planfix_release(plan, document, observed);
+}
+
+static void a_client_already_carrying_the_metric_is_left_alone(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(METRIC_DEVICE, METRIC_IFACE, METRIC_NETWORK, "",
+	    "\"links\":[" METRIC_LINK "],"
+	    "\"backends\":[{\"kind\":\"dhcp4\",\"interface\":\"wlan0\","
+	    "\"running\":true,\"started_metric\":100}]," METRIC_LEASE_ROUTE("100"),
+	    &document, &observed);
+
+	/* **The convergence check.** Both answers agree with what is wanted, so a
+	 * second apply of a converged machine plans nothing -- which is the
+	 * property `plan.h` names load-bearing, and the one a restart pass is
+	 * most likely to break. */
+	check(plan && planfix_count(plan, "backend.stop") == 0u,
+	    "a client already carrying the metric is left alone, so the plan converges");
+	planfix_release(plan, document, observed);
+}
+
+static void a_client_that_will_not_take_it_is_left_alone_after_the_cap(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(METRIC_DEVICE, METRIC_IFACE, METRIC_NETWORK, "",
+	    "\"links\":[" METRIC_LINK "],"
+	    "\"backends\":[{\"kind\":\"dhcp4\",\"interface\":\"wlan0\","
+	    "\"running\":true}],"
+	    "\"backend_restarts\":[[\"dhcp4\",\"wlan0\",9]],"
+	    METRIC_LEASE_ROUTE("600"), &document, &observed);
+
+	/*
+	 * **0079's cap, and it matters more here than anywhere else it applies.**
+	 * A client that will not take the metric -- an operator's own
+	 * `dhcpcd.conf` overriding it, say -- would otherwise be stopped and
+	 * started on every reconcile for ever, and each round drops the lease. A
+	 * machine whose network goes away every five seconds is worse than one
+	 * whose route ranks wrongly.
+	 */
+	check(plan && planfix_count(plan, "backend.stop") == 0u,
+	    "past the restart cap the client is left alone rather than looped on");
+	check(plan && planfix_warned(plan, "leaving it alone rather than looping"),
+	    "  and the plan says so, with the count that stopped it");
+	planfix_release(plan, document, observed);
+}
+
+static void an_interface_asking_for_no_lease_is_not_restarted(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	/*
+	 * A static interface whose network names a metric -- **and a dhcp4 client
+	 * running on it anyway**, which is what makes this check the addressing
+	 * and not something else. A first draft left the backend list empty, so
+	 * the "is one running" guard declined it and removing the addressing guard
+	 * entirely left the check green: it was passing for the wrong reason.
+	 *
+	 * A client running on an interface whose document asks for no lease is an
+	 * ordinary machine, not a contrived one: it is what netcfgd's own teardown
+	 * is about to stop.
+	 */
+	ncfg_plan_t     *plan = planfix_plan(METRIC_DEVICE,
+	    "{\"name\":\"wlan0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"10.0.0.2/24\"}],\"preference\":600}",
+	    METRIC_NETWORK, "", "\"links\":[" METRIC_LINK "],"
+	    "\"backends\":[{\"kind\":\"dhcp4\",\"interface\":\"wlan0\","
+	    "\"running\":true,\"started_metric\":600}]," METRIC_LEASE_ROUTE("600"),
+	    &document, &observed);
+
+	/*
+	 * **Asserted on the restart and not on `backend.stop`**, because there is
+	 * legitimately one of those: the teardown stops a client the document no
+	 * longer asks for, which is right and is a different pass. A first draft
+	 * counted stops and went red against correct behaviour.
+	 */
+	check(plan && planfix_count(plan, "backend.start") == 0u,
+	    "an interface asking for no lease is not restarted over a route it did not ask for");
+	check(plan && !planfix_warned(plan, "the lease is dropped for as long as the exchange"),
+	    "  and nothing says a restart is happening, because none is");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_prefix_that_has_not_arrived_starts_nothing();
@@ -917,8 +1073,13 @@ int main(void)
 	what_a_network_states_and_nothing_reads_is_not_something_to_wait_for();
 	a_network_that_asks_for_none_of_it_says_nothing();
 	only_the_half_a_network_states_is_named();
-	a_networks_metric_is_this_ports_gap_and_names_what_is_missing();
+	a_networks_metric_no_longer_warns_because_it_is_applied();
 	a_route_takes_the_metric_of_the_network_it_is_associated_to();
+	a_client_installing_the_old_metric_is_restarted();
+	a_client_started_with_the_old_metric_is_restarted_before_any_route();
+	a_client_already_carrying_the_metric_is_left_alone();
+	a_client_that_will_not_take_it_is_left_alone_after_the_cap();
+	an_interface_asking_for_no_lease_is_not_restarted();
 
 	printf("plan gaps: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

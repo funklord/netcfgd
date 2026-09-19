@@ -201,3 +201,179 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder)
 		(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
 	}
 }
+
+/* ------------------------------------------------------------------------ *
+ * A client running with a metric the document has moved on from
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The metric a running DHCP client's own default route carries, or absent.
+ *
+ * **Filtered by the protocol the kernel stamped on it**, which is what tells a
+ * lease's route from a static one the document also asked for: whichever client
+ * installed it -- dhcpcd, dhclient, udhcpc -- the kernel records
+ * `NCFG_DHCP_ROUTE_PROTO`, and `observed.h` says that is why the protocol is
+ * the normaliser rather than the client's own lease file.
+ */
+static ncfg_optint_t installed_metric(const ncfg_observed_t *observed, const char *name)
+{
+	ncfg_optint_t none;
+	size_t        i;
+
+	memset(&none, 0, sizeof(none));
+	for (i = 0; observed && i < observed->route_count; i++) {
+		const ncfg_observed_route_t *route = &observed->routes[i];
+
+		if (!route->interface || !name || strcmp(route->interface, name) != 0) {
+			continue;
+		}
+		if (!route->destination || strcmp(route->destination, "default") != 0) {
+			continue;
+		}
+		if (!route->proto.has || route->proto.value != NCFG_DHCP_ROUTE_PROTO) {
+			continue;
+		}
+		return route->metric;
+	}
+	return none;
+}
+
+/*
+ * The metric a running client was started with, where it is not the one now
+ * wanted.
+ *
+ * `observed.h` says this is read out of the client's own `argv` when it
+ * started, so it is there **before any route exists** -- which is the half the
+ * installed route cannot answer, because a client that has not finished its
+ * first exchange has installed nothing.
+ */
+static ncfg_optint_t started_with_another(const ncfg_observed_t *observed, const char *name,
+    int64_t wanted)
+{
+	ncfg_optint_t none;
+	size_t        i;
+
+	memset(&none, 0, sizeof(none));
+	for (i = 0; observed && i < observed->backend_count; i++) {
+		const ncfg_observed_backend_t *backend = &observed->backends[i];
+
+		if (backend->kind != NCFG_BACKEND_DHCP4 || !backend->running) {
+			continue;
+		}
+		if (!backend->interface || !name || strcmp(backend->interface, name) != 0) {
+			continue;
+		}
+		if (backend->started_metric.has && backend->started_metric.value != wanted) {
+			return backend->started_metric;
+		}
+		return none;
+	}
+	return none;
+}
+
+void ncfg_plan_metric_restart(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base)
+{
+	ncfg_optint_t   wanted;
+	ncfg_optint_t   seen;
+	ncfg_plan_ids_t deps = { NULL, 0, 0 };
+	ncfg_op_t       op;
+	ncfg_op_t       inverse;
+	ncfg_reason_t   reason;
+	int64_t         restarts;
+	uint32_t        stop;
+
+	if (!interface || !interface->name) {
+		return;
+	}
+	wanted = ncfg_observed_effective_metric(builder->desired, builder->observed, interface);
+	if (!wanted.has) {
+		return;
+	}
+	/*
+	 * Only where the document asks for a lease at all and one is running. A
+	 * client netcfgd is not running is not one it can restart, and an
+	 * interface with no `dhcp4` source has no lease route to be wrong.
+	 */
+	if (!addressing_asks_for(interface, NCFG_BACKEND_DHCP4) ||
+	    !ncfg_observed_backend_running(builder->observed, NCFG_BACKEND_DHCP4,
+	    interface->name)) {
+		return;
+	}
+	/*
+	 * **Two answers and neither subsumes the other.** The `argv` says what the
+	 * client was *told* and is there at once; the route says what it *did* and
+	 * catches a client that ignored what it was told. `seen` is whichever
+	 * noticed, and it is what the sentence reports, so an operator is told the
+	 * number that is actually on their machine.
+	 */
+	seen = installed_metric(builder->observed, interface->name);
+	if (!seen.has || seen.value == wanted.value) {
+		seen = started_with_another(builder->observed, interface->name, wanted.value);
+	}
+	if (!seen.has || seen.value == wanted.value) {
+		return;
+	}
+	/*
+	 * 0079's cap, and it matters more here than anywhere else it is applied: a
+	 * client that will not take the metric -- because the operator's own
+	 * `dhcpcd.conf` overrides it, say -- would otherwise be stopped and
+	 * started on every reconcile for ever, and each round drops the lease for
+	 * as long as the exchange takes. A machine whose network goes away every
+	 * five seconds is worse than one whose route ranks wrongly.
+	 */
+	restarts = ncfg_observed_backend_restarts(builder->observed, NCFG_BACKEND_DHCP4,
+	    interface->name);
+	if (restarts >= NCFG_PLAN_RESTART_LIMIT) {
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "%s's lease route still carries metric %lld rather than the %lld its "
+		    "network asks for, and the client has been restarted %lld times -- netcfgd "
+		    "is leaving it alone rather than looping",
+		    interface->name, (long long)seen.value, (long long)wanted.value,
+		    (long long)restarts);
+		return;
+	}
+	/*
+	 * Said out loud because it is not free. A restart drops the lease for as
+	 * long as the exchange takes, and an operator who sees their network blink
+	 * deserves to find the reason in the plan rather than in a packet capture.
+	 */
+	ncfg_plan_warnf(builder->plan, interface->name,
+	    "restarting the DHCP client on %s so its route takes metric %lld rather than "
+	    "%lld; the lease is dropped for as long as the exchange takes", interface->name,
+	    (long long)wanted.value, (long long)seen.value);
+
+	reason = ncfg_plan_reason_differs(interface->name, "route.metric",
+	    ncfg_plan_internf(builder->plan, "%lld", (long long)wanted.value),
+	    ncfg_plan_internf(builder->plan, "%lld", (long long)seen.value));
+	ncfg_plan_ids_extend(builder->plan, &deps, base);
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_STOP;
+	op.u.backend.kind = NCFG_BACKEND_DHCP4;
+	op.u.backend.iface = interface->name;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = NCFG_OP_BACKEND_START;
+	inverse.u.backend.kind = NCFG_BACKEND_DHCP4;
+	inverse.u.backend.iface = interface->name;
+	stop = ncfg_builder_push(builder, &op, &reason, deps.ids, deps.count, &inverse);
+	ncfg_plan_ids_free(&deps);
+	if (stop == NCFG_PLAN_NO_ACTION) {
+		return;
+	}
+	/*
+	 * **The start waits on the stop**, which is the whole of why this is two
+	 * actions rather than a `backend.reload`: there is no reload for a DHCP
+	 * client -- `ncfg_service_backend_supported` says only a router
+	 * advertisement daemon has one -- and a start that raced its own stop
+	 * would leave two clients on one interface, both retrying for ever.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = NCFG_BACKEND_DHCP4;
+	op.u.backend.iface = interface->name;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = NCFG_OP_BACKEND_STOP;
+	inverse.u.backend.kind = NCFG_BACKEND_DHCP4;
+	inverse.u.backend.iface = interface->name;
+	(void)ncfg_builder_push(builder, &op, &reason, &stop, 1u, &inverse);
+}
