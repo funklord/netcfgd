@@ -53,6 +53,7 @@
 
 #include "../src/apply/kernel_internal.h"
 #include "tempdir.h"
+#include "testdir.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1514,6 +1515,7 @@ static void check_wireguard(void)
 	ncfg_wire_attrs_t       attrs;
 	ncfg_wire_attr_t        attr;
 	ncfg_buf_t              held;
+	ncfg_buf_t              record;
 	char                    err[NCFG_ERROR_MAX];
 	char                    ifname[64];
 	const char             *allowed[1];
@@ -1549,9 +1551,29 @@ static void check_wireguard(void)
 	op.u.wg_device.listen_port.value = 51820;
 
 	memset(&messages, 0, sizeof(messages));
-	check(ncfg_kernel_wg_build(&messages, &family, 12u, &op, &document, &resolver, err,
-	    sizeof(err)), "a wg.set_device builds");
+	ncfg_buf_init(&record, 0);
+	check(ncfg_kernel_wg_build(&messages, &record, &family, 12u, &op, &document, &resolver,
+	    err, sizeof(err)), "a wg.set_device builds");
 	check(messages.count == 1u, "as one message");
+	/*
+	 * **The record is digested from what is being sent, and the digest is the
+	 * observer's own rule.** Those are the two halves of one comparison: the
+	 * executor writes this and `ncfg_observe_wireguard_currency` digests what
+	 * the store holds and compares. Asked here by calling the same function
+	 * the reader calls, because two spellings of the rule would make
+	 * `key_matches` false for ever and the planner would re-send a key the
+	 * kernel already holds on every reconcile.
+	 */
+	{
+		char wanted[NCFG_SHA256_HEX_SIZE];
+		char line[NCFG_SHA256_HEX_SIZE + 2u];
+
+		ncfg_observe_wg_digest(A_KEY, strlen(A_KEY), wanted);
+		(void)snprintf(line, sizeof(line), "%s\n", wanted);
+		check(strcmp(ncfg_buf_text(&record), line) == 0,
+		    "  and leaves the private key's digest, by the rule the observer reads with");
+	}
+	ncfg_buf_free(&record);
 	held.data = NULL;
 	check(messages.count == 1u &&
 	    ncfg_wire_header_decode(messages.message[0].bytes, messages.message[0].length,
@@ -1601,8 +1623,122 @@ static void check_wireguard(void)
 	op.u.wg_peers.peer_count = 1u;
 
 	memset(&messages, 0, sizeof(messages));
-	check(ncfg_kernel_wg_build(&messages, &family, 12u, &op, &document, &resolver, err,
-	    sizeof(err)), "a wg.set_peers builds");
+	ncfg_buf_init(&record, 0);
+	check(ncfg_kernel_wg_build(&messages, &record, &family, 12u, &op, &document, &resolver,
+	    err, sizeof(err)), "a wg.set_peers builds");
+	/*
+	 * One line per peer that was given a key: the public key as the only name
+	 * the kernel and the document share -- a peer's `name` is the document's
+	 * alone and a kernel dump has no idea of it -- and the digest of the key
+	 * that was sent.
+	 */
+	{
+		char wanted[NCFG_SHA256_HEX_SIZE];
+		char rendered[NCFG_KEY_TEXT_SIZE];
+		char line[256];
+
+		ncfg_observe_wg_digest(B_KEY, strlen(B_KEY), wanted);
+		check(ncfg_key_render(peer.public_key, rendered, sizeof(rendered), NULL, 0),
+		    "  the peer's public key renders");
+		(void)snprintf(line, sizeof(line), "%s %s\n", rendered, wanted);
+		check(strcmp(ncfg_buf_text(&record), line) == 0,
+		    "  and the record is one `<public key> <digest>` line for it");
+	}
+	ncfg_buf_free(&record);
+
+	/*
+	 * **A peer with no preshared key contributes no line, and that is what the
+	 * reader wants.** `preshared_matches` is absent for a peer that has none,
+	 * which is a different answer from one whose key netcfgd cannot check --
+	 * so a line here would turn "nothing to be out of date" into a claim.
+	 */
+	{
+		ncfg_wg_peer_t     bare = peer;
+		ncfg_op_t          alone;
+		ncfg_wg_messages_t spare;
+
+		bare.preshared_key = NULL;
+		memset(&alone, 0, sizeof(alone));
+		alone.kind = NCFG_OP_WG_SET_PEERS;
+		alone.u.wg_peers.iface = "wg0";
+		alone.u.wg_peers.peers = &bare;
+		alone.u.wg_peers.peer_count = 1u;
+		memset(&spare, 0, sizeof(spare));
+		ncfg_buf_init(&record, 0);
+		check(ncfg_kernel_wg_build(&spare, &record, &family, 12u, &alone, &document,
+		    &resolver, err, sizeof(err)) && ncfg_buf_text(&record)[0] == '\0',
+		    "a peer with no preshared key leaves no line, so the reader says nothing");
+		ncfg_wg_messages_free(&spare);
+		ncfg_buf_free(&record);
+	}
+
+	/* Freed before the next build overwrites the handle, which is what
+	 * `ncfg_wg_messages_t` owns: the peers build above filled it, and a
+	 * `memset` over it would strand the bytes carrying a preshared key. */
+	ncfg_wg_messages_free(&messages);
+	memset(&messages, 0, sizeof(messages));
+	check(ncfg_kernel_wg_build(&messages, NULL, &family, 12u, &op, &document, &resolver, err,
+	    sizeof(err)), "and it builds the same way with no record asked for");
+
+	/* ---- what the record does to the file ---- */
+	{
+		char       run[512];
+		char       written[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+		char      *back;
+		ncfg_buf_t empty;
+
+		/*
+		 * The run directory is the daemon's to create, not this module's:
+		 * `ncfg_kernel_wg_write_record` makes `<run>/wireguard` under one that
+		 * exists and refuses to invent the rest. So the fixture makes it, the
+		 * way a running daemon would have.
+		 */
+		(void)snprintf(run, sizeof(run), "%s/run", dir);
+		testdir_mkdirp(run);
+		check(ncfg_observe_wg_preset_record_path(run, "wg0", written, sizeof(written),
+		    NULL, 0), "the reader's own path names the record");
+
+		ncfg_buf_init(&record, 0);
+		ncfg_buf_add_text(&record, "line\n");
+		ncfg_kernel_wg_write_record(run, "wg0", NCFG_OP_WG_SET_PEERS, &record);
+		back = testdir_read(written, NULL);
+		check(back && strcmp(back, "line\n") == 0,
+		    "  and a record lands there, where the observer looks");
+		free(back);
+		ncfg_buf_free(&record);
+
+		/*
+		 * **An empty record removes the file rather than writing nothing into
+		 * it.** A `wg.set_peers` that removed the last peer with a preshared
+		 * key must not leave yesterday's digests behind, or the reader goes on
+		 * answering `preshared_matches` about keys no peer holds.
+		 */
+		ncfg_buf_init(&empty, 0);
+		ncfg_kernel_wg_write_record(run, "wg0", NCFG_OP_WG_SET_PEERS, &empty);
+		check(testdir_read(written, NULL) == NULL,
+		    "  an empty one takes a stale record away rather than emptying it");
+		ncfg_buf_free(&empty);
+
+		/*
+		 * And a buffer that ran out leaves the file alone. It hands back the
+		 * empty string, so writing it would record "no peer has a preshared
+		 * key" about a device where several do -- which is worse than no
+		 * record, because the reader knows how to hold "no record".
+		 */
+		ncfg_buf_init(&record, 0);
+		ncfg_buf_add_text(&record, "kept\n");
+		ncfg_kernel_wg_write_record(run, "wg0", NCFG_OP_WG_SET_PEERS, &record);
+		ncfg_buf_free(&record);
+		ncfg_buf_init(&record, 4u);
+		ncfg_buf_add_text(&record, "far longer than four bytes");
+		check(ncfg_buf_failed(&record), "a record buffer that ran out says so");
+		ncfg_kernel_wg_write_record(run, "wg0", NCFG_OP_WG_SET_PEERS, &record);
+		back = testdir_read(written, NULL);
+		check(back && strcmp(back, "kept\n") == 0,
+		    "  and leaves the file as it was rather than recording that nobody has a key");
+		free(back);
+		ncfg_buf_free(&record);
+	}
 	if (messages.count >= 1u) {
 		ncfg_wire_messages_t walk;
 		uint32_t             flags;
@@ -1638,7 +1774,7 @@ static void check_wireguard(void)
 	 * provider, so both are needed and both must agree: a mismatch is a plan
 	 * built from another document, and the key it would load is not the key
 	 * that was planned. */
-	check(!ncfg_kernel_wg_build(&messages, &family, 12u, &op, &document, &resolver, err,
+	check(!ncfg_kernel_wg_build(&messages, NULL, &family, 12u, &op, &document, &resolver, err,
 	    sizeof(err)) && strstr(err, "different document") != NULL,
 	    "a private key reference the document does not name is refused");
 	ncfg_wg_messages_free(&messages);
@@ -1649,7 +1785,7 @@ static void check_wireguard(void)
 	op.u.wg_device.private_key_ref = "broken";
 	memset(&messages, 0, sizeof(messages));
 	err[0] = '\0';
-	check(!ncfg_kernel_wg_build(&messages, &family, 12u, &op, &document, &resolver, err,
+	check(!ncfg_kernel_wg_build(&messages, NULL, &family, 12u, &op, &document, &resolver, err,
 	    sizeof(err)), "a key that does not decode is refused");
 	check(strstr(err, "this is not a key") == NULL,
 	    "and the refusal does not quote it: a key that failed to parse is still a key");

@@ -623,6 +623,32 @@ typedef struct {
 int ncfg_key_parse(const char *text, size_t length, unsigned char out[NCFG_KEY_LEN], char *err,
     size_t err_size);
 
+/* The 44 characters and a NUL that `ncfg_key_render` writes. */
+#define NCFG_KEY_TEXT_SIZE (NCFG_KEY_TEXT_LEN + 1u)
+
+/*
+ * The base64 a key's 32 octets spell, into `out`.
+ *
+ * **`ncfg_key_parse`'s other half, and published for its reason.** That
+ * function's comment says two base64 *readers* of one format is how the halves
+ * of one program come to disagree about a key; two writers is the same hazard
+ * pointed the other way, and there were already two -- `document.c` and
+ * `observed.c` each spelled the encoder out, identically, and a third was
+ * about to be written for the record an executor leaves under `/run`. A record
+ * written in one spelling and read in another is a key that never compares
+ * equal to itself.
+ *
+ * **The low two bits of the last character are cleared**, which is what makes
+ * the round trip canonical: a key that sets them is still a valid key and `wg`
+ * emits them, so the decoder ignores them and this renders the form that does
+ * not. Two spellings in, one spelling out.
+ *
+ * `out_size` is `NCFG_KEY_TEXT_SIZE` or more. 1 with the text; 0 with a
+ * sentence where it would not fit, which **never quotes the key**.
+ */
+int ncfg_key_render(const unsigned char key[NCFG_KEY_LEN], char *out, size_t out_size,
+    char *err, size_t err_size);
+
 typedef struct {
 	char             *name; /* local label, and the sorting key */
 	/*

@@ -707,25 +707,38 @@ int ncfg_observe_wireguard(ncfg_observed_t *observed, char *err, size_t err_size
  * `out` is `NCFG_SHA256_HEX_SIZE`. Both the octets and the text are the
  * caller's to wipe; the octets here are wiped before this returns.
  */
-static void digest_of(const ncfg_secret_t *secret, char *out)
+void ncfg_observe_wg_digest(const char *material, size_t length, char *out)
 {
 	unsigned char octets[NCFG_KEY_LEN];
-	const char   *text = ncfg_secret_expose(secret);
-	size_t        length = ncfg_secret_length(secret);
 	size_t        start = 0;
 
-	while (start < length && (unsigned char)text[start] <= ' ') {
+	if (!out) {
+		return;
+	}
+	out[0] = '\0';
+	if (!material) {
+		return;
+	}
+	while (start < length && (unsigned char)material[start] <= ' ') {
 		start++;
 	}
-	while (length > start && (unsigned char)text[length - 1u] <= ' ') {
+	while (length > start && (unsigned char)material[length - 1u] <= ' ') {
 		length--;
 	}
-	if (ncfg_key_parse(text + start, length - start, octets, NULL, 0)) {
+	if (ncfg_key_parse(material + start, length - start, octets, NULL, 0)) {
 		ncfg_sha256_hex(octets, sizeof(octets), out);
 		explicit_bzero(octets, sizeof(octets));
 		return;
 	}
-	ncfg_sha256_hex(text + start, length - start, out);
+	ncfg_sha256_hex(material + start, length - start, out);
+}
+
+/* The same, of a resolved secret. A wrapper rather than a second rule: this
+ * file asks it of a `ncfg_secret_t` and the executor asks it of the octets it
+ * is about to send, and those are the two halves of one comparison. */
+static void digest_of(const ncfg_secret_t *secret, char *out)
+{
+	ncfg_observe_wg_digest(ncfg_secret_expose(secret), ncfg_secret_length(secret), out);
 }
 
 /*

@@ -673,6 +673,10 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	world.socket = &kernel->socket;
 	world.document = kernel->document;
 	world.secrets = kernel->secrets;
+	/* The service context's, because that is where `/run` is written down for
+	 * this executor. NULL where none was installed, which means the WireGuard
+	 * arm writes no record -- see `ncfg_kernel_world_t`. */
+	world.run_dir = kernel->service ? kernel->service->run_dir : NULL;
 	world.resolve = resolve_index;
 	switch ((ncfg_op_kind_t)op->kind) {
 	case NCFG_OP_LINK_CREATE:

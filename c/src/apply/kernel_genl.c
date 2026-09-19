@@ -41,14 +41,20 @@
 #include "kernel_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/log.h"
+#include "ncfg/observe.h"
+#include "ncfg/state.h"
 #include "ncfg/wire.h"
 
+#include <errno.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 /* ------------------------------------------------------------------------ *
  * A socket, and a family on it
@@ -379,14 +385,42 @@ static const ncfg_secret_ref_t *private_key_ref(const ncfg_document_t *document,
 	return &kind->wireguard.private_key;
 }
 
-int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, const ncfg_genl_family_t *family,
-    uint32_t seq, const ncfg_op_t *op, const ncfg_document_t *document,
-    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size)
+/*
+ * The record line for one peer that was given a preshared key.
+ *
+ * `<public key in base64> <digest>`, which is `observe.h`'s format and the
+ * public key is the only name the kernel and the document share -- a peer's
+ * `name` is the document's alone and a kernel dump has no idea of it.
+ */
+static void record_peer(ncfg_buf_t *record, const unsigned char *public_key,
+    const unsigned char *preshared)
+{
+	char rendered[NCFG_KEY_TEXT_SIZE];
+	char digest[NCFG_SHA256_HEX_SIZE];
+
+	if (!record || !public_key || !preshared) {
+		return;
+	}
+	if (!ncfg_key_render(public_key, rendered, sizeof(rendered), NULL, 0)) {
+		return;
+	}
+	ncfg_observe_wg_digest((const char *)preshared, (size_t)NCFG_KEY_LEN, digest);
+	ncfg_buf_add_text(record, rendered);
+	ncfg_buf_add_char(record, ' ');
+	ncfg_buf_add_text(record, digest);
+	ncfg_buf_add_char(record, '\n');
+}
+
+int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
+    const ncfg_genl_family_t *family, uint32_t seq, const ncfg_op_t *op,
+    const ncfg_document_t *document, const ncfg_secret_resolver_t *resolver, char *err,
+    size_t err_size)
 {
 	ncfg_wireguard_config_t config;
 	ncfg_wg_request_t       request;
 	material_t              material;
 	unsigned char           private[NCFG_KEY_LEN];
+	size_t                  i;
 	int                     built;
 
 	if (!out || !op) {
@@ -425,6 +459,19 @@ int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, const ncfg_genl_family_t *fami
 		}
 		request.private_key = private;
 		built = ncfg_wg_set_device_build(out, family, seq, &request, err, err_size);
+		/*
+		 * Digested from the octets that are about to be sent, before they are
+		 * wiped -- which is the whole reason this is here and not in the
+		 * caller. `kernel_internal.h` has the argument: a record built from a
+		 * second resolution describes whatever the store held a moment later.
+		 */
+		if (built && record) {
+			char digest[NCFG_SHA256_HEX_SIZE];
+
+			ncfg_observe_wg_digest((const char *)private, sizeof(private), digest);
+			ncfg_buf_add_text(record, digest);
+			ncfg_buf_add_char(record, '\n');
+		}
 		memset(private, 0, sizeof(private));
 		return built;
 	}
@@ -466,6 +513,18 @@ int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, const ncfg_genl_family_t *fami
 	}
 	request.material = material.at;
 	built = ncfg_wg_set_device_build(out, family, seq, &request, err, err_size);
+	/*
+	 * One line per peer that was given a key, out of the material that was
+	 * built for the message rather than out of a second resolution -- and
+	 * before `material_free` scrubs it.
+	 *
+	 * A peer with no preshared key contributes no line, which is what the
+	 * reader wants: `preshared_matches` is absent for a peer that has none,
+	 * and that is a different answer from one whose key netcfgd cannot check.
+	 */
+	for (i = 0; built && record && i < config.peer_count; i++) {
+		record_peer(record, config.peers[i].public_key, material.at[i].preshared_key);
+	}
 	material_free(&material);
 	return built;
 }
@@ -528,12 +587,84 @@ int ncfg_kernel_build_offloads(ncfg_buf_t *out, const ncfg_genl_family_t *family
  * The arms
  * ------------------------------------------------------------------------ */
 
+/*
+ * Leave the record the observer reads back.
+ *
+ * `<run>/wireguard/<iface>.key.sha256` and `.psk.sha256`, named through
+ * `observe.h`'s own path functions rather than composed here -- which is what
+ * those functions were declared for, before there was a writer: two spellings
+ * of one path is a reader looking where nothing was written.
+ *
+ * **An empty record removes the file rather than writing nothing into it.** A
+ * `wg.set_peers` that left every peer without a preshared key, or removed the
+ * last peer that had one, must not leave yesterday's digests behind: the
+ * reader would go on answering `preshared_matches` about keys no peer holds.
+ * Removing something that is not there is success, which is `process.h`'s rule
+ * for `ESRCH` applied to a file.
+ *
+ * Nothing here can fail the op -- see the caller -- so every failure is a log
+ * line naming the file. The record holds digests and no material, so the mode
+ * is the run directory's ordinary one rather than a credential's.
+ */
+void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kind,
+    const ncfg_buf_t *record)
+{
+	char        path[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+	char        dir[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+	char        why[NCFG_ERROR_MAX];
+	const char *text;
+	int         named;
+
+	named = kind == NCFG_OP_WG_SET_DEVICE ?
+	    ncfg_observe_wg_key_record_path(run_dir, iface, path, sizeof(path), NULL, 0) :
+	    ncfg_observe_wg_preset_record_path(run_dir, iface, path, sizeof(path), NULL, 0);
+	if (!named) {
+		return;
+	}
+	if (ncfg_buf_failed(record)) {
+		/* A buffer that ran out hands back the empty string, so writing it
+		 * would record "no peer has a preshared key" about a device where
+		 * several do. Saying nothing leaves the reader with no record, which
+		 * is the answer it already knows how to hold. */
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "%s: the WireGuard record could not be built, so %s is left as it was and "
+		    "the next observation will say nothing about the keys in use",
+		    iface ? iface : "?", path);
+		return;
+	}
+	text = ncfg_buf_text(record);
+	if (!text || !text[0]) {
+		if (unlink(path) != 0 && errno != ENOENT) {
+			ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+			    "%s: %s could not be removed (%s), so it goes on describing keys "
+			    "that are no longer in use", iface ? iface : "?", path,
+			    strerror(errno));
+		}
+		return;
+	}
+	(void)snprintf(dir, sizeof(dir), "%s/wireguard", run_dir);
+	if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "%s: %s could not be made (%s), so no WireGuard record is kept",
+		    iface ? iface : "?", dir, strerror(errno));
+		return;
+	}
+	why[0] = '\0';
+	if (!ncfg_write_atomically(path, text, strlen(text), 0600, why, sizeof(why))) {
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "%s: the WireGuard record could not be written (%s), so the next "
+		    "observation will say nothing about the keys in use", iface ? iface : "?",
+		    why);
+	}
+}
+
 int ncfg_kernel_wg_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size)
 {
 	ncfg_netlink_t     socket;
 	ncfg_genl_family_t family;
 	ncfg_wg_messages_t messages;
+	ncfg_buf_t         record;
 	const char        *iface;
 	uint32_t           seq;
 	size_t             i;
@@ -552,8 +683,9 @@ int ncfg_kernel_wg_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, cha
 	 */
 	seq = ncfg_netlink_take_seq(&socket);
 	memset(&messages, 0, sizeof(messages));
-	ok = ncfg_kernel_wg_build(&messages, &family, seq, op, world->document, world->secrets,
-	    err, err_size);
+	ncfg_buf_init(&record, 0);
+	ok = ncfg_kernel_wg_build(&messages, world->run_dir ? &record : NULL, &family, seq, op,
+	    world->document, world->secrets, err, err_size);
 	for (i = 0; ok && i < messages.count; i++) {
 		char doing[NCFG_ERROR_MAX];
 
@@ -578,6 +710,23 @@ int ncfg_kernel_wg_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, cha
 	ncfg_wg_messages_free(&messages);
 	ncfg_genl_family_free(&family);
 	ncfg_netlink_close(&socket);
+	/*
+	 * **After the kernel accepted it, and never instead of it.** The record
+	 * says what netcfgd handed over; writing one for a request that failed
+	 * would tell the next observation that a key is in use which the device
+	 * never took, and `key_matches` would answer true about a device holding
+	 * the old one -- a plan that then does nothing, for ever.
+	 *
+	 * A write that fails does **not** fail the op. The machine has already
+	 * changed; the observer reads a missing record as "not a device netcfgd
+	 * configured", which is the one shape the planner is built to do nothing
+	 * about, and failing here would report an op that succeeded as an op that
+	 * did not.
+	 */
+	if (ok && world->run_dir) {
+		ncfg_kernel_wg_write_record(world->run_dir, iface, op->kind, &record);
+	}
+	ncfg_buf_free(&record);
 	return ok;
 }
 

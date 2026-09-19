@@ -293,10 +293,53 @@ int ncfg_kernel_build_redirect(ncfg_buf_t *first, ncfg_buf_t *second, uint32_t s
  * `resolver` may be NULL, which means the machine's own secrets directory.
  * `out` is filled in on success and the caller frees it with
  * `ncfg_wg_messages_free`, which scrubs the bytes -- they carry a private key.
+ *
+ * `record` may be NULL, and where it is not it receives the text of the record
+ * the observer reads back: the private key's digest for a `wg.set_device`, and
+ * one `<public key> <digest>` line per peer that was given a preshared key for
+ * a `wg.set_peers`.
+ *
+ * **It is filled here rather than by the caller resolving the keys again, and
+ * that is a correctness property rather than a saving.** The record has to
+ * describe what was *sent*. A caller that re-resolved would digest whatever
+ * the store holds a moment later, so a key rotated between the two reads would
+ * be recorded as the one in use while the kernel held the old one -- and the
+ * observer, comparing the store against the record, would answer `key_matches`
+ * true for ever and the planner would never send the new key. That is the
+ * convergence failure this port has already found twice, in the NAT pass and
+ * in WireGuard itself.
+ *
+ * The record carries digests and never material, so it is safe in a buffer a
+ * caller keeps; the octets it was computed from are wiped here.
  */
-int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, const ncfg_genl_family_t *family,
-    uint32_t seq, const ncfg_op_t *op, const ncfg_document_t *document,
-    const ncfg_secret_resolver_t *resolver, char *err, size_t err_size);
+/*
+ * Leave the record the observer reads back, at `observe.h`'s own path.
+ *
+ * **Called only after the kernel has accepted the request**, and that ordering
+ * is the point: a record for a request that failed tells the next observation
+ * that a key is in use which the device never took, so `key_matches` answers
+ * true about a device holding the old one and the planner does nothing about
+ * it, for ever.
+ *
+ * Published rather than static so the three things it decides can be checked
+ * without a WireGuard device and `CAP_NET_ADMIN`: that a good record lands
+ * where the reader looks, that an **empty** one removes a stale file rather
+ * than writing nothing into it -- otherwise a device whose last preshared key
+ * was removed goes on being described by yesterday's digests -- and that a
+ * buffer which ran out leaves the file alone rather than recording "no peer
+ * has a key" about one where several do.
+ *
+ * Nothing here fails the op. The machine has already changed, and the observer
+ * reads a missing record as "not a device netcfgd configured", which is the
+ * one shape the planner is built to do nothing about.
+ */
+void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kind,
+    const ncfg_buf_t *record);
+
+int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
+    const ncfg_genl_family_t *family, uint32_t seq, const ncfg_op_t *op,
+    const ncfg_document_t *document, const ncfg_secret_resolver_t *resolver, char *err,
+    size_t err_size);
 
 /*
  * A peer endpoint as the kernel wants it.
@@ -427,6 +470,18 @@ typedef struct {
 	const ncfg_document_t       *document;
 	/* Where `file` secrets live. NULL means the machine's own directory. */
 	const ncfg_secret_resolver_t *secrets;
+	/*
+	 * Where netcfgd records what it handed the kernel. The service context's
+	 * own run directory, so an executor given none has none.
+	 *
+	 * **NULL means the record is not written, and that is a real answer
+	 * rather than a failure.** The observer treats a missing record as "this
+	 * is not a device netcfgd configured, or `/run` was cleared under a
+	 * running one", and says nothing about the key either way -- which is the
+	 * one shape the planner is built to do nothing about. An op that changed
+	 * the machine must not fail because a note about it could not be written.
+	 */
+	const char                  *run_dir;
 	ncfg_kernel_index_fn         resolve;
 	void                        *context;
 } ncfg_kernel_world_t;
