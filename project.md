@@ -9515,6 +9515,57 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.197 The cycle option lands, and the last planner gap closes
+
+`ncfg_plan_options_t::cycle` is 0152's option half, and it was the last thing
+in the planner that was this port's to finish. The daemon side was already
+whole -- `ncfg_sims_advance` moves a modem to its next SIM source and leaves a
+note, `ncfg_sims_pending_*` lists the notes, `ncfg_sims_cycled` clears them
+once a plan carrying the cycle has been **applied** -- and `cycles_in`'s own
+comment in `reconcile_pass.c` said what was missing: *"this build's [planner]
+carries no `cycle` option at all and so emits none ... everything is cleared
+correctly the day the option lands."* This is that day.
+
+**Why the planner is asked rather than the daemon acting.** Publishing a SIM
+choice is not applying it: a `pre_up` hook is what reads the file, and `pre_up`
+fires at bring-up, so a link whose probe is failing is still up and never sees
+it. Something has to cycle the link -- and an action assembled by hand and
+handed to an executor would go round the `managed` choke point 0035 exists to
+be, so an unmanaged device could be cycled by a code path that never asked.
+There is a check for exactly that, and it goes red when the central guard in
+`ncfg_builder_push` is removed, alongside the existing unmanaged case.
+
+The cycle is a `plan_disable` and not a bare `link.down`, which is what makes
+the rest of that function's work happen: the `pre_down` hook, and the addresses
+`link.down` would otherwise strand -- it flushes IPv6 and keeps IPv4, measured
+on a real kernel. Folded into `base`, so the bring-up waits and the order is
+down, `pre_up`, up.
+
+**A sabotage aimed at the wrong guard.** Bypassing `ncfg_plan_link_is_plannable`
+turned nothing red, which for a moment looked like an unchecked claim. It was
+not: the unmanaged protection is the `declined`/`unmanaged` filter in
+`ncfg_builder_push`, which is where this campaign deliberately put it so that "a
+pass added later would not know to ask" -- and a pass added later is exactly
+what this is. Removing *that* turns the check red. The guard was in the right
+place and my sabotage was not.
+
+Two sentences moved. `cycles_in`'s no longer says the option is missing; it
+says why the plan is still asked rather than assumed -- the planner declines a
+cycle for a device it will not touch, so a note whose cycle was refused must
+stay. And `warn_unported`'s modem sentence says what a switch produces instead
+of what a plan cannot be asked to do; the warning itself stays, because no
+action in a plan is *about* a `modem` block and an operator should not have to
+wonder where theirs went.
+
+6,329 checks across 95 binaries. Three sabotages caught: a link already down
+cycled anyway, the cycle not making `bringing_up` true -- so the link went down
+and stayed down -- and the unmanaged guard removed.
+
+**With this the planner has no port gaps left.** What `warn_unported` still
+names is `warn_unbuilt`'s: link-local addressing, a `bluetooth` block, and a
+network block's own addressing, routes, `dns` and hooks are read by nobody in
+either language, so they are new work rather than porting.
+
 ## 10.196 The other half of the metric, and two sabotages that caught nothing
 
 `ncfg_plan_metric_restart` closes the second half of what a network's `metric`

@@ -482,13 +482,23 @@ static void warn_unported(ncfg_builder_t *builder)
 		const ncfg_device_t *device = &desired->devices[i];
 
 		if (device->modem) {
+			/*
+			 * **Both halves are here now, so this says what it does rather
+			 * than what is missing.** The daemon's SIM selection reads the
+			 * block and advances the source; a plan can be asked to cycle the
+			 * link, which is `ncfg_plan_options_t::cycle`, and the cycle is
+			 * what makes the `pre_up` hook fire on the new selection. The
+			 * warning stays because no action in the plan is *about* the
+			 * block itself -- an operator reading a plan for a modem machine
+			 * should not have to wonder where their `modem` block went.
+			 */
 			ncfg_plan_warnf(builder->plan, device->name,
 			    "a `modem` block is read by the daemon's SIM selection rather "
-			    "than by the planner, so no action in the plan above is about it. "
-			    "What is missing here is only the other half of a switch: a plan "
-			    "cannot yet be asked to cycle the link, so a modem that has moved "
-			    "to another SIM source gets no `link.down` and no `link.up`, and "
-			    "the `pre_up` hook that drives the mux does not fire");
+			    "than by the planner, so no action in the plan above is about it "
+			    "directly. What a switch produces is here: the daemon advances "
+			    "the source and asks for a cycle, and this plan carries the "
+			    "`link.down` and `link.up` that make the `pre_up` hook act on "
+			    "the new selection");
 		}
 	}
 	if (desired->bluetooth_count != 0u) {

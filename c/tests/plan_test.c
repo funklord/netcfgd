@@ -1823,6 +1823,131 @@ static void a_warning_too_long_to_print_says_it_was_cut(void)
 	ncfg_plan_free(plan);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Cycling a link for a SIM switch
+ * ------------------------------------------------------------------------ */
+
+#define CYCLE_DEVICES \
+	"\"devices\":[{\"name\":\"wwan0\",\"kind\":{\"kind\":\"physical\"}," \
+	"\"modem\":{\"sim\":[\"esim\",\"socket\"],\"apn\":\"im.cxn\"}}]," \
+	"\"interfaces\":[{\"name\":\"wwan0\",\"addressing\":[]}]"
+#define CYCLE_UP "\"links\":[" LINK_UP("wwan0") "]"
+
+/*
+ * 0152's option half: a modem advanced to another SIM source needs its link
+ * taken down and brought back, because the `pre_up` hook that acts on the new
+ * selection fires at bring-up and a link whose probe is failing is still up.
+ */
+static void a_cycle_takes_the_link_down_and_brings_it_back(void)
+{
+	static const char *const asked[] = { "wwan0" };
+	ncfg_plan_options_t options;
+	ncfg_document_t    *document;
+	ncfg_observed_t    *observed;
+	ncfg_plan_t        *plan;
+
+	memset(&options, 0, sizeof(options));
+	options.cycle = asked;
+	options.cycle_count = 1u;
+	plan = plan_of("{}", CYCLE_DEVICES, CYCLE_UP, &options, &document, &observed);
+
+	check(plan && has_name(plan, "link.down") && has_name(plan, "link.up"),
+	    "an interface asked for by name is taken down and brought back");
+	/*
+	 * **Down, then up**, which is the whole of what a cycle is -- and the
+	 * `pre_up` hook belongs between them, because that is the moment the new
+	 * selection is read. Checked by position rather than by the edge here
+	 * because `plan.h` says the list is already a valid execution order, and
+	 * an executor that ignores `depends_on` must still get this right.
+	 */
+	check(plan && position(plan, "link.down") < position(plan, "link.up"),
+	    "  in that order, since a cycle that came up before it went down is not one");
+	release(plan, document, observed);
+}
+
+static void an_interface_nobody_asked_about_is_not_cycled(void)
+{
+	static const char *const asked[] = { "wwan1" };
+	ncfg_plan_options_t options;
+	ncfg_document_t    *document;
+	ncfg_observed_t    *observed;
+	ncfg_plan_t        *plan;
+
+	memset(&options, 0, sizeof(options));
+	options.cycle = asked;
+	options.cycle_count = 1u;
+	plan = plan_of("{}", CYCLE_DEVICES, CYCLE_UP, &options, &document, &observed);
+
+	/* Per interface, like `allow_disruption` and for its reason: this takes a
+	 * link down, which is a disruption somebody has to have asked for by
+	 * name. */
+	check(plan && !has_name(plan, "link.down"),
+	    "an interface the cycle list does not name is left alone");
+	release(plan, document, observed);
+
+	/* And no list at all is the ordinary reconcile. */
+	plan = plan_of("{}", CYCLE_DEVICES, CYCLE_UP, NULL, &document, &observed);
+	check(plan && !has_name(plan, "link.down"),
+	    "and a plan built with no options at all cycles nothing");
+	release(plan, document, observed);
+}
+
+static void an_unmanaged_device_is_not_cycled_however_loudly_it_is_asked_for(void)
+{
+	static const char *const asked[] = { "wwan0" };
+	ncfg_plan_options_t options;
+	ncfg_document_t    *document;
+	ncfg_observed_t    *observed;
+	ncfg_plan_t        *plan;
+
+	memset(&options, 0, sizeof(options));
+	options.cycle = asked;
+	options.cycle_count = 1u;
+	plan = plan_of("{}",
+	    "\"devices\":[{\"name\":\"wwan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"managed\":false,\"modem\":{\"sim\":[\"esim\",\"socket\"],"
+	    "\"apn\":\"im.cxn\"}}],"
+	    "\"interfaces\":[{\"name\":\"wwan0\",\"addressing\":[]}]",
+	    CYCLE_UP, &options, &document, &observed);
+
+	/*
+	 * **This is why the planner is asked rather than the daemon acting.** An
+	 * action assembled by hand and handed to an executor would go round the
+	 * `managed` choke point 0035 exists to be, and an unmanaged device would
+	 * be cycled by a code path that never asked whether it may be.
+	 */
+	check(plan && !has_name(plan, "link.down"),
+	    "an unmanaged device is not cycled, which is why the planner decides and not the "
+	    "caller");
+	release(plan, document, observed);
+}
+
+static void a_link_that_is_already_down_is_not_cycled(void)
+{
+	static const char *const asked[] = { "wwan0" };
+	ncfg_plan_options_t options;
+	ncfg_document_t    *document;
+	ncfg_observed_t    *observed;
+	ncfg_plan_t        *plan;
+
+	memset(&options, 0, sizeof(options));
+	options.cycle = asked;
+	options.cycle_count = 1u;
+	plan = plan_of("{}", CYCLE_DEVICES,
+	    "\"links\":[{\"name\":\"wwan0\",\"index\":2,\"mtu\":1500,\"up\":false,"
+	    "\"carrier\":true,\"ownership\":\"unknown\"}]",
+	    &options, &document, &observed);
+
+	/* There is nothing to take down, and the bring-up it would wait for is
+	 * happening anyway -- so a `link.down` here would be an action that undoes
+	 * the one after it. */
+	check(plan && !has_name(plan, "link.down"),
+	    "a link that is already down is brought up without being taken down first");
+	check(plan && has_name(plan, "link.up"),
+	    "  and it is still brought up, because that is what it needed");
+	release(plan, document, observed);
+}
+
 int main(void)
 {
 	the_frozen_witness();
@@ -1843,6 +1968,11 @@ int main(void)
 	nothing_foreign_is_ever_removed();
 	a_guard_refuses_a_disruptive_action_at_plan_time();
 	consent_unblocks_the_named_interface_and_no_other();
+
+	a_cycle_takes_the_link_down_and_brings_it_back();
+	an_interface_nobody_asked_about_is_not_cycled();
+	an_unmanaged_device_is_not_cycled_however_loudly_it_is_asked_for();
+	a_link_that_is_already_down_is_not_cycled();
 	a_guarded_interface_is_not_torn_down_when_it_leaves_the_config();
 	an_unmanaged_device_is_not_touched();
 
