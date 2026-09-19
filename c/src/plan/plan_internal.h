@@ -354,6 +354,33 @@ const ncfg_routing_rule_t *ncfg_plan_intern_rule(ncfg_plan_t *plan,
  * `field` is the dotted path the reason carries, so an operator told a client
  * was started because of `addressing[1]` can go and look at the right line.
  */
+/*
+ * Restart a DHCP client whose route carries a metric the document has moved on
+ * from.
+ *
+ * The second half of `netcfgd_model::wifi::effective_metric`'s meaning: the
+ * first is that a route the interface declares takes the effective metric,
+ * which `address.c` does, and this is the lease's own route -- which netcfgd
+ * does not install and cannot edit, because the client installs it from what it
+ * was started with. So the only way to move it is to start the client again.
+ *
+ * **It looks at two things and neither subsumes the other.** The client's own
+ * `argv`, recorded as `started_metric`, says what it was *told* and is there
+ * before any route exists; the installed default route with the kernel's DHCP
+ * protocol on it says what the client *did*, and catches one that ignored what
+ * it was told.
+ *
+ * Bounded by 0079's restart cap, which matters more here than anywhere else it
+ * is applied: each round drops the lease for as long as the exchange takes, so
+ * a client that will not take the metric would otherwise take the machine's
+ * network away every reconcile, for ever.
+ *
+ * Nothing where the document asks for no lease, where none is running, or
+ * where neither answer differs from what is wanted.
+ */
+void ncfg_plan_metric_restart(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base);
+
 void ncfg_plan_backend(ncfg_builder_t *builder, const char *name, int kind, const char *field,
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
 void ncfg_plan_teardown_backends(ncfg_builder_t *builder);

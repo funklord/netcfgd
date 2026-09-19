@@ -616,6 +616,15 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	for (i = 0; i < interface->addressing_count; i++) {
 		ncfg_plan_source(builder, interface, i, &source_base, &addressing);
 	}
+	/*
+	 * And a client already running with a metric the document has moved on
+	 * from, after the sources for a reason: `ncfg_plan_backend` starts one
+	 * that is *not* running and returns at once when one is, so the two never
+	 * both fire -- a client this pass just planned a start for has nothing
+	 * running to restart, and one that is running is the only case this can
+	 * see. Same prerequisites as the source it belongs to.
+	 */
+	ncfg_plan_metric_restart(builder, interface, &source_base);
 	/* The document's routes and the report's, through the one function that
 	 * answers what the list is -- the teardown asks the same one, so the two
 	 * cannot disagree and plan a route that is installed and withdrawn on

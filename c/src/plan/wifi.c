@@ -231,14 +231,14 @@ static void warn_regdom(ncfg_builder_t *builder)
  *     into the list an executor verifies a script's hash against, so that a
  *     `hook.run` naming one could be carried out -- and no pass emits that op
  *     for a network, which is the same state one step further on.
- *   * **`metric` is the one real port gap of the five**, so it keeps the
- *     promise and gets its own sentence naming what is missing. The Rust's
- *     planner applies `netcfgd_model::wifi::effective_metric` to the routes an
- *     interface declares and restarts a DHCP client that was started with the
- *     old one. **The first half is here now**, as
- *     `ncfg_observed_effective_metric`, which `address.c` fills a route's
- *     metric from and the daemon starts a client with; the restart is not, and
- *     0263 records the deferral on that half alone.
+ *   * **`metric` was the one real port gap of the five, and it is closed.**
+ *     The Rust's planner applies `netcfgd_model::wifi::effective_metric` to
+ *     the routes an interface declares and restarts a DHCP client that was
+ *     started with the old one; both are here, as
+ *     `ncfg_observed_effective_metric` -- which `address.c` fills a route's
+ *     metric from and the daemon starts a client with -- and
+ *     `ncfg_plan_metric_restart`. So it has no warning here any more, which is
+ *     `build.c`'s rule rather than an omission.
  *
  * So the first four get `ncfg_plan_warn_unbuilt`'s sentence and the fifth does
  * not, which is what 10.180 published that helper for: "this port has not got
@@ -312,22 +312,17 @@ static void warn_networks_held(ncfg_builder_t *builder)
 			ncfg_buf_free(&block);
 			ncfg_buf_free(&names);
 		}
-		if (network->metric.has) {
-			/* The one that is this port's to finish, and it is now half
-			 * finished, so it says which half rather than "not acted on" --
-			 * and, to the same width as above, what the metric does reach, so a
-			 * number an operator wrote is not reported as inert when it decides
-			 * which network gets joined. */
-			ncfg_plan_warnf(builder->plan, NULL,
-			    "the `network` block `%s` states `metric = %lld`, and half of it "
-			    "is applied: the routes this interface declares take it while the "
-			    "radio is associated here, and a DHCP client started now is given "
-			    "it. What is missing is a *re*start, so a client already running "
-			    "keeps installing its lease's route at the old metric. It also "
-			    "reaches the join order, as the supplicant's `priority`, and a "
-			    "`linkset`'s choice",
-			    network->id, (long long)network->metric.value);
-		}
+		/*
+		 * **`metric` had a warning here and no longer does.** It was the one
+		 * of the five that was this port's to finish, and both halves have:
+		 * `address.c` fills a route's metric from
+		 * `ncfg_observed_effective_metric` while the radio is associated, the
+		 * daemon starts a DHCP client with it, and `ncfg_plan_metric_restart`
+		 * restarts a client already running with the old one. `build.c`'s rule
+		 * is that a pass landing takes its warning out in the same commit, and
+		 * a warning that outlives the gap it describes is the other way this
+		 * goes wrong -- an operator told a number is inert when it is not.
+		 */
 	}
 }
 

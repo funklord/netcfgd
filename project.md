@@ -9515,6 +9515,57 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.196 The other half of the metric, and two sabotages that caught nothing
+
+`ncfg_plan_metric_restart` closes the second half of what a network's `metric`
+means. The first half -- a route the interface declares taking the effective
+metric -- landed in 10.195; this is the **lease's own route**, which netcfgd
+does not install and cannot edit, because the client installs it from what it
+was started with. The only way to move it is to start the client again.
+
+**It looks at two things and neither subsumes the other**, which is the Rust's
+arrangement and its reason. The client's own `argv`, recorded as
+`started_metric`, says what it was *told* and is there before any route exists
+-- a client that has not finished its first exchange has installed nothing. The
+installed default route carrying the kernel's DHCP protocol says what the
+client *did*, and catches one that ignored what it was told. `seen` is whichever
+noticed, and it is what the sentence reports, so an operator is told the number
+actually on their machine.
+
+**0079's cap matters more here than anywhere else it is applied.** Each round
+drops the lease for as long as the exchange takes, so a client that will not
+take the metric -- an operator's own `dhcpcd.conf` overriding it, say -- would
+otherwise take the machine's network away every reconcile, for ever. A machine
+whose network goes away every five seconds is worse than one whose route ranks
+wrongly.
+
+**And the warning is gone, which is `build.c`'s rule rather than a deletion.** A
+pass landing takes its warning out in the same commit; a warning that outlives
+the gap it describes tells an operator a number they wrote is inert when it is
+not. The test that asserted the warning now asserts its absence, and the two
+halves are checked for real instead.
+
+**Two sabotages caught nothing, and both were faults in my checks.**
+
+The start not waiting on the stop turned nothing red: the case asserted only
+that the stop came *first in the list*, which is the push order and stays the
+same without the edge. An executor that reads `depends_on` and parallelises
+would have started a second client beside the one being stopped, both retrying
+for ever. It asserts the edge now, and the list order beside it.
+
+Removing the "does this interface ask for a lease" guard turned nothing red
+either, because that case's fixture had **no dhcp4 backend running** -- so the
+*other* guard declined it and the check was passing for a reason it did not
+name. The fixture has a running client now, which is the ordinary shape of a
+machine whose document stopped asking for one. Fixing it exposed a third
+mistake of mine: the check counted `backend.stop`, and there legitimately is
+one -- the teardown stopping a client the document no longer asks for. It
+asserts on the restart's own half instead.
+
+6,321 checks across 95 binaries. Five sabotages caught: the restart cap
+ignored, the start not waiting on the stop, a converged client restarted
+anyway, the addressing guard removed, and the `argv` half dropped.
+
 ## 10.195 Half a wifi metric, and the count that came out of `build.c`
 
 `address.c`'s `with_metric` filled a route's metric from
