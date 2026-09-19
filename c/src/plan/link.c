@@ -506,6 +506,7 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_op_t                   inverse;
 	ncfg_reason_t               reason;
 	int                         bringing_up;
+	int                         cycling;
 	size_t                      i;
 
 	if (!ncfg_plan_link_is_plannable(builder, interface->name)) {
@@ -532,7 +533,34 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	 * producing a plan that went `pre_up`, `link.down`, `post_down`,
 	 * `post_up`. Decision 0063.
 	 */
-	bringing_up = interface->enabled && (!link || !link->up);
+	/*
+	 * **A cycle asked for by name, and it is a `link.down` like any other.**
+	 * 0152's option half: the daemon advanced this modem to another SIM
+	 * source and published the choice, and the `pre_up` hook that acts on the
+	 * choice fires at bring-up -- so a link that is still up never sees it.
+	 * Taking it down through `plan_disable` rather than emitting a bare
+	 * `link.down` is what makes the rest of that function's work happen too:
+	 * the `pre_down` hook, and the addresses that `link.down` would otherwise
+	 * leave behind (it flushes IPv6 and keeps IPv4, measured on a real
+	 * kernel).
+	 *
+	 * Folded into `base`, so the bring-up below waits for it and the order is
+	 * down, `pre_up`, up. `cycling` then makes `bringing_up` true, because the
+	 * link this plan is about to raise is one this plan just lowered.
+	 */
+	cycling = interface->enabled && link && link->up &&
+	    ncfg_plan_names(builder->options ? builder->options->cycle : NULL,
+	    builder->options ? builder->options->cycle_count : 0u, interface->name);
+	if (cycling) {
+		ncfg_plan_teardown_t switched = { "modem.sim", "the next source", "the one it had" };
+		uint32_t             down = plan_disable(builder, interface, &base, &switched);
+
+		if (down != NCFG_PLAN_NO_ACTION) {
+			ncfg_plan_ids_push(builder->plan, &base, down);
+		}
+	}
+
+	bringing_up = interface->enabled && (cycling || !link || !link->up);
 
 	ncfg_plan_ids_extend(builder->plan, &up_deps, &base);
 	if (bringing_up) {

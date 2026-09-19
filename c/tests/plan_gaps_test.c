@@ -582,8 +582,14 @@ static void a_modem_block_is_the_daemons_and_the_gap_is_named_exactly(void)
 
 	check(plan && planfix_warned(plan, "the daemon's SIM selection"),
 	    "a `modem` block is reported as the daemon's, which is whose it is");
-	check(plan && planfix_warned(plan, "cannot yet be asked to cycle the link"),
-	    "and the part that really is missing here is named exactly rather than in general");
+	/* **This asserted what was missing and now asserts what is there.** A
+	 * plan can be asked to cycle the link, and a switch produces the
+	 * `link.down` and `link.up` that make the `pre_up` hook act -- checked for
+	 * real by the cases below rather than by reading the sentence. */
+	check(plan && !planfix_warned(plan, "cannot yet be asked to cycle the link"),
+	    "and the half that used to be missing is no longer claimed to be");
+	check(plan && planfix_warned(plan, "asks for a cycle"),
+	    "  the sentence says what a switch produces instead");
 	planfix_release(plan, document, observed);
 }
 

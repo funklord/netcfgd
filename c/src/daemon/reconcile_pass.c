@@ -625,12 +625,13 @@ static void portal_checks(ncfg_reconcile_t *loop)
 /*
  * The pending devices whose cycle this plan actually carries.
  *
- * `ncfg_sims_cycled` reads "no records at all" as "no cycle was needed",
- * which is right for a planner that emits a cycle for every link that is up
- * -- and wrong for this build's, which carries no `cycle` option at all and
- * so emits none. Asking the plan for the `link.down` is the same condition
- * said where it can be checked, so nothing is cleared today and everything is
- * cleared correctly the day the option lands.
+ * `ncfg_sims_cycled` reads "no records at all" as "no cycle was needed", so
+ * asking the plan for the `link.down` is what tells a note that was acted on
+ * from one that was not. **The option has landed**, and this is why it is
+ * still asked rather than assumed: the planner declines a cycle for a device
+ * it will not touch -- an unmanaged one, or a link that is already down -- so
+ * a note whose cycle the planner refused must stay, and clearing it on the
+ * strength of having asked would leave the modem on a source nothing selected.
  */
 static size_t cycles_in(const ncfg_plan_t *plan, const ncfg_sims_t *sims, const char **out,
     size_t out_max)
@@ -934,8 +935,11 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 {
 	ncfg_drifts_t         *drifts;
 	ncfg_plan_t           *plan;
+	ncfg_plan_options_t    options;
 	ncfg_confirm_window_t  window;
+	const char            *wanted[CYCLES_MAX];
 	char                   message[NCFG_ERROR_MAX];
+	size_t                 pending;
 	size_t                 at;
 
 	report->looked = 1;
@@ -946,8 +950,24 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 		 * still worth having: it is what the daemon answers `status` from. */
 		return;
 	}
+	/*
+	 * **The cycles go into the plan rather than being done to it.** 0152's
+	 * option half: a modem the daemon advanced needs its link taken down and
+	 * brought back so the `pre_up` hook acts on the new selection, and doing
+	 * that by handing an executor a `link.down` of this module's own making
+	 * would go round the `managed` choke point 0035 exists to be. So the
+	 * planner is told, and it decides -- including declining an unmanaged
+	 * device, which is the whole point.
+	 */
+	memset(&options, 0, sizeof(options));
+	for (pending = 0; pending < ncfg_sims_pending_count(loop->sims) &&
+	    pending < (size_t)CYCLES_MAX; pending++) {
+		wanted[pending] = ncfg_sims_pending_at(loop->sims, pending);
+	}
+	options.cycle = wanted;
+	options.cycle_count = pending;
 	message[0] = '\0';
-	plan = ncfg_plan_build(loop->state->desired, loop->state->observed, NULL, message,
+	plan = ncfg_plan_build(loop->state->desired, loop->state->observed, &options, message,
 	    sizeof(message));
 	if (!plan) {
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR, "this machine could not be planned for: %s",

@@ -500,6 +500,26 @@ typedef struct {
 	 */
 	const char *const *allow_disruption;
 	size_t             allow_disruption_count;
+	/*
+	 * Interfaces to take down and bring back up, whatever else this plan does.
+	 *
+	 * **The option half of 0152.** Advancing a modem to its next SIM source
+	 * publishes the choice, and a `pre_up` hook is what acts on it -- but
+	 * `pre_up` fires at bring-up, and a link whose probe is failing is still
+	 * up. So something has to cycle it, and that something is **the planner
+	 * rather than the daemon reaching past it**: an action assembled by hand
+	 * and handed to an executor would miss the `managed` choke point 0035
+	 * exists to be, so an unmanaged device could be cycled by a code path that
+	 * never asked.
+	 *
+	 * Per interface, like `allow_disruption` and for its reason: this takes a
+	 * link down, which is a disruption somebody has to have asked for. An
+	 * interface that is already down, or that the document disables, is not
+	 * cycled -- there is nothing to take down, and the bring-up it would wait
+	 * for is not happening.
+	 */
+	const char *const *cycle;
+	size_t             cycle_count;
 } ncfg_plan_options_t;
 
 /* An empty plan, or NULL. */
