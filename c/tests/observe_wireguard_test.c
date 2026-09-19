@@ -1197,6 +1197,90 @@ static void the_record_paths(void)
 	    "and a record needs both halves of its name");
 }
 
+/*
+ * The digests this file's fixtures are written with are the ones the rule
+ * produces.
+ *
+ * **Two documents agreeing are one witness if the same hand wrote both.**
+ * Every case above compares an observation against a literal digest that was
+ * computed once, by hand, and pasted in -- so the whole file would pass over a
+ * digest rule that had drifted, as long as the literals drifted with it. They
+ * cannot: the executor writes the record through `ncfg_observe_wg_digest` and
+ * this asserts the literals are what that function answers, which ties the
+ * reader's fixtures to the writer's output rather than to a second opinion.
+ */
+static void the_literal_digests_are_what_the_rule_produces(void)
+{
+	char digest[NCFG_SHA256_HEX_SIZE];
+
+	ncfg_observe_wg_digest(STORED_PRIVATE_TEXT, strlen(STORED_PRIVATE_TEXT), digest);
+	check(strcmp(digest, STORED_PRIVATE_DIGEST) == 0,
+	    "the private key's fixture digest is the one the shared rule computes");
+	ncfg_observe_wg_digest(STORED_PRESET_TEXT, strlen(STORED_PRESET_TEXT), digest);
+	check(strcmp(digest, STORED_PRESET_DIGEST) == 0,
+	    "and so is the preshared key's, which the executor writes with");
+	/*
+	 * **The two spellings of one key digest the same**, which is the whole
+	 * reason the rule parses before it hashes: base64's final character
+	 * carries four significant bits, so a store entry re-encoded by `wg` would
+	 * otherwise read as a rotation and the planner would re-send a key the
+	 * kernel already holds.
+	 */
+	{
+		char other[NCFG_SHA256_HEX_SIZE];
+
+		ncfg_observe_wg_digest(PEER_TWO_TEXT, strlen(PEER_TWO_TEXT), digest);
+		ncfg_observe_wg_digest(PEER_TWO_OTHER_SPELLING, strlen(PEER_TWO_OTHER_SPELLING),
+		    other);
+		check(strcmp(digest, other) == 0,
+		    "and two spellings of one key digest alike, or a re-encode reads as a "
+		    "rotation");
+	}
+	/* Material that is not a key at all is hashed as it stands, which is the
+	 * honest answer rather than a refusal: a `pass` entry holding a passphrase
+	 * is still something netcfgd handed over and can compare. */
+	ncfg_observe_wg_digest(CANARY, strlen(CANARY), digest);
+	check(strcmp(digest, CANARY_DIGEST) == 0,
+	    "and material that is not a key is hashed as it stands");
+	/* Surrounding whitespace is trimmed, which is what an editor or `echo`
+	 * leaves on a stored key -- and a digest that included it would never
+	 * match one written from the octets. */
+	{
+		char padded[128];
+		char trimmed[NCFG_SHA256_HEX_SIZE];
+
+		(void)snprintf(padded, sizeof(padded), "  %s\n", STORED_PRIVATE_TEXT);
+		ncfg_observe_wg_digest(padded, strlen(padded), trimmed);
+		check(strcmp(trimmed, STORED_PRIVATE_DIGEST) == 0,
+		    "and what an editor left around it is trimmed first");
+	}
+}
+
+/* `ncfg_key_render` is `ncfg_key_parse`'s other half, and there were two
+ * private copies of it before there was one. */
+static void a_key_renders_back_to_the_spelling_it_parses_from(void)
+{
+	unsigned char octets[NCFG_KEY_LEN];
+	char          text[NCFG_KEY_TEXT_SIZE];
+
+	check(ncfg_key_parse(PEER_TWO_TEXT, strlen(PEER_TWO_TEXT), octets, NULL, 0) &&
+	    ncfg_key_render(octets, text, sizeof(text), NULL, 0) &&
+	    strcmp(text, PEER_TWO_TEXT) == 0,
+	    "a key parses and renders back to the same 44 characters");
+	/*
+	 * **And the other spelling renders to the canonical one.** The low two
+	 * bits of the last character are not decoded and `wg` emits them set, so
+	 * the decoder ignores them and the renderer clears them: two spellings in,
+	 * one out. That is what makes a record comparable with itself.
+	 */
+	check(ncfg_key_parse(PEER_TWO_OTHER_SPELLING, strlen(PEER_TWO_OTHER_SPELLING), octets,
+	    NULL, 0) && ncfg_key_render(octets, text, sizeof(text), NULL, 0) &&
+	    strcmp(text, PEER_TWO_TEXT) == 0,
+	    "and the other spelling of it renders to the canonical one, never back to itself");
+	check(!ncfg_key_render(octets, text, NCFG_KEY_TEXT_SIZE - 1u, NULL, 0),
+	    "and somewhere too small to hold one is refused rather than truncated");
+}
+
 int main(void)
 {
 	ncfg_log_accept(NCFG_LOG_NOTE);
@@ -1206,6 +1290,8 @@ int main(void)
 	a_machine_with_no_wireguard_asks_nothing();
 	a_device_that_cannot_be_read_is_not_a_device_with_no_peers();
 	the_record_paths();
+	the_literal_digests_are_what_the_rule_produces();
+	a_key_renders_back_to_the_spelling_it_parses_from();
 	the_currency_question();
 	nothing_that_identifies_a_key_leaves_this_pass();
 	what_the_observation_buys_the_planner();

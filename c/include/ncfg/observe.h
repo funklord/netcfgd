@@ -137,6 +137,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/document.h"
+#include "ncfg/hooks.h"
 #include "ncfg/netlink.h"
 #include "ncfg/observed.h"
 #include "ncfg/qdisc.h"
@@ -1030,6 +1031,31 @@ int ncfg_observe_wg_key_record_path(const char *run_dir, const char *iface, char
 
 int ncfg_observe_wg_preset_record_path(const char *run_dir, const char *iface, char *out,
     size_t out_size, char *err, size_t err_size);
+
+/*
+ * The digest netcfgd records for a key it handed the kernel.
+ *
+ * **One rule, because the two halves of a comparison must not spell it
+ * differently.** The observer digests what the store holds now and compares it
+ * against this record; the executor digests what it just sent and writes it.
+ * A writer that hashed the base64 text while the reader hashed the octets
+ * would produce a record that never matches, so `key_matches` would be false
+ * for ever and the planner would re-send a key the kernel already holds on
+ * every reconcile.
+ *
+ * The rule: trim the material, and **if it parses as a WireGuard key, hash the
+ * thirty-two octets** rather than the text. That is what makes two spellings
+ * of one key compare equal -- base64's final character carries four
+ * significant bits, so `document.h` says the same key has more than one
+ * spelling, and hashing the text would make a re-encoded store entry read as a
+ * rotation. Anything that does not parse is hashed as it stands, which is the
+ * honest answer for material that is not a key at all.
+ *
+ * `out` is `NCFG_SHA256_HEX_SIZE` bytes and is always filled. The octets are
+ * wiped before returning, which is `secrets.h`'s discipline: a digest is not a
+ * secret, and the buffer it was computed from is.
+ */
+void ncfg_observe_wg_digest(const char *material, size_t length, char *out);
 
 /* ------------------------------------------------------------------------ *
  * The answers that are computed rather than read

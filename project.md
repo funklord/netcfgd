@@ -9515,6 +9515,73 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.193 The WireGuard record gets its writer, and a third base64 encoder
+
+`observe.h` declared `ncfg_observe_wg_key_record_path` and
+`ncfg_observe_wg_preset_record_path` "so that the writer, when it lands, names
+the file through them rather than spelling the path a second time". The writer
+has landed: `ncfg_kernel_wg_write_record`, called from the WireGuard arm after
+the kernel has accepted the request. Until now `key_matches` and
+`preshared_matches` came back absent on any real machine, which is a question
+left unanswered rather than answered wrongly -- the one shape the planner is
+built to do nothing about.
+
+**The digest is computed from what was sent, not from a second resolution, and
+that is a correctness property rather than a saving.** A caller that re-read the
+store would digest whatever it held a moment later, so a key rotated between the
+two reads would be recorded as the one in use while the kernel held the old one
+-- and the observer, comparing the store against the record, would answer
+`key_matches` **true** for ever and the planner would never send the new key.
+That is the convergence failure this port has already found twice, in the NAT
+pass and in WireGuard itself. So `ncfg_kernel_wg_build` fills the record from
+the octets it is about to send, before it wipes them.
+
+**And the digest rule is one function now.** `digest_of` was a static in the
+observer -- trim, parse as a key if possible, hash the octets rather than the
+text. A writer that hashed the base64 instead would produce a record that never
+matches, so `key_matches` would be false for ever and the planner would re-send
+a key the kernel already holds on every reconcile. It is
+`ncfg_observe_wg_digest`, and both halves call it.
+
+**A third base64 encoder was about to be written.** `ncfg_key_parse`'s own
+comment says two base64 *readers* of one format is how the halves of one program
+come to disagree about a key; there were already two *writers* --  `document.c`
+and `observed.c` each spelled the encoder out, identically -- and the record
+needed a third. `ncfg_key_render` is published beside `ncfg_key_parse` now and
+all three call it. It clears the low two bits of the last character, which the
+decoder ignores and `wg` emits set, so two spellings in give one spelling out.
+
+**The reader's fixtures were an independent witness, and now they are not.**
+`observe_wireguard_test.c` compares observations against literal digests that
+were computed once by hand and pasted in, so the whole file would pass over a
+rule that had drifted as long as the literals drifted with it -- `evidence.md`'s
+"two documents agreeing are one witness if the same hand wrote both". There is a
+case asserting each literal is what `ncfg_observe_wg_digest` answers, which ties
+them to the writer's output.
+
+**A sabotage that caught nothing, and what it found.** Writing the record even
+when the send failed turned nothing red: the ordering had no check, and neither
+did the file behaviour under it. `ncfg_kernel_wg_write_record` is published
+rather than static so three things can be checked without a WireGuard device and
+`CAP_NET_ADMIN`: a good record lands where the reader looks, an **empty** one
+removes a stale file rather than emptying it -- a device whose last preshared key
+was removed would otherwise go on being described by yesterday's digests -- and
+a buffer that ran out leaves the file alone rather than recording "no peer has a
+key" about one where several do. The `ok &&` before the call remains a one-line
+reading, which is what it should be.
+
+**And a leak I wrote, caught by the sanitiser and not by me.** The new
+"builds the same way with no record asked for" case `memset` a
+`ncfg_wg_messages_t` that the peers build had filled, stranding 320 bytes --
+bytes carrying a preshared key, which is the one kind this project scrubs on
+purpose. Freed before the handle is overwritten.
+
+6,304 checks across 95 binaries. Five sabotages caught: the digest hashing text
+instead of octets, the renderer keeping the low two bits, an empty record
+emptying the file rather than removing it, a failed buffer written anyway, and
+-- the one that caught nothing first time -- the record written for a request
+the kernel refused.
+
 ## 10.192 The service context is complete, and the refusal is about the planner now
 
 The last unresolved member of `ncfg_service_t` was `tunnels`:

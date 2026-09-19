@@ -366,26 +366,16 @@ static int key_octets_read(const ncfg_json_doc_t *doc, uint32_t node, unsigned c
 	return 1;
 }
 
+/* `document.h`'s renderer. This file had an identical copy of it, which is the
+ * hazard `ncfg_key_parse`'s comment names pointed at the writing side: one
+ * spelling in, one out, everywhere. */
 static void key_octets_write(ncfg_json_writer_t *writer, const unsigned char *key)
 {
-	char   text[45];
-	size_t at = 0;
-	size_t i;
+	char text[NCFG_KEY_TEXT_SIZE];
 
-	for (i = 0; i < 32u; i += 3u) {
-		size_t   have = 32u - i < 3u ? 32u - i : 3u;
-		unsigned block = 0;
-		size_t   j;
-
-		for (j = 0; j < have; j++) {
-			block |= (unsigned)key[i + j] << (16u - 8u * (unsigned)j);
-		}
-		for (j = 0; j < 4u; j++) {
-			text[at++] = j < have + 1u ?
-			    base64_alphabet[(block >> (18u - 6u * (unsigned)j)) & 0x3fu] : '=';
-		}
+	if (!ncfg_key_render(key, text, sizeof(text), NULL, 0)) {
+		return;
 	}
-	text[at] = '\0';
 	ncfg_json_write_string(writer, text);
 }
 

@@ -1117,15 +1117,21 @@ static int public_key_read(const ncfg_json_doc_t *doc, uint32_t node, void *fiel
 	return ncfg_key_parse(text, text ? length : 0, field, err, err_size);
 }
 
-static void public_key_write(ncfg_json_writer_t *writer, const void *field)
+int ncfg_key_render(const unsigned char key[NCFG_KEY_LEN], char *out, size_t out_size,
+    char *err, size_t err_size)
 {
-	const unsigned char *key = field;
-	char                 text[45];
-	size_t               at = 0;
-	size_t               i;
+	size_t at = 0;
+	size_t i;
 
-	for (i = 0; i < 32u; i += 3u) {
-		size_t   have = 32u - i < 3u ? 32u - i : 3u;
+	if (!key || !out || out_size < NCFG_KEY_TEXT_SIZE) {
+		/* Named by its size and never by its value: a key that would not fit
+		 * is still a key. */
+		ncfg_error_set(err, err_size, "a key needs %u bytes to render into",
+		    (unsigned)NCFG_KEY_TEXT_SIZE);
+		return 0;
+	}
+	for (i = 0; i < NCFG_KEY_LEN; i += 3u) {
+		size_t   have = NCFG_KEY_LEN - i < 3u ? NCFG_KEY_LEN - i : 3u;
 		unsigned block = 0;
 		size_t   j;
 
@@ -1133,11 +1139,21 @@ static void public_key_write(ncfg_json_writer_t *writer, const void *field)
 			block |= (unsigned)key[i + j] << (16u - 8u * (unsigned)j);
 		}
 		for (j = 0; j < 4u; j++) {
-			text[at++] = j < have + 1u ?
+			out[at++] = j < have + 1u ?
 			    base64_alphabet[(block >> (18u - 6u * (unsigned)j)) & 0x3fu] : '=';
 		}
 	}
-	text[at] = '\0';
+	out[at] = '\0';
+	return 1;
+}
+
+static void public_key_write(ncfg_json_writer_t *writer, const void *field)
+{
+	char text[NCFG_KEY_TEXT_SIZE];
+
+	if (!ncfg_key_render(field, text, sizeof(text), NULL, 0)) {
+		return;
+	}
 	ncfg_json_write_string(writer, text);
 }
 
