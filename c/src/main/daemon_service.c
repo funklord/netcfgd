@@ -64,21 +64,6 @@
  * The route metric a DHCP client is started with
  * ------------------------------------------------------------------------ */
 
-/* The metric of the network of that id, or absent. */
-static ncfg_optint_t metric_of_network(const ncfg_document_t *desired, const char *id)
-{
-	ncfg_optint_t none;
-	size_t        i;
-
-	memset(&none, 0, sizeof(none));
-	for (i = 0; id && i < desired->network_count; i++) {
-		if (desired->networks[i].id && strcmp(desired->networks[i].id, id) == 0) {
-			return desired->networks[i].metric;
-		}
-	}
-	return none;
-}
-
 size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_t *observed,
     ncfg_service_client_metric_t *out, size_t out_max, size_t *missed)
 {
@@ -92,23 +77,17 @@ size_t ncfg_main_metrics_of(const ncfg_document_t *desired, const ncfg_observed_
 		return 0;
 	}
 	for (i = 0; i < desired->interface_count; i++) {
-		const ncfg_interface_t     *interface = &desired->interfaces[i];
-		const ncfg_observed_link_t *link = observed ?
-		    ncfg_observed_link(observed, interface->name) : NULL;
-		ncfg_optint_t               metric = metric_of_network(desired,
-		    link ? link->network : NULL);
-
+		const ncfg_interface_t *interface = &desired->interfaces[i];
 		/*
-		 * The network's where the radio is associated to one that carries a
-		 * metric, and the interface's own `preference` otherwise. **Not "the
-		 * network's if there is a network"**: a network with no metric of its
-		 * own falls through to the preference rather than erasing it, which is
-		 * what `or` means in the rule and is the difference between honouring
-		 * an operator's number and dropping it because they also named an SSID.
+		 * `observed.h`'s, and the planner's `with_metric` asks the same
+		 * function. That pairing is the point: this starts the client with
+		 * `-m` and the planner decides whether the route the client installs
+		 * is the one the document asked for, so two readings of the rule is a
+		 * lease whose route never matches and a plan that never converges.
 		 */
-		if (!metric.has) {
-			metric = interface->preference;
-		}
+		ncfg_optint_t metric = ncfg_observed_effective_metric(desired, observed,
+		    interface);
+
 		if (!metric.has) {
 			continue;
 		}

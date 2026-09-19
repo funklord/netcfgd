@@ -1269,6 +1269,45 @@ const ncfg_delegation_t *ncfg_observed_delegation(const ncfg_observed_t *observe
 int ncfg_observed_prefix_of(const ncfg_observed_t *observed, const ncfg_prefix_ref_t *reference,
     char *out, size_t out_size);
 
+/*
+ * The route metric an interface's routes take, given what it is associated to.
+ *
+ * `netcfgd_model::wifi::effective_metric`: **the metric of the network this
+ * radio is associated to, where that network carries one, and the interface's
+ * own `preference` otherwise.** Absent where neither states anything, which is
+ * an ordinary document and not a failure.
+ *
+ * **It falls back rather than replacing**, and that is the whole of the rule
+ * that is easy to get wrong: a network with no `metric` of its own leaves the
+ * interface's `preference` exactly as it was, so every machine that never
+ * needed this is unaffected. Reading it as "the network's if there is a
+ * network" drops an operator's number because they also named an SSID.
+ *
+ * **Here because three callers need one answer.** The planner fills in a
+ * route's metric with it; the planner's *teardown* fills in the same value to
+ * decide whether a route it is looking at is one of these -- and `address.c`
+ * says why that pair must agree, because a metric computed differently on each
+ * side makes the comparison never match and the plan loop for ever. The third
+ * is the daemon, which starts a DHCP client with `-m` so the lease's own route
+ * carries it. The Rust delegates for exactly this reason and records what
+ * happened before it did: its executor built the list from `preference` alone,
+ * so the metric a network carried never reached the client that installs the
+ * route -- measured on a veth with a real server, 1003 on a document whose
+ * network said 100.
+ *
+ * `observed` may be NULL, which is a machine nothing has looked at: nothing is
+ * associated, so the answer is the interface's own.
+ *
+ * **The gating is deliberately not this question.** Carrier and probe decide
+ * whether an interface's routes go in at all, and both key on `preference`,
+ * because that is a property of the link rather than of the network on it -- a
+ * radio whose network names a metric but whose interface names no preference
+ * is asking to be ranked, not asking to have its routes withheld when the
+ * cable is out.
+ */
+ncfg_optint_t ncfg_observed_effective_metric(const ncfg_document_t *desired,
+    const ncfg_observed_t *observed, const ncfg_interface_t *interface);
+
 /* What was last delivered for a DNS scope. */
 const ncfg_dns_policy_t *ncfg_observed_dns_for(const ncfg_observed_t *observed,
     const char *scope);

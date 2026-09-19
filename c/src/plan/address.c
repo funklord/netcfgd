@@ -156,22 +156,37 @@ const char *ncfg_plan_render_route(ncfg_plan_t *plan, const ncfg_route_t *route)
 }
 
 /*
- * A route with the interface's preference filled in as its metric.
+ * A route with the interface's effective metric filled in.
  *
  * Resolved here rather than at compile time so the document stays a literal
  * reading of the config -- `ncfg show` reports what was written, and the plan
  * reports what it means. **It also has to happen in exactly one place**,
  * because the comparison that decides "is this route already present" uses the
  * metric and would loop forever against a value computed differently on each
- * side. This build has one answer, `interface->preference`, in both
- * directions; see the port notes for where the Rust has two.
+ * side.
+ *
+ * **The answer is `ncfg_observed_effective_metric`'s, and it used to be
+ * `interface->preference` alone.** That was this port's half of the rule: a
+ * radio associated to a network carrying `metric = N` installed its routes at
+ * the interface's preference instead, so an operator who ranked a network got
+ * the number they wrote on the interface and nothing said so. The teardown arm
+ * below fills in the same value through the same function, which is what keeps
+ * the pair that has to agree from being two readings.
  */
-static ncfg_route_t with_metric(const ncfg_route_t *route, const ncfg_interface_t *interface)
+static ncfg_route_t with_metric(const ncfg_builder_t *builder, const ncfg_route_t *route,
+    const ncfg_interface_t *interface)
 {
-	ncfg_route_t copy = *route;
+	ncfg_route_t  copy = *route;
+	ncfg_optint_t effective;
 
-	if (!copy.metric.has && interface->preference.has) {
-		copy.metric = interface->preference;
+	if (copy.metric.has) {
+		/* A route that states its own is not overridden by either: what an
+		 * operator wrote on the route is the most specific thing there is. */
+		return copy;
+	}
+	effective = ncfg_observed_effective_metric(builder->desired, builder->observed, interface);
+	if (effective.has) {
+		copy.metric = effective;
 	}
 	return copy;
 }
@@ -291,7 +306,7 @@ void ncfg_plan_route(ncfg_builder_t *builder, const ncfg_interface_t *interface,
 {
 	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed,
 	    interface->name);
-	ncfg_route_t                wanted = with_metric(route, interface);
+	ncfg_route_t                wanted = with_metric(builder, route, interface);
 	ncfg_plan_ids_t             deps = { NULL, 0, 0 };
 	ncfg_op_t                   op;
 	ncfg_op_t                   inverse;
@@ -462,7 +477,7 @@ static void teardown_routes(ncfg_builder_t *builder)
 				ncfg_plan_routes_for(builder, interface, &routes);
 				for (j = 0; j < routes.count; j++) {
 					ncfg_route_t candidate =
-					    with_metric(&routes.routes[j], interface);
+					    with_metric(builder, &routes.routes[j], interface);
 
 					if (ncfg_plan_route_matches(&candidate, seen)) {
 						wanted = 1;
