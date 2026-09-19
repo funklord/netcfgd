@@ -9515,6 +9515,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.199 What radvd is announcing, and four passes still to write
+
+I had been saying the port had no gaps left. That was wrong, and re-deriving
+rather than repeating it is what found them: `observe.h` names **five**
+observation passes still unwritten -- `ask_supplicants`,
+`read_access_control`, `read_advertised`, `read_secret_currency` and
+`read_tunnel_currency`. One of them is closed here.
+
+**`read_advertised` was a pass that planned nothing, ever.**
+`ncfg_observed_backend_t::advertised` is the one value in a document that
+arrives *after* the document does: the prefixes come from a delegation a lease
+supplied, so an ISP renumbering moves them under a daemon already running.
+`plan/advertise.c` compares what the policy resolves to now against what the
+daemon was last given -- and treats an **empty** list as "netcfgd cannot tell"
+rather than "announcing nothing", deliberately, because the second reading
+plans a reload on every reconcile. Nothing filled the list, so it was always
+empty, so the comparison never ran: a renumbered prefix left radvd announcing
+the old block for ever, telling every host on the wire to use an address the
+upstream will not route. The planner's half was already checked against a
+hand-written observation; nothing made the observation real.
+
+**It reads the file, not the daemon.** radvd has no control socket, so what it
+announces is whatever was in its configuration when it last read one -- and
+netcfgd generated that file, so the file *is* the record. `ncfg_ra_config_path`
+names it rather than this composing the path again, which is every record
+reader's rule here.
+
+**The order is kept rather than sorted**, because the comparison joins both
+sides into a string: sorting one side would plan a reload on every reconcile
+for any document whose prefixes are not in ascending order. There is a
+descending fixture for it, and the sabotage that sorts goes red.
+
+**A sabotage that proved nothing, by construction.** Clearing the list when the
+file is missing turned nothing red -- because the fixture's list was empty
+already, so "left alone" and "cleared" were the same bytes. The fixture now
+starts with a prefix in it, which is the case that matters anyway: a `/run`
+cleared under a running daemon must not wipe what the record says, or the next
+plan reloads against a guess. Two sabotages bite there now where none did.
+
+**And `observe.h` had a stale paragraph of mine.** It still said
+`apply/kernel_genl.c` does not write the WireGuard key record; I wrote that
+writer in 10.193 and corrected the liveness paragraph beside it without
+correcting this one. Fixed.
+
+6,354 checks across 97 binaries. Five sabotages caught: the prefixes sorted, a
+stopped daemon asked anyway, the `prefix` line matched on the wrong keyword, a
+missing file clearing the record, and a prefixless file clearing it.
+
+**Four passes remain**, and the note that they are "a round trip to the daemon
+it asks" is only true of some: `read_secret_currency` and
+`read_tunnel_currency` are digests of files, like this one was.
+
 ## 10.198 The offload disagreement is closed, in both languages
 
 10.194 left this open because closing it needed a decision above the work: a
