@@ -911,3 +911,35 @@ int ncfg_wire_error_code(const void *payload, size_t length, int32_t *out,
 	*out = -code;
 	return 1;
 }
+
+int ncfg_wire_request_parts(const ncfg_buf_t *message, const char *what, uint16_t *kind,
+    uint16_t *flags, ncfg_buf_t *body, char *err, size_t err_size)
+{
+	ncfg_wire_messages_t walk;
+	ncfg_wire_message_t  parsed;
+
+	if (!message || !kind || !flags || !body) {
+		ncfg_error_set(err, err_size, "there is no request to take apart");
+		return 0;
+	}
+	ncfg_wire_messages_start(&walk, message->data, message->length);
+	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
+		/*
+		 * Overwritten rather than carried up, which is what all five copies
+		 * did: the walk's sentence is about bytes, and what a reader needs is
+		 * that netcfgd built a request it cannot itself parse -- a fault here
+		 * rather than in the kernel.
+		 */
+		ncfg_error_set(err, err_size, "a %s request this port built is not a netlink "
+		    "message", what ? what : "netlink");
+		return 0;
+	}
+	*kind = parsed.header.kind;
+	*flags = parsed.header.flags;
+	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
+	if (ncfg_buf_failed(body)) {
+		ncfg_error_set(err, err_size, "no room for a %s request", what ? what : "netlink");
+		return 0;
+	}
+	return 1;
+}

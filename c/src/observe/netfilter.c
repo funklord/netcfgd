@@ -45,42 +45,6 @@
 #include <string.h>
 
 /*
- * A complete request message, taken apart into what the exchange takes.
- *
- * `nft.h` builds a whole message because that is what its other caller sends
- * -- a transaction is a run of them -- and the exchange writes a header of its
- * own. Taking the kind, the flags and the body out of what nft.c built is what
- * keeps the subsystem number, the dump flags and the table filter in the one
- * module that owns them; spelling any of the three again here is how a dump
- * comes to be aimed at another table and read as netcfgd's. `collect.c` does
- * the same thing to the two traffic-control requests and for the same reason.
- *
- * The sequence number the message carries is discarded with its header, which
- * is why the callers below build with zero.
- */
-static int request_parts(const ncfg_buf_t *message, uint16_t *kind, uint16_t *flags,
-    ncfg_buf_t *body, char *err, size_t err_size)
-{
-	ncfg_wire_messages_t walk;
-	ncfg_wire_message_t  parsed;
-
-	ncfg_wire_messages_start(&walk, message->data, message->length);
-	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
-		ncfg_error_set(err, err_size,
-		    "an nftables request this port built is not a netlink message");
-		return 0;
-	}
-	*kind = parsed.header.kind;
-	*flags = parsed.header.flags;
-	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
-	if (ncfg_buf_failed(body)) {
-		ncfg_error_set(err, err_size, "no room for an nftables request");
-		return 0;
-	}
-	return 1;
-}
-
-/*
  * One dump, built by nft.c and performed by the caller's exchange.
  *
  * 0 is a request this port could not build, which is a fault in netcfgd; a
@@ -106,7 +70,7 @@ static int dump(const ncfg_observe_kernel_t *kernel,
 		ncfg_buf_free(&body);
 		return 0;
 	}
-	parts = request_parts(&message, &kind, &flags, &body, err, err_size);
+	parts = ncfg_wire_request_parts(&message, "nftables", &kind, &flags, &body, err, err_size);
 	ncfg_buf_free(&message);
 	if (!parts) {
 		ncfg_buf_free(&body);

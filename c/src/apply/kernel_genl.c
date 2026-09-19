@@ -72,27 +72,6 @@
  * alternative is spelling the request again, which is how a request comes to
  * be aimed at the wrong thing in the one module that does not own it.
  */
-static int request_parts(const ncfg_buf_t *message, uint16_t *kind, uint16_t *flags,
-    ncfg_buf_t *body, char *err, size_t err_size)
-{
-	ncfg_wire_messages_t walk;
-	ncfg_wire_message_t  parsed;
-
-	ncfg_wire_messages_start(&walk, message->data, message->length);
-	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
-		ncfg_error_set(err, err_size,
-		    "a generic netlink request this port built is not a netlink message");
-		return 0;
-	}
-	*kind = parsed.header.kind;
-	*flags = parsed.header.flags;
-	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
-	if (ncfg_buf_failed(body)) {
-		ncfg_error_set(err, err_size, "no room for a generic netlink request");
-		return 0;
-	}
-	return 1;
-}
 
 /*
  * Open a generic netlink socket and resolve one family on it.
@@ -126,7 +105,7 @@ static int family_open(const char *name, ncfg_netlink_t *socket, ncfg_genl_famil
 	ncfg_buf_init(&body, 0);
 	memset(&reply, 0, sizeof(reply));
 	ok = ncfg_genl_getfamily_request(&message, name, seq, err, err_size) &&
-	    request_parts(&message, &kind, &flags, &body, err, err_size);
+	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, err, err_size);
 	if (ok) {
 		ok = ncfg_netlink_request(socket, kind, flags, &body, NULL, &reply, err, err_size);
 	}

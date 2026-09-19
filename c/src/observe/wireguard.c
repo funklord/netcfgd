@@ -209,27 +209,6 @@ static char *trim(char *text)
  * other than what the module that owns it built. The sequence number goes with
  * the discarded header, which is why the callers below build with zero.
  */
-static int request_parts(const ncfg_buf_t *message, uint16_t *kind, uint16_t *flags,
-    ncfg_buf_t *body, char *err, size_t err_size)
-{
-	ncfg_wire_messages_t walk;
-	ncfg_wire_message_t  parsed;
-
-	ncfg_wire_messages_start(&walk, message->data, message->length);
-	if (ncfg_wire_messages_next(&walk, &parsed, err, err_size) != NCFG_WIRE_OK) {
-		ncfg_error_set(err, err_size,
-		    "a generic netlink request this port built is not a netlink message");
-		return 0;
-	}
-	*kind = parsed.header.kind;
-	*flags = parsed.header.flags;
-	ncfg_buf_add(body, parsed.payload, parsed.payload_length);
-	if (ncfg_buf_failed(body)) {
-		ncfg_error_set(err, err_size, "no room for a generic netlink request");
-		return 0;
-	}
-	return 1;
-}
 
 /*
  * Send what `build` produced and collect the replies.
@@ -250,7 +229,7 @@ static int ask(const ncfg_observe_kernel_t *kernel, const ncfg_buf_t *message,
 
 	memset(reply, 0, sizeof(*reply));
 	ncfg_buf_init(&body, 0);
-	if (!request_parts(message, &kind, &flags, &body, why, why_size)) {
+	if (!ncfg_wire_request_parts(message, "generic netlink", &kind, &flags, &body, why, why_size)) {
 		ncfg_buf_free(&body);
 		return 0;
 	}
