@@ -623,6 +623,32 @@ typedef struct {
 	 * not distinguish either. */
 	char  **offloads;
 	size_t  offload_count;
+	/*
+	 * Which of those the device holds **regardless of what it was asked for**,
+	 * so a `link.set_offloads` cannot move them.
+	 *
+	 * `ethtool -k` prints exactly these as `[fixed]`. The test is the kernel's
+	 * `ACTIVE` bitset disagreeing with its `WANTED` one: `WANTED` is what a
+	 * `set_features` writes and `ACTIVE` is what the device is doing, so a
+	 * name in one and not the other is a request that did not take -- and the
+	 * planner's question is only whether asking again would help, not why it
+	 * would not.
+	 *
+	 * **Both directions.** A name here may be active and unwanted, which
+	 * cannot be turned off, or wanted and inactive, which cannot be turned on.
+	 * Without it a document naming a driver-forced feature `off` planned
+	 * `link.set_offloads` on every pass for ever, and one naming an
+	 * unsupported feature `on` did the same -- measured on this workstation,
+	 * where `rx-checksum` is active and unwanted on the loopback, on
+	 * `docker0` and on both WireGuard devices (project.md 10.185, 10.198).
+	 *
+	 * A subset of `offloads` only for the first direction; the second names
+	 * features that are *not* in it. Empty where every request took, which is
+	 * every ordinary device, and also where netcfgd could not ask at all --
+	 * `offloads` is empty then too, and neither is a statement.
+	 */
+	char  **offloads_fixed;
+	size_t  offloads_fixed_count;
 	/* Absent covers both "no token" and "this device cannot have one": a dummy
 	 * or any other NOARP device does no neighbour discovery, and the kernel
 	 * refuses a token on it. */

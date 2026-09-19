@@ -171,6 +171,30 @@ pub struct ObservedLink {
 	/// unsupported, which the kernel does not distinguish either.
 	#[serde(default)]
 	pub offloads: Vec<String>,
+	/// Which of those the device holds regardless of what it was asked for, so
+	/// a `link.set_offloads` cannot move them.
+	///
+	/// `ethtool -k` prints exactly these as `[fixed]`. The test is the
+	/// kernel's `ACTIVE` bitset disagreeing with its `WANTED` one: `WANTED` is
+	/// what a `set_features` writes and `ACTIVE` is what the device is doing,
+	/// so a name in one and not the other is a request that did not take --
+	/// and the planner's question is only whether asking again would help, not
+	/// why it would not.
+	///
+	/// **Both directions.** A name here may be active and unwanted, which
+	/// cannot be turned off, or wanted and inactive, which cannot be turned
+	/// on. Without it a document naming a driver-forced feature `off` planned
+	/// `link.set_offloads` on every pass for ever, and one naming an
+	/// unsupported feature `on` did the same. Measured: `rx-checksum` and
+	/// `tx-checksum-ip-generic` are active and unwanted on a loopback, and
+	/// `rx-checksum` on an `iwlwifi` radio.
+	///
+	/// Omitted when empty, unlike `offloads` beside it: every ordinary device
+	/// holds nothing fixed, so writing it always would put an empty list on
+	/// every link of every observation. That also makes a record written
+	/// before this field existed read back as "none".
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub offloads_fixed: Vec<String>,
 	/// The IPv6 interface identifier, where one is set.
 	///
 	/// `None` covers both "no token" and "this device cannot have one" -- a

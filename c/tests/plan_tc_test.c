@@ -137,6 +137,87 @@ static void a_link_that_does_not_exist_yet_still_gets_its_offloads(void)
 	planfix_release(plan, document, observed);
 }
 
+/* ------------------------------------------------------------------------ *
+ * What the device will not move
+ * ------------------------------------------------------------------------ */
+
+/*
+ * A feature the device holds regardless of what it is asked for.
+ *
+ * `ethtool -k` prints these `[fixed]`, and planning one is an action that must
+ * fail on every pass, for ever: the executor writes the request, the kernel
+ * keeps what it had, the next observation reports the same thing and the
+ * planner asks again. Measured on this workstation -- a loopback holds
+ * `rx-checksum` and `tx-checksum-ip-generic` whatever it is asked, and an
+ * `iwlwifi` radio holds `rx-checksum`.
+ */
+static void a_feature_the_device_holds_fixed_is_not_asked_for(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = one(ETHTOOL_DEVICE("\"rx_checksum\":\"off\""),
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"offloads\":[\"rx-checksum\"],"
+	    "\"offloads_fixed\":[\"rx-checksum\"]") "]", &document, &observed);
+
+	/*
+	 * **The convergence check.** Without this the document says `off`, the
+	 * observation says on, and the difference is planned on every pass for
+	 * ever -- which is the failure this port has found in the NAT pass and
+	 * twice in WireGuard.
+	 */
+	check(plan && quiet(plan),
+	    "a feature the device holds fixed is not asked for, so the plan converges");
+	check(plan && planfix_warned(plan, "whatever it is asked, so netcfgd is not asking"),
+	    "  and the plan says why, rather than going quiet about a field that was written");
+	check(plan && planfix_warned(plan, "reports it as fixed"),
+	    "  naming the device's own word for it, which is what `ethtool -k` prints");
+	planfix_release(plan, document, observed);
+}
+
+static void the_other_features_of_one_field_are_still_asked_for(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	/*
+	 * `tx_checksum` is three kernel features because a driver offers whichever
+	 * its hardware has, and a device commonly fixes one of them. Dropping the
+	 * whole field over that would stop netcfgd setting the ones it can, so the
+	 * guard is per feature.
+	 */
+	ncfg_plan_t         *plan = one(ETHTOOL_DEVICE("\"tx_checksum\":\"off\""),
+	    "\"links\":[" PLANFIX_LINK("eth0",
+	    ",\"offloads\":[\"tx-checksum-ip-generic\",\"tx-checksum-ipv4\"],"
+	    "\"offloads_fixed\":[\"tx-checksum-ip-generic\"]") "]", &document, &observed);
+	const ncfg_action_t *action = plan ? planfix_action(plan, "link.set_offloads") : NULL;
+
+	check(sets(action, "tx-checksum-ipv4", 0),
+	    "the features of a field the device will move are still asked for");
+	check(action && !sets(action, "tx-checksum-ip-generic", 0),
+	    "  and the one it holds fixed is left out of the same op, by name");
+	planfix_release(plan, document, observed);
+}
+
+static void a_feature_wanted_and_not_delivered_is_the_same_case(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	/*
+	 * **The mirror direction.** A feature the device was asked for and does
+	 * not do is `WANTED` without `ACTIVE`, and it is in `offloads_fixed` and
+	 * not in `offloads`. Without the guard a document saying `on` plans it on
+	 * every pass for ever, exactly as the forced-on case does for `off`.
+	 */
+	ncfg_plan_t     *plan = one(ETHTOOL_DEVICE("\"gro\":\"on\""),
+	    "\"links\":[" PLANFIX_LINK("eth0", ",\"offloads\":[],"
+	    "\"offloads_fixed\":[\"rx-gro\"]") "]", &document, &observed);
+
+	check(plan && quiet(plan),
+	    "a feature asked for and never delivered is not asked for again either");
+	check(plan && planfix_warned(plan, "holds `rx-gro` off whatever it is asked"),
+	    "  and the sentence says which way round it is stuck");
+	planfix_release(plan, document, observed);
+}
+
 /*
  * The half of an `ethtool` block that needs a physical NIC is named field by
  * field rather than as one blanket sentence -- an operator who set only `gro`
@@ -466,6 +547,9 @@ int main(void)
 	an_offload_the_driver_has_off_is_turned_on();
 	one_model_field_covers_every_spelling_a_driver_may_have();
 	a_link_that_does_not_exist_yet_still_gets_its_offloads();
+	a_feature_the_device_holds_fixed_is_not_asked_for();
+	the_other_features_of_one_field_are_still_asked_for();
+	a_feature_wanted_and_not_delivered_is_the_same_case();
 	only_the_unapplied_ethtool_fields_are_named();
 	offloads_that_already_agree_plan_nothing();
 

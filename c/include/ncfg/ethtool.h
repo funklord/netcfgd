@@ -145,6 +145,31 @@ int ncfg_ethtool_features_set_request(ncfg_buf_t *out, const ncfg_genl_family_t 
  * bit is being talked about", not "this bit is on". Nothing here sends one, so
  * reading it as a list would be wrong rather than merely useless.
  */
+/*
+ * Which of a `FEATURES_GET` reply's bitsets to read.
+ *
+ * The reply carries four -- `HW`, `WANTED`, `ACTIVE` and `NOCHANGE` -- and
+ * netcfgd reads two. `ACTIVE` is what the device is doing; `WANTED` is what it
+ * was last asked for, which is the bitset a `set_features` writes. **Where the
+ * two disagree, a request did not take**, and that is the one thing an
+ * observation cannot learn from either on its own.
+ *
+ * `HW` and `NOCHANGE` are deliberately not here. They say *why* a feature
+ * cannot move -- the device does not support it, or the kernel never changes
+ * it -- and the planner's question is only *whether*, which the two above
+ * answer between them. A reader that added them would be keeping two facts to
+ * decide one.
+ */
+typedef enum {
+	NCFG_ETHTOOL_BITSET_ACTIVE,
+	NCFG_ETHTOOL_BITSET_WANTED
+} ncfg_ethtool_bitset_t;
+
+int ncfg_ethtool_bitset_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
+    ncfg_ethtool_bitset_t which, char *err, size_t err_size);
+
+/* `ncfg_ethtool_bitset_merge` for the active set, which is every caller that
+ * predates there being a second one. */
 int ncfg_ethtool_active_merge(ncfg_ethtool_names_t *out, const void *payload, size_t length,
     char *err, size_t err_size);
 

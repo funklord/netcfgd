@@ -1122,6 +1122,30 @@ fn read_backend_liveness(observed: &mut Observed, run_dir: &Path) {
 /// virtual interfaces and is not an error. So is a kernel older than 5.6, which
 /// has no `ethtool` family at all -- there the list is empty everywhere and
 /// nothing is planned, which is the honest outcome.
+/// The features a device holds regardless of what it was asked for.
+///
+/// `ACTIVE` disagreeing with `WANTED`, in **both** directions, because they
+/// fail the same way: one active and unwanted cannot be turned off, one wanted
+/// and inactive cannot be turned on, and planning either is an action that
+/// fails on every pass for ever. `ethtool -k` prints these as `[fixed]`.
+///
+/// **Pure, and separate from the round that fetches the bitsets, so it can be
+/// checked.** The fetch needs a kernel and a device; this needs neither, and
+/// it is the half with a rule in it. Its C counterpart is driven through a
+/// replay seam instead -- see `c/tests/observe_offloads_test.c`.
+fn fixed_features(active: &[String], asked: &[String], managed: &[&str]) -> Vec<String> {
+	let mut fixed: Vec<String> = active
+		.iter()
+		.filter(|name| !asked.contains(name))
+		.chain(asked.iter().filter(|name| !active.contains(name)))
+		.filter(|name| managed.contains(&name.as_str()))
+		.cloned()
+		.collect();
+	fixed.sort_unstable();
+	fixed.dedup();
+	fixed
+}
+
 fn read_offloads(observed: &mut Observed) {
 	let Ok(mut ethtool) = netcfgd_sys::ethtool::Ethtool::open() else {
 		return;
@@ -1136,9 +1160,10 @@ fn read_offloads(observed: &mut Observed) {
 		.collect();
 
 	for link in &mut observed.links {
-		let Ok(active) = ethtool.active_features(&link.name) else {
+		let Ok((active, asked)) = ethtool.features(&link.name) else {
 			continue;
 		};
+		link.offloads_fixed = fixed_features(&active, &asked, &managed);
 		link.offloads = active
 			.into_iter()
 			.filter(|name| managed.contains(&name.as_str()))
@@ -1167,6 +1192,55 @@ fn read_netfilter(observed: &mut Observed) {
 
 #[cfg(test)]
 mod tests {
+	/// A feature active and never asked for is one the device holds.
+	///
+	/// This is a loopback's `rx-checksum` exactly, measured on a real machine:
+	/// active, absent from `WANTED`, and a `link.set_offloads` for it fails on
+	/// every pass for ever.
+	#[test]
+	fn a_feature_on_and_not_asked_for_is_held_fixed() {
+		let managed = ["rx-gro", "rx-checksum"];
+		let active = ["rx-gro".to_owned(), "rx-checksum".to_owned()];
+		let asked = ["rx-gro".to_owned()];
+
+		assert_eq!(
+			super::fixed_features(&active, &asked, &managed),
+			vec!["rx-checksum".to_owned()]
+		);
+	}
+
+	/// And one asked for and never delivered is held the other way round.
+	///
+	/// `WANTED` without `ACTIVE`. It fails the same way, so it is the same
+	/// answer -- without it a document saying `on` plans the feature on every
+	/// pass for ever, exactly as the forced-on case does for `off`.
+	#[test]
+	fn a_feature_asked_for_and_not_delivered_is_held_fixed_too() {
+		let managed = ["rx-gro"];
+		let active: [String; 0] = [];
+		let asked = ["rx-gro".to_owned()];
+
+		assert_eq!(
+			super::fixed_features(&active, &asked, &managed),
+			vec!["rx-gro".to_owned()]
+		);
+	}
+
+	/// A device that took what it was asked for holds nothing, and names
+	/// outside the model are not kept whichever way they disagree.
+	#[test]
+	fn a_device_that_took_what_it_was_asked_holds_nothing() {
+		let managed = ["rx-gro"];
+		let agreed = ["rx-gro".to_owned()];
+
+		assert!(super::fixed_features(&agreed, &agreed, &managed).is_empty());
+		// `rx-hashing` is outside `offload_names` on purpose: a driver reports
+		// dozens and storing them all would be a page of driver detail in
+		// `/run` for five fields.
+		let unmanaged = ["rx-hashing".to_owned()];
+		assert!(super::fixed_features(&unmanaged, &[], &managed).is_empty());
+	}
+
 	/// A supplicant that lost its networks is not one that matches.
 	///
 	/// **The digest compares netcfgd's record against the document, and neither
