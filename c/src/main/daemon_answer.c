@@ -37,6 +37,8 @@
  */
 #include "loop_internal.h"
 
+#include "ncfg/wifi_profile.h"
+
 #include "ncfg/config.h"
 #include "ncfg/log.h"
 #include "ncfg/secrets.h"
@@ -180,11 +182,6 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`monitor` is taken by the control socket itself, which hands the "
 		    "connection to the event stream; reaching this is a bug in the server "
 		    "rather than in the request";
-	case NCFG_PROTO_REQ_WIFI_ADD:
-	case NCFG_PROTO_REQ_WIFI_FORGET:
-		return "this build of netcfgd cannot write a `network` block: the profile "
-		    "writer is a seam with no implementation in the C port, and a second copy "
-		    "of it is the drift the port exists to avoid";
 	case NCFG_PROTO_REQ_PROBE_PUT:
 		return "this build of netcfgd cannot write a probe drop-in: the writer that "
 		    "renders a `probe` block is not ported. `ncfg config put` writes the same "
@@ -208,6 +205,12 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_CONNECT:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
+	/* 0117's path, answered since `wifi_profile.h` landed. The refusal that
+	 * used to stand here said the profile writer was a seam with no
+	 * implementation, which stopped being true when that module was written
+	 * and went on being said. */
+	case NCFG_PROTO_REQ_WIFI_ADD:
+	case NCFG_PROTO_REQ_WIFI_FORGET:
 	case NCFG_PROTO_REQ_CONFIG_PUT:
 	case NCFG_PROTO_REQ_PROFILE_SAVE:
 	case NCFG_PROTO_REQ_PROFILE_SET:
@@ -445,6 +448,92 @@ static int answer_for_interface(ncfg_main_desk_t *desk, ncfg_proto_request_kind_
 	    err_size);
 }
 
+/*
+ * 0117's path: write a `network` block for a client that may not write the
+ * file itself.
+ *
+ * **The rendering is `ncfg_wifi_configure_network`'s and the writing is
+ * `wifi_profile.h`'s**, joined through the seam `daemon.h` declares. Two
+ * implementations of "what a `network` block looks like" is the drift this tree
+ * keeps finding, so the CLI and this arm reach the same two functions -- the
+ * CLI calls the writer directly because it already holds the directories, and
+ * this one hands them over as the seam's context.
+ *
+ * The credential travels as the request's own bytes and is never copied here:
+ * `wifi_profile.h`'s rule is that a passphrase exists in exactly one place for
+ * exactly as long as the decoded line does, and this arm is inside that line's
+ * lifetime.
+ */
+static int answer_wifi_add(ncfg_main_desk_t *desk, const ncfg_proto_wifi_add_t *wanted,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_wifi_installer_t installer;
+	int                   ok;
+
+	if (!desk->config_dir || !desk->factory_dir) {
+		ncfg_error_set(err, err_size,
+		    "this daemon was not told where configuration is written, so it will not "
+		    "write a `network` block: there is no default for it, because a daemon "
+		    "pointed at a scratch tree must not write into the machine's own");
+		return 0;
+	}
+	memset(&installer, 0, sizeof(installer));
+	installer.config_dir = desk->config_dir;
+	installer.factory_dir = desk->factory_dir;
+	ok = ncfg_wifi_configure_network(desk->state->desired, wanted,
+	    ncfg_wifi_profile_installer, &installer, out, err, err_size);
+	ncfg_wifi_installed_free(&installer.installed);
+	return ok;
+}
+
+/*
+ * The same for `wifi forget`, which needs no seam.
+ *
+ * `ncfg_wifi_configure_network` exists because *rendering* a block is the
+ * daemon's and *writing* one is the host module's; a forget renders nothing,
+ * so this calls the writer straight. The drop-in goes before the credential,
+ * which is `ncfg_wifi_profile_forget`'s rule: the other order takes a
+ * passphrase away from a network that is still configured.
+ */
+static int answer_wifi_forget(ncfg_main_desk_t *desk, ncfg_proto_str_t id, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_wifi_forgotten_t forgotten;
+	char                  label[NAME_MAX_BYTES];
+	int                   denied = 0;
+	int                   ok;
+
+	/* Through `name_of`, which is what every other arm takes a
+	 * `ncfg_proto_str_t` through: the protocol carries bytes and a length, and
+	 * turning one into a C string is where an embedded NUL or a missing
+	 * terminator becomes somebody else's problem. */
+	if (!name_of(id, "network", label, sizeof(label), err, err_size)) {
+		return 0;
+	}
+	if (!desk->config_dir || !desk->factory_dir) {
+		ncfg_error_set(err, err_size,
+		    "this daemon was not told where configuration is written, so it will not "
+		    "take a `network` block away either");
+		return 0;
+	}
+	memset(&forgotten, 0, sizeof(forgotten));
+	ok = ncfg_wifi_profile_forget(desk->config_dir, desk->factory_dir, desk->state->desired,
+	    label, &forgotten, &denied, err, err_size);
+	ncfg_wifi_forgotten_free(&forgotten);
+	if (!ok) {
+		return 0;
+	}
+	/*
+	 * A plain acknowledgement, which is what `ncfg_wifi_configure_network`
+	 * answers for an add and what the client expects: `ncfg wifi forget`
+	 * renders the credentials it removed only when *it* did the removing, and
+	 * prints `daemon: true` otherwise. Sending the detail here would be a
+	 * second shape of one reply for the client to handle.
+	 */
+	(void)denied;
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
 static int answer_wifi_connect(ncfg_main_desk_t *desk, const ncfg_proto_wifi_connect_t *join,
     ncfg_buf_t *out, char *err, size_t err_size)
 {
@@ -510,6 +599,10 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		    err_size);
 	case NCFG_PROTO_REQ_WIFI_CONNECT:
 		return answer_wifi_connect(desk, &request->u.wifi_connect, out, err, err_size);
+	case NCFG_PROTO_REQ_WIFI_ADD:
+		return answer_wifi_add(desk, &request->u.wifi_add, out, err, err_size);
+	case NCFG_PROTO_REQ_WIFI_FORGET:
+		return answer_wifi_forget(desk, request->u.id, out, err, err_size);
 	case NCFG_PROTO_REQ_RADIOS:
 		return ncfg_wifi_radios(&desk->where, desk->state->desired, desk->state->observed,
 		    out, err, err_size);
@@ -544,8 +637,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_MONITOR:
-	case NCFG_PROTO_REQ_WIFI_ADD:
-	case NCFG_PROTO_REQ_WIFI_FORGET:
 	case NCFG_PROTO_REQ_PROBE_LIST:
 	case NCFG_PROTO_REQ_HOOK_LIST:
 	case NCFG_PROTO_REQ_PROFILE_LIST:
