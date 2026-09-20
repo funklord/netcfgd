@@ -1055,9 +1055,14 @@ typedef struct {
 /*
  * A DNS scope netcfgd last delivered, and what it delivered.
  *
- * Read back from `/run/netcfgd/dns/`. Without it a plan could not tell an
- * already-applied policy from an unapplied one, and every run would emit a
- * `dns.apply` -- which would fail the plan-idempotence gate.
+ * Written into `owned.json` by the fold, from the scope list the apply was
+ * given -- **not** read back from the files under `/run/netcfgd/dns/`, which
+ * are 0007's greppable half and carry what a resolver was told rather than the
+ * policy behind it. `observed.dns` is filled from that record and from nowhere
+ * else, so while nothing wrote it a plan could not tell an already-applied
+ * policy from an unapplied one and every run emitted a `dns.apply` -- the
+ * plan-idempotence gate failing with the machine already changed. `apply.h`
+ * has the argument.
  */
 typedef struct {
 	char             *scope; /* an interface name, or `globals` */

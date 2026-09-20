@@ -57,6 +57,14 @@
  *   own tables, published rather than copied, because a second DNS policy
  *   codec in this module is exactly the duplication 0263 forbids.
  *
+ *   **Carrying a member is not the same as having a writer for it**, and `dns`
+ *   is where the two came apart: this file round-tripped a record another
+ *   netcfgd had written and nothing in the port ever put a scope in one, so
+ *   the list was empty on every machine for the same downstream cost. Its
+ *   writer is `ncfg_apply_record`, which takes the scopes an apply delivered
+ *   -- `dns.apply` being the one op that is not its own effect -- and the
+ *   member below says what it does with them.
+ *
  *   The journal of the last apply (`plan.last.json`) is `netcfgd-apply`'s type
  *   and landed with that module, and `OwnedState::absorb` -- the fold of an
  *   apply's effects into this record -- landed with it too, for the same

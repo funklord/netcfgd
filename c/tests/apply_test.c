@@ -37,6 +37,7 @@
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/dns.h"
 #include "ncfg/document.h"
 #include "ncfg/hooks.h"
 #include "ncfg/observed.h"
@@ -1669,7 +1670,7 @@ static void only_what_ran_is_claimed(char *run_dir)
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 
 	message[0] = '\0';
-	check(ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message)),
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message)),
 	    "what an apply did is folded into owned.json");
 	if (read_back(run_dir, &owned)) {
 		check(has_string(owned.created_links, owned.created_link_count, "br0"),
@@ -1747,7 +1748,7 @@ static void a_revert_takes_the_claims_back(char *run_dir)
 	message[0] = '\0';
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(object_named(owned.addresses, owned.address_count, "br0",
 		    "10.0.0.9/24") != NULL,
@@ -1759,7 +1760,7 @@ static void a_revert_takes_the_claims_back(char *run_dir)
 
 	check(ncfg_apply_revert(plan, &journal, &executor) == 1u, "  the window closes unconfirmed");
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(object_named(owned.addresses, owned.address_count, "br0",
 		    "10.0.0.9/24") == NULL,
@@ -1946,6 +1947,207 @@ static void the_folding_rules(void)
 }
 
 /* A plan that changed nothing does not rewrite the file. */
+/* A document whose `globals` block has a DNS policy of its own, which
+ * `planfix_document`'s does not -- half the point here is that the host scope
+ * and an interface's are two entries rather than one. */
+static ncfg_document_t *dns_document(void)
+{
+	char             text[4096];
+	char             message[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+
+	(void)snprintf(text, sizeof(text),
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"generated_by\":\"apply_test\","
+	    "\"globals\":{\"dns\":{\"mode\":\"resolved\","
+	    "\"servers\":[{\"addr\":\"9.9.9.9\"}]}},"
+	    "\"devices\":[{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"}}],"
+	    "\"interfaces\":[{\"name\":\"eth0\","
+	    "\"addressing\":[{\"source\":\"static\",\"address\":\"10.0.0.2/24\"}],"
+	    "\"dns\":{\"mode\":\"resolved\","
+	    "\"servers\":[{\"addr\":\"10.0.0.53\",\"port\":5353,\"sni\":\"dns.lan\"}],"
+	    "\"search\":[\"lan.example\"],"
+	    "\"domains\":[{\"suffix\":\"lan.example\",\"exclusive\":true}],"
+	    "\"dnssec\":\"yes\",\"transport\":\"tls\"}}],"
+	    "\"networks\":[]}");
+	message[0] = '\0';
+	document = ncfg_document_read(text, strlen(text), message, sizeof(message));
+	if (!document) {
+		printf("  fixture document did not read: %s\n", message);
+	}
+	return document;
+}
+
+static const ncfg_applied_dns_t *applied_named(const ncfg_owned_state_t *owned, const char *scope)
+{
+	size_t at;
+
+	for (at = 0; at < owned->dns_count; at++) {
+		if (owned->dns[at].scope && strcmp(owned->dns[at].scope, scope) == 0) {
+			return &owned->dns[at];
+		}
+	}
+	return NULL;
+}
+
+static int plans_a_delivery(const ncfg_plan_t *plan)
+{
+	size_t at;
+
+	for (at = 0; at < plan->action_count; at++) {
+		if (plan->actions[at].op.kind == NCFG_OP_DNS_APPLY) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * What a delivery is written down as, and what that is for.
+ *
+ * **The second plan is the subject, not the file.** `observed.dns` is filled
+ * from this record and from nowhere else, so while nothing wrote it the
+ * planner compared every scope it wanted against an empty list and emitted a
+ * `dns.apply` on every pass for ever -- plan idempotence failing with the
+ * machine already changed. So the last two checks plan twice against the same
+ * document: once with the record this fold wrote and once with nothing, and
+ * they have to disagree.
+ *
+ * The scope list is the executor's, not the op's: one `dns.apply` names
+ * `globals` and both scopes are recorded, because a delivery writes the
+ * resolver file whole.
+ */
+static void what_a_delivery_is_recorded_as(char *run_dir)
+{
+	static const int done[] = { NCFG_OUTCOME_DONE };
+	static const int failed[] = { NCFG_OUTCOME_FAILED };
+	ncfg_document_t        *document = dns_document();
+	ncfg_dns_scopes_t      *scopes;
+	const ncfg_dns_scope_t *items;
+	size_t                  count = 0;
+	ncfg_plan_t            *plan;
+	ncfg_journal_t          journal;
+	ncfg_owned_state_t      owned;
+	ncfg_op_t               op;
+	char                    message[NCFG_ERROR_MAX];
+
+	if (!document) {
+		check(0, "what a delivery is recorded as");
+		return;
+	}
+	message[0] = '\0';
+	scopes = ncfg_dns_scopes_of(document, NULL, message, sizeof(message));
+	items = ncfg_dns_scopes_items(scopes, &count);
+	check(count == 2u, "the fixture has a host scope and an interface's");
+	message[0] = '\0';
+	plan = ncfg_plan_new(message, sizeof(message));
+	if (!plan || !scopes) {
+		check(0, "a plan carrying one delivery");
+		ncfg_dns_scopes_free(scopes);
+		ncfg_document_free(document);
+		ncfg_plan_free(plan);
+		return;
+	}
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_DNS_APPLY;
+	op.u.dns.scope = "globals";
+	op.u.dns.policy = items[0].policy;
+	put(plan, &op);
+
+	journal_of(&journal, plan, done);
+	message[0] = '\0';
+	check(ncfg_apply_record(run_dir, plan, &journal, items, count, message, sizeof(message)),
+	    "what a delivery delivered is folded into owned.json");
+	if (read_back(run_dir, &owned)) {
+		const ncfg_applied_dns_t *eth0 = applied_named(&owned, "eth0");
+
+		check(owned.dns_count == 2u && applied_named(&owned, "globals") != NULL &&
+		        eth0 != NULL,
+		    "  both scopes are recorded, not the one the op named");
+		check(eth0 && eth0->policy.server_count == 1u && eth0->policy.servers[0].addr &&
+		        strcmp(eth0->policy.servers[0].addr, "10.0.0.53") == 0,
+		    "  with the servers that were delivered");
+		/* The four a hand-written copy is likeliest to drop, and every one of
+		 * them is a field the planner compares: a policy that read back
+		 * without them would be called different on every pass. */
+		check(eth0 && eth0->policy.server_count == 1u &&
+		        eth0->policy.servers[0].port.has &&
+		        eth0->policy.servers[0].port.value == 5353 &&
+		        eth0->policy.servers[0].sni &&
+		        strcmp(eth0->policy.servers[0].sni, "dns.lan") == 0,
+		    "  a server's port and SNI survive the round trip");
+		check(eth0 && eth0->policy.dnssec.has &&
+		        eth0->policy.dnssec.value == (int64_t)NCFG_DNSSEC_YES &&
+		        eth0->policy.transport.has &&
+		        eth0->policy.transport.value == (int64_t)NCFG_DNS_TRANSPORT_TLS,
+		    "  and so do dnssec and transport");
+		check(eth0 && eth0->policy.search_count == 1u && eth0->policy.domain_count == 1u &&
+		        eth0->policy.domains[0].exclusive,
+		    "  and the search list and the routing domains");
+		{
+			ncfg_observed_t *blank = observed_of("\"links\":[]");
+			ncfg_observed_t *knowing = observed_of("\"links\":[]");
+			ncfg_plan_t     *again;
+			ncfg_plan_t     *ignorant;
+
+			/* Moved rather than copied, which is what `observe/current.c`
+			 * does with this member for the same reason: the record owns the
+			 * policies and the observation is about to. */
+			if (knowing) {
+				knowing->dns = owned.dns;
+				knowing->dns_count = owned.dns_count;
+				owned.dns = NULL;
+				owned.dns_count = 0;
+			}
+			message[0] = '\0';
+			again = knowing ? ncfg_plan_build(document, knowing, NULL, message,
+			    sizeof(message)) : NULL;
+			ignorant = blank ? ncfg_plan_build(document, blank, NULL, message,
+			    sizeof(message)) : NULL;
+			check(again && !plans_a_delivery(again),
+			    "  and a second plan against it asks for no delivery at all");
+			check(ignorant && plans_a_delivery(ignorant),
+			    "  which the same plan against an empty record does ask for");
+			ncfg_plan_free(again);
+			ncfg_plan_free(ignorant);
+			ncfg_observed_free(knowing);
+			ncfg_observed_free(blank);
+		}
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/*
+	 * A caller with no list leaves the record alone rather than emptying it.
+	 * Emptying would be the failure this whole path exists to close, arrived
+	 * at from the other side: the next plan would ask for a delivery again.
+	 */
+	journal_of(&journal, plan, done);
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(owned.dns_count == 2u,
+		    "a fold with no scope list leaves the delivered scopes alone");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/* And an action that did not reach the machine delivered nothing, so the
+	 * record still says what the last delivery said. */
+	journal_of(&journal, plan, failed);
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, items, 1u, message, sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(owned.dns_count == 2u,
+		    "and a delivery that failed records nothing, not even a shorter list");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	ncfg_plan_free(plan);
+	ncfg_dns_scopes_free(scopes);
+	ncfg_document_free(document);
+}
+
 static void an_empty_journal_writes_nothing(char *run_dir)
 {
 	ncfg_plan_t   *plan;
@@ -1965,7 +2167,7 @@ static void an_empty_journal_writes_nothing(char *run_dir)
 		return;
 	}
 	message[0] = '\0';
-	check(ncfg_apply_record(run_dir, plan, &journal, message, sizeof(message)) &&
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message)) &&
 	    stat(path, &after) == 0 && before.st_ino == after.st_ino,
 	    "a plan with nothing in it does not rewrite the record");
 	ncfg_journal_free(&journal);
@@ -2189,6 +2391,7 @@ static void what_an_apply_did_is_recorded(void)
 	a_revert_takes_the_claims_back(run_dir);
 	an_empty_journal_writes_nothing(run_dir);
 	the_journal_reaches_the_run_directory(run_dir);
+	what_a_delivery_is_recorded_as(run_dir);
 	the_folding_rules();
 
 	/* Named, never swept: this directory is one this test made, and the two

@@ -22,6 +22,7 @@
  */
 #include "ncfg/daemon.h"
 
+#include "daemon_internal.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/json_write.h"
@@ -594,39 +595,6 @@ static char *duplicate(const char *text)
  * half-applied plan that stopped at a failure, and a restart, which loses the
  * inverses entirely. If the inverses were complete it finds nothing to do.
  */
-/*
- * Fold what an apply or a revert did into `owned.json`.
- *
- * A note rather than a refusal, for `state.h`'s reason: the run directory is
- * derived and disposable, and a record that lost an entry makes netcfgd leave
- * an object of its own alone -- which is the safe direction of being wrong.
- */
-static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
-    const ncfg_journal_t *journal)
-{
-	char message[NCFG_ERROR_MAX];
-
-	message[0] = '\0';
-	if (!ncfg_apply_record(run_dir, plan, journal, message, sizeof(message))) {
-		ncfg_log_emitf("confirm", NCFG_LOG_NOTE,
-		    "what this apply did could not be recorded (%s), so netcfgd will not claim "
-		    "those objects as its own", message);
-	}
-	/*
-	 * And the journal, which on this path is the only record of a revert at
-	 * all: the inverses ran without anybody watching, and `plan.last.json` is
-	 * where somebody finding the machine afterwards reads which of them stood
-	 * and which did not. Sequential rather than nested, because both take
-	 * `owned.lock`.
-	 */
-	message[0] = '\0';
-	if (!ncfg_apply_write_journal(run_dir, journal, message, sizeof(message))) {
-		ncfg_log_emitf("confirm", NCFG_LOG_NOTE,
-		    "the journal of this apply could not be written (%s), so nothing under the "
-		    "run directory says where it got to", message);
-	}
-}
-
 static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executor_t *executor)
 {
 	char             why[NCFG_ERROR_MAX];
@@ -652,7 +620,7 @@ static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executo
 	}
 	ncfg_journal_init(&journal);
 	(void)ncfg_apply(plan, executor, &journal, why, sizeof(why));
-	record_what_ran(state->paths.run, plan, &journal);
+	ncfg_daemon_record_what_ran(state, "confirm", plan, &journal);
 	failure = ncfg_journal_failure(&journal);
 	if (failure) {
 		ncfg_log_emitf("confirm", NCFG_LOG_ERROR, "revert incomplete: %s failed: %s",
@@ -745,7 +713,7 @@ int ncfg_confirm_revert(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
 		 * construction, every rule in the fold replacing or removing before it
 		 * adds.
 		 */
-		record_what_ran(state->paths.run, armed->undo, &armed->journal);
+		ncfg_daemon_record_what_ran(state, "confirm", armed->undo, &armed->journal);
 		/*
 		 * **The re-plan below has to see the machine the inverses left.**
 		 * Without this it plans against the observation taken before they ran

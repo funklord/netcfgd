@@ -589,10 +589,15 @@ int ncfg_service_backend_reload(const ncfg_service_t *service, int kind, const c
  * Every scope the context carries, not the one the op names -- see
  * `dns_scopes` above for why. The record under `<run>/dns/` is `ncfg_dns_
  * deliver`'s own last step and is not written again here; what this adds is
- * that the run directory is **demanded before anything is delivered**, since
- * without the record a plan cannot tell an already-applied policy from an
- * unapplied one and every run emits a `dns.apply` -- the plan-idempotence
- * property failing, with the machine already changed.
+ * that the run directory is **demanded before anything is delivered**, so that
+ * a delivery nobody could write down is refused rather than made.
+ *
+ * That record is for a person with `grep`, and it is not what the planner
+ * reads: the scopes an apply delivered are folded into `owned.json` by
+ * `ncfg_apply_record`, and `observed.dns` comes from there. Without that fold
+ * a plan cannot tell an already-applied policy from an unapplied one and every
+ * run emits a `dns.apply` -- the plan-idempotence property failing, with the
+ * machine already changed.
  *
  * `scope` and `policy` are the op's own and are used only where the context
  * carries no scope list.

@@ -62,6 +62,7 @@
 #include <stdint.h>
 
 #include "ncfg/buf.h"
+#include "ncfg/dns.h"
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
 #include "ncfg/secrets.h"
@@ -292,23 +293,33 @@ size_t ncfg_apply_revert(const ncfg_plan_t *plan, ncfg_journal_t *journal,
  *   accumulator inside the real executor would put the one piece of bookkeeping
  *   that decides what netcfgd may later delete behind a live netlink socket.
  *
- * WHAT IS NOT FOLDED, AND WHY EACH ONE IS NOT
- *   Two members of the Rust's `Effects` are still not a function of any op, and
- *   the record now has somewhere to put both -- `state.h` carries `backends`
- *   and `dns`. What stops each is different and worth keeping apart.
+ * THE ONE ACTION THAT IS NOT ITS OWN EFFECT
+ *   `dns.apply` names one scope and `ncfg_service_dns_apply` delivers *every*
+ *   scope its context carries whatever the op says, so folding the op's own
+ *   scope would record one delivery as the whole of one -- and a scope that has
+ *   left the document would stand in the record for ever, with the planner
+ *   asking for a re-delivery on every pass while it did.
  *
- *   **`applied_dns` is not the op.** `dns.apply` names one scope, and
- *   `ncfg_service_dns_apply` delivers *every* scope its context carries
- *   whatever the op says -- so the op is not the effect here, which is the one
- *   condition the argument above rests on. Recording the op's own scope alone
- *   would leave a scope that has left the document recorded for ever, and the
- *   planner asks for a re-delivery on every pass while that entry stands. It
- *   would also need a deep copy of an `ncfg_dns_policy_t`, which exists nowhere
- *   in this port and which `observe.h` says is deliberate. So the record
- *   **carries** `dns` -- a file another netcfgd wrote round-trips through this
- *   build instead of losing it -- and nothing here fills it. The producer that
- *   would is a reader of `<run>/dns/`, which `dns.h` already promises and which
- *   is that module's work.
+ *   So the delivered set is an argument: `ncfg_apply_record` takes the same
+ *   scope list the executor was given, and a `dns.apply` that reached the
+ *   machine **replaces** the record's with it. That keeps the fold a pure
+ *   function of things the caller already holds -- the list is
+ *   `ncfg_dns_scopes_of` of the document and the observation, which is what
+ *   built the executor's -- rather than an accumulator inside it.
+ *
+ *   A caller with no list passes NULL, and the record is left alone. It costs
+ *   one re-delivery on the next pass and never a wrong file, because the
+ *   resolver is written from the document rather than from this record. The
+ *   Rust's `absorb` says the same of an empty `applied_dns`.
+ *
+ *   **Without it every pass plans `dns.apply` for ever.** `observed.dns` is
+ *   filled from this record and from nowhere else, so a record nothing writes
+ *   is an empty list, and the planner compares every scope it wants against
+ *   nothing. That is the plan-idempotence property failing with the machine
+ *   already changed, which is what `dns.h`, `service.h` and `observed.h` each
+ *   warn of from their own side.
+ *
+ * WHAT IS STILL NOT FOLDED
  *
  *   **`observed_running` is what the observation saw**, and the clear it drives
  *   belongs to whoever composes one. `backend_restarts` and `backends` are both
@@ -359,7 +370,8 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op);
  * writer is in the middle of.
  */
 int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
-    const ncfg_journal_t *journal, char *err, size_t err_size);
+    const ncfg_journal_t *journal, const ncfg_dns_scope_t *delivered, size_t delivered_count,
+    char *err, size_t err_size);
 
 /*
  * Publish the journal as `<run_dir>/plan.last.json`.

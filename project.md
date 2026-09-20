@@ -9515,6 +9515,91 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.205 The record with a reader, a format and no writer
+
+The same sweep as 10.203 and 10.204, run a third time and this time over
+`doc/decision/0263`, whose entries are cited from source. One of them said
+`applied_dns` "has nowhere to go for the reason `state.h` already gives".
+`state.h` had stopped giving that reason several waves ago: it carries `dns`,
+reads it, writes it and frees it. So I went looking for who fills it, and
+nobody did.
+
+**`observed.dns` is filled from `owned.json` and from nowhere else**, so an
+empty record is an empty observation, and `plan/host_wide.c` compares every
+scope the document wants against nothing and emits `dns.apply` for each of
+them. On every pass. For ever. That is the plan-idempotence property `plan.h`
+names load-bearing, failing on any machine that configures DNS at all -- the
+same failure 10.182 and 10.183 found from the reading side, with the writing
+side never there.
+
+**Four documents said a reader existed, in one hand.** `dns.h`: "the observer
+reads those files back as `ncfg_applied_dns_t`". `observed.h`: "Read back from
+`/run/netcfgd/dns/`". `service.h` hung the idempotence property on that record.
+`backend/dns/scopes.c` repeated it in the comment explaining why a nameserver
+is canonicalised. No such observer exists here, and none exists in the Rust
+either -- its `AppliedDns` carries the same sentence and is filled from
+`Effects` like everything else. That is `evidence.md`'s corroboration rule
+exactly: four agreeing documents are one witness when one hand wrote them, and
+the hand here was the Rust's own doc comment, ported faithfully along with its
+error. The Rust's is recorded, not fixed.
+
+**And the promised reader could not have closed it.** `<run>/dns/<scope>.conf`
+holds what the resolver was *told* -- nameserver lines, a search line, the mode
+in a comment. A policy has a port, an SNI, a `dnssec` setting and a transport,
+and the planner compares the whole policy. A reader of those files would have
+produced a record that compares unequal on every pass, which is the same defect
+with more code in it.
+
+**The fix is an argument, not an accumulator.** `dns.apply` is the one op that
+is not its own effect: the executor delivers every scope its context carries
+whatever the op names, so the op cannot say what was delivered. But the caller
+can -- the list is `ncfg_dns_scopes_of` of the document and the observation,
+which is the same pure function on the same pair that built the executor's own
+list. So `ncfg_apply_record` takes it, and a `dns.apply` that reached the
+machine replaces the record's list with it. A caller with no list passes NULL
+and the record is left alone, which costs one re-delivery and never a wrong
+file; the Rust's `absorb` says the same of an empty `applied_dns`. 0263's
+"every effect is a pure function of its op" survives with one named exception
+rather than being quietly false.
+
+**The copy is a render and a parse, deliberately.** A policy is a value with
+seven owned lists in it, and a hand-written deep copy is a function somebody
+must remember to extend the next time `ncfg_dns_policy_t` gains a field -- a
+field that is not copied reads back absent and the scope is called different
+for ever, which is this same bug with a longer fuse. The model's field tables
+already write a policy and read one, so `note_dns` renders the borrowed scopes
+through `ncfg_applied_dns_write` and reads them back with
+`ncfg_applied_dns_read`.
+
+**One lift, because the two copies were about to disagree.** `record_what_ran`
+existed twice -- the reconcile pass and the confirm window's revert -- identical
+but for the log tag it emits under. Teaching one of them to record a delivery
+and not the other would leave a revert stranding a stale scope list, which is
+the very thing above. Both now call `ncfg_daemon_record_what_ran` in a new
+`c/src/daemon/record.c`, declared in a new `c/src/daemon/daemon_internal.h`.
+
+**The proof is two plans, not a file.** `apply_test` folds a delivery, reads
+the record back, moves it into an observation the way `observe/current.c` does,
+and plans the same document twice: against that record, no `dns.apply`; against
+an empty one, a `dns.apply`. A check on the file alone would have proved the
+file.
+
+Five sabotages, all caught. Recording only the op's own scope, never recording
+at all, recording on a failed action, recording over a NULL list, and -- the one
+that matters -- dropping `dnssec`, `transport` and a server's port from the
+copy, which turns the *convergence* check red rather than only the field check.
+That is the argument for the round trip standing up as a measurement.
+
+**A sixth sabotage caught nothing, and the instrument was wrong again.** I
+cleared those fields on `copied[0]`, which is `globals`, while every field
+check is on `eth0`. Same shape as the six earlier this session: a sabotage that
+misses tells you where you aimed it.
+
+`apply_test` is 104 checks, up from 93. `main_test`'s source-grep for the
+journal writer moved with the code and now asserts both halves -- that the pass
+reaches the fold, and that the fold writes the journal -- because either alone
+is a machine that records nothing.
+
 ## 10.204 Six more ops, found by sweeping for the same shape again
 
 10.203's sweep was for *sentences* that had outlived their truth. This one is

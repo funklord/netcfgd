@@ -3188,6 +3188,84 @@ taken.
   on its own bring one up. Written down here for the reason the entry above it
   was: so that nobody reads "the launcher landed" as "a WPA laptop comes up".
 
+### The entries above that have since closed
+
+Five waves of divergences are recorded above and some of them describe a state
+this port has left. They are **not rewritten**: a decision record is what was
+decided and why, and editing the reasoning out of one leaves a citation
+pointing at a claim nobody can check. What follows is the closing note for
+each, in the order they appear.
+
+* ***`effective_metric` stays deferred on both halves***. Closed, and that
+  entry deserves credit it did not get: it named **both** blockers exactly,
+  including that `ncfg_observed_link_t.network` had no writer in this port and
+  that a producer written without one "would be a function that looks like the
+  rule and is the bug the rule exists to prevent". A later wave rediscovered
+  that second blocker independently, by re-deriving what `ask_supplicants`
+  does, and only then found this paragraph had said it first (project.md
+  10.202). The first blocker went when `ncfg_main_service_of` began composing
+  an `ncfg_service_t` (10.189) and the four lists were filled over the waves
+  that followed (10.189, 10.190, 10.192); the second went when
+  `ncfg_observe_supplicants` landed (10.202). Both halves of the rule are
+  applied now -- `with_metric` through `ncfg_observed_effective_metric`, and
+  `ncfg_plan_metric_restart` for a client already running with the old one --
+  and the warning that named the gap came out in the same commit that closed
+  it, which is `build.c`'s rule.
+
+* ***The service-side executor has no caller in `src/main/`***. Closed:
+  `ncfg_main_world_executor_open` installs one (10.189). The entry's warning --
+  "so that nobody reads *the launcher landed* as *a WPA laptop comes up*" -- is
+  the reason it was worth writing, and the same shape recurred twice more
+  afterwards: `ncfg_wifi_configure_network` had an implementation and no caller
+  (10.203), and `ncfg_kernel_set_document` had none either, which left six
+  netlink ops refusing by name (10.204). Both were found by **measuring** for
+  a published function with no caller rather than by reasoning about what was
+  left, which is the method 10.204 records and recommends repeating.
+
+* ***`netcfgd_host::wifi_profile` was not ported***, and the arms that cited
+  it. The module landed; what outlived it was the daemon's refusal, which went
+  on saying the profile writer was "a seam with no implementation in the C
+  port" until 10.203.
+
+* ***The `observe.h` entry that named the deferred passes had been wrong for
+  several waves***. It was wrong again afterwards, twice, and is now right:
+  every observation pass that header names is written (10.199 through 10.202).
+
+* ***The journal writer is still deferred and is now the whole of it***, which
+  was the closing clause of the entry above it. Closed too:
+  `ncfg_apply_write_journal` publishes `plan.last.json`, and both paths that
+  apply a plan call it -- the reconcile pass and the confirm window's revert --
+  through `ncfg_daemon_record_what_ran`.
+
+* ***`applied_dns` has nowhere to go for the reason `state.h` already
+  gives***. The reason had expired: `state.h` carries `dns`, reads it and
+  writes it. What the entry could not see is that carrying a member is not
+  having a writer for one, and this one had none -- so `observed.dns`, which is
+  filled from that record and from nowhere else, was empty on every machine and
+  the planner asked for a delivery it had already made, on every pass, for ever
+  (project.md 10.205). It is folded now: `ncfg_apply_record` takes the scope
+  list an apply delivered, because `dns.apply` is the one op that is not its
+  own effect. The entry's own argument for deferring it -- that a deep copy of
+  an `ncfg_dns_policy_t` "exists nowhere in this port" -- was sound and is
+  answered rather than ignored: the copy is a render and a parse through the
+  model's field tables, so no hand-written one exists now either.
+
+**The pattern these share is the one worth carrying forward.** Every entry
+above was true when written. What made them dangerous is that each described a
+*gap*, and a gap is the one kind of claim that becomes false without anybody
+touching the sentence. A deferral is therefore worth revisiting on a schedule
+rather than when something reminds you of it -- and `grep` for the shape, not
+for the words, because the words are what went stale.
+
+**The last one goes further and is the reason to keep doing this.** The other
+four were sentences that had outlived their subject and cost a reader some
+confusion. That one was a sentence that had outlived its subject **and was
+standing in for a defect**: while it said the member was waiting on something,
+nobody asked who filled it, and a machine running this build would have
+rewritten its resolver configuration on every reconcile until somebody noticed.
+A stale deferral is not only bad documentation -- it is where a missing writer
+hides.
+
 ## What is not being decided here
 
 Whether the C replaces the Rust, and when. Nothing in `c/` is installed, the

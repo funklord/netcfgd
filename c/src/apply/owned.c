@@ -23,16 +23,21 @@
  *   op that produced it, so the op is the effect and the fold is checkable
  *   against the recorder rather than against a kernel.
  *
- *   `dns.apply` is the one op that is **not** its own effect, and it is the one
- *   member of the record nothing here folds. See the case below.
+ *   `dns.apply` is the one op that is **not** its own effect: the executor
+ *   delivers every scope its context carries whatever the op names. So the
+ *   delivered set arrives as an argument to `ncfg_apply_record` instead, and
+ *   the case below says what that costs and what leaving it out cost.
  */
 #include "ncfg/apply.h"
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/json_write.h"
 #include "ncfg/lock.h"
 #include "ncfg/state.h"
+#include "ncfg_json.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -394,12 +399,11 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 	 *
 	 *   * `backend.reload` neither starts nor stops anything, so it neither
 	 *     counts a restart nor clears one;
-	 *   * `dns.apply` **is** recorded in the Rust and is not here, and the
-	 *     record does now carry `dns`. What stops the fold is that the op is
-	 *     not the effect: `ncfg_service_dns_apply` delivers every scope its
-	 *     context carries whatever this op names, so folding the op's own
-	 *     scope would strand a departed one in the record for ever.
-	 *     `apply.h` has the whole argument;
+	 *   * `dns.apply` is recorded, and not from here: the op names one scope
+	 *     and `ncfg_service_dns_apply` delivers every scope its context
+	 *     carries, so folding the op's own scope would strand a departed one
+	 *     in the record for ever. `ncfg_apply_record` takes the delivered set
+	 *     and replaces the record's with it; `apply.h` has the argument;
 	 *   * the three commit ops are markers in the plan rather than changes to
 	 *     the machine, which is why the executor does nothing for them either.
 	 */
@@ -450,9 +454,89 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 /* What `ncfg_owned_update` is handed, so that the walk happens under the lock
  * rather than either side of it. */
 typedef struct {
-	const ncfg_plan_t    *plan;
-	const ncfg_journal_t *journal;
+	const ncfg_plan_t      *plan;
+	const ncfg_journal_t   *journal;
+	/* What a `dns.apply` in this journal delivered, or NULL from a caller that
+	 * has no scope list -- which leaves the record's alone. */
+	const ncfg_dns_scope_t *delivered;
+	size_t                  delivered_count;
 } fold_t;
+
+/*
+ * Replace the delivered DNS scopes with what this apply delivered.
+ *
+ * **Published and read back rather than copied field by field.** The record
+ * holds `ncfg_applied_dns_t`, whose policy is a value with seven owned lists
+ * inside it, and a hand-written deep copy of that is a function somebody has to
+ * remember to extend the next time `ncfg_dns_policy_t` gains a field -- the
+ * quiet half of a drift, since a field that is not copied reads back absent and
+ * the planner calls the scope different for ever. The model's own field tables
+ * already write a policy and read one, so the copy is one render and one parse
+ * through them and cannot fall behind a field they gain.
+ *
+ * The scopes are borrowed into the writer's own element type, which is a
+ * struct copy of a policy nobody frees: `ncfg_applied_dns_write` reads it and
+ * nothing else, and the copies the caller keeps are the reader's.
+ *
+ * **Replaced rather than merged**, which is `state.h`'s rule for this member
+ * and the delivery's shape: a scope absent from a delivery is absent from the
+ * resolver file it wrote whole, so a record saying otherwise is simply wrong.
+ */
+static int note_dns(ncfg_owned_state_t *owned, const ncfg_dns_scope_t *scopes, size_t count)
+{
+	ncfg_applied_dns_t *borrowed = NULL;
+	ncfg_applied_dns_t *copied = NULL;
+	size_t              copied_count = 0;
+	size_t              borrowed_count = 0;
+	size_t              at;
+	ncfg_buf_t          rendered;
+	ncfg_json_writer_t  writer;
+	ncfg_json_doc_t    *doc;
+	int                 ok;
+
+	if (count != 0u) {
+		borrowed = calloc(count, sizeof(*borrowed));
+		if (!borrowed) {
+			return 0;
+		}
+		for (at = 0u; at < count; at++) {
+			/* A scope with no name or no policy is one nothing could look up
+			 * afterwards, and `ncfg_dns_scopes_of` produces neither. Dropped
+			 * rather than written as an empty entry, which would read back as
+			 * a scope netcfgd delivered nothing to. */
+			if (!scopes[at].name || !scopes[at].policy) {
+				continue;
+			}
+			borrowed[borrowed_count].scope = (char *)(uintptr_t)scopes[at].name;
+			borrowed[borrowed_count].policy = *scopes[at].policy;
+			borrowed_count++;
+		}
+	}
+	ncfg_buf_init(&rendered, 0u);
+	ncfg_json_write_init(&writer, &rendered);
+	ncfg_applied_dns_write(&writer, borrowed, borrowed_count);
+	free(borrowed);
+	if (ncfg_buf_failed(&rendered)) {
+		ncfg_buf_free(&rendered);
+		return 0;
+	}
+	doc = ncfg_json_parse(ncfg_buf_text(&rendered), strlen(ncfg_buf_text(&rendered)), NULL, 0u);
+	ncfg_buf_free(&rendered);
+	if (!doc) {
+		return 0;
+	}
+	ok = borrowed_count == 0u ||
+	    ncfg_applied_dns_read(doc, ncfg_json_root(doc), &copied, &copied_count, NULL, 0u);
+	ncfg_json_free(doc);
+	if (!ok) {
+		ncfg_applied_dns_free(copied, copied_count);
+		return 0;
+	}
+	ncfg_applied_dns_free(owned->dns, owned->dns_count);
+	owned->dns = copied;
+	owned->dns_count = copied_count;
+	return 1;
+}
 
 /* The action a record came from, by id rather than by position -- a journal may
  * be assembled from more than one apply, and a position that happened to line
@@ -472,6 +556,7 @@ static const ncfg_action_t *action_with_id(const ncfg_plan_t *plan, uint32_t id)
 static int fold(ncfg_owned_state_t *owned, void *context)
 {
 	const fold_t *what = context;
+	int           delivered_dns = 0;
 	size_t        at;
 
 	for (at = 0; at < what->journal->record_count; at++) {
@@ -480,6 +565,17 @@ static int fold(ncfg_owned_state_t *owned, void *context)
 
 		if (!action) {
 			continue;
+		}
+		/*
+		 * A `dns.apply` that reached the machine, whichever way round. Its
+		 * inverse is a `dns.apply` too, and with a scope list the executor
+		 * delivers that list either way -- so what is in force after a revert
+		 * is what is in force after the action, and one flag covers both.
+		 */
+		if ((record->outcome == NCFG_OUTCOME_DONE ||
+		        record->outcome == NCFG_OUTCOME_REVERTED) &&
+		    action->op.kind == NCFG_OP_DNS_APPLY) {
+			delivered_dns = 1;
 		}
 		if (record->outcome == NCFG_OUTCOME_DONE) {
 			if (!ncfg_owned_absorb(owned, &action->op)) {
@@ -497,11 +593,18 @@ static int fold(ncfg_owned_state_t *owned, void *context)
 		 * no declared inverse is one the revert could not put back -- so the
 		 * original op is still in effect and the record it wrote stands. */
 	}
+	/* And the one member no op is. A caller with no list leaves it alone,
+	 * which costs one re-delivery on the next pass; `apply.h` has why that is
+	 * the right direction and what the absence of any writer at all cost. */
+	if (delivered_dns && what->delivered) {
+		return note_dns(owned, what->delivered, what->delivered_count);
+	}
 	return 1;
 }
 
 int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
-    const ncfg_journal_t *journal, char *err, size_t err_size)
+    const ncfg_journal_t *journal, const ncfg_dns_scope_t *delivered, size_t delivered_count,
+    char *err, size_t err_size)
 {
 	fold_t what;
 
@@ -518,6 +621,8 @@ int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
 	}
 	what.plan = plan;
 	what.journal = journal;
+	what.delivered = delivered;
+	what.delivered_count = delivered ? delivered_count : 0u;
 	if (ncfg_owned_update(run_dir, fold, &what, err, err_size)) {
 		return 1;
 	}
