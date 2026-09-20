@@ -173,6 +173,9 @@ int ncfg_wifi_profile_install(const char *config_dir, const char *factory_dir,
  * daemon's wifi half was; it stays a seam rather than becoming a direct call
  * because `daemon.h` may not depend on the host module -- and because a test
  * of the request's validation should not have to write a file to reach it.
+ *
+ * `daemon_answer.c`'s `answer_wifi_add` is the one caller that installs it, on
+ * 0117's path: a client with no permission to write the file itself.
  */
 typedef struct {
 	const char           *config_dir;

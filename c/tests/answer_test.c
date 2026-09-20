@@ -526,6 +526,118 @@ static void a_dispatcher_with_nothing_behind_it_refuses(void)
 	ncfg_buf_free(&out);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Writing a `network` block for a client that may not
+ * ------------------------------------------------------------------------ */
+
+/*
+ * 0117's path, which was refused with a sentence that had stopped being true.
+ *
+ * The daemon's arm said "the profile writer is a seam with no implementation
+ * in the C port" long after `wifi_profile.h` had landed -- so a client with no
+ * permission to write the file itself, which is what that path exists for, was
+ * being told netcfgd could not do something it could.
+ */
+static void a_network_block_is_written_for_a_client_that_may_not(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[640];
+	char                *written;
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_WIFI_ADD;
+	/* Hex, as an SSID is everywhere in this model: 0..32 arbitrary octets and
+	 * never guaranteed text. `63616665` is `cafe`, which is also what the
+	 * block gets named when the request sends no `id`. */
+	request.u.wifi_add.ssid.bytes = "63616665";
+	request.u.wifi_add.ssid.length = 8u;
+	request.u.wifi_add.passphrase.bytes = "a-passphrase-of-some-length";
+	request.u.wifi_add.passphrase.length = 27u;
+	err[0] = '\0';
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
+	    "a `wifi add` over the socket is answered rather than refused");
+	detail("it said", err);
+	ncfg_buf_free(&out);
+
+	/*
+	 * **Written where the document is read from**, which is the whole of what
+	 * the client could not do for itself. Checked on disk rather than by the
+	 * reply, because an `ok` for a file nobody wrote is exactly the shape this
+	 * path must not have.
+	 */
+	/* `wifi-<id>`, which is `ncfg_wifi_profile_drop_in`'s naming -- and the
+	 * loader's own `conf.d`, so a fixture cannot look where nothing was
+	 * written. */
+	(void)snprintf(path, sizeof(path), "%s/conf.d/wifi-cafe.conf", config_dir);
+	written = testdir_read(path, NULL);
+	check(written != NULL, "  and the `network` block is on disk where the document reads");
+	/* And the credential is not in it: the block carries an `@secret:`
+	 * reference and the passphrase went to the store, which is what keeps a
+	 * document free of secret material whichever caller asked. */
+	check(written && strstr(written, "a-passphrase-of-some-length") == NULL,
+	    "  carrying no passphrase, only a reference to one");
+	free(written);
+}
+
+static void a_network_block_is_taken_away_again(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[640];
+
+	/* The document has to hold it before it can be forgotten, which is a
+	 * reload away: the arm refuses a network the document does not have. */
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_RELOAD;
+	err[0] = '\0';
+	(void)ask(&request, &out, err, sizeof(err));
+	ncfg_buf_free(&out);
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_WIFI_FORGET;
+	request.u.id.bytes = "cafe";
+	request.u.id.length = 4u;
+	err[0] = '\0';
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
+	    "a `wifi forget` over the socket is answered rather than refused");
+	detail("it said", err);
+	ncfg_buf_free(&out);
+	/* `wifi-<id>`, which is `ncfg_wifi_profile_drop_in`'s naming -- and the
+	 * loader's own `conf.d`, so a fixture cannot look where nothing was
+	 * written. */
+	(void)snprintf(path, sizeof(path), "%s/conf.d/wifi-cafe.conf", config_dir);
+	check(!testdir_exists(path), "  and the block is gone from where the document reads");
+}
+
+static void writing_is_refused_where_this_daemon_was_told_nowhere(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	const char          *kept = desk.config_dir;
+
+	/*
+	 * **No default, which is `ncfg_wifi_where_t`'s rule one field along.** A
+	 * daemon pointed at a scratch tree must not fall back to the machine's own
+	 * configuration directory, so being told nowhere is a refusal by name
+	 * rather than a write somewhere nobody asked for.
+	 */
+	desk.config_dir = NULL;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_WIFI_ADD;
+	request.u.wifi_add.ssid.bytes = "63616665";
+	request.u.wifi_add.ssid.length = 8u;
+	err[0] = '\0';
+	check(!ask(&request, &out, err, sizeof(err)) &&
+	    strstr(err, "where configuration is written") != NULL,
+	    "a daemon told nowhere to write refuses by name rather than choosing");
+	ncfg_buf_free(&out);
+	desk.config_dir = kept;
+}
+
 int main(void)
 {
 	const char *made;
@@ -565,12 +677,17 @@ int main(void)
 	desk.where.run_dir = run_dir;
 	desk.secrets_dir = config_dir;
 	desk.certs_dir = run_dir;
+	desk.config_dir = config_dir;
+	desk.factory_dir = factory_dir;
 
 	every_request_is_answered_or_refused_by_name();
 	a_refusal_names_the_request_it_refused();
 	a_kind_the_table_answers_has_an_arm();
 	a_drop_in_is_written_and_taken_away();
 	a_secret_is_stored_and_removed();
+	a_network_block_is_written_for_a_client_that_may_not();
+	a_network_block_is_taken_away_again();
+	writing_is_refused_where_this_daemon_was_told_nowhere();
 	a_field_carrying_a_nul_is_refused();
 	an_absent_field_is_refused_rather_than_defaulted();
 	a_credential_past_its_ceiling_names_the_ceiling();

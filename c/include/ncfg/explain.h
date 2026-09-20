@@ -155,11 +155,10 @@ void ncfg_explanation_free(ncfg_explanation_t *explanation);
  * the reason the count is carried at all.
  *
  * This is a buffer rather than a print because a library never prints: the
- * caller hands the result to `ncfg_out_text`. `ncfg explain` itself is not
- * wired in this wave -- the verb's first step is a local observation, and the
- * observer that turns netlink into an `ncfg_observed_t` is not ported -- so
- * this is the half that is ported and tested, as `cli.h` describes for
- * `status` and `plan`.
+ * caller hands the result to `ncfg_out_text`. **`ncfg explain` is wired**: this
+ * said it was not, because the verb's first step is a local observation and
+ * the observer was not ported -- which stopped being true when
+ * `ncfg_observe_current` landed, and went on being said.
  */
 int ncfg_explanation_render(const ncfg_explanation_t *explanation, ncfg_buf_t *out, char *err,
     size_t err_size);

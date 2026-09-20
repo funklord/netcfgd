@@ -1384,6 +1384,18 @@ typedef struct {
 	 * materialised for a supplicant to open. Neither has a default. */
 	const char              *secrets_dir;
 	const char              *certs_dir;
+	/*
+	 * Where a `network` block is written, and the layer it must not be
+	 * shadowed by.
+	 *
+	 * 0117's path: a client with no permission to write the file itself sends
+	 * a typed request and the daemon writes the block. Neither has a default,
+	 * for `ncfg_wifi_where_t`'s reason -- a daemon pointed at a scratch tree
+	 * must not write into the machine's real configuration. NULL refuses
+	 * `wifi add` and `wifi forget` by name.
+	 */
+	const char              *config_dir;
+	const char              *factory_dir;
 	/* Where a `monitor` lands, and who is told when a reload is asked for.
 	 * NULL tells nobody and refuses a subscription by name. */
 	ncfg_main_subscribers_t *subscribers;

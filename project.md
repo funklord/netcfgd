@@ -9515,6 +9515,49 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.203 A seam with an implementation and no caller, found by sweeping
+
+I had said the port had no gaps left twice and been wrong twice, so this time I
+swept the headers instead of asserting it -- `grep` for "not ported", "no
+caller", "no implementation", "when it lands". Eleven hits. Four were stale
+claims of mine, one was a header describing a gap it had itself closed, and one
+was real.
+
+**`ncfg_wifi_configure_network` had no caller outside the tests.** The daemon's
+`wifi add` and `wifi forget` arms refused with *"the profile writer is a seam
+with no implementation in the C port"* -- and `ncfg_wifi_profile_installer` has
+been that implementation since `wifi_profile.h` landed. The sentence stopped
+being true and went on being said, which is this campaign's most common defect
+by some distance. The CLI was never affected: it holds the directories and
+calls the writer directly. What was refused is **0117's path** -- a client with
+no permission to write the file itself, which is what the GUI uses.
+
+So `answer_wifi_add` installs the seam and `answer_wifi_forget` calls the
+writer straight, because a forget renders nothing and the seam exists to
+separate *rendering* a block from *writing* one. The desk gains `config_dir`
+and `factory_dir`, neither with a default, for `ncfg_wifi_where_t`'s reason: a
+daemon pointed at a scratch tree must not fall back to the machine's own
+configuration. There is a check that being told nowhere refuses by name.
+
+**Three fixture mistakes of mine, each caught by the refusal being specific.**
+The request's SSID is hex like everywhere else in this model, so `"cafe"`
+decoded to two non-text octets and was refused by name; the written file is
+`wifi-<id>.conf` through `ncfg_wifi_profile_drop_in`, not `<id>.conf`; and the
+credential field is `passphrase`, not `credential`. Each refusal said exactly
+what was wrong, which is what those sentences are for.
+
+**And the stale claims, corrected rather than left.** `observe.h` still said
+four passes were unwritten -- and that each was "a round trip to the daemon it
+asks", which was true of two; `service.h` still said the observer had no reader
+for the supplicant's record, which 10.202 wrote; `explain.h` still said
+`ncfg explain` was unwired because the observer was not ported, which it has
+not been for many waves.
+
+6,422 checks across 100 binaries. Three sabotages caught, and the first of them
+also tripped the existing "a kind the table answers has an arm" check -- which
+is the check that would have caught this gap if the arm had ever claimed to
+answer.
+
 ## 10.202 The last observation pass, and a rule whose input nobody wrote
 
 `ask_supplicants` is `ncfg_observe_supplicants`. With it the observer has no

@@ -410,9 +410,9 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
  *
  * `<run>/supplicant/<iface>.networks.sha256`, which is the Rust's spelling and
  * is what an observation reads to answer `networks_match`. Published because
- * two readers of one path is how two readers of one path come to disagree, and
- * the C observer has no reader for it yet -- the day it grows one it takes
- * this rather than spelling the name again.
+ * two readers of one path is how two readers of one path come to disagree --
+ * and `ncfg_observe_supplicants` is that second reader now, taking this rather
+ * than spelling the name again.
  *
  * 1 with the path in `out`; a path that would not fit is a failure rather than
  * a shorter one.

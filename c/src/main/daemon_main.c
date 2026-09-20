@@ -722,6 +722,11 @@ static int start(const options_t *options)
 	desk.where.run_dir = where.run;
 	desk.secrets_dir = where.secrets;
 	desk.certs_dir = where.certs;
+	/* 0117's path: where a `network` block this daemon is asked to write goes,
+	 * and the layer it must not be shadowed by. Both resolved once, like every
+	 * other path this daemon uses. */
+	desk.config_dir = where.config;
+	desk.factory_dir = where.factory;
 	desk.subscribers = &subscribers;
 
 	err[0] = '\0';

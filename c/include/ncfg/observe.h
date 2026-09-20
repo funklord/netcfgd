@@ -70,8 +70,11 @@
  *       who owns a pid. What it costs is that `liveness_test.c` starts real
  *       children instead of pointing at a tree it made.
  *
- *       The four remaining are simply not written yet, each being a round trip
- *       to the daemon it asks.
+ *       **The other four are written too**, and the note that each was "a round
+ *       trip to the daemon it asks" was true of only two: `read_advertised`
+ *       reads radvd's generated configuration and the two currency questions
+ *       digest files, while `read_access_control` and `ask_supplicants` really
+ *       do open a control socket. Every pass this header names now exists.
  *     * `read_resolv_currency` walks `observed.dns`, which the record now
  *       carries too -- but only carries: nothing in this build *writes* a
  *       delivered scope into it, because `dns.apply` is the one op that is not
