@@ -307,6 +307,14 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	     * before it is held up behind the wait.
 	     */
 	    !ncfg_observe_access_control(observed, run_dir, 0, err, err_size) ||
+	    /*
+	     * **Before `derive`, because `derive` reads the link's network.** So
+	     * does `ncfg_observed_effective_metric`, and so does the inventory --
+	     * this is the pass that fills it, and running it afterwards would
+	     * leave all three drawing conclusions from a field nothing had
+	     * written.
+	     */
+	    !ncfg_observe_supplicants(observed, run_dir, secrets, desired, 0, err, err_size) ||
 	    !ncfg_observe_augment_host(observed, roots, err, err_size) ||
 	    !ncfg_observe_derive(observed, desired, err, err_size)) {
 		/*

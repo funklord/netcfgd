@@ -417,6 +417,23 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
  * 1 with the path in `out`; a path that would not fit is a failure rather than
  * a shorter one.
  */
+/*
+ * The three device-wide settings a supplicant is configured with.
+ *
+ * `mac_policy`, scan randomisation and autoconnect, from the `wifi` block of
+ * the device -- or their defaults where it has none: permanent address, no
+ * randomisation, joins.
+ *
+ * **Published because the fingerprint is computed twice and must match.** The
+ * executor digests these three alongside the networks when it records what a
+ * supplicant was handed; the observer digests them again to answer
+ * `networks_match`. Two spellings of the defaults is a digest that never
+ * matches, so `networks_match` would be false for ever and the planner would
+ * re-hand the whole set on every reconcile.
+ */
+void ncfg_service_radio_policy(const ncfg_document_t *document, const char *device,
+    int *mac_policy, int *randomise, int *joins);
+
 int ncfg_service_networks_record_path(const char *run_dir, const char *iface, char *out,
     size_t out_size, char *err, size_t err_size);
 

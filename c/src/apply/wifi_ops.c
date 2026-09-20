@@ -275,8 +275,8 @@ int ncfg_service_supplicant_driver(const ncfg_document_t *document, const char *
  * itself. `autoconnect` defaulting to true is 0236's answer and is why the
  * `DISABLE_NETWORK all` below is not sent on almost every machine.
  */
-static void radio_policy(const ncfg_document_t *document, const char *device, int *mac_policy,
-    int *randomise, int *joins)
+void ncfg_service_radio_policy(const ncfg_document_t *document, const char *device,
+    int *mac_policy, int *randomise, int *joins)
 {
 	const ncfg_wifi_device_policy_t *found = ncfg_service_wifi_on(document, device);
 
@@ -471,7 +471,7 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 		return ok;
 	}
 
-	radio_policy(service->document, device, &mac_policy, &randomise, &joins);
+	ncfg_service_radio_policy(service->document, device, &mac_policy, &randomise, &joins);
 	/* Cleared first, so a supplicant that survived a netcfgd crash -- or one
 	 * started by something else -- does not contribute networks the document
 	 * cannot account for. 0015. */
