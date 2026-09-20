@@ -908,13 +908,20 @@ static void this_build_does_not_reconcile(void)
 	    "  and the journal of an apply has a writer, which it did not");
 	{
 		char *pass = read_source("src/daemon/reconcile_pass.c");
+		char *record = read_source("src/daemon/record.c");
 
-		/* The file that would have to change, which is 10.177's rule about
-		 * asserting a negative over a location: `record_what_ran` is
-		 * `reconcile_pass.c`'s and nowhere else. */
-		check(pass && strstr(pass, "ncfg_apply_write_journal(run_dir") != NULL,
+		/*
+		 * The two files that would have to change, which is 10.177's rule
+		 * about asserting a negative over a location. Both halves, because
+		 * either alone is a machine that records nothing: the pass has to
+		 * reach the fold, and the fold is what writes the journal. They were
+		 * one file until the revert path needed the same pair.
+		 */
+		check(pass && strstr(pass, "ncfg_daemon_record_what_ran(loop->state") != NULL &&
+		    record && strstr(record, "ncfg_apply_write_journal(state->paths.run") != NULL,
 		    "  and the pass that reconciles a machine writes one");
 		free(pass);
+		free(record);
 	}
 
 	/*

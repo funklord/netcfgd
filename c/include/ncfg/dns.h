@@ -28,8 +28,14 @@
  * WHAT IS RECORDED, AND WHY IT IS NOT WHAT IS RETURNED
  *   0007's partial mitigation for the one place principle 2 bends: once DNS is
  *   handed to another daemon, the effective behaviour lives in that daemon's
- *   head, so netcfgd makes its own half greppable under `<run>/dns/`. The
- *   observer reads those files back as `ncfg_applied_dns_t`.
+ *   head, so netcfgd makes its own half greppable under `<run>/dns/`.
+ *
+ *   **Nothing reads those files back.** They are for a person holding `grep`,
+ *   and they could not answer the other question anyway: they carry what the
+ *   resolver was told rather than the policy it came from, so a port, an SNI
+ *   or a `dnssec` setting is not in them. What the planner compares against is
+ *   `owned.json`, which the fold writes from the scope list an apply was given
+ *   -- `apply.h` has that argument and what the absence of any writer cost.
  *
  *   **The delivery reports scope names and not policies**, which is where this
  *   differs from the Rust. There, `deliver` returns `Vec<AppliedDns>`, each
@@ -38,6 +44,11 @@
  *   caller, with a matching free -- three chances to get ownership wrong for a
  *   value nobody learns anything from. The names say which scopes were
  *   delivered, which is the part the caller did not already know.
+ *
+ *   The record does hold the policies, and gets them without a hand-written
+ *   copy: `ncfg_apply_record` renders the caller's own scope list through the
+ *   model's field tables and reads it back, so a field `ncfg_dns_policy_t`
+ *   gains is copied by the tables that already write it.
  */
 #ifndef NCFG_DNS_H
 #define NCFG_DNS_H

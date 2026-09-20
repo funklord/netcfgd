@@ -172,8 +172,8 @@ static const ncfg_observed_report_t *report_for(const ncfg_observed_t *observed,
  * refused rather than carried, because a nameserver is one address and
  * `10.0.0.53/24` in a `nameserver` line is a resolver file nothing can use.
  *
- * **Canonical, and that is what makes the pass idempotent.** The delivery
- * records what it wrote under `<run>/dns/`, the observer reads it back, and
+ * **Canonical, and that is what makes the pass idempotent.** What an apply
+ * delivered is folded into `owned.json` and comes back as `observed.dns`, and
  * the planner compares the two: a server carried through in whatever spelling
  * the report's author used would compare unequal against netcfgd's own record
  * of having delivered it, and `dns.apply` would be planned on every run.

@@ -28,11 +28,12 @@
  *
  * WHAT IS DEFERRED HERE, RATHER THAN QUIETLY MISSING
  *   **Not `plan.last.json` any more**, and not the fold beside it. Both run in
- *   `record_what_ran`, under the apply lock and before the executor is closed,
- *   and both are the same pair on the revert path in `confirm.c`. The fold was
- *   never waiting on an effect list -- `ncfg_apply_record` takes the plan and
- *   the journal -- and the journal writer was waiting on nothing but being
- *   written.
+ *   `ncfg_daemon_record_what_ran`, under the apply lock and before the
+ *   executor is closed, and both are the same pair on the revert path in
+ *   `confirm.c`. The fold was
+ *   never waiting on an effect list -- `ncfg_apply_record` takes the plan, the
+ *   journal and the scopes a `dns.apply` delivered -- and the journal writer
+ *   was waiting on nothing but being written.
  *
  *   The `cycle` option a plan is built with. `ncfg_plan_options_t` has none
  *   yet, so this build's planner emits no link cycle for a modem that has
@@ -43,6 +44,7 @@
  */
 #include "ncfg/daemon.h"
 
+#include "daemon_internal.h"
 #include "ncfg/log.h"
 #include "ncfg/portal.h"
 #include "ncfg/state.h"
@@ -246,51 +248,6 @@ static void remember(const char *run_dir, tellings_t *told)
 		    "what the %s hooks were told could not be recorded (%s), so they may "
 		    "fire again",
 		    ncfg_hook_phase_name((ncfg_hook_phase_t)told->phase), message);
-	}
-}
-
-/*
- * Fold what an apply just did into `owned.json`.
- *
- * **Under the apply lock, which is why it is here and not after the close.**
- * `ncfg_owned_update` takes `owned.lock` of its own, so the file cannot be
- * interleaved either way -- but the apply lock is what makes the read, the
- * change and the write describe one machine rather than two applies' worth of
- * it.
- *
- * A failure is a note rather than a refusal, which is `remember`'s bargain
- * above and is the same one: the run directory is derived and disposable. What
- * it costs is larger here and is said, because an object netcfgd installed and
- * did not record is one it will decline to remove later -- the safe direction,
- * and still a machine that drifts.
- */
-static void record_what_ran(const char *run_dir, const ncfg_plan_t *plan,
-    const ncfg_journal_t *journal)
-{
-	char message[NCFG_ERROR_MAX];
-
-	message[0] = '\0';
-	if (!ncfg_apply_record(run_dir, plan, journal, message, sizeof(message))) {
-		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
-		    "what this apply did could not be recorded (%s), so netcfgd will not "
-		    "claim those objects as its own", message);
-	}
-	/*
-	 * And the journal beside it, which is the file that answers *where an
-	 * apply stopped*. A reconcile has no terminal, so without this a pass that
-	 * halted at its third action leaves that fact in the log alone -- and the
-	 * Rust's own record of this says the log held two startup lines and
-	 * nothing else while `plan.last.json` named the cause exactly.
-	 *
-	 * After the fold rather than inside it: both take `owned.lock` and `flock`
-	 * is held by the open file description, so a call nested in the other's
-	 * critical section would be this process waiting on itself.
-	 */
-	message[0] = '\0';
-	if (!ncfg_apply_write_journal(run_dir, journal, message, sizeof(message))) {
-		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
-		    "the journal of this apply could not be written (%s), so nothing under "
-		    "the run directory says where it got to", message);
 	}
 }
 
@@ -846,7 +803,7 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
 	(void)ncfg_apply(restricted, &executor, &journal, message, sizeof(message));
-	record_what_ran(loop->state->paths.run, restricted, &journal);
+	ncfg_daemon_record_what_ran(loop->state, "apply", restricted, &journal);
 	close_executor(&loop->world, &executor);
 
 	guard_resolv(loop, restricted, report);
@@ -1111,7 +1068,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	ncfg_journal_init(&journal);
 	message[0] = '\0';
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
-	record_what_ran(loop->state->paths.run, plan, &journal);
+	ncfg_daemon_record_what_ran(loop->state, "apply", plan, &journal);
 	close_executor(&loop->world, &executor);
 
 	if (ncfg_journal_failure(&journal)) {
