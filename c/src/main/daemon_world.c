@@ -520,6 +520,23 @@ int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err
 		    "by name: %s", err);
 	}
 	ncfg_kernel_set_service(world->kernel, &world->service);
+	/*
+	 * **And the two setters beside it, which the service half was wired
+	 * without.** They are the same shape one field along: six netlink ops
+	 * carry a device's name and nothing else -- `link.set_bridge`,
+	 * `link.set_bond`, `link.set_macvlan`, `link.set_tunnel`,
+	 * `link.set_vxlan` and `wg.set_device` -- and what they change is the
+	 * document's, so without one they refuse by name rather than configuring
+	 * a device from an empty block.
+	 *
+	 * The resolver matters for a different reason: NULL means the machine's
+	 * own secrets directory, so a daemon pointed at a scratch tree would load
+	 * the machine's real key material to configure it. Handing over the one
+	 * this world was given is what makes that seam mean anything.
+	 */
+	ncfg_kernel_set_document(world->kernel, world->state ? world->state->desired : NULL);
+	ncfg_kernel_set_secrets(world->kernel,
+	    world->secrets.secrets_dir || world->secrets.materialise_dir ? &world->secrets : NULL);
 	ncfg_kernel_executor(world->kernel, out);
 	world->open = 1;
 	return 1;

@@ -9515,6 +9515,48 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.204 Six more ops, found by sweeping for the same shape again
+
+10.203's sweep was for *sentences* that had outlived their truth. This one is
+for the shape underneath them: **a published function with no caller.** That is
+what hid `ncfg_kernel_set_service`, and then `ncfg_wifi_configure_network`, so
+rather than look for a third by reasoning I measured it -- 936 declarations in
+`c/include/ncfg/`, each counted against every call in `c/src`, leaving 103 that
+appear exactly once, which is their own definition.
+
+Most are legitimate: a free, a constructor, an accessor a test or the GUI uses,
+a function installed as a pointer rather than called. **Two were not.**
+
+`ncfg_kernel_set_document` had no caller, so the six netlink ops that carry a
+device's *name* and nothing else -- `link.set_bridge`, `link.set_bond`,
+`link.set_macvlan`, `link.set_tunnel`, `link.set_vxlan` and `wg.set_device` --
+refused by name on every apply the daemon would have made. `apply.h` says what
+that refusal is protecting against: "a bridge with every setting at the
+kernel's default, reported as a successful apply". **I wired the service half
+in 10.189 and did not notice the setter beside it**, which is the same kind of
+miss the sweep exists to catch.
+
+`ncfg_kernel_set_secrets` had none either, and it matters for a different
+reason: NULL means the machine's **own** secrets directory, so a daemon pointed
+at a scratch tree would load the machine's real key material to configure it
+with. That is exactly the hazard `ncfg_main_world_where_t` was built to prevent
+in 10.189, one field along and missed the same way.
+
+**A check that passed before its subject, for the fifth time this session.** The
+WireGuard fixture omitted `peers`, which the reader requires, so the document
+came back NULL, the op refused for want of a document, and a check looking for
+a sentence about the secret store was green. The fixture is asserted now, which
+is what the four previous ones taught and what I had not yet applied to a
+document I wrote inline.
+
+6,425 checks across 100 binaries. Four sabotages caught across the two setters.
+
+**The sweep is worth repeating and is not worth a gate.** A gate would need an
+allow-list of every function a test or the GUI legitimately owns, and that list
+is maintenance that rots exactly the way the sentences did. Running it by hand
+at the end of a wave costs a minute and has now found three gaps that three
+separate "what is left?" readings did not.
+
 ## 10.203 A seam with an implementation and no caller, found by sweeping
 
 I had said the port had no gaps left twice and been wrong twice, so this time I
