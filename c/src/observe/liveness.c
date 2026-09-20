@@ -29,6 +29,25 @@
  *   `default:` so that a kind added to the taxonomy fails to compile rather
  *   than falling quietly into "cannot answer".
  *
+ * WHAT ELSE A DHCP CLIENT IS ASKED WHILE IT IS UP
+ *   `started_metric`: the route metric the running client was started with, and
+ *   the reason it is read *here* is the reason the Rust reads it here too -- a
+ *   record read for a process that has exited is not an observation of
+ *   anything. It is the input to `ncfg_plan_metric_restart`'s first half, which
+ *   answers before any route exists; the installed route answers the second
+ *   half and cannot, because a client that has not finished its first exchange
+ *   has installed nothing. Until this pass wrote it the field had no producer
+ *   at all, so that first half never fired on any machine (project.md 10.206).
+ *
+ *   **Read for a client this pass could not ask about, as well as one it
+ *   found.** That is not sloppiness and it is where this differs from the
+ *   Rust's, which reads it only behind a pid: the record is written for dhcpcd
+ *   alone -- `dhcp.h` says busybox udhcpc has no `-m` to be given -- and
+ *   dhcpcd is precisely the client this pass cannot ask about. Reading it only
+ *   where a pid was found would fill the field exactly for the clients that
+ *   never have a metric, which is a producer that cannot produce. What it is
+ *   never read for is a backend this pass has just declared dead.
+ *
  * THE TWO CLIENTS A DHCP KIND COULD BE
  *   `ncfg_dhcp_running_pid` takes the program, because the pid file lives in a
  *   directory named after the client. The record does not carry which one was
@@ -37,6 +56,12 @@
  *   no pid file of netcfgd's and no mark in its process image, so a dhcpcd
  *   machine's clients are left alone here and `ncfg_dhcpcd_whose` is the
  *   question to ask about one.
+ *
+ *   What separates the two is **whether the file is there**, not whether it
+ *   answered. No file for either program is dhcpcd, or a client from before
+ *   this build, and neither may be buried on that. A file netcfgd wrote that
+ *   names nothing is netcfgd's own record of a client that has gone, and is
+ *   the one case here that may clear.
  */
 #include "ncfg/observe.h"
 
@@ -46,6 +71,27 @@
 #include "ncfg/openvpn.h"
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
+
+#include <unistd.h>
+
+/*
+ * Whether netcfgd's own pid file for this client is there at all.
+ *
+ * Separate from reading it, because the two answer different questions: the
+ * pid says whether the client is alive, and the file says whether netcfgd is
+ * in a position to ask. `ncfg_dhcp_pid_path` composes it rather than this
+ * file, so a directory layout change cannot make the check and the read
+ * disagree -- which would be invisible, every client reading "cannot tell".
+ */
+static int dhcp_pid_file(const char *run_dir, const char *program, const char *iface)
+{
+	char path[512];
+
+	if (!ncfg_dhcp_pid_path(run_dir, program, iface, path, sizeof(path), NULL, 0)) {
+		return 0;
+	}
+	return access(path, F_OK) == 0;
+}
 
 /*
  * Whether this kind can be asked at all, and the answer if it can.
@@ -80,16 +126,25 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 		if (pid <= 0) {
 			pid = ncfg_dhcp_running_pid(run_dir, "busybox", backend->interface);
 		}
-		if (pid <= 0) {
+		if (pid <= 0 && !dhcp_pid_file(run_dir, "udhcpc", backend->interface) &&
+		    !dhcp_pid_file(run_dir, "busybox", backend->interface)) {
 			/*
 			 * **Not answerable, rather than answered `no`.** dhcpcd is the
 			 * default client on a Debian machine and netcfgd gives it no pid
-			 * file at all, so clearing here would report every dhcpcd client
-			 * on the machine as dead -- and the planner would restart a client
-			 * that is running, taking the lease down to do it. `dhcp.h` names
-			 * `ncfg_dhcpcd_whose` as the question for one of those, and it
-			 * needs the machine's paths, which an observation pass is not
-			 * given.
+			 * file at all, so clearing on a missing file would report every
+			 * dhcpcd client on the machine as dead -- and the planner would
+			 * restart a client that is running, taking the lease down to do
+			 * it. `dhcp.h` names `ncfg_dhcpcd_whose` as the question for one
+			 * of those, and it needs the machine's paths, which an observation
+			 * pass is not given.
+			 *
+			 * **The file's absence is the test, not the pid's.** A pid file
+			 * that is there and names nothing is netcfgd's own record of a
+			 * client that has gone, and while this arm answered "cannot tell"
+			 * to both, a udhcpc client that died stayed `running` for ever --
+			 * so the planner never restarted it and the interface kept no
+			 * lease at all (project.md 10.206). The Rust asks `path.exists()`
+			 * first for the same reason.
 			 */
 			*answerable = 0;
 		}
@@ -112,6 +167,23 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 	}
 	*answerable = 0;
 	return 0;
+}
+
+/*
+ * What a running DHCPv4 client was started with, where netcfgd wrote it down.
+ *
+ * Absent where it cannot tell -- no record, an unreadable one, or a client
+ * started before the record existed -- which `dhcp.h` keeps distinct from a
+ * metric of zero, that being a legitimate and the strongest value. Only a
+ * DHCPv4 client: `-m` is never given to anything else, and a record beside
+ * another kind would be a number nobody wrote.
+ */
+static void note_started_metric(ncfg_observed_backend_t *backend, const char *run_dir)
+{
+	if (backend->kind != (int)NCFG_BACKEND_DHCP4) {
+		return;
+	}
+	backend->started_metric = ncfg_dhcp_started_metric(run_dir, backend->interface);
 }
 
 int ncfg_observe_backend_liveness(ncfg_observed_t *observed, const char *run_dir, char *err,
@@ -139,6 +211,9 @@ int ncfg_observe_backend_liveness(ncfg_observed_t *observed, const char *run_dir
 			continue;
 		}
 		if (pid_of_backend(backend, run_dir, &answerable) > 0 || !answerable) {
+			/* Still up as far as this pass can tell, which is the condition
+			 * the metric record is an observation under. */
+			note_started_metric(backend, run_dir);
 			continue;
 		}
 		backend->running = 0;
