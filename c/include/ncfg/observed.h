@@ -1002,12 +1002,21 @@ typedef struct {
 	 * ask" and "hostapd denies nobody" are different answers and only the
 	 * second may be reconciled against. */
 	ncfg_observed_access_control_t *access_control;
-	/* The route metric a running DHCP client was started with, read from its
-	 * own `argv`. **The metric is read once, when the client starts**, so a
-	 * radio that moves to a network asking for a different one keeps the old
-	 * metric on its lease's default route -- and until 0241 the only way
-	 * netcfgd noticed was by comparing the installed route, which cannot exist
-	 * until the exchange that installs it has finished. */
+	/*
+	 * The route metric a running DHCP client was started with.
+	 *
+	 * **The metric is read once, when the client starts**, so a radio that
+	 * moves to a network asking for a different one keeps the old metric on
+	 * its lease's default route -- and until 0241 the only way netcfgd noticed
+	 * was by comparing the installed route, which cannot exist until the
+	 * exchange that installs it has finished.
+	 *
+	 * The Rust reads it out of the client's own `argv`; here it is a record
+	 * `ncfg_dhcp_record_metric` writes beside the client and removes with it,
+	 * because the client that is given a metric at all is dhcpcd, which
+	 * carries no mark of netcfgd's in its process image. `ncfg_observe_backend_
+	 * liveness` is what puts it here, and only while the client is up.
+	 */
 	ncfg_optint_t started_metric;
 	ncfg_observed_access_point_t *started_with;
 	/* Whether the secret a running daemon holds is still the one the store

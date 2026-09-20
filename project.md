@@ -9515,6 +9515,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.206 The same sweep one level down: a field with no producer
+
+10.204 swept for a published function with no caller. 10.205 was a
+different shape of the same thing -- a *record member* nothing ever wrote --
+and it was found by reading a stale sentence rather than by measuring. So I
+measured this one: every field the observed model's codec names, 198 of them
+across 33 types, each counted against every write in `c/src`.
+
+Three types of answer came back. Most fields have an obvious producer. Three
+are false positives of the tool -- `dnssec`, `transport` and a server's `sni`
+are lowered from no configuration syntax at all, which `render.c` says in as
+many words and refuses out loud. **One had no producer**:
+`ncfg_observed_backend_t::started_metric`.
+
+**What it cost.** `ncfg_plan_metric_restart` asks two questions and its own
+comment says neither subsumes the other: the installed route says what a DHCP
+client *did*, and `started_metric` says what it was *told* -- which is there
+before the first exchange has installed anything. `ncfg_dhcp_record_metric`
+writes that record when a client starts and removes it when one stops;
+`ncfg_dhcp_started_metric` reads it back and had no caller outside the tests.
+So the first question was never asked on any machine, and a client started
+with the wrong metric was left alone until it managed to install a route with
+the wrong metric.
+
+**A test using a function is not a caller**, and that is the lesson 10.204's
+sweep needed. `ncfg_dhcp_started_metric` was in that sweep's output and I
+classified it as legitimate, because `dhcp_test.c` calls it six times. Six
+calls from a test file are exactly what an unwired producer looks like.
+
+It is filled in the liveness pass, which is where the Rust fills it and for
+the reason the Rust gives: a record read for a process that has exited is not
+an observation of anything. **The one divergence is which clients it is read
+for**, and it is forced. The Rust reads it only behind a pid it found; here
+the metric record is written for dhcpcd alone -- busybox udhcpc has no `-m` to
+be given -- and dhcpcd is precisely the client this pass cannot ask about, so
+reading it only behind a pid would fill the field exactly for the clients that
+never have a metric. A producer that cannot produce is the bug one level up.
+
+### And the case the new test could not write, which was a second gap
+
+The check I wanted was "a client this pass has buried is not asked what it was
+started with". It would not go red, and the reason was not the metric: **this
+pass could not bury a DHCP client at all.** The arm answered "netcfgd cannot
+tell" whenever no pid came back, and that ran two cases together -- no pid file
+at all, which is dhcpcd and must never be cleared on, and a pid file netcfgd
+wrote that names nothing, which is netcfgd's own record of a client that has
+gone. A udhcpc client that died therefore stayed `running: true` for ever, the
+planner never restarted it, and the interface kept no lease at all. That is
+the other convergence failure -- a pass that plans *nothing*, ever -- and it
+had been sitting behind a comment that argued convincingly for the half of the
+rule that was right.
+
+The file's absence is the test now, not the pid's, which is what the Rust's
+`path.exists()` does first and why it can tell the two apart.
+
+**Five sabotages, all caught, and a sixth that caught nothing.** The one that
+caught nothing was "read the metric for every kind, not only a v4 client": my
+fixture was a router advertisement daemon, which this pass declines earlier
+and for a different reason, so the check was green for the wrong reason for
+the seventh time this session. A v6 client on the same interface is the right
+fixture -- it shares the whole DHCP arm and only the kind separates them --
+and with it the sabotage goes red.
+
 ## 10.205 The record with a reader, a format and no writer
 
 The same sweep as 10.203 and 10.204, run a third time and this time over

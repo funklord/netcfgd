@@ -29,6 +29,7 @@
 #include "ncfg/observe.h"
 
 #include "ncfg/base.h"
+#include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/process.h"
 #include "ncfg/supplicant.h"
@@ -176,6 +177,20 @@ static int record_supplicant(const char *iface, pid_t pid, char *path, size_t pa
 		return 0;
 	}
 	(void)snprintf(text, sizeof(text), "%d\n", (int)pid);
+	return testdir_write(path, text, strlen(text));
+}
+
+/* Write the metric record netcfgd writes when it starts a dhcpcd client. */
+static int record_metric(const char *iface, const char *text)
+{
+	char dir[640];
+	char path[700];
+
+	(void)snprintf(dir, sizeof(dir), "%s/dhcpcd", run_dir);
+	testdir_mkdirp(dir);
+	if (!ncfg_dhcp_metric_path(run_dir, iface, path, sizeof(path), NULL, 0)) {
+		return 0;
+	}
 	return testdir_write(path, text, strlen(text));
 }
 
@@ -328,6 +343,107 @@ static void a_client_netcfgd_gave_no_pid_file_is_left_alone(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * What the client was started with, which is the other half of a rule.
+ *
+ * `ncfg_plan_metric_restart` asks two questions and neither subsumes the
+ * other: the installed route says what the client *did*, and this says what it
+ * was *told* -- which is there before the first exchange has installed
+ * anything. The second had no producer at all until this pass read it, so a
+ * client started with the wrong metric was left alone until it managed to
+ * install a route with the wrong metric (project.md 10.206).
+ *
+ * The client here is a dhcpcd one, which is deliberate twice over: it is the
+ * only client netcfgd gives a metric to, and it is the one this pass cannot
+ * ask about -- so a metric read only behind a pid would never be read at all.
+ */
+static void a_running_client_says_what_it_was_started_with(void)
+{
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_DHCP4, "eth-metric", 1);
+	ncfg_observed_t *quiet = observed_with(NCFG_BACKEND_DHCP4, "eth-nometric", 1);
+	ncfg_observed_t *other = observed_with(NCFG_BACKEND_DHCP6, "eth-metric", 1);
+	char             message[NCFG_ERROR_MAX];
+
+	if (!observed || !quiet || !other || !record_metric("eth-metric", "600\n")) {
+		check(0, "the fixture for a client started with a metric");
+		ncfg_observed_free(observed);
+		ncfg_observed_free(quiet);
+		ncfg_observed_free(other);
+		return;
+	}
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	(void)ncfg_observe_backend_liveness(quiet, run_dir, message, sizeof(message));
+	(void)ncfg_observe_backend_liveness(other, run_dir, message, sizeof(message));
+	check(observed->backend_count == 1u && observed->backends[0].started_metric.has &&
+	        observed->backends[0].started_metric.value == 600,
+	    "a running DHCP client reports the metric it was started with");
+	/* "netcfgd cannot tell" and "started with metric 0" are different answers
+	 * and only one of them may be compared against: 0 is a legitimate metric
+	 * and the strongest one. */
+	check(quiet->backend_count == 1u && !quiet->backends[0].started_metric.has,
+	    "  and a client with no record of one says nothing, rather than zero");
+	/*
+	 * The record is named for the interface and nothing else, so a v6 client
+	 * on the same interface would read the v4 client's number as its own --
+	 * and `-m` is only ever given to a v4 one. The v6 kind rather than some
+	 * distant daemon on purpose: it shares this pass's whole DHCP arm, so it
+	 * reaches the same place by the same route and only the kind separates
+	 * them.
+	 */
+	check(other->backend_count == 1u && !other->backends[0].started_metric.has,
+	    "  and a v6 client on that interface is never given the v4 one's");
+	ncfg_observed_free(observed);
+	ncfg_observed_free(quiet);
+	ncfg_observed_free(other);
+}
+
+/*
+ * And a client this pass has just buried is not asked what it was started
+ * with. A record outlives the process where a client was killed rather than
+ * stopped -- netcfgd removes it on a stop -- and a metric read off one would
+ * be an observation of a process that is gone.
+ */
+static void a_client_that_has_died_reports_no_metric(void)
+{
+	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_DHCP4, "eth-gone", 1);
+	char             path[700];
+	char             dir[640];
+	char             text[32];
+	char             message[NCFG_ERROR_MAX];
+	pid_t            child;
+
+	if (!observed) {
+		check(0, "the fixture for a client that has died");
+		return;
+	}
+	(void)snprintf(dir, sizeof(dir), "%s/udhcpc", run_dir);
+	testdir_mkdirp(dir);
+	if (!ncfg_dhcp_pid_path(run_dir, "udhcpc", "eth-gone", path, sizeof(path), NULL, 0)) {
+		check(0, "the pid file for a udhcpc client could be named");
+		ncfg_observed_free(observed);
+		return;
+	}
+	/* Started carrying the pid file's path, as netcfgd's own `-p` would have
+	 * it, and then killed -- so this pass can answer, and answers `gone`. */
+	child = marked_child(path);
+	(void)snprintf(text, sizeof(text), "%d\n", (int)child);
+	if (!testdir_write(path, text, strlen(text)) || !record_metric("eth-gone", "700\n")) {
+		check(0, "the fixture for a client that has died could be written");
+		ncfg_observed_free(observed);
+		reap();
+		return;
+	}
+	reap();
+	message[0] = '\0';
+	(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+	check(observed->backend_count == 1u && !observed->backends[0].running,
+	    "a client whose process is gone stops being running");
+	check(observed->backend_count == 1u && !observed->backends[0].started_metric.has,
+	    "  and is not asked what it was started with, its record having outlived it");
+	ncfg_observed_free(observed);
+}
+
 static void a_kind_that_is_not_a_process_is_left_alone(void)
 {
 	ncfg_observed_t *wireguard = observed_with(NCFG_BACKEND_WIREGUARD, "wg0", 1);
@@ -430,6 +546,8 @@ int main(void)
 	it_only_ever_clears();
 	a_client_netcfgd_gave_no_pid_file_is_left_alone();
 	a_kind_that_is_not_a_process_is_left_alone();
+	a_running_client_says_what_it_was_started_with();
+	a_client_that_has_died_reports_no_metric();
 	an_access_point_can_be_asked_at_last();
 	the_round_refuses_what_it_cannot_be_asked();
 
