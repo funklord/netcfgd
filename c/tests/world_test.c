@@ -1043,6 +1043,130 @@ static void an_executor_now_carries_a_service_context(void)
 	ncfg_document_free(state.desired);
 }
 
+/*
+ * The two setters beside the service, which it was wired without.
+ *
+ * Six netlink ops carry a device's *name* and nothing else --
+ * `link.set_bridge`, `link.set_bond`, `link.set_macvlan`, `link.set_tunnel`,
+ * `link.set_vxlan` and `wg.set_device` -- and what they change is the
+ * document's. Without one they refuse by name rather than configuring a device
+ * from an empty block, which `apply.h` says would be "a bridge with every
+ * setting at the kernel's default, reported as a successful apply".
+ *
+ * Found by sweeping for published functions with no caller, which is the shape
+ * that hid this and `ncfg_kernel_set_service` before it.
+ */
+static void an_executor_is_given_the_document_those_six_ops_need(void)
+{
+	ncfg_main_world_t   world;
+	ncfg_daemon_state_t state;
+	ncfg_op_t           op;
+	char                message[NCFG_ERROR_MAX];
+	char                err[NCFG_ERROR_MAX];
+	char                run[512];
+
+	(void)snprintf(run, sizeof(run), "%s/document-context", base);
+	testdir_mkdirp(run);
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[{\"name\":\"br0\","
+	    "\"kind\":{\"kind\":\"bridge\",\"stp\":true}}],"
+	    "\"interfaces\":[{\"name\":\"br0\"}]");
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, where_of(run), &state, NULL, NULL, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_SET_BRIDGE;
+	op.u.named.name = "br0";
+	(void)execute_through(&world, &op, message, sizeof(message));
+	/*
+	 * It fails -- there is no `br0` on this machine and no privilege to make
+	 * one -- but **what it must not say** is that the executor was given no
+	 * document. That refusal means the op never reached the kernel at all, and
+	 * it is what every apply on a real machine got for these six.
+	 */
+	check(strstr(message, "no document") == NULL && strstr(message, "given none") == NULL,
+	    "a `link.set_bridge` no longer refuses for want of a document");
+	detail("it said", message);
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
+/*
+ * And the resolver beside it, which matters for a different reason.
+ *
+ * NULL means the machine's **own** secrets directory -- so a daemon pointed at
+ * a scratch tree would load the machine's real key material to configure it
+ * with. That is the hazard the whole `ncfg_main_world_where_t` seam exists
+ * for, one field along.
+ *
+ * Checked by which refusal comes back: a key the test's store holds resolves
+ * only if the world's resolver was handed over, and the op then fails on the
+ * device instead. With the machine's directory it fails in the store.
+ */
+static void an_executor_resolves_secrets_where_the_world_was_pointed(void)
+{
+	ncfg_main_world_t       world;
+	ncfg_main_world_where_t where;
+	ncfg_daemon_state_t     state;
+	ncfg_op_t               op;
+	char                    message[NCFG_ERROR_MAX];
+	char                    err[NCFG_ERROR_MAX];
+	char                    run[512];
+	char                    secrets[512];
+	char                    path[640];
+	static const char       key[] = "QFX7C0kXSvBS8k5WJkS6Km/8PFRqxLS3fqCpJZxnq0Q=";
+
+	(void)snprintf(run, sizeof(run), "%s/wg-run", base);
+	testdir_mkdirp(run);
+	(void)snprintf(secrets, sizeof(secrets), "%s/wg-secrets", base);
+	testdir_mkdirp(secrets);
+	(void)snprintf(path, sizeof(path), "%s/wg-private", secrets);
+	(void)testdir_write(path, key, strlen(key));
+	/* The `file` provider refuses anything anybody else can read. */
+	(void)chmod(path, (mode_t)0600);
+
+	memset(&where, 0, sizeof(where));
+	where.run_dir = run;
+	where.secrets_dir = secrets;
+	memset(&state, 0, sizeof(state));
+	state.desired = document_of("\"devices\":[{\"name\":\"wg-absent\","
+	    "\"kind\":{\"kind\":\"wire_guard\","
+	    "\"private_key\":{\"provider\":\"file\",\"name\":\"wg-private\"},"
+	    "\"peers\":[]}}],"
+	    "\"interfaces\":[{\"name\":\"wg-absent\"}]");
+	/*
+	 * **Asserted, because a fixture that did not read makes the check below
+	 * pass over nothing.** A first draft omitted `peers`, which the reader
+	 * requires; the document came back NULL, the op refused for want of a
+	 * document, and the check -- which looks for a sentence about the store --
+	 * was green.
+	 */
+	check(state.desired != NULL, "the wireguard fixture reads");
+	if (!state.desired) {
+		return;
+	}
+	err[0] = '\0';
+	(void)ncfg_main_world_open(&world, &where, &state, NULL, NULL, err, sizeof(err));
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_WG_SET_DEVICE;
+	op.u.wg_device.iface = "wg-absent";
+	op.u.wg_device.private_key_ref = "wg-private";
+	(void)execute_through(&world, &op, message, sizeof(message));
+	/*
+	 * It fails -- there is no such device -- but it must get **past the
+	 * store** to fail there. A sentence about a secret means the resolver was
+	 * not the one this world was given, which on a real machine means netcfgd
+	 * read key material nobody pointed it at.
+	 */
+	check(strstr(message, "secret") == NULL && strstr(message, "store") == NULL,
+	    "a wg.set_device resolves its key where the world was pointed, not where the "
+	    "machine keeps its own");
+	detail("it said", message);
+	ncfg_main_world_close(&world);
+	ncfg_document_free(state.desired);
+}
+
 static void a_sysctl_is_written_where_the_world_was_pointed(void)
 {
 	ncfg_main_world_t       world;
@@ -1884,6 +2008,8 @@ int main(void)
 	an_executor_takes_the_apply_lock_before_anything_else();
 	the_hooks_an_executor_is_given();
 	an_executor_now_carries_a_service_context();
+	an_executor_is_given_the_document_those_six_ops_need();
+	an_executor_resolves_secrets_where_the_world_was_pointed();
 	a_sysctl_is_written_where_the_world_was_pointed();
 	the_service_carries_every_scope_and_not_the_one_the_op_names();
 	the_route_metric_a_dhcp_client_is_started_with();
