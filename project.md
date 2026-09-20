@@ -9515,6 +9515,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.200 Two currency questions, and a check that passed for the wrong reason
+
+`read_secret_currency` and `read_tunnel_currency` are `ncfg_observe_currency`
+now, one round because they are one shape: a passphrase and a `.ovpn` are both
+handed to a daemon **once, when it starts**, and the daemon never looks again.
+Editing the document or the store changes nothing until something restarts the
+process, and nothing can decide to restart it without knowing what it is
+holding has gone stale.
+
+`secret_matches` compares the `wpa_passphrase` line of the generated
+`hostapd.conf` against what the store answers now. `config_matches` compares the
+digest of the `.ovpn` the document names against the digest netcfgd recorded
+when it started the tunnel -- never reading the file for meaning, which is what
+0046 protects. `config_present` is answered **separately**, because it is a
+fault in the document rather than in netcfgd's bookkeeping: `observed.h` records
+what its absence cost, a document pointing at a file that is not there producing
+`nothing to do` on every apply, for ever.
+
+**Absent is an answer and it is not "differs".** No document, a generated file
+that is gone, a store that cannot answer -- each leaves the field as it was.
+Answering "differs" from any of them restarts a working daemon on a guess;
+answering "matches" leaves a rotated credential unused for ever.
+
+**A check that passed for the wrong reason.** "A generated file that is gone
+says nothing" put the daemon on `wlan-gone` and the access point block on
+`wlan0` -- so the *missing block* declined it, never reaching the file read, and
+the sabotage that answers "differs" from a missing file turned nothing red. The
+fixture names the block on the same device now. That is the third time this
+session a case has been found passing before its subject: the first was a
+borrow asserted of a scope that never reaches the merging branch (10.195), the
+second an addressing guard whose fixture had no client running (10.196).
+
+**`NCFG_HOSTAPD_PASSPHRASE_MAX` is published**, because the renderer is no
+longer the only one that needs it. A reader with a bound of its own would
+either refuse a passphrase the renderer wrote or truncate one -- and a truncated
+passphrase compares unequal to the store's, which restarts a working access
+point on every reconcile.
+
+**The canary sweep is the check that the design held.** 0052 says the answer is
+a boolean so that an observation never carries the value; the passphrase
+comparison has both values in this process at once, so the last case writes the
+observation out and sweeps it, and the sentence beside it, for the canary. A
+guarantee nobody checks is a comment.
+
+6,372 checks across 98 binaries. Six sabotages caught: a missing file answering
+"differs", a store that cannot answer meaning "differs", `config_present` not
+answered separately, the digest not compared, the passphrase reaching the
+observation, and the `wpa_passphrase` line matched on the wrong key.
+
+**Two passes remain** -- `ask_supplicants` and `read_access_control` -- and
+those two really are control-socket round trips.
+
 ## 10.199 What radvd is announcing, and four passes still to write
 
 I had been saying the port had no gaps left. That was wrong, and re-deriving
