@@ -9515,6 +9515,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.202 The last observation pass, and a rule whose input nobody wrote
+
+`ask_supplicants` is `ncfg_observe_supplicants`. With it the observer has no
+port gaps left: every pass `observe.h` names is written.
+
+Three answers out of one connection, and **the third is the one other rules
+were already written against**. `ncfg_observed_link_t::network` -- which
+network a radio is associated to -- is read by
+`ncfg_observed_effective_metric`, by `inventory.c` and by `derive.c`, and
+**nothing in this port wrote it**. So the metric rule closed in 10.195 and
+10.196 always fell through to the interface's `preference` on a real machine:
+the rule was right, the input was absent, and every test of it supplied the
+field by hand. Found by re-deriving what this pass does rather than by any
+check going red, which is the same way 10.199's gap was found.
+
+`answering` is written onto the backend matched **by kind as well as by
+interface**. One interface carries several backends -- a supplicant and a DHCP
+client at least -- and matching on the name alone puts the supplicant's answer
+on whichever sorts first, which the Rust records having done. The case lists
+the DHCP client first on purpose.
+
+`networks_match` comes from a record because the supplicant cannot say:
+`LIST_NETWORKS` returns ids and SSIDs and a passphrase is write-only. But **the
+record is what netcfgd did, not what is** (0237) -- it cannot see a supplicant
+emptied afterwards while staying reachable, which `RECONFIGURE` does, measured
+against wpa_supplicant 2.10 on the `none` driver. So `LIST_NETWORKS` is asked
+on the connection already open and overrides the record, **in one direction
+only**: it cannot confirm a set but it can refute one.
+
+**The fingerprint has to be computed the same way on both sides or it never
+matches**, so `ncfg_service_radio_policy` is published: the executor digests
+the networks *and* the three device-wide settings when it records what it
+handed over, and two spellings of those defaults is `networks_match` false for
+ever and the whole set re-handed on every reconcile. The test's own fixture
+writes the record through the same two functions, so it cannot disagree with
+the executor about what was handed over either.
+
+**A sabotage I misread as uncaught.** Removing the "is this network in the
+document" guard printed no `FAILED` -- because it segfaulted, and a crash
+prints none. Grepping for `FAILED` was the wrong instrument; the check was
+biting all along. That is the fourth measurement mistake of mine this session
+and the first where the tool rather than the fixture was wrong.
+
+6,416 checks across 100 binaries. Five sabotages caught: the answer landing on
+the first backend, `LIST_NETWORKS` not overriding the record, the association
+not written, the fingerprint ignoring the radio policy, and the unknown-network
+guard.
+
+**The observer is complete.** What remains in the port is not porting: the
+NetworkManager adapter waits on 0264's libdbus decision, and whether the daemon
+may manage a machine is the holder's to decide.
+
 ## 10.201 `answering` gets its answer, and the fake hostapd is shared
 
 `read_access_control` is `ncfg_observe_access_control`, the one observation

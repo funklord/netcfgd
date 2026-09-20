@@ -1331,6 +1331,40 @@ int ncfg_observe_currency(ncfg_observed_t *observed, const char *run_dir,
 int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, int patience_ms,
     char *err, size_t err_size);
 
+/*
+ * What each running supplicant is holding, and whether it answers.
+ *
+ * Three answers out of one connection. **`answering`** is 0078's question, and
+ * it is written onto the backend matched **by kind as well as by interface**:
+ * one interface carries several backends, a supplicant and a DHCP client at
+ * least, and matching on the name alone puts the supplicant's answer on
+ * whichever sorts first. **`networks_match`** is whether the running
+ * supplicant still holds what the document asks for. And
+ * **`ncfg_observed_link_t::network`**, which network the radio is associated
+ * to -- the field `ncfg_observed_effective_metric`, `inventory.c` and
+ * `derive.c` all read and **nothing in this port wrote**, so a route took the
+ * interface's `preference` where its network named a metric.
+ *
+ * `networks_match` comes from a record because the supplicant cannot say:
+ * `LIST_NETWORKS` returns ids and SSIDs and a passphrase is write-only, so the
+ * question is answered by digesting what the document asks for and comparing
+ * it against the digest netcfgd wrote when it handed the set over. **The
+ * record is what netcfgd did, not what is** (0237) -- it cannot see a
+ * supplicant emptied afterwards while staying reachable, which `RECONFIGURE`
+ * does. So `LIST_NETWORKS` is asked on the connection already open and
+ * **overrides** the record, in one direction only: it cannot confirm a set but
+ * it can refute one.
+ *
+ * `desired` may be NULL, which is a configuration that does not compile:
+ * `answering` is still answered, because that is a fact about a process, and
+ * the other two stay absent because there is nothing to resolve against.
+ *
+ * `patience_ms` bounds each connection. 0 is `NCFG_SUPPLICANT_IMPATIENT_MS`.
+ */
+int ncfg_observe_supplicants(ncfg_observed_t *observed, const char *run_dir,
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, int patience_ms,
+    char *err, size_t err_size);
+
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
     ncfg_observed_t **out, char *err, size_t err_size);
