@@ -39,11 +39,11 @@ static const char POLICY_MARKER[] = "# netcfgd policy: ";
 static const char BAND_24[] = "2.4";
 static const char BAND_5[] = "5";
 
-/* **The limit belongs to `wpa_passphrase`, not to WPA** (0205). Counted the way
- * both daemons count it -- octets, so a character outside ASCII counts as more
- * than one. */
-#define PASSPHRASE_MIN 8u
-#define PASSPHRASE_MAX 63u
+/* `hostapd.h`'s, now that the currency pass reads the line back and has to
+ * agree with what this writes. Kept as names here so the checks below read as
+ * they did. */
+#define PASSPHRASE_MIN NCFG_HOSTAPD_PASSPHRASE_MIN
+#define PASSPHRASE_MAX NCFG_HOSTAPD_PASSPHRASE_MAX
 
 void ncfg_hostapd_lines_free(ncfg_hostapd_lines_t *lines)
 {

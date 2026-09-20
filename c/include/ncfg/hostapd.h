@@ -64,6 +64,23 @@
 #define NCFG_HOSTAPD_PATH_MAX 512
 
 /*
+ * What `wpa_passphrase` accepts, in octets.
+ *
+ * **The limit belongs to `wpa_passphrase`, not to WPA** (0205). Counted the way
+ * both daemons count it -- octets, so a character outside ASCII counts as more
+ * than one.
+ *
+ * Published because the renderer is no longer the only one that needs it: the
+ * currency pass reads the line back out of a generated file to compare it
+ * against the store, and a reader with a bound of its own would either refuse a
+ * passphrase the renderer wrote or truncate one -- and a truncated passphrase
+ * compares unequal to the store's, which restarts a working access point on
+ * every reconcile.
+ */
+#define NCFG_HOSTAPD_PASSPHRASE_MIN 8u
+#define NCFG_HOSTAPD_PASSPHRASE_MAX 63u
+
+/*
  * Something the document asks for that this build cannot render.
  *
  * A code beside the sentence, because the sentence is for an operator and the

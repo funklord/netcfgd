@@ -1266,6 +1266,41 @@ int ncfg_observe_backend_liveness(ncfg_observed_t *observed, const char *run_dir
 int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char *err,
     size_t err_size);
 
+/*
+ * Whether a running access point and a running tunnel still hold what the
+ * document asks for.
+ *
+ * Two questions in one round because they are one shape: a passphrase and a
+ * `.ovpn` are both handed to a daemon **once, when it starts**, so editing the
+ * document or the store changes nothing until something restarts the process --
+ * and nothing can decide to restart it without knowing what it is holding has
+ * gone stale.
+ *
+ * `secret_matches` compares the `wpa_passphrase` line of the generated
+ * `hostapd.conf` against what the store answers now. `config_matches` compares
+ * the digest of the `.ovpn` the document names against the digest netcfgd
+ * recorded when it started the tunnel -- never reading the file for meaning,
+ * which is what 0046 protects. `config_present` says whether that file can be
+ * read at all, and is answered **separately**, because it is a fault in the
+ * document rather than in netcfgd's bookkeeping.
+ *
+ * **Each is a boolean rather than a value** (0052): an observation carrying the
+ * passphrase would put it in `/run/netcfgd/observed.json` and in
+ * `ncfg status --json`.
+ *
+ * **Absent is an answer and it is not "differs".** No document, a generated
+ * file that is gone, a store that cannot answer -- each leaves the field as it
+ * was, and `apply.h`'s rule is that a planner does nothing about a question
+ * nobody answered. Answering "differs" would restart a working daemon on a
+ * guess; answering "matches" would leave a rotated credential unused for ever.
+ *
+ * `desired` may be NULL, which is a machine whose configuration does not
+ * compile: there is nothing to be current with, so nothing is said.
+ */
+int ncfg_observe_currency(ncfg_observed_t *observed, const char *run_dir,
+    const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, char *err,
+    size_t err_size);
+
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
     ncfg_observed_t **out, char *err, size_t err_size);
