@@ -1252,6 +1252,26 @@ typedef struct {
 } ncfg_ssid_t;
 
 /*
+ * The octets a lowercase-hex SSID spells.
+ *
+ * The one decoder, and published for `ncfg_key_parse`'s reason: the document
+ * reads an SSID out of JSON and the observer reads one back out of a generated
+ * `hostapd.conf`'s `ssid2=` line, which is the same hex in another file. Two
+ * readers of one encoding is how the two halves of one program come to
+ * disagree about a network's name -- and the comparison they feed decides
+ * whether an access point is restarted.
+ *
+ * **Lowercase only, and uppercase is refused rather than accepted**: two
+ * spellings of one SSID would break the byte-identical guarantee the whole
+ * document rests on.
+ *
+ * `length` is the text's, not counting a terminator. 1 with `out` filled; 0
+ * with a sentence naming the offending digit or the length.
+ */
+int ncfg_ssid_parse_hex(const char *text, size_t length, ncfg_ssid_t *out, char *err,
+    size_t err_size);
+
+/*
  * When a client should look for a better access point on the same network.
  *
  * Stated as an intent rather than as `wpa_supplicant`'s string: a

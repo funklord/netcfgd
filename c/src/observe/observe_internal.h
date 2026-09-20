@@ -39,6 +39,27 @@ void observe_list_sort(char **list, size_t count);
 void observe_names_free(char **names, size_t count);
 
 /*
+ * The whole of a file netcfgd generated, or NULL, with a ceiling on it.
+ *
+ * Absent, unreadable and past the ceiling are one answer throughout this
+ * module and it is never a failure: a daemon netcfgd never started has no
+ * generated file, and a `/run` cleared under a running one has none either.
+ * Neither is a statement about what the daemon is doing.
+ */
+char *observe_read_generated(const char *path);
+
+/*
+ * The value of `key=` in a generated configuration, copied into `out`.
+ *
+ * The first match wins, which is how hostapd reads its own file. 1 with the
+ * value, 0 where the key is absent **or would not fit** -- and those are one
+ * answer on purpose: a truncated value compares unequal to what the document
+ * asks for, which restarts a working daemon on every reconcile, and that is
+ * the failure these passes exist to avoid rather than to cause.
+ */
+int observe_config_value(const char *text, const char *key, char *out, size_t out_size);
+
+/*
  * A number the kernel reports, into the width the model holds it in.
  *
  * **Checked rather than cast**, with the field named in the refusal, which is

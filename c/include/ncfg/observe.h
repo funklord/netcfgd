@@ -1301,6 +1301,36 @@ int ncfg_observe_currency(ncfg_observed_t *observed, const char *run_dir,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, char *err,
     size_t err_size);
 
+/*
+ * What each running access point is admitting, and whether it answers at all.
+ *
+ * **The one pass here that talks to a daemon rather than reading a file**, and
+ * the connection answers three things at once: `answering`, the two station
+ * lists, and the access point as it was started.
+ *
+ * `answering` is 0078's question and the reason that field exists apart from
+ * `running`: a wedged hostapd holds its socket, holds its pid, serves nobody,
+ * and answered `running: true` to everything netcfgd had. A connection that
+ * fails is `answering: false` -- **a statement**, and the only one this module
+ * makes out of a failure, because the record says a daemon is running and the
+ * socket says otherwise. The lists stay absent, because "hostapd denies
+ * nobody" and "netcfgd could not ask" are different answers and only the first
+ * may be reconciled against.
+ *
+ * **Both lists**, because the document names only one (0039) -- so the other
+ * has to be observed to notice it is not empty, which is the only way to see
+ * from outside that an operator flipped the policy under a running access
+ * point. The policy itself comes from `ncfg_hostapd_recorded_policy` rather
+ * than the socket, because `macaddr_acl` is not readable over the control
+ * interface.
+ *
+ * `patience_ms` bounds each connection. 0 is
+ * `NCFG_SUPPLICANT_IMPATIENT_MS`, which is what anything with a reconcile
+ * waiting behind it gives a control socket.
+ */
+int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, int patience_ms,
+    char *err, size_t err_size);
+
 int ncfg_observe_current(const char *run_dir, const ncfg_observe_roots_t *roots,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired,
     ncfg_observed_t **out, char *err, size_t err_size);

@@ -59,79 +59,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * How much of a generated file is read.
- *
- * Generous for what netcfgd writes and a ceiling rather than a growing read,
- * because these run once per running daemon on every observation. Past it the
- * file is treated as unreadable, which leaves the answer absent -- the same as
- * a file that is not there, and for the same reason.
- */
-#define CURRENCY_FILE_MAX 65536
-
-static char *read_whole(const char *path)
-{
-	FILE  *file = fopen(path, "rb");
-	char  *body;
-	size_t got;
-
-	if (!file) {
-		return NULL;
-	}
-	body = malloc((size_t)CURRENCY_FILE_MAX + 1u);
-	if (!body) {
-		(void)fclose(file);
-		return NULL;
-	}
-	got = fread(body, 1u, (size_t)CURRENCY_FILE_MAX, file);
-	if (!feof(file) || ferror(file)) {
-		(void)fclose(file);
-		free(body);
-		return NULL;
-	}
-	(void)fclose(file);
-	body[got] = '\0';
-	return body;
-}
-
-/*
- * The value of `key=` in a generated configuration, copied into `out`.
- *
- * The first match wins, which is hostapd's own reading of its file. 1 with the
- * value, 0 where the key is absent or would not fit -- and **not fitting is
- * the same as absent** here rather than a truncated comparison, because a
- * truncated passphrase compares unequal to the store's and would restart a
- * working access point on every reconcile.
- */
-static int value_of(const char *text, const char *key, char *out, size_t out_size)
-{
-	const char *line = text;
-	size_t      key_length = strlen(key);
-
-	while (line && *line) {
-		const char *end = strchr(line, '\n');
-		const char *stop = end ? end : line + strlen(line);
-		const char *at = line;
-
-		while (at < stop && (*at == ' ' || *at == '\t')) {
-			at++;
-		}
-		if ((size_t)(stop - at) > key_length && strncmp(at, key, key_length) == 0 &&
-		    at[key_length] == '=') {
-			size_t length = (size_t)(stop - at) - key_length - 1u;
-
-			if (length + 1u > out_size) {
-				return 0;
-			}
-			memcpy(out, at + key_length + 1u, length);
-			out[length] = '\0';
-			return 1;
-		}
-		line = end ? end + 1 : NULL;
-	}
-	return 0;
-}
-
 /* The access point block for this device, or NULL. */
 static const ncfg_access_point_t *point_on(const ncfg_document_t *desired, const char *device)
 {
@@ -184,11 +111,11 @@ static void access_point_currency(ncfg_observed_backend_t *backend, const char *
 	if (!ncfg_hostapd_config_path(run_dir, backend->interface, path, sizeof(path), NULL, 0)) {
 		return;
 	}
-	text = read_whole(path);
+	text = observe_read_generated(path);
 	if (!text) {
 		return;
 	}
-	if (!value_of(text, "wpa_passphrase", started, sizeof(started))) {
+	if (!observe_config_value(text, "wpa_passphrase", started, sizeof(started))) {
 		/* A file netcfgd wrote for a PSK network always has one, so this is a
 		 * file somebody else wrote or one from a build that rendered
 		 * differently. Nothing may be concluded from it. */
@@ -248,7 +175,7 @@ static void tunnel_currency(ncfg_observed_backend_t *backend, const char *run_di
 	    0)) {
 		return;
 	}
-	recorded = read_whole(path);
+	recorded = observe_read_generated(path);
 	if (!recorded) {
 		/* Started by a build too old to write the record, or a `/run` cleared
 		 * underneath a running tunnel. Nothing may be concluded. */
