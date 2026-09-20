@@ -1650,15 +1650,13 @@ static const ncfg_type_t interface_type = TYPE("interface", interface_fields);
  * Wifi networks and access points
  * ------------------------------------------------------------------------ */
 
-static int ssid_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
+int ncfg_ssid_parse_hex(const char *text, size_t length, ncfg_ssid_t *out, char *err,
     size_t err_size)
 {
-	ncfg_ssid_t *ssid = field;
-	size_t       length = 0;
-	const char  *text = ncfg_json_string(doc, node, &length);
+	ncfg_ssid_t *ssid = out;
 	size_t       i;
 
-	if (!text) {
+	if (!text || !out) {
 		ncfg_error_set(err, err_size, "an ssid is lowercase hex, and this is not a string");
 		return 0;
 	}
@@ -1699,6 +1697,15 @@ static int ssid_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, cha
 	ssid->length = length / 2u;
 	ssid->has = 1;
 	return 1;
+}
+
+static int ssid_read(const ncfg_json_doc_t *doc, uint32_t node, void *field, char *err,
+    size_t err_size)
+{
+	size_t      length = 0;
+	const char *text = ncfg_json_string(doc, node, &length);
+
+	return ncfg_ssid_parse_hex(text, text ? length : 0u, field, err, err_size);
 }
 
 static void ssid_write(ncfg_json_writer_t *writer, const void *field)

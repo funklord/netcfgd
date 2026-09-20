@@ -299,6 +299,14 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	    !ncfg_observe_backend_liveness(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_advertised(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_currency(observed, run_dir, secrets, desired, err, err_size) ||
+	    /*
+	     * **Last of the record readers, because it is the one that waits.**
+	     * Every pass before it reads a file; this opens a control socket per
+	     * running access point and gives each one `NCFG_SUPPLICANT_IMPATIENT_MS`
+	     * -- so a wedged hostapd costs the observation that long and nothing
+	     * before it is held up behind the wait.
+	     */
+	    !ncfg_observe_access_control(observed, run_dir, 0, err, err_size) ||
 	    !ncfg_observe_augment_host(observed, roots, err, err_size) ||
 	    !ncfg_observe_derive(observed, desired, err, err_size)) {
 		/*

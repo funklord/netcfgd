@@ -8,6 +8,7 @@
 #include "observe_internal.h"
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -108,4 +109,75 @@ int observe_widen(uint64_t value, const char *what, int64_t *out, char *err, siz
 	}
 	*out = (int64_t)value;
 	return 1;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Reading back what netcfgd generated
+ * ------------------------------------------------------------------------ */
+
+/*
+ * How much of a generated file is read.
+ *
+ * Generous for what netcfgd writes and a ceiling rather than a growing read,
+ * because these run once per running daemon on every observation. Past it the
+ * file is treated as unreadable, which leaves the answer absent -- the same as
+ * a file that is not there, and for the same reason.
+ */
+#define GENERATED_FILE_MAX 65536
+
+char *observe_read_generated(const char *path)
+{
+	FILE  *file = path ? fopen(path, "rb") : NULL;
+	char  *body;
+	size_t got;
+
+	if (!file) {
+		return NULL;
+	}
+	body = malloc((size_t)GENERATED_FILE_MAX + 1u);
+	if (!body) {
+		(void)fclose(file);
+		return NULL;
+	}
+	got = fread(body, 1u, (size_t)GENERATED_FILE_MAX, file);
+	if (!feof(file) || ferror(file)) {
+		(void)fclose(file);
+		free(body);
+		return NULL;
+	}
+	(void)fclose(file);
+	body[got] = '\0';
+	return body;
+}
+
+int observe_config_value(const char *text, const char *key, char *out, size_t out_size)
+{
+	const char *line = text;
+	size_t      key_length = key ? strlen(key) : 0u;
+
+	if (!text || !key || !out || out_size == 0u) {
+		return 0;
+	}
+	while (line && *line) {
+		const char *end = strchr(line, '\n');
+		const char *stop = end ? end : line + strlen(line);
+		const char *at = line;
+
+		while (at < stop && (*at == ' ' || *at == '\t')) {
+			at++;
+		}
+		if ((size_t)(stop - at) > key_length && strncmp(at, key, key_length) == 0 &&
+		    at[key_length] == '=') {
+			size_t length = (size_t)(stop - at) - key_length - 1u;
+
+			if (length + 1u > out_size) {
+				return 0;
+			}
+			memcpy(out, at + key_length + 1u, length);
+			out[length] = '\0';
+			return 1;
+		}
+		line = end ? end + 1 : NULL;
+	}
+	return 0;
 }

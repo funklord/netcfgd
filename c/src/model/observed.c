@@ -1111,6 +1111,24 @@ static const ncfg_field_t observed_access_point_fields[] = {
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);
 
+void ncfg_observed_access_control_free(ncfg_observed_access_control_t *access_control)
+{
+	if (!access_control) {
+		return;
+	}
+	ncfg_type_free(&access_control_type, access_control);
+	free(access_control);
+}
+
+void ncfg_observed_access_point_free(ncfg_observed_access_point_t *access_point)
+{
+	if (!access_point) {
+		return;
+	}
+	ncfg_type_free(&observed_access_point_type, access_point);
+	free(access_point);
+}
+
 static const ncfg_field_t observed_backend_fields[] = {
 	{ .name = "kind", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
 	    .choices = &backend_kind_set, .offset = offsetof(ncfg_observed_backend_t, kind) },

@@ -9515,6 +9515,70 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.201 `answering` gets its answer, and the fake hostapd is shared
+
+`read_access_control` is `ncfg_observe_access_control`, the one observation
+pass that talks to a daemon rather than reading a file. The connection answers
+three things at once:
+
+  * **`answering`**, which is 0078's question and the reason that field exists
+    apart from `running`: a wedged hostapd holds its socket, holds its pid,
+    serves nobody, and answered `running: true` to everything netcfgd had. The
+    round trip already had to be made; what was missing was writing down that
+    it succeeded.
+  * **Both station lists**, because the document names only one (0039) -- so
+    the other has to be observed to notice it is not empty, which is the only
+    way to see from outside that an operator flipped the policy under a running
+    access point.
+  * **`started_with`**, the access point as it was started. hostapd reads its
+    file once, so one started as WPA2 goes on offering WPA2 however the
+    document is edited -- and the passphrase comparison says nothing about it,
+    because changing the generation changes no secret.
+
+**A failed connection is the one statement this module makes out of a
+failure.** Everywhere else an unreadable input leaves the field absent; here
+the record says a daemon is running and the socket says otherwise, and the
+socket is closer to the truth. The *lists* still stay absent, because "hostapd
+denies nobody" and "netcfgd could not ask" are different answers and only the
+first may be reconciled against.
+
+**The fake hostapd is a shared header now.** `service_test.c` grew it for the
+executor's access-control ops and this pass needs the same stand-in. Two fakes
+of one daemon is two beliefs about its protocol -- the reply shape, the `FAIL`
+on a duplicate, what a wedged one does -- and what would drift is the thing
+both sides of netcfgd are written against. `hostapdfake.h` is `planfix.h`'s
+arrangement for `planfix.h`'s reason.
+
+**Two sabotages caught nothing, and the fake is why.** Both aimed at the
+"connected and then would not answer" branch, which `wedged` never reaches --
+it fails at the *connect*, so the client is NULL and a different branch runs.
+The fake grew a `deaf` mode that answers `PING` and nothing else, which is the
+only way to produce that state, and both sabotages bite now. The branch had no
+case at all before.
+
+**And a wrong expectation of mine, not a defect.** The first draft expected
+upper-case station addresses. Both sides are lower case -- the compiler's
+`ncfg_normalize_station` writes a lowercase table and
+`ncfg_hostapd_parse_acl_show` lowercases what hostapd printed -- so they
+compare equal, which is what matters. (`ncfg_hardware_address_strict`
+uppercases, and is a different field: a device's own address, where BlueZ sets
+the case.) Checked rather than assumed, because a mismatch there would have
+added every named station on every pass, for ever.
+
+Three lifts came with it: `ncfg_ssid_parse_hex` (the document reads an SSID out
+of JSON and this reads one back out of a generated `ssid2=` line -- one decoder
+for the hex, whichever file it came from), `observe_config_value` and
+`observe_read_generated` (shared with the currency pass), and
+`ncfg_observed_access_control_free` / `ncfg_observed_access_point_free`, so a
+pass that replaces one of those fields releases what was there without reaching
+into the model's statics.
+
+6,398 checks across 99 binaries. Five sabotages caught. Also swept: three
+`world_test` directories left by the segfault in 10.192, and fourteen
+`/tmp/netcfgd-owner-*` from the Rust test leak recorded in 10.189.
+
+**One pass remains: `ask_supplicants`.**
+
 ## 10.200 Two currency questions, and a check that passed for the wrong reason
 
 `read_secret_currency` and `read_tunnel_currency` are `ncfg_observe_currency`

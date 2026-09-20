@@ -937,6 +937,17 @@ typedef struct {
 	size_t                 accepted_count;
 } ncfg_observed_access_control_t;
 
+/*
+ * Release one, and the access point beside it.
+ *
+ * 0263's convention, and published for the reason `ncfg_applied_dns_free` is:
+ * a pass that *replaces* one of these fields has to release what was there,
+ * and the only walk that knows how is the type table in `model/observed.c`.
+ * Without these the observer would either leak the prior state's copy or
+ * reach into the model's statics. NULL is nothing.
+ */
+void ncfg_observed_access_control_free(ncfg_observed_access_control_t *access_control);
+
 /* The list one policy reads. Returns NULL and a zero count outside the set. */
 char *const *ncfg_observed_access_control_list(const ncfg_observed_access_control_t *control,
     int policy, size_t *count_out);
@@ -970,6 +981,9 @@ typedef struct {
 	 * them as written would restart it on every reconcile. */
 	char         *regdom;
 } ncfg_observed_access_point_t;
+
+/* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */
+void ncfg_observed_access_point_free(ncfg_observed_access_point_t *access_point);
 
 /* A backend process as netcfgd currently believes it to be. */
 typedef struct {
