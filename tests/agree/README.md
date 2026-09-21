@@ -8,6 +8,13 @@ profile, folds the previous selection into `conf.d` and selects the new one,
 and the two programs are handed identical directories and have to produce
 identical ones. The renderer has no other differential.
 
+It compares the daemon's own argument handling too -- `netcfgd --help`,
+`--version`, an option nobody defined, an option with no value, a bare word.
+Every case there prints or refuses and exits, and each is given
+`--no-apply-on-start` and a scratch directory pair as well: a case that started
+a daemon would be this gate running a network manager on whatever machine
+invoked it.
+
 It also runs the verbs that only *read* -- `--help`, `--version`, `control
 show`, `profile get`, `profile list` -- and compares what they print, because
 the help is the contract somebody reads before they type and the C's is

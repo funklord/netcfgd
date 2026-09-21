@@ -72,6 +72,15 @@ diagnostic onto the sentence that introduces it and the Rust puts it on the
 next line; that is the same rendering divergence as above, and collapsing is
 what lets the *words* be compared without pinning the line breaks.
 
+AND THE DAEMON'S ARGUMENT HANDLING
+
+The other program has a surface too -- `--help`, `--version`, an option nobody
+defined, an option with no value -- and it is compared the same way. **Every
+case there prints or refuses and exits**: a case that started a daemon would be
+this gate running a network manager on whatever machine invoked it. Each is
+given `--no-apply-on-start` and a scratch directory pair as well, so that a
+mistake in that list observes and changes nothing.
+
 AND THE VERBS THAT ONLY READ
 
 `--help`, `--version`, `control show`, `profile get` and `profile list` print
@@ -278,6 +287,26 @@ READ_CASES = [
 
 # What the reading cases are pointed at. A copy of it is made per case.
 READ_CORPUS = "tests/footprint/etc"
+
+# The daemon's own argument handling.
+#
+# **Every one of these prints or refuses and exits**, and that is a rule rather
+# than an observation: a case that *started* a daemon would be this gate
+# running a network manager on whatever machine it was invoked on. Two things
+# hold it. Each case is an invocation that cannot reach the loop -- `--help`,
+# `--version`, an option nobody defined, an option with no value -- and every
+# one is given `--no-apply-on-start` and a scratch directory pair anyway, so
+# that a mistake here observes and watches and changes nothing.
+DAEMON_CASES = [
+	["--help"],
+	["--version"],
+	["--nonsense"],
+	["extra"],
+	["--config-dir"],
+]
+DAEMON_RUST = "./target/release/netcfgd"
+DAEMON_RUST_FALLBACK = "./target/debug/netcfgd"
+DAEMON_C = "./c/netcfgd"
 
 WRITE_CASES = [
 	("config put", "tests/footprint/etc", [
@@ -519,6 +548,34 @@ def compare_reads(rust, c):
 	return None
 
 
+def compare_daemon(rust, c):
+	"""Returns a sentence where the daemon's argument handling differs."""
+	for verb in DAEMON_CASES:
+		with tempfile.TemporaryDirectory() as work:
+			config_dir = os.path.join(work, "etc")
+			run_dir = os.path.join(work, "run")
+			os.makedirs(config_dir)
+			os.makedirs(run_dir)
+			said = []
+			for program in (rust, c):
+				result = subprocess.run(
+					[program, "--no-apply-on-start",
+					 "--config-dir", config_dir, "--run-dir", run_dir] + verb,
+					capture_output=True,
+					text=True,
+					timeout=30,
+					check=False,
+				)
+				text = (result.stdout + result.stderr)
+				said.append((result.returncode,
+					     text.replace(config_dir, "<config>").replace(run_dir, "<run>")))
+		if said[0] != said[1]:
+			return (f"`netcfgd {' '.join(verb)}` differs\n"
+				f"    rust: {said[0][1].strip()[:160]}\n"
+				f"    c   : {said[1][1].strip()[:160]}")
+	return None
+
+
 def compare_save(rust, c, config_dir):
 	"""Returns a sentence where the two write-backs differ, or None."""
 	with tempfile.TemporaryDirectory() as work:
@@ -546,7 +603,10 @@ def compare_save(rust, c, config_dir):
 
 def main():
 	rust = RUST if os.path.exists(RUST) else RUST_FALLBACK
-	missing = [name for name in (rust, C) if not os.path.exists(name)]
+	daemon_rust = (DAEMON_RUST if os.path.exists(DAEMON_RUST)
+		       else DAEMON_RUST_FALLBACK)
+	missing = [name for name in (rust, C, daemon_rust, DAEMON_C)
+		   if not os.path.exists(name)]
 	if missing:
 		print(f"agree-gate: not built: {', '.join(missing)}", file=sys.stderr)
 		return 1
@@ -570,6 +630,9 @@ def main():
 	problem = compare_reads(rust, C)
 	if problem:
 		failures.append(problem)
+	problem = compare_daemon(daemon_rust, DAEMON_C)
+	if problem:
+		failures.append(problem)
 	problem = compare_writes(rust, C)
 	if problem:
 		failures.append(problem)
@@ -582,7 +645,8 @@ def main():
 	      f"programs to the same document and written back as the same profile, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
 	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
-	      f"directory behind, and {len(READ_CASES)} invocation(s) that only read")
+	      f"directory behind, {len(READ_CASES)} invocation(s) that only read, and "
+	      f"{len(DAEMON_CASES)} of the daemon's own")
 	return 0
 
 
