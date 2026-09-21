@@ -28,6 +28,7 @@
 #include "ncfg/base.h"
 #include "ncfg/hooks.h"
 #include "ncfg/parse.h"
+#include "ncfg/wifi_profile.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -1414,5 +1415,87 @@ int ncfg_probe_list(const char *config_dir, const char *factory_dir,
 	}
 	*out = found;
 	*count_out = taken;
+	return 1;
+}
+
+/*
+ * Whether this is anything but whitespace.
+ *
+ * The Rust asks `text.trim().is_empty()`, and the question is the same one: a
+ * script that is a single newline exits zero exactly as an empty one does.
+ */
+static int has_text(const char *text)
+{
+	size_t at;
+
+	for (at = 0u; text[at]; at++) {
+		if (text[at] != ' ' && text[at] != '\t' && text[at] != '\n' &&
+		    text[at] != '\r' && text[at] != '\f' && text[at] != '\v') {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ncfg_probe_install(const char *config_dir, const char *name, const char *text, int replace,
+    char **path_out, char *err, size_t err_size)
+{
+	char       *dir;
+	char       *path;
+	struct stat about;
+
+	if (path_out) {
+		*path_out = NULL;
+	}
+	if (!ncfg_wifi_profile_usable_id(name, err, err_size)) {
+		return 0;
+	}
+	if (!config_dir) {
+		ncfg_error_set(err, err_size, "a probe script was given nowhere to be written");
+		return 0;
+	}
+	if (!text || !has_text(text)) {
+		/* Not a probe that does nothing: an empty script exits zero, and zero
+		 * is what netcfgd reads as the link being up. */
+		ncfg_error_set(err, err_size,
+		    "nothing was given for `%s`, and an empty script exits zero -- which "
+		    "netcfgd would read as the link being up, for ever", name);
+		return 0;
+	}
+	dir = ncfg_host_join(config_dir, "probe", err, err_size);
+	if (!dir) {
+		return 0;
+	}
+	path = ncfg_host_join(dir, name, err, err_size);
+	if (!path) {
+		free(dir);
+		return 0;
+	}
+	if (stat(path, &about) == 0 && !replace) {
+		ncfg_error_set(err, err_size,
+		    "%s already exists. Ask to replace it if that is what you mean", path);
+		free(path);
+		free(dir);
+		return 0;
+	}
+	/*
+	 * Executable from the moment the file exists rather than written and then
+	 * chmodded, which is `ncfg_secret_store_put`'s rule pointed the other way:
+	 * there a file must never be briefly readable, and here a probe must never
+	 * be briefly *unrunnable* -- the runner opens it on an interval, and a
+	 * window where it is not executable is a link reported down for no reason.
+	 */
+	if (!ncfg_host_make_directory(dir, (mode_t)0755, err, err_size) ||
+	    !ncfg_host_write_atomically(path, text, strlen(text), (mode_t)0755, err, err_size)) {
+		free(path);
+		free(dir);
+		return 0;
+	}
+	free(dir);
+	if (path_out) {
+		*path_out = path;
+	} else {
+		free(path);
+	}
 	return 1;
 }

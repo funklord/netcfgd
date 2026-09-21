@@ -245,10 +245,13 @@ static void a_refusal_names_the_request_it_refused(void)
 	 * stopped being refused. What this guards against is the walk finding
 	 * nothing -- a loop whose body never runs passes every check inside it --
 	 * so it is the count that has to stay well above zero rather than the
-	 * count that has to match. Twenty-two kinds are answered now; the
-	 * rest are what this walks.
+	 * count that has to match. Twenty-five kinds are answered now and five
+	 * of the rest are what this walks: `apply`, `confirm` and `revert`, plus
+	 * `hello` and `monitor`, which the server answers before this table is
+	 * asked and which are named here so that the walk is over all
+	 * thirty-two.
 	 */
-	check(checked >= 6u, "every unported kind refuses with its own name in the sentence");
+	check(checked >= 5u, "every unported kind refuses with its own name in the sentence");
 }
 
 /*
@@ -1226,6 +1229,79 @@ static void the_probe_and_modem_listings_leave_out_what_is_not_there(void)
 	desk.sims = kept_sims;
 }
 
+/*
+ * Writing a link-detection script, which is the most dangerous file netcfgd
+ * writes.
+ *
+ * **The privilege half is not here and is not missing.**
+ * `ncfg_authz_check_content` refuses this request from anyone but local root
+ * before the dispatcher sees it, and `authorize_test.c` is where that is
+ * driven. What this case is about is what the write itself refuses: a name
+ * that would choose the directory, a script that would say the link is up for
+ * ever, and an overwrite nobody asked for.
+ *
+ * The refusal that used to stand here said the writer that renders a `probe`
+ * block was not ported. Two things were wrong with it: this request writes a
+ * *script* and no block at all, and `render_link.c` renders one anyway
+ * (project.md 10.215).
+ */
+static void a_probe_script_is_written_and_guarded(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[700];
+	char                *back;
+	size_t               length = 0;
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_PROBE_PUT;
+	request.u.put.name = ncfg_proto_str("office");
+	request.u.put.text = ncfg_proto_str("#!/bin/sh\nping -c1 10.0.0.1\n");
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
+	    "`probe put` writes the script and answers `ok`");
+	ncfg_buf_free(&out);
+	(void)snprintf(path, sizeof(path), "%s/probe/office", config_dir);
+	back = testdir_read(path, &length);
+	check(back && strstr(back, "ping -c1 10.0.0.1") != NULL,
+	    "  with the bytes that were sent");
+	free(back);
+	check((testdir_mode(path) & 0111) == 0111,
+	    "  and executable, because the runner runs it rather than reads it");
+
+	/* The same name again, which is the operator's own script by now. */
+	check(!ask(&request, &out, err, sizeof(err)) && strstr(err, "already exists") != NULL,
+	    "and a second write of one name is refused rather than silently replacing it");
+	ncfg_buf_free(&out);
+	request.u.put.replace = 1;
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
+	    "  unless replacing is what was asked for");
+	ncfg_buf_free(&out);
+	request.u.put.replace = 0;
+
+	/*
+	 * An empty script is not a probe that does nothing: it exits zero, and
+	 * zero is what netcfgd reads as the link being up. So it is refused, and
+	 * the refusal says that rather than "empty".
+	 */
+	request.u.put.name = ncfg_proto_str("silent");
+	request.u.put.text = ncfg_proto_str("  \n\t\n");
+	check(!ask(&request, &out, err, sizeof(err)) &&
+	        strstr(err, "the link being up, for ever") != NULL,
+	    "a script with nothing in it is refused, and the refusal says what it would mean");
+	ncfg_buf_free(&out);
+
+	/* And the name, which is the one guard that belongs to the writer: a
+	 * separator would let a caller pick the directory instead of netcfgd. */
+	request.u.put.name = ncfg_proto_str("../../etc/cron.d/x");
+	request.u.put.text = ncfg_proto_str("#!/bin/sh\nexit 0\n");
+	check(!ask(&request, &out, err, sizeof(err)), "a name that would choose the directory "
+	    "is refused");
+	(void)snprintf(path, sizeof(path), "%s/probe/../../etc/cron.d/x", config_dir);
+	check(!testdir_exists(path), "  and nothing was written under it");
+	ncfg_buf_free(&out);
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -1418,6 +1494,7 @@ int main(void)
 	an_explanation_names_the_file_the_reload_recorded();
 	a_truncated_explanation_says_so_in_a_fact();
 	the_probe_and_modem_listings_leave_out_what_is_not_there();
+	a_probe_script_is_written_and_guarded();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

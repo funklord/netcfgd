@@ -9515,6 +9515,43 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.215 The refusal that was wrong twice, and the last verb before the apply
+
+`probe put` was refused with: "this build of netcfgd cannot write a probe
+drop-in: the writer that renders a `probe` block is not ported". Both halves
+are false. The request writes a **script** and no block at all -- the Rust's
+handler is one call to `install_probe` -- and `render_link.c` renders a
+`probe` block anyway, and has since before that sentence was written.
+
+So the vein that has run through this whole session reaches its own dispatcher:
+a sentence describing a gap, outliving the gap, and this time refusing a verb
+an operator asks for. Twenty-five of the thirty-two request kinds are answered
+now, and what is left is `apply`, `confirm` and `revert` -- which are one
+decision rather than three gaps -- plus `hello` and `monitor`, which the server
+answers before the table is asked.
+
+**The one guard that belongs to the writer is the name.** Whether *this caller*
+may write a probe is `ncfg_authz_check_content`'s, asked before the dispatcher,
+because a probe is a program netcfgd runs as root on an interval and an
+authorization question answered twice is one that comes to disagree. What the
+writer decides is the *name*: one carrying a separator or `..` would choose the
+directory instead of netcfgd and put an executable anywhere root can reach.
+
+**An empty script is refused, and the refusal says why rather than saying
+"empty".** A script with nothing in it exits zero, and netcfgd reads zero as
+the link being up -- so an empty probe is not a probe that does nothing, it is
+a link that is never reported down, ever. Whitespace counts as nothing, which
+is `trim().is_empty()` asked in C.
+
+**Executable from the moment the file exists**, which is
+`ncfg_secret_store_put`'s rule pointed the other way: there a file must never
+be briefly readable, and here a probe must never be briefly unrunnable -- the
+runner opens it on an interval, and a window where it is not executable is a
+link reported down for no reason.
+
+Four sabotages, each caught: dropping the name check, accepting whitespace,
+writing the file unexecutable, and replacing without being asked.
+
 ## 10.214 The probes and the modems, and four members that are absences
 
 Twenty-four of the thirty-two request kinds are answered; `journal` is the only
