@@ -917,6 +917,97 @@ static void the_two_lists_are_the_envelope_the_witness_spells(void)
 	state.desired = kept_desired;
 }
 
+/*
+ * The configuration files a client may edit, and the hooks it may read.
+ *
+ * **The two listings answer opposite questions and their rules are opposite.**
+ * A configuration file that cannot be read is left out, because the listing
+ * *is* the file and a client writing an empty text back would truncate one it
+ * was never shown. A hook that cannot be read is listed with `readable: false`,
+ * because there the listing is the document's *claim* about a file -- and a
+ * client that never saw the row would write the interface back without the
+ * hook, which is to say delete it because netcfgd could not open it.
+ */
+static void the_file_listings_answer_opposite_questions(void)
+{
+	ncfg_document_t     *kept_desired = state.desired;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[700];
+	char                 hook[640];
+
+	/* The base file and one drop-in, which is the pair the witness shows. */
+	(void)snprintf(path, sizeof(path), "%s/netcfgd.conf", config_dir);
+	(void)testdir_write(path, "global { }\n", strlen("global { }\n"));
+	(void)snprintf(path, sizeof(path), "%s/conf.d/wifi-home.conf", config_dir);
+	(void)testdir_write(path, "network \"home\" { }\n", strlen("network \"home\" { }\n"));
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_CONFIG_LIST;
+	check(ask(&request, &out, err, sizeof(err)), "`config list` is answered");
+	check(strcmp(ncfg_buf_text(&out),
+	    "{\"response\":\"configs\",\"configs\":["
+	    "{\"file\":\"netcfgd.conf\",\"removable\":false,\"text\":\"global { }\\n\"},"
+	    "{\"name\":\"wifi-home\",\"file\":\"conf.d/wifi-home.conf\",\"removable\":true,"
+	    "\"text\":\"network \\\"home\\\" { }\\n\"}]}") == 0,
+	    "  in the witness' spelling, the base file first and with no name to delete it by");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	/* Two hooks: one whose script is on disk and one whose is not. */
+	(void)snprintf(hook, sizeof(hook), "%s/hooks", run_dir);
+	make_dir(hook);
+	(void)snprintf(hook, sizeof(hook), "%s/hooks/eth0.post_up.0", run_dir);
+	(void)testdir_write(hook, "#!/bin/sh\nlogger up\n", strlen("#!/bin/sh\nlogger up\n"));
+	{
+		char body[2048];
+
+		(void)snprintf(body, sizeof(body),
+		    "\"devices\":[],\"interfaces\":["
+		    "{\"name\":\"eth0\",\"hooks\":[{\"phase\":\"post_up\",\"path\":\"%s\","
+		    "\"sha256\":\"%064d\"}]},"
+		    "{\"name\":\"eth1\",\"hooks\":[{\"phase\":\"drift\","
+		    "\"path\":\"%s/hooks/eth1.drift.1\",\"sha256\":\"%064d\"}]}]",
+		    hook, 0, run_dir, 0);
+		state.desired = document_of(body);
+	}
+	if (!state.desired) {
+		check(0, "a document naming two hooks");
+		state.desired = kept_desired;
+		return;
+	}
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_HOOK_LIST;
+	check(ask(&request, &out, err, sizeof(err)), "`hook list` is answered");
+	check(strstr(ncfg_buf_text(&out), "\"text\":\"#!/bin/sh\\nlogger up\\n\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "\"readable\":true") != NULL,
+	    "  with the same bytes the runner would execute");
+	check(strstr(ncfg_buf_text(&out), "\"phase\":\"drift\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "\"readable\":false") != NULL,
+	    "  and a hook whose script is missing is listed as itself rather than dropped");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+	ncfg_document_free(state.desired);
+
+	/* And a daemon with no compiled configuration declares no hooks, which is
+	 * an empty list rather than a refusal: nothing is wrong with the machine.
+	 */
+	state.desired = NULL;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_HOOK_LIST;
+	check(ask(&request, &out, err, sizeof(err)) &&
+	        strcmp(ncfg_buf_text(&out), "{\"response\":\"hooks\",\"hooks\":[]}") == 0,
+	    "a daemon with no configuration declares no hooks, which is an empty list");
+	ncfg_buf_free(&out);
+
+	state.desired = kept_desired;
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -1105,6 +1196,7 @@ int main(void)
 	the_status_and_the_document_are_the_witness_shape();
 	the_served_plan_says_who_else_manages_an_interface();
 	the_two_lists_are_the_envelope_the_witness_spells();
+	the_file_listings_answer_opposite_questions();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

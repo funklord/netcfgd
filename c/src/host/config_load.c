@@ -1117,3 +1117,114 @@ int ncfg_config_writable_files(const char *config_dir, char ***out, size_t *coun
 	*count_out = count;
 	return 1;
 }
+
+void ncfg_config_entries_free(ncfg_config_entry_t *entries, size_t count)
+{
+	size_t at;
+
+	if (!entries) {
+		return;
+	}
+	for (at = 0u; at < count; at++) {
+		free(entries[at].name);
+		free(entries[at].file);
+		free(entries[at].text);
+	}
+	free(entries);
+}
+
+/* The part of `path` after the last separator, or the whole of it. */
+static const char *leaf_of(const char *path)
+{
+	const char *slash = strrchr(path, '/');
+
+	return slash ? slash + 1 : path;
+}
+
+/* Whether this path's directory is the drop-in one. */
+static int under_conf_d(const char *path)
+{
+	const char *leaf = leaf_of(path);
+	size_t      prefix = (size_t)(leaf - path);
+	const char *wanted = "/conf.d/";
+	size_t      want = strlen(wanted);
+
+	return prefix >= want && strncmp(path + prefix - want, wanted, want) == 0;
+}
+
+int ncfg_config_list_drop_ins(const char *config_dir, ncfg_config_entry_t **out,
+    size_t *count_out, char *err, size_t err_size)
+{
+	char             **paths = NULL;
+	size_t             path_count = 0;
+	ncfg_config_entry_t *found = NULL;
+	size_t             taken = 0;
+	size_t             at;
+
+	if (!out || !count_out) {
+		ncfg_error_set(err, err_size, "a config listing was asked for with nowhere to put it");
+		return 0;
+	}
+	*out = NULL;
+	*count_out = 0;
+	if (!ncfg_config_writable_files(config_dir, &paths, &path_count, err, err_size)) {
+		return 0;
+	}
+	if (path_count == 0u) {
+		ncfg_config_paths_free(paths, path_count);
+		return 1;
+	}
+	found = calloc(path_count, sizeof(*found));
+	if (!found) {
+		ncfg_config_paths_free(paths, path_count);
+		ncfg_error_set(err, err_size, "out of memory listing the configuration");
+		return 0;
+	}
+	for (at = 0u; at < path_count; at++) {
+		size_t      length = 0;
+		char       *text = ncfg_host_read_file(paths[at], &length, NCFG_CONFIG_FILE_MAX);
+		const char *leaf;
+		int         drop_in;
+
+		if (!text) {
+			/* Left out rather than listed empty: `config.h` says why, and it
+			 * is the one mistake a listing could cause. */
+			continue;
+		}
+		leaf = leaf_of(paths[at]);
+		drop_in = under_conf_d(paths[at]);
+		found[taken].text = text;
+		found[taken].removable = drop_in;
+		if (drop_in) {
+			const char *dot = strrchr(leaf, '.');
+			size_t      stem = dot ? (size_t)(dot - leaf) : strlen(leaf);
+
+			found[taken].name = malloc(stem + 1u);
+			found[taken].file = malloc(strlen("conf.d") + strlen(leaf) + 2u);
+			if (!found[taken].name || !found[taken].file) {
+				ncfg_config_entries_free(found, taken + 1u);
+				ncfg_config_paths_free(paths, path_count);
+				ncfg_error_set(err, err_size, "out of memory listing the configuration");
+				return 0;
+			}
+			memcpy(found[taken].name, leaf, stem);
+			found[taken].name[stem] = '\0';
+			(void)sprintf(found[taken].file, "conf.d/%s", leaf);
+		} else {
+			found[taken].name = NULL;
+			found[taken].file = malloc(strlen(leaf) + 1u);
+			if (!found[taken].file) {
+				ncfg_config_entries_free(found, taken + 1u);
+				ncfg_config_paths_free(paths, path_count);
+				ncfg_error_set(err, err_size, "out of memory listing the configuration");
+				return 0;
+			}
+			memcpy(found[taken].file, leaf, strlen(leaf) + 1u);
+		}
+		taken++;
+	}
+	ncfg_config_paths_free(paths, path_count);
+	*out = found;
+	*count_out = taken;
+	return 1;
+}

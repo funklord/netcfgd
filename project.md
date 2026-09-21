@@ -9515,6 +9515,49 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.212 Two listings whose rules are opposite
+
+`configs` and `hooks`, which brings the answered request kinds to twenty-one of
+thirty-two. Neither had a producer, so both gained one where it belongs:
+`ncfg_config_list_drop_ins` in `config.h` beside the enumeration it reuses, and
+`ncfg_hooks_list` in `hooks.h` beside the materialiser whose files it reads.
+
+**The two listings answer opposite questions, and their rules invert.**
+
+* A configuration file that cannot be read is **left out**. The listing *is*
+  the file: a client shown an empty `text` and writing it back would truncate
+  a file it was never shown, which is the one mistake this listing could cause.
+* A hook whose script cannot be read is **listed as itself**, with
+  `readable: false`. Here the listing is the document's *claim* about a file,
+  and a client that never saw the row would write the interface back without
+  the hook -- deleting a hook because netcfgd could not open it.
+
+Neither rule is obvious from its own side, and writing them a day apart is how
+they would have come out the same.
+
+**The hook bodies are read at the moment they are asked for.** They pass
+through the process at every reload -- the compiler names them and the
+materialiser writes them -- so a copy kept in the daemon is a second answer to
+"what runs at `post_up`" that can disagree with the file the runner opens. What
+a client sees is the bytes that execute, including the `#!/bin/sh` the
+materialiser prepends to a body that has none.
+
+**`name` is omitted for a file that is not a drop-in**, because `name` is what
+`config put` and `config delete` take: a client shown one for `netcfgd.conf`
+would offer a delete that is refused. That is the third omission-as-contract in
+two rounds, after `used_by` and `chosen`.
+
+**A sabotage that catches nothing, and why it is left that way.** Listing an
+unreadable configuration file as empty turns nothing red, because nothing can
+set the case up: `ncfg_config_writable_files` stats every candidate and takes
+only regular files, so a file reaches the read unless it is removed in between.
+The branch is a race and is now documented as one, in the header, where the
+next person to aim a sabotage at it will look first.
+
+Four sabotages caught: calling every file removable, dropping an unreadable
+hook, writing `name` for the base file, and the earlier pair on the two lists
+before them.
+
 ## 10.211 Two lists whose producers were already here
 
 `secrets` and `profiles`, which are the cheapest two of the responses left:
