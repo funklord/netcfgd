@@ -166,11 +166,14 @@ int ncfg_profile_name_usable(const char *name, char *err, size_t err_size)
 }
 
 int ncfg_profile_set(const char *config_dir, const char *factory_dir, const char *name,
-    int *denied, char *err, size_t err_size)
+    char **path_out, int *denied, char *err, size_t err_size)
 {
 	char *text;
 	int   ok;
 
+	if (path_out) {
+		*path_out = NULL;
+	}
 	if (denied) {
 		*denied = 0;
 	}
@@ -190,7 +193,7 @@ int ncfg_profile_set(const char *config_dir, const char *factory_dir, const char
 	 * on the config until somebody thought to run `profile unset`.
 	 */
 	ok = ncfg_config_install_drop_in(config_dir, factory_dir, NCFG_PROFILE_DROP_IN, text, 1,
-	    NULL, denied, err, err_size);
+	    path_out, denied, err, err_size);
 	free(text);
 	return ok;
 }

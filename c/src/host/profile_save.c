@@ -414,7 +414,7 @@ static int write_profile_snapshot(const char *config_dir, const char *factory_di
 
 	/* Selecting is part of the same act: having just said what this profile
 	 * means, being left on none would be a surprise. */
-	if (!ncfg_profile_set(config_dir, factory_dir, name, denied, err, err_size)) {
+	if (!ncfg_profile_set(config_dir, factory_dir, name, NULL, denied, err, err_size)) {
 		goto done;
 	}
 

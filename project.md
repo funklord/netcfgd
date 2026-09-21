@@ -9515,6 +9515,41 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.222 Eight sequences, and the line `profile set` was not printing
+
+The writing half of the agreement gate is eight sequences now rather than four
+single verbs, and several are pairs on purpose: **undoing is the half that goes
+wrong**. A `rm` that leaves a file behind, or takes one more than it was asked
+for, shows up only when the directory is compared after both halves have run.
+`config put` and `rm`, `secret set` and `rm`, `secret set` then `wifi forget`,
+and `profile save`, `unset` and `set` are the four pairs; a new corpus
+directory with a `network` block in it is what `wifi forget` needs, and it
+carries a *reference* to a credential rather than a credential, because the
+sequence stores one with `ncfg secret set` first.
+
+**It found a missing line immediately.** `ncfg profile set` writes the
+`90-profile` drop-in and the Rust says which file that was; the C said only
+that no daemon was listening, which leaves an operator looking for the file by
+hand. Every other verb in this port that writes a file names it -- `config
+put`, `profile save`, `wifi add` -- so this was the one that did not.
+
+The fix is not a `printf` in the CLI: `ncfg_profile_set` hands the path back
+now, the way `ncfg_config_install_drop_in` already did. Composing it in the
+caller would be a second spelling of where that file goes, and `dhcp.h` records
+what that costs when the two drift -- here it would be a message naming a file
+nobody wrote.
+
+**The `--json` object is deliberately unchanged.** 0263 pins it: `set`, `save`
+and `unset` print `chosen` beside `daemon`, and `path` belongs to `save` alone.
+So the text form gained a line and the document did not, which is the kind of
+asymmetry worth writing down rather than tidying: the flag's contract is
+recorded and the text's was merely missing.
+
+Two other divergences met on the way and neither is a defect. The Rust ignores
+`--json` at every verb that writes and the C answers it, which 0263 records as
+this port's own decision. And `ncfg wifi forget` agrees exactly, which is worth
+knowing because it is the verb that removes a credential as well as a block.
+
 ## 10.221 Comparing permissions found a Rust defect on the first run
 
 The agreement gate now also runs the three verbs that write -- `config put`,

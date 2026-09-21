@@ -397,7 +397,7 @@ static int answer_profile_set(ncfg_main_desk_t *desk, ncfg_proto_str_t which, nc
 		return 0;
 	}
 	if (!ncfg_profile_set(desk->state->paths.config, desk->state->paths.factory, name,
-	    &denied, err, err_size)) {
+	    NULL, &denied, err, err_size)) {
 		return 0;
 	}
 	return ncfg_daemon_ok_encode(out, err, err_size);

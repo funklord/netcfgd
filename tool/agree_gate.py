@@ -51,13 +51,15 @@ out of it. That is where a configuration neither can write back shows up: the
 determinism fixture states a `qdisc`, which neither renderer can put into
 configuration text, so both refuse it in the same words and write nothing.
 
-AND THE THREE VERBS THAT WRITE
+AND THE VERBS THAT WRITE
 
-`config put`, `secret set` and `control set` each take something from a caller
-and put it in the configuration directory, and none of them reads the kernel
-either. They are run against one corpus entry rather than all of them -- what
-they write barely depends on what was there, and a gate that is slow is a gate
-somebody runs less often.
+`config put`, `secret set`, `control set`, `profile set`, `wifi forget` and the
+`rm` of each take something from a caller and put it in -- or take it out of --
+the configuration directory, and none of them reads the kernel either.
+
+**Several run as pairs**, because undoing is the half that goes wrong: a `rm`
+that leaves a file behind, or takes one more than it was asked for, shows up
+only when the directory is compared after both halves have run.
 
 `wifi add` is **deliberately not among them**, and the reason is worth writing
 down: it activates a radio, so what it writes depends on which radios this
@@ -94,6 +96,7 @@ C = "./c/ncfg"
 # one nobody notices going empty.
 CORPUS = [
 	("tests/determinism", True),
+	("tests/agree/network", True),
 	("tests/footprint/etc", True),
 	("packaging/profile/offline", True),
 	("tests/agree/wrong-block", False),
@@ -199,17 +202,43 @@ def compare(rust, c, config_dir, expected_to_compile):
 	return None
 
 
-# One corpus entry, three verbs, and what each is given on standard input.
+# What is asked of a copy of a configuration directory, and in what order.
 # Named rather than generated: a list a person reads is a list a person can
 # argue with.
-WRITE_CORPUS = "tests/footprint/etc"
-WRITE_VERBS = [
-	("config put", ["config", "put", "lab"],
-	 "device lo {\n\tmanaged = false\n}\n"),
-	("config put, refused", ["config", "put", "lab"],
-	 "interface lo {\n\tmanaged = false\n}\n"),
-	("secret set", ["secret", "set", "lab"], "hunter2\n"),
-	("control set", ["control", "set", "--observe", "any"], ""),
+#
+# **Several are pairs, because undoing is the half that goes wrong.** A `rm`
+# that leaves a file behind, or takes one more than it was asked for, shows up
+# only when the directory is compared after both halves have run.
+WRITE_CASES = [
+	("config put", "tests/footprint/etc", [
+		(["config", "put", "lab"], "device lo {\n\tmanaged = false\n}\n"),
+	]),
+	("config put, refused", "tests/footprint/etc", [
+		(["config", "put", "lab"], "interface lo {\n\tmanaged = false\n}\n"),
+	]),
+	("config put and rm", "tests/footprint/etc", [
+		(["config", "put", "lab"], "device lo {\n\tmanaged = false\n}\n"),
+		(["config", "rm", "lab"], ""),
+	]),
+	("secret set", "tests/footprint/etc", [
+		(["secret", "set", "lab"], "hunter2\n"),
+	]),
+	("secret set and rm", "tests/footprint/etc", [
+		(["secret", "set", "lab"], "hunter2\n"),
+		(["secret", "rm", "lab"], ""),
+	]),
+	("control set", "tests/footprint/etc", [
+		(["control", "set", "--observe", "any"], ""),
+	]),
+	("wifi forget", "tests/agree/network", [
+		(["secret", "set", "lab"], "hunter2\n"),
+		(["wifi", "forget", "Lab"], ""),
+	]),
+	("profile save, unset and set", "tests/footprint/etc", [
+		(["profile", "save", "agree"], ""),
+		(["profile", "unset"], ""),
+		(["profile", "set", "agree"], ""),
+	]),
 ]
 
 
@@ -237,7 +266,7 @@ def known_divergence(name, rust_mode, c_mode):
 
 
 def words(text):
-	"""The text with its whitespace collapsed, for `WRITE_VERBS`' reason."""
+	"""The text with its whitespace collapsed, for `WRITE_CASES`' reason."""
 	return " ".join(text.split())
 
 
@@ -285,35 +314,37 @@ def saved(program, config_dir, work):
 	return said, tree(copy)
 
 
-def wrote(program, config_dir, verb, stdin, work):
-	"""One writing verb over a copy of `config_dir`. Returns (said, tree)."""
+def wrote(program, config_dir, steps, work):
+	"""One sequence of writing verbs over a copy. Returns (said, tree)."""
 	copy = os.path.join(work, "etc")
 	run_dir = os.path.join(work, "run")
 	shutil.copytree(config_dir, copy)
 	os.makedirs(run_dir, exist_ok=True)
-	result = subprocess.run(
-		[program] + verb + ["--config-dir", copy, "--run-dir", run_dir],
-		input=stdin,
-		capture_output=True,
-		text=True,
-		timeout=120,
-		check=False,
-	)
+	said = ""
+	for verb, stdin in steps:
+		result = subprocess.run(
+			[program] + verb + ["--config-dir", copy, "--run-dir", run_dir],
+			input=stdin,
+			capture_output=True,
+			text=True,
+			timeout=120,
+			check=False,
+		)
+		said += result.stdout + result.stderr
 	# Both scratch paths, because a message can name either -- "nothing is
 	# listening on <run>/netcfgd.sock, so this was written directly" names the
 	# run directory, and the two programs are given different ones on purpose.
-	said = (result.stdout + result.stderr).replace(copy, "<config>")
-	said = said.replace(run_dir, "<run>")
+	said = said.replace(copy, "<config>").replace(run_dir, "<run>")
 	return words(said), tree(copy)
 
 
 def compare_writes(rust, c):
 	"""Returns a sentence where a writing verb differs, or None."""
-	for name, verb, stdin in WRITE_VERBS:
+	for name, config_dir, steps in WRITE_CASES:
 		with tempfile.TemporaryDirectory() as work:
-			rust_said, rust_tree = wrote(rust, WRITE_CORPUS, verb, stdin,
+			rust_said, rust_tree = wrote(rust, config_dir, steps,
 						     os.path.join(work, "rust"))
-			c_said, c_tree = wrote(c, WRITE_CORPUS, verb, stdin,
+			c_said, c_tree = wrote(c, config_dir, steps,
 					       os.path.join(work, "c"))
 		if rust_said != c_said:
 			return (f"`ncfg {name}` said different things\n"
@@ -393,7 +424,8 @@ def main():
 	print(f"agree-gate: {len(present)} configuration(s), {compiling} compiled by both "
 	      f"programs to the same document and written back as the same profile, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
-	      f"{len(WRITE_VERBS)} writing verb(s) that left the same directory behind")
+	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
+	      "directory behind")
 	return 0
 
 
