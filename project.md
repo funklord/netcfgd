@@ -9515,6 +9515,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.219 Seven refusals, compared word for word
+
+The agreement gate compared one bad configuration. It compares seven now, and
+the comparison is stricter than "the same position": the C's first diagnostic
+line has to *begin with* the Rust's.
+
+That works because of a divergence 0263 already records -- the C joins a
+diagnostic's help onto one line where the Rust prints it as a `help:`
+continuation -- so the Rust's sentence is a prefix of the C's by construction.
+Which makes the rule strict on purpose: **a message reworded in one program is
+a message that has to be reworded in the other**, and finding that out from a
+gate is better than finding it out from somebody who moved between the two
+binaries and could no longer grep their own notes.
+
+The seven are one mistake each, and none of them is invented: a key in the
+wrong block (the language moved `mtu` to `device`), a misspelled key, a value
+outside an enumeration -- `mac_policy = "random"`, which `example_gate.py`
+records having found in the shipped example file -- a block defined twice, a
+block never closed, an `override` with nothing to override, and an include
+naming a file that is not there.
+
+**All seven agree.** Six name the same file, line and column and say the same
+thing. The seventh is in the corpus precisely because neither program names a
+position: an unresolved include is refused by the loader, before anything is
+parsed, so there is no line to point at in either. What is compared there is
+that both refused and neither invented a line -- a program that read a missing
+include as an empty file would compile what the other one refuses.
+
+Their sentences differ in shape, which the gate does not fail on and is worth
+writing down: the Rust says "could not read <directory>: <path>: No such file
+or directory (os error 2)" and the C says "<path>: No such file or directory".
+Neither is wrong and the C's names the file first, which is the half a reader
+needs.
+
+**One arm of the gate has no fixture and says so.** "One program named a
+position and the other did not" cannot be reached by anything in the corpus:
+today they always agree about whether there is a line to point at. Removing
+that arm turns nothing red, so the comment says as much -- the alternative is
+somebody aiming a sabotage at it later and reading the silence as the code
+being wrong.
+
+Three sabotages caught: rewording the C's diagnostic, moving its line by one,
+and renaming a field in the document model (which is the comparison the
+*compiling* half of the corpus makes).
+
 ## 10.218 The first comparison of the two programs
 
 0263 says a module of the port is a candidate to replace its Rust half "only
