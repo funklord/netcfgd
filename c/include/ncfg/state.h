@@ -431,15 +431,25 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
     size_t err_size);
 
 /*
- * Write the observed model.
+ * Write the observed model, whole and per link.
  *
- * The whole-host file only. **The per-link projections are deferred**, and it
- * is the reason `owned.json`'s two lists were: one of those files is `{link,
- * addresses on it, routes on it}` and assembling it needs three more of the
- * observed model's writers, which are still private -- the two the record
- * needed are published and the rest are not, because publishing a table
- * nothing calls is a table nothing checks. `observed.json` itself goes through
- * `ncfg_observed_write_canonical`, which is public.
+ * `observed.json` is the record and goes through
+ * `ncfg_observed_write_canonical`. Beside it, `<run>/observed/<name>.json`
+ * carries one link, the addresses on it and the routes on it, so that a reader
+ * asking about `eth0` does not have to filter the whole-host view -- the same
+ * arrangement `ncfg_state_write_desired` has for the document, and the same
+ * two rules: a view of a link that has gone is removed rather than left
+ * claiming, and a machine with no links leaves no directory at all.
+ *
+ * **The three element writers this needs are published now**, which is what it
+ * waited on: `observed.h` has `ncfg_observed_link_write` and the address and
+ * route pair beside it. They were private while nothing called them, on the
+ * argument that a table nothing calls is a table nothing checks, and this is
+ * the caller (project.md 10.217).
+ *
+ * The whole file is written first. A run directory that can hold only one of
+ * the two holds the record, and a per-link view that could not be written
+ * fails the call rather than leaving a set a reader would take for complete.
  */
 int ncfg_state_write_observed(const char *run_dir, ncfg_observed_t *observed, char *err,
     size_t err_size);

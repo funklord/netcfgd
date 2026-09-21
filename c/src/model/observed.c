@@ -1564,6 +1564,31 @@ void ncfg_observed_backend_free(ncfg_observed_backend_t *backend)
 	ncfg_type_free(&observed_backend_type, backend);
 }
 
+void ncfg_observed_link_write(ncfg_json_writer_t *writer, const ncfg_observed_link_t *link)
+{
+	if (!writer || !link) {
+		return;
+	}
+	ncfg_type_write(&observed_link_type, writer, link);
+}
+
+void ncfg_observed_address_write(ncfg_json_writer_t *writer,
+    const ncfg_observed_address_t *address)
+{
+	if (!writer || !address) {
+		return;
+	}
+	ncfg_type_write(&observed_address_type, writer, address);
+}
+
+void ncfg_observed_route_write(ncfg_json_writer_t *writer, const ncfg_observed_route_t *route)
+{
+	if (!writer || !route) {
+		return;
+	}
+	ncfg_type_write(&observed_route_type, writer, route);
+}
+
 int ncfg_applied_dns_read(const ncfg_json_doc_t *doc, uint32_t node, ncfg_applied_dns_t **out,
     size_t *count_out, char *err, size_t err_size)
 {

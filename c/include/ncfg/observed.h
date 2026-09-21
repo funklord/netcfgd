@@ -1104,6 +1104,26 @@ void ncfg_observed_backends_free(ncfg_observed_backend_t *backends, size_t count
  * `ncfg_state_reports_free` for the same reason. */
 void ncfg_observed_backend_free(ncfg_observed_backend_t *backend);
 
+/*
+ * One link, one address and one route as a JSON object, into an object
+ * somebody else opened.
+ *
+ * **Published for the per-link projections and for nothing else.**
+ * `state.h` writes `<run>/observed/<name>.json` as `{link, addresses on it,
+ * routes on it}`, and the alternative is a second rendering of three of this
+ * model's types in a module that owns none of them -- which is how a field
+ * added here comes to be missing from a file somebody's script reads, with
+ * nothing failing to compile.
+ *
+ * Each writes the *members*; the caller opens the object, exactly as
+ * `ncfg_observed_write_members` does, because the projections nest them under
+ * keys of their own.
+ */
+void ncfg_observed_link_write(ncfg_json_writer_t *writer, const ncfg_observed_link_t *link);
+void ncfg_observed_address_write(ncfg_json_writer_t *writer,
+    const ncfg_observed_address_t *address);
+void ncfg_observed_route_write(ncfg_json_writer_t *writer, const ncfg_observed_route_t *route);
+
 int ncfg_applied_dns_read(const ncfg_json_doc_t *doc, uint32_t node, ncfg_applied_dns_t **out,
     size_t *count_out, char *err, size_t err_size);
 void ncfg_applied_dns_write(ncfg_json_writer_t *writer, const ncfg_applied_dns_t *dns,
