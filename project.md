@@ -9515,6 +9515,43 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.224 Argument handling, and pinning a divergence by its words
+
+Twenty-seven invocations now, and most of them are argument handling: a verb
+with no subcommand, a flag nobody defined, a name that cannot be one, a count
+that is not a number, no verb at all. It is a wide surface, an easy one for two
+implementations to drift on, and none of it needs a machine.
+
+**Twenty-six agree, exit status and text.** The twenty-seventh is `ncfg reset
+extra`, which 0263 records: the Rust's dispatch drops every positional at that
+verb, so `ncfg reset office --yes` empties the whole configuration there, and
+this port refuses the argument instead.
+
+### The marker had to get finer
+
+`reset` has three recorded divergences, and the first version of the marker
+asked only that the two texts differ *somehow*. That passes while two of the
+three are quietly converged -- which is the shape of vacuous pass this tree
+keeps finding, arrived at from the other direction: not a check over an empty
+list, but a check whose condition is satisfied by something other than what it
+is about.
+
+Each divergence is pinned by the words it produces instead: the Rust still
+saying "The next apply would remove", the C still saying "The next reconcile or
+apply", the C still printing `would remove` before it removes, and the C still
+refusing a positional. A fragment that stops appearing makes the gate go red
+naming which exception can be deleted.
+
+Proved by closing each one in turn: three sabotages, three different sentences,
+each naming the divergence that had gone rather than "something differs".
+
+**Every reading case runs against a copy**, which is a rule rather than a
+precaution: the list is meant to be verbs that print, and the day somebody adds
+one that writes, the mistake should cost a temporary directory rather than the
+fixtures in the tree. It nearly mattered already -- `ncfg reset extra` is a
+*dry run* in the Rust, and it listed this repository's own fixture files while I
+was probing by hand.
+
 ## 10.223 The verbs that only read, and two texts required to differ
 
 Five more comparisons, all of them text: `--help`, `--version`, `control show`,
