@@ -448,6 +448,39 @@ int ncfg_daemon_ok_encode(ncfg_buf_t *out, char *err, size_t err_size);
 int ncfg_daemon_hello_encode(const ncfg_tier_t *tiers, size_t tier_count, ncfg_buf_t *out,
     char *err, size_t err_size);
 
+/*
+ * What this daemon can see, as the `status` response.
+ *
+ * **The observation flattened into the envelope**, which is the wire shape the
+ * Rust's `Response::Status(Box<Observed>)` has and `doc/schema/socket.json`
+ * pins: `{"response":"status",<every member of the observation>}`. The members
+ * are written by the model's own tables through
+ * `ncfg_observed_write_members`, so this encoder cannot come to disagree with
+ * `observed.json` about a member name or its order.
+ *
+ * **A daemon that has not observed the machine refuses rather than answering
+ * an empty observation**, and that is the whole judgement in this call: an
+ * observation with no links reads as a machine with no interfaces, which a
+ * client cannot tell from one nothing has looked at. The refusal says which it
+ * is.
+ */
+int ncfg_daemon_status_encode(const ncfg_observed_t *observed, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
+ * The desired state, as the `document` response.
+ *
+ * The same shape and the same argument, one model along:
+ * `{"response":"document",<every member of the document>}`.
+ *
+ * A daemon holding no compiled configuration refuses with `diagnostics` where
+ * it has them, which is what the Rust answers: the reason the configuration
+ * did not compile is the answer to "show me the configuration", and "no
+ * configuration" is what is left when nothing said why.
+ */
+int ncfg_daemon_document_encode(const ncfg_document_t *desired, const char *diagnostics,
+    ncfg_buf_t *out, char *err, size_t err_size);
+
 /* ------------------------------------------------------------- the server */
 
 /*

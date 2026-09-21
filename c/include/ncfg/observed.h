@@ -1274,6 +1274,21 @@ void ncfg_observed_canonicalize(ncfg_observed_t *observed);
  * exactly where the Rust omits it, so an observation read and written back is
  * the one that arrived.
  */
+/*
+ * The members alone, into an object somebody else opened.
+ *
+ * For an envelope that carries an observation flattened into it, which is what
+ * the protocol's `status` response is: `{"response":"status",<the members>}`.
+ * Published rather than copied, because the alternative is a second list of
+ * this model's members in the daemon -- and a member added here and forgotten
+ * there is a client reading a field the daemon has stopped sending, with
+ * nothing failing to compile.
+ *
+ * Writes nothing where either argument is NULL; the writer carries its own
+ * failure and the caller's `ncfg_json_write_done` is where it is noticed.
+ */
+void ncfg_observed_write_members(ncfg_json_writer_t *writer, const ncfg_observed_t *observed);
+
 int ncfg_observed_write(const ncfg_observed_t *observed, ncfg_buf_t *buf, char *err,
     size_t err_size);
 

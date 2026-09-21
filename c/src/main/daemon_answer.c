@@ -19,9 +19,9 @@
  *   refusal as a request the daemon did not recognise. Two things make this
  *   different from that, and both are properties rather than intentions:
  *
- *     * fourteen of the thirty-two kinds are answered, including every wifi
- *       verb, `reload`, and everything that writes a drop-in, a secret or a
- *       profile;
+ *     * sixteen of the thirty-two kinds are answered, including every wifi
+ *       verb, `reload`, `status`, `show`, and everything that writes a
+ *       drop-in, a secret or a profile;
  *     * every other kind is refused with a sentence that **names the request
  *       and says what is missing**, so it cannot be read as "unrecognised".
  *       `ncfg_main_answer_unported` is that table, reachable on its own so
@@ -29,11 +29,11 @@
  *       remembered.
  *
  *   The refusals are not a policy decision either: nothing in `c/src/` encodes
- *   a `status`, `plan`, `document`, `journal`, `explanation`, `secrets`,
- *   `modems`, `profiles`, `configs`, `hooks` or `probes` response, because
- *   `proto.h` decodes every response and encodes none and the encoders belong
- *   beside the requests that produce them. When one lands, one row of the
- *   table becomes an arm.
+ *   a `plan`, `journal`, `explanation`, `secrets`, `modems`, `profiles`,
+ *   `configs`, `hooks` or `probes` response, because `proto.h` decodes every
+ *   response and encodes none and the encoders belong beside the requests that
+ *   produce them. When one lands, one row of the table becomes an arm --
+ *   `status` and `document` are the two that have, and `daemon.h` has them.
  */
 #include "loop_internal.h"
 
@@ -153,9 +153,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`hello` is answered by the control socket itself, so nothing here "
 		    "answers it; reaching this is a bug in the server rather than in the "
 		    "request";
-	case NCFG_PROTO_REQ_STATUS:
 	case NCFG_PROTO_REQ_PLAN:
-	case NCFG_PROTO_REQ_SHOW:
 	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_PROBE_LIST:
@@ -220,6 +218,11 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_AP_STATIONS:
 	case NCFG_PROTO_REQ_RADIOS:
 	case NCFG_PROTO_REQ_RADIO_SET:
+	/* The two that are a model and an envelope: `daemon.h` encodes both from
+	 * the model's own writers, so neither can come to disagree with the file
+	 * of the same shape under `/run`. */
+	case NCFG_PROTO_REQ_STATUS:
+	case NCFG_PROTO_REQ_SHOW:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -591,6 +594,18 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	switch (request->kind) {
 	case NCFG_PROTO_REQ_RELOAD:
 		return answer_reload(desk, out, err, err_size);
+	/*
+	 * The two that are a model and an envelope. Both refuse rather than
+	 * inventing an empty answer, and `daemon.h` argues each: an observation
+	 * with no links is not a machine with nothing on it, and the reason a
+	 * configuration did not compile is the answer to "show me the
+	 * configuration".
+	 */
+	case NCFG_PROTO_REQ_STATUS:
+		return ncfg_daemon_status_encode(desk->state->observed, out, err, err_size);
+	case NCFG_PROTO_REQ_SHOW:
+		return ncfg_daemon_document_encode(desk->state->desired, desk->state->diagnostics,
+		    out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -628,12 +643,10 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	 * both is for.
 	 */
 	case NCFG_PROTO_REQ_HELLO:
-	case NCFG_PROTO_REQ_STATUS:
 	case NCFG_PROTO_REQ_PLAN:
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
-	case NCFG_PROTO_REQ_SHOW:
 	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_MONITOR:

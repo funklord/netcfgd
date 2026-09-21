@@ -80,6 +80,7 @@
 #include <stdint.h>
 
 #include "ncfg/buf.h"
+#include "ncfg/json_write.h"
 #include "ncfg/value.h"
 
 /* ------------------------------------------------------------------------ *
@@ -1685,6 +1686,15 @@ int ncfg_document_validate(const ncfg_document_t *document, char *err, size_t er
  * omitted exactly where the Rust omits it, so a document read and written back
  * is the document that arrived.
  */
+/*
+ * The members alone, into an object somebody else opened.
+ *
+ * `ncfg_observed_write_members`' reason, for the protocol's `document`
+ * response: `{"response":"document",<the members>}`. One list of this model's
+ * members, in the module that owns it.
+ */
+void ncfg_document_write_members(ncfg_json_writer_t *writer, const ncfg_document_t *document);
+
 int ncfg_document_write(const ncfg_document_t *document, ncfg_buf_t *buf, char *err,
     size_t err_size);
 
