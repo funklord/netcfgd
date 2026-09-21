@@ -359,6 +359,33 @@ void ncfg_probe_entries_free(ncfg_probe_entry_t *entries, size_t count);
 int ncfg_probe_list(const char *config_dir, const char *factory_dir,
     ncfg_probe_entry_t **out, size_t *count_out, char *err, size_t err_size);
 
+/*
+ * Put a link-detection script on disk, executable.
+ *
+ * **The most dangerous thing netcfgd writes, and one of the shortest calls.**
+ * A probe is a program netcfgd runs as root on an interval, so the guard is
+ * not here: `ncfg_authz_check_content` refuses the request from anyone but
+ * local root before it reaches a dispatcher, for the reason
+ * `ncfg_config_install_drop_in` gives -- an authorization question answered in
+ * two places is one where the two come to disagree.
+ *
+ * What *is* here is the **name**, because that is not an authorization
+ * question. A name carrying a separator, or `..`, would let a caller choose
+ * the directory instead of netcfgd and write an executable anywhere root can.
+ * `ncfg_wifi_profile_usable_id` is that rule, asked rather than restated.
+ *
+ * **An empty script is refused**, and the reason is the one thing about
+ * probes that is not obvious: a script with nothing in it exits zero, and
+ * netcfgd reads zero as the link being up. So an empty probe is not a probe
+ * that does nothing -- it is a link that is never reported down, for ever.
+ *
+ * `replace` has to be asked for, so that a client overwriting the operator's
+ * own script does it on purpose. `path_out` is the caller's to free where it
+ * is wanted, and NULL asks for nothing.
+ */
+int ncfg_probe_install(const char *config_dir, const char *name, const char *text, int replace,
+    char **path_out, char *err, size_t err_size);
+
 /* Free a list of paths and zero the count. Freeing NULL is nothing. */
 void ncfg_config_paths_free(char **paths, size_t count);
 

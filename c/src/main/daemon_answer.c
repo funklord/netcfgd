@@ -19,10 +19,10 @@
  *   refusal as a request the daemon did not recognise. Two things make this
  *   different from that, and both are properties rather than intentions:
  *
- *     * twenty-four of the thirty-two kinds are answered, including every
- *       wifi verb, `reload`, `status`, `show`, `plan`, `explain`, every list
- *       but the journal's, and everything that writes a drop-in, a secret or
- *       a profile;
+ *     * twenty-five of the thirty-two kinds are answered: every wifi verb,
+ *       `reload`, `status`, `show`, `plan`, `explain`, every listing, and
+ *       everything that writes a drop-in, a secret, a profile or a probe
+ *       script;
  *     * every other kind is refused with a sentence that **names the request
  *       and says what is missing**, so it cannot be read as "unrecognised".
  *       `ncfg_main_answer_unported` is that table, reachable on its own so
@@ -30,7 +30,7 @@
  *       remembered.
  *
  *   The refusals are not a policy decision either: nothing in `c/src/` encodes
- *   a `journal` response, because `proto.h` decodes every
+ *   a `journal` response -- which is what an *apply* answers with, because `proto.h` decodes every
  *   response and encodes none and the encoders belong beside the requests that
  *   produce them. When one lands, one row of the table becomes an arm --
  *   `status` and `document` are the two that have, and `daemon.h` has them.
@@ -163,10 +163,6 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`monitor` is taken by the control socket itself, which hands the "
 		    "connection to the event stream; reaching this is a bug in the server "
 		    "rather than in the request";
-	case NCFG_PROTO_REQ_PROBE_PUT:
-		return "this build of netcfgd cannot write a probe drop-in: the writer that "
-		    "renders a `probe` block is not ported. `ncfg config put` writes the same "
-		    "file where a caller composes the block itself";
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
@@ -217,6 +213,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_PROBE_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
+	case NCFG_PROTO_REQ_PROBE_PUT:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -271,6 +268,43 @@ static int answer_config_put(ncfg_main_desk_t *desk, const ncfg_proto_put_t *put
 	}
 	wrote = ncfg_config_install_drop_in(desk->state->paths.config, desk->state->paths.factory,
 	    name, text, put->replace ? 1 : 0, NULL, &denied, err, err_size);
+	free(text);
+	if (!wrote) {
+		return 0;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+/*
+ * Put a link-detection script on disk.
+ *
+ * **The privilege question is not asked here and that is deliberate.**
+ * `ncfg_authz_check_content` refuses this request from anyone but local root
+ * before it reaches this dispatcher, because a probe is a program netcfgd runs
+ * as root on an interval -- and an authorization question answered in two
+ * places is one where the two come to disagree. By the time execution is here
+ * the answer is yes.
+ *
+ * The ceiling is a configuration file's rather than a credential's: a probe is
+ * a script somebody wrote, and `NCFG_CONFIG_FILE_MAX` is the number this port
+ * already reluctantly picked for "a file a person edits".
+ */
+static int answer_probe_put(ncfg_main_desk_t *desk, const ncfg_proto_put_t *put,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	char  name[NAME_MAX_BYTES];
+	char *text;
+	int   wrote;
+
+	if (!name_of(put->name, "probe name", name, sizeof(name), err, err_size)) {
+		return 0;
+	}
+	text = text_of(put->text, "probe script", (size_t)NCFG_CONFIG_FILE_MAX, err, err_size);
+	if (!text) {
+		return 0;
+	}
+	wrote = ncfg_probe_install(desk->state->paths.config, name, text, put->replace ? 1 : 0,
+	    NULL, err, err_size);
 	free(text);
 	if (!wrote) {
 		return 0;
@@ -926,6 +960,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_probe_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_MODEM_LIST:
 		return answer_modem_list(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_PROBE_PUT:
+		return answer_probe_put(desk, &request->u.put, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -967,7 +1003,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
 	case NCFG_PROTO_REQ_MONITOR:
-	case NCFG_PROTO_REQ_PROBE_PUT:
 	case NCFG_PROTO_REQ_COUNT:
 	default:
 		ncfg_error_set(err, err_size,
