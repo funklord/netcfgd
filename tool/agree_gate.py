@@ -75,16 +75,25 @@ what lets the *words* be compared without pinning the line breaks.
 AND THE VERBS THAT ONLY READ
 
 `--help`, `--version`, `control show`, `profile get` and `profile list` print
-and change nothing, so they are compared as text and nothing else. The help is
-the one a person actually depends on: it is the contract somebody reads before
-they type, and it is maintained by hand on the C side.
+and change nothing, so they are compared as text and as an exit status. The
+help is the one a person actually depends on: it is the contract somebody reads
+before they type, and it is maintained by hand on the C side.
+
+Most of that list is **argument handling** -- a verb with no subcommand, a flag
+nobody defined, a name that cannot be one, a count that is not a number. It is
+a wide surface, an easy one for two implementations to drift on, and none of it
+needs a machine. Each runs against a copy of a configuration directory, because
+a mistake here -- a verb that writes where this expected it to print -- must not
+reach the tree.
 
 TWO CASES WHERE THE TEXT IS *REQUIRED* TO DIFFER
 
-`ncfg reset` diverges in two ways that 0263 records with its reasons -- the C
+`ncfg reset` diverges in three ways that 0263 records with its reasons -- the C
 says `would remove` before and `removed` after where the Rust prints the whole
 list under `removed` and *then* runs the loop that removes, and its note says
-"the next reconcile or apply" where the Rust says "the next apply". Those cases
+"the next reconcile or apply" where the Rust says "the next apply", and it
+refuses a positional argument where the Rust's dispatch drops one -- so
+`ncfg reset office --yes` empties the whole configuration there. Those cases
 are marked, and the gate then insists the two **do** differ. So a divergence
 that gets closed is a gate that goes red asking for its own exception to be
 deleted, which is the opposite of what an allow-list does.
@@ -226,13 +235,49 @@ def compare(rust, c, config_dir, expected_to_compile):
 # **Several are pairs, because undoing is the half that goes wrong.** A `rm`
 # that leaves a file behind, or takes one more than it was asked for, shows up
 # only when the directory is compared after both halves have run.
-READ_VERBS = [
-	["--help"],
-	["--version"],
-	["control", "show"],
-	["profile", "get"],
-	["profile", "list"],
+# Invocations that print and change nothing, with whether the two programs are
+# *required* to differ. Most are argument handling: which flags are accepted,
+# what a missing one says, and what a verb does with a word it did not expect.
+# That is a wide surface and an easy one for two implementations to drift on,
+# and none of it needs a machine.
+#
+# They are still run against a copy, because a mistake here -- a verb that
+# writes where this expected it to print -- must not reach the tree.
+READ_CASES = [
+	(["--help"], False),
+	(["--version"], False),
+	(["control", "show"], False),
+	(["profile", "get"], False),
+	(["profile", "list"], False),
+	([], False),
+	(["nonsense"], False),
+	(["--nonsense"], False),
+	(["-h"], False),
+	(["explain"], False),
+	(["explain", "interface"], False),
+	(["explain", "nonsense", "eth0"], False),
+	(["wifi"], False),
+	(["wifi", "connect"], False),
+	(["profile"], False),
+	(["profile", "set"], False),
+	(["profile", "set", "../x"], False),
+	(["config"], False),
+	(["config", "put"], False),
+	(["config", "rm"], False),
+	(["control"], False),
+	(["secret"], False),
+	(["secret", "set"], False),
+	(["wait-online", "notanumber"], False),
+	(["show", "--json", "--nonsense"], False),
+	(["--config-dir"], False),
+	# 0263: the Rust's dispatch drops every positional at `reset`, so
+	# `ncfg reset office --yes` empties the whole configuration. This port
+	# refuses the argument instead.
+	(["reset", "extra"], True),
 ]
+
+# What the reading cases are pointed at. A copy of it is made per case.
+READ_CORPUS = "tests/footprint/etc"
 
 WRITE_CASES = [
 	("config put", "tests/footprint/etc", [
@@ -266,13 +311,43 @@ WRITE_CASES = [
 	]),
 ]
 
-# The cases where 0263 records that the two say different things on purpose.
-# The trees are still compared; only the text is expected to differ, and the
-# gate insists that it does.
-TEXT_DIVERGES = {
-	"reset, dry run",
-	"reset",
+# The places 0263 records the two saying different things on purpose, spelled
+# as the words each program has to still be using.
+#
+# **Each divergence is pinned separately** rather than as "these two differ
+# somehow": `reset` has three of them, and a marker that only asked for one
+# difference would go on passing while two of the three were quietly converged.
+# A fragment that stops appearing is a gate that goes red naming which
+# exception can go.
+REQUIRED_DIFFERENCES = {
+	"reset, dry run": [
+		("rust", "The next apply would remove"),
+		("c", "The next reconcile or apply would remove"),
+	],
+	"reset": [
+		("rust", "The next apply would remove"),
+		("c", "The next reconcile or apply would remove"),
+		# The Rust prints the whole list under `removed` before the loop that
+		# removes; this port says `would remove` first and `removed` as each
+		# file actually goes.
+		("c", "would remove <config>/netcfgd.conf"),
+	],
+	"reset extra": [
+		("rust", "would remove <config>/netcfgd.conf"),
+		("c", "takes no arguments and got"),
+	],
 }
+
+
+def missing_difference(name, rust_said, c_said):
+	"""Which recorded divergence has stopped being one, or None."""
+	for which, fragment in REQUIRED_DIFFERENCES.get(name, []):
+		said = rust_said if which == "rust" else c_said
+		if fragment not in said:
+			return (f"`ncfg {name}`: the {which} program no longer says "
+				f"{fragment!r}. 0263 records that divergence; if it has been "
+				"closed, the exception in this gate can go")
+	return None
 
 WRITE_CASES += [
 	("reset, dry run", "tests/footprint/etc", [
@@ -388,11 +463,10 @@ def compare_writes(rust, c):
 						     os.path.join(work, "rust"))
 			c_said, c_tree = wrote(c, config_dir, steps,
 					       os.path.join(work, "c"))
-		if name in TEXT_DIVERGES:
-			if rust_said == c_said:
-				return (f"`ncfg {name}` now says the same thing in both "
-					"programs; 0263 records why it did not, and the "
-					"exception in this gate can go")
+		if name in REQUIRED_DIFFERENCES:
+			gone = missing_difference(name, rust_said, c_said)
+			if gone:
+				return gone
 		elif rust_said != c_said:
 			return (f"`ncfg {name}` said different things\n"
 				f"    rust: {rust_said[:160]}\n    c   : {c_said[:160]}")
@@ -414,22 +488,32 @@ def compare_writes(rust, c):
 
 def compare_reads(rust, c):
 	"""Returns a sentence where a verb that only reads differs, or None."""
-	for verb in READ_VERBS:
-		with tempfile.TemporaryDirectory() as run_dir:
+	for verb, must_differ in READ_CASES:
+		with tempfile.TemporaryDirectory() as work:
+			copy = os.path.join(work, "etc")
+			run_dir = os.path.join(work, "run")
+			shutil.copytree(READ_CORPUS, copy)
+			os.makedirs(run_dir, exist_ok=True)
 			said = []
 			for program in (rust, c):
 				result = subprocess.run(
-					[program] + verb + ["--config-dir", WRITE_CASES[0][1],
+					[program] + verb + ["--config-dir", copy,
 							    "--run-dir", run_dir],
 					capture_output=True,
 					text=True,
 					timeout=120,
 					check=False,
 				)
-				said.append((result.returncode,
-					     (result.stdout + result.stderr).replace(run_dir, "<run>")))
-		if said[0] != said[1]:
-			return (f"`ncfg {' '.join(verb)}` differs\n"
+				text = (result.stdout + result.stderr)
+				text = text.replace(copy, "<config>").replace(run_dir, "<run>")
+				said.append((result.returncode, text))
+		spelled = " ".join(verb) or "(no verb)"
+		if must_differ:
+			gone = missing_difference(spelled, said[0][1], said[1][1])
+			if gone:
+				return gone
+		elif said[0] != said[1]:
+			return (f"`ncfg {spelled}` differs\n"
 				f"    rust: {said[0][1].strip()[:160]}\n"
 				f"    c   : {said[1][1].strip()[:160]}")
 	return None
@@ -498,7 +582,7 @@ def main():
 	      f"programs to the same document and written back as the same profile, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
 	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
-	      f"directory behind, and {len(READ_VERBS)} verb(s) that only read")
+	      f"directory behind, and {len(READ_CASES)} invocation(s) that only read")
 	return 0
 
 

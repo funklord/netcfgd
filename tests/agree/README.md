@@ -19,12 +19,18 @@ behind: the files, their contents and their **permissions**. The last matters
 most for `secret set`: a comparison of contents alone passes a program that
 wrote the right passphrase into a world-readable file.
 
-Two cases are marked as *required to differ*: `ncfg reset` says `would remove`
-before and `removed` after where the Rust prints the whole list under `removed`
-and then runs the loop that removes, and its note says "the next reconcile or
-apply" where the Rust says "the next apply". 0263 records both with their
-reasons, so the gate insists the two still differ -- a divergence that gets
-closed makes the gate ask for its own exception to be deleted.
+Three of `ncfg reset`'s divergences are marked as *required*: it says `would
+remove` before and `removed` after where the Rust prints the whole list under
+`removed` and then runs the loop that removes; its note says "the next
+reconcile or apply" where the Rust says "the next apply"; and it refuses a
+positional argument where the Rust's dispatch drops one, so `ncfg reset office
+--yes` empties the whole configuration there. 0263 records all three with their
+reasons.
+
+**Each is pinned by the words it produces**, rather than as "these two differ
+somehow". A marker that asked only for *a* difference would go on passing while
+two of the three were quietly converged; a fragment that stops appearing makes
+the gate go red naming which exception can be deleted.
 
 `wifi add` is deliberately not among them. It activates a radio, so what it
 writes depends on which radios the machine running the gate has, and a check
