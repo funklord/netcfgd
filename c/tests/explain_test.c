@@ -567,7 +567,7 @@ static void an_empty_table_is_said_rather_than_left_to_be_noticed(void)
 	memset(&empty, 0, sizeof(empty));
 	explanation = ncfg_explain(&subject, document, observed, &empty, message, sizeof(message));
 	if (explanation) {
-		check(says(explanation, "provenance", "records no file positions"),
+		check(says(explanation, "provenance", "table of file positions"),
 		    "an explanation that could locate nothing says so");
 		check(explanation->count > 0u &&
 		    strcmp(explanation->facts[0].topic, "provenance") == 0,
@@ -728,7 +728,7 @@ static void the_compilers_own_table_is_the_one_explain_reads(void)
 	 */
 	explanation = ncfg_explain(&subject, document, observed, &empty, message, sizeof(message));
 	if (explanation) {
-		check(says(explanation, "provenance", "records no file positions"),
+		check(says(explanation, "provenance", "table of file positions"),
 		    "and the same document with no table still says it can locate nothing");
 		check(!names_source(explanation, "/etc/netcfgd/conf.d/10-lan.conf:4:1"),
 		    "  and names no file, having been given none");

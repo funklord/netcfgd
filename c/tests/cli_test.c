@@ -1719,6 +1719,20 @@ static void the_sentence_that_stopped_being_true_is_gone(void)
 	}
 	check(strstr(source, "the netlink dump the observer is built from") == NULL,
 	    "no arm still says it is waiting for the observer, which landed");
+	/*
+	 * And the second, which cost an answer rather than only a sentence.
+	 * `explain` said 0263 did not port `compile_with_provenance` and handed
+	 * `ncfg_explain` nothing, so every line declined to name a file -- while
+	 * the compiler had been recording positions for waves. The sentence and
+	 * the argument are asserted together on purpose: deleting the comment
+	 * without passing the table would leave the command exactly as wrong and
+	 * this check green (project.md 10.208).
+	 */
+	check(strstr(source, "does not port `compile_with_provenance`") == NULL,
+	    "no arm still says the compiler records no positions, which it does");
+	check(strstr(source, "&provenance, err, sizeof(err))") != NULL &&
+	    strstr(source, "ncfg_explain(&subject, document, observed, &provenance") != NULL,
+	    "  and `explain` compiles with a positions table and hands it on");
 	/* The vacuous-pass guard: a file that failed to open reads as a file with
 	 * nothing objectionable in it. */
 	check(strstr(source, "not in this wave") != NULL,

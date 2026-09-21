@@ -630,9 +630,15 @@ static int command_simple(const ncfg_cli_options_t *options, ncfg_proto_request_
  * `apply` needs the scripts on disk; every other one is read-only and used to
  * write them anyway, because the compiler did it on their behalf. `ncfg plan`'s
  * own help says it changes nothing.
+ *
+ * **`provenance` is NULL for every caller but `explain`.** A positions table is
+ * the one thing here a caller either wants entirely or not at all, and one
+ * nobody reads is a second structure that has to go on agreeing with the
+ * document. Zeroed by the caller, filled in here, and freed by the caller
+ * however the compile ended.
  */
 static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *run_dir,
-    size_t run_dir_size, char *err, size_t err_size)
+    size_t run_dir_size, ncfg_provenance_t *provenance, char *err, size_t err_size)
 {
 	char                  config_dir[NCFG_CLI_TEXT_MAX];
 	char                  factory_dir[NCFG_CLI_TEXT_MAX];
@@ -655,8 +661,8 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 		ncfg_config_sources_free(&sources);
 		return NULL;
 	}
-	document = ncfg_config_compile(&sources, ncfg_pending_hooks_sink(pending), &diags, err,
-	    err_size);
+	document = ncfg_config_compile_with_provenance(&sources, ncfg_pending_hooks_sink(pending),
+	    provenance, &diags, err, err_size);
 	if (!document) {
 		size_t at;
 
@@ -696,7 +702,7 @@ static int command_show(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
 	char             err[NCFG_ERROR_MAX];
-	ncfg_document_t *document = compile_config(options, run_dir, sizeof(run_dir), err,
+	ncfg_document_t *document = compile_config(options, run_dir, sizeof(run_dir), NULL, err,
 	    sizeof(err));
 	int              code;
 
@@ -781,7 +787,7 @@ static int command_status(const ncfg_cli_options_t *options)
 	ncfg_observed_t *observed = NULL;
 	int              code = NCFG_CLI_EXIT_OK;
 
-	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
 	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
 		return fail(err);
@@ -940,7 +946,7 @@ static int command_plan(const ncfg_cli_options_t *options)
 	ncfg_plan_t        *plan;
 	int                 code = NCFG_CLI_EXIT_OK;
 
-	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
 	if (!document) {
 		return fail(err);
 	}
@@ -993,14 +999,17 @@ static int command_plan(const ncfg_cli_options_t *options)
  * command somebody reaches for when things are broken -- which is when a daemon
  * is least likely to be running.
  *
- * **The provenance table handed in is empty, and that is not an omission being
- * papered over.** 0263 does not port `compile_with_provenance`: nothing in
- * `src/compile/` records an entry, because a side table nobody reads is a
- * second thing that has to go on agreeing with the document. So every lookup
- * misses, and `ncfg_explain` says so as the first fact of its own output rather
- * than quietly naming no files -- which a reader could not tell from a
- * configuration that has nothing to name. The day lowering records a table this
- * passes it instead, and the notice disappears by itself.
+ * **The compile here is the one that carries a positions table**, which is the
+ * whole difference between "because the configuration says so" and "because
+ * `/etc/netcfgd/conf.d/10-lan.conf` line 4 says so". Every other verb passes
+ * NULL: a side table nobody reads is a second thing that has to go on agreeing
+ * with the document.
+ *
+ * It is freed whether or not the compile succeeded, because a compile that
+ * stopped part way still recorded what it had reached -- and where it produced
+ * nothing at all, `ncfg_explain` says so as the first fact of its own output
+ * rather than quietly naming no files, which a reader could not tell from a
+ * configuration with nothing to name.
  */
 static int command_explain(const ncfg_cli_options_t *options, const char **positional,
     size_t count)
@@ -1011,8 +1020,11 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 	ncfg_document_t     *document;
 	ncfg_observed_t     *observed = NULL;
 	ncfg_explanation_t  *explanation;
+	ncfg_provenance_t    provenance;
 	ncfg_buf_t           rendered;
 	int                  wrote;
+
+	memset(&provenance, 0, sizeof(provenance));
 
 	memset(&subject, 0, sizeof(subject));
 	if (count == 2 && strcmp(positional[0], "interface") == 0) {
@@ -1037,16 +1049,19 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 	 * observation half of the answer is given anyway -- it is worth having on
 	 * its own, and this is the command for the moment it is all there is.
 	 */
-	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), &provenance, err,
+	    sizeof(err));
 	if (!document) {
 		(void)fprintf(stderr, "ncfg: the configuration does not compile, so this "
 		    "explains what the machine is doing and not what was asked for\n");
 	}
 	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
+		ncfg_provenance_free(&provenance);
 		ncfg_document_free(document);
 		return fail(err);
 	}
-	explanation = ncfg_explain(&subject, document, observed, NULL, err, sizeof(err));
+	explanation = ncfg_explain(&subject, document, observed, &provenance, err, sizeof(err));
+	ncfg_provenance_free(&provenance);
 	if (!explanation) {
 		ncfg_observed_free(observed);
 		ncfg_document_free(document);
@@ -1126,7 +1141,7 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
 			    (int)NCFG_CLI_TEXT_MAX, positional[0]);
 		}
 	}
-	document = compile_config(options, run_dir, sizeof(run_dir), err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
 
 	if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) {
 		ncfg_document_free(document);

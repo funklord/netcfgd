@@ -243,6 +243,28 @@ ncfg_document_t *ncfg_config_compile(const ncfg_config_sources_t *sources,
     const ncfg_hook_sink_t *hooks, ncfg_lower_diags_t *diags, char *err, size_t err_size);
 
 /*
+ * The same compile, with the side table of where each field was written.
+ *
+ * `provenance` is zeroed by the caller and filled in here, and is the caller's
+ * to free with `ncfg_provenance_free` however the compile ends -- a compile
+ * that failed part way still recorded the positions it had reached, and
+ * leaving them unreachable would be a leak on the path that already went
+ * wrong.
+ *
+ * **Separate from the call above rather than an argument to it**, which is the
+ * Rust's arrangement and `lower.h`'s: almost every caller wants a document and
+ * nothing else, and a positions table nobody reads is a second thing that has
+ * to go on agreeing with the document. `ncfg explain` is the one caller that
+ * wants it -- it answers "because `conf.d/10-lan.conf` line 4 says so" -- and
+ * this is how it asks.
+ *
+ * A set of no files fills in nothing and is not a failure, exactly as above.
+ */
+ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t *sources,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size);
+
+/*
  * Every config file in one directory, in the order the loader would read them.
  *
  * The list `ncfg reset` removes, and the list it prints. Deliberately the same

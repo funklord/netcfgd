@@ -38,6 +38,7 @@
 #include "ncfg/document.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
+#include "ncfg/state.h"
 
 #include "testdir.h"
 
@@ -1224,6 +1225,73 @@ static void saving(const char *root)
  * The defaults, read rather than written to
  * ------------------------------------------------------------------------ */
 
+/*
+ * The positions table, filled in by the compile a command actually runs.
+ *
+ * **The loader is where this had to be checked, not the compiler.**
+ * `explain_test.c` already drives `ncfg_compile_with_provenance` on a string
+ * and proves the table locates what it should; what had no caller was the path
+ * from a *directory* to that call, so `ncfg explain` compiled through
+ * `ncfg_config_compile` and handed `ncfg_explain` nothing. Every line of its
+ * output then declined to name a file, and the notice at the top said the
+ * compiler recorded no positions -- which had stopped being true several waves
+ * earlier (project.md 10.208).
+ *
+ * Two files, because the name in an entry is the thing a single-file fixture
+ * cannot get wrong: a table that recorded the position but lost which file it
+ * came from would still locate everything, and would send a reader to the
+ * wrong one.
+ */
+static void positions(const char *root)
+{
+	const file_t          files[] = {
+		{ "netcfgd.conf", "device eth0 {\n\tmtu = 1400\n}\n" },
+		{ "conf.d/10-lan.conf", "interface eth0 {\n\tconfig = \"10.0.0.1/24\"\n}\n" }
+	};
+	const char                    *dir = tree(root, "positions", files, 2u);
+	ncfg_config_sources_t          sources = { 0 };
+	ncfg_provenance_t              provenance;
+	ncfg_document_t               *document;
+	const ncfg_provenance_entry_t *interface;
+	const ncfg_provenance_entry_t *mtu;
+	char                           err[NCFG_ERROR_MAX];
+	char                           where[256];
+
+	memset(&provenance, 0, sizeof(provenance));
+	err[0] = '\0';
+	if (!ncfg_config_load(dir, &sources, err, sizeof(err))) {
+		check(0, "the positions fixture loads");
+		ncfg_config_sources_free(&sources);
+		return;
+	}
+	document = ncfg_config_compile_with_provenance(&sources, ncfg_hook_sink_unwritten(),
+	    &provenance, NULL, err, sizeof(err));
+	check(document != NULL, "a configuration directory compiles with its positions beside it");
+	check(provenance.count > 0u, "  and the table is not empty, which it was for every "
+	    "caller that went through the loader");
+	interface = ncfg_provenance_lookup(&provenance, "interfaces[eth0]");
+	mtu = ncfg_provenance_lookup(&provenance, "interfaces[eth0].mtu");
+	where[0] = '\0';
+	if (interface) {
+		ncfg_provenance_location(interface, where, sizeof(where));
+	}
+	check(interface && strstr(where, "10-lan.conf:1:1") != NULL,
+	    "  the interface block is located in the drop-in that declares it");
+	where[0] = '\0';
+	if (mtu) {
+		ncfg_provenance_location(mtu, where, sizeof(where));
+	}
+	/* The MTU is written in the *device* block of the other file, and the
+	 * document carries it on the interface -- so a table that guessed the
+	 * position from the document would name the wrong file. */
+	check(mtu && strstr(where, "netcfgd.conf:2:2") != NULL,
+	    "  and the mtu in the file that writes it, which is not the one it ends up in");
+
+	ncfg_provenance_free(&provenance);
+	ncfg_document_free(document);
+	ncfg_config_sources_free(&sources);
+}
+
 static void the_defaults(void)
 {
 	char out[256];
@@ -1256,6 +1324,7 @@ int main(void)
 	writing(root);
 	the_fold(root);
 	saving(root);
+	positions(root);
 	the_defaults();
 
 	remove_tree(root);
