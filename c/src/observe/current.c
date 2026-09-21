@@ -300,6 +300,16 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	    !ncfg_observe_advertised(observed, run_dir, err, err_size) ||
 	    !ncfg_observe_currency(observed, run_dir, secrets, desired, err, err_size) ||
 	    /*
+	     * **After the record has been read and before anything reads
+	     * `observed.dns`.** This is the one pass that takes an answer away: it
+	     * empties the delivered scopes where the file no longer holds what
+	     * they say netcfgd put there, and the planner reads that list as
+	     * "already delivered". Running it later would leave a pass concluding
+	     * from a delivery that is not on the machine any more.
+	     */
+	    !ncfg_observe_resolv_currency(observed, roots ? roots->resolv_conf : NULL, err,
+	    err_size) ||
+	    /*
 	     * **Last of the record readers, because it is the one that waits.**
 	     * Every pass before it reads a file; this opens a control socket per
 	     * running access point and gives each one `NCFG_SUPPLICANT_IMPATIENT_MS`

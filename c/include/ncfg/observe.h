@@ -32,18 +32,16 @@
  *   global state, which is radio.h's argument and is why that module already
  *   takes its root as an argument.
  *
- * WHAT THIS PORT DOES NOT CARRY YET, SAID OUT LOUD
+ * WHAT THIS PORT DID NOT CARRY, AND WHAT CLOSED IT
  *   `host.rs`'s `augment` calls eleven passes by name, beside the four small
  *   readers this port has -- the sysctls, the hostname, rfkill and Bluetooth --
- *   and `derive`. **This entry said for several waves that six of the eleven
- *   were deferred, while naming nine and while every one of them was.**
- *   Counted against the tree instead: seven are deferred, four are here, and
- *   the reason most of them are deferred has now moved twice -- once because
- *   the blockers that were written down had been overtaken, and once because
- *   the record they actually waited on arrived. Each is named below with what
- *   it waits on **today**, because a list nobody re-checks is worse than none:
- *   it is addressed to somebody who cannot check it (project.md 10.180,
- *   10.182, 10.183).
+ *   and `derive`. **All eleven are here.** This entry said for several waves
+ *   that six of them were deferred while naming nine, then that seven were
+ *   while the body below already said otherwise, and each time the count was
+ *   the part that had gone stale. It is kept as history rather than deleted
+ *   because what each pass waited on is the useful part, and because a list
+ *   nobody re-checks is worse than none -- it is addressed to somebody who
+ *   cannot check it (project.md 10.180, 10.182, 10.183, 10.205, 10.216).
  *
  *     * **Six walk `observed.backends`, and that list is no longer always
  *       empty.** `ask_supplicants`, `read_access_control`, `read_advertised`,
@@ -75,11 +73,15 @@
  *       reads radvd's generated configuration and the two currency questions
  *       digest files, while `read_access_control` and `ask_supplicants` really
  *       do open a control socket. Every pass this header names now exists.
- *     * `read_resolv_currency` walks `observed.dns`, which the record now
- *       carries too -- but only carries: nothing in this build *writes* a
- *       delivered scope into it, because `dns.apply` is the one op that is not
- *       its own effect. `apply.h` has the argument and `dns.h` names the
- *       producer that would close it, a reader of `<run>/dns/`.
+ *     * `read_resolv_currency` walks `observed.dns`, and that list had no
+ *       writer at all for several waves -- `dns.apply` is the one op that is
+ *       not its own effect, so nothing folded a delivery into the record.
+ *       `ncfg_apply_record` takes the delivered scopes now (`apply.h`), and
+ *       this pass landed with the writer for a reason worth keeping: while the
+ *       record was empty the planner re-delivered on every pass, which
+ *       corrected an overwritten resolver **by accident**. Closing the first
+ *       gap removed that accident, so the second had to close in the same
+ *       wave. `ncfg_observe_resolv_currency` is it.
  *
  *   `read_netfilter`, `read_offloads`, `read_wireguard_keys` and
  *   `read_wireguard_currency` **are** ported, as `ncfg_observe_netfilter_from`,
@@ -199,6 +201,18 @@ typedef struct {
 	char class_net[NCFG_OBSERVE_ROOT_MAX];
 	char proc[NCFG_OBSERVE_ROOT_MAX];
 	char sys[NCFG_OBSERVE_ROOT_MAX];
+	/*
+	 * The resolver file to compare a delivery against -- a file rather than a
+	 * root, and here because it is read by an observation and nothing else in
+	 * this struct's family fits it.
+	 *
+	 * **Empty asks nothing**, which is why it is not defaulted where the other
+	 * three are: `ncfg_observe_roots_default` answers "the machine's" for the
+	 * two kernel roots because reading `/proc` tells you about processes, and
+	 * reading this one decides whether netcfgd rewrites the file that says how
+	 * this machine resolves a name. A caller that means the machine's says so.
+	 */
+	char resolv_conf[NCFG_OBSERVE_ROOT_MAX];
 } ncfg_observe_roots_t;
 
 /*
@@ -1302,6 +1316,40 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
  */
 int ncfg_observe_currency(ncfg_observed_t *observed, const char *run_dir,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, char *err,
+    size_t err_size);
+
+/*
+ * Whether the `resolv.conf` netcfgd delivered is still the one on disk.
+ *
+ * **The only pass that can take an answer away.** Every other one adds to the
+ * observation; this one *clears* `observed.dns` -- the whole list -- when the
+ * file does not hold what the record says netcfgd put there. That is the
+ * Rust's behaviour and the reason is the planner's: `observed.dns` is what
+ * says "already delivered", so emptying it is how netcfgd is told to deliver
+ * again, and a per-scope answer would be a lie about which scope was
+ * overwritten. The file is written whole, so it is wrong whole.
+ *
+ * **It became load-bearing the moment the record gained a writer.** While
+ * nothing wrote `owned.json`'s `dns`, the list was empty on every machine and
+ * the planner re-delivered on every pass -- which corrected a resolver
+ * somebody else had overwritten, by accident and at the cost of a `dns.apply`
+ * for ever (project.md 10.205). Now that the record is written, that accident
+ * is gone and this is what notices.
+ *
+ * Only where a delivered scope asks for `write_resolv_conf`: netcfgd owns that
+ * file in that mode and in no other. Under `resolvconf`, `resolved` or a
+ * forwarder, the file belongs to somebody else and comparing it would report
+ * drift netcfgd must not correct.
+ *
+ * **An unreadable file is "different" rather than an error**, which is
+ * deliberate: the file netcfgd owns being gone, or replaced by a symlink into
+ * another daemon's runtime state, are both states that want rewriting.
+ *
+ * `resolv_conf` is the path to compare, with no default here -- an observation
+ * pointed at a scratch tree must not read the machine's resolver, and one that
+ * was given no path says nothing rather than guessing at `/etc`.
+ */
+int ncfg_observe_resolv_currency(ncfg_observed_t *observed, const char *resolv_conf, char *err,
     size_t err_size);
 
 /*
