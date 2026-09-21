@@ -51,6 +51,25 @@ out of it. That is where a configuration neither can write back shows up: the
 determinism fixture states a `qdisc`, which neither renderer can put into
 configuration text, so both refuse it in the same words and write nothing.
 
+AND THE THREE VERBS THAT WRITE
+
+`config put`, `secret set` and `control set` each take something from a caller
+and put it in the configuration directory, and none of them reads the kernel
+either. They are run against one corpus entry rather than all of them -- what
+they write barely depends on what was there, and a gate that is slow is a gate
+somebody runs less often.
+
+`wifi add` is **deliberately not among them**, and the reason is worth writing
+down: it activates a radio, so what it writes depends on which radios this
+machine has. Both programs read the same machine and agreed when this was
+tried by hand, but a check whose fixture is the developer's laptop is one that
+fails for a reason nobody can reproduce.
+
+The text each prints is compared with its whitespace collapsed. The C joins a
+diagnostic onto the sentence that introduces it and the Rust puts it on the
+next line; that is the same rendering divergence as above, and collapsing is
+what lets the *words* be compared without pinning the line breaks.
+
 WHY IT FAILS RATHER THAN SKIPS
 
 A gate that skips when a binary is missing reports success exactly as loudly as
@@ -180,14 +199,63 @@ def compare(rust, c, config_dir, expected_to_compile):
 	return None
 
 
+# One corpus entry, three verbs, and what each is given on standard input.
+# Named rather than generated: a list a person reads is a list a person can
+# argue with.
+WRITE_CORPUS = "tests/footprint/etc"
+WRITE_VERBS = [
+	("config put", ["config", "put", "lab"],
+	 "device lo {\n\tmanaged = false\n}\n"),
+	("config put, refused", ["config", "put", "lab"],
+	 "interface lo {\n\tmanaged = false\n}\n"),
+	("secret set", ["secret", "set", "lab"], "hunter2\n"),
+	("control set", ["control", "set", "--observe", "any"], ""),
+]
+
+
+# One place the two programs are known to differ, with both sides written out.
+#
+# `profile save`'s snapshot is the only configuration file the Rust writes with
+# `fs::write` rather than through its own `write_atomically(.., 0o644)`, so it
+# lands with the process umask -- 0664 under this tree's 0002 -- and without the
+# temporary-and-rename every other file in that module gets. The C writes 0644
+# atomically like everything else. Recorded rather than fixed: the Rust is what
+# this port is being compared against, and a defect in it is a finding rather
+# than an edit (project.md 10.221).
+#
+# Written as an exact pair so that it stops being an exception the moment
+# either side changes: a Rust that starts writing 0644 makes the two equal and
+# never reaches here, and a C that stops writing 0644 fails.
+KNOWN_MODE_DIVERGENCE = {
+	("profile/agree/00-saved.conf", 0o664, 0o644),
+}
+
+
+def known_divergence(name, rust_mode, c_mode):
+	"""Whether this is the one difference that is written down."""
+	return (name, rust_mode, c_mode) in KNOWN_MODE_DIVERGENCE
+
+
+def words(text):
+	"""The text with its whitespace collapsed, for `WRITE_VERBS`' reason."""
+	return " ".join(text.split())
+
+
 def tree(root):
-	"""Every file under `root`, as {relative path: bytes}."""
+	"""Every file under `root`, as {relative path: (permissions, bytes)}.
+
+	**The permissions are compared as well as the contents**, and that is not
+	tidiness: `ncfg secret set` writes a credential and the mode is the whole
+	of what keeps it from being world-readable. A comparison of contents alone
+	passes a program that wrote the right passphrase into the wrong file.
+	"""
 	found = {}
 	for directory, _, names in os.walk(root):
 		for name in names:
 			path = os.path.join(directory, name)
 			with open(path, "rb") as handle:
-				found[os.path.relpath(path, root)] = handle.read()
+				found[os.path.relpath(path, root)] = (
+					os.stat(path).st_mode & 0o777, handle.read())
 	return found
 
 
@@ -213,7 +281,57 @@ def saved(program, config_dir, work):
 	# The scratch path is in the output -- "wrote <copy>/profile/agree/..." --
 	# and it differs between the two runs by construction.
 	said = (result.stdout + result.stderr).replace(copy, "<config>")
+	said = said.replace(run_dir, "<run>")
 	return said, tree(copy)
+
+
+def wrote(program, config_dir, verb, stdin, work):
+	"""One writing verb over a copy of `config_dir`. Returns (said, tree)."""
+	copy = os.path.join(work, "etc")
+	run_dir = os.path.join(work, "run")
+	shutil.copytree(config_dir, copy)
+	os.makedirs(run_dir, exist_ok=True)
+	result = subprocess.run(
+		[program] + verb + ["--config-dir", copy, "--run-dir", run_dir],
+		input=stdin,
+		capture_output=True,
+		text=True,
+		timeout=120,
+		check=False,
+	)
+	# Both scratch paths, because a message can name either -- "nothing is
+	# listening on <run>/netcfgd.sock, so this was written directly" names the
+	# run directory, and the two programs are given different ones on purpose.
+	said = (result.stdout + result.stderr).replace(copy, "<config>")
+	said = said.replace(run_dir, "<run>")
+	return words(said), tree(copy)
+
+
+def compare_writes(rust, c):
+	"""Returns a sentence where a writing verb differs, or None."""
+	for name, verb, stdin in WRITE_VERBS:
+		with tempfile.TemporaryDirectory() as work:
+			rust_said, rust_tree = wrote(rust, WRITE_CORPUS, verb, stdin,
+						     os.path.join(work, "rust"))
+			c_said, c_tree = wrote(c, WRITE_CORPUS, verb, stdin,
+					       os.path.join(work, "c"))
+		if rust_said != c_said:
+			return (f"`ncfg {name}` said different things\n"
+				f"    rust: {rust_said[:160]}\n    c   : {c_said[:160]}")
+		if set(rust_tree) != set(c_tree):
+			only_rust = sorted(set(rust_tree) - set(c_tree))
+			only_c = sorted(set(c_tree) - set(rust_tree))
+			return (f"`ncfg {name}` wrote different files "
+				f"(only rust: {only_rust}, only c: {only_c})")
+		for leaf in sorted(rust_tree):
+			rust_mode, rust_bytes = rust_tree[leaf]
+			c_mode, c_bytes = c_tree[leaf]
+			if rust_mode != c_mode and not known_divergence(leaf, rust_mode, c_mode):
+				return (f"`ncfg {name}` wrote {leaf} with mode "
+					f"{rust_mode:04o} and {c_mode:04o}")
+			if rust_bytes != c_bytes:
+				return f"`ncfg {name}` wrote a different {leaf}"
+	return None
 
 
 def compare_save(rust, c, config_dir):
@@ -231,7 +349,12 @@ def compare_save(rust, c, config_dir):
 		return (f"{config_dir}: `profile save` wrote different files "
 			f"(only rust: {only_rust}, only c: {only_c})")
 	for name in sorted(rust_tree):
-		if rust_tree[name] != c_tree[name]:
+		rust_mode, rust_bytes = rust_tree[name]
+		c_mode, c_bytes = c_tree[name]
+		if rust_mode != c_mode and not known_divergence(name, rust_mode, c_mode):
+			return (f"{config_dir}: `profile save` wrote {name} with mode "
+				f"{rust_mode:04o} and {c_mode:04o}")
+		if rust_bytes != c_bytes:
 			return f"{config_dir}: `profile save` wrote a different {name}"
 	return None
 
@@ -259,14 +382,18 @@ def main():
 			problem = compare_save(rust, C, config_dir)
 			if problem:
 				failures.append(problem)
+	problem = compare_writes(rust, C)
+	if problem:
+		failures.append(problem)
 	if failures:
 		for problem in failures:
 			print(f"agree-gate: {problem}", file=sys.stderr)
 		return 1
 	compiling = sum(1 for _, ok in present if ok)
 	print(f"agree-gate: {len(present)} configuration(s), {compiling} compiled by both "
-	      f"programs to the same document and written back as the same profile, and "
-	      f"{len(present) - compiling} refused by both in the same words")
+	      f"programs to the same document and written back as the same profile, "
+	      f"{len(present) - compiling} refused by both in the same words, and "
+	      f"{len(WRITE_VERBS)} writing verb(s) that left the same directory behind")
 	return 0
 
 
