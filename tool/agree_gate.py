@@ -24,10 +24,17 @@ the second half of that sentence.
 WHAT A REFUSAL IS COMPARED ON
 
 A configuration that does not compile has to be refused by both, at the same
-file, line and column. The *text* after that is deliberately not compared: the
-C joins a diagnostic's help onto one line and the Rust prints it as a `help:`
-continuation, which is a rendering difference recorded in 0263 rather than a
-disagreement about the configuration.
+file, line and column, saying the same thing. The C joins a diagnostic's help
+onto one line where the Rust prints it as a `help:` continuation -- 0263
+records that -- so the Rust's first line is a *prefix* of the C's, and that is
+the comparison. It is deliberately strict: a message reworded in one program is
+a message that has to be reworded in the other, and finding that out here is
+better than finding it out from somebody who moved between the two.
+
+One case has no position in either program, and it is in the corpus for that:
+an include naming a file which is not there is refused by the loader, before
+anything is parsed. What is compared there is that both refused and neither
+invented a line.
 
 WHY IT FAILS RATHER THAN SKIPS
 
@@ -54,7 +61,13 @@ CORPUS = [
 	("tests/determinism", True),
 	("tests/footprint/etc", True),
 	("packaging/profile/offline", True),
-	("tests/agree/refused", False),
+	("tests/agree/wrong-block", False),
+	("tests/agree/unknown-key", False),
+	("tests/agree/bad-value", False),
+	("tests/agree/defined-twice", False),
+	("tests/agree/unclosed", False),
+	("tests/agree/override-alone", False),
+	("tests/agree/include-missing", False),
 ]
 
 
@@ -72,20 +85,28 @@ def run(program, config_dir):
 	return result.returncode, result.stdout, result.stderr
 
 
-def location(text):
-	"""The `file:line:column` a diagnostic names, or None.
+def first_diagnostic(text):
+	"""The first `ncfg: ` line, and the `file:line:column` in it if there is one.
 
-	The first such line only: a compile reports every diagnostic it found, and
-	what is being compared here is where the two programs stopped agreeing with
-	the operator -- not how many things they had to say about it.
+	The first only: a compile reports every diagnostic it found, and what is
+	being compared is where the two programs stopped agreeing with the operator
+	-- not how many things they then had to say about it.
+
+	A refusal with no position is a real answer rather than a parse failure
+	here: an include that names a file which is not there is refused by the
+	*loader*, before anything has been parsed, so there is no line to point at
+	in either program.
 	"""
 	for line in text.split("\n"):
 		if not line.startswith("ncfg: "):
 			continue
-		parts = line[len("ncfg: "):].split(":")
+		body = line[len("ncfg: "):]
+		parts = body.split(":")
+		where = None
 		if len(parts) >= 3 and parts[1].isdigit() and parts[2].isdigit():
-			return ":".join(parts[:3])
-	return None
+			where = ":".join(parts[:3])
+		return body, where
+	return None, None
 
 
 def compare(rust, c, config_dir, expected_to_compile):
@@ -101,12 +122,36 @@ def compare(rust, c, config_dir, expected_to_compile):
 		if expected_to_compile:
 			return (f"{config_dir}: neither program compiled a directory that "
 				f"should: {rust_err.strip().splitlines()[:1]}")
-		here, there = location(rust_err), location(c_err)
-		if here is None or there is None:
-			return (f"{config_dir}: a refusal named no position "
-				f"(rust {here}, c {there})")
+		rust_said, here = first_diagnostic(rust_err)
+		c_said, there = first_diagnostic(c_err)
+		if rust_said is None or c_said is None:
+			return (f"{config_dir}: a refusal said nothing that begins `ncfg: ` "
+				f"(rust {rust_said!r}, c {c_said!r})")
+		if (here is None) != (there is None):
+			# **No fixture reaches this arm**, and that is the fact it exists to
+			# watch: today every input in the corpus makes both programs name a
+			# position or neither. Removing it therefore turns nothing red,
+			# which is said here rather than left for somebody to discover by
+			# aiming a sabotage at it.
+			return (f"{config_dir}: one program named a position and the other "
+				f"did not (rust {here}, c {there})")
+		if here is None:
+			# Both refused before parsing. Agreeing about *that* is the whole
+			# of what can be compared, and it is worth comparing: a program
+			# that read a missing include as an empty file would compile a
+			# configuration the other one refuses.
+			return None
 		if here != there:
 			return f"{config_dir}: refused at {here} by one and {there} by the other"
+		if not c_said.startswith(rust_said):
+			# **The C's line is the Rust's plus the help.** 0263 records that
+			# divergence: the C joins a diagnostic's help onto one line and the
+			# Rust prints it as a `help:` continuation. So the Rust's sentence
+			# is a prefix of the C's, and a reworded message in one program is
+			# a message that has to be reworded in the other -- which is a
+			# decision to take rather than a difference to discover later.
+			return (f"{config_dir}: the two refusals do not say the same thing\n"
+				f"    rust: {rust_said}\n    c   : {c_said}")
 		return None
 	if not expected_to_compile:
 		return f"{config_dir}: expected not to compile, and both programs compiled it"
@@ -143,7 +188,8 @@ def main():
 		return 1
 	compiling = sum(1 for _, ok in present if ok)
 	print(f"agree-gate: {len(present)} configuration(s), {compiling} compiled by both "
-	      "programs to the same document and the rest refused at the same position")
+	      f"programs to the same document and {len(present) - compiling} refused by both "
+	      "in the same words")
 	return 0
 
 
