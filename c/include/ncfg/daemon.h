@@ -64,9 +64,11 @@
 #include "ncfg/ast.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/config.h"
 #include "ncfg/document.h"
 #include "ncfg/lex.h"
 #include "ncfg/observed.h"
+#include "ncfg/secrets.h"
 #include "ncfg/portal.h"
 #include "ncfg/process.h"
 #include "ncfg/proto.h"
@@ -494,6 +496,36 @@ int ncfg_daemon_document_encode(const ncfg_document_t *desired, const char *diag
  */
 int ncfg_daemon_plan_encode(const ncfg_plan_t *plan, ncfg_buf_t *out, char *err,
     size_t err_size);
+
+/*
+ * Every credential name this machine knows about, as the `secrets` response.
+ *
+ * The entries are `ncfg_secret_list`'s and are borrowed. **Nothing here reads a
+ * value**, which is that call's own property and is what makes this answerable
+ * to a client at all: the store is consulted for whether a file exists and for
+ * nothing else.
+ *
+ * `used_by` is **omitted rather than empty** where nothing refers to a name,
+ * because the two are different answers: a machine whose configuration does
+ * not compile can say which credentials it holds and cannot say who wants
+ * them, and an empty list would claim the second.
+ *
+ * An empty list of entries is an answer -- a machine with no credentials --
+ * and is written as one.
+ */
+int ncfg_daemon_secrets_encode(const ncfg_secret_entry_t *entries, size_t count,
+    ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * The profiles this machine has and the one in force, as the `profiles`
+ * response.
+ *
+ * `chosen` is **omitted where none is selected**, which is the common case and
+ * not an error; a client reads its absence as "none" rather than as a name it
+ * has to compare against.
+ */
+int ncfg_daemon_profiles_encode(const ncfg_profile_entry_t *entries, size_t count,
+    const char *chosen, ncfg_buf_t *out, char *err, size_t err_size);
 
 /* ------------------------------------------------------------- the server */
 

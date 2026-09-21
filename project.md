@@ -9515,6 +9515,45 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.211 Two lists whose producers were already here
+
+`secrets` and `profiles`, which are the cheapest two of the responses left:
+`ncfg_secret_list` and `ncfg_profile_list` already existed, tested where they
+live, and what was missing was the envelope. Nineteen of the thirty-two
+request kinds are answered now.
+
+**Both omissions are the whole of the contract.** `used_by` is absent rather
+than empty for a credential nothing refers to, and `chosen` is absent where no
+profile is selected. An empty value in either place is a *claim* -- "nothing
+wants this credential", "a profile called nothing" -- where the truth is
+"there is nothing to say", and the difference matters most on the machine that
+most needs the answer: one whose configuration has stopped compiling can still
+say which credentials it holds and cannot say who wants them.
+`ncfg_secret_list` takes a NULL document for exactly that case, so the arm
+passes `state->desired` and gets the weaker answer by itself.
+
+**`chosen` comes from the compiled document, not from the directory.** That is
+the distinction `cli/profile.c` exists to preserve: the selection on disk and
+the selection netcfgd is running differ for as long as it takes somebody to
+edit a file without reloading, and the answer a client wants is the second.
+The sabotage for it passes NULL and the check goes red.
+
+**Nothing in either answer reads a credential's value.** That is
+`ncfg_secret_list`'s own property -- the store is consulted for whether a file
+exists and for nothing else -- and it is what makes a credential list a thing
+a client may be told at all.
+
+**One thing the witness does not promise.** The `profiles` sample lists the
+shipped profile first and `ncfg_profile_list` lists the operator's first, which
+`config.h` argues for: a name in both layers reads as theirs, because their
+files layer over the shipped ones. So the check pins the members and their
+spelling and not the array's order -- pinning a sample's order would go red the
+first time somebody added a profile to the sample. The members *are* pinned
+byte for byte, which is the part a client built against the Rust depends on.
+
+Four sabotages, each caught: writing `used_by` always, writing `chosen`
+always, taking `chosen` from nowhere, and listing secrets with no document.
+
 ## 10.210 The plan a client is served, and the warnings only it carries
 
 The third response of the same shape, and the first with a rule in it rather

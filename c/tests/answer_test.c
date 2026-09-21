@@ -95,6 +95,18 @@ static int ask(const ncfg_proto_request_t *request, ncfg_buf_t *out, char *err, 
 	return ncfg_main_answer(&desk, request, &peer, NCFG_ARRIVED_LOCAL, out, err, err_size);
 }
 
+/* A copy this file owns, for a document member that has to be replaced. */
+static char *duplicate_text(const char *text)
+{
+	size_t size = strlen(text) + 1u;
+	char  *copy = malloc(size);
+
+	if (copy) {
+		memcpy(copy, text, size);
+	}
+	return copy;
+}
+
 /* A document from the members a case cares about, the rest being the empty
  * defaults. JSON rather than the configuration language, because what is being
  * driven here is the dispatcher and not the compiler. */
@@ -104,9 +116,14 @@ static ncfg_document_t *document_of(const char *body)
 	char             err[NCFG_ERROR_MAX];
 	ncfg_document_t *document;
 
+	/* The body carries `networks` where a case cares about one; otherwise the
+	 * empty list is appended, because the reader refuses a member stated
+	 * twice and a document with none is not the same as one with an empty
+	 * list. */
 	(void)snprintf(text, sizeof(text),
 	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"generated_by\":\"answer_test\","
-	    "\"globals\":{},%s,\"networks\":[]}", body);
+	    "\"globals\":{},%s%s}", body,
+	    strstr(body, "\"networks\"") ? "" : ",\"networks\":[]");
 	err[0] = '\0';
 	document = ncfg_document_read(text, strlen(text), err, sizeof(err));
 	if (!document) {
@@ -228,10 +245,10 @@ static void a_refusal_names_the_request_it_refused(void)
 	 * stopped being refused. What this guards against is the walk finding
 	 * nothing -- a loop whose body never runs passes every check inside it --
 	 * so it is the count that has to stay well above zero rather than the
-	 * count that has to match. Sixteen kinds are answered now; the rest are
-	 * what this walks.
+	 * count that has to match. Nineteen kinds are answered now; the rest
+	 * are what this walks.
 	 */
-	check(checked >= 12u, "every unported kind refuses with its own name in the sentence");
+	check(checked >= 9u, "every unported kind refuses with its own name in the sentence");
 }
 
 /*
@@ -782,6 +799,124 @@ static void the_served_plan_says_who_else_manages_an_interface(void)
 	state.diagnostics = kept_diagnostics;
 }
 
+/*
+ * The two lists whose producers were already here.
+ *
+ * `ncfg_secret_list` and `ncfg_profile_list` are `secrets.h`'s and
+ * `config.h`'s, tested where they live; what was missing was the envelope, so
+ * what is checked here is the envelope -- member for member, in the spelling
+ * `doc/schema/socket.json` uses, because a decode would accept a member in the
+ * wrong order or an omitted default and the point is that a client built
+ * against the Rust reads this.
+ *
+ * **The two omissions are the subject.** `used_by` is absent rather than empty
+ * for a credential nothing refers to, and `chosen` is absent where no profile
+ * is selected: in both cases an empty value would be a claim -- "nothing wants
+ * this" and "a profile called nothing" -- where the truth is "there is nothing
+ * to say".
+ */
+static void the_two_lists_are_the_envelope_the_witness_spells(void)
+{
+	ncfg_observed_t     *kept_observed = state.observed;
+	ncfg_document_t     *kept_desired = state.desired;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[700];
+
+	/* Two stored credentials, one of which nothing refers to, and one
+	 * referenced name with no file -- `secrets.h` says the interesting faults
+	 * are those two ways round. */
+	err[0] = '\0';
+	if (!ncfg_secret_store_put(config_dir, "cafe", "hunter2", 1, NULL, err, sizeof(err)) ||
+	    !ncfg_secret_store_put(config_dir, "old-vpn", "hunter2", 1, NULL, err, sizeof(err))) {
+		detail("the store fixture did not write", err);
+		check(0, "a credential store to list");
+		return;
+	}
+	state.desired = document_of("\"devices\":[],\"interfaces\":[],\"networks\":["
+	    "{\"id\":\"Cafe\",\"security\":{\"type\":\"psk\","
+	    "\"passphrase\":{\"provider\":\"file\",\"name\":\"cafe\"}}},"
+	    "{\"id\":\"Campus\",\"security\":{\"type\":\"psk\","
+	    "\"passphrase\":{\"provider\":\"file\",\"name\":\"campus\"}}}]");
+	if (!state.desired) {
+		check(0, "a document naming two networks");
+		state.desired = kept_desired;
+		return;
+	}
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SECRET_LIST;
+	check(ask(&request, &out, err, sizeof(err)), "`secret list` is answered");
+	check(strcmp(ncfg_buf_text(&out),
+	    "{\"response\":\"secrets\",\"secrets\":["
+	    "{\"name\":\"cafe\",\"stored\":true,\"used_by\":[\"network Cafe\"]},"
+	    "{\"name\":\"campus\",\"stored\":false,\"used_by\":[\"network Campus\"]},"
+	    "{\"name\":\"old-vpn\",\"stored\":true}]}") == 0,
+	    "  in the witness' spelling, with `used_by` absent where nothing refers to it");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+	ncfg_document_free(state.desired);
+	state.desired = NULL;
+
+	/* And the profiles: one shipped, one the operator's, and the one in force
+	 * taken from the compiled document rather than from the directory. */
+	(void)snprintf(path, sizeof(path), "%s/profile", factory_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/offline", factory_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/offline/10-offline.conf", factory_dir);
+	(void)testdir_write(path, "global { }\n", strlen("global { }\n"));
+	(void)snprintf(path, sizeof(path), "%s/profile", config_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/office", config_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/office/10-office.conf", config_dir);
+	(void)testdir_write(path, "global { }\n", strlen("global { }\n"));
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_PROFILE_LIST;
+	check(ask(&request, &out, err, sizeof(err)),
+	    "`profile list` is answered with no profile chosen");
+	check(strstr(ncfg_buf_text(&out), "\"chosen\"") == NULL,
+	    "  and `chosen` is absent rather than empty, which is what none means");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	state.desired = document_of("\"devices\":[],\"interfaces\":[],\"networks\":[]");
+	if (state.desired) {
+		free(state.desired->globals.profile);
+		state.desired->globals.profile = duplicate_text("office");
+	}
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_PROFILE_LIST;
+	check(ask(&request, &out, err, sizeof(err)), "and answered with one chosen");
+	/*
+	 * The members and their spelling are the witness'; the *order of the
+	 * array* is `ncfg_profile_list`'s, which puts the operator's first so
+	 * that a name in both layers reads as theirs. The witness line lists them
+	 * the other way round, and that is its fixture rather than a promise --
+	 * pinning a sample's array order here would make this red the first time
+	 * somebody added a profile to it.
+	 */
+	check(strcmp(ncfg_buf_text(&out),
+	    "{\"response\":\"profiles\",\"profiles\":["
+	    "{\"name\":\"office\",\"shipped\":false},"
+	    "{\"name\":\"offline\",\"shipped\":true}],\"chosen\":\"office\"}") == 0,
+	    "  in the witness' spelling, with the profile the document names");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+	ncfg_document_free(state.desired);
+
+	state.observed = kept_observed;
+	state.desired = kept_desired;
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -969,6 +1104,7 @@ int main(void)
 	taking_a_radio_on_is_refused_rather_than_half_done();
 	the_status_and_the_document_are_the_witness_shape();
 	the_served_plan_says_who_else_manages_an_interface();
+	the_two_lists_are_the_envelope_the_witness_spells();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

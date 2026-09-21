@@ -126,3 +126,84 @@ int ncfg_daemon_document_encode(const ncfg_document_t *desired, const char *diag
 	ncfg_json_write_object_end(&writer);
 	return finish(&writer, out, "document", err, err_size);
 }
+
+int ncfg_daemon_secrets_encode(const ncfg_secret_entry_t *entries, size_t count,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+	size_t             which;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the credential list");
+		return 0;
+	}
+	if (!entries && count != 0u) {
+		ncfg_error_set(err, err_size, "a credential list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "secrets");
+	ncfg_json_write_key(&writer, "secrets");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "name",
+		    entries[at].name ? entries[at].name : "");
+		ncfg_json_write_member_bool(&writer, "stored", entries[at].stored ? 1 : 0);
+		/* Omitted rather than empty: `daemon.h` says why, and it is the
+		 * difference between "nothing wants this" and "netcfgd could not tell
+		 * what wants this". */
+		if (entries[at].used_by_count > 0u) {
+			ncfg_json_write_key(&writer, "used_by");
+			ncfg_json_write_array_begin(&writer);
+			for (which = 0u; which < entries[at].used_by_count; which++) {
+				ncfg_json_write_string(&writer,
+				    entries[at].used_by[which] ? entries[at].used_by[which] : "");
+			}
+			ncfg_json_write_array_end(&writer);
+		}
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "secrets", err, err_size);
+}
+
+int ncfg_daemon_profiles_encode(const ncfg_profile_entry_t *entries, size_t count,
+    const char *chosen, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the profile list");
+		return 0;
+	}
+	if (!entries && count != 0u) {
+		ncfg_error_set(err, err_size, "a profile list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "profiles");
+	ncfg_json_write_key(&writer, "profiles");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "name",
+		    entries[at].name ? entries[at].name : "");
+		ncfg_json_write_member_bool(&writer, "shipped", entries[at].shipped ? 1 : 0);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	/* Absent where none is chosen, never null and never an empty name: the
+	 * client reads the absence as "none", and `cli/profile.c` says the same
+	 * of the text form it prints from this. */
+	if (chosen && chosen[0]) {
+		ncfg_json_write_member_string(&writer, "chosen", chosen);
+	}
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "profiles", err, err_size);
+}
