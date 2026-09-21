@@ -9515,6 +9515,44 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.223 The verbs that only read, and two texts required to differ
+
+Five more comparisons, all of them text: `--help`, `--version`, `control show`,
+`profile get` and `profile list`. They agree byte for byte, which is the answer
+one wants and not the one to assume -- the C's help is maintained by hand, and
+until now the only thing checking it was `main_test.c` asserting that three
+particular lines were in it.
+
+**And `ncfg reset`, which is the first case the gate must insist *differs*.**
+Two of its divergences are recorded in 0263 with their reasons:
+
+  * the C says `would remove` before and `removed` after, where the Rust prints
+    the whole list under `removed` and *then* runs the loop that removes -- so a
+    reset that fails on its second file has already told the operator that
+    every file is gone;
+  * its note says "the next reconcile or apply" where the Rust says "the next
+    apply", because a daemon reconcile removes what an apply would.
+
+Both are the C being right on purpose. So the gate marks those cases and then
+requires the texts to **differ**: the trees are still compared and still agree,
+and if somebody ever converges the wording the gate goes red asking for its own
+exception to be deleted. That is the same shape as the permission divergence
+two rounds ago, and it is the opposite of an allow-list -- an exception here
+expires by failing rather than by being noticed.
+
+**I nearly "fixed" the first one.** `ncfg reset --yes` printing "would remove"
+above "removed" looks exactly like a bug, and the obvious next step was to make
+it print one list. Reading `reset.c` first found the argument sitting above the
+loop, and 0263's entry naming the measurement behind it: the base file gone,
+both drop-ins left, and three lines claiming all three. Checking the source
+before repeating what the output suggested is the same rule that
+`verify-worker-claims` states about somebody else's report, pointed at my own
+reading.
+
+Three sabotages caught: an extra line in the C's `--help`, and -- for the two
+marked cases -- converging the note's wording, which makes the dry run identical
+and the gate say the exception can go.
+
 ## 10.222 Eight sequences, and the line `profile set` was not printing
 
 The writing half of the agreement gate is eight sequences now rather than four

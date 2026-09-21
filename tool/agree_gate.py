@@ -72,6 +72,23 @@ diagnostic onto the sentence that introduces it and the Rust puts it on the
 next line; that is the same rendering divergence as above, and collapsing is
 what lets the *words* be compared without pinning the line breaks.
 
+AND THE VERBS THAT ONLY READ
+
+`--help`, `--version`, `control show`, `profile get` and `profile list` print
+and change nothing, so they are compared as text and nothing else. The help is
+the one a person actually depends on: it is the contract somebody reads before
+they type, and it is maintained by hand on the C side.
+
+TWO CASES WHERE THE TEXT IS *REQUIRED* TO DIFFER
+
+`ncfg reset` diverges in two ways that 0263 records with its reasons -- the C
+says `would remove` before and `removed` after where the Rust prints the whole
+list under `removed` and *then* runs the loop that removes, and its note says
+"the next reconcile or apply" where the Rust says "the next apply". Those cases
+are marked, and the gate then insists the two **do** differ. So a divergence
+that gets closed is a gate that goes red asking for its own exception to be
+deleted, which is the opposite of what an allow-list does.
+
 WHY IT FAILS RATHER THAN SKIPS
 
 A gate that skips when a binary is missing reports success exactly as loudly as
@@ -209,6 +226,14 @@ def compare(rust, c, config_dir, expected_to_compile):
 # **Several are pairs, because undoing is the half that goes wrong.** A `rm`
 # that leaves a file behind, or takes one more than it was asked for, shows up
 # only when the directory is compared after both halves have run.
+READ_VERBS = [
+	["--help"],
+	["--version"],
+	["control", "show"],
+	["profile", "get"],
+	["profile", "list"],
+]
+
 WRITE_CASES = [
 	("config put", "tests/footprint/etc", [
 		(["config", "put", "lab"], "device lo {\n\tmanaged = false\n}\n"),
@@ -238,6 +263,23 @@ WRITE_CASES = [
 		(["profile", "save", "agree"], ""),
 		(["profile", "unset"], ""),
 		(["profile", "set", "agree"], ""),
+	]),
+]
+
+# The cases where 0263 records that the two say different things on purpose.
+# The trees are still compared; only the text is expected to differ, and the
+# gate insists that it does.
+TEXT_DIVERGES = {
+	"reset, dry run",
+	"reset",
+}
+
+WRITE_CASES += [
+	("reset, dry run", "tests/footprint/etc", [
+		(["reset"], ""),
+	]),
+	("reset", "tests/footprint/etc", [
+		(["reset", "--yes"], ""),
 	]),
 ]
 
@@ -346,7 +388,12 @@ def compare_writes(rust, c):
 						     os.path.join(work, "rust"))
 			c_said, c_tree = wrote(c, config_dir, steps,
 					       os.path.join(work, "c"))
-		if rust_said != c_said:
+		if name in TEXT_DIVERGES:
+			if rust_said == c_said:
+				return (f"`ncfg {name}` now says the same thing in both "
+					"programs; 0263 records why it did not, and the "
+					"exception in this gate can go")
+		elif rust_said != c_said:
 			return (f"`ncfg {name}` said different things\n"
 				f"    rust: {rust_said[:160]}\n    c   : {c_said[:160]}")
 		if set(rust_tree) != set(c_tree):
@@ -362,6 +409,29 @@ def compare_writes(rust, c):
 					f"{rust_mode:04o} and {c_mode:04o}")
 			if rust_bytes != c_bytes:
 				return f"`ncfg {name}` wrote a different {leaf}"
+	return None
+
+
+def compare_reads(rust, c):
+	"""Returns a sentence where a verb that only reads differs, or None."""
+	for verb in READ_VERBS:
+		with tempfile.TemporaryDirectory() as run_dir:
+			said = []
+			for program in (rust, c):
+				result = subprocess.run(
+					[program] + verb + ["--config-dir", WRITE_CASES[0][1],
+							    "--run-dir", run_dir],
+					capture_output=True,
+					text=True,
+					timeout=120,
+					check=False,
+				)
+				said.append((result.returncode,
+					     (result.stdout + result.stderr).replace(run_dir, "<run>")))
+		if said[0] != said[1]:
+			return (f"`ncfg {' '.join(verb)}` differs\n"
+				f"    rust: {said[0][1].strip()[:160]}\n"
+				f"    c   : {said[1][1].strip()[:160]}")
 	return None
 
 
@@ -413,6 +483,9 @@ def main():
 			problem = compare_save(rust, C, config_dir)
 			if problem:
 				failures.append(problem)
+	problem = compare_reads(rust, C)
+	if problem:
+		failures.append(problem)
 	problem = compare_writes(rust, C)
 	if problem:
 		failures.append(problem)
@@ -425,7 +498,7 @@ def main():
 	      f"programs to the same document and written back as the same profile, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
 	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
-	      "directory behind")
+	      f"directory behind, and {len(READ_VERBS)} verb(s) that only read")
 	return 0
 
 

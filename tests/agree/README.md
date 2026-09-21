@@ -8,11 +8,23 @@ profile, folds the previous selection into `conf.d` and selects the new one,
 and the two programs are handed identical directories and have to produce
 identical ones. The renderer has no other differential.
 
-It also runs three verbs that *write* -- `config put`, `secret set` and
+It also runs the verbs that only *read* -- `--help`, `--version`, `control
+show`, `profile get`, `profile list` -- and compares what they print, because
+the help is the contract somebody reads before they type and the C's is
+maintained by hand.
+
+And it runs the verbs that *write* -- `config put`, `secret set` and
 `control set` -- against one of these directories, and compares what each left
 behind: the files, their contents and their **permissions**. The last matters
 most for `secret set`: a comparison of contents alone passes a program that
 wrote the right passphrase into a world-readable file.
+
+Two cases are marked as *required to differ*: `ncfg reset` says `would remove`
+before and `removed` after where the Rust prints the whole list under `removed`
+and then runs the loop that removes, and its note says "the next reconcile or
+apply" where the Rust says "the next apply". 0263 records both with their
+reasons, so the gate insists the two still differ -- a divergence that gets
+closed makes the gate ask for its own exception to be deleted.
 
 `wifi add` is deliberately not among them. It activates a radio, so what it
 writes depends on which radios the machine running the gate has, and a check
