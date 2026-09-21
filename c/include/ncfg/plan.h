@@ -620,6 +620,22 @@ int ncfg_plan_strands_credentials(const ncfg_plan_t *plan);
 int ncfg_plan_write(const ncfg_plan_t *plan, ncfg_buf_t *buf, char *err, size_t err_size);
 
 /*
+ * The four members alone, into an object somebody else opened.
+ *
+ * For the protocol's `plan` response, which carries them flattened into the
+ * envelope: `{"response":"plan","actions":[...],...}`. Published for the same
+ * reason `ncfg_observed_write_members` is -- the alternative is a second
+ * writer for this shape in the daemon, and a plan that gains a member there
+ * and not here is a client reading four fields where the file has five.
+ *
+ * **A plan that failed while it was being built is not refused here**, because
+ * this writes into a message somebody has already begun. `ncfg_plan_write` and
+ * the response encoder each ask `plan->failed` before they start: half a plan
+ * that looks whole is the one that gets applied.
+ */
+void ncfg_plan_write_members(ncfg_json_writer_t *writer, const ncfg_plan_t *plan);
+
+/*
  * Compute what would have to change for `observed` to satisfy `desired`.
  *
  * `options` may be NULL, which means every default. The plan borrows from both

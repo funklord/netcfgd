@@ -481,6 +481,20 @@ int ncfg_daemon_status_encode(const ncfg_observed_t *observed, ncfg_buf_t *out, 
 int ncfg_daemon_document_encode(const ncfg_document_t *desired, const char *diagnostics,
     ncfg_buf_t *out, char *err, size_t err_size);
 
+/*
+ * What netcfgd would do, as the `plan` response.
+ *
+ * `{"response":"plan",<the plan's four members>}`, flattened like the two
+ * above and written by `ncfg_plan_write_members` for the same reason.
+ *
+ * **A plan that failed while it was being built is refused rather than sent.**
+ * `plan.h` says why at its own writer: half a plan that looks whole is the one
+ * that gets applied, and a client cannot tell a plan with three actions from a
+ * plan that ran out of memory after three.
+ */
+int ncfg_daemon_plan_encode(const ncfg_plan_t *plan, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
 /* ------------------------------------------------------------- the server */
 
 /*

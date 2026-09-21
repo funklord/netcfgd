@@ -95,6 +95,26 @@ static int ask(const ncfg_proto_request_t *request, ncfg_buf_t *out, char *err, 
 	return ncfg_main_answer(&desk, request, &peer, NCFG_ARRIVED_LOCAL, out, err, err_size);
 }
 
+/* A document from the members a case cares about, the rest being the empty
+ * defaults. JSON rather than the configuration language, because what is being
+ * driven here is the dispatcher and not the compiler. */
+static ncfg_document_t *document_of(const char *body)
+{
+	char             text[2048];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+
+	(void)snprintf(text, sizeof(text),
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"generated_by\":\"answer_test\","
+	    "\"globals\":{},%s,\"networks\":[]}", body);
+	err[0] = '\0';
+	document = ncfg_document_read(text, strlen(text), err, sizeof(err));
+	if (!document) {
+		detail("the document fixture did not read", err);
+	}
+	return document;
+}
+
 /* Whether what came back is the `ok` object, read by the client's decoder
  * rather than compared as text. */
 static int is_ok(ncfg_buf_t *out)
@@ -618,6 +638,150 @@ static void the_status_and_the_document_are_the_witness_shape(void)
 	state.diagnostics = kept_diagnostics;
 }
 
+/*
+ * The plan a client is served, and the warnings that are only in this one.
+ *
+ * The shape is the witness'. The contention warning is the part that was
+ * missing from every client but `ncfg plan`: the daemon works contention out
+ * for its own log and the plan it serves said nothing about it, so a GUI
+ * showing a radio had no way to say why its scans fail every other attempt.
+ *
+ * `NetworkManager`'s state file is written here rather than the machine's
+ * being read, and the desk is pointed at this test's own root -- the daemon
+ * reads `/run`, and a test that did would be reading whatever the workstation
+ * it was built on happens to be running.
+ */
+static void the_served_plan_says_who_else_manages_an_interface(void)
+{
+	static const char *const witness =
+	    "{\"response\":\"plan\",\"actions\":[],\"warnings\":[],\"refusals\":[],"
+	    "\"stranded\":[]}";
+	static const char *const machine =
+	    "{\"links\":[{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"wireless\":true,\"ownership\":\"unknown\"}]}";
+	ncfg_observed_t     *kept_observed = state.observed;
+	ncfg_document_t     *kept_desired = state.desired;
+	char                *kept_diagnostics = state.diagnostics;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[640];
+	static char          proc_root[640];
+
+	err[0] = '\0';
+	state.observed = ncfg_observed_read("{}", 2u, err, sizeof(err));
+	state.desired = ncfg_document_new(err, sizeof(err));
+	state.diagnostics = NULL;
+	if (!state.observed || !state.desired) {
+		detail("the empty fixtures did not build", err);
+		check(0, "an empty observation and an empty document");
+	} else {
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_PLAN;
+		check(ask(&request, &out, err, sizeof(err)), "`plan` is answered");
+		check(strcmp(ncfg_buf_text(&out), witness) == 0,
+		    "  and an empty one is the witness' spelling, flattened into the envelope");
+		if (strcmp(ncfg_buf_text(&out), witness) != 0) {
+			detail("what was written", ncfg_buf_text(&out));
+		}
+		ncfg_buf_free(&out);
+	}
+	/*
+	 * **A plan that failed while it was being built is not sent.** Driven at
+	 * the encoder, because the only way through the dispatcher is an
+	 * allocation that fails -- and a client cannot tell a plan with no
+	 * actions from a plan that ran out of memory before it had any, which is
+	 * the whole reason the flag is checked rather than the count.
+	 */
+	if (state.observed && state.desired) {
+		ncfg_plan_t *half = ncfg_plan_build(state.desired, state.observed, NULL, err,
+		    sizeof(err));
+
+		if (half) {
+			half->failed = 1;
+			ncfg_buf_init(&out, 0);
+			check(!ncfg_daemon_plan_encode(half, &out, err, sizeof(err)) &&
+			        strstr(err, "could not be built") != NULL,
+			    "  and a plan that failed while it was built is refused rather than "
+			    "sent as an empty one");
+			ncfg_buf_free(&out);
+			ncfg_plan_free(half);
+		} else {
+			check(0, "a plan to spoil");
+		}
+	}
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+
+	/*
+	 * And the same request against a machine another daemon is managing. The
+	 * document claims `wlan0`, the kernel gives it index 3, and
+	 * `NetworkManager` has a file saying it manages index 3.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/NetworkManager", run_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/NetworkManager/devices", run_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/NetworkManager/devices/3", run_dir);
+	(void)testdir_write(path, "[device]\nmanaged=true\nconnection-uuid=abc\n",
+	    strlen("[device]\nmanaged=true\nconnection-uuid=abc\n"));
+	/* And a `/proc` saying it is running: the check asks both, because a
+	 * state file left behind by a daemon that has stopped claims nothing. */
+	(void)snprintf(path, sizeof(path), "%s/proc", base);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/proc/100", base);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/proc/100/comm", base);
+	(void)testdir_write(path, "NetworkManager\n", strlen("NetworkManager\n"));
+	(void)snprintf(proc_root, sizeof(proc_root), "%s/proc", base);
+	desk.contention.run_root = run_dir;
+	desk.contention.proc_root = proc_root;
+	desk.contention.run_root_is_the_machines = 0;
+	err[0] = '\0';
+	state.observed = ncfg_observed_read(machine, strlen(machine), err, sizeof(err));
+	state.desired = document_of(
+	    "\"devices\":[{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"}}],"
+	    "\"interfaces\":[{\"name\":\"wlan0\"}]");
+	if (!state.observed || !state.desired) {
+		detail("the contended fixture did not build", err);
+		check(0, "a contended machine reads");
+	} else {
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_PLAN;
+		check(ask(&request, &out, err, sizeof(err)), "a plan over a contended radio is "
+		    "answered rather than refused");
+		check(strstr(ncfg_buf_text(&out), "NetworkManager") != NULL,
+		    "  and it names the daemon that also manages the interface");
+		check(strstr(ncfg_buf_text(&out), "\"interface\":\"wlan0\"") != NULL,
+		    "  against the interface it is about, so a client can filter by the one it "
+		    "is showing");
+		if (failures) {
+			detail("what was written", ncfg_buf_text(&out));
+		}
+		ncfg_buf_free(&out);
+	}
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+	desk.contention.run_root = NULL;
+
+	/* And what it answers with no configuration at all, which is the reason
+	 * the configuration did not compile rather than a plan for the last one
+	 * that did. */
+	state.observed = NULL;
+	state.desired = NULL;
+	state.diagnostics = NULL;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_PLAN;
+	check(!ask(&request, &out, err, sizeof(err)) && strstr(err, "no configuration") != NULL,
+	    "a daemon with no compiled configuration says so rather than planning against "
+	    "nothing");
+	ncfg_buf_free(&out);
+
+	state.observed = kept_observed;
+	state.desired = kept_desired;
+	state.diagnostics = kept_diagnostics;
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -804,6 +968,7 @@ int main(void)
 	a_reload_answers_and_announces();
 	taking_a_radio_on_is_refused_rather_than_half_done();
 	the_status_and_the_document_are_the_witness_shape();
+	the_served_plan_says_who_else_manages_an_interface();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

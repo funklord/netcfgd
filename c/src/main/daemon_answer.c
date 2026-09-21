@@ -153,7 +153,6 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`hello` is answered by the control socket itself, so nothing here "
 		    "answers it; reaching this is a bug in the server rather than in the "
 		    "request";
-	case NCFG_PROTO_REQ_PLAN:
 	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_PROBE_LIST:
@@ -218,11 +217,12 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_AP_STATIONS:
 	case NCFG_PROTO_REQ_RADIOS:
 	case NCFG_PROTO_REQ_RADIO_SET:
-	/* The two that are a model and an envelope: `daemon.h` encodes both from
-	 * the model's own writers, so neither can come to disagree with the file
+	/* The three that are a model and an envelope: `daemon.h` encodes each
+	 * from the model's own writer, so none can come to disagree with the file
 	 * of the same shape under `/run`. */
 	case NCFG_PROTO_REQ_STATUS:
 	case NCFG_PROTO_REQ_SHOW:
+	case NCFG_PROTO_REQ_PLAN:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -553,6 +553,125 @@ static int answer_wifi_connect(ncfg_main_desk_t *desk, const ncfg_proto_wifi_con
 	    desk->certs_dir, interface, network, out, err, err_size);
 }
 
+/*
+ * What netcfgd would do, with what stands in the way.
+ *
+ * **Built fresh rather than kept**, which is the Rust's arrangement: a plan is
+ * a function of the document and the observation, and a stored one is a fourth
+ * thing that has to be invalidated whenever either moves.
+ *
+ * A configuration that did not compile answers with the diagnostics rather
+ * than with a plan for the last one that did. `ncfg_daemon_document_encode`
+ * says why for `show` and it is the same reason: the asker wants to know what
+ * went wrong, and a plan built from a document they can no longer see is worse
+ * than a refusal.
+ *
+ * **The contention warnings are part of the answer and not an extra.** They
+ * were only ever rendered by `ncfg plan` locally, so the one client that read
+ * `/run` was the one that needed them least and every other client was told
+ * nothing -- the report that produced them is a GUI wifi tab with no way to
+ * say why scans on a contended radio fail every other attempt. One warning per
+ * interface rather than one naming several, because a client filters by the
+ * interface it is showing and a warning naming three belongs to none of them.
+ *
+ * The claims are the document's interfaces that the kernel knows, not the
+ * backends netcfgd is running: this asks "who else manages what this
+ * configuration claims", which is a wider question than
+ * `ncfg_main_world_release_contended`'s "what is netcfgd holding that it
+ * should give back", and the two are kept apart for that reason.
+ */
+static void warn_about_contenders(ncfg_main_desk_t *desk, ncfg_plan_t *plan)
+{
+	ncfg_interface_claim_t claims[NCFG_MAIN_CLAIMS_MAX];
+	ncfg_contenders_t      found;
+	ncfg_buf_t             said;
+	char                   message[NCFG_ERROR_MAX];
+	size_t                 claim_count = 0;
+	size_t                 at;
+	size_t                 which;
+
+	/* Both roots, because `ncfg_contenders_find` needs both -- it reads the
+	 * other daemons' state under `/run` and asks `/proc` whether they are
+	 * running at all. A desk given neither says nothing rather than logging a
+	 * note per plan. */
+	if (!desk->contention.run_root || !desk->contention.proc_root ||
+	    !desk->state->desired || !desk->state->observed) {
+		return;
+	}
+	for (at = 0; at < desk->state->desired->interface_count &&
+	    claim_count < (size_t)NCFG_MAIN_CLAIMS_MAX; at++) {
+		const char                 *name = desk->state->desired->interfaces[at].name;
+		const ncfg_observed_link_t *link = name ?
+		    ncfg_observed_link(desk->state->observed, name) : NULL;
+
+		/* `ncfg_main_claims_of`'s narrowing rule, for its reason: an index
+		 * that does not fit is skipped rather than truncated, because a
+		 * truncated one matches a contender against an interface nobody
+		 * named. */
+		if (!link || link->index < 0 || link->index > (int64_t)UINT32_MAX) {
+			continue;
+		}
+		claims[claim_count].name = name;
+		claims[claim_count].index = (uint32_t)link->index;
+		claim_count++;
+	}
+	if (claim_count == 0u) {
+		return;
+	}
+	memset(&found, 0, sizeof(found));
+	message[0] = '\0';
+	if (!ncfg_contenders_find(&desk->contention, claims, claim_count, &found, message,
+	        sizeof(message))) {
+		/* An allocation failure and nothing else -- `apply.h` says every
+		 * ordinary absence reads as "nothing found". The plan is still the
+		 * answer, so this is a note rather than a refusal. */
+		ncfg_log_emitf("contention", NCFG_LOG_NOTE,
+		    "the plan could not say who else manages these interfaces (%s)", message);
+		return;
+	}
+	for (at = 0; at < found.count; at++) {
+		ncfg_buf_init(&said, 0);
+		message[0] = '\0';
+		if (!ncfg_contender_describe(&found.at[at], &said, message, sizeof(message))) {
+			ncfg_buf_free(&said);
+			continue;
+		}
+		for (which = 0; which < found.at[at].interface_count; which++) {
+			ncfg_plan_warn(plan, found.at[at].interfaces[which],
+			    ncfg_buf_text(&said));
+		}
+		ncfg_buf_free(&said);
+	}
+	ncfg_contenders_free(&found);
+}
+
+static int answer_plan(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_plan_t *plan;
+	int          wrote;
+
+	if (!desk->state->desired) {
+		ncfg_error_set(err, err_size, "%s",
+		    desk->state->diagnostics && desk->state->diagnostics[0] ?
+		        desk->state->diagnostics : "no configuration");
+		return 0;
+	}
+	if (!desk->state->observed) {
+		ncfg_error_set(err, err_size,
+		    "this daemon has not managed to observe the machine, so it cannot say what "
+		    "it would do to it");
+		return 0;
+	}
+	plan = ncfg_plan_build(desk->state->desired, desk->state->observed, NULL, err, err_size);
+	if (!plan) {
+		return 0;
+	}
+	warn_about_contenders(desk, plan);
+	wrote = ncfg_daemon_plan_encode(plan, out, err, err_size);
+	ncfg_plan_free(plan);
+	return wrote;
+}
+
 /* ------------------------------------------------------------------------ *
  * The dispatch
  * ------------------------------------------------------------------------ */
@@ -606,6 +725,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_SHOW:
 		return ncfg_daemon_document_encode(desk->state->desired, desk->state->diagnostics,
 		    out, err, err_size);
+	case NCFG_PROTO_REQ_PLAN:
+		return answer_plan(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -643,7 +764,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	 * both is for.
 	 */
 	case NCFG_PROTO_REQ_HELLO:
-	case NCFG_PROTO_REQ_PLAN:
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
