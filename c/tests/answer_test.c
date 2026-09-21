@@ -245,10 +245,10 @@ static void a_refusal_names_the_request_it_refused(void)
 	 * stopped being refused. What this guards against is the walk finding
 	 * nothing -- a loop whose body never runs passes every check inside it --
 	 * so it is the count that has to stay well above zero rather than the
-	 * count that has to match. Nineteen kinds are answered now; the rest
-	 * are what this walks.
+	 * count that has to match. Twenty-two kinds are answered now; the
+	 * rest are what this walks.
 	 */
-	check(checked >= 9u, "every unported kind refuses with its own name in the sentence");
+	check(checked >= 6u, "every unported kind refuses with its own name in the sentence");
 }
 
 /*
@@ -946,6 +946,10 @@ static void the_file_listings_answer_opposite_questions(void)
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_CONFIG_LIST;
 	check(ask(&request, &out, err, sizeof(err)), "`config list` is answered");
+	/* The drop-in below is an open network with no `wifi { open = true }`,
+	 * which the compiler refuses -- deliberate, because a listing describes
+	 * files rather than a compile, and it is removed at the end of this case
+	 * so that the next one can reload the same directory. */
 	check(strcmp(ncfg_buf_text(&out),
 	    "{\"response\":\"configs\",\"configs\":["
 	    "{\"file\":\"netcfgd.conf\",\"removable\":false,\"text\":\"global { }\\n\"},"
@@ -956,6 +960,8 @@ static void the_file_listings_answer_opposite_questions(void)
 		detail("what was written", ncfg_buf_text(&out));
 	}
 	ncfg_buf_free(&out);
+	(void)snprintf(path, sizeof(path), "%s/conf.d/wifi-home.conf", config_dir);
+	(void)unlink(path);
 
 	/* Two hooks: one whose script is on disk and one whose is not. */
 	(void)snprintf(hook, sizeof(hook), "%s/hooks", run_dir);
@@ -1006,6 +1012,128 @@ static void the_file_listings_answer_opposite_questions(void)
 	ncfg_buf_free(&out);
 
 	state.desired = kept_desired;
+}
+
+/*
+ * Why something is the way it is, over the socket, naming the file.
+ *
+ * **The positions come out of the run directory, and the reload is what put
+ * them there.** So this drives a real reload first: that is the path a daemon
+ * takes, and a test that wrote `provenance.json` itself would prove a file
+ * format rather than the thing that keeps it current.
+ *
+ * The daemon's `explain` and `ncfg explain` therefore name the same line by
+ * construction rather than by agreement -- both read what the last successful
+ * compile wrote.
+ */
+static void an_explanation_names_the_file_the_reload_recorded(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[700];
+
+	(void)snprintf(path, sizeof(path), "%s/conf.d/50-explain.conf", config_dir);
+	(void)testdir_write(path, "interface eth-explain {\n\tconfig = \"192.0.2.10/24\"\n}\n",
+	    strlen("interface eth-explain {\n\tconfig = \"192.0.2.10/24\"\n}\n"));
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_RELOAD;
+	check(ask(&request, &out, err, sizeof(err)) && is_ok(&out),
+	    "a reload over a directory that compiles is the thing that records the positions");
+	ncfg_buf_free(&out);
+	(void)snprintf(path, sizeof(path), "%s/provenance.json", run_dir);
+	check(testdir_exists(path), "  and it wrote them under the run directory");
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_EXPLAIN;
+	request.u.explain.kind = NCFG_PROTO_SUBJECT_INTERFACE;
+	request.u.explain.name = ncfg_proto_str("eth-explain");
+	check(ask(&request, &out, err, sizeof(err)), "`explain` is answered");
+	check(strstr(ncfg_buf_text(&out), "\"response\":\"explanation\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "\"subject\":\"interface eth-explain\"") != NULL,
+	    "  about the subject that was asked about");
+	check(strstr(ncfg_buf_text(&out), "\"source\":\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "50-explain.conf:1:1") != NULL,
+	    "  naming the file and line the reload recorded, which is the whole of the verb");
+	/* And the notice is gone by itself: it appears only where nothing could be
+	 * located, so its absence is the positive half of the check above. */
+	check(strstr(ncfg_buf_text(&out), "table of file positions") == NULL,
+	    "  so the caveat about having no positions does not appear");
+	/*
+	 * And the other half of that member: a fact that came from nowhere
+	 * nameable carries no `source` at all. Every explanation has some --
+	 * `observed` and `next` are derived -- so an encoder writing `""` would
+	 * be naming a file called nothing in most of its output.
+	 *
+	 * **Before the buffer is freed**, which is not a detail: written after it
+	 * this read the empty string every time and passed whatever the encoder
+	 * did.
+	 */
+	check(strstr(ncfg_buf_text(&out), "\"source\":\"\"") == NULL,
+	    "  and a fact that came from nowhere nameable carries no source at all");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	/* Cleaned up by name, because the next case compiles this directory too. */
+	(void)snprintf(path, sizeof(path), "%s/conf.d/50-explain.conf", config_dir);
+	(void)unlink(path);
+}
+
+/*
+ * What the wire says when the bound bit.
+ *
+ * Driven at the encoder with a hand-built explanation, because what is being
+ * checked is the encoder's own rule rather than the bound: `explain_test.c`
+ * already proves `ncfg_explain` stops at `NCFG_EXPLAIN_FACTS_MAX` and counts
+ * past it, and reproducing its six-hundred-address fixture here would test
+ * that again on the way to testing this.
+ *
+ * The rule is the C's own. The Rust has no bound, so its `Explanation` carries
+ * a subject and facts and nothing else -- adding a member would be a response
+ * a client built against it refuses to decode, and saying nothing would be an
+ * answer silently missing most of itself.
+ */
+static void a_truncated_explanation_says_so_in_a_fact(void)
+{
+	ncfg_explain_fact_t one;
+	ncfg_explanation_t  explanation;
+	ncfg_buf_t          out;
+	char                err[NCFG_ERROR_MAX];
+
+	memset(&one, 0, sizeof(one));
+	one.topic = (char *)(uintptr_t) "desired";
+	one.detail = (char *)(uintptr_t) "static 192.0.2.1/24";
+	memset(&explanation, 0, sizeof(explanation));
+	explanation.subject = (char *)(uintptr_t) "interface eth0";
+	explanation.facts = &one;
+	explanation.count = 1u;
+	explanation.total = 5u;
+
+	ncfg_buf_init(&out, 0);
+	err[0] = '\0';
+	check(ncfg_daemon_explanation_encode(&explanation, &out, err, sizeof(err)),
+	    "an explanation that hit the bound is still an answer");
+	check(strcmp(ncfg_buf_text(&out),
+	    "{\"response\":\"explanation\",\"subject\":\"interface eth0\",\"facts\":["
+	    "{\"topic\":\"desired\",\"detail\":\"static 192.0.2.1/24\"},"
+	    "{\"topic\":\"explanation\",\"detail\":\"4 more fact(s) were found and are not "
+	    "in this answer\"}]}") == 0,
+	    "  and the last fact is the one that says how many are missing");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	/* And an explanation that fitted says nothing of the sort, or every answer
+	 * would end with a caveat about a bound it never met. */
+	explanation.total = 1u;
+	ncfg_buf_init(&out, 0);
+	(void)ncfg_daemon_explanation_encode(&explanation, &out, err, sizeof(err));
+	check(strstr(ncfg_buf_text(&out), "not in this answer") == NULL,
+	    "and one that fitted carries no such fact");
+	ncfg_buf_free(&out);
 }
 
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
@@ -1197,6 +1325,8 @@ int main(void)
 	the_served_plan_says_who_else_manages_an_interface();
 	the_two_lists_are_the_envelope_the_witness_spells();
 	the_file_listings_answer_opposite_questions();
+	an_explanation_names_the_file_the_reload_recorded();
+	a_truncated_explanation_says_so_in_a_fact();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

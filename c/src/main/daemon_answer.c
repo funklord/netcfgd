@@ -19,10 +19,10 @@
  *   refusal as a request the daemon did not recognise. Two things make this
  *   different from that, and both are properties rather than intentions:
  *
- *     * twenty-one of the thirty-two kinds are answered, including every wifi
- *       verb, `reload`, `status`, `show`, `plan`, the credential, profile,
- *       configuration and hook lists, and everything that writes a drop-in, a
- *       secret or a profile;
+ *     * twenty-two of the thirty-two kinds are answered, including every wifi
+ *       verb, `reload`, `status`, `show`, `plan`, `explain`, the credential,
+ *       profile, configuration and hook lists, and everything that writes a
+ *       drop-in, a secret or a profile;
  *     * every other kind is refused with a sentence that **names the request
  *       and says what is missing**, so it cannot be read as "unrecognised".
  *       `ncfg_main_answer_unported` is that table, reachable on its own so
@@ -30,7 +30,7 @@
  *       remembered.
  *
  *   The refusals are not a policy decision either: nothing in `c/src/` encodes
- *   a `journal`, `explanation`, `modems` or `probes` response, because `proto.h` decodes every
+ *   a `journal`, `modems` or `probes` response, because `proto.h` decodes every
  *   response and encodes none and the encoders belong beside the requests that
  *   produce them. When one lands, one row of the table becomes an arm --
  *   `status` and `document` are the two that have, and `daemon.h` has them.
@@ -153,7 +153,6 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`hello` is answered by the control socket itself, so nothing here "
 		    "answers it; reaching this is a bug in the server rather than in the "
 		    "request";
-	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_PROBE_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
 		/* The verb is recognised and the answer cannot be written: `proto.h`
@@ -226,6 +225,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_PROFILE_LIST:
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_HOOK_LIST:
+	case NCFG_PROTO_REQ_EXPLAIN:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -746,6 +746,46 @@ static int answer_hook_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, 
 	return wrote;
 }
 
+/*
+ * Why something is the way it is.
+ *
+ * **The positions are read from the run directory rather than kept.** Every
+ * compile that succeeds writes them there -- the daemon's reload does, and so
+ * does every `ncfg` that compiles -- so what an explanation names is the
+ * configuration in force whichever binary compiled it last. A table held here
+ * would be a second answer that disagrees with the file the moment somebody
+ * runs `ncfg show`.
+ *
+ * An absent or unreadable file reads as an empty table, which
+ * `ncfg_state_read_provenance` guarantees: an explanation that cannot name
+ * files is still worth having, and `ncfg_explain` says so as its first fact
+ * rather than quietly naming none.
+ *
+ * A document that does not compile is not a refusal here. `explain.h` argues
+ * it: the moment somebody reaches for this is often the moment the
+ * configuration has stopped compiling, and the observation half of the answer
+ * is worth having on its own.
+ */
+static int answer_explain(ncfg_main_desk_t *desk, const ncfg_proto_subject_t *subject,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_provenance_t   provenance;
+	ncfg_explanation_t *explanation;
+	int                 wrote;
+
+	memset(&provenance, 0, sizeof(provenance));
+	(void)ncfg_state_read_provenance(desk->state->paths.run, &provenance, NULL, 0);
+	explanation = ncfg_explain(subject, desk->state->desired, desk->state->observed,
+	    &provenance, err, err_size);
+	ncfg_provenance_free(&provenance);
+	if (!explanation) {
+		return 0;
+	}
+	wrote = ncfg_daemon_explanation_encode(explanation, out, err, err_size);
+	ncfg_explanation_free(explanation);
+	return wrote;
+}
+
 static int answer_plan(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
 {
 	ncfg_plan_t *plan;
@@ -836,6 +876,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_config_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_HOOK_LIST:
 		return answer_hook_list(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_EXPLAIN:
+		return answer_explain(desk, &request->u.explain, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -876,7 +918,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
-	case NCFG_PROTO_REQ_EXPLAIN:
 	case NCFG_PROTO_REQ_MONITOR:
 	case NCFG_PROTO_REQ_PROBE_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
