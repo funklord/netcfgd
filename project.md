@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.209 Two responses that were a model and an envelope
+
+Four sweeps came back clean this round before one came back useful. A seam
+member nothing installs: two, both documented defaults (`now` is
+`ncfg_confirm_now`, `recv` is the real socket). A document field nothing
+consumes: of 259, one -- `device match`, which the configuration language
+cannot reach and `render_device.c` refuses by name, so it is handled rather
+than missing. An op the Rust planner emits and the C's does not: none, once
+the sweep was taught that a planner pushes ops through helpers as often as it
+assigns `op.kind`.
+
+What was left is the thing `daemon_answer.c` has been saying all along:
+"nothing in `c/src/` encodes a `status`, `plan`, `document` ... response,
+because `proto.h` decodes every response and encodes none". Two of that list
+are a model and an envelope and nothing else.
+
+**The wire shape is the work, and it is not the obvious one.**
+`Response::Status(Box<Observed>)` is flattened: the observation's members go
+*in* the envelope beside `"response":"status"`, not under a key. An encoder
+that wrapped them -- which is what anybody writes first -- produces something
+every client built against the Rust ignores. `doc/schema/socket.json` pins
+both lines, so the checks compare byte for byte rather than decoding: a decode
+accepts a member in the wrong order or an omitted default, and what is being
+asserted is that a Rust-built client reads this.
+
+**The members are the model's own writer.** `ncfg_observed_write_members` and
+`ncfg_document_write_members` are published for the envelope, and
+`ncfg_observed_write` now calls the first rather than repeating it. Writing the
+members in the daemon instead would be a second list of a model's members in a
+module that does not own one -- and a member added to the model and forgotten
+there is a client reading a field the daemon has stopped sending, with nothing
+failing to compile. That is 10.205's defect in a new place, prevented rather
+than found. The sabotage for it drops a member from the shared writer, and the
+witness check goes red.
+
+**Neither invents an empty answer.** An observation with no links reads as a
+machine with nothing on it, and a client cannot tell that from a daemon that
+has not looked yet; a document with no interfaces reads as a machine nobody
+has configured. So `status` with no observation refuses with a sentence saying
+which it is, and `show` with no document answers with the *diagnostics* --
+somebody asking to see a configuration that did not compile wants the reason,
+which is what the Rust answers too.
+
+Sixteen of the thirty-two request kinds are answered now. Four sabotages, each
+caught: wrapping the members, answering an empty observation, ignoring the
+diagnostics, and dropping a member from the shared writer.
+
+### And a `git checkout --` that took a real edit with it
+
+Restoring after the fourth sabotage I ran `git checkout -- c/src/model/
+observed.c`, which put the file back to `HEAD` -- taking with it the
+`ncfg_observed_write_members` this round had just written, since the sabotage
+and the edit were in one file. The guidelines spend a page on exactly this and
+the reason is the same one: a discard is not a commit, there is no reflog for
+it, and `--stat` said "1 file changed" about two different things.
+
+It cost a re-edit and nothing else, because the change was three minutes old
+and mine. The discipline the other sabotages in this session used is the one
+that works: copy the file aside first, `cp` it back afterwards, and never ask
+git to undo something in a tree where another session may be writing.
+
 ## 10.208 The answer that had the facts and would not print them
 
 10.207 found this while triaging its own sweep and left it: `ncfg explain`

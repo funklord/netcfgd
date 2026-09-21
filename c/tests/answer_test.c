@@ -203,7 +203,15 @@ static void a_refusal_names_the_request_it_refused(void)
 		}
 		checked++;
 	}
-	check(checked >= 15u, "every unported kind refuses with its own name in the sentence");
+	/*
+	 * **A floor rather than a figure**, and it moved when `status` and `show`
+	 * stopped being refused. What this guards against is the walk finding
+	 * nothing -- a loop whose body never runs passes every check inside it --
+	 * so it is the count that has to stay well above zero rather than the
+	 * count that has to match. Sixteen kinds are answered now; the rest are
+	 * what this walks.
+	 */
+	check(checked >= 12u, "every unported kind refuses with its own name in the sentence");
 }
 
 /*
@@ -508,6 +516,108 @@ static void taking_a_radio_on_is_refused_rather_than_half_done(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * The two responses that are a model and an envelope, byte for byte.
+ *
+ * **Compared against `doc/schema/socket.json` rather than decoded**, which is
+ * `daemon_wifi_test.c`'s rule and the reason the witness exists: a decode
+ * accepts a member in the wrong order or an omitted default, and what is being
+ * asserted is that a client built against the Rust reads this. The two lines
+ * here are the witness' own, copied.
+ *
+ * The flattening is the part worth pinning. `Response::Status(Box<Observed>)`
+ * puts the observation's members in the envelope rather than under a key, so
+ * an encoder that wrapped them -- the obvious thing to write -- produces
+ * something every existing client ignores.
+ */
+static void the_status_and_the_document_are_the_witness_shape(void)
+{
+	static const char *const status_witness =
+	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[],"
+	    "\"backends\":[],\"dns\":[],\"rules\":[],\"bridge_vlans\":[],\"delegations\":[],"
+	    "\"reports\":[],\"qdisc_applied\":[],\"ingress_applied\":[],"
+	    "\"privacy_applied\":[],\"backend_restarts\":[],\"accept_ra_applied\":[],"
+	    "\"forwarding_applied\":[],\"nat\":[],\"nat_conflicts\":[],\"hook_state\":[],"
+	    "\"address_proto_supported\":false}";
+	static const char *const document_witness =
+	    "{\"response\":\"document\",\"schema_version\":{\"major\":1,\"minor\":1},"
+	    "\"globals\":{\"dns\":{\"mode\":\"none\",\"servers\":[],\"search\":[],"
+	    "\"domains\":[],\"options\":[]},\"on_drift_default\":\"reconcile\","
+	    "\"confirm_default\":null,\"networking\":\"on\",\"hostname_policy\":\"none\","
+	    "\"control\":{\"observe\":\"root\",\"wifi\":\"root\",\"admin\":\"root\"},"
+	    "\"remote\":{\"observe\":false,\"wifi\":false,\"admin\":false,"
+	    "\"agent\":\"root\"}},\"devices\":[],\"interfaces\":[],\"networks\":[],"
+	    "\"rules\":[],\"access_points\":[]}";
+	static char          said[] = "netcfgd.conf:3: `mtu` wants a number";
+	ncfg_observed_t     *kept_observed = state.observed;
+	ncfg_document_t     *kept_desired = state.desired;
+	char                *kept_diagnostics = state.diagnostics;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+
+	err[0] = '\0';
+	state.observed = ncfg_observed_read("{}", 2u, err, sizeof(err));
+	state.desired = ncfg_document_new(err, sizeof(err));
+	state.diagnostics = NULL;
+	if (!state.observed || !state.desired) {
+		detail("the empty fixtures did not build", err);
+		check(0, "an empty observation and an empty document");
+	} else {
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_STATUS;
+		check(ask(&request, &out, err, sizeof(err)), "`status` is answered");
+		check(strcmp(ncfg_buf_text(&out), status_witness) == 0,
+		    "  and it is the witness' spelling, the observation flattened into the "
+		    "envelope");
+		if (strcmp(ncfg_buf_text(&out), status_witness) != 0) {
+			detail("what was written", ncfg_buf_text(&out));
+		}
+		ncfg_buf_free(&out);
+
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_SHOW;
+		check(ask(&request, &out, err, sizeof(err)), "`show` is answered");
+		check(strcmp(ncfg_buf_text(&out), document_witness) == 0,
+		    "  and it is the witness' spelling too, member for member");
+		if (strcmp(ncfg_buf_text(&out), document_witness) != 0) {
+			detail("what was written", ncfg_buf_text(&out));
+		}
+		ncfg_buf_free(&out);
+	}
+
+	/*
+	 * And what each refuses, which is the judgement rather than the shape. An
+	 * observation with no links is a machine with nothing on it and a daemon
+	 * that has not looked is not, so the second may not be answered as the
+	 * first -- and the caller asking to see a configuration that did not
+	 * compile wants the reason rather than a sentence about there being none.
+	 */
+	ncfg_observed_free(state.observed);
+	ncfg_document_free(state.desired);
+	state.observed = NULL;
+	state.desired = NULL;
+	/* This file's own storage, never freed by the state: `state.diagnostics`
+	 * is owned, and the pointer is put back below before anything frees it. */
+	state.diagnostics = said;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_STATUS;
+	check(!ask(&request, &out, err, sizeof(err)) && strstr(err, "not managed to observe") &&
+	        strstr(err, "nothing on it") != NULL,
+	    "a daemon that has not observed the machine says so rather than reporting an "
+	    "empty one");
+	ncfg_buf_free(&out);
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_SHOW;
+	check(!ask(&request, &out, err, sizeof(err)) && strstr(err, "wants a number") != NULL,
+	    "and one whose configuration does not compile answers with the reason it did not");
+	ncfg_buf_free(&out);
+
+	state.observed = kept_observed;
+	state.desired = kept_desired;
+	state.diagnostics = kept_diagnostics;
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -693,6 +803,7 @@ int main(void)
 	a_credential_past_its_ceiling_names_the_ceiling();
 	a_reload_answers_and_announces();
 	taking_a_radio_on_is_refused_rather_than_half_done();
+	the_status_and_the_document_are_the_witness_shape();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

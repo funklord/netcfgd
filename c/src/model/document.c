@@ -2239,6 +2239,14 @@ refused:
 	return NULL;
 }
 
+void ncfg_document_write_members(ncfg_json_writer_t *writer, const ncfg_document_t *document)
+{
+	if (!writer || !document) {
+		return;
+	}
+	ncfg_type_write(&document_type, writer, document);
+}
+
 int ncfg_document_write(const ncfg_document_t *document, ncfg_buf_t *buf, char *err,
     size_t err_size)
 {
@@ -2250,7 +2258,7 @@ int ncfg_document_write(const ncfg_document_t *document, ncfg_buf_t *buf, char *
 	}
 	ncfg_json_write_init(&writer, buf);
 	ncfg_json_write_object_begin(&writer);
-	ncfg_type_write(&document_type, &writer, document);
+	ncfg_document_write_members(&writer, document);
 	ncfg_json_write_object_end(&writer);
 	if (!ncfg_json_write_done(&writer)) {
 		const char *why = ncfg_json_write_failure(&writer);
