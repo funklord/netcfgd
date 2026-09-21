@@ -567,9 +567,16 @@ int ncfg_profile_name_usable(const char *name, char *err, size_t err_size);
  *
  * The one place that spells `global { profile = "..." }`, so the name is
  * validated before it can reach a quoted string.
+ *
+ * `path_out` receives the drop-in this wrote, for a caller that reports which
+ * file it left behind -- it is the caller's to free, and NULL asks for
+ * nothing. It is handed back rather than composed by the caller for the reason
+ * `ncfg_dhcp_metric_path` gives about its own pair: two spellings of one path
+ * disagree silently, and here the disagreement would be a message naming a
+ * file nobody wrote.
  */
 int ncfg_profile_set(const char *config_dir, const char *factory_dir, const char *name,
-    int *denied, char *err, size_t err_size);
+    char **path_out, int *denied, char *err, size_t err_size);
 
 /* Take the selection away, leaving the base exactly as it is. `removed` says
  * whether there was one; both out parameters may be NULL. */

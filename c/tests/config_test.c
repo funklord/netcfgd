@@ -935,11 +935,11 @@ static void the_fold(const char *root)
 
 		(void)snprintf(config_kept, sizeof(config_kept), "%s", config);
 		factory = tree(root, "profile-broken-factory", NULL, 0);
-		check(!ncfg_profile_set(config_kept, factory, "broken", NULL, err, sizeof(err)),
+		check(!ncfg_profile_set(config_kept, factory, "broken", NULL, NULL, err, sizeof(err)),
 		    "a profile whose drop-in does not compile is not chosen");
 		check(!testdir_exists(in(config_kept, "conf.d/" NCFG_PROFILE_DROP_IN ".conf")),
 		    "  and the refused selection was not left behind");
-		check(ncfg_profile_set(config_kept, factory, "fine", NULL, err, sizeof(err)),
+		check(ncfg_profile_set(config_kept, factory, "fine", NULL, NULL, err, sizeof(err)),
 		    "a profile that compiles is selectable");
 
 		{

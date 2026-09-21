@@ -528,15 +528,28 @@ static int set(const char **rest, size_t count, const ncfg_cli_options_t *option
 		(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
 		(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
 		    sizeof(factory_dir));
-		if (!ncfg_profile_set(config_dir, factory_dir, name, &denied, said,
+		char *written = NULL;
+
+		if (!ncfg_profile_set(config_dir, factory_dir, name, &written, &denied, said,
 		    sizeof(said))) {
 			ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
 			return 0;
 		}
 		if (!options->json) {
+			/*
+			 * **The file, before the note about how it got there.** `save`
+			 * says which file it wrote and so does `config put`; this said
+			 * only that a daemon was not listening, which leaves an operator
+			 * looking for the drop-in by hand. The order is the Rust's.
+			 *
+			 * The `--json` object does not gain a `path`: 0263 pins it as
+			 * `chosen` beside `daemon`, with `path` on `save` alone.
+			 */
+			ncfg_out_writef("wrote %s\n", written ? written : "");
 			ncfg_out_writef("nothing is listening on %s, so this was written "
 			    "directly\n", socket_path);
 		}
+		free(written);
 	}
 	/*
 	 * **The advice is not in the document.** `ncfg plan` and `ncfg apply
