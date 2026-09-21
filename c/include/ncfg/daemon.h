@@ -66,6 +66,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/config.h"
 #include "ncfg/document.h"
+#include "ncfg/explain.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lex.h"
 #include "ncfg/observed.h"
@@ -547,6 +548,27 @@ int ncfg_daemon_configs_encode(const ncfg_config_entry_t *entries, size_t count,
  * one is.
  */
 int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
+/*
+ * Why something is the way it is, as the `explanation` response.
+ *
+ * `{"response":"explanation","subject":...,"facts":[...]}`, and `source` is
+ * omitted for a fact that came from nowhere nameable -- a derived answer, or a
+ * policy read off the document without a recorded position. An empty string
+ * there would be a file called nothing.
+ *
+ * **Where the bound bit, the last fact says so.** `explain.h` holds an
+ * explanation at `NCFG_EXPLAIN_FACTS_MAX` with `total` counting past it, and
+ * the wire has nowhere to put that number: the Rust has no bound, so its
+ * `Explanation` carries a subject and facts and nothing else. Adding a member
+ * would be a response a client built against the Rust refuses to decode, and
+ * saying nothing would be an answer silently missing most of itself. A fact is
+ * what this protocol has for saying something, so the truncation is one --
+ * last, where a reader meets it after what was shown rather than instead of
+ * it.
+ */
+int ncfg_daemon_explanation_encode(const ncfg_explanation_t *explanation, ncfg_buf_t *out,
     char *err, size_t err_size);
 
 /* ------------------------------------------------------------- the server */

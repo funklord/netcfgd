@@ -33,6 +33,8 @@
 
 #include "ncfg/json_write.h"
 
+#include <stdio.h>
+
 /* `answer.c`'s, for its reason: a half-written message is the one that gets
  * sent by accident, so the buffer is failed rather than merely reported on. */
 static int finish(ncfg_json_writer_t *writer, ncfg_buf_t *out, const char *what, char *err,
@@ -282,4 +284,56 @@ int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, nc
 	ncfg_json_write_array_end(&writer);
 	ncfg_json_write_object_end(&writer);
 	return finish(&writer, out, "hooks", err, err_size);
+}
+
+int ncfg_daemon_explanation_encode(const ncfg_explanation_t *explanation, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the explanation");
+		return 0;
+	}
+	if (!explanation) {
+		ncfg_error_set(err, err_size, "there is nothing to explain");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "explanation");
+	ncfg_json_write_member_string(&writer, "subject",
+	    explanation->subject ? explanation->subject : "");
+	ncfg_json_write_key(&writer, "facts");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < explanation->count; at++) {
+		const ncfg_explain_fact_t *fact = &explanation->facts[at];
+
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "topic", fact->topic ? fact->topic : "");
+		ncfg_json_write_member_string(&writer, "detail", fact->detail ? fact->detail : "");
+		/* Omitted rather than empty: a fact that came from nowhere nameable
+		 * has no file, and `""` would be one called nothing. */
+		if (fact->source && fact->source[0]) {
+			ncfg_json_write_member_string(&writer, "source", fact->source);
+		}
+		ncfg_json_write_object_end(&writer);
+	}
+	/* And the bound, as a fact, because the wire has nowhere else to put it.
+	 * `daemon.h` has the argument. */
+	if (explanation->total > explanation->count) {
+		char said[128];
+
+		(void)snprintf(said, sizeof(said),
+		    "%lu more fact(s) were found and are not in this answer",
+		    (unsigned long)(explanation->total - explanation->count));
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "topic", "explanation");
+		ncfg_json_write_member_string(&writer, "detail", said);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "explanation", err, err_size);
 }

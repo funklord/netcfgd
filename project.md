@@ -9515,6 +9515,50 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.213 The explanation over the socket, and the file positions it reads
+
+Twenty-two of the thirty-two request kinds are answered. This one needed a
+producer the last round had deliberately left without callers:
+`ncfg_state_write_provenance` and `ncfg_state_read_provenance`, which 10.208
+recorded as "right to have no caller, because the file exists so a daemon's
+`explain` can answer without recompiling, and that response is unported". It is
+ported now, so both have one, and the note was right about why rather than
+about what.
+
+**Every compile that succeeds writes the positions; the explanation reads them
+back.** That is the Rust's arrangement and the reason is in its own comment:
+what is under the run directory then describes the configuration in force
+*whichever binary compiled it last*. The daemon's `explain` and `ncfg explain`
+therefore name the same line by construction rather than by agreement -- and a
+table kept in the daemon's memory would disagree with the file the moment
+somebody ran `ncfg show`.
+
+The reload writes it after the compile succeeded and after the hooks are
+materialised, best effort: a run directory that cannot be written costs an
+explanation its file positions and nothing else, and refusing a reload over
+that would take the whole configuration down for a notice.
+
+**The bound had nowhere to go, so it is a fact.** `explain.h` holds an
+explanation at `NCFG_EXPLAIN_FACTS_MAX` with `total` counting past it, and the
+wire has no member for that number: the Rust has no bound, so its
+`Explanation` carries a subject and facts and nothing else. Adding a member
+would be a response a client built against the Rust refuses to decode, and
+saying nothing would be an answer silently missing most of itself. `topic` is
+a free string on the wire, so the truncation is one more fact -- last, where a
+reader meets it after what was shown rather than instead of it.
+
+**A check that passed against a freed buffer.** The sabotage for "a fact from
+nowhere nameable carries no `source`" caught nothing, and the encoder was
+right: the check was written after `ncfg_buf_free`, so it read the empty
+string and passed whatever the encoder did. Moved above the free, it goes red.
+That is the eighth check-green-for-the-wrong-reason this session and the first
+of this shape -- the others were fixtures that never reached the branch, and
+this one reached it and then looked at the wrong thing.
+
+Five sabotages caught in the end: not writing the positions on reload, not
+reading them in the arm, writing an empty `source`, dropping the truncation
+fact, and adding one where nothing was truncated.
+
 ## 10.212 Two listings whose rules are opposite
 
 `configs` and `hooks`, which brings the answered request kinds to twenty-one of

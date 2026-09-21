@@ -168,6 +168,7 @@ int ncfg_daemon_state_reload(ncfg_daemon_state_t *state, char *err, size_t err_s
 	char                  hash[NCFG_DAEMON_HASH_MAX];
 	char                  why[NCFG_ERROR_MAX];
 	char                  sentence[NCFG_ERROR_MAX + 256];
+	ncfg_provenance_t     provenance;
 
 	if (!state) {
 		ncfg_error_set(err, err_size, "there is no state to reload");
@@ -193,9 +194,11 @@ int ncfg_daemon_state_reload(ncfg_daemon_state_t *state, char *err, size_t err_s
 		ncfg_config_sources_free(&sources);
 		return 0;
 	}
-	document = ncfg_config_compile(&sources, ncfg_pending_hooks_sink(pending), &diags, why,
-	    sizeof(why));
+	memset(&provenance, 0, sizeof(provenance));
+	document = ncfg_config_compile_with_provenance(&sources, ncfg_pending_hooks_sink(pending),
+	    &provenance, &diags, why, sizeof(why));
 	if (!document) {
+		ncfg_provenance_free(&provenance);
 		char *rendered = render_diagnostics(&diags);
 
 		hold(&state->diagnostics, rendered ? rendered : duplicate(why));
@@ -218,6 +221,24 @@ int ncfg_daemon_state_reload(ncfg_daemon_state_t *state, char *err, size_t err_s
 		ncfg_log_emitf("config", NCFG_LOG_ERROR, "%s", why);
 	}
 	ncfg_pending_hooks_free(pending);
+	/*
+	 * **Written on every compile that succeeded, not when `explain` asks.**
+	 * What is under the run directory then describes the configuration that is
+	 * in force, whichever binary compiled it last -- and the explanation path
+	 * reads it rather than keeping a table, so a daemon and a `ncfg explain`
+	 * run a second apart cannot name different lines.
+	 *
+	 * Best effort: a run directory that cannot be written costs an explanation
+	 * its file positions and nothing else, and refusing the reload over it
+	 * would take the whole configuration down for a notice.
+	 */
+	why[0] = '\0';
+	if (!ncfg_state_write_provenance(state->paths.run, &provenance, why, sizeof(why))) {
+		ncfg_log_emitf("config", NCFG_LOG_NOTE,
+		    "the file positions of this configuration were not recorded (%s), so an "
+		    "explanation will not name files", why);
+	}
+	ncfg_provenance_free(&provenance);
 
 	if (state->rejected && ncfg_daemon_document_hash(document, hash, why, sizeof(why)) &&
 	    strcmp(state->rejected, hash) == 0) {
