@@ -1450,6 +1450,88 @@ static void write_config(const char *config_dir, const char *text)
 	"\"links\":[{\"name\":\"eth0\",\"index\":2,\"mtu\":1500,\"up\":true," \
 	"\"carrier\":true,\"ownership\":\"unknown\"}]"
 
+/* A modem device with two sources, and a second configuration with none: the
+ * removal is half of what publishing a selection is for. */
+#define WITH_A_MODEM                                        \
+	"device wwan0 {\n\tmodem {\n\t\tsim = [\"soldered\", \"socket\"]\n" \
+	"\t\tapn = \"im.cxn\"\n\t}\n}\n"                     \
+	"interface eth0 {\n\tconfig = \"192.0.2.10/24\"\n}\n"
+#define WITHOUT_A_MODEM "interface eth0 {\n\tconfig = \"192.0.2.10/24\"\n}\n"
+
+/*
+ * Which SIM source netcfgd wants, said where a hook can read it.
+ *
+ * **The file is the whole of how a selection reaches the hardware.** netcfgd
+ * says which source it wants and a `pre_up` hook drives the mux, because
+ * driving a select line is board enablement. `ncfg_sims_sync` publishes it and
+ * nothing called it, so a modem that had never advanced had no file at all --
+ * and the hook, whose only job is to read one, had nothing (project.md
+ * 10.207).
+ *
+ * Both halves here, because the second is what a removal costs: a device that
+ * leaves the document keeps its file otherwise, and a hook with no other way
+ * of knowing reads a source netcfgd stopped asking for.
+ */
+static void a_start_says_which_sim_a_modem_is_on(const char *base)
+{
+	harness_t               harness;
+	ncfg_reconcile_wake_t   wake;
+	ncfg_reconcile_report_t report;
+	char                    path[640];
+	char                    err[NCFG_ERROR_MAX];
+	char                   *written;
+
+	if (!harness_start(&harness, base, "modem")) {
+		check(0, "a loop over a real configuration directory");
+		harness_stop(&harness);
+		return;
+	}
+	harness.state.observe = observe_fixture;
+	harness.machine.body = BARE_LINK;
+	harness.state.observe_context = &harness.machine;
+	harness.state.observed = observed_of(BARE_LINK);
+	write_config(harness.config, WITH_A_MODEM);
+	err[0] = '\0';
+	if (!harness.state.observed ||
+	    !ncfg_daemon_state_reload(&harness.state, err, sizeof(err))) {
+		detail("the modem fixture would not compile", err);
+		check(0, "the modem fixture is built");
+		harness_stop(&harness);
+		return;
+	}
+	(void)snprintf(path, sizeof(path), "%s/modem/wwan0", harness.run);
+	check(!testdir_exists(path), "nothing has published a selection yet");
+
+	/*
+	 * With the hold on, which is the sharper case: publishing is not acting.
+	 * A daemon told not to apply on start still has to say what it wants, or
+	 * `/run` disagrees with its own document for as long as the hold lasts.
+	 */
+	err[0] = '\0';
+	check(ncfg_reconcile_start(&harness.loop, 0, 0, err, sizeof(err)),
+	    "a start that is holding still starts");
+	written = testdir_read(path, NULL);
+	check(written != NULL, "and publishes the SIM selection a `pre_up` hook reads");
+	check(written && strstr(written, "sim=soldered") != NULL,
+	    "  naming the first source the document lists, which is where a modem starts");
+	check(written && strstr(written, "apn=im.cxn") != NULL,
+	    "  and the APN beside it, the two being one answer to a hook");
+	free(written);
+
+	/* And the reload, through the pass: the device leaves the document and
+	 * its file goes with it. */
+	write_config(harness.config, WITHOUT_A_MODEM);
+	memset(&wake, 0, sizeof(wake));
+	ncfg_reconcile_collapse(&wake, NCFG_WOKE_CONFIG);
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(report.reloaded && !testdir_exists(path),
+	    "a device that leaves the configuration has its selection taken away with it");
+
+	harness_stop(&harness);
+}
+
 /*
  * **"The file was written" is not "the configuration changed".**
  *
@@ -1932,6 +2014,7 @@ int main(void)
 	a_pass_says_under_run_where_it_got_to(base);
 	a_held_loop_still_observes_and_still_reports(base);
 	a_roam_is_told_before_anything_looks(base);
+	a_start_says_which_sim_a_modem_is_on(base);
 	a_byte_identical_rewrite_arms_nothing(base);
 	a_stale_timer_finds_nothing_to_do(base);
 	an_open_window_holds_the_reconcile_off(base);

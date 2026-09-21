@@ -299,6 +299,44 @@ static void resolve_window(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *repo
 }
 
 /*
+ * Publish which SIM source each modem device is on, and clear up after one
+ * that has left.
+ *
+ * **On the reload and at the start, which is where `daemon.h` says this is
+ * called and where nothing called it.** The file under `<run>/modem/` is the
+ * whole of how a selection reaches the hardware: netcfgd says which source is
+ * wanted and a `pre_up` hook drives the mux, because driving a select line is
+ * board enablement. So while nothing published it, a modem device that had
+ * never advanced had no file at all and the hook had nothing to read -- and a
+ * device that left the document kept a stale one, read as current by a hook
+ * with no other way of knowing (project.md 10.207).
+ *
+ * `ncfg_sims_advance` publishes the one device it moves, and its own comment
+ * relies on this to republish from the index afterwards: without it a `/run`
+ * that was full for a moment left this module and the file permanently
+ * disagreeing.
+ *
+ * A failure is a note. The in-memory selection is brought into line either
+ * way, so the next reload publishes from a selection that is still following
+ * the document.
+ */
+static void publish_sims(ncfg_reconcile_t *loop)
+{
+	char message[NCFG_ERROR_MAX];
+
+	if (!loop->sims || !loop->state || !loop->state->desired) {
+		return;
+	}
+	message[0] = '\0';
+	if (!ncfg_sims_sync(loop->sims, loop->state->desired, loop->state->paths.run, message,
+	        sizeof(message))) {
+		ncfg_log_emitf("modem", NCFG_LOG_NOTE,
+		    "the SIM selection could not be published (%s), so a `pre_up` hook reads "
+		    "whatever was there before", message);
+	}
+}
+
+/*
  * Recompile, and say whether the desired document actually moved.
  *
  * Comparing the document either side is what makes the exclusion true rather
@@ -330,6 +368,16 @@ static int reload(ncfg_reconcile_t *loop)
 	event.ok = compiled ? 1u : 0u;
 	event.diagnostics = ncfg_proto_str(loop->state->diagnostics);
 	announce(&loop->world, &event);
+
+	/*
+	 * After the recompile and whether or not the document moved: a reload that
+	 * failed to compile leaves the previous document standing, and publishing
+	 * from it again is how a selection that could not be written last time
+	 * catches up. A document that did move is the case this exists for -- a
+	 * device that gained a modem block, lost one, or had its source list
+	 * shortened under an index already past the end.
+	 */
+	publish_sims(loop);
 
 	if (had_before != had_after) {
 		return 1;
@@ -1118,6 +1166,14 @@ int ncfg_reconcile_start(ncfg_reconcile_t *loop, int apply_on_start, int reverte
 		ncfg_error_set(err, err_size, "there is no loop to start");
 		return 0;
 	}
+	/*
+	 * **Before the hold is decided, because publishing is not acting.** The
+	 * file says which source netcfgd wants; the `pre_up` hook that acts on it
+	 * runs inside an apply, which the hold is what defers. A daemon told not
+	 * to apply on start that also declined to say what it wants would leave
+	 * `/run` disagreeing with its own document for as long as the hold lasts.
+	 */
+	publish_sims(loop);
 	/* A latch, not a startup skip: once the loop reconciles on its own,
 	 * `--no-apply-on-start` has to keep meaning something, or it delays
 	 * acting by one tick and no more. */
