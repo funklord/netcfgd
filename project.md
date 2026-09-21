@@ -9515,6 +9515,45 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.221 Comparing permissions found a Rust defect on the first run
+
+The agreement gate now also runs the three verbs that write -- `config put`,
+`secret set` and `control set` -- and compares what each left behind. Adding
+**permissions** to that comparison took one line and found something
+immediately.
+
+`ncfg profile save` writes its snapshot with mode **0664 in the Rust and 0644
+in the C**. The Rust's `write_profile_snapshot` uses `fs::write`, which creates
+with the process umask, where every other configuration file that module writes
+goes through its own `write_atomically(.., 0o644)` -- including the
+`90-profile` selection drop-in written a few lines away. So the snapshot is the
+one configuration file netcfgd writes that is group-writable under a umask of
+002, and the one written without a temporary and a rename. `state.rs`'s own
+comment about having had two `write_atomically`s and watching them drift is the
+argument against exactly this.
+
+**Recorded rather than fixed**, which is this port's standing rule: the Rust is
+what the C is being compared against, and a defect in it is a finding. The C
+writes 0644 atomically like everything else, which is what the file should be.
+
+**The exception is written as an exact pair**, `(path, 0o664, 0o644)`, rather
+than as "ignore this file". A Rust that starts writing 0644 makes the two equal
+and never reaches the exception; a C that stops writing 0644 fails. So the day
+somebody fixes the Rust, the gate says the exception can go -- which is the
+opposite of what an allow-list does.
+
+Why permissions belong in the comparison at all: `secret set` writes a
+credential, and the mode is the whole of what keeps it from being readable by
+everyone on the machine. A comparison of contents alone passes a program that
+wrote the right passphrase into the wrong file. The sabotage for that -- the C
+writing 0640 -- goes red now and did not before.
+
+`wifi add` is left out of the writing verbs and the reason is in the gate: it
+activates a radio, so what it writes depends on which radios the machine
+running the check has. Both programs agreed when it was tried by hand here, and
+a check whose fixture is the developer's laptop is one that fails for a reason
+nobody can reproduce.
+
 ## 10.220 The renderer's differential, which is `profile save`
 
 The agreement gate compared what a configuration compiles *to*. It now also

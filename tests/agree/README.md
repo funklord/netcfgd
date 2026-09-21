@@ -8,6 +8,17 @@ profile, folds the previous selection into `conf.d` and selects the new one,
 and the two programs are handed identical directories and have to produce
 identical ones. The renderer has no other differential.
 
+It also runs three verbs that *write* -- `config put`, `secret set` and
+`control set` -- against one of these directories, and compares what each left
+behind: the files, their contents and their **permissions**. The last matters
+most for `secret set`: a comparison of contents alone passes a program that
+wrote the right passphrase into a world-readable file.
+
+`wifi add` is deliberately not among them. It activates a radio, so what it
+writes depends on which radios the machine running the gate has, and a check
+whose fixture is the developer's laptop is one that fails for a reason nobody
+can reproduce.
+
 The directories here are the mistakes. A corpus of files that all compile would
 never exercise the other half of the comparison: two compilers that agree about
 valid input and disagree about where an error is are two compilers a person
