@@ -1,14 +1,21 @@
-A configuration both programs must refuse, in the same place.
+Configurations the two `ncfg` programs must treat identically.
 
-`tool/agree_gate.py` compiles every configuration in its corpus with the Rust
-`ncfg` and the C one and compares the documents. A corpus of files that all
-compile would never exercise the other half of that comparison: two compilers
-that agree about valid input and disagree about where an error is are two
-compilers a person cannot use interchangeably, and an operator reading a
-`file:line:column` is reading the half that has to match.
+`tool/agree_gate.py` asks both of them two questions about every directory in
+its corpus: what the configuration compiles to, and -- for the ones that
+compile -- what `ncfg profile save` writes back. The second is the longer path:
+it compiles what is on disk, renders it back to configuration text, writes the
+profile, folds the previous selection into `conf.d` and selects the new one,
+and the two programs are handed identical directories and have to produce
+identical ones. The renderer has no other differential.
 
-Each directory here is one mistake, and the gate requires both programs to
-refuse it **at the same file, line and column, saying the same thing**. The C
+The directories here are the mistakes. A corpus of files that all compile would
+never exercise the other half of the comparison: two compilers that agree about
+valid input and disagree about where an error is are two compilers a person
+cannot use interchangeably, and an operator reading a `file:line:column` is
+reading the half that has to match.
+
+Each is one mistake, and the gate requires both programs to refuse it **at the
+same file, line and column, saying the same thing**. The C
 joins a diagnostic's help onto one line where the Rust prints it as a `help:`
 continuation -- 0263 records that -- so the Rust's sentence is a *prefix* of the
 C's, and that is the comparison. A message reworded in one program is therefore

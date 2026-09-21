@@ -12190,6 +12190,36 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.220 The renderer's differential, which is `profile save`
+
+The agreement gate compared what a configuration compiles *to*. It now also
+compares what the two programs write *back*: `ncfg profile save` over a copy of
+each compiling directory, and the resulting trees have to be identical file for
+file and byte for byte.
+
+**That path is much longer than it looks**, which is why it is worth having:
+it compiles what is on disk, renders the document back to configuration text,
+writes the profile, folds the previous selection into `conf.d` and selects the
+new one. None of it reads the kernel, so the two programs can be handed
+identical directories and asked for identical ones -- and the renderer, which is
+a thousand lines on each side, had no other differential at all.
+
+**They agree**, on the files and on what they print.
+
+**Including where neither can write a configuration back.** The determinism
+fixture states a `qdisc`, which no renderer on either side can put into
+configuration text, so both refuse with the same sentence and write nothing.
+That is a shared limitation rather than a divergence, and the gate compares it
+as one -- the text each prints is compared with the scratch directory's path
+taken out.
+
+Two sabotages, each caught and each catching a different half. Renaming the
+rendered `routes` key produced a profile the C's own round-trip check refused
+to keep -- so the two programs *said* different things, and the gate reported
+that. Changing the indentation of one rendered key produced a profile that
+compiles perfectly well and is not the Rust's, so the two programs *wrote*
+different things, and the gate reported that instead.
+
 ## 10.219 Seven refusals, compared word for word
 
 The agreement gate compared one bad configuration. It compares seven now, and

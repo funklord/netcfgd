@@ -36,6 +36,21 @@ an include naming a file which is not there is refused by the loader, before
 anything is parsed. What is compared there is that both refused and neither
 invented a line.
 
+WHAT ELSE IS COMPARED: WRITING A CONFIGURATION BACK
+
+`ncfg profile save` is the other pure path, and a longer one: it compiles what
+is on disk, renders it back to configuration text, writes the profile, folds
+the previous selection into `conf.d` and selects the new one. Nothing in that
+reads the kernel either, so the two programs can be handed identical
+directories and asked to produce identical ones -- which is a comparison of the
+renderer, the profile writer and the fold at once, and the renderer has no
+other differential.
+
+The text each prints is compared too, with the scratch directory's path taken
+out of it. That is where a configuration neither can write back shows up: the
+determinism fixture states a `qdisc`, which neither renderer can put into
+configuration text, so both refuse it in the same words and write nothing.
+
 WHY IT FAILS RATHER THAN SKIPS
 
 A gate that skips when a binary is missing reports success exactly as loudly as
@@ -46,6 +61,7 @@ run on. The corpus is counted for the same reason.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -164,6 +180,62 @@ def compare(rust, c, config_dir, expected_to_compile):
 	return None
 
 
+def tree(root):
+	"""Every file under `root`, as {relative path: bytes}."""
+	found = {}
+	for directory, _, names in os.walk(root):
+		for name in names:
+			path = os.path.join(directory, name)
+			with open(path, "rb") as handle:
+				found[os.path.relpath(path, root)] = handle.read()
+	return found
+
+
+def saved(program, config_dir, work):
+	"""`profile save` over a copy of `config_dir`. Returns (said, tree).
+
+	The copy is what makes this comparable: the command writes into the
+	configuration directory, so the two programs each get one of their own and
+	what is compared is what they made of the same starting point.
+	"""
+	copy = os.path.join(work, "etc")
+	run_dir = os.path.join(work, "run")
+	shutil.copytree(config_dir, copy)
+	os.makedirs(run_dir, exist_ok=True)
+	result = subprocess.run(
+		[program, "profile", "save", "agree", "--config-dir", copy,
+		 "--run-dir", run_dir],
+		capture_output=True,
+		text=True,
+		timeout=120,
+		check=False,
+	)
+	# The scratch path is in the output -- "wrote <copy>/profile/agree/..." --
+	# and it differs between the two runs by construction.
+	said = (result.stdout + result.stderr).replace(copy, "<config>")
+	return said, tree(copy)
+
+
+def compare_save(rust, c, config_dir):
+	"""Returns a sentence where the two write-backs differ, or None."""
+	with tempfile.TemporaryDirectory() as work:
+		rust_said, rust_tree = saved(rust, config_dir, os.path.join(work, "rust"))
+		c_said, c_tree = saved(c, config_dir, os.path.join(work, "c"))
+	if rust_said != c_said:
+		return (f"{config_dir}: `profile save` said different things\n"
+			f"    rust: {rust_said.strip()[:160]}\n"
+			f"    c   : {c_said.strip()[:160]}")
+	if set(rust_tree) != set(c_tree):
+		only_rust = sorted(set(rust_tree) - set(c_tree))
+		only_c = sorted(set(c_tree) - set(rust_tree))
+		return (f"{config_dir}: `profile save` wrote different files "
+			f"(only rust: {only_rust}, only c: {only_c})")
+	for name in sorted(rust_tree):
+		if rust_tree[name] != c_tree[name]:
+			return f"{config_dir}: `profile save` wrote a different {name}"
+	return None
+
+
 def main():
 	rust = RUST if os.path.exists(RUST) else RUST_FALLBACK
 	missing = [name for name in (rust, C) if not os.path.exists(name)]
@@ -182,14 +254,19 @@ def main():
 		problem = compare(rust, C, config_dir, expected)
 		if problem:
 			failures.append(problem)
+			continue
+		if expected:
+			problem = compare_save(rust, C, config_dir)
+			if problem:
+				failures.append(problem)
 	if failures:
 		for problem in failures:
 			print(f"agree-gate: {problem}", file=sys.stderr)
 		return 1
 	compiling = sum(1 for _, ok in present if ok)
 	print(f"agree-gate: {len(present)} configuration(s), {compiling} compiled by both "
-	      f"programs to the same document and {len(present) - compiling} refused by both "
-	      "in the same words")
+	      f"programs to the same document and written back as the same profile, and "
+	      f"{len(present) - compiling} refused by both in the same words")
 	return 0
 
 
