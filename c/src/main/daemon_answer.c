@@ -19,9 +19,10 @@
  *   refusal as a request the daemon did not recognise. Two things make this
  *   different from that, and both are properties rather than intentions:
  *
- *     * nineteen of the thirty-two kinds are answered, including every wifi
- *       verb, `reload`, `status`, `show`, `plan`, the credential and profile
- *       lists, and everything that writes a drop-in, a secret or a profile;
+ *     * twenty-one of the thirty-two kinds are answered, including every wifi
+ *       verb, `reload`, `status`, `show`, `plan`, the credential, profile,
+ *       configuration and hook lists, and everything that writes a drop-in, a
+ *       secret or a profile;
  *     * every other kind is refused with a sentence that **names the request
  *       and says what is missing**, so it cannot be read as "unrecognised".
  *       `ncfg_main_answer_unported` is that table, reachable on its own so
@@ -29,8 +30,7 @@
  *       remembered.
  *
  *   The refusals are not a policy decision either: nothing in `c/src/` encodes
- *   a `journal`, `explanation`, `modems`, `configs`, `hooks` or `probes`
- *   response, because `proto.h` decodes every
+ *   a `journal`, `explanation`, `modems` or `probes` response, because `proto.h` decodes every
  *   response and encodes none and the encoders belong beside the requests that
  *   produce them. When one lands, one row of the table becomes an arm --
  *   `status` and `document` are the two that have, and `daemon.h` has them.
@@ -154,9 +154,7 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		    "answers it; reaching this is a bug in the server rather than in the "
 		    "request";
 	case NCFG_PROTO_REQ_EXPLAIN:
-	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_PROBE_LIST:
-	case NCFG_PROTO_REQ_HOOK_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
 		/* The verb is recognised and the answer cannot be written: `proto.h`
 		 * decodes every response and encodes none, and the encoder for each
@@ -226,6 +224,8 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	 * this only had to wrap in an envelope. */
 	case NCFG_PROTO_REQ_SECRET_LIST:
 	case NCFG_PROTO_REQ_PROFILE_LIST:
+	case NCFG_PROTO_REQ_CONFIG_LIST:
+	case NCFG_PROTO_REQ_HOOK_LIST:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -702,6 +702,50 @@ static int answer_profile_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *er
 	return wrote;
 }
 
+/*
+ * Every configuration file netcfgd reads, with its text.
+ *
+ * The listing is `ncfg_config_list_drop_ins`', which enumerates exactly what
+ * the loader reads: a client shown a different set would offer an editor for a
+ * file that configures nothing, or hide one that does.
+ */
+static int answer_config_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_config_entry_t *entries = NULL;
+	size_t               count = 0;
+	int                  wrote;
+
+	if (!ncfg_config_list_drop_ins(desk->state->paths.config, &entries, &count, err,
+	        err_size)) {
+		return 0;
+	}
+	wrote = ncfg_daemon_configs_encode(entries, count, out, err, err_size);
+	ncfg_config_entries_free(entries, count);
+	return wrote;
+}
+
+/*
+ * Every hook the document declares, with the script that would run.
+ *
+ * Read from disk at the moment it is asked for rather than remembered, which
+ * `hooks.h` argues: a copy kept here is a second answer to "what runs at
+ * `post_up`" and can disagree with the file the runner opens.
+ */
+static int answer_hook_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_hook_script_t *scripts = NULL;
+	size_t              count = 0;
+	int                 wrote;
+
+	if (!ncfg_hooks_list(desk->state->desired, &scripts, &count, err, err_size)) {
+		return 0;
+	}
+	wrote = ncfg_daemon_hooks_encode(scripts, count, out, err, err_size);
+	ncfg_hook_scripts_free(scripts, count);
+	return wrote;
+}
+
 static int answer_plan(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
 {
 	ncfg_plan_t *plan;
@@ -788,6 +832,10 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_secret_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_PROFILE_LIST:
 		return answer_profile_list(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_CONFIG_LIST:
+		return answer_config_list(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_HOOK_LIST:
+		return answer_hook_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -829,10 +877,8 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
 	case NCFG_PROTO_REQ_EXPLAIN:
-	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_MONITOR:
 	case NCFG_PROTO_REQ_PROBE_LIST:
-	case NCFG_PROTO_REQ_HOOK_LIST:
 	case NCFG_PROTO_REQ_MODEM_LIST:
 	case NCFG_PROTO_REQ_PROBE_PUT:
 	case NCFG_PROTO_REQ_COUNT:

@@ -369,3 +369,97 @@ const ncfg_hook_sink_t *ncfg_hook_sink_unwritten(void)
 
 	return &sink;
 }
+
+/* ------------------------------------------------------------------------ *
+ * What a client is shown
+ * ------------------------------------------------------------------------ */
+
+void ncfg_hook_scripts_free(ncfg_hook_script_t *scripts, size_t count)
+{
+	size_t at;
+
+	if (!scripts) {
+		return;
+	}
+	for (at = 0u; at < count; at++) {
+		free(scripts[at].interface);
+		free(scripts[at].path);
+		free(scripts[at].text);
+	}
+	free(scripts);
+}
+
+/* A copy of `text`, or NULL. */
+static char *hook_dup(const char *text)
+{
+	size_t size;
+	char  *copy;
+
+	if (!text) {
+		text = "";
+	}
+	size = strlen(text) + 1u;
+	copy = malloc(size);
+	if (copy) {
+		memcpy(copy, text, size);
+	}
+	return copy;
+}
+
+int ncfg_hooks_list(const ncfg_document_t *desired, ncfg_hook_script_t **out,
+    size_t *count_out, char *err, size_t err_size)
+{
+	ncfg_hook_script_t *found = NULL;
+	size_t              room = 0;
+	size_t              taken = 0;
+	size_t              at;
+	size_t              which;
+
+	if (!out || !count_out) {
+		ncfg_error_set(err, err_size, "a hook listing was asked for with nowhere to put it");
+		return 0;
+	}
+	*out = NULL;
+	*count_out = 0;
+	if (!desired) {
+		return 1;
+	}
+	for (at = 0u; at < desired->interface_count; at++) {
+		room += desired->interfaces[at].hook_count;
+	}
+	if (room == 0u) {
+		return 1;
+	}
+	found = calloc(room, sizeof(*found));
+	if (!found) {
+		ncfg_error_set(err, err_size, "out of memory listing the hooks");
+		return 0;
+	}
+	for (at = 0u; at < desired->interface_count; at++) {
+		const ncfg_interface_t *interface = &desired->interfaces[at];
+
+		for (which = 0u; which < interface->hook_count; which++) {
+			const ncfg_hook_ref_t *hook = &interface->hooks[which];
+			size_t                 length = 0;
+			char                  *text = hook->path ?
+			    ncfg_host_read_file(hook->path, &length, NCFG_HOOK_SCRIPT_MAX) : NULL;
+
+			found[taken].interface = hook_dup(interface->name);
+			found[taken].path = hook_dup(hook->path);
+			found[taken].phase = hook->phase;
+			found[taken].readable = text != NULL;
+			/* Empty where it could not be read, which `hooks.h` keeps
+			 * distinct from an empty script through `readable`. */
+			found[taken].text = text ? text : hook_dup("");
+			if (!found[taken].interface || !found[taken].path || !found[taken].text) {
+				ncfg_hook_scripts_free(found, taken + 1u);
+				ncfg_error_set(err, err_size, "out of memory listing the hooks");
+				return 0;
+			}
+			taken++;
+		}
+	}
+	*out = found;
+	*count_out = taken;
+	return 1;
+}

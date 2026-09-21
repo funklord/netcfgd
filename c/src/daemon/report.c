@@ -207,3 +207,79 @@ int ncfg_daemon_profiles_encode(const ncfg_profile_entry_t *entries, size_t coun
 	ncfg_json_write_object_end(&writer);
 	return finish(&writer, out, "profiles", err, err_size);
 }
+
+int ncfg_daemon_configs_encode(const ncfg_config_entry_t *entries, size_t count,
+    ncfg_buf_t *out, char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the configuration list");
+		return 0;
+	}
+	if (!entries && count != 0u) {
+		ncfg_error_set(err, err_size, "a configuration list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "configs");
+	ncfg_json_write_key(&writer, "configs");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		ncfg_json_write_object_begin(&writer);
+		/* Omitted for a file that is not a drop-in: `daemon.h` says why, and
+		 * it is the member a client acts on rather than displays. */
+		if (entries[at].name && entries[at].name[0]) {
+			ncfg_json_write_member_string(&writer, "name", entries[at].name);
+		}
+		ncfg_json_write_member_string(&writer, "file",
+		    entries[at].file ? entries[at].file : "");
+		ncfg_json_write_member_bool(&writer, "removable", entries[at].removable ? 1 : 0);
+		ncfg_json_write_member_string(&writer, "text",
+		    entries[at].text ? entries[at].text : "");
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "configs", err, err_size);
+}
+
+int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the hook list");
+		return 0;
+	}
+	if (!scripts && count != 0u) {
+		ncfg_error_set(err, err_size, "a hook list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "hooks");
+	ncfg_json_write_key(&writer, "hooks");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		const char *phase = ncfg_hook_phase_name((ncfg_hook_phase_t)scripts[at].phase);
+
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "interface",
+		    scripts[at].interface ? scripts[at].interface : "");
+		ncfg_json_write_member_string(&writer, "phase", phase ? phase : "");
+		ncfg_json_write_member_string(&writer, "path",
+		    scripts[at].path ? scripts[at].path : "");
+		ncfg_json_write_member_string(&writer, "text",
+		    scripts[at].text ? scripts[at].text : "");
+		ncfg_json_write_member_bool(&writer, "readable", scripts[at].readable ? 1 : 0);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "hooks", err, err_size);
+}

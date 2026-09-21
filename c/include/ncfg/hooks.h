@@ -160,4 +160,61 @@ void ncfg_pending_hooks_free(ncfg_pending_hooks_t *pending);
  */
 const ncfg_hook_sink_t *ncfg_hook_sink_unwritten(void);
 
+/*
+ * The most of a hook script a listing will read back.
+ *
+ * `NCFG_CONFIG_FILE_MAX`'s reluctance, one file along: what a hook may contain
+ * is somebody's shell and any number is invented, but `ncfg_host_read_file`
+ * takes a ceiling and there is no way to spell "none" that does not overflow
+ * its arithmetic. A megabyte is far past any hook and short of anything that
+ * hurts a daemon whose whole resident budget is five -- and a script this
+ * refuses to show is still run: nothing here decides what executes.
+ */
+#define NCFG_HOOK_SCRIPT_MAX (1024u * 1024u)
+
+/*
+ * One hook a document declares, with the script netcfgd would run.
+ *
+ * `text` is empty where `readable` is 0, and the two are not the same answer:
+ * an empty script is a file somebody wrote and an unreadable one is a file
+ * netcfgd could not open.
+ */
+typedef struct {
+	char *interface;
+	int   phase; /* ncfg_hook_phase_t, from value.h */
+	char *path;
+	int   readable;
+	char *text;
+} ncfg_hook_script_t;
+
+void ncfg_hook_scripts_free(ncfg_hook_script_t *scripts, size_t count);
+
+/*
+ * Every hook the document declares, read back from disk.
+ *
+ * **Read rather than remembered.** The bodies pass through this process at
+ * every reload -- the compiler names them and `ncfg_pending_hooks_t` writes
+ * them -- and keeping a copy would be a second answer to "what runs at
+ * `post_up`" that can disagree with the file the runner opens. What a caller
+ * is shown is the same bytes the runner executes, including the `#!/bin/sh`
+ * the materialiser prepends to a body that has none.
+ *
+ * **A file that is not there is listed as itself rather than skipped.** The
+ * document names it, so a client that never saw the row would write an
+ * `interface` block with the hook missing -- which is to say, delete a hook
+ * because netcfgd could not read it. That is the opposite of
+ * `ncfg_config_list_drop_ins`' rule and for the opposite reason: there the
+ * listing *is* the file, and here the listing is the document's claim about a
+ * file.
+ *
+ * **Interface hooks only.** A `network` block may carry them and this build
+ * runs none of them at any phase, which the planner warns about; listing them
+ * would offer an editor for something that does not execute.
+ *
+ * A NULL document lists nothing and is not an error: a machine whose
+ * configuration does not compile declares no hooks.
+ */
+int ncfg_hooks_list(const ncfg_document_t *desired, ncfg_hook_script_t **out,
+    size_t *count_out, char *err, size_t err_size);
+
 #endif /* NCFG_HOOKS_H */

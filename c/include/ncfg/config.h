@@ -281,6 +281,48 @@ ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t
 int ncfg_config_writable_files(const char *config_dir, char ***out, size_t *count_out, char *err,
     size_t err_size);
 
+/*
+ * One configuration file, as a client is shown it.
+ *
+ * `name` is the drop-in's stem and is **empty for a file that is not one**:
+ * `name` is what `config put` and `config delete` take, so a file without one
+ * is a file a client cannot address. `file` is relative to the config
+ * directory -- `netcfgd.conf`, or `conf.d/wifi-home.conf` -- which is what a
+ * person recognises and what a client shows.
+ */
+typedef struct {
+	char *name;
+	char *file;
+	int   removable;
+	char *text;
+} ncfg_config_entry_t;
+
+void ncfg_config_entries_free(ncfg_config_entry_t *entries, size_t count);
+
+/*
+ * Every configuration file netcfgd reads, with its contents.
+ *
+ * The same enumeration as the loader, through `ncfg_config_writable_files`,
+ * for that call's reason: a listing that showed a different set from the one
+ * that gets loaded would offer an editor for a file that configures nothing,
+ * or hide one that does.
+ *
+ * **A file under `conf.d` is removable and everything else is not**, which is
+ * the same rule `ncfg_config_remove_drop_in` enforces: the base configuration
+ * is the operator's own and netcfgd does not offer to delete it.
+ *
+ * A file that cannot be read is left out rather than listed empty. An empty
+ * `text` means an empty file, and a client that wrote that back would truncate
+ * a file it was never shown -- which is the one mistake this listing could
+ * cause. **That case is a race and nothing else**: the enumeration stats every
+ * candidate and takes only regular files, so a file reaches the read here
+ * unless it is removed in between. It is handled rather than asserted on for
+ * that reason, and a sabotage of it catches nothing because nothing can set it
+ * up. A directory that is not there lists nothing and is not an error.
+ */
+int ncfg_config_list_drop_ins(const char *config_dir, ncfg_config_entry_t **out,
+    size_t *count_out, char *err, size_t err_size);
+
 /* Free a list of paths and zero the count. Freeing NULL is nothing. */
 void ncfg_config_paths_free(char **paths, size_t count);
 

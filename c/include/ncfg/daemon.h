@@ -66,6 +66,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/config.h"
 #include "ncfg/document.h"
+#include "ncfg/hooks.h"
 #include "ncfg/lex.h"
 #include "ncfg/observed.h"
 #include "ncfg/secrets.h"
@@ -526,6 +527,27 @@ int ncfg_daemon_secrets_encode(const ncfg_secret_entry_t *entries, size_t count,
  */
 int ncfg_daemon_profiles_encode(const ncfg_profile_entry_t *entries, size_t count,
     const char *chosen, ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * Every configuration file netcfgd reads, as the `configs` response.
+ *
+ * The entries are `ncfg_config_list_drop_ins`'. `name` is **omitted where the
+ * file is not a drop-in**, because `name` is what `config put` and
+ * `config delete` take: a client shown one for `netcfgd.conf` would offer a
+ * delete that is refused.
+ */
+int ncfg_daemon_configs_encode(const ncfg_config_entry_t *entries, size_t count,
+    ncfg_buf_t *out, char *err, size_t err_size);
+
+/*
+ * Every hook the document declares, as the `hooks` response.
+ *
+ * The entries are `ncfg_hooks_list`'. `text` is written even where the script
+ * could not be read, because `readable` is what says which of the two an empty
+ * one is.
+ */
+int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
 
 /* ------------------------------------------------------------- the server */
 
