@@ -323,6 +323,42 @@ void ncfg_config_entries_free(ncfg_config_entry_t *entries, size_t count);
 int ncfg_config_list_drop_ins(const char *config_dir, ncfg_config_entry_t **out,
     size_t *count_out, char *err, size_t err_size);
 
+/*
+ * One probe script, as a client is shown it.
+ *
+ * `directory` is where it was found, spelled out, so a client showing two of
+ * the same name can say which is which -- and `editable` says whether this is
+ * the copy `probe put` would replace: netcfgd writes into the operator's
+ * directory and never into the one the package ships.
+ */
+typedef struct {
+	char *name;
+	char *directory;
+	char *text;
+	int   editable;
+} ncfg_probe_entry_t;
+
+void ncfg_probe_entries_free(ncfg_probe_entry_t *entries, size_t count);
+
+/*
+ * Every probe script this machine has, the operator's layer first.
+ *
+ * **A name in the operator's directory hides the shipped one of that name**,
+ * which is what running one does: the probe runner looks in the same order, so
+ * a listing that showed both would offer an editor for a script that never
+ * executes.
+ *
+ * Sorted within each directory, so two runs of the same machine list the same
+ * thing in the same order. Only regular files, and one that cannot be read is
+ * left out for `ncfg_config_list_drop_ins`' reason -- an empty `text` written
+ * back would truncate a program netcfgd runs as root.
+ *
+ * A directory that is not there contributes nothing and is not an error: a
+ * machine with no probes of its own is the ordinary one.
+ */
+int ncfg_probe_list(const char *config_dir, const char *factory_dir,
+    ncfg_probe_entry_t **out, size_t *count_out, char *err, size_t err_size);
+
 /* Free a list of paths and zero the count. Freeing NULL is nothing. */
 void ncfg_config_paths_free(char **paths, size_t count);
 

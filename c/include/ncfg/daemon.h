@@ -571,6 +571,33 @@ int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, nc
 int ncfg_daemon_explanation_encode(const ncfg_explanation_t *explanation, ncfg_buf_t *out,
     char *err, size_t err_size);
 
+/*
+ * Every probe script this machine has, as the `probes` response.
+ *
+ * The entries are `ncfg_probe_list`'s, operator's layer first, and `editable`
+ * is what says which copy `probe put` would replace.
+ */
+int ncfg_daemon_probes_encode(const ncfg_probe_entry_t *entries, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
+/*
+ * Every modem device and where its SIM selection has got to, as the `modems`
+ * response.
+ *
+ * The entries are `ncfg_sims_status`', which joins what the document asks for
+ * with what this daemon has chosen -- the two live apart and a client
+ * stitching them together would be a second copy of a rule that belongs here.
+ *
+ * **Four members are omitted rather than written empty**, and each absence is
+ * an answer: no `apn` where the document states none, no `cycle_pending` where
+ * the selection has not moved, no `cards` for a device no helper has reported
+ * one on -- the mux shows the module one SIM at a time, so a source netcfgd
+ * has never been on has no card and that is the honest answer rather than a
+ * gap to fill -- and no `selected` where the device lists no sources at all.
+ */
+int ncfg_daemon_modems_encode(const ncfg_proto_modem_t *modems, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------- the server */
 
 /*

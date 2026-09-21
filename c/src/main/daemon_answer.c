@@ -19,10 +19,10 @@
  *   refusal as a request the daemon did not recognise. Two things make this
  *   different from that, and both are properties rather than intentions:
  *
- *     * twenty-two of the thirty-two kinds are answered, including every wifi
- *       verb, `reload`, `status`, `show`, `plan`, `explain`, the credential,
- *       profile, configuration and hook lists, and everything that writes a
- *       drop-in, a secret or a profile;
+ *     * twenty-four of the thirty-two kinds are answered, including every
+ *       wifi verb, `reload`, `status`, `show`, `plan`, `explain`, every list
+ *       but the journal's, and everything that writes a drop-in, a secret or
+ *       a profile;
  *     * every other kind is refused with a sentence that **names the request
  *       and says what is missing**, so it cannot be read as "unrecognised".
  *       `ncfg_main_answer_unported` is that table, reachable on its own so
@@ -30,7 +30,7 @@
  *       remembered.
  *
  *   The refusals are not a policy decision either: nothing in `c/src/` encodes
- *   a `journal`, `modems` or `probes` response, because `proto.h` decodes every
+ *   a `journal` response, because `proto.h` decodes every
  *   response and encodes none and the encoders belong beside the requests that
  *   produce them. When one lands, one row of the table becomes an arm --
  *   `status` and `document` are the two that have, and `daemon.h` has them.
@@ -153,17 +153,6 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`hello` is answered by the control socket itself, so nothing here "
 		    "answers it; reaching this is a bug in the server rather than in the "
 		    "request";
-	case NCFG_PROTO_REQ_PROBE_LIST:
-	case NCFG_PROTO_REQ_MODEM_LIST:
-		/* The verb is recognised and the answer cannot be written: `proto.h`
-		 * decodes every response and encodes none, and the encoder for each
-		 * of these belongs beside the request that produces it. `ncfg status`,
-		 * `ncfg plan` and `ncfg explain` read the machine themselves and do
-		 * not need a daemon, which is where to send somebody meanwhile. */
-		return "this build of netcfgd understands the request and cannot write the "
-		    "answer: nothing in the C port encodes that response yet. `ncfg status`, "
-		    "`ncfg plan` and `ncfg explain` read the machine themselves and need no "
-		    "daemon";
 	case NCFG_PROTO_REQ_MONITOR:
 		/* Never reaches the seam either, and for `hello`'s reason one step
 		 * further out: the answer to `monitor` is the connection itself, and
@@ -226,6 +215,8 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 	case NCFG_PROTO_REQ_CONFIG_LIST:
 	case NCFG_PROTO_REQ_HOOK_LIST:
 	case NCFG_PROTO_REQ_EXPLAIN:
+	case NCFG_PROTO_REQ_PROBE_LIST:
+	case NCFG_PROTO_REQ_MODEM_LIST:
 		return NULL;
 	case NCFG_PROTO_REQ_COUNT:
 	default:
@@ -766,6 +757,59 @@ static int answer_hook_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, 
  * configuration has stopped compiling, and the observation half of the answer
  * is worth having on its own.
  */
+/*
+ * Every probe script, the operator's copy of a name hiding the shipped one.
+ *
+ * The listing is `ncfg_probe_list`', which reads in the order the probe runner
+ * does -- a listing that showed both copies would offer an editor for a script
+ * that never executes.
+ */
+static int answer_probe_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_probe_entry_t *entries = NULL;
+	size_t              count = 0;
+	int                 wrote;
+
+	if (!ncfg_probe_list(desk->state->paths.config, desk->state->paths.factory, &entries,
+	        &count, err, err_size)) {
+		return 0;
+	}
+	wrote = ncfg_daemon_probes_encode(entries, count, out, err, err_size);
+	ncfg_probe_entries_free(entries, count);
+	return wrote;
+}
+
+/*
+ * Every modem device, what it asks for and what is in force.
+ *
+ * **Refused where this desk was given no selection**, which is
+ * `ncfg_main_desk_t`'s rule and right here rather than merely consistent: what
+ * a client wants is where netcfgd has *got to*, and that is the loop's memory
+ * rather than anything the document says. Answering from the document alone
+ * would describe a machine on its first SIM whatever had happened since.
+ */
+static int answer_modem_list(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_proto_modem_t *modems = NULL;
+	size_t              count = 0;
+	int                 wrote;
+
+	if (!desk->sims) {
+		ncfg_error_set(err, err_size,
+		    "this daemon was not given a SIM selection to report, so it cannot say "
+		    "which source each modem is on");
+		return 0;
+	}
+	if (!ncfg_sims_status(desk->sims, desk->state->desired, &modems, &count, err, err_size)) {
+		return 0;
+	}
+	wrote = ncfg_daemon_modems_encode(modems, count, out, err, err_size);
+	ncfg_sims_status_free(modems, count);
+	return wrote;
+}
+
 static int answer_explain(ncfg_main_desk_t *desk, const ncfg_proto_subject_t *subject,
     ncfg_buf_t *out, char *err, size_t err_size)
 {
@@ -878,6 +922,10 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 		return answer_hook_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_EXPLAIN:
 		return answer_explain(desk, &request->u.explain, out, err, err_size);
+	case NCFG_PROTO_REQ_PROBE_LIST:
+		return answer_probe_list(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_MODEM_LIST:
+		return answer_modem_list(desk, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
 	case NCFG_PROTO_REQ_WIFI_DISCONNECT:
@@ -919,8 +967,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
 	case NCFG_PROTO_REQ_MONITOR:
-	case NCFG_PROTO_REQ_PROBE_LIST:
-	case NCFG_PROTO_REQ_MODEM_LIST:
 	case NCFG_PROTO_REQ_PROBE_PUT:
 	case NCFG_PROTO_REQ_COUNT:
 	default:

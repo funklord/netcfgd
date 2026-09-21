@@ -337,3 +337,110 @@ int ncfg_daemon_explanation_encode(const ncfg_explanation_t *explanation, ncfg_b
 	ncfg_json_write_object_end(&writer);
 	return finish(&writer, out, "explanation", err, err_size);
 }
+
+int ncfg_daemon_probes_encode(const ncfg_probe_entry_t *entries, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the probe list");
+		return 0;
+	}
+	if (!entries && count != 0u) {
+		ncfg_error_set(err, err_size, "a probe list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "probes");
+	ncfg_json_write_key(&writer, "probes");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		ncfg_json_write_object_begin(&writer);
+		ncfg_json_write_member_string(&writer, "name",
+		    entries[at].name ? entries[at].name : "");
+		ncfg_json_write_member_string(&writer, "directory",
+		    entries[at].directory ? entries[at].directory : "");
+		ncfg_json_write_member_string(&writer, "text",
+		    entries[at].text ? entries[at].text : "");
+		ncfg_json_write_member_bool(&writer, "editable", entries[at].editable ? 1 : 0);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "probes", err, err_size);
+}
+
+/* One borrowed string as a member, where it is there at all. */
+static void member_str(ncfg_json_writer_t *writer, const char *name, ncfg_proto_str_t text)
+{
+	if (!ncfg_proto_str_present(text)) {
+		return;
+	}
+	ncfg_json_write_key(writer, name);
+	ncfg_json_write_string_bytes(writer, text.bytes, text.length);
+}
+
+int ncfg_daemon_modems_encode(const ncfg_proto_modem_t *modems, size_t count, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	size_t             at;
+	size_t             which;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the modem list");
+		return 0;
+	}
+	if (!modems && count != 0u) {
+		ncfg_error_set(err, err_size, "a modem list was asked for with no entries");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "modems");
+	ncfg_json_write_key(&writer, "modems");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < count; at++) {
+		const ncfg_proto_modem_t *modem = &modems[at];
+
+		ncfg_json_write_object_begin(&writer);
+		/* The device is the one member that is always written: a modem with
+		 * nothing else to say is still a device a client lists. */
+		ncfg_json_write_key(&writer, "device");
+		ncfg_json_write_string_bytes(&writer, modem->device.bytes, modem->device.length);
+		if (modem->sim.count > 0u) {
+			ncfg_json_write_key(&writer, "sim");
+			ncfg_json_write_array_begin(&writer);
+			for (which = 0u; which < modem->sim.count; which++) {
+				ncfg_json_write_string_bytes(&writer, modem->sim.items[which].bytes,
+				    modem->sim.items[which].length);
+			}
+			ncfg_json_write_array_end(&writer);
+		}
+		member_str(&writer, "selected", modem->selected);
+		member_str(&writer, "apn", modem->apn);
+		/* Written only when true, which `daemon.h` argues: `false` here is the
+		 * ordinary state of every modem on the machine. */
+		if (modem->cycle_pending) {
+			ncfg_json_write_member_bool(&writer, "cycle_pending", 1);
+		}
+		if (modem->card_count > 0u) {
+			ncfg_json_write_key(&writer, "cards");
+			ncfg_json_write_array_begin(&writer);
+			for (which = 0u; which < modem->card_count; which++) {
+				ncfg_json_write_object_begin(&writer);
+				member_str(&writer, "source", modem->cards[which].source);
+				member_str(&writer, "iccid", modem->cards[which].iccid);
+				ncfg_json_write_object_end(&writer);
+			}
+			ncfg_json_write_array_end(&writer);
+		}
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "modems", err, err_size);
+}
