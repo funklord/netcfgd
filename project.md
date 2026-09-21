@@ -9515,6 +9515,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.216 The accident that 10.205 removed, and the pass that replaces it
+
+`observe.h` still said `read_resolv_currency` was waiting on a record nothing
+wrote. That had stopped being true four rounds earlier -- and the sentence was
+hiding something sharper than a stale claim.
+
+**Closing one gap opened another.** While `owned.json`'s `dns` had no writer,
+`observed.dns` was empty on every machine, so the planner emitted a `dns.apply`
+on every pass. That was the defect 10.205 fixed -- and it was *also*, by
+accident, the only thing that corrected a `/etc/resolv.conf` some other program
+had overwritten. Writing the record took the accident away with the defect: a
+machine whose resolver was replaced would now have netcfgd reporting nothing to
+do, for ever, because its record says it delivered one.
+
+So the pass that notices had to land in the same wave, and this is it.
+
+**It is the only observation pass that takes an answer away.** Every other one
+adds; this one empties `observed.dns` when the file does not hold what the
+record says netcfgd put there -- because that list is what the planner reads as
+"already delivered", and emptying it is how netcfgd is told to deliver again.
+
+**All of it, not one scope.** `resolv.conf` is written whole from every scope
+at once, so there is no line in it belonging to one scope rather than another:
+"this is not what netcfgd wrote" is a statement about the delivery. Clearing
+one entry would be a guess about which scope the other program meant to
+replace, and the repair is the same either way -- one delivery, written whole.
+
+**Only under `write_resolv_conf`.** netcfgd owns that file in that mode and no
+other; under `resolvconf`, `resolved` or a forwarder the file is somebody
+else's to write, and comparing it would report the other daemon doing its job
+as drift on every pass.
+
+**The renderer is the delivery's**, which is the check that matters most: a
+second spelling of `resolv.conf` here -- even the generator name in the first
+line -- would make every comparison differ, and netcfgd would rewrite a file it
+had just written, for ever. The sabotage for it changes `"netcfgd"` to `"ncfg"`
+and the case goes red.
+
+**The path has no default.** `ncfg_observe_roots_t` carries the two kernel
+roots defaulted and this file not, and the asymmetry is the point: reading
+`/proc` tells you about processes, and reading this decides whether netcfgd
+rewrites the file that says how the machine resolves a name. An observation
+given no path says nothing. The daemon names `dns.h`'s constant, which is the
+same one its executor is given, so what is written and what is compared cannot
+come to be two files.
+
+Four sabotages, each caught: judging a mode netcfgd does not own the file in,
+never clearing, rendering with a different generator, and reading a path
+nobody gave.
+
 ## 10.215 The refusal that was wrong twice, and the last verb before the apply
 
 `probe put` was refused with: "this build of netcfgd cannot write a probe

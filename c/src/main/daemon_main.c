@@ -602,6 +602,17 @@ static int start(const options_t *options)
 		ncfg_daemon_state_free(&state);
 		return cannot("this daemon cannot work out how to read the machine", err);
 	}
+	/*
+	 * And the resolver file, which `ncfg_observe_roots_t` leaves empty on
+	 * purpose: an observation that was given no path says nothing about a
+	 * delivery rather than reading whatever `/etc/resolv.conf` this machine
+	 * has. This is the daemon, so it means the machine's -- `dns.h`'s
+	 * constant, which is also what the executor's world is given further
+	 * down, so that what is written and what is compared cannot come to be
+	 * two files.
+	 */
+	(void)snprintf(source.roots.resolv_conf, sizeof(source.roots.resolv_conf), "%s",
+	    NCFG_RESOLV_CONF);
 	state.observe = ncfg_observe_source_observe;
 	state.observe_context = &source;
 
