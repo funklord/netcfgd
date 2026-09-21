@@ -728,6 +728,10 @@ static int start(const options_t *options)
 	desk.config_dir = where.config;
 	desk.factory_dir = where.factory;
 	desk.subscribers = &subscribers;
+	/* The machine's, and the same answer the reconcile pass gives a radio
+	 * back on: two readings of "who else is managing this" would be two
+	 * answers to one question. */
+	ncfg_contention_machine(&desk.contention);
 
 	err[0] = '\0';
 	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, ncfg_main_stream, &desk,

@@ -324,7 +324,6 @@ static void write_action(ncfg_json_writer_t *writer, const ncfg_action_t *action
 int ncfg_plan_write(const ncfg_plan_t *plan, ncfg_buf_t *buf, char *err, size_t err_size)
 {
 	ncfg_json_writer_t writer;
-	size_t             i;
 
 	/*
 	 * A plan that failed while it was being built writes nothing. Half a plan
@@ -337,54 +336,7 @@ int ncfg_plan_write(const ncfg_plan_t *plan, ncfg_buf_t *buf, char *err, size_t 
 	}
 	ncfg_json_write_init(&writer, buf);
 	ncfg_json_write_object_begin(&writer);
-
-	ncfg_json_write_key(&writer, "actions");
-	ncfg_json_write_array_begin(&writer);
-	for (i = 0; i < plan->action_count; i++) {
-		write_action(&writer, &plan->actions[i]);
-	}
-	ncfg_json_write_array_end(&writer);
-
-	ncfg_json_write_key(&writer, "warnings");
-	ncfg_json_write_array_begin(&writer);
-	for (i = 0; i < plan->warning_count; i++) {
-		ncfg_json_write_object_begin(&writer);
-		member_text(&writer, "message", plan->warnings[i].message);
-		if (plan->warnings[i].interface) {
-			ncfg_json_write_member_string(&writer, "interface",
-			    plan->warnings[i].interface);
-		}
-		ncfg_json_write_object_end(&writer);
-	}
-	ncfg_json_write_array_end(&writer);
-
-	ncfg_json_write_key(&writer, "refusals");
-	ncfg_json_write_array_begin(&writer);
-	for (i = 0; i < plan->refusal_count; i++) {
-		ncfg_json_write_object_begin(&writer);
-		member_text(&writer, "interface", plan->refusals[i].interface);
-		member_text(&writer, "op", plan->refusals[i].op);
-		member_text(&writer, "guard", plan->refusals[i].guard);
-		ncfg_json_write_key(&writer, "reason");
-		write_reason(&writer, &plan->refusals[i].reason);
-		member_text(&writer, "override_with", plan->refusals[i].override_with);
-		ncfg_json_write_object_end(&writer);
-	}
-	ncfg_json_write_array_end(&writer);
-
-	ncfg_json_write_key(&writer, "stranded");
-	ncfg_json_write_array_begin(&writer);
-	for (i = 0; i < plan->stranded_count; i++) {
-		ncfg_json_write_object_begin(&writer);
-		member_text(&writer, "interface", plan->stranded[i].interface);
-		member_text(&writer, "credential", plan->stranded[i].credential);
-		member_text(&writer, "irrevocable", plan->stranded[i].irrevocable);
-		member_text(&writer, "remove_with", plan->stranded[i].remove_with);
-		member_text(&writer, "consent_with", plan->stranded[i].consent_with);
-		ncfg_json_write_object_end(&writer);
-	}
-	ncfg_json_write_array_end(&writer);
-
+	ncfg_plan_write_members(&writer, plan);
 	ncfg_json_write_object_end(&writer);
 	if (!ncfg_json_write_done(&writer)) {
 		const char *why = ncfg_json_write_failure(&writer);
@@ -394,4 +346,59 @@ int ncfg_plan_write(const ncfg_plan_t *plan, ncfg_buf_t *buf, char *err, size_t 
 		return 0;
 	}
 	return 1;
+}
+
+void ncfg_plan_write_members(ncfg_json_writer_t *writer, const ncfg_plan_t *plan)
+{
+	size_t i;
+
+	if (!writer || !plan) {
+		return;
+	}
+	ncfg_json_write_key(writer, "actions");
+	ncfg_json_write_array_begin(writer);
+	for (i = 0; i < plan->action_count; i++) {
+		write_action(writer, &plan->actions[i]);
+	}
+	ncfg_json_write_array_end(writer);
+
+	ncfg_json_write_key(writer, "warnings");
+	ncfg_json_write_array_begin(writer);
+	for (i = 0; i < plan->warning_count; i++) {
+		ncfg_json_write_object_begin(writer);
+		member_text(writer, "message", plan->warnings[i].message);
+		if (plan->warnings[i].interface) {
+			ncfg_json_write_member_string(writer, "interface",
+			    plan->warnings[i].interface);
+		}
+		ncfg_json_write_object_end(writer);
+	}
+	ncfg_json_write_array_end(writer);
+
+	ncfg_json_write_key(writer, "refusals");
+	ncfg_json_write_array_begin(writer);
+	for (i = 0; i < plan->refusal_count; i++) {
+		ncfg_json_write_object_begin(writer);
+		member_text(writer, "interface", plan->refusals[i].interface);
+		member_text(writer, "op", plan->refusals[i].op);
+		member_text(writer, "guard", plan->refusals[i].guard);
+		ncfg_json_write_key(writer, "reason");
+		write_reason(writer, &plan->refusals[i].reason);
+		member_text(writer, "override_with", plan->refusals[i].override_with);
+		ncfg_json_write_object_end(writer);
+	}
+	ncfg_json_write_array_end(writer);
+
+	ncfg_json_write_key(writer, "stranded");
+	ncfg_json_write_array_begin(writer);
+	for (i = 0; i < plan->stranded_count; i++) {
+		ncfg_json_write_object_begin(writer);
+		member_text(writer, "interface", plan->stranded[i].interface);
+		member_text(writer, "credential", plan->stranded[i].credential);
+		member_text(writer, "irrevocable", plan->stranded[i].irrevocable);
+		member_text(writer, "remove_with", plan->stranded[i].remove_with);
+		member_text(writer, "consent_with", plan->stranded[i].consent_with);
+		ncfg_json_write_object_end(writer);
+	}
+	ncfg_json_write_array_end(writer);
 }

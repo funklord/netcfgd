@@ -1399,6 +1399,19 @@ typedef struct {
 	/* Where a `monitor` lands, and who is told when a reload is asked for.
 	 * NULL tells nobody and refuses a subscription by name. */
 	ncfg_main_subscribers_t *subscribers;
+	/*
+	 * Where a contention check reads, for the warnings a served `plan`
+	 * carries.
+	 *
+	 * **A desk left without one answers a plan with no contention warnings in
+	 * it**, which is the one place this struct's "no defaults" rule bends and
+	 * is deliberate: those warnings are additional information about the
+	 * machine, and refusing to say what netcfgd would do because nobody said
+	 * where another daemon's state lives would be a worse answer than the
+	 * plan. The daemon always has it -- `ncfg_contention_machine`'s, through
+	 * the world -- and a test that wants none leaves it zeroed.
+	 */
+	ncfg_contention_where_t  contention;
 } ncfg_main_desk_t;
 
 /*

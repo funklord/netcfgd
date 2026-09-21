@@ -9515,6 +9515,59 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.210 The plan a client is served, and the warnings only it carries
+
+The third response of the same shape, and the first with a rule in it rather
+than only an envelope. `{"response":"plan",<the four members>}` is
+`ncfg_plan_write_members` published for the same reason the other two were --
+a plan that gains a member in the file and not in the response is a client
+reading four fields where `plan.json` has five.
+
+**The plan is built fresh rather than kept.** It is a function of the document
+and the observation, and a stored one is a fourth thing to invalidate whenever
+either moves. A configuration that did not compile answers with the
+diagnostics: somebody asking what netcfgd would do wants to know why it cannot
+say, and a plan built from a document they can no longer see is worse than a
+refusal.
+
+**The contention warnings are the part that was missing from every client but
+one.** The daemon works out who else manages an interface -- it says so in its
+own log at startup -- and the plan it served said nothing about it. `ncfg plan`
+computed contention locally and printed it beside the daemon's warnings, so
+the one client that could already read `/run` was the one that needed it least
+and every other client was told nothing at all. The report that produced this
+in the Rust is a GUI wifi tab with no way to say why scans on a contended
+radio fail every other attempt: a scan whose control socket vanishes for a
+moment answers "is `wpa_supplicant` running?", which is true and the wrong
+question.
+
+One warning per interface rather than one naming several, because a client
+filters by the interface it is showing and a warning naming three belongs to
+none of them. The claims are the document's interfaces that the kernel knows
+-- *who else manages what this configuration claims* -- which is a wider
+question than `ncfg_main_world_release_contended`'s *what is netcfgd holding
+that it should give back*, and the two stay apart.
+
+**The desk gained the one member that has a default**, and it is deliberate:
+`ncfg_main_desk_t` otherwise refuses by name whatever it was not given, and a
+desk with no contention paths serves the plan *without* those warnings instead.
+Refusing to say what netcfgd would do because nobody said where another
+daemon's state lives would be a worse answer than the plan. The daemon always
+has them.
+
+**A sabotage that caught nothing, and the check it was missing.** Removing the
+`plan->failed` guard -- which is what stops half a plan being sent as a whole
+one -- turned nothing red, because the only route to that flag through the
+dispatcher is an allocation that fails. The check now drives the encoder
+directly with the flag set, which is honest about what it is testing: a client
+cannot tell a plan with no actions from a plan that ran out of memory before
+it had any, and that is why the flag is asked rather than the count.
+
+Seventeen of the thirty-two request kinds are answered. Three sabotages caught
+before the fourth found the gap above: dropping the contention pass, replacing
+one warning per interface with one naming all of them, and wrapping the
+members instead of flattening them.
+
 ## 10.209 Two responses that were a model and an envelope
 
 Four sweeps came back clean this round before one came back useful. A seam
