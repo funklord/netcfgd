@@ -9515,6 +9515,46 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.217 The per-link views, and a guard that turned out to be reachable
+
+`state.h` said the per-link projections were deferred because assembling one
+needs three of the observed model's writers and they were private -- "publishing
+a table nothing calls is a table nothing checks". That was a good reason and it
+expired the moment there was a caller. They are published now and the files are
+written: `<run>/observed/<name>.json` carrying one link, the addresses on it
+and the routes on it, beside the `<run>/desired/<name>.json` the document
+already had.
+
+What a reader gets is the thing the whole-host file makes awkward: `cat
+/run/netcfgd/observed/eth0.json` instead of filtering `observed.json` for every
+line mentioning `eth0`.
+
+**Built through the writers rather than sliced, and that is the difference
+from the desired side.** A desired projection is one interface block and *is* a
+slice of `desired.json`, so slicing it and parsing the slice back proves the
+two agree -- which is what that code does. An observed projection is three
+things joined, and no slice of `observed.json` has that shape. So this one
+renders through the model's own element writers, which is the same guarantee by
+a different route: a field added to the model cannot go missing from the file,
+because nothing here lists the fields.
+
+Two rules come with it, both `write_projections`': a view of a link that has
+gone is **removed** rather than left claiming the link is still there, and a
+machine with no links leaves **no directory** -- the filesystem reflects use
+rather than capability.
+
+**A sabotage that caught nothing, and then did.** Removing the
+`usable_leaf` guard turned nothing red, because every fixture had a name the
+kernel could have produced. The guard looked defensive until I asked where a
+link list comes from: netlink, *and* `observed.json` read back. A file somebody
+edited can carry any string at all, and `../escaped` as a link name would put a
+per-link view outside the directory netcfgd owns. The check writes that
+observation now, and the sabotage goes red.
+
+Three other sabotages caught: writing every address into every link's file, not
+removing the stale views, and creating the directory for a machine with no
+links.
+
 ## 10.216 The accident that 10.205 removed, and the pass that replaces it
 
 `observe.h` still said `read_resolv_currency` was waiting on a record nothing

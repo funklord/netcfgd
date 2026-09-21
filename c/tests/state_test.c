@@ -684,21 +684,109 @@ static void the_desired_document_and_its_projections(const char *run_dir)
 	free(desired_dir);
 }
 
+/* An observation with two links, an address on each and one route, read from
+ * JSON so that the fixture is the shape the model reads rather than a struct
+ * built by hand. */
+static ncfg_observed_t *two_links(void)
+{
+	static const char text[] =
+	    "{\"links\":[{\"name\":\"eth0\",\"index\":2,\"mtu\":1500,\"up\":true,"
+	    "\"carrier\":true,\"ownership\":\"ours\"},"
+	    "{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":false,"
+	    "\"carrier\":false,\"wireless\":true,\"ownership\":\"unknown\"}],"
+	    "\"addresses\":[{\"interface\":\"eth0\",\"address\":\"10.0.0.1/24\","
+	    "\"ownership\":\"ours\"},"
+	    "{\"interface\":\"wlan0\",\"address\":\"10.9.9.9/24\","
+	    "\"ownership\":\"unknown\"}],"
+	    "\"routes\":[{\"interface\":\"eth0\",\"destination\":\"default\","
+	    "\"via\":\"10.0.0.254\",\"ownership\":\"ours\"}]}";
+	char             message[NCFG_ERROR_MAX] = "";
+	ncfg_observed_t *observed = ncfg_observed_read(text, sizeof(text) - 1u, message,
+	    sizeof(message));
+
+	if (!observed) {
+		printf("could not read the observation fixture: %s\n", message);
+		exit(1);
+	}
+	return observed;
+}
+
 static void the_observation_is_written_whole(const char *run_dir)
 {
 	char message[NCFG_ERROR_MAX] = "";
 	ncfg_observed_t *observed = ncfg_observed_new(message, sizeof(message));
 	char *whole;
+	char *one;
+	char *observed_dir = strdup(join(run_dir, "observed"));
+	char *stale = strdup(join(observed_dir, "gone.json"));
 
 	check(observed && ncfg_state_write_observed(run_dir, observed, message, sizeof(message)),
 	    "the observation is written whole");
 	whole = testdir_read(join(run_dir, "observed.json"), NULL);
-	/* The per-link projections are deferred, and `state.h` says why: one of
-	 * those files is a link with the addresses and routes on it, and
-	 * assembling it needs the observed model's own writers. */
 	check(whole && whole[0] == '{', "and is a document a reader can `cat`");
 	free(whole);
+	check(!testdir_exists(observed_dir),
+	    "a machine with no links leaves no per-link directory behind");
 	ncfg_observed_free(observed);
+
+	/* And the per-link views, which are what a reader asking about one
+	 * interface uses instead of filtering the whole-host file. */
+	check(mkdir(observed_dir, 0755) == 0 && testdir_write(stale, "{}", 2u),
+	    "a per-link view for a link this machine no longer has");
+	observed = two_links();
+	check(ncfg_state_write_observed(run_dir, observed, message, sizeof(message)),
+	    "an observation with two links is written");
+	one = testdir_read(join(observed_dir, "eth0.json"), NULL);
+	/*
+	 * The link, the addresses on it and the routes on it -- and nothing
+	 * belonging to the other link. A projection that carried the whole-host
+	 * lists would be the file it exists to save a reader from.
+	 */
+	check(one && strstr(one, "\"link\":{\"name\":\"eth0\"") != NULL &&
+	        strstr(one, "10.0.0.1/24") != NULL && strstr(one, "10.0.0.254") != NULL,
+	    "each link has a file carrying itself, its addresses and its routes");
+	check(one && strstr(one, "wlan0") == NULL && strstr(one, "10.9.9.9") == NULL,
+	    "  and nothing belonging to another link");
+	free(one);
+	one = testdir_read(join(observed_dir, "wlan0.json"), NULL);
+	check(one && strstr(one, "10.9.9.9/24") != NULL && strstr(one, "\"routes\":[]") != NULL,
+	    "for every link, and a link with no routes says so with an empty list");
+	free(one);
+	check(!testdir_exists(stale),
+	    "and a view of a link that has gone is removed, not left claiming it is there");
+	ncfg_observed_free(observed);
+
+	/*
+	 * And a name that could not be a filename, which is reachable rather than
+	 * defensive: a link list is read back out of `observed.json` as well as
+	 * taken from the kernel, and a file somebody edited can carry any string
+	 * at all. `../` in it would put a per-link view outside the directory.
+	 */
+	{
+		static const char escape[] =
+		    "{\"links\":[{\"name\":\"../escaped\",\"index\":9,\"mtu\":1500,"
+		    "\"up\":false,\"carrier\":false,\"ownership\":\"unknown\"}]}";
+		ncfg_observed_t *bad = ncfg_observed_read(escape, sizeof(escape) - 1u, message,
+		    sizeof(message));
+
+		if (bad) {
+			message[0] = '\0';
+			check(!ncfg_state_write_observed(run_dir, bad, message, sizeof(message)) &&
+			        strstr(message, "cannot be a filename") != NULL,
+			    "a link whose name could not be a filename is refused by name");
+			check(!testdir_exists(join(run_dir, "escaped.json")),
+			    "  and nothing was written outside the directory");
+			ncfg_observed_free(bad);
+		} else {
+			check(0, "the escaping fixture reads");
+		}
+	}
+
+	(void)unlink(join(observed_dir, "eth0.json"));
+	(void)unlink(join(observed_dir, "wlan0.json"));
+	(void)rmdir(observed_dir);
+	free(stale);
+	free(observed_dir);
 	(void)unlink(join(run_dir, "observed.json"));
 }
 

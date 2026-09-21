@@ -629,6 +629,135 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
 	return ok;
 }
 
+/*
+ * One link and everything on it, as `<run>/observed/<name>.json`.
+ *
+ * **Built through the model's own writers rather than sliced out of the
+ * whole-host rendering**, which is where this differs from the desired
+ * projections above: those are one interface block each and *are* a slice of
+ * `desired.json`, so slicing it and parsing the slice back proves they agree.
+ * This one is three things joined -- the link, the addresses on it and the
+ * routes on it -- and no slice of `observed.json` has that shape. So the three
+ * element writers are published (`observed.h`) and used here, which is what
+ * keeps a field added to the model from going missing out of this file.
+ */
+static int write_observed_projection(const char *dir, const ncfg_observed_t *observed,
+    const ncfg_observed_link_t *link, char *err, size_t err_size)
+{
+	ncfg_buf_t         buf;
+	ncfg_json_writer_t writer;
+	char              *leaf;
+	char              *file;
+	size_t             leaf_size;
+	size_t             at;
+	int                ok;
+
+	if (!usable_leaf(link->name)) {
+		ncfg_error_set(err, err_size,
+		    "`%s` cannot be a filename, so no per-link view was written for it",
+		    link->name ? link->name : "");
+		return 0;
+	}
+	ncfg_buf_init(&buf, 0u);
+	ncfg_json_write_init(&writer, &buf);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_key(&writer, "link");
+	ncfg_json_write_object_begin(&writer);
+	ncfg_observed_link_write(&writer, link);
+	ncfg_json_write_object_end(&writer);
+	ncfg_json_write_key(&writer, "addresses");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < observed->address_count; at++) {
+		if (!observed->addresses[at].interface ||
+		    strcmp(observed->addresses[at].interface, link->name) != 0) {
+			continue;
+		}
+		ncfg_json_write_object_begin(&writer);
+		ncfg_observed_address_write(&writer, &observed->addresses[at]);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_key(&writer, "routes");
+	ncfg_json_write_array_begin(&writer);
+	for (at = 0u; at < observed->route_count; at++) {
+		if (!observed->routes[at].interface ||
+		    strcmp(observed->routes[at].interface, link->name) != 0) {
+			continue;
+		}
+		ncfg_json_write_object_begin(&writer);
+		ncfg_observed_route_write(&writer, &observed->routes[at]);
+		ncfg_json_write_object_end(&writer);
+	}
+	ncfg_json_write_array_end(&writer);
+	ncfg_json_write_object_end(&writer);
+	if (!ncfg_json_write_done(&writer)) {
+		const char *why = ncfg_json_write_failure(&writer);
+
+		ncfg_error_set(err, err_size, "the per-link view of `%s` could not be written: %s",
+		    link->name, why ? why : "it did not fit");
+		ncfg_buf_free(&buf);
+		return 0;
+	}
+	leaf_size = strlen(link->name) + 6u;
+	leaf = malloc(leaf_size);
+	if (!leaf) {
+		ncfg_error_set(err, err_size, "out of memory");
+		ncfg_buf_free(&buf);
+		return 0;
+	}
+	(void)snprintf(leaf, leaf_size, "%s.json", link->name);
+	file = ncfg_host_join(dir, leaf, err, err_size);
+	free(leaf);
+	if (!file) {
+		ncfg_buf_free(&buf);
+		return 0;
+	}
+	ok = ncfg_write_atomically(file, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)), 0666u,
+	    err, err_size);
+	free(file);
+	ncfg_buf_free(&buf);
+	return ok;
+}
+
+/*
+ * Every link's own view, and nothing left over.
+ *
+ * Removed first, so a link that has gone does not leave a file claiming it is
+ * still there -- principle 2 depends on what is in `/run` being true rather
+ * than once-true. No links, no directory: section 4.6, the filesystem reflects
+ * use rather than capability.
+ *
+ * A file that could not be written fails the call and is named. The whole-host
+ * `observed.json` is on disk by then, which is the half that matters -- but a
+ * reader that finds a per-link file has to be able to trust it, and refusing
+ * is what keeps a half-written set from reading as a whole one.
+ */
+static int write_observed_projections(const char *run_dir, const ncfg_observed_t *observed,
+    char *err, size_t err_size)
+{
+	char  *dir = ncfg_host_join(run_dir, "observed", err, err_size);
+	size_t at;
+	int    ok = 1;
+
+	if (!dir) {
+		return 0;
+	}
+	remove_projections(dir);
+	if (observed->link_count == 0u) {
+		free(dir);
+		return 1;
+	}
+	if (!ncfg_host_make_directory(dir, (mode_t)0755, err, err_size)) {
+		free(dir);
+		return 0;
+	}
+	for (at = 0u; ok && at < observed->link_count; at++) {
+		ok = write_observed_projection(dir, observed, &observed->links[at], err, err_size);
+	}
+	free(dir);
+	return ok;
+}
+
 int ncfg_state_write_observed(const char *run_dir, ncfg_observed_t *observed, char *err,
     size_t err_size)
 {
@@ -654,5 +783,9 @@ int ncfg_state_write_observed(const char *run_dir, ncfg_observed_t *observed, ch
 	    err, err_size);
 	free(path);
 	ncfg_buf_free(&buf);
-	return ok;
+	/* And one file per link, so a reader asking about `eth0` does not have to
+	 * filter the whole-host view. After the whole file rather than before: the
+	 * projections are a convenience and `observed.json` is the record, so a
+	 * run directory that can hold only one of them holds that one. */
+	return ok && write_observed_projections(run_dir, observed, err, err_size);
 }
