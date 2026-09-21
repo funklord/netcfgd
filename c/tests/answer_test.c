@@ -1136,6 +1136,96 @@ static void a_truncated_explanation_says_so_in_a_fact(void)
 	ncfg_buf_free(&out);
 }
 
+/*
+ * The probe scripts and the modems, and what each one leaves out.
+ *
+ * **The probe listing's rule is the runner's**: a name in the operator's
+ * directory hides the shipped one of that name, because that is which script
+ * executes. A listing showing both would offer an editor for a file that never
+ * runs.
+ *
+ * **The modem listing's rule is that four members are absences.** A modem with
+ * no `apn`, no pending cycle and no card reported is the ordinary state of
+ * every modem on the machine, and writing `false` and `[]` and `""` for it
+ * would make the ordinary case look like an answer about something.
+ */
+static void the_probe_and_modem_listings_leave_out_what_is_not_there(void)
+{
+	ncfg_document_t     *kept_desired = state.desired;
+	const ncfg_sims_t   *kept_sims = desk.sims;
+	ncfg_sims_t         *sims;
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 path[700];
+
+	/* The same name in both layers, and one only the package ships. */
+	(void)snprintf(path, sizeof(path), "%s/probe", config_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/probe/default", config_dir);
+	(void)testdir_write(path, "#!/bin/sh\nexit 0\n", strlen("#!/bin/sh\nexit 0\n"));
+	(void)snprintf(path, sizeof(path), "%s/probe", factory_dir);
+	make_dir(path);
+	(void)snprintf(path, sizeof(path), "%s/probe/default", factory_dir);
+	(void)testdir_write(path, "#!/bin/sh\nexit 9\n", strlen("#!/bin/sh\nexit 9\n"));
+	(void)snprintf(path, sizeof(path), "%s/probe/shipped", factory_dir);
+	(void)testdir_write(path, "#!/bin/sh\nexit 1\n", strlen("#!/bin/sh\nexit 1\n"));
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_PROBE_LIST;
+	check(ask(&request, &out, err, sizeof(err)), "`probe list` is answered");
+	check(strstr(ncfg_buf_text(&out), "\"name\":\"default\",\"directory\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "exit 0") != NULL &&
+	        strstr(ncfg_buf_text(&out), "exit 9") == NULL,
+	    "  and the operator's copy of a name is the one listed, which is the one that "
+	    "runs");
+	check(strstr(ncfg_buf_text(&out), "\"name\":\"shipped\"") != NULL &&
+	        strstr(ncfg_buf_text(&out), "\"editable\":false") != NULL,
+	    "  while a shipped script with no local copy is listed and marked unwritable");
+	if (failures) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	/* A modem the document names, with nothing having happened to it yet. */
+	sims = ncfg_sims_new(err, sizeof(err));
+	state.desired = document_of("\"devices\":[{\"name\":\"wwan0\","
+	    "\"kind\":{\"kind\":\"physical\"},\"modem\":{\"sim\":[\"esim\",\"socket\"]}}],"
+	    "\"interfaces\":[]");
+	desk.sims = sims;
+	if (!sims || !state.desired) {
+		check(0, "a modem fixture");
+	} else {
+		memset(&request, 0, sizeof(request));
+		request.kind = NCFG_PROTO_REQ_MODEM_LIST;
+		check(ask(&request, &out, err, sizeof(err)), "`modem list` is answered");
+		check(strcmp(ncfg_buf_text(&out),
+		    "{\"response\":\"modems\",\"modems\":[{\"device\":\"wwan0\","
+		    "\"sim\":[\"esim\",\"socket\"],\"selected\":\"esim\"}]}") == 0,
+		    "  with no apn, no cycle and no card, because none of the three happened");
+		if (failures) {
+			detail("what was written", ncfg_buf_text(&out));
+		}
+		ncfg_buf_free(&out);
+	}
+
+	/* And a desk with no selection refuses by name rather than answering from
+	 * the document, which would describe a machine on its first SIM whatever
+	 * had happened since. */
+	desk.sims = NULL;
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_MODEM_LIST;
+	check(!ask(&request, &out, err, sizeof(err)) &&
+	        strstr(err, "which source each modem is on") != NULL,
+	    "a daemon with no SIM selection says so rather than answering from the document");
+	ncfg_buf_free(&out);
+
+	ncfg_sims_free(sims);
+	ncfg_document_free(state.desired);
+	state.desired = kept_desired;
+	desk.sims = kept_sims;
+}
+
 static void a_dispatcher_with_nothing_behind_it_refuses(void)
 {
 	ncfg_proto_request_t request;
@@ -1327,6 +1417,7 @@ int main(void)
 	the_file_listings_answer_opposite_questions();
 	an_explanation_names_the_file_the_reload_recorded();
 	a_truncated_explanation_says_so_in_a_fact();
+	the_probe_and_modem_listings_leave_out_what_is_not_there();
 	a_dispatcher_with_nothing_behind_it_refuses();
 
 	ncfg_daemon_state_free(&state);

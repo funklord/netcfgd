@@ -732,6 +732,10 @@ static int start(const options_t *options)
 	 * back on: two readings of "who else is managing this" would be two
 	 * answers to one question. */
 	ncfg_contention_machine(&desk.contention);
+	/* The loop's own selection, borrowed rather than copied: a client is told
+	 * where this daemon has got to, not where a second copy of the rule
+	 * would. */
+	desk.sims = loop.sims;
 
 	err[0] = '\0';
 	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, ncfg_main_stream, &desk,

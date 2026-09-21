@@ -9515,6 +9515,39 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.214 The probes and the modems, and four members that are absences
+
+Twenty-four of the thirty-two request kinds are answered; `journal` is the only
+response left unencoded. `ncfg_probe_list` is new and `ncfg_sims_status` was
+already here -- it was on 10.207's list of published calls with no caller, kept
+there with a reason ("waits on `modems`"), and this is that.
+
+**The probe listing's rule is the runner's.** A name in the operator's
+directory hides the shipped one of that name, because that is the copy that
+executes: a listing showing both would offer an editor for a script that never
+runs. Sorted within each layer so two runs of one machine list the same thing
+in the same order, regular files only, and one that cannot be read is left out
+-- an empty `text` written back would truncate a program netcfgd runs as root.
+
+**Four members of a modem are absences**, and each one is an answer rather
+than a default: no `apn` where the document states none, no `cycle_pending`
+where the selection has not moved, no `cards` for a source no helper has
+reported one on -- the mux shows the module one SIM at a time, so a source
+netcfgd has never been on has no card, and that absence is honest where a
+filled-in gap would be a guess -- and no `selected` where the device lists no
+sources at all. The ordinary modem on the ordinary machine has three of the
+four missing, so writing `false`, `[]` and `""` would make the ordinary case
+look like an answer about something.
+
+**`modem list` refuses where the desk was given no selection.** That is
+`ncfg_main_desk_t`'s rule and it is right here rather than merely consistent:
+what a client wants is where netcfgd has *got to*, which is the loop's memory,
+and answering from the document alone would describe a machine on its first SIM
+whatever had happened since.
+
+Three sabotages caught: listing both copies of a probe name, writing
+`cycle_pending` always, and answering a modem list with no selection behind it.
+
 ## 10.213 The explanation over the socket, and the file positions it reads
 
 Twenty-two of the thirty-two request kinds are answered. This one needed a

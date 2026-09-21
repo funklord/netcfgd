@@ -1228,3 +1228,191 @@ int ncfg_config_list_drop_ins(const char *config_dir, ncfg_config_entry_t **out,
 	*count_out = taken;
 	return 1;
 }
+
+/* ------------------------------------------------------------------------ *
+ * The probe scripts
+ * ------------------------------------------------------------------------ */
+
+void ncfg_probe_entries_free(ncfg_probe_entry_t *entries, size_t count)
+{
+	size_t at;
+
+	if (!entries) {
+		return;
+	}
+	for (at = 0u; at < count; at++) {
+		free(entries[at].name);
+		free(entries[at].directory);
+		free(entries[at].text);
+	}
+	free(entries);
+}
+
+/* A copy this module owns, or NULL. */
+static char *probe_dup(const char *text)
+{
+	size_t size = strlen(text) + 1u;
+	char  *copy = malloc(size);
+
+	if (copy) {
+		memcpy(copy, text, size);
+	}
+	return copy;
+}
+
+/* Whether a name is already in the list, which is how the operator's layer
+ * hides the shipped one. */
+static int probe_seen(const ncfg_probe_entry_t *entries, size_t count, const char *name)
+{
+	size_t at;
+
+	for (at = 0u; at < count; at++) {
+		if (entries[at].name && strcmp(entries[at].name, name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Every regular file in one probe directory, sorted by name. */
+static int probe_names(const char *directory, char ***out, size_t *count_out)
+{
+	DIR           *open_dir = opendir(directory);
+	struct dirent *entry;
+	char         **found = NULL;
+	size_t         count = 0;
+	size_t         capacity = 0;
+
+	*out = NULL;
+	*count_out = 0;
+	if (!open_dir) {
+		/* A directory that is not there contributes nothing, which is the
+		 * ordinary machine rather than a failure. */
+		return 1;
+	}
+	while ((entry = readdir(open_dir)) != NULL) {
+		char       *path;
+		struct stat about;
+
+		if (entry->d_name[0] == '.') {
+			continue;
+		}
+		path = ncfg_host_join(directory, entry->d_name, NULL, 0);
+		if (!path) {
+			(void)closedir(open_dir);
+			ncfg_host_strings_free(found, count);
+			return 0;
+		}
+		if (stat(path, &about) != 0 || !S_ISREG(about.st_mode)) {
+			free(path);
+			continue;
+		}
+		free(path);
+		if (!ncfg_host_strings_add(&found, &count, &capacity, entry->d_name)) {
+			(void)closedir(open_dir);
+			ncfg_host_strings_free(found, count);
+			return 0;
+		}
+	}
+	(void)closedir(open_dir);
+	/* Sorted and de-duplicated: two entries of one name in one directory is
+	 * not a thing a filesystem produces, so the second half costs nothing and
+	 * the first is what makes two runs list the same order. */
+	ncfg_host_strings_sort_unique(found, &count);
+	*out = found;
+	*count_out = count;
+	return 1;
+}
+
+int ncfg_probe_list(const char *config_dir, const char *factory_dir,
+    ncfg_probe_entry_t **out, size_t *count_out, char *err, size_t err_size)
+{
+	const char         *dirs[2];
+	int                 editable[2];
+	ncfg_probe_entry_t *found = NULL;
+	size_t              taken = 0;
+	size_t              capacity = 0;
+	size_t              which;
+
+	if (!out || !count_out) {
+		ncfg_error_set(err, err_size, "a probe listing was asked for with nowhere to put it");
+		return 0;
+	}
+	*out = NULL;
+	*count_out = 0;
+	dirs[0] = config_dir;
+	dirs[1] = factory_dir;
+	editable[0] = 1;
+	editable[1] = 0;
+	for (which = 0u; which < 2u; which++) {
+		char  *directory;
+		char **names = NULL;
+		size_t name_count = 0;
+		size_t at;
+
+		if (!dirs[which]) {
+			continue;
+		}
+		directory = ncfg_host_join(dirs[which], "probe", err, err_size);
+		if (!directory) {
+			ncfg_probe_entries_free(found, taken);
+			return 0;
+		}
+		if (!probe_names(directory, &names, &name_count)) {
+			free(directory);
+			ncfg_probe_entries_free(found, taken);
+			ncfg_error_set(err, err_size, "out of memory listing the probes");
+			return 0;
+		}
+		for (at = 0u; at < name_count; at++) {
+			char  *path;
+			char  *text;
+			size_t length = 0;
+
+			if (probe_seen(found, taken, names[at])) {
+				/* The operator's copy is the one that runs, so it is the one
+				 * listed; the shipped one of that name is not offered. */
+				continue;
+			}
+			path = ncfg_host_join(directory, names[at], NULL, 0);
+			text = path ? ncfg_host_read_file(path, &length, NCFG_CONFIG_FILE_MAX) : NULL;
+			free(path);
+			if (!text) {
+				continue;
+			}
+			if (taken == capacity) {
+				size_t              want = capacity ? capacity * 2u : 8u;
+				ncfg_probe_entry_t *grown = realloc(found, want * sizeof(*grown));
+
+				if (!grown) {
+					free(text);
+					ncfg_host_strings_free(names, name_count);
+					free(directory);
+					ncfg_probe_entries_free(found, taken);
+					ncfg_error_set(err, err_size, "out of memory listing the probes");
+					return 0;
+				}
+				found = grown;
+				capacity = want;
+			}
+			memset(&found[taken], 0, sizeof(found[taken]));
+			found[taken].text = text;
+			found[taken].editable = editable[which];
+			found[taken].name = probe_dup(names[at]);
+			found[taken].directory = probe_dup(directory);
+			if (!found[taken].name || !found[taken].directory) {
+				ncfg_probe_entries_free(found, taken + 1u);
+				ncfg_host_strings_free(names, name_count);
+				free(directory);
+				ncfg_error_set(err, err_size, "out of memory listing the probes");
+				return 0;
+			}
+			taken++;
+		}
+		ncfg_host_strings_free(names, name_count);
+		free(directory);
+	}
+	*out = found;
+	*count_out = taken;
+	return 1;
+}

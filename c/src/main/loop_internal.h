@@ -1412,6 +1412,17 @@ typedef struct {
 	 * the world -- and a test that wants none leaves it zeroed.
 	 */
 	ncfg_contention_where_t  contention;
+	/*
+	 * Where the SIM selection lives, for the `modems` answer.
+	 *
+	 * The loop's own, borrowed: the selection moves when a probe says a source
+	 * does not work, and a second one here would answer a client with a
+	 * machine the daemon is not on. NULL refuses `modem list` by name, which
+	 * is this struct's rule -- a listing of what netcfgd has chosen cannot be
+	 * invented from the document, because choosing is what `ncfg_sims_t`
+	 * remembers.
+	 */
+	const ncfg_sims_t       *sims;
 } ncfg_main_desk_t;
 
 /*
