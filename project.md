@@ -9515,6 +9515,68 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.207 A published call with no caller, and the SIM nobody selected
+
+The third run of the same sweep, with the correction 10.206 forced into it: a
+function is unwired when nothing in `c/src/` **mentions** it -- not when
+nothing calls it -- because a seam installed as a function pointer is wired
+and a function six tests call is not. Counting mentions rather than calls, and
+counting `client/` and `gui/` as callers too, leaves 57 published functions
+that appear nowhere but their own file.
+
+Most are what the list is expected to hold: an accessor a response encoder
+will use when that response is ported, an alternative entry point for a caller
+that already owns its socket, a default a `NULL` seam means instead. Several
+are named in `daemon_answer.c`'s own table of requests this build refuses --
+`ncfg_confirm_keep` waits on `confirm`, `ncfg_sims_status` on `modems` -- which
+is a gap with a sentence in front of it rather than a hidden one.
+
+**`ncfg_sims_sync` was not.** Its own header says "called on every reload", and
+nothing called it.
+
+**What the file under `<run>/modem/` is.** netcfgd does not drive a modem: it
+writes which SIM source it wants, and a `pre_up` hook drives the mux, because
+driving a select line is board enablement and netcfgd has no GPIO anywhere. So
+that file is the whole of how a selection reaches the hardware. While nothing
+published it:
+
+* a modem device that had never advanced had **no file at all**, so the hook
+  whose only job is to read one had nothing, and the modem stayed on whatever
+  the hardware came up on;
+* a device that left the configuration **kept its file**, read as current by a
+  hook with no other way of knowing;
+* an index already past the end of a shortened source list was never clamped;
+* and `ncfg_sims_advance`'s own comment -- "`ncfg_sims_sync` republishes from
+  the index on the next reload, so a `/run` that was full for a moment catches
+  up" -- was relying on a call that did not exist.
+
+It is called now at the start and on the reload. **At the start before the
+`--no-apply-on-start` hold is decided**, which is the one judgement in this:
+publishing is not acting. The file says what netcfgd wants and the hook that
+acts on it runs inside an apply, which is what the hold defers -- so a daemon
+told not to apply still says what it wants, rather than leaving `/run`
+disagreeing with its own document for as long as the hold lasts.
+
+On the reload it is called whether or not the document moved, because a reload
+that failed to compile leaves the previous document standing and republishing
+from it is how a selection that could not be written last time catches up.
+
+Three sabotages, each caught: dropping the start call, dropping the reload
+call, and making the publication conditional on something that is always true.
+The test drives a real configuration directory through
+`ncfg_reconcile_start` and then a pass, and reads the file back -- both halves,
+because the removal is the one a check on the write alone would miss.
+
+**What the sweep found next, and did not do.** `ncfg explain` hands
+`ncfg_explain` an empty provenance table and prints a notice saying the table
+is not produced. It is: 0263 recorded four waves ago that
+`ncfg_compile_with_provenance` and `ncfg_lower_with_provenance` landed and that
+the lowering records eleven kinds of entry. So the notice is a stale sentence
+costing a user-visible feature -- every `ncfg explain` line could name a file
+and a line and none of them does. That is the next round's work rather than
+this one's: it needs a compile entry point that carries the table, which
+`config.h` does not have yet.
+
 ## 10.206 The same sweep one level down: a field with no producer
 
 10.204 swept for a published function with no caller. 10.205 was a
