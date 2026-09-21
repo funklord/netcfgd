@@ -9515,6 +9515,60 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.218 The first comparison of the two programs
+
+0263 says a module of the port is a candidate to replace its Rust half "only
+once it passes the Rust's own tests for the same behaviour", and that the
+comparison "needs the modules to exist first". They do now, so this is that
+comparison, in the narrowest form that means anything: `tool/agree_gate.py`
+compiles four configuration directories with both `ncfg` programs and compares
+what comes out.
+
+**They agree.** Three directories compile to the same document -- as *values*,
+because the Rust prints it indented and the C compact, which `plan.h` already
+records as the only difference -- and the fourth is refused by both at the same
+file, line and column.
+
+**`show` and nothing else, on purpose.** It is the whole pure path: a
+configuration in, a canonical document out, with nothing read from the kernel.
+`plan`, `status` and `explain` all observe the machine, so two runs of one a
+moment apart are answering questions about two moments, and comparing those
+needs a machine held still -- which is what the live scripts are for. A gate
+that compared them would go red for honest reasons, and a gate that goes red
+for honest reasons teaches people to ignore red.
+
+### What the corpus found before it compared anything
+
+`tests/determinism/netcfgd.conf` **no longer compiled**, with either program.
+`mtu`, `qdisc` and `bridge` moved from `interface` to `device` in the language
+and the fixture went on stating them where they used to go. So
+`determinism.sh` -- which cross-builds for three architectures and compares
+`ncfg show --json` against `expected.json` -- could only have reported three
+failures. On this machine it reports a skip, because there is no docker, and a
+skip reads exactly like a pass.
+
+That is `evidence.md`'s rule meeting the thing it warns about: a gate nobody
+can run is a gate nobody can read. The fixture is fixed, `expected.json` is
+regenerated, and the README now says which of its claims is about the *old*
+fixture -- the recorded md5 across x86_64, aarch64 and s390x is a measurement
+of a document this file no longer produces, and I have no docker with which to
+repeat it. Saying so beats quietly replacing the number with one measured on
+one architecture.
+
+### The gate fails rather than skips, three ways
+
+A missing binary, a corpus directory that is not there, and a "must not
+compile" fixture that compiles are each a failure. The first is the one that
+matters: both programs are built by `make`, so an absent one is a broken tree
+rather than a machine this cannot run on -- and a gate that skipped there would
+report success exactly as loudly as one that had compared something.
+
+Proved by breaking it, which for this gate means making the two programs
+disagree: renaming one field in the C document model's table turns
+`tests/determinism` red with "the two documents differ", and restoring it turns
+it green. A fixture that compiles when it should not, and a corpus entry that
+does not exist, were each driven the same way.
+
 ## 10.217 The per-link views, and a guard that turned out to be reachable
 
 `state.h` said the per-link projections were deferred because assembling one

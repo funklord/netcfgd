@@ -110,7 +110,7 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage c-test
+                 example adapters gui linkage c-test agree
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -2189,6 +2189,16 @@ style-docs:
 # test target has just built.
 example:
 	@python3 tool/example_gate.py
+
+# The two programs compile the same configuration to the same document.
+#
+# After `c-test` in the gate list, because it needs both binaries and that
+# target is what builds the C one. The comparison is `tool/agree_gate.py`'s and
+# the argument for it being `show` and nothing else is in that file's header:
+# every other verb observes the machine, so two runs of it are answering
+# questions about two moments.
+agree: c-test
+	@python3 tool/agree_gate.py
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`

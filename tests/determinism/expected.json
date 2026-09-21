@@ -1,7 +1,7 @@
 {
   "schema_version": {
     "major": 1,
-    "minor": 0
+    "minor": 1
   },
   "globals": {
     "dns": {
@@ -11,25 +11,53 @@
       "domains": [],
       "options": []
     },
-    "on_drift_default": "report",
+    "on_drift_default": "reconcile",
     "confirm_default": null,
+    "networking": "on",
     "hostname_policy": "none",
     "control": {
       "observe": "root",
       "wifi": "root",
       "admin": "root"
+    },
+    "remote": {
+      "observe": false,
+      "wifi": false,
+      "admin": false,
+      "agent": "root"
     }
   },
-  "devices": [],
-  "interfaces": [
+  "devices": [
     {
       "name": "br0",
+      "managed": true,
+      "on_unmanage": "leave",
       "kind": {
         "kind": "bridge",
         "members": [],
         "stp": true,
         "vlan_filtering": false
       },
+      "bridge_vlans": []
+    },
+    {
+      "name": "eth0",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1492,
+      "kind": {
+        "kind": "physical"
+      },
+      "qdisc": {
+        "kind": "cake",
+        "bandwidth_bits": 100000000
+      },
+      "bridge_vlans": []
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "br0",
       "enabled": true,
       "addressing": [
         {
@@ -38,16 +66,11 @@
         }
       ],
       "routes": [],
-      "hooks": [],
-      "bridge_vlans": []
+      "hooks": []
     },
     {
       "name": "eth0",
-      "kind": {
-        "kind": "physical"
-      },
       "enabled": true,
-      "mtu": 1492,
       "addressing": [
         {
           "source": "dhcp4",
@@ -72,12 +95,7 @@
         "options": []
       },
       "hooks": [],
-      "qdisc": {
-        "kind": "cake",
-        "bandwidth_bits": 100000000
-      },
-      "preference": 100,
-      "bridge_vlans": []
+      "preference": 100
     }
   ],
   "networks": [
@@ -93,7 +111,6 @@
         },
         "proto": "wpa2_wpa3"
       },
-      "priority": 0,
       "autoconnect": true,
       "metered": false,
       "addressing": [],
