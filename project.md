@@ -9515,6 +9515,33 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.225 The other binary, and the rule that keeps this gate off the machine
+
+The agreement gate had only ever run `ncfg`. It runs `netcfgd` now, for the
+five invocations that binary answers without starting: `--help`, `--version`,
+an option nobody defined, an option with no value, and a bare word. All five
+agree, exit status and text.
+
+**Every one of them prints or refuses and exits, and that is a rule rather than
+an observation.** A case in that list which *started* a daemon would be this
+gate running a network manager on whatever machine invoked it -- and the one it
+would run first is the Rust, which applies on start. So two things hold it: the
+cases are invocations that cannot reach the loop, and every one is given
+`--no-apply-on-start` and a scratch directory pair anyway, so that a mistake
+there observes and watches and changes nothing.
+
+That belt is the same judgement as the reading cases running against a copy.
+Neither is needed for the list as it stands; both are what make the list safe
+to add to, and the day somebody adds a sixth case is the day it matters.
+
+**A symlink made the missing-binary check read better than expected.** Hiding
+`c/netcfgd` to prove that arm still fails named *two* missing programs, because
+`c/ncfg` is a symlink to it -- the multicall binary this port ships as one image
+under two names. The gate says both, which is the honest answer: neither is
+there.
+
+One sabotage, caught: rewording the C daemon's "unknown option".
+
 ## 10.224 Argument handling, and pinning a divergence by its words
 
 Twenty-seven invocations now, and most of them are argument handling: a verb
