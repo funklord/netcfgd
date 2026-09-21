@@ -660,6 +660,13 @@ static void add_diag(ncfg_lower_diags_t *diags, const char *source, ncfg_span_t 
 ncfg_document_t *ncfg_config_compile(const ncfg_config_sources_t *sources,
     const ncfg_hook_sink_t *hooks, ncfg_lower_diags_t *diags, char *err, size_t err_size)
 {
+	return ncfg_config_compile_with_provenance(sources, hooks, NULL, diags, err, err_size);
+}
+
+ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t *sources,
+    const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
+    char *err, size_t err_size)
+{
 	ncfg_ast_file_t **trees;
 	ncfg_source_t    *parsed;
 	ncfg_document_t  *document = NULL;
@@ -742,7 +749,8 @@ ncfg_document_t *ncfg_config_compile(const ncfg_config_sources_t *sources,
 	}
 
 	if (!failed) {
-		document = ncfg_compile(parsed, sources->count, hooks, diags, err, err_size);
+		document = ncfg_compile_with_provenance(parsed, sources->count, hooks, provenance,
+		    diags, err, err_size);
 	}
 	for (i = 0; i < sources->count; i++) {
 		ncfg_ast_file_free(trees[i]);

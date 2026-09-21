@@ -1038,17 +1038,21 @@ ncfg_explanation_t *ncfg_explain(const ncfg_proto_subject_t *subject,
 	}
 
 	/*
-	 * What this build cannot answer, said rather than left to be noticed.
+	 * What this answer cannot contain, said rather than left to be noticed.
 	 *
-	 * See `explain.h`: the compiler records no positions here, so every lookup
-	 * missed, and an answer that silently stops naming files is one a reader
-	 * cannot tell from a configuration with nothing to name.
+	 * See `explain.h`: an explanation given no table located nothing, and an
+	 * answer that silently stops naming files is one a reader cannot tell from
+	 * a configuration with nothing to name. **About the table rather than
+	 * about the compiler**, which is what keeps the sentence true: the
+	 * compiler does record positions, and `ncfg explain` asks for them, so a
+	 * notice blaming the compiler would be a caveat that had outlived its
+	 * cause while still appearing for the caller that passed nothing.
 	 */
 	if (builder.lookups > 0u && builder.located == 0u &&
 	    (!provenance || provenance->count == 0u)) {
 		prepend(&builder, "provenance",
-		    "this build's compiler records no file positions, so no fact below names the "
-		    "file and line it was written in");
+		    "nothing handed this explanation a table of file positions, so no fact "
+		    "below names the file and line it was written in");
 	}
 
 	if (!explanation->subject || builder.failed) {

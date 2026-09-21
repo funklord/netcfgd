@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.208 The answer that had the facts and would not print them
+
+10.207 found this while triaging its own sweep and left it: `ncfg explain`
+handed `ncfg_explain` no positions table and printed a notice saying the
+compiler records none. The compiler had been recording them for waves --
+0263's own entry says so, naming the eleven kinds of entry the lowering
+records -- so every line of every explanation declined to name a file, and the
+first line of the output said that was the compiler's fault.
+
+**What it cost is the product.** `explain.h` opens by saying what the command
+is for: "because `/etc/netcfgd/conf.d/10-lan.conf` line 4 says so" rather than
+"because the configuration says so". Only the second was ever printed.
+
+**The missing piece was one call, not a feature.** `ncfg_compile_with_
+provenance` exists and is tested; what nothing had was a path from a
+*directory* to it, because `ncfg_config_compile` -- which is what every
+command actually runs -- takes no table. So the loader gained
+`ncfg_config_compile_with_provenance` beside it, the old call became a
+one-line wrapper passing NULL, and `compile_config` in the CLI takes a table
+that every verb but `explain` passes NULL for.
+
+Now:
+
+    interface eth0
+      desired   declared in the configuration   [.../conf.d/10-lan.conf:1:1]
+      desired   mtu 1400                        [.../netcfgd.conf:2:2]
+      desired   addressing[0] is 10.0.0.1/24    [.../conf.d/10-lan.conf:2:11]
+
+The `mtu` line is the one worth reading twice: it is written in a `device`
+block in one file and ends up on the interface from another, so a table that
+guessed a position from the document would send a reader to the wrong file.
+That is the fixture the loader's test uses, for that reason.
+
+**The notice was rewritten rather than deleted.** It said "this build's
+compiler records no file positions", which had become false while still being
+printed; but an explanation given no table genuinely can locate nothing, and
+`explain_test.c` has a case that insists the caveat go on appearing for that
+caller. So it is now about the table it was given -- "nothing handed this
+explanation a table of file positions" -- which is true for the caller it
+appears for and stays true whatever the compiler learns. Deleting it would
+have taken the caveat away from the caller that still needs it.
+
+**Two checks, because either alone passes wrongly.** The loader's test proves
+a directory compiles to a table with the right file in each entry; the CLI's
+test proves `explain` asks for one and hands it on, by reading `run.c` the way
+the check beside it reads it for the sentence that stopped being true.
+Deleting the stale comment without passing the table would have left the
+command exactly as wrong with a green check, which is why the sentence and the
+argument are asserted together. Three sabotages, each caught.
+
+**And one absence that is now explained rather than merely present.**
+`ncfg_state_write_provenance` and `ncfg_state_read_provenance` still have no
+caller, and that is right: the file exists so a daemon's `explain` response
+can name a file without recompiling, and that response is one of the kinds
+`daemon_answer.c` refuses by name. `ncfg explain` here is deliberately not
+routed through the daemon -- design 4.4, daemon-optional as a property -- so
+it compiles fresh and needs no file. Writing one nothing reads is the second
+structure that has to go on agreeing with the document, which is what the
+argument against a side table was in the first place. Recorded so the next
+sweep does not triage it again.
+
 ## 10.207 A published call with no caller, and the SIM nobody selected
 
 The third run of the same sweep, with the correction 10.206 forced into it: a

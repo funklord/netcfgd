@@ -17,24 +17,24 @@
  *   form of that answer is a file and a line: "because
  *   `/etc/netcfgd/conf.d/10-lan.conf` line 4 says so" rather than "because the
  *   configuration says so". That answer needs the compiler's provenance side
- *   table, and 0263 does not port the half of the compiler that fills one in --
- *   `state.h` declares the table and reads and writes the file, and nothing in
- *   `src/compile/` records an entry.
+ *   table, which `ncfg_config_compile_with_provenance` fills in and
+ *   `ncfg explain` asks for.
  *
- *   So this takes the table as an argument, exactly as the Rust does, and is
- *   complete the day lowering starts recording one. Until then every lookup
- *   misses, and **an explanation whose every lookup missed says so, in its own
- *   output, as its first fact** -- because the alternative is an answer that
- *   silently stops naming files and a reader who cannot tell that from a
- *   configuration with nothing to name. It is the first fact and not the last
- *   for the reason the radio fact comes before the addresses: a caveat about
- *   what an answer cannot contain is worth nothing after the answer.
+ *   So this takes the table as an argument, exactly as the Rust does, and a
+ *   caller that has none gets the weaker answer rather than a wrong one:
+ *   **an explanation whose every lookup missed says so, in its own output, as
+ *   its first fact** -- because the alternative is an answer that silently
+ *   stops naming files and a reader who cannot tell that from a configuration
+ *   with nothing to name. It is the first fact and not the last for the reason
+ *   the radio fact comes before the addresses: a caveat about what an answer
+ *   cannot contain is worth nothing after the answer.
  *
- *   **Nothing here invents a position.** A file and line this build did not
- *   record is a file and line it does not print. The notice disappears by
- *   itself the moment a real table arrives, and where the table has an entry
- *   for some fields and not others -- a real state, once a compiler fills one
- *   in partially -- the gap is per field and no blanket claim is made.
+ *   **Nothing here invents a position.** A file and line nobody recorded is a
+ *   file and line this does not print. The notice is about the table it was
+ *   given rather than about the compiler, so it appears for a caller that
+ *   passed none and disappears for one that did; and where a table has an
+ *   entry for some fields and not others -- which a compile that stopped part
+ *   way produces -- the gap is per field and no blanket claim is made.
  *
  * WHERE THIS DIVERGES FROM THE RUST
  *   The list lives in `doc/decision/0263-the-c-port.md`, which is where a
