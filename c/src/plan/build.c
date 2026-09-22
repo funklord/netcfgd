@@ -653,6 +653,16 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 		uint32_t enslaved;
 
 		/*
+		 * **Before the guard below, and that is the whole point of it being
+		 * here.** A pppoe or openvpn device with no link is one
+		 * `link_is_plannable` answers no about -- rightly, for everything that
+		 * needs something to attach to -- and the one action that would bring
+		 * the link into existence is the daemon this starts. `session.c` says
+		 * why it is in this loop rather than the interface walk, and what
+		 * planning it in both cost.
+		 */
+		ncfg_plan_session(&builder, &desired->devices[i]);
+		/*
 		 * **A device that will never exist gets no configuration either.**
 		 * `link_is_plannable` already answers this for the addressing and
 		 * routing passes: a link that is observed is plannable, and one that

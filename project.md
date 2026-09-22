@@ -9515,6 +9515,78 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.230 The dial, which is the one action that makes a link
+
+10.229 left the PPPoE backend with no emitter: nothing in `src/plan/` started
+a `pppoe` or an `openvpn` backend, so the module could be called and never
+planned. `src/plan/session.c` is that pass, and it closes the gap for both
+daemons -- the openvpn one had been unemitted since it landed.
+
+**Where the call sits is the whole of this pass.** Every other backend is
+started for an interface that already exists; these two are the other way
+round, because `pppd` makes `ppp0` and `openvpn` makes `tun0`. So the link is
+absent *because* the daemon has not run -- and an absent link is what
+`ncfg_plan_link_is_plannable` treats as a reason to plan nothing, correctly,
+for everything that needs something to attach to. The device loop in `build.c`
+therefore calls this **before** that guard: the one action that would make the
+link exist cannot be gated on the link existing.
+
+It is in the device walk rather than the interface walk for a second reason of
+the Rust's: a tunnel need not have an `interface` block at all, having nothing
+to address until its daemon reports something, so a pass driven from the
+interface list would never see one (0155 pass 1b).
+
+**And it is in one walk rather than both**, which the Rust paid for: it planned
+the dial from the device walk and from the interface walk at once, so every
+apply started two `backend.start` actions for one session and ran `pppd` twice.
+Its fixture asserted the action was *present*. Every case in
+`plan_session_test.c` counts instead, and the sabotage that plans it from both
+walks goes red on the count.
+
+### Stopping is the same question asked of the device list
+
+`backend_wanted` gains the two arms, answered by `ncfg_plan_session_wanted`
+beside the pass that starts one -- `ncfg_plan_supplicant_wanted`'s arrangement,
+for its reason: the conditions that start a daemon and the conditions that keep
+one have to stay the same, and two copies is how they come to disagree.
+
+The question is asked of the **device** list. Asking the interface list would
+answer "nobody wants this" for every tunnel that has no interface block and
+stop a working one. Without the arm at all, deleting a `pppoe` device left
+`pppd` holding the line with `persist` and `maxfail 0` in the options netcfgd
+had written it -- which is to say for ever, and is what the Rust's own
+`stop_pppoe` comment records being found by dialling a real line.
+
+### A warning that had to move rather than be deleted
+
+`link.c`'s creation pass said the device was brought into existence by the
+daemon that dials it "and this build of the planner starts no `pppoe` or
+`openvpn` backend". The second half stopped being true in this commit, which is
+`build.c`'s rule -- a pass landing takes its warning out in the same commit --
+so that arm is silent now and the sentence an operator gets is the session
+pass's: *ppp0 is not up yet; addressing and routes are planned once its pppoe
+daemon has brought it into existence*. One warning per device, from the pass
+that knows.
+
+`plan_kind_test.c` asserted the old wording and now asserts the new one. Its
+own comment had already made the right move once -- from asserting a sentence
+to asserting the property -- so what changed is the fragment it matches, and a
+paragraph saying whose words they are now.
+
+### Five sabotages, five caught
+
+The dial moved after the plannability guard; planned from the interface walk as
+well; `backend_wanted` answering "always wanted"; `session_wanted` asking the
+interface list; and the dial put inside an "is the link absent" branch -- which
+is the arrangement that left a tunnel whose daemon had died unrestarted while
+its device lingered, and which the case about exactly that catches.
+
+**What this leaves.** A PPPoE line can now be planned, dialled, reported from,
+hung up when its block goes, and left alone when it is already running -- and
+the same for an OpenVPN tunnel, whose executor had been waiting for a planner
+since it was written. `ncfg_apply_supported` refuses nothing that is a port gap
+and `src/plan/` emits every op that executor carries out.
+
 ## 10.229 The session nobody could hang up
 
 A PPPoE session is a `pppd`, and until this round the C port could neither

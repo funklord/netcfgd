@@ -400,6 +400,26 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder);
  * that keep one have to stay the same, and a rule in two files is one that
  * eventually disagrees with itself.
  */
+/*
+ * Start the daemon that brings a ppp link or a tunnel into existence.
+ *
+ * Driven from the device walk and **before the plannability guard**, because
+ * the link this would create is exactly the link whose absence that guard
+ * stops everything else for. `session.c` has the rest, including why planning
+ * it from the interface walk as well cost a session once already.
+ */
+void ncfg_plan_session(ncfg_builder_t *builder, const ncfg_device_t *device);
+
+/*
+ * Whether a running pppoe or openvpn backend is one the document still asks
+ * for, asked of the device list rather than the interface list.
+ *
+ * Beside the pass that starts one, for `ncfg_plan_supplicant_wanted`'s reason:
+ * the conditions that start a daemon and the conditions that keep one have to
+ * stay the same, and two copies is how they come to disagree.
+ */
+int ncfg_plan_session_wanted(const ncfg_document_t *desired, const char *name, int kind);
+
 void ncfg_plan_dot1x(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
 int ncfg_plan_supplicant_wanted(const ncfg_document_t *desired, const ncfg_observed_t *observed,

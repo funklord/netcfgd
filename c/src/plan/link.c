@@ -80,14 +80,19 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 		return;
 	}
 	if (device->kind.kind == NCFG_KIND_PPPOE || device->kind.kind == NCFG_KIND_OPENVPN) {
-		/* Planning a `link.create` for either would emit an action that must
+		/*
+		 * Planning a `link.create` for either would emit an action that must
 		 * fail; starting the backend is what brings it into existence, and
-		 * that pass is not in this build. */
-		ncfg_plan_warnf(builder->plan, device->name,
-		    "`%s` is brought into existence by the daemon that dials it, and this "
-		    "build of the planner starts no `pppoe` or `openvpn` backend, so nothing "
-		    "here creates it or configures what would run over it",
-		    device->name);
+		 * `ncfg_plan_session` is the pass that does it -- from this same
+		 * device walk, one call earlier.
+		 *
+		 * **Silently, where this used to warn.** The sentence here said the
+		 * planner started no such backend, which stopped being true when that
+		 * pass landed; and the warning an operator wants -- that the
+		 * addressing is waiting rather than missing -- is that pass's, said
+		 * once. Two warnings about one device would be this file and that one
+		 * both claiming the subject.
+		 */
 		return;
 	}
 	if (device->kind.kind == NCFG_KIND_PHYSICAL) {
