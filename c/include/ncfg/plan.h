@@ -520,6 +520,29 @@ typedef struct {
 	 */
 	const char *const *cycle;
 	size_t             cycle_count;
+	/*
+	 * Interfaces whose irrevocable credentials the operator consents to
+	 * leaving behind.
+	 *
+	 * Named rather than a blanket switch, for `allow_disruption`'s reason and
+	 * a sharper one: what is consented to here cannot be taken back (0042). A
+	 * key left loaded on a device netcfgd is walking away from is a key whose
+	 * authority is a public key in every peer's configuration, and those
+	 * machines may not be yours.
+	 */
+	const char *const *strand_credentials;
+	size_t             strand_credentials_count;
+	/*
+	 * Backends that are running, will not answer, and may be restarted.
+	 *
+	 * 0141: a wedged backend fails loudly and is restarted only when asked,
+	 * because netcfgd cannot tell a wedged daemon from a slow answer on a
+	 * loaded machine and killing a healthy one is the worse failure. Per
+	 * interface, like the two lists above, and bounded by the same restart
+	 * counter an ordinary start is: consent is not consent to a loop.
+	 */
+	const char *const *restart_wedged;
+	size_t             restart_wedged_count;
 } ncfg_plan_options_t;
 
 /* An empty plan, or NULL. */

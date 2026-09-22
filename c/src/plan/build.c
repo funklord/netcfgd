@@ -620,6 +620,10 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	ncfg_plan_standby_collect(&builder);
 	warn_unmanaged(&builder);
 	warn_unported(&builder);
+	/* Beside the other two reports about the machine rather than about the
+	 * document, and in the Rust's position among them. What it may *do* --
+	 * restart one -- is the consented arm inside it. */
+	ncfg_plan_wedged_backends(&builder);
 	plan_commit_arm(&builder);
 
 	/*
@@ -741,6 +745,13 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	ncfg_plan_nat(&builder);
 	ncfg_plan_wifi(&builder);
 	ncfg_plan_access_control(&builder);
+	/*
+	 * Last of the reports, and after every pass that could have taken a key
+	 * away: `ncfg_plan_clearing` is what decides whether a device is being
+	 * cleared, and a notice about a key a clearing device is about to destroy
+	 * would be a hazard the operator has already dealt with.
+	 */
+	ncfg_plan_stranded_credentials(&builder);
 
 	/*
 	 * Teardown comes last, so a change to an address is make-before-break: the

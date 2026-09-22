@@ -411,6 +411,26 @@ void ncfg_plan_teardown_backends(ncfg_builder_t *builder);
 void ncfg_plan_session(ncfg_builder_t *builder, const ncfg_device_t *device);
 
 /*
+ * Report every backend that is running and will not answer, and restart the
+ * ones the operator named.
+ *
+ * `wedged.c` has the argument: netcfgd cannot tell a wedged daemon from a slow
+ * answer, so the default is a warning and a refusal naming what consents, and
+ * `--restart-wedged` is what turns it into a stop and a start.
+ */
+void ncfg_plan_wedged_backends(ncfg_builder_t *builder);
+
+/*
+ * Report every irrevocable credential this plan walks away from.
+ *
+ * Driven by the observation rather than the document -- `strand.c` says why
+ * twice over -- and silent for a device the operator consented to with
+ * `--strand-credentials`, or one whose `on_unmanage = "clear"` takes the key
+ * away with the link.
+ */
+void ncfg_plan_stranded_credentials(ncfg_builder_t *builder);
+
+/*
  * Whether a running pppoe or openvpn backend is one the document still asks
  * for, asked of the device list rather than the interface list.
  *

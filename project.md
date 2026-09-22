@@ -9515,6 +9515,96 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.231 The two consents that were parsed and dropped
+
+10.228 recorded a gap and this closes it: `--strand-credentials` and
+`--restart-wedged` reached `ncfg_cli_options_t` and `ncfg_daemon_apply_ask_t`
+and stopped there, because `ncfg_plan_options_t` had no member for either. A
+client asking for consent got a plan that had not heard it -- a stranding still
+refused, a wedged backend still a loud failure -- and the daemon's arm said so
+in a warning rather than doing anything about it.
+
+Both passes are now here, and both options are wired from the terminal and from
+the socket.
+
+### A backend that is running and will not answer
+
+`src/plan/wedged.c`. The default is **a warning and a refusal, not a restart**,
+and the reason is a measurement rather than caution: the round trip behind
+`answering` has a one-second deadline so a wedged daemon cannot stall the
+reconcile loop, and a healthy fake has already missed it under load. Acting on
+that reading would kill working access points on busy machines.
+
+So the operator is told, in the noun they would use -- *the access point on
+wlan0 is running and did not answer its control socket* -- and the refusal is
+first-class rather than a second warning line, because "what did netcfgd
+decline, and how do I consent?" is a question a script has to answer as well as
+a person (0010). `--restart-wedged wlan0` turns it into a `backend.stop` and a
+`backend.start` that waits on it.
+
+**The consent is still bounded by the restart counter.** Consent to restarting
+a wedged backend is not consent to an endless loop, and a machine that is
+merely slow would otherwise be restarted for ever by one flag.
+
+**Absent is not false.** `answering` says nothing where the kind has no control
+socket or where nothing asked, and reading that as a wedge would put the
+warning on every DHCP client on the machine (0074). The filter is
+`has && !value`, and the case that proves it is a backend with no `answering`
+at all.
+
+### A credential the plan walks away from
+
+`src/plan/strand.c`, and `ncfg_plan_strand` finally has a producer: the list,
+the writer and the exit status were all ported, and nothing pushed onto them.
+
+It is driven by the **observation**, twice over. The kernel is what decides
+whether a key is really there -- a document declaring one for an interface that
+was never applied strands nothing, and a notice about that would be a notice
+about a file. And a WireGuard interface whose block has been deleted while its
+device still says `managed = false` has the key loaded and is not in the
+document at all. It also means there is no second opinion about which links are
+WireGuard: `private_key_loaded` is set in one place, so a `kind` check here
+would be a branch no test could make fail.
+
+The notice names both ways out -- the configuration change that destroys the
+key, and the invocation that consents to leaving it -- and says why it cannot
+simply be withdrawn later: the key's authority is the matching public key in
+every peer's configuration, and those machines may not be yours.
+
+A device whose `on_unmanage = "clear"` is not reported, because the clearing
+removes the link and the key with it; reporting it would be reporting a hazard
+the operator has already dealt with.
+
+### The wiring, and the one fixture that was measuring something else
+
+`plan_options_of` fills both lists, `ncfg_daemon_apply_request` passes both
+through, and the warning that said the planner had no option for them is gone
+with the gap. Twenty-eight checks in `plan_consent_test.c` for the rules, and a
+case in `reconcile_test.c` for the wiring -- a request naming a wedged access
+point in `restart_wedged` makes the recorder see the stop and the start, which
+is the consent arriving from a client rather than from a test's own options
+struct.
+
+**Three of the wedged cases failed for a reason that was not the code.** The
+fixture had a radio with `dhcp4` addressing and no `access_point` block, so the
+plan carried a DHCP client's own `backend.start` -- and, worse, a
+`backend.stop` for the access point the document no longer asked for. Every
+count was measuring two backends at once and one of them was the teardown pass
+doing its job. The fixture now declares the access point the running backend
+belongs to, and has no addressing on the radio at all.
+
+Six sabotages, six caught: absent read as not-answering, the restart limit
+ignored once consent was given, the unmanaged test dropped, the consent list
+ignored, a clearing device reported anyway, and the daemon dropping the lists
+again on the way to the planner.
+
+**What is not covered by a check is the CLI's own half of that wiring.**
+`plan_options_of` is static and reachable only through `command_plan` and
+`command_apply`, both of which observe the machine this is built on -- where no
+backend is wedged and no key is stranded, so neither pass has anything to
+report. The daemon's path is checked end to end and the CLI's is checked by
+reading, which is worth writing down rather than leaving as an assumption.
+
 ## 10.230 The dial, which is the one action that makes a link
 
 10.229 left the PPPoE backend with no emitter: nothing in `src/plan/` started
