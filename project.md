@@ -9515,6 +9515,113 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.228 The daemon's three verbs that change the machine
+
+`apply`, `confirm` and `revert` are answered over the socket. Thirty of the
+thirty-two request kinds are answered now; the two that are not are `hello` and
+`monitor`, which the server takes before the seam is asked and which reach no
+arm at all.
+
+**They live beside the reconcile pass rather than in the dispatcher**, in
+`src/daemon/request.c`. Each opens an executor, each can leave the machine
+different from how it found it, and all three touch the four things a pass
+touches: the desired document, the ownership record, the confirm window and
+what that window covers. Writing them in `src/main/daemon_answer.c` -- which
+takes a request apart and hands the pieces on -- would have put a second copy
+of the arming rule there. What is left in the dispatcher is the decode: counted
+protocol fields into C strings, and a refusal into a sentence.
+
+The pass's own helpers became the daemon's: `ncfg_daemon_announce`,
+`ncfg_daemon_open_executor`, `ncfg_daemon_close_executor`,
+`ncfg_daemon_cycles_in` and `ncfg_daemon_arm_window`, declared in
+`daemon_internal.h`. The last of those is the half of `arm_window` that opens a
+window; what differs between a pass and a request is how the window is
+*decided*, and nothing about how it is opened.
+
+**`ncfg_main_desk_t` gains the loop**, and a desk without one refuses all three
+by name. That is the struct's own rule -- no member has a default -- and it
+matters more here than anywhere else in it: the loop is what carries the way to
+the machine, so a desk given none is a daemon nobody said may change anything.
+`answer_test.c` runs with exactly that desk, which is why its whole suite can
+drive the dispatcher on a workstation this daemon manages.
+
+### Two places this does not do what the Rust does
+
+**A revert with no window open is refused before an executor is opened.** The
+Rust opens one first, which takes the apply lock and a netlink socket to
+discover there is nothing to do -- against the same lock `ncfg apply` waits on.
+0184 made that argument about the contention check; it is the same argument.
+
+**Confirming does not record a configuration the machine has never been in.**
+The Rust writes `state.desired` as the new last-good, and a reload *inside* the
+window leaves `desired` holding an edit that was deferred and never applied --
+so the next window's revert would take the machine somewhere it has never been.
+The armed record carries the hash of what actually ran, so the two are
+compared, and a disagreement records nothing and says so. A daemon that
+restarted inside the window has no armed record, cannot tell, and falls back to
+`desired`, which is the Rust's behaviour and the older one.
+
+### What the planner does not read, said out loud
+
+`Request::Apply` carries `strand_credentials` and `restart_wedged`, and
+`ncfg_plan_options_t` has neither. Both halves of this port already dropped
+them: `plan_options_of` in the CLI sets `confirm_window` and
+`allow_disruption` and nothing else. So a client naming an interface in either
+list gets an apply that did not hear it -- a stranding still refused, a wedged
+backend still a loud failure.
+
+Refusing the whole request would be worse, since the rest of the apply is
+exactly what it would have been, and dropping them silently is worst: the
+client asked for consent and got nothing back. The arm logs one warning per
+list, naming how many interfaces were not consented to. The lists are carried
+in `ncfg_daemon_apply_ask_t` for the day the planner gains the options.
+
+### The journal response was the witness' spelling first time
+
+`doc/schema/socket.json` line 52 is a `journal` response, and
+`ncfg_daemon_journal_encode` produced it byte for byte on the first run --
+records flattened into the envelope rather than under a key, `error` absent
+rather than null on an action that stood. `ncfg_journal_write_members` is what
+the encoder and `plan.last.json` share, for the reason
+`ncfg_plan_write_members` exists: one writer, so a member added to the model
+cannot reach the file and miss the wire.
+
+**A journal carrying a failure is an answer rather than an error**, and that is
+the only interesting decision in the arm's return value. The client asked what
+happened; what happened is that the fourth action failed and the two behind it
+were not attempted. `0` with a sentence is for an apply that never *started* --
+a configuration that does not compile, a machine nobody has observed, a window
+somebody else holds, no way to reach the machine -- because there is then
+nothing that ran to report.
+
+The refusal for a configuration that does not compile is the compiler's own
+diagnostics, as far as an error buffer holds them. Three mistakes are three
+lines and longer than the buffer; the front is the half worth keeping, because
+the first line names the file, the line and the column.
+
+### The sentence that had stopped being true
+
+`will_not_reconcile` told an operator that "`ncfg apply` is refused for the
+same reason". It is not, since 10.227: somebody typed it, against the machine
+in front of them, having read what `ncfg plan` said. The daemon still refuses
+to start, and the reason is now stated as what it actually is -- a reconcile on
+a timer is an apply nobody typed, repeatedly, against a live network. Two
+sentences and a comment block rewritten; `may_reconcile` still answers 0.
+
+Six cases in `reconcile_test.c`, sharing its world double rather than a second
+copy of it: an apply that does the work and records it, a window armed and a
+second refused before anything is touched, `--confirm-within 0` declining the
+document's own window, a confirm that keeps the change, a revert that puts it
+back and refuses early, and the two refusals that leave the machine alone. Two
+more in `answer_test.c`: the witness spelling, and the three arms refusing a
+desk with no loop.
+
+Five sabotages, five caught. **A sixth caught nothing and was my fault rather
+than the check's**: setting `seconds` from `ask->confirm.value` without the
+`> 0` guard changes nothing when the value *is* zero, so it was not the
+defect 0094 describes. The defect is the document's window winning over an
+explicit zero, and written that way it goes red twice.
+
 ## 10.227 `ncfg apply` arrives, and the seam that keeps it off this machine
 
 The verb that changes things is ported. It compiles, observes, plans, acts,

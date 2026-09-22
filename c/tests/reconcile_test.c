@@ -1988,6 +1988,389 @@ static void a_startup_apply_that_failed_records_no_last_good(const char *base)
 	harness_stop(&harness);
 }
 
+
+/* ------------------------------------------------------------------------ *
+ * The three requests that change the machine
+ * ------------------------------------------------------------------------ *
+ *
+ * WHY THEY ARE IN THIS FILE
+ *   `apply`, `confirm` and `revert` run in this loop, against these seams, and
+ *   touch the four things the pass touches: the desired document, the
+ *   ownership record, the confirm window and what that window covers. The
+ *   world double above is the executor they open, the clock they read and the
+ *   subscriber they announce to -- a second copy of it in a file of its own
+ *   would be the thing this port keeps refusing, and the two copies would
+ *   drift in the way that matters: one of them learning what a window costs
+ *   and the other not.
+ *
+ * WHAT MAKES THEM SAFE TO RUN HERE
+ *   The same thing that makes the pass safe: **not one seam is the real one**.
+ *   Every directory is this binary's own, the executor records op names, and
+ *   the arming timer is a step in a list. netcfgd is running on the machine
+ *   this is built on, and nothing here can reach it.
+ */
+
+/* An `ask` with nothing in it: no window, no consent, which is `ncfg apply`
+ * with no flags. */
+static ncfg_daemon_apply_ask_t asking_for_nothing(void)
+{
+	ncfg_daemon_apply_ask_t ask;
+
+	memset(&ask, 0, sizeof(ask));
+	return ask;
+}
+
+static ncfg_daemon_apply_ask_t asking_for_a_window(int64_t seconds)
+{
+	ncfg_daemon_apply_ask_t ask = asking_for_nothing();
+
+	ask.confirm.has = 1;
+	ask.confirm.value = seconds;
+	return ask;
+}
+
+/* A loop standing over a compiled configuration and an observed machine, or 0
+ * with the check already failed. */
+static int request_harness(harness_t *harness, ncfg_confirm_armed_t *armed, const char *base,
+    const char *leaf, const char *config, const char *machine)
+{
+	char err[NCFG_ERROR_MAX];
+
+	if (!harness_start(harness, base, leaf)) {
+		check(0, "a loop over directories of this test's own");
+		return 0;
+	}
+	harness->loop.armed = armed;
+	harness->state.observe = observe_fixture;
+	harness->machine.body = machine;
+	harness->state.observe_context = &harness->machine;
+	harness->state.observed = observed_of(machine);
+	write_config(harness->config, config);
+	err[0] = '\0';
+	if (!harness->state.observed ||
+	    !ncfg_daemon_state_reload(&harness->state, err, sizeof(err))) {
+		detail("the request fixture would not compile", err);
+		check(0, "the request fixture is built");
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * An apply request carries the plan out and says what it did.
+ *
+ * The journal is the answer, and the two files under `/run` are the part a
+ * client never sees: what netcfgd now owns, and where the apply got to.
+ */
+static void an_apply_request_does_the_work_and_records_it(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_nothing();
+	ncfg_journal_t          journal;
+	ncfg_confirm_window_t   window;
+	ncfg_document_t        *last_good;
+	char                    path[640];
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-apply", WITHOUT_A_MODEM,
+	        BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	check(ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "an apply request runs");
+	detail("if not", err);
+	check(ncfg_journal_done(&journal) >= 1u, "and something reached the machine");
+	check(step_at(&harness.world, "executor.open") >= 0 &&
+	        step_at(&harness.world, "op:addr.add") >= 0 &&
+	        step_at(&harness.world, "executor.close") >= 0,
+	    "through the seam, which is given back afterwards");
+	ncfg_journal_free(&journal);
+
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", harness.run);
+	check(testdir_exists(path), "the apply leaves a journal under the run directory");
+	(void)snprintf(path, sizeof(path), "%s/owned.json", harness.run);
+	check(testdir_exists(path), "and what it did is folded into the ownership record");
+
+	check(!ncfg_confirm_read_window(harness.run, &window),
+	    "no window was armed, because none was asked for");
+	err[0] = '\0';
+	last_good = ncfg_confirm_read_last_good(harness.run, err, sizeof(err));
+	check(last_good != NULL && !ncfg_reconcile_document_is_empty(last_good),
+	    "and what was applied became what a future window falls back to");
+	ncfg_document_free(last_good);
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
+/*
+ * A window is decided before the apply and opened after it, and a second one
+ * is refused before anything is touched.
+ *
+ * **The refusal is the case worth having.** A machine with a window open is
+ * one somebody is watching a change on; a second apply over it would leave the
+ * first change's safety net covering a machine that has moved again.
+ */
+static void an_apply_may_arm_a_window_and_a_second_may_not(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_a_window(60);
+	ncfg_journal_t          journal;
+	ncfg_confirm_window_t   window;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-window", WITH_A_WINDOW,
+	        BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	check(ncfg_reconcile_establish_last_good(&harness.state, err, sizeof(err)),
+	    "there is something for a window to fall back to");
+
+	err[0] = '\0';
+	check(ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "an apply asking for a window runs");
+	detail("if not", err);
+	ncfg_journal_free(&journal);
+	check(ncfg_confirm_read_window(harness.run, &window) && window.window_seconds == 60u,
+	    "and the window it asked for is open");
+	check(step_at(&harness.world, "expiry:60") >= 0,
+	    "with something arranged to close it, which is what makes it a window");
+	check(step_at(&harness.world, "event:confirm_armed") >= 0,
+	    "and everybody watching was told");
+	check(armed.undo != NULL,
+	    "what to undo is recorded, and before the window was opened");
+
+	/* And the second, over the first. */
+	harness.world.count = 0;
+	err[0] = '\0';
+	check(!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "a second apply asking for a window is refused");
+	check(strstr(err, "already open") != NULL, "  and the refusal says why");
+	check(step_at(&harness.world, "executor.open") < 0,
+	    "  before anything was applied, so the machine is untouched");
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
+/*
+ * `--confirm-within 0` declines the document's own window.
+ *
+ * 0094: a window of no seconds arms and expires, which is the apply undoing
+ * itself a moment after it succeeded. The configuration here sets `confirm =
+ * 30`, so a request that ignored the zero would arm one.
+ */
+static void a_window_of_no_seconds_is_a_refusal_to_arm(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_a_window(0);
+	ncfg_journal_t          journal;
+	ncfg_confirm_window_t   window;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-zero", WITH_A_WINDOW, BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	check(ncfg_reconcile_establish_last_good(&harness.state, err, sizeof(err)),
+	    "there is something a window could have fallen back to");
+	err[0] = '\0';
+	check(ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "an apply declining a window still applies");
+	detail("if not", err);
+	check(ncfg_journal_done(&journal) >= 1u, "  and did the work");
+	ncfg_journal_free(&journal);
+	check(!ncfg_confirm_read_window(harness.run, &window),
+	    "and no window is open, although the configuration sets one");
+	check(step_at(&harness.world, "expiry:") < 0, "  nothing was arranged to close one");
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
+/*
+ * Confirming keeps the change; confirming nothing is an answer rather than a
+ * failure.
+ */
+static void a_confirm_closes_the_window_and_keeps_what_ran(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_a_window(45);
+	ncfg_journal_t          journal;
+	ncfg_confirm_window_t   window;
+	ncfg_document_t        *last_good;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-confirm", WITH_A_WINDOW,
+	        BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	check(!ncfg_daemon_confirm_request(&harness.loop, err, sizeof(err)) &&
+	        strstr(err, "no confirm window is open") != NULL,
+	    "confirming with no window open is answered rather than done");
+
+	err[0] = '\0';
+	(void)ncfg_reconcile_establish_last_good(&harness.state, err, sizeof(err));
+	err[0] = '\0';
+	if (!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err))) {
+		detail("the apply that opens the window", err);
+		check(0, "an apply opens a window to confirm");
+		ncfg_confirm_armed_free(&armed);
+		harness_stop(&harness);
+		return;
+	}
+	ncfg_journal_free(&journal);
+	harness.world.count = 0;
+
+	err[0] = '\0';
+	check(ncfg_daemon_confirm_request(&harness.loop, err, sizeof(err)),
+	    "the change is confirmed");
+	detail("if not", err);
+	check(!ncfg_confirm_read_window(harness.run, &window), "the window is closed");
+	check(armed.undo == NULL, "what it covered is dropped, because the change stood");
+	check(step_at(&harness.world, "event:confirm_resolved") >= 0, "and everybody was told");
+	check(step_at(&harness.world, "executor.open") < 0,
+	    "confirming reaches no machine at all: it is bookkeeping");
+	err[0] = '\0';
+	last_good = ncfg_confirm_read_last_good(harness.run, err, sizeof(err));
+	check(last_good != NULL && !ncfg_reconcile_document_is_empty(last_good),
+	    "and the configuration that stood is what a future window falls back to");
+	ncfg_document_free(last_good);
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
+/*
+ * Reverting puts the machine back; reverting nothing refuses **before** it
+ * opens anything.
+ *
+ * That second half is this port's and not the Rust's: opening an executor
+ * takes the apply lock and a netlink socket, and a `revert` with no window is
+ * refused either way. 0184 is the same argument about the contention check --
+ * a lock taken to find out there is nothing to do is a lock `ncfg apply` is
+ * waiting on.
+ */
+static void a_revert_puts_it_back_and_refuses_early(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_a_window(45);
+	ncfg_journal_t          journal;
+	ncfg_confirm_window_t   window;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-revert", WITH_A_WINDOW,
+	        BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	check(!ncfg_daemon_revert_request(&harness.loop, "asked to", err, sizeof(err)) &&
+	        strstr(err, "no confirm window is open") != NULL,
+	    "reverting with no window open is answered rather than done");
+	check(step_at(&harness.world, "executor.open") < 0,
+	    "  without taking the apply lock to find that out");
+
+	err[0] = '\0';
+	(void)ncfg_reconcile_establish_last_good(&harness.state, err, sizeof(err));
+	err[0] = '\0';
+	if (!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err))) {
+		detail("the apply that opens the window", err);
+		check(0, "an apply opens a window to revert");
+		ncfg_confirm_armed_free(&armed);
+		harness_stop(&harness);
+		return;
+	}
+	ncfg_journal_free(&journal);
+	harness.world.count = 0;
+
+	err[0] = '\0';
+	check(ncfg_daemon_revert_request(&harness.loop, "asked to", err, sizeof(err)),
+	    "the change is taken back");
+	detail("if not", err);
+	check(!ncfg_confirm_read_window(harness.run, &window), "the window is closed");
+	check(step_at(&harness.world, "executor.open") >= 0 &&
+	        step_at(&harness.world, "executor.close") >= 0,
+	    "and this one did reach the machine, which is what a revert is");
+	check(step_at(&harness.world, "event:confirm_resolved") >= 0, "everybody was told");
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
+/*
+ * The two refusals that leave the machine alone, and both are answers a client
+ * reads: no way to reach the machine, and a configuration that does not
+ * compile.
+ */
+static void an_apply_that_cannot_start_says_which_of_the_two_it_is(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_nothing();
+	ncfg_journal_t          journal;
+	char                    path[640];
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-refused", WITHOUT_A_MODEM,
+	        BARE_LINK)) {
+		harness_stop(&harness);
+		return;
+	}
+	harness.world.no_executor = 1;
+	err[0] = '\0';
+	check(!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)) &&
+	        strstr(err, "cannot start an apply") != NULL,
+	    "an apply with no way to reach the machine is refused");
+	check(strstr(err, "told it cannot apply") != NULL,
+	    "  carrying what the seam itself said");
+	(void)snprintf(path, sizeof(path), "%s/plan.last.json", harness.run);
+	check(!testdir_exists(path), "  and nothing was recorded, because nothing ran");
+
+	/* And the other one: the configuration on disk no longer compiles. */
+	harness.world.no_executor = 0;
+	write_config(harness.config, "interface eth0 {\n\tconfig = \"not an address\"\n}\n");
+	err[0] = '\0';
+	(void)ncfg_daemon_state_reload(&harness.state, err, sizeof(err));
+	err[0] = '\0';
+	check(!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "an apply of a configuration that does not compile is refused");
+	/*
+	 * **The diagnostics themselves, as far as they fit.** They are one line
+	 * per mistake and a configuration with three of them is longer than an
+	 * error buffer, so what a client gets is the front of the compiler's own
+	 * text rather than all of it -- which is the right half to keep: the first
+	 * line names the file, the line and the column. A sentence of this arm's
+	 * own would send somebody looking for a different fault.
+	 */
+	check(harness.state.diagnostics && err[0] != '\0' &&
+	        strncmp(harness.state.diagnostics, err, strlen(err)) == 0,
+	    "  and the answer is the compiler's own diagnostics, not a sentence about them");
+	check(step_at(&harness.world, "executor.open") < 0,
+	    "  with nothing opened, so the machine keeps the configuration that works");
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
 int main(void)
 {
 	const char *base = testdir_make("reconcile");
@@ -2022,6 +2405,13 @@ int main(void)
 	a_loop_with_no_seams_still_observes(base);
 	the_startup_apply_records_a_last_good_and_arms_nothing(base);
 	a_startup_apply_that_failed_records_no_last_good(base);
+
+	an_apply_request_does_the_work_and_records_it(base);
+	an_apply_may_arm_a_window_and_a_second_may_not(base);
+	a_window_of_no_seconds_is_a_refusal_to_arm(base);
+	a_confirm_closes_the_window_and_keeps_what_ran(base);
+	a_revert_puts_it_back_and_refuses_early(base);
+	an_apply_that_cannot_start_says_which_of_the_two_it_is(base);
 
 	testdir_remove(base);
 

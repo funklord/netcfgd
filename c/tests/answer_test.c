@@ -241,17 +241,20 @@ static void a_refusal_names_the_request_it_refused(void)
 		checked++;
 	}
 	/*
-	 * **A floor rather than a figure**, and it moved when `status` and `show`
-	 * stopped being refused. What this guards against is the walk finding
+	 * **A floor rather than a figure**, and it has moved twice: once when
+	 * `status` and `show` stopped being refused, and again when `apply`,
+	 * `confirm` and `revert` did. What this guards against is the walk finding
 	 * nothing -- a loop whose body never runs passes every check inside it --
-	 * so it is the count that has to stay well above zero rather than the
-	 * count that has to match. Twenty-five kinds are answered now and five
-	 * of the rest are what this walks: `apply`, `confirm` and `revert`, plus
+	 * so it is the count that has to stay above zero rather than the count
+	 * that has to match.
+	 *
+	 * Thirty of the thirty-two kinds are answered now. The two this walks are
 	 * `hello` and `monitor`, which the server answers before this table is
-	 * asked and which are named here so that the walk is over all
-	 * thirty-two.
+	 * asked -- neither reaches the seam at all, and both are named in the
+	 * table so that the walk is over all thirty-two rather than over the
+	 * kinds somebody remembered.
 	 */
-	check(checked >= 5u, "every unported kind refuses with its own name in the sentence");
+	check(checked >= 2u, "every unported kind refuses with its own name in the sentence");
 }
 
 /*
@@ -1432,6 +1435,97 @@ static void writing_is_refused_where_this_daemon_was_told_nowhere(void)
 	desk.config_dir = kept;
 }
 
+/*
+ * The journal response, byte for byte against the witness.
+ *
+ * `doc/schema/socket.json` line 52 is what a client built against the Rust
+ * reads, and this is that line: the journal's records flattened into the
+ * envelope rather than put under a key, the reason carried beside the outcome,
+ * and `error` absent rather than null on an action that stood.
+ */
+static void a_journal_is_the_witness_shape(void)
+{
+	static const char *const witness =
+	    "{\"response\":\"journal\",\"records\":[{\"id\":1,\"op\":\"addr.add\","
+	    "\"interface\":\"eth0\",\"reason\":{\"interface\":\"eth0\","
+	    "\"field\":\"addressing[0]\",\"desired\":\"192.0.2.1/24\","
+	    "\"observed\":\"<absent>\"},\"outcome\":\"done\"}]}";
+	ncfg_journal_t journal;
+	ncfg_record_t  record;
+	ncfg_buf_t     out;
+	char           err[NCFG_ERROR_MAX];
+
+	ncfg_journal_init(&journal);
+	memset(&record, 0, sizeof(record));
+	record.id = 1u;
+	record.op = "addr.add";
+	record.interface = "eth0";
+	record.reason.interface = "eth0";
+	record.reason.field = "addressing[0]";
+	record.reason.desired = "192.0.2.1/24";
+	record.reason.observed = "<absent>";
+	record.outcome = NCFG_OUTCOME_DONE;
+	ncfg_journal_push(&journal, &record);
+
+	ncfg_buf_init(&out, 0);
+	err[0] = '\0';
+	check(ncfg_daemon_journal_encode(&journal, &out, err, sizeof(err)),
+	    "a journal is answered with");
+	detail("if not", err);
+	check(strcmp(ncfg_buf_text(&out), witness) == 0,
+	    "  and it is the witness' spelling, the records flattened into the envelope");
+	if (strcmp(ncfg_buf_text(&out), witness) != 0) {
+		detail("what was written", ncfg_buf_text(&out));
+	}
+	ncfg_buf_free(&out);
+
+	/*
+	 * And the one journal that is not sent. A client cannot tell a journal
+	 * with one record from a journal that ran out of memory after one, and
+	 * the difference is whether the actions it does not mention ran.
+	 */
+	journal.failed = 1;
+	ncfg_buf_init(&out, 0);
+	err[0] = '\0';
+	check(!ncfg_daemon_journal_encode(&journal, &out, err, sizeof(err)) &&
+	        strstr(err, "ran out of memory") != NULL,
+	    "  and a journal that ran out of memory is refused rather than sent short");
+	ncfg_buf_free(&out);
+	ncfg_journal_free(&journal);
+}
+
+/*
+ * The three that change the machine need a loop, and say so by name.
+ *
+ * This desk has none -- `loop_internal.h` gives it no default for the reason
+ * `testdir.h` gives about paths, one step further out: the loop is what
+ * carries the way to the machine, and a desk that invented one would be this
+ * test reconfiguring the workstation it is running on. So what is checked here
+ * is the refusal, and that it is about the missing loop rather than about the
+ * request being unknown.
+ */
+static void the_three_that_change_the_machine_need_a_loop(void)
+{
+	static const ncfg_proto_request_kind_t kinds[] = { NCFG_PROTO_REQ_APPLY,
+		NCFG_PROTO_REQ_CONFIRM, NCFG_PROTO_REQ_REVERT };
+	size_t at;
+
+	for (at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
+		ncfg_proto_request_t request;
+		ncfg_buf_t           out;
+		char                 err[NCFG_ERROR_MAX];
+
+		memset(&request, 0, sizeof(request));
+		request.kind = kinds[at];
+		check(!ask(&request, &out, err, sizeof(err)),
+		    "a desk with no loop changes nothing");
+		check(strstr(err, "no way to change the machine") != NULL,
+		    "  and the refusal is about the missing loop");
+		detail("what it says", err);
+		ncfg_buf_free(&out);
+	}
+}
+
 int main(void)
 {
 	const char *made;
@@ -1496,6 +1590,8 @@ int main(void)
 	the_probe_and_modem_listings_leave_out_what_is_not_there();
 	a_probe_script_is_written_and_guarded();
 	a_dispatcher_with_nothing_behind_it_refuses();
+	a_journal_is_the_witness_shape();
+	the_three_that_change_the_machine_need_a_loop();
 
 	ncfg_daemon_state_free(&state);
 	testdir_remove(made);

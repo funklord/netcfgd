@@ -500,6 +500,22 @@ int ncfg_daemon_plan_encode(const ncfg_plan_t *plan, ncfg_buf_t *out, char *err,
     size_t err_size);
 
 /*
+ * What an apply did, as the `journal` response.
+ *
+ * `{"response":"journal","records":[...]}`, flattened like the three above and
+ * written by `ncfg_journal_write_members` for the same reason.
+ *
+ * **A journal carrying a failure is an answer rather than an error.** The
+ * client asked what happened and this says what happened, including that the
+ * fourth action failed and the two behind it were not attempted. What is
+ * refused is a journal that ran out of memory while it was being built, which
+ * is the one shape a client would read as fewer actions rather than as a
+ * shorter list.
+ */
+int ncfg_daemon_journal_encode(const ncfg_journal_t *journal, ncfg_buf_t *out, char *err,
+    size_t err_size);
+
+/*
  * Every credential name this machine knows about, as the `secrets` response.
  *
  * The entries are `ncfg_secret_list`'s and are borrowed. **Nothing here reads a
@@ -2892,5 +2908,91 @@ int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wak
     const ncfg_reconcile_roam_t *roams, size_t roam_count,
     const ncfg_proto_request_t *requests, size_t request_count,
     ncfg_reconcile_report_t *report, char *err, size_t err_size);
+
+/* ------------------------------------------------------------------------ *
+ * The three requests that change the machine
+ * ------------------------------------------------------------------------ *
+ *
+ * Every other request is answered from what the daemon already holds. These
+ * three open an executor, and each of them can leave the machine different
+ * from how it found it -- so they are here, beside the pass they share their
+ * seams with, rather than in whatever dispatcher is taking requests apart.
+ *
+ * **All three run on the loop's own thread.** That is not a style: the loop
+ * and a connection applying at the same time would be two plans built against
+ * one machine, which 0184 measured as a failed `route.add` every time. The
+ * mailbox is what parks a connection until the loop has the request in hand.
+ */
+
+/* What a client asked for when it asked for an apply.
+ *
+ * The request's own strings, converted by whoever decoded it: this library
+ * takes C strings and the protocol's are counted, and a decoder is the one
+ * place that knows what to do about a name carrying a NUL. */
+typedef struct {
+	/*
+	 * Seconds before an unconfirmed change reverts, absent where the client
+	 * did not say. **Zero is the client declining a window** that the
+	 * document's own `confirm` key would otherwise open, and is passed to the
+	 * planner as the zero it is -- a window of no seconds would arm and expire,
+	 * which is the apply undoing itself a moment after it succeeded (0094).
+	 */
+	ncfg_optint_t      confirm;
+	/* Interfaces the client has consented to disrupt. */
+	const char *const *allow_disruption;
+	size_t             allow_disruption_count;
+	/*
+	 * The two consents this build's planner has no option for.
+	 *
+	 * Carried so that the arm can say they were not read rather than drop
+	 * them silently -- `ncfg_plan_options_t` has neither, so a stranding is
+	 * still refused and a wedged backend is still a loud failure. The counts
+	 * are what the warning names; the lists are here for the day the planner
+	 * gains them.
+	 */
+	const char *const *strand_credentials;
+	size_t             strand_credentials_count;
+	const char *const *restart_wedged;
+	size_t             restart_wedged_count;
+} ncfg_daemon_apply_ask_t;
+
+/*
+ * Apply the configuration, and answer with what happened.
+ *
+ * Fills `out` with the journal and returns 1 -- **including where the plan
+ * stopped at a failure**, because that is what happened and the client asked.
+ * `ncfg_journal_free` is the caller's to call. 0 with a sentence is an apply
+ * that never started: a configuration that does not compile, a machine nobody
+ * has observed, a window somebody else holds, or no way to reach the machine
+ * at all. Nothing is written to `out` on that path.
+ *
+ * The order is observe, decide the window, plan, act, record, arm -- and the
+ * window is decided *before* the plan runs so that a refusal leaves the
+ * machine untouched rather than changed-but-unprotected.
+ */
+int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_ask_t *ask,
+    ncfg_journal_t *out, char *err, size_t err_size);
+
+/*
+ * Keep the change an open window covers.
+ *
+ * 1 and the window is closed, what it covered is dropped, and the
+ * configuration that was applied becomes what a future revert falls back to.
+ * 0 with a sentence where no window is open, which is an answer to send the
+ * client rather than a failure of this daemon.
+ */
+int ncfg_daemon_confirm_request(ncfg_reconcile_t *loop, char *err, size_t err_size);
+
+/*
+ * Put the last-good configuration back, and close the window.
+ *
+ * `reason` is what the log says the revert was for; NULL is "asked to". 1 and
+ * the machine is back at the last-good configuration -- by the declared
+ * inverses first and a re-plan after them, which is `ncfg_confirm_revert`'s
+ * subject. 0 with a sentence where no window is open, where the last-good
+ * configuration is unreadable, or where the machine cannot be reached.
+ */
+int ncfg_daemon_revert_request(ncfg_reconcile_t *loop, const char *reason, char *err,
+    size_t err_size);
 
 #endif /* NCFG_DAEMON_H */
