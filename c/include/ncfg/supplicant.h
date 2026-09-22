@@ -865,10 +865,38 @@ int ncfg_supplicant_answers(const char *dir, const char *interface);
  *
  * **Takes an open client rather than connecting**: the observation already has
  * one, and connecting a second time would double the round trips for a fact
- * the first connection could have carried. `bssid` may be NULL.
+ * the first connection could have carried. `bssid` and `key_mgmt` may both be
+ * NULL.
+ *
+ * `key_mgmt` is the field as the supplicant spells it, for
+ * `ncfg_supplicant_key_mgmt_security` to read. It comes back from this call
+ * rather than from a second `STATUS` for the reason in the paragraph above:
+ * the round trip that carries the SSID and the BSSID carries this too, and
+ * asking again would be two answers to one question as well as two trips.
  */
+/*
+ * What `key_mgmt=` in a `STATUS` means, as an `ncfg_security_kind_t`.
+ *
+ * **The one thing that separates two `network` blocks sharing an SSID and no
+ * BSSID** -- an open network beside a WPA2 one of the same name, which is an
+ * ordinary arrangement and was reported from a machine that has it in other
+ * software. `ncfg_wifi_network_for` asks this so that a join is credited to
+ * the block that actually describes it, and the metric that follows is the
+ * right one.
+ *
+ * The vocabulary is wpa_supplicant's and is matched by what it contains rather
+ * than by equality: a station reports `WPA2-PSK`, `WPA2-PSK-SHA256`,
+ * `FT-PSK`, `SAE`, `WPA2-EAP`, `FT-EAP`, `IEEE8021X` or `NONE`, and a list of
+ * them joined by `+` while more than one is negotiated. `OWE` is its own kind
+ * rather than an open network, which is what the document says it is.
+ *
+ * `NCFG_WIFI_SECURITY_UNSTATED` where the string is absent, empty or none of
+ * those -- which is a caller that could not tell, never a guess.
+ */
+int ncfg_supplicant_key_mgmt_security(const char *key_mgmt);
+
 int ncfg_supplicant_associated(ncfg_supplicant_client_t *client, ncfg_ssid_t *ssid_out,
-    char *bssid, size_t bssid_size);
+    char *bssid, size_t bssid_size, char *key_mgmt, size_t key_mgmt_size);
 
 /*
  * The supplicant's own state name, such as `COMPLETED` or `SCANNING`.

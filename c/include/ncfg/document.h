@@ -511,6 +511,19 @@ typedef struct {
 	ncfg_eap_config_t eap;
 } ncfg_security_t;
 
+/*
+ * What an *observation* says when it cannot tell which of these it is.
+ *
+ * **Not a fifth member**, and that is the point of it being a constant: the
+ * enum above is the document's, every walk over it is exhaustive, and a value
+ * meaning "unknown" would have to be answered in places a document can never
+ * carry one. Not knowing belongs to the other side -- a scan row whose flags
+ * nothing has parsed, a supplicant that answered without a `key_mgmt` -- and
+ * `ncfg_wifi_network_for` takes it to mean *order these candidates by name
+ * alone*, which is what it did before it could be told.
+ */
+#define NCFG_WIFI_SECURITY_UNSTATED (-1)
+
 /* ------------------------------------------------------------------------ *
  * What a device is, and therefore what netcfgd creates
  * ------------------------------------------------------------------------ */

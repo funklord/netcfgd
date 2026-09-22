@@ -403,6 +403,9 @@ static ncfg_observed_t *observation(const char *text)
 /* `HomeFiber`, `Cafe` and `Office` as the octets they are. */
 #define HOMEFIBER_HEX "486f6d654669626572"
 #define CAFE_HEX "43616665"
+/* `guest`, for the two blocks that share a name and differ in how they are
+ * secured. */
+#define GUEST_HEX "6775657374"
 #define OFFICE_HEX "4f6666696365"
 
 /*
@@ -544,29 +547,122 @@ static void the_address_answers_before_the_name(void)
 	other.has = 1;
 
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &home,
-	    "66:77:88:99:aa:bb");
+	    "66:77:88:99:aa:bb", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found && found->id && strcmp(found->id, "zzz-second") == 0,
 	    "the block naming this access point wins over the one that sorts first");
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &home,
-	    "00:11:22:33:44:55");
+	    "00:11:22:33:44:55", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found && found->id && strcmp(found->id, "aaa-first") == 0,
 	    "  and the other address answers the other block");
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &home,
-	    "de:ad:be:ef:00:00");
+	    "de:ad:be:ef:00:00", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found && found->id && strcmp(found->id, "aaa-first") == 0,
 	    "an address neither block names falls back to the ssid, in id order");
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &other,
-	    "cc:dd:ee:ff:00:11");
+	    "cc:dd:ee:ff:00:11", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found && found->id && strcmp(found->id, "by-address-only") == 0,
 	    "a block that states no ssid is matched on its addresses alone");
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &cafe,
-	    "00:11:22:33:44:55");
+	    "00:11:22:33:44:55", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found && found->id && strcmp(found->id, "by-name-only") == 0,
 	    "a block that states no address is matched on its name alone");
 	found = ncfg_wifi_network_for(document->networks, document->network_count, &other,
-	    "de:ad:be:ef:00:00");
+	    "de:ad:be:ef:00:00", NCFG_WIFI_SECURITY_UNSTATED);
 	check(found == NULL, "and a network the configuration does not describe is not invented");
 	ncfg_document_free(document);
+}
+
+
+/*
+ * Two blocks, one SSID, no addresses -- and only the security tells them
+ * apart.
+ *
+ * **Reported from the machine this is written on**: an open network beside a
+ * WPA2 one of the same name, which is an ordinary arrangement in other
+ * software and which the SSID rule above answers with whichever block sorts
+ * first. The station on the open one was then credited to the WPA2 block and
+ * would take its `metric` -- 0239's mismatch with the access points taken
+ * away.
+ *
+ * The supplicant says which it is, in `key_mgmt`. The Rust has no such arm, so
+ * this is where the two implementations answer differently (project.md
+ * 10.235).
+ */
+static void the_security_separates_two_blocks_of_one_name(void)
+{
+	ncfg_document_t *document = compiled("shared.conf",
+	    "network \"guest-open\" {\n\tssid = \"" GUEST_HEX "\"\n"
+	    "\twifi { open = true }\n}\n"
+	    "network \"guest-psk\" {\n\tssid = \"" GUEST_HEX "\"\n"
+	    "\twifi { psk = \"@secret:guest\" }\n}\n");
+	ncfg_ssid_t                guest;
+	const ncfg_wifi_network_t *found;
+
+	printf("\n-- one ssid, two blocks, told apart by what the radio is using\n");
+	if (!document) {
+		check(0, "the shared-name fixture compiles");
+		return;
+	}
+	check(document->network_count == 2u,
+	    "two networks of one name are a configuration, not a mistake");
+	memset(&guest, 0, sizeof(guest));
+	memcpy(guest.bytes, "guest", 5u);
+	guest.length = 5u;
+	guest.has = 1;
+
+	found = ncfg_wifi_network_for(document->networks, document->network_count, &guest, "",
+	    NCFG_SECURITY_PSK);
+	check(found && found->id && strcmp(found->id, "guest-psk") == 0,
+	    "a radio using a passphrase is on the block that states one");
+	found = ncfg_wifi_network_for(document->networks, document->network_count, &guest, "",
+	    NCFG_SECURITY_OPEN);
+	check(found && found->id && strcmp(found->id, "guest-open") == 0,
+	    "and one using nothing is on the open block, which sorts first anyway");
+
+	/* The half that proves the check is not the id order: ask for the one that
+	 * sorts second and get it. */
+	found = ncfg_wifi_network_for(document->networks, document->network_count, &guest, "",
+	    NCFG_WIFI_SECURITY_UNSTATED);
+	check(found && found->id && strcmp(found->id, "guest-open") == 0,
+	    "a caller that cannot tell gets the first block, exactly as before");
+
+	/* And a security no block states falls back to the name rather than
+	 * answering nothing: a block matching the ssid is still a better answer
+	 * than none, which is what `daemon.h` says this arm may not do. */
+	found = ncfg_wifi_network_for(document->networks, document->network_count, &guest, "",
+	    NCFG_SECURITY_EAP);
+	check(found && found->id && strcmp(found->id, "guest-open") == 0,
+	    "and a security neither block states still answers on the name");
+	ncfg_document_free(document);
+}
+
+/* What the supplicant's own vocabulary means, which is what the arm above is
+ * asked with. */
+static void what_key_mgmt_says(void)
+{
+	printf("\n-- `key_mgmt`, as a station reports it\n");
+	check(ncfg_supplicant_key_mgmt_security("NONE") == NCFG_SECURITY_OPEN,
+	    "`NONE` is an open network");
+	check(ncfg_supplicant_key_mgmt_security("WPA2-PSK") == NCFG_SECURITY_PSK,
+	    "`WPA2-PSK` is a passphrase");
+	check(ncfg_supplicant_key_mgmt_security("WPA2-PSK+WPA-PSK") == NCFG_SECURITY_PSK,
+	    "  and so is a pair of them, which is how a station reports two");
+	check(ncfg_supplicant_key_mgmt_security("FT-PSK") == NCFG_SECURITY_PSK,
+	    "  and a roaming one, whose name has the suffix in front");
+	check(ncfg_supplicant_key_mgmt_security("SAE") == NCFG_SECURITY_PSK,
+	    "WPA3's `SAE` is the same block in this document's vocabulary");
+	check(ncfg_supplicant_key_mgmt_security("WPA2-EAP-SHA256") == NCFG_SECURITY_EAP,
+	    "`WPA2-EAP-SHA256` is enterprise, suffix and all");
+	check(ncfg_supplicant_key_mgmt_security("IEEE8021X") == NCFG_SECURITY_EAP,
+	    "  and so is the wired spelling of it");
+	check(ncfg_supplicant_key_mgmt_security("OWE") == NCFG_SECURITY_OWE,
+	    "`OWE` is its own kind rather than an open network");
+	check(ncfg_supplicant_key_mgmt_security("") == NCFG_WIFI_SECURITY_UNSTATED,
+	    "an empty field is not an answer");
+	check(ncfg_supplicant_key_mgmt_security(NULL) == NCFG_WIFI_SECURITY_UNSTATED,
+	    "and neither is none at all");
+	check(ncfg_supplicant_key_mgmt_security("SOMETHING-NEW") == NCFG_WIFI_SECURITY_UNSTATED,
+	    "a word this build does not know is unstated rather than guessed");
 }
 
 static void why_there_is_no_supplicant(void)
@@ -1638,6 +1734,8 @@ int main(int argc, char **argv)
 
 	the_backend_is_refused_by_name();
 	the_address_answers_before_the_name();
+	the_security_separates_two_blocks_of_one_name();
+	what_key_mgmt_says();
 	why_there_is_no_supplicant();
 	what_activation_writes_is_asked_of_the_planner();
 	the_radio_list_comes_from_the_kernel();

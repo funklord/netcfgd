@@ -52,8 +52,42 @@ static int read_status(ncfg_supplicant_client_t *client, ncfg_supplicant_status_
 	return ncfg_supplicant_parse_status(body, out, count_out, err, err_size);
 }
 
+/*
+ * `key_mgmt=` as a security kind. See `supplicant.h` for what it is for.
+ *
+ * **Matched by what the string contains**, because a station negotiating more
+ * than one reports them joined by `+` -- `WPA2-PSK+WPA-PSK` -- and because the
+ * suffixes multiply: `WPA2-PSK-SHA256`, `FT-PSK`, `FT-EAP`. Asking for
+ * equality would answer "unstated" for the ordinary case.
+ *
+ * The order is the one that cannot be fooled by a substring of another: `OWE`
+ * and `SAE` are their own words, `EAP` and `IEEE8021X` name the enterprise
+ * kinds, `PSK` the personal one, and `NONE` is what an open network reports.
+ */
+int ncfg_supplicant_key_mgmt_security(const char *key_mgmt)
+{
+	if (!key_mgmt || key_mgmt[0] == '\0') {
+		return NCFG_WIFI_SECURITY_UNSTATED;
+	}
+	if (strstr(key_mgmt, "OWE")) {
+		return NCFG_SECURITY_OWE;
+	}
+	if (strstr(key_mgmt, "EAP") || strstr(key_mgmt, "IEEE8021X")) {
+		return NCFG_SECURITY_EAP;
+	}
+	if (strstr(key_mgmt, "PSK") || strstr(key_mgmt, "SAE")) {
+		return NCFG_SECURITY_PSK;
+	}
+	if (strcmp(key_mgmt, "NONE") == 0) {
+		return NCFG_SECURITY_OPEN;
+	}
+	/* Something this build does not know. Not a guess: `network_for` asked
+	 * without an answer behaves exactly as it did before this existed. */
+	return NCFG_WIFI_SECURITY_UNSTATED;
+}
+
 int ncfg_supplicant_associated(ncfg_supplicant_client_t *client, ncfg_ssid_t *ssid_out,
-    char *bssid, size_t bssid_size)
+    char *bssid, size_t bssid_size, char *key_mgmt, size_t key_mgmt_size)
 {
 	char                           message[NCFG_ERROR_MAX];
 	ncfg_supplicant_status_pair_t *status = NULL;
@@ -65,6 +99,9 @@ int ncfg_supplicant_associated(ncfg_supplicant_client_t *client, ncfg_ssid_t *ss
 
 	if (bssid && bssid_size) {
 		bssid[0] = '\0';
+	}
+	if (key_mgmt && key_mgmt_size) {
+		key_mgmt[0] = '\0';
 	}
 	if (!client || !ssid_out) {
 		return 0;
@@ -93,6 +130,14 @@ int ncfg_supplicant_associated(ncfg_supplicant_client_t *client, ncfg_ssid_t *ss
 		 * needs both -- a network that lists BSSIDs instead of an SSID is
 		 * identified by the second. */
 		(void)snprintf(bssid, bssid_size, "%s", address ? address : "");
+	}
+	if (answered && key_mgmt && key_mgmt_size) {
+		/* The third half, and it comes from this round trip rather than a
+		 * second: two `network` blocks may share an SSID and pin no address,
+		 * and what separates them is what the radio is actually using. */
+		const char *how = ncfg_supplicant_status_field(status, count, "key_mgmt");
+
+		(void)snprintf(key_mgmt, key_mgmt_size, "%s", how ? how : "");
 	}
 	ncfg_supplicant_status_free(status, count);
 	return answered;

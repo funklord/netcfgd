@@ -1783,6 +1783,27 @@ int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interfa
  * states an SSID must agree on both, so a listed address that has moved to a
  * different network is not answered with the block that used to name it.
  *
+ * **And then the security, which is 0239's case without the access points.**
+ * Two blocks may share an SSID and pin no addresses at all -- an open network
+ * beside a WPA2 one of the same name, reported from a machine that has both
+ * in other software -- and first-match answered whichever sorted earlier for
+ * both. That is the same mismatch one step further in: the station on the open
+ * one is credited to the WPA2 block and takes its `metric`. So a caller that
+ * knows what the radio is actually using says so, and a block whose security
+ * agrees is preferred over one that merely shares the name.
+ *
+ * `security` is an `ncfg_security_kind_t`, or `NCFG_WIFI_SECURITY_UNSTATED`
+ * from a caller that cannot tell -- in which case this answers exactly as it
+ * did before. **It never refuses on the strength of it**: a block matching the
+ * SSID and nothing else is still a better answer than none, so the security
+ * orders the candidates rather than filtering them.
+ *
+ * **The Rust does not have this arm.** `netcfgd_model::wifi::network_for` has
+ * the BSSID rule and the first-match fallback and stops there, so the two
+ * implementations answer differently for exactly the configuration this was
+ * added for. Recorded rather than changed there, which is this branch's rule
+ * for the Rust (project.md 10.235).
+ *
  * **This is `netcfgd_model::wifi::network_for` and it belongs in the model**,
  * which is where the Rust keeps it and says why: the socket answers "which
  * network is this radio on?" for a client and the observation answers it for
@@ -1793,7 +1814,7 @@ int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interfa
  * Borrowed from `networks`, or NULL.
  */
 const ncfg_wifi_network_t *ncfg_wifi_network_for(const ncfg_wifi_network_t *networks,
-    size_t count, const ncfg_ssid_t *ssid, const char *bssid);
+    size_t count, const ncfg_ssid_t *ssid, const char *bssid, int security);
 
 /*
  * Why there is no supplicant on an interface, in words that say what to do.

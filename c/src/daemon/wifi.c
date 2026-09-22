@@ -307,7 +307,7 @@ int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interfa
 }
 
 const ncfg_wifi_network_t *ncfg_wifi_network_for(const ncfg_wifi_network_t *networks,
-    size_t count, const ncfg_ssid_t *ssid, const char *bssid)
+    size_t count, const ncfg_ssid_t *ssid, const char *bssid, int security)
 {
 	size_t at;
 	size_t which;
@@ -327,6 +327,22 @@ const ncfg_wifi_network_t *ncfg_wifi_network_for(const ncfg_wifi_network_t *netw
 		for (which = 0; which < network->bssid_count; which++) {
 			if (same_address(network->bssid[which], bssid)) {
 				return network;
+			}
+		}
+	}
+	/*
+	 * **Then the security, where the caller could tell.** The same case as
+	 * above with the access points taken away: an open network beside a WPA2
+	 * one of the same name, which the SSID cannot separate and this can.
+	 * Ordering rather than filtering -- the loop below still answers a block
+	 * that matches on the name alone, because that is a better answer than
+	 * none and is what every caller got before this arm existed.
+	 */
+	if (security != NCFG_WIFI_SECURITY_UNSTATED) {
+		for (at = 0; at < count; at++) {
+			if (networks[at].ssid.has && ssid_equal(&networks[at].ssid, ssid) &&
+			    networks[at].security.kind == security) {
+				return &networks[at];
 			}
 		}
 	}
@@ -703,8 +719,18 @@ static int scan_report(const ncfg_document_t *document, ncfg_supplicant_client_t
 		const ncfg_wifi_network_t    *configured = NULL;
 
 		if (document) {
+			/*
+			 * `NCFG_WIFI_SECURITY_UNSTATED`, and it is a gap rather than a
+			 * judgement: a scan row's `flags` do say -- `[WPA2-PSK-CCMP]`
+			 * against `[ESS]` -- and nothing here parses them into a kind
+			 * yet. What it costs is a listing that may credit an access point
+			 * to whichever of two same-named blocks sorts first, where the
+			 * association itself is resolved correctly. The mapping belongs
+			 * beside `ncfg_supplicant_key_mgmt_security` when somebody wants
+			 * it.
+			 */
 			configured = ncfg_wifi_network_for(document->networks, document->network_count,
-			    &scan->ssid, scan->bssid);
+			    &scan->ssid, scan->bssid, NCFG_WIFI_SECURITY_UNSTATED);
 		}
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "bssid", scan->bssid ? scan->bssid : "");
@@ -980,9 +1006,13 @@ int ncfg_wifi_status(const ncfg_wifi_where_t *where, const ncfg_document_t *docu
 	if (named && document) {
 		/* The associated BSSID is the second half: a network identified by
 		 * address rather than by name is exactly the one whose SSID cannot
-		 * answer "which of my networks is this?". */
+		 * answer "which of my networks is this?" -- and `key_mgmt` is the
+		 * third, for two blocks that share a name and pin no address. The
+		 * status this is written from already carries both. */
 		const ncfg_wifi_network_t *network = ncfg_wifi_network_for(document->networks,
-		    document->network_count, &ssid, bssid ? bssid : "");
+		    document->network_count, &ssid, bssid ? bssid : "",
+		    ncfg_supplicant_key_mgmt_security(
+		        ncfg_supplicant_status_field(pairs, count, "key_mgmt")));
 
 		if (network && network->id) {
 			ncfg_json_write_member_string(&writer, "network", network->id);
