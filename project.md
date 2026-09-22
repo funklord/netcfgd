@@ -9515,6 +9515,33 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.226 Where each program is told to look, and a case that proved nothing
+
+`--help` promises that every directory is the flag, or the variable, or the
+default, in that order. A precedence that differed between the two programs
+would be the quietest divergence available: nothing refuses, nothing is logged,
+and a machine is configured from a directory nobody meant. Five cases compare
+it now -- `NCFG_CONFIG_DIR` and `NCFG_FACTORY_DIR` in place of a flag, and one
+with both -- and the two agree.
+
+**The first version of the "flag wins" case could not have failed.** It ran
+`control show` with the flag pointing at a fixture and the variable at a
+directory that does not exist -- and `control show` prints the same three
+default tiers either way, because the fixture states no `control` block. The
+sabotage that makes the environment beat the flag turned nothing red, which is
+how it was noticed.
+
+That is the same vacuous shape as an empty file list, in its third dress this
+session: a check whose *inputs* cannot distinguish the answers. The fixture had
+to become one where they do, so `tests/agree/selected` names a profile and
+`profile get` prints `office` from it and `no profile chosen` from anywhere
+else. With that, both sabotages go red: ignoring the variable, and letting it
+beat the flag.
+
+**Each environment case names the directory it is given**, rather than sharing
+one corpus, for exactly that reason -- *which* directory a case is pointed at
+is the thing it is about.
+
 ## 10.225 The other binary, and the rule that keeps this gate off the machine
 
 The agreement gate had only ever run `ncfg`. It runs `netcfgd` now, for the
