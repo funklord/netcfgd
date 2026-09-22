@@ -878,6 +878,51 @@ static void this_build_does_not_reconcile(void)
 	check(!ncfg_main_netcfgd_may_reconcile(), "  and the default is put back");
 
 	/*
+	 * **The stale reply sockets are swept at startup**, read from the source
+	 * for `may_reconcile`'s reason: the call is in the one function a test
+	 * may not run, and what would otherwise assert it is a daemon holding
+	 * this machine's radio.
+	 *
+	 * What the sweep *does* is `supplicant_test.c`'s, against a directory of
+	 * its own. What is checked here is that the daemon reaches it -- the
+	 * function was ported with its module and called by nothing but a test
+	 * for a whole wave, while the Rust daemon did it at every start.
+	 */
+	{
+		char *source = read_source("src/main/daemon_main.c");
+
+		check(source != NULL &&
+		        strstr(source, "ncfg_supplicant_reap_reply_sockets(ctrl_dir)") != NULL,
+		    "the daemon sweeps the supplicant's dead reply sockets at startup");
+		check(source != NULL && strstr(source, "left by processes that are gone") != NULL,
+		    "  and says so, which is how the Rust's doing it was noticed");
+		free(source);
+	}
+
+	/*
+	 * **And the watcher says what it decided.** The decision is
+	 * `loop_test.c`'s -- every arm of it, with the severities -- and this is
+	 * the line that writes it, which no test reaches: driving it wants a fake
+	 * supplicant bound in a control directory, and the one this tree has
+	 * lives inside `supplicant_client_test.c` rather than in a header two
+	 * files could share. `hostapdfake.h` is the precedent for moving it, and
+	 * until somebody does, a sabotage that deletes the emit is caught here
+	 * and nowhere else.
+	 */
+	{
+		char *source = read_source("src/main/daemon_watchers.c");
+
+		check(source != NULL &&
+		        strstr(source, "ncfg_main_supplicant_event_line(radio->interface") != NULL,
+		    "the watcher asks what a supplicant event is worth saying");
+		check(source != NULL &&
+		        strstr(source, "ncfg_log_emitf(\"supplicant\", (ncfg_severity_t)severity")
+		            != NULL,
+		    "  and says it, at the level the answer carried");
+		free(source);
+	}
+
+	/*
 	 * **And no init script passes it**, which is a grep of the packaging
 	 * rather than of this program. The refusal is worth nothing if the thing
 	 * that installs netcfgd hands every machine the flag -- and that is a file

@@ -9515,6 +9515,72 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.237 What the daemon was not saying
+
+A sweep for functions nothing calls -- every `ncfg_*` declared in a public
+header, counted by *mentions* rather than by call sites, so a seam installed as
+a function pointer reads as wired -- found one with nothing but its definition
+and thirty-seven reached only by tests. Most of the thirty-seven are accessors
+the Rust leaves unused too, checked one at a time rather than assumed:
+`ncfg_connectivity_connected` and `ncfg_probes_verdict` are called nowhere but
+their own tests in both languages, and the supplicant client's `interface`
+accessor is unused in both.
+
+Two were real, and both are about the same thing: **this daemon was quieter
+than the one it replaces.**
+
+### The reply sockets nobody swept
+
+`ncfg_supplicant_reap_reply_sockets` was ported with its module, is tested, and
+had no caller. The Rust calls it at every start -- and was watched doing it on
+this machine during the first tryout:
+
+    netcfgd[2228759]: [supplicant] !: removed 2 reply socket(s) in
+                      /run/wpa_supplicant left by processes that are gone
+
+while the C daemon's own log, holding the same machine ninety seconds earlier,
+said nothing. netcfgd installs no `SIGTERM` handler, so every one of its lives
+leaves two of these behind: 18 entries to 20 per restart, for ever (0193).
+
+Swept once, at startup, before anything lists that directory. Startup is the
+whole of the schedule: the set can only grow when a process dies, so a later
+sweep finds nothing this one missed, and sweeping per connect would be a
+`read_dir` for every command netcfgd sends.
+
+### The events that reached the daemon and left no trace
+
+The C watcher reads the supplicant's event stream **only to notice a roam**.
+Everything else -- a station refused, a network given up on, a scan the radio
+could not run, and the association itself -- arrived and was dropped. That is
+why the log from the first tryout was three startup lines: not because nothing
+happened, but because nothing was written down.
+
+`ncfg_main_supplicant_event_line` is the Rust's table, ported as what it is
+there: **a decision separated from saying it**, because every arm used to end
+in a log macro that writes and returns nothing, so a test could assert the code
+compiled and no more -- and one arm went in with nothing holding it.
+
+The levels are the subject as much as the words. A disconnect this machine
+caused -- `locally_generated=1`, netcfgd selecting another network, a scan, a
+rekey -- happens dozens of times a day and is verbose; the access point
+dropping the station is rare and is a note. A network the supplicant has given
+up on is a warning carrying the supplicant's own `reason`, because
+`WRONG_KEY` and `CONN_FAILED` send a person to different places. And the
+re-enable is reported too (0225): every other arm is bad news, so a machine
+that lost its association at three in the morning and got it back had the loss
+in the log and the recovery nowhere.
+
+Eighteen checks over the arms and the levels, and two sabotages caught: a local
+disconnect reported like a remote one, and the recovery arm removed.
+
+**The wiring is checked by reading**, which is worth saying plainly. Driving
+the watcher wants a fake supplicant bound in a control directory, and the one
+this tree has lives inside `supplicant_client_test.c` rather than in a header
+two files could share -- `hostapdfake.h` is the precedent for moving it. Until
+somebody does, `main_test.c` greps the watcher for the call and for the emit
+beside it, which is what catches a sabotage that deletes either. The same
+pattern covers the reaper's one call site.
+
 ## 10.236 Two gaps this session named, closed
 
 Both were written down by the sessions that hit them, which is the point of
