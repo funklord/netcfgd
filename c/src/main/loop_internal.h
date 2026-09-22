@@ -43,6 +43,7 @@
 #ifndef NCFG_MAIN_LOOP_INTERNAL_H
 #define NCFG_MAIN_LOOP_INTERNAL_H
 
+#include "ncfg/cli.h"
 #include "ncfg/daemon.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/lock.h"
@@ -1218,6 +1219,18 @@ int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err
     size_t err_size);
 /* `ncfg_reconcile_world_t::executor_close`. */
 void ncfg_main_world_executor_close(void *context, ncfg_executor_t *executor);
+
+/*
+ * How `ncfg apply` reaches the machine, for `ncfg_cli_main_on`.
+ *
+ * `cli.h` declares the seam and argues why the library half cannot do this for
+ * itself; `cli_machine.c` implements it as the daemon's own world opened for
+ * one apply rather than for a loop.
+ *
+ * The returned seam and everything it points at are static: one apply per
+ * process, which is what `ncfg` does.
+ */
+const ncfg_cli_machine_t *ncfg_main_cli_machine(void);
 /* `ncfg_reconcile_world_t::announce`. Nothing where no list was given. */
 void ncfg_main_world_announce(void *context, const ncfg_proto_event_t *event);
 
