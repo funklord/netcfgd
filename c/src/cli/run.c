@@ -933,6 +933,15 @@ static void plan_options_of(const ncfg_cli_options_t *options, ncfg_plan_options
 	out->confirm_window = options->confirm;
 	out->allow_disruption = options->allow_disruption.items;
 	out->allow_disruption_count = options->allow_disruption.count;
+	/* The two consents that used to be parsed and dropped: `--strand-credentials`
+	 * and `--restart-wedged` reached `ncfg_cli_options_t` and stopped there,
+	 * so a plan refused a stranding the operator had consented to and declined
+	 * to restart a backend they had named. `strand.c` and `wedged.c` read
+	 * them. */
+	out->strand_credentials = options->strand_credentials.items;
+	out->strand_credentials_count = options->strand_credentials.count;
+	out->restart_wedged = options->restart_wedged.items;
+	out->restart_wedged_count = options->restart_wedged.count;
 }
 
 /* `ncfg plan`: what would change, changing nothing. */

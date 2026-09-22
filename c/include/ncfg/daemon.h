@@ -2942,13 +2942,13 @@ typedef struct {
 	const char *const *allow_disruption;
 	size_t             allow_disruption_count;
 	/*
-	 * The two consents this build's planner has no option for.
+	 * The two consents that are not about disruption.
 	 *
-	 * Carried so that the arm can say they were not read rather than drop
-	 * them silently -- `ncfg_plan_options_t` has neither, so a stranding is
-	 * still refused and a wedged backend is still a loud failure. The counts
-	 * are what the warning names; the lists are here for the day the planner
-	 * gains them.
+	 * `--strand-credentials` says a key may be left loaded on a device
+	 * netcfgd is walking away from (0042), and `--restart-wedged` says a
+	 * backend that is running and silent may be killed and started again
+	 * (0141). Both are per interface for `allow_disruption`'s reason, and both
+	 * reach `ncfg_plan_options_t`.
 	 */
 	const char *const *strand_credentials;
 	size_t             strand_credentials_count;

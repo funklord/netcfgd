@@ -45,36 +45,6 @@
  * ------------------------------------------------------------------------ */
 
 /*
- * The two lists this build's planner has no option for, said out loud.
- *
- * `ncfg_plan_options_t` carries `allow_disruption` and `cycle` and neither of
- * the other two consents, so a client naming an interface in one of them gets
- * a plan that did not hear it: a stranding is still refused, and a wedged
- * backend is still a loud failure rather than something restarted. Refusing
- * the whole request would be worse -- the rest of the apply is exactly what it
- * would have been -- and saying nothing would be worst, because the client
- * asked for consent and got silence. `ncfg` drops the same two flags in
- * `plan_options_of`, which is the same gap seen from the other end.
- */
-static void say_what_was_not_read(const ncfg_daemon_apply_ask_t *ask)
-{
-	if (ask->strand_credentials_count > 0u) {
-		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
-		    "this build's planner has no consent for stranding a credential, so the "
-		    "%zu interface(s) named in `strand_credentials` are not consented to and "
-		    "a stranding is still refused",
-		    ask->strand_credentials_count);
-	}
-	if (ask->restart_wedged_count > 0u) {
-		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
-		    "this build's planner has no consent for restarting a wedged backend, so "
-		    "the %zu interface(s) named in `restart_wedged` are left as a loud "
-		    "failure",
-		    ask->restart_wedged_count);
-	}
-}
-
-/*
  * What this apply falls back to if nobody confirms, or NULL where no window
  * was asked for.
  *
@@ -163,8 +133,6 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
 		                         : "no configuration");
 		return 0;
 	}
-	say_what_was_not_read(ask);
-
 	/*
 	 * **`--confirm-within 0` is how an operator declines a window on a machine
 	 * whose configuration sets one, and it is the only way to say it (0094).**
@@ -186,6 +154,13 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
 	options.confirm_window = ask->confirm;
 	options.allow_disruption = ask->allow_disruption;
 	options.allow_disruption_count = ask->allow_disruption_count;
+	/* The two consents the planner gained with `strand.c` and `wedged.c`.
+	 * They were carried here and warned about rather than passed on, which is
+	 * `ncfg_daemon_apply_ask_t`'s note -- and that note goes with them. */
+	options.strand_credentials = ask->strand_credentials;
+	options.strand_credentials_count = ask->strand_credentials_count;
+	options.restart_wedged = ask->restart_wedged;
+	options.restart_wedged_count = ask->restart_wedged_count;
 	if (last_good) {
 		message[0] = '\0';
 		if (ncfg_daemon_document_hash(last_good, revert_to, message, sizeof(message))) {

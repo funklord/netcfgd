@@ -2371,6 +2371,72 @@ static void an_apply_that_cannot_start_says_which_of_the_two_it_is(const char *b
 	harness_stop(&harness);
 }
 
+/*
+ * A consent the client sent reaches the planner.
+ *
+ * **The wiring is the subject, not the rule.** `plan_consent_test.c` is where
+ * `--restart-wedged` is argued out; what is checked here is that a request
+ * carrying the list produces the actions, because the two lists reached
+ * `ncfg_daemon_apply_ask_t` and stopped there for a whole wave -- the arm
+ * warned that the planner had no option for them and dropped them, and a
+ * client asking for consent got a plan that had not heard it.
+ *
+ * A wedged access point is the fixture because the restart is two actions an
+ * executor can be asked for without a radio: the recorder sees `backend.stop`
+ * and `backend.start`, and nothing reaches hostapd.
+ */
+static void a_consent_the_client_sent_reaches_the_planner(const char *base)
+{
+	harness_t               harness;
+	ncfg_confirm_armed_t    armed;
+	ncfg_daemon_apply_ask_t ask = asking_for_nothing();
+	const char             *named[] = { "wlan0" };
+	ncfg_journal_t          journal;
+	char                    err[NCFG_ERROR_MAX];
+
+	memset(&armed, 0, sizeof(armed));
+	if (!request_harness(&harness, &armed, base, "request-consent",
+	        "device wlan0 {}\naccess_point \"home\" {\n\tdevice = \"wlan0\"\n"
+	        "\twifi { open = true }\n}\n",
+	        "\"links\":[{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":true,"
+	        "\"carrier\":true,\"ownership\":\"ours\"}],"
+	        "\"backends\":[{\"kind\":\"access_point\",\"interface\":\"wlan0\","
+	        "\"running\":true,\"answering\":false}]")) {
+		harness_stop(&harness);
+		return;
+	}
+	/* Without the consent: reported and refused, and nothing is killed. */
+	err[0] = '\0';
+	if (!ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err))) {
+		detail("the apply that should have refused the restart", err);
+		check(0, "an apply over a wedged access point runs");
+		ncfg_confirm_armed_free(&armed);
+		harness_stop(&harness);
+		return;
+	}
+	ncfg_journal_free(&journal);
+	check(step_at(&harness.world, "op:backend.stop") < 0,
+	    "a wedged backend nobody consented to restarting is left alone");
+
+	/* And with it: stopped and started again, through the seam. */
+	harness.world.count = 0;
+	ask.restart_wedged = named;
+	ask.restart_wedged_count = 1u;
+	err[0] = '\0';
+	check(ncfg_daemon_apply_request(&harness.loop, &ask, &journal, err, sizeof(err)),
+	    "an apply naming it in `restart_wedged` runs");
+	detail("if not", err);
+	check(step_at(&harness.world, "op:backend.stop") >= 0 &&
+	        step_at(&harness.world, "op:backend.start") >= 0,
+	    "  and the restart reaches the machine, which is the consent arriving");
+	before(&harness.world, "op:backend.stop", "op:backend.start",
+	    "  in that order, because that is what a restart is");
+	ncfg_journal_free(&journal);
+
+	ncfg_confirm_armed_free(&armed);
+	harness_stop(&harness);
+}
+
 int main(void)
 {
 	const char *base = testdir_make("reconcile");
@@ -2412,6 +2478,7 @@ int main(void)
 	a_confirm_closes_the_window_and_keeps_what_ran(base);
 	a_revert_puts_it_back_and_refuses_early(base);
 	an_apply_that_cannot_start_says_which_of_the_two_it_is(base);
+	a_consent_the_client_sent_reaches_the_planner(base);
 
 	testdir_remove(base);
 
