@@ -675,8 +675,31 @@ ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t
 	int               failed = 0;
 	int               said = 0;
 
-	if (!sources || !hooks) {
+	if (!sources) {
 		ncfg_error_set(err, err_size, "a compile was asked for with nothing to compile");
+		return NULL;
+	}
+	/*
+	 * **Named separately, because it is a different mistake.** Both were one
+	 * refusal saying "nothing to compile", and a caller that passed a perfectly
+	 * good set of sources and no sink was told its *sources* were the problem
+	 * -- which cost two rounds of looking in the wrong place while a probe was
+	 * being written against this call (project.md 10.236).
+	 *
+	 * And it stays a refusal rather than becoming a default. A sink is what
+	 * turns a hook's body into `{phase, path, sha256}`; without one, a
+	 * configuration carrying hooks would compile to a document with none of
+	 * them, which is `build.c`'s hazard exactly -- a plan that omits something
+	 * without saying so. A caller that genuinely wants no hooks recorded says
+	 * so by passing a sink whose `record` is NULL, which is a statement rather
+	 * than an omission.
+	 */
+	if (!hooks) {
+		ncfg_error_set(err, err_size,
+		    "a compile needs somewhere to put the hooks it finds: this one was given "
+		    "%zu source file(s) and no sink. A document whose hook bodies went nowhere "
+		    "would be quieter than the configuration it came from",
+		    sources->count);
 		return NULL;
 	}
 	if (sources->count == 0u) {

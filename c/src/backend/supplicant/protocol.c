@@ -693,6 +693,40 @@ int ncfg_supplicant_scan_is_owe(const ncfg_supplicant_scan_t *scan)
 	return flags_contain(scan, "OWE");
 }
 
+int ncfg_supplicant_scan_security(const ncfg_supplicant_scan_t *scan)
+{
+	/*
+	 * The same three questions this file already answers, composed into the
+	 * document's vocabulary -- rather than a fourth reading of the flags,
+	 * which is how the three of them would come to disagree.
+	 *
+	 * **OWE before the rest**, because an OWE row is secured and is not a
+	 * passphrase: it is its own kind in the document, and `is_owe` exists
+	 * because `is_secured` alone could not say so.
+	 */
+	if (ncfg_supplicant_scan_is_owe(scan)) {
+		return NCFG_SECURITY_OWE;
+	}
+	if (ncfg_supplicant_scan_is_enterprise(scan)) {
+		return NCFG_SECURITY_EAP;
+	}
+	if (flags_contain(scan, "WPA") || flags_contain(scan, "SAE")) {
+		return NCFG_SECURITY_PSK;
+	}
+	/*
+	 * **WEP is unstated rather than `psk`, and that is the interesting one.**
+	 * It is secured -- `is_secured` says so, and joining it needs a key -- but
+	 * no `network` block can express it, so calling it a passphrase would
+	 * credit a WEP access point to a WPA2 block of the same name. Unstated
+	 * falls back to matching on the name, which is what this answered before
+	 * it could answer at all.
+	 */
+	if (ncfg_supplicant_scan_is_secured(scan)) {
+		return NCFG_WIFI_SECURITY_UNSTATED;
+	}
+	return NCFG_SECURITY_OPEN;
+}
+
 int ncfg_supplicant_scan_does_fast_transition(const ncfg_supplicant_scan_t *scan)
 {
 	return flags_contain(scan, "FT/");

@@ -664,6 +664,22 @@ static void a_machine_that_has_a_hook(const char *root)
 		check(document == NULL && strstr(err, "cannot accept hooks") != NULL,
 		    "  and the refusing sink refuses it, which is what the check used to use");
 		ncfg_document_free(document);
+
+		/*
+		 * **And no sink at all is a different refusal, which it did not used
+		 * to be.** Both said "a compile was asked for with nothing to
+		 * compile", so a caller holding five good source files and no sink was
+		 * told its sources were the problem. The sentence names what is
+		 * missing now, and the count is in it so that the sources are visibly
+		 * *not* the complaint.
+		 */
+		err[0] = '\0';
+		document = ncfg_config_compile(&sources, NULL, NULL, err, sizeof(err));
+		check(document == NULL && strstr(err, "somewhere to put the hooks") != NULL,
+		    "  and a compile with no sink says that is what it is missing");
+		check(strstr(err, "nothing to compile") == NULL,
+		    "  rather than blaming the sources it was given");
+		ncfg_document_free(document);
 		ncfg_config_sources_free(&sources);
 
 		check(ncfg_config_install_drop_in(config, factory, "another",

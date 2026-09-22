@@ -9515,6 +9515,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.236 Two gaps this session named, closed
+
+Both were written down by the sessions that hit them, which is the point of
+writing them down.
+
+### What a scan row is secured with
+
+10.235 left the listing asking `ncfg_wifi_network_for` with
+`NCFG_WIFI_SECURITY_UNSTATED` and said so in a comment: a row's `flags` carry
+the answer -- `[WPA2-PSK-CCMP]` against `[ESS]` -- and nothing parsed them into
+a kind. So an association was credited to the right one of two same-named
+blocks and the scan listing beside it was not.
+
+`ncfg_supplicant_scan_security` is the three questions that file already
+answers, composed into the document's vocabulary rather than a fourth reading
+of the flags: OWE first, because an OWE row *is* secured and is not a
+passphrase; then enterprise; then WPA or SAE.
+
+**WEP is unstated rather than `psk`, and that is the arm worth the paragraph.**
+It is secured -- joining it needs a key -- and no `network` block can express
+it, so calling it a passphrase would credit a WEP access point to a WPA2 block
+of the same name. Unstated falls back to matching on the name, which is what
+the listing did before it could answer at all.
+
+The fixture was already there: six rows, one of each shape, written for 0227's
+OWE case. Two sabotages caught -- WEP answered as a passphrase, and OWE
+answered after the passphrase test so that every OWE row read as `psk`.
+
+### A refusal that named the wrong thing
+
+`ncfg_config_compile_with_provenance` refused a NULL `sources` and a NULL
+`hooks` with one sentence: *a compile was asked for with nothing to compile*.
+A caller holding five perfectly good source files and no sink was told its
+sources were the problem, and the header above it said `hooks` was "the
+caller's choice", which reads as optional.
+
+That cost two rounds of looking in the wrong place while a read-only probe was
+being written against this call, in the same session that fixed it. The two
+mistakes are two refusals now, and the one about the sink carries the source
+count so that the sources are visibly not the complaint.
+
+**It stays a refusal rather than becoming a default.** A sink is what turns a
+hook's body into `{phase, path, sha256}`; without one a configuration carrying
+hooks would compile to a document with none of them, which is `build.c`'s
+hazard exactly. A caller that wants no hooks recorded passes a sink whose
+`record` is NULL, which is a statement rather than an omission -- and that is
+now what the header says.
+
 ## 10.235 One SSID, two blocks, and what tells them apart
 
 10.234 recorded the limitation this closes: `ncfg_wifi_network_for` answers
