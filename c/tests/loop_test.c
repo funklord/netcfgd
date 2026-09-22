@@ -51,6 +51,7 @@
 #include "ncfg/supplicant.h"
 #include "ncfg/watch.h"
 
+#include "supplicantfake.h"
 #include "testdir.h"
 
 #include <errno.h>
@@ -375,6 +376,142 @@ static void what_the_log_says_about_a_supplicant_event(void)
 	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)) &&
 	        strcmp(said, "wlan0: dropped by ? (reason 3)") == 0,
 	    "a field the event did not carry reads as `?`");
+}
+
+
+/*
+ * A supplicant event reaches the log, driven rather than read.
+ *
+ * **This is what `main_test.c` was grepping the source for.** The decision --
+ * which events are worth a line, at what level -- is checked above as a value.
+ * What could not be checked was the watcher actually saying it: that wants a
+ * supplicant bound in a control directory, and the fake for one lived inside
+ * `supplicant_client_test.c` where nothing else could reach it. It is
+ * `supplicantfake.h` now, and this is the first thing that needed it.
+ *
+ * Nothing here goes near a radio: the socket is in a directory this test made,
+ * the interface is `wlan0` and exists only there, and the fake is a forked
+ * process this test started and takes down by its own recorded pid.
+ */
+static void a_supplicant_event_reaches_the_log(const char *base)
+{
+	ncfg_main_watchers_t      watchers;
+	ncfg_main_watch_t         what;
+	ncfg_main_run_t           run;
+	ncfg_main_round_report_t  report;
+	ncfg_supplicant_client_t *tester;
+	char                      dir[512];
+	char                      log_path[640];
+	char                      message[NCFG_ERROR_MAX];
+	char                      err[NCFG_ERROR_MAX];
+	char                     *said;
+	ncfg_severity_t           kept_level;
+	int                       saved_stderr;
+	int                       fd;
+
+	(void)snprintf(dir, sizeof(dir), "%s/ctrl", base);
+	(void)mkdir(dir, 0700);
+	(void)snprintf(log_path, sizeof(log_path), "%s/fake.log", base);
+	if (!fake_start(dir, "wlan0", log_path)) {
+		check(0, "a fake radio to watch");
+		return;
+	}
+
+	memset(&what, 0, sizeof(what));
+	what.supplicant_dir = dir;
+	what.poll_config = 1;
+	err[0] = '\0';
+	if (!ncfg_main_watchers_open(&watchers, &what, err, sizeof(err))) {
+		detail("the watches would not open", err);
+		check(0, "the watches open over a control directory");
+		fake_stop();
+		return;
+	}
+	memset(&run, 0, sizeof(run));
+	run.sources = &watchers.sources;
+	run.ticks = fake_ticks;
+	/*
+	 * **The refresh, which is how a radio is ever found.** The watcher scans
+	 * the control directory from `ncfg_main_watchers_refresh`, and a round
+	 * with no `refresh` installed never looks -- which is exactly what the
+	 * first version of this case did, and the fake heard no `ATTACH` at all.
+	 * `daemon_main.c` installs the same pair.
+	 */
+	run.refresh = ncfg_main_watchers_refresh;
+	run.refresh_context = &watchers;
+
+	/* A round to find the socket and attach to it. The watcher's own
+	 * `ATTACH` is what makes the fake broadcast reach it at all. */
+	clock_is_expired();
+	err[0] = '\0';
+	(void)ncfg_main_round(&run, &report, err, sizeof(err));
+
+	/*
+	 * The event, sent through a second connection of this test's own:
+	 * `TROUBLE` is the fake's way of being told to emit one, and it
+	 * broadcasts to everything that has attached -- which is the watcher.
+	 */
+	message[0] = '\0';
+	tester = ncfg_supplicant_connect_within(dir, "wlan0", 2000, message, sizeof(message));
+	check(tester != NULL, "a second connection, to tell the fake what to emit");
+	if (!tester) {
+		ncfg_main_watchers_close(&watchers);
+		fake_stop();
+		return;
+	}
+
+	/* **Both streams captured across the round**, because the log writes
+	 * straight to descriptor 2 -- which is `log.c`'s arrangement and the
+	 * reason the only honest way to read it is to be the reader. */
+	(void)fflush(stderr);
+	saved_stderr = dup(STDERR_FILENO);
+	fd = open(log_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0 || saved_stderr < 0) {
+		check(0, "stderr can be captured");
+		ncfg_supplicant_client_free(tester);
+		ncfg_main_watchers_close(&watchers);
+		fake_stop();
+		return;
+	}
+	(void)snprintf(log_path, sizeof(log_path), "%s/narration", base);
+	(void)close(fd);
+	fd = open(log_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	(void)dup2(fd, STDERR_FILENO);
+	(void)close(fd);
+
+	/*
+	 * **And the level raised, which is the half that made this fail first.**
+	 * `main` sets the suite to `CRITICAL` so that a hundred and seventy checks
+	 * do not narrate themselves; a note written into that is a note nothing
+	 * records, and the capture came back empty. Put back straight after, so
+	 * the rest of the file is as quiet as it was.
+	 */
+	kept_level = ncfg_log_accepted();
+	ncfg_log_accept(NCFG_LOG_VERBOSE);
+	message[0] = '\0';
+	(void)ncfg_supplicant_command(tester,
+	    "TROUBLE CTRL-EVENT-CONNECTED - Connection to a0:a4:7f:23:9a:cf completed "
+	    "[id=0 id_str=]", message, sizeof(message));
+	clock_is_expired();
+	err[0] = '\0';
+	(void)ncfg_main_round(&run, &report, err, sizeof(err));
+	ncfg_log_accept(kept_level);
+
+	(void)fflush(stderr);
+	(void)dup2(saved_stderr, STDERR_FILENO);
+	(void)close(saved_stderr);
+
+	said = testdir_read(log_path, NULL);
+	check(said != NULL && strstr(said, "wlan0: joined a0:a4:7f:23:9a:cf") != NULL,
+	    "an association the supplicant reported is in the daemon's log");
+	if (!said || strstr(said, "wlan0: joined a0:a4:7f:23:9a:cf") == NULL) {
+		detail("what it said", said ? said : "(nothing)");
+	}
+	free(said);
+
+	ncfg_supplicant_client_free(tester);
+	ncfg_main_watchers_close(&watchers);
+	fake_stop();
 }
 
 static void a_roam_is_a_move_within_one_network(void)
@@ -2161,6 +2298,7 @@ int main(void)
 	a_window_timer_that_fires_during_a_pass_is_not_lost(base);
 	a_signal_between_the_check_and_the_wait_still_stops_it();
 	a_station_that_moved_is_carried_out_of_the_round(base);
+	a_supplicant_event_reaches_the_log(base);
 
 	fifty_events_are_one_observation(base);
 	the_pass_sees_a_waiting_request_before_anything_answers_it(base);
