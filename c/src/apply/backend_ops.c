@@ -474,9 +474,25 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
     char *err, size_t err_size)
 {
 	const char *run_dir;
+	int         adopted = 0;
 
 	if (!run_dir_of(service, "backend.start", iface, &run_dir, err, err_size)) {
 		return 0;
+	}
+	/*
+	 * **Before every kind's own start, and for every kind.** Each of them
+	 * asks whether one of its own is running by reading a pid file, which is
+	 * the right first question and is useless in the case that happens:
+	 * stopping the unit takes `/run/netcfgd` with it and leaves the daemons
+	 * running. `backend_adopt.c` has the argument; what matters here is that
+	 * it is one call rather than a recovery written into four of the five
+	 * starts and missing from the rest.
+	 */
+	if (!ncfg_service_backend_adopt(service, kind, iface, &adopted, err, err_size)) {
+		return 0;
+	}
+	if (adopted) {
+		return 1;
 	}
 	switch ((ncfg_backend_kind_t)kind) {
 	case NCFG_BACKEND_ACCESS_POINT:

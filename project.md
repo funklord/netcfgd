@@ -9515,6 +9515,73 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.240 The four backends that could not be taken back
+
+A sweep of what each implementation *says* -- every log line, by subsystem --
+found three the Rust has and this port has none of: `backend`, `wireguard` and
+`profile`. The first is the interesting one, and it is not a message that was
+missing but the thing the message reports.
+
+**Only the supplicant could be adopted.** Every backend module answers "is one
+of mine already running?" by reading the pid file netcfgd wrote, which is the
+right first question and is useless in the case that actually happens:
+`systemctl stop netcfgd` takes `/run/netcfgd` with it --
+`RuntimeDirectoryPreserve=restart` keeps it across a restart and not across a
+stop -- while `KillMode=process` leaves every daemon netcfgd started running.
+The pid file is gone and the process is not.
+
+The supplicant had a recovery for that (0140) and hostapd, radvd, openvpn and
+the PPPoE session did not, so a start in that state started a **second** one.
+Two on one radio, two on one line. The Rust generalised this for the same
+reason and its comment says what per-backend recovery cost: four kinds that
+could not be recovered at all, "which is what kept `KillMode=process`
+unshippable" (0142).
+
+`ncfg_service_backend_adopt` is one call, at the top of
+`ncfg_service_backend_start`, with the three answers:
+
+* **a pid file that still names a live process of ours** -- running, do not
+  start a second; this is what every converged pass takes;
+* **no usable pid file and the daemon answers** -- it is ours, by a marker it
+  carries in its own `argv`, so the record is written again and the caller
+  stops;
+* **no usable pid file and it does not answer** -- a corpse holding a radio.
+  It is stopped, and the caller starts fresh.
+
+**A weak marker gets no entry.** The marker has to be an absolute path netcfgd
+composed: a pid file it named, a generated configuration, a management socket,
+an options file. The two DHCP clients get the interface name instead, which
+`dhcp.h` calls the weakest marker netcfgd uses -- `eth0` is a short string an
+unrelated command line could contain -- so they keep the two specific
+recoveries they already have, and scanning `/proc` for them never happens.
+
+**Stopping here is not 0141's case.** That decision is about not killing a
+daemon that may only be busy, where a false positive kills somebody's healthy
+process, so a person decides. Here the marker is a path netcfgd chose and the
+process carries in its own argv, so *is this mine* is answered rather than
+guessed -- and a backend whose pid file still names a live process never
+reaches that branch, wedged or not.
+
+### What the test found
+
+Twelve checks against processes the test forks, carrying the mark in their own
+argv. The adopt branch **failed on the first run**, and not because of the
+fixture: `write_pid` did not make the directory. The case adoption exists for
+is `/run/netcfgd` being taken away -- and it takes `radvd/`, `openvpn/`,
+`supplicant/` and `ppp/` with it, so the daemon is running, its mark is in
+`/proc`, and the place its pid file goes does not exist. Every kind but one
+would have answered *could not be recorded* and then adopted again on the next
+pass, for ever.
+
+Three sabotages caught: the orphan stepped around rather than stopped, the
+marker scan removed so a lost pid file means a second daemon, and a weak
+marker given an entry so `/proc` is scanned for `eth0`.
+
+**`wireguard` and `profile` are still silent**, and both look like the same
+shape as this one rather than missing messages: the Rust warns there from code
+paths this port reaches differently. Not investigated yet, which is worth
+saying rather than leaving as an even sweep.
+
 ## 10.239 The last grep, and the fixture that was weaker than it read
 
 10.238 left one source check standing: the reply-socket sweep was a single

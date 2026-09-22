@@ -589,6 +589,34 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
  * population that failed fails the start. Reporting a start done while the
  * supplicant knows no networks is reporting a port authenticated that is not.
  */
+/*
+ * Where a daemon netcfgd started records its pid, and what marks it as that
+ * daemon rather than something else with the same pid.
+ *
+ * **In the module that starts them**, because "how do I find this daemon" and
+ * "how do I start one" are the same knowledge. 1 with both filled in; 0 where
+ * netcfgd has **no handle on this kind**, which is not the same as "it is not
+ * running" and must not be read as one -- the DHCP clients are found through
+ * their own two recoveries, and WireGuard and DNS are not daemons.
+ */
+int ncfg_service_backend_handle(const char *run, int kind, const char *iface, char *pid_path,
+    size_t pid_size, char *marker, size_t marker_size);
+
+/*
+ * Take back a backend netcfgd started and has lost the record of, before
+ * starting one.
+ *
+ * `*adopted` says whether the caller should stop: 1 where one is already
+ * running -- recorded or recovered -- and 0 where it should go ahead and
+ * start. `backend_adopt.c` argues the three answers and why an unreachable
+ * orphan is stopped rather than stepped around.
+ *
+ * 0 with a sentence only where a daemon was recovered and its pid could not be
+ * written down, which is the one failure that would repeat for ever.
+ */
+int ncfg_service_backend_adopt(const ncfg_service_t *service, int kind, const char *iface,
+    int *adopted, char *err, size_t err_size);
+
 int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const char *iface,
     char *err, size_t err_size);
 
