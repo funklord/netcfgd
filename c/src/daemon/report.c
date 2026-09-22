@@ -101,6 +101,48 @@ int ncfg_daemon_plan_encode(const ncfg_plan_t *plan, ncfg_buf_t *out, char *err,
 	return finish(&writer, out, "plan", err, err_size);
 }
 
+/*
+ * What an apply did, in answer to `apply`, `confirm` and `revert`.
+ *
+ * **The only response that is the record of a change rather than a reading of
+ * the machine**, and the one a client is entitled to whether the apply
+ * succeeded or stopped half way: a journal whose third record failed is not an
+ * error, it is the answer. `answer.c`'s `error` is for an apply that could not
+ * be started at all -- no executor, a configuration that does not compile, a
+ * window somebody else holds -- because there is then nothing that ran to
+ * report.
+ */
+int ncfg_daemon_journal_encode(const ncfg_journal_t *journal, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_json_writer_t writer;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "nowhere to put the journal");
+		return 0;
+	}
+	if (!journal) {
+		ncfg_error_set(err, err_size, "there is no journal to answer with");
+		return 0;
+	}
+	if (journal->failed) {
+		/* `ncfg_journal_write`'s refusal, in the same words for the same
+		 * reason: a journal that ran out of memory while it was being built
+		 * would not say what really happened, and a client acting on a
+		 * shortened one would believe actions that never ran had. */
+		ncfg_error_set(err, err_size,
+		    "this journal ran out of memory while it was being built; "
+		    "it would not say what really happened");
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "response", "journal");
+	ncfg_journal_write_members(&writer, journal);
+	ncfg_json_write_object_end(&writer);
+	return finish(&writer, out, "journal", err, err_size);
+}
+
 int ncfg_daemon_document_encode(const ncfg_document_t *desired, const char *diagnostics,
     ncfg_buf_t *out, char *err, size_t err_size)
 {

@@ -1436,6 +1436,23 @@ typedef struct {
 	 * remembers.
 	 */
 	const ncfg_sims_t       *sims;
+	/*
+	 * The loop the three requests that change the machine run in.
+	 *
+	 * Borrowed, and the one member here that carries a way to *act*: the
+	 * loop's world is where the executor seam lives, and its `armed` record is
+	 * what an open window covers. NULL refuses `apply`, `confirm` and `revert`
+	 * by name, which is this struct's rule and matters more here than
+	 * anywhere else -- a desk given no loop is one nobody said may change
+	 * anything, and inventing a world would be this file deciding that for
+	 * them.
+	 *
+	 * **The same loop the pass runs**, not a second one. They share the
+	 * ownership record, the confirm window and the apply lock, and two of them
+	 * would be two plans built against one machine -- which 0184 measured as a
+	 * failed `route.add` every time.
+	 */
+	ncfg_reconcile_t        *loop;
 } ncfg_main_desk_t;
 
 /*

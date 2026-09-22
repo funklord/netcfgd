@@ -131,6 +131,55 @@ static char *text_of(ncfg_proto_str_t text, const char *what, size_t max, char *
 	return copy;
 }
 
+/*
+ * A counted list of counted fields, as an array of C strings the caller frees.
+ *
+ * One allocation for the pointers and one per name, freed by `names_free`. An
+ * empty list answers NULL with a count of zero, which is what every consent
+ * list means when nobody named anything -- and is why this answers 1 for it
+ * rather than treating it as a failure.
+ */
+static void names_free(char **names, size_t count)
+{
+	size_t at;
+
+	if (!names) {
+		return;
+	}
+	for (at = 0; at < count; at++) {
+		free(names[at]);
+	}
+	free(names);
+}
+
+static int names_of(ncfg_proto_strs_t list, const char *what, char ***out, size_t *count_out,
+    char *err, size_t err_size)
+{
+	char **names;
+	size_t at;
+
+	*out = NULL;
+	*count_out = 0;
+	if (list.count == 0u || !list.items) {
+		return 1;
+	}
+	names = calloc(list.count, sizeof(*names));
+	if (!names) {
+		ncfg_error_set(err, err_size, "there was not enough memory for the %s list", what);
+		return 0;
+	}
+	for (at = 0; at < list.count; at++) {
+		names[at] = text_of(list.items[at], what, NAME_MAX_BYTES, err, err_size);
+		if (!names[at]) {
+			names_free(names, at);
+			return 0;
+		}
+	}
+	*out = names;
+	*count_out = list.count;
+	return 1;
+}
+
 /* ------------------------------------------------------------------------ *
  * What this build cannot answer, and why
  * ------------------------------------------------------------------------ */
@@ -163,20 +212,13 @@ const char *ncfg_main_answer_unported(ncfg_proto_request_kind_t kind)
 		return "`monitor` is taken by the control socket itself, which hands the "
 		    "connection to the event stream; reaching this is a bug in the server "
 		    "rather than in the request";
+	/* The three that change the machine. `daemon.h` has them beside the
+	 * reconcile pass, whose seams they share, and `desk->loop` is how this
+	 * seam reaches one -- a desk without it refuses them by name rather than
+	 * applying through a loop nobody gave it. */
 	case NCFG_PROTO_REQ_APPLY:
 	case NCFG_PROTO_REQ_CONFIRM:
 	case NCFG_PROTO_REQ_REVERT:
-		/* 0263's facts about `ncfg apply` that are still facts -- the two it
-		 * named about ownership are closed, and so is the third, the journal
-		 * `ncfg_apply_write_journal` now publishes -- each of which is on its
-		 * own enough, said in one sentence rather than two: this is a refusal
-		 * an operator reads on a socket, not the decision record. */
-		return "this build of netcfgd will not apply, and what is left is no longer "
-		    "in the executor: every member of its service context is resolved, so the "
-		    "fourteen ops that are not netlink are carried out rather than refused. "
-		    "What is left is the planner, which does not read every block a document "
-		    "can carry. `ncfg plan` names each one it is holding, against the same "
-		    "document and the same machine, and changes nothing";
 	case NCFG_PROTO_REQ_RELOAD:
 	case NCFG_PROTO_REQ_WIFI_SCAN:
 	case NCFG_PROTO_REQ_WIFI_STATUS:
@@ -245,6 +287,103 @@ static int answer_reload(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, siz
 	}
 	ncfg_main_subscribers_tell(desk->subscribers, &event);
 	if (!took) {
+		return 0;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+/* ------------------------------------------------------------------------ *
+ * The three that change the machine
+ * ------------------------------------------------------------------------ *
+ *
+ * Each of these is a decode and a call: `daemon.h` has the arms themselves,
+ * beside the reconcile pass whose executor seam, confirm window and ownership
+ * record they share. What is left here is what this file is for -- turning
+ * counted fields into C strings, and a refusal into a sentence naming the
+ * request.
+ *
+ * **A desk with no loop refuses all three by name.** That is this struct's
+ * rule and it is load-bearing here rather than tidy: the loop is what carries
+ * the way to the machine, so a desk without one is a daemon that was never
+ * given permission to change anything.
+ */
+
+static int answer_apply(ncfg_main_desk_t *desk, const ncfg_proto_apply_t *ask, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_daemon_apply_ask_t wanted;
+	ncfg_journal_t          journal;
+	char                  **disruption = NULL;
+	char                  **strand = NULL;
+	char                  **wedged = NULL;
+	size_t                  disruption_count = 0;
+	size_t                  strand_count = 0;
+	size_t                  wedged_count = 0;
+	int                     encoded;
+
+	if (!desk->loop) {
+		ncfg_error_set(err, err_size, "this daemon was given no way to change the "
+		    "machine, so it observes and reports and applies nothing");
+		return 0;
+	}
+	if (!names_of(ask->allow_disruption, "allow_disruption name", &disruption,
+	        &disruption_count, err, err_size) ||
+	    !names_of(ask->strand_credentials, "strand_credentials name", &strand, &strand_count,
+	        err, err_size) ||
+	    !names_of(ask->restart_wedged, "restart_wedged name", &wedged, &wedged_count, err,
+	        err_size)) {
+		names_free(disruption, disruption_count);
+		names_free(strand, strand_count);
+		names_free(wedged, wedged_count);
+		return 0;
+	}
+	memset(&wanted, 0, sizeof(wanted));
+	wanted.confirm.has = ask->confirm.present ? 1 : 0;
+	wanted.confirm.value = ask->confirm.value;
+	wanted.allow_disruption = (const char *const *)disruption;
+	wanted.allow_disruption_count = disruption_count;
+	wanted.strand_credentials = (const char *const *)strand;
+	wanted.strand_credentials_count = strand_count;
+	wanted.restart_wedged = (const char *const *)wedged;
+	wanted.restart_wedged_count = wedged_count;
+
+	encoded = ncfg_daemon_apply_request(desk->loop, &wanted, &journal, err, err_size);
+	names_free(disruption, disruption_count);
+	names_free(strand, strand_count);
+	names_free(wedged, wedged_count);
+	if (!encoded) {
+		return 0;
+	}
+	encoded = ncfg_daemon_journal_encode(&journal, out, err, err_size);
+	ncfg_journal_free(&journal);
+	return encoded;
+}
+
+static int answer_confirm(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	if (!desk->loop) {
+		ncfg_error_set(err, err_size, "this daemon was given no way to change the "
+		    "machine, so there is no window of its own to confirm");
+		return 0;
+	}
+	if (!ncfg_daemon_confirm_request(desk->loop, err, err_size)) {
+		return 0;
+	}
+	return ncfg_daemon_ok_encode(out, err, err_size);
+}
+
+static int answer_revert(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	if (!desk->loop) {
+		ncfg_error_set(err, err_size, "this daemon was given no way to change the "
+		    "machine, so it cannot put anything back");
+		return 0;
+	}
+	/* The reason the log line carries, and it is the Rust's word: a revert
+	 * asked for over the socket is not the same event as one a window's timer
+	 * caused, and somebody reading the log afterwards is entitled to know
+	 * which of the two happened. */
+	if (!ncfg_daemon_revert_request(desk->loop, "asked to", err, err_size)) {
 		return 0;
 	}
 	return ncfg_daemon_ok_encode(out, err, err_size);
@@ -932,6 +1071,12 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	switch (request->kind) {
 	case NCFG_PROTO_REQ_RELOAD:
 		return answer_reload(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_APPLY:
+		return answer_apply(desk, &request->u.apply, out, err, err_size);
+	case NCFG_PROTO_REQ_CONFIRM:
+		return answer_confirm(desk, out, err, err_size);
+	case NCFG_PROTO_REQ_REVERT:
+		return answer_revert(desk, out, err, err_size);
 	/*
 	 * The two that are a model and an envelope. Both refuse rather than
 	 * inventing an empty answer, and `daemon.h` argues each: an observation
@@ -999,9 +1144,6 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	 * both is for.
 	 */
 	case NCFG_PROTO_REQ_HELLO:
-	case NCFG_PROTO_REQ_APPLY:
-	case NCFG_PROTO_REQ_CONFIRM:
-	case NCFG_PROTO_REQ_REVERT:
 	case NCFG_PROTO_REQ_MONITOR:
 	case NCFG_PROTO_REQ_COUNT:
 	default:

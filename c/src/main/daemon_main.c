@@ -747,6 +747,10 @@ static int start(const options_t *options)
 	 * where this daemon has got to, not where a second copy of the rule
 	 * would. */
 	desk.sims = loop.sims;
+	/* And the loop itself, for the three requests that change the machine.
+	 * The same one the pass runs: two loops would be two plans built against
+	 * one machine, and they would take the apply lock from each other. */
+	desk.loop = &loop;
 
 	err[0] = '\0';
 	if (!ncfg_main_mailbox_open(&mailbox, ncfg_main_answer, ncfg_main_stream, &desk,
@@ -886,13 +890,15 @@ done:
  * so a plan that stopped halfway says under `/run` where it stopped. What is
  * left is the two above, and neither is bookkeeping.
  *
- * And the decision is the operator's rather than this function's. `on_drift =
- * reconcile` is the default, so starting this build on a machine is an apply
- * nobody typed -- against, on the machine this port is written on, a live
- * network somebody is working over. The rule the socket's own refusal states
- * is that one build must not refuse an apply at a terminal and accept one over
- * a socket; it must not accept one from a timer either, and `ncfg apply` is
- * still refused.
+ * And the decision is the operator's rather than this function's. That is the
+ * whole of the difference between this and `ncfg apply`, which **does apply
+ * now**: somebody typed it, against the machine in front of them, having read
+ * whatever `ncfg plan` said about the blocks this build is holding. `on_drift
+ * = reconcile` is the default, so starting this build is an apply nobody typed
+ * -- on a timer, repeatedly, against a live network somebody is working over
+ * on the machine this port is written on. The socket's `apply` arm is ported
+ * for the same reason the terminal's is: it is a request somebody made. A
+ * reconcile is not one.
  *
  * Deleting this function is how the daemon is turned on, and the two facts
  * above are what has to be answered first.
@@ -918,9 +924,9 @@ static int will_not_reconcile(void)
 	    "block this build is holding and not acting on, against the same document and "
 	    "the same machine, and changes nothing. Run it and read the warnings; they "
 	    "are the list, and they stay current by a rule that cannot rot -- a pass "
-	    "landing takes its warning out in the same commit. `ncfg apply` is refused "
-	    "for the same reason, and a daemon reconciling on drift is an apply nobody "
-	    "typed");
+	    "landing takes its warning out in the same commit. `ncfg apply` will then do "
+	    "what it says, because somebody typed it; a daemon reconciling on drift is "
+	    "an apply nobody typed, on a timer, and that is what this refuses");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 

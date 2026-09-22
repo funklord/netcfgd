@@ -75,7 +75,7 @@ static uint64_t now_of(const ncfg_reconcile_world_t *world)
 	return ncfg_confirm_now();
 }
 
-static void announce(const ncfg_reconcile_world_t *world, const ncfg_proto_event_t *event)
+void ncfg_daemon_announce(const ncfg_reconcile_world_t *world, const ncfg_proto_event_t *event)
 {
 	if (world->announce) {
 		world->announce(world->context, event);
@@ -90,11 +90,11 @@ static void announce_summary(const ncfg_reconcile_world_t *world, const char *su
 	memset(&event, 0, sizeof(event));
 	event.kind = NCFG_PROTO_EVENT_OBSERVED;
 	event.summary = ncfg_proto_str(summary);
-	announce(world, &event);
+	ncfg_daemon_announce(world, &event);
 }
 
-static int open_executor(const ncfg_reconcile_world_t *world, ncfg_executor_t *out, char *err,
-    size_t err_size)
+int ncfg_daemon_open_executor(const ncfg_reconcile_world_t *world, ncfg_executor_t *out,
+    char *err, size_t err_size)
 {
 	memset(out, 0, sizeof(*out));
 	if (!world->executor_open) {
@@ -106,7 +106,7 @@ static int open_executor(const ncfg_reconcile_world_t *world, ncfg_executor_t *o
 	return world->executor_open(world->context, out, err, err_size);
 }
 
-static void close_executor(const ncfg_reconcile_world_t *world, ncfg_executor_t *executor)
+void ncfg_daemon_close_executor(const ncfg_reconcile_world_t *world, ncfg_executor_t *executor)
 {
 	if (world->executor_close) {
 		world->executor_close(world->context, executor);
@@ -281,7 +281,7 @@ static void resolve_window(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *repo
 		return;
 	}
 	message[0] = '\0';
-	if (!open_executor(&loop->world, &executor, message, sizeof(message))) {
+	if (!ncfg_daemon_open_executor(&loop->world, &executor, message, sizeof(message))) {
 		ncfg_log_emitf("confirm", NCFG_LOG_ERROR,
 		    "a commit-confirm window closed unconfirmed and cannot be put back: %s",
 		    message);
@@ -289,13 +289,13 @@ static void resolve_window(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *repo
 	}
 	if (ncfg_confirm_revert(loop->state, loop->armed, &executor,
 	    "the window closed unconfirmed", &event, message, sizeof(message))) {
-		announce(&loop->world, &event);
+		ncfg_daemon_announce(&loop->world, &event);
 		report->window_resolved = 1;
 	} else {
 		ncfg_log_emitf("confirm", NCFG_LOG_ERROR, "the window could not be resolved: %s",
 		    message);
 	}
-	close_executor(&loop->world, &executor);
+	ncfg_daemon_close_executor(&loop->world, &executor);
 }
 
 /*
@@ -367,7 +367,7 @@ static int reload(ncfg_reconcile_t *loop)
 	event.kind = NCFG_PROTO_EVENT_RELOADED;
 	event.ok = compiled ? 1u : 0u;
 	event.diagnostics = ncfg_proto_str(loop->state->diagnostics);
-	announce(&loop->world, &event);
+	ncfg_daemon_announce(&loop->world, &event);
 
 	/*
 	 * After the recompile and whether or not the document moved: a reload that
@@ -638,8 +638,8 @@ static void portal_checks(ncfg_reconcile_t *loop)
  * a note whose cycle the planner refused must stay, and clearing it on the
  * strength of having asked would leave the modem on a source nothing selected.
  */
-static size_t cycles_in(const ncfg_plan_t *plan, const ncfg_sims_t *sims, const char **out,
-    size_t out_max)
+size_t ncfg_daemon_cycles_in(const ncfg_plan_t *plan, const ncfg_sims_t *sims,
+    const char **out, size_t out_max)
 {
 	size_t kept = 0;
 	size_t at;
@@ -718,15 +718,13 @@ static void decide_arming(ncfg_reconcile_t *loop, int config_is_new, arming_t *o
  * a half-applied change is exactly what a window is for, and refusing to arm
  * one there would withhold the safety net from the case that needs it most.
  */
-static void arm_window(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
-    const ncfg_journal_t *journal, arming_t *arming, ncfg_reconcile_report_t *report)
+void ncfg_daemon_arm_window(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
+    const ncfg_journal_t *journal, uint32_t seconds, const ncfg_document_t *last_good,
+    int *armed_out)
 {
 	ncfg_proto_event_t event;
 	char               message[NCFG_ERROR_MAX];
 
-	if (arming->answer != NCFG_ARM_YES) {
-		return;
-	}
 	message[0] = '\0';
 	/* What to undo if nobody confirms, set *before* the window is opened, so
 	 * there is no instant in which a window is open with nothing recorded
@@ -743,7 +741,7 @@ static void arm_window(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
 		}
 	}
 	message[0] = '\0';
-	if (!ncfg_confirm_arm(loop->state, arming->seconds, arming->last_good, &event, message,
+	if (!ncfg_confirm_arm(loop->state, seconds, last_good, &event, message,
 	    sizeof(message))) {
 		/* **Refused rather than announced.** The Rust logs this and hands
 		 * back the event anyway, so a full or read-only `/run` told every
@@ -757,10 +755,26 @@ static void arm_window(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
 		return;
 	}
 	if (loop->world.expiry) {
-		loop->world.expiry(loop->world.context, arming->seconds);
+		loop->world.expiry(loop->world.context, seconds);
 	}
-	announce(&loop->world, &event);
-	report->armed = 1;
+	ncfg_daemon_announce(&loop->world, &event);
+	if (armed_out) {
+		*armed_out = 1;
+	}
+}
+
+/* The reconcile pass's own call, which arms only where `decide_arming` said
+ * yes. Split from the body above so the request path can share it: the two
+ * differ in how the window is *decided* and in nothing about how it is
+ * opened. */
+static void arm_window(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
+    const ncfg_journal_t *journal, arming_t *arming, ncfg_reconcile_report_t *report)
+{
+	if (arming->answer != NCFG_ARM_YES) {
+		return;
+	}
+	ncfg_daemon_arm_window(loop, applied, journal, arming->seconds, arming->last_good,
+	    &report->armed);
 }
 
 /* Count the reclaim, and sweep where something will not stop taking
@@ -838,10 +852,10 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 	 * so the next pass tries again. */
 	cycles = ncfg_sims_pending_count(loop->sims) == 0u
 	    ? 0u
-	    : cycles_in(restricted, loop->sims, cycled, CYCLES_MAX);
+	    : ncfg_daemon_cycles_in(restricted, loop->sims, cycled, CYCLES_MAX);
 
 	message[0] = '\0';
-	if (!open_executor(&loop->world, &executor, message, sizeof(message))) {
+	if (!ncfg_daemon_open_executor(&loop->world, &executor, message, sizeof(message))) {
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
 		    "cannot start an apply to reconcile drift: %s", message);
 		ncfg_document_free(arming.last_good);
@@ -852,7 +866,7 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 	message[0] = '\0';
 	(void)ncfg_apply(restricted, &executor, &journal, message, sizeof(message));
 	ncfg_daemon_record_what_ran(loop->state, "apply", restricted, &journal);
-	close_executor(&loop->world, &executor);
+	ncfg_daemon_close_executor(&loop->world, &executor);
 
 	guard_resolv(loop, restricted, report);
 	ncfg_sims_cycled(loop->sims, cycled, cycles, &journal);
@@ -999,7 +1013,7 @@ static void look(ncfg_reconcile_t *loop, int config_is_new, const ncfg_proto_req
 		ncfg_proto_event_t event;
 
 		ncfg_drift_event(&drifts->at[at], &event);
-		announce(&loop->world, &event);
+		ncfg_daemon_announce(&loop->world, &event);
 	}
 	if (drifts->total > drifts->count) {
 		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
@@ -1100,7 +1114,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 		return 1;
 	}
 	message[0] = '\0';
-	if (!open_executor(&loop->world, &executor, message, sizeof(message))) {
+	if (!ncfg_daemon_open_executor(&loop->world, &executor, message, sizeof(message))) {
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR, "cannot start an apply: %s", message);
 		return 1;
 	}
@@ -1108,7 +1122,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	plan = ncfg_plan_build(loop->state->desired, loop->state->observed, NULL, message,
 	    sizeof(message));
 	if (!plan) {
-		close_executor(&loop->world, &executor);
+		ncfg_daemon_close_executor(&loop->world, &executor);
 		ncfg_error_set(err, err_size, "the startup apply could not be planned: %s",
 		    message);
 		return 0;
@@ -1117,7 +1131,7 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	message[0] = '\0';
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 	ncfg_daemon_record_what_ran(loop->state, "apply", plan, &journal);
-	close_executor(&loop->world, &executor);
+	ncfg_daemon_close_executor(&loop->world, &executor);
 
 	if (ncfg_journal_failure(&journal)) {
 		const ncfg_record_t *failure = ncfg_journal_failure(&journal);

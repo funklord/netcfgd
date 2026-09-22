@@ -285,11 +285,25 @@ static void write_record(ncfg_json_writer_t *writer, const ncfg_record_t *record
 	ncfg_json_write_object_end(writer);
 }
 
+void ncfg_journal_write_members(ncfg_json_writer_t *writer, const ncfg_journal_t *journal)
+{
+	size_t i;
+
+	if (!writer || !journal) {
+		return;
+	}
+	ncfg_json_write_key(writer, "records");
+	ncfg_json_write_array_begin(writer);
+	for (i = 0; i < journal->record_count; i++) {
+		write_record(writer, &journal->records[i]);
+	}
+	ncfg_json_write_array_end(writer);
+}
+
 int ncfg_journal_write(const ncfg_journal_t *journal, ncfg_buf_t *buf, char *err,
     size_t err_size)
 {
 	ncfg_json_writer_t writer;
-	size_t             i;
 
 	if (!journal || !buf) {
 		ncfg_error_set(err, err_size, "a journal and a buffer are both needed to write one");
@@ -303,12 +317,7 @@ int ncfg_journal_write(const ncfg_journal_t *journal, ncfg_buf_t *buf, char *err
 	}
 	ncfg_json_write_init(&writer, buf);
 	ncfg_json_write_object_begin(&writer);
-	ncfg_json_write_key(&writer, "records");
-	ncfg_json_write_array_begin(&writer);
-	for (i = 0; i < journal->record_count; i++) {
-		write_record(&writer, &journal->records[i]);
-	}
-	ncfg_json_write_array_end(&writer);
+	ncfg_journal_write_members(&writer, journal);
 	ncfg_json_write_object_end(&writer);
 	if (!ncfg_json_write_done(&writer)) {
 		const char *why = ncfg_json_write_failure(&writer);

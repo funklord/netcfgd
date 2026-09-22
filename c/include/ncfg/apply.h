@@ -64,6 +64,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
+#include "ncfg/json_write.h"
 #include "ncfg/plan.h"
 #include "ncfg/secrets.h"
 #include "ncfg/state.h"
@@ -207,6 +208,21 @@ size_t ncfg_journal_reverted(const ncfg_journal_t *journal);
  */
 int ncfg_journal_write(const ncfg_journal_t *journal, ncfg_buf_t *buf, char *err,
     size_t err_size);
+
+/*
+ * The same members, into a message somebody else began.
+ *
+ * For the protocol's `journal` response, which carries them flattened into the
+ * envelope: `{"response":"journal","records":[...]}`. Published for
+ * `ncfg_plan_write_members`' reason -- the alternative is a second writer for
+ * this shape in the daemon, and a journal that gains a member there and not
+ * here is a client reading one fewer field than the file has.
+ *
+ * **A journal that ran out of memory while it was being built is not refused
+ * here**, because this writes into a message already begun. `ncfg_journal_write`
+ * and the response encoder each ask `failed` before they start.
+ */
+void ncfg_journal_write_members(ncfg_json_writer_t *writer, const ncfg_journal_t *journal);
 
 /* ------------------------------------------------------------------------ *
  * Running a plan
