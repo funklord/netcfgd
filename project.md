@@ -9515,6 +9515,118 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.229 The session nobody could hang up
+
+A PPPoE session is a `pppd`, and until this round the C port could neither
+start one nor stop one: `ncfg_apply_supported` refused `backend.start` on a
+pppoe interface with "which is not ported in this build", and that refusal was
+the last **port gap** in the executor. `src/backend/pppoe/` closes it.
+
+**What netcfgd owns is the options file, the two scripts, and the lifecycle.**
+The session is pppd's. The options file is the interesting half: it is what an
+operator reads when a line will not come up, and every line in it is a decision
+-- `nodefaultroute` and `noipdefault` because netcfgd owns routes and a route
+pppd installed is somebody configuring the network behind its back,
+`usepeerdns` because the ISP's resolvers are the one thing only pppd learns,
+`nic-<parent>` rather than a bare device argument because it cannot be mistaken
+for something else and needs no quoting, and `unit N` taken from the interface
+name so that `interface ppp0` is ppp0 rather than whichever unit was free. The
+test asserts the whole file rather than lines of it, for `cli_test.c`'s reason:
+the file is the product.
+
+**The password is in it, so the file is 0600 and the mode goes on the open.**
+`ncfg_backend_write_file` already settled that: `open` applies its mode only
+when it creates the file, so a rewrite keeps whatever mode was there, and a
+create-then-chmod leaves a window in which a local process opens a readable
+descriptor that the later chmod does not revoke. `/run/netcfgd` is traversable
+by anyone on the machine -- `RuntimeDirectoryMode=0755` -- so this is a DSL
+password, not a hypothetical.
+
+**Two scripts, not one told apart by its environment.** pppd hands `ip-up` and
+`ip-down` the same argv and does not unset `DNS1` or `DNS2` on the way down, so
+a single script testing its environment would report the same nameservers as
+the session went away -- netcfgd would then hold an ISP's resolvers for a line
+that is down. And each nameserver is its own `if` rather than
+`[ -n "$DNS1" ] && printf ...`: a failing test as the last command of a group
+makes the group's status 1, `|| exit 1` fires, and the report is written only
+when the peer offered *both*. The Rust measured that; a peer offering one
+nameserver is ordinary.
+
+### Stopping it is the half that was missing in the Rust too
+
+pppd has no control socket, which is what every other daemon here is stopped
+through (0014). It has a pid file it writes itself -- and a pid file outlives
+the process it names while pids are recycled, so the pid is checked against
+`/proc/<pid>/cmdline` with **the options file netcfgd generated** as the
+marker. An operator's own pppd cannot match a path netcfgd chose. Where pppd
+writes that file is not fixed, so the directories are a parameter carrying a
+list rather than one guess.
+
+The files go *after* the signal and never before, because the options file is
+what identifies the process: a stop that failed must leave the evidence for the
+next attempt. And a session that died on its own -- which is the branch that
+matters most -- still has its files taken back, since otherwise a DSL password
+stays readable under `/run` until the machine is rebooted.
+
+### What the port adds to the Rust's version
+
+pppd's own complaint is kept. The Rust runs it with inherited stdio and tells
+the operator "its log will say why", meaning syslog; here stderr goes to
+`<run>/ppp/<iface>.log` like every other backend's, so a dial that failed on
+`Cannot open /dev/ppp` says so in the refusal on a machine with no syslog at
+all.
+
+### Six sabotages, and the fixture that had to get sharper
+
+All six caught: the default route put back, the password written unquoted, the
+options file at 0644, the ip-down script reporting nameservers, the stop
+leaving the options file behind, and -- the one worth the paragraph -- the
+stop identifying a process by the interface name instead of by the options
+path.
+
+**That last one failed in only one direction at first.** The fixture for
+"netcfgd does not claim a pppd that is not its own" ran a process carrying some
+unrelated word, so a weakened marker did not match it either and the check
+passed while the rule was broken; only the *other* case, recognising netcfgd's
+own session, went red. The fixture now carries `ppp0` as an argument of its
+own, which is what an operator's own `pppd ... ppp0` looks like, and both
+directions go red.
+
+Two other things about that test were wrong before they were right, and both
+are the same shape -- a check that cannot fail:
+
+* **The stand-in ran `sh -c "sleep 30"`**, and dash execs the last command of a
+  `-c` script in place of itself, so the marker in its argv disappeared and
+  every question about its command line was asked of the wrong process.
+  `sleep 30; :` keeps the shell.
+* **The wait for the exec read `/proc/<pid>/cmdline` through `testdir_read`**,
+  which seeks to the end to size its buffer -- and a file under `/proc` reports
+  a length of zero. It reported "not yet" about a command line that was there.
+
+### What this leaves
+
+The list of what `ncfg_apply_supported` refuses now has no port gap in it:
+`link.create` for a physical device is a statement of fact, a plain
+`backend.start` for DHCPv6 is refused in both implementations for 0050's
+reason, and WireGuard and DNS have nothing to start in either. Two shared tests
+moved with it -- `service_test.c`'s carried list gains the session and its
+refused list drops to the two category errors, and `apply_test.c`'s
+"the refusal says what is missing" moved to the DHCPv6 start. That check's own
+comment had said, through four subjects, that when it had nowhere left to move
+the port would be finished; this is the first round where its subject is a
+refusal both implementations make.
+
+**The emitter is still missing, and that is the next round.** No pass in
+`src/plan/` emits `backend.start` for a pppoe or an openvpn interface --
+`link.c` says so in a warning, which is why this is a known gap rather than a
+discovery -- so what landed here is reachable through
+`ncfg_service_backend_start` and not yet through a plan. The same was already
+true of the openvpn backend.
+The planner's guard is where it has to change: `ncfg_plan_link_is_plannable`
+answers no for an interface whose link is absent because its daemon has not
+created it, which is right for addresses and routes and wrong for the one op
+that would bring the link into existence.
+
 ## 10.228 The daemon's three verbs that change the machine
 
 `apply`, `confirm` and `revert` are answered over the socket. Thirty of the

@@ -131,9 +131,22 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 		return 0;
 	case NCFG_KIND_PPPOE:
 	case NCFG_KIND_OPENVPN:
+		/*
+		 * **Not a gap: there is nothing here for netlink to make.** The helper
+		 * creates the device as it connects -- pppd's `ppp0` appears when the
+		 * session comes up, openvpn's `tun0` when the tunnel does -- so the op
+		 * that brings one of these into existence is `backend.start`, which
+		 * both of them have. Neither planner emits `link.create` for either
+		 * kind, which is why this arm is a sentence for a caller assembling a
+		 * plan by hand rather than something an apply reaches.
+		 *
+		 * The refusal used to end "and no helper is started in this build",
+		 * which was true of the session until its module landed and stayed
+		 * written afterwards -- the shape `build.c` keeps warning about.
+		 */
 		ncfg_error_set(err, err_size,
-		    "a %s interface (%s) is brought up by a helper rather than by a netlink "
-		    "message, and no helper is started in this build",
+		    "a %s interface (%s) is created by the helper that connects it rather than "
+		    "by a netlink message: `backend.start` is what brings one up",
 		    word ? word : "link", name ? name : "?");
 		return 0;
 	}

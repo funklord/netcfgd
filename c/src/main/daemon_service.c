@@ -324,6 +324,79 @@ size_t ncfg_main_tunnels_of(ncfg_main_world_t *world, const ncfg_document_t *des
 	return taken;
 }
 
+size_t ncfg_main_sessions_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    size_t *missed)
+{
+	size_t taken = 0;
+	size_t i;
+
+	if (missed) {
+		*missed = 0;
+	}
+	if (!world || !desired) {
+		return 0;
+	}
+	for (i = 0; i < desired->device_count; i++) {
+		const ncfg_device_t       *device = &desired->devices[i];
+		const ncfg_pppoe_config_t *config;
+		ncfg_secret_t             *password = NULL;
+		char                       message[NCFG_ERROR_MAX];
+
+		if (device->kind.kind != NCFG_KIND_PPPOE || !device->name) {
+			continue;
+		}
+		/* An unmanaged device is not netcfgd's to dial on, which is the
+		 * question every other list built here asks first. */
+		if (!device->managed) {
+			continue;
+		}
+		config = &device->kind.pppoe;
+		if (!config->parent || !config->parent[0]) {
+			/* A session with no parent interface is a document that names
+			 * nothing to dial over. `backend.start` says so by name; an entry
+			 * would reach `ncfg_pppoe_start` instead, which is one refusal
+			 * further from the operator. */
+			continue;
+		}
+		if (taken == (size_t)NCFG_MAIN_SESSIONS_MAX) {
+			if (missed) {
+				(*missed)++;
+			}
+			continue;
+		}
+		if (config->password.name) {
+			/* The world's own resolver, for `ncfg_main_tunnels_of`'s reason:
+			 * reading `world->service.secrets` here would make this answer
+			 * depend on the order of assignments inside its caller. */
+			const ncfg_secret_resolver_t *resolver =
+			    world->secrets.secrets_dir || world->secrets.materialise_dir ?
+			    &world->secrets : NULL;
+
+			message[0] = '\0';
+			password = ncfg_secret_resolve(resolver, &config->password, NULL, message,
+			    sizeof(message));
+			if (!password) {
+				ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+				    "the password for the pppoe session on %s could not be "
+				    "resolved, so this executor will refuse to dial rather than "
+				    "dial with a credential it does not have: %s",
+				    device->name, message);
+				continue;
+			}
+		}
+		world->session_passwords[taken] = password;
+		world->sessions[taken].iface = device->name;
+		world->sessions[taken].config = config;
+		/* `ncfg_secret_expose` is named so that every use of it is one grep
+		 * away. This is one of them: the value goes into a struct the executor
+		 * hands to `ncfg_pppoe_start`, which writes it to a file at 0600 --
+		 * the arrangement that keeps it off pppd's command line. */
+		world->sessions[taken].password = password ? ncfg_secret_expose(password) : NULL;
+		taken++;
+	}
+	return taken;
+}
+
 /* ------------------------------------------------------------------------ *
  * The whole context
  * ------------------------------------------------------------------------ */
@@ -421,6 +494,17 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 		    NCFG_MAIN_TUNNELS_MAX);
 	}
 	missed = 0;
+	world->session_count = ncfg_main_sessions_of(world, desired, &missed);
+	world->service.sessions = world->sessions;
+	world->service.session_count = world->session_count;
+	if (missed > 0u) {
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+		    "%zu pppoe session(s) of this configuration did not fit in the %d an "
+		    "executor carries credentials for, so dialling them will be refused rather "
+		    "than attempted without the passwords their documents name", missed,
+		    NCFG_MAIN_SESSIONS_MAX);
+	}
+	missed = 0;
 	world->advertise_count = ncfg_main_advertising_of(world, desired, observed, &missed);
 	world->service.advertising = world->advertising;
 	world->service.advertise_count = world->advertise_count;
@@ -462,6 +546,11 @@ void ncfg_main_service_release(ncfg_main_world_t *world)
 		world->tunnel_passwords[at] = NULL;
 	}
 	world->tunnel_count = 0;
+	for (at = 0; at < world->session_count; at++) {
+		ncfg_secret_free(world->session_passwords[at]);
+		world->session_passwords[at] = NULL;
+	}
+	world->session_count = 0;
 	ncfg_dns_scopes_free(world->scopes);
 	world->scopes = NULL;
 	world->metric_count = 0;
