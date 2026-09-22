@@ -52,6 +52,7 @@
 #include "ncfg/observe.h"
 #include "ncfg/observed.h"
 #include "ncfg/plan.h"
+#include "ncfg/process.h"
 #include "ncfg/secrets.h"
 #include "ncfg/service.h"
 #include "ncfg/state.h"
@@ -877,6 +878,161 @@ static void leaving_and_the_regulatory_domain(void)
  * Backends
  * ------------------------------------------------------------------------ */
 
+
+/* ------------------------------------------------------------------------ *
+ * Taking back a daemon netcfgd started and lost the record of
+ * ------------------------------------------------------------------------ */
+
+/*
+ * A stand-in for a daemon of netcfgd's, carrying the mark in its own argv.
+ *
+ * `sh -c "sleep 30; :"` rather than `sleep 30`, because dash execs the last
+ * command of a `-c` script in place of itself and the marker would go with it
+ * -- which `pppoe_test.c` paid for first.
+ */
+static pid_t marked_process(const char *marker)
+{
+	pid_t pid = fork();
+
+	if (pid == 0) {
+		execl("/bin/sh", "sh", "-c", "sleep 30; :", marker, (char *)NULL);
+		_exit(127);
+	}
+	return pid;
+}
+
+/* Wait, bounded, for the child to have exec'd -- before that its command line
+ * is this test binary's, so a check made too early asks about the wrong
+ * process and passes for the wrong reason. */
+static int carries_the_mark(pid_t pid, const char *marker)
+{
+	struct timespec pause = { 0, 20L * 1000L * 1000L };
+	int             attempt;
+
+	for (attempt = 0; attempt < 100; attempt++) {
+		if (ncfg_process_pid_by_marker(marker) == pid) {
+			return 1;
+		}
+		(void)nanosleep(&pause, NULL);
+	}
+	return 0;
+}
+
+static void reap(pid_t pid)
+{
+	int status = 0;
+
+	if (pid > 0) {
+		(void)kill(pid, SIGKILL);
+		(void)waitpid(pid, &status, 0);
+	}
+}
+
+/*
+ * The three answers, each driven against a process this test started.
+ *
+ * **The case this exists for is `systemctl stop netcfgd`**: it takes
+ * `/run/netcfgd` with it and `KillMode=process` leaves the daemons running, so
+ * the pid file is gone and the process is not. Until this, only the supplicant
+ * could be recovered from that, and every other kind was started again beside
+ * the one already there.
+ */
+static void a_backend_netcfgd_lost_the_record_of(void)
+{
+	ncfg_service_t service = a_context();
+	char           pid_path[512];
+	char           marker[512];
+	char           message[NCFG_ERROR_MAX];
+	pid_t          daemon_pid;
+	int            adopted = -1;
+
+	printf("\n-- taking back a backend whose pid file has gone\n");
+	make_tree(run_dir);
+
+	/* A kind with no control socket answers `yes` to "does it answer", which
+	 * is the honest answer for a radvd: there is no way to ask one. */
+	check(ncfg_service_backend_handle(run_dir, NCFG_BACKEND_ROUTER_ADVERT, "lan0", pid_path,
+	          sizeof(pid_path), marker, sizeof(marker)),
+	    "a router advertisement daemon has a pid file and a mark");
+	check(strstr(marker, "lan0.conf") != NULL,
+	    "  and the mark is the configuration it recites, which netcfgd wrote");
+
+	daemon_pid = marked_process(marker);
+	check(daemon_pid > 0 && carries_the_mark(daemon_pid, marker),
+	    "a daemon of netcfgd's is running, with no pid file to its name");
+	(void)unlink(pid_path);
+
+	message[0] = '\0';
+	check(ncfg_service_backend_adopt(&service, NCFG_BACKEND_ROUTER_ADVERT, "lan0", &adopted,
+	          message, sizeof(message)) && adopted == 1,
+	    "it is adopted rather than started again");
+	if (message[0] != '\0') {
+		printf("       said: %s\n", message);
+	}
+	check(ncfg_process_pid_of(pid_path, marker) == daemon_pid,
+	    "  and the record is written again, so the next pass does not adopt it twice");
+
+	/* And the converged case, which is every pass after that one. */
+	adopted = -1;
+	message[0] = '\0';
+	check(ncfg_service_backend_adopt(&service, NCFG_BACKEND_ROUTER_ADVERT, "lan0", &adopted,
+	          message, sizeof(message)) && adopted == 1,
+	    "a pid file that still names it is enough on its own");
+	reap(daemon_pid);
+	(void)unlink(pid_path);
+
+	/*
+	 * **The orphan, which is the branch that stops something.** A supplicant
+	 * can be asked whether it answers, and this one cannot: there is no
+	 * socket for it in the control directory. It is netcfgd's by the mark in
+	 * its own argv, it cannot be driven, and starting a second beside it is
+	 * what drops the association -- so it is stopped and the caller starts
+	 * fresh.
+	 */
+	check(ncfg_service_backend_handle(run_dir, NCFG_BACKEND_SUPPLICANT, "wlan9", pid_path,
+	          sizeof(pid_path), marker, sizeof(marker)),
+	    "a supplicant's mark is the pid file's own path");
+	daemon_pid = marked_process(marker);
+	check(daemon_pid > 0 && carries_the_mark(daemon_pid, marker),
+	    "an orphan carrying it is running");
+	(void)unlink(pid_path);
+
+	adopted = -1;
+	message[0] = '\0';
+	check(ncfg_service_backend_adopt(&service, NCFG_BACKEND_SUPPLICANT, "wlan9", &adopted,
+	          message, sizeof(message)) && adopted == 0,
+	    "one that cannot be reached is not adopted");
+	{
+		/* Bounded: the signal is delivered to a process this test forked, and
+		 * what is being checked is that it was sent at all. */
+		struct timespec pause = { 0, 20L * 1000L * 1000L };
+		int             attempt;
+		int             gone = 0;
+
+		for (attempt = 0; attempt < 100 && !gone; attempt++) {
+			if (waitpid(daemon_pid, NULL, WNOHANG) == daemon_pid) {
+				gone = 1;
+				break;
+			}
+			(void)nanosleep(&pause, NULL);
+		}
+		check(gone, "  it is stopped, because a corpse holding a radio is worse than none");
+		if (!gone) {
+			reap(daemon_pid);
+		}
+	}
+
+	/* And the kinds netcfgd has no handle on say so rather than guessing. */
+	check(!ncfg_service_backend_handle(run_dir, NCFG_BACKEND_DHCP4, "eth0", pid_path,
+	          sizeof(pid_path), marker, sizeof(marker)),
+	    "a DHCP client's marker is an interface name, which is too weak to scan for");
+	adopted = -1;
+	message[0] = '\0';
+	check(ncfg_service_backend_adopt(&service, NCFG_BACKEND_DHCP4, "eth0", &adopted, message,
+	          sizeof(message)) && adopted == 0,
+	    "  so adopting one is not an error, it is a caller that goes on to start it");
+}
+
 static void a_backend_op_says_what_it_was_not_given(void)
 {
 	ncfg_service_t service;
@@ -1121,6 +1277,7 @@ int main(void)
 	joining_asks_before_it_acts();
 	leaving_and_the_regulatory_domain();
 
+	a_backend_netcfgd_lost_the_record_of();
 	a_backend_op_says_what_it_was_not_given();
 	stopping_an_access_point_takes_the_passphrase_with_it();
 	a_resolver_configuration_is_delivered_and_recorded();
