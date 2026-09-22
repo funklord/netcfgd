@@ -617,10 +617,33 @@ int ncfg_main_watchers_open(ncfg_main_watchers_t *watchers, const ncfg_main_watc
 	}
 
 	if (what->supplicant_dir) {
-		int wd = -1;
+		int    wd = -1;
+		size_t reaped;
 
 		(void)snprintf(watchers->supplicant_dir, sizeof(watchers->supplicant_dir), "%s",
 		    what->supplicant_dir);
+		/*
+		 * **The dead reply sockets go before anything lists this directory**,
+		 * which is the one moment they can be swept without racing the scan
+		 * that follows. netcfgd installs no `SIGTERM` handler, so every one of
+		 * its lives leaves two behind -- 18 entries to 20 per restart, for
+		 * ever (0193) -- and `attach` has to walk past each of them on every
+		 * refresh.
+		 *
+		 * **Here rather than where the directory is resolved.** It was in
+		 * `daemon_main.c`, one call in the one function a test may not run,
+		 * so the only thing holding it was a `grep` of the source
+		 * (project.md 10.239). The sweep belongs with the code that lists the
+		 * directory in any case: this is the first thing in this program that
+		 * reads it, and the reason the sweep is once rather than per connect
+		 * is that the set can only grow when a process dies.
+		 */
+		reaped = ncfg_supplicant_reap_reply_sockets(watchers->supplicant_dir);
+		if (reaped > 0u) {
+			ncfg_log_emitf("supplicant", NCFG_LOG_NOTE,
+			    "removed %zu reply socket(s) in %s left by processes that are gone",
+			    reaped, watchers->supplicant_dir);
+		}
 		/* Stale from the start, so that the first refresh is the scan: the
 		 * radios that already exist produce no inotify event, having appeared
 		 * before there was anything watching. */
