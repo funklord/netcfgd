@@ -9515,6 +9515,50 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.239 The last grep, and the fixture that was weaker than it read
+
+10.238 left one source check standing: the reply-socket sweep was a single
+call in `daemon_main.c`, in the one function a test may not run, so a `grep`
+of the source was the only thing holding it.
+
+**The call moved to where the directory is first listed.**
+`ncfg_main_watchers_open` is the first thing in this program that reads the
+control directory, and it is somewhere a test can reach -- so the sweep is
+there now, before the scan that attaches to the radios, which is also where it
+belongs on its own terms. `daemon_main.c` says where it went.
+
+`loop_test.c` drives it: a directory of the test's own, a reply socket bound
+and closed -- which is exactly what a netcfgd that exited leaves -- and live
+ones beside it. Opening the watches takes the dead one and leaves the rest.
+The three source checks in `main_test.c` are gone with it; what is left there
+is the one guard that cannot be driven, because a test proving this daemon
+reconciles would be a daemon reconciling the machine running the suite.
+
+### The fixture that passed a sabotage
+
+The sweep has **two** guards, and the first fixture reached only one.
+
+    if (connect(probe, ...) == 0)   -> live and unconnected: leave it
+    if (errno != ECONNREFUSED)      -> EPERM: live and already connected
+
+A bound socket nobody has connected answers a probe's `connect` with success.
+A client mid-conversation with its supplicant makes the kernel answer `EPERM`
+instead -- and **that is what every in-flight netcfgd reply socket is**. The
+fixture bound one and did not connect it, so removing the `EPERM` guard
+changed nothing it could see: the sabotage passed.
+
+A third socket, bound *and* connected, is in the fixture now, and both
+sabotages go red.
+
+**The second one fails in a way worth reading.** Removing the *first* guard
+does not leave the live socket doomed, it leaves the **dead** one standing --
+because `connect` succeeding does not set `errno`, so the second guard then
+reads whatever the last failing call left there. The two guards are coupled
+through `errno`, and the early return is what keeps the second from being
+asked about a call that succeeded. A sabotage that produces the wrong failure
+is still a sabotage caught, and this one says something about the code that
+reading the guards in isolation does not.
+
 ## 10.238 The fake that was locked in one file
 
 10.237 closed with a check it called the weakest thing in that round: the

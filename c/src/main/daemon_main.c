@@ -707,34 +707,10 @@ static int start(const options_t *options)
 		ctrl_dir[0] = '\0';
 		ncfg_log_emitf("wifi", NCFG_LOG_WARNING,
 		    "no supplicant control directory (%s), so no radio's events are watched", err);
-	} else {
-		/*
-		 * **Once, here, before anything lists that directory.** netcfgd
-		 * installs no `SIGTERM` handler, so every one of its lives leaves two
-		 * reply sockets behind -- 18 entries to 20 per restart, for ever
-		 * (0193). `ncfg_supplicant_reap_reply_sockets` asks the kernel
-		 * whether each candidate is bound rather than reading `/proc`, which
-		 * is 0224's fix for reaped names being reused by kernel threads.
-		 *
-		 * **Startup is the whole of the schedule.** The set can only grow
-		 * when a process dies, so a later sweep would find nothing this one
-		 * missed, and sweeping per connect would be a `read_dir` for every
-		 * command netcfgd sends.
-		 *
-		 * The function was ported with the module and had no caller but a
-		 * test: the Rust daemon does this at every start and was observed
-		 * doing it -- *removed 2 reply socket(s) ... left by processes that
-		 * are gone* -- while the C daemon's own log, holding the same machine
-		 * minutes earlier, said nothing (project.md 10.237).
-		 */
-		size_t reaped = ncfg_supplicant_reap_reply_sockets(ctrl_dir);
-
-		if (reaped > 0u) {
-			ncfg_log_emitf("supplicant", NCFG_LOG_NOTE,
-			    "removed %zu reply socket(s) in %s left by processes that are gone",
-			    reaped, ctrl_dir);
-		}
 	}
+	/* The dead reply sockets in that directory are swept by
+	 * `ncfg_main_watchers_open`, which is the first thing here that lists it
+	 * -- and is somewhere a test can drive. */
 	memset(&watch, 0, sizeof(watch));
 	watch.config_dir = where.config;
 	watch.rfkill_device = NCFG_RFKILL_DEVICE;

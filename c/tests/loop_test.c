@@ -393,6 +393,109 @@ static void what_the_log_says_about_a_supplicant_event(void)
  * the interface is `wlan0` and exists only there, and the fake is a forked
  * process this test started and takes down by its own recorded pid.
  */
+
+/*
+ * The dead reply sockets are swept when the watches open.
+ *
+ * **A live one beside them is the half that matters.** A sweep that removed
+ * everything shaped like a reply socket would take the one a client has open
+ * right now -- netcfgd's own in-flight connections live in this directory --
+ * and the command that client is waiting on would never be answered. So the
+ * question is asked of the kernel: connecting to a unix datagram address
+ * answers `ECONNREFUSED` when nobody has it bound, which is the definition of
+ * a stale file rather than a guess at one (0224).
+ *
+ * This is what `main_test.c` was grepping `daemon_main.c` for. The call moved
+ * to where the directory is first listed, which is both the right place and
+ * somewhere a test can reach.
+ */
+static void the_dead_reply_sockets_are_swept(const char *base)
+{
+	struct sockaddr_un   address;
+	ncfg_main_watchers_t watchers;
+	ncfg_main_watch_t    what;
+	/* Sized to a unix address rather than to a path, because that is the
+	 * bound these two have to fit: a name longer than `sun_path` is one the
+	 * kernel would truncate, and a fixture that did that would be binding
+	 * something other than what it checks for. */
+	char                 dir[sizeof(address.sun_path) / 2u];
+	char                 dead[sizeof(address.sun_path)];
+	char                 alive[sizeof(address.sun_path)];
+	char                 busy[sizeof(address.sun_path)];
+	char                 err[NCFG_ERROR_MAX];
+	int                  keeper;
+	int                  talker;
+	int                  gone;
+
+	(void)snprintf(dir, sizeof(dir), "%s/reap", base);
+	(void)mkdir(dir, 0700);
+	(void)snprintf(dead, sizeof(dead), "%s/netcfgd-999001-0", dir);
+	(void)snprintf(alive, sizeof(alive), "%s/netcfgd-999002-0", dir);
+	(void)snprintf(busy, sizeof(busy), "%s/netcfgd-999003-0", dir);
+
+	/* One bound and closed, which leaves the file with nothing behind it --
+	 * exactly what a netcfgd that exited leaves -- and one bound and kept. */
+	gone = socket(AF_UNIX, SOCK_DGRAM, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", dead);
+	check(gone >= 0 && bind(gone, (struct sockaddr *)&address, sizeof(address)) == 0,
+	    "a reply socket whose process is about to go");
+	(void)close(gone);
+
+	keeper = socket(AF_UNIX, SOCK_DGRAM, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", alive);
+	check(keeper >= 0 && bind(keeper, (struct sockaddr *)&address, sizeof(address)) == 0,
+	    "and one that is still bound, waiting for an answer");
+
+	/*
+	 * **And one that is bound *and connected*, which is what a live reply
+	 * socket actually is.** The sweep has two guards and this fixture had
+	 * only reached the first: a bound socket nobody has connected answers a
+	 * probe's `connect` with success, while a client that has connected to
+	 * its supplicant makes the kernel answer `EPERM` -- and it is the second
+	 * that every in-flight netcfgd connection is. A sabotage that removed the
+	 * `EPERM` guard passed against the old fixture, which is how this was
+	 * found.
+	 */
+	talker = socket(AF_UNIX, SOCK_DGRAM, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", busy);
+	check(talker >= 0 && bind(talker, (struct sockaddr *)&address, sizeof(address)) == 0,
+	    "and one bound by a client that is mid-conversation");
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", alive);
+	check(talker >= 0 && connect(talker, (struct sockaddr *)&address, sizeof(address)) == 0,
+	    "  connected, which is what makes the kernel refuse a second connect to it");
+
+	memset(&what, 0, sizeof(what));
+	what.supplicant_dir = dir;
+	what.poll_config = 1;
+	err[0] = '\0';
+	if (!ncfg_main_watchers_open(&watchers, &what, err, sizeof(err))) {
+		detail("the watches would not open", err);
+		check(0, "the watches open over a control directory");
+		(void)close(keeper);
+		return;
+	}
+	check(!testdir_exists(dead), "opening the watches takes the dead socket away");
+	check(testdir_exists(alive),
+	    "  and leaves the one somebody is still waiting on, which is the whole risk");
+	check(testdir_exists(busy),
+	    "  and the one whose client is mid-conversation, which the kernel says by "
+	    "refusing the probe rather than by refusing the address");
+
+	ncfg_main_watchers_close(&watchers);
+	(void)close(keeper);
+	(void)close(talker);
+	(void)unlink(alive);
+	(void)unlink(busy);
+}
+
 static void a_supplicant_event_reaches_the_log(const char *base)
 {
 	ncfg_main_watchers_t      watchers;
@@ -2299,6 +2402,7 @@ int main(void)
 	a_signal_between_the_check_and_the_wait_still_stops_it();
 	a_station_that_moved_is_carried_out_of_the_round(base);
 	a_supplicant_event_reaches_the_log(base);
+	the_dead_reply_sockets_are_swept(base);
 
 	fifty_events_are_one_observation(base);
 	the_pass_sees_a_waiting_request_before_anything_answers_it(base);

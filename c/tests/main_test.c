@@ -878,34 +878,18 @@ static void this_build_does_not_reconcile(void)
 	check(!ncfg_main_netcfgd_may_reconcile(), "  and the default is put back");
 
 	/*
-	 * **The narration checks that stood here are gone**, and that is an
-	 * improvement rather than a loss: they grepped `daemon_watchers.c` for
-	 * the call and the emit beside it, and `loop_test.c` now drives the whole
-	 * path -- a fake radio, a real `ATTACH`, an event, and the line in the
-	 * log. A source check and a behavioural one for the same thing would be
-	 * two things to keep true, and the weaker one is the one to drop.
+	 * **Three source checks stood here and all three are gone**, which is the
+	 * direction this file should move in. Two grepped the watcher for the
+	 * narration; one grepped `daemon_main.c` for the reply-socket sweep. Each
+	 * is driven now -- `loop_test.c` opens the watches over a directory of
+	 * its own, with a fake radio in it and a dead reply socket beside a live
+	 * one -- and a source check kept beside a behavioural one is a second
+	 * thing to keep true.
 	 *
-	 * **The stale reply sockets are swept at startup**, read from the source
-	 * for `may_reconcile`'s reason: the call is in the one function a test
-	 * may not run, and what would otherwise assert it is a daemon holding
-	 * this machine's radio.
-	 *
-	 * What the sweep *does* is `supplicant_test.c`'s, against a directory of
-	 * its own. What is checked here is that the daemon reaches it -- the
-	 * function was ported with its module and called by nothing but a test
-	 * for a whole wave, while the Rust daemon did it at every start.
+	 * What is left here is the guard that cannot be driven: a test that
+	 * proved this daemon reconciles would be a daemon reconciling the machine
+	 * running the suite.
 	 */
-	{
-		char *source = read_source("src/main/daemon_main.c");
-
-		check(source != NULL &&
-		        strstr(source, "ncfg_supplicant_reap_reply_sockets(ctrl_dir)") != NULL,
-		    "the daemon sweeps the supplicant's dead reply sockets at startup");
-		check(source != NULL && strstr(source, "left by processes that are gone") != NULL,
-		    "  and says so, which is how the Rust's doing it was noticed");
-		free(source);
-	}
-
 	/*
 	 * **And no init script passes it**, which is a grep of the packaging
 	 * rather than of this program. The refusal is worth nothing if the thing
