@@ -289,6 +289,27 @@ static int drain_radio(void *context, ncfg_main_harvest_t *harvest, char *err, s
 		if (!got) {
 			break;
 		}
+		/*
+		 * **Said before anything is decided about it.** What the watcher does
+		 * with an event is narrow -- it looks for a roam -- and until this
+		 * line the rest of the stream reached the daemon and left no trace at
+		 * all: a station refused, a network given up on, a scan the radio
+		 * could not run, and the association itself. The first tryout of this
+		 * daemon on a live machine produced a log of three startup lines while
+		 * the Rust beside it narrated every one of these (project.md 10.237).
+		 *
+		 * The decision is `ncfg_main_supplicant_event_line`'s, which is where
+		 * it can be tested; this is the part that writes and cannot be.
+		 */
+		{
+			char said[NCFG_LOG_MAX];
+			int  severity = NCFG_LOG_NOTE;
+
+			if (ncfg_main_supplicant_event_line(radio->interface, &event, &severity, said,
+			        sizeof(said))) {
+				ncfg_log_emitf("supplicant", (ncfg_severity_t)severity, "%s", said);
+			}
+		}
 		if (!ncfg_supplicant_event_is(&event, "CTRL-EVENT-CONNECTED")) {
 			continue;
 		}

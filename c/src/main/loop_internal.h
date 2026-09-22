@@ -355,6 +355,37 @@ int ncfg_main_woke_for(ncfg_main_source_kind_t kind, ncfg_woke_t *out);
 int ncfg_main_passes(const ncfg_reconcile_wake_t *wake, size_t roams, size_t requests);
 
 /*
+ * What the log should say about one supplicant event, or nothing.
+ *
+ * **The decision, separated from saying it**, which is what makes it
+ * answerable at all. The Rust's own comment records why: every arm used to end
+ * in a log macro, which writes and returns nothing, so a test could assert
+ * that the code compiled and no more -- and one of the arms went in with
+ * nothing holding it.
+ *
+ * 0 is "netcfgd has nothing to say about this", which is most of the stream by
+ * volume: scan results, and the DSCP policy traffic. 1 fills `severity` with
+ * an `ncfg_severity_t` and `out` with the sentence.
+ *
+ * **The severities are not decoration.** A disconnect this machine caused --
+ * `locally_generated=1`, which is netcfgd selecting another network, a scan, a
+ * rekey -- happens dozens of times on an ordinary day and is verbose; the
+ * access point dropping the station is the rarer one and the one somebody
+ * would want to know about, so it is a note. A network the supplicant has
+ * given up on is a warning, and so is an access point refusing the station.
+ *
+ * **And the recovery is reported as well as the loss** (0225). Every arm but
+ * the re-enable is bad news, so a machine that lost its association at three
+ * in the morning and got it back had the loss in the log and the recovery
+ * nowhere -- the record read as an outage that never ended.
+ *
+ * A field the event does not carry renders as `?`, which is the Rust's answer
+ * and is honest: the sentence is about what arrived.
+ */
+int ncfg_main_supplicant_event_line(const char *interface,
+    const ncfg_supplicant_event_t *event, int *severity, char *out, size_t out_size);
+
+/*
  * Whether a `CONNECTED` is a roam, given what this radio last reported.
  *
  * The Rust's `is_roam`, and its reasoning is 0239's: a different address is

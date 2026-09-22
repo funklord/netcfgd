@@ -28,6 +28,8 @@
  */
 #include "loop_internal.h"
 
+#include "ncfg/log.h"
+
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
@@ -304,6 +306,121 @@ int ncfg_main_passes(const ncfg_reconcile_wake_t *wake, size_t roams, size_t req
 	 */
 	return wake->kernel_changed || wake->config_changed || wake->confirm_expired ||
 	    wake->ticked;
+}
+
+/* One field, or `?`. The sentence is about what arrived, so a field the event
+ * does not carry says so rather than being left out of the line. */
+static const char *field_or_unknown(const ncfg_supplicant_event_t *event, const char *key,
+    char *out, size_t out_size)
+{
+	if (!ncfg_supplicant_event_field(event, key, out, out_size) || out[0] == '\0') {
+		(void)snprintf(out, out_size, "?");
+	}
+	return out;
+}
+
+int ncfg_main_supplicant_event_line(const char *interface,
+    const ncfg_supplicant_event_t *event, int *severity, char *out, size_t out_size)
+{
+	/* An event name and four of its fields. 64 is what every other reader of
+	 * these in this tree uses -- a `reason` is a word, a `status_code` a
+	 * number, an ssid up to 32 octets -- and a value that did not fit is
+	 * truncated into the sentence rather than dropped from it. */
+	char name[64];
+	char first[64];
+	char second[64];
+	char third[64];
+	char fourth[64];
+
+	if (!interface || !event || !severity || !out || out_size == 0u) {
+		return 0;
+	}
+	out[0] = '\0';
+	if (!ncfg_supplicant_event_name(event, name, sizeof(name))) {
+		return 0;
+	}
+	/* The one that matters. `reason` is the supplicant's own word for what
+	 * gave up -- `CONN_FAILED`, `AUTH_FAILED`, `WRONG_KEY` -- and is worth
+	 * more than any sentence written here, so it is passed through. */
+	if (strcmp(name, "CTRL-EVENT-SSID-TEMP-DISABLED") == 0) {
+		*severity = NCFG_LOG_WARNING;
+		(void)snprintf(out, out_size,
+		    "%s: not trying `%s` for %ss -- %s failed attempts so far (%s)", interface,
+		    field_or_unknown(event, "ssid", first, sizeof(first)),
+		    field_or_unknown(event, "duration", second, sizeof(second)),
+		    field_or_unknown(event, "auth_failures", third, sizeof(third)),
+		    field_or_unknown(event, "reason", fourth, sizeof(fourth)));
+		return 1;
+	}
+	/* The recovery half, and it is not decoration: without it the log only
+	 * ever says things got worse, and a network that came back looks exactly
+	 * like one that is still broken (0225). */
+	if (strcmp(name, "CTRL-EVENT-SSID-REENABLED") == 0) {
+		*severity = NCFG_LOG_NOTE;
+		(void)snprintf(out, out_size, "%s: trying `%s` again", interface,
+		    field_or_unknown(event, "ssid", first, sizeof(first)));
+		return 1;
+	}
+	/*
+	 * One line, at note: an association is rare on a desk and one per move on
+	 * a laptop, which is the rate somebody reading a day's log wants. A roam
+	 * gets no second line -- it is two of these with different addresses, and
+	 * the hook the watcher fires is what acts on it.
+	 */
+	if (strcmp(name, "CTRL-EVENT-CONNECTED") == 0) {
+		*severity = NCFG_LOG_NOTE;
+		if (!ncfg_supplicant_event_connected_bssid(event, first, sizeof(first))) {
+			(void)snprintf(first, sizeof(first), "an unnamed access point");
+		}
+		(void)snprintf(out, out_size, "%s: joined %s", interface, first);
+		return 1;
+	}
+	/*
+	 * Missed by 0192, which read the events that say an association is failing
+	 * and not the one that says the radio could not even look. Twenty-four of
+	 * these in three days on the reporting machine, and a scan that failed is
+	 * exactly when `SCAN_RESULTS` hands back something old. `ret` is the
+	 * driver's errno, negated: -16 is `EBUSY`, -100 `ENETDOWN`.
+	 */
+	if (strcmp(name, "CTRL-EVENT-SCAN-FAILED") == 0) {
+		*severity = NCFG_LOG_NOTE;
+		(void)snprintf(out, out_size, "%s: the radio could not scan (ret=%s)", interface,
+		    field_or_unknown(event, "ret", first, sizeof(first)));
+		return 1;
+	}
+	/* Refused at the 802.11 layer, before any key or credential is exchanged:
+	 * a different fault from the one above, and the access point's rather than
+	 * anything in netcfgd's configuration. */
+	if (strcmp(name, "CTRL-EVENT-AUTH-REJECT") == 0 ||
+	    strcmp(name, "CTRL-EVENT-ASSOC-REJECT") == 0) {
+		*severity = NCFG_LOG_WARNING;
+		(void)snprintf(out, out_size,
+		    "%s: the access point refused this station, status %s", interface,
+		    field_or_unknown(event, "status_code", first, sizeof(first)));
+		return 1;
+	}
+	/*
+	 * **Who ended it is the whole content of a disconnect.**
+	 * `locally_generated=1` is this machine leaving -- netcfgd selecting
+	 * another network, a scan, a rekey -- and there are dozens on an ordinary
+	 * day. The access point dropping the station is the rarer one and the one
+	 * somebody would want to know about, so they get different levels rather
+	 * than the same line forty-three times.
+	 */
+	if (strcmp(name, "CTRL-EVENT-DISCONNECTED") == 0) {
+		int ours = ncfg_supplicant_event_field(event, "locally_generated", first,
+		    sizeof(first)) && strcmp(first, "1") == 0;
+
+		*severity = ours ? NCFG_LOG_VERBOSE : NCFG_LOG_NOTE;
+		(void)snprintf(out, out_size, "%s: %s %s (reason %s)", interface,
+		    ours ? "left" : "dropped by",
+		    field_or_unknown(event, "bssid", second, sizeof(second)),
+		    field_or_unknown(event, "reason", third, sizeof(third)));
+		return 1;
+	}
+	/* Everything else: the scan results, and the DSCP policy traffic that is
+	 * most of the stream by volume. */
+	return 0;
 }
 
 int ncfg_main_is_roam(int had_last, uint32_t last_network, const char *last_bssid,

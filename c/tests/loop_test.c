@@ -288,6 +288,95 @@ static void a_round_with_nothing_in_it_runs_no_pass(void)
 	    "a write in the configuration directory is a pass even with no kernel event");
 }
 
+
+/*
+ * What the log says about one supplicant event.
+ *
+ * **Every arm used to end in a log macro**, which writes and returns nothing,
+ * so a test could assert that the code compiled and no more -- the Rust's own
+ * comment records an arm going in with nothing holding it. The decision is a
+ * value here, which is what makes these checks possible at all.
+ *
+ * And the levels are the subject as much as the words: a disconnect this
+ * machine caused happens dozens of times a day and a station being dropped is
+ * rare, so reporting both the same way is a log nobody can read.
+ */
+static void what_the_log_says_about_a_supplicant_event(void)
+{
+	ncfg_supplicant_event_t event;
+	char                    said[NCFG_LOG_MAX];
+	int                     severity = -1;
+
+	/* The association itself, which is what somebody reading a day's log is
+	 * looking for. */
+	check(ncfg_supplicant_event_parse(
+	          "<3>CTRL-EVENT-CONNECTED - Connection to a0:a4:7f:23:9a:cf completed "
+	          "[id=0 id_str=]", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)),
+	    "a `CONNECTED` is worth a line");
+	check(strcmp(said, "wlan0: joined a0:a4:7f:23:9a:cf") == 0, "  naming what it joined");
+	check(severity == NCFG_LOG_NOTE, "  at note, because an association is rare on a desk");
+
+	/* **Who ended a disconnect is its whole content.** */
+	check(ncfg_supplicant_event_parse(
+	          "<3>CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3 "
+	          "locally_generated=1", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)),
+	    "a disconnect this machine caused is reported");
+	check(strcmp(said, "wlan0: left a0:a4:7f:23:9a:cf (reason 3)") == 0,
+	    "  as this machine leaving");
+	check(severity == NCFG_LOG_VERBOSE,
+	    "  at verbose, because there are dozens of them on an ordinary day");
+	check(ncfg_supplicant_event_parse(
+	          "<3>CTRL-EVENT-DISCONNECTED bssid=a0:a4:7f:23:9a:cf reason=3", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)),
+	    "and one the access point caused is reported differently");
+	check(strcmp(said, "wlan0: dropped by a0:a4:7f:23:9a:cf (reason 3)") == 0,
+	    "  as the station being dropped");
+	check(severity == NCFG_LOG_NOTE, "  at note, because that one is rare and wanted");
+
+	/* The network given up on, and the network tried again -- 0225's pair. */
+	check(ncfg_supplicant_event_parse(
+	          "<3>CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"Cafe\" auth_failures=2 "
+	          "duration=10 reason=WRONG_KEY", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)) &&
+	        severity == NCFG_LOG_WARNING,
+	    "a network the supplicant has given up on is a warning");
+	check(strstr(said, "not trying `Cafe` for 10s") != NULL &&
+	        strstr(said, "2 failed attempts so far (WRONG_KEY)") != NULL,
+	    "  carrying the supplicant's own reason, which is where a person goes next");
+	check(ncfg_supplicant_event_parse("<3>CTRL-EVENT-SSID-REENABLED id=0 ssid=\"Cafe\"",
+	          &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)),
+	    "and the recovery is reported too, which is the half that was missing");
+	check(strcmp(said, "wlan0: trying `Cafe` again") == 0,
+	    "  so a network that came back does not read as an outage that never ended");
+
+	/* The two the access point refuses, and the scan that could not run. */
+	check(ncfg_supplicant_event_parse("<3>CTRL-EVENT-ASSOC-REJECT status_code=17", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)) &&
+	        severity == NCFG_LOG_WARNING &&
+	        strcmp(said, "wlan0: the access point refused this station, status 17") == 0,
+	    "an access point refusing the station says so, with its status");
+	check(ncfg_supplicant_event_parse("<3>CTRL-EVENT-SCAN-FAILED ret=-16", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)) &&
+	        strcmp(said, "wlan0: the radio could not scan (ret=-16)") == 0,
+	    "and a scan the radio could not run is a line rather than silence");
+
+	/* Most of the stream by volume, and netcfgd has nothing to say about it. */
+	check(ncfg_supplicant_event_parse("<3>CTRL-EVENT-SCAN-RESULTS ", &event) &&
+	        !ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)),
+	    "a scan result is not narrated, which is most of the stream");
+	check(said[0] == '\0', "  and nothing is left in the buffer to be printed by mistake");
+
+	/* A field the event does not carry is `?` rather than a gap in the
+	 * sentence: what is being reported is what arrived. */
+	check(ncfg_supplicant_event_parse("<3>CTRL-EVENT-DISCONNECTED reason=3", &event) &&
+	        ncfg_main_supplicant_event_line("wlan0", &event, &severity, said, sizeof(said)) &&
+	        strcmp(said, "wlan0: dropped by ? (reason 3)") == 0,
+	    "a field the event did not carry reads as `?`");
+}
+
 static void a_roam_is_a_move_within_one_network(void)
 {
 	check(!ncfg_main_is_roam(0, 0u, "", 1, 3u, "aa:bb:cc:dd:ee:01"),
@@ -2054,6 +2143,7 @@ int main(void)
 	which_wake_a_descriptor_folds_into();
 	a_round_with_nothing_in_it_runs_no_pass();
 	a_roam_is_a_move_within_one_network();
+	what_the_log_says_about_a_supplicant_event();
 	the_source_set_keeps_its_order();
 	a_roam_that_does_not_fit_is_counted();
 
