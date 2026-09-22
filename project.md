@@ -9515,6 +9515,140 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.232 What it would take to run this on the machine, and what watches
+
+The question was whether the C daemon could be tried on this workstation
+without the workstation being what pays for it. Everything below was settled
+by reading the machine rather than by argument, and **nothing was changed on
+it**: the Rust daemon is still the one managing the radio.
+
+### What the machine is
+
+One default route, over the wifi: `wlp0s20f3`, on `EMP-XYLEM`, DHCP, metric
+200. Both ethernet ports are down with no carrier. So the radio under test is
+the only way off the machine, which is the worst case and the one worth
+arranging for.
+
+### What the C would do to it, asked without writing anything
+
+`ncfg plan` writes `desired` and `observed` into the run directory, and the
+live one is the running daemon's own state -- so the question was asked
+through the library instead, by a short program in the scratch directory that
+compiles, observes and plans and writes nothing. Against `/etc/netcfgd` and
+`/run/netcfgd` as they are:
+
+    actions (0):
+    warnings (0):
+    refusals: 0  stranded: 0
+
+**Nothing.** The C planner, given this machine's configuration and this
+machine's state, would do nothing at all -- which is the state in which
+starting a daemon is a test rather than a change.
+
+### The one thing that would have taken the machine down
+
+A first attempt planned `backend.start supplicant`, and that is exactly how a
+radio is lost: two supplicants on one radio deauthenticate each other. It was
+**the measurement that was wrong, not the port**. The probe used a copy of the
+run directory, and the marker netcfgd identifies its own supplicant by is *the
+pid file's own path* (0080) -- so a copy under `/tmp` made the running
+supplicant look like somebody else's. Pointed at the real path, the library
+answers:
+
+    supplicant pid  : 1256      (the one wpa_supplicant that is running)
+    answers         : 1         (its control socket, on /run/wpa_supplicant)
+    pid by marker   : 1256      (found without the pid file, by argv alone)
+
+All three matter, because `systemctl stop netcfgd` **wipes `/run/netcfgd`** --
+`RuntimeDirectoryPreserve=restart` keeps it across a restart and not across a
+stop -- while `KillMode=process` leaves the supplicant running. That is the
+adoption case exactly: no pid file, a live process carrying the marker, a
+control socket that still answers. `ncfg_supplicant_adopt` is what handles it,
+and it is reached from `ncfg_supplicant_start` before anything is spawned.
+
+**So the danger was real, the port already had the answer, and the first
+reading of it was an artefact of how it was measured.** Checking the second
+question rather than reporting the first is the whole of the difference
+between this entry and a wrong one.
+
+### The gate, and why it stopped being a list
+
+`netcfgd` refused to start, and the refusal named two things: ops the executor
+would not carry out, and blocks the planner held. 10.229 closed the first and
+this session's sweep closed the second -- every block this planner holds is one
+the Rust holds too, each carrying `warn_unbuilt`'s *nothing acts on it in the
+Rust either*, and the two that are read elsewhere say where.
+
+What is left is not a list of missing code: **no netcfgd written in C has run a
+machine.** Every check in the tree runs against a recorder, a scratch directory
+or a fake, and the live scripts read. That is a reason to be told rather than
+one to be talked out of, so the refusal stays and says that instead -- and
+`--try-the-c-daemon` is how somebody at the keyboard says they are watching.
+
+The flag is long on purpose, is in no unit file, and `main_test.c` greps the
+four init scripts this project ships to keep it that way: a refusal is worth
+nothing if the packaging hands every machine the override.
+
+### What watches
+
+`tests/live/c_daemon_tryout.sh`. It records whether `netcfgd.service` was
+running, stops it, starts the C daemon with `--no-apply-on-start` -- so it
+observes, adopts, and changes nothing until asked -- and then watches: a ping
+of the default gateway and a name resolution every five seconds, three
+consecutive misses and it hands the machine back. The gateway alone is not
+enough, because a link that is up and carrying nothing answers it.
+
+The fallback is `restore`, and it is the exit trap as well as the fallback: the
+deadline, Ctrl-C, a lost network and the C daemon dying on its own all end the
+same way. It SIGTERMs the C daemon, waits ten seconds, SIGKILLs, starts the
+Rust daemon and **waits for the network to come back, reporting how long that
+took** -- which is the number worth having afterwards. It also refuses to start
+at all on a machine whose network is already down: stopping a working daemon to
+experiment on a broken machine is not a test.
+
+Every loop in it is bounded -- the interval, the miss count, the deadline, the
+wait for the network -- which is `~/.claude/guidelines`' rule for anything that
+runs unattended, applied to the thing whose whole job is to be unattended.
+
+### The net has something dropped into it
+
+A safety net nobody has tested is a claim, so `tests/live/c_daemon_watch.sh`
+drives the tryout against stubs: `systemctl`, `ping`, `getent` and `ip` are
+scripts in a directory the test made, first on `PATH`, and the daemon is a
+fake named through `NCFG_TRYOUT_DAEMON`. Sixteen checks over three cases -- the
+network stays up, the network goes away, the network was already down -- and
+none of them touches this machine: the stub `ip` answers with a gateway on
+`192.0.2.0/24`, so a stub that failed to intercept would fail rather than
+quietly read the real route.
+
+Four sabotages, four caught: a fallback that stops the C daemon and forgets to
+start the Rust one, a miss counter that never reaches its threshold, a restore
+that leaves the C daemon running, and the refusal on an already-broken machine
+removed.
+
+### The gate caught the help text, and then the exception caught itself
+
+`netcfgd --help` is one of the five daemon invocations the agreement gate
+compares byte for byte, so adding a flag to one program broke it -- which is
+the gate doing its job. The divergence is recorded the way 10.224 records the
+`reset` ones: as the exact lines the C produces, so that a Rust which grew the
+flag and a C which lost it both go red.
+
+**The first version recorded the substring `--try-the-c-daemon`, and a
+sabotage that renamed the flag to `--try-the-c-daemon-x` passed.** The
+fragment was still *in* the renamed line, so the exception swallowed a flag
+nobody had written down. Whole lines now, dropped once each from the side that
+owns them, and both sabotages go red: the rename names the line that has gone,
+and an unrelated line added to the C's help fails as an ordinary difference.
+
+### What is not done
+
+**The tryout has not been run.** That is the copyright holder's to type, at
+the keyboard, on the machine whose only route is the radio it would hand over.
+What this entry records is that the arrangement exists, that the fallback works
+against stubs, and that the machine as it stands would give the C daemon
+nothing to do.
+
 ## 10.231 The two consents that were parsed and dropped
 
 10.228 recorded a gap and this closes it: `--strand-credentials` and

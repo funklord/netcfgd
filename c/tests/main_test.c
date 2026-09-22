@@ -866,6 +866,64 @@ static void this_build_does_not_reconcile(void)
 	}
 
 	/*
+	 * And the other half: the flag is what changes the answer, and it changes
+	 * it back. A latch nothing could set would be a refusal with no way past
+	 * it, which is not what this is -- and a latch that stayed set would make
+	 * every check after this one run against a program that reconciles.
+	 */
+	ncfg_main_netcfgd_allow_reconcile(1);
+	check(ncfg_main_netcfgd_may_reconcile(),
+	    "  unless this invocation was told to, which is `--try-the-c-daemon`");
+	ncfg_main_netcfgd_allow_reconcile(0);
+	check(!ncfg_main_netcfgd_may_reconcile(), "  and the default is put back");
+
+	/*
+	 * **And no init script passes it**, which is a grep of the packaging
+	 * rather than of this program. The refusal is worth nothing if the thing
+	 * that installs netcfgd hands every machine the flag -- and that is a file
+	 * nobody reading `daemon_main.c` would think to check. One check per init
+	 * this project ships, named, so that a fifth arriving without one is a
+	 * file this test does not read rather than a silent pass.
+	 */
+	{
+		static const char *const installed[] = { "packaging/systemd/netcfgd.service",
+			"packaging/systemd/netcfgd-exclusive.conf", "packaging/openrc/netcfgd",
+			"packaging/procd/netcfgd" };
+		size_t at;
+
+		for (at = 0; at < sizeof(installed) / sizeof(installed[0]); at++) {
+			char *text = read_source(installed[at]);
+			char  what[160];
+
+			(void)snprintf(what, sizeof(what), "  and %s does not pass it",
+			    installed[at]);
+			check(text != NULL && strstr(text, "--try-the-c-daemon") == NULL, what);
+			free(text);
+		}
+	}
+
+	/* The parser is what sets it, from that spelling and no other. */
+	{
+		char       *argv[3];
+		options_t   options;
+		int         done = 0;
+		int         code = 0;
+
+		argv[0] = (char *)"netcfgd";
+		argv[1] = (char *)"--try-the-c-daemon";
+		argv[2] = NULL;
+		memset(&options, 0, sizeof(options));
+		check(ncfg_main_netcfgd_parse(2, argv, &options, &done, &code) &&
+		        options.try_the_c_daemon,
+		    "  which the parser sets from the flag");
+		argv[1] = (char *)"--no-apply-on-start";
+		memset(&options, 0, sizeof(options));
+		check(ncfg_main_netcfgd_parse(2, argv, &options, &done, &code) &&
+		        !options.try_the_c_daemon,
+		    "  and no other option sets it");
+	}
+
+	/*
 	 * The first of the two old reasons, read from the file that creates a
 	 * link. A source read rather than a call, because what is being asserted
 	 * is that `create_link` reaches the marking at all -- the bytes it builds
