@@ -9515,6 +9515,82 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.233 The first run, and the eight seconds it took to hand back
+
+The tryout was run on the machine: `systemctl stop netcfgd`, the C daemon
+holding the radio for eighty-nine seconds, Ctrl-C, handed back. It reported
+that everything worked. **The journal says something the script did not.**
+
+### What the C daemon did, which was nothing
+
+From 17:52:51 to 17:54:20 there is not one network event in the journal. No
+disconnect, no carrier change, no route added or deleted, nothing from
+wpa_supplicant or dhcpcd. The C daemon's own log is three lines: the warning
+that the gate was overridden, and two saying it was watching `/etc/netcfgd`
+and listening on the socket.
+
+That is the first evidence that a netcfgd written in C can hold a machine --
+with `--no-apply-on-start`, so it observed and adopted and was asked for
+nothing. The supplicant that was running before is the supplicant that is
+running now, same pid, never restarted.
+
+### What the handback did, which was take the network away
+
+    17:54:20  Started netcfgd.service
+    17:54:20  adopted the Supplicant backend already running (pid 1256)
+    17:54:20  adopted the dhcp client already running
+    17:54:20  carrier lost / CTRL-EVENT-DISCONNECTED locally_generated=1
+    17:54:20  deleting default route via 10.78.63.254
+    17:54:23  CTRL-EVENT-CONNECTED
+    17:54:28  adding default route via 10.78.63.254
+
+**Eight seconds with no default route, and the Rust daemon caused them.** It
+adopts the supplicant it finds -- correctly, and says so -- and then re-hands
+it its networks, which makes wpa_supplicant disconnect and re-associate: a
+full PEAP handshake and a DHCP rebind. Recorded rather than fixed, which is
+this branch's rule for the Rust.
+
+It is worth knowing for its own sake: **every `systemctl restart netcfgd` on
+this machine costs about eight seconds of network**, and the fallback in the
+tryout is a restart. The safety net is not free, and its price is now measured
+rather than assumed.
+
+### And the check that said none of that happened
+
+The script printed *the network came back after 0s*. It asked once, straight
+after `systemctl start netcfgd` returned -- at 17:54:20, in the instant before
+the supplicant was told to disconnect. Everything it asserted was true of a
+state that was about to be replaced, and the eight seconds happened after it
+had said all was well and exited.
+
+**A check that passes on the state a restart is about to replace is not a
+check.** The wait now settles for three seconds and then wants three
+consecutive successes, so what it reports is a network that stays. The
+sabotage that puts the old single-shot answer back reproduces the live run's
+own wrong answer exactly: `0 s`.
+
+`c_daemon_watch.sh` gained the case for it -- a stub `systemctl start` that
+brings the network up, takes it away a second later and returns it four
+seconds after that, which is the machine's own shape in miniature. Nineteen
+checks now, and the new one reports 9 s where the broken version reports 0.
+
+### The log that was not evidence
+
+The real run's log came back with fifteen lines of `fake netcfgd:` above it.
+The tryout wrote `/tmp/netcfgd-c-tryout.log`, a fixed name, and
+`c_daemon_watch.sh` drives the tryout with a *fake* daemon -- so the stub's
+output and the machine's own evidence went to the same file, and the file was
+appended to for ever. One `mktemp` log per run now: a log somebody reads to
+find out what the C daemon did must not be a log anything else has written to.
+
+### What still has not been tested
+
+**The switch.** Nothing asked the C daemon to change anything: the hold was
+never released, no `ncfg apply`, no `ncfg wifi connect`. What is established
+is that it starts, adopts, watches and hands back without disturbing a live
+association -- which is the floor the switch has to be tried from, not the
+switch.
+
 ## 10.232 What it would take to run this on the machine, and what watches
 
 The question was whether the C daemon could be tried on this workstation
@@ -9643,11 +9719,9 @@ and an unrelated line added to the C's help fails as an ordinary difference.
 
 ### What is not done
 
-**The tryout has not been run.** That is the copyright holder's to type, at
-the keyboard, on the machine whose only route is the radio it would hand over.
-What this entry records is that the arrangement exists, that the fallback works
-against stubs, and that the machine as it stands would give the C daemon
-nothing to do.
+**The tryout has not been run** -- at the time this entry was written. It was
+run the same day, and what it found is 10.233, including a defect in the
+handback check recorded here as working.
 
 ## 10.231 The two consents that were parsed and dropped
 
