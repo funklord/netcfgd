@@ -1273,6 +1273,7 @@ static void what_the_supplicant_says_it_is_on(const char *dir)
 	    message, sizeof(message));
 	ncfg_ssid_t               ssid;
 	char                      bssid[32];
+	char                      key_mgmt[64];
 	char                      state[64];
 
 	if (!client) {
@@ -1280,10 +1281,20 @@ static void what_the_supplicant_says_it_is_on(const char *dir)
 		return;
 	}
 	memset(&ssid, 0, sizeof(ssid));
-	check(ncfg_supplicant_associated(client, &ssid, bssid, sizeof(bssid)) &&
+	check(ncfg_supplicant_associated(client, &ssid, bssid, sizeof(bssid), key_mgmt,
+	          sizeof(key_mgmt)) &&
 	    ssid.length == 9u && memcmp(ssid.bytes, "HomeFiber", 9u) == 0 &&
 	    strcmp(bssid, "00:11:22:33:44:55") == 0,
 	    "both halves of an association come back, because resolving it needs both");
+	/*
+	 * **Three halves, since two blocks may share a name and pin no address.**
+	 * It comes from this round trip rather than a second `STATUS`, which is
+	 * the same argument the other two are here for.
+	 */
+	check(key_mgmt[0] != '\0',
+	    "  and what the radio is using, for a name two blocks may share");
+	check(ncfg_supplicant_key_mgmt_security(key_mgmt) != NCFG_WIFI_SECURITY_UNSTATED,
+	    "  in a spelling this build understands");
 	check(ncfg_supplicant_state(client, state, sizeof(state), message, sizeof(message)) &&
 	    strcmp(state, "COMPLETED") == 0, "and the supplicant's own state name with them");
 	ncfg_supplicant_client_free(client);

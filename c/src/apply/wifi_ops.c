@@ -669,7 +669,7 @@ int ncfg_service_associate(const ncfg_service_t *service, const char *device,
 	 * must produce an empty second plan.
 	 */
 	memset(&current, 0, sizeof(current));
-	if (ncfg_supplicant_associated(client, &current, NULL, 0u) &&
+	if (ncfg_supplicant_associated(client, &current, NULL, 0u, NULL, 0u) &&
 	    same_ssid(&current, &wanted)) {
 		ncfg_supplicant_client_free(client);
 		return 1;

@@ -9515,6 +9515,72 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.235 One SSID, two blocks, and what tells them apart
+
+10.234 recorded the limitation this closes: `ncfg_wifi_network_for` answers
+"which of my `network` blocks is this radio on?" by BSSID first and then by the
+first block with that SSID, so two blocks sharing an SSID and pinned to no
+address -- an open network beside a WPA2 one of the same name, which is the
+configuration that was reported -- both resolve to whichever sorts earlier.
+
+That is 0239's mismatch with the access points taken away, and it costs the
+same thing: the station on the open network is credited to the WPA2 block, and
+an interface's routes take that block's `metric`.
+
+**What separates them is what the radio is actually using**, and the supplicant
+says so in `key_mgmt`. So the rule takes it:
+
+1. a block naming this access point (0239);
+2. then a block whose SSID **and security** both agree;
+3. then a block whose SSID agrees, which is what every caller got before.
+
+**It orders rather than filters**, and the case for that is the third step: a
+block matching the name alone is a better answer than none, so a `key_mgmt`
+this build does not know, or a security no block states, falls through to the
+old behaviour rather than answering that the machine is on nothing.
+
+### Where the answer comes from
+
+`ncfg_supplicant_key_mgmt_security` maps the station's vocabulary onto the
+document's, by what the string *contains*: a station negotiating two reports
+`WPA2-PSK+WPA-PSK`, a roaming one `FT-PSK`, and the suffixes multiply --
+`WPA2-PSK-SHA256`, `WPA2-EAP-SHA256`. Asking for equality would answer
+"unstated" for the ordinary case. `SAE` is WPA3 and is the same `psk` block
+here; `OWE` is its own kind, which is what the document calls it; `NONE` is
+open; anything else is unstated rather than guessed.
+
+`ncfg_supplicant_associated` hands it back beside the SSID and the BSSID,
+**out of the same round trip** -- a second `STATUS` would be two answers to one
+question as well as two trips, which is the argument that call already makes
+about connecting twice.
+
+The scan listing still asks with `NCFG_WIFI_SECURITY_UNSTATED`, and that is a
+gap rather than a judgement: a scan row's `flags` carry it -- `[WPA2-PSK-CCMP]`
+against `[ESS]` -- and nothing parses them into a kind yet. What it costs is a
+listing that may credit an access point to the wrong one of two same-named
+blocks; the association, which is what the planner reads, is right.
+
+### The sentinel is a constant, not a fifth kind
+
+`NCFG_WIFI_SECURITY_UNSTATED` lives beside `ncfg_security_kind_t` in
+`document.h` and is deliberately not a member of it. That enum is the
+document's, every walk over it is exhaustive, and a value meaning "unknown"
+would have to be answered in places a document can never carry one. Not
+knowing belongs to the observation.
+
+### This is a divergence, on purpose
+
+`netcfgd_model::wifi::network_for` has the BSSID rule and the first-match
+fallback and stops there. The copyright holder's call was to fix the C and
+record the Rust, which is this branch's rule for the Rust generally -- so the
+two implementations now answer differently for exactly the configuration this
+was written for, and that is written down in `daemon.h` beside the arm.
+
+Sixteen checks over the rule and the mapping, and four sabotages caught: the
+security arm filtering instead of ordering, the security answering before the
+address, `key_mgmt` not coming back from the association, and `SAE` falling out
+of the passphrase kind so that every WPA3 station resolved by name alone.
+
 ## 10.234 The second run, which broke the network on purpose
 
 The tryout was run again and this time the fallback fired for real: three

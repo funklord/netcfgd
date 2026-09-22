@@ -167,16 +167,25 @@ static void note_association(ncfg_observed_t *observed, ncfg_supplicant_client_t
 {
 	ncfg_ssid_t                ssid;
 	char                       bssid[18];
+	char                       key_mgmt[64];
 	const ncfg_wifi_network_t *network;
 	ncfg_observed_link_t      *link;
 
 	memset(&ssid, 0, sizeof(ssid));
 	bssid[0] = '\0';
-	if (!ncfg_supplicant_associated(client, &ssid, bssid, sizeof(bssid))) {
+	key_mgmt[0] = '\0';
+	if (!ncfg_supplicant_associated(client, &ssid, bssid, sizeof(bssid), key_mgmt,
+	        sizeof(key_mgmt))) {
 		return;
 	}
+	/*
+	 * **The security as well as the name and the address**, because this is
+	 * the answer the *planner* reads: an interface's routes take the metric of
+	 * the network the radio is on, so crediting a join to the wrong one of two
+	 * same-named blocks puts the wrong number on every route.
+	 */
 	network = ncfg_wifi_network_for(desired->networks, desired->network_count, &ssid,
-	    bssid[0] ? bssid : NULL);
+	    bssid[0] ? bssid : NULL, ncfg_supplicant_key_mgmt_security(key_mgmt));
 	if (!network || !network->id) {
 		/* Associated to something the document does not describe. Left absent
 		 * rather than named, because every reader of this field asks it about
