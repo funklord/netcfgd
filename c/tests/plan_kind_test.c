@@ -651,6 +651,15 @@ static void a_converged_port_plans_nothing(void)
  * What this case asserts now is the property, not the sentence: a kind nothing
  * here can bring into being is not planned as a creation, and the plan says so
  * in somebody's words rather than staying silent.
+ *
+ * **Whose words they are has moved, which is the point of asserting the
+ * property.** `link.c` used to say that nothing here creates the device and
+ * that this build starts no backend for it; the second half stopped being true
+ * when `session.c` landed, so that arm is silent now and the sentence an
+ * operator gets is the session pass's -- the addressing is waiting rather than
+ * missing. The creation is still not planned, which is what the first check
+ * below is about, and the dial is: `plan_session_test.c` is where *that* is
+ * asserted, one action per device.
  */
 static void a_kind_this_build_cannot_create_is_warned_about(void)
 {
@@ -676,7 +685,7 @@ static void a_kind_this_build_cannot_create_is_warned_about(void)
 		}
 		check(planfix_count(plan, "link.create") == 0u,
 		    "a kind this build cannot create is not planned as a creation");
-		check(planfix_warned(plan, "nothing here creates it"),
+		check(planfix_warned(plan, "is not up yet"),
 		    "  and the plan says so rather than staying silent");
 		planfix_release(plan, document, observed);
 	}

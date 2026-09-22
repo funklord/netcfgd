@@ -161,6 +161,20 @@ static int backend_wanted(const ncfg_builder_t *builder, const ncfg_observed_bac
 		 * reason, beside the pass that starts one. */
 		*field = "access_point";
 		return ncfg_plan_access_point_wanted(builder->desired, backend->interface);
+	case NCFG_BACKEND_PPPOE:
+	case NCFG_BACKEND_OPENVPN:
+		/*
+		 * **The device, not the interface**, which is `session.c`'s rule: a
+		 * tunnel need not have an `interface` block at all, and asking the
+		 * interface list would answer no and stop a working one.
+		 *
+		 * This is what makes deleting the block hang the line up. Without it a
+		 * removed `pppoe` device left `pppd` holding the line with `persist`
+		 * and `maxfail 0` in the options netcfgd wrote for it -- for ever.
+		 */
+		*field = backend->kind == NCFG_BACKEND_PPPOE ? "pppoe" : "openvpn";
+		return ncfg_plan_session_wanted(builder->desired, backend->interface,
+		    backend->kind);
 	default:
 		*field = "";
 		return 1;
