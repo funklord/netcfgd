@@ -153,7 +153,7 @@ grep -q "handing the machine back" "$down_out" && check 0 "  and said so" ||
 grep -q "^start netcfgd$" "$work/systemctl.log" &&
 	check 0 "  and started the Rust daemon, which is the fallback" ||
 	check 1 "  and started the Rust daemon, which is the fallback"
-grep -q "the network came back after" "$down_out" &&
+grep -q "is back and steady after" "$down_out" &&
 	check 0 "  and waited for the network rather than claiming it was back" ||
 	check 1 "  and waited for the network rather than claiming it was back"
 
@@ -164,6 +164,66 @@ if pgrep -f "fake-netcfgd" >/dev/null 2>&1; then
 else
 	check 0 "  with nothing of the C daemon left running"
 fi
+
+# ------------------------------------------------- the network that comes back
+# and goes again. This is the machine's own behaviour, measured: the Rust
+# daemon adopts the supplicant it finds and then re-hands it its networks,
+# which disconnects and re-associates -- so for about eight seconds after
+# `systemctl start netcfgd` returns there is no default route. A handback that
+# asked once, straight away, answered "came back after 0s" into that window.
+#
+# The stub `systemctl start` here says the network is up, and a second later
+# takes it away for four -- which is the shape of that, in miniature.
+
+echo active > "$work/active"
+echo down > "$work/net"
+: > "$work/systemctl.log"
+cat > "$work/bin/systemctl" <<'STUB'
+#!/bin/sh
+echo "$*" >> "$NCFG_WATCH_WORK/systemctl.log"
+case "$1" in
+is-active) cat "$NCFG_WATCH_WORK/active" ;;
+stop)      echo down > "$NCFG_WATCH_WORK/active" ;;
+start)     echo active > "$NCFG_WATCH_WORK/active"
+           echo up > "$NCFG_WATCH_WORK/net"
+           # The restart takes the association down a moment after it returns,
+           # and brings it back four seconds later.
+           ( sleep 1; echo down > "$NCFG_WATCH_WORK/net"
+             sleep 4; echo up > "$NCFG_WATCH_WORK/net" ) & ;;
+esac
+exit 0
+STUB
+chmod +x "$work/bin/systemctl"
+echo up > "$work/net"
+
+flap_out="$work/flap.out"
+( sleep 2; echo down > "$work/net" ) &
+dropper=$!
+sh "$repo/tests/live/c_daemon_tryout.sh" --interval 1 --failures 2 --minutes 1 \
+    >"$flap_out" 2>&1 && code=0 || code=$?
+wait "$dropper" 2>/dev/null || true
+
+check "$( [ "$code" = 1 ] && echo 0 || echo 1 )" \
+	"a handback whose network flaps still leaves with 1"
+steady=$(sed -n 's/.*is back and steady after \([0-9]*\)s.*/\1/p' "$flap_out")
+check "$( [ -n "$steady" ] && echo 0 || echo 1 )" \
+	"  and reports the network back only once it is steady"
+check "$( [ -n "$steady" ] && [ "$steady" -ge 5 ] && echo 0 || echo 1 )" \
+	"  which is after the flap, not in the window before it ($steady s)"
+
+# Put the plain stub back for the case below.
+cat > "$work/bin/systemctl" <<'STUB'
+#!/bin/sh
+echo "$*" >> "$NCFG_WATCH_WORK/systemctl.log"
+case "$1" in
+is-active) cat "$NCFG_WATCH_WORK/active" ;;
+stop)      echo down > "$NCFG_WATCH_WORK/active" ;;
+start)     echo active > "$NCFG_WATCH_WORK/active"
+           echo up > "$NCFG_WATCH_WORK/net" ;;
+esac
+exit 0
+STUB
+chmod +x "$work/bin/systemctl"
 
 # ------------------------------------------------------- a network already down
 # is not a tryout: it would stop the working daemon to start an experiment on a

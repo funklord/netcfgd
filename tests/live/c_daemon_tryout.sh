@@ -108,14 +108,39 @@ reachable() {
 	return 0
 }
 
-# Wait for the network, bounded. Answers 0 when it came back, 1 when it did
-# not -- and the caller says so rather than looping again.
+# Wait for the network to be back **and stay back**, bounded. Answers 0 with
+# the seconds it took, 1 with the seconds it gave up after.
+#
+# **Consecutive successes, after a settle, and that is not belt and braces.**
+# The first version asked once, straight after `systemctl start netcfgd`, and
+# on the machine this was written for it answered yes and printed "the network
+# came back after 0s" -- into a window where the network had not gone yet.
+# Measured from the journal afterwards: the Rust daemon adopts the running
+# supplicant and then re-hands it its networks, which makes wpa_supplicant
+# disconnect (`locally_generated=1`) and re-associate; the default route was
+# gone for eight seconds *after* this script had said everything was fine and
+# exited. A check that passes on the state the restart is about to replace is
+# not a check.
+STABLE_SETTLE=3
+STABLE_RUNS=3
+
 wait_for_net() {
+	limit=${1:-60}
 	waited=0
-	while [ "$waited" -lt "${1:-60}" ]; do
+	good=0
+	sleep "$STABLE_SETTLE"
+	waited=$STABLE_SETTLE
+	while [ "$waited" -lt "$limit" ]; do
 		if reachable; then
-			echo "$waited"
-			return 0
+			good=$((good + 1))
+			if [ "$good" -ge "$STABLE_RUNS" ]; then
+				echo "$waited"
+				return 0
+			fi
+		else
+			# One miss and the count starts again: what is being waited for
+			# is a network that stays, and a flap is not that.
+			good=0
 		fi
 		sleep 2
 		waited=$((waited + 2))
@@ -151,9 +176,9 @@ restore() {
 		say "starting the Rust daemon again"
 		systemctl start netcfgd || say "WARNING: systemctl start netcfgd failed"
 		if took=$(wait_for_net 60); then
-			say "the network came back after ${took}s"
+			say "the network is back and steady after ${took}s"
 		else
-			say "WARNING: the network is still down after ${took}s -- look at it"
+			say "WARNING: the network is not steady after ${took}s -- look at it"
 		fi
 	else
 		say "netcfgd.service was not running before this, so it is left stopped"
@@ -180,7 +205,12 @@ fi
 say "stopping netcfgd.service (the supplicant and the client keep running)"
 systemctl stop netcfgd
 
-log=${TMPDIR:-/tmp}/netcfgd-c-tryout.log
+# **One log per run**, rather than one name appended to for ever. The first
+# version wrote `/tmp/netcfgd-c-tryout.log` every time -- and `c_daemon_watch.sh`
+# drives this script with a *fake* daemon, so the evidence from a real run came
+# back with fifteen lines of stub output above it. A log somebody reads to find
+# out what the C daemon did must not be a log anything else has written to.
+log=$(mktemp "${TMPDIR:-/tmp}/netcfgd-c-tryout.XXXXXX.log")
 say "starting the C daemon, log in $log"
 "$daemon" --try-the-c-daemon --no-apply-on-start >>"$log" 2>&1 &
 c_pid=$!
