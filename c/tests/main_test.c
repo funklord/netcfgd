@@ -878,6 +878,13 @@ static void this_build_does_not_reconcile(void)
 	check(!ncfg_main_netcfgd_may_reconcile(), "  and the default is put back");
 
 	/*
+	 * **The narration checks that stood here are gone**, and that is an
+	 * improvement rather than a loss: they grepped `daemon_watchers.c` for
+	 * the call and the emit beside it, and `loop_test.c` now drives the whole
+	 * path -- a fake radio, a real `ATTACH`, an event, and the line in the
+	 * log. A source check and a behavioural one for the same thing would be
+	 * two things to keep true, and the weaker one is the one to drop.
+	 *
 	 * **The stale reply sockets are swept at startup**, read from the source
 	 * for `may_reconcile`'s reason: the call is in the one function a test
 	 * may not run, and what would otherwise assert it is a daemon holding
@@ -896,29 +903,6 @@ static void this_build_does_not_reconcile(void)
 		    "the daemon sweeps the supplicant's dead reply sockets at startup");
 		check(source != NULL && strstr(source, "left by processes that are gone") != NULL,
 		    "  and says so, which is how the Rust's doing it was noticed");
-		free(source);
-	}
-
-	/*
-	 * **And the watcher says what it decided.** The decision is
-	 * `loop_test.c`'s -- every arm of it, with the severities -- and this is
-	 * the line that writes it, which no test reaches: driving it wants a fake
-	 * supplicant bound in a control directory, and the one this tree has
-	 * lives inside `supplicant_client_test.c` rather than in a header two
-	 * files could share. `hostapdfake.h` is the precedent for moving it, and
-	 * until somebody does, a sabotage that deletes the emit is caught here
-	 * and nowhere else.
-	 */
-	{
-		char *source = read_source("src/main/daemon_watchers.c");
-
-		check(source != NULL &&
-		        strstr(source, "ncfg_main_supplicant_event_line(radio->interface") != NULL,
-		    "the watcher asks what a supplicant event is worth saying");
-		check(source != NULL &&
-		        strstr(source, "ncfg_log_emitf(\"supplicant\", (ncfg_severity_t)severity")
-		            != NULL,
-		    "  and says it, at the level the answer carried");
 		free(source);
 	}
 

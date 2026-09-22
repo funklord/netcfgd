@@ -9515,6 +9515,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.238 The fake that was locked in one file
+
+10.237 closed with a check it called the weakest thing in that round: the
+watcher's narration was asserted by grepping `daemon_watchers.c` for the call
+and the emit beside it. A grep is a check of the text, and what it could not
+say is whether a supplicant event reaches the log at all.
+
+The reason it was a grep is worth stating, because it is the thing that got
+fixed: the fake supplicant that could drive it lived **inside**
+`supplicant_client_test.c`, four hundred and forty lines of it, where nothing
+else could reach it. `tests/hostapdfake.h` is the precedent -- that fake was
+moved for exactly this reason, and its header says so in its first paragraph.
+
+`tests/supplicantfake.h` is that move. The proof it was faithful is the
+canary: `supplicant_client_test.c` counts, in the fake and without writing it
+down, how many times the passphrase really crossed the wire -- and the count
+after the move is what it was before, 1754 bytes swept, seventy-nine checks,
+all passing. A move that broke the fake would have shown up as a sweep that
+found nothing to sweep.
+
+### What it made possible
+
+`loop_test.c` now drives the whole path: a fake radio bound in a directory of
+the test's own, the watcher finding it and sending its own `ATTACH`, an event
+broadcast through a second connection, a round, and the line in the log.
+
+    an association the supplicant reported is in the daemon's log   ok
+
+Two things had to be right before it passed, and both are the kind of thing a
+grep would never have found:
+
+* **A round with no `refresh` installed never looks for a radio.** The watcher
+  scans the control directory from `ncfg_main_watchers_refresh`, which
+  `daemon_main.c` installs on the run and the first version of this case did
+  not -- so the fake heard no `ATTACH` and the log stayed empty. The case
+  installs the same pair the daemon does.
+* **The suite runs at `CRITICAL`.** A hundred and seventy checks that narrated
+  themselves would be unreadable, so `main` silences the log -- and a note
+  written into that is a note nothing records. The case raises the level for
+  the round it reads and puts it back.
+
+### And the greps are gone
+
+Both narration checks in `main_test.c` were deleted rather than kept beside the
+new one. A source check and a behavioural check for one thing are two things to
+keep true, and the weaker is the one to drop. The reaper's grep stays, because
+its one call site still has nothing driving it.
+
+Two sabotages, both caught by the new case where the grep caught one: the emit
+deleted, and the narration narrowed to the event the watcher was already
+looking at.
+
 ## 10.237 What the daemon was not saying
 
 A sweep for functions nothing calls -- every `ncfg_*` declared in a public
