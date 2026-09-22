@@ -9515,6 +9515,82 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.227 `ncfg apply` arrives, and the seam that keeps it off this machine
+
+The verb that changes things is ported. It compiles, observes, plans, acts,
+records what it did and says so -- and in this build of the library it cannot
+reach a kernel at all, which is the arrangement rather than a stage of it.
+
+**The machine is a seam, and `ncfg_cli_main` installs none.** `cli.h` now
+carries `ncfg_cli_machine_t` -- an `executor_open` and an `executor_close`
+around a context -- and `ncfg_cli_main_on(argc, argv, machine)` is the entry
+point that takes one. `ncfg_cli_main` calls it with `NULL`, so every program
+that links `libncfg.a` and does not go out of its way can plan and explain and
+refuse and change nothing:
+
+    ncfg: this build of `ncfg` was started with no way to reach the machine,
+          so it will not apply.
+
+`src/main/cli_machine.c` is the one installer. It is where the machine's paths
+are spelled -- `/proc`, the supplicant control directory, `resolv.conf`,
+dnsmasq, unbound, the DHCP client -- and it hands `ncfg_main_world_open` the
+document and the observation the command already has. The library half names
+none of those files, which is 0263's rule about `src/main/` applied to the one
+verb where getting it wrong reconfigures a workstation.
+
+**That is also what makes `cli_apply_test.c` safe to run here.** Its recorder
+sits in the seam; the plan is real, the command is driven from `argv`, every
+action is carried out -- against a function that appends a name to an array. A
+case that forgot to install one would not apply *by default*: it would get the
+refusal above, which `cli_test.c` asserts as its own check. The two files are
+the two halves of the property, and neither is a promise about discipline.
+
+### The fixtures are written so the plan is not this machine's
+
+`ncfg apply` observes through netlink and there is no seam for that, so a
+fixture naming an interface would plan whatever this workstation happens to
+have. Both fixtures avoid it from opposite sides. The plan that is carried out
+is `dns.apply` and `hostname.set`: a hostname no machine is called, and a
+delivery whose record is read from `owned.json` under a run directory that is
+this test's own and empty. The plan that is empty configures `ncfgt0`, and is
+empty *because* no such device exists -- the planner declines an interface that
+is not there and says so, which is the case that proves an empty plan opens
+nothing.
+
+**An empty plan opening nothing is the check worth having.** A converged
+machine is the ordinary case, and taking the apply lock and three netlink
+sockets to discover there is no work is slower and a chance to fail where there
+was none. `--confirm-within` is the other side of the same question: a window
+is a timer that has to outlive the command, so that apply belongs to the
+daemon, and the test asserts the handover by asserting the seam is never
+opened.
+
+Seven cases, forty-seven checks: the empty plan, a plan carried out in order,
+the directories the seam is handed, the fold into `owned.json` and
+`plan.last.json`, a failing action stopping the rest while the seam is still
+given back, `--json` answering with the journal and neither line of prose, a
+seam that will not open, and the unwired program.
+
+Five sabotages, five caught: opening the machine for an empty plan, never
+closing the executor, handing the seam the run directory in place of the
+configuration directory, dropping the failure's exit status, and not writing
+`plan.last.json`.
+
+**One assertion had to be loosened and it is the interesting one.**
+`hostname.set` renders `(was <whatever this host is called>)`, so a whole-line
+match carries the hostname of the machine it was written on and fails
+everywhere else. The prefix is what the port decides; the tail is the
+observation's. `line_starting` is that distinction, not a weaker check.
+
+**The directory left in `/tmp` was mine, not the fixture's.** A run piped into
+`head -20` takes SIGPIPE mid-suite, so `testdir_remove` never runs -- the
+cleanup is correct and was proved correct on a failing run. Reading a test's
+output through `head` is how a clean fixture looks like a leaking one.
+
+`may_reconcile` is still 0: the daemon does not reconcile on its own, and its
+`apply`, `confirm` and `revert` arms are the next thing rather than a part of
+this.
+
 ## 10.226 Where each program is told to look, and a case that proved nothing
 
 `--help` promises that every directory is the flag, or the variable, or the

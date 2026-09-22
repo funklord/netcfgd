@@ -1268,24 +1268,243 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  * observation, with every block this build is holding named, and nothing
  * changed.
  */
-static int command_apply(void)
+/*
+ * `ncfg apply --confirm-within N`, which is the daemon's to carry out.
+ *
+ * **One implementation of the safety net, in the program that is still
+ * running when the window expires.** A `ncfg` that armed one itself would have
+ * to stay alive to resolve it, and two implementations of the mechanism that
+ * saves a machine from a bad configuration is two chances to get it wrong --
+ * with the one that ran depending on how it was invoked.
+ *
+ * So this sends the request and prints what came back. Where the daemon
+ * refuses, its sentence is what an operator reads: this build's does, and says
+ * why, which is a better answer than a second refusal composed here.
+ */
+static int apply_through_daemon(const ncfg_cli_options_t *options)
 {
-	(void)failf("`ncfg apply` is not in this wave of the C port, and what is missing "
-	    "is this command rather than anything it would call: there is no apply path "
-	    "here at all. Nothing takes the apply lock, opens an executor or carries a "
-	    "plan out. The executor's own half that is not netlink is written and the "
-	    "daemon installs it, so the sentence that used to stand here -- that nothing "
-	    "outside the tests gives an executor a service context -- has stopped being "
-	    "true.");
-	(void)fail("It also has nothing to record with and nothing to revert with: the "
-	    "fold into owned.json and the `" NCFG_OBSERVE_ALTNAME_PREFIX "` mark a created "
-	    "link wears are written, and this command has no apply path to reach either "
-	    "from -- so an object it installed would be one netcfgd may never remove again "
-	    "-- while a `commit.arm` this plan carries arms no window here, so a change "
-	    "that cut the machine off would not come back.");
-	return fail("`ncfg plan` is the half that is ported: it reads the same "
-	    "configuration against the same machine, names every block this build is "
-	    "holding and not acting on, and changes nothing.");
+	ncfg_proto_request_t request;
+	ncfg_proto_message_t message;
+	int                  code = NCFG_CLI_EXIT_OK;
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_APPLY;
+	request.u.apply.confirm.present = 1u;
+	request.u.apply.confirm.value = options->confirm.value;
+	request.u.apply.allow_disruption.items = NULL;
+	request.u.apply.allow_disruption.count = 0u;
+	if (!ask_or_fail(options, &request, &message, &code)) {
+		return code;
+	}
+	/*
+	 * A journal is what an apply answers with. Nothing in this build encodes
+	 * one yet, so reaching here means the daemon answered something else --
+	 * which is a fact about the two halves disagreeing rather than about this
+	 * machine, and is said as one.
+	 */
+	if (message.u.response.kind != NCFG_PROTO_RESP_JOURNAL) {
+		ncfg_proto_message_free(&message);
+		return fail("the daemon answered an apply with something that is not a "
+		    "journal");
+	}
+	ncfg_proto_message_free(&message);
+	return code;
+}
+
+/*
+ * Where this program is allowed to reach the machine, or NULL.
+ *
+ * Set once by `ncfg_cli_main_on` before anything is dispatched. A file-scope
+ * pointer rather than an argument threaded through `dispatch`: every other
+ * verb would have to carry a parameter it never reads, and the one that does
+ * read it is the one that must not be reachable by accident.
+ */
+static const ncfg_cli_machine_t *the_machine;
+
+/*
+ * The exit status a plan that did not fail leaves with.
+ *
+ * A refusal means the desired state was not reached, whether or not some
+ * actions ran; exiting zero there would tell a script that convergence
+ * happened when the very change it asked for is the one that did not.
+ * Stranding is a separate code because it has a separate remedy, and refusal
+ * wins when both apply -- it is the one where netcfgd did not do something it
+ * was asked.
+ */
+static int outcome_of(const ncfg_plan_t *plan)
+{
+	if (ncfg_plan_was_refused(plan)) {
+		return NCFG_CLI_EXIT_REFUSED;
+	}
+	if (ncfg_plan_strands_credentials(plan)) {
+		return NCFG_CLI_EXIT_STRANDED;
+	}
+	return NCFG_CLI_EXIT_OK;
+}
+
+/* Where this run was told the configuration is, resolved once. The executor
+ * resolves credentials under it, so it is part of what an apply is pointed at
+ * rather than something the seam may answer for itself. */
+static const char *config_dir_of(const ncfg_cli_options_t *options, char *out, size_t out_size)
+{
+	return ncfg_config_resolve_dir(options->config_dir, out, out_size);
+}
+
+/*
+ * `ncfg apply`: make the machine match the configuration.
+ *
+ * **The order is observe, plan, act, and the lock covers all three.** Two
+ * applies racing plan against a machine the other is changing: the Rust
+ * measured two simultaneous runs producing a failed `route.add` every time,
+ * because the second had planned against a route the first then installed
+ * (0184). The lock is the executor seam's to take, which is why it is opened
+ * before the plan is carried out and closed after the record is written.
+ *
+ * **What is recorded is written before what happened is printed.** A journal
+ * that exists only in the terminal is no use to whoever finds the machine
+ * afterwards, and the fold into `owned.json` is what decides whether netcfgd
+ * may ever remove these objects again.
+ *
+ * **`--confirm-within` goes to the daemon**, and that is not a shortcut: the
+ * window is a timer that outlives this process, so a `ncfg` that armed one
+ * itself would have to stay alive to resolve it. One implementation of the
+ * safety net, in the one program that is still running when it expires.
+ */
+static int command_apply(const ncfg_cli_options_t *options)
+{
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             config_dir[NCFG_CLI_TEXT_MAX];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	ncfg_observed_t *observed = NULL;
+	ncfg_plan_options_t how;
+	ncfg_plan_t     *plan;
+	ncfg_journal_t   journal;
+	ncfg_executor_t  executor;
+	ncfg_dns_scopes_t      *scopes = NULL;
+	const ncfg_dns_scope_t *delivered = NULL;
+	size_t                  delivered_count = 0;
+	int                     code;
+
+	if (options->confirm.has) {
+		return apply_through_daemon(options);
+	}
+	if (!the_machine || !the_machine->executor_open) {
+		return fail("this build of `ncfg` was started with no way to reach the "
+		    "machine, so it will not apply. That is the seam `src/main/` installs; a "
+		    "program embedding this library without one can plan and explain and "
+		    "cannot change anything");
+	}
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
+	if (!document) {
+		return fail(err);
+	}
+	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	(void)ncfg_state_write_desired(run_dir, document, err, sizeof(err));
+	(void)ncfg_state_write_observed(run_dir, observed, err, sizeof(err));
+
+	plan_options_of(options, &how);
+	plan = ncfg_plan_build(document, observed, &how, err, sizeof(err));
+	if (!plan) {
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+		return fail(err);
+	}
+	/*
+	 * **An empty plan opens no socket.** Nothing to do is the ordinary answer
+	 * on a converged machine, and reaching for netlink to discover that is
+	 * both slower and a chance to fail where there was no work.
+	 */
+	if (ncfg_plan_is_empty(plan)) {
+		if (!options->json) {
+			if (ncfg_plan_was_refused(plan) || ncfg_plan_strands_credentials(plan)) {
+				ncfg_cli_print_plan_notes(plan);
+			} else {
+				ncfg_out_line("nothing to do");
+			}
+		}
+		code = outcome_of(plan);
+		ncfg_plan_free(plan);
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+		return code;
+	}
+
+	err[0] = '\0';
+	if (!the_machine->executor_open(the_machine->context, config_dir_of(options, config_dir,
+	        sizeof(config_dir)), run_dir, document, observed, &executor, err, sizeof(err))) {
+		ncfg_plan_free(plan);
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+		return failf("cannot start an apply: %s", err);
+	}
+	ncfg_journal_init(&journal);
+	err[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, err, sizeof(err));
+
+	/*
+	 * The scopes a `dns.apply` in this plan delivered, which is what the fold
+	 * needs: `dns.apply` is the one op that is not its own effect. The same
+	 * pure function on the same pair the executor was built from, so the
+	 * record says what the delivery did.
+	 */
+	err[0] = '\0';
+	scopes = ncfg_dns_scopes_of(document, observed, err, sizeof(err));
+	if (scopes) {
+		delivered = ncfg_dns_scopes_items(scopes, &delivered_count);
+	}
+	err[0] = '\0';
+	if (!ncfg_apply_record(run_dir, plan, &journal, delivered, delivered_count, err,
+	        sizeof(err))) {
+		(void)failf("could not record ownership: %s", err);
+	}
+	ncfg_dns_scopes_free(scopes);
+	err[0] = '\0';
+	if (!ncfg_apply_write_journal(run_dir, &journal, err, sizeof(err))) {
+		(void)failf("could not write the journal: %s", err);
+	}
+	if (the_machine->executor_close) {
+		the_machine->executor_close(the_machine->context, &executor);
+	}
+
+	if (options->json) {
+		ncfg_buf_t buf;
+
+		ncfg_buf_init(&buf, 0);
+		code = say_json(&buf, ncfg_journal_write(&journal, &buf, err, sizeof(err)), err);
+		ncfg_buf_free(&buf);
+		if (code != NCFG_CLI_EXIT_OK) {
+			ncfg_journal_free(&journal);
+			ncfg_plan_free(plan);
+			ncfg_observed_free(observed);
+			ncfg_document_free(document);
+			return code;
+		}
+	} else {
+		ncfg_cli_print_journal(&journal);
+		ncfg_cli_print_plan_notes(plan);
+	}
+
+	code = outcome_of(plan);
+	if (ncfg_journal_failure(&journal)) {
+		const ncfg_record_t *failure = ncfg_journal_failure(&journal);
+
+		if (!options->json) {
+			(void)failf("stopped at action %u (%s); %zu done, %zu not attempted",
+			    (unsigned)failure->id, failure->op ? failure->op : "an action",
+			    ncfg_journal_done(&journal), ncfg_journal_skipped(&journal));
+			(void)fail("re-run `ncfg apply` to resume from current state");
+		}
+		code = NCFG_CLI_EXIT_FAILED;
+	}
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+	return code;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -1349,7 +1568,7 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 		return command_plan(options);
 	}
 	if (strcmp(command, "apply") == 0) {
-		return command_apply();
+		return command_apply(options);
 	}
 	if (strcmp(command, "show") == 0) {
 		return command_show(options);
@@ -1388,6 +1607,11 @@ static int dispatch(const char *command, const ncfg_cli_options_t *options,
 
 int ncfg_cli_main(int argc, char **argv)
 {
+	return ncfg_cli_main_on(argc, argv, NULL);
+}
+
+int ncfg_cli_main_on(int argc, char **argv, const ncfg_cli_machine_t *machine)
+{
 	ncfg_cli_options_t options;
 	const char       **positional;
 	const char        *command;
@@ -1395,6 +1619,7 @@ int ncfg_cli_main(int argc, char **argv)
 	char               err[NCFG_ERROR_MAX];
 	int                code;
 
+	the_machine = machine;
 	if (argc < 2) {
 		ncfg_cli_print_usage();
 		return NCFG_CLI_EXIT_USAGE;

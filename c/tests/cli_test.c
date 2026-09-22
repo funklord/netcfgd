@@ -1733,104 +1733,44 @@ static void the_sentence_that_stopped_being_true_is_gone(void)
 	check(strstr(source, "&provenance, err, sizeof(err))") != NULL &&
 	    strstr(source, "ncfg_explain(&subject, document, observed, &provenance") != NULL,
 	    "  and `explain` compiles with a positions table and hands it on");
-	/* The vacuous-pass guard: a file that failed to open reads as a file with
-	 * nothing objectionable in it. */
-	check(strstr(source, "not in this wave") != NULL,
-	    "  and the file was read, the refusals that remain being in it");
+	/*
+	 * The vacuous-pass guard: a file that failed to open reads as a file with
+	 * nothing objectionable in it. The anchor used to be `ncfg apply`'s "not
+	 * in this wave", which is gone -- that command is written now -- so it is
+	 * the refusal that replaced it: the one an `ncfg` built without a way to
+	 * reach the machine gives.
+	 */
+	check(strstr(source, "no way to reach the ") != NULL,
+	    "  and the file was read, the refusal that remains being in it");
 	free(source);
 }
 
 /*
- * `ncfg apply` is refused, and the refusal is specific enough to act on.
+ * `ncfg apply` with no way to reach the machine refuses, and writes nothing.
  *
- * **It is checked by running the program**, because what is being asserted is
- * that nothing happens before the refusal: the arm is reached from `dispatch`
- * with no compile, no observation and no socket in between, so a case that
- * called a helper directly would be checking a different path from the one an
- * operator takes.
+ * **This is the seam's whole point, driven through the program.** `cli.h`
+ * keeps the library half unable to change anything: `ncfg_cli_main` installs
+ * no machine, so this suite -- which runs on a developer's workstation and on
+ * whatever builds the package -- cannot apply even by mistake. The check that
+ * says so has to run the command, because what is being asserted is that the
+ * refusal comes before anything else happens.
  *
- * The four facts are each named because each on its own is the reason: a
- * partial planner, an executor that refuses mid-plan, no ownership fold, and
- * no window. The alternative-name prefix is spelled from `observe.h`'s
- * constant rather than typed again, so a rename makes this red rather than
- * leaving the sentence pointing at a marker nothing uses.
+ * `cli_apply_test.c` drives the other side: the same command with a recorder
+ * installed, where the plan is carried out and nothing touches a kernel.
  */
-static void apply_is_refused_and_says_what_it_is_waiting_for(void)
+static void apply_with_no_machine_refuses_and_changes_nothing(void)
 {
 	char       *argv[] = { (char *)"ncfg", (char *)"apply" };
 	int         code = 0;
 	const char *said = ran(argv, 2, &code);
 
-	check(code == NCFG_CLI_EXIT_FAILED, "`ncfg apply` is refused");
-	/*
-	 * **Counted, not numbered.** These two named a number of planner passes
-	 * and a number of executor ops, and both had stopped being true by the
-	 * time the wave that made them true landed -- the executor carries every
-	 * op kind now and refuses by kind instead. A refusal that cites a figure
-	 * has to be swept whenever the figure moves, and a check asserting the
-	 * figure is what makes the sweep mandatory rather than optional. What
-	 * matters to somebody reading the refusal is which shape of thing is
-	 * missing, so that is what is asserted.
-	 */
-	/*
-	 * **Named, not counted -- for the second time.** This asserted "ten kinds
-	 * of configuration block" and the number was wrong within one wave: four
-	 * of the ten were ported and three of the rest turned out not to be this
-	 * port's gap at all. A refusal that cites a figure has to be swept
-	 * whenever the figure moves, which is the lesson 10.177 recorded about
-	 * the executor's op count and which this check then repeated. What is
-	 * asserted now is which blocks are held, because that is what a reader
-	 * needs and it changes only when the fact does.
-	 */
-	/*
-	 * **Named, not counted -- and now named after three names went stale.**
-	 * This asserted a count of blocks, then the two blocks that count resolved
-	 * to, then the mechanism that every op needing a service context is
-	 * refused because nothing installs one. That last was written as the thing
-	 * that "stops being true only when somebody writes that caller, which is
-	 * the event this sentence exists to wait for" -- and the daemon is that
-	 * caller now, so the event happened and the sentence had to move again.
-	 *
-	 * What it names now is the one fact that cannot be closed by anything
-	 * *underneath* this command: `ncfg apply` has no apply path of its own.
-	 * The executor, its service half and the fold are all written; there is
-	 * nothing here that calls them. That stops being true when somebody
-	 * writes `command_apply`, which is the only event that can change it.
-	 */
-	check(strstr(said, "no apply path") != NULL,
-	    "  naming the thing that is missing, which is this command and not its parts");
-	check(strstr(said, "has stopped being true") != NULL,
-	    "  and saying out loud that the reason it used to give no longer holds");
-	/* The consequence, which is what an operator needs from the sentence: not
-	 * that something is missing, but what a machine would look like if this
-	 * ran anyway. */
-	check(strstr(said, "takes the apply lock") != NULL,
-	    "  and what it is that nothing here does");
-	check(strstr(said, "owned.json") != NULL,
-	    "  and that nothing records what an apply did");
-	check(strstr(said, NCFG_OBSERVE_ALTNAME_PREFIX) != NULL,
-	    "  and the marker a link it created would not wear");
-	check(strstr(said, "commit.arm") != NULL,
-	    "  and the window that would be armed by nobody");
-	check(strstr(said, "`ncfg plan`") != NULL, "  and offers the half that is ported");
+	check(code == NCFG_CLI_EXIT_FAILED, "`ncfg apply` with no machine is refused");
+	check(strstr(said, "no way to reach the machine") != NULL,
+	    "  naming what is missing, which is the seam rather than the command");
+	check(strstr(said, "can plan and explain") != NULL,
+	    "  and what is still there, so the refusal is somewhere to go from");
 }
 
-/*
- * The four that read the machine are wired, each checked at the last refusal
- * before the kernel.
- *
- * `explain` parses its subject first and `wait-online` parses its argument
- * first, so reaching either sentence proves the arm is no longer
- * `not_in_this_wave` -- and `current_test.c` is where the observation
- * underneath them is driven.
- *
- * **`status` and `plan` used to be checked here and are not any more.** What
- * proved them was the refusal they gave `--json` before doing anything else,
- * and that refusal is gone: the flag is answered now. Nothing else stands
- * between those two arms and a netlink dump of the machine this suite is
- * built on, which this file does not touch. `no_arm_refuses_the_flag_any_more`
- * is what is left of the claim, and says so about itself.
- */
 static void the_four_that_read_the_machine_are_wired(void)
 {
 	char       *explain[] = { (char *)"ncfg", (char *)"explain" };
@@ -2455,7 +2395,7 @@ int main(void)
 	every_command_in_the_help_text_is_dispatched();
 	the_version_surface_names_the_copyright_holder();
 	the_sentence_that_stopped_being_true_is_gone();
-	apply_is_refused_and_says_what_it_is_waiting_for();
+	apply_with_no_machine_refuses_and_changes_nothing();
 	the_four_that_read_the_machine_are_wired();
 	the_wait_default_is_written_down_once();
 

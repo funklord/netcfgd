@@ -69,6 +69,7 @@
 #ifndef NCFG_CLI_H
 #define NCFG_CLI_H
 
+#include "ncfg/apply.h"
 #include "ncfg/document.h"
 #include "ncfg/explain.h"
 #include "ncfg/observed.h"
@@ -357,6 +358,25 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed);
  * empty and is not "nothing to do" in the sense anybody means.
  */
 void ncfg_cli_print_plan(const ncfg_plan_t *plan);
+
+/*
+ * What a plan says that is not an action: its refusals and its strandings.
+ *
+ * Printed under a plan by `ncfg_cli_print_plan` and under a *journal* by
+ * `ncfg apply`, which is why it is published rather than left static. Both
+ * need it in the same words: a guard that stopped an action is the same fact
+ * whether or not the rest of the plan then ran.
+ */
+void ncfg_cli_print_plan_notes(const ncfg_plan_t *plan);
+
+/*
+ * `ncfg apply`: what each action became, in the order they were attempted.
+ *
+ * One line per record, marked `ok`, `FAIL` or `skip`, and a failure's sentence
+ * indented under it -- the record has carried that all along, and a path that
+ * dropped it left an operator with `FAIL hook.run` and no reason.
+ */
+void ncfg_cli_print_journal(const ncfg_journal_t *journal);
 
 /*
  * `ncfg show`: the compiled document, canonically, where `cat` can reach it.
@@ -1101,15 +1121,58 @@ int ncfg_cli_read_secret(const char *prompt, char **out, char *err, size_t err_s
  * ------------------------------------------------------------------------ */
 
 /*
- * `ncfg`, from `argv`.
+ * How `ncfg apply` reaches the machine.
+ *
+ * **A seam because opening one opens a netlink socket and using one
+ * reconfigures the machine this process is running on.** Every other verb in
+ * this program reads; this is the one that changes something, and the library
+ * half of it must not be able to do that by itself. `src/main/` installs the
+ * implementation, which is the daemon's own world -- the apply lock, the
+ * kernel socket, the service context, the hooks and the document -- opened for
+ * one pass instead of for a loop, so there is one arrangement of those pieces
+ * rather than two.
+ *
+ * **A test installs a recorder instead, and that is the point rather than a
+ * convenience.** A check that drove the real thing would reconfigure the
+ * machine the suite is built on. With no seam at all `ncfg apply` refuses by
+ * name, so a program that embeds this library and forgets to install one
+ * cannot apply by accident either.
+ *
+ * `executor_open` is given both directories this run resolved and the document
+ * and observation the plan was built from. An implementation needs all four:
+ * the run directory to take the lock and record what it did, the configuration
+ * directory because the secrets and certificates it resolves live under it --
+ * a run pointed at a scratch tree must not load the machine's key material --
+ * and the other two for the ops that are not netlink. 0 with a sentence where
+ * the machine could not be reached, which `ncfg apply` reports rather than
+ * half-applying.
+ */
+typedef struct {
+	/* Whatever the implementation keeps. Never touched by this module. */
+	void *context;
+	int  (*executor_open)(void *context, const char *config_dir, const char *run_dir,
+	    const ncfg_document_t *desired, const ncfg_observed_t *observed,
+	    ncfg_executor_t *out, char *err, size_t err_size);
+	/* Release what `executor_open` filled in, and the lock it took. */
+	void (*executor_close)(void *context, ncfg_executor_t *executor);
+} ncfg_cli_machine_t;
+
+/*
+ * `ncfg`, from `argv`, with a way to reach the machine.
  *
  * The entry point a multi-call `main` calls rather than the runtime: both
  * programs live in one binary that dispatches on `argv[0]`, because they share
  * most of their code and shipping it twice cost 775 KB of the install.
  *
+ * `machine` may be NULL, and then every verb but `apply` behaves exactly as it
+ * does with one -- which is what makes the seam safe to leave out of a test.
+ *
  * Returns the process's exit code. It may not return at all: a write whose
  * reader has gone leaves at 141 (0261).
  */
+int ncfg_cli_main_on(int argc, char **argv, const ncfg_cli_machine_t *machine);
+
+/* The same, reaching nothing. `ncfg apply` refuses by name. */
 int ncfg_cli_main(int argc, char **argv);
 
 #endif /* NCFG_CLI_H */

@@ -130,8 +130,57 @@ void ncfg_cli_print_plan(const ncfg_plan_t *plan)
 			ncfg_out_writef("warning: %s\n", warning->message);
 		}
 	}
+	ncfg_cli_print_plan_notes(plan);
+}
+
+void ncfg_cli_print_plan_notes(const ncfg_plan_t *plan)
+{
+	if (!plan) {
+		return;
+	}
 	print_refusals(plan);
 	print_stranded(plan);
+}
+
+void ncfg_cli_print_journal(const ncfg_journal_t *journal)
+{
+	size_t at;
+
+	if (!journal) {
+		return;
+	}
+	for (at = 0; at < journal->record_count; at++) {
+		const ncfg_record_t *record = &journal->records[at];
+		char                 line[DESCRIBE_MAX];
+		const char          *mark;
+
+		switch (record->outcome) {
+		case NCFG_OUTCOME_DONE:
+			mark = "ok  ";
+			break;
+		case NCFG_OUTCOME_FAILED:
+			mark = "FAIL";
+			break;
+		case NCFG_OUTCOME_REVERTED:
+			/*
+			 * Not reachable from `ncfg apply`, which never reverts -- the
+			 * window is the daemon's -- and written out rather than swept into
+			 * the `skip` arm so that the day a caller hands this a reverted
+			 * journal it reads as what it is.
+			 */
+			mark = "back";
+			break;
+		case NCFG_OUTCOME_SKIPPED:
+		default:
+			mark = "skip";
+			break;
+		}
+		ncfg_out_writef("%s %s\n", mark,
+		    describe(record->op, &record->reason, line, sizeof(line)));
+		if (record->error) {
+			ncfg_out_writef("     %s\n", record->error);
+		}
+	}
 }
 
 /*

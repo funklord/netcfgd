@@ -13,6 +13,7 @@
  * `src/main/` is kept out of `libncfg.a` for the same reason. An archive that
  * enforces "a library never exits" would otherwise have a `main` inside it.
  */
+#include "loop_internal.h"
 #include "main_internal.h"
 
 #include "ncfg/cli.h"
@@ -29,7 +30,16 @@ int main(int argc, char **argv)
 
 	switch (ncfg_main_program_for(called_as)) {
 	case NCFG_MAIN_PROGRAM_CLIENT:
-		return ncfg_cli_main(argc, argv);
+		/*
+		 * **With a way to reach the machine, which only this program gives
+		 * it.** `ncfg apply` is the one verb that changes anything, and
+		 * `cli.h` keeps the library half unable to: a test drives the same
+		 * command through a recorder, and an embedder that installs nothing
+		 * gets a refusal rather than an apply. Which directories this run means
+		 * is the command line's answer and arrives with the call, not this
+		 * one's: a second parse of `argv` here is a second answer.
+		 */
+		return ncfg_cli_main_on(argc, argv, ncfg_main_cli_machine());
 	case NCFG_MAIN_PROGRAM_DAEMON:
 		return ncfg_main_netcfgd(argc, argv);
 	case NCFG_MAIN_PROGRAM_PROBE:
