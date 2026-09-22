@@ -231,6 +231,59 @@ exit 0
 STUB
 chmod +x "$work/bin/systemctl"
 
+# ----------------------------------------------------------- a switch, rehearsed
+# What `ncfg wifi connect <ssid>` does to this supervisor. A switch takes the
+# association down **on purpose** and the new one takes seconds to come up --
+# EAP is a full handshake and a lease follows it -- so the network is gone for
+# longer than an accident would take, and the supervisor must be told to
+# expect that rather than treating it as the failure it looks like.
+#
+# Measured on the machine this was written for: an association re-established
+# in about 3s and a default route back 8s after that. So the default of three
+# misses at five seconds -- fifteen seconds -- is inside the window a switch
+# can take, and `--failures 6` is what the tryout's own hint says to use.
+#
+# Both halves are checked here: the default hands back during a switch, and
+# the longer count rides it out. Neither is a bug; which one is wanted is the
+# operator's, and what matters is that the difference is real rather than
+# hoped for.
+
+rehearse_switch() {
+	# $1 how many misses to allow, $2 how long the switch takes, $3 the file
+	echo active > "$work/active"
+	echo up > "$work/net"
+	: > "$work/systemctl.log"
+	( sleep 2; echo down > "$work/net"; sleep "$2"; echo up > "$work/net" ) &
+	switcher=$!
+	sh "$repo/tests/live/c_daemon_tryout.sh" --interval 1 --failures "$1" --minutes 1 \
+	    >"$3" 2>&1 && switch_code=0 || switch_code=$?
+	wait "$switcher" 2>/dev/null || true
+}
+
+rehearse_switch 2 6 "$work/switch-short.out"
+check "$( [ "$switch_code" = 1 ] && echo 0 || echo 1 )" \
+	"a switch longer than the misses allowed hands the machine back"
+grep -q "handing the machine back" "$work/switch-short.out" &&
+	check 0 "  which is the supervisor doing what it was told" ||
+	check 1 "  which is the supervisor doing what it was told"
+
+rehearse_switch 10 6 "$work/switch-long.out"
+check "$( [ "$switch_code" = 0 ] && echo 0 || echo 1 )" \
+	"and the same switch with misses enough to cover it is ridden out"
+grep -q "no network" "$work/switch-long.out" &&
+	check 0 "  having noticed the association go, rather than not looking" ||
+	check 1 "  having noticed the association go, rather than not looking"
+grep -q "the network answered again after" "$work/switch-long.out" &&
+	check 0 "  and said when it came back, which is the switch completing" ||
+	check 1 "  and said when it came back, which is the switch completing"
+grep -q "handing the machine back to the Rust daemon" "$work/switch-long.out" &&
+	check 1 "  without handing anything back" ||
+	check 0 "  without handing anything back"
+# And the C daemon is still the one holding the machine at the end of it.
+grep -q "the .* minutes are up; handing back" "$work/switch-long.out" &&
+	check 0 "  the tryout ran to its own deadline with the daemon still up" ||
+	check 1 "  the tryout ran to its own deadline with the daemon still up"
+
 # ------------------------------------------------------- a network already down
 # is not a tryout: it would stop the working daemon to start an experiment on a
 # machine that is already broken.
