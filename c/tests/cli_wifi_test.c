@@ -495,6 +495,18 @@ static void what_adding_an_open_network_writes(void)
 	options.wifi.interface = "wlan0";
 	check(!add("Cafe", err, sizeof(err)) && strstr(err, "already configured") != NULL,
 	    "adding the same network twice is refused, naming what to do instead");
+	/*
+	 * **And what it names has to be the way out of *this* case.** The label
+	 * is what cannot be shared; the SSID can, which is how an open network
+	 * sits beside a WPA2 one of the same name -- a configuration reported
+	 * from a machine that has it in other software. The refusal used to
+	 * advise editing or forgetting the network that is already there, which
+	 * destroys the one the operator has to add the one they want.
+	 */
+	check(strstr(err, "--id") != NULL,
+	    "  and what it names is `--id`, which is how the second one gets a label");
+	check(strstr(err, "same SSID") != NULL,
+	    "  saying that two blocks may share an SSID, since that is the case in hand");
 }
 
 static void what_adding_a_secured_network_writes(void)

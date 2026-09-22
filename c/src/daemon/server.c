@@ -414,6 +414,24 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 	    : 0;
 	pthread_mutex_unlock(&server->lock);
 	if (!built) {
+		/*
+		 * **Said in the log as well as to the client**, which it was not.
+		 * A refused request went back over the socket and left no trace here
+		 * at all -- so a `wifi connect` that failed mid-join on the machine
+		 * this was written on showed the operator a sentence and the daemon's
+		 * own log three startup lines, with nothing to say a request had ever
+		 * arrived (project.md 10.234). A daemon whose log cannot be read
+		 * afterwards to find out what it was asked is one nobody can debug
+		 * from the evidence.
+		 *
+		 * A note rather than an error: most of these are the client being
+		 * told no -- a name that is not a name, a tier it does not hold --
+		 * which is the control socket working, not the daemon failing.
+		 */
+		const char *what = ncfg_proto_request_name(request->kind);
+
+		ncfg_log_emitf("control", NCFG_LOG_NOTE, "`%s` was refused: %s",
+		    what ? what : "a request", err[0] ? err : "no reason given");
 		ncfg_buf_free(&line);
 		send_error(fd, err[0] ? err : "the daemon had no answer for that");
 		return 1;

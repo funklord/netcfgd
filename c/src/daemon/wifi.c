@@ -36,6 +36,7 @@
 #include "ncfg/radio.h"
 #include "ncfg/secrets.h"
 #include "ncfg/supplicant.h"
+#include "ncfg/wifi_profile.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1544,11 +1545,11 @@ int ncfg_wifi_configure_network(const ncfg_document_t *document,
 	for (at = 0; document && at < document->network_count; at++) {
 		if (document->networks[at].id &&
 		    strcmp(document->networks[at].id, profile.id) == 0) {
-			ncfg_error_set(err, err_size,
-			    "a network `%s` is already configured. Change it by editing the "
-			    "configuration, or remove it and add it again",
-			    document->networks[at].id);
-			return 0;
+			/* `wifi_profile.h` owns the sentence, because the CLI's own
+			 * path refuses the same thing and the two used to say it
+			 * separately. */
+			return ncfg_wifi_profile_label_taken(document->networks[at].id, err,
+			    err_size);
 		}
 	}
 	/*

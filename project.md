@@ -9515,6 +9515,118 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.234 The second run, which broke the network on purpose
+
+The tryout was run again and this time the fallback fired for real: three
+missed checks, the C daemon stopped, the Rust daemon started, the network back
+and steady after thirteen seconds. What made the network go was an
+`ncfg wifi connect` that failed mid-join -- which is the arrangement working,
+and four findings.
+
+### A signal is not a supplicant that died
+
+    ncfg: `OpenPC.se` did not join on `wlp0s20f3`: the supplicant on
+          wlp0s20f3 stopped answering: Interrupted system call
+
+**That is 0233 again, at the other socket netcfgd blocks in.** That decision
+is about this same daemon on this same machine: `EINTR` means *call it again*
+and nothing else, netcfgd spawns a child every time it runs a hook, and the
+handlers it installs carry no `SA_RESTART` deliberately so that interruption
+is handled where it arrives. It was fixed in the netlink watcher and the
+supplicant client was never looked at.
+
+Both of that client's reads were wrong. The event read listed the two
+spellings of a timeout -- `EAGAIN`, `EWOULDBLOCK` -- and left the interruption
+out, so a signal was reported as a supplicant that had stopped answering; it
+answers *nothing yet* now, which is 0233's own remedy and what a timeout
+already got. The command read reported it as no reply at all; it retries what
+is left of the **same** deadline now, and says so when the deadline is what ran
+out rather than blaming the supplicant.
+
+A sweep for the class found no others: `c/src/backend/supplicant/client.c` was
+the only file in the tree with a blocking call and no `EINTR` in it.
+`daemon_loop.c` looks like one and is not -- its classification lives in
+`daemon_wake.c`, which is where 0233 put it.
+
+**The tests fire a real signal.** A `setitimer` every 50ms with an
+`SA_RESTART`-less handler, into an event read that has nothing to read and
+into a command the fake answers by going quiet -- both block, both are
+interrupted, and the case asserts a signal *did* arrive before asserting it
+did not matter. Two sabotages, two caught.
+
+### A daemon that was asked something and said nothing
+
+The C daemon's own log for that run is three lines, all from startup. The
+request that failed, and the sentence the operator saw, appear nowhere: a
+refused request went back over the socket and left no trace. So the log a
+person reads afterwards to find out what the daemon was asked could not
+answer it. `server.c` notes every refusal now, with the request's name and the
+reason -- a note rather than an error, because most of them are the control
+socket working.
+
+### `ncfg apply` does not reach the daemon, and `ncfg` is the Rust one
+
+Two things went wrong in one command:
+
+    $ ncfg apply
+    ncfg: could not start an apply: Permission denied (os error 13)
+
+`/usr/bin/ncfg` is the **Rust** binary on a machine with the package
+installed, so that was the Rust CLI, not this port. And `ncfg apply` without
+`--confirm-within` does not go to the daemon at all: it applies in the
+client's own process and takes the apply lock itself, which as a non-root user
+it cannot open. What releases a `--no-apply-on-start` hold, and what makes the
+*daemon* do the work, is an apply request over the socket -- which is what
+`--confirm-within` sends.
+
+The C's own sentence for that failure names the file it could not open
+(`cannot start an apply: cannot open /run/netcfgd/apply.lock: Permission
+denied`), where the Rust's says only what errno said. Recorded, not fixed.
+
+The tryout prints the commands by path now, with `--confirm-within 60` as the
+one that makes the daemon apply, and says that a switch drops the association
+on purpose so `--failures 6` is the flag for it.
+
+### Two networks, one SSID
+
+Reported from the machine: *we cannot add the same SSID twice, once with
+WPA2/PSK and once open.* The configuration is expressible and both programs
+compile it -- proved against both, two blocks, one `psk` and one `open`,
+sharing `ssid = "6775657374"` -- because a block's **label** is its name and
+the SSID is a field. What refused it was `ncfg wifi add`, and what it said was
+the problem:
+
+> a network `guest` is already configured. Change it by editing the
+> configuration, or remove it and add it again
+
+That is the advice for the *same* network and exactly wrong for a different
+one with the same name: it tells an operator to destroy the network they have
+in order to add the one they want. The sentence now says which thing is taken
+-- the label names the block, the file and the credential -- that two blocks
+may share an SSID, and that `--id` is how the second one gets a label of its
+own.
+
+**And it is one sentence now.** There were two copies, in the CLI's own write
+path and in the daemon's arm, and correcting one of them made them disagree --
+so it lives in `wifi_profile.h`, which owns what a label is.
+
+**What is not fixed, and is the Rust's too.** `ncfg_wifi_network_for` answers
+"which of my blocks is this radio on?" by BSSID first and then by the first
+block with that SSID (0239). Two blocks sharing an SSID and distinguished only
+by their security -- exactly the reported configuration -- resolve to whichever
+comes first, so `ncfg wifi status` may name the wrong one and the planner may
+take the wrong one's `metric`. The supplicant's `STATUS` carries `key_mgmt`,
+which is what would separate them. The Rust has the same rule in
+`netcfgd_model::wifi::network_for`, so this is a limitation to decide about
+rather than a port gap to close.
+
+### And the log that was evidence, again
+
+`c_daemon_watch.sh` drives the tryout with a fake daemon, and the tryout names
+its log under `$TMPDIR` -- which the self-test did not set, so its stub output
+landed in `/tmp` beside the real runs' and stayed there. Nine files after one
+afternoon. The self-test points `TMPDIR` at its own directory now.
+
 ## 10.233 The first run, and the eight seconds it took to hand back
 
 The tryout was run on the machine: `systemctl stop netcfgd`, the C daemon

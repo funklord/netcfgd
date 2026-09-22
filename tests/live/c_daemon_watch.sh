@@ -102,6 +102,12 @@ STUB
 chmod +x "$work/bin/"*
 echo active > "$work/active"
 
+# **The tryout's log goes in this test's directory, not in `/tmp`.** It names
+# its log with `mktemp` under `$TMPDIR`, one per run -- so without this the
+# fake daemon's output landed beside the real runs' evidence and stayed there:
+# nine stray `netcfgd-c-tryout.*.log` files after one afternoon, each 53 bytes
+# of stub.
+export TMPDIR="$work"
 export NCFG_WATCH_WORK="$work"
 export NCFG_TRYOUT_DAEMON="$work/bin/fake-netcfgd"
 export PATH="$work/bin:$PATH"
