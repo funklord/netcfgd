@@ -342,6 +342,66 @@ DAEMON_CASES = [
 	["extra"],
 	["--config-dir"],
 ]
+# The one place the two daemons' own output is allowed to differ, written as
+# the exact lines each side produces so that it expires by failing.
+#
+# `--try-the-c-daemon` is the C port's alone and must stay that way: the Rust
+# daemon runs when it is started, and this one refuses unless somebody at the
+# keyboard says they are watching (project.md 10.232). A Rust that grew the
+# flag would be a Rust that had acquired the C's refusal, which should not
+# happen quietly -- and a C that lost it would leave this gate carrying an
+# exception for a divergence that has gone.
+#
+# **Whole lines, not fragments, and that is not fussiness.** The first version
+# of this recorded the substring `--try-the-c-daemon`, and a sabotage that
+# renamed the flag to `--try-the-c-daemon-x` passed: the fragment was still
+# *in* the line, so the exception swallowed a flag nobody had recorded. An
+# exception that matches more than what it was written for is how a gate comes
+# to approve its own drift.
+DAEMON_DIFFERENCES = {
+	"--help": [
+		("c", "  --try-the-c-daemon     run the loop anyway. This build refuses by"),
+		("c", "                         default and prints why; read that first, and"),
+		("c", "                         have something watching the machine when you"),
+		("c", "                         use this -- tests/live/c_daemon_tryout.sh is"),
+		("c", "                         what it was written for"),
+	],
+}
+
+
+def daemon_without_exceptions(verb, rust_text, c_text):
+	"""The two texts with the recorded divergence taken out, or a sentence.
+
+	Answers `(rust, c, None)` when every recorded line is exactly where it
+	should be, and `(None, None, why)` when one has gone -- which is how an
+	exception stops outliving the thing it is about.
+	"""
+	recorded = DAEMON_DIFFERENCES.get(verb, [])
+	if not recorded:
+		return (rust_text, c_text, None)
+	for which, line in recorded:
+		said = rust_text if which == "rust" else c_text
+		if line not in said.splitlines():
+			return (None, None,
+				f"`netcfgd {verb}`: the {which} program no longer has the line "
+				f"{line!r}. project.md 10.232 records that divergence; if it has "
+				"been closed, the exception in this gate can go")
+	# Each recorded line is dropped once, from the side that owns it, so a
+	# second copy of one -- or any line nobody recorded -- still has to match.
+	def trimmed(text, which):
+		lines = text.splitlines(True)
+		for owner, line in recorded:
+			if owner != which:
+				continue
+			for at, existing in enumerate(lines):
+				if existing.rstrip("\n") == line:
+					del lines[at]
+					break
+		return "".join(lines)
+
+	return (trimmed(rust_text, "rust"), trimmed(c_text, "c"), None)
+
+
 DAEMON_RUST = "./target/release/netcfgd"
 DAEMON_RUST_FALLBACK = "./target/debug/netcfgd"
 DAEMON_C = "./c/netcfgd"
@@ -642,7 +702,11 @@ def compare_daemon(rust, c):
 				text = (result.stdout + result.stderr)
 				said.append((result.returncode,
 					     text.replace(config_dir, "<config>").replace(run_dir, "<run>")))
-		if said[0] != said[1]:
+		rust_text, c_text, why = daemon_without_exceptions(
+			" ".join(verb), said[0][1], said[1][1])
+		if why:
+			return why
+		if said[0][0] != said[1][0] or rust_text != c_text:
 			return (f"`netcfgd {' '.join(verb)}` differs\n"
 				f"    rust: {said[0][1].strip()[:160]}\n"
 				f"    c   : {said[1][1].strip()[:160]}")

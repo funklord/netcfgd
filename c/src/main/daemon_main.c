@@ -78,6 +78,11 @@ static const char usage_text[] =
     "  --socket PATH          default " NCFG_RUN_DIR_DEFAULT "/netcfgd.sock\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
+    "  --try-the-c-daemon     run the loop anyway. This build refuses by\n"
+    "                         default and prints why; read that first, and\n"
+    "                         have something watching the machine when you\n"
+    "                         use this -- tests/live/c_daemon_tryout.sh is\n"
+    "                         what it was written for\n"
     "  -h, --help             this text\n"
     "  --version              the version, and who holds the copyright\n";
 
@@ -212,6 +217,8 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 			options->apply_on_start = 0;
 		} else if (strcmp(argument, "--poll-config") == 0) {
 			options->poll_config = 1;
+		} else if (strcmp(argument, "--try-the-c-daemon") == 0) {
+			options->try_the_c_daemon = 1;
 		} else {
 			/*
 			 * Unknown rather than ignored, and it names what was typed. A
@@ -850,62 +857,59 @@ done:
 }
 
 /*
- * Whether this build may be let loose on a machine.
+ * Whether this build may be let loose on a machine, and what changed about the
+ * answer.
  *
- * **The two facts that used to be here are closed, and this still answers 0.**
- * A created link now wears `NCFG_OBSERVE_ALTNAME_PREFIX` as an alternative
- * name (`kernel.c`'s `mark_as_ours`), and every apply and every revert folds
- * what it did into `owned.json` (`ncfg_apply_record`). So
- * `ncfg_observe_link_ownership` answers `ours` about a link this build made,
- * by the kernel's mark and by the record, and the change that had no way to be
- * undone can be undone.
+ * **Three facts stood here and all three are closed.** A created link wears
+ * `NCFG_OBSERVE_ALTNAME_PREFIX` as an alternative name, every apply and every
+ * revert folds what it did into `owned.json`, and `plan.last.json` says where
+ * an apply stopped. The two that replaced them are closed too:
  *
- * What is left is not bookkeeping and is not this directory's:
+ *   * **The executor refuses nothing that is a port gap.** What
+ *     `ncfg_apply_supported` still declines is a physical device it cannot
+ *     create, a plain `backend.start` for DHCPv6 that carries neither the
+ *     delegation request nor the client (0050), and WireGuard and DNS, which
+ *     are not daemons. The Rust declines each of those in the same words.
+ *   * **The planner holds no block the Rust does not.** Every arm of
+ *     `warn_unported`, of `wifi.c`'s held list and of `offload.c` carries
+ *     `ncfg_plan_warn_unbuilt`'s sentence -- *nothing acts on it in the Rust
+ *     either* -- and the two blocks that are read elsewhere say where. A
+ *     reconcile here would converge exactly what a reconcile there converges.
  *
- *   * **The planner still holds blocks rather than acting on them**, and warns
- *     by name for each one. **The list is not written here**, and that is the
- *     lesson rather than laziness: it was written here once -- ten blocks --
- *     and most of them landed while the sentence sat unchanged, so a reader
- *     was told a pass was missing that had been there for waves. The list is
- *     `warn_unported` in `src/plan/build.c` together with each pass's own
- *     held-block warning, and it stays current by a rule that cannot rot: a
- *     pass landing takes its warning out in the same commit.
+ * So the refusal stays, and its reason is now the one that cannot be closed by
+ * writing code: **no netcfgd written in C has run a machine.** Every check in
+ * this tree runs against a recorder, a scratch directory or a fake; the live
+ * scripts read. A loop is the one part of this program that acts with nobody
+ * at the keyboard, and the thing it would act on first, on the machine this is
+ * written on, is the radio carrying the only route off it.
  *
- *     A warning is what makes `ncfg plan` honest and is exactly what a
- *     reconcile on a timer would act past: it would converge part of a
- *     machine and report having converged it, to nobody who is reading.
- *   * **An op this executor cannot carry out is refused while the plan is
- *     running.** `ncfg_apply_supported` is asked by `execute`, one action at a
- *     time -- a `link.create` for a physical device, a pppoe session or an
- *     openvpn tunnel, and a `backend.start` for four of the nine backend
- *     kinds -- measured through `ncfg_apply_supported` rather than counted
- *     by reading its arms -- and `ncfg_apply` stops at the first failure. A
- *     plan mixing a supported op with an unsupported one therefore changes
- *     the machine and stops halfway. The link half of that list used to name
- *     a vlan, a bond, a macvlan and a tunnel; all four are created now, and
- *     the three left are ones `plan/link.c` declines by an earlier arm of its
- *     own.
- * The third fact that used to be here is closed too: `plan.last.json` is
- * written, by `ncfg_apply_write_journal`, after every apply and every revert,
- * so a plan that stopped halfway says under `/run` where it stopped. What is
- * left is the two above, and neither is bookkeeping.
- *
- * And the decision is the operator's rather than this function's. That is the
- * whole of the difference between this and `ncfg apply`, which **does apply
- * now**: somebody typed it, against the machine in front of them, having read
- * whatever `ncfg plan` said about the blocks this build is holding. `on_drift
- * = reconcile` is the default, so starting this build is an apply nobody typed
- * -- on a timer, repeatedly, against a live network somebody is working over
- * on the machine this port is written on. The socket's `apply` arm is ported
- * for the same reason the terminal's is: it is a request somebody made. A
- * reconcile is not one.
- *
- * Deleting this function is how the daemon is turned on, and the two facts
- * above are what has to be answered first.
+ * **That is a reason to be told, not a reason to be talked out of.** So this
+ * answers what the invocation said: `--try-the-c-daemon` is how somebody at
+ * the keyboard says they are watching, and `tests/live/c_daemon_tryout.sh` is
+ * what watches -- it hands the machine back to the Rust daemon when the
+ * network goes, which is the evidence-gathering arrangement this was waiting
+ * for. Nothing in any unit file passes that flag.
  */
+/*
+ * Whether *this invocation* was told to run anyway, and nothing else.
+ *
+ * **A latch rather than a parameter, so that the default is what a test can
+ * ask about.** `main_test.c`'s subject is "this build does not reconcile
+ * unless somebody says so", which is a question about the program rather than
+ * about one call -- and a function taking the options would answer it only for
+ * whatever options a test happened to build. Set once, by the parser, from a
+ * flag that is not in any unit file.
+ */
+static int told_to_reconcile;
+
+void ncfg_main_netcfgd_allow_reconcile(int allowed)
+{
+	told_to_reconcile = allowed ? 1 : 0;
+}
+
 int ncfg_main_netcfgd_may_reconcile(void)
 {
-	return 0;
+	return told_to_reconcile;
 }
 
 /*
@@ -913,20 +917,32 @@ int ncfg_main_netcfgd_may_reconcile(void)
  */
 static int will_not_reconcile(void)
 {
-	(void)fail("this build of the C port will not start, and what is left is no longer "
-	    "in the executor: every member of its service context is resolved now, so the "
-	    "fourteen ops that are not netlink are carried out rather than refused. What "
-	    "is left is the planner. It does not read every block a document can carry, "
-	    "and a reconcile on a timer would act past the ones it holds -- converging "
-	    "part of a machine and reporting that it had converged it, to nobody who is "
-	    "reading");
-	(void)fail("`ncfg plan` is the half that is honest about this: it names every "
-	    "block this build is holding and not acting on, against the same document and "
-	    "the same machine, and changes nothing. Run it and read the warnings; they "
-	    "are the list, and they stay current by a rule that cannot rot -- a pass "
-	    "landing takes its warning out in the same commit. `ncfg apply` will then do "
-	    "what it says, because somebody typed it; a daemon reconciling on drift is "
-	    "an apply nobody typed, on a timer, and that is what this refuses");
+	/*
+	 * **What this says had to change, because what was true stopped being
+	 * true.** It named two things: ops the executor refused, and blocks the
+	 * planner held. The first is closed -- `ncfg_apply_supported` refuses
+	 * nothing that is a port gap. So is the second, in the only sense that
+	 * distinguished this build from the Rust: every block the planner holds is
+	 * one the Rust holds too, each carrying `warn_unbuilt`'s sentence, and the
+	 * two that are not held here are read by the daemon instead.
+	 *
+	 * What is left is not a list of missing code. It is that **no netcfgd
+	 * written in C has ever run a machine**, and a reconcile loop is the one
+	 * part of this program that acts without anybody having typed anything.
+	 * That is a different kind of reason and it is the honest one: the risk
+	 * is the evidence nobody has, not a feature somebody can name.
+	 */
+	(void)fail("this build of the C port does not start its reconcile loop by default, "
+	    "and the reason is no longer a list of missing code: the executor refuses "
+	    "nothing that is a port gap, and every block this planner holds is one the "
+	    "Rust holds too. What is missing is evidence -- no netcfgd written in C has "
+	    "run a machine for any length of time -- and a loop is the one part of this "
+	    "program that acts with nobody at the keyboard");
+	(void)fail("`ncfg plan` changes nothing and says what this build would do on this "
+	    "machine; `ncfg apply` does it, because somebody typed it. To run the loop "
+	    "anyway, pass `--try-the-c-daemon`, and have something watching that can hand "
+	    "the machine back -- `tests/live/c_daemon_tryout.sh` is that something, and it "
+	    "falls back to the Rust daemon when the network goes");
 	return NCFG_MAIN_EXIT_FAILED;
 }
 
@@ -942,8 +958,21 @@ int ncfg_main_netcfgd(int argc, char **argv)
 	if (done) {
 		return NCFG_MAIN_EXIT_OK;
 	}
+	ncfg_main_netcfgd_allow_reconcile(options.try_the_c_daemon);
 	if (!ncfg_main_netcfgd_may_reconcile()) {
 		return will_not_reconcile();
 	}
+	/*
+	 * **Said every time, at the level nothing filters.** Somebody who typed
+	 * the flag knows what they did; the person who finds this in a log a week
+	 * later, or inherits a machine running it, does not. It names the build,
+	 * what is watching (nothing, from here -- that is the operator's to
+	 * arrange) and how to stop.
+	 */
+	ncfg_log_emitf("daemon", NCFG_LOG_WARNING,
+	    "starting the C port's reconcile loop because `--try-the-c-daemon` was given. "
+	    "This build has never run a machine for long; the refusal it replaces is in "
+	    "`netcfgd --help` and in daemon_main.c. Stop it with SIGTERM and start the Rust "
+	    "daemon to hand the machine back");
 	return start(&options);
 }

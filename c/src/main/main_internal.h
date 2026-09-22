@@ -183,6 +183,18 @@ typedef struct ncfg_main_options {
 	const char *socket;
 	int         apply_on_start;
 	int         poll_config;
+	/*
+	 * `--try-the-c-daemon`, which is the only thing that lets this build's
+	 * loop run at all.
+	 *
+	 * `ncfg_main_netcfgd_may_reconcile` says what the refusal is for. This is
+	 * the other half of it: an operator who has read that, is at the keyboard,
+	 * and has something watching -- `tests/live/c_daemon_tryout.sh` is that
+	 * something -- can say so in as many words. **It is not in any unit file**
+	 * and it is not short: a flag a machine could acquire by a typo or by an
+	 * init script somebody copied is not consent.
+	 */
+	int         try_the_c_daemon;
 } options_t;
 
 int ncfg_main_netcfgd_parse(int argc, char **argv, struct ncfg_main_options *options, int *done,
@@ -322,3 +334,13 @@ int ncfg_main_probe(int argc, char **argv);
  * reasoning and the two things that have to be true before it answers yes.
  */
 int ncfg_main_netcfgd_may_reconcile(void);
+
+/*
+ * Say that this invocation was told to run the loop.
+ *
+ * Called once by the entry point with what the parser found, and by
+ * `main_test.c`, which is the only other caller and puts it back afterwards.
+ * Nothing else may: a second caller would be a way for the loop to start
+ * without the flag, which is the whole of what the flag is.
+ */
+void ncfg_main_netcfgd_allow_reconcile(int allowed);
