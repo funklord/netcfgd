@@ -85,6 +85,7 @@
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
+#include "ncfg/pppoe.h"
 #include "ncfg/secrets.h"
 
 /* ------------------------------------------------------------------------ *
@@ -161,6 +162,31 @@ typedef struct {
 	/* Where the tunnel's `--up` script writes what it was given. */
 	const char *report;
 } ncfg_service_tunnel_t;
+
+/*
+ * One PPPoE session, with its password already resolved.
+ *
+ * `ncfg_service_tunnel_t`'s arrangement and for its reason: the credential is
+ * written to a file only pppd and netcfgd know the name of, and resolving it
+ * is the caller's because the resolver is the caller's. What is borrowed from
+ * the document is the block itself -- the parent interface, the username, the
+ * optional service and access concentrator -- because the options file is
+ * rendered from all of it and a copy here would be a second spelling of the
+ * same five fields.
+ *
+ * **A session whose password cannot be resolved gets no entry**, and
+ * `backend.start` then refuses it by name. pppd dialling with the wrong
+ * credential retries for ever -- `persist` and `maxfail 0` are in the options
+ * netcfgd writes -- which reads to an operator as a line fault rather than as
+ * a secret netcfgd could not read.
+ */
+typedef struct {
+	const char *iface;
+	/* Borrowed from the document. */
+	const ncfg_pppoe_config_t *config;
+	/* The resolved password, or NULL for a document that named none. */
+	const char *password;
+} ncfg_service_session_t;
 
 /*
  * The route metric one interface's DHCP client is started with.
@@ -258,6 +284,21 @@ typedef struct {
 	/* Each tunnel, with its credentials resolved. */
 	const ncfg_service_tunnel_t *tunnels;
 	size_t                       tunnel_count;
+	/* Each PPPoE session, with its password resolved. */
+	const ncfg_service_session_t *sessions;
+	size_t                        session_count;
+	/*
+	 * What a PPPoE session needs from the machine: which pppd to run and
+	 * where pppd's own pid file may be.
+	 *
+	 * A struct for `dhcp`'s reason -- they are one subject and `pppoe.h` owns
+	 * it. Left zero, a session start finds pppd by name and looks for a pid
+	 * file in the machine's own directories, which is what
+	 * `ncfg_pppoe_machine` would have answered; unlike the DHCP clients there
+	 * is nothing here a wrong answer could write to, because the only thing
+	 * netcfgd does with a pid it finds is check whose it is.
+	 */
+	ncfg_pppoe_machine_t pppoe;
 	/*
 	 * What a DHCP client needs from the machine: the three programs, the
 	 * shipped hook, dhcpcd's own run directory and what `-f` points at.

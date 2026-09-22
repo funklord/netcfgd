@@ -971,6 +971,10 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  * than to start one that will sit retrying.
  */
 #define NCFG_MAIN_TUNNELS_MAX            8
+/* And the sessions. A machine with more than eight DSL lines on it is not one
+ * this bound was written for; the ones that do not fit are refused by name
+ * rather than dialled without the credential their document states. */
+#define NCFG_MAIN_SESSIONS_MAX           8
 
 /*
  * How long a path this file composes.
@@ -1114,6 +1118,11 @@ typedef struct {
 	ncfg_secret_t                *tunnel_passwords[NCFG_MAIN_TUNNELS_MAX];
 	char                          tunnel_reports[NCFG_MAIN_TUNNELS_MAX]
 	                                            [NCFG_MAIN_LOOP_PATH_MAX];
+	/* Each PPPoE session, the same way and for the same reason: the password
+	 * is owned here so that closing an executor wipes it. */
+	ncfg_service_session_t        sessions[NCFG_MAIN_SESSIONS_MAX];
+	size_t                        session_count;
+	ncfg_secret_t                *session_passwords[NCFG_MAIN_SESSIONS_MAX];
 	/* How long to wait for the apply lock. A field so that a test does not
 	 * have to wait thirty seconds to see the refusal. */
 	long                     patience_ms;
@@ -1345,6 +1354,22 @@ size_t ncfg_main_advertising_of(ncfg_main_world_t *world, const ncfg_document_t 
  * Answers how many were taken, counting in `*missed` (which may be NULL) those
  * that had credentials and did not fit.
  */
+/*
+ * Each PPPoE session the document declares, with its password resolved.
+ *
+ * `ncfg_main_tunnels_of`'s arrangement, member for member: the block is
+ * borrowed from the document, the password is resolved through the world's own
+ * resolver and owned by the world because `ncfg_secret_free` wipes it, and a
+ * session whose password cannot be resolved **gets no entry** -- pppd dialling
+ * with the wrong credential retries for ever, which reads to an operator as a
+ * line fault rather than as a secret netcfgd could not read.
+ *
+ * Answers how many were taken, counting in `*missed` (which may be NULL) those
+ * that did not fit.
+ */
+size_t ncfg_main_sessions_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
+    size_t *missed);
+
 size_t ncfg_main_tunnels_of(ncfg_main_world_t *world, const ncfg_document_t *desired,
     size_t *missed);
 

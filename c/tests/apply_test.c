@@ -1055,23 +1055,31 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		ncfg_reason_t reason;
 
 		/*
-		 * **`wg.set_peers` was the example here, then the DHCP client, then
-		 * the supplicant's launcher, and all three are carried out now** -- so
-		 * the subject moves again rather than the check being deleted: what it
-		 * asserts is that a refusal says *what* is missing, and that property
-		 * outlives any particular op. A PPPoE session is a `pppd`, which is
-		 * the next launcher with no port. When that lands, this check moves
-		 * again -- and if it has nowhere to move to, the port is finished.
+		 * **`wg.set_peers` stood here, then the DHCP client, then the
+		 * supplicant's launcher, then a PPPoE session -- and all four are
+		 * carried out now.** The comment above this check said that when the
+		 * last of them landed it would have nowhere left to move to, and that
+		 * the port would then be finished; this is that, and the check stays
+		 * rather than being deleted, with its subject changed to the refusal
+		 * that is *not* a missing port.
+		 *
+		 * A plain `backend.start` for DHCPv6 is refused in both
+		 * implementations and for the same reason: which v6 client can serve a
+		 * document turns on whether it asked for a delegated prefix -- only
+		 * odhcp6c reports one -- and the op carries neither the request nor
+		 * the client (0050). So what this asserts is unchanged and its subject
+		 * is permanent: a refusal says *what* is missing rather than only that
+		 * something is.
 		 */
 		memset(&reason, 0, sizeof(reason));
-		reason.interface = "ppp0";
-		reason.field = "backend.pppoe";
+		reason.interface = "eth0";
+		reason.field = "backend.dhcp6";
 		reason.desired = "running";
 		reason.observed = "<absent>";
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_BACKEND_START;
-		op.u.backend.kind = (int)NCFG_BACKEND_PPPOE;
-		op.u.backend.iface = "ppp0";
+		op.u.backend.kind = (int)NCFG_BACKEND_DHCP6;
+		op.u.backend.iface = "eth0";
 		(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
 
 		/* The double refuses exactly what `ncfg_apply_supported` refuses,
@@ -1085,7 +1093,7 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		    "an op this build cannot carry out fails its action rather than passing");
 		message[0] = '\0';
 		check(!ncfg_apply_supported(&op, message, sizeof(message)) &&
-		    strstr(message, "backend.start") && strstr(message, "pppd"),
+		    strstr(message, "backend.start") && strstr(message, "delegated prefix"),
 		    "and the refusal says what is missing, not just that it is missing");
 	} else {
 		check(0, "an op this build cannot carry out fails its action rather than passing");

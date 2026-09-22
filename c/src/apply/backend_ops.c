@@ -131,6 +131,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	case NCFG_BACKEND_OPENVPN:
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_SUPPLICANT:
+	case NCFG_BACKEND_PPPOE:
 		return 1;
 	case NCFG_BACKEND_DHCP6:
 		/*
@@ -149,11 +150,6 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 		    "which the plain backend path does not carry -- dhcpcd never reports a "
 		    "prefix to a script and only odhcp6c can, so netcfgd will not pick one "
 		    "here. A DHCPv4 client on %s is started normally", name, iface, iface);
-		return 0;
-	case NCFG_BACKEND_PPPOE:
-		ncfg_error_set(err, err_size,
-		    "%s on %s is a `pppd` session, which is not ported in this build", name,
-		    iface);
 		return 0;
 	case NCFG_BACKEND_WIREGUARD:
 		ncfg_error_set(err, err_size,
@@ -431,6 +427,49 @@ static int start_tunnel(const ncfg_service_t *service, const char *run_dir, cons
 	    tunnel->password, tunnel->report, service->openvpn_program, err, err_size);
 }
 
+static const ncfg_service_session_t *session_on(const ncfg_service_t *service, const char *iface)
+{
+	size_t i;
+
+	for (i = 0; i < service->session_count; i++) {
+		if (service->sessions[i].iface && strcmp(service->sessions[i].iface, iface) == 0) {
+			return &service->sessions[i];
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Dial a PPPoE session.
+ *
+ * **Configured from the document rather than from the op**, which is what
+ * `start_access_point` and `start_tunnel` are: the op carries an interface and
+ * a kind, and what pppd needs is a parent interface, a username and a
+ * credential nobody would put in a plan (constraint 5).
+ *
+ * A session already running is success without dialling a second one, which is
+ * the property every backend op here is arranged around: a plan applied twice
+ * on a converged machine must not leave two pppds on one line. `pppoe.h` says
+ * why the pid it finds has to prove whose it is.
+ */
+static int start_session(const ncfg_service_t *service, const char *run_dir, const char *iface,
+    char *err, size_t err_size)
+{
+	const ncfg_service_session_t *session = session_on(service, iface);
+
+	if (!session || !session->config) {
+		ncfg_error_set(err, err_size,
+		    "backend.start asks for a pppoe session on %s, and this executor was given "
+		    "no configuration for it", iface);
+		return 0;
+	}
+	if (ncfg_pppoe_running_pid(run_dir, iface, &service->pppoe) > 0) {
+		return 1;
+	}
+	return ncfg_pppoe_start(run_dir, iface, session->config, session->password,
+	    &service->pppoe, err, err_size);
+}
+
 int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const char *iface,
     char *err, size_t err_size)
 {
@@ -450,8 +489,9 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_dhcp(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_SUPPLICANT:
 		return start_supplicant(service, run_dir, iface, err, err_size);
-	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_PPPOE:
+		return start_session(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
 		break;
@@ -612,6 +652,18 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		return ncfg_supplicant_stop(run_dir, supplicant_dir, iface, service->patience_ms,
 		    err, err_size);
 	case NCFG_BACKEND_PPPOE:
+		/*
+		 * **By pid, because pppd has no control socket** -- the one daemon
+		 * here that is stopped that way, and `pppoe.h` argues what makes it
+		 * defensible: the pid has to name a process whose `/proc` entry
+		 * carries the options file netcfgd wrote for *this* interface, which
+		 * an operator's own pppd cannot match.
+		 *
+		 * A session with no entry still has files and a report to take back,
+		 * so an absent one is not a refusal here any more than it is for a
+		 * tunnel.
+		 */
+		return ncfg_pppoe_stop(run_dir, iface, NULL, &service->pppoe, err, err_size);
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
 		break;

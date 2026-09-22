@@ -53,6 +53,10 @@ void ncfg_service_machine(ncfg_service_t *out)
 	 * gone -- and the operator's configuration that `-f` points at. The three
 	 * programs stay NULL, which means "find the conventional name". */
 	ncfg_dhcp_machine(&out->dhcp);
+	/* And a PPPoE session's, which `pppoe.h` owns for that reason: which pppd
+	 * to run stays NULL, and the directories pppd's own pid file may be in
+	 * are the list that header publishes. */
+	ncfg_pppoe_machine(&out->pppoe);
 }
 
 int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, char *err,

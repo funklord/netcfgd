@@ -233,12 +233,21 @@ static void the_fourteen_are_supported(void)
 		/* The launcher landed, so a supplicant answers both verbs. The whole
 		 * of it is `supplicant_launch_test.c`; what belongs here is that the
 		 * single list of what this build carries out now says so. */
-		NCFG_BACKEND_SUPPLICANT
+		NCFG_BACKEND_SUPPLICANT,
+		/* And the session, whose `pppd` is `pppoe_test.c`'s: the list here
+		 * moves in the same commit as the module, which is `build.c`'s rule
+		 * for a warning applied to a list of what is carried. */
+		NCFG_BACKEND_PPPOE
 	};
-	static const int refused_kinds[] = {
-		NCFG_BACKEND_DHCP6, NCFG_BACKEND_PPPOE, NCFG_BACKEND_WIREGUARD,
-		NCFG_BACKEND_DNS
-	};
+	/*
+	 * **What is left refused is refused for a reason that is not a missing
+	 * port**, which is the whole of what changed when the session landed.
+	 * WireGuard is a kernel device rather than a daemon -- `link.create` makes
+	 * it and `wg.set_device` configures it -- and DNS is delivered by
+	 * `dns.apply` rather than started, the resolver being somebody else's
+	 * daemon. Neither has anything to start in either implementation.
+	 */
+	static const int refused_kinds[] = { NCFG_BACKEND_WIREGUARD, NCFG_BACKEND_DNS };
 	char   message[NCFG_ERROR_MAX];
 	size_t i;
 	int    all = 1;
@@ -270,7 +279,8 @@ static void the_fourteen_are_supported(void)
 		}
 	}
 	check(all,
-	    "an access point, a radvd, an openvpn, a DHCPv4 client and a supplicant are carried out");
+	    "an access point, a radvd, an openvpn, a DHCPv4 client, a supplicant and a "
+	    "pppoe session are carried out");
 
 	/*
 	 * **The DHCPv6 half answers differently for the two verbs, and that is the
