@@ -83,6 +83,28 @@
 int ncfg_wifi_profile_usable_id(const char *id, char *err, size_t err_size);
 
 /*
+ * The refusal for a label that is already a block's, written once.
+ *
+ * **Two paths add a network** -- the CLI writes the file itself where it may,
+ * and sends a typed request where it may not (0117) -- and each had its own
+ * copy of this sentence. They said the same thing until one of them was
+ * corrected, which is the shape this project keeps finding: a message
+ * duplicated is a message that will come to differ, and the operator gets
+ * whichever copy their path happens to reach.
+ *
+ * **What it has to say is which thing is taken.** The label names the block,
+ * the file and the credential, so it cannot be shared -- but the *SSID* can,
+ * and an open network beside a WPA2 one of the same name is an ordinary
+ * arrangement that `ncfg_wifi_network_for` is written around. The sentence
+ * that used to be here advised editing or forgetting the network already
+ * configured, which is right for the same network and destroys the wrong one
+ * for a different network with the same name.
+ *
+ * Always answers 0, so a caller can `return ncfg_wifi_profile_label_taken(..)`.
+ */
+int ncfg_wifi_profile_label_taken(const char *id, char *err, size_t err_size);
+
+/*
  * `wifi-<id>`: what `config put` and `config delete` call this file.
  *
  * The same string as the path below, minus the directory and the suffix,

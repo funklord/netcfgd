@@ -371,6 +371,35 @@ int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const cha
 	for (;;) {
 		ssize_t read = recv(client->fd, buffer, NCFG_SUPPLICANT_REPLY_MAX, 0);
 
+		if (read < 0 && errno == EINTR) {
+			/*
+			 * **0233's case, at the other socket netcfgd blocks in.** A
+			 * signal arriving mid-`recv` means *call it again* and nothing
+			 * else: netcfgd spawns a child every time it runs a hook or
+			 * starts a client, so `SIGCHLD` lands here on an ordinary day,
+			 * and the handlers this daemon installs carry no `SA_RESTART`
+			 * deliberately -- `EINTR` is handled where it arrives.
+			 *
+			 * Found live rather than by reading: `ncfg wifi connect` on the
+			 * machine this was written on failed with *the supplicant on
+			 * wlp0s20f3 stopped answering: Interrupted system call*, which is
+			 * the event read below saying the same thing (project.md 10.234).
+			 *
+			 * It cannot spin. Every one of these is a signal that really
+			 * arrived, and what is left of the **same** deadline is what
+			 * bounds the retry -- the socket carries `SO_RCVTIMEO` as well,
+			 * so an interrupted wait resumes with its own ceiling rather than
+			 * a fresh one.
+			 */
+			if (now_ms() < deadline) {
+				continue;
+			}
+			ncfg_error_set(err, err_size,
+			    "no reply to `%s` from %s within %dms; the waits were interrupted by "
+			    "signals and the deadline is what ran out", label, client->interface,
+			    client->timeout_ms);
+			return 0;
+		}
 		if (read < 0) {
 			ncfg_error_set(err, err_size, "no reply to `%s` from %s: %s", label,
 			    client->interface, strerror(errno));
@@ -534,10 +563,20 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 	 */
 	(void)set_deadline(client->fd, client->timeout_ms);
 	if (read < 0) {
-		/* The two a timeout arrives as, which differ by whether the socket
-		 * was interrupted first. Nothing arriving is the ordinary answer on a
-		 * quiet radio and is not a failure. */
-		if (errno == EAGAIN || errno == EWOULDBLOCK) {
+		/* The two a timeout arrives as, and the interruption that is not a
+		 * timeout at all. Nothing arriving is the ordinary answer on a quiet
+		 * radio and is not a failure; neither is a signal. */
+		if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+			/*
+			 * **`EINTR` is answered as "nothing yet", which is 0233's own
+			 * remedy.** That decision put it this way: it "is reported as
+			 * nothing yet, the same answer a timeout gets, so the caller's
+			 * existing loop simply asks again". The comment above listed the
+			 * two spellings of a timeout and left the interruption out, which
+			 * is how a signal came to be reported as a supplicant that had
+			 * died -- measured on this machine, aborting an `ncfg wifi
+			 * connect` mid-join (project.md 10.234).
+			 */
 			return 1;
 		}
 		ncfg_error_set(err, err_size, "the supplicant on %s stopped answering: %s",

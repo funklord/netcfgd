@@ -936,9 +936,9 @@ int ncfg_cli_wifi_add(const ncfg_cli_options_t *options, const char **positional
 	for (at = 0; document && at < document->network_count; at++) {
 		if (document->networks[at].id &&
 		    strcmp(document->networks[at].id, id) == 0) {
-			ncfg_error_set(err, err_size,
-			    "a network `%s` is already configured. Change it by editing the "
-			    "configuration, or remove it and add it again", id);
+			/* The daemon's arm refuses the same thing; the sentence is
+			 * `wifi_profile.h`'s so that the two cannot drift apart. */
+			(void)ncfg_wifi_profile_label_taken(id, err, err_size);
 			goto done;
 		}
 	}

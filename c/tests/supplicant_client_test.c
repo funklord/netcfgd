@@ -51,6 +51,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -712,6 +713,129 @@ static void an_ordinary_name_still_gets_the_ordinary_answer(const char *work_dir
  * **Timed rather than merely checked for an error**, because the wrong
  * behaviour here also returns an error -- just far too late to matter.
  */
+
+/* ------------------------------------------------------------------------ *
+ * A signal arriving mid-read
+ * ------------------------------------------------------------------------ */
+
+/*
+ * Counted rather than ignored, so a case can say the signal really arrived --
+ * a check that a signal did not break something is worth nothing if no signal
+ * was delivered.
+ */
+static volatile sig_atomic_t signals_arrived;
+
+static void note_the_signal(int number)
+{
+	(void)number;
+	signals_arrived++;
+}
+
+/*
+ * Arrange for `SIGALRM` to keep arriving, with no `SA_RESTART`.
+ *
+ * That is the daemon's own arrangement -- `ncfg_main_signals_watch` installs
+ * its handlers with `sa_flags = 0` deliberately, so that `EINTR` is handled
+ * where it arrives -- and it is what makes `SIGCHLD` interrupt a blocking read
+ * on an ordinary day, netcfgd spawning a child every time it runs a hook.
+ */
+static void interrupt_every(long micros)
+{
+	struct sigaction  action;
+	struct itimerval  every;
+
+	memset(&action, 0, sizeof(action));
+	action.sa_handler = note_the_signal;
+	(void)sigemptyset(&action.sa_mask);
+	action.sa_flags = 0;
+	(void)sigaction(SIGALRM, &action, NULL);
+	signals_arrived = 0;
+	memset(&every, 0, sizeof(every));
+	every.it_value.tv_usec = micros;
+	every.it_interval.tv_usec = micros;
+	(void)setitimer(ITIMER_REAL, &every, NULL);
+}
+
+static void stop_interrupting(void)
+{
+	struct itimerval none;
+
+	memset(&none, 0, sizeof(none));
+	(void)setitimer(ITIMER_REAL, &none, NULL);
+	(void)signal(SIGALRM, SIG_DFL);
+}
+
+/*
+ * **A signal is not a supplicant that died.** 0233.
+ *
+ * Found on the machine this is written on, by running the daemon: an
+ * `ncfg wifi connect` mid-join came back with *the supplicant on wlp0s20f3
+ * stopped answering: Interrupted system call*, which is this exact read
+ * reporting `EINTR` as a failure. The association was left down and the
+ * fallback put the Rust daemon back (project.md 10.234).
+ *
+ * Both halves are driven here because the two reads answer differently: an
+ * event read has "nothing yet" available to it and a command does not, so one
+ * returns and the other retries what is left of its own deadline.
+ */
+static void a_signal_is_not_a_supplicant_that_died(const char *dir)
+{
+	char                      message[NCFG_ERROR_MAX] = "";
+	ncfg_supplicant_client_t *client = ncfg_supplicant_connect_within(dir, "wlan0", 1000,
+	    message, sizeof(message));
+	ncfg_supplicant_event_t   event;
+	long long                 started;
+	long long                 waited;
+	int                       got = 1;
+	int                       read_ok;
+	int                       refused;
+
+	if (!client) {
+		check(0, kept(message));
+		return;
+	}
+	check(ncfg_supplicant_attach(client, message, sizeof(message)),
+	    "a connection that asked to be sent events");
+
+	/* Nothing is going to send an event, so this read blocks until its
+	 * timeout -- and the timer fires into it four times on the way. */
+	interrupt_every(50000L);
+	memset(&event, 0, sizeof(event));
+	message[0] = '\0';
+	read_ok = ncfg_supplicant_next_event(client, 250, &event, &got, message,
+	    sizeof(message));
+	stop_interrupting();
+	check(signals_arrived > 0, "a signal really did arrive during the event read");
+	check(read_ok, "an event read interrupted by one is not a failure");
+	if (!read_ok) {
+		printf("       said: %s\n", message);
+	}
+	check(!got, "  and it answers `nothing yet`, which is what a timeout answers");
+
+	/* And the command path, which cannot answer `nothing yet`: it has to wait
+	 * what is left of its own deadline and then say the honest thing. */
+	check(ncfg_supplicant_command(client, "SILENT_NEXT", message, sizeof(message)),
+	    "a fake that will answer one command and then go quiet");
+	interrupt_every(50000L);
+	started = now_ms();
+	message[0] = '\0';
+	refused = !ncfg_supplicant_command(client, "SET update_config 0", message,
+	    sizeof(message));
+	waited = now_ms() - started;
+	stop_interrupting();
+	check(signals_arrived > 0, "a signal really did arrive during the command");
+	check(refused, "a command nothing answers still fails");
+	check(strstr(message, "Interrupted") == NULL,
+	    "  but not as an interruption, which is a supplicant that never spoke");
+	if (strstr(message, "Interrupted") != NULL) {
+		printf("       said: %s\n", message);
+	}
+	check(waited >= 200,
+	    "  and it waited its deadline out rather than returning at the first signal");
+
+	ncfg_supplicant_client_free(client);
+}
+
 static void the_deadline_outlives_the_connect(const char *dir)
 {
 	char                      message[NCFG_ERROR_MAX] = "";
@@ -1501,6 +1625,7 @@ int main(void)
 		return 1;
 	}
 	the_deadline_outlives_the_connect(ctrl_dir);
+	a_signal_is_not_a_supplicant_that_died(ctrl_dir);
 	a_reply_that_fills_the_buffer_is_refused_rather_than_used(ctrl_dir);
 	a_clients_own_reply_socket_is_not_an_interface(ctrl_dir);
 	events_and_replies_do_not_get_mixed_up(ctrl_dir);

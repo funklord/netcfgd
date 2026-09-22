@@ -221,9 +221,26 @@ if ! kill -0 "$c_pid" 2>/dev/null; then
 	exit 1
 fi
 say "the C daemon is running as pid $c_pid"
-say "it applies nothing until asked: try \`ncfg status\`, \`ncfg plan\`,"
-say "  \`ncfg wifi status\`, and then \`ncfg wifi connect <ssid>\` to switch"
-say "Ctrl-C hands the machine back"
+# **The C binaries, by path.** `/usr/bin/ncfg` is the *Rust* one on a machine
+# with the package installed, and it speaks the same protocol -- so it will
+# talk to the C daemon happily, and `ncfg apply` without a window will not
+# reach the daemon at all: that path applies in the client's own process and
+# takes the apply lock itself. What releases this daemon's `--no-apply-on-start`
+# hold, and what makes *it* do the work, is an apply request over the socket,
+# which is what `--confirm-within` sends.
+say "it applies nothing until asked. Read first:"
+say "  sudo $repo/c/ncfg status     # what it sees"
+say "  sudo $repo/c/ncfg plan       # what it would do, changing nothing"
+say "  sudo $repo/c/ncfg wifi status"
+say "then, to make *this daemon* apply -- and arm a window that puts it back"
+say "on its own if nobody confirms:"
+say "  sudo $repo/c/ncfg apply --confirm-within 60"
+say "  sudo $repo/c/ncfg confirm    # keep it, before the 60s are up"
+say "  sudo $repo/c/ncfg revert     # or put it back now"
+say "and to switch networks:"
+say "  sudo $repo/c/ncfg wifi connect <ssid>"
+say "Ctrl-C hands the machine back. A switch drops the association on purpose,"
+say "so run this with --failures 6 if the new network is slow to come up."
 
 # ------------------------------------------------------------------ watching
 

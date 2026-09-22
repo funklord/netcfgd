@@ -92,6 +92,19 @@ static const char *proto_text(int proto)
  * Names and paths
  * ------------------------------------------------------------------------ */
 
+int ncfg_wifi_profile_label_taken(const char *id, char *err, size_t err_size)
+{
+	ncfg_error_set(err, err_size,
+	    "a network labelled `%s` is already configured, and a label cannot be shared: "
+	    "it names the block, the file and the credential. If this is a different "
+	    "network that happens to have the same SSID -- an open one beside a WPA2 one, "
+	    "say -- give it a label of its own with `--id`; the SSID itself is kept exactly, "
+	    "and two blocks may share it. If it is the same network, edit the configuration, "
+	    "or forget it and add it again",
+	    id ? id : "");
+	return 0;
+}
+
 int ncfg_wifi_profile_usable_id(const char *id, char *err, size_t err_size)
 {
 	/*
