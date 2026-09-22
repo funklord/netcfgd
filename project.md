@@ -9581,6 +9581,26 @@ security arm filtering instead of ordering, the security answering before the
 address, `key_mgmt` not coming back from the association, and `SAE` falling out
 of the passphrase kind so that every WPA3 station resolved by name alone.
 
+### And the switch, rehearsed against stubs
+
+`c_daemon_watch.sh` gained the case that matters before anybody types
+`ncfg wifi connect` under the tryout: a switch takes the association down **on
+purpose**, and the new one is a full EAP handshake and a lease behind it. On
+this machine that measured about three seconds to re-associate and eight to
+the default route -- so the supervisor's default of three misses at five
+seconds is *inside* the window a switch can take, and would hand the machine
+back in the middle of one.
+
+Both halves are checked rather than one: the default hands back during a
+switch, and `--failures 10` rides the same switch out, noticing the network go
+and saying when it came back. Neither is a bug and which is wanted is the
+operator's -- what this proves is that the difference is real rather than
+hoped for, and the tryout's own hint says `--failures 6` for a switch.
+
+Twenty-six checks in that file now. The sabotage for the new pair: a miss that
+does not accumulate, so nothing is ever counted and nothing is ever said about
+the network coming back.
+
 ## 10.234 The second run, which broke the network on purpose
 
 The tryout was run again and this time the fallback fired for real: three
