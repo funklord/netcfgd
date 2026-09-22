@@ -8,6 +8,15 @@ profile, folds the previous selection into `conf.d` and selects the new one,
 and the two programs are handed identical directories and have to produce
 identical ones. The renderer has no other differential.
 
+It compares **where each program is told to look** as well: the same verbs with
+`NCFG_CONFIG_DIR` and `NCFG_FACTORY_DIR` set instead of a flag, and one case
+with both, since `--help` promises the flag wins. A precedence that differs
+between the two is the quietest divergence available -- nothing refuses, and a
+machine is configured from a directory nobody meant. `selected/` exists for
+those cases: it names a profile, so `profile get` prints `office` from it and
+`no profile chosen` from anywhere else, which is what makes a case able to say
+*which* directory was read.
+
 It compares the daemon's own argument handling too -- `netcfgd --help`,
 `--version`, an option nobody defined, an option with no value, a bare word.
 Every case there prints or refuses and exits, and each is given

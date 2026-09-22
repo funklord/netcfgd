@@ -72,6 +72,14 @@ diagnostic onto the sentence that introduces it and the Rust puts it on the
 next line; that is the same rendering divergence as above, and collapsing is
 what lets the *words* be compared without pinning the line breaks.
 
+AND WHERE THEY ARE TOLD TO LOOK
+
+`--help` promises that each directory is "the flag, or the variable, or the
+default", and a precedence that differs between the two programs is the
+quietest divergence available: nothing refuses, and a machine is configured
+from a directory nobody meant. Those cases set the variables and compare what
+comes back.
+
 AND THE DAEMON'S ARGUMENT HANDLING
 
 The other program has a surface too -- `--help`, `--version`, an option nobody
@@ -287,6 +295,36 @@ READ_CASES = [
 
 # What the reading cases are pointed at. A copy of it is made per case.
 READ_CORPUS = "tests/footprint/etc"
+
+# Where the two programs are told to look **through the environment** rather
+# than through a flag.
+#
+# `--help` promises this in as many words -- "default /etc/netcfgd, or
+# $NCFG_CONFIG_DIR" -- and a precedence that differs between the two is the
+# quietest kind of divergence there is: nothing refuses, and a machine is
+# configured from a directory the operator did not mean. So the cases are the
+# three answers in order -- the flag, then the variable, then the default --
+# and one where the variable names a directory that is not there.
+#
+# `<config>` is replaced with the copy this case runs against, and `<missing>`
+# with a path inside the scratch tree that does not exist. A case that lists a
+# flag as well is the one testing that the flag wins.
+# Each case names the directory it is given a copy of, because *which* one
+# matters here: a case whose answer is the same from the flag's directory and
+# from the variable's proves nothing about which was read.
+# `tests/agree/selected` names a profile, so `profile get` prints `office` from
+# it and `no profile chosen` from anywhere else.
+ENV_CASES = [
+	(["profile", "get"], {"NCFG_CONFIG_DIR": "<config>"}, "tests/agree/selected"),
+	(["profile", "get"], {"NCFG_CONFIG_DIR": "<missing>"}, "tests/agree/selected"),
+	(["control", "show"], {"NCFG_CONFIG_DIR": "<config>"}, "tests/footprint/etc"),
+	# The flag against a variable pointing somewhere else: the flag wins, and
+	# the two directories answer differently, so this fails if it does not.
+	(["profile", "get", "--config-dir", "<config>"],
+	 {"NCFG_CONFIG_DIR": "<missing>"}, "tests/agree/selected"),
+	(["profile", "list"],
+	 {"NCFG_FACTORY_DIR": "<config>", "NCFG_CONFIG_DIR": "<missing>"}, "packaging"),
+]
 
 # The daemon's own argument handling.
 #
@@ -548,6 +586,41 @@ def compare_reads(rust, c):
 	return None
 
 
+def compare_env(rust, c):
+	"""Returns a sentence where reading the environment differs, or None."""
+	for verb, environment, corpus in ENV_CASES:
+		with tempfile.TemporaryDirectory() as work:
+			copy = os.path.join(work, "etc")
+			run_dir = os.path.join(work, "run")
+			missing = os.path.join(work, "nowhere")
+			shutil.copytree(corpus, copy)
+			os.makedirs(run_dir, exist_ok=True)
+			filled = {key: value.replace("<config>", copy).replace("<missing>", missing)
+				  for key, value in environment.items()}
+			argv = [word.replace("<config>", copy).replace("<missing>", missing)
+				for word in verb]
+			said = []
+			for program in (rust, c):
+				result = subprocess.run(
+					[program] + argv + ["--run-dir", run_dir],
+					env=dict(os.environ, **filled),
+					capture_output=True,
+					text=True,
+					timeout=120,
+					check=False,
+				)
+				text = (result.stdout + result.stderr)
+				text = text.replace(copy, "<config>").replace(missing, "<missing>")
+				said.append((result.returncode, text.replace(run_dir, "<run>")))
+		if said[0] != said[1]:
+			spelled = " ".join(verb)
+			named = " ".join(f"{key}={value}" for key, value in sorted(environment.items()))
+			return (f"`{named} ncfg {spelled}` differs\n"
+				f"    rust: {said[0][1].strip()[:160]}\n"
+				f"    c   : {said[1][1].strip()[:160]}")
+	return None
+
+
 def compare_daemon(rust, c):
 	"""Returns a sentence where the daemon's argument handling differs."""
 	for verb in DAEMON_CASES:
@@ -630,6 +703,9 @@ def main():
 	problem = compare_reads(rust, C)
 	if problem:
 		failures.append(problem)
+	problem = compare_env(rust, C)
+	if problem:
+		failures.append(problem)
 	problem = compare_daemon(daemon_rust, DAEMON_C)
 	if problem:
 		failures.append(problem)
@@ -645,8 +721,9 @@ def main():
 	      f"programs to the same document and written back as the same profile, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
 	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
-	      f"directory behind, {len(READ_CASES)} invocation(s) that only read, and "
-	      f"{len(DAEMON_CASES)} of the daemon's own")
+	      f"directory behind, {len(READ_CASES)} invocation(s) that only read, "
+	      f"{len(ENV_CASES)} that are told where to look through the environment, "
+	      f"and {len(DAEMON_CASES)} of the daemon's own")
 	return 0
 
 
