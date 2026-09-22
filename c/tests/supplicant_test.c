@@ -560,6 +560,35 @@ static void a_scan_row_says_which_of_the_four_security_shapes_it_is(void)
 		    owe == want_owe;
 	}
 	check(shapes, "each row says which of the four it is, and OWE is not open");
+
+	/*
+	 * And the same six rows as the document's own vocabulary, which is what a
+	 * listing hands `ncfg_wifi_network_for` so that an access point is
+	 * credited to the block describing it rather than to whichever of two
+	 * same-named blocks sorts first.
+	 */
+	for (index = 0; index < count; index++) {
+		int         got = ncfg_supplicant_scan_security(&rows[index]);
+		const char *name = (const char *)rows[index].ssid.bytes;
+		int         want = NCFG_SECURITY_PSK;
+		char        what[96];
+
+		if (memcmp(name, "corp", 4u) == 0) {
+			want = NCFG_SECURITY_EAP;
+		} else if (memcmp(name, "open", 4u) == 0) {
+			want = NCFG_SECURITY_OPEN;
+		} else if (memcmp(name, "guest", 5u) == 0) {
+			want = NCFG_SECURITY_OWE;
+		} else if (memcmp(name, "old", 3u) == 0) {
+			/* **WEP is unstated, not `psk`.** No `network` block can express
+			 * it, so naming one would credit this access point to a block
+			 * that does not describe it. */
+			want = NCFG_WIFI_SECURITY_UNSTATED;
+		}
+		(void)snprintf(what, sizeof(what), "  `%.*s` reads as the kind a document would name",
+		    (int)rows[index].ssid.length, name);
+		check(got == want, what);
+	}
 	ncfg_supplicant_scans_free(rows, count);
 
 	/* **A name is not a flag.** There is an access point called

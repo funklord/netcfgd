@@ -719,18 +719,12 @@ static int scan_report(const ncfg_document_t *document, ncfg_supplicant_client_t
 		const ncfg_wifi_network_t    *configured = NULL;
 
 		if (document) {
-			/*
-			 * `NCFG_WIFI_SECURITY_UNSTATED`, and it is a gap rather than a
-			 * judgement: a scan row's `flags` do say -- `[WPA2-PSK-CCMP]`
-			 * against `[ESS]` -- and nothing here parses them into a kind
-			 * yet. What it costs is a listing that may credit an access point
-			 * to whichever of two same-named blocks sorts first, where the
-			 * association itself is resolved correctly. The mapping belongs
-			 * beside `ncfg_supplicant_key_mgmt_security` when somebody wants
-			 * it.
-			 */
+			/* The row's own flags say how it is secured, which is what
+			 * separates two blocks sharing an SSID -- so a listing credits
+			 * each access point to the block that describes it rather than
+			 * to whichever sorts first. */
 			configured = ncfg_wifi_network_for(document->networks, document->network_count,
-			    &scan->ssid, scan->bssid, NCFG_WIFI_SECURITY_UNSTATED);
+			    &scan->ssid, scan->bssid, ncfg_supplicant_scan_security(scan));
 		}
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "bssid", scan->bssid ? scan->bssid : "");

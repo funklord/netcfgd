@@ -231,7 +231,11 @@ int ncfg_config_load_with_profile(const char *factory_dir, const char *config_di
  * the sentence.
  *
  * `hooks` is the caller's choice and the header comment says which one every
- * caller in this module passes.
+ * caller in this module passes. **It is required**, and a NULL one is refused
+ * by name: a sink is what turns a hook's body into `{phase, path, sha256}`, so
+ * a compile without one would hand back a document quieter than the
+ * configuration it came from. A caller that wants no hooks recorded passes a
+ * sink whose `record` is NULL, which says so.
  *
  * **A set of no files compiles to an empty document**, which is a divergence
  * from `ncfg_merge` and not from the Rust: merge refuses "nothing to merge",

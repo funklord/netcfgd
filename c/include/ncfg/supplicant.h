@@ -262,6 +262,23 @@ int ncfg_supplicant_scan_is_enterprise(const ncfg_supplicant_scan_t *scan);
 int ncfg_supplicant_scan_is_owe(const ncfg_supplicant_scan_t *scan);
 
 /*
+ * What a scan row is secured with, as an `ncfg_security_kind_t`.
+ *
+ * The three questions above composed into the document's vocabulary, for
+ * `ncfg_wifi_network_for`: a listing says which `network` block each access
+ * point matches, and two blocks may share an SSID and differ only in this.
+ * Without it a scan credits an open access point to a WPA2 block of the same
+ * name -- the association is resolved correctly and the listing beside it was
+ * not.
+ *
+ * `NCFG_WIFI_SECURITY_UNSTATED` for a row that is secured with something no
+ * `network` block can express, which today means WEP. Guessing `psk` there
+ * would be worse than not answering: it would name a block that does not
+ * describe the access point.
+ */
+int ncfg_supplicant_scan_security(const ncfg_supplicant_scan_t *scan);
+
+/*
  * Whether it advertises 802.11r fast transition.
  *
  * Not the mobility *domain* -- two access points can both do fast transition
