@@ -55,6 +55,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <time.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 static int failures;
@@ -990,9 +991,142 @@ static void the_delegations_a_client_reported(const char *run_dir)
 	free(dir);
 }
 
+/*
+ * **What a file written under `/run` ends up being readable by.**
+ *
+ * The rule every comment about these files already states: the mode passed in
+ * is what the file is opened with, and **the umask decides the rest**. 0666 on
+ * an ordinary record means "as open as this machine's umask allows"; 0600 on a
+ * credential means 0600, because a umask can only clear bits that are already
+ * set and those two are the owner's.
+ *
+ * It stopped being true and nothing noticed. The atomic write set the mode on
+ * the descriptor as well as the open -- for a good reason, a credential must
+ * not inherit the mode of a temporary an earlier run left -- and `fchmod`
+ * ignores the umask. So every record netcfgd wrote under `/run` came out 0666
+ * rather than 0644: `owned.json` among them, which is the record deciding what
+ * netcfgd will remove, world-writable on a machine where any local user could
+ * edit it. Found by comparing the two implementations' output file by file.
+ *
+ * `O_EXCL` answers both: there is no file to inherit from, so the open's mode
+ * is the whole of it.
+ */
+static void what_a_written_file_is_readable_by(const char *dir)
+{
+	static const unsigned modes[] = { 0666u, 0644u, 0600u };
+	static const mode_t   masks[] = { 0000, 0022, 0077 };
+	char                  err[NCFG_ERROR_MAX];
+	size_t                at;
+	size_t                mask_at;
+	unsigned              agreed = 0;
+	unsigned              tried = 0;
+	mode_t                kept;
+
+	printf("\n-- what a written file is readable by\n");
+	kept = umask(0);
+	for (mask_at = 0; mask_at < sizeof(masks) / sizeof(masks[0]); mask_at++) {
+		(void)umask(masks[mask_at]);
+		for (at = 0; at < sizeof(modes) / sizeof(modes[0]); at++) {
+			char        path[512];
+			struct stat found;
+			unsigned    wanted = modes[at] & (unsigned)~masks[mask_at];
+
+			(void)snprintf(path, sizeof(path), "%s/mode-%zu-%zu", dir, mask_at, at);
+			err[0] = '\0';
+			tried++;
+			if (!ncfg_write_atomically(path, "x", 1u, modes[at], err, sizeof(err))) {
+				printf("       could not write: %s\n", err);
+				continue;
+			}
+			if (stat(path, &found) != 0) {
+				printf("       could not stat what was written\n");
+				continue;
+			}
+			if ((found.st_mode & 0777u) == wanted) {
+				agreed++;
+			} else {
+				printf("       umask %03o, asked %04o, got %04o, wanted %04o\n",
+				    (unsigned)masks[mask_at], modes[at],
+				    (unsigned)(found.st_mode & 0777u), wanted);
+			}
+			(void)unlink(path);
+		}
+	}
+	(void)umask(kept);
+	check(tried == 9u, "nine combinations of mode and umask were tried");
+	check(agreed == tried,
+	    "  and every file came out at the mode asked for with the umask applied, "
+	    "which is what keeps a record out of a stranger's reach");
+
+	/* And the half that must not follow the umask down to nothing: a
+	 * credential is 0600 whatever the umask, because those are the owner's
+	 * bits and a umask only clears what is already set elsewhere. */
+	kept = umask(0);
+	{
+		char        path[512];
+		struct stat found;
+
+		(void)snprintf(path, sizeof(path), "%s/credential", dir);
+		err[0] = '\0';
+		check(ncfg_write_atomically(path, "secret", 6u, 0600u, err, sizeof(err)) &&
+		    stat(path, &found) == 0 && (found.st_mode & 0777u) == 0600u,
+		    "and a credential is 0600 even where the umask would allow more");
+		(void)unlink(path);
+	}
+	(void)umask(kept);
+
+	/*
+	 * **And the hazard `O_EXCL` is actually for.**
+	 *
+	 * A run that died between creating the temporary and renaming it leaves
+	 * one behind. Opening that with `O_TRUNC` writes a credential into a file
+	 * whose mode is whatever the dead run left -- which is the reason the
+	 * `fchmod` was there, and dropping it without `O_EXCL` would bring the
+	 * hazard back in silence. The umask checks above do not notice: with no
+	 * leftover, truncating and creating exclusively do the same thing, and a
+	 * sabotage that swapped them passed every one of them.
+	 *
+	 * The temporary is `.<name>.<pid>.<counter>` and the counter is a static
+	 * this test cannot read. So a leftover is laid at every plausible counter
+	 * instead: whichever one the write picks, it finds a world-readable file
+	 * in its way.
+	 */
+	{
+		char        path[512];
+		char        leftover[512];
+		struct stat found;
+		unsigned    at_seq;
+
+		(void)snprintf(path, sizeof(path), "%s/after-a-crash", dir);
+		for (at_seq = 0; at_seq < 64u; at_seq++) {
+			int fd;
+
+			(void)snprintf(leftover, sizeof(leftover), "%s/.after-a-crash.%ld.%u",
+			    dir, (long)getpid(), at_seq);
+			fd = open(leftover, O_WRONLY | O_CREAT | O_TRUNC, 0666);
+			if (fd >= 0) {
+				(void)chmod(leftover, 0666);
+				(void)close(fd);
+			}
+		}
+		err[0] = '\0';
+		check(ncfg_write_atomically(path, "secret", 6u, 0600u, err, sizeof(err)) &&
+		    stat(path, &found) == 0 && (found.st_mode & 0777u) == 0600u,
+		    "and a credential written over a temporary a dead run left is still 0600");
+		(void)unlink(path);
+		for (at_seq = 0; at_seq < 64u; at_seq++) {
+			(void)snprintf(leftover, sizeof(leftover), "%s/.after-a-crash.%ld.%u",
+			    dir, (long)getpid(), at_seq);
+			(void)unlink(leftover);
+		}
+	}
+}
+
 int main(void)
 {
 	const char *run_dir = testdir_make("state");
+
+	what_a_written_file_is_readable_by(run_dir);
 
 	printf("== state_test in %s\n", run_dir);
 	the_run_directory_is_chosen_in_one_order();

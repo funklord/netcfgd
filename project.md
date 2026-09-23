@@ -9515,6 +9515,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.251 Every record netcfgd wrote under /run was world-writable
+
+The DNS renderers were compared for the first time last round. The other
+backends render files too, so the next question was which of them can be
+reached without hardware. radvd cannot -- its prefixes are delegation
+references and need a DHCPv6-PD server. PPPoE can: a parent interface and a
+credential is the whole of it.
+
+Both implementations wrote the same options file, and the comparison of
+everything *around* it found something the options file itself would never
+have shown. Listing what each left under `/run`, with modes:
+
+```text
+rust: 600 (the credential)  664 (a record)   755 (two scripts)
+c:    600                   666              755
+```
+
+**`fchmod` ignores the umask.** The atomic write set the mode on the descriptor
+as well as on the open, for a good and stated reason -- `open` applies its mode
+only when it creates the file, so a credential written back over a temporary an
+earlier run left would inherit that one's mode. The fix for that broke the
+other half: `0666`, which every comment in this tree describes as "and let the
+umask decide", stopped being reduced and started being 0666 exactly.
+
+So every record this port wrote under `/run` was world-writable:
+`desired.json`, `observed.json`, the per-interface files -- and `owned.json`,
+which is the
+record deciding what netcfgd will remove. A local user could edit it and have
+netcfgd disown an address, or claim one that was never its. The Rust's files on
+this machine are 0644; the C's were 0666.
+
+**`O_EXCL` answers both at once.** There is no file to inherit a mode from, so
+the open's mode is the whole of it and the umask reduces it as documented; and
+a leftover is removed rather than written into, the name carrying this process'
+id and a counter so one that exists is this program's own.
+
+### The sabotage that passed, and the test it bought
+
+Putting the `fchmod` back is caught. Swapping `O_EXCL` for `O_TRUNC` was
+**not** -- with no leftover in the way the two do the same thing, and every
+umask check passed.
+
+That is the half the original `fchmod` was written for, so a test that cannot
+see it would let the hazard back in the moment somebody simplified the open.
+The temporary is `.<name>.<pid>.<counter>` and the counter is a static nothing
+can read, so the check lays a world-readable leftover at every plausible
+counter and writes a credential over it. Whichever one the write picks, it
+finds a file in its way -- and both sabotages fail now.
+
+### Three smaller differences the same comparison turned up
+
+Recorded rather than acted on, because each is a judgement rather than a
+defect:
+
+* `backend.start ppp0` reads `pppoe: Pppoe` from the Rust and `pppoe: pppoe`
+  from this port. The Rust is printing an enum through `Debug`; the C prints
+  the document's word. The C's is better and it is still a divergence in
+  operator-visible output.
+* The C leaves `<run>/ppp/ppp0.log` and the Rust does not.
+* The generated ip-up script computes its temporary path differently -- a
+  literal in the Rust, `dirname`/`basename` at run time in the C. Both correct,
+  and the scripts are not byte-identical.
+
 ## 10.250 A test for this defect must not be able to cause it
 
 10.249 said the live script for the delivery modes was the obvious next thing

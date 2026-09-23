@@ -136,16 +136,37 @@ int ncfg_host_write_atomically(const char *path, const void *bytes, size_t lengt
 	    slash ? slash + 1 : path, (long)getpid(), sequence++);
 	free(directory);
 
-	fd = open(temporary, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	/*
+	 * **`O_EXCL`, so that the mode on the open is the mode the file gets.**
+	 *
+	 * `open` applies its mode only when it creates the file, so writing a
+	 * credential back over a temporary an earlier run left would inherit
+	 * whatever that one was. That is a real hazard and it used to be answered
+	 * with an `fchmod` on the descriptor -- which fixed it and broke something
+	 * else: **`fchmod` ignores the umask**, so `0666` stopped meaning "and let
+	 * the umask decide" and started meaning 0666. Every file netcfgd writes
+	 * under `/run` came out world-writable, `owned.json` among them -- the
+	 * record that decides what netcfgd will remove, which any local user could
+	 * then edit. The Rust's files on this machine are 0644; these were 0666.
+	 *
+	 * Creating exclusively answers both at once. There is no file to inherit a
+	 * mode from, so the open's mode is the whole of it and the umask reduces
+	 * it as every comment about these files already says it does. A leftover
+	 * is removed rather than written into: the name carries this process' id
+	 * and a counter, so one that exists is this program's own from a run that
+	 * died between the create and the rename.
+	 */
+	fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, mode);
+	if (fd < 0 && errno == EEXIST) {
+		(void)unlink(temporary);
+		fd = open(temporary, O_WRONLY | O_CREAT | O_EXCL, mode);
+	}
 	if (fd < 0) {
 		ncfg_error_set(err, err_size, "could not write %s: %s", path, strerror(errno));
 		free(temporary);
 		return 0;
 	}
-	/* The mode is set on the descriptor as well as the open, because `open`
-	 * applies its mode only when it creates the file -- and this one may be
-	 * writing a credential back over a temporary an earlier run left. */
-	if (fchmod(fd, mode) != 0 || !write_all(fd, bytes, length) ||
+	if (!write_all(fd, bytes, length) ||
 	    /* Durable before it is visible. A rename that beats the data to disk
 	     * is a truncated file after a power cut, which on a router is the
 	     * failure that needs a serial cable. */
