@@ -616,6 +616,22 @@ static void the_paths_are_the_ones_every_other_caller_resolves(void)
 	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
 	    strcmp(where.resolv, NCFG_RESOLV_CONF) == 0,
 	    "  and back to the machine's once it is unset");
+	/* And the two forwarders' drop-ins, which were left behind when
+	 * `resolv.conf` was done: three files, one rule, and the round that fixed
+	 * one of them is why this walks all three. */
+	check(strcmp(where.dnsmasq, NCFG_DNSMASQ_CONF) == 0 &&
+	    strcmp(where.unbound, NCFG_UNBOUND_CONF) == 0,
+	    "and the two forwarding resolvers' drop-ins are the machine's by default");
+	(void)setenv(NCFG_DNSMASQ_CONF_ENV, "/tmp/not-a-real-dnsmasq.conf", 1);
+	(void)setenv(NCFG_UNBOUND_CONF_ENV, "/tmp/not-a-real-unbound.conf", 1);
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
+	    strcmp(where.dnsmasq, "/tmp/not-a-real-dnsmasq.conf") == 0 &&
+	    strcmp(where.unbound, "/tmp/not-a-real-unbound.conf") == 0,
+	    "  and both follow their own variable, which is how a forwarder is tested "
+	    "without one installed");
+	(void)unsetenv(NCFG_DNSMASQ_CONF_ENV);
+	(void)unsetenv(NCFG_UNBOUND_CONF_ENV);
 
 	/* What was typed wins over the environment and over the default. */
 	options.config_dir = "/tmp/not-a-real-config";

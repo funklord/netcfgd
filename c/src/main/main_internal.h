@@ -266,6 +266,10 @@ typedef struct {
 	 * the paragraph above is arranged to make impossible.
 	 */
 	char resolv[NCFG_MAIN_PATH_MAX];
+	/* And the two forwarding resolvers' drop-ins, through the same call and
+	 * for the same reason. Three files, one rule. */
+	char dnsmasq[NCFG_MAIN_PATH_MAX];
+	char unbound[NCFG_MAIN_PATH_MAX];
 } ncfg_main_where_t;
 
 /*

@@ -9515,6 +9515,52 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.249 The other two files, and the grep that missed them
+
+10.246 fixed `NCFG_RESOLV_CONF` and left its two siblings alone on a wrong
+premise. `dns.h` says the Rust reads all three; a grep over `crates/` found
+only the first, so the other two looked like variables this port had invented
+and nothing honoured.
+
+They are in `backend/netcfgd-dns/src/lib.rs`, which is not under `crates/`.
+`Forwarder::path` reads `NCFG_DNSMASQ_CONF` and `NCFG_UNBOUND_CONF` and gives
+the same reason in the same words: "the same reason `NCFG_RESOLV_CONF` exists,
+and it exists because a test very nearly rewrote this machine's".
+
+So the port was missing all three and one round fixed one of them. Both are
+wired now, and **through one function**: `from_env` in `deliver.c`, with three
+thin callers. Three copies of four lines is how one of them comes to check its
+variable and another not to -- which is exactly what happened here, in the gap
+between two rounds, and is why the test walks all three rather than asserting
+each.
+
+### What it was aiming at
+
+The unfixed C, with `NCFG_DNSMASQ_CONF` pointed at a temp file:
+
+```text
+FAIL dns.apply  dns: dnsmasq (was <absent>)
+     /etc/dnsmasq.d does not exist, so dnsmasq is not installed here or
+     does not read it; mode = "dnsmasq" needs it
+```
+
+It names the machine's own path. This host has no dnsmasq, so the refusal is
+where the write would have been; on a host that has one there is no refusal and
+no temp file either. The fixed one writes where the variable points.
+
+### And a surface nothing had compared
+
+Both forwarder renderings came out **byte-identical** between the two
+implementations -- dnsmasq's `server=`/`domain=` pair and unbound's
+`forward-zone` stanzas, scope by scope. That is the first time either renderer
+has been compared against its counterpart, and it was only possible because
+the variable that points them at a temp file now works in both.
+
+A live script for the delivery modes is the obvious next thing and is not here.
+It would have to bind-mount over `/etc/dnsmasq.d` the way 10.246's negative
+control does, because a script testing for this defect must not be able to
+cause it -- and that is a piece of work rather than a line.
+
 ## 10.248 Both daemons, one client, the same questions
 
 The ledger says the two request taxonomies are whole -- thirty-two names, none

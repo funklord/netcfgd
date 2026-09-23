@@ -421,6 +421,8 @@ int ncfg_main_netcfgd_where(const struct ncfg_main_options *options, ncfg_main_w
 	(void)ncfg_config_resolve_dir(options->config_dir, out->config, sizeof(out->config));
 	(void)ncfg_state_resolve_dir(options->run_dir, out->run, sizeof(out->run));
 	(void)ncfg_dns_resolve_conf_path(NULL, out->resolv, sizeof(out->resolv));
+	(void)ncfg_dns_resolve_dnsmasq_path(NULL, out->dnsmasq, sizeof(out->dnsmasq));
+	(void)ncfg_dns_resolve_unbound_path(NULL, out->unbound, sizeof(out->unbound));
 	if (!out->factory[0] || !out->config[0] || !out->run[0]) {
 		ncfg_error_set(err, err_size,
 		    "one of the three directories did not fit in %d bytes", NCFG_MAIN_PATH_MAX);
@@ -793,8 +795,8 @@ static int start(const options_t *options)
 	 * should spell them: a daemon delivers to the machine it manages, and the
 	 * seam exists so that nothing else does it by accident. */
 	world_where.resolv_conf = where.resolv;
-	world_where.dnsmasq_conf = NCFG_DNSMASQ_CONF;
-	world_where.unbound_conf = NCFG_UNBOUND_CONF;
+	world_where.dnsmasq_conf = where.dnsmasq;
+	world_where.unbound_conf = where.unbound;
 	/* And dhcpcd's, which `dhcp.h` owns for the same reason. */
 	ncfg_dhcp_machine(&world_where.dhcp);
 	if (!ncfg_main_world_open(&world, &world_where, &state, &subscribers, &watchers, err,
