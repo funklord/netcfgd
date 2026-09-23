@@ -1813,6 +1813,11 @@ live:
 		exit 1; \
 	}
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/links.sh"
+	@# What a device the C port creates actually carries, compared against the
+	@# Rust on one kernel and read back by `ip -d`. Most kinds ride along in the
+	@# create message; a bridge deliberately does not (0057) and this port was
+	@# making every one of them on the kernel's defaults.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_link_settings.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"

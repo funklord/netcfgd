@@ -9515,6 +9515,93 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.243 Every bridge this port made came up on the kernel's defaults
+
+10.242 fixed one half of a create arm and did not look at the other. The Rust's
+has two `if let`s in it -- WireGuard, then bridge -- and only the first was
+missing here. The second was missing too.
+
+**A bridge is deliberately not configured by the message that creates it.** The
+kernel would take `IFLA_INFO_DATA` there and 0057 says not to use it:
+correcting an existing bridge has to be a separate `RTM_NEWLINK` anyway, and
+one path rather than two is what stops the create case and the
+correct-an-existing case drifting apart. `kernel_link.c` says exactly that
+where it builds the bare link, and it is right.
+
+This port took that half of 0057 and not the other. Nothing applied the
+settings afterwards, so every bridge it made came up with the kernel's
+defaults -- forward delay 15s, hello time 2s, priority 32768, STP off --
+whatever the document said, and `ncfg apply` reported `ok` for all of it.
+
+There is no `link.set_bridge` in a plan that creates a bridge, in either
+implementation and correctly, for the same reason there is no `wg.set_device`
+in one that creates a tunnel: a create carries its whole configuration, and the
+two `link.set_*` ops exist to *correct* a device that is already there. So the
+create arm is where the settings have to be applied and nothing else was going
+to reach them.
+
+`finish_create` is the two halves in one place now, and it hands the bridge to
+the arm that already knows how -- a second encoder here is what 0057 is about.
+
+### The sweep that says it is only these two
+
+Every other kind rides along in the create message, and that is measured
+rather than assumed: bond, vxlan, vlan and macvlan were given the same document
+by both programs on one kernel and the devices came out identical, at the same
+time as the bridge did not. `tests/live/c_link_settings.sh` keeps them there,
+so a change that moved any of them onto a second message lands in this script
+rather than in somebody's bridge a year later.
+
+**The reader is `ip -d`** -- a third program with its own netlink code. Reading
+it back through `ncfg status` would prove only that netcfgd agrees with itself.
+And because two programs can be wrong alike, the bridge's four settings are
+also asserted against the numbers the document asked for, in the kernel's own
+units.
+
+Sabotages: the bridge half taken back out, five failures, the right five; a
+vlan id shifted by one in the create builder, caught with the two `ip -d` lines
+printed side by side.
+
+### The check that was comparing a clock
+
+It failed about twice in sixty-five runs and passed twenty-five in a row when
+asked to explain itself, which is the worst way for a check to behave: rare
+enough to read as a defect somewhere else, and gone whenever it is looked at.
+
+**A bridge's `ip -d` line carries running state.** `hello_timer`, `gc_timer`,
+`tcn_timer` and `topology_change_timer` tick while the bridge is up, so
+comparing the whole line compares when the two applies happened --
+`hello_timer 0.99` against `1.00`. Everything else on that line is settings,
+which is why it took so long to see.
+
+Reproduced by making the machine busy: a `make -B -j8` in the other window put
+a hundredth of a second between the two applies and it failed within fifteen
+runs. Fifteen more with the four timers dropped by name, under the same load,
+all green. A `sleep` or a rounding would have hidden it rather than fixed it.
+
+Worth the paragraph because the shape is the round's own: `ip -d` is an
+honest reader, and what it reads is the device -- settings and state together.
+A comparison has to say which of the two it is about.
+
+### Two things that looked like findings and were not
+
+Worth recording, because both cost time and both were mine.
+
+**The C's refusal looked shorter than the Rust's.** It was `tail -1` of a
+message the C folds onto one line where the Rust prints a `help:` continuation
+-- which is 0263, already recorded. Asked directly, `show`, `plan` and `apply`
+give the identical first line with the identical file, line and column.
+
+**`ncfg status` looked like it refused a configuration that would not
+compile.** It was `head -1` of output that prints the diagnostics *and then the
+status*, exit status 0 -- which is this port's own deliberate improvement on
+the Rust, already written down in `command_status` and in 10.x where it was
+made. The Rust calls `compile` through `.ok()` and says nothing.
+
+Two misreadings, both from truncating output before reading it. The rule that
+would have caught both is the one already in `evidence.md` -- check the
+artifact, not a convenient summary of it.
+
 ## 10.242 The tunnel that was up, addressed and carrying nothing
 
 The last of 10.240's three silent subsystems, and it was not a missing message
