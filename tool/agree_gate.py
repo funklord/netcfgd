@@ -360,6 +360,13 @@ DAEMON_CASES = [
 # to approve its own drift.
 DAEMON_DIFFERENCES = {
 	"--help": [
+		# `--supported` is the C port's alone for the same kind of reason and a
+		# different one: it is the completeness ledger `doc/c-transition.md`
+		# section 5 asks for, and what it answers is "what does *this port* not
+		# do yet". A Rust that grew one would be answering a question nobody is
+		# asking of it. project.md 10.247.
+		("c", "  --supported            what this build carries out, as JSON lines, asked"),
+		("c", "                         of the code that decides rather than listed"),
 		("c", "  --try-the-c-daemon     run the loop anyway. This build refuses by"),
 		("c", "                         default and prints why; read that first, and"),
 		("c", "                         have something watching the machine when you"),

@@ -1122,9 +1122,93 @@ static void this_build_does_not_reconcile(void)
 	}
 }
 
+/*
+ * **The ledger walks everything, or it lies by omission.**
+ *
+ * `--supported` is the completeness ledger `doc/c-transition.md` asks for, and
+ * its whole value is that it cannot drift from what the build does -- every
+ * row is an answer from `ncfg_apply_supported` or `ncfg_proto_request_name`
+ * rather than a line somebody wrote. A loop that stopped one short would be a
+ * ledger where every line was true and the file was false, which is the exact
+ * failure a checklist has and the reason that section forbids one.
+ *
+ * So what is checked is the *count* of each subject against the enum that
+ * bounds it, taken from the enum rather than written down here. A kind added
+ * to either enumeration moves both sides together; a walk that skips one moves
+ * only the dump.
+ */
+static void the_ledger_walks_every_kind(const char *dir)
+{
+	char   *text;
+	size_t  length = 0;
+	int     kept;
+	int     fd;
+	char    path[256];
+	size_t  requests = 0;
+	size_t  ops = 0;
+	size_t  creates = 0;
+	size_t  backends = 0;
+	size_t  at;
+
+	printf("\n-- the completeness ledger\n");
+	/* `cli_control_test.c`'s arrangement: the ledger goes to stdout because it
+	 * is an answer rather than a diagnostic (0261), so reading it back means
+	 * pointing stdout at a file for the length of the call. */
+	(void)snprintf(path, sizeof(path), "%s/ledger.txt", dir);
+	(void)fflush(stdout);
+	kept = dup(STDOUT_FILENO);
+	fd = open(path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+	if (fd < 0 || kept < 0) {
+		check(0, "stdout can be pointed at a file");
+		return;
+	}
+	(void)dup2(fd, STDOUT_FILENO);
+	(void)close(fd);
+	ncfg_main_netcfgd_supported();
+	(void)fflush(stdout);
+	(void)dup2(kept, STDOUT_FILENO);
+	(void)close(kept);
+	text = testdir_read(path, &length);
+	if (!text) {
+		check(0, "the ledger can be read back");
+		return;
+	}
+	for (at = 0; at < length; at++) {
+		const char *line = text + at;
+		const char *end = strchr(line, '\n');
+
+		if (!end) {
+			break;
+		}
+		if (strstr(line, "\"subject\":\"request\"") && (size_t)(end - line) > 0) {
+			requests++;
+		} else if (strstr(line, "\"subject\":\"op\"")) {
+			ops++;
+		} else if (strstr(line, "\"subject\":\"link.create\"")) {
+			creates++;
+		} else if (strstr(line, "\"subject\":\"backend.")) {
+			backends++;
+		}
+		at = (size_t)(end - text);
+	}
+	check(requests == (size_t)NCFG_PROTO_REQ_COUNT,
+	    "every request kind the protocol has is in the ledger");
+	/* The four whose answer is a function of a kind are asked per kind
+	 * instead, which is why this is the op count less four. */
+	check(ops == (size_t)NCFG_OP_COMMIT_REVERT + 1u - 4u,
+	    "and every op but the four asked per kind");
+	check(creates == (size_t)NCFG_KIND_IFB + 1u,
+	    "and `link.create` once for every interface kind there is");
+	check(backends == ((size_t)NCFG_BACKEND_DNS + 1u) * 3u,
+	    "and each backend kind under each of the three backend verbs");
+	free(text);
+}
+
 int main(void)
 {
 	const char *dir = testdir_make("main");
+
+	the_ledger_walks_every_kind(dir);
 
 	(void)snprintf(capture_file, sizeof(capture_file), "%s/printed", dir);
 

@@ -78,6 +78,8 @@ static const char usage_text[] =
     "  --socket PATH          default " NCFG_RUN_DIR_DEFAULT "/netcfgd.sock\n"
     "  --no-apply-on-start    observe and watch, but change nothing until asked\n"
     "  --poll-config          use mtime polling rather than inotify\n"
+    "  --supported            what this build carries out, as JSON lines, asked\n"
+    "                         of the code that decides rather than listed\n"
     "  --try-the-c-daemon     run the loop anyway. This build refuses by\n"
     "                         default and prints why; read that first, and\n"
     "                         have something watching the machine when you\n"
@@ -85,6 +87,123 @@ static const char usage_text[] =
     "                         what it was written for\n"
     "  -h, --help             this text\n"
     "  --version              the version, and who holds the copyright\n";
+
+/*
+ * The completeness ledger, derived rather than kept by hand.
+ *
+ * `doc/c-transition.md` section 5 asks for exactly this, and says why it may
+ * not be a checklist: "a hand-written checklist of supported features is
+ * exactly the shape this workspace has been burned by repeatedly -- a list
+ * that quietly stops matching the thing it describes, under a name that claims
+ * it is exhaustive."
+ *
+ * So nothing here is a list. Every line is produced by **asking the code that
+ * decides**: `ncfg_apply_supported` about each of the forty-eight ops, and
+ * `ncfg_proto_request_name` about each request kind. What is printed is what
+ * this build would do, and it cannot drift from that because there is no
+ * second copy of it to drift from.
+ *
+ * **A refusal prints its own sentence**, which is the half a checklist loses.
+ * "not supported" and "created by the helper that connects it rather than by
+ * a netlink message" are different facts, and only the second tells a reader
+ * whether anything is actually missing.
+ *
+ * `link.create` is asked once per interface kind rather than once, because
+ * that op's answer is a function of the kind: it is the one place where the
+ * ledger has more rows than the op list. The same is true of the backend
+ * family, which is asked once per backend kind.
+ *
+ * JSON lines, one object per subject, so `tool/ledger_gate.py` can diff it
+ * against the frozen witnesses in `doc/schema/` without reading prose. On
+ * stdout, because it is the answer to a question rather than a diagnostic
+ * (0261).
+ */
+static void say_one(const char *subject, const char *name, int supported, const char *why)
+{
+	ncfg_buf_t        buf;
+	ncfg_json_writer_t writer;
+
+	ncfg_buf_init(&buf, 0);
+	ncfg_json_write_init(&writer, &buf);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_member_string(&writer, "subject", subject);
+	ncfg_json_write_member_string(&writer, "name", name ? name : "?");
+	ncfg_json_write_member_bool(&writer, "supported", supported);
+	if (!supported && why && why[0]) {
+		ncfg_json_write_member_string(&writer, "refusal", why);
+	}
+	ncfg_json_write_object_end(&writer);
+	if (!ncfg_buf_failed(&buf)) {
+		ncfg_out_line(ncfg_buf_text(&buf));
+	}
+	ncfg_buf_free(&buf);
+}
+
+void ncfg_main_netcfgd_supported(void)
+{
+	int kind;
+
+	for (kind = 0; kind < (int)NCFG_PROTO_REQ_COUNT; kind++) {
+		/* Named means the wire can carry it, and `daemon_answer.c` switches
+		 * over the same enum with no `default`, so a kind that reaches the
+		 * dispatcher without an arm does not compile. */
+		say_one("request", ncfg_proto_request_name((ncfg_proto_request_kind_t)kind), 1,
+		    NULL);
+	}
+	for (kind = 0; kind <= (int)NCFG_OP_COMMIT_REVERT; kind++) {
+		ncfg_op_t op;
+		char      why[NCFG_ERROR_MAX];
+		int       ok;
+
+		memset(&op, 0, sizeof(op));
+		op.kind = kind;
+		if (kind == (int)NCFG_OP_LINK_CREATE || kind == (int)NCFG_OP_BACKEND_START ||
+		    kind == (int)NCFG_OP_BACKEND_STOP || kind == (int)NCFG_OP_BACKEND_RELOAD) {
+			/* Asked per kind below, where the answer is decided. */
+			continue;
+		}
+		why[0] = '\0';
+		ok = ncfg_apply_supported(&op, why, sizeof(why));
+		say_one("op", ncfg_op_name(&op), ok, why);
+	}
+	for (kind = 0; kind <= (int)NCFG_KIND_IFB; kind++) {
+		ncfg_interface_kind_t created;
+		ncfg_op_t             op;
+		char                  why[NCFG_ERROR_MAX];
+		int                   ok;
+
+		memset(&created, 0, sizeof(created));
+		created.kind = kind;
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_CREATE;
+		op.u.link_create.name = "x";
+		op.u.link_create.kind = &created;
+		why[0] = '\0';
+		ok = ncfg_apply_supported(&op, why, sizeof(why));
+		say_one("link.create", ncfg_interface_kind_name(kind), ok, why);
+	}
+	for (kind = 0; kind <= (int)NCFG_BACKEND_DNS; kind++) {
+		static const int verbs[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
+			NCFG_OP_BACKEND_RELOAD };
+		size_t           at;
+
+		for (at = 0; at < sizeof(verbs) / sizeof(verbs[0]); at++) {
+			ncfg_op_t op;
+			char      why[NCFG_ERROR_MAX];
+			char      subject[64];
+			int       ok;
+
+			memset(&op, 0, sizeof(op));
+			op.kind = verbs[at];
+			op.u.backend.kind = kind;
+			op.u.backend.iface = "x";
+			why[0] = '\0';
+			ok = ncfg_apply_supported(&op, why, sizeof(why));
+			(void)snprintf(subject, sizeof(subject), "%s", ncfg_op_name(&op));
+			say_one(subject, ncfg_backend_kind_name(kind), ok, why);
+		}
+	}
+}
 
 const char *ncfg_main_netcfgd_usage(void)
 {
@@ -190,6 +309,11 @@ static int parse(int argc, char **argv, options_t *options, int *done, int *code
 		if (strcmp(argument, "--version") == 0) {
 			ncfg_out_writef(NCFG_MAIN_DAEMON_NAME " %s\n", NCFG_CLI_VERSION);
 			ncfg_out_line(NCFG_CLI_COPYRIGHT);
+			*done = 1;
+			return 1;
+		}
+		if (strcmp(argument, "--supported") == 0) {
+			ncfg_main_netcfgd_supported();
 			*done = 1;
 			return 1;
 		}

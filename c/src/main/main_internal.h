@@ -329,6 +329,22 @@ int ncfg_main_remote_is_open(const ncfg_remote_policy_t *remote);
 const char *ncfg_main_netcfgd_usage(void);
 
 /*
+ * The completeness ledger, on stdout, as JSON lines.
+ *
+ * `doc/c-transition.md` section 5 asks for this and forbids it being a
+ * checklist, so every row is produced by asking the code that decides --
+ * `ncfg_apply_supported` about each op and each kind it is a function of, and
+ * `ncfg_proto_request_name` about each request. `tool/ledger_gate.py` diffs it
+ * against the frozen witnesses in `doc/schema/`.
+ *
+ * Published so `main_test` can check the walk is exhaustive rather than a
+ * subset: the whole value of this is that it cannot drift from what the build
+ * does, and a loop that stopped one short would be a ledger that lied by
+ * omission while every line in it was true.
+ */
+void ncfg_main_netcfgd_supported(void);
+
+/*
  * `netcfgd-probe`, from `argv`.
  *
  * The one entry point here that is finished, because `ncfg_portal_helper` is:
