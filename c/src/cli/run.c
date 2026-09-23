@@ -746,18 +746,34 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
 	}
 	/*
 	 * The one question an observation asks the secret store, and it is asked
-	 * **under the directory this invocation was given** rather than under a
-	 * default: `--config-dir` is the whole of how somebody points `ncfg` at a
-	 * tree that is not the machine's, and a status listing that read
-	 * `/etc/netcfgd/secrets` anyway would be reading credentials nobody
-	 * pointed it at. A name that does not fit leaves the question unasked,
-	 * which is the honest answer rather than a wrong one.
+	 * **under the directory this invocation resolved** -- through
+	 * `ncfg_config_resolve_dir`, which is the same call `compile_config` makes
+	 * a few lines earlier and the only place the three answers are folded into
+	 * one: `--config-dir`, then `$NCFG_CONFIG_DIR`, then the machine's.
+	 *
+	 * This used to read `options->config_dir` alone, and the effect was not
+	 * "a default it declined to reach for": an `ncfg` pointed by the
+	 * environment -- which is how a unit file and a container image point it
+	 * -- compiled the document out of that tree and then asked the secret
+	 * store nothing, so `key_matches` and `preshared_matches` came back
+	 * unanswered and a rotated WireGuard key could not be noticed by the
+	 * program that was looking straight at it. Two rules for one directory,
+	 * and the half that read credentials had the narrower one.
+	 *
+	 * A name that does not fit leaves the question unasked, which is the
+	 * honest answer rather than a wrong one.
 	 */
 	memset(&secrets, 0, sizeof(secrets));
-	if (options && options->config_dir && options->config_dir[0] &&
-	    (size_t)snprintf(secrets_dir, sizeof(secrets_dir), "%s/secrets",
-	    options->config_dir) < sizeof(secrets_dir)) {
-		secrets.secrets_dir = secrets_dir;
+	{
+		char config_dir[NCFG_CLI_TEXT_MAX];
+
+		(void)ncfg_config_resolve_dir(options ? options->config_dir : NULL, config_dir,
+		    sizeof(config_dir));
+		if (config_dir[0] &&
+		    (size_t)snprintf(secrets_dir, sizeof(secrets_dir), "%s/secrets",
+		    config_dir) < sizeof(secrets_dir)) {
+			secrets.secrets_dir = secrets_dir;
+		}
 	}
 	return ncfg_observe_current(run_dir, &roots, secrets.secrets_dir ? &secrets : NULL,
 	    desired, out, err, err_size);

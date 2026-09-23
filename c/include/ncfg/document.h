@@ -805,6 +805,12 @@ typedef struct {
  * outside the set. */
 const char *ncfg_interface_kind_name(int kind);
 
+/* The language's word for the same kind -- `wireguard` and `openvpn` where the
+ * document says `wire_guard` and `open_vpn`, and the same word everywhere
+ * else. What an operator reads against the file they wrote uses this one; what
+ * is serialised uses the other. NULL outside the set. */
+const char *ncfg_interface_kind_language_name(int kind);
+
 /*
  * The word a tunnel encapsulation goes on the wire as, or NULL outside the set.
  *

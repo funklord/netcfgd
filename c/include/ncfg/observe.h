@@ -1070,6 +1070,31 @@ int ncfg_observe_wg_preset_record_path(const char *run_dir, const char *iface, c
  */
 void ncfg_observe_wg_digest(const char *material, size_t length, char *out);
 
+/*
+ * The same digest, of a key that is **already 32 octets**.
+ *
+ * The door the executor uses, and it exists because the text door was the
+ * wrong one for it. `ncfg_observe_wg_digest` trims leading and trailing bytes
+ * of `0x20` or less before deciding what it has -- which is right for material
+ * read out of a file, where the trailing newline is the whole reason, and
+ * silently wrong for a key: an octet is a number, and a key whose first or
+ * last octet happens to be `0x1f` is not a key with whitespace around it.
+ *
+ * The executor recorded the digest of thirty-one octets for every such key.
+ * They are **24% of all keys** -- 33 of 256 values at each end -- so roughly
+ * one WireGuard device in four came up with a record that could never match
+ * what the observer computed from the store, `key_matches` answered false for
+ * ever, and the planner re-sent a key the kernel already held on every single
+ * reconcile. Nothing failed and nothing was said; the tunnel worked.
+ *
+ * The rule is still one rule -- hash the thirty-two octets of the key -- and
+ * this is the half that already has them. What the text door does is find
+ * them.
+ *
+ * `out` is `NCFG_SHA256_HEX_SIZE` bytes. The key is the caller's to wipe.
+ */
+void ncfg_observe_wg_digest_key(const unsigned char key[NCFG_KEY_LEN], char *out);
+
 /* ------------------------------------------------------------------------ *
  * The answers that are computed rather than read
  * ------------------------------------------------------------------------ */

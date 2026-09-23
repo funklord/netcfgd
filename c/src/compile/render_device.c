@@ -15,21 +15,6 @@
 
 #include <stdio.h>
 
-/*
- * **The configuration language's word for a link kind, which is not always the
- * document's.** `ncfg_interface_kind_name` answers with the document's,
- * because that is what the JSON carries: it says `wire_guard` and `open_vpn`,
- * and an operator writes `wireguard` and `openvpn`.
- *
- * Only the refusal message uses it, and that is exactly why it has to be
- * right: the refusal exists so an operator knows which block to write by hand,
- * and naming a word the language does not have sends them to write a block
- * that cannot compile. This project has shipped that pair of words the wrong
- * way round twice.
- */
-static const char *const language_kind_words[] = { "physical", "bridge", "bond", "vlan", "vxlan",
-	"wireguard", "pppoe", "openvpn", "dummy", "veth", "vrf", "macvlan", "tunnel", "tun",
-	"ifb" };
 
 /* `iproute2`'s spellings, the same on both sides, from
  * `netcfgd-model/src/interface.rs`. `802.3ad` is what every piece of bonding
@@ -224,9 +209,13 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		/* The scope is `device` and not `interface`, which is where 0155 pass
 		 * 1b moved the kind to -- a refusal naming the wrong block sends the
 		 * operator to write the key where the parser no longer reads it. */
+		/* The language's word and not the document's: the refusal exists so
+		 * an operator knows which block to write by hand, and naming a word
+		 * the language does not have sends them to write one that cannot
+		 * compile. The table is the model's -- `document.h` says why there is
+		 * only one of it. */
 		ncfg_render_refuse(missing, "device", name, "kind %s",
-		    ncfg_render_word_or_gap(ncfg_render_word(language_kind_words,
-		        NCFG_COUNT_OF(language_kind_words), kind->kind)));
+		    ncfg_render_word_or_gap(ncfg_interface_kind_language_name(kind->kind)));
 		break;
 	}
 }

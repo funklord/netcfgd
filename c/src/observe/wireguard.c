@@ -705,11 +705,23 @@ void ncfg_observe_wg_digest(const char *material, size_t length, char *out)
 		length--;
 	}
 	if (ncfg_key_parse(material + start, length - start, octets, NULL, 0)) {
-		ncfg_sha256_hex(octets, sizeof(octets), out);
+		ncfg_observe_wg_digest_key(octets, out);
 		explicit_bzero(octets, sizeof(octets));
 		return;
 	}
 	ncfg_sha256_hex(material + start, length - start, out);
+}
+
+void ncfg_observe_wg_digest_key(const unsigned char key[NCFG_KEY_LEN], char *out)
+{
+	if (!out) {
+		return;
+	}
+	out[0] = '\0';
+	if (!key) {
+		return;
+	}
+	ncfg_sha256_hex(key, NCFG_KEY_LEN, out);
 }
 
 /* The same, of a resolved secret. A wrapper rather than a second rule: this

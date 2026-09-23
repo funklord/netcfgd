@@ -680,10 +680,29 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	world.resolve = resolve_index;
 	switch ((ncfg_op_kind_t)op->kind) {
 	case NCFG_OP_LINK_CREATE:
-		return create_link(kernel, op, err, err_size);
+		if (!create_link(kernel, op, err, err_size)) {
+			return 0;
+		}
+		/* **A WireGuard device is not configured by the message that creates
+		 * it.** The key, the port, the mark and the peers all go over generic
+		 * netlink afterwards, so a create that stopped at the link left a
+		 * tunnel that was up, addressed and carrying nothing at all.
+		 * `kernel_internal.h` has the rest. */
+		return ncfg_kernel_wg_configure_new(&world, op->u.link_create.name,
+		    op->u.link_create.kind, err, err_size);
 	case NCFG_OP_LINK_DELETE:
-		return on_link(kernel, op->u.named.name, op, build_delete, "delete the link", err,
-		    err_size);
+		if (!on_link(kernel, op->u.named.name, op, build_delete, "delete the link", err,
+		    err_size)) {
+			return 0;
+		}
+		/* **After the kernel took the link, and only then.** The two
+		 * WireGuard records say "netcfgd configured this device"; their
+		 * absence says it did not, and that absence is what the observer
+		 * reads -- so a record left behind describes a device that has gone,
+		 * and a record removed ahead of a delete that failed describes a live
+		 * one as unconfigured. `kernel_internal.h` has the case that bites. */
+		ncfg_kernel_wg_forget_records(world.run_dir, op->u.named.name);
+		return 1;
 	case NCFG_OP_LINK_UP:
 		return on_link(kernel, op->u.named.name, op, build_up, "bring the link up", err,
 		    err_size);

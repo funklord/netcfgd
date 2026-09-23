@@ -383,7 +383,11 @@ static void record_peer(ncfg_buf_t *record, const unsigned char *public_key,
 	if (!ncfg_key_render(public_key, rendered, sizeof(rendered), NULL, 0)) {
 		return;
 	}
-	ncfg_observe_wg_digest((const char *)preshared, (size_t)NCFG_KEY_LEN, digest);
+	/* The octet door, for the reason `observe.h` gives at length: a preshared
+	 * key is 32 octets from `wg genpsk` and not text, so the text door's trim
+	 * would take an end byte of `0x1f` for whitespace and record the digest of
+	 * thirty-one of them. */
+	ncfg_observe_wg_digest_key(preshared, digest);
 	ncfg_buf_add_text(record, rendered);
 	ncfg_buf_add_char(record, ' ');
 	ncfg_buf_add_text(record, digest);
@@ -447,7 +451,7 @@ int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
 		if (built && record) {
 			char digest[NCFG_SHA256_HEX_SIZE];
 
-			ncfg_observe_wg_digest((const char *)private, sizeof(private), digest);
+			ncfg_observe_wg_digest_key(private, digest);
 			ncfg_buf_add_text(record, digest);
 			ncfg_buf_add_char(record, '\n');
 		}
@@ -605,7 +609,7 @@ void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kin
 		 * would record "no peer has a preshared key" about a device where
 		 * several do. Saying nothing leaves the reader with no record, which
 		 * is the answer it already knows how to hold. */
-		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		ncfg_log_emitf("wireguard", NCFG_LOG_WARNING,
 		    "%s: the WireGuard record could not be built, so %s is left as it was and "
 		    "the next observation will say nothing about the keys in use",
 		    iface ? iface : "?", path);
@@ -614,7 +618,7 @@ void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kin
 	text = ncfg_buf_text(record);
 	if (!text || !text[0]) {
 		if (unlink(path) != 0 && errno != ENOENT) {
-			ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+			ncfg_log_emitf("wireguard", NCFG_LOG_WARNING,
 			    "%s: %s could not be removed (%s), so it goes on describing keys "
 			    "that are no longer in use", iface ? iface : "?", path,
 			    strerror(errno));
@@ -623,17 +627,89 @@ void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kin
 	}
 	(void)snprintf(dir, sizeof(dir), "%s/wireguard", run_dir);
 	if (mkdir(dir, 0700) != 0 && errno != EEXIST) {
-		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		ncfg_log_emitf("wireguard", NCFG_LOG_WARNING,
 		    "%s: %s could not be made (%s), so no WireGuard record is kept",
 		    iface ? iface : "?", dir, strerror(errno));
 		return;
 	}
 	why[0] = '\0';
 	if (!ncfg_write_atomically(path, text, strlen(text), 0600, why, sizeof(why))) {
-		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		ncfg_log_emitf("wireguard", NCFG_LOG_WARNING,
 		    "%s: the WireGuard record could not be written (%s), so the next "
 		    "observation will say nothing about the keys in use", iface ? iface : "?",
 		    why);
+	}
+}
+
+int ncfg_kernel_wg_configure_new(const ncfg_kernel_world_t *world, const char *iface,
+    const ncfg_interface_kind_t *kind, char *err, size_t err_size)
+{
+	const ncfg_wireguard_config_t *config;
+	ncfg_op_t                      op;
+
+	/* Every other kind configures itself in the `RTM_NEWLINK` that created it,
+	 * so this is a question rather than a caller's duty to ask. */
+	if (!kind || kind->kind != (int)NCFG_KIND_WIREGUARD) {
+		return 1;
+	}
+	config = &kind->wireguard;
+	/*
+	 * The device's own fields first, because they carry the private key: a
+	 * device with peers and no key answers nothing, and the record written
+	 * here is what lets the next observation notice a rotated one.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_WG_SET_DEVICE;
+	op.u.wg_device.iface = iface;
+	/* The document's own, by name. A synthesized action has no plan to have
+	 * been built from a different document than, which is the disagreement
+	 * `private_key_ref` exists to catch. */
+	op.u.wg_device.private_key_ref = NULL;
+	op.u.wg_device.listen_port = config->listen_port;
+	op.u.wg_device.fwmark = config->fwmark;
+	if (!ncfg_kernel_wg_op(world, &op, err, err_size)) {
+		return 0;
+	}
+	/*
+	 * Then the peers, **and unconditionally**. A brand-new device has none to
+	 * replace, so an empty list costs one transaction and says the true thing;
+	 * asking first would put a second rule about when peers are sent beside
+	 * the one `wg.set_peers` already has, and the two would drift.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_WG_SET_PEERS;
+	op.u.wg_peers.iface = iface;
+	op.u.wg_peers.peers = config->peers;
+	op.u.wg_peers.peer_count = config->peer_count;
+	return ncfg_kernel_wg_op(world, &op, err, err_size);
+}
+
+void ncfg_kernel_wg_forget_records(const char *run_dir, const char *iface)
+{
+	char   path[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+	size_t at;
+
+	if (!run_dir || !run_dir[0] || !iface || !iface[0]) {
+		return;
+	}
+	/* The two, by name, through the same path functions the reader and the
+	 * writer use -- a third spelling here would remove some other file and
+	 * leave the record standing. */
+	for (at = 0; at < 2; at++) {
+		int named = at == 0 ?
+		    ncfg_observe_wg_key_record_path(run_dir, iface, path, sizeof(path), NULL, 0) :
+		    ncfg_observe_wg_preset_record_path(run_dir, iface, path, sizeof(path), NULL,
+		        0);
+
+		if (!named) {
+			continue;
+		}
+		if (unlink(path) != 0 && errno != ENOENT) {
+			ncfg_log_emitf("wireguard", NCFG_LOG_WARNING,
+			    "%s: %s outlived the link it describes and could not be removed "
+			    "(%s), so the next observation will answer about a device that is "
+			    "no longer there", iface, path, strerror(errno));
+		}
 	}
 }
 

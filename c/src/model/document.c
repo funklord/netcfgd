@@ -198,6 +198,38 @@ const char *ncfg_interface_kind_name(int kind)
 }
 
 /*
+ * **The configuration language's word for the same kind**, which differs from
+ * the document's in exactly two places and in both of them it matters.
+ *
+ * `wire_guard` and `open_vpn` are what the JSON carries; `wireguard` and
+ * `openvpn` are what an operator writes in a `device` block. Anything that a
+ * person reads against the file they wrote -- a refusal telling them which
+ * block to add, a plan reason saying what the document asked for -- has to use
+ * this one, and anything serialised has to use the other.
+ *
+ * **Here rather than in either caller, because the words have been shipped the
+ * wrong way round three times.** `render_device.c` carried a private copy of
+ * this table for its refusal and said so in a comment counting two; the
+ * planner did not have a copy and reached for the document's, so `ncfg plan`
+ * said `kind: wire_guard` beside an observed side already saying `wireguard`.
+ * A table that is one table cannot disagree with itself.
+ *
+ * The two lists are index-for-index with `interface_kind_words`, which is what
+ * makes one tag answer both; `document_test` holds that.
+ *
+ * NULL outside the set, `value.h`'s convention.
+ */
+static const char *const language_kind_words[] = { "physical", "bridge", "bond", "vlan",
+	"vxlan", "wireguard", "pppoe", "openvpn", "dummy", "veth", "vrf", "macvlan", "tunnel",
+	"tun", "ifb" };
+static const ncfg_enum_t language_kind_set = WORD_SET("interface kind", language_kind_words);
+
+const char *ncfg_interface_kind_language_name(int kind)
+{
+	return ncfg_field_enum_name(&language_kind_set, kind);
+}
+
+/*
  * The word a tunnel encapsulation goes on the wire as.
  *
  * **The document's spelling and the kernel's are the same word**, deliberately

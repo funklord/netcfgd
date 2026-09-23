@@ -336,6 +336,32 @@ int ncfg_kernel_build_redirect(ncfg_buf_t *first, ncfg_buf_t *second, uint32_t s
 void ncfg_kernel_wg_write_record(const char *run_dir, const char *iface, int kind,
     const ncfg_buf_t *record);
 
+/*
+ * Take the two records away, because the link they describe has gone.
+ *
+ * **Their absence is what carries the meaning.** `observe.h` reads "no record"
+ * as *netcfgd did not configure this device, so it has nothing to say about
+ * the key* -- which stops being true the moment a record outlives its link. A
+ * `wg0` that netcfgd deleted and somebody then recreated by hand is the case
+ * that bites: the observer finds yesterday's digest, compares the store's key
+ * against it, answers `key_matches` true about a device holding a stranger's
+ * key, and the planner leaves the tunnel exactly as it is.
+ *
+ * Called after the delete the kernel acknowledged, and never before one: a
+ * record removed ahead of a delete that then failed describes a live device as
+ * unconfigured, which is the same lie pointed the other way.
+ *
+ * **Unconditional rather than asked about the kind.** A deleted link's kind is
+ * precisely what is no longer there to ask, and for anything that was not a
+ * WireGuard device the two files simply do not exist. Both are named -- the
+ * interface's own key record and its own preshared record -- rather than swept
+ * out of a directory a concurrent device is also writing into.
+ *
+ * Nothing here fails the op, for `ncfg_kernel_wg_write_record`'s reason: the
+ * link is already gone. A file that would not go is a log line naming it.
+ */
+void ncfg_kernel_wg_forget_records(const char *run_dir, const char *iface);
+
 int ncfg_kernel_wg_build(ncfg_wg_messages_t *out, ncfg_buf_t *record,
     const ncfg_genl_family_t *family, uint32_t seq, const ncfg_op_t *op,
     const ncfg_document_t *document, const ncfg_secret_resolver_t *resolver, char *err,
@@ -485,6 +511,34 @@ typedef struct {
 	ncfg_kernel_index_fn         resolve;
 	void                        *context;
 } ncfg_kernel_world_t;
+
+/*
+ * Configure a WireGuard device that has just been created, or do nothing.
+ *
+ * **Everything that makes a WireGuard device a tunnel goes over generic
+ * netlink, after the link exists** -- the key, the listen port, the firewall
+ * mark and the peers. `RTM_NEWLINK` carries none of it. So a create that stops
+ * at the link leaves a device that is up, addressed, and silently carrying
+ * nothing: no peer can reach it and it can reach no peer, and `ncfg status`
+ * shows an interface with an address on it. That is what this port did.
+ *
+ * Part of creating the device rather than a separate action, which is why
+ * there is no `wg.set_device` in a plan that creates one -- the planner emits
+ * the two WireGuard ops only to *correct* a device that already exists, and a
+ * create carries its whole configuration. Decision 0054 split the two ops for
+ * the correcting case and says nothing about this one.
+ *
+ * A failure is the create's failure. The link is already there by then and is
+ * left there: the machine has changed, the journal says which action stopped,
+ * and a confirm window is exactly the machinery for a change that went in
+ * half-way. Removing the link here would be this arm inventing a rollback the
+ * plan did not ask for.
+ *
+ * Anything that is not a WireGuard kind is 1 and no work, so the caller asks
+ * once rather than every arm asking about itself.
+ */
+int ncfg_kernel_wg_configure_new(const ncfg_kernel_world_t *world, const char *iface,
+    const ncfg_interface_kind_t *kind, char *err, size_t err_size);
 
 int ncfg_kernel_link_kind_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, char *err,
     size_t err_size);
