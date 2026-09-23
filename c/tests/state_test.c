@@ -1122,11 +1122,61 @@ static void what_a_written_file_is_readable_by(const char *dir)
 	}
 }
 
+/*
+ * **And what a record ends up as, whatever the umask is.**
+ *
+ * The case above is about the mechanism: a mode asked for, reduced by the
+ * umask, which is what an `open` does. This is about what the callers ask
+ * *for*, and it is a different question with a different answer.
+ *
+ * These files used to be opened `0666` with a comment saying the umask would
+ * decide. True, and not enough: a daemon started with a umask of zero -- from
+ * a container entrypoint, or an init script that cleared it -- then wrote
+ * every record world-writable, `owned.json` among them, which is the record
+ * deciding what netcfgd will remove. `NCFG_RUN_FILE_MODE` is `0644` stated
+ * rather than hoped for, and this is the check that says the writers use it.
+ *
+ * Driven under a umask of zero deliberately: with an ordinary one the wrong
+ * answer and the right answer are the same file.
+ */
+static void a_record_is_never_world_writable(const char *dir)
+{
+	char             message[NCFG_ERROR_MAX];
+	char             path[512];
+	ncfg_observed_t *observed;
+	struct stat      found;
+	mode_t           kept;
+
+	printf("\n-- what a record is, whatever the umask\n");
+	observed = ncfg_observed_read("{\"links\":[]}", 12u, message, sizeof(message));
+	if (!observed) {
+		check(0, "an observation to write");
+		return;
+	}
+	kept = umask(0);
+	message[0] = '\0';
+	check(ncfg_state_write_observed(dir, observed, message, sizeof(message)),
+	    "an observation is written under a umask of zero");
+	if (message[0]) { printf("       %s\n", message); }
+	(void)snprintf(path, sizeof(path), "%s/observed.json", dir);
+	/* **The number, not the constant.** Comparing against
+	 * `NCFG_RUN_FILE_MODE` makes the assertion move with the thing it is
+	 * asserting: a sabotage that set the constant to `0666` passed, because
+	 * the file was then 0666 and so was what it was compared to. */
+	check(stat(path, &found) == 0 && (found.st_mode & 0777u) == 0644u,
+	    "  and it is 0644, not whatever the umask happened to allow");
+	check((found.st_mode & 0022u) == 0u,
+	    "  so no group and no stranger can write the record netcfgd reads back");
+	(void)umask(kept);
+	ncfg_observed_free(observed);
+}
+
 int main(void)
 {
 	const char *run_dir = testdir_make("state");
 
 	what_a_written_file_is_readable_by(run_dir);
+	a_record_is_never_world_writable(run_dir);
 
 	printf("== state_test in %s\n", run_dir);
 	the_run_directory_is_chosen_in_one_order();

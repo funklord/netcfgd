@@ -744,8 +744,8 @@ int ncfg_owned_write(const char *run_dir, const ncfg_owned_state_t *owned, char 
 	 * (0055), so tightening it is a decision to take deliberately rather than
 	 * in passing.
 	 */
-	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)), 0666u,
-	    err, err_size);
+	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
+	    NCFG_RUN_FILE_MODE, err, err_size);
 	free(path);
 	ncfg_buf_free(&buf);
 	return ok;
