@@ -152,6 +152,11 @@ const char *ncfg_hostapd_effective_band(const char *band, const ncfg_optint_t *c
 	return channel->value <= 14 ? BAND_24 : BAND_5;
 }
 
+int ncfg_hostapd_channel_needs_radar_detection(int64_t channel)
+{
+	return (channel >= 52 && channel <= 64) || (channel >= 100 && channel <= 144);
+}
+
 int ncfg_hostapd_channel_in_band(const char *band, int64_t channel)
 {
 	if (band && strcmp(band, BAND_24) == 0) {

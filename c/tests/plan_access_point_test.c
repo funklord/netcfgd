@@ -24,6 +24,8 @@
  *   a document and an observation, which is what lets this suite run on a
  *   workstation whose network must not be disturbed.
  */
+#include "ncfg/hostapd.h"
+
 #include "planfix.h"
 
 #include <stdio.h>
@@ -587,6 +589,91 @@ static void only_the_first_access_point_on_a_radio_is_restarted(void)
 
 	check(quiet(plan),
 	    "the second access point on a radio does not restart the first's hostapd");
+	/*
+	 * **And it is said.** The block is read, kept and never started -- both
+	 * halves at once needs a second virtual interface on the phy, which
+	 * netcfgd does not create -- so a plan that quietly starts the first looks
+	 * exactly like a plan that did everything asked of it.
+	 *
+	 * Said once, by the block that runs, naming the ones that do not: three
+	 * blocks on one radio told three times would never say which one won.
+	 */
+	check(plan && planfix_warned(plan, "has more than one access point"),
+	    "  and the one that will not run is said, rather than silently dropped");
+	check(plan && planfix_warned(plan, "so `a-first` is started and `b-second` is not"),
+	    "  naming which one runs and which does not");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    ",\"access_points\":[{\"id\":\"a-first\",\"ssid\":\"686f6d65\","
+	    "\"device\":\"wlan0\",\"security\":{\"type\":\"open\"}}]",
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)),
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "has more than one access point"),
+	    "and one access point on a radio is the ordinary arrangement, so nothing is said");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * A DFS channel, where hostapd comes up and says nothing for a while.
+ *
+ * The radio has to listen before it may beacon, so everything netcfgd reports
+ * says the access point is running while a scan finds nothing -- which is
+ * exactly when somebody goes looking for a fault that is not there.
+ */
+static void an_access_point_that_has_to_listen_first_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    ",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\","
+	    "\"device\":\"wlan0\",\"security\":{\"type\":\"open\"},\"channel\":52}]",
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+
+	check(plan && planfix_warned(plan, "shared with radar"),
+	    "an access point on a DFS channel is said to be silent at first");
+	check(plan && planfix_warned(plan, "Channels 36 to 48 and 149 upwards need no such wait"),
+	    "  and told which channels do not wait");
+	planfix_release(plan, document, observed);
+
+	/* The bounds, from both ends of both ranges and one channel outside each.
+	 * A range written as `>= 52 && <= 64` is one typo away from `> 52`, and a
+	 * single sample in the middle cannot tell. */
+	{
+		static const int inside[] = { 52, 64, 100, 144 };
+		static const int outside[] = { 48, 65, 99, 149 };
+		size_t           at;
+		unsigned         said = 0;
+		unsigned         quiet_count = 0;
+
+		for (at = 0; at < sizeof(inside) / sizeof(inside[0]); at++) {
+			said += ncfg_hostapd_channel_needs_radar_detection(inside[at]) ? 1u : 0u;
+		}
+		for (at = 0; at < sizeof(outside) / sizeof(outside[0]); at++) {
+			quiet_count +=
+			    ncfg_hostapd_channel_needs_radar_detection(outside[at]) ? 0u : 1u;
+		}
+		check(said == 4u, "  the two DFS ranges include both of their ends");
+		check(quiet_count == 4u, "  and the channels either side of them are not DFS");
+	}
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    ",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\","
+	    "\"device\":\"wlan0\",\"security\":{\"type\":\"open\"},\"channel\":36}]",
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "shared with radar"),
+	    "and one that beacons straight away is not");
+	planfix_release(plan, document, observed);
+
+	/* An absent channel is hostapd surveying and choosing, which this cannot
+	 * answer for and must not warn about. */
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    ",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\","
+	    "\"device\":\"wlan0\",\"security\":{\"type\":\"open\"}}]",
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "shared with radar"),
+	    "and an access point with no channel at all is hostapd's to choose, so nothing "
+	    "is said");
 	planfix_release(plan, document, observed);
 }
 
@@ -613,6 +700,7 @@ int main(void)
 	a_policy_that_moved_restarts_rather_than_being_half_applied();
 	a_restarted_access_point_has_its_station_lists_left_alone();
 	only_the_first_access_point_on_a_radio_is_restarted();
+	an_access_point_that_has_to_listen_first_is_said();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

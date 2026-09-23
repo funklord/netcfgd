@@ -131,6 +131,64 @@ void ncfg_plan_access_point(ncfg_builder_t *builder, const ncfg_interface_t *int
  * block produces an empty plan and no explanation -- which is the failure a
  * warning pass exists to prevent, arrived at by deleting a warning.
  */
+/*
+ * A radio carrying more than one access point, where only the first runs.
+ *
+ * **One BSS per radio is what this build does.** Both halves at once needs a
+ * second virtual interface on the phy, which netcfgd does not create -- so the
+ * second `access_point` block naming a device is read, kept, and never
+ * started, and the plan that starts the first looks exactly like a plan that
+ * did everything asked of it.
+ *
+ * Said once, by the block that *is* started, and naming the ones that are not:
+ * a sentence per ignored block would tell an operator with three of them the
+ * same thing three times without ever saying which one won.
+ */
+static void warn_second_access_point(ncfg_builder_t *builder,
+    const ncfg_access_point_t *point)
+{
+	ncfg_buf_t ignored;
+	size_t     count = 0;
+	size_t     i;
+
+	if (!point->device) {
+		return;
+	}
+	ncfg_buf_init(&ignored, 0);
+	for (i = 0; i < builder->desired->access_point_count; i++) {
+		const ncfg_access_point_t *other = &builder->desired->access_points[i];
+
+		if (!other->device || strcmp(other->device, point->device) != 0) {
+			continue;
+		}
+		/* The first block on this device is the one that runs, and anything
+		 * before this one in the list means this is not it. */
+		if (other == point) {
+			break;
+		}
+		ncfg_buf_free(&ignored);
+		return;
+	}
+	for (i = 0; i < builder->desired->access_point_count; i++) {
+		const ncfg_access_point_t *other = &builder->desired->access_points[i];
+
+		if (other == point || !other->device ||
+		    strcmp(other->device, point->device) != 0) {
+			continue;
+		}
+		ncfg_buf_addf(&ignored, "%s%s", count ? "`, `" : "", other->id);
+		count++;
+	}
+	if (count != 0u) {
+		ncfg_plan_warnf(builder->plan, point->device,
+		    "`%s` has more than one access point and this build runs one BSS per "
+		    "radio, so `%s` is started and `%s` %s not",
+		    point->device, point->id, ncfg_buf_text(&ignored),
+		    count == 1u ? "is" : "are");
+	}
+	ncfg_buf_free(&ignored);
+}
+
 void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 {
 	size_t i;
@@ -146,6 +204,28 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 		    "brings the radio up and nothing starts hostapd on it. Adding "
 		    "`interface %s { }` is enough",
 		    point->id, point->device, point->device);
+	}
+	for (i = 0; i < builder->desired->access_point_count; i++) {
+		const ncfg_access_point_t *point = &builder->desired->access_points[i];
+
+		/*
+		 * **A silent access point that is working correctly.** A DFS channel
+		 * has to be listened on before the radio may beacon, so hostapd comes
+		 * up, says nothing for a minute or so, and only then appears in a
+		 * scan. Every part of netcfgd reports success meanwhile, which is
+		 * exactly when somebody starts looking for the fault.
+		 */
+		if (point->channel.has &&
+		    ncfg_hostapd_channel_needs_radar_detection(point->channel.value)) {
+			ncfg_plan_warnf(builder->plan, point->device,
+			    "access point `%s` is on channel %lld, which is shared with radar "
+			    "in most regulatory domains: the radio has to listen on it before "
+			    "it may beacon, so the access point will be silent for a minute or "
+			    "so after this apply returns -- longer on some channels. Channels "
+			    "36 to 48 and 149 upwards need no such wait",
+			    point->id, (long long)point->channel.value);
+		}
+		warn_second_access_point(builder, point);
 	}
 }
 
