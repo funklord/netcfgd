@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: example deb apk apk-source apk-container all check check-ci build test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -110,7 +110,7 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage c-test agree
+                 example adapters gui linkage c-test agree ledger
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -2214,6 +2214,22 @@ example:
 # questions about two moments.
 agree: c-test
 	@python3 tool/agree_gate.py
+
+# What the C build carries out, against the frozen witnesses.
+#
+# `doc/c-transition.md` section 5 asks for a completeness ledger and forbids it
+# being a checklist. So one side is `netcfgd --supported`, which asks the code
+# that decides and prints what it answers, and the other is `doc/schema/`.
+# Neither is written by hand, and what the gate compares is the taxonomy: a
+# name in the witnesses this build has never heard of is the two enumerations
+# drifting apart.
+#
+# After `c-test` for `agree`'s reason: it needs the C binary, and that target
+# builds it. It also prints what is refused and why, which is the answer to
+# "what does the C side not do yet" and is why the output is worth reading
+# rather than just being green.
+ledger: c-test
+	@python3 tool/ledger_gate.py
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`

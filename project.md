@@ -9515,6 +9515,91 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.247 The completeness ledger, asked of the code rather than written down
+
+The question this campaign keeps being asked -- what does the C side not do
+yet -- has been answered by hand each time. `doc/c-transition.md` section 5
+says that is the wrong way and names the right one:
+
+> A completeness ledger, and it must be derived rather than kept by hand. The
+> question "what does the C side not do yet" is answered by asking the C daemon
+> -- a `--supported` dump, or an extended `Hello` -- and diffing that against
+> the Rust side's own request and action taxonomy. A hand-written checklist of
+> supported features is exactly the shape this workspace has been burned by
+> repeatedly: a list that quietly stops matching the thing it describes, under
+> a name that claims it is exhaustive.
+
+So `netcfgd --supported` now prints one JSON object per subject, and every row
+is an answer from the code that decides -- `ncfg_apply_supported` about each of
+the forty-eight ops, and about each interface kind and backend kind the two
+conditional arms are a function of; `ncfg_proto_request_name` about each
+request. Nothing is listed. **A refusal prints its own sentence**, which is the
+half a checklist loses: "not supported" and "created by the helper that
+connects it rather than by a netlink message" are different facts, and only the
+second tells a reader whether anything is missing.
+
+`tool/ledger_gate.py` diffs it against `doc/schema/`, and `make ledger` is in
+`check`. What it says today:
+
+```text
+ledger-gate: 32 request(s), 48 op(s), 1 link kind(s) and 3 backend action(s)
+             in the witnesses, all carried out by this build
+ledger-gate: and 16 thing(s) refused, each saying why
+```
+
+Those sixteen are the ledger. Three `link.create` kinds -- a physical device
+netcfgd configures and cannot make, and `pppoe` and `openvpn`, whose helper
+creates the interface as it connects. Eight `backend.reload`s, because only a
+router advertisement daemon re-reads its configuration. DHCPv6, WireGuard and
+DNS under `start`/`stop`, each for its own stated reason. **Not one of them is
+an unported feature**, and the sentences are what say so.
+
+### What the taxonomy comparison found: nothing, and that is the finding
+
+32 requests in the frozen socket transcript, 32 named by the C, none either
+way. 48 distinct ops in `plan.json`, 48 in this port's enum, all executed. The
+two conditional vocabularies are whole. That is worth having as a mechanical
+statement rather than as this paragraph.
+
+### The gate was wrong before it was right, again
+
+Its first run reported a gap: `plan.json` contains `backend.reload` for a
+`supplicant`, and this build refuses it.
+
+**`plan.json` is populated by hand.** Its own test says so: its job is to pin
+the serialisation of every `Op` variant, so a renamed op or a new field moves
+the file. It is not a plan anything produced and not one anything could run --
+and the Rust refuses that same pairing in the same words, "not implemented in
+this build".
+
+So the first version had read a format witness as an executable plan. What the
+witness actually pins is the **taxonomy**, and that is what the gate compares
+now: every name in it must be one this build has heard of. Whether a particular
+pairing is carried out is the live suite's question, and it runs real plans.
+
+The pattern is the same one this session keeps meeting -- a tool that reports a
+defect before it has understood what it is reading. It is cheaper here than
+most, because the gate's claim was checkable against the Rust in one grep.
+
+Two smaller things the new flag cost, both of them the surrounding gates doing
+their job. `tool/ledger_gate.py` went in with four-space indentation and
+`style-source` counted ninety-five violations in it: this tree indents Python
+with tabs like everything else. And `agree_gate.py` went red because the two
+daemons' `--help` no longer match -- which is right, and the fix is an entry in
+`DAEMON_DIFFERENCES` beside `--try-the-c-daemon`, as **exact whole lines** for
+that table's own stated reason. Checked by renaming the flag and watching the
+exception expire rather than swallow it.
+
+### And the other half of the answer, for the record
+
+`adapter/netcfgd-nm` has no C counterpart and is not supposed to: section 1
+scopes the transition to "the daemon and its sixteen crates", and the adapters
+are separate cargo workspaces with their own lockfiles, deliberately
+unprivileged clients of the control socket. `client/ncfg_client.c` already
+speaks that protocol in C. An adapter staying Rust is the arrangement, not a
+gap -- which is worth writing down because "is everything duplicated as C?" has
+been asked and the honest answer has two parts.
+
 ## 10.246 The variable that exists so a test does not rewrite this machine
 
 Looking for the next surface to compare, two came out clean and are now
