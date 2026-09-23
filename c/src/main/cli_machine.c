@@ -61,6 +61,9 @@ typedef struct {
 	 * compiler warning about one. */
 	char                    secrets_dir[NCFG_MAIN_LOOP_PATH_MAX + 16];
 	char                    certs_dir[NCFG_MAIN_LOOP_PATH_MAX + 16];
+	/* The resolver file this invocation writes, which is the environment's
+	 * where one is set. `dns.h` has why that matters more than it looks. */
+	char                    resolv_conf[NCFG_MAIN_LOOP_PATH_MAX + 16];
 	int                     open;
 } apply_world_t;
 
@@ -104,7 +107,8 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	held->where.supplicant_dir = NCFG_SUPPLICANT_CTRL_DIR;
 	held->where.secrets_dir = held->secrets_dir;
 	held->where.certs_dir = held->certs_dir;
-	held->where.resolv_conf = NCFG_RESOLV_CONF;
+	held->where.resolv_conf = ncfg_dns_resolve_conf_path(NULL, held->resolv_conf,
+	    sizeof(held->resolv_conf));
 	held->where.dnsmasq_conf = NCFG_DNSMASQ_CONF;
 	held->where.unbound_conf = NCFG_UNBOUND_CONF;
 	ncfg_dhcp_machine(&held->where.dhcp);

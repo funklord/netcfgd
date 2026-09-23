@@ -887,8 +887,51 @@ static void a_forwarder_with_no_directory_is_refused(const char *base)
 	check(!testdir_exists(dir), "and the directory is not created on the way to refusing");
 }
 
+/*
+ * **Where the machine's resolver configuration is, asked once.**
+ *
+ * This file's own header says the library defaults nothing: a delivery handed
+ * no path fails rather than reaching for `/etc`. That leaves the choice to the
+ * program -- and the programs made it by writing the constant out at three
+ * call sites, so `NCFG_RESOLV_CONF` was in this port's documentation and
+ * honoured nowhere.
+ *
+ * What that cost is not hypothetical and is not about tests only: every live
+ * script that keeps a resolver test off the real file does it by setting that
+ * variable, so the first one pointed at these programs would have rewritten
+ * the `/etc/resolv.conf` of whatever machine it ran on. It was found by very
+ * nearly doing exactly that.
+ */
+static void the_resolver_file_is_the_one_the_caller_asked_for(void)
+{
+	char out[256];
+
+	printf("\n-- where resolv.conf is\n");
+	check(strcmp(ncfg_dns_resolve_conf_path("/somewhere/resolv.conf", out, sizeof(out)),
+	    "/somewhere/resolv.conf") == 0, "an explicit path wins");
+	(void)setenv(NCFG_RESOLV_CONF_ENV, "/from-the-environment", 1);
+	check(strcmp(ncfg_dns_resolve_conf_path(NULL, out, sizeof(out)),
+	    "/from-the-environment") == 0,
+	    "and the environment beats the default, which is what keeps a test off the "
+	    "machine's own");
+	check(strcmp(ncfg_dns_resolve_conf_path("/explicit", out, sizeof(out)), "/explicit") == 0,
+	    "  and an explicit path still beats the environment");
+	(void)unsetenv(NCFG_RESOLV_CONF_ENV);
+	check(strcmp(ncfg_dns_resolve_conf_path(NULL, out, sizeof(out)), NCFG_RESOLV_CONF) == 0,
+	    "with nothing said, the machine's");
+	/* An empty variable is nothing said rather than an empty path: a caller
+	 * that exported one and did not fill it would otherwise deliver to "". */
+	(void)setenv(NCFG_RESOLV_CONF_ENV, "", 1);
+	check(strcmp(ncfg_dns_resolve_conf_path(NULL, out, sizeof(out)), NCFG_RESOLV_CONF) == 0,
+	    "and an empty variable says nothing rather than naming an empty path");
+	(void)unsetenv(NCFG_RESOLV_CONF_ENV);
+	check(strcmp(ncfg_dns_resolve_conf_path(NULL, NULL, 0), NCFG_RESOLV_CONF) == 0,
+	    "and asked with nowhere to put it, the answer is still a usable path");
+}
+
 int main(void)
 {
+	the_resolver_file_is_the_one_the_caller_asked_for();
 	const char *base = testdir_make("dns");
 
 	interface_scopes_come_before_globals();

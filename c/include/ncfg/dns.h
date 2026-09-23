@@ -61,6 +61,35 @@
 /* Where `resolv.conf` lives when a caller has no other opinion. */
 #define NCFG_RESOLV_CONF "/etc/resolv.conf"
 
+/* What overrides it, for a test. The Rust reads this name, and `observe.h`
+ * already reads the two beside it for `/proc` and `/sys`. */
+#define NCFG_RESOLV_CONF_ENV "NCFG_RESOLV_CONF"
+
+/*
+ * The resolver file to use: the explicit one, then the environment, then the
+ * machine's.
+ *
+ * **This is the caller choosing, which is what the rule above allows for.**
+ * `ncfg_dns_targets_t` still takes every path and still defaults nothing: a
+ * delivery handed no file fails rather than reaching for `/etc`. What this
+ * adds is the one answer a *program* gives when asked where the machine's
+ * resolver configuration is -- spelled once, so that what an apply writes and
+ * what an observation compares cannot become two files.
+ *
+ * **The environment is not a convenience here either.** It is how a test is
+ * kept off the file that decides whether this machine can resolve a name at
+ * all, and the Rust's own comment says those variables exist because "a test
+ * very nearly rewrote this machine's". This port had the variable in its
+ * documentation and honoured it nowhere, so every live script that isolates
+ * the resolver would have written the real file the moment it was pointed at
+ * these programs -- which is how this was found, by very nearly doing it.
+ *
+ * Copies into `out` and returns it, so a caller has one buffer and no
+ * ownership question. Never NULL. `ncfg_state_resolve_dir` is the same shape
+ * for the run directory and this is deliberately its twin.
+ */
+const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, size_t out_size);
+
 /* And the two forwarding resolvers' drop-ins. Both are in directories netcfgd
  * will not create: an absent `/etc/dnsmasq.d` means dnsmasq is not installed
  * or does not read that directory, and creating it would leave a file nothing

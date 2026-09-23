@@ -252,6 +252,20 @@ typedef struct {
 	 */
 	char proc[NCFG_MAIN_PATH_MAX];
 	char supplicant[NCFG_MAIN_PATH_MAX];
+	/*
+	 * And the resolver file, which is the same arrangement again and the one
+	 * that was missing.
+	 *
+	 * `dns.h` deliberately defaults nothing: a delivery handed no file fails
+	 * rather than reaching for `/etc`. That leaves the choice to the program,
+	 * and the program made it by writing the constant out at three call sites
+	 * -- so `NCFG_RESOLV_CONF`, which exists so that a test is kept off the
+	 * file deciding whether this machine can resolve a name, was honoured
+	 * nowhere. The observation compares this file and the executor writes it,
+	 * and a daemon that compared one file and wrote another is exactly what
+	 * the paragraph above is arranged to make impossible.
+	 */
+	char resolv[NCFG_MAIN_PATH_MAX];
 } ncfg_main_where_t;
 
 /*

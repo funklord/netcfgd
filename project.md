@@ -9515,6 +9515,90 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.246 The variable that exists so a test does not rewrite this machine
+
+Looking for the next surface to compare, two came out clean and are now
+measured rather than assumed: **converging away** -- apply a document, apply a
+smaller one, and compare what is left -- agrees exactly, down to `owned.json`
+and the `proto 110` tag on a route; and so do routes, rules, addressing,
+`qdisc`, MTU and forwarding on one kernel.
+
+The third probe was DNS delivery, and writing it nearly rewrote this machine's
+`/etc/resolv.conf`.
+
+**`NCFG_RESOLV_CONF` is how every resolver test is kept off the real file.**
+The Rust reads it in one function, `resolv_conf_path`, used by the delivery and
+by the observation that compares the delivery -- and its comment says why the
+variable exists at all: "a test very nearly rewrote this machine's".
+
+This port had the variable in its documentation and honoured it nowhere. Three
+call sites in `src/main/` wrote `NCFG_RESOLV_CONF` -- the constant -- straight
+into the executor's world and the observation's roots. So `dns_mode =
+"write_resolv_conf"` under these programs goes to `/etc/resolv.conf` whatever
+the environment says, and the first live script pointed at them would have
+rewritten the resolver configuration of the machine it was built on. Mine
+nearly was that script.
+
+### Why the library was right and the programs were not
+
+`dns.h` argues at length that **every path is a parameter**:
+`ncfg_dns_targets_t` defaults nothing, and a delivery handed no file fails
+rather than reaching for `/etc`. That is correct and stays. What it leaves
+open is the one answer a *program* gives when asked where the machine's
+resolver configuration is -- and
+three call sites each answered it separately, by writing the constant.
+
+`ncfg_dns_resolve_conf_path` is that answer, spelled once: the explicit path,
+then the environment, then the machine's. It is deliberately
+`ncfg_state_resolve_dir`'s twin, and `ncfg_main_where_t` now carries `resolv`
+beside `proc` and `supplicant` -- whose own comment already said the rule this
+was missing: the pair that has to agree is one answer rather than two
+spellings, "and both honour the same environment override a test points at a
+directory it made".
+
+The CLI's observation was given no resolver file at all, so `ncfg status`
+answered nothing about whether netcfgd's own delivery is still in effect --
+which is the question somebody runs it to ask. It asks now, through the same
+call the daemon makes.
+
+### Proving it without doing the damage
+
+The negative control cannot simply be "run the unfixed binary", because the
+unfixed binary writes the file the machine resolves names through.
+
+`unshare -rmn` with `mount --bind` over `/etc/resolv.conf` is the answer, and
+the isolation was checked first on a sentinel file before any netcfgd went near
+it: a write to `/etc/resolv.conf` inside the namespace landed on the bind
+source and the real file did not change. Under that, the unfixed C reports
+
+```text
+could not replace /etc/resolv.conf: Device or resource busy
+```
+
+-- aiming squarely at the machine's own path and stopped by the mount rather
+than by anything in netcfgd -- while the fixed one writes the file the
+environment names and leaves the stand-in untouched. That mount is what makes
+a C resolver live script possible at all, and any such script has to use it:
+a test for this defect must not be able to cause it.
+
+Three sabotages, each caught by the test that owns it: the environment not
+read (both), an empty variable taken as a path (the pure one), and the
+resolution dropped from `ncfg_main_netcfgd_where` (the wiring one).
+
+### One divergence recorded and not changed
+
+The Rust's CLI writes `provenance.json` into `/run` on **every** compile, "so
+that what is in /run describes the current configuration whichever binary last
+ran". This port writes it from the daemon only.
+
+Nothing is broken by that: `ncfg explain` was compared on the same document and
+the two are identical, line and column, because the CLI computes its own
+provenance and does not read the file. What differs is who may overwrite the
+copy the *daemon* answers `explain` from over the socket -- and it is not
+obvious the Rust has it the right way round, since a CLI compile of an edited
+file makes the daemon describe a configuration it has not loaded. Recorded
+rather than decided.
+
 ## 10.245 The comparison that found those four, made into a gate
 
 10.244 found four missing warnings by hand: write a document, run both

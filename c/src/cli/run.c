@@ -745,6 +745,17 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
 		return 0;
 	}
 	/*
+	 * **And the resolver file, which `ncfg_observe_roots_default` leaves empty
+	 * on purpose.** An observation given no path says nothing about a delivery
+	 * rather than reading whatever `/etc/resolv.conf` this machine has -- so
+	 * the caller that means the machine's has to say so, and this one does:
+	 * `ncfg status` answering nothing about whether netcfgd's own delivery is
+	 * still in effect is the question an operator runs it to ask. The daemon
+	 * says the same thing a few files away, through the same call, so what is
+	 * written and what is compared cannot become two files.
+	 */
+	(void)ncfg_dns_resolve_conf_path(NULL, roots.resolv_conf, sizeof(roots.resolv_conf));
+	/*
 	 * The one question an observation asks the secret store, and it is asked
 	 * **under the directory this invocation resolved** -- through
 	 * `ncfg_config_resolve_dir`, which is the same call `compile_config` makes

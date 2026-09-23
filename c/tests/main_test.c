@@ -30,6 +30,7 @@
 
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
+#include "ncfg/dns.h"
 #include "ncfg/cli.h"
 #include "ncfg/document.h"
 #include "ncfg/config.h"
@@ -593,6 +594,28 @@ static void the_paths_are_the_ones_every_other_caller_resolves(void)
 	    "the secrets directory is under the configuration directory in force");
 	check(strcmp(where.certs, NCFG_RUN_DIR_DEFAULT "/certs") == 0,
 	    "and the certificate directory is under the run directory in force");
+
+	/*
+	 * **And the resolver file, which is the one this struct was missing.**
+	 * The daemon writes it and the observation compares it, so one answer
+	 * rather than two spellings -- and the environment is honoured, because
+	 * that variable is how a test is kept off the file that decides whether
+	 * this machine can resolve a name at all. Every call site wrote the
+	 * constant out instead, so a live script pointed at these programs would
+	 * have rewritten the machine's own.
+	 */
+	check(strcmp(where.resolv, NCFG_RESOLV_CONF) == 0,
+	    "the resolver file is the machine's when nothing says otherwise");
+	(void)setenv(NCFG_RESOLV_CONF_ENV, "/tmp/not-a-real-resolv.conf", 1);
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
+	    strcmp(where.resolv, "/tmp/not-a-real-resolv.conf") == 0,
+	    "  and the environment's where one is set, which is what a test points away");
+	(void)unsetenv(NCFG_RESOLV_CONF_ENV);
+	err[0] = '\0';
+	check(ncfg_main_netcfgd_where(&options, &where, err, sizeof(err)) &&
+	    strcmp(where.resolv, NCFG_RESOLV_CONF) == 0,
+	    "  and back to the machine's once it is unset");
 
 	/* What was typed wins over the environment and over the default. */
 	options.config_dir = "/tmp/not-a-real-config";
