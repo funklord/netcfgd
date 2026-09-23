@@ -1256,6 +1256,96 @@ static void the_literal_digests_are_what_the_rule_produces(void)
 	}
 }
 
+/*
+ * **The two halves of the comparison, asked of the same key.**
+ *
+ * The case above ties this file's literals to the rule -- and asks the rule
+ * through one door twice. The executor does not use that door: it has the
+ * thirty-two octets in hand and the observer has the store's text, and the
+ * whole arrangement works only if those two ways in agree.
+ *
+ * They did not. `ncfg_observe_wg_digest` trims bytes of `0x20` or less off
+ * both ends before deciding what it is looking at, which is right for text out
+ * of a file and wrong for a key -- an octet is a number, and one that happens
+ * to be `0x1f` is not whitespace. The executor called it with the octets, so a
+ * key whose first or last octet was low had thirty-one of them recorded. That
+ * is 33 of 256 values at each end: **about one key in four**, and nothing
+ * failed. The record simply never matched, `key_matches` answered false for
+ * ever, and the planner re-sent a key the kernel already held on every
+ * reconcile.
+ *
+ * Driven from the octets rather than from text, because the ends are the whole
+ * point and a base64 literal hides them.
+ */
+static void the_two_halves_of_the_comparison_agree(void)
+{
+	/* The ends that matter, and two that do not: `0x00` and `0x20` are the
+	 * bounds of what the text door trims, `0x1f` is the one that was actually
+	 * found in the field, and `0xc5` is an ordinary octet that always
+	 * worked -- so a fix that stopped trimming text would show up here too. */
+	static const unsigned char ends[] = { 0x00u, 0x09u, 0x0au, 0x1fu, 0x20u, 0x21u, 0xc5u };
+	size_t                     at;
+	unsigned                   agreed = 0;
+
+	for (at = 0; at < sizeof(ends) / sizeof(ends[0]); at++) {
+		unsigned char key[NCFG_KEY_LEN];
+		char          text[NCFG_KEY_TEXT_SIZE];
+		char          from_octets[NCFG_SHA256_HEX_SIZE];
+		char          from_text[NCFG_SHA256_HEX_SIZE];
+		size_t        i;
+
+		/* Both ends at once: the trim runs from each independently, so a key
+		 * that is low at one end and ordinary at the other would pass a fix
+		 * that only looked at one of them. */
+		for (i = 0; i < sizeof(key); i++) {
+			key[i] = (unsigned char)(0x40u + i);
+		}
+		key[0] = ends[at];
+		key[sizeof(key) - 1u] = ends[at];
+
+		if (!ncfg_key_render(key, text, sizeof(text), NULL, 0)) {
+			check(0, "a key renders to the text a store would hold");
+			return;
+		}
+		ncfg_observe_wg_digest_key(key, from_octets);
+		ncfg_observe_wg_digest(text, strlen(text), from_text);
+		if (strcmp(from_octets, from_text) == 0) {
+			agreed++;
+		} else {
+			detail("the octets said", from_octets);
+			detail("the text said", from_text);
+			detail("the key ends with", text);
+		}
+	}
+	check(agreed == sizeof(ends) / sizeof(ends[0]),
+	    "the executor's door and the observer's door digest one key alike, whatever "
+	    "its end octets are");
+
+	/*
+	 * And the octet door reads all thirty-two. Two keys differing only in the
+	 * last octet must differ, which is what the thirty-one-octet digest could
+	 * not do: every key ending `0x1f` collided with every key ending `0x0a`.
+	 */
+	{
+		unsigned char one[NCFG_KEY_LEN];
+		unsigned char two[NCFG_KEY_LEN];
+		char          first[NCFG_SHA256_HEX_SIZE];
+		char          second[NCFG_SHA256_HEX_SIZE];
+		size_t        i;
+
+		for (i = 0; i < sizeof(one); i++) {
+			one[i] = (unsigned char)(0x40u + i);
+			two[i] = one[i];
+		}
+		one[sizeof(one) - 1u] = 0x0au;
+		two[sizeof(two) - 1u] = 0x1fu;
+		ncfg_observe_wg_digest_key(one, first);
+		ncfg_observe_wg_digest_key(two, second);
+		check(strcmp(first, second) != 0,
+		    "  and two keys differing only in their last octet do not digest alike");
+	}
+}
+
 /* `ncfg_key_render` is `ncfg_key_parse`'s other half, and there were two
  * private copies of it before there was one. */
 static void a_key_renders_back_to_the_spelling_it_parses_from(void)
@@ -1291,6 +1381,7 @@ int main(void)
 	a_device_that_cannot_be_read_is_not_a_device_with_no_peers();
 	the_record_paths();
 	the_literal_digests_are_what_the_rule_produces();
+	the_two_halves_of_the_comparison_agree();
 	a_key_renders_back_to_the_spelling_it_parses_from();
 	the_currency_question();
 	nothing_that_identifies_a_key_leaves_this_pass();

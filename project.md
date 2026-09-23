@@ -9515,6 +9515,117 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.242 The tunnel that was up, addressed and carrying nothing
+
+The last of 10.240's three silent subsystems, and it was not a missing message
+either. Pulling on it found four defects, one of them the worst this port has
+had.
+
+**A WireGuard device is not configured by the message that creates it.** The
+private key, the listen port, the firewall mark and the peers all go over
+generic netlink after the link exists; `RTM_NEWLINK` carries none of it. The
+Rust's create arm says so and calls `configure_wireguard` from inside itself.
+This port's stopped at the link.
+
+So `ncfg apply` printed three green actions, `ip link` showed `wg0` up with its
+address, and the device held no key, had no peers and could carry nothing. The
+planner emits no `wg.set_device` on a create -- by design, and identically in
+both implementations, because a create carries its whole configuration -- so
+the two WireGuard arms that do the work were simply never reached, and the key
+record the observer reads was never written.
+
+`ncfg_kernel_wg_configure_new` is the create arm's second half now: the device
+fields first, because they carry the key, then the peers unconditionally.
+
+### What only a namespace could say
+
+Everything after the netlink send needs `CAP_NET_ADMIN`, so no unit check
+reaches any of this -- and the plan is byte-identical either way, because the
+defect is entirely in what the executor does with one. `unshare -rn` is what
+makes the question askable, and `tests/live/c_wireguard.sh` asks it.
+
+Its independent reader is **the Rust `ncfg`**, observing the same kernel
+through its own generic netlink code and its own record reader, which is what
+section 9 asks for: netcfgd reading back its own work proves only that it
+agrees with itself. `wg` is not needed and the script runs without it.
+
+### The one that was silently wrong for a quarter of all keys
+
+Writing that script turned up a defect the port had been carrying, and it is
+the kind that never announces itself.
+
+`ncfg_observe_wg_digest` is the shared rule -- trim the material, and if it
+parses as a key, hash the thirty-two octets rather than the text. The trim is
+there because a key read out of a file has a newline on it. The executor
+called the same function with **the raw octets**, and the trim does not know
+the difference: it takes off any leading or trailing byte of `0x20` or less,
+and an octet is a number, not a character. A key whose first or last octet was
+low had thirty-one of them digested.
+
+That is 33 of 256 values at each end -- **about one WireGuard key in four**.
+Nothing failed. The tunnel worked. The record simply never matched what the
+observer computed from the store, so `key_matches` answered false for ever and
+the planner re-sent a key the kernel already held on every reconcile, for the
+life of the device. The preshared-key record had the identical call and the
+identical defect.
+
+`ncfg_observe_wg_digest_key` is the door for material that is already
+thirty-two octets. One rule still, and the text door's job is to find them.
+
+**The unit tests could have caught this and were built not to.** The file's
+own case is called *the literal digests are what the rule produces*, and its
+comment quotes `evidence.md`: two documents agreeing are one witness if the
+same hand wrote both. It then asked the rule through one door, twice. The
+writer's door was never in it. The new case drives both from the octets, with
+`0x00`, `0x09`, `0x0a`, `0x1f`, `0x20`, `0x21` and `0xc5` at each end.
+
+### Two smaller ones found on the way
+
+**`ncfg status` asked the secret store nothing when pointed by the
+environment.** `observe_now` built the secrets path from `--config-dir` alone,
+while `compile_config` four lines earlier resolved through
+`ncfg_config_resolve_dir`, which folds the flag, `$NCFG_CONFIG_DIR` and the
+machine's default into one answer. So an `ncfg` pointed by the environment --
+which is how a unit file and a container image point it -- compiled the
+document out of that tree and then declined to ask about its keys.
+`key_matches` came back unanswered and a rotated key could not be noticed by
+the program looking straight at it. Two rules for one directory, and the half
+that read credentials had the narrower one.
+
+**`ncfg plan` said `kind: wire_guard` where the Rust says `wireguard`** --
+in the human line and in the reason's `desired` field in the plan JSON, beside
+an observed side that already said `wireguard`, so one line carried both
+spellings of one kind. The document's spelling and the language's are both
+right and each belongs to one surface; `render_device.c` kept a private table
+of the language's for its refusal and its comment counted two previous times
+this pair had shipped the wrong way round. The table is the model's now,
+`ncfg_interface_kind_language_name`, with both callers on it and
+`document_test` walking the two lists for the exactly-two they may differ on.
+
+**The gate could not have caught it.** `agree_gate.py` compares `show --json`
+because it is the whole pure path; `plan` observes the machine, so it is out
+of reach until both programs can be handed an observation. Worth writing down
+as a boundary rather than leaving as a surprise.
+
+### The records go with the link
+
+Smaller, and the one this round set out to do. The two records under
+`<run>/wireguard/` were left behind when netcfgd deleted the device. Their
+**absence** is what tells the observer netcfgd did not configure a device, so a
+record that outlives its link makes the next `wg0` -- whoever created it --
+read as one netcfgd knows the key of. Both are named from the interface rather
+than swept out of a directory another device is writing into.
+
+### The sabotages
+
+The create arm back to stopping at the link: eight failures. The delete arm
+back to leaving the records: two, and the right two. The executor back through
+the text door: **two failures on one run in five**, because the script
+generated a random key and the defect is a quarter of them. That is the check
+being weaker than it reads, found by the sabotage it was written for. The
+script now forces both end octets low -- thirty octets of entropy is still a
+key, and the two ends are the question -- and it fails every run.
+
 ## 10.241 The profile the daemon kept while editing around it
 
 The second of 10.240's three silent subsystems. `profile` was not a missing

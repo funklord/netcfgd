@@ -1738,6 +1738,48 @@ static void check_wireguard(void)
 		    "  and leaves the file as it was rather than recording that nobody has a key");
 		free(back);
 		ncfg_buf_free(&record);
+
+		/*
+		 * **And the records go when the link does.** Their absence is what
+		 * tells the observer netcfgd did not configure a device -- so a
+		 * record that outlives its link makes the next `wg0`, whoever
+		 * created it, read as one netcfgd knows the key of.
+		 *
+		 * Both files, and a neighbour's left alone: the two are named from
+		 * the interface rather than swept out of a directory another device
+		 * is writing into at the same time.
+		 */
+		{
+			char keyed[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+			char other[NCFG_OBSERVE_WG_RECORD_PATH_MAX];
+
+			check(ncfg_observe_wg_key_record_path(run, "wg0", keyed, sizeof(keyed),
+			    NULL, 0) &&
+			    ncfg_observe_wg_preset_record_path(run, "wg1", other, sizeof(other),
+			        NULL, 0),
+			    "the key record and a second device's record are both named");
+			check(testdir_write(keyed, "digest\n", 7u) &&
+			    testdir_write(other, "wg1\n", 4u),
+			    "  and both are on disk, as a configured pair of devices leaves them");
+
+			ncfg_kernel_wg_forget_records(run, "wg0");
+			check(testdir_read(keyed, NULL) == NULL,
+			    "deleting the link takes its key record with it");
+			check(testdir_read(written, NULL) == NULL,
+			    "  and its preshared record too, without being asked which kind it was");
+			back = testdir_read(other, NULL);
+			check(back && strcmp(back, "wg1\n") == 0,
+			    "  and leaves the device beside it alone");
+			free(back);
+
+			/* Twice is not an error: a delete of a link that was never a
+			 * tunnel finds no files, which is the ordinary case and is the
+			 * same `ENOENT` `process.h` treats as success. */
+			ncfg_kernel_wg_forget_records(run, "wg0");
+			check(testdir_read(keyed, NULL) == NULL,
+			    "and a link that had no records at all is not a failure");
+			(void)unlink(other);
+		}
 	}
 	if (messages.count >= 1u) {
 		ncfg_wire_messages_t walk;

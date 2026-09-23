@@ -2026,6 +2026,12 @@ live:
 	@# state back through netcfgd would only prove netcfgd agrees with itself.
 	@# The script's header says how to get `wg` without installing it.
 	@unshare -rn sh -c "sh tests/live/wireguard.sh"
+	@# The same module, asking the question before that one: whether the device
+	@# the C port *creates* carries anything at all. It did not, and no unit
+	@# check could say so -- everything after the netlink send needs
+	@# CAP_NET_ADMIN. `wg` is not needed here: the independent reader is the
+	@# Rust ncfg, observing the same kernel through its own code.
+	@unshare -rn sh -c "sh tests/live/c_wireguard.sh"
 	@# The only python test. A TUI needs a pty to say anything about, and
 	@# script(1) cannot drive input reliably; see the file's own header.
 	@if command -v python3 >/dev/null 2>&1; then \

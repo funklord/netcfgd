@@ -352,6 +352,51 @@ int main(int argc, char **argv)
 		check(refused_saying(DOCUMENT_HEAD "\"devices\":[{\"name\":\"wg0\",\"kind\":"
 		    "{\"kind\":\"wireguard\"}}],\"interfaces\":[],\"networks\":[]}", "wireguard"),
 		    "so the language's spelling is refused where the document's belongs");
+
+		/*
+		 * **And the other table answers the same tags.** The two lists are
+		 * index-for-index, which is the whole of what lets one enum ask
+		 * either -- a word added to one and not the other shifts every kind
+		 * after it, so a `vrf` would render as a `macvlan` rather than as
+		 * nothing, and nothing would refuse it.
+		 *
+		 * Walked rather than spelled out: a check listing the fifteen words
+		 * is a second copy of the table, and a second copy is what this pair
+		 * is here to stop having.
+		 */
+		{
+			int tag;
+			int paired = 1;
+			int differing = 0;
+
+			for (tag = (int)NCFG_KIND_PHYSICAL; tag <= (int)NCFG_KIND_IFB; tag++) {
+				const char *document_word = ncfg_interface_kind_name(tag);
+				const char *language_word = ncfg_interface_kind_language_name(tag);
+
+				if (!document_word || !language_word) {
+					paired = 0;
+					break;
+				}
+				if (strcmp(document_word, language_word) != 0) {
+					differing++;
+				}
+			}
+			check(paired, "every kind has a word in both tables");
+			/* Exactly the two, and naming the count rather than the words:
+			 * a third kind that started differing would be a spelling
+			 * somebody introduced without saying so here. */
+			check(differing == 2,
+			    "  and the document and the language differ on exactly two of them");
+			check(ncfg_interface_kind_language_name(NCFG_KIND_WIREGUARD) != NULL &&
+			    strcmp(ncfg_interface_kind_language_name(NCFG_KIND_WIREGUARD),
+			        "wireguard") == 0 &&
+			    ncfg_interface_kind_language_name(NCFG_KIND_OPENVPN) != NULL &&
+			    strcmp(ncfg_interface_kind_language_name(NCFG_KIND_OPENVPN),
+			        "openvpn") == 0,
+			    "  which are the two an operator writes without the underscore");
+			check(ncfg_interface_kind_language_name(-1) == NULL,
+			    "  and this table has no word outside the set either");
+		}
 	}
 
 	/* ---- the four numberings the executor may not keep a copy of ---- */

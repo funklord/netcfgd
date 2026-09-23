@@ -64,6 +64,40 @@ int ncfg_plan_link_is_plannable(const ncfg_builder_t *builder, const char *name)
 	return 1;
 }
 
+/*
+ * The word a reason names a kind by, which is the **configuration language's**
+ * and not the document's.
+ *
+ * `ncfg_interface_kind_name` answers what the document serialises --
+ * `wire_guard`, `open_vpn` -- and `document.c` says in as many words that
+ * those are not typos to tidy up. A reason is read by an operator against the
+ * file they wrote, where the words are `wireguard` and `openvpn`, so the two
+ * spellings are both right and each belongs to one surface.
+ *
+ * This port printed the document's in `ncfg plan` and in the reason's
+ * `desired` field in the plan JSON, where the Rust prints the language's --
+ * and beside an observed side that already said `wireguard`, so one line
+ * carried both spellings of one kind.
+ *
+ * The table is the model's, so this is which of the two to ask and the one
+ * kind that answers with something narrower than itself.
+ */
+static const char *kind_word(const ncfg_interface_kind_t *kind)
+{
+	if (!kind) {
+		return NULL;
+	}
+	switch (kind->kind) {
+	case NCFG_KIND_TUNNEL:
+		/* Its encapsulation rather than the word "tunnel": `gre` is what the
+		 * operator wrote and what the kernel calls it. The only kind whose
+		 * reason names something narrower than its kind. */
+		return ncfg_tunnel_kind_name(kind->tunnel.mode);
+	default:
+		return ncfg_interface_kind_language_name(kind->kind);
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * Creation
  * ------------------------------------------------------------------------ */
@@ -175,8 +209,7 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 	memset(&inverse, 0, sizeof(inverse));
 	inverse.kind = NCFG_OP_LINK_DELETE;
 	inverse.u.named.name = device->name;
-	reason = ncfg_plan_reason_absent(device->name, "kind",
-	    ncfg_interface_kind_name(device->kind.kind));
+	reason = ncfg_plan_reason_absent(device->name, "kind", kind_word(&device->kind));
 
 	ncfg_builder_gate(builder, device->name, &gate);
 	id = ncfg_builder_push(builder, &op, &reason, gate.ids, gate.count, &inverse);
