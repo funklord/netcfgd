@@ -63,9 +63,26 @@ LIB = libncfg.a
 # is one deep -- the directory is the list.
 # `src/main/` is filtered out for the reason the header gives: what is under it
 # decides an exit status, and a library may not.
-SRCS = $(filter-out src/main/%,$(wildcard src/*/*.c)) $(wildcard src/*/*/*.c) \
-       ../client/ncfg_json.c
-OBJS = $(patsubst %.c,%.o,$(SRCS))
+SRCS = $(filter-out src/main/%,$(wildcard src/*/*.c)) $(wildcard src/*/*/*.c)
+
+# The shared reader, compiled **here** rather than where it lives.
+#
+# `%.o: %.c` next to the source would put the object at
+# `../client/ncfg_json.o` -- which is the exact path `client/Makefile` builds
+# and archives, with different flags and outside the `.build-flags` stamp that
+# exists to stop precisely this. `make SANITIZE=1` in this directory therefore
+# left a sanitized object in `client/`, `client`'s own archive picked it up,
+# and the link of `client/tests/client_test` failed with forty lines about
+# `__asan_report_store1` -- the failure that stamp's comment describes, arriving
+# by the one route it cannot see. A clean here made it worse rather than better:
+# `clean` removed `$(OBJS)`, so this directory was reaching across and deleting
+# another component's object as well as writing it.
+#
+# One source, two builds, two objects. The file is still shared; only the
+# output is ours.
+SHARED_SRCS = ../client/ncfg_json.c
+SHARED_OBJS = $(notdir $(SHARED_SRCS:.c=.o))
+OBJS = $(patsubst %.c,%.o,$(SRCS)) $(SHARED_OBJS)
 
 # The program, its second name, and the entry points that make it one.
 PROGRAM       = netcfgd
@@ -96,7 +113,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test clean
+.PHONY: all test clean FORCE
 
 all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
 
@@ -112,7 +129,26 @@ $(PROGRAM): $(PROGRAM_OBJS) $(LIB)
 $(PROGRAM_LINK): $(PROGRAM)
 	ln -sf $(PROGRAM) $@
 
-%.o: %.c
+# The flags this was last built with, as a file every object depends on.
+#
+# `client/Makefile` has carried this since the GUI's first build and this
+# directory did not, so `make SANITIZE=1 test` followed by a plain `make test`
+# relinked yesterday's sanitized objects against no sanitizer runtime and said
+# `__asan_report_store1` forty times. Objects do not record what built them,
+# and a timestamp cannot tell an optimized `.o` from an instrumented one.
+#
+# `cmp` rather than a plain write: an unchanged stamp keeps its timestamp and
+# nothing rebuilds.
+.build-flags: FORCE
+	@echo '$(CC) $(CFLAGS)' > $@.candidate
+	@cmp -s $@.candidate $@ || mv $@.candidate $@
+	@rm -f $@.candidate
+
+%.o: %.c .build-flags
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Named, because the pattern rule above would write it into `client/`.
+$(SHARED_OBJS): $(SHARED_SRCS) .build-flags
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Each test is its own binary, and each is run. A suite that stops at the
@@ -133,7 +169,7 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK)
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
-tests/%_test: tests/%_test.c $(LIB)
+tests/%_test: tests/%_test.c $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 # The two tests that link more than the library, because what they check is not
@@ -146,20 +182,20 @@ tests/%_test: tests/%_test.c $(LIB)
 # for the reason 0263 gives -- a library never exits and never owns a `poll`
 # that decides when a process stops. `world_test` and `answer_test` are the
 # other two halves of the same sentence.
-tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB)
+tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
-tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(LIB)
+tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
 # The same two, for the same reason: the four seams a reconcile pass reaches
 # the machine through and the request dispatcher are `src/main/`'s work --
 # owning the apply lock, the netlink socket and the connections an event is
 # written to is what that directory is for.
-tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(LIB)
+tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
-tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB)
+tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
 
 # What this build made, by the same wildcard that made it -- and nothing by
@@ -167,4 +203,4 @@ tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB)
 # two literal names rather than a wildcard, because this directory is not one
 # whose contents a build produced.
 clean:
-	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS)
+	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) .build-flags

@@ -617,6 +617,43 @@ int ncfg_profile_adopt(const char *config_dir, const char *factory_dir, char **f
     char *err, size_t err_size);
 
 /*
+ * The fold a settings write makes, and the one thing it does not fold for.
+ *
+ * `ncfg_profile_adopt` with the rule that decides whether to call it at all:
+ * **writing the selection drop-in is not a settings change**, so `ncfg profile
+ * set` does not take the machine off the profile it has just chosen. Every
+ * other name is an ordinary edit and folds.
+ *
+ * **Here rather than in each caller**, because there are two and they are the
+ * two halves of 0117: the CLI writes the file itself where it may, and sends a
+ * typed request where it may not. The rule was written into the first and
+ * missing from the second, so a client without permission to write kept its
+ * profile *and* its edit -- and the next reload had the profile override the
+ * edit, which is the thing 0151 forbids.
+ *
+ * `*folded_out` is the profile's name, which the caller frees, or NULL where
+ * none was chosen -- the common case, and not an error.
+ */
+int ncfg_profile_fold_for_write(const char *config_dir, const char *factory_dir,
+    const char *name, char **folded_out, char *err, size_t err_size);
+
+/*
+ * Put the selection back, because the write the fold was made for did not
+ * happen, and say so in the refusal the caller is already carrying.
+ *
+ * The fold has to come first -- folding afterwards would have to preserve a
+ * document in which the profile still overrides the new edit, so it would land
+ * late and the edit would never take effect. Coming first means it can be made
+ * for a write that is then refused, and a rejected edit must move nothing.
+ *
+ * **A failed undo is appended to the refusal rather than swallowed**: the
+ * machine is then genuinely off its profile and whoever asked has to know.
+ * `folded` may be NULL, which is nothing to do.
+ */
+void ncfg_profile_put_back(const char *config_dir, const char *folded, char *err,
+    size_t err_size);
+
+/*
  * Undo a fold, because the settings write it was made for did not happen.
  *
  * The fold has to come first -- folding after the write would have to preserve

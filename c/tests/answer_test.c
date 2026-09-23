@@ -24,6 +24,7 @@
  *     * a field carrying a NUL, a field that is absent, and a field past its
  *       ceiling, each refused by name rather than taken as the part that fits.
  */
+#include "../src/host/config_internal.h"
 #include "../src/main/loop_internal.h"
 
 #include "ncfg/base.h"
@@ -347,6 +348,161 @@ static void a_drop_in_is_written_and_taken_away(void)
 	check(ask(&request, &out, err, sizeof(err)),
 	    "and removing one that is not there is success rather than a failure");
 	ncfg_buf_free(&out);
+}
+
+
+/*
+ * A settings write over the socket takes the machine off its profile.
+ *
+ * **0151, on the half of 0117 that had it and the half that did not.** A
+ * client that may write `conf.d` itself came off its profile, because the CLI
+ * folded before writing; one that had to ask the daemon kept the profile *and*
+ * the edit -- and a profile overrides `conf.d`, so the next reload put the
+ * edit back the way the profile said. The two halves are one call now.
+ *
+ * What makes this checkable is that folding is not a label change: the
+ * profile's files are written into `conf.d` in the same step, so the compiled
+ * document is the same afterwards but for the selection. The fixture is
+ * therefore a profile that actually changes something.
+ */
+static void a_write_takes_the_machine_off_its_profile(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_buf_t           out;
+	char                 err[NCFG_ERROR_MAX];
+	char                 profile_dir[640];
+	char                 path[720];
+	char                *text;
+	size_t               at;
+
+	printf("\n-- 0151: a settings write folds the profile in\n");
+
+	/* A profile that says something, so a fold that dropped it would show.
+	 * `make_dir` is one `mkdir`, so the parent is made first rather than
+	 * assumed -- the failure otherwise is the fixture, reported as the
+	 * feature. */
+	(void)snprintf(profile_dir, sizeof(profile_dir), "%s/profile", config_dir);
+	make_dir(profile_dir);
+	(void)snprintf(profile_dir, sizeof(profile_dir), "%s/profile/office", config_dir);
+	make_dir(profile_dir);
+	(void)snprintf(path, sizeof(path), "%s/10-office.conf", profile_dir);
+	{
+		static const char body[] = "device eth9 {\n\tmtu = 1400\n}\n";
+
+		if (!testdir_write(path, body, strlen(body))) {
+			check(0, "a profile with a setting in it");
+			return;
+		}
+	}
+	err[0] = '\0';
+	check(ncfg_profile_set(config_dir, factory_dir, "office", NULL, NULL, err, sizeof(err)),
+	    "the machine is on a profile");
+	detail("if not", err);
+	(void)snprintf(path, sizeof(path), "%s/conf.d/%s.conf", config_dir, NCFG_PROFILE_DROP_IN);
+	check(testdir_exists(path), "  which is a drop-in naming it");
+
+	/* Now an ordinary settings write, through the socket. */
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_CONFIG_PUT;
+	request.u.put.name = ncfg_proto_str("by-hand");
+	request.u.put.text = ncfg_proto_str("interface eth8 {\n\tconfig = \"dhcp\"\n}\n");
+	if (!ask(&request, &out, err, sizeof(err))) {
+		detail("config_put refused", err);
+		check(0, "a `config_put` while a profile is chosen is written");
+	} else {
+		check(is_ok(&out), "a `config_put` while a profile is chosen answers `ok`");
+	}
+	ncfg_buf_free(&out);
+
+	check(!testdir_exists(path),
+	    "and the machine is no longer claiming to be on the profile");
+	/* **The name is the module's, not this file's.** There are two possible
+	 * positions and the fold tries them in order, because where the generated
+	 * file sorts decides whether it still layers the way the profile did --
+	 * so a test that spelled one of them would be asserting the answer rather
+	 * than the property. */
+	{
+		int found = 0;
+
+		for (at = 0; at < (size_t)NCFG_FOLDED_PREFIX_COUNT && !found; at++) {
+			(void)snprintf(path, sizeof(path), "%s/conf.d/%soffice.conf", config_dir,
+			    ncfg_config_folded_prefixes[at]);
+			found = testdir_exists(path);
+		}
+		check(found, "  because the profile was folded into conf.d instead");
+	}
+	text = testdir_read(path, NULL);
+	check(text != NULL && strstr(text, "mtu = 1400") != NULL,
+	    "  carrying what it was running, so nothing moved");
+	if (text) {
+		free(text);
+	}
+
+	/* And the write itself happened, which is the half a fold must not eat. */
+	(void)snprintf(path, sizeof(path), "%s/conf.d/by-hand.conf", config_dir);
+	check(testdir_exists(path), "and the edit that caused it is on disk");
+
+	/*
+	 * **And the one write that is not a settings change.** Choosing a profile
+	 * is done by writing `90-profile` itself, so a fold there would take the
+	 * machine off the profile one line after putting it on -- which is why
+	 * `ncfg_profile_fold_for_write` has that name and that exception rather
+	 * than being a call to `ncfg_profile_adopt`.
+	 *
+	 * Checked because a sabotage that removed the exception passed: the rule
+	 * had moved into one function and nothing anywhere asked whether it still
+	 * held.
+	 */
+	/* The fold above left the profile's settings in `conf.d` under their own
+	 * name, so choosing the profile again would be the same `device eth9`
+	 * twice and refused for that -- which is the fold working. Take the copy
+	 * away first, by name, and the machine can be put back on it. */
+	for (at = 0; at < (size_t)NCFG_FOLDED_PREFIX_COUNT; at++) {
+		(void)snprintf(path, sizeof(path), "%s/conf.d/%soffice.conf", config_dir,
+		    ncfg_config_folded_prefixes[at]);
+		(void)unlink(path);
+	}
+	err[0] = '\0';
+	check(ncfg_profile_set(config_dir, factory_dir, "office", NULL, NULL, err, sizeof(err)),
+	    "the machine is put back on the profile");
+	detail("if not", err);
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_CONFIG_PUT;
+	request.u.put.name = ncfg_proto_str(NCFG_PROFILE_DROP_IN);
+	request.u.put.text = ncfg_proto_str("global {\n\tprofile = \"office\"\n}\n");
+	request.u.put.replace = 1;
+	if (!ask(&request, &out, err, sizeof(err))) {
+		detail("writing the selection refused", err);
+		check(0, "writing the selection drop-in is answered");
+	} else {
+		check(is_ok(&out), "writing the selection drop-in is answered `ok`");
+	}
+	ncfg_buf_free(&out);
+	(void)snprintf(path, sizeof(path), "%s/conf.d/%s.conf", config_dir, NCFG_PROFILE_DROP_IN);
+	check(testdir_exists(path),
+	    "  and the machine is still on the profile it has just chosen");
+
+	/*
+	 * **Put back, by name.** The cases in this file share one configuration
+	 * directory and the listings below assert what is in it -- so a case that
+	 * leaves four files behind is a case that breaks the next one, which is
+	 * what this did on its first run. Named rather than swept, which is the
+	 * rule for anything that removes.
+	 */
+	(void)unlink(path);
+	(void)snprintf(path, sizeof(path), "%s/conf.d/by-hand.conf", config_dir);
+	(void)unlink(path);
+	for (at = 0; at < (size_t)NCFG_FOLDED_PREFIX_COUNT; at++) {
+		(void)snprintf(path, sizeof(path), "%s/conf.d/%soffice.conf", config_dir,
+		    ncfg_config_folded_prefixes[at]);
+		(void)unlink(path);
+	}
+	(void)snprintf(path, sizeof(path), "%s/profile/office/10-office.conf", config_dir);
+	(void)unlink(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/office", config_dir);
+	(void)rmdir(path);
+	(void)snprintf(path, sizeof(path), "%s/profile", config_dir);
+	(void)rmdir(path);
 }
 
 static void a_secret_is_stored_and_removed(void)
@@ -1572,6 +1728,7 @@ int main(void)
 	a_refusal_names_the_request_it_refused();
 	a_kind_the_table_answers_has_an_arm();
 	a_drop_in_is_written_and_taken_away();
+	a_write_takes_the_machine_off_its_profile();
 	a_secret_is_stored_and_removed();
 	a_network_block_is_written_for_a_client_that_may_not();
 	a_network_block_is_taken_away_again();

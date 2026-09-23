@@ -9515,6 +9515,93 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.241 The profile the daemon kept while editing around it
+
+The second of 10.240's three silent subsystems. `profile` was not a missing
+message either: it was the daemon not doing the thing the message reports.
+
+**0151 is a rule about writes, and only half the writes obeyed it.** A machine
+on a profile is a machine whose settings come from `profile/<name>/`, so an
+edit to `conf.d` is an edit the next reload overwrites. The CLI knew that --
+`ncfg config put` takes the machine off its profile first, folding the
+profile's own files into `conf.d` under their own name so nothing moves, and
+then writes -- and the daemon's `config put` and `config delete` arms, which
+are the same write reached over the socket by a client with no permission to
+touch the directory, did not. That client kept both the profile and its edit,
+and the profile won on the next reload.
+
+The fold is now one pair, in `src/host/profile.c`:
+
+* `ncfg_profile_fold_for_write` -- take the machine off its profile because a
+  settings write is coming, and say which profile was folded;
+* `ncfg_profile_put_back` -- put it back where the write then failed, so a
+  refused write leaves the machine as it found it.
+
+`src/cli/drop_in.c` had both as statics and calls the pair instead; both
+daemon arms call it and log what happened under `[profile]`, which is the
+subsystem the sweep found silent.
+
+### The sabotage that caught nothing
+
+The pair has an exception: **writing `90-profile` itself is not a settings
+change.** Choosing a profile *is* a write to `conf.d`, so folding there would
+take the machine off the profile one line after putting it on, and `profile
+set` would undo itself.
+
+Removing that exception passed every check. Nothing in either implementation's
+tests asked whether it still held -- the rule had been true in two places and
+was now true in one, and moving it had quietly made it unowned.
+
+The check that now holds it: a machine put on a profile, the selection drop-in
+written back through the socket, and the selection still there afterwards. It
+fails with the exception gone, because the re-fold is then the profile's
+`device eth9` beside the copy it has just made of it, and the write is refused
+for the duplicate.
+
+Worth naming as method rather than as a bug. A sabotage that catches nothing
+is the only signal that a rule has no owner, and this one was on code written
+in the same hour.
+
+**`wireguard` is the one left** of the three.
+
+### The object two builds were sharing
+
+Found by this round's own verification rather than by looking: `make check`
+failed to link `client/tests/client_test` with forty lines about
+`__asan_report_store1`, minutes after a `SANITIZE=1` run in `c/`.
+
+`client/Makefile` has carried a `.build-flags` stamp since the GUI's first
+build, for exactly this failure -- objects do not record what built them, and a
+timestamp cannot tell an optimized `.o` from an instrumented one. It did not
+help, because the sanitized object did not arrive through `client/Makefile`.
+
+`c/Makefile` compiles `../client/ncfg_json.c` -- the reader it deliberately
+shares rather than copies -- and its pattern rule wrote the object beside the
+source, at `../client/ncfg_json.o`. That is the path `client/Makefile` builds
+and archives. So a sanitized build here overwrote the object `client/` links,
+with flags the stamp meant to guard never saw; and `c/`'s `clean` removed
+`$(OBJS)`, which meant this directory was also reaching across and deleting
+another component's build output. Sharing the source had quietly become
+sharing the object.
+
+Two fixes, and both were one-line problems:
+
+* **the shared source is compiled under this directory's own name.** One
+  source, two builds, two objects. `clean` no longer reaches out of the tree,
+  and `.gitignore` names the new object.
+* **`c/` has the stamp `client/` had.** It never did, which is why a plain
+  `make test` after a sanitized one relinked instrumented objects against no
+  runtime -- the failure that stamp's comment describes, arriving by the one
+  route it could not see.
+
+The proof is the sequence that failed: `make SANITIZE=1 test` in `c/`, then
+`make check` from the root with no clean in between.
+
+Worth the paragraphs because the shape recurs. A guard is only as wide as the
+paths that write what it guards, and a second writer that never touches the
+stamp is invisible to it -- the same thing the sabotage above found, in a
+Makefile instead of a function.
+
 ## 10.240 The four backends that could not be taken back
 
 A sweep of what each implementation *says* -- every log line, by subsystem --

@@ -109,28 +109,6 @@ int ncfg_cli_say_json(const ncfg_json_writer_t *writer, const char *what, char *
  * A person changed a setting, so the machine comes off its profile
  * ------------------------------------------------------------------------ */
 
-/*
- * Fold the chosen profile into `conf.d` and stop claiming to be on it.
- *
- * The local half of the daemon's rule of the same name (0151), for a machine
- * being configured before netcfgd runs on it. What is running does not move --
- * `ncfg_profile_adopt` proves that by compiling before and after -- and only
- * the label changes.
- *
- * `*folded_out` receives the profile's name, which the caller frees, or NULL
- * where none was chosen. Writing the selection drop-in itself is not a
- * settings write and takes no profile off.
- */
-static int take_off_profile(const char *config_dir, const char *factory_dir, const char *name,
-    char **folded_out, char *err, size_t err_size)
-{
-	*folded_out = NULL;
-	if (strcmp(name, NCFG_PROFILE_DROP_IN) == 0) {
-		return 1;
-	}
-	return ncfg_profile_adopt(config_dir, factory_dir, folded_out, err, err_size);
-}
-
 /* What the fold is announced as, once the write it was made for stands. */
 static void say_folded(const char *folded)
 {
@@ -138,34 +116,6 @@ static void say_folded(const char *folded)
 		ncfg_out_writef("the `%s` profile was folded into your configuration and no "
 		    "profile is chosen now; what is running has not changed\n", folded);
 	}
-}
-
-/*
- * Put the selection back, because the write it was made for did not happen.
- *
- * The fold has to come first -- folding afterwards would have to preserve a
- * document in which the profile still overrides the new edit, so it would land
- * late and the edit would never take effect -- which means the only way to keep
- * "a write that did not happen moved nothing" true is to undo it.
- *
- * A failed undo is appended to the refusal rather than swallowed: the machine
- * is then genuinely off its profile and the operator has to know.
- */
-static void put_profile_back(const char *config_dir, const char *folded, char *err,
-    size_t err_size)
-{
-	char undo[NCFG_ERROR_MAX];
-	char refusal[NCFG_ERROR_MAX];
-
-	if (!folded) {
-		return;
-	}
-	if (ncfg_profile_restore(config_dir, folded, undo, sizeof(undo))) {
-		return;
-	}
-	(void)snprintf(refusal, sizeof(refusal), "%s", err ? err : "");
-	ncfg_error_set(err, err_size, "%s\n(and the `%s` profile could not be put back: %s)",
-	    refusal, folded, undo);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -224,13 +174,14 @@ int ncfg_cli_put_text(const char *name, const char *text, int replace, const cha
 	(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
 	    sizeof(factory_dir));
 
-	if (!take_off_profile(config_dir, factory_dir, name, &folded, err, err_size)) {
+	if (!ncfg_profile_fold_for_write(config_dir, factory_dir, name, &folded, err,
+	        err_size)) {
 		return 0;
 	}
 	if (!ncfg_config_install_drop_in(config_dir, factory_dir, name, text, replace, &path,
 	    &denied, said, sizeof(said))) {
 		ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
-		put_profile_back(config_dir, folded, err, err_size);
+		ncfg_profile_put_back(config_dir, folded, err, err_size);
 		free(folded);
 		return 0;
 	}
@@ -294,7 +245,8 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 	(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
 	    sizeof(factory_dir));
 
-	if (!take_off_profile(config_dir, factory_dir, name, &folded, err, err_size)) {
+	if (!ncfg_profile_fold_for_write(config_dir, factory_dir, name, &folded, err,
+	        err_size)) {
 		return 0;
 	}
 	/*
@@ -306,7 +258,7 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 	if (!ncfg_config_remove_drop_in(config_dir, factory_dir, name, &removed, &denied, said,
 	    sizeof(said))) {
 		ncfg_cli_refused_locally(denied, said, socket_path, err, err_size);
-		put_profile_back(config_dir, folded, err, err_size);
+		ncfg_profile_put_back(config_dir, folded, err, err_size);
 		free(folded);
 		return 0;
 	}
@@ -315,7 +267,7 @@ int ncfg_cli_remove_named(const char *name, const char *subject,
 		 * still on its profile.** The Rust kept the fold here: a `rm` of a
 		 * name that was never written took the selection away and folded the
 		 * profile into `conf.d`, for a command that did nothing. */
-		put_profile_back(config_dir, folded, err, err_size);
+		ncfg_profile_put_back(config_dir, folded, err, err_size);
 		free(folded);
 		if (!options->json) {
 			ncfg_out_writef("%s is not in %s\n", subject, config_dir);

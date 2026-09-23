@@ -417,6 +417,43 @@ static char *folded_text(const ncfg_config_sources_t *with_profile,
 	}
 }
 
+int ncfg_profile_fold_for_write(const char *config_dir, const char *factory_dir,
+    const char *name, char **folded_out, char *err, size_t err_size)
+{
+	if (folded_out) {
+		*folded_out = NULL;
+	}
+	if (!name || !folded_out) {
+		ncfg_error_set(err, err_size,
+		    "a fold needs the name being written and somewhere to put the answer");
+		return 0;
+	}
+	/* Writing the selection itself is not a settings change: `ncfg profile
+	 * set` would otherwise take the machine off the profile it has just
+	 * chosen, one line after choosing it. */
+	if (strcmp(name, NCFG_PROFILE_DROP_IN) == 0) {
+		return 1;
+	}
+	return ncfg_profile_adopt(config_dir, factory_dir, folded_out, err, err_size);
+}
+
+void ncfg_profile_put_back(const char *config_dir, const char *folded, char *err,
+    size_t err_size)
+{
+	char undo[NCFG_ERROR_MAX];
+	char refusal[NCFG_ERROR_MAX];
+
+	if (!folded) {
+		return;
+	}
+	if (ncfg_profile_restore(config_dir, folded, undo, sizeof(undo))) {
+		return;
+	}
+	(void)snprintf(refusal, sizeof(refusal), "%s", err ? err : "");
+	ncfg_error_set(err, err_size, "%s\n(and the `%s` profile could not be put back: %s)",
+	    refusal, folded, undo);
+}
+
 int ncfg_profile_adopt(const char *config_dir, const char *factory_dir, char **folded_out,
     char *err, size_t err_size)
 {

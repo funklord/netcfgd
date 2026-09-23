@@ -389,11 +389,35 @@ static int answer_revert(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, siz
 	return ncfg_daemon_ok_encode(out, err, err_size);
 }
 
+/*
+ * What a settings write does to a chosen profile, on this side of 0117.
+ *
+ * **The rule was written into the CLI's own write path and missing here.** A
+ * client that may write the file itself came off its profile; one that had to
+ * ask the daemon kept both the profile and the edit -- and the next reload had
+ * the profile override the edit, which is the thing 0151 exists to prevent. It
+ * is `ncfg_profile_fold_for_write` for both now.
+ *
+ * Said in the log rather than to the client: the answer to `config put` is
+ * `ok` and has no room for a second sentence, and this is a change to the
+ * machine's configuration that nobody asked for directly -- which is exactly
+ * what a log is for.
+ */
+static void say_folded(const char *folded)
+{
+	if (folded) {
+		ncfg_log_emitf("profile", NCFG_LOG_NOTE,
+		    "a setting was changed by hand, so the `%s` profile was folded into conf.d "
+		    "and no profile is chosen now; what is running has not changed", folded);
+	}
+}
+
 static int answer_config_put(ncfg_main_desk_t *desk, const ncfg_proto_put_t *put,
     ncfg_buf_t *out, char *err, size_t err_size)
 {
 	char  name[NAME_MAX_BYTES];
 	char *text;
+	char *folded = NULL;
 	int   denied = 0;
 	int   wrote;
 
@@ -405,12 +429,24 @@ static int answer_config_put(ncfg_main_desk_t *desk, const ncfg_proto_put_t *put
 	if (!text) {
 		return 0;
 	}
+	/* **Before the write**, because a fold made afterwards would have to
+	 * preserve a document in which the profile still overrides the new edit. */
+	if (!ncfg_profile_fold_for_write(desk->state->paths.config, desk->state->paths.factory,
+	        name, &folded, err, err_size)) {
+		free(text);
+		return 0;
+	}
 	wrote = ncfg_config_install_drop_in(desk->state->paths.config, desk->state->paths.factory,
 	    name, text, put->replace ? 1 : 0, NULL, &denied, err, err_size);
 	free(text);
 	if (!wrote) {
+		/* A rejected edit must move nothing, including the selection. */
+		ncfg_profile_put_back(desk->state->paths.config, folded, err, err_size);
+		free(folded);
 		return 0;
 	}
+	say_folded(folded);
+	free(folded);
 	return ncfg_daemon_ok_encode(out, err, err_size);
 }
 
@@ -454,17 +490,27 @@ static int answer_probe_put(ncfg_main_desk_t *desk, const ncfg_proto_put_t *put,
 static int answer_config_delete(ncfg_main_desk_t *desk, ncfg_proto_str_t which, ncfg_buf_t *out,
     char *err, size_t err_size)
 {
-	char name[NAME_MAX_BYTES];
-	int  denied = 0;
-	int  removed = 0;
+	char  name[NAME_MAX_BYTES];
+	char *folded = NULL;
+	int   denied = 0;
+	int   removed = 0;
 
 	if (!name_of(which, "drop-in name", name, sizeof(name), err, err_size)) {
 		return 0;
 	}
-	if (!ncfg_config_remove_drop_in(desk->state->paths.config, desk->state->paths.factory,
-	    name, &removed, &denied, err, err_size)) {
+	/* Taking a drop-in away is a settings change like any other. */
+	if (!ncfg_profile_fold_for_write(desk->state->paths.config, desk->state->paths.factory,
+	        name, &folded, err, err_size)) {
 		return 0;
 	}
+	if (!ncfg_config_remove_drop_in(desk->state->paths.config, desk->state->paths.factory,
+	    name, &removed, &denied, err, err_size)) {
+		ncfg_profile_put_back(desk->state->paths.config, folded, err, err_size);
+		free(folded);
+		return 0;
+	}
+	say_folded(folded);
+	free(folded);
 	/* Absent is success and `removed` is how a caller could tell -- but this
 	 * response has nowhere to carry it, exactly as the Rust's does not. What
 	 * 0263 fixes is the *client's* half, which asks the filesystem. */
