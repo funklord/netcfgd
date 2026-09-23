@@ -29,6 +29,13 @@ gui/build-*/
 # left the tree dirty for whoever else was working in it.
 c/src/*/*.o
 c/src/*/*/*.o
+# The shared JSON reader's object, which `c/` builds under its own name rather
+# than beside the source in `client/` -- one file, two builds, two objects, so
+# that a sanitized build here cannot poison the archive `client/` links.
+c/ncfg_json.o
+# What `c/` was last built with, so a flag change rebuilds rather than relinks
+# instrumented objects against no runtime.
+c/.build-flags
 c/*.a
 c/tests/*_test
 # The program the port links, and its second name. Two literal names rather
