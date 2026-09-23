@@ -416,6 +416,43 @@ void ncfg_plan_warn_unbuilt(ncfg_builder_t *builder, const char *interface, cons
  * is about -- the shape `warn_unapplied` in the Rust arrived at after its own
  * list went stale twice while a comment above it claimed to enumerate them.
  */
+/*
+ * A `device` block with no `interface` block plans nothing at all.
+ *
+ * **netcfgd plans by interface.** A `device` block on its own is policy about
+ * hardware nobody has asked it to configure, so it is read, kept, and acted on
+ * by nothing -- and the plan says `nothing to do` with no hint that a block was
+ * ignored.
+ *
+ * The incident the Rust records for this is an operator with a `device` block
+ * carrying `wifi { autoconnect = true }`, a `network` block carrying the
+ * passphrase, and no `interface` block: the documented example was wrong, and
+ * the product agreed with it in silence. Decision 0186.
+ *
+ * **A warning and not a refusal.** The configuration is legal and somebody may
+ * be building one up a block at a time; what an inert block is owed is a
+ * sentence, and the sentence names the line that would make it live.
+ */
+static void warn_inert_devices(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 i;
+
+	for (i = 0; i < desired->device_count; i++) {
+		const ncfg_device_t *device = &desired->devices[i];
+
+		if (ncfg_plan_interface(desired, device->name)) {
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, device->name,
+		    "%s has a `device` block and no `interface` block, so nothing is planned "
+		    "for it: netcfgd plans by interface, and a `device` block on its own is "
+		    "policy about hardware nobody has asked it to configure. `interface %s "
+		    "{ config = \"dhcp\" }` is what makes it netcfgd's",
+		    device->name, device->name);
+	}
+}
+
 static void warn_unported(ncfg_builder_t *builder)
 {
 	const ncfg_document_t *desired = builder->desired;
@@ -619,6 +656,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 */
 	ncfg_plan_standby_collect(&builder);
 	warn_unmanaged(&builder);
+	warn_inert_devices(&builder);
 	warn_unported(&builder);
 	/* Beside the other two reports about the machine rather than about the
 	 * document, and in the Rust's position among them. What it may *do* --

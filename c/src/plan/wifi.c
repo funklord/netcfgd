@@ -69,6 +69,7 @@
 
 #include "ncfg/base.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -154,6 +155,149 @@ static void warn_device_policy(ncfg_builder_t *builder, const ncfg_device_t *dev
 	ncfg_buf_free(&block);
 	ncfg_buf_free(&names);
 	ncfg_buf_free(&reasons);
+}
+
+/*
+ * A fixed `mac` on a radio whose `mac_policy` replaces it.
+ *
+ * **netcfgd does both, and the second one wins.** The configured address is
+ * written to the link, and then the supplicant applies a randomised one when
+ * it associates, over whatever the link is carrying -- so the fixed address
+ * holds until the radio joins a network and not after. An operator who set it
+ * for MAC-based admission gets admitted exactly once, before the first
+ * association, and then stops being admitted for a reason nothing reports.
+ *
+ * `mac_policy = "permanent"` is what keeps a fixed address, and the sentence
+ * says so rather than leaving the reader to work out which of the two to
+ * remove.
+ */
+static void warn_mac_contradiction(ncfg_builder_t *builder)
+{
+	size_t i;
+
+	for (i = 0; i < builder->desired->device_count; i++) {
+		const ncfg_device_t *device = &builder->desired->devices[i];
+
+		if (!device->mac || !device->wifi ||
+		    device->wifi->mac_policy == NCFG_MAC_POLICY_PERMANENT) {
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, device->name,
+		    "%s sets `mac` to %s and a `mac_policy` of `%s`, which replaces it: the "
+		    "supplicant applies a randomised address when it associates, over "
+		    "whatever the link is carrying. netcfgd does both, so the configured "
+		    "address holds until the radio joins a network and not after. If the "
+		    "fixed address is for MAC-based admission, `mac_policy = \"permanent\"` "
+		    "is what keeps it",
+		    device->name, device->mac,
+		    ncfg_mac_policy_name(device->wifi->mac_policy));
+	}
+}
+
+/*
+ * EAP that trusts whatever answers, in the two degrees it comes in.
+ *
+ * **`ca_cert` says who signed the server's certificate; `domain_suffix_match`
+ * says who the certificate is for.** With neither, the supplicant believes any
+ * server that replies, and the inner method hands it the credential. With only
+ * the first, every certificate that issuer ever signed is accepted -- which is
+ * fine for an organisation's own CA and nearly worthless for a public one, and
+ * a commercial certificate on a RADIUS server is an ordinary arrangement.
+ * Decision 0206.
+ *
+ * Two sentences rather than one with a clause, because the remedies differ:
+ * the first case needs an issuer pinned at all, the second needs a name.
+ *
+ * **No interface is named.** A network is not an interface -- the same profile
+ * can be handed to every radio on the machine -- so naming one would be a
+ * guess dressed as a fact.
+ */
+static void warn_eap_without_ca(ncfg_builder_t *builder)
+{
+	size_t i;
+
+	for (i = 0; i < builder->desired->network_count; i++) {
+		const ncfg_wifi_network_t *network = &builder->desired->networks[i];
+		const ncfg_eap_config_t *eap = &network->security.eap;
+
+		if (network->security.kind != NCFG_SECURITY_EAP) {
+			continue;
+		}
+		if (eap->ca_cert.has && eap->domain_suffix_match) {
+			continue;
+		}
+		if (eap->ca_cert.has) {
+			ncfg_plan_warnf(builder->plan, NULL,
+			    "network `%s` pins a `ca_cert` and no `domain_suffix_match`, so it "
+			    "accepts any server certificate that issuer signed. Where the "
+			    "issuer is a public CA that is anybody who can buy one: they raise "
+			    "an access point with this name, are believed, and take what the "
+			    "inner method sends. Set `domain_suffix_match` to the server's "
+			    "name, such as `radius.example.com`", network->id);
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "network `%s` authenticates with EAP and pins no `ca_cert`, so it will "
+		    "trust any server that answers -- which is how the credential is taken. "
+		    "Set `ca_cert` to the issuer's certificate, or `ncfg wifi add ... "
+		    "--ca-cert PATH`, and `domain_suffix_match` to the server's name",
+		    network->id);
+	}
+}
+
+/*
+ * A `phase2` that pins no inner method, wherever 802.1X is configured.
+ *
+ * **Warned rather than refused, and the asymmetry is the argument.** The value
+ * is inert at the supplicant, not invalid: a network carrying one works today,
+ * and the protection it looks like it adds was never there. Refusing it at
+ * compile time would take the wifi off every machine carrying one -- netcfgd
+ * runs with no document when one will not compile -- to fix something that was
+ * already absent. That is 0189: a check that stops a network working teaches
+ * an operator to use something else.
+ *
+ * **netcfgd's own example told them to write it.** `phase2 = "mschapv2"` is
+ * exactly the inert form, so the configurations carrying one were written by
+ * following the documentation.
+ *
+ * Both places 802.1X can live, because the model has two: a wifi network's EAP
+ * security, and a wired interface's `dot1x` (0008).
+ */
+static void warn_phase2_that_pins_nothing(ncfg_builder_t *builder)
+{
+	static const char *const sentence =
+	    "`phase2 = \"%s\"` on %s pins no inner method: wpa_supplicant reads this as "
+	    "`key=value` and ignores anything else, so the server proposes the inner "
+	    "method and the supplicant accepts it -- including one that sends the "
+	    "password in clear inside the tunnel. Write `auth=MSCHAPV2`, or `autheap=` "
+	    "where the inner method is itself EAP";
+	size_t i;
+
+	for (i = 0; i < builder->desired->network_count; i++) {
+		const ncfg_wifi_network_t *network = &builder->desired->networks[i];
+		char                    where[NCFG_ERROR_MAX];
+
+		if (network->security.kind != NCFG_SECURITY_EAP ||
+		    !network->security.eap.phase2 ||
+		    !ncfg_phase2_pins_nothing(network->security.eap.phase2)) {
+			continue;
+		}
+		(void)snprintf(where, sizeof(where), "network `%s`", network->id);
+		ncfg_plan_warnf(builder->plan, NULL, sentence,
+		    network->security.eap.phase2, where);
+	}
+	for (i = 0; i < builder->desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &builder->desired->interfaces[i];
+		char                    where[NCFG_ERROR_MAX];
+
+		if (!interface->dot1x || !interface->dot1x->phase2 ||
+		    !ncfg_phase2_pins_nothing(interface->dot1x->phase2)) {
+			continue;
+		}
+		(void)snprintf(where, sizeof(where), "`%s`", interface->name);
+		ncfg_plan_warnf(builder->plan, interface->name, sentence,
+		    interface->dot1x->phase2, where);
+	}
 }
 
 /*
@@ -359,6 +503,9 @@ static void warn_held(ncfg_builder_t *builder)
 	 * on the machine.
 	 */
 	ncfg_plan_radio_warn(builder);
+	warn_mac_contradiction(builder);
+	warn_eap_without_ca(builder);
+	warn_phase2_that_pins_nothing(builder);
 	warn_regdom(builder);
 	warn_networks_held(builder);
 	/*

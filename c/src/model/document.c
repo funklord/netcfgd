@@ -229,6 +229,45 @@ const char *ncfg_interface_kind_language_name(int kind)
 	return ncfg_field_enum_name(&language_kind_set, kind);
 }
 
+const char *ncfg_mac_policy_name(int policy)
+{
+	return ncfg_field_enum_name(&mac_policy_set, policy);
+}
+
+int ncfg_phase2_pins_nothing(const char *phase2)
+{
+	const char *at = phase2;
+
+	if (!at) {
+		return 1;
+	}
+	while (*at) {
+		const char *token;
+		const char *equals;
+
+		while (*at == ' ' || *at == '\t' || *at == '\n' || *at == '\r') {
+			at++;
+		}
+		token = at;
+		while (*at && *at != ' ' && *at != '\t' && *at != '\n' && *at != '\r') {
+			at++;
+		}
+		if (at == token) {
+			break;
+		}
+		/* A token pins something when it is `key=value` with both halves
+		 * present. `strchr` over the token rather than the rest of the string:
+		 * an `=` in a later token says nothing about this one. */
+		for (equals = token; equals < at && *equals != '='; equals++) {
+			/* nothing */
+		}
+		if (equals > token && equals < at - 1) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /*
  * The word a tunnel encapsulation goes on the wire as.
  *

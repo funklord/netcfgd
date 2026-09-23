@@ -805,6 +805,30 @@ typedef struct {
  * outside the set. */
 const char *ncfg_interface_kind_name(int kind);
 
+/* A radio's MAC policy as the language spells it, or NULL outside the set. */
+const char *ncfg_mac_policy_name(int policy);
+
+/*
+ * Whether a `phase2` value pins no inner method at all.
+ *
+ * wpa_supplicant reads `phase2` as whitespace-separated `key=value` tokens and
+ * ignores anything that is not one -- so `phase2 = "mschapv2"`, which reads
+ * like an instruction, pins nothing: the server proposes the inner method and
+ * the supplicant accepts what it is offered, including one that sends the
+ * password in clear inside the tunnel. `auth=MSCHAPV2` is the form that pins
+ * it, and `autheap=` where the inner method is itself EAP.
+ *
+ * **In the model rather than in the planner**, which is where the Rust keeps
+ * it: the planner warns about it, the renderer writes it out and a future
+ * validator may want the same answer, and three readings of one rule is how
+ * they come to disagree about a value nobody can see the effect of.
+ *
+ * 1 where nothing is pinned, which is the direction that gets warned about. An
+ * empty key or an empty value pins nothing either: `=MSCHAPV2` and `auth=` are
+ * both tokens the supplicant discards.
+ */
+int ncfg_phase2_pins_nothing(const char *phase2);
+
 /* The language's word for the same kind -- `wireguard` and `openvpn` where the
  * document says `wire_guard` and `open_vpn`, and the same word everywhere
  * else. What an operator reads against the file they wrote uses this one; what

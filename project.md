@@ -9515,6 +9515,112 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.244 Four sentences this port did not say
+
+The two rounds before this compared what the two programs *do* to a kernel.
+This compares what they *say* about a document, which is the other half of the
+same question -- and it found four warnings the Rust emits and this port does
+not.
+
+Every one is about a configuration that is legal, compiles, plans actions, and
+does something other than what it looks like. That is the only kind of mistake
+a warning can catch; everything else is a refusal.
+
+**A `device` block with no `interface` block plans nothing at all** (0186).
+netcfgd plans by interface, so a `device` block on its own is policy about
+hardware nobody asked it to configure -- read, kept, and acted on by nothing.
+The incident the Rust records is an operator with `wifi { autoconnect = true }`
+on a device, a `network` block with the passphrase, no `interface` block, and a
+plan that said `nothing to do`. The documented example was wrong and the
+product agreed with it in silence.
+
+**A fixed `mac` under a `mac_policy` that replaces it.** netcfgd writes the
+configured address to the link and the supplicant then writes a randomised one
+over it when it associates, so the fixed address holds until the radio joins a
+network and not after. An operator who set it for MAC-based admission is
+admitted exactly once and then stops being admitted, for a reason nothing
+reports.
+
+**EAP that believes whatever answers, in two degrees** (0206). With no
+`ca_cert`, the supplicant trusts any server that replies and the inner method
+hands it the credential. With a `ca_cert` and no `domain_suffix_match`, every
+certificate that issuer ever signed is accepted -- fine for an organisation's
+own CA, nearly worthless for a public one, and a commercial certificate on a
+RADIUS server is an ordinary arrangement. Two sentences rather than one with a
+clause, because the remedies differ.
+
+**A `phase2` that pins no inner method** (0189). wpa_supplicant reads `phase2`
+as whitespace-separated `key=value` tokens and discards anything else, so
+`phase2 = "mschapv2"` -- which reads like an instruction -- pins nothing: the
+server proposes the inner method and the supplicant accepts what it is
+offered, including one that sends the password in clear inside the tunnel.
+Warned and not refused, because the value is inert rather than invalid and
+refusing it would take the wifi off every machine carrying one to fix
+something that was already absent. **netcfgd's own example told people to
+write it.**
+
+`ncfg_phase2_pins_nothing` went into the model rather than the planner, which
+is where the Rust keeps it: the planner warns about it, the renderer writes it
+out, and three readings of one rule is how they come to disagree about a value
+whose effect nobody can see.
+
+Five sabotages, five caught: the inert-device pass removed (2), the permanent
+policy no longer excused (1), the two EAP degrees collapsed into one (1), the
+phase2 pass removed (3), and the model's rule loosened so `y=` reads as
+pinning something (4).
+
+### The sweep was wrong three times before it was right
+
+Worth writing down, because the method is the round.
+
+The first attempt compared the two implementations' *source text*: pull each
+Rust warning's message, grep the C for a distinctive phrase. It reported
+thirteen of fifteen missing, which was obviously wrong -- the C plainly has
+`warn_unmanaged` and `warn_regdom`. Three separate faults, each of which on
+its own produced a confident wrong answer:
+
+* **C string literals are split across lines**, so any probe spanning a split
+  found nothing. Fixed by joining adjacent literals first.
+* **The probe was not contiguous text.** It filtered non-alphabetic words out
+  of a phrase and then joined what was left, so `is false with clear netcfgd`
+  was searched for in a message that says "is `managed = false` with
+  `on_unmanage = \"clear\"`: netcfgd". Fixed by taking a run of five
+  *adjacent* plain words.
+* **The blob included comments**, so prose in a comment counted as a message.
+  `warn_inert_devices` came back "found" on the strength of two comments in
+  `plan/kind.c` and `plan/radio.c` -- while the port demonstrably did not emit
+  it. Fixed by extracting only string literals, with comments stripped first.
+
+The third fault is the instructive one: it is a **false pass**, and the other
+two were false failures. A false failure wastes an hour; a false pass closes
+the question. `evidence.md` says a passing check is not evidence until you
+know what it inspected, and a grep that cannot tell a message from a comment
+about a message does not know.
+
+**What settled it was running both programs.** One document, both `ncfg plan`
+invocations, the warnings sorted and diffed -- four lines present on one side
+and absent on the other, and afterwards the same diff empty. That comparison
+is now the fixture: the same four cases live in `plan_wifi_test.c` against the
+planner directly.
+
+### And a check that stopped discriminating
+
+`plan_radio_test` went red on the new pass, for a warning that belongs.
+
+Two of its cases assert that a particular radio arrangement is *not* warned
+about, and they said so by asking whether any warning contained the words "no
+`interface` block". That was precise while one sentence in the program used
+them. `warn_inert_devices` says "has a `device` block and no `interface`
+block" about every device without one -- correctly, and the Rust says it in
+exactly the shape the fixture builds, which is how the collision was settled
+rather than argued.
+
+So the check was the thing that was wrong, and it was wrong in the weaker
+direction: an assertion that nothing *matches* gets looser every time another
+sentence is added, and nothing tells you. Both now name this radio's own
+words, and taking the radio warning back out still fails them -- which is the
+half that had to be re-established after loosening the match.
+
 ## 10.243 Every bridge this port made came up on the kernel's defaults
 
 10.242 fixed one half of a create arm and did not look at the other. The Rust's
