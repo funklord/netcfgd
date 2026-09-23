@@ -371,7 +371,13 @@ static void the_radio_this_build_does_start_one_for_is_not_warned_about(void)
 	ncfg_plan_t     *plan = planfix_plan(RADIO_DEVICE, INTERFACE, "", "",
 	    "\"links\":[" RADIO_LINK "]", &document, &observed);
 
-	check(plan && !planfix_warned(plan, "no `interface` block"),
+	/* **This radio's sentence, not any sentence with those words in it.**
+	 * `warn_inert_devices` says "has a `device` block and no `interface`
+	 * block" about every device without one, radio or not, and it is right to
+	 * -- so a check on the shorter phrase stopped discriminating the moment
+	 * that pass landed, and failed here for a warning that belongs. What this
+	 * case is about is the supplicant. */
+	check(plan && !planfix_warned(plan, "is a radio with no `interface` block"),
 	    "a radio with an `interface` block is not told about a block it has");
 	planfix_release(plan, document, observed);
 
@@ -381,7 +387,7 @@ static void the_radio_this_build_does_start_one_for_is_not_warned_about(void)
 	 * is noise rather than news. */
 	plan = planfix_plan(RADIO_DEVICE, "", "", "", "\"links\":[" WIRED_LINK "]",
 	    &document, &observed);
-	check(plan && !planfix_warned(plan, "no `interface` block"),
+	check(plan && !planfix_warned(plan, "is a radio with no `interface` block"),
 	    "and neither is a `wifi` block on something the kernel does not call wireless");
 	planfix_release(plan, document, observed);
 

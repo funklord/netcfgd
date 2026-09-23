@@ -221,6 +221,167 @@ static void a_regulatory_domain_written_in_the_wrong_place_is_said(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * The four sentences this port did not say.
+ *
+ * Found by giving both programs one document and comparing the warnings:
+ * `ncfg plan` here emitted five and the Rust six, then four, then three. Each
+ * is about a configuration that is legal, compiles, plans actions, and does
+ * something other than what it looks like -- which is the only kind of mistake
+ * a warning can catch, because every other kind is a refusal.
+ */
+static void a_device_nobody_asked_to_configure_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"spare0\",\"kind\":{\"kind\":\"dummy\"}}", "", "", "",
+	    "\"links\":[" PLANFIX_LINK("spare0", "") "]", &document, &observed);
+
+	/* 0186: an operator with a `device` block, a `network` block and no
+	 * `interface` block was told `nothing to do`. */
+	check(plan && planfix_warned(plan, "has a `device` block and no `interface` block"),
+	    "a device block with no interface block is said to plan nothing");
+	check(plan && planfix_warned(plan, "config = \"dhcp\" }` is what makes it netcfgd's"),
+	    "  and the sentence names the line that would make it live");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan("{\"name\":\"spare0\",\"kind\":{\"kind\":\"dummy\"}}",
+	    "{\"name\":\"spare0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"10.0.0.1/24\"}]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("spare0", "") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "and no `interface` block"),
+	    "and the same device with one is quiet");
+	planfix_release(plan, document, observed);
+}
+
+static void a_fixed_mac_the_supplicant_replaces_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(
+	    "{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"mac\":\"02:00:00:00:00:01\","
+	    "\"wifi\":{\"backend\":\"auto\",\"mac_policy\":\"per_network\"}}", "", "", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+
+	check(plan && planfix_warned(plan, "which replaces it"),
+	    "a fixed mac under a policy that randomises it is said");
+	check(plan && planfix_warned(plan, "`mac_policy = \"permanent\"` is what keeps it"),
+	    "  and the sentence says which of the two to change");
+	planfix_release(plan, document, observed);
+
+	/* The arrangement that is not a contradiction: a fixed address kept. */
+	plan = planfix_plan("{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"mac\":\"02:00:00:00:00:01\","
+	    "\"wifi\":{\"backend\":\"auto\",\"mac_policy\":\"permanent\"}}", "", "", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "which replaces it"),
+	    "and `permanent` beside a fixed mac is the arrangement that works, so nothing "
+	    "is said");
+	planfix_release(plan, document, observed);
+
+	/* And a policy with no `mac`: nothing to contradict. */
+	plan = planfix_plan(RADIO("\"backend\":\"auto\",\"mac_policy\":\"per_network\""),
+	    "", "", "", "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]",
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "which replaces it"),
+	    "and a randomising policy on its own is the ordinary one");
+	planfix_release(plan, document, observed);
+}
+
+/* The two degrees of trusting whatever answers (0206). */
+static void eap_that_believes_any_server_is_said(void)
+{
+	static const char *const eap_head =
+	    "{\"id\":\"corp\",\"security\":{\"type\":\"eap\","
+	    "\"method\":\"peap\",\"identity\":\"someone\"";
+	ncfg_document_t         *document;
+	ncfg_observed_t         *observed;
+	ncfg_plan_t             *plan;
+	char                     extra[1024];
+
+	(void)snprintf(extra, sizeof(extra), "%s}}", eap_head);
+	plan = planfix_plan(RADIO("\"backend\":\"auto\""), "", extra, "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "pins no `ca_cert`, so it will trust any server"),
+	    "EAP with no issuer pinned is said to trust whatever answers");
+	planfix_release(plan, document, observed);
+
+	/* An issuer and no name: the half-answer, which used to read as the whole
+	 * one. Every certificate that issuer ever signed is accepted. */
+	(void)snprintf(extra, sizeof(extra),
+	    "%s,\"ca_cert\":{\"path\":\"/etc/ssl/ca.pem\"}}}", eap_head);
+	plan = planfix_plan(RADIO("\"backend\":\"auto\""), "", extra, "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "and no `domain_suffix_match`"),
+	    "and an issuer with no name is said to accept anything that issuer signed");
+	check(plan && !planfix_warned(plan, "pins no `ca_cert`"),
+	    "  and is not also told it pinned nothing, which is the other case");
+	planfix_release(plan, document, observed);
+
+	(void)snprintf(extra, sizeof(extra),
+	    "%s,\"ca_cert\":{\"path\":\"/etc/ssl/ca.pem\"},"
+	    "\"domain_suffix_match\":\"radius.example.com\"}}", eap_head);
+	plan = planfix_plan(RADIO("\"backend\":\"auto\""), "", extra, "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "server certificate"),
+	    "and both together are the arrangement that answers who the server is");
+	planfix_release(plan, document, observed);
+}
+
+/* 0189: warned and not refused, because the value is inert rather than wrong
+ * and netcfgd's own example told people to write it. */
+static void a_phase2_that_pins_nothing_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+	size_t           at;
+	unsigned         said = 0;
+	unsigned         quiet = 0;
+	/* The inert forms and the pinning ones, through the model's own rule. */
+	static const char *const pins_nothing[] = { "mschapv2", "auth", "MSCHAPV2 ", "=x", "y=" };
+	static const char *const pins[] = { "auth=MSCHAPV2", "autheap=MSCHAPV2",
+		"mschapv2 auth=MSCHAPV2" };
+
+	for (at = 0; at < sizeof(pins_nothing) / sizeof(pins_nothing[0]); at++) {
+		said += ncfg_phase2_pins_nothing(pins_nothing[at]) ? 1u : 0u;
+	}
+	for (at = 0; at < sizeof(pins) / sizeof(pins[0]); at++) {
+		quiet += ncfg_phase2_pins_nothing(pins[at]) ? 0u : 1u;
+	}
+	check(said == sizeof(pins_nothing) / sizeof(pins_nothing[0]),
+	    "a phase2 with no `key=value` token pins nothing, including a lone key and a "
+	    "lone value");
+	check(quiet == sizeof(pins) / sizeof(pins[0]),
+	    "  and one with a whole token pins something, wherever in the value it sits");
+	check(ncfg_phase2_pins_nothing(NULL),
+	    "  and an absent one pins nothing, which is the same answer");
+
+	plan = planfix_plan(RADIO("\"backend\":\"auto\""), "",
+	    "{\"id\":\"corp\",\"security\":{\"type\":\"eap\","
+	    "\"method\":\"peap\",\"identity\":\"someone\",\"phase2\":\"mschavp2\","
+	    "\"ca_cert\":{\"path\":\"/etc/ssl/ca.pem\"},"
+	    "\"domain_suffix_match\":\"radius.example.com\"}}", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", ",\"wireless\":true") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "pins no inner method"),
+	    "a network whose phase2 pins nothing is said");
+	check(plan && planfix_warned(plan, "Write `auth=MSCHAPV2`"),
+	    "  and told the form that would pin one");
+	planfix_release(plan, document, observed);
+
+	/* The wired half, which is the other place 802.1X lives (0008). */
+	plan = planfix_plan("{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"}}",
+	    "{\"name\":\"eth0\",\"dot1x\":{\"method\":\"peap\",\"identity\":\"someone\","
+	    "\"phase2\":\"mschapv2\",\"ca_cert\":{\"path\":\"/etc/ssl/ca.pem\"},"
+	    "\"domain_suffix_match\":\"radius.example.com\"}}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
+	check(plan && planfix_warned(plan, "pins no inner method"),
+	    "and so is a wired `dot1x` that does the same thing");
+	planfix_release(plan, document, observed);
+}
+
 /* ------------------------------------------------------------------------ *
  * The station lists
  * ------------------------------------------------------------------------ */
@@ -387,6 +548,10 @@ int main(void)
 	nothing_is_handed_to_a_supplicant_that_is_not_running();
 	the_radio_settings_that_reach_nothing_are_named();
 	a_regulatory_domain_written_in_the_wrong_place_is_said();
+	a_device_nobody_asked_to_configure_is_said();
+	a_fixed_mac_the_supplicant_replaces_is_said();
+	eap_that_believes_any_server_is_said();
+	a_phase2_that_pins_nothing_is_said();
 	a_station_list_is_converged_in_both_directions();
 	the_list_the_policy_does_not_select_is_emptied_too();
 	an_unknown_policy_converges_nothing_and_says_so();
