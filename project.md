@@ -9515,6 +9515,62 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.250 A test for this defect must not be able to cause it
+
+10.249 said the live script for the delivery modes was the obvious next thing
+and was not there, because it would have to protect the machine from the very
+failure it tests for. `tests/live/c_dns_delivery.sh` is that script.
+
+**It runs under `unshare -rmn` and is the only one that does.** A sentinel is
+bind-mounted over `/etc/resolv.conf` before anything else happens, the mount is
+confirmed by reading it back, and the script refuses to continue if it did not
+take. At the end the sentinel is checked again, which is the strongest thing
+the script can say: nothing in it reached the file this machine resolves names
+through.
+
+That guard was then tested the only way worth testing it -- by putting the
+defect back. With the C ignoring `NCFG_RESOLV_CONF` again, the script goes red
+in two places **and the machine's own file is untouched**.
+
+**The two forwarders are handled differently, and the reason is honest.**
+`/etc/dnsmasq.d` and `/etc/unbound/unbound.conf.d` cannot be bind-mounted over
+on a machine that does not have them, and creating them would be the script
+changing the host in order to test itself. So it checks they are absent and
+runs those cases only then: a regression would find no directory and refuse,
+which is harmless. Where a machine has them, those two cases are skipped and
+say so. **A check that cannot be made safely is not made.**
+
+Seven modes compared, and all seven agree: `none`, `write_resolv_conf`, the two
+drop-ins, `resolvconf` and `openresolv` -- through a fake on `PATH` recording
+its arguments and standard input, which is the only way to compare a delivery
+whose other end is somebody else's program -- and `exec`, which is refused.
+
+### Two vacuous passes caught while writing it
+
+**`exec` compared two records of nothing.** The mode exists in the model and
+the configuration language has no way to write the command it would run, so
+`lower_global.c` refuses the word deliberately. Both programs refused the
+document identically and the case reported `ok` while testing nothing.
+
+The record was a grep for `dns.apply` and `argv:` lines, so a refusal produced
+two headers and no content -- and the guard against that was a **length floor**
+of forty characters, which two headers clear. The floor is now the subject
+rather than the size: the record has to mention the mode by name, which it does
+whether the mode was delivered or refused. The record itself is the whole apply
+output, because what a delivery does is visible in its output or it is not
+visible at all.
+
+The `exec` case is kept, as a refusal compared the way `agree_gate.py` compares
+one: the Rust's first line must begin the C's, which is 0263 -- the C folds a
+diagnostic's help onto one line where the Rust prints a `help:` continuation.
+
+**And every case failed once the whole output was compared**, for a reason that
+was the harness's: the two programs run one after the other in one namespace,
+and the device was removed after both rather than before each, so the second
+program found a machine the first had already configured and planned nothing to
+create. Cleaning before each run rather than after the pair is a one-line fix
+and was three checks' worth of confusion.
+
 ## 10.249 The other two files, and the grep that missed them
 
 10.246 fixed `NCFG_RESOLV_CONF` and left its two siblings alone on a wrong

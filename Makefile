@@ -1828,6 +1828,13 @@ live:
 	@# changing reports whichever instant it sampled -- which is true of both
 	@# and is not a difference between them.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_answers.sh"
+	@# **`-rmn`, and it is the only one.** A resolver delivery writes the file
+	@# that decides whether this machine can resolve a name, so the script
+	@# bind-mounts a sentinel over `/etc/resolv.conf` before it runs anything
+	@# and checks the sentinel afterwards. A test for the defect that sends a
+	@# delivery to the wrong place must not be able to cause it -- which is not
+	@# hypothetical here (project.md 10.246).
+	@unshare -rmn sh -c "NCFG_LIVE=1 sh tests/live/c_dns_delivery.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
