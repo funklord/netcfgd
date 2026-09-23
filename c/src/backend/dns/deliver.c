@@ -23,6 +23,24 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, size_t out_size)
+{
+	const char *from_environment;
+
+	if (!out || !out_size) {
+		return NCFG_RESOLV_CONF;
+	}
+	if (explicit_path && explicit_path[0]) {
+		(void)snprintf(out, out_size, "%s", explicit_path);
+		return out;
+	}
+	from_environment = getenv(NCFG_RESOLV_CONF_ENV);
+	(void)snprintf(out, out_size, "%s",
+	    from_environment && from_environment[0] ? from_environment : NCFG_RESOLV_CONF);
+	return out;
+}
+
+
 #define DNS_PATH_MAX 512
 
 /*
