@@ -654,6 +654,64 @@ static int run_hook(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, size_
  * The dispatch
  * ------------------------------------------------------------------------ */
 
+/*
+ * The half of a create that the `RTM_NEWLINK` does not carry.
+ *
+ * **Two kinds are not configured by the message that creates them**, and for
+ * opposite reasons:
+ *
+ *   * a **WireGuard** device cannot be -- its key, port, mark and peers go
+ *     over generic netlink, and `RTM_NEWLINK` has nowhere to put them. A
+ *     create that stopped at the link left a tunnel up, addressed and carrying
+ *     nothing;
+ *   * a **bridge** deliberately is not. The kernel would take `IFLA_INFO_DATA`
+ *     there, and 0057 says not to use it: correcting an existing bridge has to
+ *     be a separate `RTM_NEWLINK` anyway, and one path rather than two is what
+ *     stops the two cases drifting apart. `kernel_link.c` says the same thing
+ *     where it builds the bare link. This port took the first half of that
+ *     decision and not the second, so every bridge it made came up on the
+ *     kernel's defaults -- forward delay 15s, hello time 2s, priority 32768,
+ *     STP off -- whatever the document said, and the apply reported `ok`.
+ *
+ * Every other kind rides along in the create message and is checked against
+ * the Rust on a real kernel by `tests/live/c_link_settings.sh`; bond and vxlan
+ * were confirmed identical when this was found.
+ *
+ * **There is no `link.set_bridge` in a plan that creates a bridge**, in either
+ * implementation, for the same reason there is no `wg.set_device` in one that
+ * creates a tunnel: a create carries its whole configuration, and the two
+ * `link.set_*` ops exist to *correct* a device that is already there. So this
+ * is where the settings have to be applied, and nowhere else was reaching it.
+ *
+ * A failure here is the create's failure, which is the Rust's behaviour: the
+ * link is already there and is left there, the journal says which action
+ * stopped, and a confirm window is the machinery for a change that went in
+ * half-way. Inventing a rollback the plan did not ask for is not this arm's
+ * to do.
+ */
+static int finish_create(const ncfg_kernel_world_t *world, const ncfg_op_t *create, char *err,
+    size_t err_size)
+{
+	const ncfg_interface_kind_t *kind = create->u.link_create.kind;
+	const char                  *name = create->u.link_create.name;
+	ncfg_op_t                    op;
+
+	if (!ncfg_kernel_wg_configure_new(world, name, kind, err, err_size)) {
+		return 0;
+	}
+	if (!kind || kind->kind != (int)NCFG_KIND_BRIDGE) {
+		return 1;
+	}
+	/* The correcting arm, given the op it already knows how to carry out --
+	 * it reads the settings out of the document being applied, which is where
+	 * a `link.set_bridge` gets them from too. A second encoder here is
+	 * exactly what 0057 is about. */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_SET_BRIDGE;
+	op.u.named.name = name;
+	return ncfg_kernel_link_kind_op(world, &op, err, err_size);
+}
+
 static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 {
 	ncfg_kernel_t      *kernel = state;
@@ -683,13 +741,7 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 		if (!create_link(kernel, op, err, err_size)) {
 			return 0;
 		}
-		/* **A WireGuard device is not configured by the message that creates
-		 * it.** The key, the port, the mark and the peers all go over generic
-		 * netlink afterwards, so a create that stopped at the link left a
-		 * tunnel that was up, addressed and carrying nothing at all.
-		 * `kernel_internal.h` has the rest. */
-		return ncfg_kernel_wg_configure_new(&world, op->u.link_create.name,
-		    op->u.link_create.kind, err, err_size);
+		return finish_create(&world, op, err, err_size);
 	case NCFG_OP_LINK_DELETE:
 		if (!on_link(kernel, op->u.named.name, op, build_delete, "delete the link", err,
 		    err_size)) {
