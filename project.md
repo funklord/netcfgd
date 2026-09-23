@@ -9515,6 +9515,59 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.248 Both daemons, one client, the same questions
+
+The ledger says the two request taxonomies are whole -- thirty-two names, none
+either way. It says nothing about the **answers**, and the daemon is the last
+thing in the porting order, "last, because they are what the others are for".
+
+`tests/live/c_daemon_answers.sh` asks both the same questions. One client
+against two daemons, deliberately: a difference is then the daemon's, where two
+clients against two daemons would leave it ambiguous. `NCFG_RUN_DIR` picks
+which daemon answers, there being no `--socket` on the client.
+
+Nineteen read-and-refuse verbs with both daemons up at once, sharing a
+configuration directory and changing nothing: `status`, `show`, `plan` in both
+renderings, two shapes of `explain`, the four wifi and modem verbs that have no
+radio to find, `control show`, `profile get` and `list`, `confirm` and `revert`
+with no window, `reload`, and two refusals about things that do not exist.
+**Byte-identical, every one.**
+
+Then the writing verbs, one daemon at a time in its own configuration
+directory, because a drop-in written through one would otherwise be read by the
+other: `config put`, `config rm`, `config put` again, `secret set`,
+`wifi add`, `profile save`. The answers agree and so does the directory each
+left behind, named file by file rather than counted.
+
+Two sabotages: a reworded refusal in `src/daemon/confirm.c` (caught, twice --
+`confirm` and `revert`), and a drop-in filed under a different suffix (caught
+by the tree comparison).
+
+### The finding that was not one, and what it cost to establish
+
+The first version ran `ncfg apply` as well, and `status --json` then disagreed
+about one field: the Rust recorded `hook_state` as `link.create: kind is
+<absent> but should be dummy` and the C as `link.up: enabled is false but
+should be true` -- a half-applied machine, recorded by one and not the other.
+It looked exactly like a defect, and it reproduced three times out of three.
+
+It is a race, and it is in both. The drift pass reports on an observation taken
+**without the apply lock**, which is deliberate and documented in `daemon.h`:
+"a pass that only observes never takes it", and that lifetime is the Rust's. So
+while a third process is changing the machine, what either daemon records is
+whichever instant it sampled. Measured: the C produced the mid-apply value in
+four runs of six, the Rust in one of eight. Same behaviour, different odds.
+
+**Three runs agreeing is not determinism**, which is the lesson worth keeping.
+The sample that settled it was eight runs of the Rust alone, and the first of
+those eight was the one that disagreed with the other seven.
+
+The fix is not to filter the field. It is to stop moving the machine underneath
+the question: nothing in the script applies, so no link is created, and the
+index, the MAC and the drift record all stop being things two daemons can
+sample differently. A comparison that needs a field excluded is usually a
+comparison asking about two moments.
+
 ## 10.247 The completeness ledger, asked of the code rather than written down
 
 The question this campaign keeps being asked -- what does the C side not do

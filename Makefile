@@ -1822,6 +1822,12 @@ live:
 	@# `show --json` because a plan observes the machine; a fresh namespace is
 	@# what holds the machine still enough to compare one.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_warnings.sh"
+	@# Both daemons, one client, the same requests. The ledger says the two
+	@# request taxonomies are whole; this is what says the answers are. Nothing
+	@# in it applies, because a daemon watching a machine a third process is
+	@# changing reports whichever instant it sampled -- which is true of both
+	@# and is not a difference between them.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_answers.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
