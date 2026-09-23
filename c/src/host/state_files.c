@@ -243,8 +243,8 @@ int ncfg_state_write_provenance(const char *run_dir, ncfg_provenance_t *provenan
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)), 0666u,
-	    err, err_size);
+	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
+	    NCFG_RUN_FILE_MODE, err, err_size);
 	free(path);
 	ncfg_buf_free(&buf);
 	return ok;
@@ -526,7 +526,7 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(path, text, strlen(text), 0666u, err, err_size);
+	ok = ncfg_write_atomically(path, text, strlen(text), NCFG_RUN_FILE_MODE, err, err_size);
 	free(path);
 	if (!ok) {
 		ncfg_buf_free(&buf);
@@ -617,7 +617,8 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
 			ok = 0;
 			break;
 		}
-		ok = ncfg_write_atomically(file, array, (size_t)(end - array), 0666u, err, err_size);
+		ok = ncfg_write_atomically(file, array, (size_t)(end - array),
+		    NCFG_RUN_FILE_MODE, err, err_size);
 		free(file);
 		array = skip_ws(end);
 		if (*array == ',') {
@@ -712,8 +713,8 @@ static int write_observed_projection(const char *dir, const ncfg_observed_t *obs
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(file, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)), 0666u,
-	    err, err_size);
+	ok = ncfg_write_atomically(file, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
+	    NCFG_RUN_FILE_MODE, err, err_size);
 	free(file);
 	ncfg_buf_free(&buf);
 	return ok;
@@ -779,8 +780,8 @@ int ncfg_state_write_observed(const char *run_dir, ncfg_observed_t *observed, ch
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)), 0666u,
-	    err, err_size);
+	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
+	    NCFG_RUN_FILE_MODE, err, err_size);
 	free(path);
 	ncfg_buf_free(&buf);
 	/* And one file per link, so a reader asking about `eth0` does not have to

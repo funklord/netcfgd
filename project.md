@@ -9515,6 +9515,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.252 0644 stated, rather than a umask hoped for
+
+The last round's fix made the C's records match the Rust's. Sweeping *modes*
+across everything both write -- which the earlier run-directory comparison did
+not do, and is why the 0666 slipped through it -- showed what that match was
+worth.
+
+**Under a umask of zero, both implementations wrote `owned.json`,
+`desired.json` and `observed.json` world-writable.** 0666 with the umask left
+to decide is the right file on a machine with an ordinary umask and the wrong
+one on a machine without: a daemon started from a container entrypoint or an
+init script that cleared it gets no protection at all. The previous round
+closed the `fchmod` hole and left this one, because matching the Rust was
+taken as the goal.
+
+The C already wrote most of its files `0644` outright -- drop-ins, profiles,
+locks, logs -- so the tree had two families with the same reasoning and
+different answers. `NCFG_RUN_FILE_MODE` is one name for it now, `0644`, with
+the argument where the constant is: anyone may read a record, only netcfgd may
+write one, and that is a fact about the file rather than a hope about the
+environment. Two modes remain in this tree and both are stated: `0600` for a
+credential and this.
+
+Measured afterwards, under a umask of zero: the C writes 0644, the Rust writes
+0666. **Recorded as a Rust defect, not fixed.** Its directories are the same
+shape -- `create_dir_all` is 0777 and the umask, so a cleared umask gives 0777
+under `/run`, where the C states 0755.
+
+### Two sabotages that passed, and both were the test's fault
+
+Setting `NCFG_RUN_FILE_MODE` to `0666` passed. The check compared the file's
+mode **against the constant**, so the assertion moved with the thing it was
+asserting: the file became 0666 and so did what it was compared to. It asserts
+the number now.
+
+Changing the writer passed too, twice, and each time because the sabotage went
+somewhere else: the first replaced the mode at a different call site, and the
+second matched the string `observed.json` in a comment forty lines above the
+writer and edited the next call after *that*. A sabotage aimed by a text search
+lands where the text is, not where the meaning is.
+
+There was a third: the first attempt at the constant sabotage passed because
+`c/Makefile` has no header dependencies, so editing `state.h` rebuilt nothing
+and the old binary ran. That is a real gap in the build rather than in the
+test, and it is worth knowing when a header is what a sabotage changes: the
+round that found it worked around it with `make clean`, and this one did the
+same.
+
 ## 10.251 Every record netcfgd wrote under /run was world-writable
 
 The DNS renderers were compared for the first time last round. The other

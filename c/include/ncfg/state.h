@@ -88,6 +88,28 @@
 /* Where runtime state lives when nothing says otherwise. */
 #define NCFG_RUN_DIR_DEFAULT "/run/netcfgd"
 
+/*
+ * What a record netcfgd writes under `/run` is readable and writable by.
+ *
+ * **Anyone may read one and only netcfgd may write one.** `ncfg status` run by
+ * an ordinary user reads `observed.json`; nothing but netcfgd has any business
+ * changing `owned.json`, which is the record deciding what netcfgd will
+ * remove.
+ *
+ * **Stated rather than left to the umask, which is the whole point of it being
+ * a constant.** These files used to be opened `0666` with a comment saying the
+ * umask would decide -- true, and not enough: a daemon started with a umask of
+ * zero, from a container entrypoint or an init script that cleared it, then
+ * wrote every one of them world-writable. `0644` is the same file on a machine
+ * with an ordinary umask and the same file on one without.
+ *
+ * The other mode this tree uses is `0600`, for a credential, and it is written
+ * out where it is used because there are few of them and each is obvious. This
+ * one is named because it is everywhere and because what it protects is not
+ * obvious from the call site.
+ */
+#define NCFG_RUN_FILE_MODE 0644u
+
 /* What overrides it, for a test or for a second netcfgd on one machine. */
 #define NCFG_RUN_DIR_ENV "NCFG_RUN_DIR"
 

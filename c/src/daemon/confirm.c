@@ -43,9 +43,10 @@
 #define WINDOW_FILE_MAX  (64u * 1024u)
 #define DOCUMENT_FILE_MAX (16u * 1024u * 1024u)
 
-/* The mode both files are written with, which is `netcfgd-host`'s: the umask
- * still applies, as it does to any `open`. */
-#define CONFIRM_FILE_MODE 0666u
+/* The mode both files are written with, which is `state.h`'s one answer for a
+ * record under `/run`: readable by anyone, writable by netcfgd, and stated
+ * rather than left to the umask -- see the constant for what that cost. */
+#define CONFIRM_FILE_MODE NCFG_RUN_FILE_MODE
 
 /* ------------------------------------------------------------------------ *
  * Where the promise is kept
