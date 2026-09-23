@@ -244,6 +244,25 @@ const char *ncfg_hostapd_effective_band(const char *band, const ncfg_optint_t *c
  */
 int ncfg_hostapd_channel_in_band(const char *band, int64_t channel);
 
+/*
+ * Whether a channel is one the radio must listen on before it may beacon.
+ *
+ * DFS: the 5 GHz channels shared with weather and military radar. A radio has
+ * to watch them for a clear-channel assessment period before transmitting, so
+ * an access point on one is **silent for a minute or so after the apply
+ * returns** -- longer on some channels -- and an operator who does not know
+ * that sees a configured access point nobody can find and goes looking for a
+ * fault that is not there.
+ *
+ * **The kernel is the authority and this is not it**, which is
+ * `ncfg_hostapd_channel_in_band`'s argument and holds here with one difference
+ * that makes the approximation safe: this drives a warning rather than a
+ * refusal, so being wrong about a channel costs a sentence rather than an
+ * access point. The range is the one that is DFS in every regulatory domain
+ * netcfgd is likely to meet; 36 to 48 and 149 upwards need no wait anywhere.
+ */
+int ncfg_hostapd_channel_needs_radar_detection(int64_t channel);
+
 /* ------------------------------------------------------------- the files */
 
 /*

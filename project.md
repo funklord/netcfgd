@@ -9515,6 +9515,76 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.245 The comparison that found those four, made into a gate
+
+10.244 found four missing warnings by hand: write a document, run both
+programs, diff what they say. The obvious next move was to keep doing that,
+and the better one was to stop doing it by hand.
+
+Widening the corpus first found two more, both about access points:
+
+**An access point on a DFS channel.** Channels 52-64 and 100-144 are shared
+with radar in most regulatory domains, so the radio has to listen before it may
+beacon and the access point is silent for a minute or so after the apply
+returns -- longer on some. Everything netcfgd reports says it is running while
+a scan finds nothing, which is exactly when somebody goes looking for a fault
+that is not there. `ncfg_hostapd_channel_needs_radar_detection` sits beside
+`channel_in_band`, and for the same stated reason: the kernel is the authority
+and this is not it, but this drives a warning rather than a refusal, so being
+wrong about a channel costs a sentence rather than an access point.
+
+**The second access point on one radio.** This build runs one BSS per radio --
+both halves at once needs a second virtual interface on the phy, which netcfgd
+does not create -- so the second `access_point` block was read, kept and never
+started, and the plan that started the first looked exactly like a plan that
+did everything asked of it. Said once, by the block that runs, naming the ones
+that do not: three blocks on one radio told three times would never say which
+one won.
+
+Three sabotages: the pass removed (2 failures each), and the DFS range shifted
+by one at each end (3), which is what the bounds checks are for -- `>= 52 &&
+<= 64` is one keystroke from `> 52` and a sample in the middle cannot tell.
+
+### `tests/live/c_warnings.sh`
+
+The gate compares `ncfg show --json` because that is the whole pure path. A
+plan is not pure -- it observes the machine -- so the gate cannot reach the
+planner, and **the planner is where every warning is decided**. That gap had
+six warnings in it.
+
+A fresh network namespace is what closes it: both programs observe the same
+machine a moment apart, and in an empty namespace that machine does not change
+between the two runs, so the observation half cancels and what is left is what
+they say about the document.
+
+**Differences are declared as exact whole lines**, in `agree_gate.py`'s shape
+and for its reason. This port says two things the Rust does not, both
+deliberate and both with their reasoning written down where they are emitted:
+a `network` block's own addressing is applied by neither implementation and
+only this one says so, and the `ethtool` sentence agrees in number where the
+Rust says "`speed` ... are". So the script holds one *extra line* and one
+*rewording pair*, and a declaration that stops describing anything fails
+rather than lingering -- checked by pointing one at a network that does not
+exist and watching it go red.
+
+### The corpus had to be made to bite
+
+The first eight documents written for this reported "same" on five of them.
+All five were **refused by both compilers** -- wrong keys, wrong spelling of a
+`dns_mode`, an `allow` list that is not an access point key -- so the
+comparison was between two identical refusals and said nothing at all.
+
+That is `evidence.md`'s gate over an empty file list, arrived at from a new
+direction: not a check that inspected nothing, but a check that inspected two
+things which agreed because neither had happened. So each document now
+declares **how many warnings it must produce**, and one that stops producing
+them fails instead of passing quietly.
+
+The count itself then caught something on its first real run: the NAT document
+was declared at two warnings because that is what it produced on this machine,
+and in the namespace it produces one. The number belongs to the environment
+the script runs in, which is the namespace, and nowhere else.
+
 ## 10.244 Four sentences this port did not say
 
 The two rounds before this compared what the two programs *do* to a kernel.

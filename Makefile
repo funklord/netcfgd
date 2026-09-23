@@ -1818,6 +1818,10 @@ live:
 	@# create message; a bridge deliberately does not (0057) and this port was
 	@# making every one of them on the kernel's defaults.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_link_settings.sh"
+	@# What the two implementations *say* about a document. The gate compares
+	@# `show --json` because a plan observes the machine; a fresh namespace is
+	@# what holds the machine still enough to compare one.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_warnings.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
