@@ -90,6 +90,24 @@
  */
 const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, size_t out_size);
 
+/*
+ * The same, for the two forwarding resolvers' drop-ins.
+ *
+ * **The same rule and the same function underneath**, which is what stops one
+ * of the three checking its variable while another does not -- this port had
+ * exactly that for a round, with `resolv.conf` resolved and these two still
+ * written out as constants at every call site.
+ *
+ * Both default into directories netcfgd will not create, which is the constant
+ * above being a *default* rather than a promise: an absent `/etc/dnsmasq.d`
+ * means dnsmasq is not installed or does not read that directory, and a
+ * delivery there is refused rather than creating a file nothing consumes.
+ */
+const char *ncfg_dns_resolve_dnsmasq_path(const char *explicit_path, char *out,
+    size_t out_size);
+const char *ncfg_dns_resolve_unbound_path(const char *explicit_path, char *out,
+    size_t out_size);
+
 /* And the two forwarding resolvers' drop-ins. Both are in directories netcfgd
  * will not create: an absent `/etc/dnsmasq.d` means dnsmasq is not installed
  * or does not read that directory, and creating it would leave a file nothing
@@ -97,6 +115,12 @@ const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, siz
  * use -- cuts both ways. */
 #define NCFG_DNSMASQ_CONF "/etc/dnsmasq.d/netcfgd.conf"
 #define NCFG_UNBOUND_CONF "/etc/unbound/unbound.conf.d/netcfgd.conf"
+
+/* And what overrides those two, which the Rust reads in `Forwarder::path` for
+ * the reason it gives there -- the same reason as `NCFG_RESOLV_CONF`, in the
+ * same words: a test very nearly rewrote this machine's. */
+#define NCFG_DNSMASQ_CONF_ENV "NCFG_DNSMASQ_CONF"
+#define NCFG_UNBOUND_CONF_ENV "NCFG_UNBOUND_CONF"
 
 /* The scope that is not an interface. `resolvconf` keys on an interface name
  * so it becomes `lo.netcfgd`, and resolved is per-link so it becomes `lo`. */

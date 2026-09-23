@@ -64,6 +64,8 @@ typedef struct {
 	/* The resolver file this invocation writes, which is the environment's
 	 * where one is set. `dns.h` has why that matters more than it looks. */
 	char                    resolv_conf[NCFG_MAIN_LOOP_PATH_MAX + 16];
+	char                    dnsmasq_conf[NCFG_MAIN_LOOP_PATH_MAX + 16];
+	char                    unbound_conf[NCFG_MAIN_LOOP_PATH_MAX + 16];
 	int                     open;
 } apply_world_t;
 
@@ -109,8 +111,10 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	held->where.certs_dir = held->certs_dir;
 	held->where.resolv_conf = ncfg_dns_resolve_conf_path(NULL, held->resolv_conf,
 	    sizeof(held->resolv_conf));
-	held->where.dnsmasq_conf = NCFG_DNSMASQ_CONF;
-	held->where.unbound_conf = NCFG_UNBOUND_CONF;
+	held->where.dnsmasq_conf = ncfg_dns_resolve_dnsmasq_path(NULL, held->dnsmasq_conf,
+	    sizeof(held->dnsmasq_conf));
+	held->where.unbound_conf = ncfg_dns_resolve_unbound_path(NULL, held->unbound_conf,
+	    sizeof(held->unbound_conf));
 	ncfg_dhcp_machine(&held->where.dhcp);
 
 	if (!ncfg_main_world_open(&held->world, &held->where, &held->state, NULL, NULL, err,

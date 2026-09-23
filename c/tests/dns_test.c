@@ -904,9 +904,58 @@ static void a_forwarder_with_no_directory_is_refused(const char *base)
  */
 static void the_resolver_file_is_the_one_the_caller_asked_for(void)
 {
-	char out[256];
+	/*
+	 * **All three, walked.** The rule is one function underneath, and the
+	 * reason it is one function is that three copies of it is how one of them
+	 * comes to check its variable and another not to -- which is not a
+	 * hypothetical: this port shipped `resolv.conf` resolved and the two
+	 * forwarders still written out as constants for a round, because they were
+	 * fixed separately.
+	 */
+	static const struct {
+		const char *(*resolve)(const char *, char *, size_t);
+		const char *variable;
+		const char *fallback;
+		const char *what;
+	} files[] = {
+		{ ncfg_dns_resolve_conf_path, NCFG_RESOLV_CONF_ENV, NCFG_RESOLV_CONF,
+		    "resolv.conf" },
+		{ ncfg_dns_resolve_dnsmasq_path, NCFG_DNSMASQ_CONF_ENV, NCFG_DNSMASQ_CONF,
+		    "dnsmasq's drop-in" },
+		{ ncfg_dns_resolve_unbound_path, NCFG_UNBOUND_CONF_ENV, NCFG_UNBOUND_CONF,
+		    "unbound's drop-in" },
+	};
+	size_t   at;
+	unsigned obeyed = 0;
+	char     out[256];
 
-	printf("\n-- where resolv.conf is\n");
+	printf("\n-- where the three resolver files are\n");
+	for (at = 0; at < sizeof(files) / sizeof(files[0]); at++) {
+		char buffer[256];
+
+		(void)setenv(files[at].variable, "/from-the-environment", 1);
+		if (strcmp(files[at].resolve(NULL, buffer, sizeof(buffer)),
+		    "/from-the-environment") != 0) {
+			printf("       %s does not read its variable\n", files[at].what);
+			continue;
+		}
+		(void)unsetenv(files[at].variable);
+		if (strcmp(files[at].resolve(NULL, buffer, sizeof(buffer)),
+		    files[at].fallback) != 0) {
+			printf("       %s does not fall back to the machine's\n", files[at].what);
+			continue;
+		}
+		if (strcmp(files[at].resolve("/explicit", buffer, sizeof(buffer)),
+		    "/explicit") != 0) {
+			printf("       %s does not take an explicit path\n", files[at].what);
+			continue;
+		}
+		obeyed++;
+	}
+	check(obeyed == sizeof(files) / sizeof(files[0]),
+	    "each of the three resolver files takes the explicit path, then its "
+	    "environment variable, then the machine's");
+
 	check(strcmp(ncfg_dns_resolve_conf_path("/somewhere/resolv.conf", out, sizeof(out)),
 	    "/somewhere/resolv.conf") == 0, "an explicit path wins");
 	(void)setenv(NCFG_RESOLV_CONF_ENV, "/from-the-environment", 1);

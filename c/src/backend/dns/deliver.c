@@ -23,21 +23,46 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, size_t out_size)
+/*
+ * The explicit path, then the environment, then the machine's.
+ *
+ * One rule for the three files, which is the point of it being a function: the
+ * observe module's `root_from_env` is the same shape for `/proc` and `/sys`,
+ * and three copies of four lines is how one of them comes to check the
+ * variable and another not to. That is not hypothetical here -- this port had
+ * all three written out as constants at every call site, and the first one was
+ * fixed a round before the other two.
+ */
+static const char *from_env(const char *explicit_path, const char *variable,
+    const char *fallback, char *out, size_t out_size)
 {
-	const char *from_environment;
+	const char *said;
 
 	if (!out || !out_size) {
-		return NCFG_RESOLV_CONF;
+		return fallback;
 	}
 	if (explicit_path && explicit_path[0]) {
 		(void)snprintf(out, out_size, "%s", explicit_path);
 		return out;
 	}
-	from_environment = getenv(NCFG_RESOLV_CONF_ENV);
-	(void)snprintf(out, out_size, "%s",
-	    from_environment && from_environment[0] ? from_environment : NCFG_RESOLV_CONF);
+	said = getenv(variable);
+	(void)snprintf(out, out_size, "%s", said && said[0] ? said : fallback);
 	return out;
+}
+
+const char *ncfg_dns_resolve_conf_path(const char *explicit_path, char *out, size_t out_size)
+{
+	return from_env(explicit_path, NCFG_RESOLV_CONF_ENV, NCFG_RESOLV_CONF, out, out_size);
+}
+
+const char *ncfg_dns_resolve_dnsmasq_path(const char *explicit_path, char *out, size_t out_size)
+{
+	return from_env(explicit_path, NCFG_DNSMASQ_CONF_ENV, NCFG_DNSMASQ_CONF, out, out_size);
+}
+
+const char *ncfg_dns_resolve_unbound_path(const char *explicit_path, char *out, size_t out_size)
+{
+	return from_env(explicit_path, NCFG_UNBOUND_CONF_ENV, NCFG_UNBOUND_CONF, out, out_size);
 }
 
 
