@@ -9515,6 +9515,256 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.269 A mechanical rewrite that redirected the control, and the flag thirty scripts needed
+
+Two findings from the first sweep that was honestly all-C, and the second is
+only visible because the first was fixed.
+
+### The seam pointed the comparison at itself
+
+10.262's rewrite gave seventy live scripts `build="${NCFG_LIVE_BUILD:-...}"`
+and replaced every `$repo/target/debug` with `$build`. Five of those scripts
+are the **comparisons**: `c_daemon_answers`, `c_dns_delivery`,
+`c_link_settings`, `c_warnings` and `c_wireguard` each name the C tree by path
+and use `$repo/target/debug` for **the Rust side, deliberately**, because the
+Rust is the control. The rewrite pointed that side at the C too, so with
+`NCFG_LIVE_BUILD` set each compared the C against itself.
+
+`c_daemon_answers` says it out loud in its own output -- *the Rust daemon never
+bound its socket*, above the C port's refusal to start a loop -- and the line
+was read for four hours as a C defect.
+
+**The proof 10.262 carried could not have caught it.** It checked that the
+default expands to the string it replaced, which is true of all seventy and is
+a claim about the *substitution*. What was wrong is the **population**: the
+rewrite's set should have been "scripts that drive one implementation", and
+five scripts drive two. A tool asking "did I replace the right text" cannot
+answer "should I have replaced it here", and the second question is the one a
+sweep over a directory has to ask.
+
+The five are restored to their committed form.
+
+### The reconcile loop is off, and thirty scripts start a daemon
+
+With the control honest, the all-C sweep is **23 of 79** and thirty of the
+failures are one sentence: *this build of the C port does not start its
+reconcile loop by default*. That is 10.240's gate working exactly as written --
+no netcfgd in C has run a machine, so the loop asks to be told somebody is
+watching -- and `--try-the-c-daemon` is the flag that tells it. `unshare -rn`
+is a private network namespace, so a live script is the one place where being
+wrong costs nothing; the flag was simply never passed there.
+
+    daemon_flags=
+    if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+    	daemon_flags=--try-the-c-daemon
+    fi
+
+**Asked of the binary rather than inferred from the path**, so the Rust is
+untouched: it has no such option, would refuse it, and its help does not
+mention it -- measured, `grep -c` returns 0. The default remains what it was;
+nothing in any unit file passes the flag, and
+`ncfg_main_netcfgd_may_reconcile` still answers no unless this invocation said
+otherwise.
+
+**The population assertion is what made the edit safe**, and it fired twice.
+The tool classifies every `"$build/netcfgd"` in `tests/live` as a *start*
+(backgrounded), a *fallback* (`ncfg=` where no `ncfg` binary exists) or a
+*probe* (`[ -x ... ] || skip`), refuses to write if any site is none of the
+three, and asserts per file that it substituted exactly the starts it counted.
+The first run stopped on 34 unclassified existence probes -- a third class
+nobody had named -- and wrote nothing. 42 starts, 43 non-starts, 85 sites, 36
+files.
+
+## 10.263 The Rust's live suite, run against the C, with the Rust as its control
+
+10.262 built the seam. This is the first run, and the first answer this tree
+has ever had to *does the C behave like the Rust* on anything that touches a
+kernel.
+
+Both builds, the same 75 scripts the `live` target names, the same harness:
+each script under `timeout --kill-after=10 120 unshare -rn`, `NCFG_LIVE=1` so
+a skip is loud, output per script.
+
+    22   both pass
+    33   the Rust passes and the C does not
+    11   both fail          -- no wireguard-tools, no openvpn, no pppd,
+                               mac80211_hwsim absent, /dev/vhci refused
+     8   both skip
+     1   one skips
+     0   the C passes and the Rust does not
+
+**The control is the whole of why the 33 is worth anything.** Eleven scripts
+fail for this machine rather than for either implementation, and without the
+Rust run they would have been reported as C defects; `evidence.md` says a
+failing check is not evidence until you know it could have succeeded, and here
+a fifth of the failures could not have.
+
+### The daemon's off-switch is what the first run actually measures
+
+Every daemon-driven script failed identically at first: *"this build of the C
+port does not start its reconcile loop by default"*. That is the deliberate
+latch, and the program's own message names the flag and even names the script
+written to supervise it.
+
+So the run was done through a two-file scratch directory -- `netcfgd` a shell
+script that execs `c/netcfgd --try-the-c-daemon "$@"`, `ncfg` a symlink beside
+it, since the program takes its identity from `basename(argv[0])` -- pointed at
+by `NCFG_LIVE_BUILD`. **Nothing in the tree was changed to do it**, which is
+the point: the latch stays on, and a suite that wants the loop passes the flag
+the way a person would.
+
+Measured after: **one** of the 33 still fails at daemon start. The other 32 got
+a running C daemon and disagreed with the Rust about what it did.
+
+### The sharpest one, which is a silent no-op on an edited configuration
+
+`links.sh`, 11 failures, and the first is the worst:
+
+    FAIL an edited vlan id plans a delete
+           expected to contain: link.delete work-net
+           actual:              nothing to do
+
+`links.sh` says why it matters where it asserts it: *"`ip link set work-net
+type vlan id 78` succeeds and changes nothing, so the only way to apply an
+edited id is to delete the interface and make it again -- with everything on
+it"* (0059). The Rust plans the delete and the create. **The C plans nothing
+and reports a converged machine.**
+
+The same shape three times over: an edited vlan id, a changed kind, a moved
+vlan parent. `grep` finds no remake path in `c/src/plan/link.c` at all, so it
+is one missing rule rather than three defects.
+
+That is a configuration an operator edits, applies, and is told is done. It is
+the defect class 0061 exists against, reached by the one instrument that could
+find it -- and neither the ledger, the agree gate, nor 90 C test binaries said
+a word about it, because every one of them asks whether an op is carried out
+rather than whether the right op was planned.
+
+### The rest, by size
+
+    roam 13   links 11   displace 9   exec_refused 9   write_full 8
+    openvpn 7   wedged 6   adopt 5   altname 5   ap 5
+    c_warnings 4   linkset 4   nat 4   resolv_owned 4 ...
+
+First lines rather than a diagnosis, because each wants reading: *netcfgd
+installs the address from config* (adopt), *netcfgd creates the bridge the
+config asks for* (altname), *the uplink is masqueraded* (nat), *netcfgd writes
+the file it was told to own* (resolv_owned), *netcfgd attaches to the
+supplicant's event socket, once* (roam), *and no staging file is left beside
+it* (write_full). Several are plainly the same daemon-side question asked from
+different angles; none has been chased yet.
+
+### A defect in the harness, and the proof that could not see it
+
+`sandbox_writes.sh` died with `build: parameter not set`. The substitution
+replaced a literal path with a shell variable, and three scripts use that path
+inside a **nested** shell -- `unshare -r sh -c '...'` -- where a plain variable
+does not exist. The literal always had.
+
+10.262's proof checked that the default expands to the string it replaced, in
+70 scripts, both ways. It was a true proof of the wrong property: textual
+expansion in the shell that declares it, where what mattered was scope. `export
+build` fixes all 70 at once.
+
+**The lesson is the shape rather than the fix.** A mechanical change's proof
+has to name the property that can actually break, and "the text expands to what
+it replaced" is not it when the replacement changes what kind of thing the text
+*is*. A literal is in scope everywhere; a variable is not.
+
+### What was not disturbed
+
+`/usr/sbin/netcfgd` -- this machine's own, running its network -- was never
+signalled, and no process from either build of this tree survived the run. Each
+script had a private network namespace and its own `mktemp -d`, with
+`NCFG_CONFIG_DIR` and `NCFG_RUN_DIR` pointed into it; the C honours both, which
+was checked before the first run rather than assumed. `/tmp` gained 13
+directories and 820 KB, on a 16 GB tmpfs at 10%.
+## 10.262 What is still missing, asked of the Rust rather than of the port
+
+Two questions, and the first one's answer is why the second matters.
+
+### What Rust code the C does not have
+
+Asked by name: every `pub fn` in `crates/`, against every identifier in `c/`,
+matching on the trailing words so `ncfg_dhcp_udhcpc_args` answers for
+`udhcpc_args`. **112 Rust function names have no C identifier ending in
+them**, across every crate -- 31 in `netcfgd-sys`, 24 in `netcfgd-model`, 21 in
+`netcfgd-host`.
+
+**And nearly all of them are the detector, not the port.** Spot-checked
+against the file each belongs to: `wireless_links` is `ncfg_radio_links`,
+`exclusive_within` is `ncfg_lock_take_within`, `chains` and `nat_uplinks` are
+`ncfg_nft_build_chain_dump` and its neighbours, `set_features` and
+`active_features` are the `ncfg_ethtool_*` pair, `redirect_ingress` is the two
+messages `kernel_internal.h` describes and `observed.h` carries
+`ingress_redirect` for, `key_mgmt_of` is `ncfg_security_key_mgmt` -- which
+10.257 moved into the model this week. A name-based comparison across two
+naming conventions reports the conventions.
+
+So the honest answer to *what is missing* is: **nothing that any instrument in
+this tree can name.** The ledger carries every request and op in the frozen
+witnesses and its 15 remaining refusals are all permanent facts about a kind
+(10.261). Every observation pass is ported. Every CLI verb is wired. The
+planner holds back one addressing source and says so per plan. What is left is
+not a list of functions -- it is whether the two programs *behave* alike, which
+no list can answer.
+
+### Which of the Rust's tests can be put to the C
+
+Counted rather than assumed:
+
+    536  #[test] across 24 integration files -- Rust calling Rust
+      2  of those 24 files drive a binary at all
+     79  shell scripts under tests/live/, every one driving a binary
+      6  of the 79 written for the C already (`c_*.sh`)
+
+**The Rust's unit and integration tests cannot be pointed at the C**, and that
+is not a gap to close: they call Rust functions with Rust values, and the C's
+equivalent is its own 90 test binaries. The `agree` gate is what compares the
+two programs today, on the paths that read no kernel.
+
+**The 79 live scripts are the part that can.** They drive `ncfg` and `netcfgd`
+as programs, and 70 of them named the Rust's build directory literally -- 44 by
+the byte-identical line `ncfg="$repo/target/debug/ncfg"`.
+
+### The seam
+
+One variable, in one line per script:
+
+    build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+
+and every `$repo/target/debug` becomes `$build`. Both trees present the same
+pair -- `netcfgd` with `ncfg` a symlink beside it -- so a directory is the
+whole of what has to change, and `NCFG_LIVE_BUILD=$PWD/c make live` puts the
+same suite on the C.
+
+**The proof is that nothing moved.** The edit is a substitution whose default
+is the string it replaced, so the invariant is that with the variable unset
+every script invokes exactly what it did. Checked three ways rather than read:
+the declaration is present exactly once in each of the 70 and is byte-identical
+in all of them; each one's `build` is evaluated in a shell with `repo` set and
+answers `/R/target/debug` unset and `/R/c` set, 70 for 70; and the whole diff,
+with every path elided to a token, collapses to four line shapes and nothing
+else. All 86 scripts still parse.
+
+**No live script was run.** The suite creates interfaces and starts daemons,
+and `make live` runs it under `unshare -rn` for that reason; this machine's
+network is netcfgd's own. What is proved here is the seam, not the suite.
+
+### What the seam is for, and what it will find
+
+0263 says a module of the port replaces its Rust half *"only once it passes the
+Rust's own tests for the same behaviour"*. Until now that sentence had no
+instrument behind it for anything that touches a kernel: the `agree` gate
+deliberately compares only the paths that do not, because `plan`, `status` and
+`explain` observe the machine and would differ for honest reasons.
+
+These 79 scripts are that instrument, and they were written against the Rust
+over the whole project. Running them against the C is the first thing in this
+tree that can answer *behaves alike* rather than *carries out the same ops* --
+and the expectation should be that it goes red, in places, on the first run.
+That is the point of it.
+
 ## 10.252 0644 stated, rather than a umask hoped for
 
 The last round's fix made the C's records match the Rust's. Sweeping *modes*
@@ -13979,47 +14229,55 @@ and was therefore always empty. So every scope differed on every pass, for ever.
 
 The other is the six observation passes, which now have a list to walk.
 
-### What is still not done, and why each
+### What this wave left open, and where each of them closed
 
-**`dns` is carried and not folded.** The fold's whole argument is that the op
-*is* the effect; `dns.apply` is the one op where that is false, because
+**Rewritten rather than appended to, because both of these have since been
+done** and a reader who found the old text beside the new would believe the one
+that sounded more careful -- which is always the older one. What is kept is why
+each was blocked, since that is the part a later reader can use; the status is
+the part that rotted.
+
+**`dns` was carried and not folded.** The fold's whole argument is that the op
+*is* the effect, and `dns.apply` is the one op where that is false:
 `ncfg_service_dns_apply` delivers every scope its context carries whatever the
-op names while the planner emits an op only for a scope that differs. Neither
-of the two rules that could be written from the ops converges: recording the
-op's own scope leaves a departed scope in the record for ever and the planner
-re-delivers on every pass while it stands, and replacing the list from the ops
-drops the scopes that did not differ so the two states alternate. It would also
-want a deep copy of an `ncfg_dns_policy_t`, which `observe.h` says this port
-deliberately does not have. What the carrying buys on its own is not small: a
-record another netcfgd wrote round-trips instead of being silently emptied,
-which is the thing `carried_more` existed to warn about. The producer that
-closes it is a reader of `<run>/dns/<scope>.conf`, which `dns.h` already
-promises the observer does and nothing does; that file is a rendered resolver
-blob with comments rather than a policy, and stale scopes are never removed
-from the directory, so it is a wave rather than a line.
+op names, while the planner emits an op only for a scope that differs. Neither
+rule that could be written from the ops converges -- recording the op's own
+scope leaves a departed scope in the record for ever and the planner
+re-delivers while it stands, and replacing the list from the ops drops the
+scopes that did not differ so the two states alternate. **The answer was that
+neither rule should be written from the ops.** The delivered set is an argument
+to `ncfg_apply_record` now, the same list `ncfg_dns_scopes_of` gave the
+executor, so the record says what the delivery did rather than what the op
+named; a caller with no list passes NULL and costs one re-delivery. `apply.h`
+carries the argument and `ncfg_observe_resolv_currency` is the reader that
+closed the other half.
 
-**0079's third clear is still not written, and the reason has moved again.**
-§10.182 found it had neither an output nor an input and said both close on the
-record carrying backends. The output half did. The input half did not: the clear
-fires for a backend *seen running*, and `running` in this record is netcfgd's
-memory of having started the daemon -- 0078's whole distinction. Clearing on
-that would clear every count on every pass and the cap would never bite at all:
-the defect would go from "a backend that failed five times is never started
-again" to "a backend that fails for ever is started for ever", which is the
-thing 0079 was written to stop, measured at 181 starts in twelve seconds.
+**0079's third clear was not written**, and §10.182 said it had neither an
+output nor an input. The output half closed with the record carrying backends.
+The input half did not, and the reason was sharper than "not done yet": the
+clear fires for a backend *seen running*, and `running` in the record was
+netcfgd's memory of having started the daemon -- 0078's whole distinction.
+Clearing on that would have cleared every count on every pass and the cap would
+never have bitten, turning "a backend that failed five times is never started
+again" into "one that fails for ever is started for ever", which is the defect
+0079 was written against.
 
-So it waits on `read_backend_liveness`, which waits on something smaller than a
-module and larger than a line: a **backend kind mapped to a pid file and an
-`argv` marker**. The Rust has one function for it,
-`netcfgd_apply::backend_pid_file` (`crates/netcfgd-apply/src/kernel.rs:3311`),
-covering seven kinds. This port has five per-module answers -- `ncfg_ra_running_
-pid`, `ncfg_openvpn_running_pid`, `ncfg_dhcp_running_pid` and two pid-path calls
--- with different arities (a DHCP client's pid path needs the *program*, because
-which client is running is a property of the machine) and no map over them. And
-every one of them reaches `/proc` at a fixed path through `process.h`, which is
-that module's subject and `observe.h`'s rule broken: every root an observation
-pass reads under is a parameter there. Threading a `/proc` root through
-`process.h` and five backend modules is that module's wave, not this one's.
+So it waited on `read_backend_liveness`, and that waited on something smaller
+than a module and larger than a line: a backend kind mapped to a pid file and
+an `argv` marker. The Rust has one function for it,
+`netcfgd_apply::backend_pid_file`, covering seven kinds. **This port answered it
+the other way round** -- the six modules that start these daemons already know
+how to find one, so `ncfg_service_backend_handle` is a switch over the taxonomy
+with no `default:` that calls them, rather than a seventh spelling of six
+rules. `ncfg_observe_backend_liveness` is the pass, and §10.254 is the clear
+itself.
+
+**What did not close is the `/proc` root**, and `observe.h` records it in the
+module it belongs to rather than here: the liveness answers come from
+`process.h`, where finding a process is a security property, and a second
+reader taking a root would be two answers to who owns a pid. What it costs is
+that `liveness_test.c` starts real children instead of pointing at a tree it
+made.
 
 ### One defect in the Rust, found while agreeing with it
 

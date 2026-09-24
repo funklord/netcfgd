@@ -19,6 +19,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -29,7 +31,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 [ -d /proc/sys/net/ipv6 ] || skip "this kernel has no IPv6 (ipv6.disable=1)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-privacy.XXXXXX")
@@ -38,7 +40,7 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

@@ -17,6 +17,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -28,7 +30,7 @@ skip() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8) to check the result with"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-links.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
@@ -162,7 +164,7 @@ CONF
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 missing() {
@@ -287,7 +289,7 @@ contains "and the underlay the document named" "$(detail vx100)" "dev br0"
 contains "a veth pair exists"          "$(ip -br link show type veth)" "veth-b@veth-a"
 # `gso = off` removes it and `tso = on` leaves the other alone -- the kernel
 # takes a mask, so a request names exactly what changes.
-offloads=$("$repo/target/debug/ncfg" status 2>/dev/null | awk '
+offloads=$("$build/ncfg" status 2>/dev/null | awk '
 	/^[^ ]/ { iface = $1 } iface == "off0" && $1 == "offloads" { print }')
 missing "gso is turned off"            "$offloads" "tx-generic-segmentation"
 contains "and tso left on"             "$offloads" "tx-tcp-segmentation"

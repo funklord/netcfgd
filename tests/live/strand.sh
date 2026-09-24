@@ -21,6 +21,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -32,7 +34,7 @@ skip() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 # A kernel without the module has no WireGuard device to strand a key on, and
 # that is a skip rather than a failure: nothing else in netcfgd needs it.
 ip link add wgprobe type wireguard 2>/dev/null || skip "this kernel has no wireguard support"
@@ -45,7 +47,7 @@ mkdir -p "$work/etc/secrets" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

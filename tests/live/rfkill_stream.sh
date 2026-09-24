@@ -21,6 +21,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -32,7 +45,7 @@ skip() {
 }
 
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rfk.XXXXXX")
 daemon=
@@ -108,7 +121,7 @@ while True:
 PY
 feeder=$!
 
-"$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 50 ]; do

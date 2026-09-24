@@ -26,6 +26,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -136,7 +138,7 @@ printf '#!/bin/sh\nexit 127\n' > "$work/bin/dhcpcd"
 chmod +x "$work/bin/dhcpcd"
 
 NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" \
-	"$repo/target/debug/ncfg" apply > "$work/apply.log" 2>&1 || true
+	"$build/ncfg" apply > "$work/apply.log" 2>&1 || true
 
 check "netcfgd writes the handle back rather than spawning" \
 	"$(cat "$pidfile" 2>/dev/null || echo none)" "$first"

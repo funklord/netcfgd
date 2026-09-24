@@ -33,6 +33,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -43,7 +56,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rsock.XXXXXX")
 daemon=
@@ -110,7 +123,7 @@ check() {
 # from the document it read then.
 start_daemon() {
 	rm -f "$work/run/netcfgd.sock" "$work/run/remote.sock"
-	"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+	"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 	daemon=$!
 	i=0
 	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$i" -lt 50 ]; do
@@ -198,7 +211,7 @@ done
 # landed on a closed socket and reported `Broken pipe` while the daemon's own
 # sentence sat unread in its receive buffer.
 start_daemon
-python3 - "$work/run/netcfgd.sock" "$repo/target/debug/ncfg" > "$work/cap.log" 2>&1 <<'PROBE' || true
+python3 - "$work/run/netcfgd.sock" "$build/ncfg" > "$work/cap.log" 2>&1 <<'PROBE' || true
 import socket, subprocess, sys, time
 
 sock, ncfg = sys.argv[1], sys.argv[2]
@@ -311,7 +324,7 @@ start_daemon
 # `ncfg wifi status` sends `WifiStatus` to the daemon and prints what comes
 # back, which is the path the report came in on.
 probe() {
-	"$repo/target/debug/ncfg" wifi status "$1" 2>&1 | head -1 |
+	"$build/ncfg" wifi status "$1" 2>&1 | head -1 |
 		sed "s|$1||g" | tr -s ' '
 }
 
@@ -324,10 +337,10 @@ else
 fi
 check "a path that exists and one that does not get the same answer" "$same" "same"
 check "and the answer is about the name rather than about the filesystem" \
-	"$("$repo/target/debug/ncfg" wifi status /etc/passwd 2>&1 |
+	"$("$build/ncfg" wifi status /etc/passwd 2>&1 |
 		grep -c 'is not an interface name' || true)" "1"
 check "while an ordinary name still gets the real diagnosis" \
-	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 |
+	"$("$build/ncfg" wifi status wlan0 2>&1 |
 		grep -c 'no control socket' || true)" "1"
 stop_daemon
 

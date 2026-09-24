@@ -25,6 +25,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -35,7 +48,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-log.XXXXXX")
 daemon=
@@ -82,9 +95,9 @@ printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
 say() {
 	rm -f "$work/run/netcfgd.sock"
 	if [ -n "${1:-}" ]; then
-		NCFG_LOG="$1" "$repo/target/debug/netcfgd" > "$work/said" 2>&1 &
+		NCFG_LOG="$1" "$build/netcfgd" $daemon_flags > "$work/said" 2>&1 &
 	else
-		"$repo/target/debug/netcfgd" > "$work/said" 2>&1 &
+		"$build/netcfgd" $daemon_flags > "$work/said" 2>&1 &
 	fi
 	daemon=$!
 	waited=0

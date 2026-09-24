@@ -56,6 +56,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -67,7 +69,7 @@ skip() {
 }
 
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 # The fake daemonises, so the shell has no job to kill and its command line is
 # the only handle there is. Without pkill this script would run its checks and
 # leave a daemon behind on every invocation, which is what it did for months.
@@ -104,7 +106,7 @@ mkdir -p "$work/etc" "$work/run" "$work/bin"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export FAKE_OPENVPN_LOG="${FAKE_OPENVPN_LOG:-$work/openvpn.log}"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

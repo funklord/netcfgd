@@ -25,13 +25,26 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 shim="$repo/adapter/netcfgd-nm/target/debug/netcfgd-nm"
 # **Defined, because `set -u` is on and this was used undefined.** One wait
 # loop below asks `$ncfg plan`, and with the variable unset the script died
 # there with "parameter not set" rather than failing a check -- so the failure
 # named the shell and not the thing under test. `make live` builds the
 # workspace and makes this symlink before running any script.
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -45,7 +58,7 @@ skip() {
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v nmcli >/dev/null 2>&1 || skip "nmcli is not installed (apt install network-manager | apk add networkmanager)"
 command -v dbus-daemon >/dev/null 2>&1 || skip "dbus-daemon is not installed"
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 [ -x "$shim" ] || skip "netcfgd-nm is not built (make adapters)"
 
 # Short, because a unix socket path has to fit in sun_path and the repo may be
@@ -223,7 +236,7 @@ if command -v python3 >/dev/null 2>&1; then
 	done
 fi
 
-"$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ]; do
@@ -240,7 +253,7 @@ while [ ! -e "$work/run/netcfgd.sock" ]; do
 done
 # The daemon applies on start, but the apply and the socket appearing are not
 # ordered, and the shim must not be asked about a machine mid-configuration.
-"$repo/target/debug/ncfg" apply > "$work/apply.log" 2>&1 || true
+"$build/ncfg" apply > "$work/apply.log" 2>&1 || true
 
 # Before the bus exists at all: the shim must refuse to claim NM's name when it
 # cannot answer, rather than claiming it and erroring at every client. A daemon
@@ -736,7 +749,7 @@ else
 	waited=0
 	while [ ! -f "$work/resolv.conf" ] && [ "$waited" -lt 8 ]; do
 		waited=$((waited + 1))
-		"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true
+		"$build/ncfg" apply > /dev/null 2>&1 || true
 	done
 	if [ ! -f "$work/resolv.conf" ]; then
 		echo "FAIL netcfgd delivered the DNS these panel checks read"
@@ -865,7 +878,7 @@ else
 	check "and the other route keeps its next hop and metric" \
 		"$(grep -c '10.0.0.0/8 via 192.0.2.9 metric 600' "$office" 2>/dev/null || true)" "1"
 	check "netcfgd accepts what was written" \
-		"$("$repo/target/debug/ncfg" show 2>/dev/null | grep -c '"id": "Office"' || true)" "1"
+		"$("$build/ncfg" show 2>/dev/null | grep -c '"id": "Office"' || true)" "1"
 
 	timeout 15 nmcli connection delete Office > /dev/null 2>&1 || true
 
@@ -937,7 +950,7 @@ else
 	check "and the nameservers become a dns block" \
 		"$(grep -c 'dns { servers = \["1.1.1.1"\]; search = \["example.com"\] }' "$opts" 2>/dev/null || true)" "1"
 	check "which netcfgd accepts" \
-		"$("$repo/target/debug/ncfg" show 2>/dev/null | grep -c '"id": "Opts"' || true)" "1"
+		"$("$build/ncfg" show 2>/dev/null | grep -c '"id": "Opts"' || true)" "1"
 
 	# An MTU is the one option that has nowhere to go: an interface has one and
 	# an SSID does not. It is named in the file rather than silently ignored.
@@ -961,7 +974,7 @@ else
 	check "creating a network writes a netcfgd block" \
 		"$([ -f "$created" ] && echo yes || echo no)" "yes"
 	check "and netcfgd reads it" \
-		"$("$repo/target/debug/ncfg" show 2>/dev/null |
+		"$("$build/ncfg" show 2>/dev/null |
 			grep -c '"id": "Roaming"' || true)" "1"
 	check "the block is what a person would have written" \
 		"$(grep -c 'network "Roaming" {' "$created" || true)" "1"
@@ -1011,7 +1024,7 @@ else
 	check "and the credential too, rather than leaving it for nothing" \
 		"$([ -f "$work/etc/secrets/Roaming" ] && echo yes || echo no)" "no"
 	check "and netcfgd no longer has the network" \
-		"$("$repo/target/debug/ncfg" show 2>/dev/null |
+		"$("$build/ncfg" show 2>/dev/null |
 			grep -c '"id": "Roaming"' || true)" "0"
 
 	# --------------------------------------------------- the secret agent

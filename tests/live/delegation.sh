@@ -50,6 +50,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 if [ "$(id -u)" != "0" ]; then
 	echo "delegation.sh: needs real root: odhcp6c binds port 546 and kea binds 547."
@@ -69,7 +71,7 @@ for tool in odhcp6c kea-dhcp6 radvd ip; do
 		exit 0
 	}
 done
-[ -x "$repo/target/debug/ncfg" ] || {
+[ -x "$build/ncfg" ] || {
 	echo "delegation.sh: skipping: ncfg is not built"
 	exit 0
 }
@@ -103,7 +105,7 @@ mkdir -p "$work/etc" "$work/run" /run/kea /var/lib/kea
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

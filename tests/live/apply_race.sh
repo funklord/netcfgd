@@ -36,6 +36,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -46,7 +48,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 # Its own network namespace, refused rather than assumed: this makes an
 # interface, and a script that makes interfaces must not do it on the real
@@ -62,7 +64,7 @@ mkdir -p "$work/etc" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

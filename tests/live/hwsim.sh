@@ -31,6 +31,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 ns=ncfg-hwsim
 loaded_here=
 created_ns=
@@ -66,7 +79,7 @@ skip() {
 supplicant=$(find_in_sbin wpa_supplicant) || skip "wpa_supplicant is not installed"
 iw=$(find_in_sbin iw) || skip "iw is not installed (apt install iw | apk add iw)"
 ip=$(find_in_sbin ip) || die "no ip(8), which is not something this can work around"
-[ -x "$repo/target/debug/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
 
 # The AP side is wpa_supplicant in AP mode rather than hostapd, so this needs
 # no package the station side did not already need. That requires the binary to
@@ -299,7 +312,7 @@ CONF
 printf '%s' "$passphrase" > "$work/etc/secrets/test"
 chmod 600 "$work/etc/secrets/test"
 
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 cli="${supplicant%wpa_supplicant}wpa_cli"
 
 failures=0
@@ -402,7 +415,7 @@ host_leases_before=$(ls /var/lib/dhcpcd 2>/dev/null | sort)
 # quieter form: not killing the operator's processes, only writing into their
 # state. A test that leaves a lease file named after a simulated radio in a
 # real /var/lib/dhcpcd has reached outside its sandbox either way.
-innc "$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+innc "$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 # Kept so cleanup can kill this by name rather than only by namespace. `$!` is
 # the *subshell* the background function call forked, not netcfgd, and that is
 # the point: it is the process holding this script's stdout open, and it sits

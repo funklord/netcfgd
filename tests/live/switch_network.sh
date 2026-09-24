@@ -54,6 +54,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -66,8 +79,8 @@ skip() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-switch.XXXXXX")
 daemon=
@@ -201,7 +214,7 @@ mkdir -p "$work/etc/secrets"
 printf 'hunter2hunter2' > "$work/etc/secrets/HomeFiber"
 chmod 0600 "$work/etc/secrets/HomeFiber"
 
-"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 50 ]; do
@@ -210,7 +223,7 @@ while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 50 ]; do
 done
 [ -e "$work/run/netcfgd.sock" ] || { cat "$work/daemon.log" >&2; exit 1; }
 
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 # roam.sh's sender, unchanged: a datagram client needs an address of its own,
 # in a directory of its own because the whole path has to fit a unix socket's

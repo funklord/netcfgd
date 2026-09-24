@@ -31,6 +31,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -54,7 +56,7 @@ find_openvpn() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 openvpn=$(find_openvpn) || skip "openvpn is not installed (apt install openvpn | apk add openvpn)"
 [ -c /dev/net/tun ] || skip "no /dev/net/tun, so no tunnel can be opened"
 command -v openssl >/dev/null 2>&1 \
@@ -63,7 +65,7 @@ command -v openssl >/dev/null 2>&1 \
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-tunnel.XXXXXX")
 peer=
 cleanup() {
-	"$repo/target/debug/ncfg" apply > /dev/null 2>&1 || true
+	"$build/ncfg" apply > /dev/null 2>&1 || true
 	pkill -f "netcfgd-vpn0" 2>/dev/null || true
 	if [ -n "$peer" ]; then
 		kill "$peer" 2>/dev/null || true
@@ -94,7 +96,7 @@ export NCFG_RUN_DIR="$work/run"
 # So a test of DNS delivery does not rewrite the resolver of the machine
 # running it.
 export NCFG_RESOLV_CONF="$work/resolv.conf"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

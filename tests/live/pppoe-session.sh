@@ -52,6 +52,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 if [ "$(id -u)" != "0" ]; then
 	echo "pppoe-session.sh: needs real root: /dev/ppp is root-only, and the"
@@ -76,7 +78,7 @@ for tool in pppd pppoe-server ip; do
 		exit 0
 	}
 done
-[ -x "$repo/target/debug/ncfg" ] || {
+[ -x "$build/ncfg" ] || {
 	echo "pppoe-session.sh: skipping: ncfg is not built"
 	exit 0
 }
@@ -110,7 +112,7 @@ mkdir -p "$work/etc/secrets" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

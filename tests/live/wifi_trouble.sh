@@ -31,6 +31,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -43,8 +56,8 @@ skip() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-wifi-trouble.XXXXXX")
 daemon=
@@ -123,7 +136,7 @@ for name in ("netcfgd-0-9", "netcfgd-1-9"):
 	sock.bind(os.path.join(sys.argv[1], name))
 PLANT
 
-"$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 50 ]; do
@@ -177,7 +190,7 @@ PY
 check "nothing is said about a network before anything goes wrong" \
 	"$(grep -c 'not trying' "$work/daemon.log" || true)" 0
 check "and the status names nothing it is not trying" \
-	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 |
+	"$("$build/ncfg" wifi status wlan0 2>&1 |
 		grep -c 'not being tried' || true)" 0
 
 # ------------------------------------------------------------------ the events
@@ -232,7 +245,7 @@ check "and everything else is still dropped" \
 
 send 'DISABLE [TEMP-DISABLED] Guest Wifi'
 sleep 1
-status=$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 || true)
+status=$("$build/ncfg" wifi status wlan0 2>&1 || true)
 
 check "the status names what the supplicant is not trying" \
 	"$(printf '%s\n' "$status" | grep -c 'not being tried' || true)" 1
@@ -256,7 +269,7 @@ check "and says what a temporary disable actually means" \
 # protocol: that netcfgd waits to be told the scan finished, and that it says
 # so when it was not told.
 
-scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+scan=$("$build/ncfg" wifi scan wlan0 2>&1 || true)
 check "an ordinary scan does not call its results stale" \
 	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 0
 # The control from the other side: the scan really did return something, so
@@ -268,7 +281,7 @@ check "and it returned what the fake radio can see" \
 # the two this machine's journal actually shows.
 send 'FAIL_NEXT_SCAN -16'
 sleep 1
-scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+scan=$("$build/ncfg" wifi scan wlan0 2>&1 || true)
 check "a scan the radio refused says the results are the previous ones" \
 	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 1
 check "and passes the driver's own return code through" \
@@ -285,7 +298,7 @@ check "the failed scan is in netcfgd's own log too" \
 
 # The mode is one scan deep, so the next one is fresh again -- the assertion
 # that netcfgd is reading the event rather than latching on a first failure.
-scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+scan=$("$build/ncfg" wifi scan wlan0 2>&1 || true)
 check "and the scan after it is fresh again" \
 	"$(printf '%s\n' "$scan" | grep -c "previous scan" || true)" 0
 
@@ -326,38 +339,38 @@ printf '0\n' > "$sysroot/class/rfkill/rfkill0/hard"
 # The control first: with the switch clear, nothing is said about it. Without
 # this the checks below pass on a daemon that prints the line unconditionally.
 check "an unblocked radio says nothing about a switch" \
-	"$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 | grep -c 'switched off' || true)" 0
+	"$("$build/ncfg" wifi status wlan0 2>&1 | grep -c 'switched off' || true)" 0
 
 # Soft: the one a command can clear, and the message has to say which command.
 printf '1\n' > "$sysroot/class/rfkill/rfkill0/soft"
-"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+"$build/ncfg" reload >/dev/null 2>&1 || true
 # **Seven seconds, because the switch is read by the reconcile loop.** A
 # `/sys` file changing produces no netlink event and no rfkill record here --
 # the real thing would emit one, and this fake cannot -- so what picks it up is
 # the loop's five-second backstop. Two seconds passed the soft case by luck of
 # where in that cycle it landed, and failed the hard one.
 sleep 7
-status=$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 || true)
+status=$("$build/ncfg" wifi status wlan0 2>&1 || true)
 check "a soft-blocked radio says so in status" \
 	"$(printf '%s\n' "$status" | grep -c 'switched off at phy0' || true)" 1
 check "and names the command that clears it" \
 	"$(printf '%s\n' "$status" | grep -c 'rfkill unblock wifi' || true)" 1
 
-scan=$("$repo/target/debug/ncfg" wifi scan wlan0 2>&1 || true)
+scan=$("$build/ncfg" wifi scan wlan0 2>&1 || true)
 check "and a scan says it too, rather than 'no access points'" \
 	"$(printf '%s\n' "$scan" | grep -c 'switched off at phy0' || true)" 1
 
 # Hard: telling somebody to run a command that cannot work wastes their evening.
 printf '0\n' > "$sysroot/class/rfkill/rfkill0/soft"
 printf '1\n' > "$sysroot/class/rfkill/rfkill0/hard"
-"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+"$build/ncfg" reload >/dev/null 2>&1 || true
 # **Seven seconds, because the switch is read by the reconcile loop.** A
 # `/sys` file changing produces no netlink event and no rfkill record here --
 # the real thing would emit one, and this fake cannot -- so what picks it up is
 # the loop's five-second backstop. Two seconds passed the soft case by luck of
 # where in that cycle it landed, and failed the hard one.
 sleep 7
-status=$("$repo/target/debug/ncfg" wifi status wlan0 2>&1 || true)
+status=$("$build/ncfg" wifi status wlan0 2>&1 || true)
 check "a hard-blocked radio is not offered a software remedy" \
 	"$(printf '%s\n' "$status" | grep -c 'rfkill unblock wifi' || true)" 0
 check "and is told it is the button on the machine" \
@@ -365,7 +378,7 @@ check "and is told it is the button on the machine" \
 
 # Back to clear, so the checks after this see an ordinary radio.
 printf '0\n' > "$sysroot/class/rfkill/rfkill0/hard"
-"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+"$build/ncfg" reload >/dev/null 2>&1 || true
 sleep 2
 
 # ------------------------------------------------------------- joining, or not
@@ -390,10 +403,10 @@ network "HomeFiber" {
 	}
 }
 CONF
-"$repo/target/debug/ncfg" reload >/dev/null 2>&1 || true
+"$build/ncfg" reload >/dev/null 2>&1 || true
 sleep 1
 
-join=$("$repo/target/debug/ncfg" wifi connect HomeFiber 2>&1 || true)
+join=$("$build/ncfg" wifi connect HomeFiber 2>&1 || true)
 check "a join that works says so, in the past tense" \
 	"$(printf '%s\n' "$join" | grep -c 'joined' || true)" 1
 check "and does not say it is still trying" \
@@ -402,7 +415,7 @@ check "and does not say it is still trying" \
 # The failure that started all of this: the supplicant gives up, and says why.
 send 'FAIL_NEXT_JOIN CONN_FAILED'
 sleep 1
-join=$("$repo/target/debug/ncfg" wifi connect HomeFiber 2>&1 || true)
+join=$("$build/ncfg" wifi connect HomeFiber 2>&1 || true)
 check "a join that fails is reported as a failure" \
 	"$(printf '%s\n' "$join" | grep -c 'did not join' || true)" 1
 check "and carries the supplicant's own reason" \
@@ -425,12 +438,12 @@ check "and the count of attempts the supplicant reported" \
 # what a two-second bound tests without being flaky on a loaded machine.
 send 'SILENT_NEXT_SCAN'
 sleep 1
-"$repo/target/debug/ncfg" wifi scan wlan0 > "$work/slow_scan" 2>&1 &
+"$build/ncfg" wifi scan wlan0 > "$work/slow_scan" 2>&1 &
 slow=$!
 sleep 1
 
 started=$(date +%s)
-"$repo/target/debug/ncfg" wifi status wlan0 > /dev/null 2>&1 || true
+"$build/ncfg" wifi status wlan0 > /dev/null 2>&1 || true
 waited=$(( $(date +%s) - started ))
 check "another request is answered while a scan is still waiting" \
 	"$([ "$waited" -lt 2 ] && echo prompt || echo "blocked for ${waited}s")" prompt

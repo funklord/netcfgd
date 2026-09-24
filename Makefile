@@ -1786,6 +1786,24 @@ FUZZ_ARGS   ?=
 #
 # A script run by hand still has the caller's PATH, which is what the headers
 # in tests/live/ already tell people to set.
+# WHICH BUILD THE SCRIPTS DRIVE
+#   Every script under `tests/live/` takes its pair of binaries from one
+#   directory, `$$build`, defaulting to `target/debug` -- so `NCFG_LIVE_BUILD`
+#   points the same suite at another build without a script being edited. Both
+#   trees present the same pair: `netcfgd` with `ncfg` a symlink beside it.
+#
+#   That is what 0263 asks for before a module of the C port may replace its
+#   Rust half -- "only once it passes the Rust's own tests for the same
+#   behaviour". The Rust's own *unit* tests cannot be pointed anywhere: 536 of
+#   them across 24 files, and only 2 of those files drive a binary at all; the
+#   rest call Rust functions directly. These 79 scripts drive a binary, and
+#   they are therefore the whole of the Rust's suite that the C can be put
+#   under (project.md 10.262).
+#
+#       make live                                    the Rust, as before
+#       NCFG_LIVE_BUILD=$$PWD/c make live            the C
+#
+#   `make live` does not set it, so this target is unchanged.
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
 	$(CARGO) build --workspace

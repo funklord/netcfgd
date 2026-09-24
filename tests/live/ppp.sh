@@ -28,6 +28,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -50,7 +52,7 @@ find_pppd() {
 	return 1
 }
 
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 pppd=$(find_pppd) || skip "pppd is not installed (apt install ppp | apk add ppp)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ppp.XXXXXX")
@@ -59,7 +61,7 @@ mkdir -p "$work/etc/secrets" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

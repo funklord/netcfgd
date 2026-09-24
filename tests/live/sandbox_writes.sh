@@ -39,6 +39,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -49,7 +62,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 unshare -rm true 2>/dev/null || skip "no user and mount namespaces here"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-dnssb.XXXXXX")
@@ -82,7 +95,7 @@ unshare -rm sh -c '
 	NCFG_CONFIG_DIR="$work/etc" \
 	NCFG_RUN_DIR="$work/run" \
 	NCFG_RESOLV_CONF="$work/sys/resolv.conf" \
-		"$repo/target/debug/ncfg" apply --oneshot > "$work/apply.log" 2>&1 || true
+		"$build/ncfg" apply --oneshot > "$work/apply.log" 2>&1 || true
 	# Read it back from inside, where the bind mount is visible.
 	cat "$work/sys/resolv.conf" > "$work/seen"
 ' sh "$work" "$repo"
@@ -130,7 +143,7 @@ unshare -rm sh -c '
 	# The tightest grant a hardened unit could write: the config file alone.
 	mount --bind "$work/rw2/netcfgd.conf" "$work/etc2/netcfgd/netcfgd.conf"
 	NCFG_CONFIG_DIR="$work/etc2/netcfgd" NCFG_RUN_DIR="$work/run2" \
-		"$repo/target/debug/ncfg" control set --observe any > "$work/control.log" 2>&1 || true
+		"$build/ncfg" control set --observe any > "$work/control.log" 2>&1 || true
 	cat "$work/etc2/netcfgd/netcfgd.conf" > "$work/seen2"
 ' sh "$work" "$repo"
 
@@ -173,7 +186,7 @@ unshare -rm sh -c '
 	mount --bind "$work/sys3" "$work/sys3"
 	NCFG_CONFIG_DIR="$work/etc3" NCFG_RUN_DIR="$work/run3" \
 	NCFG_RESOLV_CONF="$work/sys3/resolv.conf" \
-		"$repo/target/debug/ncfg" apply --oneshot > "$work/sym_wide.log" 2>&1 || true
+		"$build/ncfg" apply --oneshot > "$work/sym_wide.log" 2>&1 || true
 	cat "$work/sys3/resolv.conf" > "$work/sym_wide.seen" 2>/dev/null || true
 	if [ -L "$work/sys3/resolv.conf" ]; then echo link; else echo file; fi > "$work/sym_wide.kind"
 ' sh "$work" "$repo"
@@ -201,7 +214,7 @@ unshare -rm sh -c '
 	mount --bind "$work/writable4" "$work/stub4/stub-resolv.conf"
 	NCFG_CONFIG_DIR="$work/etc3" NCFG_RUN_DIR="$work/run4" \
 	NCFG_RESOLV_CONF="$work/sys4/resolv.conf" \
-		"$repo/target/debug/ncfg" apply --oneshot > "$work/sym_narrow.log" 2>&1 || true
+		"$build/ncfg" apply --oneshot > "$work/sym_narrow.log" 2>&1 || true
 	cat "$work/stub4/stub-resolv.conf" > "$work/sym_narrow.target"
 ' sh "$work" "$repo"
 
@@ -246,7 +259,7 @@ unshare -rmn sh -c '
 	mount --bind "$work/etc5" "$work/etc5"
 	mount -o remount,bind,ro "$work/etc5"
 	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run5" \
-		"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon5.log" 2>&1 &
+		"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon5.log" 2>&1 &
 	daemon=$!
 	waited=0
 	while [ ! -S "$work/run5/netcfgd.sock" ]; do
@@ -255,7 +268,7 @@ unshare -rmn sh -c '
 		sleep 0.1
 	done
 	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run5" \
-		"$repo/target/debug/ncfg" config put thing "$work/drop5.conf" \
+		"$build/ncfg" config put thing "$work/drop5.conf" \
 		> "$work/put5.log" 2>&1 || true
 	kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
@@ -291,7 +304,7 @@ unshare -rmn sh -c '
 	mount --bind "$work/etc5" "$work/etc5"
 	mount -o remount,bind,ro "$work/etc5"
 	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/nosuchrun" \
-		"$repo/target/debug/ncfg" config put thing "$work/drop5.conf" \
+		"$build/ncfg" config put thing "$work/drop5.conf" \
 		> "$work/put6.log" 2>&1 || true
 ' sh "$work" "$repo"
 
@@ -318,7 +331,7 @@ unshare -rmn sh -c '
 	set -eu
 	work=$1; repo=$2
 	NCFG_CONFIG_DIR="$work/etc5/netcfgd" NCFG_RUN_DIR="$work/run7" \
-		"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon7.log" 2>&1 &
+		"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon7.log" 2>&1 &
 	daemon=$!
 	waited=0
 	while [ ! -S "$work/run7/netcfgd.sock" ]; do

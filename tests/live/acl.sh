@@ -28,6 +28,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -39,7 +41,7 @@ skip() {
 }
 
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-acl.XXXXXX")
 cleanup() {
@@ -80,7 +82,7 @@ chmod 600 "$work/etc/secrets/guest"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 write_config() {
 	cat > "$work/etc/netcfgd.conf" <<CONF

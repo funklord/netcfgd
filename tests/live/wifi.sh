@@ -16,6 +16,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 supplicant=
 for candidate in /usr/sbin /sbin /usr/local/sbin /usr/bin; do
 	if [ -x "$candidate/wpa_supplicant" ]; then
@@ -34,7 +47,7 @@ skip() {
 }
 
 [ -n "$supplicant" ] || skip "wpa_supplicant is not installed"
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 
 # Short, because a unix socket path has to fit in SUN_LEN (108 bytes) and a
 # path under the usual scratch directories does not.
@@ -95,7 +108,7 @@ export NCFG_WPA_CTRL_DIR="$work/ctrl"
 # tree it populates on purpose; everything else points it at an empty one.
 mkdir -p "$work/runroot"
 export NCFG_RUN_ROOT="$work/runroot"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 cli="$supplicant"
 cli="${supplicant%wpa_supplicant}wpa_cli"
 
@@ -131,7 +144,7 @@ while [ ! -e "$work/ctrl/lo" ]; do
 	sleep 0.1
 done
 
-"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -e "$work/run/netcfgd.sock" ]; do

@@ -39,6 +39,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -49,7 +51,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 [ "$(id -u)" = 0 ] || skip "only root can mount a tmpfs over /run"
 
 # **Its own network namespace, and it refuses to borrow the machine's.** This
@@ -85,7 +87,7 @@ mkdir -p /run/netcfgd
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR=/run/netcfgd
 export NCFG_RESOLV_CONF=/run/resolv.conf
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {
