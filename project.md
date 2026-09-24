@@ -9515,6 +9515,39 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.270 A `(null)` directory in the repository root, holding a real lock
+
+Found as untracked litter, not by a test: a directory named `(null)` beside
+`Makefile`, containing an empty `apply.lock`.
+
+`ncfg_main_world_executor_open` checked `world` and `out` and not
+`world->run_dir`, which is a `const char *`. `ncfg_main_world_open` guards it
+-- *a world needs somewhere to be and a run directory to take the apply lock
+in* -- so a world that opened has one; a world that never opened, or whose open
+failed, keeps NULL, and `snprintf("%s/apply.lock", NULL)` writes the four
+characters glibc prints for a null pointer. The path is then **relative**, so
+the lock landed wherever the process was standing.
+
+**The expectation about what happened next was wrong, and measuring it is what
+made this worth a guard rather than a tidy-up.** The guess was that the netlink
+open two lines further on would fail for want of CAP_NET_ADMIN, leaving the
+file as litter. Removing the guard and running says otherwise: opening a
+netlink socket needs no capability, so the call returned **an armed executor**
+-- lock held, kernel open, ready to carry actions out -- certain it held the
+apply lock, on a file no other daemon would ever look at. The lock's entire job
+is to be the file everybody agrees on.
+
+The guard refuses, and says which of the two things is missing. Three checks in
+`world_test`, all three failing with the guard removed and the `(null)`
+directory reappearing in `c/` when they do.
+
+**What this says about the class is the part to keep.** Every other path in
+this tree that builds a run-directory path goes through a helper that returns
+0 on failure; this one used `snprintf` directly, and `snprintf` cannot fail on
+a null pointer -- it renders it. So the family to sweep is not "missing NULL
+checks" but **`%s` over a pointer whose provenance is a caller's struct**,
+where the failure is not a crash but a plausible-looking path.
+
 ## 10.269 A mechanical rewrite that redirected the control, and the flag thirty scripts needed
 
 Two findings from the first sweep that was honestly all-C, and the second is

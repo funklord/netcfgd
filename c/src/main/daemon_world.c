@@ -504,6 +504,25 @@ int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err
 		ncfg_error_set(err, err_size, "there is nowhere to put an executor");
 		return 0;
 	}
+	/*
+	 * **A world with no run directory is a refusal, not a relative path.**
+	 * `ncfg_main_world_open` guards `run_dir` and a world that never opened
+	 * keeps a NULL one, which `snprintf` writes as the four characters
+	 * `(null)` -- so the lock below was taken at `(null)/apply.lock`,
+	 * relative to whatever directory the process happened to be in. It was
+	 * found as an untracked `(null)/` in the repository root, holding an
+	 * empty lock file. Opening a netlink socket needs no capability, so this
+	 * did not then fail: it handed back an armed executor whose apply lock was
+	 * a file in the current working directory -- a daemon certain it held the
+	 * lock, in a place no other daemon would ever look.
+	 */
+	if (!world->run_dir || !world->run_dir[0]) {
+		ncfg_error_set(err, err_size,
+		    "this world has no run directory, so there is nowhere to take the apply "
+		    "lock: it was never opened, or the open that would have given it one "
+		    "failed");
+		return 0;
+	}
 	if (world->open) {
 		/*
 		 * Refused by name rather than attempted. `flock` is held by the open

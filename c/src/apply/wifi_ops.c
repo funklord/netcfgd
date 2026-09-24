@@ -336,20 +336,38 @@ static void record_networks(const ncfg_service_t *service, const char *device, i
 	char  detail[NCFG_ERROR_MAX];
 	FILE *file;
 
-	/* The directory the record goes in, since `<run>` may hold nothing of this
-	 * backend's yet -- a supplicant netcfgd adopted rather than started leaves
-	 * no `<run>/supplicant` behind it. 0700 because the neighbouring files a
-	 * supplicant backend keeps are not for everybody; an existing directory is
-	 * success, which is what this means. */
-	if (snprintf(path, sizeof(path), "%s/supplicant", service->run_dir) > 0) {
-		(void)mkdir(path, 0700);
-	}
+	/*
+	 * **The name is asked for before the directory is made**, and the order is
+	 * the whole of this. `ncfg_service_networks_record_path` refuses a run
+	 * directory that is absent; the `mkdir` below did not, and
+	 * `service->run_dir` is a borrowed `const char *` whose contract says NULL
+	 * refuses every backend op. `snprintf` renders a null pointer as `(null)`
+	 * rather than failing, so the old order made a `(null)/supplicant`
+	 * directory relative to wherever the daemon was standing, and only then
+	 * declined to write the record into it. Same defect as the apply lock's,
+	 * found by the sweep that one prompted.
+	 */
 	if (!ncfg_service_networks_record_path(service->run_dir, device, path, sizeof(path),
 	    detail, sizeof(detail))) {
 		ncfg_log_emitf("supplicant", NCFG_LOG_WARNING,
 		    "cannot name the supplicant's network record for %s: %s; a changed "
 		    "passphrase, bssid or network list will not be noticed", device, detail);
 		return;
+	}
+	/* The directory the record goes in, since `<run>` may hold nothing of this
+	 * backend's yet -- a supplicant netcfgd adopted rather than started leaves
+	 * no `<run>/supplicant` behind it. 0700 because the neighbouring files a
+	 * supplicant backend keeps are not for everybody; an existing directory is
+	 * success, which is what this means. `path` names the record, so the
+	 * directory is its parent. */
+	{
+		char *slash = strrchr(path, '/');
+
+		if (slash) {
+			*slash = '\0';
+			(void)mkdir(path, 0700);
+			*slash = '/';
+		}
 	}
 	detail[0] = '\0';
 	if (!ncfg_supplicant_fingerprint(service->document->networks,
