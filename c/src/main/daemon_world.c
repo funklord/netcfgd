@@ -42,6 +42,8 @@
 
 #include "ncfg/json_write.h"
 #include "ncfg/log.h"
+#include "ncfg/openvpn.h"
+#include "ncfg/supplicant.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -412,6 +414,45 @@ size_t ncfg_main_hooks_of(const ncfg_document_t *document, ncfg_hook_ref_t *out,
 		*missed = lost;
 	}
 	return taken;
+}
+
+/*
+ * The two programs a test may put in front of the conventional ones.
+ *
+ * **Read here and nowhere else**, which is what the two module headers ask
+ * for: `supplicant.h` and `openvpn.h` each say every path is a parameter and
+ * that nothing in those modules reads an environment variable, because a test
+ * passes a program it wrote. Somebody still has to do the passing, and it is
+ * whoever builds a world -- the daemon and `ncfg`, in the same breath as
+ * `NCFG_RUN_DIR`.
+ *
+ * **Only the two the Rust has.** `hostapd_program` and `radvd_program` are
+ * fields of the same struct and are deliberately left alone: no environment
+ * variable names them on either side, and inventing one here would be a seam
+ * this port has and the thing it is being compared against does not.
+ *
+ * An empty value is no value. `NCFG_WPA_SUPPLICANT=` names no program, and a
+ * caller that treated it as one would `execv("")` and report the conventional
+ * search having failed for a reason nobody could see.
+ */
+static const char *program_from_environment(const char *name)
+{
+	const char *set = getenv(name);
+
+	return set && set[0] ? set : NULL;
+}
+
+void ncfg_main_world_where_from_environment(ncfg_main_world_where_t *where)
+{
+	if (!where) {
+		return;
+	}
+	if (!where->supplicant_program) {
+		where->supplicant_program = program_from_environment(NCFG_SUPPLICANT_PROGRAM_ENV);
+	}
+	if (!where->openvpn_program) {
+		where->openvpn_program = program_from_environment(NCFG_OPENVPN_PROGRAM_ENV);
+	}
 }
 
 int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t *where,

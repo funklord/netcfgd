@@ -1250,6 +1250,13 @@ typedef struct {
  * `where`, everything it points at, and `state` are borrowed and must outlive
  * this. `subscribers` may be NULL.
  */
+/*
+ * Fill the two program seams from the environment, where the caller named
+ * none. Called by whoever builds a world before `ncfg_main_world_open`; see
+ * the definition for why it is two rather than four.
+ */
+void ncfg_main_world_where_from_environment(ncfg_main_world_where_t *where);
+
 int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t *where,
     const ncfg_daemon_state_t *state, ncfg_main_subscribers_t *subscribers,
     ncfg_main_watchers_t *watchers, char *err, size_t err_size);
