@@ -111,6 +111,62 @@ void ncfg_plan_radio_supplicant(ncfg_builder_t *builder, const ncfg_interface_t 
 }
 
 /*
+ * A radio joining networks cannot be a bridge port, and netcfgd sets the
+ * master anyway (0202).
+ *
+ * **Two opposite arrangements that both put a radio in a bridge**, and the
+ * whole of the difference is which end holds the associations. An
+ * `access_point` bridged into a LAN is the ordinary way to put wireless
+ * clients on the wired subnet, and is fine. A *station* cannot be: it
+ * associates in 802.11's three-address mode, so a frame the bridge forwards
+ * from another port reaches the access point sourced from an address that
+ * never associated, and is dropped.
+ *
+ * What makes it worth a sentence rather than a refusal is that everything
+ * looks right. `link.set_master` succeeds, `bridge link` shows the port, and
+ * nothing crosses. netcfgd sets the master because the document asked for it
+ * -- refusing would be a guess at what the operator meant -- and says what
+ * will happen instead.
+ *
+ * The condition is `ncfg_plan_radio_supplicant_wanted`'s, asked rather than
+ * restated: managed, carrying a `wifi { }` block, wireless in the kernel's
+ * own view, and not the serving end of an `access_point`. The last is what
+ * keeps this off the bridged access point next door to it.
+ */
+static void warn_bridged_station(ncfg_builder_t *builder)
+{
+	size_t i;
+	size_t at;
+
+	for (i = 0; i < builder->desired->device_count; i++) {
+		const ncfg_device_t *device = &builder->desired->devices[i];
+
+		if (device->kind.kind != NCFG_KIND_BRIDGE) {
+			continue;
+		}
+		for (at = 0; at < device->kind.bridge.member_count; at++) {
+			const char *member = device->kind.bridge.members[at];
+
+			if (!member || !ncfg_plan_radio_supplicant_wanted(builder->desired,
+			                   builder->observed, member)) {
+				continue;
+			}
+			ncfg_plan_warnf(builder->plan, member,
+			    "`%s` is a radio joining networks and a member of the `%s` bridge, "
+			    "which cannot work: a station associates in 802.11's three-address "
+			    "mode, so a frame the bridge forwards from another port reaches the "
+			    "access point sourced from an address that never associated, and is "
+			    "dropped. netcfgd sets the master anyway, so the bridge will look "
+			    "configured and carry nothing across the wifi. Four-address mode "
+			    "(WDS) is what bridges a station and both ends must agree on it; "
+			    "otherwise route or NAT between the two. Bridging an `access_point` "
+			    "radio is the other case and is fine",
+			    member, device->name);
+		}
+	}
+}
+
+/*
  * A radio the document declares and states no `interface` block for.
  *
  * **This is what the blanket sentence that used to stand in `wifi.c` narrowed
@@ -157,4 +213,5 @@ void ncfg_plan_radio_warn(ncfg_builder_t *builder)
 		    "it. Adding `interface %s { }` is enough",
 		    device->name, device->name);
 	}
+	warn_bridged_station(builder);
 }

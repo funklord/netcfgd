@@ -547,15 +547,35 @@ char *ncfg_backend_strdup(const char *text)
  * A caller that knows which program it wants passes a path instead; every seam
  * under `src/backend/` takes one, which is what this is the fallback for.
  */
-char *ncfg_backend_find_program(const char *name)
+/*
+ * The four directories a daemon lives in, searched before `PATH`.
+ *
+ * `/usr/bin` is on every `PATH` there is and is listed because a fallback that
+ * has to be exhaustive is one nobody has to reason about.
+ */
+static char *in_the_sbins(const char *name)
 {
-	/* Only what an unprivileged `PATH` is missing. `/usr/bin` is on every
-	 * `PATH` there is and is listed because a fallback that has to be
-	 * exhaustive is one nobody has to reason about. */
 	static const char *const sbin[] = { "/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin" };
 	char                     path[1024];
 	size_t                   at;
-	const char              *env;
+
+	for (at = 0u; at < sizeof(sbin) / sizeof(sbin[0]); at++) {
+		struct stat about;
+
+		if (snprintf(path, sizeof(path), "%s/%s", sbin[at], name) < 0) {
+			continue;
+		}
+		if (stat(path, &about) == 0 && S_ISREG(about.st_mode)) {
+			return ncfg_backend_strdup(path);
+		}
+	}
+	return NULL;
+}
+
+char *ncfg_backend_find_on_path(const char *name)
+{
+	char        path[1024];
+	const char *env;
 
 	if (!name) {
 		return NULL;
@@ -576,22 +596,35 @@ char *ncfg_backend_find_program(const char *name)
 		}
 		env = end ? end + 1u : NULL;
 	}
-	/* A `PATH` that exists and does not hold it is an answer: this machine
-	 * does not have it. Only the absence of any `PATH` is a question nobody
-	 * has answered. */
-	env = getenv("PATH");
-	if (env && env[0]) {
+	return NULL;
+}
+
+char *ncfg_backend_find_program(const char *name)
+{
+	char *found;
+
+	if (!name) {
 		return NULL;
 	}
-	for (at = 0u; at < sizeof(sbin) / sizeof(sbin[0]); at++) {
-		struct stat about;
-
-		if (snprintf(path, sizeof(path), "%s/%s", sbin[at], name) < 0) {
-			continue;
-		}
-		if (stat(path, &about) == 0 && S_ISREG(about.st_mode)) {
-			return ncfg_backend_strdup(path);
-		}
+	/*
+	 * **`/usr/sbin` first, which is this function's whole reason.** It is not
+	 * on a non-root `PATH` on Debian and several others, so searching `PATH`
+	 * alone finds no `hostapd` on a machine that has the package -- and the
+	 * live scripts run under `unshare -rn`, where the invoking user's `PATH`
+	 * is what a daemon inherits.
+	 *
+	 * **This was inverted once, and `ap.sh` is what noticed.** The argument
+	 * for `PATH` first was that a test could then put a stand-in in front of
+	 * the real daemon; the answer to that is the program parameter every
+	 * caller here already takes, which `backend_internal.h` explains at
+	 * length. Inverting it instead made netcfgd unable to find the real
+	 * hostapd at all, so an access point that should have failed with
+	 * hostapd's own words failed with "no hostapd found" -- and the log the
+	 * operator is told to read was never written, because nothing ran.
+	 */
+	found = in_the_sbins(name);
+	if (found) {
+		return found;
 	}
-	return NULL;
+	return ncfg_backend_find_on_path(name);
 }

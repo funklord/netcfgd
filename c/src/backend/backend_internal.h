@@ -126,12 +126,28 @@ int ncfg_backend_complaints(const char *log_path, const char *const *markers, si
 char *ncfg_backend_strdup(const char *text);
 
 /*
- * Find a daemon by name, `/usr/sbin` first.
+ * Find a daemon by name, `/usr/sbin` first and then `PATH`.
  *
  * Allocated, or NULL where nothing was found. `/usr/sbin` is not on a non-root
  * `PATH` on Debian and several others, so searching `PATH` alone finds nothing
  * on a machine that has the package.
  */
 char *ncfg_backend_find_program(const char *name);
+
+/*
+ * Find a program on `PATH` and nowhere else.
+ *
+ * **For the DHCP clients only**, which is where the two searches differ and
+ * the difference is the Rust's: it runs `Command::new("dhcpcd")` for those,
+ * which consults `PATH` alone, while `hostapd`, `radvd`, `openvpn`, `pppd`
+ * and `wpa_supplicant` each get the `/usr/sbin`-first search above. A client
+ * is something an operator installs and may shadow; a daemon is something the
+ * package manager puts in a directory an ordinary `PATH` does not carry.
+ *
+ * `tests/live/exec_refused.sh` depends on this half: it points `PATH` at a
+ * directory holding a stand-in and expects netcfgd to run it, which the
+ * `/usr/sbin`-first search would defeat on any machine with dhcpcd installed.
+ */
+char *ncfg_backend_find_on_path(const char *name);
 
 #endif /* NCFG_BACKEND_INTERNAL_H */

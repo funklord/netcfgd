@@ -9515,6 +9515,79 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.273 A search order inverted on a false premise, and three warnings nobody wrote
+
+`ap.sh` had seven failures and passes. Two of them were mine, from four days
+earlier in this same port.
+
+### The `/usr/sbin`-first search was not a mistake to fix
+
+10.267 changed `ncfg_backend_find_program` to search `PATH` first and fall
+back to `/usr/sbin`, `/sbin`, `/usr/local/sbin` and `/usr/bin` only where
+`PATH` is unset, and the commit message said this was "the shape its own
+header already described". **The header says the opposite**, in as many words:
+*Find a daemon by name, `/usr/sbin` first ... searching `PATH` alone finds
+nothing on a machine that has the package.* So does the Rust, in four separate
+modules, each carrying the same sentence.
+
+The cost was `ap.sh`: under `unshare -rn` the invoking user's `PATH` has no
+`/usr/sbin`, so netcfgd could not find the real hostapd at all. An access
+point that should have failed with hostapd's own words -- `nl80211`, *could
+not read interface* -- failed with *no hostapd found*, and the log the message
+tells the operator to read was never written, because nothing ran.
+
+**The argument for inverting it was real and the remedy was the wrong one.** A
+test that puts a stand-in on `PATH` should reach the stand-in; that is what
+`exec_refused.sh` does. But the answer to that is the program parameter every
+one of these callers already takes, which `backend_internal.h` argues at
+length -- and which 10.271 finally supplied. Inverting a search to get a seam
+that already existed is the shape worth remembering.
+
+**The two searches are now two functions, because the Rust has two.**
+`ncfg_backend_find_program` is `/usr/sbin` first and then `PATH`, for hostapd,
+radvd, openvpn, pppd and wpa_supplicant. `ncfg_backend_find_on_path` is `PATH`
+alone, for the DHCP clients, because the Rust runs `Command::new("dhcpcd")`
+there. The distinction is not arbitrary: a client is something an operator
+installs and may shadow, a daemon is something the package manager puts where
+an ordinary `PATH` does not look. `exec_refused.sh` depends on the second half
+and passes.
+
+### Three warnings the port had not reached
+
+All three are the planner's, all three are in the Rust, and each is a case
+where the machine works and the configuration does not do what its author
+meant.
+
+**An access point whose interface has no address.** The existing warning says
+`interface wlan0 { }` is enough, and it is -- enough to bring the radio up and
+start hostapd. Follow it exactly and the SSID beacons, a station associates,
+and there is nothing on this end to talk to; netcfgd serves no DHCP either, so
+an address is necessary and not sufficient. **The bridged case is what makes
+this hard**: an access point bridged into a LAN has no address of its own and
+is correct, and the Rust records that its own first version of this warning
+fired on exactly that arrangement. Both spellings are excluded -- members
+named from the bridge, and a master named from the member.
+
+**An empty `allow` list**, which shuts every station out. Legitimate -- it is
+how an access point is closed without taking it down -- and one deletion away
+from a list that worked. An empty `deny` list is the opposite and is silent.
+
+**A station radio in a bridge** (0202), which cannot work at all: a station
+associates in 802.11's three-address mode, so a frame the bridge forwards from
+another port arrives sourced from an address that never associated and is
+dropped. netcfgd sets the master anyway, because the document asked, so the
+bridge looks configured and carries nothing. The condition is
+`ncfg_plan_radio_supplicant_wanted`'s, asked rather than restated -- managed,
+`wifi { }`, wireless in the kernel's view, and not the serving end of an
+`access_point`. That last clause is the whole of what keeps it off the bridged
+access point next to it.
+
+**Each control is the case that would fire a wrong version**, which is the
+point of writing them: an addressed radio and a bridged one for the first, a
+populated `allow` and an empty `deny` for the second, and the serving end of
+the same bridge for the third. Sabotaged one at a time, each pass takes
+exactly its own two checks red and nothing else.
+
 ## 10.272 The guard was on the wrong side of the harm, and the buffer was too small to say so
 
 `displace.sh` had one failure left: netcfgd was expected to say *NetworkManager
