@@ -159,52 +159,12 @@ static void member_strings(ncfg_json_writer_t *writer, const char *name, char *c
 	ncfg_json_write_array_end(writer);
 }
 
-/*
- * A Curve25519 key, held as octets and written back as base64.
- *
- * The model keeps the octets rather than the text because base64 has more than
- * one spelling of the same bytes, and a key that compares unequal to itself is
- * a peer that is replaced on every reconcile. No base64 dependency: a
- * fixed-length codec is thirty lines.
- */
-static const char base64_alphabet[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-void ncfg_plan_render_key(const unsigned char *key, char *out, size_t out_size)
-{
-	size_t at = 0;
-	size_t i;
-
-	if (out_size < NCFG_PLAN_KEY_TEXT_MAX) {
-		/* A buffer that could truncate is refused rather than truncated
-		 * into, which is `ncfg_address_render`'s rule: half a key still
-		 * looks like one. */
-		if (out_size != 0u) {
-			out[0] = '\0';
-		}
-		return;
-	}
-	for (i = 0; i < 32u; i += 3u) {
-		size_t   have = 32u - i < 3u ? 32u - i : 3u;
-		unsigned block = 0;
-		size_t   j;
-
-		for (j = 0; j < have; j++) {
-			block |= (unsigned)key[i + j] << (16u - 8u * (unsigned)j);
-		}
-		for (j = 0; j < 4u; j++) {
-			out[at++] = j < have + 1u ?
-			    base64_alphabet[(block >> (18u - 6u * (unsigned)j)) & 0x3fu] : '=';
-		}
-	}
-	out[at] = '\0';
-}
 
 static void write_key(ncfg_json_writer_t *writer, const unsigned char *key)
 {
-	char text[NCFG_PLAN_KEY_TEXT_MAX];
+	char text[NCFG_KEY_TEXT_SIZE];
 
-	ncfg_plan_render_key(key, text, sizeof(text));
+	(void)ncfg_key_render(key, text, sizeof(text), NULL, 0);
 	ncfg_json_write_string(writer, text);
 }
 

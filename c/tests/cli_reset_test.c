@@ -216,6 +216,56 @@ static int has_line(const char *text, const char *wanted)
 	return 0;
 }
 
+/*
+ * Whether every `removed <path>` line names a path that is off the disk.
+ *
+ * The count comes back as well, because the interesting case is a run that
+ * stopped part way and the question is then two questions: was each claim
+ * true, and were there as many as the refusal said. A predicate alone cannot
+ * fail on a run that claimed nothing, which is the shape of a check that
+ * inspected nothing.
+ *
+ * **The obvious form of this is wrong and was here.** It asked whether stdout
+ * held `10-site.conf` and `removed ` and whether that file was still on disk,
+ * which is three substring tests over the whole stream rather than the
+ * sentence they were written for: the preview table above the removals already
+ * names every doomed path, so the first is true on any run at all, and the
+ * base file really was removed, so the second is true beside it. Reading the
+ * lines is what asks the question.
+ */
+static int removals_claimed_are_real(const char *text, size_t *claimed)
+{
+	const char *at = text;
+	int         all_true = 1;
+
+	*claimed = 0u;
+	while (at && *at) {
+		const char *end = strchr(at, '\n');
+		size_t      run = end ? (size_t)(end - at) : strlen(at);
+
+		if (run > 8u && memcmp(at, "removed ", 8u) == 0) {
+			char   path[512];
+			size_t length = run - 8u;
+
+			*claimed += 1u;
+			if (length >= sizeof(path)) {
+				all_true = 0;
+			} else {
+				memcpy(path, at + 8u, length);
+				path[length] = '\0';
+				if (testdir_exists(path)) {
+					all_true = 0;
+				}
+			}
+		}
+		if (!end) {
+			break;
+		}
+		at = end + 1;
+	}
+	return all_true;
+}
+
 /* ------------------------------------------------------------------------ *
  * What it refuses
  * ------------------------------------------------------------------------ */
@@ -409,6 +459,8 @@ static void a_removal_that_could_not_happen(void)
 {
 	char        err[NCFG_ERROR_MAX];
 	const char *printed;
+	size_t      claimed;
+	int         all_true;
 	int         ok;
 
 	(void)fprintf(report, "\n-- a removal the filesystem refuses\n");
@@ -425,10 +477,10 @@ static void a_removal_that_could_not_happen(void)
 	(void)chmod(in(config_dir, "conf.d"), 0755);
 	check(!ok && strstr(err, "conf.d") != NULL && strstr(err, "still there") != NULL,
 	    "it refuses, names the file, and says how much had already gone");
-	check(strstr(printed, "10-site.conf") == NULL ||
-	    strstr(printed, "removed ") == NULL ||
-	    testdir_exists(in(in(config_dir, "conf.d"), "10-site.conf")) == 0,
-	    "  and never printed `removed` for a file that is still on disk");
+	all_true = removals_claimed_are_real(printed, &claimed);
+	check(all_true, "  and never printed `removed` for a file that is still on disk");
+	check(claimed == 1u,
+	    "  and claimed exactly the one the refusal counts, not the two it could not take");
 	check(testdir_exists(in(in(config_dir, "conf.d"), "10-site.conf")),
 	    "  the file it could not remove is still there");
 }

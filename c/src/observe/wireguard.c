@@ -649,26 +649,6 @@ int ncfg_observe_wireguard_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 	return 1;
 }
 
-int ncfg_observe_wireguard(ncfg_observed_t *observed, char *err, size_t err_size)
-{
-	ncfg_netlink_t        netlink;
-	ncfg_observe_kernel_t kernel;
-	int                   read;
-
-	/*
-	 * **The offloads round's socket, not a fourth one.** One generic netlink
-	 * socket carries every family, and `observe_genl_open` is named for the
-	 * protocol rather than for a family precisely so that this pass asks over
-	 * it -- which is what `observe_internal.h` says where it is declared.
-	 */
-	if (!observe_genl_open(&netlink, &kernel)) {
-		return ncfg_observe_wireguard_from(NULL, observed, err, err_size);
-	}
-	read = ncfg_observe_wireguard_from(&kernel, observed, err, err_size);
-	ncfg_netlink_close(&netlink);
-	return read;
-}
-
 /* ------------------------------------------------------------------------ *
  * Is what is running what was asked for
  * ------------------------------------------------------------------------ */
