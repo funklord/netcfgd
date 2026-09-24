@@ -70,6 +70,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -101,7 +103,7 @@ find_in_sbin() {
 # ---------------------------------------------------------------- preflight
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "ncfg is not built (cargo build --workspace)"
 dhcpcd=$(find_in_sbin dhcpcd) || skip "dhcpcd is not installed (apt install dhcpcd-base | apk add dhcpcd)"
 command -v hostname >/dev/null 2>&1 || skip "no hostname(1), which is how the counter-proof is measured"
 
@@ -271,7 +273,7 @@ export NCFG_RESOLV_CONF="$work/resolv.conf"
 # and this script would drive the client it is not about.
 PATH="$(dirname "$dhcpcd"):$PATH"
 export PATH
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

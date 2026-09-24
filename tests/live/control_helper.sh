@@ -18,6 +18,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -29,7 +31,7 @@ skip() {
 }
 
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-helper.XXXXXX")
 cleanup() {
@@ -46,7 +48,7 @@ trap cleanup EXIT INT TERM
 mkdir -p "$work/etc"
 printf 'interface eth0 {\n\tconfig = "dhcp"\n}\n' > "$work/etc/netcfgd.conf"
 
-helper="$repo/target/debug/ncfg control helper --config-dir $work/etc"
+helper="$build/ncfg control helper --config-dir $work/etc"
 policy="$work/etc/conf.d/00-control.conf"
 
 fail() {

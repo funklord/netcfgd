@@ -31,7 +31,9 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-probe="$repo/target/debug/examples/live_association"
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+probe="$build/examples/live_association"
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then

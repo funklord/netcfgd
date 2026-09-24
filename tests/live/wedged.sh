@@ -21,6 +21,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -33,7 +35,7 @@ skip() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v python3 >/dev/null 2>&1 || skip "no python3"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-wedged.XXXXXX")
 fake=
@@ -72,7 +74,7 @@ export NCFG_WPA_CTRL_DIR="$work/ctrl"
 # tree it populates on purpose; everything else points it at an empty one.
 mkdir -p "$work/runroot"
 export NCFG_RUN_ROOT="$work/runroot"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

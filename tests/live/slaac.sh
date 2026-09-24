@@ -55,6 +55,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -77,7 +79,7 @@ find_in_sbin() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 [ -d /proc/sys/net/ipv6 ] || skip "this kernel has no IPv6 (ipv6.disable=1)"
 dnsmasq=$(find_in_sbin dnsmasq) ||
 	skip "no dnsmasq, which is the router here (apt install dnsmasq-base | apk add dnsmasq)"
@@ -136,7 +138,7 @@ mkdir -p "$work/etc" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

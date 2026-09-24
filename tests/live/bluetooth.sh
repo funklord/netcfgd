@@ -35,6 +35,19 @@
 set -eu
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -48,7 +61,7 @@ skip() {
 [ "$(id -u)" = 0 ] || skip "needs real root (/dev/vhci is root-only)"
 [ -c /dev/vhci ] || skip "no /dev/vhci on this kernel"
 command -v python3 >/dev/null 2>&1 || skip "python3 is not installed"
-[ -x "$repo/target/debug/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
+[ -x "$build/ncfg" ] || skip "netcfgd is not built (cargo build --workspace)"
 
 before=$(ls /sys/class/bluetooth 2>/dev/null | sort | tr '\n' ' ')
 
@@ -161,7 +174,7 @@ echo "bluetooth.sh: virtual adapter $new"
 mkdir -p "$work/etc" "$work/run"
 : > "$work/etc/netcfgd.conf"
 NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" \
-	"$repo/target/debug/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+	"$build/netcfgd" $daemon_flags --no-apply-on-start > "$work/daemon.log" 2>&1 &
 daemon=$!
 
 waited=0
@@ -177,7 +190,7 @@ done
 
 # **netcfgd's own observer, not this script's reading of sysfs.** A test that
 # listed the directory itself would pass whether or not netcfgd looked.
-seen=$(NCFG_RUN_DIR="$work/run" "$repo/target/debug/ncfg" status 2>&1 || true)
+seen=$(NCFG_RUN_DIR="$work/run" "$build/ncfg" status 2>&1 || true)
 contains "netcfgd reports the adapter it can see" "$seen" "$new"
 
 # And the switch it read is the adapter's own. On a laptop there is a platform

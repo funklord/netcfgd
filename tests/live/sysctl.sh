@@ -35,6 +35,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -45,7 +47,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 command -v ip >/dev/null 2>&1 || skip "iproute2 is not installed"
 # The directory is never writable -- nothing creates files there -- so this
 # asks about a file, which is what netcfgd actually writes. /proc/sys/net is
@@ -53,8 +55,8 @@ command -v ip >/dev/null 2>&1 || skip "iproute2 is not installed"
 [ -w /proc/sys/net/ipv4/ip_forward ] 2>/dev/null || skip "the sysctl tree is not writable here"
 
 work=$(mktemp -d /tmp/ncfg-sysctl.XXXXXX)
-ncfg="$repo/target/debug/ncfg"
-[ -x "$ncfg" ] || ncfg="$repo/target/debug/netcfgd"
+ncfg="$build/ncfg"
+[ -x "$ncfg" ] || ncfg="$build/netcfgd"
 failures=0
 
 cleanup() { rm -rf "$work"; }

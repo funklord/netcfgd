@@ -52,6 +52,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 # **A skip is a failure when `NCFG_LIVE` says the environment should be able to
 # run this**, which 66 of the suite's 69 skipping scripts honour and this one
@@ -88,7 +90,7 @@ for tool in pppd pppoe-server ip; do
 	command -v "$tool" >/dev/null 2>&1 ||
 		skip "no $tool (apt install ppp pppoe | apk add ppp ppp-pppoe)"
 done
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 [ -c /dev/ppp ] || skip "no /dev/ppp (modprobe ppp_generic)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pppoe.XXXXXX")
@@ -116,7 +118,7 @@ mkdir -p "$work/etc/secrets" "$work/run"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

@@ -34,6 +34,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 supplicant=
 for candidate in /usr/sbin /sbin /usr/local/sbin /usr/bin; do
 	if [ -x "$candidate/wpa_supplicant" ]; then
@@ -52,7 +54,7 @@ skip() {
 }
 
 [ -n "$supplicant" ] || skip "wpa_supplicant is not installed"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 cli="${supplicant%wpa_supplicant}wpa_cli"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-8021x.XXXXXX")
@@ -103,7 +105,7 @@ export NCFG_WPA_CTRL_DIR="$work/ctrl"
 # tree it populates on purpose; everything else points it at an empty one.
 mkdir -p "$work/runroot"
 export NCFG_RUN_ROOT="$work/runroot"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

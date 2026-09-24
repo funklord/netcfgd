@@ -38,6 +38,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -49,7 +51,7 @@ skip() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-helper.XXXXXX")
 cleanup() { rm -rf "$work"; }
@@ -61,7 +63,7 @@ export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
 export MBIMCLI="$repo/tests/live/fake_mbimcli.sh"
 export FAKE_MBIMCLI_LOG="$work/mbimcli.log"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 helper="$repo/helper/netcfgd-modem-mbim"
 
 failures=0

@@ -39,6 +39,8 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -50,7 +52,7 @@ skip() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 command -v busybox >/dev/null 2>&1 || skip "no busybox (which is the client here)"
 busybox --list | grep -qx udhcpc || skip "this busybox has no udhcpc applet"
 
@@ -182,7 +184,7 @@ for dir in $PATH; do
 done
 IFS=$saved_ifs
 client_path="$work/bin${client_path:+:$client_path}"
-ncfg() { PATH="$client_path" "$repo/target/debug/ncfg" "$@"; }
+ncfg() { PATH="$client_path" "$build/ncfg" "$@"; }
 
 failures=0
 check() {

@@ -22,6 +22,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -43,7 +45,7 @@ find_hostapd() {
 }
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 # The same search order netcfgd uses. A test that found hostapd somewhere
 # netcfgd does not look would pass while netcfgd reported it missing.
 hostapd=$(find_hostapd) || skip "hostapd is not installed (apt install hostapd | apk add hostapd)"
@@ -55,7 +57,7 @@ mkdir -p "$work/etc/secrets" "$work/run"
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {

@@ -47,6 +47,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -60,7 +62,7 @@ skip() {
 if [ "${NCFG_DHCPCD_INNER:-}" != "1" ]; then
 	command -v dhcpcd >/dev/null 2>&1 || command -v /sbin/dhcpcd >/dev/null 2>&1 ||
 		skip "dhcpcd is not installed"
-	[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+	[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 	unshare --map-root-user --map-auto --mount --uts --net true 2>/dev/null ||
 		skip "cannot make a user, mount and network namespace here"
 	# **`--pid --fork` and a fresh /proc, or this script can kill processes on
@@ -204,7 +206,7 @@ interface probe0 {
 CONF
 NCFG_CONFIG_DIR=/run/work/etc NCFG_RUN_DIR=/run/netcfgd \
 	NCFG_DHCPCD_RUN_DIR=/run/dhcpcd \
-	"$repo/target/debug/ncfg" apply > /run/work/apply.log 2>&1 || true
+	"$build/ncfg" apply > /run/work/apply.log 2>&1 || true
 
 # **This count cannot discriminate, and saying so is the point.** A second
 # `dhcpcd -b` against a running one is a silent no-op -- measured, it prints
@@ -252,7 +254,7 @@ check "an operator's own dhcpcd is running" \
 
 NCFG_CONFIG_DIR=/run/work/etc NCFG_RUN_DIR=/run/netcfgd \
 	NCFG_DHCPCD_RUN_DIR=/run/dhcpcd \
-	"$repo/target/debug/ncfg" apply > /run/work/stranger.log 2>&1 || true
+	"$build/ncfg" apply > /run/work/stranger.log 2>&1 || true
 
 check "netcfgd does NOT adopt it" \
 	"$(grep -c 'adopted the dhcp client' /run/work/stranger.log || true)" "0"

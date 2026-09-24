@@ -29,6 +29,19 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
+
+# **The C port's reconcile loop refuses to run unless it is told somebody is
+# watching**, and every script here that starts a daemon meets that refusal.
+# The flag is asked of the binary rather than inferred from the path, so a
+# build carrying neither property is left exactly as it was -- the Rust daemon
+# has no such option and would refuse it.
+daemon_flags=
+if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
+	daemon_flags=--try-the-c-daemon
+fi
+export daemon_flags
 
 skip() {
 	if [ -n "${NCFG_LIVE:-}" ]; then
@@ -39,7 +52,7 @@ skip() {
 	exit 0
 }
 
-[ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
+[ -x "$build/netcfgd" ] || skip "netcfgd is not built"
 [ -r /proc/self/status ] || skip "no /proc, so nothing here can be measured"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-steady.XXXXXX")
@@ -71,7 +84,7 @@ check() {
 }
 
 printf 'global { control { observe = "any" } }\n' > "$work/etc/netcfgd.conf"
-"$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
+"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 daemon=$!
 waited=0
 while [ ! -S "$work/run/netcfgd.sock" ] && [ "$waited" -lt 60 ]; do
@@ -95,7 +108,7 @@ burst() {
 	while [ "$round" -lt "$1" ]; do
 		printf 'global { control { observe = "any" } }\n#%d\n' "$round" \
 			> "$work/etc/netcfgd.conf"
-		"$repo/target/debug/ncfg" control show > /dev/null 2>&1 || true
+		"$build/ncfg" control show > /dev/null 2>&1 || true
 		round=$((round + 1))
 	done
 	sleep 2
@@ -127,7 +140,7 @@ check "and no more threads" "$(threads)" "$base_threads"
 # The control: the measurements above mean nothing if the daemon was not
 # actually serving during them.
 check "the daemon was answering throughout" \
-	"$("$repo/target/debug/ncfg" control show 2>&1 | grep -c '^observe')" "1"
+	"$("$build/ncfg" control show 2>&1 | grep -c '^observe')" "1"
 
 if [ "$failures" -eq 0 ]; then
 	echo "steady_state.sh: all checks passed"

@@ -50,6 +50,8 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+export build
 
 # **A skip is a failure when `NCFG_LIVE` says the environment should be able to
 # run this**, which 66 of the suite's 69 skipping scripts honour and this one
@@ -82,7 +84,7 @@ for tool in odhcp6c kea-dhcp6 radvd ip; do
 	command -v "$tool" >/dev/null 2>&1 ||
 		skip "no $tool (see the header for odhcp6c)"
 done
-[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pd.XXXXXX")
 cleanup() {
@@ -113,7 +115,7 @@ mkdir -p "$work/etc" "$work/run" /run/kea /var/lib/kea
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
-ncfg="$repo/target/debug/ncfg"
+ncfg="$build/ncfg"
 
 failures=0
 check() {
