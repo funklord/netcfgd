@@ -53,10 +53,26 @@
  * the only reason this is a deletion rather than a reconciliation.
  */
 
-/* `ncfg: <sentence>` on stderr, which is what this program has always said. */
+/*
+ * `ncfg: <sentence>` on stderr, which is what this program has always said.
+ *
+ * **An empty message is one that has already been printed**, and the case is
+ * `compile_config`: it renders every diagnostic itself, with the file, line and
+ * column that a single `err` string cannot carry, and then returns NULL to a
+ * caller whose next move is `fail(err)`. That printed each complaint twice --
+ * once findable and once not -- and the second copy is the worse of the two,
+ * because it is the one without the line number. Measured on `ncfg plan` over a
+ * relative `.ovpn` path: `grep -c` counted two where the Rust says one.
+ *
+ * The empty string is set deliberately at the point of printing rather than
+ * left to chance, so that a caller reaching here with nothing to say has been
+ * told rather than forgotten.
+ */
 static int fail(const char *message)
 {
-	(void)fprintf(stderr, "ncfg: %s\n", message);
+	if (message && message[0] != '\0') {
+		(void)fprintf(stderr, "ncfg: %s\n", message);
+	}
 	return NCFG_CLI_EXIT_FAILED;
 }
 
@@ -681,6 +697,15 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 		}
 		if (diags.total > diags.count) {
 			(void)fprintf(stderr, "ncfg: and %zu more\n", diags.total - diags.count);
+		}
+		/*
+		 * Said, so the caller's `fail(err)` does not say it again without the
+		 * line number. A compile that failed with no diagnostic at all -- an
+		 * unreadable file, a run directory that will not take the pending
+		 * hooks -- keeps its `err`, which is the only thing the operator gets.
+		 */
+		if (diags.count > 0) {
+			err[0] = '\0';
 		}
 	}
 	ncfg_lower_diags_free(&diags);
