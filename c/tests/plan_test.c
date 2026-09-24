@@ -1948,6 +1948,153 @@ static void a_link_that_is_already_down_is_not_cycled(void)
 	release(plan, document, observed);
 }
 
+/*
+ * A plan asked for with nothing to plan against is refused, not a crash.
+ *
+ * **`base.h`'s rule, and this entry point was the one place it was broken.**
+ * `ncfg_plan_build` walked `observed->backend_count` on its first warning
+ * pass, so a NULL observation was a segfault -- and the daemon's startup
+ * converge handed it one, because `ncfg_reconcile_start` reaches the planner
+ * before anything has read the machine. Every daemon-driven live script that
+ * did not pass `--no-apply-on-start` died on its first converge, which is what
+ * `tests/live/roam.sh` was really reporting when it said netcfgd never
+ * attached to the supplicant (project.md 10.265).
+ *
+ * Refused rather than treated as an empty observation: an empty observation
+ * and a machine nobody has read are different facts, and planning against the
+ * first when the truth is the second is a plan to create everything.
+ */
+/*
+ * 0053: an edited `.ovpn` restarts the tunnel, because openvpn reads it once.
+ *
+ * **Three states, and only the middle one plans anything**, which is the whole
+ * of the pass: absent means the question could not be asked and a running
+ * tunnel is left alone rather than dropped over an unanswered question;
+ * matching means there is nothing to do; and differing is the restart. The
+ * first is the one worth a case of its own -- it is what a mistyped path looks
+ * like, and the failure it guards against is `nothing to do` for ever with the
+ * daemon running a file nobody meant.
+ *
+ * **The device carries `interface` nowhere.** A tunnel need not have an
+ * `interface` block at all until it reports an address, so the fixture
+ * deliberately gives it none: a pass walking interfaces would ask this of
+ * nothing.
+ */
+#define OPENVPN_DEVICE \
+	"\"devices\":[{\"name\":\"vpn0\",\"managed\":true,\"on_unmanage\":\"leave\"," \
+	"\"kind\":{\"kind\":\"open_vpn\",\"config\":\"/etc/openvpn/work.ovpn\"}}]"
+#define OPENVPN_BACKEND(extra) \
+	"\"backends\":[{\"kind\":\"open_vpn\",\"interface\":\"vpn0\",\"running\":true" \
+	extra "}]"
+
+static void an_edited_tunnel_configuration_restarts_the_tunnel(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+	char             names[1024];
+
+	plan = plan_of("{}", OPENVPN_DEVICE ",\"interfaces\":[]",
+	    "\"links\":[]," OPENVPN_BACKEND(",\"config_matches\":false"), NULL, &document,
+	    &observed);
+	if (plan) {
+		names_of(plan, names, sizeof(names));
+		check(strcmp(names, "backend.stop,backend.start") == 0,
+		    "an edited configuration stops the tunnel and starts it again");
+		check(plan->action_count == 2u &&
+		        depends_on(&plan->actions[1], plan->actions[0].id),
+		    "and the start waits on the stop, so there are never two daemons");
+		check(plan->action_count == 2u && plan->actions[0].has_inverse &&
+		        plan->actions[0].inverse.kind == NCFG_OP_BACKEND_START &&
+		        plan->actions[1].has_inverse &&
+		        plan->actions[1].inverse.kind == NCFG_OP_BACKEND_STOP,
+		    "and each half carries the other as its inverse");
+		check(warned_about(plan, "drops it for as long as the handshake takes"),
+		    "saying what the restart costs, because it is not free");
+	} else {
+		check(0, "the edited-configuration fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", OPENVPN_DEVICE ",\"interfaces\":[]",
+	    "\"links\":[]," OPENVPN_BACKEND(",\"config_matches\":true"), NULL, &document,
+	    &observed);
+	if (plan) {
+		check(plan->action_count == 0u,
+		    "a tunnel running the file it was started from plans nothing");
+	} else {
+		check(0, "the unchanged-configuration fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", OPENVPN_DEVICE ",\"interfaces\":[]",
+	    "\"links\":[]," OPENVPN_BACKEND(",\"config_present\":false"), NULL, &document,
+	    &observed);
+	if (plan) {
+		check(plan->action_count == 0u,
+		    "a configuration that cannot be read does not drop a working tunnel");
+		check(warned_about(plan, "cannot be read"),
+		    "and the operator is told, which is the whole of what is left to do");
+	} else {
+		check(0, "the unreadable-configuration fixture planned");
+	}
+	release(plan, document, observed);
+
+	/* A tunnel that is not running has nothing to restart, and a backend on
+	 * some other interface is not this device's. Both are the guard rather
+	 * than the pass, and both would plan a stop if the walk were sloppy. */
+	plan = plan_of("{}", OPENVPN_DEVICE ",\"interfaces\":[]",
+	    "\"links\":[],\"backends\":[{\"kind\":\"open_vpn\",\"interface\":\"vpn1\","
+	    "\"running\":true,\"config_matches\":false}]", NULL, &document, &observed);
+	if (plan) {
+		names_of(plan, names, sizeof(names));
+		/*
+		 * vpn0's tunnel is not running, so it is started; vpn1 is nobody's
+		 * device, so the ownership pass stops it. What this asserts is that
+		 * **the restart did not fire as well** -- a pass matching on kind
+		 * rather than on the interface name would have planned a stop and a
+		 * start for vpn0 as well, and the count is what catches that.
+		 */
+		check(strcmp(names, "backend.start,backend.stop") == 0,
+		    "and a stale tunnel on another interface is not this device's to restart");
+	} else {
+		check(0, "the other-interface fixture planned");
+	}
+	release(plan, document, observed);
+}
+
+static void a_plan_with_nothing_to_plan_against_is_refused(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	char             message[NCFG_ERROR_MAX];
+	ncfg_plan_t     *plan;
+
+	document = document_of("{}", "\"devices\":[],\"interfaces\":[]");
+	observed = observed_of("\"links\":[]");
+	if (!document || !observed) {
+		check(0, "a plan asked for with no observation is refused");
+		return;
+	}
+	message[0] = '\0';
+	plan = ncfg_plan_build(document, NULL, NULL, message, sizeof(message));
+	check(!plan && strstr(message, "observation") != NULL,
+	    "a plan asked for with no observation is refused, naming what is missing");
+
+	message[0] = '\0';
+	plan = ncfg_plan_build(NULL, observed, NULL, message, sizeof(message));
+	check(!plan && strstr(message, "configuration") != NULL,
+	    "  and one with no configuration likewise");
+
+	message[0] = '\0';
+	plan = ncfg_plan_build(NULL, NULL, NULL, message, sizeof(message));
+	check(!plan && strstr(message, "both") != NULL,
+	    "  and with neither, the sentence says so rather than naming one");
+
+	ncfg_document_free(document);
+	ncfg_observed_free(observed);
+}
+
 int main(void)
 {
 	the_frozen_witness();
@@ -1984,6 +2131,8 @@ int main(void)
 	nothing_the_document_asks_for_is_passed_over_in_silence();
 	the_subnet_arithmetic();
 	an_absent_optional_member_is_written_as_null();
+	a_plan_with_nothing_to_plan_against_is_refused();
+	an_edited_tunnel_configuration_restarts_the_tunnel();
 
 	printf("\nplan: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

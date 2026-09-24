@@ -116,19 +116,29 @@ void ncfg_daemon_close_executor(const ncfg_reconcile_world_t *world, ncfg_execut
 void ncfg_reconcile_hook_run(void *context, const ncfg_hook_ref_t *hook,
     const ncfg_hook_env_t *env, const char *variable, const char *value)
 {
-	char message[NCFG_ERROR_MAX];
+	ncfg_hook_env_t carried;
+	char            message[NCFG_ERROR_MAX];
 
 	(void)context;
 	/*
-	 * `variable` and `value` are dropped, and that is the one thing this
-	 * runner cannot carry: `ncfg_hook_env_t` is `apply.h`'s and has four
-	 * fixed members, so `NCFG_ACTION`, `NCFG_BSSID` and `NCFG_URL` are not
-	 * set. The pair reaches this seam so that the loop is not where the fact
-	 * is lost, and the day that struct grows a general pair this is where the
-	 * two lines go.
+	 * **The two lines this comment used to say would go here.** `variable`
+	 * and `value` were dropped for several waves, and what was dropped with
+	 * them is `NCFG_ACTION`, `NCFG_BSSID` and `NCFG_URL` -- three names
+	 * section 5.2 fixes as a contract, so a `roam` hook written against
+	 * `$NCFG_BSSID` was told nothing and nothing said so. `ncfg_hook_env_t`
+	 * carries a general pair now (project.md 10.260).
+	 *
+	 * Copied rather than cast: the env is the caller's and `const`, and this
+	 * is the one place the phase's own variable is joined to it.
 	 */
-	(void)variable;
-	(void)value;
+	if (env) {
+		carried = *env;
+	} else {
+		memset(&carried, 0, sizeof(carried));
+	}
+	carried.variable = variable;
+	carried.value = value;
+	env = &carried;
 	message[0] = '\0';
 	/* Never a veto at any of the three phases this runs: the drift has
 	 * happened, the station has moved, the portal has answered. There is
@@ -1111,6 +1121,26 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 	if (!loop->state->desired) {
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
 		    "there is no compiled configuration, so nothing was applied");
+		return 1;
+	}
+	/*
+	 * **Read the machine before planning against it**, which every other pass
+	 * does and this one did not. `ncfg_reconcile_start` reaches here before
+	 * anything has observed, so `state->observed` was NULL on the startup
+	 * apply -- and the planner walked it. A daemon started without
+	 * `--no-apply-on-start` crashed on its first converge; with the flag it
+	 * never came here, which is why the scripts that pass it were the ones
+	 * that worked (project.md 10.265).
+	 *
+	 * `reobserve` logs its own failure and leaves the previous observation
+	 * standing, so this is the same call the ordinary pass makes and needs no
+	 * status of its own.
+	 */
+	reobserve(loop, report);
+	if (!loop->state->observed) {
+		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
+		    "this machine has not been observed, so nothing was applied; the next pass "
+		    "reads it again");
 		return 1;
 	}
 	message[0] = '\0';

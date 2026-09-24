@@ -9575,6 +9575,69 @@ The first run stopped on 34 unclassified existence probes -- a third class
 nobody had named -- and wrote nothing. 42 starts, 43 non-starts, 85 sites, 36
 files.
 
+## 10.268 The openvpn tunnel restart, and two ways a message was wrong
+
+`openvpn.sh` had seven failures and passes. Four faults, and only the first is
+about openvpn.
+
+**Decision 0053 was recorded and never read.** The observer writes
+`config_matches` -- a digest of the `.ovpn` the tunnel was started from,
+compared against the file as it is now -- and `currency.c` has written it since
+the observe wave. Two live checks passed on the strength of it: netcfgd
+recorded which file the tunnel was started from, and an unchanged file plans
+nothing. What nothing did was **compare it**: the field was read by
+`tui.c` and by `explain.c`, and by no pass in the planner. So an edited
+`.ovpn` planned `nothing to do` for ever, with the daemon running the file it
+was started with, and netcfgd calling the machine converged.
+
+`ncfg_plan_stale_tunnel` is the pass, beside the two questions of the same
+shape the planner already asks -- `ncfg_plan_wedged_backends` and
+`ncfg_plan_metric_restart`, from which it takes the stop-then-start-depending-
+on-the-stop idiom and the rule that a restart says what it costs. Three states
+and only the middle one plans:
+
+    config_present false   cannot be read; warn, and leave a working tunnel up
+    config_matches true    the running file is the file; nothing to do
+    config_matches false   stop, start, and say that the tunnel drops
+
+**The absent case is the one worth the sentence it got.** Leaving a tunnel
+alone over an unanswered question is right -- dropping a working VPN because a
+digest could not be taken would be worse than the drift. But the state it
+produces is `nothing to do` on every apply for a mistyped path, which is the
+defect above wearing a different hat, so the operator is told.
+
+**It walks devices, not interfaces.** The `openvpn` block is a device's since
+0155 pass 1b, and a tunnel need not have an `interface` block at all until it
+reports an address. A pass over interfaces would have asked this of nothing and
+passed its tests.
+
+### A compile diagnostic printed twice, the second time without its line
+
+`ncfg plan` over a relative `.ovpn` path said:
+
+    ncfg: <path>:1:15: `work.ovpn` is not an absolute path: ...
+    ncfg: `work.ovpn` is not an absolute path: ...
+
+`compile_config` renders every diagnostic with its file, line and column, and
+then returns NULL to a caller whose next move is `fail(err)` -- and `err` holds
+the same complaint stripped of the location. **The second copy is the worse of
+the two**, and it is the one a reader's eye lands on last. Three live checks
+counted 2 where the Rust says 1, in three unrelated refusals, which is what
+made it look like three faults.
+
+`fail` prints nothing for an empty message now and `compile_config` empties
+`err` **only when it printed at least one diagnostic** -- a compile that failed
+with none, an unreadable file or a run directory that will not take the pending
+hooks, keeps its sentence, because that is all the operator gets.
+
+### A refused stop that did not say which tunnel
+
+`ncfg_openvpn_command` says what openvpn answered -- ``openvpn refused `signal
+SIGTERM`: ...`` -- and nothing in that sentence names the interface. An
+operator with two tunnels reads a complaint about neither. Both halves of the
+stop carry the tunnel now, matching the Rust's wording, which is what the live
+check was asking for: *reported, not recorded as stopped*.
+
 ## 10.267 A program search that reproduced the defect its own header describes
 
 `exec_refused.sh` had nine failures and passes. Three faults, and the first is
@@ -9754,6 +9817,200 @@ result from any other build is not evidence.
 Every one of the twelve scripts that set `NCFG_RUN_ROOT` was re-run against
 the new build. `roam` and `orphan` pass, `displace` improved, and `revive`,
 `wedged`, `wifi` and `wifi_trouble` are unchanged. Nothing regressed.
+## 10.265 A segfault on the daemon's first converge, found by asking why a hook never ran
+
+`roam.sh` reported 13 failures, the first being *netcfgd attaches to the
+supplicant's event socket, once*. The watcher that does the attaching is
+written, the directory it scans was pointed at the test's own, and the
+environment variable naming it is spelled the same on both sides. It never
+scanned because **the daemon was already dead.**
+
+### The crash
+
+    Thread 1 "netcfgd" received signal SIGSEGV
+    #0  ncfg_plan_wedged_backends ()
+    #1  ncfg_plan_build ()
+    #2  ncfg_reconcile_converge ()
+    #3  start ()
+
+`ncfg_plan_wedged_backends` is the first pass `ncfg_plan_build` runs, and its
+first act is `builder->observed->backend_count`. The observation was NULL.
+
+`ncfg_reconcile_start` converges before anything has read the machine --
+`reobserve` is what every *ordinary* pass calls and the startup path did not --
+so `state->observed` was NULL on the first apply. And `ncfg_plan_build` checked
+neither of its two required arguments, which every other entry point in this
+library does.
+
+**The same file already knew.** Sixty lines above the crash,
+`reconcile_pass.c` reads `if (loop->state->observed && ...)` before touching
+the reports. One guard written, the other not, in one function.
+
+### Why it looked like thirty-two separate defects
+
+A daemon started with `--no-apply-on-start` never reaches `converge` at
+startup, so it lived. Of the 32 scripts the C was failing and the Rust
+passing, **27 do not pass that flag** and 5 do -- and all five of the
+daemon-driven scripts that *were* passing pass it. One crash, correlated
+almost perfectly with one command-line option, wearing thirty-two costumes.
+
+Nothing in 90 C test binaries could see it: every one of them hands
+`ncfg_plan_build` an observation, because a test that did not would be a test
+about nothing.
+
+### The fix, both halves
+
+**`ncfg_plan_build` refuses a NULL document or observation**, naming which is
+missing, which is `base.h`'s rule -- a library never segfaults on its
+arguments.
+
+Refused rather than treated as an empty observation, and that is a deliberate
+divergence: the Rust cannot reach this state at all, because its daemon holds
+an `Observed` **by value** and defaults it to an empty one. An empty
+observation and a machine nobody has read are different facts, the C can tell
+them apart, and planning against the first when the truth is the second is a
+plan to create everything.
+
+**`ncfg_reconcile_converge` reads the machine before planning against it**, the
+same `reobserve` call the ordinary pass makes, and says so and stops if there
+is still nothing -- so the startup apply behaves like every other pass rather
+than like a special case that skipped a step.
+
+### And the second defect the first was hiding
+
+With the daemon alive, `roam.sh` fell to one failure: *a burst of events is
+drained rather than paced*, 20 of 30.
+
+`drain_radio` takes up to `NCFG_MAIN_EVENT_BURST` events from a radio in a
+round -- 64, the Rust's number -- and the round's harvest held
+`NCFG_MAIN_ROAMS_MAX` of them, **16**. A hold smaller than the drain overflows
+on every burst the drain exists to handle: 0240 is a supplicant losing an
+access point, which is exactly what produces one.
+
+The two are one mechanism and are one constant now. `NCFG_MAIN_ROAMS_MAX` is
+`NCFG_MAIN_EVENT_BURST`, with the relationship written where the number was,
+so the next person to change either finds the other.
+
+### What it was worth, measured the same way as before
+
+    both pass                   22 -> 30
+    rust passes, C does not     33 -> 25
+
+Newly passing: `links` (10.264), `orphan`, `portal`, `resolv_defended`,
+`resolv_owned`, `roam`, `steady_state`, `switch`. None regressed.
+
+**Four scripts read as regressions and were not**, which is worth recording
+because the error was in the measurement rather than the tree: they ran while
+`make -C c clean` was in flight in another shell of the same command, so the
+binaries were absent and each said so. Re-run against a settled build, all four
+pass. A sweep taken during a rebuild is a sweep of a tree that does not exist,
+and the four that caught it were the four whose skip message names the binary.
+
+### How the two halves are proved
+
+Three checks in `plan_test.c`: no observation, no configuration, and neither --
+the last because a sentence that names one when both are missing is a sentence
+that sends the reader to the wrong argument. The crash itself is proved by the
+control that found it: with the recreation pass of 10.264 disabled the
+segfault is unchanged, which is how it was established as older than that wave
+rather than caused by it.
+## 10.264 The link remake rule, which the live suite found by being run
+
+10.263's sharpest finding, fixed: an edited vlan id planned **nothing to do**
+where the Rust plans a delete and a create, and `links.sh` went from 11
+failures to none.
+
+### What was missing
+
+0059, entire. The port had no recreation pass at all -- `grep` found no remake
+path in `c/src/plan/link.c` -- so three shapes the kernel takes and ignores
+were silently unhandled:
+
+  * a VLAN whose **id** or tag protocol differs. `ip link set X type vlan id N`
+    succeeds and changes nothing, which is the worst of the kernel's four
+    answers: a planner that emits a set reports a change that never happened
+    and goes on reporting it;
+  * a VLAN's or a macvlan's **parent**, which is the outer `IFLA_LINK` and gets
+    the same answer (0060) -- while a VXLAN's and a tunnel's underlay lives in
+    its own nest, is moved by the kernel, and is corrected in place;
+  * a device that exists as an entirely **different kind**, which planned a
+    `link.up` and nothing else -- netcfgd bringing somebody else's device up
+    and calling the network configured.
+
+### The shape, which is the decision's rather than this port's
+
+`ncfg_plan_recreation` runs before the creation pass, stops what netcfgd runs
+on each doomed link, fires its `down` and `post_down` hooks around the delete,
+and hands back the names. `ncfg_plan_observed_without` then makes the
+observation every later pass reads, with those links -- and their addresses,
+routes, backends, the `master` of anything enslaved to them and any
+`ingress_redirect` onto them -- taken out.
+
+**That third step is the whole design.** Every pass below plans for a remade
+interface exactly as for one that never existed: the creation pass makes it,
+the addressing pass puts its addresses back, the backend pass restarts its
+client, and none of them knows. A flag threaded through eleven passes is the
+same information written eleven times.
+
+**The C's filtered observation is a shallow copy where the Rust's is a clone.**
+It borrows every string from the original, which the builder holds and which
+outlives the plan, so it is four `calloc`ed arrays and a `memcpy` of elements
+rather than a deep copy -- and it is freed by `ncfg_plan_observed_release`,
+never by `ncfg_observed_free`. The two places that differ from a plain filter
+are the reason a copy is needed at all: `master` and `ingress_redirect` are
+cleared *in the copy* on links that survive, which a filter-at-access could not
+do.
+
+The three `*_applied` lists are deliberately **not** filtered: they record that
+netcfgd once set a qdisc, a redirect or a sysctl, which is still true and is
+what makes deleting the setting from the document mean something. What the
+kernel held went away with the link.
+
+### Only a link netcfgd made
+
+This is the one place in the planner that throws an interface away, so the
+ownership rule that governs addresses and routes governs it: a link netcfgd has
+no record of creating gets a sentence naming what differs and what correcting
+it would cost, and is left alone. That leaves a real gap and it is the right
+one -- the alternative is a config file that deletes interfaces netcfgd never
+made.
+
+A guard (0010) or an unmanaged device refuses the delete, and the name then
+does **not** join the returned list, so nothing below plans as though it had
+happened.
+
+### One word published on the way
+
+`ncfg_vlan_protocol_name` -- `dot1q` or `dot1ad` -- existed as a private word
+set in `model/document.c` with no accessor, so the planner had no way to
+compare what a document asks for against the word an observation carries. A
+second copy of two words is how two spellings of one tag protocol arrive.
+
+### Proof
+
+Eight checks in `plan_kind_test.c`, driving all three remake shapes, the VXLAN
+that is **not** one, and the foreign link that is explained rather than
+deleted. Three sabotages:
+
+    the parent is no longer a remake          1 check red
+    a foreign link may be deleted             7 checks red
+    the observation is not filtered           1 check red
+
+The second is the interesting count: removing the ownership check reddens
+nearly everything, because a plan that deletes a link it does not own also
+deletes the one every other case is built on. The third is the one that matters
+most and is the quietest -- with the observation unfiltered the delete is still
+planned and the **create is not**, so the interface goes away and does not come
+back. One check, and it is the difference between a remake and a removal.
+
+### And the suite, re-run
+
+    both pass                   22 -> 23
+    rust passes, C does not     33 -> 32
+
+One script moved, which is the honest number: `links.sh` is the only one of the
+75 that exercises this. The other 32 are still there and are still the next
+thing.
 ## 10.263 The Rust's live suite, run against the C, with the Rust as its control
 
 10.262 built the seam. This is the first run, and the first answer this tree

@@ -19,6 +19,7 @@
 #include "ncfg/base.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------------ *
@@ -732,4 +733,415 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	ncfg_plan_ids_free(&serving);
 	ncfg_plan_ids_free(&joining);
 	ncfg_plan_ids_free(&source_base);
+}
+
+/* ------------------------------------------------------------------------ *
+ * Remaking a link the kernel will not change (0059)
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The word the kernel calls this kind, or NULL for one that is never remade.
+ *
+ * `netcfgd_plan::recreatable_kind`. Not `ncfg_interface_kind_name`, which is
+ * the document's word, nor the language's: this is compared against
+ * `IFLA_INFO_KIND`, so a tunnel answers with its mode and a `wire_guard`
+ * answers `wireguard`.
+ *
+ * A physical device, a PPPoE session and an OpenVPN tunnel answer NULL. None
+ * is made by netlink, so none can be remade by deleting it -- which is the
+ * same set `ncfg_plan_link_creation` declines to create.
+ */
+static const char *recreatable_kind(const ncfg_interface_kind_t *kind)
+{
+	switch ((ncfg_interface_kind_tag_t)kind->kind) {
+	case NCFG_KIND_BRIDGE:
+		return "bridge";
+	case NCFG_KIND_BOND:
+		return "bond";
+	case NCFG_KIND_VLAN:
+		return "vlan";
+	case NCFG_KIND_VXLAN:
+		return "vxlan";
+	case NCFG_KIND_WIREGUARD:
+		return "wireguard";
+	case NCFG_KIND_DUMMY:
+		return "dummy";
+	case NCFG_KIND_VETH:
+		return "veth";
+	case NCFG_KIND_VRF:
+		return "vrf";
+	case NCFG_KIND_MACVLAN:
+		return "macvlan";
+	case NCFG_KIND_TUNNEL:
+		return ncfg_tunnel_kind_name(kind->tunnel.mode);
+	case NCFG_KIND_IFB:
+		return "ifb";
+	/* **Both modes are `tun` to the kernel.** One `rtnl_link_ops` is
+	 * registered for tun and tap alike, so this catches a `tun` block whose
+	 * name is held by something else entirely and does not catch a block
+	 * changed from `tun` to `tap`. The second wants `IFLA_TUN_TYPE`, which
+	 * this observation does not read; recorded rather than worked around
+	 * (0254). */
+	case NCFG_KIND_TUN:
+		return "tun";
+	case NCFG_KIND_PHYSICAL:
+	case NCFG_KIND_PPPOE:
+	case NCFG_KIND_OPENVPN:
+		break;
+	}
+	return NULL;
+}
+
+/*
+ * Why this link has to be remade rather than corrected, or 0.
+ *
+ * `netcfgd_plan::recreation_reason`, and the three shapes it answers are the
+ * three the kernel takes and ignores (0059, 0060): a kind that is not the one
+ * asked for, a VLAN's or a macvlan's parent, and a VLAN's id or tag protocol.
+ *
+ * A VXLAN's and a tunnel's underlay is deliberately **not** here: it lives in
+ * their own nest, the kernel moves it, and the set passes correct it in place.
+ */
+static int recreation_reason(const ncfg_interface_kind_t *kind,
+    const ncfg_observed_link_t *link, const char **field, const char **wanted,
+    const char **seen, char *scratch, size_t scratch_size)
+{
+	const char *kernel = recreatable_kind(kind);
+	const char *parent = NULL;
+
+	if (!kernel) {
+		return 0;
+	}
+	/*
+	 * An empty kind is a device with no `LINKINFO` at all -- a NIC, or the
+	 * loopback. Not compared: the document says this is a dummy and the
+	 * kernel says nothing, and the honest reading of that is "somebody else's
+	 * device with a name netcfgd wants", which the ownership check turns into
+	 * a sentence rather than a deletion.
+	 */
+	if (link->kind && link->kind[0] && strcmp(link->kind, kernel) != 0) {
+		*field = "kind";
+		*wanted = kernel;
+		*seen = link->kind;
+		return 1;
+	}
+	if (kind->kind == NCFG_KIND_VLAN) {
+		parent = kind->vlan.parent;
+	} else if (kind->kind == NCFG_KIND_MACVLAN) {
+		parent = kind->macvlan.parent;
+	}
+	if (parent && link->parent && strcmp(parent, link->parent) != 0) {
+		*field = "parent";
+		*wanted = parent;
+		*seen = link->parent;
+		return 1;
+	}
+	if (kind->kind != NCFG_KIND_VLAN || !link->vlan) {
+		return 0;
+	}
+	/*
+	 * Only where the kernel answered. A VLAN whose `INFO_DATA` did not
+	 * arrive, or whose tag protocol this build has no word for, is not
+	 * compared -- an interface is not thrown away over an unanswered
+	 * question, which is 0052's "absent is not false" applied to the most
+	 * destructive action in the planner.
+	 */
+	if (link->vlan->id.has && link->vlan->id.value != kind->vlan.id) {
+		int written = snprintf(scratch, scratch_size, "%lld|%lld",
+		    (long long)kind->vlan.id, (long long)link->vlan->id.value);
+
+		if (written < 0 || (size_t)written >= scratch_size) {
+			return 0;
+		}
+		*field = "vlan.id";
+		*wanted = scratch;
+		*seen = strchr(scratch, '|') + 1;
+		*(strchr(scratch, '|')) = '\0';
+		return 1;
+	}
+	if (link->vlan->protocol) {
+		const char *asked = ncfg_vlan_protocol_name(kind->vlan.protocol);
+
+		if (asked && strcmp(asked, link->vlan->protocol) != 0) {
+			*field = "vlan.protocol";
+			*wanted = asked;
+			*seen = link->vlan->protocol;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Delete every link the kernel will not change, and say which they were.
+ *
+ * `netcfgd_plan::plan_recreation`, and 0059's three steps: find them, stop
+ * what netcfgd runs on them and emit the delete, and hand back the names so
+ * the rest of the plan can be made against an observation they are not in.
+ *
+ * **Devices, not interfaces.** A kind lives on a `device` and a device need
+ * not have an `interface` block at all; walking the interfaces instead is how
+ * the Rust once had a VXLAN that was a dummy in the kernel produce `nothing to
+ * do` -- no recreation, and not even the warning this exists to print.
+ *
+ * **Only a link netcfgd created.** This is the one place in the planner that
+ * throws an interface away, so the ownership rule that governs addresses and
+ * routes governs it too: a link netcfgd has no record of making gets a
+ * sentence naming what differs and what correcting it would cost, and is left
+ * alone. That leaves a real gap and it is the right gap -- the alternative is
+ * a config file that deletes interfaces netcfgd never made.
+ *
+ * Answers how many names were written into `gone`, which is at most
+ * `gone_max`.
+ */
+size_t ncfg_plan_recreation(ncfg_builder_t *builder, const char **gone, size_t gone_max)
+{
+	size_t count = 0;
+	size_t i;
+
+	for (i = 0; i < builder->desired->device_count && count < gone_max; i++) {
+		const ncfg_device_t        *device = &builder->desired->devices[i];
+		const ncfg_observed_link_t *link =
+		    ncfg_observed_link(builder->observed, device->name);
+		const ncfg_interface_t     *interface = NULL;
+		const char                 *field = NULL;
+		const char                 *wanted = NULL;
+		const char                 *seen = NULL;
+		char                        scratch[64];
+		ncfg_plan_ids_t             stopped;
+		ncfg_reason_t               reason;
+		ncfg_op_t                   op;
+		uint32_t                    id;
+		size_t                      at;
+
+		if (!link ||
+		    !recreation_reason(&device->kind, link, &field, &wanted, &seen, scratch,
+		    sizeof(scratch))) {
+			continue;
+		}
+		if (!ncfg_ownership_may_remove(link->ownership)) {
+			ncfg_plan_warnf(builder->plan, device->name,
+			    "the %s of %s is %s in the config and %s in the kernel, and the kernel "
+			    "will not change it on an interface that exists -- correcting it means "
+			    "deleting %s and making it again, which netcfgd will not do to a link "
+			    "it did not create", field, device->name, wanted, seen, device->name);
+			continue;
+		}
+		for (at = 0; at < builder->desired->interface_count; at++) {
+			if (strcmp(builder->desired->interfaces[at].name, device->name) == 0) {
+				interface = &builder->desired->interfaces[at];
+				break;
+			}
+		}
+		/*
+		 * What runs on it stops first. A client bound to an interface that is
+		 * about to be deleted would be left holding a name that comes back as
+		 * a different device, with netcfgd's own record still saying it runs
+		 * -- a plan that converges while nothing is leasing.
+		 */
+		memset(&stopped, 0, sizeof(stopped));
+		for (at = 0; at < builder->observed->backend_count; at++) {
+			const ncfg_observed_backend_t *backend = &builder->observed->backends[at];
+			ncfg_op_t                      restart;
+			uint32_t                       stop_id;
+
+			if (!backend->interface || strcmp(backend->interface, device->name) != 0) {
+				continue;
+			}
+			memset(&op, 0, sizeof(op));
+			op.kind = NCFG_OP_BACKEND_STOP;
+			op.u.backend.kind = backend->kind;
+			op.u.backend.iface = device->name;
+			memset(&restart, 0, sizeof(restart));
+			restart.kind = NCFG_OP_BACKEND_START;
+			restart.u.backend.kind = backend->kind;
+			restart.u.backend.iface = device->name;
+			memset(&reason, 0, sizeof(reason));
+			reason.interface = device->name;
+			reason.field = field;
+			reason.desired = ncfg_plan_internf(builder->plan,
+			    "%s, which needs %s remade", wanted, device->name);
+			reason.observed = seen;
+			stop_id = ncfg_builder_push(builder, &op, &reason, NULL, 0, &restart);
+			if (stop_id != NCFG_PLAN_NO_ACTION) {
+				ncfg_plan_ids_push(builder->plan, &stopped, stop_id);
+			}
+		}
+		/*
+		 * The interface is about to stop existing, so it goes down as far as a
+		 * hook is concerned -- and it comes back in this same plan, where
+		 * `pre_up` and `post_up` fire again because the creation pass plans it
+		 * as absent. Firing `down` here is what makes those two symmetrical.
+		 */
+		if (interface) {
+			plan_hooks(builder, interface, NCFG_HOOK_PHASE_DOWN, &stopped, &stopped);
+		}
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_LINK_DELETE;
+		op.u.named.name = device->name;
+		memset(&reason, 0, sizeof(reason));
+		reason.interface = device->name;
+		reason.field = field;
+		reason.desired = wanted;
+		reason.observed = seen;
+		/*
+		 * No inverse. The create that follows is the inverse in every sense
+		 * that matters and is in this same plan; offering `link.create` here
+		 * would claim commit-confirm can put back an interface's addresses and
+		 * routes, which it cannot -- what this deletes is remade from the
+		 * document rather than from the observation.
+		 */
+		id = ncfg_builder_push(builder, &op, &reason, stopped.ids, stopped.count, NULL);
+		ncfg_plan_ids_free(&stopped);
+		/*
+		 * Refused by a guard, or dropped because the device is unmanaged. The
+		 * interface is then left exactly as it is: not deleted, and -- because
+		 * its name does not go in the list -- not planned for as though it had
+		 * been.
+		 */
+		if (id == NCFG_PLAN_NO_ACTION) {
+			continue;
+		}
+		if (interface) {
+			ncfg_plan_ids_t after;
+
+			memset(&after, 0, sizeof(after));
+			ncfg_plan_ids_push(builder->plan, &after, id);
+			plan_hooks(builder, interface, NCFG_HOOK_PHASE_POST_DOWN, &after, NULL);
+			ncfg_plan_ids_free(&after);
+		}
+		ncfg_builder_mark(builder, &builder->gates, &builder->gate_count, device->name,
+		    id);
+		gone[count++] = device->name;
+	}
+	return count;
+}
+
+/* Whether this name is one of the links about to be deleted. NULL is not. */
+static int doomed(const char *const *gone, size_t count, const char *name)
+{
+	size_t i;
+
+	if (!name) {
+		return 0;
+	}
+	for (i = 0; i < count; i++) {
+		if (gone[i] && strcmp(gone[i], name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * The same observation with some links, and everything the kernel holds on
+ * them, taken out.
+ *
+ * **This is 0059's whole design.** Every pass below then plans for a remade
+ * interface exactly as it plans for one that was never there: the creation
+ * pass makes it, the addressing pass puts its addresses back, the routing pass
+ * its routes, the backend pass restarts its client. None of them knows this
+ * happened, and a pass added later gets it right without being told. The
+ * alternative -- a flag threaded through eleven passes, each deciding what a
+ * "being replaced" interface means for it -- is the same information written
+ * eleven times.
+ *
+ * **A shallow copy, and it must never be freed as an observation.** The Rust
+ * clones; this borrows every string from the original, which the builder holds
+ * and which outlives the plan. `ncfg_plan_observed_release` frees the four
+ * arrays and nothing inside them.
+ *
+ * What is taken out, each of which was a defect the Rust's first version had:
+ *
+ *   * the links themselves;
+ *   * their **addresses and routes**, or the passes that would put them back
+ *     see them already present and plan nothing -- the interface comes back
+ *     bare and the plan says there was nothing to do;
+ *   * their **backends**, so the client is started again;
+ *   * the **`master` of every link enslaved to one**, or the enslavement pass
+ *     sees the membership it wants and the remade bridge comes back empty;
+ *   * an **`ingress_redirect` onto one**, which is about to be no redirect.
+ *
+ * What is deliberately **not** taken out is the three `*_applied` lists: those
+ * record that netcfgd once set a qdisc, a redirect or a sysctl, which is still
+ * true and is what makes deleting the setting from the document mean
+ * something. What the kernel held went away with the link.
+ *
+ * 0 where there was nothing to take out, which is every ordinary plan -- this
+ * must not copy an observation to change nothing.
+ */
+int ncfg_plan_observed_without(const ncfg_observed_t *observed, const char *const *gone,
+    size_t gone_count, ncfg_observed_t *out)
+{
+	size_t i;
+	size_t at;
+
+	if (!gone_count) {
+		return 0;
+	}
+	*out = *observed;
+	out->links = calloc(observed->link_count ? observed->link_count : 1u,
+	    sizeof(*out->links));
+	out->addresses = calloc(observed->address_count ? observed->address_count : 1u,
+	    sizeof(*out->addresses));
+	out->routes = calloc(observed->route_count ? observed->route_count : 1u,
+	    sizeof(*out->routes));
+	out->backends = calloc(observed->backend_count ? observed->backend_count : 1u,
+	    sizeof(*out->backends));
+	if (!out->links || !out->addresses || !out->routes || !out->backends) {
+		ncfg_plan_observed_release(out);
+		return 0;
+	}
+	out->link_count = 0;
+	out->address_count = 0;
+	out->route_count = 0;
+	out->backend_count = 0;
+	/*
+	 * Neither of these is read by the planner and both describe the machine as
+	 * it is rather than as this hypothetical leaves it: a set's choice made
+	 * against links that are about to be deleted would be a choice about
+	 * nothing. Empty says "not computed", which is what it is.
+	 */
+	out->linksets = NULL;
+	out->linkset_count = 0u;
+	out->inventory = NULL;
+	out->inventory_count = 0u;
+	for (i = 0; i < observed->link_count; i++) {
+		if (doomed(gone, gone_count, observed->links[i].name)) {
+			continue;
+		}
+		at = out->link_count++;
+		out->links[at] = observed->links[i];
+		if (doomed(gone, gone_count, out->links[at].master)) {
+			out->links[at].master = NULL;
+		}
+		if (doomed(gone, gone_count, out->links[at].ingress_redirect)) {
+			out->links[at].ingress_redirect = NULL;
+		}
+	}
+	for (i = 0; i < observed->address_count; i++) {
+		if (!doomed(gone, gone_count, observed->addresses[i].interface)) {
+			out->addresses[out->address_count++] = observed->addresses[i];
+		}
+	}
+	for (i = 0; i < observed->route_count; i++) {
+		if (!doomed(gone, gone_count, observed->routes[i].interface)) {
+			out->routes[out->route_count++] = observed->routes[i];
+		}
+	}
+	for (i = 0; i < observed->backend_count; i++) {
+		if (!doomed(gone, gone_count, observed->backends[i].interface)) {
+			out->backends[out->backend_count++] = observed->backends[i];
+		}
+	}
+	return 1;
+}
+
+void ncfg_plan_observed_release(ncfg_observed_t *filtered)
+{
+	free(filtered->links);
+	free(filtered->addresses);
+	free(filtered->routes);
+	free(filtered->backends);
+	memset(filtered, 0, sizeof(*filtered));
 }

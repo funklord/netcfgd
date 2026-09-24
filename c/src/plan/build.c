@@ -629,11 +629,37 @@ static void plan_commit_arm(ncfg_builder_t *builder)
 ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed_t *observed,
     const ncfg_plan_options_t *options, char *err, size_t err_size)
 {
-	ncfg_builder_t builder;
-	ncfg_plan_t   *plan = ncfg_plan_new(err, err_size);
-	size_t         i;
+	ncfg_builder_t  builder;
+	ncfg_plan_t    *plan = ncfg_plan_new(err, err_size);
+	ncfg_observed_t filtered;
+	const char     *gone[NCFG_PLAN_RECREATE_MAX];
+	size_t          gone_count = 0;
+	int             filtered_in_use = 0;
+	size_t          i;
 
 	if (!plan) {
+		return NULL;
+	}
+	/*
+	 * **A library never segfaults on its arguments**, which is `base.h`'s rule
+	 * and is why every other entry point here checks. This one did not, and
+	 * the first pass over `observed->backend_count` is where a NULL
+	 * observation landed -- a crash on the daemon's startup converge, which
+	 * had never been observed because the C suite always hands this function
+	 * something (project.md 10.265).
+	 *
+	 * Refused rather than treated as an empty observation. The Rust cannot
+	 * reach this state at all -- its daemon holds an `Observed` by value and
+	 * defaults it to an empty one -- but an empty observation and a machine
+	 * nobody has read are different facts, and planning against the first when
+	 * the truth is the second is a plan to create everything.
+	 */
+	if (!desired || !observed) {
+		ncfg_error_set(err, err_size,
+		    "a plan needs a configuration and an observation; %s missing",
+		    !desired && !observed ? "both are" : !desired ? "the configuration is" :
+		    "the observation is");
+		ncfg_plan_free(plan);
 		return NULL;
 	}
 	memset(&builder, 0, sizeof(builder));
@@ -676,6 +702,28 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * device exist with nothing running over it -- an `ifb` carries no address
 	 * and never will.
 	 */
+	/*
+	 * 0059, and it runs before the creation pass because that is what makes
+	 * the rest of this function need no changes: a link the kernel will not
+	 * change is deleted here, and every pass below is then given an
+	 * observation it is not in -- so it is planned for exactly as one that
+	 * never existed. `ncfg_plan_recreation` has the argument.
+	 */
+	/*
+	 * Before the recreation pass, because it asks about a tunnel that is
+	 * *running* -- and a remake takes its backend out of the observation the
+	 * passes below read. The question is about a backend, so it is asked
+	 * where the other two backend questions are: beside
+	 * `ncfg_plan_wedged_backends`, which runs above.
+	 */
+	for (i = 0; i < desired->device_count; i++) {
+		ncfg_plan_stale_tunnel(&builder, &desired->devices[i]);
+	}
+	gone_count = ncfg_plan_recreation(&builder, gone, NCFG_PLAN_RECREATE_MAX);
+	if (ncfg_plan_observed_without(observed, gone, gone_count, &filtered)) {
+		builder.observed = &filtered;
+		filtered_in_use = 1;
+	}
 	for (i = 0; i < desired->device_count; i++) {
 		ncfg_plan_link_creation(&builder, &desired->devices[i]);
 	}
@@ -816,6 +864,11 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	free(builder.declined);
 	free(builder.appearing);
 	free(builder.unmanaged);
+	/* Shallow: it borrowed every string from the caller's observation, which
+	 * outlives this call. Never `ncfg_observed_free`. */
+	if (filtered_in_use) {
+		ncfg_plan_observed_release(&filtered);
+	}
 
 	if (plan->failed) {
 		ncfg_error_set(err, err_size, "out of memory building the plan");

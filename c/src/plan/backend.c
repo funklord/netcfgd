@@ -391,3 +391,99 @@ void ncfg_plan_metric_restart(ncfg_builder_t *builder, const ncfg_interface_t *i
 	inverse.u.backend.iface = interface->name;
 	(void)ncfg_builder_push(builder, &op, &reason, &stop, 1u, &inverse);
 }
+
+/*
+ * Restart a tunnel whose `.ovpn` is no longer the one it was started from.
+ *
+ * **The last of the "is what is running still what the document says"
+ * questions** (0053), beside the wedged backend and the lease metric. netcfgd
+ * never reads that file for meaning -- 0046 keeps it the operator's -- so what
+ * is compared is a digest the observer took, the same trick a hook's `sha256`
+ * plays on a script netcfgd equally does not interpret.
+ *
+ * **Devices rather than interfaces.** The `openvpn` block is a device's since
+ * 0155 pass 1b, and a tunnel need not have an interface at all until it
+ * reports an address -- so a tunnel with no `interface` block would never be
+ * asked this if the walk were over interfaces.
+ *
+ * **Absent restarts nothing, and that was the whole of the hole it left.**
+ * `config_matches` is deliberately absent where the file cannot be read, so a
+ * working tunnel is never dropped over an unanswered question. What that cost
+ * in the Rust was an operator who mistyped the path getting `nothing to do` on
+ * every apply for ever, with the daemon running the configuration it was
+ * started from and netcfgd calling the machine converged. The tunnel is still
+ * left alone -- it is the best thing available -- and the operator is told.
+ */
+void ncfg_plan_stale_tunnel(ncfg_builder_t *builder, const ncfg_device_t *device)
+{
+	const ncfg_observed_backend_t *backend = NULL;
+	ncfg_reason_t                  reason;
+	ncfg_op_t                      op;
+	ncfg_op_t                      inverse;
+	uint32_t                       stop;
+	size_t                         at;
+
+	if (!device || !device->name || device->kind.kind != NCFG_KIND_OPENVPN) {
+		return;
+	}
+	for (at = 0; at < builder->observed->backend_count; at++) {
+		const ncfg_observed_backend_t *one = &builder->observed->backends[at];
+
+		if (one->kind == (int)NCFG_BACKEND_OPENVPN && one->running && one->interface &&
+		    strcmp(one->interface, device->name) == 0) {
+			backend = one;
+			break;
+		}
+	}
+	if (!backend) {
+		return;
+	}
+	if (backend->config_present.has && !backend->config_present.value) {
+		ncfg_plan_warnf(builder->plan, device->name,
+		    "the openvpn configuration for %s cannot be read, so netcfgd cannot tell "
+		    "whether the running tunnel still matches it -- the tunnel is left alone "
+		    "rather than dropped, and it is still running the file it was started with",
+		    device->name);
+		return;
+	}
+	if (!backend->config_matches.has || backend->config_matches.value) {
+		return;
+	}
+	/*
+	 * Said out loud because it is not free, which is `ncfg_plan_metric_restart`'s
+	 * rule: openvpn reads its configuration once, so the only way to apply an
+	 * edited file is to stop the daemon and start it again, and that drops the
+	 * tunnel for as long as the handshake takes.
+	 */
+	ncfg_plan_warnf(builder->plan, device->name,
+	    "the openvpn configuration for %s has changed since the tunnel was started, and "
+	    "openvpn reads it once -- so the tunnel is restarted, which drops it for as long "
+	    "as the handshake takes", device->name);
+
+	reason = ncfg_plan_reason_differs(device->name, "openvpn.config",
+	    "the file as it is now", "the file the tunnel was started from");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_STOP;
+	op.u.backend.kind = NCFG_BACKEND_OPENVPN;
+	op.u.backend.iface = device->name;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = NCFG_OP_BACKEND_START;
+	inverse.u.backend.kind = NCFG_BACKEND_OPENVPN;
+	inverse.u.backend.iface = device->name;
+	stop = ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
+	if (stop == NCFG_PLAN_NO_ACTION) {
+		return;
+	}
+	/* The start waits on the stop, for `ncfg_plan_metric_restart`'s reason:
+	 * there is no reload for a tunnel, and a start that raced its own stop
+	 * would leave two openvpn daemons on one interface. */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = NCFG_BACKEND_OPENVPN;
+	op.u.backend.iface = device->name;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = NCFG_OP_BACKEND_STOP;
+	inverse.u.backend.kind = NCFG_BACKEND_OPENVPN;
+	inverse.u.backend.iface = device->name;
+	(void)ncfg_builder_push(builder, &op, &reason, &stop, 1u, &inverse);
+}
