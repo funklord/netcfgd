@@ -384,6 +384,155 @@ static void what_udhcpc_is_started_with(void)
 	    "a vector asked for with no program is refused with a sentence");
 }
 
+/*
+ * The DHCPv6 half: which client can serve a document, and what it is given.
+ *
+ * **All four combinations, which is why the choice is a pure function.** The
+ * refusing one needs a machine with only dhcpcd installed, and a branch no
+ * test can make fire is untested code however defensive it looks -- so the
+ * Rust keeps its `dhcp6_client` pure and separate for exactly this, and so
+ * does this port.
+ */
+static void which_v6_client_can_serve_the_document(void)
+{
+	char message[NCFG_ERROR_MAX];
+
+	message[0] = '\0';
+	check_text(ncfg_dhcp6_client(0, 1, "eth0", message, sizeof(message)), "odhcp6c",
+	    "odhcp6c serves a plain dhcp6 interface");
+	check_text(ncfg_dhcp6_client(1, 1, "eth0", message, sizeof(message)), "odhcp6c",
+	    "  and one that asks for a delegated prefix");
+	check_text(ncfg_dhcp6_client(0, 0, "eth0", message, sizeof(message)), "dhcpcd",
+	    "dhcpcd serves one that asks for no prefix, where there is no odhcp6c");
+
+	/* The one that matters, and the one no machine here can reach: dhcpcd
+	 * reports the addresses it derived from a prefix rather than the prefix,
+	 * and netcfgd does the deriving -- so the lease would arrive and nothing
+	 * would come of it (0050). */
+	message[0] = '\0';
+	check(ncfg_dhcp6_client(1, 0, "eth0", message, sizeof(message)) == NULL,
+	    "and a delegation with only dhcpcd installed is refused rather than served");
+	check(strstr(message, "eth0") != NULL && strstr(message, "0050") != NULL &&
+	    strstr(message, "Install odhcp6c") != NULL,
+	    "  naming the interface, the decision, and what to install");
+}
+
+static void what_a_prefix_is_asked_for_with(void)
+{
+	ncfg_pd_request_t request;
+	char              out[64];
+
+	memset(&request, 0, sizeof(request));
+	check(ncfg_dhcp_prefix_request(&request, out, sizeof(out)) && strcmp(out, "0") == 0,
+	    "a request that states no length asks for whatever the server offers");
+	request.length.has = 1;
+	request.length.value = 56;
+	check(ncfg_dhcp_prefix_request(&request, out, sizeof(out)) && strcmp(out, "56") == 0,
+	    "  a stated length is the whole argument");
+	request.hint = (char *)(void *)"2001:db8::";
+	check(ncfg_dhcp_prefix_request(&request, out, sizeof(out)) &&
+	    strcmp(out, "2001:db8::/56") == 0,
+	    "  and a hint is the pair odhcp6c takes");
+	request.length.has = 0;
+	check(ncfg_dhcp_prefix_request(&request, out, sizeof(out)) &&
+	    strcmp(out, "2001:db8::/0") == 0,
+	    "  a hint with no length still asks for any length");
+
+	out[0] = 'x';
+	check(!ncfg_dhcp_prefix_request(NULL, out, sizeof(out)) && out[0] == '\0',
+	    "no request is no argument, and the buffer is emptied rather than left");
+	check(!ncfg_dhcp_prefix_request(&request, out, 4u) && out[0] == '\0',
+	    "  and one that would not fit is refused rather than truncated");
+}
+
+static void what_odhcp6c_is_started_with(void)
+{
+	ncfg_dhcp_args_t args;
+	char             message[NCFG_ERROR_MAX];
+	char             line[1024];
+
+	message[0] = '\0';
+	check(ncfg_dhcp_odhcp6c_args("/usr/sbin/odhcp6c", "eth0",
+	      "/run/netcfgd/hooks/pd-eth0", "/run/netcfgd/odhcp6c/eth0.pid", NULL, &args,
+	      message, sizeof(message)),
+	    "odhcp6c's command line is built");
+	joined(&args, line, sizeof(line));
+	check_text(line,
+	    "/usr/sbin/odhcp6c -d -p /run/netcfgd/odhcp6c/eth0.pid -s "
+	    "/run/netcfgd/hooks/pd-eth0 eth0",
+	    "  and carries no -P at all where the document asked for no prefix");
+	check(args.argv[args.count] == NULL, "  and it is NULL-terminated for execv");
+
+	/*
+	 * **The half an unconditional `-P` cost.** The Rust records it: every
+	 * `config = "dhcp6"` solicited a delegation nobody had written down, and
+	 * an ISP handed one out that nothing would ever use. Both directions are
+	 * asserted, because "the flag is there when asked for" passes just as
+	 * loudly on a build that always passes it.
+	 */
+	message[0] = '\0';
+	check(ncfg_dhcp_odhcp6c_args("/usr/sbin/odhcp6c", "eth0", "/h", "/p", "2001:db8::/56",
+	      &args, message, sizeof(message)),
+	    "a document that asked for a prefix gets one asked for");
+	joined(&args, line, sizeof(line));
+	check_text(line, "/usr/sbin/odhcp6c -d -p /p -P 2001:db8::/56 -s /h eth0",
+	    "  with -P before the script, and the request as written");
+
+	message[0] = '\0';
+	check(ncfg_dhcp_odhcp6c_args("/usr/sbin/odhcp6c", "eth0", "/h", "/p", "", &args, message,
+	      sizeof(message)),
+	    "an empty request is no request");
+	joined(&args, line, sizeof(line));
+	check_text(line, "/usr/sbin/odhcp6c -d -p /p -s /h eth0", "  and carries no -P either");
+
+	message[0] = '\0';
+	check(!ncfg_dhcp_odhcp6c_args(NULL, "eth0", "/h", "/p", NULL, &args, message,
+	      sizeof(message)) && message[0] != '\0',
+	    "a vector asked for with no program is refused with a sentence");
+}
+
+/*
+ * The hook odhcp6c runs, and the file the observer already reads.
+ *
+ * `ncfg_state_read_reports` has walked `<run>/prefixes/` since the host module
+ * landed and nothing ever wrote into it. This is the writer end; what is
+ * asserted is the contract between them -- one prefix per line, written to a
+ * staged name beside the target and renamed.
+ */
+static void the_prefix_hook_writes_what_the_observer_reads(void)
+{
+	char  message[NCFG_ERROR_MAX];
+	char *text;
+
+	message[0] = '\0';
+	text = ncfg_dhcp_pd_script("eth0", "/run/netcfgd/prefixes/eth0", message,
+	    sizeof(message));
+	check(text != NULL, "the prefix hook renders");
+	if (!text) {
+		return;
+	}
+	check(strncmp(text, "#!/bin/sh\n", 10u) == 0, "  it is a shell script");
+	check(strstr(text, "${PREFIXES:-}") != NULL,
+	    "  it reads odhcp6c's PREFIXES and nothing else");
+	check(strstr(text, "new_delegated_dhcp6_prefix") == NULL &&
+	    strstr(text, "new_dhcp6_prefix") == NULL,
+	    "  and no dhcpcd variable beside it, which would never be set (0050)");
+	check(strstr(text, "${p%%,*}") != NULL,
+	    "  odhcp6c's trailing lifetimes are stripped, the prefix being up to the comma");
+	check(strstr(text, "'/run/netcfgd/prefixes/.eth0.tmp'") != NULL,
+	    "  it writes to the staged name beside the target, which the reader skips");
+	check(strstr(text, "mv '/run/netcfgd/prefixes/.eth0.tmp' \"$out\"") != NULL,
+	    "  and renames it, so a half-written file is never read as a shorter list");
+	check(strstr(text, ": > '/run/netcfgd/prefixes/.eth0.tmp'") != NULL,
+	    "  truncating first, so a renewal that dropped a prefix does not leave both");
+	free(text);
+
+	message[0] = '\0';
+	check(ncfg_dhcp_pd_script(NULL, "/t", message, sizeof(message)) == NULL &&
+	    message[0] != '\0',
+	    "a hook asked for with no interface is refused with a sentence");
+}
+
 static void what_dhcpcd_is_started_with(void)
 {
 	ncfg_dhcp_args_t args;
@@ -912,6 +1061,135 @@ static void a_machine(ncfg_dhcp_machine_t *machine, const char *dhcpcd, const ch
 	/* Short, because two cases here deliberately drive a client that will not
 	 * stop and the thing waiting behind a real one is the reconcile loop. */
 	machine->patience_ms = 200;
+}
+
+/*
+ * A whole argument in the recorder's output, rather than a substring of it.
+ *
+ * `strstr(said, "-P")` reads a file of newline-separated argv as one string,
+ * and several of those arguments are **paths**: the run directory, the hook.
+ * This binary's scratch directory is `netcfgd-c-dhcp-XXXXXX`, so a `mkdtemp`
+ * that picks `P` for the first of its six characters puts a literal `-P` into
+ * every path the client is given, and "no delegation is solicited" fails for a
+ * directory name. One run in sixty-two -- which is the rate at which a failure
+ * is read as somebody else's flake rather than as a defect in the check.
+ *
+ * The positive assertion had the same fault pointing the other way, and it is
+ * the worse half: it would have passed on the directory name alone with the
+ * `-P` deleted from the argv builder entirely.
+ */
+static int argv_has(const char *recorded, const char *argument)
+{
+	size_t length = strlen(argument);
+	const char *at = recorded;
+
+	while (at && *at) {
+		const char *end = strchr(at, '\n');
+		size_t      span = end ? (size_t)(end - at) : strlen(at);
+
+		if (span == length && memcmp(at, argument, length) == 0) {
+			return 1;
+		}
+		at = end ? end + 1 : NULL;
+	}
+	return 0;
+}
+
+/*
+ * A DHCPv6 start: which client, what it is given, and the file it leaves.
+ *
+ * **The recorder is the whole instrument.** `write_recorder` puts a shell
+ * script where the client should be, which prints its own argv into a file and
+ * exits 0 -- so the start runs to completion without a real odhcp6c, and what
+ * it was given is on disk to be read back. That is how the v4 half is driven
+ * and it is what makes the v6 half's `-P` assertable end to end rather than
+ * only at the argv builder.
+ */
+static void a_dhcp6_start_carries_the_document_s_request(const char *base)
+{
+	ncfg_dhcp_machine_t machine;
+	char                fake[256];
+	char                record[256];
+	char                where[256];
+	char                hook[512];
+	char                message[NCFG_ERROR_MAX];
+	char               *said;
+
+	(void)testdir_in(base, "v6run", where, sizeof(where));
+	testdir_mkdirp(where);
+	(void)testdir_in(base, "fake-odhcp6c", fake, sizeof(fake));
+	(void)testdir_in(base, "v6-argv", record, sizeof(record));
+	write_recorder(fake, record, 0);
+	a_machine(&machine, "/nonexistent/dhcpcd", "/nonexistent/udhcpc",
+	    "/nonexistent/busybox");
+	machine.odhcp6c_program = fake;
+
+	message[0] = '\0';
+	check(ncfg_dhcp6_start(where, "eth6", NULL, &machine, message, sizeof(message)),
+	    "a dhcp6 start with no prefix asked for runs the client");
+	said = testdir_read(record, NULL);
+	check(said && !argv_has(said, "-P"),
+	    "  and gives it no -P, so no delegation is solicited");
+	check(said && strstr(said, "eth6") != NULL,
+	    "  with the interface it was started for");
+	free(said);
+
+	/* The hook, which is the writer end of a file whose reader has existed
+	 * since the host module landed. */
+	(void)snprintf(hook, sizeof(hook), "%s/hooks/pd-eth6", where);
+	check(testdir_exists(hook), "  and leaves the prefix hook where it told odhcp6c to look");
+	said = testdir_read(hook, NULL);
+	check(said && strstr(said, "${PREFIXES:-}") != NULL,
+	    "  which reads odhcp6c's PREFIXES");
+	free(said);
+
+	message[0] = '\0';
+	check(ncfg_dhcp6_start(where, "eth7", "2001:db8::/56", &machine, message,
+	      sizeof(message)),
+	    "and one that asked for a prefix runs it too");
+	said = testdir_read(record, NULL);
+	check(said && argv_has(said, "-P") && argv_has(said, "2001:db8::/56"),
+	    "  with the request the document asked for, and only then");
+	free(said);
+}
+
+/*
+ * A machine that cannot serve the document, which is a refusal rather than a
+ * fallback.
+ *
+ * The only place the two answers differ, and the reason `ncfg_dhcp6_client` is
+ * pure: with no odhcp6c a plain dhcp6 interface is dhcpcd's and one that asked
+ * for a prefix is nobody's (0050).
+ */
+static void a_dhcp6_start_without_odhcp6c(const char *base)
+{
+	ncfg_dhcp_machine_t machine;
+	char                where[256];
+	char                message[NCFG_ERROR_MAX];
+
+	(void)testdir_in(base, "v6bare", where, sizeof(where));
+	testdir_mkdirp(where);
+	a_machine(&machine, "/nonexistent/dhcpcd", "/nonexistent/udhcpc",
+	    "/nonexistent/busybox");
+	machine.odhcp6c_program = "/nonexistent/odhcp6c";
+
+	message[0] = '\0';
+	check(!ncfg_dhcp6_start(where, "eth6", "2001:db8::/56", &machine, message,
+	      sizeof(message)) &&
+	    strstr(message, "0050") != NULL && strstr(message, "Install odhcp6c") != NULL,
+	    "a delegation with no odhcp6c is refused, naming the decision and the repair");
+	check(!testdir_exists("/nonexistent"),
+	    "  and nothing was written for a client that was never going to run");
+
+	message[0] = '\0';
+	check(!ncfg_dhcp6_start(where, "eth6", NULL, &machine, message, sizeof(message)) &&
+	    strstr(message, "install odhcp6c or dhcpcd") != NULL,
+	    "and with neither client installed the refusal names both");
+
+	message[0] = '\0';
+	check(!ncfg_dhcp6_start(where, "eth6", NULL, NULL, message, sizeof(message)) &&
+	    message[0] != '\0',
+	    "a v6 start with no machine refuses rather than reaching for this machine's own");
 }
 
 static void a_start_prefers_dhcpcd_and_writes_both_marks(const char *base)
@@ -1459,6 +1737,10 @@ int main(void)
 
 	what_udhcpc_is_started_with();
 	what_dhcpcd_is_started_with();
+	which_v6_client_can_serve_the_document();
+	what_a_prefix_is_asked_for_with();
+	what_odhcp6c_is_started_with();
+	the_prefix_hook_writes_what_the_observer_reads();
 	what_stops_it_names_the_same_family();
 	the_paths_are_the_marks();
 
@@ -1470,6 +1752,8 @@ int main(void)
 	the_writer_and_the_reader_agree_on_where_the_record_lives();
 
 	a_start_prefers_dhcpcd_and_writes_both_marks(base);
+	a_dhcp6_start_carries_the_document_s_request(base);
+	a_dhcp6_start_without_odhcp6c(base);
 	a_machine_with_only_busybox_still_gets_a_lease(base);
 	a_stale_metric_record_goes_with_the_client_that_had_one(base);
 	a_dhcpcd_with_no_hook_is_refused_naming_the_file(base);

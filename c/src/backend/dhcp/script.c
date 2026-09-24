@@ -47,6 +47,75 @@ static int staged_path(const char *target, char *out, size_t out_size)
 	return written >= 0 && (size_t)written < out_size;
 }
 
+char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size_t err_size)
+{
+	ncfg_buf_t buf;
+	char       staged[NCFG_DHCP_PATH_MAX];
+	char      *out;
+
+	if (!iface || !target) {
+		ncfg_error_set(err, err_size,
+		    "a prefix hook was rendered with no interface or nowhere to report to");
+		return NULL;
+	}
+	if (!staged_path(target, staged, sizeof(staged))) {
+		ncfg_error_set(err, err_size,
+		    "the staging name beside %s is longer than this build will build", target);
+		return NULL;
+	}
+	ncfg_buf_init(&buf, SCRIPT_MAX);
+	/*
+	 * **`PREFIXES` is odhcp6c's, and there is deliberately no second variable
+	 * beside it.** The Rust's carried `$new_dhcp6_prefix` "for dhcpcd" for a
+	 * while, which is not a variable dhcpcd sets: the nearest thing it has is
+	 * `$new_delegated_dhcp6_prefix`, and that carries the addresses dhcpcd
+	 * itself derived from a prefix rather than the prefix. netcfgd does the
+	 * deriving (0009 makes a prefix reference an indirection the document
+	 * resolves), so there is nothing for dhcpcd to delegate to and the
+	 * variable is always empty. `ncfg_dhcp6_client` refuses that pairing
+	 * outright, so this script is odhcp6c's and says so (0050).
+	 *
+	 * Written to a temporary and renamed, which is `doc/interface-report.md`'s
+	 * rule and `ncfg_dhcp_udhcpc_script`'s: the observer may read at any
+	 * moment and a half-written file reads as a shorter list rather than as an
+	 * error. Rewritten rather than appended, because a renewal that changed
+	 * the prefix must not leave both.
+	 *
+	 * `${p%%,*}` strips odhcp6c's trailing lifetimes: it reports
+	 * `2001:db8::/56,3600,7200`, and the prefix is everything before the first
+	 * comma.
+	 */
+	ncfg_buf_addf(&buf,
+	    "#!/bin/sh\n"
+	    "# Written by netcfgd. Reports the prefixes delegated on %s.\n"
+	    "# One per line; an empty file means the lease is gone.\n"
+	    "#\n"
+	    "# Run by odhcp6c. dhcpcd cannot report a delegated prefix to a script\n"
+	    "# at all -- see doc/decision/0050 -- so netcfgd refuses that pairing\n"
+	    "# rather than leaving a variable here that would never be set.\n"
+	    "set -u\n"
+	    "out='%s'\n"
+	    ": > '%s'\n"
+	    "for p in ${PREFIXES:-}; do\n"
+	    "\tprintf '%%s\\n' \"${p%%%%,*}\" >> '%s'\n"
+	    "done\n"
+	    "mv '%s' \"$out\"\n",
+	    iface, target, staged, staged, staged);
+	if (ncfg_buf_failed(&buf)) {
+		ncfg_error_set(err, err_size,
+		    "the prefix hook for %s is larger than this build will render", iface);
+		ncfg_buf_free(&buf);
+		return NULL;
+	}
+	out = ncfg_buf_take(&buf, NULL);
+	if (!out) {
+		ncfg_error_set(err, err_size, "out of memory rendering the prefix hook for %s",
+		    iface);
+	}
+	ncfg_buf_free(&buf);
+	return out;
+}
+
 char *ncfg_dhcp_udhcpc_script(const char *iface, const char *state, const char *report,
     char *err, size_t err_size)
 {
