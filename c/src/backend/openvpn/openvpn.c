@@ -591,6 +591,11 @@ static int stop_by_pid(const char *run, const char *iface, char *err, size_t err
 		return 1;
 	}
 	if (!ncfg_process_terminate(pid, err, err_size)) {
+		char why[NCFG_ERROR_MAX];
+
+		(void)snprintf(why, sizeof(why), "%s", err);
+		ncfg_error_set(err, err_size,
+		    "could not stop the openvpn tunnel on %s (pid %ld): %s", iface, (long)pid, why);
 		return 0;
 	}
 	if (pid_file[0] != '\0') {
@@ -645,6 +650,20 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		return stop_by_pid(run, iface, err, err_size);
 	}
 	if (!ncfg_openvpn_command(management, "signal SIGTERM", NULL, 0u, err, err_size)) {
+		char why[NCFG_ERROR_MAX];
+
+		/*
+		 * **Named, because a refusal that is not recorded as a stop still has
+		 * to be a stop that is reported.** `ncfg_openvpn_command` says what
+		 * openvpn answered -- `openvpn refused \`signal SIGTERM\`: ...` -- and
+		 * nothing in that sentence says which tunnel, so an operator with two
+		 * running reads a complaint about neither. The management reply is the
+		 * only thing that reads this path at all: without it the client could
+		 * return any line and the plan would record the tunnel as stopped.
+		 */
+		(void)snprintf(why, sizeof(why), "%s", err);
+		ncfg_error_set(err, err_size, "could not stop the openvpn tunnel on %s: %s", iface,
+		    why);
 		ncfg_openvpn_disconnect(management);
 		return 0;
 	}

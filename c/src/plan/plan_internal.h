@@ -57,8 +57,6 @@ const char *ncfg_plan_qdisc_kind_word(int kind);
  * characters and a terminator; 32 is not a multiple of three, which is where
  * the single `=` comes from. A buffer that could truncate is refused rather
  * than truncated into. */
-#define NCFG_PLAN_KEY_TEXT_MAX 45u
-void ncfg_plan_render_key(const unsigned char *key, char *out, size_t out_size);
 
 /* ------------------------------------------------------------------------ *
  * The builder
@@ -197,6 +195,27 @@ uint32_t ncfg_builder_push(ncfg_builder_t *builder, const ncfg_op_t *op,
 /* Record a `(name, id)` in one of the mark lists. */
 void ncfg_builder_mark(ncfg_builder_t *builder, ncfg_plan_mark_t **list, size_t *count,
     const char *name, uint32_t id);
+/* How many links one plan may remake. Text with no ceiling is text a caller
+ * chooses the size of (0263); a document asking to remake more interfaces than
+ * this in one pass is one nobody has written. */
+#define NCFG_PLAN_RECREATE_MAX 64u
+
+/*
+ * 0059: delete every link whose identity the kernel will not change, and plan
+ * the rest against an observation they are not in.
+ *
+ * The pair is one mechanism. `ncfg_plan_recreation` writes the names of the
+ * links it deleted into `gone`; `ncfg_plan_observed_without` makes the
+ * observation the passes after it read, with those links and everything the
+ * kernel holds on them taken out. The filtered observation borrows every
+ * string from the original and is freed with `ncfg_plan_observed_release`,
+ * never with `ncfg_observed_free`.
+ */
+size_t ncfg_plan_recreation(ncfg_builder_t *builder, const char **gone, size_t gone_max);
+int ncfg_plan_observed_without(const ncfg_observed_t *observed, const char *const *gone,
+    size_t gone_count, ncfg_observed_t *out);
+void ncfg_plan_observed_release(ncfg_observed_t *filtered);
+
 void ncfg_builder_note_string(ncfg_builder_t *builder, const char ***list, size_t *count,
     const char *value);
 
@@ -378,6 +397,11 @@ const ncfg_routing_rule_t *ncfg_plan_intern_rule(ncfg_plan_t *plan,
  * Nothing where the document asks for no lease, where none is running, or
  * where neither answer differs from what is wanted.
  */
+/* 0053: a tunnel whose `.ovpn` is no longer the file it was started from is
+ * stopped and started again, because openvpn reads it once. Devices rather
+ * than interfaces -- a tunnel need not have an interface block at all. */
+void ncfg_plan_stale_tunnel(ncfg_builder_t *builder, const ncfg_device_t *device);
+
 void ncfg_plan_metric_restart(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base);
 
