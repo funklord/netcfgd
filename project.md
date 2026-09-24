@@ -9575,6 +9575,185 @@ The first run stopped on 34 unclassified existence probes -- a third class
 nobody had named -- and wrote nothing. 42 starts, 43 non-starts, 85 sites, 36
 files.
 
+## 10.267 A program search that reproduced the defect its own header describes
+
+`exec_refused.sh` had nine failures and passes. Three faults, and the first is
+the one worth carrying.
+
+### The search tried the machine before it tried `PATH`
+
+`ncfg_backend_find_program` walked `/usr/sbin`, `/sbin`, `/usr/local/sbin` and
+`/usr/bin`, and only then `$PATH`. So a script that puts a stand-in on `PATH`
+was answered with the machine's own program.
+
+`backend_internal.h` opens by describing exactly that fault:
+
+> The Rust finds `radvd`, `hostapd` and `openvpn` by searching `/usr/sbin`
+> first, and openvpn's own comment records what that cost: `tests/live/
+> openvpn.sh` faked the daemon on `PATH` to check the command line netcfgd
+> builds, the search reached the real one first, and 20 of its 45 checks were
+> silently exercising the machine's openvpn (0101).
+
+The header names the fault, the cost and the decision number, and the function
+beneath it does the thing. **A comment that describes a defect is not a guard
+against it**, and this is the sharpest instance this session has produced: the
+port did not inherit the Rust's bug, it reimplemented it under a paragraph
+explaining why not to.
+
+The `live` target states the order that was wanted, too, about its own `PATH`:
+*appended rather than prepended, so a purpose-built binary earlier on PATH
+still wins*.
+
+### And the fallback made "not installed" unrepresentable
+
+Reversing the order fixed two checks and not the first one, which points `PATH`
+at an empty directory and asks netcfgd to say which packages would provide a
+client. The fallback still answered with `/usr/sbin/dhcpcd`.
+
+The Rust's `which` is `$PATH` and nothing else. This port added four
+directories for a real reason -- `wpa_supplicant`, `resolvconf` and `tc` are in
+`/sbin` and `/usr/sbin`, which are on root's `PATH` and not on an ordinary
+user's -- but consulting them whenever `PATH` comes up empty means *no client
+is installed* is a state nothing can express.
+
+**Nothing reachable needed it.** systemd gives a unit with no
+`Environment=PATH` its own default, which carries all four; root's login
+`PATH` and sudo's `secure_path` carry them too; and the `live` target appends
+them. So the fallback now applies only where `PATH` cannot answer at all --
+a process started with no environment -- and a `PATH` that exists and does not
+hold the program is an answer.
+
+### The refusal nobody could read, and the function nobody called
+
+Five checks remained, all about *why* a client would not run: the mode it
+found, the missing executable bit, the `noexec` mount. netcfgd said `No such
+file or directory` for every one.
+
+`execv` reports to the child and the child is about to stop existing, so the
+parent had only "exited 127" and **guessed `ENOENT`**. A program that was there
+and not executable was reported as missing.
+
+`ncfg_process_exec_refusal` -- which tells "no executable bit" from "mounted
+`noexec`", and is 0182 -- existed, was tested, and **had no caller anywhere**.
+10.258 listed it among the twenty-five functions used only inside their own
+file; this is what that cost, named by a script rather than by a sweep.
+
+The child writes its `errno` down a close-on-exec pipe now. A successful exec
+closes the write end, so the parent's read of zero bytes also separates *could
+not become the program* from *the program ran and exited 127* -- which the old
+code could not, and reported as the first.
+
+`pipe` and then `FD_CLOEXEC` rather than `pipe2`: this build compiles with
+`_DEFAULT_SOURCE` and `pipe2` wants `_GNU_SOURCE`, which is a build-wide change
+and not one function's to make. The window between the two calls is named in
+the code rather than ignored.
+
+### Two messages that carry more rather than less
+
+The last two failures were wording, and neither was fixed by copying the Rust.
+
+The exec refusal led with the resolved path while its second half already named
+that path -- so it said it twice and buried the word an operator greps for. It
+leads with the program's name now and keeps the path where it is doing work.
+
+A client that ran and failed was reported by its own complaint out of the log,
+which is the better half and is this port's recorded design. It carried no exit
+status, which is the half a script can branch on. It carries both.
+
+### What it was worth
+
+    both pass                   22 -> 34
+    rust passes, C does not     33 -> 21
+
+Across four waves: the link remake (10.264), the startup segfault and the roam
+burst (10.265), the contention roots (10.266) and this. Twenty-one scripts
+still fail and are now the list: `ap`, `apply_race`, `confirm`, `c_warnings`,
+`displace`, `dot1x`, `enterprise`, `hooks`, `linkset`, `log_shape`, `nat`,
+`openvpn`, `orphan`, `restart`, `revive`, `rfkill`, `rfkill_stream`,
+`stations`, `switch_network`, `wedged`, `write_full`.
+
+`openvpn` is worth looking at first, for the reason this section is about: it
+is the script whose fault the header describes, and its stand-in is on `PATH`.
+## 10.266 The contention check was pointed at the machine, whatever it was told
+
+`displace.sh` is about netcfgd and another manager sharing a radio: declining
+one that NetworkManager holds, taking it when NM lets go, and giving it back
+when NM claims it again. Seven of its checks failed against the C; three do
+now.
+
+### What was wrong
+
+`ncfg_contention_machine` fills `run_root` with `/run`, `proc_root` with
+`/proc` and `run_root_is_the_machines` with 1, and the daemon called it and
+nothing else. So **every contention check read the real
+`/run/NetworkManager`**, whatever the caller had been pointed at.
+
+`apply.h` says, above the struct, that the Rust "reads `NCFG_RUN_ROOT` and
+`NCFG_PROC` so that its tests can point it". The sentence was in this port's
+own header, describing a facility this port did not have.
+
+In production the hard-coded roots are right -- the machine's own `/run` is the
+one that matters -- so this cost no wrong answer on a real machine. What it
+cost is that the case could never be made to happen: five of the seven failures
+were netcfgd starting a supplicant on a radio the fixture had marked as
+NetworkManager's, because netcfgd was reading a directory the fixture had not
+written to.
+
+### The fix, and where it goes
+
+`daemon_world.c` resolves the two roots from the environment after asking for
+the machine's, which is where `daemon_main.c` already resolves the
+configuration, run and supplicant directories. **The library still reads no
+environment** -- `service.h`'s rule, and the reason a seam takes its roots as
+arguments -- and the two names are published in `apply.h` beside the struct
+they fill, so the program and the document agree about them.
+
+**A named run root clears `run_root_is_the_machines`**, which is the Rust's
+rule and is what that field exists for. Its own comment says the namespace
+check is about a `/run` this process did not choose: a fixture, or a container
+somebody pointed netcfgd at on purpose, is not that.
+
+### The third time in one session
+
+The first run after the fix showed **eleven** failures where there had been
+seven, and four of the new ones were in a section the change could not reach --
+it runs before the fixture exports either variable. Three consecutive runs
+reproduced it exactly, at 56, 56 and 55 seconds.
+
+It was not a regression. The change grew a struct in `loop_internal.h` and
+`c/Makefile` has no header dependencies, so only the one file edited was
+recompiled and every other object still held the old layout. `make clean` took
+it from eleven to three.
+
+**Reproducible is not correct when the artifact is inconsistent**, and three
+identical runs are three readings of one bad binary. This has now cost this
+session three times -- 10.252 records the first, and the `ncfg_dhcp_machine_t`
+field in 10.259 the second -- and the pattern is the same each time: a header
+that grows a field, a build that says nothing, and a failure a long way from
+its cause. The rule that survives it is mechanical rather than attentive:
+**after touching a header in `c/`, the next build is `make clean`**, and a
+result from any other build is not evidence.
+
+### The three that are left, characterised rather than chased
+
+  * **`and an apply says who is holding it`** -- the apply tries to start a
+    supplicant and fails with `status 65280` instead of declining with the
+    sentence naming the holder. The sentence exists in
+    `backend/supplicant/launch.c` and its branch needs
+    `ncfg_supplicant_answers` to say the foreign socket replies; it says it
+    does not. Whether the fake answers what this port asks, or the port asks
+    something it should not, is the next question.
+  * **`and names the manager rather than guessing`** -- the same shape one
+    layer up: the daemon's log does not carry `already managing`.
+  * **`and scanning works through it`** -- `the supplicant could not scan
+    (ret=-1)`, which is the fake refusing a scan rather than a contention
+    question at all.
+
+### And what did not move
+
+Every one of the twelve scripts that set `NCFG_RUN_ROOT` was re-run against
+the new build. `roam` and `orphan` pass, `displace` improved, and `revive`,
+`wedged`, `wifi` and `wifi_trouble` are unchanged. Nothing regressed.
 ## 10.263 The Rust's live suite, run against the C, with the Rust as its control
 
 10.262 built the seam. This is the first run, and the first answer this tree
@@ -9954,6 +10133,157 @@ Recorded rather than acted on, which is what `working-practice.md` asks: which
 of the two is wrong is a real question, and the answer is the copyright
 holder's. `NCFG_SSID` is in the same paragraph of that document and is missing
 from both in the same way.
+
+## 10.259 The DHCPv6 client, and a deferral justified by a claim about the Rust
+
+10.258's lens was a function nothing reaches. The next one down is a **field**
+nothing reaches -- which is this project's own recurring defect rather than a
+borrowed idea: `started_metric` had no producer at all, so the first half of
+the metric-restart rule never fired on any machine, and `observed.dns` had no
+writer, so the planner compared every scope against an empty list and
+re-delivered for ever. Both were found by accident.
+
+### The observation is clean, and that is a measurement
+
+184 field names in `observed.h`, each checked for a writer other than its own
+JSON codec and a reader other than its own JSON writer. **Every one has both.**
+
+The detector needed three corrections before that zero meant anything, and all
+three under-reported -- which is 10.258's asymmetry again, met on a different
+instrument. A write is not only `->x =`: it is `->x.y =`, which is how
+`liveness.c` sets `answering`; it is `->x[i] =`; and it is **having its address
+taken**, `&out->nameservers`, which is how every list in this tree is filled and
+which hid the field the whole lease-contributes-nameservers rule turns on.
+
+The zero was then controlled rather than believed: removing the single writer
+of `config_matches` in `observe/currency.c` makes the sweep name that field and
+nothing else, and putting it back clears it.
+
+### The document is not clean
+
+The same question of `document.h`, where the answer is sharper because a
+document field is a **configuration key**: one that nothing outside the
+compiler, the codec and the renderers ever names is a key an operator can
+write, that netcfgd will accept, canonicalise and echo back, and never act on.
+This project has shipped that exact defect twice by a spelling -- `wire_guard`
+for `wireguard`, `open_vpn` for `openvpn` (0263).
+
+244 fields, 21 with no actor. Most are shared with the Rust, which does not act
+on them either, and are the model carrying a design ahead of an implementation.
+One is not.
+
+### `prefix_delegation`
+
+The C compiles it: `lower_address.c` builds an `ncfg_pd_request_t` from the
+document, `render_link.c` writes it back out as `pd_hint`. Then nothing. The
+executor refuses to start a DHCPv6 client at all, and
+`ncfg_service_backend_supported` says why:
+
+> a dhcp6 client on %s needs to know whether the document asked for a delegated
+> prefix, which the plain backend path does not carry
+
+`backend_ops.c`'s header adds the sentence that made this look settled: **"The
+Rust refuses it in exactly the same words at the same point."**
+
+It does not. The Rust has that sentence, in `start_backend` -- and its executor
+never reaches it for DHCPv6. `Op::BackendStart` with `kind == Dhcp6` is
+intercepted one match arm earlier, looks the interface up in the `delegating`
+map its `with_context` built from the document, and calls `start_dhcp6` with
+the request. **The port reproduced the dead arm and not the live one**, and
+then cited the dead arm as agreement.
+
+That is the shape worth keeping: a wrongly-deferred question is caught by
+nothing, and this one was justified by a claim about somebody else's code that
+nobody re-read. `evidence.md` calls it a claim about another tree being a
+measurement you did not take; here the measurement was taken once, correctly,
+against the wrong function.
+
+### One end of a file, implemented
+
+The consequence is visible without reading either implementation.
+`ncfg_state_read_reports` has walked `<run>/prefixes/` since the host module
+landed, and **nothing in this port has ever written into it** -- the writer is
+the hook script a DHCPv6 client is started with, and no DHCPv6 client is ever
+started. A reader with no writer, which is `observed.dns` again one layer out.
+
+### What landed this wave, and what did not
+
+Landed, with tests and two sabotages:
+
+  * `ncfg_dhcp6_client`, the choice, **pure and separate for the Rust's own
+    stated reason** -- the refusing case needs a machine with no odhcp6c, and a
+    branch no test can make fire is untested code however defensive it looks.
+    All four combinations are driven;
+  * `ncfg_dhcp_prefix_request`, the `-P` spelling: `<hint>/<length>`, the
+    length alone, or `0` for a length nobody stated;
+  * `ncfg_dhcp_odhcp6c_args`, which passes `-P` **only where the document asked
+    for one**. Both directions are asserted, because "the flag is there when
+    asked for" passes just as loudly on a build that always passes it -- and
+    always passing it is what the Rust records as the defect: every
+    `config = "dhcp6"` solicited a delegation nobody had written down, and an
+    ISP handed one out that nothing would ever use;
+  * `ncfg_dhcp_pd_script`, the hook, asserted against the contract its reader
+    already implements: one prefix per line, odhcp6c's `PREFIXES` and no dhcpcd
+    variable beside it, staged under a dotted name and renamed.
+
+Sabotaged: making `-P` unconditional reddens both directions of the argv check,
+and serving a delegation with dhcpcd reddens the refusal and the sentence it
+carries.
+
+### The start, and what it took the refusal down to
+
+`ncfg_dhcp6_start` is `ncfg_dhcp_start`'s order with two differences that are
+the v6 half's own. **Which client can serve the document is decided first**,
+because it is a refusal rather than a fallback -- so a machine that cannot
+serve it is told before a hook and a symlink are laid down for a client that
+will never run; the v4 half has no such case, its three candidates being
+interchangeable. And **the hook is netcfgd's own generated script** rather than
+the shipped dhcpcd one: it is the writer of `<run>/prefixes/<iface>`.
+
+The executor reads the request out of the document the service already holds,
+which is `ncfg_service_supplicant_driver`'s arrangement rather than the Rust's
+precomputed `delegating` map -- the C's executor is asked per start rather than
+built once per apply, so a second list of the same fact would be a second thing
+to keep in step.
+
+`ncfg_service_backend_supported` stops refusing the start. What survives is the
+one refusal that is a fact about the **machine** rather than about this build,
+and it moved to where it can be answered: a pure predicate over an op cannot
+see whether odhcp6c is installed, and the start can.
+
+**The ledger says what it was worth: 15 refusals where there were 16.**
+
+### Three test comments that had written the gap down as a decision
+
+Every one of them said, in its own words, that this was settled:
+
+  * `backend_ops.c`'s header -- "The Rust refuses it in exactly the same words
+    at the same point";
+  * `apply_test.c`'s, which used the DHCPv6 start as its example of a
+    permanent refusal and said so: *"what this asserts is unchanged and its
+    subject is permanent"*. Its subject has now moved five times, and it is
+    pointed at `backend.start` for WireGuard, which is a refusal about the
+    **kind** -- a kernel device is not a daemon -- rather than about a missing
+    port;
+  * `service_test.c`'s -- "the DHCPv6 half answers differently for the two
+    verbs, and that is the decision rather than an oversight".
+
+Three sentences, none of them true, each in a place nobody re-reads. **A
+wrongly-deferred question is caught by nothing**, and what made this one
+invisible was not that it was undocumented but that it was documented three
+times as a choice.
+
+### What the tests cover, and the one they did not until they did
+
+`dhcp_test.c` drives the argv builder both directions, all four client choices,
+the hook's contract with its reader, and the start itself against a stand-in
+odhcp6c that records its own `argv`.
+
+None of that covers the executor **finding** the request. Dropping the lookup
+-- passing NULL where the document asked for a prefix -- leaves every check in
+that file green, which is what a value with two consumers and one wired looks
+like. `service_test.c` asserts it now, against a document built in the test for
+the purpose, and the sabotage reddens exactly that check.
 
 ## 10.258 Four dead functions, and a detector that was wrong four times finding them
 

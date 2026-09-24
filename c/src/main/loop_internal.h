@@ -125,8 +125,17 @@
  * the list travelling beside the wake. What a bound buys is that a radio
  * flapping cannot make one round's allocation the operator's to choose;
  * whatever does not fit is counted and said, rather than dropped in silence.
+ *
+ * **It is `NCFG_MAIN_EVENT_BURST` rather than a number of its own, and the
+ * two are one mechanism.** `drain_radio` takes up to that many events from a
+ * radio in a round, so that is how many roams a round can produce -- and a
+ * hold smaller than the drain overflows on every burst the drain exists to
+ * handle. It was 16 against a drain of 64, so a supplicant losing an access
+ * point (0240, which is why the drain is a drain) reliably lost the tail:
+ * `tests/live/roam.sh` asks for thirty and counted twenty (project.md 10.265).
+ * Naming the relationship is what stops the two drifting apart again.
  */
-#define NCFG_MAIN_ROAMS_MAX 16
+#define NCFG_MAIN_ROAMS_MAX NCFG_MAIN_EVENT_BURST
 
 /* `a0:a4:7f:23:9a:cf` and a NUL, which is what `supplicant.h` asks for. */
 #define NCFG_MAIN_BSSID_MAX 18
@@ -1157,6 +1166,11 @@ typedef struct {
 	/* How long to wait for the apply lock. A field so that a test does not
 	 * have to wait thirty seconds to see the refusal. */
 	long                     patience_ms;
+	/* What `contention.run_root` and `contention.proc_root` point at, where
+	 * the environment named them. Owned here because that struct borrows, and
+	 * it is read for the life of the daemon. */
+	char                     contention_run[NCFG_MAIN_LOOP_PATH_MAX];
+	char                     contention_proc[NCFG_MAIN_LOOP_PATH_MAX];
 } ncfg_main_world_t;
 
 /*
