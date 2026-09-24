@@ -32,8 +32,21 @@
  *   which is not an accident of the porting order. Which v6 client can serve a
  *   document is decided by whether that document asked for a delegated prefix
  *   -- odhcp6c can report one and dhcpcd measurably cannot (0050) -- and a
- *   plain `backend.start` carries neither the request nor an odhcp6c. The Rust
- *   refuses it in exactly the same words at the same point. Stopping is a
+ *   plain `backend.start` carries neither the request nor an odhcp6c.
+ *
+ *   **That last sentence used to read "The Rust refuses it in exactly the same
+ *   words at the same point", and it was wrong.** The Rust has the sentence,
+ *   in its `start_backend` free function -- and its executor never reaches it
+ *   for DHCPv6: `Op::BackendStart` with that kind is intercepted one match arm
+ *   earlier, looks the interface up in the `delegating` map `with_context`
+ *   built from the document, and starts a client with the request. This port
+ *   reproduced the dead arm and cited it as agreement. The pieces the start
+ *   needs are in `dhcp.h` now -- `ncfg_dhcp6_client`,
+ *   `ncfg_dhcp_prefix_request`, `ncfg_dhcp_odhcp6c_args` and
+ *   `ncfg_dhcp_pd_script` -- and the refusal stands until there is a start to
+ *   replace it with, because a `supported` that said yes to a start that
+ *   cannot happen is worse than one that says no with a reason (project.md
+ *   10.259). Stopping is a
  *   different question and is answerable: `dhcpcd -6 -k` and an odhcp6c's
  *   recorded pid are both this module's, so a v6 client that is running can be
  *   stopped whoever started it.
@@ -107,6 +120,32 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	kind = op->u.backend.kind;
 	iface = op->u.backend.iface ? op->u.backend.iface : "?";
 
+	/*
+	 * **What the kind is comes before what the verb is.** Two of the nine
+	 * name no daemon at all, and telling somebody who asked to reload
+	 * WireGuard that "only a router advertisement daemon re-reads its
+	 * configuration" answers a question about reload semantics they were not
+	 * asking: there is nothing there to reload, start or stop, and that is
+	 * the sentence for all three verbs. The refusal an operator reads has to
+	 * name the thing that is actually wrong (0010), and until this the two
+	 * kinds got the sharper sentence for `start` and `stop` and the generic
+	 * one for `reload` (project.md 10.261).
+	 */
+	if (kind == NCFG_BACKEND_WIREGUARD) {
+		ncfg_error_set(err, err_size,
+		    "%s on %s names WireGuard, which is a kernel device rather than a "
+		    "daemon: `link.create` makes it and `wg.set_device` configures it, so "
+		    "there is no process here to start, stop or reload", name, iface);
+		return 0;
+	}
+	if (kind == NCFG_BACKEND_DNS) {
+		ncfg_error_set(err, err_size,
+		    "%s on %s names DNS, which `dns.apply` delivers rather than a daemon "
+		    "netcfgd runs: the resolver is somebody else's, so there is nothing here "
+		    "to start, stop or reload", name, iface);
+		return 0;
+	}
+
 	if (op->kind == NCFG_OP_BACKEND_RELOAD) {
 		/*
 		 * Only radvd has one. It re-reads its configuration on `SIGHUP`, so a
@@ -132,36 +171,27 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_SUPPLICANT:
 	case NCFG_BACKEND_PPPOE:
-		return 1;
+	/*
+	 * **DHCPv6 was refused here and is not any more.** The refusal said the
+	 * plain backend path carried neither the prefix request nor the odhcp6c
+	 * it would need. It carries both now: `start_dhcp6` reads the request out
+	 * of the document the service holds, and `ncfg_dhcp6_client` picks the
+	 * client. What survives is the one refusal that is a fact about the
+	 * machine rather than about this build -- a document asking for a prefix
+	 * where only dhcpcd is installed -- and that belongs to the start, which
+	 * can see what is installed, rather than to this predicate, which is pure
+	 * (project.md 10.259, 0050).
+	 */
 	case NCFG_BACKEND_DHCP6:
-		/*
-		 * Stopping one is answerable and starting one is not. See the note at
-		 * the top: which v6 client can serve a document turns on whether it
-		 * asked for a delegated prefix, and a plain `backend.start` carries
-		 * neither that request nor the odhcp6c it would need -- so a document
-		 * that asked for one would get a client that takes the lease and
-		 * reports nothing (0050).
-		 */
-		if (op->kind == NCFG_OP_BACKEND_STOP) {
-			return 1;
-		}
-		ncfg_error_set(err, err_size,
-		    "%s on %s needs to know whether the document asked for a delegated prefix, "
-		    "which the plain backend path does not carry -- dhcpcd never reports a "
-		    "prefix to a script and only odhcp6c can, so netcfgd will not pick one "
-		    "here. A DHCPv4 client on %s is started normally", name, iface, iface);
-		return 0;
+		return 1;
+	/* Answered above, before the verb was looked at, because the sentence is
+	 * the kind's rather than the verb's. Named here rather than removed so
+	 * that this switch stays exhaustive over the taxonomy -- which is what
+	 * makes a kind added to it fail to compile instead of falling silently
+	 * into a refusal that does not fit it. */
 	case NCFG_BACKEND_WIREGUARD:
-		ncfg_error_set(err, err_size,
-		    "%s on %s names WireGuard, which is a kernel device rather than a "
-		    "daemon: `link.create` makes it and `wg.set_device` configures it, and "
-		    "there is nothing here to start", name, iface);
-		return 0;
 	case NCFG_BACKEND_DNS:
-		ncfg_error_set(err, err_size,
-		    "%s on %s names DNS, which is delivered by `dns.apply` rather than "
-		    "started: the resolver is somebody else's daemon", name, iface);
-		return 0;
+		break;
 	}
 	ncfg_error_set(err, err_size, "%s names a backend this build does not know", name);
 	return 0;
@@ -339,6 +369,69 @@ static ncfg_optint_t client_metric_on(const ncfg_service_t *service, const char 
 	return none;
 }
 
+/*
+ * The `-P` argument this interface's document asks for, or an empty string.
+ *
+ * Read from the document here rather than precomputed onto the service,
+ * which is `ncfg_service_supplicant_driver`'s arrangement: the document is
+ * held by the service and a second list of the same fact is a second thing to
+ * keep in step. The Rust precomputes it into `with_context`'s `delegating`
+ * because its executor is built once per apply; this one is asked per start,
+ * and the walk is over the interfaces of one document.
+ *
+ * **Empty is not `0`.** No `-P` at all and `-P 0` are different requests: the
+ * second solicits a delegation nobody wrote down, which is the defect
+ * `ncfg_dhcp_odhcp6c_args` records.
+ */
+static void prefix_request_on(const ncfg_service_t *service, const char *iface, char *out,
+    size_t out_size)
+{
+	size_t i;
+
+	if (out_size) {
+		out[0] = '\0';
+	}
+	if (!service->document) {
+		return;
+	}
+	for (i = 0; i < service->document->interface_count; i++) {
+		const ncfg_interface_t *one = &service->document->interfaces[i];
+		size_t                  at;
+
+		if (!one->name || strcmp(one->name, iface) != 0) {
+			continue;
+		}
+		for (at = 0; at < one->addressing_count; at++) {
+			const ncfg_address_source_t *source = &one->addressing[at];
+
+			if (source->kind != (int)NCFG_ADDRESS_SOURCE_DHCP6 ||
+			    !source->dhcp6.prefix_delegation) {
+				continue;
+			}
+			(void)ncfg_dhcp_prefix_request(source->dhcp6.prefix_delegation, out, out_size);
+			return;
+		}
+		return;
+	}
+}
+
+/*
+ * Start a DHCPv6 client, or adopt the one already there.
+ *
+ * `start_dhcp`'s arrangement -- the running question is `ncfg_dhcp6_start`'s
+ * first two steps -- with the document's prefix request carried in, which is
+ * the whole of what this build could not do until now (project.md 10.259).
+ */
+static int start_dhcp6(const ncfg_service_t *service, const char *run_dir, const char *iface,
+    char *err, size_t err_size)
+{
+	char request[128];
+
+	prefix_request_on(service, iface, request, sizeof(request));
+	return ncfg_dhcp6_start(run_dir, iface, request[0] ? request : NULL, &service->dhcp, err,
+	    err_size);
+}
+
 /* Start a DHCPv4 client, or adopt the one already there.
  *
  * **Nothing is asked here about whether one is running**, unlike the three
@@ -503,11 +596,12 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_tunnel(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP4:
 		return start_dhcp(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_DHCP6:
+		return start_dhcp6(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_SUPPLICANT:
 		return start_supplicant(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_PPPOE:
 		return start_session(service, run_dir, iface, err, err_size);
-	case NCFG_BACKEND_DHCP6:
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
 		break;

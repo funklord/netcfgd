@@ -47,6 +47,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -252,6 +253,46 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
 }
 
 /*
+ * The two roots a contention check reads, where somebody named them.
+ *
+ * **In the program rather than in the library**, which is `service.h`'s rule:
+ * nothing under `src/` reads the environment, because a default is how the
+ * difference between a check and an outage becomes a variable somebody
+ * remembered to set. `daemon_main.c` resolves the configuration, run and
+ * supplicant directories the same way.
+ *
+ * `apply.h` says of `ncfg_contention_where_t` that the Rust "reads
+ * `NCFG_RUN_ROOT` and `NCFG_PROC` so that its tests can point it" -- and this
+ * port read neither, so every contention check asked the real
+ * `/run/NetworkManager` whatever it had been pointed at. What that cost is not
+ * a wrong answer in production, where the machine's own `/run` is the right
+ * one: it is that `tests/live/displace.sh` could never make the case fire, and
+ * five of its checks reported netcfgd starting a supplicant on a radio
+ * `NetworkManager` had claimed (project.md 10.266).
+ *
+ * **A named run root clears `run_root_is_the_machines`**, which is the Rust's
+ * rule and the one that field exists for: the namespace check is about a
+ * `/run` this process did not choose. A fixture, or a container somebody
+ * pointed netcfgd at on purpose, is not that.
+ */
+static void contention_roots_from_environment(ncfg_main_world_t *world)
+{
+	const char *run = getenv(NCFG_CONTENTION_RUN_ROOT_ENV);
+	const char *proc = getenv(NCFG_CONTENTION_PROC_ROOT_ENV);
+
+	if (run && run[0] && strlen(run) < sizeof(world->contention_run)) {
+		(void)snprintf(world->contention_run, sizeof(world->contention_run), "%s", run);
+		world->contention.run_root = world->contention_run;
+		world->contention.run_root_is_the_machines = 0;
+	}
+	if (proc && proc[0] && strlen(proc) < sizeof(world->contention_proc)) {
+		(void)snprintf(world->contention_proc, sizeof(world->contention_proc), "%s",
+		    proc);
+		world->contention.proc_root = world->contention_proc;
+	}
+}
+
+/*
  * Put one built line on a subscriber, or say it has gone.
  *
  * A short write is a gone subscriber and not a retry: what is on the wire is
@@ -408,11 +449,13 @@ int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t
 	world->subscribers = subscribers;
 	world->watchers = watchers;
 	world->patience_ms = NCFG_MAIN_APPLY_PATIENCE_MS;
+
 	/* Once, here, rather than per tick: `/run` and `/proc` are written down in
 	 * one place and this reads that place one time, which is
 	 * `ncfg_observe_source_machine`'s rule applied to the other reader of the
 	 * machine. */
 	ncfg_contention_machine(&world->contention);
+	contention_roots_from_environment(world);
 	return 1;
 }
 

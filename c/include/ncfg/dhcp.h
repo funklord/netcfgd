@@ -168,6 +168,13 @@ typedef struct {
 	const char *udhcpc_program;
 	const char *busybox_program;
 	/*
+	 * odhcp6c, which is the only client that can report a delegated prefix
+	 * (0050). NULL searches for the name; a path that is not there is a
+	 * machine without one, which is what makes `ncfg_dhcp6_client`'s refusing
+	 * branch reachable from a test.
+	 */
+	const char *odhcp6c_program;
+	/*
 	 * The hook dhcpcd is pointed at with `-c`. NULL, or a path that is not
 	 * there, refuses a dhcpcd start by name -- see the header above for what
 	 * a missing one costs.
@@ -269,6 +276,23 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  * ------------------------------------------------------------------------ */
 
 /*
+ * The script odhcp6c runs, which reports the prefixes it was delegated.
+ *
+ * One prefix per line into `target`, written to a temporary beside it and
+ * renamed -- `doc/interface-report.md`'s rule, because the observer may read
+ * at any moment and a half-written file reads as a shorter list rather than as
+ * an error. An empty file means the lease is gone.
+ *
+ * **The reader end of this file already existed and the writer did not.**
+ * `ncfg_state_read_reports` walks `<run>/prefixes/` and has since the host
+ * module landed; nothing wrote into it, because the C refused to start a
+ * DHCPv6 client at all (project.md 10.259).
+ *
+ * Allocated; free it. NULL with a sentence.
+ */
+char *ncfg_dhcp_pd_script(const char *iface, const char *target, char *err, size_t err_size);
+
+/*
  * The script udhcpc runs when a lease changes.
  *
  * **Without one udhcpc obtains a lease and configures nothing at all** --
@@ -320,6 +344,54 @@ typedef struct {
 	/* What `-m` points at. Room for any `int64_t` and a sign. */
 	char metric[24];
 } ncfg_dhcp_args_t;
+
+/*
+ * The `-P` argument odhcp6c is given for a delegated prefix.
+ *
+ * `<hint>/<length>` where the document named a hint, the length alone
+ * otherwise, and `0` for a length it did not state -- which asks for whatever
+ * the server offers. 1 with the text, 0 with `out` emptied where there is no
+ * request or it would not fit.
+ */
+int ncfg_dhcp_prefix_request(const ncfg_pd_request_t *request, char *out, size_t out_size);
+
+/*
+ * Which DHCPv6 client can serve what the document asked for, or NULL with the
+ * reason.
+ *
+ * **Pure and separate, which is the Rust's arrangement and its reason**: the
+ * refusing case needs a machine with no odhcp6c, and a branch no test can make
+ * fire is untested code however defensive it looks. Asked this way a test
+ * makes all four combinations fire without the machine having to be any of
+ * them.
+ *
+ * **Prefix delegation is odhcp6c's.** Measured in the Rust against a real
+ * `kea-dhcp6` over a veth pair, with 0050 carrying the whole of it: dhcpcd
+ * exposes a delegated prefix to a script only as
+ * `$new_delegated_dhcp6_prefix`, which carries **the addresses dhcpcd itself
+ * derived** from the prefix, on an interface it delegated to. netcfgd does the
+ * deriving (0009 makes a prefix reference an indirection the document
+ * resolves), so there is no interface for dhcpcd to delegate to and the
+ * variable is always empty. A document that asks for a prefix on a machine
+ * with only dhcpcd is therefore refused, rather than served by a client that
+ * would take a lease from the ISP and report nothing.
+ */
+const char *ncfg_dhcp6_client(int delegating, int has_odhcp6c, const char *iface, char *err,
+    size_t err_size);
+
+/*
+ * odhcp6c's command line.
+ *
+ * `-d` to daemonise, `-p` for the pid file that is the only handle there is,
+ * `-s` for the script netcfgd generated, and `-P` **only where the document
+ * asked for a prefix** -- see `ncfg_dhcp_odhcp6c_args` for what an
+ * unconditional one cost. `request` may be NULL or empty for no delegation.
+ *
+ * Borrows every string, exactly as `ncfg_dhcp_udhcpc_args` does.
+ */
+int ncfg_dhcp_odhcp6c_args(const char *program, const char *iface, const char *script,
+    const char *pid_path, const char *request, ncfg_dhcp_args_t *out, char *err,
+    size_t err_size);
 
 /*
  * What netcfgd starts udhcpc with.
@@ -535,6 +607,31 @@ ncfg_optint_t ncfg_dhcp_started_metric(const char *run, const char *iface);
  * all, and the record written at the end says which of those happened.
  */
 int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *metric,
+    const ncfg_dhcp_machine_t *machine, char *err, size_t err_size);
+
+/*
+ * Start a DHCPv6 client on one interface, or adopt the one already there.
+ *
+ * `ncfg_dhcp_start`'s order, with two differences that are the v6 half's own:
+ *
+ *   * **Which client can serve this document is decided first**, by
+ *     `ncfg_dhcp6_client`, because it is a refusal rather than a fallback: a
+ *     machine with only dhcpcd cannot serve an interface that asked for a
+ *     delegated prefix, and starting one would take a lease from the ISP and
+ *     report nothing (0050). The v4 half has no such case -- its three
+ *     candidates are interchangeable.
+ *   * **The hook is netcfgd's own generated script**, written here and passed
+ *     to odhcp6c with `-s`, rather than the shipped dhcpcd hook. It is the
+ *     writer of `<run>/prefixes/<iface>`, whose reader
+ *     (`ncfg_state_read_reports`) existed for several waves with nothing
+ *     writing into it because this function did not exist (project.md 10.259).
+ *
+ * `request` is the `-P` argument `ncfg_dhcp_prefix_request` built, or NULL
+ * where the document asked for no prefix -- and an absent one means no `-P` at
+ * all rather than `-P 0`, which is the difference between soliciting a
+ * delegation and not.
+ */
+int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
     const ncfg_dhcp_machine_t *machine, char *err, size_t err_size);
 
 /*

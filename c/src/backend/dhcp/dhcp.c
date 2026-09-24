@@ -175,6 +175,98 @@ static int too_long(const char *program, char *err, size_t err_size)
 	return 0;
 }
 
+int ncfg_dhcp_prefix_request(const ncfg_pd_request_t *request, char *out, size_t out_size)
+{
+	int written;
+
+	if (!out || out_size == 0u) {
+		return 0;
+	}
+	out[0] = '\0';
+	if (!request) {
+		return 0;
+	}
+	/*
+	 * `-P 0` asks for a prefix of whatever length the server offers, which is
+	 * what an absent length means. A hint is a prefix the client would like,
+	 * and odhcp6c takes the pair as `<hint>/<length>`.
+	 */
+	if (request->hint) {
+		written = snprintf(out, out_size, "%s/%lld", request->hint,
+		    request->length.has ? (long long)request->length.value : 0LL);
+	} else {
+		written = snprintf(out, out_size, "%lld",
+		    request->length.has ? (long long)request->length.value : 0LL);
+	}
+	if (written < 0 || (size_t)written >= out_size) {
+		out[0] = '\0';
+		return 0;
+	}
+	return 1;
+}
+
+const char *ncfg_dhcp6_client(int delegating, int has_odhcp6c, const char *iface, char *err,
+    size_t err_size)
+{
+	if (has_odhcp6c) {
+		return "odhcp6c";
+	}
+	if (!delegating) {
+		return "dhcpcd";
+	}
+	ncfg_error_set(err, err_size,
+	    "`%s` asks for a delegated prefix and only dhcpcd is installed. dhcpcd never "
+	    "reports the prefix itself to a script -- it reports the addresses it derived "
+	    "from one, and netcfgd does that deriving -- so the lease would arrive and "
+	    "nothing would come of it. Install odhcp6c, or drop the delegation from this "
+	    "interface. See doc/decision/0050", iface ? iface : "this interface");
+	return NULL;
+}
+
+int ncfg_dhcp_odhcp6c_args(const char *program, const char *iface, const char *script,
+    const char *pid_path, const char *request, ncfg_dhcp_args_t *out, char *err,
+    size_t err_size)
+{
+	if (!out) {
+		ncfg_error_set(err, err_size, "a command line was asked for with nowhere to put it");
+		return 0;
+	}
+	memset(out, 0, sizeof(*out));
+	out->argv[0] = NULL;
+	if (!program || !iface || !script || !pid_path) {
+		ncfg_error_set(err, err_size,
+		    "odhcp6c was asked for without a program, an interface, a script or a pid "
+		    "file");
+		return 0;
+	}
+	if (!push(out, program) || !push(out, "-d") ||
+	    /* Where it will write its pid, which is the only handle there is:
+	     * odhcp6c has no control socket and no `-k`, so a client netcfgd
+	     * cannot find is a client netcfgd cannot stop. It writes the file only
+	     * when it daemonises and removes it on the way out, both read out of
+	     * its `odhcp6c.c`. Decision 0071. */
+	    !push(out, "-p") || !push(out, pid_path)) {
+		return too_long(program, err, err_size);
+	}
+	/*
+	 * **Only where the document asked for one.** The Rust records what an
+	 * unconditional `-P` cost: every `config = "dhcp6"` solicited a delegation
+	 * nobody had written down, and an ISP handed one out that nothing would
+	 * ever use.
+	 */
+	if (request && request[0]) {
+		if (!push(out, "-P") || !push(out, request)) {
+			return too_long(program, err, err_size);
+		}
+	}
+	/* The script as an argument, which is the shape this wants: no global hook
+	 * directory to share with other clients. */
+	if (!push(out, "-s") || !push(out, script) || !push(out, iface)) {
+		return too_long(program, err, err_size);
+	}
+	return 1;
+}
+
 int ncfg_dhcp_udhcpc_args(const char *program, const char *applet, const char *iface,
     const char *script, const char *pid_path, ncfg_dhcp_args_t *out, char *err, size_t err_size)
 {
@@ -591,14 +683,209 @@ static int run_client(const char *program, const ncfg_dhcp_args_t *args, const c
 	}
 	if (ncfg_backend_complaints(log, DHCP_MARKERS,
 	    sizeof(DHCP_MARKERS) / sizeof(DHCP_MARKERS[0]), NULL, 0u, 2u, said, sizeof(said))) {
-		ncfg_error_set(err, err_size, "%s would not start on %s: %s. Its output is in %s",
-		    program, iface, said, log);
+		/*
+		 * **The status as well as the words.** The daemon's own complaint is
+		 * the better half and this used to carry it alone -- so a client that
+		 * ran and failed was reported without the one fact a script can
+		 * branch on, which is what `tests/live/exec_refused.sh` asks for. The
+		 * Rust carries the status and not the words; carrying both loses
+		 * nothing (project.md 10.267).
+		 */
+		ncfg_error_set(err, err_size,
+		    "%s on %s exited with status %d: %s. Its output is in %s", program, iface,
+		    WIFEXITED(status) ? WEXITSTATUS(status) : status, said, log);
 	} else {
 		ncfg_error_set(err, err_size,
 		    "%s would not start on %s: it exited with status %d. Its output is in %s",
 		    program, iface, status, log);
 	}
 	return 0;
+}
+
+/*
+ * The hook odhcp6c is started with, and the two directories it needs.
+ *
+ * `<run>/hooks/pd-<iface>` runs; `<run>/prefixes/` is what it writes into and
+ * what `ncfg_state_read_reports` walks. Both are made here rather than by the
+ * script, for `write_script`'s reason: a generated script that made its own
+ * directory left a shipped one arriving with nothing around it.
+ */
+static int write_pd_hook(const char *run, const char *iface, char *out, size_t out_size,
+    char *err, size_t err_size)
+{
+	char  dir[NCFG_DHCP_PATH_MAX];
+	char  target[NCFG_DHCP_PATH_MAX];
+	char *text;
+	int   ok;
+
+	if (!ncfg_backend_join(dir, sizeof(dir), run, "prefixes", err, err_size) ||
+	    !ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_backend_join(target, sizeof(target), dir, iface, err, err_size)) {
+		return 0;
+	}
+	if (!ncfg_backend_join(dir, sizeof(dir), run, "hooks", err, err_size) ||
+	    !ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+		return 0;
+	}
+	{
+		int written = snprintf(out, out_size, "%s/pd-%s", dir, iface);
+
+		if (written < 0 || (size_t)written >= out_size) {
+			out[0] = '\0';
+			ncfg_error_set(err, err_size,
+			    "the prefix hook's path for %s is longer than this build composes one in",
+			    iface);
+			return 0;
+		}
+	}
+	text = ncfg_dhcp_pd_script(iface, target, err, err_size);
+	if (!text) {
+		return 0;
+	}
+	/* 0755 for `write_script`'s reason and with its caveat: odhcp6c execs this,
+	 * so a `/run` mounted `noexec` stops it where busybox's `/bin/sh` would
+	 * not. The mode is netcfgd's half of that and the mount is not (0178). */
+	ok = ncfg_backend_write_file(out, text, strlen(text), 0755, err, err_size);
+	free(text);
+	return ok;
+}
+
+int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
+    const ncfg_dhcp_machine_t *machine, char *err, size_t err_size)
+{
+	char             hook[NCFG_DHCP_PATH_MAX];
+	char             pid_path[NCFG_DHCP_PATH_MAX];
+	char             config[NCFG_DHCP_PATH_MAX];
+	char             log[NCFG_DHCP_PATH_MAX];
+	char             dir[NCFG_DHCP_PATH_MAX];
+	char             recited[NCFG_DHCP_PATH_MAX];
+	ncfg_dhcp_args_t args;
+	const char      *chosen;
+	char            *owned = NULL;
+	const char      *program;
+	pid_t            adopted = 0;
+	int              has_odhcp6c;
+	int              ok;
+
+	if (!machine) {
+		ncfg_error_set(err, err_size,
+		    "a dhcp6 client was started with no machine: this build has no default for "
+		    "the programs, because a default is how a check comes to start a client on "
+		    "the machine it is running on");
+		return 0;
+	}
+	if (!run || run[0] == '\0' || !iface || iface[0] == '\0') {
+		ncfg_error_set(err, err_size,
+		    "a dhcp6 client was started without a run directory or an interface");
+		return 0;
+	}
+
+	/* Already netcfgd's, which is what a converged machine is on every
+	 * reconcile. `ncfg_dhcp_start`'s first question, for its reason. */
+	if (ncfg_dhcp_running_pid(run, "odhcp6c", iface) > 0) {
+		return 1;
+	}
+
+	/*
+	 * **Which client, before anything is written.** This is a refusal rather
+	 * than a fallback, so asking it first means a machine that cannot serve
+	 * the document is told so without a hook and a symlink being laid down
+	 * for a client that will never run.
+	 */
+	program = program_for(machine->odhcp6c_program, "odhcp6c", &owned);
+	has_odhcp6c = program != NULL;
+	free(owned);
+	owned = NULL;
+	chosen = ncfg_dhcp6_client(request && request[0] ? 1 : 0, has_odhcp6c, iface, err,
+	    err_size);
+	if (!chosen) {
+		return 0;
+	}
+
+	if (!ncfg_dhcp_pid_path(run, chosen, iface, pid_path, sizeof(pid_path), err, err_size) ||
+	    !ncfg_dhcp_log_path(run, iface, NCFG_DHCP_FAMILY_V6, log, sizeof(log), err,
+	    err_size)) {
+		return 0;
+	}
+	if (!ncfg_backend_join(dir, sizeof(dir), run, "dhcp", err, err_size) ||
+	    !ncfg_backend_make_dir(dir, 0755, err, err_size)) {
+		return 0;
+	}
+
+	if (strcmp(chosen, "odhcp6c") == 0) {
+		if (!write_pd_hook(run, iface, hook, sizeof(hook), err, err_size)) {
+			return 0;
+		}
+		/* An odhcp6c whose pid file went with the run directory. */
+		if (!ncfg_dhcp_adopt(run, "odhcp6c", iface, &adopted, err, err_size)) {
+			return 0;
+		}
+		if (adopted > 0) {
+			ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+			    "adopted the dhcp6 client already running on %s (pid %d); it is "
+			    "netcfgd's, by the `-p %s` it was started with and the privilege it "
+			    "runs with", iface, (int)adopted, pid_path);
+			return 1;
+		}
+		program = program_for(machine->odhcp6c_program, "odhcp6c", &owned);
+		if (!program) {
+			/* Between the two asks above something took it away, which is a
+			 * fault to report rather than a second client to try. */
+			ncfg_error_set(err, err_size,
+			    "odhcp6c was there when %s was planned and is not there now", iface);
+			return 0;
+		}
+		ok = ncfg_dhcp_odhcp6c_args(program, iface, hook, pid_path, request, &args, err,
+		    err_size);
+	} else {
+		/*
+		 * dhcpcd, in its v6 family, with netcfgd's own mark. The same three
+		 * answers the v4 half gets from `ncfg_dhcpcd_whose`, and the same
+		 * refusal for somebody else's: a second `dhcpcd -b` against a running
+		 * one exits 0 having started nothing (0141).
+		 */
+		if (!write_mark(run, iface, NCFG_DHCP_FAMILY_V6, machine, config, sizeof(config),
+		    err, err_size)) {
+			return 0;
+		}
+		recited[0] = '\0';
+		switch (ncfg_dhcpcd_whose(run, iface, NCFG_DHCP_FAMILY_V6, machine, recited,
+		    sizeof(recited))) {
+		case NCFG_DHCPCD_OURS:
+			ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+			    "adopted the dhcp6 client already running on %s; it is netcfgd's, by "
+			    "the `-f %s` it recites", iface, config);
+			return 1;
+		case NCFG_DHCPCD_THEIRS:
+			ncfg_error_set(err, err_size,
+			    "a dhcpcd is already running on %s and it is not netcfgd's: it recites "
+			    "`-f %s` where netcfgd's would recite `%s`. Starting a second would be "
+			    "a silent no-op -- dhcpcd refuses a second instance and exits 0 -- so "
+			    "netcfgd is not doing it. Stop that client, or take %s out of "
+			    "netcfgd's configuration", iface, recited, config, iface);
+			return 0;
+		case NCFG_DHCPCD_SILENT:
+		default:
+			break;
+		}
+		program = program_for(machine->dhcpcd_program, "dhcpcd", &owned);
+		if (!program) {
+			ncfg_error_set(err, err_size,
+			    "no DHCPv6 client is installed for %s; install odhcp6c or dhcpcd",
+			    iface);
+			return 0;
+		}
+		ok = ncfg_dhcp_dhcpcd_args(program, NCFG_DHCP_FAMILY_V6, iface, NULL,
+		    machine->hook, config, &args, err, err_size);
+	}
+	if (!ok || !run_client(program, &args, log, iface, err, err_size)) {
+		free(owned);
+		return 0;
+	}
+	free(owned);
+	return 1;
 }
 
 int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *metric,

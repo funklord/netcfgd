@@ -7,6 +7,7 @@
 #include "backend_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/process.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -204,6 +205,24 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 	pid_t child;
 	int   log;
 	int   status = 0;
+	/*
+	 * **How the parent learns why the exec failed.** `execv` reports to the
+	 * child and the child is about to stop existing, so without this the
+	 * parent has only "exited 127" and has to guess -- and it guessed
+	 * `ENOENT`, so a program that is there and not executable was reported as
+	 * missing. 0182 is the fault: `Permission denied` is two different faults,
+	 * a file with no executable bit and a file on a filesystem mounted
+	 * `noexec`, and `ncfg_process_exec_refusal` tells them apart. That
+	 * function existed, was tested, and had no caller anywhere
+	 * (project.md 10.258, 10.267).
+	 *
+	 * Close-on-exec, so a successful exec closes the write end and the
+	 * parent's read gets zero bytes. That is also what separates "could not
+	 * become the program" from "the program ran and exited 127", which the
+	 * old code could not and reported as the first.
+	 */
+	int   complaint[2] = { -1, -1 };
+	int   failed_to_exec = 0;
 
 	if (exited_ok) {
 		*exited_ok = 0;
@@ -221,9 +240,34 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		return 0;
 	}
 
+	/*
+	 * `pipe` and then the flag rather than `pipe2`, which this build does not
+	 * reach: the tree compiles with `_DEFAULT_SOURCE` and `pipe2` wants
+	 * `_GNU_SOURCE`, which is a build-wide change and not this function's to
+	 * make. The window between the two calls is a descriptor another thread
+	 * could carry through an exec of its own; it is named rather than
+	 * ignored, and it is the same window every `open` in this tree avoids by
+	 * passing `O_CLOEXEC` outright.
+	 */
+	if (pipe(complaint) != 0 ||
+	    fcntl(complaint[0], F_SETFD, FD_CLOEXEC) != 0 ||
+	    fcntl(complaint[1], F_SETFD, FD_CLOEXEC) != 0) {
+		ncfg_error_set(err, err_size, "could not make a pipe to run %s: %s", program,
+		    strerror(errno));
+		if (complaint[0] >= 0) {
+			(void)close(complaint[0]);
+		}
+		if (complaint[1] >= 0) {
+			(void)close(complaint[1]);
+		}
+		(void)close(log);
+		return 0;
+	}
 	child = fork();
 	if (child < 0) {
 		ncfg_error_set(err, err_size, "could not run %s: %s", program, strerror(errno));
+		(void)close(complaint[0]);
+		(void)close(complaint[1]);
 		(void)close(log);
 		return 0;
 	}
@@ -236,12 +280,29 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 			_exit(127);
 		}
 		(void)close(log);
+		(void)close(complaint[0]);
 		/* The cast is const-correctness only: `execv` does not modify the
 		 * vector, and C has no way to say so in the prototype. */
 		execv(program, (char *const *)(const void *)argv);
+		{
+			int why = errno;
+
+			/* Best effort: a parent that is gone leaves nobody to tell, and
+			 * the exit status still says the exec did not happen. */
+			(void)!write(complaint[1], &why, sizeof(why));
+		}
 		_exit(127);
 	}
 	(void)close(log);
+	(void)close(complaint[1]);
+	{
+		int why = 0;
+
+		if (read(complaint[0], &why, sizeof(why)) == (ssize_t)sizeof(why)) {
+			failed_to_exec = why;
+		}
+		(void)close(complaint[0]);
+	}
 	for (;;) {
 		pid_t got = waitpid(child, &status, 0);
 
@@ -257,11 +318,33 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 	if (status_out) {
 		*status_out = status;
 	}
-	if (WIFEXITED(status) && WEXITSTATUS(status) == 127) {
-		/* The child could not become the program at all, which is a different
+	if (failed_to_exec != 0) {
+		/*
+		 * The child could not become the program at all, which is a different
 		 * failure from the program refusing its configuration -- and the one
-		 * an operator can do something about immediately. */
-		ncfg_error_set(err, err_size, "could not run %s: %s", program, strerror(ENOENT));
+		 * an operator can do something about immediately. The errno is the
+		 * child's own now rather than a guess, so the sentence separates a
+		 * missing file from one that is there and will not run.
+		 */
+		char        why[NCFG_ERROR_MAX];
+		/*
+		 * **The bare name leads and the path follows.** `program` here is a
+		 * resolved path, and the refusal below already names it in full while
+		 * saying what is wrong with it -- so leading with the path says it
+		 * twice and buries the word an operator is looking for. The Rust
+		 * leads with the name because that is all it has; this leads with the
+		 * name and keeps the path where it is doing work.
+		 */
+		const char *slash = strrchr(program, '/');
+		const char *named = slash && slash[1] ? slash + 1 : program;
+
+		if (ncfg_process_exec_refusal(program, failed_to_exec, why, sizeof(why))) {
+			ncfg_error_set(err, err_size, "could not run %s: %s -- %s", named,
+			    strerror(failed_to_exec), why);
+		} else {
+			ncfg_error_set(err, err_size, "could not run %s: %s", program,
+			    strerror(failed_to_exec));
+		}
 		return 0;
 	}
 	if (exited_ok) {
@@ -433,8 +516,42 @@ char *ncfg_backend_strdup(const char *text)
 	return out;
 }
 
+/*
+ * A program by name: `PATH` first, then the places an unprivileged `PATH` does
+ * not have.
+ *
+ * **The order is the whole of this function and it was the wrong way round.**
+ * `backend_internal.h` opens by recording what searching `/usr/sbin` first
+ * cost the Rust: `tests/live/openvpn.sh` faked the daemon on `PATH` to check
+ * the command line netcfgd builds, the search reached the real one first, and
+ * 20 of its 45 checks were silently exercising the machine's openvpn (0101).
+ * This function reproduced that exactly -- four system directories, then
+ * `PATH` -- so every live script that puts a stand-in on `PATH` was answered
+ * with the machine's own program instead (project.md 10.267).
+ *
+ * **And the fallback now applies only where `PATH` cannot answer at all.**
+ * The Rust's `which` is `PATH` and nothing else. This port added four system
+ * directories for a real reason -- `wpa_supplicant`, `resolvconf` and `tc`
+ * live in `/sbin` and `/usr/sbin`, which are on root's `PATH` and not on an
+ * ordinary user's -- but consulting them whenever `PATH` comes up empty makes
+ * *no client is installed* a state nothing can express: `exec_refused.sh`
+ * points `PATH` at an empty directory and netcfgd answered with the machine's
+ * own dhcpcd.
+ *
+ * Nothing reachable needed it. systemd gives a unit with no `Environment=PATH`
+ * its own default, which carries all four; root's login `PATH` and sudo's
+ * `secure_path` carry them too; and the `live` target appends `/sbin` and
+ * `/usr/sbin` for exactly this. What `PATH` genuinely cannot answer is a
+ * process started with no environment at all, and that is what is left.
+ *
+ * A caller that knows which program it wants passes a path instead; every seam
+ * under `src/backend/` takes one, which is what this is the fallback for.
+ */
 char *ncfg_backend_find_program(const char *name)
 {
+	/* Only what an unprivileged `PATH` is missing. `/usr/bin` is on every
+	 * `PATH` there is and is listed because a fallback that has to be
+	 * exhaustive is one nobody has to reason about. */
 	static const char *const sbin[] = { "/usr/sbin", "/sbin", "/usr/local/sbin", "/usr/bin" };
 	char                     path[1024];
 	size_t                   at;
@@ -442,16 +559,6 @@ char *ncfg_backend_find_program(const char *name)
 
 	if (!name) {
 		return NULL;
-	}
-	for (at = 0u; at < sizeof(sbin) / sizeof(sbin[0]); at++) {
-		struct stat about;
-
-		if (snprintf(path, sizeof(path), "%s/%s", sbin[at], name) < 0) {
-			continue;
-		}
-		if (stat(path, &about) == 0 && S_ISREG(about.st_mode)) {
-			return ncfg_backend_strdup(path);
-		}
 	}
 	env = getenv("PATH");
 	while (env != NULL && *env != '\0') {
@@ -468,6 +575,23 @@ char *ncfg_backend_find_program(const char *name)
 			}
 		}
 		env = end ? end + 1u : NULL;
+	}
+	/* A `PATH` that exists and does not hold it is an answer: this machine
+	 * does not have it. Only the absence of any `PATH` is a question nobody
+	 * has answered. */
+	env = getenv("PATH");
+	if (env && env[0]) {
+		return NULL;
+	}
+	for (at = 0u; at < sizeof(sbin) / sizeof(sbin[0]); at++) {
+		struct stat about;
+
+		if (snprintf(path, sizeof(path), "%s/%s", sbin[at], name) < 0) {
+			continue;
+		}
+		if (stat(path, &about) == 0 && S_ISREG(about.st_mode)) {
+			return ncfg_backend_strdup(path);
+		}
 	}
 	return NULL;
 }
