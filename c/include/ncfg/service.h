@@ -85,6 +85,7 @@
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
 #include "ncfg/plan.h"
+#include "ncfg/radio.h"
 #include "ncfg/pppoe.h"
 #include "ncfg/secrets.h"
 
@@ -220,6 +221,10 @@ typedef struct {
  * this**, which is `plan.h`'s rule for the four values a plan borrows and is
  * here for the same reason.
  */
+/* The `sys/class/net` path `ncfg_service_machine` holds. The size is
+ * `ncfg_radio_class_net`'s minimum, which it refuses anything shorter than. */
+#define NCFG_SERVICE_CLASS_NET_MAX NCFG_RADIO_ROOT_MAX
+
 typedef struct {
 	/* `<run>/netcfgd`. NULL refuses every backend op and `dns.apply`. */
 	const char *run_dir;
@@ -261,6 +266,26 @@ typedef struct {
 	const char *radvd_program;
 	const char *openvpn_program;
 	const char *supplicant_program;
+	/*
+	 * What `backend.start` asks before it starts a supplicant, and the one
+	 * question this executor puts to the rest of the machine.
+	 *
+	 * **Two managers on one radio drop the association**, which takes the
+	 * address and the default route with it -- so a radio NetworkManager or
+	 * systemd-networkd already holds is one netcfgd declines rather than
+	 * fights over. The daemon asks the same question on a tick and gives a
+	 * contended radio back; that is the remedy for a race and is not a
+	 * substitute for this, because by the time it fires the second supplicant
+	 * has already been started and the association has already gone.
+	 *
+	 * `class_net` is where `<iface>/ifindex` is read, because every daemon
+	 * whose state `contention` reads keys by index and an interface can be
+	 * renamed where an index cannot. Both left absent ask nothing and start
+	 * the supplicant, which is what a caller that knows there is no other
+	 * manager -- a fixture, a container -- is saying.
+	 */
+	const char             *class_net;
+	ncfg_contention_where_t contention;
 	/* Where a resolver configuration is delivered. */
 	ncfg_dns_targets_t dns;
 	/*

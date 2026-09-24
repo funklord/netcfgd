@@ -450,6 +450,15 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 	world->service.radvd_program = world->radvd_program;
 	world->service.openvpn_program = world->openvpn_program;
 	world->service.supplicant_program = world->supplicant_program;
+	/*
+	 * And what `backend.start` asks before it starts a supplicant, from the
+	 * world's own answer rather than from `ncfg_service_machine`'s -- the
+	 * world resolved these from the environment, and a second resolution here
+	 * would read the machine's `/run` in a namespace that had been pointed
+	 * somewhere else.
+	 */
+	world->service.contention = world->contention;
+	world->service.class_net = world->class_net[0] ? world->class_net : NULL;
 	if (!desired) {
 		/*
 		 * A configuration that does not compile. Not a failure: the daemon

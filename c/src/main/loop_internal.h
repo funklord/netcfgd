@@ -1171,6 +1171,17 @@ typedef struct {
 	 * it is read for the life of the daemon. */
 	char                     contention_run[NCFG_MAIN_LOOP_PATH_MAX];
 	char                     contention_proc[NCFG_MAIN_LOOP_PATH_MAX];
+	/*
+	 * Where `<iface>/ifindex` is read, for the one question `backend.start`
+	 * puts to the rest of the machine. Resolved once, beside the two above,
+	 * so the service borrows an answer that outlives every op.
+	 *
+	 * **`NCFG_RADIO_ROOT_MAX` and not this file's own path size**, because
+	 * `ncfg_radio_class_net` refuses anything shorter -- and refuses it
+	 * silently to a caller passing no error buffer, which is how this first
+	 * shipped resolving nothing and asking nobody.
+	 */
+	char                     class_net[NCFG_RADIO_ROOT_MAX];
 } ncfg_main_world_t;
 
 /*

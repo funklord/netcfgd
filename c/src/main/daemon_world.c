@@ -43,6 +43,7 @@
 #include "ncfg/json_write.h"
 #include "ncfg/log.h"
 #include "ncfg/openvpn.h"
+#include "ncfg/radio.h"
 #include "ncfg/supplicant.h"
 
 #include <errno.h>
@@ -281,6 +282,7 @@ static void contention_roots_from_environment(ncfg_main_world_t *world)
 {
 	const char *run = getenv(NCFG_CONTENTION_RUN_ROOT_ENV);
 	const char *proc = getenv(NCFG_CONTENTION_PROC_ROOT_ENV);
+	char        why[NCFG_ERROR_MAX];
 
 	if (run && run[0] && strlen(run) < sizeof(world->contention_run)) {
 		(void)snprintf(world->contention_run, sizeof(world->contention_run), "%s", run);
@@ -291,6 +293,26 @@ static void contention_roots_from_environment(ncfg_main_world_t *world)
 		(void)snprintf(world->contention_proc, sizeof(world->contention_proc), "%s",
 		    proc);
 		world->contention.proc_root = world->contention_proc;
+	}
+	/*
+	 * And the sysfs root the index is read through, which `radio.h` resolves
+	 * from `NCFG_SYS_CLASS_NET` -- the same seam, one directory over, and the
+	 * one the live scripts point at a tree they populate.
+	 *
+	 * **Said out loud when it fails**, because an empty answer here switches
+	 * the contention guard off and nothing downstream can tell that from a
+	 * machine with no other manager on it. This shipped once with a 512-byte
+	 * buffer where `ncfg_radio_class_net` requires 4096: it refused every
+	 * call, the refusal went to a NULL error buffer, and the guard asked
+	 * nothing on every machine while looking present.
+	 */
+	if (!ncfg_radio_class_net(world->class_net, sizeof(world->class_net), why,
+	    sizeof(why))) {
+		world->class_net[0] = '\0';
+		ncfg_log_emitf("contention", NCFG_LOG_WARNING,
+		    "cannot tell where `sys/class/net` is (%s), so netcfgd cannot read an "
+		    "interface index -- it will not notice another manager already holding "
+		    "a radio, and will start a supplicant beside it", why);
 	}
 }
 
