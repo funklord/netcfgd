@@ -9765,6 +9765,822 @@ tree that can answer *behaves alike* rather than *carries out the same ops* --
 and the expectation should be that it goes red, in places, on the first run.
 That is the point of it.
 
+## 10.261 Nothing is refused for want of porting, and one refusal answered the wrong question
+
+The ledger counts what this build declines. It said 16 before the DHCPv6 start
+landed and 15 after, so the obvious next question is what the 15 are -- read one
+at a time rather than counted, because a count says nothing about whether any of
+them is work.
+
+    backend.reload   8 kinds   only radvd re-reads; nothing else has one
+    backend.start    dns, wire_guard
+    backend.stop     dns, wire_guard
+    link.create      physical, open_vpn, pppoe
+
+**Every one is a fact about the kind, and every one is the Rust's answer too.**
+radvd re-reads on `SIGHUP` and an access point's equivalent is a restart and a
+deauthenticated LAN (0026). WireGuard is a kernel device: `link.create` makes it
+and `wg.set_device` configures it. DNS is `dns.apply`'s, the resolver being
+somebody else's daemon. And the three `link.create` refusals are
+`crates/netcfgd-plan/src/lib.rs:6452` word for word -- *"a physical device is
+the hardware's, a `PPPoE` session's interface is `pppd`'s, an `OpenVPN`
+tunnel's is `openvpn`'s"*, and netcfgd cannot remake any of them.
+
+So **nothing this build refuses is refused for want of porting.** The DHCPv6
+start was the last of that kind and 10.259 closed it. That is a different
+statement from the ledger's completeness, which has held for several waves: the
+witnesses were all carried out *and* one of the refusals beside them was a gap
+wearing a reason.
+
+### The Rust says "not implemented in this build" and this port does not
+
+Worth recording because it is a deliberate divergence in every one of these
+sentences. `start_backend`'s catch-all is *"the {other:?} backend is not
+implemented in this build"*, and the reload arm is *"reloading the {kind:?}
+backend on {iface} is not implemented in this build"*. Both are promises that a
+later release does it, for two kinds where no release ever will.
+
+`plan/offload.c` already recorded the correction and paid for it: *"It used to
+end 'not applied by this build', which is a promise nobody checked."* Every
+refusal here says instead what the kind is, so an operator reading one learns
+why it will not happen rather than when.
+
+### Except that two of them answered a question nobody asked
+
+`ncfg_service_backend_supported` looked at the **verb** first. So a
+`backend.reload` for WireGuard or for DNS -- the two kinds that name no daemon
+at all -- was answered *"only a router advertisement daemon re-reads its
+configuration, an access point's would be a restart, and a DHCP client's is the
+client's own business"*. Every word true, and an explanation of reload
+semantics to somebody whose actual problem is that there is nothing there. The
+same two kinds got the sharper sentence for `start` and `stop` and the generic
+one for `reload`, which is the inconsistency that made it visible.
+
+The kind is asked first now, and the two sentences are verb-neutral: *there is
+no process here to start, stop or reload*. `service_test.c` drives both kinds
+across all three verbs and asserts the sentence does **not** mention re-reading
+a configuration -- the negative half being the one that separates the two
+states, since a refusal is easy to assert and the wrong refusal is still a
+refusal. Sabotaged by putting the kind check back behind the verb: three checks
+red.
+
+The switch arms for those two kinds stay, breaking rather than answering, so
+the switch is still exhaustive over the taxonomy -- which is what makes a kind
+added to it fail to compile instead of falling silently into a refusal that
+does not fit it.
+
+### The `/run` layout the design document sketches is not the one anything writes
+
+Measured while reading the contracts: `netcfgd-design.md` names
+`/run/netcfgd/desired/<iface>.json`, `/run/netcfgd/observed/` and
+`/run/netcfgd/lease/wlan0.json`. What both implementations write is flat --
+`desired.json`, `observed.json`, `owned.json`, `plan.last.json` -- beside the
+directories `dhcp/`, `dhcpcd/`, `dns/`, `hooks/`, `prefixes/`, `reported/` and
+`supplicant/`.
+
+**Not a question for anybody**, which is why it is recorded here rather than
+raised: `project.md` is authoritative for what to build and names
+`desired.json` and `reported/<interface>`, the code agrees with it, and the
+design document holds the rationale rather than the layout. The sketch predates
+both. It is worth knowing only because somebody reading that document for the
+file to `cat` will not find it.
+
+## 10.260 Three sentences that closed a question, and the two sweeps that found none
+
+10.259's finding was a gap written down three times as a decision. The lens from
+that shape is **a claim in a comment that closes a question**, and this wave
+asked it two mechanical ways and one by reading.
+
+### Both mechanical halves are empty, and the method is the point
+
+**Citations of the Rust.** The port names the implementation it replaces 592
+times across 200 files. Most of that is prose only a person can check. The
+checkable subset is a citation: a path under `crates/`, a `netcfgd_x::y` symbol
+path. **124 Rust files, 0 citations naming something that is not there.**
+
+**Citations of itself.** The same question pointed inward -- a comment naming
+`` `ncfg_foo` `` where no `ncfg_foo` exists is a claim about this tree that has
+gone stale, usually because something was renamed and the sentence was not.
+**2,900 names the tree knows, 0 backticked citations of one it does not.**
+
+Two empty results, and `evidence.md` says an empty result is a measurement only
+if its method is recorded -- so both are. What they say together is where the
+fault is **not**: this tree is disciplined about naming things that exist. The
+sentences that go wrong are the ones with no name in them at all.
+
+### The one a detector did find, and what it was
+
+A block comment whose next line is another block comment is a paragraph whose
+subject has gone. Run over the tree that is 690 hits, nearly all of them
+section headings introducing the declarations below -- but **sorted by length
+the top hit is 55 lines and the next four are ordinary**. Length is the signal:
+nobody writes a 55-line section heading.
+
+It was `c/src/cli/run.c`, and it argued that **`ncfg apply` is deliberately
+refused**: four facts, each said to be enough on its own. `ncfg apply` has been
+implemented for several waves. The argument was left standing when the verb
+landed, attached to nothing, above a different function's comment.
+
+Every one of the four had closed:
+
+  * *the planner does not read every block* -- `warn_unported` holds back one
+    addressing source now, and says so per plan;
+  * *the executor refuses `backend.start` for four of the nine backend kinds*
+    -- three, since 10.259, and `make ledger` counts them;
+  * *nothing under `ncfg` folds what an apply did into `owned.json`* -- the
+    fold is `ncfg_apply_record`, called from the apply four lines from where
+    the comment sat;
+  * *there is no confirm window* -- `--confirm-within` goes to the daemon, and
+    the live comment two paragraphs down says so.
+
+What survived the deletion is the instruction inside it that outlived it:
+**do not write a count of what this build cannot do into a comment**, because a
+number has to be swept whenever a pass lands and the ones written there went
+stale inside a wave. That sentence was right about itself.
+
+### The contract three variables were missing from
+
+Following the same lens by hand into section 5.2, which fixes the hook
+environment's names: the port set `NCFG_IFACE`, `NCFG_PHASE`, `NCFG_REASON`,
+`NCFG_ADDR` and `NCFG_GW`, and **not `NCFG_ACTION`, `NCFG_BSSID` or
+`NCFG_URL`** -- the one variable each of the three event phases carries.
+
+It was not overlooked. `ncfg_reconcile_hook_run` took the pair as an argument
+and dropped it, with a comment saying exactly why and exactly where the fix
+would go: *"`ncfg_hook_env_t` is `apply.h`'s and has four fixed members ... the
+day that struct grows a general pair this is where the two lines go."* A
+`roam` hook read `$NCFG_BSSID` and got nothing, and nothing said so.
+
+The struct has the general pair now -- a name and a value rather than three
+more members, because each phase carries exactly one and three members would be
+two NULLs at every call site -- and the runner fills it. Sabotaged: dropping
+the pair again reddens the check.
+
+### A check that could not fail, three times over
+
+Beside it should have gone the other half: an inherited `NCFG_BSSID` in the
+daemon's own environment must not shadow what the phase is saying. **Three
+ways of asserting that were written and all three passed with the filter
+deleted.**
+
+  * Reading `$NCFG_BSSID`: with both entries in the array the shell resolves to
+    the later one, which is netcfgd's, so the value is right either way.
+  * Counting with `env`: a POSIX shell imports its environment into variables
+    on startup and keeps one per name, so the duplicate is gone before `env`
+    runs.
+  * Counting off `/proc/self/environ`: saw neither entry from inside the
+    script, so it separates nothing.
+
+A hook is a shell script and a shell collapses duplicates before anything in it
+can look. Where the filter changes an answer is a hook that is **not** a shell
+script -- `getenv` returns the first match and the inherited entry is first --
+and nothing in this suite execs one.
+
+So the assertion is gone and the limit is written where the code is. **A check
+that cannot fail is worse than no check**, because it is quoted afterwards as
+though it had discriminated; the three attempts are recorded beside it so the
+next person does not write a fourth.
+
+### And one contradiction to flag rather than resolve
+
+`netcfgd-design.md:163` says a network's `metered` "informs metric/backoff,
+exported to hooks", and `:357` puts `NCFG_METERED=0` in the hook environment it
+documents. **Neither implementation does either.** It is not a dead key --
+0034 has the NetworkManager shim round-tripping it, so an operator writing
+`metered = true` does get something -- but the two core behaviours the design
+document names are absent from both, and nothing in a plan says so.
+
+Recorded rather than acted on, which is what `working-practice.md` asks: which
+of the two is wrong is a real question, and the answer is the copyright
+holder's. `NCFG_SSID` is in the same paragraph of that document and is missing
+from both in the same way.
+
+## 10.258 Four dead functions, and a detector that was wrong four times finding them
+
+The last three waves all turned on a rule with two consumers. The next lens
+from that shape is the same question one step further: **a function with no
+consumer at all.** `evidence.md` has it as *an interface is only as wired as
+its least-used method* -- a dangling signal looks unfinished, while a method
+that exists, compiles and is obviously correct attracts no suspicion at all.
+
+`tool/c_tests_gate.py` already asserts that every header under
+`c/include/ncfg/` is included by some test, and says in its own words what it
+cannot see: whether anything under `c/src/` is exercised. This is that gap,
+measured per function rather than per header.
+
+**986 public functions. Four that nothing uses.**
+
+    ncfg_observe_netfilter              c/src/observe/netfilter.c
+    ncfg_observe_offloads               c/src/observe/offloads.c
+    ncfg_observe_wireguard              c/src/observe/wireguard.c
+    ncfg_supplicant_client_interface    c/src/backend/supplicant/client.c
+
+### The detector was wrong four times, and three of them flattered the tree
+
+Worth more than the four findings, because every one of the errors is the shape
+`evidence.md` calls manufacturing an absence -- and only the first was
+conspicuous.
+
+**Searching for `name(` missed a function taken as a pointer.** The first run
+reported the daemon's whole reconcile seam as dead:
+`ncfg_reconcile_hook_run`, `ncfg_reconcile_portal_probe` and
+`ncfg_reconcile_converge`. Two of the three are wired in
+`src/main/daemon_main.c` as `loop.world.hook = ncfg_reconcile_hook_run;` --
+used without ever being called. This error **over**-reported, which is the
+direction that gets noticed: three alarming names sent somebody to read the
+file.
+
+**A bare name counts a declaration as a use.** Fixed to match the identifier
+anywhere, the population fell to 27 -- and two of the three observer wrappers
+were now hidden, because each is declared in both `observe.h` and the module's
+private `observe_internal.h`, and a declaration in a second file read as a
+caller in a second file.
+
+**A bare name counts a comment as a use.** With declarations excluded the
+count was two. The other two were "used" by prose: `observe_internal.h`
+mentions both by name while explaining what the socket helpers are for. In a
+tree whose comments are longer than its code, this is not an edge case.
+
+**And the count inside the defining file was over every `ncfg_` name, not the
+one being asked about**, which made every candidate look heavily used until the
+numbers were read and found to be identical per file.
+
+The shape: **the first error was loud and the next three were quiet, and all
+three quiet ones made the finding smaller.** That is the asymmetry `evidence.md`
+names -- a loose pattern makes you work, a narrow one makes you comfortable --
+met four times in one afternoon on one detector. The version that answers is in
+`project.md` only as a description, deliberately: see below.
+
+### What the four were
+
+**Three identical twelve-line wrappers**, one per observation pass that needs a
+netlink socket: open a socket, call `ncfg_observe_X_from`, close it. The
+`_from` half is the pass, takes its seam as a parameter, and is what
+`ncfg_observe_current_from` composes. The wrappers exist for a caller that
+wants one reading on its own, and **nothing has ever wanted one**.
+
+They are not merely unused. `observe.h` spends its header on the rule that
+every root and every seam an observation pass reads through is a parameter
+there, so that a predicate's answer never depends on hidden global state -- and
+these three take neither. Worse in the specific case: `ncfg_observe_wireguard`
+carried a comment explaining that it asks over *the offloads round's socket,
+not a fourth one*, and as a standalone entry point it opened its own, which is
+exactly the fourth socket the comment says it is avoiding. The composed pass
+shares one.
+
+**One accessor**, `ncfg_supplicant_client_interface` -- "which interface this
+client talks to" -- with no caller and no test.
+
+### Removed, and what that was worth
+
+200 bytes, measured: 1,119,296 to 1,119,096. **That is not the argument** and
+is recorded so nobody reaches for it as one: thirty-six lines of wrapper do not
+move a ratchet. The argument is that a public function with no consumer is a
+promise the header makes and nothing keeps, and that these three break the rule
+their own module's header is written around.
+
+`observe_internal.h` described the removed pair in the comments explaining the
+two socket helpers; those are rewritten rather than deleted, because *why the
+helper is internal* is still the useful part and only its second caller has
+gone. The same comment also still called the two WireGuard passes deferred,
+several waves after they landed -- corrected in passing, and it is the fourth
+stale claim this session has found in a header explaining something adjacent.
+
+### Why this is not a gate, and what would have to be decided first
+
+Twenty-five more public functions are used only inside the file that defines
+them, with no test naming them either -- `ncfg_authz_satisfies`,
+`ncfg_reconcile_converge`, the per-backend `*_binary` and `*_log_path`
+accessors, the lexer's three. None is dead; each is a function its own module
+calls and the header publishes anyway.
+
+A gate at function level would go red on all twenty-five on the day it landed,
+so it cannot be written until they are settled -- and settling them is a real
+question rather than a sweep. `code-style.md` says module-private symbols are
+left unprefixed *precisely so that the absence of a prefix reads as "this does
+not leave the module"*, which would make all twenty-five `static`. Against
+that: several are published so a future consumer or a live test can reach them,
+and making a function static to satisfy a gate is deforming the source to quiet
+a checker -- the thing `evidence.md` warns costs more than it saves.
+
+**Whose decision it is: the copyright holder's.** Recorded here with the
+number, so that whoever settles it settles it once.
+
+## 10.257 Finishing the lens: every rule the model owns, asked of the whole tree
+
+10.255 and 10.256 each found one rule in the wrong layer by following the one
+before it. That is how a lens is derived and it is not how one is finished, so
+this wave asked the question mechanically instead, two ways.
+
+**From the Rust.** `netcfgd-model` has twenty-five free public functions across
+its twenty files. Each was looked up in this port and the module it landed in
+written down.
+
+**From this tree.** A sweep for string literals of twenty-four characters or
+more that appear in **more than one module**. A rule copied between modules
+takes its messages with it, and an error sentence is long, distinctive, and
+survives the copy unchanged -- so the literal is a better detector of a
+duplicated rule than the function name is, because the copy is usually
+renamed and the sentence never is.
+
+It found **39 literals in more than one module**. Three families were a rule
+copied; the other thirty-one are ordinary -- a client repeating what the daemon
+told it, two out-of-memory sentences, a refusal an option parser and a lowerer
+both have to be able to say.
+
+### The three, and one mechanism behind all of them
+
+**`usable_name`, six identical messages.** `netcfgd_model::interface::
+usable_name` is the kernel's own `dev_valid_name`. This port had it twice, in
+`src/compile/lower_value.c` and as a static in
+`src/backend/supplicant/client.c`, spelled identically down to the sentence
+explaining why `.` and `..` are named for directories. **It is a security
+check.** Each copy carries its own measurement of what its absence cost: the
+compiler's is `device "../../etc/evil" { kind = "dummy" }`, which compiled and
+planned `link.create ../../etc/evil`; the supplicant client's is 0160, where
+joining an unchecked name to a directory made the daemon an existence oracle
+over the whole filesystem answered as root -- `/etc/shadow` said "Permission
+denied" and `/etc/nonexistent` said "no control socket at ...".
+
+**`normalize_station`, and this pair had already drifted.** Same rule in
+`src/compile/lower_value.c` and `src/backend/hostapd/parse.c`; same verdicts,
+and **different text on the same input** -- the compiler printed the whole
+offending run, hostapd printed at most three characters of it. What the
+duplication threatens is not the message: `document.h` requires an access
+control list to be lowercase and colon-separated *so that comparing the
+document against what hostapd reports is string equality rather than a parse*,
+and the compiler writes that list while the backend reads the reply. Two
+normalisers is two answers to what `AA-BB-CC-DD-EE-FF` is, and an access point
+whose two lists never compare equal is one whose access control is rewritten on
+every pass.
+
+**The key codec, where the header had already named the hazard.**
+`ncfg_key_render`'s comment in `document.h` says two base64 *writers* of one
+format is how the halves of one program come to disagree about a key, records
+that there were already two, and says a third "was about to be written". There
+were three. `src/plan/model_json.c` carried `ncfg_plan_render_key` with its own
+alphabet and its own 45-byte constant, and three decoders stood beside them --
+`ncfg_key_parse`, `key_octets_read` in the same file as its own second copy,
+and `ncfg_public_key_parse` in the compiler. All six agreed; what makes it
+worth a section is that the argument against it was already written, in the
+tree, above one of the copies.
+
+**One mechanism produced all three.** `ncfg_usable_name` and
+`ncfg_normalize_station` were both declared in `src/compile/lower_internal.h`
+-- a header private to the compiler. A backend needing the rule cannot reach a
+private header, and reaching into another module's internals would be worse
+than a copy, so it wrote one. That is 10.255's finding stated generally: **a
+rule reachable by only one of its consumers grows a copy in the other**, and
+where the rule sits privately inside a module the copy is the only thing left
+to do.
+
+### Where they are now
+
+`c/src/model/document.c`, declared in `document.h` beside
+`ncfg_phase2_pins_nothing`, which is the Rust's `security::phase2_pins_nothing`
+and was already in the right place: `ncfg_usable_name`,
+`ncfg_station_address_normalize`, and with them `NCFG_INTERFACE_NAME_MAX` and
+`NCFG_STATION_ADDRESS_LEN`/`_SIZE` -- because the constant `15` was written out
+in both copies too, and a published rule with an unpublished bound is half a
+move.
+
+The compiler keeps `ncfg_normalize_station` as a wrapper rather than losing it:
+the rule is the model's, and what is the compiler's is the **arena** -- a
+lowered document owns its strings, so the answer is duplicated into the
+context rather than handed back on the stack. That is the shape to copy when a
+rule moves and a caller has a memory convention of its own.
+
+### One fix to the model that the move exposed
+
+The planner's renderer set `out[0]` to nothing on a buffer too small; the
+model's `ncfg_key_render` did not touch `out` at all. Its callers hold a buffer
+that cannot be too small and discard the status, so repointing them as they
+stood would have replaced an empty string with an uninitialised one. It empties
+`out` on a refusal now, which is `ncfg_key_parse`'s stated rule on its own
+refusal, and the header says so.
+
+**A move is not a repoint.** Two functions that answer the same question can
+still differ in what they leave behind when they refuse, and that difference
+does not show up in any test where the refusal cannot happen.
+
+### The proof, which is one edit
+
+Making the model's `ncfg_usable_name` stop refusing `/` reddens two checks in
+`lower_test` and one in `supplicant_client_test`. Both suites already tested
+the rule from their own side -- the compiler refusing `device "../../etc/evil"`
+and the client refusing `/etc/shadow` -- and before this wave the same edit
+would have reddened one of them. That the other goes red is the whole of what
+the move bought, and it is checkable in one command.
+
+### The sweep is a sweep, and does not become a gate
+
+Thirty-one of the thirty-nine are legitimate, so a standing gate would need a
+thirty-one entry waiver list, and a gate carrying a long ignore list has been
+switched off by instalments. This is the case for an investigative sweep read
+once by the person who ran it, where over-reporting costs reading time and buys
+the only errors that can be caught at all. The method is recorded so it can be
+re-run rather than rediscovered: literals of twenty-four characters or more,
+grouped by the module directory under `c/src/` that holds them, reported where
+a group spans more than one. It is thirty-one now, and a rule copied between
+modules will make it thirty-two.
+
+## 10.256 The same rule in the wrong layer, a second time, and what a gate can and cannot say
+
+10.255's lens, pointed at the rest of the tree: **which rules does the Rust keep
+in `netcfgd-model` that this port put somewhere later, and who reaches across a
+layer to get them?** The answer was one more, and it is the one 10.254's
+argument rests on.
+
+`netcfgd-plan`'s manifest depends on `netcfgd-model` and on nothing else. In
+that workspace `dns::scopes` is `netcfgd_model::dns::scopes`, called by the
+planner and by the executor, and the comment above it says what happened before
+it was one function: the planner learned that a lease contributes nameservers
+(0006 rule 4) while the executor went on building its list from the document
+alone, so the plan said `dns.apply` and the delivery wrote a `resolv.conf` with
+nothing in it.
+
+This port had it in the DNS **backend**. So `src/plan/host_wide.c` included
+`ncfg/dns.h` to reach the scope list it compares against -- and got the
+renderers, the flattener and the deliverer with it. `src/plan/host_wide.c`'s
+own header even records the move that put it there, on the condition that the
+second caller would take it rather than write a third. That condition was met.
+The layer was not.
+
+### Where it went
+
+`ncfg_dns_scope_t`, `ncfg_dns_scopes_t`, `ncfg_dns_scopes_of`,
+`ncfg_dns_scopes_items`, `ncfg_dns_scopes_free` and `NCFG_DNS_GLOBAL_SCOPE` are
+in `observed.h` now, implemented in `c/src/model/dns.c`. **`observed.h` rather
+than `document.h`, and the reason is the rule itself**: the scope list is a
+function of a document *and* an observation, which is exactly why it is a rule
+rather than a loop, and `observed.h` is the model header that has both halves.
+`document.h` cannot include `observed.h` without a cycle.
+
+`NCFG_DNS_MAXNS` stayed with the renderers. It is glibc's limit on
+`nameserver` lines, which is a fact about the file being written rather than
+about which scopes exist.
+
+The source moved whole: `scopes.c` included `dns.h`, `base.h` and `value.h`,
+and every one of its nine statics was its own. It compiles in the model against
+`observed.h` with nothing else changed, which is the measurement that says it
+was a model rule sitting in a backend rather than a backend rule with model
+callers.
+
+**Two includes went with it.** `src/plan/host_wide.c` no longer includes
+`ncfg/dns.h`, and `src/plan/access_point.c` no longer includes
+`ncfg/hostapd.h` -- the second a leftover from 10.255, which took every symbol
+out of that file and left the line. The planner's headers are now `apply`,
+`base`, `buf`, `json_write`, `linkset`, `observed`, `plan` and `value`: model,
+base, and one deliberate forward reference.
+
+### The one forward reference, which stays
+
+`src/plan/link.c` asks `ncfg_apply_supported` whether this build can create a
+device kind before planning a `link.create`, and that is right rather than
+tolerated: the alternative is the planner keeping its own list of what the
+executor can do, which is this section's own defect with the layers swapped.
+The comment there says so -- *"this asks the executor rather than keeping its
+own list"* -- and a kind the executor cannot create must not be planned, or
+`ncfg plan` lists work that fails on every apply for ever.
+
+### A gate for the half that is silent
+
+`make module-order` reads decision 0263's numbering -- base, json, model,
+compile, sys, then the sixth group -- and refuses a source in the first five
+that includes a header a later module owns. The header-to-module mapping is
+**derived** rather than listed: a header's owner is the module whose sources
+define the functions it declares, so the mapping cannot go stale in the one
+place somebody has just moved something. 54 sources checked against 49
+attributed headers.
+
+**It would not have caught either of the two copies**, and that is worth saying
+plainly rather than leaving for somebody to discover. Both took the other form:
+the compiler grew a private `effective_band` and the planner reached for a
+backend header, and only the second is an include. What the gate closes is the
+silent half -- reaching forward compiles perfectly and nothing else complains --
+and it leaves the half a reader of the file can at least see.
+
+Proven by sabotage twice, and **the first attempt proved nothing**: the
+substitution was anchored on an include that file does not have, so it never
+landed, and a sabotage that did not apply reads exactly like a gate that cannot
+fail. Re-run with the substitution asserted, the compiler including
+`ncfg/hostapd.h` is named with its tier and its owner. The attribution floor is
+sabotaged separately, because a mapping that silently attributed nothing would
+report every source clean.
+
+### The open question, which is not this wave's to settle
+
+**0263 leaves its sixth group unordered** -- proto, host, plan, apply, daemon
+and cli, with backend and observe added later -- so the gate can say nothing
+about a planner including a backend, which is the very thing this section is
+about. It was clean by judgement here, not by rule.
+
+The option is to give that group an internal order. The cost is that it is a
+convention for the rest of the port and for every module still to be written,
+and at least one deliberate divergence already exists in `plan/link.c` that
+would have to be recorded as one. **Whose decision it is: the copyright
+holder's.** Writing an order into a gate would be inventing a decision in the
+quietest possible place, and `module_order_gate.py` says in its own header that
+it declines to.
+
+## 10.255 The guard was watching the model, and the copy came from the compiler
+
+`c/include/ncfg/hostapd.h` carried four rules the Rust keeps in
+`netcfgd-model`: which band an access point comes up in, whether a channel
+exists in a band at all, whether a channel needs radar detection, and which
+`wpa_key_mgmt` a security block is spelled with. It carried them with a
+paragraph saying why they were in the wrong place and what to watch for:
+
+> They are public here rather than private so that there is still exactly one
+> implementation for both callers, and **they move to the model when it grows
+> them**; a second copy appearing in the model is the failure this paragraph
+> exists to prevent.
+
+The model never grew them. **A second copy appeared anyway**, as two private
+statics in `c/src/compile/lower_network.c` -- `effective_band` and
+`channel_in_band`, written from the same Rust a few waves later.
+
+### Why it came from there and could not have come from anywhere else
+
+The compiler needs the band rule: 0222 exists because `band = "2.4"` with
+`channel = 36` compiled, planned, and failed at `ncfg apply` with the interface
+already up. But 0263 puts `model` third in the module order and the backends
+last, so a compiler that included `ncfg/hostapd.h` to ask would invert the
+layering. **The copy was the only thing the author could do**, given where the
+rule was. The paragraph watching for a copy in the model was watching the one
+direction a copy would never come from, because nothing needed a copy there.
+
+That is the shape worth keeping rather than the instance: a rule kept in the
+wrong layer produces its second copy in whichever layer cannot reach it, and a
+note that names the layer the rule is *going to* names the wrong suspect.
+
+### What the two copies would have cost, and what they had cost so far
+
+Nothing yet, which is the uncomfortable half. Read side by side they agree on
+every input either can be given. They differ in one place and it is
+unreachable: `effective_band` with no band and no channel answers `2.4` in the
+backend's copy, and the compiler's copy takes a bare `int64_t` and is guarded
+by `if (!access_point->channel.has) return 1;` before it is ever called.
+
+What two copies cost is not a wrong answer today. An access point whose
+document and whose running configuration disagree about the band is
+**restarted**, so a drift between these two is an access point stopped and
+started on every reconcile for a document nobody has edited. The key management
+is the sharper case of the same thing: hostapd does not report it back over the
+control socket, so netcfgd's record of what it started with is the only account
+there is, and a second spelling of `WPA2` is that restart loop with no way to
+see why.
+
+### Where they went
+
+`c/src/model/device.c`, declared in `document.h` beside the other pure model
+helpers, as `ncfg_access_point_effective_band`, `ncfg_channel_in_band`,
+`ncfg_channel_needs_radar_detection`, `ncfg_psk_proto_key_mgmt` and
+`ncfg_security_key_mgmt`. The compiler, the planner and the hostapd renderer
+all call those now and none of them carries its own.
+
+One file where the Rust has two -- `device.rs` and `security.rs` -- because
+they are one decision here: every word of the argument applies to both, and a
+`security.c` holding one function would be a second place to look for the same
+reasoning.
+
+**`ncfg_hostapd_band_of_hw_mode` stays in the backend**, and the line is whose
+vocabulary a function is in rather than what it is about. `hw_mode` is
+hostapd's spelling, read back out of a file hostapd wrote. The Rust keeps its
+equivalent in `netcfgd-hostapd` for the same reason.
+
+### The test this earned, and why the table is written out by hand
+
+A move that leaves one implementation cannot be defended by asserting that the
+copies agree -- there are no copies. What defends it is a check that fails when
+a copy comes back: `lower_test.c` now puts thirteen band-and-channel pairs to
+**both layers** and asserts they reach the same verdict, compiling the pair as
+a document and rendering the same pair as an access point, refusals included.
+A pair one layer takes and the other will not is the defect in either
+direction -- accepted-then-refused fails at `ncfg apply` with the interface
+already up, refused-then-would-have-worked is a configuration nobody can write.
+
+**The expected verdicts are a literal table rather than a call to
+`ncfg_access_point_effective_band`.** A table computed from the function under
+test is that function agreeing with itself, however many rows it has. Two
+sabotages say the difference:
+
+- **a private copy grown back in the compiler**, with 13 where the model says
+  14: the two layers disagree at channel 14 and two rows go red;
+- **the model itself moved**, 13 for 14, so both layers move together and agree
+  perfectly: the same two rows go red, and only the hand-written table can see
+  it.
+
+The second is the one that says the table is a third witness. With the
+verdicts derived, that sabotage would have been green.
+
+### One stale sentence corrected on the way past
+
+`apply.h` explained `ncfg_apply_revert`'s placement as "... and the daemon
+module is not ported". It was the reason at the time and has not been true
+since `c/src/daemon/confirm.c` landed. The placement did not change -- the
+first reason given, that both halves are pure functions of a plan, a journal
+and an executor, is the one that decided it -- so what was wrong was a sentence
+still offering a blocker that had gone.
+
+## 10.254 0079's third clear, which waited two waves for a fact about a process
+
+Decision 0079 caps a backend at five consecutive starts that did not lead to a
+live process, and clears the count on three things: a deliberate stop, the plan
+that gives up, and **the backend being seen running**. The first two are things
+an apply did, so they come out of the journal and have been folded since the
+record learned about backends. The third never was.
+
+**The reason it was held back was real and is worth keeping**, because it is
+the shape of a fix that would have been worse than the gap. `running` in the
+record was netcfgd's memory of having started something -- 0078's whole
+distinction -- so a clear driven by it would have cleared every count on every
+pass and the cap would never have bitten at all. That trades "a backend that
+failed five times is never started again" for "one that fails for ever is
+started for ever", which is the defect 0079 was written against and was
+measured at 181 starts in twelve seconds. `apply.h` said so under a heading
+called *What is still not folded*, and it was right to.
+
+**What changed is that `running` became a fact about a process.**
+`ncfg_observe_backend_liveness` reads it for the six kinds netcfgd has a handle
+on, through `ncfg_service_backend_handle` -- a switch over the taxonomy with no
+`default:` that asks the module which started each daemon where it put its pid
+file and what marks it in its own `argv`. So the precondition arrived a wave
+ago, and the clear is what this one is.
+
+### What the absence cost
+
+Not a storm -- the cap was doing its job. **The cap never lifted.** Five starts
+a month apart count exactly as five in a second, because 0079 deliberately has
+no clock: the argument is that a count of consecutive starts already says the
+right thing about a daemon that dies instantly and one that dies after a
+minute, *given* that a daemon which stays up clears it. Without the third clear
+that argument loses its second half, and a tunnel that flapped four times last
+spring and has been up since is one restart away from being refused on a
+machine where nothing is wrong.
+
+### It is an argument, not a lookup
+
+The observation the plan was made from is a parameter of `ncfg_apply_record`
+now, beside the delivered DNS scopes and for the same reason: the fold stays a
+pure function of things the caller already holds, rather than growing an
+accumulator or reaching for state. Both call sites had one to hand -- `ncfg
+apply` observes before it plans, and the daemon keeps `state->observed`. A
+caller with none passes NULL and the counts are left alone, which is what every
+test that does not care about 0079 does.
+
+The Rust reaches the same three rules in the same order from its effect list,
+`KernelExecutor::with_context` having taken the running set off the observation
+it was built with. Same observation, held in a different place.
+
+**The order is load-bearing and is the Rust's.** Seen-running clears, then a
+start counts, then a stop clears. A pass that both found a tunnel up and
+started it again has to leave a count of one: clear first and the start is
+still counted, count first and the clear swallows it. That is the one of the
+four sabotages that took a check written for it -- the other three were caught
+by checks whose sentences already named what they assert.
+
+### The write that is skipped and the read that is not
+
+`ncfg_apply_record` returned early on an empty journal, so a converged tick did
+not rewrite `owned.json` -- which matters because two processes write that file
+and a lost update **puts back** a record the other had just removed. The clear
+cannot live behind that guard: a machine whose backends are all up is exactly
+the machine whose plan is empty, so gating on the journal would have fired the
+clear only on passes where something else was already wrong.
+
+So the read happens and the write does not. With an observation the record is
+read under `owned.lock` -- the one moment the file and the answer exist
+together -- and the fold gives the update back untouched where no count matched
+anything running. That needed one more thing than it looks: `ncfg_owned_update`
+answers 0 for *every* way of not writing, and only this one is success, so the
+fold says which it was rather than the caller inferring it from an empty error
+buffer. A caller that wanted no sentence would otherwise have had every
+failure read as the converged pass.
+
+The Rust does not make this distinction: `converge` calls `absorb` on every
+tick and rewrites the file whether anything moved or not. **Recorded as a
+divergence rather than a defect** -- it is the same trade this port already
+made when it added the early return, and the C's is the safer half of it.
+
+### Four sabotages, and one of them found a check that was not doing its job
+
+Making the clear a no-op, reversing its order against the count, clearing
+regardless of `running`, and never abandoning the write: all four go red.
+
+**The third one is the entry.** It first went red through *"an empty pass whose
+observation clears nothing does not rewrite the record"* -- a neighbouring
+check that noticed the file had been rewritten -- while the check whose
+sentence names the property, *"a backend the observation says is down keeps its
+count"*, stayed green. It stayed green because that fixture's pass also folds
+three starts, so a wrongly-cleared count and a correctly-kept one both arrive
+at the same number. The count is asserted on the empty pass now, where nothing
+can put it back.
+
+A sabotage caught by the wrong check is a sabotage that passed, for the purpose
+it was run: what it demonstrates is that something in the binary noticed, not
+that the assertion under test can fail.
+
+## 10.253 The suite had only ever been green for root
+
+`make -C c test` fails for an ordinary user at `e4761ac`, on a clean tree and
+after `make -C c clean`, in two checks out of ninety test binaries. Neither is
+a defect in the port. Both are checks whose verdict is a property of **who ran
+the suite**, and the reason nobody had seen them is that every run of this
+suite so far was made by a session working as root.
+
+**They fail from opposite sides of the same fault**, which is what makes the
+pair worth a section rather than two fixes.
+
+### The one that passed only as root
+
+`cli_apply_test`'s `--json` case asserted `complaint[0] == '\0'` -- nothing at
+all on stderr. The comment above it says what it is for: a `--json` run is
+something a script parses, so the per-action journal lines and the diagnostic
+about resuming have to be absent from both streams.
+
+But an apply observes the machine first, and an observation pass made without
+`CAP_NET_ADMIN` warns. Measured as `nabbe`: the nftables dump comes back EPERM
+twice, and so does every WireGuard device on this workstation. Four lines on
+stderr, none of them this command's, all of them correct. As root they are not
+there, so the assertion held for a reason that has nothing to do with `--json`
+and everything to do with the effective uid.
+
+The command's own prose carries `ncfg: `; the library's warnings carry
+`netcfgd: `. The check asks now that **no line on stderr starts with
+`ncfg: `**, which is the property the comment always described, and it does
+not move with the privileges of whoever runs it.
+
+### The one that had never run at all
+
+`cli_reset_test`'s `a_removal_that_could_not_happen` makes a removal fail by
+taking write permission off `conf.d`, and returns early when `geteuid()` is 0
+with a note saying so -- root's `unlink` is not stopped by a mode, so there is
+no way from inside a test to make one fail. That note is accurate and the skip
+is right. What it hid is that **the case behind it had never executed
+anywhere**, so its assertion had never been true or false, only skipped.
+
+Run for the first time, it is false on a correct run. It read as three
+substring tests over the whole of stdout -- does the output hold
+`10-site.conf`, does it hold `removed `, is that file still on disk -- and on
+a `--yes` run all three are true without anything being wrong: the preview
+table printed above the removals names every doomed path, and the base file
+outside `conf.d` really was removed and really was announced. Reproduced with
+the built binary rather than through the harness: stdout holds the three
+`would remove` lines and one `removed` line for `netcfgd.conf`, stderr holds
+`conf.d/10-site.conf: Permission denied. 1 of 3 file(s) were removed before
+this, and the rest are still there`, and `reset.c` prints `removed` only after
+`unlink` returns 0.
+
+The check reads the lines now. Every line beginning `removed ` names a path,
+and every one of those paths has to be off the disk; the count has to be one,
+which is the number the refusal's own sentence gives. A predicate that cannot
+fail on a run that claimed nothing is a check that inspected nothing, so the
+count is asserted beside the truth of each claim rather than instead of it.
+
+### Both sabotages fail, and one of them says what was wrong with the old check
+
+Dropping the `!options->json` guard around the two resume sentences in
+`c/src/cli/run.c` puts them on stderr; the apply check goes red and nothing
+else in that binary does. Moving `reset.c`'s `removed %s` print to before the
+`unlink` rather than after it makes the refused file's line a claim about a
+file that is still there; both reset checks go red, the truth of the claims
+and the count together.
+
+**The old reset predicate would have caught that sabotage too.** It was not too
+weak. It was too broad -- it fired on a correct run as readily as on a broken
+one, which is the failure mode that looks like rigour until somebody runs it
+in the one configuration nobody had.
+
+### What is now known, and what is not
+
+Measured: ninety test binaries under `c/tests/`, `make -C c clean && make -C c
+test` as uid 1000, every check green. That is the first time the C suite's
+result has been observed for anybody but root.
+
+Not measured: whether it is still green *as* root. Both fixes are
+euid-independent by construction -- the `netcfgd: ` warnings are present or
+absent and neither spelling is `ncfg: `, and the reset case still skips as
+root and still says why -- but that is an argument rather than a run, and
+running it would put root-owned objects back in a tree that has just had five
+thousand of them chowned away.
+
+**Four test files ask about the uid and three of them do it well.**
+`dns_test` probes whether a 0555 directory actually refuses a write rather
+than asking `geteuid`, because identity and capability disagree in a container
+without `CAP_DAC_OVERRIDE` or on a read-only filesystem. `process_test`
+asserts a different half in each case rather than skipping either.
+`daemon_test` compares the peer credential the kernel reported against
+`getuid()`, which is the whole point of the check. `cli_reset_test`'s is the
+only skip, and the skip was never the problem.
+
+**What nothing in the build says is which user a green result was measured
+under.** A suite whose answer depends on the euid in two places, and a record
+that does not carry the euid, is how a result gets quoted for a configuration
+it was never taken in. Recorded rather than solved: a banner line would be one
+more thing to keep true, and the honest fix is that a check should not depend
+on it.
+
 ## 10.252 0644 stated, rather than a umask hoped for
 
 The last round's fix made the C's records match the Rust's. Sweeping *modes*

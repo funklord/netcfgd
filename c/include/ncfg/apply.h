@@ -281,7 +281,10 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
  * the first half of `revert`. It is here because both halves are pure
  * functions of a plan, a journal and an executor -- no window file, no
  * last-good document, no socket -- so this is where they can be driven by the
- * same double as everything else, and the daemon module is not ported.
+ * same double as everything else. The sentence that used to end this one said
+ * "and the daemon module is not ported", which was the reason at the time and
+ * has not been true since `src/daemon/confirm.c` landed; the placement stayed
+ * because the first reason is the one that decided it.
  */
 size_t ncfg_apply_revert(const ncfg_plan_t *plan, ncfg_journal_t *journal,
     const ncfg_executor_t *executor);
@@ -335,18 +338,36 @@ size_t ncfg_apply_revert(const ncfg_plan_t *plan, ncfg_journal_t *journal,
  *   already changed, which is what `dns.h`, `service.h` and `observed.h` each
  *   warn of from their own side.
  *
- * WHAT IS STILL NOT FOLDED
+ * 0079'S THIRD CLEAR, AND WHY IT IS AN ARGUMENT
  *
- *   **`observed_running` is what the observation saw**, and the clear it drives
- *   belongs to whoever composes one. `backend_restarts` and `backends` are both
- *   carried, so a start and a stop are folded into each; what is missing is the
- *   clearing a *live* backend would do -- and it is missing because in this
- *   build `running` in the record is netcfgd's memory rather than an
- *   observation. Clearing on that would clear every count on every pass and
- *   0079's cap would never bite at all, which is worse than the cap never
- *   lifting. It waits on the liveness pass, and that waits on this port having
- *   a backend-kind-to-pid-file map at all; see `observe.h` and project.md
- *   10.183.
+ *   Two of the decision's three rules are things an apply did, so they come out
+ *   of the journal: a `backend.start` counts, a `backend.stop` clears. The
+ *   third is **a backend the observation found running**, which no action
+ *   performed -- so the observation the plan was made from is an argument here,
+ *   the way the delivered scopes are, and for the same reason: the fold stays a
+ *   pure function of things the caller already holds.
+ *
+ *   **This was held back for two waves and the reason was real.** `running` in
+ *   the record was netcfgd's memory of having started something, so clearing on
+ *   it would have cleared every count on every pass and 0079's cap would never
+ *   have bitten at all -- "a backend that failed five times is never started
+ *   again" traded for "one that fails for ever is started for ever", which is
+ *   the defect 0079 was written against and was measured at 181 starts in
+ *   twelve seconds. `ncfg_observe_backend_liveness` is what made it a fact
+ *   about a process, for the six kinds netcfgd has a handle on; where it has
+ *   none the field is still memory, and there it is inert, because a record
+ *   saying a backend is up is one the planner asks for no start against.
+ *
+ *   **A caller with no observation passes NULL and the counts are left alone**,
+ *   which is what the port did for both waves before this one. The cost is the
+ *   cap never lifting: five starts a month apart count the same as five in a
+ *   second, and the sixth is refused on a machine where nothing is wrong.
+ *
+ *   The Rust reaches the same three rules in the same order from its effect
+ *   list, `netcfgd_apply`'s executor having taken the running set at
+ *   `with_context` time -- which is the same observation, held in a different
+ *   place. The order matters where one pass both sees a backend up and starts
+ *   another: the clear goes first so the start is still counted.
  *
  * 1, or 0 where the record could not grow -- which is an allocation failure and
  * nothing to do with the machine.
@@ -381,13 +402,16 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op);
  * two processes write this file -- `ncfg apply` and the daemon -- and a lost
  * update here **puts back** a record the other one had just removed.
  *
- * A plan with nothing to record does not write: `ncfg_owned_update` is not even
- * entered, so a pass that changed nothing does not rewrite a file another
- * writer is in the middle of.
+ * A plan with nothing to record does not write, and a pass that changed nothing
+ * does not rewrite a file another writer is in the middle of. **With an
+ * observation the read still happens**, because whether a count is there to
+ * clear is not knowable without it -- and the read is under the same lock, so
+ * it is the one moment the record and the answer exist together. The write is
+ * what is skipped, not the look.
  */
 int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
     const ncfg_journal_t *journal, const ncfg_dns_scope_t *delivered, size_t delivered_count,
-    char *err, size_t err_size);
+    const ncfg_observed_t *observed, char *err, size_t err_size);
 
 /*
  * Publish the journal as `<run_dir>/plan.last.json`.
@@ -494,6 +518,26 @@ typedef struct {
 	const char *addr;
 	/* The gateway, where there is one. `NCFG_GW`. */
 	const char *gateway;
+	/*
+	 * The one variable a phase carries that the four above do not name:
+	 * `NCFG_ACTION` for `drift`, `NCFG_BSSID` for `roam`, `NCFG_URL` for
+	 * `portal`. Section 5.2 fixes those three names too, so a hook written
+	 * against them is the same contract as one written against `NCFG_ADDR`.
+	 *
+	 * **A general pair rather than three more members**, which is what
+	 * `daemon.h`'s hook seam said this struct would grow the day it grew
+	 * anything: the phases that carry one each carry exactly one, and three
+	 * fixed members would be two NULLs at every call site. Both NULL, or
+	 * neither -- a name with no value sets nothing, because a hook testing
+	 * `[ -n "$NCFG_BSSID" ]` must be able to tell an absent station from an
+	 * empty one.
+	 *
+	 * `variable` is the whole name and carries no `NCFG_` prefix of its own:
+	 * the caller names it in full, so a phase that grows a fourth does not
+	 * need this file changed.
+	 */
+	const char *variable;
+	const char *value;
 } ncfg_hook_env_t;
 
 /*
@@ -683,6 +727,13 @@ typedef struct {
  * with state of its own that somebody pointed netcfgd at on purpose -- the
  * question does not arise and no check is made.
  */
+/* What a program reads to point these two somewhere else, which is what the
+ * Rust's `contention.rs` reads and is therefore what the live scripts set.
+ * The library never reads them: `service.h` says why a seam takes its roots as
+ * arguments, and `daemon_world.c` is where a netcfgd resolves these. */
+#define NCFG_CONTENTION_RUN_ROOT_ENV  "NCFG_RUN_ROOT"
+#define NCFG_CONTENTION_PROC_ROOT_ENV "NCFG_PROC"
+
 typedef struct {
 	/* Where the other daemons' state lives. */
 	const char *run_root;

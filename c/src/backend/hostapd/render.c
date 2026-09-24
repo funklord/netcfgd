@@ -132,39 +132,6 @@ const char *ncfg_hostapd_band_of_hw_mode(const char *hw_mode)
 	return NULL;
 }
 
-const char *ncfg_hostapd_effective_band(const char *band, const ncfg_optint_t *channel)
-{
-	if (band) {
-		if (strcmp(band, BAND_24) == 0) {
-			return BAND_24;
-		}
-		if (strcmp(band, BAND_5) == 0) {
-			return BAND_5;
-		}
-		/* `6` reaches here, and so does anything the compiler let through. The
-		 * two are told apart by the caller, because "a band this build cannot
-		 * do" must stay a different answer from "not a band". */
-		return NULL;
-	}
-	if (!channel || !channel->has) {
-		return BAND_24;
-	}
-	return channel->value <= 14 ? BAND_24 : BAND_5;
-}
-
-int ncfg_hostapd_channel_needs_radar_detection(int64_t channel)
-{
-	return (channel >= 52 && channel <= 64) || (channel >= 100 && channel <= 144);
-}
-
-int ncfg_hostapd_channel_in_band(const char *band, int64_t channel)
-{
-	if (band && strcmp(band, BAND_24) == 0) {
-		return channel >= 1 && channel <= 14;
-	}
-	return channel >= 36 && channel <= 177;
-}
-
 /* The `hw_mode` for a band, which is hostapd's word for the same thing. */
 static const char *hw_mode_of(const char *band)
 {
@@ -196,7 +163,7 @@ static int band_of(const ncfg_access_point_t *access_point, const char **band_ou
 			    "document has no fields for and which this build has never run against a "
 			    "radio. Use \"2.4\" or \"5\"");
 		}
-		declared = ncfg_hostapd_effective_band(access_point->band, NULL);
+		declared = ncfg_access_point_effective_band(access_point->band, NULL);
 		if (!declared) {
 			if (why) {
 				*why = NCFG_HOSTAPD_UNKNOWN_BAND;
@@ -214,8 +181,8 @@ static int band_of(const ncfg_access_point_t *access_point, const char **band_ou
 		*band_out = declared ? declared : BAND_24;
 		return 1;
 	}
-	band = declared ? declared : ncfg_hostapd_effective_band(NULL, &access_point->channel);
-	if (!ncfg_hostapd_channel_in_band(band, access_point->channel.value)) {
+	band = declared ? declared : ncfg_access_point_effective_band(NULL, &access_point->channel);
+	if (!ncfg_channel_in_band(band, access_point->channel.value)) {
 		if (why) {
 			*why = NCFG_HOSTAPD_CHANNEL_NOT_IN_BAND;
 		}
@@ -251,52 +218,6 @@ static int is_writable(const char *passphrase)
 	 * truncated before it arrives. Said out loud because the Rust checks both
 	 * and a reader comparing the two would otherwise find one missing. */
 	return 1;
-}
-
-/*
- * The `wpa_key_mgmt` one generation is spelled with.
- *
- * **One function rather than a literal at each arm, because the planner asks
- * the same question.** An access point's generation is not reported back over
- * the control socket, so the only account of what it is running is the record
- * of what netcfgd started it with -- and the planner compares the document's
- * generation against that record and restarts when they differ. Two spellings
- * of "WPA2" is therefore not a cosmetic difference: it is an access point that
- * is stopped and started on every reconcile for a document nobody has touched.
- * The Rust keeps its `key_mgmt_of` in `netcfgd-model` and this header says why
- * `effective_band` is public here for exactly the same reason.
- */
-static const char *key_mgmt_of_proto(int proto)
-{
-	switch (proto) {
-	case NCFG_PSK_PROTO_WPA2:
-		return "WPA-PSK";
-	case NCFG_PSK_PROTO_WPA3:
-		return "SAE";
-	case NCFG_PSK_PROTO_WPA2_WPA3:
-	default:
-		return "WPA-PSK SAE";
-	}
-}
-
-const char *ncfg_hostapd_key_mgmt_of(const ncfg_security_t *security)
-{
-	if (!security) {
-		return NULL;
-	}
-	switch (security->kind) {
-	case NCFG_SECURITY_PSK:
-		return key_mgmt_of_proto(security->psk.proto);
-	case NCFG_SECURITY_OWE:
-		return "OWE";
-	/* An open network has no key management, and an access point using EAP is
-	 * refused before anything is rendered -- the document has no RADIUS server
-	 * to point it at. Neither has a spelling to compare. */
-	case NCFG_SECURITY_OPEN:
-	case NCFG_SECURITY_EAP:
-	default:
-		return NULL;
-	}
 }
 
 /* The `wpa_*` lines for a pre-shared key network. */
@@ -347,7 +268,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 	}
 	switch (proto) {
 	case NCFG_PSK_PROTO_WPA2:
-		if (!add_line(lines, "wpa_key_mgmt", key_mgmt_of_proto(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    !add_line(lines, "wpa_passphrase", passphrase, 1)) {
 			return refuse(NCFG_HOSTAPD_OK, why, err, err_size, "out of memory rendering wpa "
@@ -355,7 +276,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 		}
 		break;
 	case NCFG_PSK_PROTO_WPA3:
-		if (!add_line(lines, "wpa_key_mgmt", key_mgmt_of_proto(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    /* Management frame protection is required for WPA3, not optional. */
 		    !add_line(lines, "ieee80211w", "2", 0) ||
@@ -366,7 +287,7 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *passphr
 		break;
 	case NCFG_PSK_PROTO_WPA2_WPA3:
 	default:
-		if (!add_line(lines, "wpa_key_mgmt", key_mgmt_of_proto(proto), 0) ||
+		if (!add_line(lines, "wpa_key_mgmt", ncfg_psk_proto_key_mgmt(proto), 0) ||
 		    !add_line(lines, "rsn_pairwise", "CCMP", 0) ||
 		    /* Optional, because a WPA2 client cannot do it and the point of
 		     * transition mode is that such a client can still associate. */
@@ -523,7 +444,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctr
 		break;
 	case NCFG_SECURITY_OWE:
 		if (!add_line(out, "wpa", "2", 0) || !add_line(out, "wpa_key_mgmt",
-		    ncfg_hostapd_key_mgmt_of(&access_point->security), 0) ||
+		    ncfg_security_key_mgmt(&access_point->security), 0) ||
 		    !add_line(out, "rsn_pairwise", "CCMP", 0) || !add_line(out, "ieee80211w", "2", 0)) {
 			ncfg_hostapd_lines_free(out);
 			ncfg_error_set(err, err_size, "out of memory rendering an OWE network");

@@ -74,10 +74,12 @@ int observe_widen(uint64_t value, const char *what, int64_t *out, char *err, siz
  * A netfilter socket for the nftables round, and the exchange that speaks to
  * it.
  *
- * Internal because both callers are in this module and the pair they produce
- * is one public argument: `ncfg_observe_netfilter` opens one for a single
- * read, `ncfg_observe_current` opens one beside the route socket for a whole
- * observation. 0 is a machine with no nftables, which is a note rather than a
+ * Internal because its caller is in this module and the pair it produces is
+ * one public argument: `ncfg_observe_current` opens one beside the route
+ * socket for a whole observation. There was a second caller --
+ * `ncfg_observe_netfilter`, which opened one for a single read -- and nothing
+ * ever asked for a single read, so it is gone (project.md 10.258). 0 is a
+ * machine with no nftables, which is a note rather than a
  * failure and is said there -- the socket is left closed and the caller asks
  * nothing.
  */
@@ -88,15 +90,16 @@ int observe_netfilter_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out);
  * speaks to it.
  *
  * Internal for `observe_netfilter_open`'s reason, and the two are deliberately
- * the same shape: `ncfg_observe_offloads` opens one for a single read,
- * `ncfg_observe_current` opens one beside the other two for a whole
- * observation. 0 is a machine whose netlink this process may not open, which
- * is a note rather than a failure and is said there -- the socket is left
- * closed and the caller asks nothing.
+ * the same shape: `ncfg_observe_current` opens one beside the other two for a
+ * whole observation, and the single-read entry point each of them had is gone
+ * for the reason given there. 0 is a machine whose netlink this process may
+ * not open, which is a note rather than a failure and is said there -- the
+ * socket is left closed and the caller asks nothing.
  *
  * **The protocol, not the family.** Every generic netlink family shares one
- * socket, so this is the seam the two WireGuard passes `observe.h` still
- * defers will ask their family over rather than a fourth one.
+ * socket, and the two WireGuard passes -- which this comment described as
+ * still deferred for several waves after they landed -- ask their family over
+ * this one rather than a fourth.
  */
 int observe_genl_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out);
 

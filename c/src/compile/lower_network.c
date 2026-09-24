@@ -830,46 +830,6 @@ refused:
 }
 
 /*
- * Which band an access point will actually be brought up in.
- *
- * `band` decides when it is stated. When it is not, the channel decides, and
- * the split is at 14: 1..14 is 2.4 GHz and nothing else, while the numbers
- * above belong to 5 GHz. NULL for a band this build cannot render -- `6`,
- * which the compiler accepts deliberately.
- */
-static const char *effective_band(const char *band, int64_t channel)
-{
-	if (band) {
-		if (strcmp(band, "2.4") == 0) {
-			return "2.4";
-		}
-		if (strcmp(band, "5") == 0) {
-			return "5";
-		}
-		return NULL;
-	}
-	return channel <= 14 ? "2.4" : "5";
-}
-
-/*
- * Whether a channel number exists in a band at all.
- *
- * The 5 GHz list is a range rather than the exact set because which of those
- * channels are usable is a regulatory question the kernel answers, not a
- * spelling question this can answer. What this rejects is a number that is in
- * no band, which is a typo rather than a regulatory refusal. Channel 0 is in
- * no band: it is hostapd's spelling of "survey and choose", which an absent
- * `channel` already says.
- */
-static int channel_in_band(const char *band, int64_t channel)
-{
-	if (strcmp(band, "2.4") == 0) {
-		return channel >= 1 && channel <= 14;
-	}
-	return channel >= 36 && channel <= 177;
-}
-
-/*
  * The channel and the band, which only mean anything together.
  *
  * Each key is already checked alone: `band` is one of a closed set, and
@@ -887,13 +847,20 @@ static int check_channel_in_band(ncfg_lower_ctx_t *ctx, const ncfg_access_point_
 	if (!access_point->channel.has) {
 		return 1;
 	}
-	band = effective_band(access_point->band, access_point->channel.value);
+	/*
+	 * The model's, not a copy. These two were private statics here until the
+	 * rule moved: the compiler needed it, could not include a backend header
+	 * to get it, and so grew its own -- which is exactly the second
+	 * implementation `hostapd.h` had a paragraph warning against, arriving
+	 * from the direction that paragraph was not watching.
+	 */
+	band = ncfg_access_point_effective_band(access_point->band, &access_point->channel);
 	if (!band) {
 		/* A band this build cannot render, which `ncfg_lower_band` accepted on
 		 * purpose so that the renderer can say so in its own words. */
 		return 1;
 	}
-	if (channel_in_band(band, access_point->channel.value)) {
+	if (ncfg_channel_in_band(band, access_point->channel.value)) {
 		return 1;
 	}
 	ncfg_diag(ctx, channel_span, "channel %lld is not in the %s GHz band: %s",

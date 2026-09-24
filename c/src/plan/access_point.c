@@ -58,14 +58,13 @@
  *   every pass, and a plan that restarts an access point on every reconcile is
  *   a permanent deauthentication loop for a document nobody has touched --
  *   which the Rust records having shipped, twice, from both directions (0222).
- *   That is why `ncfg_hostapd_effective_band` and `ncfg_hostapd_key_mgmt_of`
+ *   That is why `ncfg_access_point_effective_band` and `ncfg_security_key_mgmt`
  *   are called rather than reimplemented: one rule with two implementations is
  *   the same loop with a longer fuse.
  */
 #include "plan_internal.h"
 
 #include "ncfg/base.h"
-#include "ncfg/hostapd.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -216,7 +215,7 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 		 * exactly when somebody starts looking for the fault.
 		 */
 		if (point->channel.has &&
-		    ncfg_hostapd_channel_needs_radar_detection(point->channel.value)) {
+		    ncfg_channel_needs_radar_detection(point->channel.value)) {
 			ncfg_plan_warnf(builder->plan, point->device,
 			    "access point `%s` is on channel %lld, which is shared with radar "
 			    "in most regulatory domains: the radio has to listen on it before "
@@ -368,7 +367,7 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		field = "access_point.channel";
 		channel_text(&point->channel, desired, sizeof(desired));
 		channel_text(&started->channel, observed, sizeof(observed));
-	} else if (!same_text(ncfg_hostapd_effective_band(point->band, &point->channel),
+	} else if (!same_text(ncfg_access_point_effective_band(point->band, &point->channel),
 	    started->band)) {
 		/*
 		 * Derived before comparing, for the reason the channel is. An absent
@@ -385,11 +384,11 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		 */
 		field = "access_point.band";
 		(void)snprintf(desired, sizeof(desired), "%s",
-		    ncfg_hostapd_effective_band(point->band, &point->channel) ?
-		    ncfg_hostapd_effective_band(point->band, &point->channel) : "<absent>");
+		    ncfg_access_point_effective_band(point->band, &point->channel) ?
+		    ncfg_access_point_effective_band(point->band, &point->channel) : "<absent>");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->band ? started->band : "<absent>");
-	} else if (!same_text(ncfg_hostapd_key_mgmt_of(&point->security), started->key_mgmt)) {
+	} else if (!same_text(ncfg_security_key_mgmt(&point->security), started->key_mgmt)) {
 		/*
 		 * **The generation, which nothing else notices changing.** hostapd
 		 * reads its file once, so an access point started as WPA2 goes on
@@ -401,8 +400,8 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		 */
 		field = "access_point.wifi.proto";
 		(void)snprintf(desired, sizeof(desired), "%s",
-		    ncfg_hostapd_key_mgmt_of(&point->security) ?
-		    ncfg_hostapd_key_mgmt_of(&point->security) : "open");
+		    ncfg_security_key_mgmt(&point->security) ?
+		    ncfg_security_key_mgmt(&point->security) : "open");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->key_mgmt ? started->key_mgmt : "open");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {

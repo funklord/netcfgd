@@ -218,7 +218,8 @@ static void backend_stopped(ncfg_owned_state_t *owned, int kind, const char *int
  * A start that has not yet been seen to work, counted (0079).
  *
  * The clearing half -- a backend observed running -- is not here, because it is
- * not something an apply did. `apply.h` says where it went.
+ * not something an apply did: it is `restarts_cleared_by_running`, which the
+ * fold applies before this one.
  */
 static int restart_counted(ncfg_owned_state_t *owned, int kind, const char *interface)
 {
@@ -254,9 +255,14 @@ static int restart_counted(ncfg_owned_state_t *owned, int kind, const char *inte
 	return 1;
 }
 
-/* A deliberate stop clears the count: the document stopped asking, so whatever
- * the daemon was doing before is no longer being attempted. */
-static void restart_cleared(ncfg_owned_state_t *owned, int kind, const char *interface)
+/*
+ * A deliberate stop clears the count: the document stopped asking, so whatever
+ * the daemon was doing before is no longer being attempted.
+ *
+ * 1 where a count was there to remove, which is what lets a converged pass tell
+ * "the record moved" from "the record already said this".
+ */
+static int restart_cleared(ncfg_owned_state_t *owned, int kind, const char *interface)
 {
 	size_t at;
 
@@ -270,8 +276,58 @@ static void restart_cleared(ncfg_owned_state_t *owned, int kind, const char *int
 		memmove(&owned->backend_restarts[at], &owned->backend_restarts[at + 1u],
 		    (owned->backend_restart_count - at - 1u) * sizeof(*owned->backend_restarts));
 		owned->backend_restart_count--;
-		return;
+		return 1;
 	}
+	return 0;
+}
+
+/*
+ * 0079's third clear: a backend the observation found running.
+ *
+ * **This is the one of the three that is not something an apply did**, which is
+ * why it arrives as an argument rather than out of the journal. A daemon that
+ * is alive has stayed up, so whatever it did last week is not a reason to stop
+ * trying now -- and without it the cap never lifts: five starts a month apart
+ * are counted the same as five in a second, and the sixth is refused on a
+ * machine where nothing is wrong.
+ *
+ * **It reads `running`, and that is only safe because the liveness pass ran.**
+ * The whole of `apply.h`'s reason for holding this back was that `running` in
+ * the record was netcfgd's memory of having started something, so clearing on
+ * it would clear every count on every pass and the cap would never bite at all
+ * -- "a backend that failed five times is never started again" traded for "one
+ * that fails for ever is started for ever", which is the defect 0079 exists
+ * against, measured at 181 starts in twelve seconds.
+ * `ncfg_observe_backend_liveness` made it a fact about a process for the six
+ * kinds netcfgd has a handle on, and for the rest it stays memory -- where it
+ * is inert, because a record that says a backend is running is a record the
+ * planner asks for no start against, so there is no count to clear.
+ *
+ * Before the journal's own two rules, which is the Rust's order
+ * (`netcfgd_host::state::absorb_restarts`): a pass that both saw one backend up
+ * and started another must not have the start swallowed by the clear.
+ *
+ * The number removed, so that the caller can tell a pass that changed the
+ * record from one that did not.
+ */
+static size_t restarts_cleared_by_running(ncfg_owned_state_t *owned,
+    const ncfg_observed_t *observed)
+{
+	size_t cleared = 0u;
+	size_t at;
+
+	if (!observed) {
+		return 0u;
+	}
+	for (at = 0; at < observed->backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &observed->backends[at];
+
+		if (!backend->running || !backend->interface) {
+			continue;
+		}
+		cleared += (size_t)restart_cleared(owned, backend->kind, backend->interface);
+	}
+	return cleared;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -388,7 +444,7 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 		}
 		return backend_started(owned, op->u.backend.kind, op->u.backend.iface);
 	case NCFG_OP_BACKEND_STOP:
-		restart_cleared(owned, op->u.backend.kind, op->u.backend.iface);
+		(void)restart_cleared(owned, op->u.backend.kind, op->u.backend.iface);
 		backend_stopped(owned, op->u.backend.kind, op->u.backend.iface);
 		return 1;
 	/*
@@ -460,6 +516,14 @@ typedef struct {
 	 * has no scope list -- which leaves the record's alone. */
 	const ncfg_dns_scope_t *delivered;
 	size_t                  delivered_count;
+	/* The observation this plan was made from, for 0079's third clear, or NULL
+	 * from a caller that has none. */
+	const ncfg_observed_t  *observed;
+	/* Set where the fold gave the update back because there was nothing to
+	 * record, as against every other way of answering 0 -- a read that failed,
+	 * a fold that could not grow the record, a write that refused. All of them
+	 * answer 0 to `ncfg_owned_update` and only this one is success. */
+	int                     abandoned;
 } fold_t;
 
 /*
@@ -555,10 +619,26 @@ static const ncfg_action_t *action_with_id(const ncfg_plan_t *plan, uint32_t id)
 
 static int fold(ncfg_owned_state_t *owned, void *context)
 {
-	const fold_t *what = context;
-	int           delivered_dns = 0;
-	size_t        at;
+	fold_t *what = context;
+	int     delivered_dns = 0;
+	size_t  cleared;
+	size_t  at;
 
+	/* First of 0079's three rules, and the only one that is not the journal's.
+	 * See `restarts_cleared_by_running` for why the order matters. */
+	cleared = restarts_cleared_by_running(owned, what->observed);
+	if (what->journal->record_count == 0u && cleared == 0u) {
+		/*
+		 * The converged pass: nothing ran and the record already said what the
+		 * observation says. Abandoned rather than written, so that a tick that
+		 * changed nothing does not rewrite a file the other writer may be in
+		 * the middle of. The flag is what tells `ncfg_apply_record` this from
+		 * a refusal, rather than an empty `err` -- a caller that wanted no
+		 * sentence would otherwise have every failure read as this.
+		 */
+		what->abandoned = 1;
+		return 0;
+	}
 	for (at = 0; at < what->journal->record_count; at++) {
 		const ncfg_record_t *record = &what->journal->records[at];
 		const ncfg_action_t *action = action_with_id(what->plan, record->id);
@@ -604,7 +684,7 @@ static int fold(ncfg_owned_state_t *owned, void *context)
 
 int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
     const ncfg_journal_t *journal, const ncfg_dns_scope_t *delivered, size_t delivered_count,
-    char *err, size_t err_size)
+    const ncfg_observed_t *observed, char *err, size_t err_size)
 {
 	fold_t what;
 
@@ -614,22 +694,35 @@ int ncfg_apply_record(const char *run_dir, const ncfg_plan_t *plan,
 		    "journal");
 		return 0;
 	}
-	if (journal->record_count == 0u) {
-		/* Nothing ran, so nothing is written -- not even the read and the
-		 * rewrite, which on an already-correct machine is every tick. */
+	if (journal->record_count == 0u && !observed) {
+		/*
+		 * Nothing ran and nobody is asking 0079's third question, so nothing is
+		 * read and nothing is written. With an observation the record has to be
+		 * read to find out whether a count is there to clear -- under the lock,
+		 * because that is the only moment the file and the answer exist
+		 * together -- and `fold` abandons the write where none was.
+		 */
 		return 1;
 	}
 	what.plan = plan;
 	what.journal = journal;
 	what.delivered = delivered;
 	what.delivered_count = delivered ? delivered_count : 0u;
+	what.observed = observed;
+	what.abandoned = 0;
 	if (ncfg_owned_update(run_dir, fold, &what, err, err_size)) {
+		return 1;
+	}
+	if (what.abandoned) {
+		/* The converged pass. `ncfg_owned_update` answers 0 for every way of
+		 * not writing, and this is the one that is success: the record already
+		 * said what this pass would have made it say. */
 		return 1;
 	}
 	/*
 	 * `ncfg_owned_update` leaves `err` alone when the *change* is what refused,
 	 * because a caller returning 0 from it is ordinarily saying "nothing to
-	 * record after all". Here it can only be an allocation failure or an op
+	 * record after all". Here that can only be an allocation failure or an op
 	 * carrying no interface, and a refusal with no sentence in it is one the
 	 * caller logs as an empty pair of brackets.
 	 */
