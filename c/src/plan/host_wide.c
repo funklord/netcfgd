@@ -47,7 +47,6 @@
 #include "plan_internal.h"
 
 #include "ncfg/base.h"
-#include "ncfg/dns.h"
 #include "ncfg/value.h"
 
 #include <stdint.h>

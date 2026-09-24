@@ -58,8 +58,10 @@
  *       one per marker, and the missing sixth (`ncfg_hostapd_running_pid`)
  *       landed with the pass; the mapping is a switch over the taxonomy with
  *       no `default:`. So `running` is a fact about a process rather than
- *       netcfgd's memory of having started one, and 0079's third clear has its
- *       precondition (`apply.h`, project.md 10.183, 10.191).
+ *       netcfgd's memory of having started one -- and 0079's third clear is
+ *       written on top of it: `ncfg_apply_record` takes the observation and
+ *       clears the restart count of every backend this pass found running
+ *       (`apply.h`, project.md 10.183, 10.191, 10.254).
  *
  *       **The `/proc` it reads under is still not a parameter**, which is this
  *       module's rule broken and is recorded rather than worked around: the
@@ -846,15 +848,6 @@ int ncfg_observe_augment_host(ncfg_observed_t *observed, const ncfg_observe_root
 int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
-/*
- * The same, opening and closing a netfilter socket of its own.
- *
- * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
- * socket that will not open is the commonest way a kernel says it has no
- * nftables, so it is a note and an empty answer rather than a refusal.
- */
-int ncfg_observe_netfilter(ncfg_observed_t *observed, char *err, size_t err_size);
-
 /* ------------------------------------------------------------------------ *
  * Which driver offloads each interface has on
  * ------------------------------------------------------------------------ */
@@ -909,15 +902,6 @@ int ncfg_observe_netfilter(ncfg_observed_t *observed, char *err, size_t err_size
 int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
-/*
- * The same, opening and closing a generic netlink socket of its own.
- *
- * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
- * socket that will not open is a note and an empty answer rather than a
- * refusal.
- */
-int ncfg_observe_offloads(ncfg_observed_t *observed, char *err, size_t err_size);
-
 /* ------------------------------------------------------------------------ *
  * What each WireGuard device is running, and whether it is current
  * ------------------------------------------------------------------------ */
@@ -966,15 +950,6 @@ int ncfg_observe_offloads(ncfg_observed_t *observed, char *err, size_t err_size)
  */
 int ncfg_observe_wireguard_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
-
-/*
- * The same, opening and closing a generic netlink socket of its own.
- *
- * `NCFG_OBSERVE_TIMEOUT_SECONDS` on it, for `ncfg_observe_collect`'s reason. A
- * socket that will not open is a note and nothing observed rather than a
- * refusal.
- */
-int ncfg_observe_wireguard(ncfg_observed_t *observed, char *err, size_t err_size);
 
 /*
  * Whether the key each device is running is the key its configuration names.

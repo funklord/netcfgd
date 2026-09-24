@@ -1063,23 +1063,32 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		 * rather than being deleted, with its subject changed to the refusal
 		 * that is *not* a missing port.
 		 *
-		 * A plain `backend.start` for DHCPv6 is refused in both
-		 * implementations and for the same reason: which v6 client can serve a
-		 * document turns on whether it asked for a delegated prefix -- only
-		 * odhcp6c reports one -- and the op carries neither the request nor
-		 * the client (0050). So what this asserts is unchanged and its subject
-		 * is permanent: a refusal says *what* is missing rather than only that
-		 * something is.
+		 * **Then DHCPv6 stood here, and that was the fifth.** This comment
+		 * said a plain `backend.start` for it was "refused in both
+		 * implementations and for the same reason", so the subject was
+		 * permanent. It was not refused in both: the Rust intercepts that kind
+		 * one match arm before the refusal and starts a client with the
+		 * request its context carries, and this port had copied the arm that
+		 * is never reached (project.md 10.259). The sentence that made a gap
+		 * look like a fixed point was in a test's own comment, which is where
+		 * nobody re-reads it.
+		 *
+		 * So the subject is a refusal that is about the **kind** rather than
+		 * about a missing port: WireGuard is a kernel device and not a daemon
+		 * -- `link.create` makes it and `wg.set_device` configures it -- so
+		 * there is nothing to start, in either implementation, ever. That is
+		 * permanent in a way "not ported yet" never was, and it is the last
+		 * time this check's subject should need moving.
 		 */
 		memset(&reason, 0, sizeof(reason));
-		reason.interface = "eth0";
-		reason.field = "backend.dhcp6";
+		reason.interface = "wg0";
+		reason.field = "backend.wireguard";
 		reason.desired = "running";
 		reason.observed = "<absent>";
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_BACKEND_START;
-		op.u.backend.kind = (int)NCFG_BACKEND_DHCP6;
-		op.u.backend.iface = "eth0";
+		op.u.backend.kind = (int)NCFG_BACKEND_WIREGUARD;
+		op.u.backend.iface = "wg0";
 		(void)ncfg_plan_add(plan, &op, &reason, NULL, 0, NULL);
 
 		/* The double refuses exactly what `ncfg_apply_supported` refuses,
@@ -1093,7 +1102,7 @@ static void an_op_this_build_cannot_do_fails_its_action(void)
 		    "an op this build cannot carry out fails its action rather than passing");
 		message[0] = '\0';
 		check(!ncfg_apply_supported(&op, message, sizeof(message)) &&
-		    strstr(message, "backend.start") && strstr(message, "delegated prefix"),
+		    strstr(message, "backend.start") && strstr(message, "kernel device"),
 		    "and the refusal says what is missing, not just that it is missing");
 	} else {
 		check(0, "an op this build cannot carry out fails its action rather than passing");
@@ -1313,6 +1322,108 @@ static void a_changed_hook_does_not_run(const char *dir)
 	free(hook.sha256);
 }
 
+/* The first line of a file the hook wrote, NUL-terminated, or NULL. */
+static char *first_line_of(const char *path)
+{
+	FILE  *file = fopen(path, "rb");
+	char  *text;
+	size_t got;
+
+	if (!file) {
+		return NULL;
+	}
+	text = calloc(1u, 512u);
+	if (!text) {
+		(void)fclose(file);
+		return NULL;
+	}
+	got = fread(text, 1u, 511u, file);
+	text[got] = '\0';
+	(void)fclose(file);
+	return text;
+}
+
+/*
+ * The phase's own variable reaches the hook.
+ *
+ * **Section 5.2 fixes `NCFG_ACTION`, `NCFG_BSSID` and `NCFG_URL` the way it
+ * fixes `NCFG_ADDR`**, so a hook written against one is the same contract. The
+ * reconcile runner took them as an argument and dropped them for several
+ * waves, because `ncfg_hook_env_t` had four fixed members and nowhere to put a
+ * name it did not know -- so a `roam` hook read `$NCFG_BSSID` and got nothing,
+ * and nothing said so (project.md 10.260).
+ *
+ * Driven through a real script, because that is the only thing that can say
+ * what a child's environment held.
+ */
+static void the_phase_s_own_variable_reaches_the_hook(const char *dir)
+{
+	ncfg_hook_ref_t hook;
+	ncfg_hook_env_t env;
+	char            path[600];
+	char            marker[600];
+	char            body[1024];
+	char           *said;
+
+	(void)snprintf(marker, sizeof(marker), "%s/bssid", dir);
+	(void)snprintf(body, sizeof(body),
+	    "printf '%%s|%%s\\n' \"${NCFG_BSSID-unset}\" \"${NCFG_IFACE-unset}\" > %s", marker);
+	if (!write_hook(dir, body, &hook, path, sizeof(path))) {
+		check(0, "a hook that records the phase's own variable");
+		return;
+	}
+	hook.phase = NCFG_HOOK_PHASE_ROAM;
+	memset(&env, 0, sizeof(env));
+	env.iface = "wlan0";
+	env.variable = "NCFG_BSSID";
+	env.value = "aa:bb:cc:dd:ee:ff";
+	(void)unlink(marker);
+	check(ncfg_hook_run(&hook, &env, path, sizeof(path)) == NCFG_HOOK_OK,
+	    "a roam hook runs");
+	said = first_line_of(marker);
+	check(said && strncmp(said, "aa:bb:cc:dd:ee:ff|wlan0", 23u) == 0,
+	    "  and is told which access point, beside the names it always gets");
+	free(said);
+
+	/*
+	 * **Absent sets nothing**, which is the rule the four fixed members
+	 * follow and the reason a script may test `[ -n "$NCFG_BSSID" ]`. Both
+	 * halves are needed: a name with no value would set an empty variable,
+	 * which is the one answer the rule forbids.
+	 */
+	env.variable = "NCFG_BSSID";
+	env.value = NULL;
+	(void)unlink(marker);
+	(void)ncfg_hook_run(&hook, &env, path, sizeof(path));
+	said = first_line_of(marker);
+	check(said && strncmp(said, "unset|", 6u) == 0,
+	    "  and a name with no value sets nothing rather than an empty string");
+	free(said);
+
+	/*
+	 * **The filter on the phase's own name is not asserted here, and that is
+	 * a recorded limit rather than an omission.** `is_ours` drops an
+	 * inherited `NCFG_BSSID` so the daemon's own environment cannot shadow
+	 * what the phase is saying, and three ways of checking it were tried and
+	 * all three passed with the filter deleted:
+	 *
+	 *   * reading `$NCFG_BSSID` -- with both entries present the shell
+	 *     resolves to the later one, which is netcfgd's, so the value is
+	 *     right either way;
+	 *   * counting with `env` -- a POSIX shell imports its environment into
+	 *     variables on startup and keeps one per name, so the duplicate is
+	 *     gone before `env` runs;
+	 *   * counting off `/proc/self/environ` -- which did not see netcfgd's
+	 *     entry at all from inside the script, so it separates nothing.
+	 *
+	 * A hook is a shell script, and a shell collapses duplicates before
+	 * anything in it can look. Where the filter does change an answer is a
+	 * hook that is **not** a shell script: `getenv` returns the first match
+	 * and the inherited entry is first. Nothing in this suite execs one, so
+	 * the property is real, argued where the code is, and unobserved.
+	 */
+}
+
 /*
  * A hook naming a user does not run at all.
  *
@@ -1507,6 +1618,7 @@ static void the_hook_runner(void)
 	}
 	a_changed_hook_does_not_run(dir);
 	a_hook_asking_to_drop_privilege_does_not_run_as_root_instead(dir);
+	the_phase_s_own_variable_reaches_the_hook(dir);
 	a_prompt_hook_succeeds_and_is_told_its_phase(dir);
 	a_hooks_own_children_are_killed_with_it(dir);
 	/* By name, never by pattern: this directory holds one file this test wrote
@@ -1678,7 +1790,7 @@ static void only_what_ran_is_claimed(char *run_dir)
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 
 	message[0] = '\0';
-	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message)),
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message, sizeof(message)),
 	    "what an apply did is folded into owned.json");
 	if (read_back(run_dir, &owned)) {
 		check(has_string(owned.created_links, owned.created_link_count, "br0"),
@@ -1756,7 +1868,7 @@ static void a_revert_takes_the_claims_back(char *run_dir)
 	message[0] = '\0';
 	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(object_named(owned.addresses, owned.address_count, "br0",
 		    "10.0.0.9/24") != NULL,
@@ -1768,7 +1880,7 @@ static void a_revert_takes_the_claims_back(char *run_dir)
 
 	check(ncfg_apply_revert(plan, &journal, &executor) == 1u, "  the window closes unconfirmed");
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(object_named(owned.addresses, owned.address_count, "br0",
 		    "10.0.0.9/24") == NULL,
@@ -2063,7 +2175,7 @@ static void what_a_delivery_is_recorded_as(char *run_dir)
 
 	journal_of(&journal, plan, done);
 	message[0] = '\0';
-	check(ncfg_apply_record(run_dir, plan, &journal, items, count, message, sizeof(message)),
+	check(ncfg_apply_record(run_dir, plan, &journal, items, count, NULL, message, sizeof(message)),
 	    "what a delivery delivered is folded into owned.json");
 	if (read_back(run_dir, &owned)) {
 		const ncfg_applied_dns_t *eth0 = applied_named(&owned, "eth0");
@@ -2131,7 +2243,7 @@ static void what_a_delivery_is_recorded_as(char *run_dir)
 	 */
 	journal_of(&journal, plan, done);
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(owned.dns_count == 2u,
 		    "a fold with no scope list leaves the delivered scopes alone");
@@ -2143,7 +2255,7 @@ static void what_a_delivery_is_recorded_as(char *run_dir)
 	 * record still says what the last delivery said. */
 	journal_of(&journal, plan, failed);
 	message[0] = '\0';
-	(void)ncfg_apply_record(run_dir, plan, &journal, items, 1u, message, sizeof(message));
+	(void)ncfg_apply_record(run_dir, plan, &journal, items, 1u, NULL, message, sizeof(message));
 	if (read_back(run_dir, &owned)) {
 		check(owned.dns_count == 2u,
 		    "and a delivery that failed records nothing, not even a shorter list");
@@ -2175,10 +2287,174 @@ static void an_empty_journal_writes_nothing(char *run_dir)
 		return;
 	}
 	message[0] = '\0';
-	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, message, sizeof(message)) &&
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message, sizeof(message)) &&
 	    stat(path, &after) == 0 && before.st_ino == after.st_ino,
 	    "a plan with nothing in it does not rewrite the record");
 	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+/*
+ * 0079's third clear: a backend the observation found running.
+ *
+ * **The rule that is not something an apply did**, and the one the port carried
+ * without for two waves. Its two neighbours come out of the journal -- a start
+ * counts, a stop clears -- and this one comes out of the observation, so there
+ * is no fixture for it that does not hand `ncfg_apply_record` one.
+ *
+ * What it is worth: without it five starts a month apart are counted the same
+ * as five in a second, and the sixth is refused on a machine where nothing has
+ * gone wrong since. The cap bites and never lifts.
+ *
+ * **It is safe only because the liveness pass runs first**, which is why
+ * `apply.h` held it back. Where `running` was netcfgd's memory of having
+ * started something, clearing on it would have cleared every count on every
+ * pass and 0079 would have stopped nothing at all.
+ */
+static void a_backend_seen_running_clears_its_count(char *run_dir)
+{
+	ncfg_plan_t       *plan;
+	ncfg_executor_t    executor;
+	recorder_t         recorder;
+	ncfg_journal_t     journal;
+	ncfg_owned_state_t owned;
+	ncfg_observed_t   *running;
+	ncfg_observed_t   *dead;
+	ncfg_op_t          op;
+	char               message[NCFG_ERROR_MAX];
+	char               path[600];
+	struct stat        before;
+	struct stat        after;
+
+	message[0] = '\0';
+	plan = ncfg_plan_new(message, sizeof(message));
+	running = observed_of("\"backends\":[{\"kind\":\"open_vpn\",\"interface\":\"vpn0\","
+	    "\"running\":true}]");
+	dead = observed_of("\"backends\":[{\"kind\":\"open_vpn\",\"interface\":\"vpn0\","
+	    "\"running\":false}]");
+	if (!plan || !running || !dead) {
+		check(0, "a backend seen running clears the count that would cap it");
+		ncfg_plan_free(plan);
+		ncfg_observed_free(running);
+		ncfg_observed_free(dead);
+		return;
+	}
+
+	/* Two starts that did not lead to a live process, which is the state 0079
+	 * counts. */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_BACKEND_START;
+	op.u.backend.kind = (int)NCFG_BACKEND_OPENVPN;
+	op.u.backend.iface = "vpn0";
+	put(plan, &op);
+	put(plan, &op);
+	recorder_init(&recorder, &executor);
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	message[0] = '\0';
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, NULL, message,
+	        sizeof(message)),
+	    "two starts of a tunnel that will not stay up are recorded");
+	if (read_back(run_dir, &owned)) {
+		check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 2,
+		    "  as a count of two, which three more would cap (0079)");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/*
+	 * A pass on which nothing ran at all, which is every tick of a converged
+	 * machine -- and the point: the clear has to fire there or it never fires
+	 * for a backend that came up and stayed up.
+	 */
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, running, message,
+	        sizeof(message)),
+	    "a pass that ran nothing still asks what the observation saw");
+	if (read_back(run_dir, &owned)) {
+		check(owned.backend_restart_count == 0u,
+		    "  and a tunnel found running clears the count, so the cap lifts");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/*
+	 * **The other half, and it is the one that decides whether 0079 works at
+	 * all.** A backend the observation did not find is not a reason to forget
+	 * what it did: clearing on anything but `running` is how "never started
+	 * again" becomes "started for ever".
+	 */
+	ncfg_journal_init(&journal);
+	put(plan, &op);
+	recorder_init(&recorder, &executor);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, dead, message,
+	    sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 3,
+		    "  a backend the observation says is down keeps its count, and grows it");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/*
+	 * **The clear goes before the count**, which is the Rust's order and
+	 * matters on exactly this pass: one that both saw the tunnel up and
+	 * started it again has to leave a count of one, not nought and not four.
+	 */
+	ncfg_journal_init(&journal);
+	recorder_init(&recorder, &executor);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	message[0] = '\0';
+	(void)ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, running, message,
+	    sizeof(message));
+	if (read_back(run_dir, &owned)) {
+		check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 3,
+		    "  and a pass that both saw it up and started it again counts the starts "
+		    "alone");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	/*
+	 * And the write is still skipped where nothing moved. The read cannot be:
+	 * whether a count is there to clear is not knowable without it, and the
+	 * lock is the one moment the file and the answer exist together.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/owned.json", run_dir);
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	if (stat(path, &before) == 0) {
+		check(ncfg_apply_record(run_dir, plan, &journal, NULL, 0u, dead, message,
+		        sizeof(message)) &&
+		    stat(path, &after) == 0 && before.st_ino == after.st_ino,
+		    "an empty pass whose observation clears nothing does not rewrite the "
+		    "record");
+	} else {
+		check(0, "an empty pass whose observation clears nothing does not rewrite the "
+		    "record");
+	}
+	/*
+	 * **And the count is still there, which is the half the inode cannot
+	 * say.** A clear that fired for a backend the observation found *down*
+	 * would leave this at nought -- and the neighbouring check above would go
+	 * red for it too, by rewriting the file, so without this one the sentence
+	 * that names the property would stay green while another caught the fault.
+	 */
+	if (read_back(run_dir, &owned)) {
+		check(owned.backend_restart_count == 1u && owned.backend_restarts[0].count == 3,
+		    "  the count a down backend kept is still what it was");
+		ncfg_owned_free(&owned);
+	}
+	ncfg_journal_free(&journal);
+
+	ncfg_observed_free(running);
+	ncfg_observed_free(dead);
 	ncfg_plan_free(plan);
 }
 
@@ -2398,6 +2674,7 @@ static void what_an_apply_did_is_recorded(void)
 	only_what_ran_is_claimed(run_dir);
 	a_revert_takes_the_claims_back(run_dir);
 	an_empty_journal_writes_nothing(run_dir);
+	a_backend_seen_running_clears_its_count(run_dir);
 	the_journal_reaches_the_run_directory(run_dir);
 	what_a_delivery_is_recorded_as(run_dir);
 	the_folding_rules();

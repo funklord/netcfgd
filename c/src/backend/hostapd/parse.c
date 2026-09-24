@@ -26,64 +26,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-int ncfg_hostapd_normalize_station(const char *text, char *out, size_t out_size, char *err,
-    size_t err_size)
-{
-	char        separator = ':';
-	size_t      part;
-	const char *walk;
-
-	if (!text || !out || out_size < 18u) {
-		ncfg_error_set(err, err_size, "a station address was normalised with nowhere to put it");
-		return 0;
-	}
-	if (strchr(text, '-') != NULL) {
-		separator = '-';
-	}
-	/* Six parts, and exactly six: a count that is not six is a different kind
-	 * of mistake from a part that is not hex, and the two say different things
-	 * to whoever wrote the list. */
-	walk = text;
-	part = 1u;
-	while ((walk = strchr(walk, separator)) != NULL) {
-		part++;
-		walk++;
-	}
-	if (part != 6u) {
-		ncfg_error_set(err, err_size,
-		    "a station address is six colon-separated octets, such as `aa:bb:cc:dd:ee:ff`; "
-		    "`%s` has %zu",
-		    text, part);
-		return 0;
-	}
-	walk = text;
-	for (part = 0u; part < 6u; part++) {
-		if (!isxdigit((unsigned char)walk[0]) || !isxdigit((unsigned char)walk[1]) ||
-		    (walk[2] != separator && walk[2] != '\0')) {
-			char shown[8];
-			size_t length = 0;
-
-			while (length < 3u && walk[length] != '\0' && walk[length] != separator) {
-				shown[length] = walk[length];
-				length++;
-			}
-			shown[length] = '\0';
-			ncfg_error_set(err, err_size,
-			    "`%s` is not a two-digit hex octet, in the station address `%s`", shown,
-			    text);
-			return 0;
-		}
-		out[part * 3u] = (char)tolower((unsigned char)walk[0]);
-		out[part * 3u + 1u] = (char)tolower((unsigned char)walk[1]);
-		if (part < 5u) {
-			out[part * 3u + 2u] = ':';
-		}
-		walk += 3u;
-	}
-	out[17] = '\0';
-	return 1;
-}
-
 static int compare_addresses(const void *one, const void *two)
 {
 	return strcmp(*(char *const *)one, *(char *const *)two);
@@ -122,7 +64,7 @@ int ncfg_hostapd_parse_acl_show(const char *reply, char ***out, size_t *count_ou
 		 * COMMAND` and a truncated line all reach here as text, and none of
 		 * them may become an entry netcfgd then tries to delete. */
 		if (word_length == 0u ||
-		    !ncfg_hostapd_normalize_station(word, address, sizeof(address), NULL, 0)) {
+		    !ncfg_station_address_normalize(word, address, sizeof(address), NULL, 0)) {
 			continue;
 		}
 		if (count == capacity) {
@@ -238,7 +180,7 @@ int ncfg_hostapd_parse_station(const char *reply, ncfg_hostapd_station_t *out)
 	/* `FAIL`, an empty reply and `UNKNOWN COMMAND` all mean "no more", and none
 	 * of them is an error worth showing somebody. A first line that is not an
 	 * address is not trusted into the list either. */
-	if (!ncfg_hostapd_normalize_station(first, out->address, sizeof(out->address), NULL, 0)) {
+	if (!ncfg_station_address_normalize(first, out->address, sizeof(out->address), NULL, 0)) {
 		return 0;
 	}
 

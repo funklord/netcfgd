@@ -36,14 +36,13 @@
 /* `IFNAMSIZ` less the terminator, written out rather than included:
  * `linux/if.h` and `net/if.h` redefine each other's structures and this file's
  * callers are entitled to either. */
-#define INTERFACE_NAME_MAX 15u
 
 struct ncfg_supplicant_client {
 	int    fd;
 	/* Our own bound path, removed when the client is freed. */
 	char   local[sizeof(((struct sockaddr_un *)0)->sun_path)];
 	/* The interface this socket belongs to, for diagnostics. */
-	char   interface[INTERFACE_NAME_MAX + 1u];
+	char   interface[NCFG_INTERFACE_NAME_MAX + 1u];
 	/* How long to wait for a reply on this connection. */
 	int    timeout_ms;
 	/* Whether `ATTACH` succeeded, so the free knows to undo it. */
@@ -72,46 +71,6 @@ static long long now_ms(void)
 	return (long long)when.tv_sec * 1000 + when.tv_nsec / 1000000;
 }
 
-/*
- * Why this is not an interface name, or NULL.
- *
- * **Before anything touches the filesystem.** `dir/name` with an absolute name
- * replaces the base rather than extending it, and the two errors below the
- * join say different things about what is there -- so without this the pair is
- * an existence oracle over the whole filesystem, answered as root. Measured
- * against the daemon: `/etc/shadow` gave "Permission denied" and
- * `/etc/nonexistent` gave "no control socket at ...". Refused here rather than
- * at the call sites because this is where the name becomes a path. 0160.
- */
-static const char *unusable_name(const char *name)
-{
-	size_t index;
-
-	if (!name || name[0] == '\0') {
-		return "an interface name cannot be empty";
-	}
-	if (strlen(name) > INTERFACE_NAME_MAX) {
-		return "an interface name is at most 15 characters";
-	}
-	if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-		return "the kernel keeps `.` and `..` for directories";
-	}
-	for (index = 0; name[index] != '\0'; index++) {
-		char one = name[index];
-
-		if (one == '/') {
-			return "an interface name cannot contain `/`";
-		}
-		if (one == ':') {
-			return "an interface name cannot contain `:`";
-		}
-		if (one == ' ' || one == '\t' || one == '\n' || one == '\r' || one == '\v' ||
-		    one == '\f') {
-			return "an interface name cannot contain whitespace";
-		}
-	}
-	return NULL;
-}
 
 int ncfg_supplicant_ctrl_dir(char *out, size_t out_size, char *err, size_t err_size)
 {
@@ -201,7 +160,7 @@ ncfg_supplicant_client_t *ncfg_supplicant_connect_within(const char *dir, const 
 		ncfg_error_set(err, err_size, "a control socket needs a directory to be found in");
 		return NULL;
 	}
-	why = unusable_name(interface);
+	why = ncfg_usable_name(interface);
 	if (why) {
 		ncfg_error_set(err, err_size, "`%s` is not an interface name: %s",
 		    interface ? interface : "", why);
@@ -317,11 +276,6 @@ void ncfg_supplicant_client_free(ncfg_supplicant_client_t *client)
 		(void)unlink(client->local);
 	}
 	free(client);
-}
-
-const char *ncfg_supplicant_client_interface(const ncfg_supplicant_client_t *client)
-{
-	return client ? client->interface : "";
 }
 
 int ncfg_supplicant_client_descriptor(const ncfg_supplicant_client_t *client)

@@ -234,6 +234,116 @@ const char *ncfg_mac_policy_name(int policy)
 	return ncfg_field_enum_name(&mac_policy_set, policy);
 }
 
+/* The six characters an interface name may not carry whitespace as. */
+static int name_whitespace(char one)
+{
+	return one == ' ' || one == '\t' || one == '\r' || one == '\n' || one == '\v' ||
+	    one == '\f';
+}
+
+/* Hex and lowercasing spelled out rather than taken from `<ctype.h>`, whose
+ * answers are the locale's. A station address is ASCII by definition and this
+ * is the one place its spelling is decided. */
+static int hex_digit(char one)
+{
+	return (one >= '0' && one <= '9') || (one >= 'a' && one <= 'f') ||
+	    (one >= 'A' && one <= 'F');
+}
+
+static char lower_hex(char one)
+{
+	return one >= 'A' && one <= 'F' ? (char)(one - 'A' + 'a') : one;
+}
+
+int ncfg_station_address_normalize(const char *text, char *out, size_t out_size, char *err,
+    size_t err_size)
+{
+	char        separator = ':';
+	size_t      part;
+	const char *walk;
+
+	if (!text || !out || out_size < NCFG_STATION_ADDRESS_SIZE) {
+		ncfg_error_set(err, err_size,
+		    "a station address was normalised with nowhere to put it");
+		return 0;
+	}
+	if (strchr(text, '-') != NULL) {
+		separator = '-';
+	}
+	/* Six parts, and exactly six: a count that is not six is a different kind
+	 * of mistake from a part that is not hex, and the two say different things
+	 * to whoever wrote the list. */
+	walk = text;
+	part = 1u;
+	while ((walk = strchr(walk, separator)) != NULL) {
+		part++;
+		walk++;
+	}
+	if (part != 6u) {
+		ncfg_error_set(err, err_size,
+		    "a station address is six colon-separated octets, such as "
+		    "`aa:bb:cc:dd:ee:ff`; `%s` has %zu",
+		    text, part);
+		return 0;
+	}
+	walk = text;
+	for (part = 0u; part < 6u; part++) {
+		if (!hex_digit(walk[0]) || !hex_digit(walk[1]) ||
+		    (walk[2] != separator && walk[2] != '\0')) {
+			char   shown[8];
+			size_t length = 0;
+
+			while (length < 3u && walk[length] != '\0' && walk[length] != separator) {
+				shown[length] = walk[length];
+				length++;
+			}
+			shown[length] = '\0';
+			ncfg_error_set(err, err_size,
+			    "`%s` is not a two-digit hex octet, in the station address `%s`", shown,
+			    text);
+			return 0;
+		}
+		out[part * 3u] = lower_hex(walk[0]);
+		out[part * 3u + 1u] = lower_hex(walk[1]);
+		if (part < 5u) {
+			out[part * 3u + 2u] = ':';
+		}
+		walk += 3u;
+	}
+	out[NCFG_STATION_ADDRESS_LEN] = '\0';
+	return 1;
+}
+
+const char *ncfg_usable_name(const char *name)
+{
+	size_t at;
+
+	if (!name || name[0] == '\0') {
+		return "an interface name cannot be empty";
+	}
+	if (strlen(name) > NCFG_INTERFACE_NAME_MAX) {
+		return "an interface name is at most 15 characters";
+	}
+	if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
+		/* Not "a directory is not an interface name": every caller prefixes
+		 * "`{name}` is not an interface name: ", so that phrasing said it
+		 * twice in one line. */
+		return "the kernel keeps `.` and `..` for directories";
+	}
+	for (at = 0; name[at]; at++) {
+		if (name[at] == '/') {
+			return "an interface name cannot contain `/`";
+		}
+		if (name[at] == ':') {
+			return "an interface name cannot contain `:`";
+		}
+		if (name_whitespace(name[at])) {
+			return "an interface name cannot contain whitespace";
+		}
+	}
+	return NULL;
+}
+
 int ncfg_phase2_pins_nothing(const char *phase2)
 {
 	const char *at = phase2;
@@ -336,6 +446,11 @@ int ncfg_macvlan_mode_number(int mode)
  * is `ncfg_bond_mode_number`'s convention and means a protocol this build must
  * not send as some other protocol.
  */
+const char *ncfg_vlan_protocol_name(int protocol)
+{
+	return ncfg_field_enum_name(&vlan_protocol_set, protocol);
+}
+
 int ncfg_vlan_protocol_ethertype(int protocol)
 {
 	switch ((ncfg_vlan_protocol_t)protocol) {
@@ -1197,6 +1312,13 @@ int ncfg_key_render(const unsigned char key[NCFG_KEY_LEN], char *out, size_t out
 	if (!key || !out || out_size < NCFG_KEY_TEXT_SIZE) {
 		/* Named by its size and never by its value: a key that would not fit
 		 * is still a key. */
+		if (out && out_size) {
+			/* Emptied rather than left as it was, which is `ncfg_key_parse`'s
+			 * rule on its own refusal -- and it is what lets a caller with a
+			 * buffer that cannot be too small discard the status without
+			 * reading an uninitialised one if it ever is. */
+			out[0] = '\0';
+		}
 		ncfg_error_set(err, err_size, "a key needs %u bytes to render into",
 		    (unsigned)NCFG_KEY_TEXT_SIZE);
 		return 0;

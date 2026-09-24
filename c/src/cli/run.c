@@ -1250,61 +1250,6 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
 }
 
 /*
- * `ncfg apply` is refused, and the refusal is the decision rather than a gap.
- *
- * The observer it was waiting for landed in this wave, so the sentence this arm
- * used to carry is no longer true -- and `status`, `plan` and `explain` are
- * wired on the strength of it. **This one is not, and the reason is not that
- * something under it is unported but that everything under it is unported in a
- * way an apply cannot survive.** Four facts, each of which is on its own enough:
- *
- *   * **The planner does not read every block a document can carry.** A plan
- *     from this build is not the whole change, so an apply would converge part
- *     of a machine and report having converged it. `warn_unported` in
- *     `src/plan/build.c` is the list, and it is named here rather than counted
- *     for the reason every other figure in this file was un-counted: a number
- *     has to be swept whenever a pass lands, and the ones that were written
- *     down here went stale inside a wave. The list is the thing a reader needs
- *     and it changes only when the fact does.
- *   * **The executor refuses what it cannot do while the plan is running,
- *     rather than before it.** It carries every op kind now; what it refuses
- *     is by *kind* -- a `link.create` for a physical device, a pppoe session
- *     or an openvpn tunnel, and `backend.start` for four of the nine backend
- *     kinds -- measured by asking `ncfg_apply_supported` about each, rather
- *     than by counting the arms that refuse. `ncfg_apply_supported` is asked by
- *     `execute`, one action at a time, and `ncfg_apply` stops at the first
- *     failure -- so a plan mixing a supported op with an unsupported one
- *     changes the machine and then stops halfway. A sweep of the plan before
- *     the first action would fix the *order* of that refusal and nothing else,
- *     which is why it is not what this arm does.
- *
- *     **The link half of that list is shorter than it was** -- a vlan, a bond,
- *     a macvlan and a tunnel are created now that `document.h` publishes the
- *     last of the four numberings -- and the three left are each covered by an
- *     earlier arm of `plan/link.c`, so nothing a document can express reaches
- *     this refusal through the planner any more. The `backend.start` half is
- *     what keeps the sentence true.
- *   * **Nothing under `ncfg` folds what an apply did into `owned.json`.** The
- *     fold itself has landed -- `ncfg_apply_record` takes a plan and a journal
- *     and is what the daemon's own apply paths call -- and the mark 0136 gives
- *     every link netcfgd creates is written by `create_link` now, so a link
- *     this build makes reads back as `ours` twice over. What is absent is this
- *     command: there is no apply path here to call either of them from, and a
- *     `ncfg apply` that changed a machine and recorded nothing would leave
- *     exactly the objects netcfgd may never remove again.
- *   * **There is no confirm window.** `ncfg_plan_confirm_window` answers from
- *     `global { confirm = ... }` as well as from `--confirm-within`, so a plan
- *     here carries `commit.arm` -- and the executor does nothing for it,
- *     correctly, because arming belongs to whoever owns the timer afterwards.
- *     Nothing here does. An apply that cut the machine off would say a window
- *     was open and never revert.
- *
- * So it says what it is waiting for, by name, and `ncfg plan` is offered
- * because it is the half that is ported: the same document against the same
- * observation, with every block this build is holding named, and nothing
- * changed.
- */
-/*
  * `ncfg apply --confirm-within N`, which is the daemon's to carry out.
  *
  * **One implementation of the safety net, in the program that is still
@@ -1405,6 +1350,19 @@ static const char *config_dir_of(const ncfg_cli_options_t *options, char *out, s
  * window is a timer that outlives this process, so a `ncfg` that armed one
  * itself would have to stay alive to resolve it. One implementation of the
  * safety net, in the one program that is still running when it expires.
+ *
+ * **This verb was refused by name for several waves**, and the argument for
+ * refusing it -- four facts, each said to be enough on its own -- stood in
+ * this file for several more after the verb landed, attached to nothing.
+ * Every one of the four has since closed: the planner holds back one
+ * addressing source and says so per plan rather than a list of blocks; the
+ * executor's refusals are by kind and are counted by `make ledger` rather
+ * than written out here; the fold is the `ncfg_apply_record` below; and the
+ * window is the paragraph above. What is left of that argument is the
+ * instruction in it that outlived it -- **do not write a count of what this
+ * build cannot do into a comment**, because a number has to be swept whenever
+ * a pass lands and the ones written here went stale inside a wave
+ * (project.md 10.260).
  */
 static int command_apply(const ncfg_cli_options_t *options)
 {
@@ -1493,7 +1451,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 		delivered = ncfg_dns_scopes_items(scopes, &delivered_count);
 	}
 	err[0] = '\0';
-	if (!ncfg_apply_record(run_dir, plan, &journal, delivered, delivered_count, err,
+	if (!ncfg_apply_record(run_dir, plan, &journal, delivered, delivered_count, observed, err,
 	        sizeof(err))) {
 		(void)failf("could not record ownership: %s", err);
 	}

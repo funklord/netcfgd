@@ -37,17 +37,22 @@
  *   they are pure and they are where the reply format was got wrong twice; what
  *   is missing is the round trip that carries a reply to them.
  *
- * WHERE THE BAND RULE LIVES, WHICH IS NOT SETTLED
- *   The Rust keeps `effective_band` and `channel_in_band` in `netcfgd-model`
- *   and says why in as many words (0222): the planner has to reach the same
- *   answer as the renderer and must not depend on a backend crate to do it,
- *   because an access point whose document and running configuration disagree
- *   about the band gets restarted -- so two copies of this rule is an access
- *   point that restarts for ever. The C model has not ported them. They are
- *   public here rather than private so that there is still exactly one
- *   implementation for both callers, and **they move to the model when it
- *   grows them**; a second copy appearing in the model is the failure this
- *   paragraph exists to prevent.
+ * WHERE THE BAND RULE LIVES, WHICH IS SETTLED NOW
+ *   It is in the model, as `ncfg_access_point_effective_band`,
+ *   `ncfg_channel_in_band`, `ncfg_channel_needs_radar_detection` and
+ *   `ncfg_security_key_mgmt`. This header used to hold all four, public, with
+ *   a paragraph saying they would move when the C model grew them and that a
+ *   second copy appearing **in the model** was the failure to watch for. The
+ *   model never grew them and the second copy appeared anyway, in
+ *   `compile/lower_network.c`, which needed the rule and could not include a
+ *   backend header to get it -- so the guard was pointed at the one direction
+ *   the copy did not come from. `src/model/device.c` has the argument and what
+ *   it cost.
+ *
+ *   `ncfg_hostapd_band_of_hw_mode` stays, and the line is whose vocabulary a
+ *   function is in rather than what it is about: `hw_mode` is hostapd's
+ *   spelling, read back out of a file hostapd wrote, and the Rust keeps its
+ *   equivalent in `netcfgd-hostapd` for the same reason.
  */
 #ifndef NCFG_HOSTAPD_H
 #define NCFG_HOSTAPD_H
@@ -193,23 +198,6 @@ char *ncfg_hostapd_acl_contents(const ncfg_access_control_t *access_control, cha
 int ncfg_hostapd_policy_in(const char *contents, int *policy_out);
 
 /*
- * The `wpa_key_mgmt` this security would be rendered with, or NULL where it has
- * none -- an open network, and an access point using EAP, which is refused
- * before anything is rendered.
- *
- * Public for the reason `ncfg_hostapd_effective_band` is, and it is the sharper
- * case of the two. hostapd does not report its key management back, so the only
- * account of the generation a running access point is offering is netcfgd's
- * record of what it started -- and the planner restarts an access point whose
- * document and record disagree. A second spelling of "WPA2" is therefore an
- * access point stopped and started on every reconcile, for a document nobody
- * has edited. The Rust keeps this in `netcfgd-model`; it moves there when the C
- * model grows the rule, and a copy appearing there meanwhile is the failure
- * this paragraph and the header's own exist to prevent.
- */
-const char *ncfg_hostapd_key_mgmt_of(const ncfg_security_t *security);
-
-/*
  * The band a `hw_mode` came from, as the document spells it.
  *
  * NULL for anything this build does not render, which is the honest answer
@@ -218,50 +206,6 @@ const char *ncfg_hostapd_key_mgmt_of(const ncfg_security_t *security);
  */
 const char *ncfg_hostapd_band_of_hw_mode(const char *hw_mode);
 
-/*
- * Which band an access point will actually be brought up in, as the document
- * spells it -- `"2.4"`, `"5"`, or NULL for one this build cannot render.
- *
- * `band` decides when it is stated. When it is not, the channel decides, and
- * the split is at 14: 1..=14 is 2.4 GHz and nothing else, while the numbers
- * above belong to 5 GHz. An access point that states neither is 2.4 GHz, which
- * every radio has and which automatic channel selection can then choose within.
- *
- * See the header comment for why this is public.
- */
-const char *ncfg_hostapd_effective_band(const char *band, const ncfg_optint_t *channel);
-
-/*
- * Whether a channel number exists in a band at all.
- *
- * The 5 GHz list is a range rather than the exact set because which of those
- * channels are usable is a regulatory question the kernel answers, not a
- * spelling question this can answer -- 149 is legal in one country and not in
- * the next. What this rejects is a number that is in no band, which is a typo
- * rather than a regulatory refusal. Channel 0 is in no band: it is hostapd's
- * spelling of "survey and choose", which netcfgd writes from an *absent*
- * channel.
- */
-int ncfg_hostapd_channel_in_band(const char *band, int64_t channel);
-
-/*
- * Whether a channel is one the radio must listen on before it may beacon.
- *
- * DFS: the 5 GHz channels shared with weather and military radar. A radio has
- * to watch them for a clear-channel assessment period before transmitting, so
- * an access point on one is **silent for a minute or so after the apply
- * returns** -- longer on some channels -- and an operator who does not know
- * that sees a configured access point nobody can find and goes looking for a
- * fault that is not there.
- *
- * **The kernel is the authority and this is not it**, which is
- * `ncfg_hostapd_channel_in_band`'s argument and holds here with one difference
- * that makes the approximation safe: this drives a warning rather than a
- * refusal, so being wrong about a channel costs a sentence rather than an
- * access point. The range is the one that is DFS in every regulatory domain
- * netcfgd is likely to meet; 36 to 48 and 149 upwards need no wait anywhere.
- */
-int ncfg_hostapd_channel_needs_radar_detection(int64_t channel);
 
 /* ------------------------------------------------------------- the files */
 
@@ -472,18 +416,5 @@ typedef struct {
  * Neither is an error worth showing somebody.
  */
 int ncfg_hostapd_parse_station(const char *reply, ncfg_hostapd_station_t *out);
-
-/*
- * Parse and normalise one station address into `out`, which holds at least 18
- * bytes.
- *
- * Accepts the two spellings people actually write -- `aa:bb:cc:dd:ee:ff` and
- * `aa-bb-cc-dd-ee-ff`, in either case -- and produces the lowercase colon form,
- * which is what hostapd prints and therefore what a comparison against its live
- * list has to be in. **Bare `aabbccddeeff` is refused**: it is one transposition
- * away from being unreadable, and an ACL is the wrong place to guess.
- */
-int ncfg_hostapd_normalize_station(const char *text, char *out, size_t out_size, char *err,
-    size_t err_size);
 
 #endif /* NCFG_HOSTAPD_H */

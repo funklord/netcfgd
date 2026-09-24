@@ -116,7 +116,7 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
 	 * through the compiler, so this is the backstop -- and it is the one that
 	 * keeps `hwaddr_aton` from failing inside hostapd against a station
 	 * netcfgd would not name. */
-	if (!ncfg_hostapd_normalize_station(station, address, sizeof(address), err, err_size)) {
+	if (!ncfg_station_address_normalize(station, address, sizeof(address), err, err_size)) {
 		return 0;
 	}
 	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), err, err_size)) {

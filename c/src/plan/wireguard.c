@@ -267,9 +267,10 @@ static const char *render_peers(ncfg_plan_t *plan, const ncfg_wg_peers_t *peers)
 	}
 	ncfg_buf_init(&buf, 0);
 	for (i = 0; i < peers->count; i++) {
-		char rendered[NCFG_PLAN_KEY_TEXT_MAX];
+		char rendered[NCFG_KEY_TEXT_SIZE];
 
-		ncfg_plan_render_key(peers->peers[i].public_key, rendered, sizeof(rendered));
+		(void)ncfg_key_render(peers->peers[i].public_key, rendered, sizeof(rendered),
+		    NULL, 0);
 		ncfg_buf_addf(&buf, "%s%s", i ? " " : "", rendered);
 	}
 	text = ncfg_plan_intern(plan, ncfg_buf_text(&buf));
@@ -403,9 +404,10 @@ void ncfg_plan_wireguard(ncfg_builder_t *builder, const ncfg_device_t *device)
 	wanted_peers(&wanted, config);
 	running_peers(&held, running);
 	if (rotated) {
-		char rendered_key[NCFG_PLAN_KEY_TEXT_MAX];
+		char rendered_key[NCFG_KEY_TEXT_SIZE];
 
-		ncfg_plan_render_key(rotated->public_key, rendered_key, sizeof(rendered_key));
+		(void)ncfg_key_render(rotated->public_key, rendered_key, sizeof(rendered_key),
+		    NULL, 0);
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_WG_SET_PEERS;
 		op.u.wg_peers.iface = device->name;

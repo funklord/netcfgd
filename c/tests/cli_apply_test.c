@@ -146,6 +146,17 @@ static void no_line(const char *text, const char *unwanted, const char *what)
 	}
 }
 
+static void no_line_starting(const char *text, const char *unwanted, const char *what)
+{
+	int found = has_line_starting(text, unwanted);
+
+	check(!found, what);
+	if (found) {
+		detail("unwanted a line starting", unwanted);
+		detail("got", text);
+	}
+}
+
 /* ------------------------------------------------------------------------ *
  * The recorder, in the machine's place
  * ------------------------------------------------------------------------ *
@@ -555,6 +566,15 @@ static void a_failing_action_stops_the_apply(void)
  * about resuming -- have to be absent: a `--json` run is something a script
  * parses, and a line of prose on either stream is what breaks it. `command_plan`
  * makes the same decision about the notes under a plan, for the same reason.
+ *
+ * **The stderr half is what this command prints, not everything on the
+ * stream.** It read `complaint[0] == '\0'` until the suite was first run by
+ * somebody who was not root, and an ordinary user's observation pass warns:
+ * the nftables dump and every WireGuard device come back EPERM without
+ * CAP_NET_ADMIN, and the library says so. Those warnings carry `netcfgd: `,
+ * this command's own prose carries `ncfg: `, and it is the second that `--json`
+ * owes a script silence on. Asserting the whole stream empty asserted a
+ * property of whoever ran the suite.
  */
 static void json_answers_with_the_journal_alone(void)
 {
@@ -585,7 +605,8 @@ static void json_answers_with_the_journal_alone(void)
 	    "and the sentence the failure came with");
 	no_line(said, "ok   dns.apply  dns: write_resolv_conf (was <absent>)",
 	    "a `--json` apply prints no journal lines beside it");
-	check(complaint[0] == '\0', "and says nothing on stderr about resuming");
+	no_line_starting(complaint, "ncfg: ",
+	    "and says nothing of its own on stderr, about resuming or anything else");
 }
 
 /*

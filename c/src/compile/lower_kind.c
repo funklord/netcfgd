@@ -607,13 +607,16 @@ static int lower_wg_peer(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 		const char *key = assignment->key;
 
 		if (strcmp(key, "public_key") == 0) {
-			char       *text = ncfg_as_string(ctx, assignment->value);
-			const char *why = NULL;
+			char *text = ncfg_as_string(ctx, assignment->value);
+			char  why[NCFG_ERROR_MAX];
 
 			if (!text) {
 				continue;
 			}
-			if (ncfg_public_key_parse(text, peer.public_key, &why)) {
+			why[0] = '\0';
+			/* The model's reader, not this module's: `ncfg_key_render` says
+			 * why one spelling of this format is the whole point. */
+			if (ncfg_key_parse(text, strlen(text), peer.public_key, why, sizeof(why))) {
 				key_seen = 1;
 			} else {
 				ncfg_diag(ctx, assignment->value->span, "`%s` is not a public key: %s", text,

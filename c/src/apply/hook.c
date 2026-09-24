@@ -198,16 +198,32 @@ static int unchanged(const ncfg_hook_ref_t *hook, char *err, size_t err_size,
  * The environment
  * ------------------------------------------------------------------------ */
 
-/* The five names this sets, so an inherited one cannot shadow ours. */
+/* The five fixed names this sets, so an inherited one cannot shadow ours. */
 static const char *const ours[] = { "NCFG_IFACE=", "NCFG_PHASE=", "NCFG_REASON=",
 	"NCFG_ADDR=", "NCFG_GW=" };
 
-static int is_ours(const char *entry)
+/*
+ * Whether an inherited entry is one this call is about to set.
+ *
+ * **The phase's own variable is filtered by name as well**, which the fixed
+ * list cannot do for it: `NCFG_BSSID` in the daemon's own environment would
+ * otherwise reach a `roam` hook unchanged and say which access point was in
+ * use last time something set it. The shadow rule is about what the hook
+ * reads, not about how many names this file happens to know.
+ */
+static int is_ours(const char *entry, const ncfg_hook_env_t *env)
 {
 	size_t i;
 
 	for (i = 0; i < sizeof(ours) / sizeof(ours[0]); i++) {
 		if (strncmp(entry, ours[i], strlen(ours[i])) == 0) {
+			return 1;
+		}
+	}
+	if (env && env->variable && env->variable[0]) {
+		size_t length = strlen(env->variable);
+
+		if (strncmp(entry, env->variable, length) == 0 && entry[length] == '=') {
 			return 1;
 		}
 	}
@@ -250,13 +266,13 @@ static char **environment(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *en
 	while (environ && environ[inherited]) {
 		inherited++;
 	}
-	/* Five of ours, and the terminator. */
-	made = calloc(inherited + 6u, sizeof(*made));
+	/* Five fixed, the phase's own, and the terminator. */
+	made = calloc(inherited + 7u, sizeof(*made));
 	if (!made) {
 		return NULL;
 	}
 	for (i = 0; i < inherited; i++) {
-		if (!is_ours(environ[i])) {
+		if (!is_ours(environ[i], env)) {
 			made[at++] = environ[i];
 		}
 	}
@@ -280,6 +296,22 @@ static char **environment(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *en
 	if (env && env->gateway) {
 		made[at++] = entry("NCFG_GW=", env->gateway);
 	}
+	/*
+	 * The phase's own, named in full by the caller. Both halves or neither:
+	 * a name with no value would set an empty variable, which is the one
+	 * thing the rule above this function says never to do.
+	 */
+	if (env && env->variable && env->variable[0] && env->value) {
+		char *named = malloc(strlen(env->variable) + 2u);
+
+		if (named) {
+			(void)snprintf(named, strlen(env->variable) + 2u, "%s=", env->variable);
+			made[at++] = entry(named, env->value);
+			free(named);
+		} else {
+			made[at++] = NULL;
+		}
+	}
 	made[at] = NULL;
 	/* One `entry` that failed leaves a NULL in the middle, which `execve`
 	 * reads as the end of the list -- so the hook would run with some of its
@@ -300,6 +332,28 @@ static char **environment(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *en
 }
 
 /* Free the entries this made, which are the ones after the inherited block. */
+/*
+ * Free the entries this built and none of the ones it borrowed.
+ *
+ * **By pointer rather than by name**, which it was not until the phase's own
+ * variable arrived: the five fixed names could be recognised from the text,
+ * and a name the caller supplies cannot be, since the whole point of it is
+ * that this file does not know what it is. An entry is this call's if it is
+ * not one of `environ`'s own pointers, which is exact and does not care what
+ * anything is called.
+ */
+static int borrowed(const char *entry)
+{
+	size_t i;
+
+	for (i = 0; environ && environ[i]; i++) {
+		if (environ[i] == entry) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 static void environment_free(char **made)
 {
 	size_t i;
@@ -308,7 +362,7 @@ static void environment_free(char **made)
 		return;
 	}
 	for (i = 0; made[i]; i++) {
-		if (is_ours(made[i])) {
+		if (!borrowed(made[i])) {
 			free(made[i]);
 		}
 	}

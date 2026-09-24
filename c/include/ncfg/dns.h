@@ -122,97 +122,9 @@ const char *ncfg_dns_resolve_unbound_path(const char *explicit_path, char *out,
 #define NCFG_DNSMASQ_CONF_ENV "NCFG_DNSMASQ_CONF"
 #define NCFG_UNBOUND_CONF_ENV "NCFG_UNBOUND_CONF"
 
-/* The scope that is not an interface. `resolvconf` keys on an interface name
- * so it becomes `lo.netcfgd`, and resolved is per-link so it becomes `lo`. */
-#define NCFG_DNS_GLOBAL_SCOPE "globals"
-
 /* glibc reads at most this many `nameserver` lines and silently ignores the
  * rest. Published so a test cannot spell the number itself. */
 #define NCFG_DNS_MAXNS 3
-
-/*
- * One scope to deliver: an interface's, a network's, or the host-wide
- * fallback.
- *
- * Borrowed, not owned. A scope is a name and a pointer to a policy the caller
- * already holds, and nothing here outlives the call it was passed to.
- */
-typedef struct {
-	const char              *name; /* an interface name, or `globals` */
-	const ncfg_dns_policy_t *policy;
-} ncfg_dns_scope_t;
-
-/* ------------------------------------------------------------------------ *
- * Which scopes a machine has, which is a rule and not a loop
- * ------------------------------------------------------------------------ */
-
-/*
- * Every scope a document asks for, given what has been observed.
- *
- * **One rule with two callers, and that is the whole reason it is here.** In
- * the Rust this is `netcfgd_model::dns::scopes`, and the comment above it
- * records what happened before it was: the planner learned that a lease
- * contributes nameservers (0006 rule 4) and the executor went on building its
- * list from the document alone, so the plan said `dns.apply` and the delivery
- * wrote a `resolv.conf` with nothing in it. The planner asks this to decide
- * what to plan; the daemon asks it to fill `ncfg_service_t::dns_scopes`, so
- * that one `dns.apply` delivers every scope rather than the one the op names.
- * A third spelling is the defect, not the duplication.
- *
- * The rule, in the order it is applied:
- *
- *   * The host's own `global { dns { } }` is a scope named `globals`, unless
- *     its mode is `none`.
- *   * Each interface of a **managed** device contributes one. An unmanaged
- *     device contributes nothing, and it has to be asked here: `dns.apply` is
- *     host-wide, so it names no interface and the planner's usual choke point
- *     never sees it.
- *   * An interface contributes its lease's nameservers and search suffixes
- *     only where it **asked** for what the network offers -- a `dns { }` block
- *     of its own, or an address from a reported source. The same gate for both
- *     lists: where an operator kept their own resolvers, a lease does not get
- *     to redefine what a bare name means (0049).
- *   * The document's servers come first, so first-occurrence-wins means a
- *     server an operator chose beats one the network handed out.
- *   * A scope that would deliver nothing is left out rather than carried with
- *     mode `none`, because an action that does nothing is one somebody reads
- *     and dismisses on every run.
- *   * A policy that states no mode takes the host's. The mode is not a
- *     per-interface choice -- a host cannot both own `resolv.conf` and hand it
- *     to `resolvconf` -- so `none` on a scope with something to deliver can
- *     only mean "not stated".
- *
- * `observed` may be NULL, which is a machine nothing has looked at yet: the
- * document's own scopes come back and no lease contributes to any of them.
- *
- * **What comes back owns the policies it had to merge and borrows the rest.**
- * A scope whose servers came straight off the document points into the
- * document, exactly as `ncfg_dns_scope_t` says; one that absorbed a lease
- * points into this object's own arena. So the document must outlive this, and
- * this must outlive anything still holding a `ncfg_dns_scope_t` it handed out
- * -- which for a plan is what `ncfg_plan_adopt` exists to arrange.
- *
- * Returns NULL with a sentence in `err` where there was nothing to allocate
- * with. A document with no DNS anywhere is an empty list and not a failure.
- */
-typedef struct ncfg_dns_scopes ncfg_dns_scopes_t;
-
-ncfg_dns_scopes_t *ncfg_dns_scopes_of(const ncfg_document_t *desired,
-    const ncfg_observed_t *observed, char *err, size_t err_size);
-
-/*
- * What it found, in document order: `globals` first, then the interfaces.
- *
- * The document's interface list is sorted by name, so the result is
- * deterministic rather than dependent on which drop-in was read first. `count`
- * may be NULL. Both answers are valid until the scopes are freed, and an empty
- * list answers a non-NULL pointer with a count of zero rather than NULL --
- * "no scopes" and "could not be asked" are different facts.
- */
-const ncfg_dns_scope_t *ncfg_dns_scopes_items(const ncfg_dns_scopes_t *scopes, size_t *count);
-
-/* Release the list and everything it had to merge. NULL is nothing. */
-void ncfg_dns_scopes_free(ncfg_dns_scopes_t *scopes);
 
 /*
  * The flattened result: what a single-list resolver ends up with.

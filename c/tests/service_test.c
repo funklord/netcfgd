@@ -284,36 +284,62 @@ static void the_fourteen_are_supported(void)
 	    "pppoe session are carried out");
 
 	/*
-	 * **The DHCPv6 half answers differently for the two verbs, and that is the
-	 * decision rather than an oversight.** Which v6 client can serve a
-	 * document turns on whether it asked for a delegated prefix -- odhcp6c can
-	 * report one and dhcpcd measurably cannot (0050) -- and a plain
-	 * `backend.start` carries neither the request nor an odhcp6c. Stopping is
-	 * a different question and is answerable: `dhcpcd -6 -k` and an odhcp6c's
-	 * recorded pid are both this build's.
+	 * **The DHCPv6 half used to answer differently for the two verbs, and this
+	 * asserted that it did.** The start was refused because "a plain
+	 * `backend.start` carries neither the request nor an odhcp6c", which was
+	 * true of this build and was written down as the decision rather than as
+	 * the gap it was -- the Rust starts that kind from its own
+	 * `Op::BackendStart`, one match arm before the refusal this port had
+	 * copied (project.md 10.259).
+	 *
+	 * Both verbs are carried out now. The refusal that survives is a fact
+	 * about the **machine** rather than about this build -- a document that
+	 * asks for a delegated prefix where only dhcpcd is installed -- and it
+	 * belongs to the start, which can see what is installed, rather than to
+	 * this predicate, which is pure. `dhcp_test.c` drives all four
+	 * combinations of it.
 	 */
 	{
 		ncfg_op_t start = backend_op(NCFG_OP_BACKEND_START, NCFG_BACKEND_DHCP6, "eth0");
 		ncfg_op_t stop = backend_op(NCFG_OP_BACKEND_STOP, NCFG_BACKEND_DHCP6, "eth0");
 
 		message[0] = '\0';
-		refused(ncfg_apply_supported(&start, message, sizeof(message)), message,
-		    "delegated prefix",
-		    "starting a DHCPv6 client is refused, naming what the op does not carry");
+		check(ncfg_apply_supported(&start, message, sizeof(message)),
+		    "starting a DHCPv6 client is carried out, the request coming from the "
+		    "document");
 		message[0] = '\0';
 		check(ncfg_apply_supported(&stop, message, sizeof(message)),
-		    "and stopping one is carried out, which is a question this build can answer");
+		    "and stopping one is too, which it always was");
 	}
 
+	/*
+	 * **All three verbs, and the sentence is the kind's rather than the
+	 * verb's.** These two name no daemon at all, so "only a router
+	 * advertisement daemon re-reads its configuration" -- which is what a
+	 * `backend.reload` for either of them used to answer -- explains reload
+	 * semantics to somebody who was not asking about them. What is wrong is
+	 * that there is nothing there (project.md 10.261).
+	 */
 	for (i = 0; i < sizeof(refused_kinds) / sizeof(refused_kinds[0]); i++) {
-		ncfg_op_t op = backend_op(NCFG_OP_BACKEND_START, refused_kinds[i], "eth0");
-		char      what[128];
+		static const int verbs[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
+			NCFG_OP_BACKEND_RELOAD };
+		size_t           at;
 
-		message[0] = '\0';
-		(void)snprintf(what, sizeof(what), "starting a %s backend is refused by name",
-		    ncfg_backend_kind_name(refused_kinds[i]));
-		refused(ncfg_apply_supported(&op, message, sizeof(message)), message,
-		    "backend.start", what);
+		for (at = 0; at < sizeof(verbs) / sizeof(verbs[0]); at++) {
+			ncfg_op_t op = backend_op(verbs[at], refused_kinds[i], "eth0");
+			char      what[160];
+
+			message[0] = '\0';
+			(void)snprintf(what, sizeof(what), "%s on a %s backend is refused by name",
+			    ncfg_op_name(&op), ncfg_backend_kind_name(refused_kinds[i]));
+			refused(ncfg_apply_supported(&op, message, sizeof(message)), message,
+			    ncfg_op_name(&op), what);
+			(void)snprintf(what, sizeof(what),
+			    "  and says what a %s is rather than what a reload is",
+			    ncfg_backend_kind_name(refused_kinds[i]));
+			check(strstr(message, "re-reads its configuration") == NULL &&
+			    strstr(message, "start, stop or reload") != NULL, what);
+		}
 	}
 
 	{
@@ -1033,6 +1059,93 @@ static void a_backend_netcfgd_lost_the_record_of(void)
 	    "  so adopting one is not an error, it is a caller that goes on to start it");
 }
 
+/*
+ * The executor reads the prefix request out of the document it holds.
+ *
+ * **The half the argv builder cannot cover.** `dhcp_test.c` proves that
+ * `ncfg_dhcp_odhcp6c_args` passes `-P` when it is given a request and not when
+ * it is not; what nothing there can say is whether the executor ever finds the
+ * request to give. Dropping the lookup -- passing NULL where the document
+ * asked for a prefix -- leaves every check in that file green, which is what a
+ * value with two consumers and one wired looks like.
+ *
+ * The document is built here rather than through `a_document`, because what is
+ * under test is one field on one addressing source and a fixture that carried
+ * it would have to carry it for every other case too.
+ */
+static void a_dhcp6_start_finds_the_request_in_the_document(void)
+{
+	ncfg_service_t        service;
+	ncfg_document_t       document;
+	ncfg_interface_t      interface;
+	ncfg_address_source_t source;
+	ncfg_pd_request_t     request;
+	char                  fake[512];
+	char                  record[512];
+	char                  message[NCFG_ERROR_MAX];
+	char                 *said;
+
+	(void)testdir_in(base, "v6-odhcp6c", fake, sizeof(fake));
+	(void)testdir_in(base, "v6-service-argv", record, sizeof(record));
+	{
+		char  body[1024];
+		FILE *file = fopen(fake, "w");
+
+		if (!file) {
+			check(0, "a stand-in odhcp6c could be written");
+			return;
+		}
+		(void)snprintf(body, sizeof(body),
+		    "#!/bin/sh\nprintf '%%s\\n' \"$@\" > '%s'\nexit 0\n", record);
+		(void)fputs(body, file);
+		(void)fclose(file);
+		(void)chmod(fake, 0755);
+	}
+
+	memset(&request, 0, sizeof(request));
+	request.hint = (char *)(void *)"2001:db8::";
+	request.length.has = 1;
+	request.length.value = 56;
+	memset(&source, 0, sizeof(source));
+	source.kind = (int)NCFG_ADDRESS_SOURCE_DHCP6;
+	source.dhcp6.prefix_delegation = &request;
+	memset(&interface, 0, sizeof(interface));
+	interface.name = (char *)(void *)"wan0";
+	interface.enabled = 1;
+	interface.addressing = &source;
+	interface.addressing_count = 1u;
+	memset(&document, 0, sizeof(document));
+	document.interfaces = &interface;
+	document.interface_count = 1u;
+
+	service = a_context();
+	service.document = &document;
+	service.dhcp.odhcp6c_program = fake;
+	service.dhcp.dhcpcd_program = "/nonexistent/dhcpcd";
+
+	message[0] = '\0';
+	check(ncfg_service_backend_start(&service, NCFG_BACKEND_DHCP6, "wan0", message,
+	      sizeof(message)),
+	    "a dhcp6 start on an interface that asked for a prefix runs the client");
+	said = testdir_read(record, NULL);
+	check(said && strstr(said, "-P") != NULL && strstr(said, "2001:db8::/56") != NULL,
+	    "  and the request came out of the document rather than being dropped");
+	free(said);
+
+	/* And the other direction, because "the flag is there when the document
+	 * asks" passes just as loudly on a build that always passes it. */
+	source.dhcp6.prefix_delegation = NULL;
+	(void)unlink(record);
+	message[0] = '\0';
+	check(ncfg_service_backend_start(&service, NCFG_BACKEND_DHCP6, "wan0", message,
+	      sizeof(message)),
+	    "an interface that asked for none runs it too");
+	said = testdir_read(record, NULL);
+	check(said && strstr(said, "-P") == NULL,
+	    "  and solicits no delegation nobody wrote down");
+	free(said);
+}
+
 static void a_backend_op_says_what_it_was_not_given(void)
 {
 	ncfg_service_t service;
@@ -1279,6 +1392,7 @@ int main(void)
 
 	a_backend_netcfgd_lost_the_record_of();
 	a_backend_op_says_what_it_was_not_given();
+	a_dhcp6_start_finds_the_request_in_the_document();
 	stopping_an_access_point_takes_the_passphrase_with_it();
 	a_resolver_configuration_is_delivered_and_recorded();
 	the_dispatch_reaches_the_right_verb();

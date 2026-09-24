@@ -110,7 +110,7 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage c-test agree ledger
+                 example adapters gui linkage c-test agree ledger module-order
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -2261,6 +2261,11 @@ agree: c-test
 # rather than just being green.
 ledger: c-test
 	@python3 tool/ledger_gate.py
+
+# Decision 0263's module order, against what the sources include. Needs no
+# build: it reads the tree, so it answers on a machine that cannot compile.
+module-order:
+	@python3 tool/module_order_gate.py
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`

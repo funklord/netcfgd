@@ -307,63 +307,23 @@ static const ncfg_custom_t address_text = { address_text_read, address_text_writ
  * "unchanged" from "different".
  * ------------------------------------------------------------------------ */
 
-static const char base64_alphabet[] =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-static int base64_value(char digit, unsigned *out)
-{
-	const char *found = digit ? strchr(base64_alphabet, digit) : NULL;
-
-	if (!found) {
-		return 0;
-	}
-	*out = (unsigned)(found - base64_alphabet);
-	return 1;
-}
-
+/*
+ * A key out of a JSON string node.
+ *
+ * **The decoding is `ncfg_key_parse`'s**, which is in this module and was
+ * spelled out a second time here. `ncfg_key_render`'s comment already records
+ * why two *writers* of this format is a hazard; two readers is the same thing
+ * pointed the other way, and it is the direction its own comment names -- a
+ * record written in one spelling and read in another is a key that never
+ * compares equal to itself. What is left here is finding the text.
+ */
 static int key_octets_read(const ncfg_json_doc_t *doc, uint32_t node, unsigned char *key,
     char *err, size_t err_size)
 {
 	size_t      length = 0;
 	const char *text = ncfg_json_string(doc, node, &length);
-	unsigned    accumulator = 0;
-	unsigned    bits = 0;
-	size_t      written = 0;
-	size_t      i;
 
-	/* 44 characters, the last of which is the one pad: 32 octets is not a
-	 * multiple of three, which is where the single `=` comes from. */
-	if (!text || length != 44u || text[43] != '=') {
-		ncfg_error_set(err, err_size,
-		    "a key is 44 characters of base64 ending in `=`, and this one is %zu",
-		    text ? length : (size_t)0);
-		return 0;
-	}
-	for (i = 0; i < 43u; i++) {
-		unsigned digit = 0;
-
-		if (!base64_value(text[i], &digit)) {
-			ncfg_error_set(err, err_size, "a key is base64, and `%c` is not", text[i]);
-			return 0;
-		}
-		accumulator = (accumulator << 6) | digit;
-		bits += 6u;
-		if (bits >= 8u) {
-			bits -= 8u;
-			if (written < 32u) {
-				key[written++] = (unsigned char)((accumulator >> bits) & 0xffu);
-			}
-		}
-	}
-	/* The low two bits of the last character are not decoded. A key that sets
-	 * them is still a valid key -- `wg` emits them -- so they are ignored
-	 * rather than refused, and the re-rendering clears them. */
-	if (written != 32u) {
-		ncfg_error_set(err, err_size, "a key decodes to 32 octets, and this one to %zu",
-		    written);
-		return 0;
-	}
-	return 1;
+	return ncfg_key_parse(text, text ? length : 0u, key, err, err_size);
 }
 
 /* `document.h`'s renderer. This file had an identical copy of it, which is the

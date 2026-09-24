@@ -457,17 +457,3 @@ int observe_genl_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out)
 	out->context = socket;
 	return 1;
 }
-
-int ncfg_observe_offloads(ncfg_observed_t *observed, char *err, size_t err_size)
-{
-	ncfg_netlink_t        netlink;
-	ncfg_observe_kernel_t kernel;
-	int                   read;
-
-	if (!observe_genl_open(&netlink, &kernel)) {
-		return ncfg_observe_offloads_from(NULL, observed, err, err_size);
-	}
-	read = ncfg_observe_offloads_from(&kernel, observed, err, err_size);
-	ncfg_netlink_close(&netlink);
-	return read;
-}

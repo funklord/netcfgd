@@ -658,7 +658,10 @@ int ncfg_key_parse(const char *text, size_t length, unsigned char out[NCFG_KEY_L
  * not. Two spellings in, one spelling out.
  *
  * `out_size` is `NCFG_KEY_TEXT_SIZE` or more. 1 with the text; 0 with a
- * sentence where it would not fit, which **never quotes the key**.
+ * sentence where it would not fit, which **never quotes the key**, and `out`
+ * emptied rather than left as it was -- `ncfg_key_parse`'s rule on a refusal,
+ * and what lets a caller holding a buffer that cannot be too small discard the
+ * status without ever reading an uninitialised one.
  */
 int ncfg_key_render(const unsigned char key[NCFG_KEY_LEN], char *out, size_t out_size,
     char *err, size_t err_size);
@@ -829,6 +832,68 @@ const char *ncfg_mac_policy_name(int policy);
  */
 int ncfg_phase2_pins_nothing(const char *phase2);
 
+/* What the kernel will hold an interface name in, counting no terminator.
+ * Published because three places wanted it and two of them wrote `15` out. */
+#define NCFG_INTERFACE_NAME_MAX 15u
+
+/*
+ * Why this is not an interface name, or NULL if it is one.
+ *
+ * `netcfgd_model::interface::usable_name`, which is the kernel's own
+ * `dev_valid_name`, so nothing is refused here that the kernel would have
+ * accepted.
+ *
+ * **In the model because an interface name becomes a path in three modules and
+ * the check has to be the same one in all of them.** A name reaches the
+ * filesystem all over this tree -- a pid file, a generated configuration, a
+ * hook script, a control socket -- and a name that is a path traverses out of
+ * the directory it was joined to. Two measurements, from the two modules that
+ * each had a copy of this:
+ *
+ *   * the compiler's: `device "../../etc/evil" { kind = "dummy" }` compiled
+ *     and planned `link.create ../../etc/evil`, and a forty-character name did
+ *     too. The kernel refuses both at netlink time, so no link appears -- and
+ *     the name has already been joined into half a dozen paths by then;
+ *   * the supplicant client's (0160): `dir/name` with an absolute name
+ *     replaces the base rather than extending it, and the two errors below the
+ *     join say different things about what is there, so the pair is an
+ *     existence oracle over the whole filesystem answered as root.
+ *     `/etc/shadow` gave "Permission denied" and `/etc/nonexistent` gave "no
+ *     control socket at ...".
+ *
+ * The sentence is the caller's to frame: every one of them prefixes
+ * "`{name}` is not an interface name: ", so this says only what is wrong.
+ * Static, never allocated.
+ */
+const char *ncfg_usable_name(const char *name);
+
+/* `aa:bb:cc:dd:ee:ff`: seventeen characters, and eighteen with the NUL. */
+#define NCFG_STATION_ADDRESS_LEN  17u
+#define NCFG_STATION_ADDRESS_SIZE (NCFG_STATION_ADDRESS_LEN + 1u)
+
+/*
+ * A station address as an access control list holds it: lowercase, colons.
+ *
+ * `netcfgd_model::device::normalize_station`, and **in the model because the
+ * comparison it exists for crosses two modules**. `document.h` requires the
+ * list to be lowercase and colon-separated so that comparing what the document
+ * asks for against what hostapd reports is string equality rather than a
+ * parse; the compiler writes that list and the hostapd backend reads the
+ * reply. Two normalisers is two answers to what `AA-BB-CC-DD-EE-FF` is, and an
+ * access point whose two lists never compare equal is one whose access control
+ * is rewritten on every pass.
+ *
+ * Neither of `value.h`'s two hardware-address readers: both of those
+ * uppercase, because BlueZ prints uppercase.
+ *
+ * Accepts `:` or `-` as the separator, exactly six two-digit parts, either
+ * case. `out_size` is `NCFG_STATION_ADDRESS_SIZE` or more. 1 with the address;
+ * 0 with a sentence, which distinguishes a wrong number of parts from a part
+ * that is not hex -- those say different things to whoever wrote the list.
+ */
+int ncfg_station_address_normalize(const char *text, char *out, size_t out_size, char *err,
+    size_t err_size);
+
 /* The language's word for the same kind -- `wireguard` and `openvpn` where the
  * document says `wire_guard` and `open_vpn`, and the same word everywhere
  * else. What an operator reads against the file they wrote uses this one; what
@@ -876,6 +941,12 @@ int ncfg_macvlan_mode_number(int mode);
  * same two numbers the other way, which is the reader this writer has to agree
  * with.
  */
+/* `dot1q` or `dot1ad`, as the document spells it, or NULL outside the set --
+ * `ncfg_tunnel_kind_name`'s convention. Published because the planner compares
+ * what a document asks for against the word an observation carries, and a
+ * second copy of two words is how two spellings of one tag protocol arrive. */
+const char *ncfg_vlan_protocol_name(int protocol);
+
 int ncfg_vlan_protocol_ethertype(int protocol);
 
 /* ------------------------------------------------------------------------ *
@@ -1405,6 +1476,81 @@ typedef struct {
 	/* Absent means everyone. */
 	ncfg_access_control_t *access_control;
 } ncfg_access_point_t;
+
+/*
+ * Which band an access point will actually be brought up in, as the document
+ * spells it -- `"2.4"`, `"5"`, or NULL for one this build cannot render.
+ *
+ * **Stated once, here, because three modules need it and two of them may not
+ * ask the third** (0222). The hostapd renderer picks a `hw_mode` from it; the
+ * planner decides from it whether a running access point is still in the band
+ * the document asks for; the compiler refuses from it a channel that is in no
+ * band, before the interface is up rather than after. An access point whose
+ * document and running configuration disagree about the band gets restarted,
+ * so two copies of this rule is an access point that restarts for ever --
+ * which is why it is in the model rather than in the backend that uses it
+ * most, and why `src/model/device.c` opens with the history of it having been
+ * in the backend and copied into the compiler.
+ *
+ * `band` decides when it is stated. When it is not, the channel decides, and
+ * the split is at 14: 1..=14 is 2.4 GHz and nothing else, while the numbers
+ * above belong to 5 GHz. An access point that states neither is 2.4 GHz, which
+ * every radio has and which automatic channel selection can then choose
+ * within.
+ */
+const char *ncfg_access_point_effective_band(const char *band, const ncfg_optint_t *channel);
+
+/*
+ * Whether a channel number exists in a band at all.
+ *
+ * The 5 GHz list is a range rather than the exact set because which of those
+ * channels are usable is a regulatory question the kernel answers, not a
+ * spelling question this can answer -- 149 is legal in one country and not in
+ * the next. What this rejects is a number that is in no band, which is a typo
+ * rather than a regulatory refusal. Channel 0 is in no band: it is hostapd's
+ * spelling of "survey and choose", which netcfgd writes from an *absent*
+ * channel, so an operator who writes it out by hand is asking for something
+ * the document already has a way to say and gets told rather than agreed with.
+ */
+int ncfg_channel_in_band(const char *band, int64_t channel);
+
+/*
+ * Whether a channel is one the radio must listen on before it may beacon.
+ *
+ * DFS: the 5 GHz channels shared with weather and military radar. A radio has
+ * to watch one for a clear-channel assessment period before transmitting, so
+ * an access point on it is **silent for a minute or so after the apply
+ * returns** -- longer on some channels -- and an operator who does not know
+ * that sees a configured access point nobody can find and goes looking for a
+ * fault that is not there (0232).
+ *
+ * **The kernel is the authority and this is not it**, which is
+ * `ncfg_channel_in_band`'s argument and holds here with one difference that
+ * makes the approximation safe: this drives a warning rather than a refusal,
+ * so being wrong about a channel costs a sentence rather than an access point.
+ * The range is the one that is DFS in every regulatory domain netcfgd is
+ * likely to meet; 36 to 48 and 149 upwards need no wait anywhere.
+ */
+int ncfg_channel_needs_radar_detection(int64_t channel);
+
+/*
+ * The `wpa_key_mgmt` a generation is spelled with, and the same for a whole
+ * security block -- NULL where it has none.
+ *
+ * **In the model for a sharper version of the band rule's reason.** hostapd
+ * does not report its key management back over the control socket, so the only
+ * account of what a running access point is offering is netcfgd's record of
+ * what it started -- and the planner restarts one whose document and record
+ * disagree. A second spelling of "WPA2" is therefore not a cosmetic difference
+ * but an access point stopped and started on every reconcile, for a document
+ * nobody has touched.
+ *
+ * An open network has none, and so does an access point using EAP, which is
+ * refused before anything is rendered because the document has no RADIUS
+ * server to point it at. Neither has a spelling to compare.
+ */
+const char *ncfg_psk_proto_key_mgmt(int proto);
+const char *ncfg_security_key_mgmt(const ncfg_security_t *security);
 
 /* ------------------------------------------------------------------------ *
  * Policy routing rules

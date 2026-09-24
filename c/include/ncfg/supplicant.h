@@ -669,8 +669,6 @@ ncfg_supplicant_client_t *ncfg_supplicant_connect_within(const char *dir, const 
 /* Detach if attached, remove the bound path, close. Freeing NULL is nothing. */
 void ncfg_supplicant_client_free(ncfg_supplicant_client_t *client);
 
-/* Which interface this client talks to. */
-const char *ncfg_supplicant_client_interface(const ncfg_supplicant_client_t *client);
 
 /*
  * The descriptor, for a caller that multiplexes several of them.

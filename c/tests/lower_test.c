@@ -36,6 +36,7 @@
 #include "ncfg/ast.h"
 #include "ncfg/base.h"
 #include "ncfg/document.h"
+#include "ncfg/hostapd.h"
 #include "ncfg/lower.h"
 #include "ncfg/parse.h"
 #include "ncfg/state.h"
@@ -1010,6 +1011,124 @@ static void network_cases(void)
 	    "is not valid inside `network`", "an unknown block inside a network is refused");
 	refuses("network \"Home\" { wifi { psk = \"@secret:h\"; wombat = 1 } }\n",
 	    "unknown wifi key", "an unknown wifi key is refused");
+}
+
+/*
+ * The compiler and the hostapd renderer agree about every band and channel.
+ *
+ * **This is the check the band rule's move to the model earned, and it is
+ * deliberately not derived from that rule.** Until this wave the compiler
+ * carried its own private `effective_band` and `channel_in_band`, written from
+ * the same Rust as the backend's public pair a few waves apart. They agreed on
+ * every input either could be given, so nothing was wrong -- and nothing would
+ * have said so if a later edit to one of them had made it wrong. What that
+ * costs is not a compile error: an access point whose document and whose
+ * running configuration disagree about the band is restarted, on every
+ * reconcile, for a document nobody has touched (0222).
+ *
+ * So the table below is written out by hand rather than computed from
+ * `ncfg_access_point_effective_band`. A table produced by the function under
+ * test is that function agreeing with itself, however many rows it has; this
+ * one is a third witness, and the two layers are each checked against it and
+ * against each other.
+ *
+ * Both verdicts, not just the accepting ones. "The compiler refuses exactly
+ * where the renderer would" is the property, and a row where one takes a
+ * configuration the other will not is the defect -- in whichever direction:
+ * accepted-then-refused fails at `ncfg apply` with the interface already up,
+ * and refused-then-would-have-worked is a configuration nobody can write.
+ */
+static void the_compiler_and_the_renderer_agree_about_bands(void)
+{
+	static const struct {
+		const char *band;    /* NULL for a document that states none */
+		int         channel; /* 0 for a document that states none */
+		int         stands;  /* whether this pair is one both layers take */
+		const char *hw_mode; /* what hostapd is told, where it stands */
+	} table[] = {
+		{ "2.4", 1, 1, "g" },
+		{ "2.4", 14, 1, "g" },
+		/* One past the top of 2.4 GHz, and a 5 GHz channel under a 2.4 GHz
+		 * band -- the pair that used to compile and plan cleanly and fail at
+		 * apply. */
+		{ "2.4", 15, 0, NULL },
+		{ "2.4", 36, 0, NULL },
+		{ "5", 36, 1, "a" },
+		{ "5", 177, 1, "a" },
+		{ "5", 35, 0, NULL },
+		{ "5", 6, 0, NULL },
+		/* With no band stated the channel decides, and the split is at 14. */
+		{ NULL, 6, 1, "g" },
+		{ NULL, 14, 1, "g" },
+		{ NULL, 36, 1, "a" },
+		/* The gap between the bands belongs to neither, and inferring a band
+		 * and then not checking it is how channel 20 became `hw_mode=a`. */
+		{ NULL, 15, 0, NULL },
+		{ NULL, 20, 0, NULL },
+	};
+	size_t at;
+
+	for (at = 0; at < sizeof(table) / sizeof(table[0]); at++) {
+		char                 text[512];
+		char                 what[256];
+		char                 message[NCFG_ERROR_MAX];
+		ncfg_document_t     *document;
+		ncfg_access_point_t  point;
+		ncfg_hostapd_lines_t lines;
+		int                  compiled;
+		int                  rendered_ok;
+
+		(void)snprintf(text, sizeof(text),
+		    "access_point \"Home\" {\n\tdevice = \"wlan0\"\n%s%s%s\tchannel = %d\n"
+		    "\twifi { psk = \"@secret:ap\" }\n}\n",
+		    table[at].band ? "\tband = \"" : "", table[at].band ? table[at].band : "",
+		    table[at].band ? "\"\n" : "", table[at].channel);
+		document = build_one(text);
+		compiled = document != NULL;
+		if (document) {
+			ncfg_document_free(document);
+		}
+
+		/*
+		 * The same pair put to the renderer directly, because a pair the
+		 * compiler refuses produces no document to render -- and "the two
+		 * agree" is a claim about both answers, so the refused rows are
+		 * exactly the ones that need asking twice.
+		 */
+		memset(&point, 0, sizeof(point));
+		point.id = (char *)(void *)"home";
+		point.ssid.has = 1;
+		point.ssid.length = 4u;
+		memcpy(point.ssid.bytes, "home", 4u);
+		point.device = (char *)(void *)"wlan0";
+		point.security.kind = NCFG_SECURITY_OPEN;
+		point.band = (char *)(void *)table[at].band;
+		point.channel.has = 1;
+		point.channel.value = table[at].channel;
+		message[0] = '\0';
+		rendered_ok = ncfg_hostapd_config(&point, "/run/netcfgd/hostapd", NULL, &lines, NULL,
+		    message, sizeof(message));
+
+		(void)snprintf(what, sizeof(what), "  band %s channel %d %s",
+		    table[at].band ? table[at].band : "(none)", table[at].channel,
+		    table[at].stands ? "stands in both layers" : "is refused by both layers");
+		check(compiled == table[at].stands && rendered_ok == table[at].stands, what);
+		if (compiled != table[at].stands || rendered_ok != table[at].stands) {
+			printf("    compiler %s, renderer %s, table says %s\n",
+			    compiled ? "took it" : "refused", rendered_ok ? "took it" : "refused",
+			    table[at].stands ? "it stands" : "it is refused");
+		}
+		if (rendered_ok) {
+			if (table[at].hw_mode) {
+				const char *mode = ncfg_hostapd_value_of(&lines, "hw_mode");
+
+				(void)snprintf(what, sizeof(what),
+				    "    and hostapd is told hw_mode=%s", table[at].hw_mode);
+				check(mode && strcmp(mode, table[at].hw_mode) == 0, what);
+			}
+			ncfg_hostapd_lines_free(&lines);
+		}
+	}
 }
 
 static void access_point_cases(void)
@@ -2526,6 +2645,7 @@ int main(void)
 	dns_cases();
 	network_cases();
 	access_point_cases();
+	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();
 	kind_cases();
 	qdisc_cases();
