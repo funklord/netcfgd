@@ -32,7 +32,7 @@
  *   decides what to do about them. The split is the one that lets the daemon
  *   ask the question without inheriting an opinion about plans.
  */
-#include "ncfg/dns.h"
+#include "ncfg/observed.h"
 
 #include "ncfg/base.h"
 #include "ncfg/value.h"

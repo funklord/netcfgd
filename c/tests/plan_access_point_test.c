@@ -647,11 +647,11 @@ static void an_access_point_that_has_to_listen_first_is_said(void)
 		unsigned         quiet_count = 0;
 
 		for (at = 0; at < sizeof(inside) / sizeof(inside[0]); at++) {
-			said += ncfg_hostapd_channel_needs_radar_detection(inside[at]) ? 1u : 0u;
+			said += ncfg_channel_needs_radar_detection(inside[at]) ? 1u : 0u;
 		}
 		for (at = 0; at < sizeof(outside) / sizeof(outside[0]); at++) {
 			quiet_count +=
-			    ncfg_hostapd_channel_needs_radar_detection(outside[at]) ? 0u : 1u;
+			    ncfg_channel_needs_radar_detection(outside[at]) ? 0u : 1u;
 		}
 		check(said == 4u, "  the two DFS ranges include both of their ends");
 		check(quiet_count == 4u, "  and the channels either side of them are not DFS");

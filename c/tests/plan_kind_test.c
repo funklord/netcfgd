@@ -70,6 +70,115 @@ static int quiet(const ncfg_plan_t *plan)
 }
 
 /* ------------------------------------------------------------------------ *
+ * Remaking a link the kernel will not change (0059)
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The three shapes the kernel takes and ignores, and the one it does not.
+ *
+ * **`ip link set X type vlan id N` succeeds and changes nothing**, so a
+ * planner that emits a set reports a change that never happened and goes on
+ * reporting it. The only way to apply an edited id is to delete the interface
+ * and make it again -- with everything on it, which is what the filtered
+ * observation below the delete arranges.
+ *
+ * This is what `tests/live/links.sh` asserts against a real kernel and what
+ * that script found missing from this port: an edited vlan id planned
+ * **nothing to do**, on a configuration an operator had just changed.
+ */
+static void a_link_the_kernel_will_not_change_is_remade(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+	/* A vlan whose id differs. `ours` is what makes it netcfgd's to remove. */
+	plan = one("{\"name\":\"v7\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"br0\","
+	    "\"id\":78,\"protocol\":\"dot1q\"}}",
+	    "\"links\":[{\"name\":\"v7\",\"index\":9,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"vlan\",\"parent\":\"br0\","
+	    "\"vlan\":{\"id\":77,\"protocol\":\"dot1q\"}}]",
+	    &document, &observed);
+	check(plan && corrects(plan, "link.delete", "vlan.id"),
+	    "an edited vlan id plans a delete naming the field");
+	check(plan && planfix_action(plan, "link.create"),
+	    "  and a create after it, from the document rather than the observation");
+	planfix_release(plan, document, observed);
+
+	/* A device that exists as an entirely different kind. Before 0059 this
+	 * planned a `link.up` and nothing else, on somebody else's device. */
+	plan = one("{\"name\":\"flip0\",\"kind\":{\"kind\":\"macvlan\","
+	    "\"parent\":\"base0\",\"mode\":\"bridge\"}}",
+	    "\"links\":[{\"name\":\"flip0\",\"index\":9,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"dummy\"}]",
+	    &document, &observed);
+	check(plan && corrects(plan, "link.delete", "kind"),
+	    "a device that is the wrong kind entirely plans a delete naming the kind");
+	planfix_release(plan, document, observed);
+
+	/* A vlan's parent is the outer `IFLA_LINK`, which the kernel accepts on a
+	 * live device and ignores -- the same answer as the id and therefore the
+	 * same remedy (0060). */
+	plan = one("{\"name\":\"v7\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"base0\","
+	    "\"id\":77,\"protocol\":\"dot1q\"}}",
+	    "\"links\":[{\"name\":\"v7\",\"index\":9,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"vlan\",\"parent\":\"br0\","
+	    "\"vlan\":{\"id\":77,\"protocol\":\"dot1q\"}}]",
+	    &document, &observed);
+	check(plan && corrects(plan, "link.delete", "parent"),
+	    "a moved vlan parent plans a delete naming the parent");
+	planfix_release(plan, document, observed);
+
+	/*
+	 * **And a VXLAN's underlay is not one of them.** It lives in the VXLAN's
+	 * own nest, the kernel moves it on a live device, and `link.set_vxlan`
+	 * corrects it in place. Asserted here rather than only in the pass that
+	 * does it, because the failure this guards is the remake rule reaching one
+	 * field too far -- and throwing an interface away is the most destructive
+	 * thing the planner does.
+	 */
+	plan = one("{\"name\":\"vx1\",\"kind\":{\"kind\":\"vxlan\",\"parent\":\"base0\","
+	    "\"id\":100}}",
+	    "\"links\":[{\"name\":\"vx1\",\"index\":9,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"ours\",\"kind\":\"vxlan\",\"parent\":\"br0\","
+	    "\"vxlan\":{\"id\":100}}]",
+	    &document, &observed);
+	check(plan && !planfix_action(plan, "link.delete"),
+	    "a moved vxlan underlay is not thrown away, being one the kernel moves");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * The one place the planner throws an interface away, and the ownership rule
+ * that governs it.
+ *
+ * A link netcfgd has no record of creating gets a sentence naming what
+ * differs and what correcting it would cost, and is left alone. That leaves a
+ * real gap and it is the right gap: the alternative is a config file that
+ * deletes interfaces netcfgd never made.
+ */
+static void a_link_netcfgd_did_not_make_is_explained_rather_than_remade(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = one(
+	    "{\"name\":\"hand\",\"kind\":{\"kind\":\"vlan\",\"parent\":\"br0\","
+	    "\"id\":91,\"protocol\":\"dot1q\"}}",
+	    "\"links\":[{\"name\":\"hand\",\"index\":9,\"mtu\":1500,\"up\":true,\"carrier\":true,"
+	    "\"ownership\":\"foreign\",\"kind\":\"vlan\",\"parent\":\"br0\","
+	    "\"vlan\":{\"id\":90,\"protocol\":\"dot1q\"}}]",
+	    &document, &observed);
+
+	check(plan && !planfix_action(plan, "link.delete"),
+	    "a link netcfgd did not create is not deleted");
+	check(plan && !planfix_action(plan, "link.create"),
+	    "  and not recreated either");
+	check(plan && planfix_warned(plan, "will not do to a link it did not create"),
+	    "  and the plan says so, naming what correcting it would cost");
+	planfix_release(plan, document, observed);
+}
+
+/* ------------------------------------------------------------------------ *
  * A bridge
  * ------------------------------------------------------------------------ */
 
@@ -781,6 +890,8 @@ int main(void)
 	wrong_vlan_flags_are_corrected();
 	an_unmentioned_port_keeps_its_vlans();
 	a_port_with_no_interface_block_still_gets_its_vlans();
+	a_link_the_kernel_will_not_change_is_remade();
+	a_link_netcfgd_did_not_make_is_explained_rather_than_remade();
 	a_port_about_to_be_created_still_drops_the_kernels_own_vlan();
 	vlans_on_a_device_in_no_bridge_are_said_once();
 	a_vlan_on_the_bridge_itself_is_a_self_operation();

@@ -247,9 +247,6 @@ extern const char *const ncfg_link_name_help;
 /* The same, where a block is named for the link it declares. */
 extern const char *const ncfg_link_label_help;
 
-/* `netcfgd_model::interface::usable_name`, which is the kernel's own
- * `dev_valid_name`. Returns the reason, or NULL where the name is fine. */
-const char *ncfg_usable_name(const char *name);
 /* The one place the "not an interface name" diagnostic is built. */
 int   ncfg_name_ok(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, const char *help);
 /* A string that has to be a name the kernel would take for a link. */
@@ -305,9 +302,6 @@ int ncfg_ssid_from_hex(const char *text, ncfg_ssid_t *out, const char **why);
  */
 char *ncfg_normalize_station(ncfg_lower_ctx_t *ctx, const char *text, char *why, size_t why_size);
 
-/* A Curve25519 public key from the base64 spelling every WireGuard tool uses.
- * Returns 1, or 0 with the reason in `*why`. */
-int ncfg_public_key_parse(const char *text, unsigned char out[32], const char **why);
 
 /* ------------------------------------------------------------------------ *
  * The block lowerers

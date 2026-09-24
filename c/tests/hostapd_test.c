@@ -724,7 +724,7 @@ static void a_station_reply_is_read(void)
 	check(ncfg_hostapd_parse_station("AA-BB-CC-DD-EE-FF\nflags=[AUTH]\n", &station) &&
 	    strcmp(station.address, "aa:bb:cc:dd:ee:ff") == 0,
 	    "the address is normalised like every other station address");
-	check(!ncfg_hostapd_normalize_station("aabbccddeeff", station.address,
+	check(!ncfg_station_address_normalize("aabbccddeeff", station.address,
 	      sizeof(station.address), NULL, 0),
 	    "and a bare twelve digits is refused, because an ACL is the wrong place to guess");
 }

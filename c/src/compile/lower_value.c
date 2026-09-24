@@ -458,49 +458,6 @@ const char *const ncfg_link_label_help = "a `device` or `interface` block is nam
     "itself, so the label has to be a name the kernel would take";
 
 /*
- * `netcfgd_model::interface::usable_name`, which is the kernel's own
- * `dev_valid_name`, so nothing is refused here that the kernel would have
- * accepted.
- *
- * **An interface name reaches the filesystem all over this tree** -- a pid
- * file, a generated config, a hook script, a control socket -- and a name that
- * is a path traverses out of the directory it was joined to. Measured before
- * this existed: `device "../../etc/evil" { kind = "dummy" }` compiled and
- * planned `link.create ../../etc/evil`, and a forty-character name did too.
- * The kernel refuses both at netlink time, so no link appears -- and the name
- * has already been joined into half a dozen paths by then.
- */
-const char *ncfg_usable_name(const char *name)
-{
-	size_t at;
-
-	if (!name || name[0] == '\0') {
-		return "an interface name cannot be empty";
-	}
-	if (strlen(name) > 15u) {
-		return "an interface name is at most 15 characters";
-	}
-	if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0) {
-		/* Not "a directory is not an interface name": every caller prefixes
-		 * "`{name}` is not an interface name: ", so that phrasing said it
-		 * twice in one line. */
-		return "the kernel keeps `.` and `..` for directories";
-	}
-	for (at = 0; name[at]; at++) {
-		if (name[at] == '/') {
-			return "an interface name cannot contain `/`";
-		}
-		if (name[at] == ':') {
-			return "an interface name cannot contain `:`";
-		}
-		if (is_space(name[at])) {
-			return "an interface name cannot contain whitespace";
-		}
-	}
-	return NULL;
-}
-
-/*
  * The one place the "not an interface name" diagnostic is built.
  *
  * Three callers, three spans, one message. It was written out three times
@@ -826,105 +783,16 @@ int ncfg_ssid_from_hex(const char *text, ncfg_ssid_t *out, const char **why)
 	return 1;
 }
 
-/* A hex digit in either case, which a station address may be written in. The
- * SSID reader above deliberately takes only one case; this one converges on
- * lowercase instead, because that is the spelling `document.h` requires. */
-static int hex_either(char one, unsigned *out)
-{
-	if (one >= 'A' && one <= 'F') {
-		*out = (unsigned)(one - 'A') + 10u;
-		return 1;
-	}
-	return hex_digit(one, out);
-}
-
 char *ncfg_normalize_station(ncfg_lower_ctx_t *ctx, const char *text, char *why, size_t why_size)
 {
-	static const char lower[] = "0123456789abcdef";
-	char              separator = strchr(text, '-') ? '-' : ':';
-	char              out[18];
-	size_t            parts = 1;
-	size_t            at = 0;
-	size_t            written = 0;
-	size_t            part;
+	char out[NCFG_STATION_ADDRESS_SIZE];
 
-	for (at = 0; text[at]; at++) {
-		if (text[at] == separator) {
-			parts++;
-		}
-	}
-	if (parts != 6u) {
-		ncfg_error_set(why, why_size,
-		    "a station address is six colon-separated octets, such as `aa:bb:cc:dd:ee:ff`; "
-		    "`%s` has %zu", text, parts);
+	/* The rule is the model's -- see `ncfg_station_address_normalize`. What is
+	 * this module's is the arena: a lowered document owns its strings, so the
+	 * answer is duplicated into `ctx` rather than handed back on the stack. */
+	if (!ncfg_station_address_normalize(text, out, sizeof(out), why, why_size)) {
 		return NULL;
 	}
-
-	at = 0;
-	for (part = 0; part < 6u; part++) {
-		size_t   start = at;
-		unsigned high;
-		unsigned low;
-
-		while (text[at] && text[at] != separator) {
-			at++;
-		}
-		if (at - start != 2u || !hex_either(text[start], &high) ||
-		    !hex_either(text[start + 1u], &low)) {
-			ncfg_error_set(why, why_size,
-			    "`%.*s` is not a two-digit hex octet, in the station address `%s`",
-			    (int)(at - start), text + start, text);
-			return NULL;
-		}
-		if (written) {
-			out[written++] = ':';
-		}
-		out[written++] = lower[high];
-		out[written++] = lower[low];
-		if (text[at]) {
-			at++;
-		}
-	}
-	out[written] = '\0';
 	return ncfg_dup(ctx, out);
 }
 
-/*
- * The base64 spelling every WireGuard tool uses: 44 characters ending in `=`,
- * decoding to 32 octets.
- *
- * The pad is not decoded: 43 significant characters carry 258 bits, of which
- * the low two are discarded. A key whose last character sets them is still a
- * valid key -- `wg` emits them -- so they are ignored rather than rejected.
- */
-int ncfg_public_key_parse(const char *text, unsigned char out[32], const char **why)
-{
-	static const char alphabet[] =
-	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-	uint32_t accumulator = 0;
-	unsigned bits = 0;
-	size_t   written = 0;
-	size_t   i;
-
-	if (strlen(text) != 44u || text[43] != '=') {
-		*why = "a key is 44 characters of base64 ending in `=`";
-		return 0;
-	}
-	for (i = 0; i < 43u; i++) {
-		const char *found = strchr(alphabet, text[i]);
-
-		if (!found || !text[i]) {
-			*why = "a key is base64, and this is not";
-			return 0;
-		}
-		accumulator = (accumulator << 6u) | (uint32_t)(found - alphabet);
-		bits += 6u;
-		if (bits >= 8u) {
-			bits -= 8u;
-			if (written < 32u) {
-				out[written++] = (unsigned char)((accumulator >> bits) & 0xffu);
-			}
-		}
-	}
-	return 1;
-}

@@ -61,8 +61,8 @@ void ncfg_daemon_record_what_ran(const ncfg_daemon_state_t *state, const char *t
 		}
 	}
 	message[0] = '\0';
-	if (!ncfg_apply_record(state->paths.run, plan, journal, delivered, count, message,
-	        sizeof(message))) {
+	if (!ncfg_apply_record(state->paths.run, plan, journal, delivered, count, state->observed,
+	        message, sizeof(message))) {
 		ncfg_log_emitf(tag, NCFG_LOG_NOTE,
 		    "what this apply did could not be recorded (%s), so netcfgd will not "
 		    "claim those objects as its own", message);
