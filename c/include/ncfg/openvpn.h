@@ -68,6 +68,17 @@
 #ifndef NCFG_OPENVPN_H
 #define NCFG_OPENVPN_H
 
+/*
+ * What a test puts in front of the conventional `openvpn`.
+ *
+ * **The name only. Nothing in this module reads it** -- every path here is a
+ * parameter, for the reason the header comment gives: 20 of 45 checks in the
+ * Rust's live script were silently exercising the machine's own openvpn
+ * because the search had no other seam. The daemon and `ncfg` read this when
+ * they build the world they hand to an executor.
+ */
+#define NCFG_OPENVPN_PROGRAM_ENV "NCFG_OPENVPN"
+
 #include <stddef.h>
 #include <sys/types.h>
 

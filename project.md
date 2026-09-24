@@ -9515,6 +9515,50 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.271 The seam the headers asked for and nobody supplied
+
+`orphan`, `revive` and `switch_network` failed with *no wpa_supplicant found
+for radio0*, in a namespace where the script had written a fake supplicant and
+named it.
+
+`ncfg_service_t` carries four program seams -- `hostapd_program`,
+`radvd_program`, `openvpn_program`, `supplicant_program` -- and
+`ncfg_main_world_where_t` carries the same four. `supplicant.h` and
+`openvpn.h` each explain at length why the program is a parameter rather than
+an environment read, with the measurement behind it: **20 of 45 checks in the
+Rust's live openvpn script were silently exercising the machine's own
+openvpn** before that project grew `NCFG_OPENVPN`. The C's headers are right
+and the seam was complete in every module.
+
+**Nothing filled it.** `daemon_main.c` memsets the struct and never assigns
+those four, and `cli_machine.c` does not either -- so every one was NULL, NULL
+means "find the conventional name", and the conventional search found nothing
+in a namespace with no `wpa_supplicant` installed. The header says *a test
+passes a program it wrote*, and no caller gave a test any way to pass one.
+
+`ncfg_main_world_where_from_environment` is the missing half, read in one
+place and by the two programs that build a world. **Two rather than four**:
+`NCFG_WPA_SUPPLICANT` and `NCFG_OPENVPN` are what the Rust has, and a seam
+this port carries that the thing it is compared against does not is a
+difference invented rather than ported. An empty value is no value, because
+`execv("")` would report the conventional search failing for a reason nobody
+could see.
+
+**A second seam in the same function was ignored outright.**
+`cli_machine.c` assigned `NCFG_SUPPLICANT_CTRL_DIR` as a literal where the
+daemon calls `ncfg_supplicant_ctrl_dir`, which reads `NCFG_WPA_CTRL_DIR` and
+falls back to that same constant. So `ncfg apply` looked for supplicant
+control sockets in `/run/wpa_supplicant` however it was told -- a default that
+is correct on the machine and wrong everywhere a test runs, which is the shape
+that makes a seam look present while doing nothing.
+
+Worth naming as a class, because this is the second instance this week: **a
+seam whose every layer exists except the one that supplies it**. The headers
+document it, the struct carries it, the callee honours it, and the one
+assignment that would make it live was never written. Nothing fails; the
+default is simply always taken. What found it was not reading the code -- it
+was a test that had set the variable and was refused anyway.
+
 ## 10.270 A `(null)` directory in the repository root, holding a real lock
 
 Found as untracked litter, not by a test: a directory named `(null)` beside

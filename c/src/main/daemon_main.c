@@ -799,6 +799,10 @@ static int start(const options_t *options)
 	world_where.unbound_conf = where.unbound;
 	/* And dhcpcd's, which `dhcp.h` owns for the same reason. */
 	ncfg_dhcp_machine(&world_where.dhcp);
+	/* And the two programs a test may put in front of the conventional ones,
+	 * which the modules that run them deliberately do not read for
+	 * themselves. */
+	ncfg_main_world_where_from_environment(&world_where);
 	if (!ncfg_main_world_open(&world, &world_where, &state, &subscribers, &watchers, err,
 	    sizeof(err))) {
 		ncfg_probes_free(loop.probes);

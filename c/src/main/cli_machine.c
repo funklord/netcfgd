@@ -56,6 +56,7 @@ typedef struct {
 	ncfg_main_world_where_t where;
 	ncfg_secret_resolver_t  secrets;
 	char                    config_dir[NCFG_MAIN_LOOP_PATH_MAX];
+	char                    ctrl_dir[NCFG_MAIN_LOOP_PATH_MAX];
 	/* Room for the leaf this composes onto the configuration directory, so
 	 * that a directory at the ceiling gives a truncated path rather than a
 	 * compiler warning about one. */
@@ -106,7 +107,19 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	 */
 	held->where.run_dir = run_dir;
 	held->where.proc_root = "/proc";
-	held->where.supplicant_dir = NCFG_SUPPLICANT_CTRL_DIR;
+	/*
+	 * **Asked for rather than assumed**, which is what the daemon does and
+	 * what this did not: `ncfg_supplicant_ctrl_dir` reads
+	 * `NCFG_WPA_CTRL_DIR` and falls back to the conventional directory, and
+	 * the constant on its own ignored the seam entirely -- so `ncfg apply`
+	 * looked for control sockets in `/run/wpa_supplicant` however it was
+	 * told. A failure to resolve one leaves the field absent, which
+	 * `ncfg_service_t` refuses the wifi ops for by name.
+	 */
+	if (!ncfg_supplicant_ctrl_dir(held->ctrl_dir, sizeof(held->ctrl_dir), err, err_size)) {
+		held->ctrl_dir[0] = '\0';
+	}
+	held->where.supplicant_dir = held->ctrl_dir[0] ? held->ctrl_dir : NULL;
 	held->where.secrets_dir = held->secrets_dir;
 	held->where.certs_dir = held->certs_dir;
 	held->where.resolv_conf = ncfg_dns_resolve_conf_path(NULL, held->resolv_conf,
@@ -116,6 +129,7 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	held->where.unbound_conf = ncfg_dns_resolve_unbound_path(NULL, held->unbound_conf,
 	    sizeof(held->unbound_conf));
 	ncfg_dhcp_machine(&held->where.dhcp);
+	ncfg_main_world_where_from_environment(&held->where);
 
 	if (!ncfg_main_world_open(&held->world, &held->where, &held->state, NULL, NULL, err,
 	        err_size)) {

@@ -586,6 +586,18 @@ int ncfg_supplicant_pick_ssid(const ncfg_wifi_network_t *network,
 #define NCFG_SUPPLICANT_CTRL_DIR_ENV "NCFG_WPA_CTRL_DIR"
 
 /*
+ * What a test puts in front of the conventional `wpa_supplicant`.
+ *
+ * **The name only. Nothing in this module reads it**, which is the rule three
+ * paragraphs of this header state: `ncfg_supplicant_start` takes the program
+ * as an argument, because a test passes a program it wrote. The daemon and
+ * `ncfg` read this when they build the world they hand to an executor, exactly
+ * as they read `NCFG_RUN_DIR`, and the spelling lives here because this is the
+ * module that owns the program.
+ */
+#define NCFG_SUPPLICANT_PROGRAM_ENV "NCFG_WPA_SUPPLICANT"
+
+/*
  * How long to wait for a reply, in milliseconds.
  *
  * Generous, because `SCAN_RESULTS` on a busy band is not instant, and a
