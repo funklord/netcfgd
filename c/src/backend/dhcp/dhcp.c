@@ -572,7 +572,11 @@ ncfg_optint_t ncfg_dhcp_started_metric(const char *run, const char *iface)
 
 char *ncfg_dhcp_binary(const char *name)
 {
-	return ncfg_backend_find_program(name);
+	/* **`PATH` alone**, unlike the four daemons: the Rust runs
+	 * `Command::new("dhcpcd")` here, and a client an operator put in front of
+	 * the packaged one on `PATH` is a choice netcfgd honours rather than
+	 * overrules. `backend_internal.h` has the whole of the difference. */
+	return ncfg_backend_find_on_path(name);
 }
 
 /*

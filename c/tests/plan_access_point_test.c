@@ -677,6 +677,160 @@ static void an_access_point_that_has_to_listen_first_is_said(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * hostapd running is not an access point working.
+ *
+ * `an_access_point_on_a_device_with_no_interface_block_is_said` covers the
+ * warning that tells an operator `interface wlan0 { }` is enough -- and it is,
+ * enough to bring the radio up and start hostapd. Following it exactly plans
+ * `link.up` and `backend.start` and no address, so the SSID beacons, a station
+ * associates, and there is nothing on this end to talk to. netcfgd serves no
+ * DHCP either, which is why the sentence has two halves.
+ *
+ * **The control is the addressed radio and it comes first**: a warning that
+ * fired on every access point would tell nobody anything, and this one was
+ * measured firing on a correct bridged arrangement when the Rust first wrote
+ * it (0202).
+ */
+static void an_access_point_with_no_address_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, ADDRESSED_RADIO, "", OPEN_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+
+	check(plan && !planfix_warned(plan, "nothing here to talk to"),
+	    "an access point whose interface has an address is not warned about");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && planfix_warned(plan, "nothing here to talk to"),
+	    "one with an empty `addressing` list is");
+	check(plan && planfix_warned(plan, "serves no DHCP"),
+	    "  and is told the half an address alone does not fix");
+	planfix_release(plan, document, observed);
+
+	/*
+	 * **The bridged access point, which is the case that made this warning
+	 * wrong once.** Its address belongs to the bridge, so the radio having
+	 * none is the correct arrangement rather than the fault. Both spellings
+	 * are checked, because a document may name members from the bridge or a
+	 * master from the member and they mean the same thing.
+	 */
+	plan = planfix_plan(RADIO ",{\"name\":\"br0\",\"kind\":{\"kind\":\"bridge\","
+	    "\"members\":[\"wlan0\"]}}",
+	    RADIO_INTERFACE ",{\"name\":\"br0\",\"addressing\":[{\"source\":\"static\","
+	    "\"address\":\"192.168.4.1/24\"}]}",
+	    "", OPEN_POINT, "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)),
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "nothing here to talk to"),
+	    "and a bridged access point is not, because the address is the bridge's");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan("{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"master\":\"br0\"},{\"name\":\"br0\",\"kind\":{\"kind\":\"bridge\"}}",
+	    RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "nothing here to talk to"),
+	    "and neither is one whose own block names the master");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * An `allow` list with nothing in it.
+ *
+ * A legitimate thing to write -- it is how an access point is closed without
+ * taking it down -- and an easy thing to arrive at by deleting the last
+ * station from a list. It compiles either way, so the difference between the
+ * two is said rather than refused.
+ *
+ * The control is the same block with a station in it, and a `deny` list with
+ * none: an empty `deny` is "nobody is barred", which is what an access point
+ * with no `access_control` block already means.
+ */
+static void an_empty_allow_list_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, ADDRESSED_RADIO, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"allow\","
+	          "\"stations\":[]}"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+
+	check(plan && planfix_warned(plan, "empty `allow` list"),
+	    "an empty allow list is said to shut everybody out");
+	check(plan && planfix_warned(plan, "Remove the `access_control` block"),
+	    "  and told what to do about it");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, ADDRESSED_RADIO, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"allow\","
+	          "\"stations\":[\"aa:bb:cc:dd:ee:ff\"]}"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "empty `allow` list"),
+	    "and one with a station in it is not");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, ADDRESSED_RADIO, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"deny\","
+	          "\"stations\":[]}"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "empty `allow` list"),
+	    "and an empty `deny` list bars nobody, which is not the same thing");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * A radio joining networks cannot be a bridge port (0202).
+ *
+ * **Two opposite arrangements that both put a radio in a bridge**, and the
+ * whole of the difference is which end holds the associations. The serving end
+ * is fine and is the ordinary way to put wireless clients on the wired subnet;
+ * the joining end cannot work, because a station associates in 802.11's
+ * three-address mode.
+ *
+ * So the control is the same bridge with an `access_point` on the member, and
+ * it is the case the condition is actually about: a test that only showed the
+ * warning firing would pass on a build that warned about every radio in every
+ * bridge.
+ */
+static void a_station_radio_in_a_bridge_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define BRIDGED_RADIO \
+	"{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},\"managed\":true," \
+	"\"wifi\":{}},{\"name\":\"br0\",\"kind\":{\"kind\":\"bridge\"," \
+	"\"members\":[\"wlan0\"]}}"
+
+	plan = planfix_plan(BRIDGED_RADIO, RADIO_INTERFACE, "", "",
+	    "\"links\":[" UP_LINK "]", &document, &observed);
+	check(plan && planfix_warned(plan, "is a radio joining networks"),
+	    "a station radio in a bridge is warned about");
+	check(plan && planfix_warned(plan, "Four-address mode"),
+	    "  and told what does bridge one");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(BRIDGED_RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	check(plan && !planfix_warned(plan, "is a radio joining networks"),
+	    "and the serving end of the same bridge is not, because it is not a station");
+	planfix_release(plan, document, observed);
+
+	/* And an interface the kernel says is not wireless, which is the other
+	 * half of the two-facts-from-two-places rule: a `wifi { }` block is not a
+	 * statement that the interface IS a radio. */
+	plan = planfix_plan(BRIDGED_RADIO, RADIO_INTERFACE, "", "",
+	    "\"links\":[" PLANFIX_LINK("wlan0", "") "]", &document, &observed);
+	check(plan && !planfix_warned(plan, "is a radio joining networks"),
+	    "and a bridge member the kernel does not call wireless is not warned about");
+	planfix_release(plan, document, observed);
+#undef BRIDGED_RADIO
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -701,6 +855,9 @@ int main(void)
 	a_restarted_access_point_has_its_station_lists_left_alone();
 	only_the_first_access_point_on_a_radio_is_restarted();
 	an_access_point_that_has_to_listen_first_is_said();
+	an_access_point_with_no_address_is_said();
+	an_empty_allow_list_is_said();
+	a_station_radio_in_a_bridge_is_said();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

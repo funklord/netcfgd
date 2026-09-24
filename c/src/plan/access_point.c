@@ -188,6 +188,99 @@ static void warn_second_access_point(ncfg_builder_t *builder,
 	ncfg_buf_free(&ignored);
 }
 
+/*
+ * Whether this device's address comes from somewhere other than its own
+ * `interface` block.
+ *
+ * A bridged access point is the ordinary way to put wireless clients on the
+ * wired subnet: the address belongs to the bridge and the radio has none, and
+ * it is working correctly. The Rust's own comment records that the warning
+ * below fired on exactly that arrangement when it was first written, calling
+ * the right answer broken -- "a true statement about one interface offered as
+ * a verdict on the whole" (0202).
+ *
+ * Both spellings, because a document may name members from the bridge or a
+ * master from the member and the two mean the same thing.
+ */
+static int address_is_somewhere_else(const ncfg_document_t *desired, const char *device)
+{
+	size_t i;
+	size_t at;
+
+	for (i = 0; i < desired->device_count; i++) {
+		const ncfg_device_t *other = &desired->devices[i];
+
+		if (other->name && strcmp(other->name, device) == 0 && other->master) {
+			return 1;
+		}
+		if (other->kind.kind != NCFG_KIND_BRIDGE) {
+			continue;
+		}
+		for (at = 0; at < other->kind.bridge.member_count; at++) {
+			const char *member = other->kind.bridge.members[at];
+
+			if (member && strcmp(member, device) == 0) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+/*
+ * An access point on an interface with no address.
+ *
+ * **hostapd running is not an access point working.** The warning above says
+ * `interface wlan0 { }` is enough, and it is -- enough to bring the radio up
+ * and start hostapd. Following it exactly gives a beaconing SSID a station
+ * can associate with and then nothing on this end to talk to, because netcfgd
+ * serves no DHCP either. So an address here is necessary and not sufficient,
+ * and the sentence says both halves.
+ *
+ * Only where there IS an `interface` block: with none, the warning above is
+ * the one to read, and two warnings about the same missing thing is one of
+ * them being noise.
+ */
+static void warn_no_address(ncfg_builder_t *builder, const ncfg_access_point_t *point)
+{
+	const ncfg_interface_t *interface = ncfg_plan_interface(builder->desired, point->device);
+
+	if (!interface || interface->addressing_count > 0u) {
+		return;
+	}
+	if (address_is_somewhere_else(builder->desired, point->device)) {
+		return;
+	}
+	ncfg_plan_warnf(builder->plan, point->device,
+	    "access point `%s` runs on `%s`, which has no address: a station can associate "
+	    "and then has nothing here to talk to. netcfgd runs hostapd and serves no DHCP, "
+	    "so give the interface an address -- `interface %s { config = \"192.168.4.1/24\" "
+	    "}` -- and run a DHCP server on it, or expect every station to be configured by "
+	    "hand",
+	    point->id, point->device, point->device);
+}
+
+/*
+ * An `allow` list with nothing in it.
+ *
+ * A legitimate thing to write -- it is how an access point is closed without
+ * taking it down -- and an easy thing to arrive at by deleting the last
+ * station from a list. It compiles either way, because a compile diagnostic
+ * is a failure and this is not one, so the difference between the two is said
+ * here rather than refused there.
+ */
+static void warn_empty_allow(ncfg_builder_t *builder, const ncfg_access_point_t *point)
+{
+	if (!point->access_control || point->access_control->policy != NCFG_ACL_POLICY_ALLOW ||
+	    point->access_control->station_count > 0u) {
+		return;
+	}
+	ncfg_plan_warnf(builder->plan, point->device,
+	    "access point `%s` has an empty `allow` list, so no station can associate with "
+	    "it at all. Remove the `access_control` block to let everyone in",
+	    point->id);
+}
+
 void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 {
 	size_t i;
@@ -224,6 +317,8 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 			    "36 to 48 and 149 upwards need no such wait",
 			    point->id, (long long)point->channel.value);
 		}
+		warn_no_address(builder, point);
+		warn_empty_allow(builder, point);
 		warn_second_access_point(builder, point);
 	}
 }
