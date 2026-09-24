@@ -877,6 +877,45 @@ static void the_seams_a_world_fills_in(void)
 }
 
 /*
+ * A world that never opened does not take a lock at `(null)/apply.lock`.
+ *
+ * Found as an untracked directory in the repository root with an empty
+ * `apply.lock` in it: `world->run_dir` is a `const char *`, `snprintf` writes
+ * a NULL one as `(null)`, and the result is a relative path -- so the lock
+ * landed wherever the process was standing. **Nothing failed.** The daemon
+ * held a real `flock` on a real file, in a place no other daemon would look,
+ * which is worse than not holding one: the lock's whole job is to be the file
+ * everybody agrees on.
+ *
+ * **Measured with the guard removed, and it is worse than it reads.** The
+ * expectation was that the netlink open two lines further on would refuse
+ * anyway and the file would be litter. It does not: opening a netlink socket
+ * needs no capability, so `ncfg_main_world_executor_open` returned an executor
+ * that was fully armed -- lock held, kernel open, ready to carry actions out --
+ * with its lock on a file in the current working directory. All three checks
+ * here fail without the guard and none with it.
+ */
+static void a_world_with_no_run_directory_writes_no_lock(void)
+{
+	ncfg_main_world_t world;
+	ncfg_executor_t   executor;
+	char              err[NCFG_ERROR_MAX];
+	struct stat       found;
+
+	memset(&world, 0, sizeof(world));
+	ncfg_lock_init(&world.lock);
+	world.patience_ms = 50;
+	memset(&executor, 0, sizeof(executor));
+	err[0] = '\0';
+	check(!ncfg_main_world_executor_open(&world, &executor, err, sizeof(err)),
+	    "a world that was never opened gives back no executor");
+	check(strstr(err, "no run directory") != NULL,
+	    "  saying which of the two things is missing");
+	check(stat("(null)", &found) != 0,
+	    "  and wrote no `(null)` directory beside whatever it was standing in");
+}
+
+/*
  * The apply lock is taken before the socket, and a lock somebody else holds is
  * a refusal rather than a wait.
  *
@@ -2005,6 +2044,7 @@ int main(void)
 	what_a_revents_means_for_a_stream();
 	a_monitor_becomes_a_subscriber_and_is_told();
 	the_seams_a_world_fills_in();
+	a_world_with_no_run_directory_writes_no_lock();
 	an_executor_takes_the_apply_lock_before_anything_else();
 	the_hooks_an_executor_is_given();
 	an_executor_now_carries_a_service_context();
