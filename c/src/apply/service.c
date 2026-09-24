@@ -22,6 +22,7 @@
 
 #include "ncfg/base.h"
 #include "ncfg/observe.h"
+#include "ncfg/radio.h"
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
 
@@ -29,6 +30,15 @@
 
 void ncfg_service_machine(ncfg_service_t *out)
 {
+	/*
+	 * Static because `ncfg_service_t` borrows every path in it and this one is
+	 * resolved rather than a constant: `ncfg_radio_class_net` reads
+	 * `NCFG_SYS_CLASS_NET` and falls back to the conventional directory, so
+	 * there is no literal to point at. One machine per process, and the answer
+	 * does not change while it runs.
+	 */
+	static char class_net[NCFG_SERVICE_CLASS_NET_MAX];
+
 	if (!out) {
 		return;
 	}
@@ -57,6 +67,22 @@ void ncfg_service_machine(ncfg_service_t *out)
 	 * to run stays NULL, and the directories pppd's own pid file may be in
 	 * are the list that header publishes. */
 	ncfg_pppoe_machine(&out->pppoe);
+	/*
+	 * And what `backend.start` asks before it starts a supplicant, which
+	 * `apply.h` owns and `radio.h` owns respectively. Named here for this
+	 * function's reason: a test asserts what a daemon reads by reading this,
+	 * rather than by anything writing near the machine's own `/run`.
+	 *
+	 * `ncfg_radio_class_net` can fail only by having nowhere to put the
+	 * answer, and there is somewhere; an empty string then asks nothing, which
+	 * is this member's documented absent state rather than an error to carry
+	 * out of a function that reports none.
+	 */
+	ncfg_contention_machine(&out->contention);
+	if (!ncfg_radio_class_net(class_net, sizeof(class_net), NULL, 0)) {
+		class_net[0] = '\0';
+	}
+	out->class_net = class_net[0] ? class_net : NULL;
 }
 
 int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, char *err,

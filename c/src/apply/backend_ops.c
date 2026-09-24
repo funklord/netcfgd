@@ -79,6 +79,7 @@
 #include "service_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/buf.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
@@ -86,7 +87,9 @@
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
 
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -468,6 +471,117 @@ static int supplicant_dir_of(const ncfg_service_t *service, const char *doing, c
 	return 1;
 }
 
+/*
+ * The kernel index of an interface, as the daemons that key by it read it.
+ *
+ * Absent for every reason that is not an error: no `class_net` given, the
+ * interface gone between the plan and the apply, a sysfs that will not answer.
+ * Each of those means the question below cannot be asked, and an unanswerable
+ * question is not a refusal -- see `no_other_manager_holds`.
+ */
+static int interface_index_of(const char *class_net, const char *iface, uint32_t *out)
+{
+	char  path[BACKEND_PATH_MAX];
+	char  text[32];
+	FILE *file;
+	long  value;
+
+	if (!class_net || !class_net[0] || !iface || !iface[0]) {
+		return 0;
+	}
+	if ((size_t)snprintf(path, sizeof(path), "%s/%s/ifindex", class_net, iface) >=
+	    sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "rb");
+	if (!file) {
+		return 0;
+	}
+	if (!fgets(text, sizeof(text), file)) {
+		(void)fclose(file);
+		return 0;
+	}
+	(void)fclose(file);
+	value = strtol(text, NULL, 10);
+	if (value <= 0 || value > (long)UINT32_MAX) {
+		return 0;
+	}
+	*out = (uint32_t)value;
+	return 1;
+}
+
+/*
+ * Refuse to start a second supplicant on a radio another manager holds.
+ *
+ * **The daemon's release pass is not this**, and running the C against the
+ * Rust's `displace.sh` is what made the difference legible. netcfgd started a
+ * supplicant on a radio NetworkManager was managing, noticed on the next tick,
+ * and stopped its own again -- printing, correctly, that two managers on one
+ * interface drop the association. It had already done that. The release pass
+ * is the remedy for a manager that declares itself *after* netcfgd took the
+ * radio; it cannot be the guard for one that declared itself first.
+ *
+ * **An unanswerable question starts the supplicant.** No `class_net` and no
+ * contention roots is what a caller says when it knows there is no other
+ * manager -- `ncfg_service_t`'s bargain, where an absent member refuses only
+ * the ops that cannot be done without it, and this one can. A `/run` from
+ * another network namespace answers nothing for the reason `apply.h` gives at
+ * length: an index means nothing outside the namespace that issued it.
+ *
+ * A failure to *look* is likewise not a refusal. `ncfg_contenders_find`
+ * returns 0 only for an allocation failure, and refusing to bring a radio up
+ * because a malloc failed would trade a working network for a tidy error.
+ */
+static int no_other_manager_holds(const ncfg_service_t *service, const char *iface, char *err,
+    size_t err_size)
+{
+	ncfg_interface_claim_t claim;
+	ncfg_contenders_t      found;
+	ncfg_buf_t             detail;
+	char                   ignored[NCFG_ERROR_MAX];
+	int                    refused = 1;
+
+	if (!service->contention.run_root || !service->contention.proc_root) {
+		return 1;
+	}
+	memset(&claim, 0, sizeof(claim));
+	claim.name = iface;
+	if (!interface_index_of(service->class_net, iface, &claim.index)) {
+		return 1;
+	}
+	memset(&found, 0, sizeof(found));
+	if (!ncfg_contenders_find(&service->contention, &claim, 1u, &found, ignored,
+	    sizeof(ignored))) {
+		return 1;
+	}
+	if (found.count == 0u) {
+		ncfg_contenders_free(&found);
+		return 1;
+	}
+	/*
+	 * The first, as the Rust takes it: a radio held by two other managers at
+	 * once is a machine with worse problems than this sentence, and naming one
+	 * of them is what makes the remedy actionable.
+	 */
+	ncfg_buf_init(&detail, 0);
+	if (!ncfg_contender_describe(&found.at[0], &detail, ignored, sizeof(ignored))) {
+		ncfg_error_set(err, err_size,
+		    "%s is already managing `%s`, so netcfgd will not start a second "
+		    "supplicant on it: two on one radio drop the association, which takes "
+		    "the address and the default route with it", found.at[0].name, iface);
+	} else {
+		ncfg_error_set(err, err_size,
+		    "%s is already managing `%s`, so netcfgd will not start a second "
+		    "supplicant on it: two on one radio drop the association, which takes "
+		    "the address and the default route with it. %s", found.at[0].name, iface,
+		    ncfg_buf_text(&detail));
+	}
+	ncfg_buf_free(&detail);
+	ncfg_contenders_free(&found);
+	refused = 0;
+	return refused;
+}
+
 /* Start a supplicant, or adopt the one already there, and give it its
  * networks.
  *
@@ -485,6 +599,9 @@ static int start_supplicant(const ncfg_service_t *service, const char *run_dir,
 
 	if (!supplicant_dir_of(service, "backend.start", iface, &dir, err, err_size) ||
 	    !ncfg_service_supplicant_driver(service->document, iface, &driver, err, err_size)) {
+		return 0;
+	}
+	if (!no_other_manager_holds(service, iface, err, err_size)) {
 		return 0;
 	}
 	if (!ncfg_supplicant_start(run_dir, dir, iface, driver, service->supplicant_program, err,

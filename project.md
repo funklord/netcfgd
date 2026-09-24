@@ -9515,6 +9515,90 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.272 The guard was on the wrong side of the harm, and the buffer was too small to say so
+
+`displace.sh` had one failure left: netcfgd was expected to say *NetworkManager
+is already managing `radio0`* and said nothing of the kind. It passes, and
+three things were wrong behind it.
+
+### Releasing a radio is not the same as declining one
+
+The C had the contention check, in the daemon's release pass: on a tick it
+asks which other managers claim an interface netcfgd runs a backend on, and
+stops its own. That is the right remedy for a manager which declares itself
+**after** netcfgd took the radio.
+
+It is not a guard. Where NetworkManager declared itself first -- which is
+`displace.sh`'s scenario and every boot on an ordinary Debian machine -- the
+sequence the C actually performed was: start a second supplicant on a radio NM
+holds, drop the association, notice on the next tick, and stop again, printing
+*two managers on one interface drop the association* about a thing it had just
+done. The log reads as a daemon behaving well.
+
+The Rust asks inside `start_supplicant`, before anything is spawned.
+`no_other_manager_holds` is the same question in the same place, and the two
+refusals now match word for word.
+
+Three states, and only the first refuses:
+
+    a contender claims this index    refuse, naming the manager and the cost
+    no contender                     start
+    the question cannot be asked     start
+
+**The third is deliberate and is the one that hid the next fault.** No sysfs
+root and no contention roots is what a caller says when it knows there is no
+other manager -- a fixture, a container -- and `ncfg_service_t`'s bargain is
+that an absent member refuses only the ops that cannot be done without it.
+This one can.
+
+### A 512-byte buffer for a function that demands 4096
+
+`ncfg_radio_class_net` refuses any buffer shorter than `NCFG_RADIO_ROOT_MAX`,
+which is 4096. The world's field and `ncfg_service_machine`'s static were both
+512, so **every call failed** -- and both callers passed `NULL, 0` for the
+error buffer, so the refusal went nowhere. `class_net` was empty, the guard
+took its third branch, and it asked nothing on every machine while appearing
+in the code, in the header and in the struct.
+
+It cost a full debugging round, and what found it was a probe printing what
+the guard saw rather than any amount of reading:
+
+    PROBE guard iface=radio0 class_net=(NULL) run_root=... proc_root=...
+    PROBE no index for radio0
+
+Both buffers are `NCFG_RADIO_ROOT_MAX` now, and a failure to resolve the root
+is logged -- because an empty answer switches the guard off and nothing
+downstream can tell that from a machine with no other manager on it. That is
+the same shape as 10.271's seam nobody supplied: **every layer present, and
+the one value that makes it live absent.** Third instance in two days.
+
+### The test's return value proves nothing; its sentences do
+
+Sabotaged by deleting the guard, `check(!ncfg_service_backend_start(...))`
+**stayed green** -- the fixture names no supplicant program, so the start
+fails either way. Only the two assertions on the message went red. A refusal
+is evidence of the *right* refusal only when it says which one it is, and the
+comment on that test says so, because the return-value check is the one a
+later reader would trust.
+
+The other direction is covered three ways, since a guard that refuses
+everything reads exactly like one aimed correctly: a NetworkManager that is
+not running (0145 -- the device file outlives the daemon), a claim on another
+interface's index, and a service told neither root.
+
+### And an edit that removed a passing test without saying so
+
+Inserting the new function searched backwards for the nearest `/*` and landed
+inside the previous one, cutting twelve lines out of the dhcp6 test -- the
+half that proves `-P` is absent when the document asks for no delegation. The
+compiler caught it, which is luck: a cut that had left valid C would have
+removed a check and left the suite green.
+
+The replacement tool inserts at a named line and asserts that the original
+text is a subsequence of the result, refusing to write otherwise. Second time
+this exact anchor-searching mistake has been made in this port; the first cut
+comments out of three observe sources.
+
 ## 10.271 The seam the headers asked for and nobody supplied
 
 `orphan`, `revive` and `switch_network` failed with *no wpa_supplicant found

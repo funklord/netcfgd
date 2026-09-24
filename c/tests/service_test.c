@@ -1146,6 +1146,118 @@ static void a_dhcp6_start_finds_the_request_in_the_document(void)
 	free(said);
 }
 
+/*
+ * A radio another manager already holds is not one netcfgd starts a
+ * supplicant on.
+ *
+ * **The daemon's release pass is not this and cannot be.** That pass stops a
+ * supplicant netcfgd is running when a contender appears, which is the remedy
+ * for a manager that declares itself second. Where it declared itself first,
+ * releasing means netcfgd started the second supplicant, dropped the
+ * association, and then tidied up -- so the guard has to be at the start.
+ *
+ * The fixture is NetworkManager's own: a `devices/<index>` file saying
+ * `managed=true`, a process in the proc root called `NetworkManager`, and an
+ * `ifindex` under the sysfs root -- because a file alone is not a claim
+ * (0145) and every daemon here keys by index rather than by name.
+ *
+ * **The two message checks are the discriminating ones, and the return value
+ * is not.** Measured by deleting the guard: this start fails either way,
+ * because the fixture names no supplicant program -- so "gets no second
+ * supplicant" stayed green over a build with no guard in it at all, and only
+ * the sentences went red. A refusal is evidence of the right refusal only
+ * when it says which one it is.
+ */
+static void write_line(const char *path, const char *text)
+{
+	FILE *file = fopen(path, "w");
+
+	if (!file) {
+		return;
+	}
+	(void)fputs(text, file);
+	(void)fclose(file);
+}
+
+static void a_radio_another_manager_holds_gets_no_second_supplicant(void)
+{
+	ncfg_service_t service;
+	char           run_root[512];
+	char           sys_root[512];
+	char           contend_proc[600];
+	char           path[1024];
+	char           message[NCFG_ERROR_MAX];
+
+	(void)testdir_in(base, "contend-run", run_root, sizeof(run_root));
+	(void)testdir_in(base, "contend-sys", sys_root, sizeof(sys_root));
+	(void)snprintf(contend_proc, sizeof(contend_proc), "%s/proc", run_root);
+	(void)snprintf(path, sizeof(path), "%s/NetworkManager/devices", run_root);
+	make_tree(path);
+	(void)snprintf(path, sizeof(path), "%s/NetworkManager/devices/7", run_root);
+	write_line(path, "[device]\nmanaged=true\n");
+	/* The live process, without which the file is a stopped manager's
+	 * leftover and netcfgd is right to take the radio. */
+	(void)snprintf(path, sizeof(path), "%s/991", contend_proc);
+	make_tree(path);
+	(void)snprintf(path, sizeof(path), "%s/991/comm", contend_proc);
+	write_line(path, "NetworkManager\n");
+	(void)snprintf(path, sizeof(path), "%s/wlan0", sys_root);
+	make_tree(path);
+	(void)snprintf(path, sizeof(path), "%s/wlan0/ifindex", sys_root);
+	write_line(path, "7\n");
+
+	a_document(1, 1);
+	service = a_context();
+	service.class_net = sys_root;
+	service.contention.run_root = run_root;
+	service.contention.proc_root = contend_proc;
+	service.contention.run_root_is_the_machines = 0;
+
+	message[0] = '\0';
+	check(!ncfg_service_backend_start(&service, NCFG_BACKEND_SUPPLICANT, "wlan0", message,
+	      sizeof(message)),
+	    "a radio NetworkManager holds gets no second supplicant");
+	check(strstr(message, "already managing") != NULL && strstr(message, "wlan0") != NULL,
+	    "  and the refusal names the manager and the radio");
+	check(strstr(message, "drop the association") != NULL,
+	    "  and what a second one would have cost");
+
+	/*
+	 * **The other direction, three ways**, because a guard that refuses
+	 * everything reads exactly like one aimed correctly. A manager that is
+	 * not running (0145's case, where the device file outlives the daemon);
+	 * a claim on some other interface's index; and a service told neither
+	 * root, which is what a caller that knows there is no other manager
+	 * says.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/991/comm", contend_proc);
+	(void)unlink(path);
+	message[0] = '\0';
+	(void)ncfg_service_backend_start(&service, NCFG_BACKEND_SUPPLICANT, "wlan0", message,
+	    sizeof(message));
+	check(strstr(message, "already managing") == NULL,
+	    "a device file a stopped NetworkManager left behind is not a claim");
+
+	(void)snprintf(path, sizeof(path), "%s/991/comm", contend_proc);
+	write_line(path, "NetworkManager\n");
+	(void)snprintf(path, sizeof(path), "%s/wlan0/ifindex", sys_root);
+	write_line(path, "8\n");
+	message[0] = '\0';
+	(void)ncfg_service_backend_start(&service, NCFG_BACKEND_SUPPLICANT, "wlan0", message,
+	    sizeof(message));
+	check(strstr(message, "already managing") == NULL,
+	    "and a claim on another interface's index is not a claim on this one");
+
+	service.class_net = NULL;
+	service.contention.run_root = NULL;
+	service.contention.proc_root = NULL;
+	message[0] = '\0';
+	(void)ncfg_service_backend_start(&service, NCFG_BACKEND_SUPPLICANT, "wlan0", message,
+	    sizeof(message));
+	check(strstr(message, "already managing") == NULL,
+	    "and a service told nothing about the machine asks nothing");
+}
+
 static void a_backend_op_says_what_it_was_not_given(void)
 {
 	ncfg_service_t service;
@@ -1391,6 +1503,7 @@ int main(void)
 	leaving_and_the_regulatory_domain();
 
 	a_backend_netcfgd_lost_the_record_of();
+	a_radio_another_manager_holds_gets_no_second_supplicant();
 	a_backend_op_says_what_it_was_not_given();
 	a_dhcp6_start_finds_the_request_in_the_document();
 	stopping_an_access_point_takes_the_passphrase_with_it();
