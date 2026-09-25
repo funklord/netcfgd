@@ -1104,6 +1104,22 @@ typedef struct {
 	 * a time: a second would ask `flock` for a lock this process already
 	 * holds on another description and wait out the whole patience for it. */
 	ncfg_lock_t              lock;
+	/*
+	 * Whether that lock is this world's to take and release, or one the caller
+	 * took before it observed.
+	 *
+	 * **`ncfg apply` plans before it opens an executor**, so a lock taken at
+	 * executor-open covers the acting and not the observing -- which is the
+	 * window `tests/live/apply_race.sh` drives: two applies observe a machine
+	 * with no route on it, both plan `route.add`, and the second gets EEXIST.
+	 * The daemon does not need this, because it plans *inside* the apply,
+	 * after its executor is open.
+	 *
+	 * `flock` is held by the open file description, so a second `open` in this
+	 * same process would wait out the whole patience against itself. The world
+	 * therefore neither takes nor releases one it was handed.
+	 */
+	int                      lock_is_the_callers;
 	ncfg_kernel_t           *kernel;
 	int                      open;
 	ncfg_hook_ref_t          hooks[NCFG_MAIN_HOOKS_MAX];

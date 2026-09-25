@@ -182,6 +182,13 @@ static struct {
 	 * the command line said. */
 	char config_dir[512];
 	char run_dir[512];
+	/* How many times the apply asked to be serialised and gave it back, and
+	 * whether it had done so by the time the machine was opened. 0184's second
+	 * half: the lock has to cover the observation, not just the acting. */
+	int  serialised;
+	int  unserialised;
+	int  serialised_before_open;
+	char serialise_run_dir[512];
 } recorder;
 
 static int recorded_execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
@@ -209,6 +216,7 @@ static int recorded_open(void *context, const char *config_dir, const char *run_
     char *err, size_t err_size)
 {
 	(void)context;
+	recorder.serialised_before_open = recorder.serialised > 0;
 	if (recorder.refuse_open) {
 		ncfg_error_set(err, err_size, "the double was told not to open");
 		return 0;
@@ -237,7 +245,34 @@ static void recorded_close(void *context, ncfg_executor_t *executor)
 	recorder.closed++;
 }
 
-static const ncfg_cli_machine_t recording_machine = { NULL, recorded_open, recorded_close };
+/*
+ * The apply lock, as the double sees it being asked for.
+ *
+ * It takes none -- a fake executor holding a real lock would serialise the
+ * suite against itself, and a lock nobody can see is not a check. What it
+ * records is that the command asked, and asked **before** it opened the
+ * machine: an apply is observe, plan, act, and a lock taken at the open covers
+ * only the last of the three.
+ */
+static int recorded_serialise(void *context, const char *run_dir, char *err, size_t err_size)
+{
+	(void)context;
+	(void)err;
+	(void)err_size;
+	recorder.serialised++;
+	(void)snprintf(recorder.serialise_run_dir, sizeof(recorder.serialise_run_dir), "%s",
+	    run_dir ? run_dir : "");
+	return 1;
+}
+
+static void recorded_unserialise(void *context)
+{
+	(void)context;
+	recorder.unserialised++;
+}
+
+static const ncfg_cli_machine_t recording_machine = { NULL, recorded_open, recorded_close,
+	recorded_serialise, recorded_unserialise };
 
 /* The names it saw, joined, so a whole sequence is one assertion. */
 static void sequence_is(const char *wanted, const char *what)
@@ -324,6 +359,10 @@ static int ran(char **argv, int argc, const ncfg_cli_machine_t *machine, const c
 	recorder.closed = 0;
 	recorder.config_dir[0] = '\0';
 	recorder.run_dir[0] = '\0';
+	recorder.serialised = 0;
+	recorder.unserialised = 0;
+	recorder.serialised_before_open = 0;
+	recorder.serialise_run_dir[0] = '\0';
 
 	(void)fflush(stdout);
 	(void)fflush(stderr);
@@ -593,6 +632,64 @@ static void a_failing_action_stops_the_apply(void)
  * what "the directory is created only when there is something to put in it"
  * means for a machine that is only being asked questions.
  */
+/*
+ * An apply is serialised before it observes, not when it acts.
+ *
+ * **The window is the whole of decision 0184's second half.** An apply is
+ * observe, plan, act. A lock taken when the executor opens covers the acting
+ * alone, so two applies observe a machine neither has changed yet, both plan
+ * the same `route.add`, and the second gets `EEXIST` -- a failed action rather
+ * than a tolerable one, because for a route `EEXIST` means the *key* exists
+ * and says nothing about where its gateway points. A tolerant add would report
+ * success over a route going somewhere else.
+ *
+ * `tests/live/apply_race.sh` drives the race itself: five rounds of two
+ * simultaneous applies, which measured five failed actions before this and
+ * none after. What it cannot see is the *order*, because a lock taken late
+ * still serialises two processes that overlap enough. This is the order.
+ */
+static void an_apply_is_serialised_before_it_observes(void)
+{
+	char        config_dir[600];
+	char        run_dir[600];
+	char       *argv[6];
+	const char *said;
+	const char *complaint;
+
+	fixture("serialise", TWO_ACTIONS, config_dir, sizeof(config_dir), run_dir,
+	    sizeof(run_dir));
+	argv[0] = (char *)"ncfg";
+	argv[1] = (char *)"apply";
+	argv[2] = (char *)"--config-dir";
+	argv[3] = config_dir;
+	argv[4] = (char *)"--run-dir";
+	argv[5] = run_dir;
+	(void)ran(argv, 6, &recording_machine, &said, &complaint);
+
+	check(recorder.serialised == 1, "an apply asks to be serialised, once");
+	check(recorder.serialised_before_open,
+	    "  and has been, by the time the machine is opened");
+	check(strcmp(recorder.serialise_run_dir, run_dir) == 0,
+	    "  in the run directory the command line named, where the lock file is");
+	check(recorder.unserialised == 1, "and gives it back when the apply is over");
+
+	/*
+	 * **And on the path that never opens a machine**, which is the one a
+	 * release written beside `executor_close` would miss: a plan with nothing
+	 * in it returns before an executor exists, and an apply that held the lock
+	 * past its own exit would block the next one for as long as the process
+	 * lived.
+	 */
+	fixture("serialise-empty", NO_ACTIONS, config_dir, sizeof(config_dir), run_dir,
+	    sizeof(run_dir));
+	argv[3] = config_dir;
+	argv[5] = run_dir;
+	(void)ran(argv, 6, &recording_machine, &said, &complaint);
+	check(recorder.opened == 0, "an empty plan opens no machine");
+	check(recorder.serialised == 1 && recorder.unserialised == 1,
+	    "and still takes the lock and gives it back");
+}
+
 static void an_apply_materialises_the_hook_bodies(void)
 {
 	static const char *const WITH_HOOK =
@@ -778,6 +875,7 @@ int main(void)
 	an_empty_plan_opens_nothing();
 	a_plan_is_carried_out();
 	a_failing_action_stops_the_apply();
+	an_apply_is_serialised_before_it_observes();
 	an_apply_materialises_the_hook_bodies();
 	json_answers_with_the_journal_alone();
 	a_machine_that_will_not_open_changes_nothing();

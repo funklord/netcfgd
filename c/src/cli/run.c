@@ -1510,6 +1510,15 @@ static const char *config_dir_of(const ncfg_cli_options_t *options, char *out, s
 	return ncfg_config_resolve_dir(options->config_dir, out, out_size);
 }
 
+/* Give the apply lock back, on every path out of an apply. Nothing where this
+ * build has no machine seam or took none. */
+static void release_serialisation(void)
+{
+	if (the_machine && the_machine->unserialise) {
+		the_machine->unserialise(the_machine->context);
+	}
+}
+
 /*
  * `ncfg apply`: make the machine match the configuration.
  *
@@ -1568,12 +1577,30 @@ static int command_apply(const ncfg_cli_options_t *options)
 		    "program embedding this library without one can plan and explain and "
 		    "cannot change anything");
 	}
+	/*
+	 * **Before anything is observed**, which is the whole of decision 0184's
+	 * second half. An apply is observe, plan, act; a lock taken when the
+	 * executor opens covers the acting alone, so two applies observe a machine
+	 * neither has changed, plan the same `route.add`, and the second fails
+	 * with `EEXIST`. Measured by `tests/live/apply_race.sh`: five rounds, five
+	 * failed actions, one per round.
+	 *
+	 * The run directory is resolved here rather than taken from
+	 * `compile_config`, because that is the call this has to come before.
+	 */
+	(void)ncfg_state_resolve_dir(options->run_dir, run_dir, sizeof(run_dir));
+	if (the_machine->serialise &&
+	    !the_machine->serialise(the_machine->context, run_dir, err, sizeof(err))) {
+		return failf("cannot start an apply: %s", err);
+	}
 	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 1, err, sizeof(err));
 	if (!document) {
+		release_serialisation();
 		return fail(err);
 	}
 	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
+		release_serialisation();
 		return fail(err);
 	}
 	(void)ncfg_state_write_desired(run_dir, document, err, sizeof(err));
@@ -1584,6 +1611,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 	if (!plan) {
 		ncfg_observed_free(observed);
 		ncfg_document_free(document);
+		release_serialisation();
 		return fail(err);
 	}
 	/*
@@ -1603,6 +1631,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 		ncfg_plan_free(plan);
 		ncfg_observed_free(observed);
 		ncfg_document_free(document);
+		release_serialisation();
 		return code;
 	}
 
@@ -1612,6 +1641,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 		ncfg_plan_free(plan);
 		ncfg_observed_free(observed);
 		ncfg_document_free(document);
+		release_serialisation();
 		return failf("cannot start an apply: %s", err);
 	}
 	ncfg_journal_init(&journal);
@@ -1654,6 +1684,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 			ncfg_plan_free(plan);
 			ncfg_observed_free(observed);
 			ncfg_document_free(document);
+			release_serialisation();
 			return code;
 		}
 	} else {
@@ -1677,6 +1708,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 	ncfg_plan_free(plan);
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);
+	release_serialisation();
 	return code;
 }
 
