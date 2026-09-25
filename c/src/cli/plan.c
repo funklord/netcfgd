@@ -184,6 +184,39 @@ void ncfg_cli_print_journal(const ncfg_journal_t *journal)
 }
 
 /*
+ * A rendered JSON document, on stdout, laid out for a person.
+ *
+ * **The one place the port's compact convention does not serve.** `plan.h`
+ * says compact and is right about what it is about: the control socket, the
+ * files under `/run`, and the frozen witnesses in `doc/schema/` that are
+ * compared against compact bytes. None of those is somebody at a terminal,
+ * and the Rust prints every `--json` verb through `to_string_pretty`.
+ *
+ * What made it a defect rather than a preference is that its own live scripts
+ * read the result with `sed`: `nat.sh` takes the masqueraded uplinks out of a
+ * `"nat": [` block, which on one long line is not there to find. Four checks
+ * failed with every value in the document correct.
+ *
+ * Four callers, because there are four ways a document reaches stdout, and a
+ * fifth added later that prints the buffer itself is the drift this exists to
+ * stop. A layout that fails prints the compact form: the only way it can fail
+ * is input that is not the JSON this program writes, and a document the
+ * operator asked for is worth more badly laid out than not at all.
+ */
+void ncfg_cli_out_json(const ncfg_buf_t *rendered)
+{
+	ncfg_buf_t laid_out;
+
+	ncfg_buf_init(&laid_out, 0);
+	if (ncfg_json_pretty(ncfg_buf_text(rendered), &laid_out)) {
+		ncfg_out_line(ncfg_buf_text(&laid_out));
+	} else {
+		ncfg_out_line(ncfg_buf_text(rendered));
+	}
+	ncfg_buf_free(&laid_out);
+}
+
+/*
  * `ncfg show`: the compiled document, where `cat` can reach it.
  *
  * **The canonical form, not a pretty one.** The Rust prints
@@ -203,7 +236,19 @@ int ncfg_cli_print_document(ncfg_document_t *document, char *err, size_t err_siz
 	if (wrote) {
 		/* `ncfg_buf_t` hands out the empty string for a buffer that failed,
 		 * never the part that fitted: half a document that looks whole is the
-		 * failure mode that rule exists for. */
+		 * failure mode that rule exists for.
+		 *
+		 * **Compact, unlike `status`, `plan`, `apply` and `explain`**, and the
+		 * difference is not a rule this port has settled -- it is one it has
+		 * not. `cli_test.c` asserts this verb prints one object on one line,
+		 * `plan.h` calls compact the port's convention, and `agree_gate.py`
+		 * records that the Rust prints this one indented and compares the two
+		 * as values because of it. Three documents agreeing, and the Rust's
+		 * own `show --json` is pretty-printed.
+		 *
+		 * Laying it out would make five documents disagree and is not a
+		 * decision to take while fixing a live script that does not read this
+		 * verb. It is in `project.md` 10.275 for the copyright holder. */
 		ncfg_out_line(ncfg_buf_text(&buf));
 	}
 	ncfg_buf_free(&buf);

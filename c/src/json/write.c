@@ -390,3 +390,100 @@ int ncfg_json_write_done(const ncfg_json_writer_t *writer)
 	}
 	return writer->depth == 0 && writer->frames[0].has_child;
 }
+
+/*
+ * `serde_json::to_string_pretty`'s layout, over compact JSON this file wrote.
+ *
+ * Structural characters outside a string decide the layout and everything else
+ * is copied. Two rules are not obvious and both were got wrong first time:
+ *
+ *   * **An opener does not break the line by itself.** serde writes `[]` and
+ *     `{}` on one line rather than opening and immediately closing, so the
+ *     break belongs to whatever comes NEXT -- which is why `pending` is a
+ *     flag the next value consumes rather than a newline written at the `{`.
+ *   * **A string is a value like any other**, so it consumes that pending
+ *     break before it copies itself through. The first version handled the
+ *     string first and returned to the loop, so every object whose first
+ *     member is a key -- which is every object -- stayed on the opener's
+ *     line.
+ *
+ * Strings are copied without being re-escaped, escapes and all, so this
+ * cannot change a value.
+ */
+static void ncfg_json_pretty_break(ncfg_buf_t *out, size_t depth)
+{
+	size_t i;
+
+	ncfg_buf_add_char(out, '\n');
+	for (i = 0; i < depth; i++) {
+		ncfg_buf_add_text(out, "  ");
+	}
+}
+
+int ncfg_json_pretty(const char *compact, ncfg_buf_t *out)
+{
+	size_t depth = 0;
+	int    pending = 0; /* an opener is waiting to see whether anything follows */
+	size_t at;
+
+	if (!compact || !out) {
+		return 0;
+	}
+	for (at = 0; compact[at] != '\0'; at++) {
+		char one = compact[at];
+
+		if (one == '}' || one == ']') {
+			if (depth == 0u) {
+				return 0; /* more closers than openers */
+			}
+			depth--;
+			if (!pending) {
+				ncfg_json_pretty_break(out, depth);
+			}
+			ncfg_buf_add_char(out, one);
+			pending = 0;
+			continue;
+		}
+		if (one == ',') {
+			ncfg_buf_add_char(out, one);
+			ncfg_json_pretty_break(out, depth);
+			continue;
+		}
+		if (one == ':') {
+			ncfg_buf_add_text(out, ": ");
+			continue;
+		}
+		/* Everything below is the start of a value, and a value is what an
+		 * opener was waiting for. */
+		if (pending) {
+			ncfg_json_pretty_break(out, depth);
+			pending = 0;
+		}
+		if (one == '{' || one == '[') {
+			ncfg_buf_add_char(out, one);
+			depth++;
+			pending = 1;
+			continue;
+		}
+		if (one != '"') {
+			ncfg_buf_add_char(out, one);
+			continue;
+		}
+		ncfg_buf_add_char(out, one);
+		for (at++; compact[at] != '\0'; at++) {
+			ncfg_buf_add_char(out, compact[at]);
+			if (compact[at] == '\\' && compact[at + 1] != '\0') {
+				at++;
+				ncfg_buf_add_char(out, compact[at]);
+				continue;
+			}
+			if (compact[at] == '"') {
+				break;
+			}
+		}
+		if (compact[at] != '"') {
+			return 0; /* a string with no end: not what this writer emits */
+		}
+	}
+	return depth == 0u;
+}

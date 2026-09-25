@@ -605,6 +605,86 @@ int main(void)
 		ncfg_buf_free(&buf);
 	}
 
+	/*
+	 * **The layout, against `serde_json::to_string_pretty`'s own shapes.**
+	 *
+	 * Each pair below was taken from what the Rust actually prints rather than
+	 * from the crate's documentation, because the two rules that matter are
+	 * exactly the ones a reading would miss: an empty container stays on its
+	 * opener's line, and a string is a value that consumes the opener's
+	 * pending break. The first version of this got both wrong, and printed
+	 * every object's first key on the brace's line.
+	 */
+	{
+		static const struct {
+			const char *compact;
+			const char *laid_out;
+			const char *what;
+		} shapes[] = {
+			{ "{}", "{}", "an empty object stays on one line" },
+			{ "[]", "[]", "and so does an empty array" },
+			{ "{\"a\":1}", "{\n  \"a\": 1\n}",
+			  "a member breaks after the brace and before it" },
+			{ "{\"a\":[]}", "{\n  \"a\": []\n}",
+			  "an empty array as a value keeps its own line" },
+			{ "[1,2]", "[\n  1,\n  2\n]", "array elements get a line each" },
+			{ "{\"a\":{\"b\":[1]}}",
+			  "{\n  \"a\": {\n    \"b\": [\n      1\n    ]\n  }\n}",
+			  "and nesting indents by two spaces a level" },
+			{ "{\"a\":\"x\",\"b\":null}", "{\n  \"a\": \"x\",\n  \"b\": null\n}",
+			  "a string member and a null are both just values" }
+		};
+		size_t at;
+
+		for (at = 0; at < sizeof(shapes) / sizeof(shapes[0]); at++) {
+			ncfg_buf_t out;
+
+			ncfg_buf_init(&out, 0);
+			check(ncfg_json_pretty(shapes[at].compact, &out) &&
+			        strcmp(ncfg_buf_text(&out), shapes[at].laid_out) == 0,
+			    shapes[at].what);
+			ncfg_buf_free(&out);
+		}
+	}
+
+	/*
+	 * **A string is copied, never re-escaped**, which is the property that
+	 * makes laying out a document safe: anything that re-emitted a string
+	 * could change a value on the way past. The braces and the comma inside
+	 * this one are what would move if it were being parsed rather than
+	 * copied.
+	 */
+	{
+		ncfg_buf_t out;
+		static const char inside[] = "{\"t\":\"a{b,c}d\\\"e\\\\\"}";
+
+		ncfg_buf_init(&out, 0);
+		check(ncfg_json_pretty(inside, &out) &&
+		        strcmp(ncfg_buf_text(&out), "{\n  \"t\": \"a{b,c}d\\\"e\\\\\"\n}") == 0,
+		    "structure inside a string is text, and an escaped quote does not end it");
+		ncfg_buf_free(&out);
+	}
+
+	/*
+	 * **And it refuses rather than printing half.** Neither of these is
+	 * something this writer emits, so the caller falls back to the compact
+	 * form -- which is why the refusal has to be a status somebody reads
+	 * rather than a truncated buffer somebody prints.
+	 */
+	{
+		ncfg_buf_t out;
+
+		ncfg_buf_init(&out, 0);
+		check(!ncfg_json_pretty("{\"a\":1", &out), "an unclosed object is refused");
+		ncfg_buf_free(&out);
+		ncfg_buf_init(&out, 0);
+		check(!ncfg_json_pretty("{\"a\":\"b}", &out), "and so is an unterminated string");
+		ncfg_buf_free(&out);
+		ncfg_buf_init(&out, 0);
+		check(!ncfg_json_pretty("{}}", &out), "and a closer with no opener");
+		ncfg_buf_free(&out);
+	}
+
 	if (failures == 0) {
 		printf("json_write_test: all checks passed\n");
 	} else {

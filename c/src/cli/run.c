@@ -141,7 +141,49 @@ static int say_json(const ncfg_buf_t *rendered, int wrote, const char *err)
 		    "it that nobody typed; the same command without `--json` renders it as "
 		    "text", err);
 	}
+	/*
+	 * **Indented here and compact everywhere else**, which is the port's
+	 * convention meeting the one place it does not serve. `plan.h` says
+	 * compact, and it is right about what it is about: the control socket, the
+	 * files under `/run`, and the frozen witnesses in `doc/schema/` that are
+	 * compared against compact bytes. None of those is a person at a terminal.
+	 *
+	 * The Rust prints every `--json` verb through `to_string_pretty`, and its
+	 * own live scripts read the result with `sed` -- `nat.sh` takes the
+	 * masqueraded uplinks out of a `"nat": [` block, which on one long line is
+	 * not there to find. So a script written against `ncfg` broke against this
+	 * port for the shape of its whitespace, with every value correct.
+	 *
+	 * A failure to lay it out prints the compact form: a document the operator
+	 * asked for is worth more badly laid out than not at all, and the only way
+	 * this fails is input that is not the JSON this program writes.
+	 */
 	ncfg_out_line(ncfg_buf_text(rendered));
+	return NCFG_CLI_EXIT_OK;
+}
+
+/*
+ * The same, laid out for a person.
+ *
+ * **Which of the two a verb uses is decided by whether the Rust prints JSON
+ * for it at all**, and that is the whole rule. `status`, `plan`, `apply`,
+ * `show` and `explain` are printed by both programs, the Rust through
+ * `to_string_pretty`, and its own live scripts read the result with `sed` --
+ * `nat.sh` takes the masqueraded uplinks out of a `"nat": [` block, which on
+ * one long line is not there to find.
+ *
+ * `wifi`, `modem`, `control`, `profile`, `secret`, `reset` and the bare `ok`
+ * are the other kind: the Rust ignores `--json` for them and prints its text
+ * table, so there is no shape to match and this port chose one object on one
+ * line for `jq`. `cli_test.c` asserts that line by line, which is what caught
+ * an earlier version of this laying out everything.
+ */
+static int say_json_for_a_person(const ncfg_buf_t *rendered, int wrote, const char *err)
+{
+	if (!wrote) {
+		return say_json(rendered, wrote, err);
+	}
+	ncfg_cli_out_json(rendered);
 	return NCFG_CLI_EXIT_OK;
 }
 
@@ -859,7 +901,7 @@ static int command_status(const ncfg_cli_options_t *options)
 		ncfg_buf_t buf;
 
 		ncfg_buf_init(&buf, 0);
-		code = say_json(&buf, ncfg_observed_write(observed, &buf, err, sizeof(err)),
+		code = say_json_for_a_person(&buf, ncfg_observed_write(observed, &buf, err, sizeof(err)),
 		    err);
 		ncfg_buf_free(&buf);
 	} else {
@@ -1039,7 +1081,7 @@ static int command_plan(const ncfg_cli_options_t *options)
 		ncfg_buf_t buf;
 
 		ncfg_buf_init(&buf, 0);
-		code = say_json(&buf, ncfg_plan_write(plan, &buf, err, sizeof(err)), err);
+		code = say_json_for_a_person(&buf, ncfg_plan_write(plan, &buf, err, sizeof(err)), err);
 		ncfg_buf_free(&buf);
 	} else {
 		ncfg_cli_print_plan(plan);
@@ -1144,7 +1186,7 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 		 */
 		wrote = ncfg_cli_json_explanation(explanation, &rendered, err, sizeof(err));
 		if (wrote) {
-			ncfg_out_line(ncfg_buf_text(&rendered));
+			ncfg_cli_out_json(&rendered);
 		}
 	} else {
 		wrote = ncfg_explanation_render(explanation, &rendered, err, sizeof(err));
@@ -1493,7 +1535,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 		ncfg_buf_t buf;
 
 		ncfg_buf_init(&buf, 0);
-		code = say_json(&buf, ncfg_journal_write(&journal, &buf, err, sizeof(err)), err);
+		code = say_json_for_a_person(&buf, ncfg_journal_write(&journal, &buf, err, sizeof(err)), err);
 		ncfg_buf_free(&buf);
 		if (code != NCFG_CLI_EXIT_OK) {
 			ncfg_journal_free(&journal);

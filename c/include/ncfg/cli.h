@@ -384,6 +384,15 @@ void ncfg_cli_print_journal(const ncfg_journal_t *journal);
  * Returns 1, or 0 with a sentence in `err`. **Canonicalises in place**, for
  * document.h's reason: there is no caller who wanted the unsorted order back.
  */
+/*
+ * A rendered JSON document on stdout, laid out for a person.
+ *
+ * Every `--json` verb prints through this. See the definition for why the
+ * port's compact convention stops at the terminal, and why there is one
+ * function rather than four call sites each deciding for itself.
+ */
+void ncfg_cli_out_json(const ncfg_buf_t *rendered);
+
 int ncfg_cli_print_document(ncfg_document_t *document, char *err, size_t err_size);
 
 /* What a scan found, strongest first, as the daemon ordered them. */
