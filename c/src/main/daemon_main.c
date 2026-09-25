@@ -723,6 +723,7 @@ static int start(const options_t *options)
 	ncfg_daemon_server_t    *local = NULL;
 	ncfg_daemon_server_t    *remote = NULL;
 	const ncfg_principal_t  *reach[3];
+	char                     rendered[NCFG_MAIN_PATH_MAX];
 	const ncfg_principal_t  *agent[1];
 	char                     ctrl_dir[NCFG_MAIN_PATH_MAX];
 	char                     err[NCFG_ERROR_MAX];
@@ -938,13 +939,22 @@ static int start(const options_t *options)
 			code = NCFG_MAIN_EXIT_FAILED;
 			goto shut;
 		}
-		/* Said out loud, because a listening socket that reaches the network
+		/*
+		 * Said out loud, because a listening socket that reaches the network
 		 * is the one thing about this daemon an operator should never
-		 * discover by finding the file. */
+		 * discover by finding the file.
+		 *
+		 * **And it names who it is open to**, which this omitted. The three
+		 * tier flags say what a caller may do and the agent says who the
+		 * caller is allowed to be -- a line carrying only the first reports a
+		 * socket open to everything without saying to whom, which is the half
+		 * an operator reads the line for.
+		 */
 		ncfg_log_emitf("control", NCFG_LOG_NOTE,
-		    "remote access is open on %s -- observe %d, wifi %d, admin %d",
-		    where.remote_socket, policy.remote.observe, policy.remote.wifi,
-		    policy.remote.admin);
+		    "remote access is open on %s to `%s` -- observe %d, wifi %d, admin %d",
+		    where.remote_socket,
+		    ncfg_cli_principal_render(&policy.remote.agent, rendered, sizeof(rendered)),
+		    policy.remote.observe, policy.remote.wifi, policy.remote.admin);
 	}
 	ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s, socket %s", where.config,
 	    ncfg_daemon_server_path(local));
