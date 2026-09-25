@@ -9515,6 +9515,56 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.274 One rule written in one of five places, and the round it silently cancelled
+
+`wedged.sh` had six failures and passes on one change.
+
+The record in `/run` is a memory rather than an observation: it says netcfgd
+started a supplicant, and the process may have been killed an hour ago. 0078's
+liveness pass is what re-asks, and the rule it turns on is the Rust's:
+
+> `None` from `backend_pid_file` leaves the record alone ... no handle means
+> netcfgd cannot tell, which is not the same as "it is not running".
+
+**The C applied that to the DHCP clients and to nothing else.** That arm has
+carried it since 10.206, with the incident written out beside it -- a udhcpc
+client that died stayed `running` for ever. The other four kinds called
+`ncfg_supplicant_running_pid` and its siblings directly, and those answer 0 for
+a missing file exactly as they do for a dead process. So a record naming a
+running supplicant with **no pid file beside it** was read as *not running*.
+
+### What it cost was not the field
+
+`ncfg_observe_supplicants` asks its questions only of backends the record still
+calls up. Clearing `running` therefore took the entire `answering` round off
+the supplicant: netcfgd never opened the control socket, so
+
+    a supplicant that answers is not called wedged      passed
+    a supplicant that never answers is reported         failed
+    and netcfgd declines to restart it                  failed
+    with consent it plans a restart instead             failed
+
+-- the first of those passing **because nothing was asked**. That is the
+vacuous pass exactly, and `wedged.sh` is built to catch it: the check
+immediately after asserts that the fake supplicant logged a `PING` at all,
+*"without it this check would pass just as well against an observation that
+never opened the socket"*. It is the only thing in the suite that could tell
+the two apart, and it is the check that went red first.
+
+### The shape worth keeping
+
+A rule with an incident attached, written into the one arm that paid for it,
+and the four siblings left as they were. Nothing marks them: each reads as a
+complete, correct call to a function that returns a pid. The duplication is
+not of code but of a *decision*, and only one copy of it exists.
+
+`backend_pid_file` is now the question for all four, composing each path
+through the module that writes it so a layout change cannot make the check and
+the read disagree. The unit test asserts the same sentence for all five kinds
+in one loop, so a sixth added later is one row rather than a decision somebody
+has to remember; sabotaged, it takes exactly the four new rows red and leaves
+the DHCP one green.
+
 ## 10.273 A search order inverted on a false premise, and three warnings nobody wrote
 
 `ap.sh` had seven failures and passes. Two of them were mine, from four days

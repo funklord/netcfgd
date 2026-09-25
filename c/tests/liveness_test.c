@@ -516,6 +516,61 @@ static void an_access_point_can_be_asked_at_last(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * A daemon with no pid file of netcfgd's is unanswerable, for all five kinds.
+ *
+ * **The rule was applied to one of them.** `a_client_netcfgd_gave_no_pid_file_
+ * is_left_alone` covers the DHCP arm, which got it in 10.206 because a udhcpc
+ * client that died stayed `running` for ever. The other four asked
+ * `*_running_pid` directly, and that answers 0 for a missing file exactly as
+ * it does for a dead process -- so a record naming a running supplicant with
+ * no pid file beside it was read as "not running".
+ *
+ * What that cost is not the field. `ncfg_observe_supplicants` asks only about
+ * backends the record still calls up, so clearing `running` took the whole
+ * `answering` round off the supplicant: netcfgd never opened the control
+ * socket, and a wedged supplicant went unreported along with a working one.
+ * `tests/live/wedged.sh` is what noticed, by asserting that its fake logged a
+ * PING at all -- a negative that would otherwise have passed against an
+ * observation which never asked.
+ *
+ * A pid file that IS there and names something else is the other half and
+ * still clears, which `an_access_point_can_be_asked_at_last` proves for
+ * hostapd. This is the absence.
+ */
+static void a_daemon_with_no_pid_file_of_netcfgds_is_left_alone(void)
+{
+	static const struct {
+		int         kind;
+		const char *interface;
+		const char *what;
+	} kinds[] = {
+		{ NCFG_BACKEND_SUPPLICANT, "wlan-nofile", "a supplicant" },
+		{ NCFG_BACKEND_ACCESS_POINT, "ap-nofile", "an access point" },
+		{ NCFG_BACKEND_ROUTER_ADVERT, "ra-nofile", "a router advertisement daemon" },
+		{ NCFG_BACKEND_OPENVPN, "vpn-nofile", "an openvpn tunnel" }
+	};
+	size_t at;
+
+	for (at = 0; at < sizeof(kinds) / sizeof(kinds[0]); at++) {
+		ncfg_observed_t *observed = observed_with(kinds[at].kind, kinds[at].interface, 1);
+		char             message[NCFG_ERROR_MAX];
+		char             said[256];
+
+		if (!observed) {
+			check(0, "the fixture reads");
+			continue;
+		}
+		message[0] = '\0';
+		(void)ncfg_observe_backend_liveness(observed, run_dir, message, sizeof(message));
+		(void)snprintf(said, sizeof(said),
+		    "%s with no pid file of netcfgd's is unanswerable, not dead",
+		    kinds[at].what);
+		check(observed->backend_count == 1u && observed->backends[0].running, said);
+		ncfg_observed_free(observed);
+	}
+}
+
 static void the_round_refuses_what_it_cannot_be_asked(void)
 {
 	ncfg_observed_t *observed = observed_with(NCFG_BACKEND_SUPPLICANT, "wlan0", 1);
@@ -549,6 +604,7 @@ int main(void)
 	a_running_client_says_what_it_was_started_with();
 	a_client_that_has_died_reports_no_metric();
 	an_access_point_can_be_asked_at_last();
+	a_daemon_with_no_pid_file_of_netcfgds_is_left_alone();
 	the_round_refuses_what_it_cannot_be_asked();
 
 	/* Named pids, never a pattern: another session's `sleep` is not this
