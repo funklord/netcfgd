@@ -224,6 +224,7 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
 	ncfg_sims_cycled(loop->sims, cycled, cycles, out);
 	message[0] = '\0';
 	(void)ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message));
+	ncfg_daemon_state_publish(loop->state);
 
 	if (seconds > 0u) {
 		ncfg_daemon_arm_window(loop, plan, out, seconds, last_good, NULL);

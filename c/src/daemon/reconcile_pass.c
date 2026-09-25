@@ -46,6 +46,7 @@
 
 #include "daemon_internal.h"
 #include "ncfg/log.h"
+#include "ncfg/observe.h"
 #include "ncfg/portal.h"
 #include "ncfg/state.h"
 
@@ -936,6 +937,30 @@ static void reobserve(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *report)
 		ncfg_log_emitf("probe", NCFG_LOG_NOTE, "a probe verdict was not recorded: %s",
 		    message);
 	}
+	/*
+	 * **And the answers computed from the verdicts, now that there are
+	 * verdicts.** `observe.h` asks for this in as many words -- "the daemon
+	 * calls `ncfg_observe_derive` a second time once the probe verdicts are
+	 * stamped on, which is why running it twice has to cost nothing" -- and
+	 * nothing called it.
+	 *
+	 * The first derive ran inside the observation, before any probe had been
+	 * asked, so every link was `reachable: <absent>` and a linkset chose on
+	 * metric alone. The planner did not: it reads the same observation *after*
+	 * this point and moved the default route to the member that answers. So
+	 * the machine was right and the record of it named the other member, with
+	 * no `ineligible` reason on the one that had lost. Everything derived from
+	 * a verdict is in this position -- the connectivity rung too, which is why
+	 * `derive` is idempotent by design.
+	 */
+	message[0] = '\0';
+	if (loop->state->observed &&
+	    !ncfg_observe_derive(loop->state->observed, loop->state->desired, message,
+	    sizeof(message))) {
+		ncfg_log_emitf("probe", NCFG_LOG_NOTE,
+		    "the answers computed from the probe verdicts were not refreshed: %s",
+		    message);
+	}
 	message[0] = '\0';
 	if (loop->state->observed &&
 	    !ncfg_sims_observe(loop->sims, loop->state->desired, loop->state->observed->reports,
@@ -943,6 +968,9 @@ static void reobserve(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *report)
 		ncfg_log_emitf("modem", NCFG_LOG_NOTE, "a reported SIM card was not recorded: %s",
 		    message);
 	}
+	/* Published here rather than in `ncfg_daemon_state_reobserve`, because
+	 * this is where this pass's observation is finished. */
+	ncfg_daemon_state_publish(loop->state);
 	if (moved) {
 		report->links_moved = 1;
 		/* **A link appearing or going away is an event even when netcfgd does

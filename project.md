@@ -9515,6 +9515,62 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.281 The record was published before the observation was finished
+
+`linkset.sh` had two failures, and the machine was already right. One default
+route, on the member that answers -- that check passed. What failed is the
+daemon's own account of why:
+
+    the member the set is using   expected setb0, actual seta0
+    why the other one lost        expected probe,  actual None
+
+### The order, which `observe.h` had written down
+
+> The daemon calls `ncfg_observe_derive` a second time once the probe verdicts
+> are stamped on, which is what that function's own comment asks for and is
+> why running it twice has to cost nothing.
+
+**Nothing called it.** The observation's first derive runs inside
+`ncfg_observe_current`, before any probe has been asked, so every link is
+`reachable: <absent>` and a linkset chooses on metric alone. The reconcile
+pass then stamps the verdicts -- correctly, with a comment saying why it must
+happen before anything reads the observation -- and never recomputed the
+answers that are derived from them.
+
+The planner was not affected: it reads the observation *after* the stamp and
+moved the default route to the member that answers. So the machine was right,
+the published record named the other member, and no member carried a reason
+for having lost. **Everything computed from a verdict is in that position**,
+the connectivity rung included, which is precisely why `derive` is idempotent
+by design.
+
+### And 10.277's publish was in the wrong place
+
+I put the write inside `ncfg_daemon_state_reobserve` -- which is *before* the
+stamp and before the second derive. That made the publish itself part of the
+defect: even with the re-derive added, a record written there is written from
+an observation nobody has finished.
+
+So publishing is its own step now. A caller publishes when its observation is
+**finished**: the reconcile pass after the stamp and the re-derive, and a
+caller with no probes to stamp as soon as `reobserve` returns. The Rust has
+the same three things in one method, in that order, with a comment recording
+what the wrong order cost it -- "the published record said the machine was on
+a link whose routes the planner had just taken away".
+
+**The test moved with it, and that is worth saying rather than hiding.**
+10.277's check asserted that re-observing publishes; it asserts now that
+re-observing publishes *nothing*, and that publishing does. The property being
+tested changed because the earlier one was wrong -- an assertion about where
+the write happened, when what matters is that it happens after the record is
+complete.
+
+The second derive gets its own test at the level it lives: one observation,
+derived twice with a verdict arriving between, answering differently. That is
+the assertion the live script cannot make and the one that says the second
+call is not a no-op. Sabotaged, `linkset.sh` goes red and the unit suite does
+not -- which is honest and is why both exist.
+
 ## 10.280 Two event hooks nobody planned, and a journal nobody printed
 
 `hooks.sh` had seventeen failures across three defects.
