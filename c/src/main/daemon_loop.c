@@ -236,11 +236,44 @@ static ncfg_main_waiting_t *slot_to_wait_in(ncfg_main_mailbox_t *mailbox, char *
 	return NULL;
 }
 
+/*
+ * The slot the loop is answering into, for the seam that wants to hand the
+ * waiting back. Thread-local because there is exactly one loop thread and it
+ * is inside exactly one delivery at a time; a handle threaded through
+ * `ncfg_daemon_answer_fn` would have to reach every implementation, including
+ * the several that never defer anything.
+ */
+static _Thread_local ncfg_main_waiting_t *delivering;
+
+int ncfg_main_answer_after_the_loop(int (*work)(void *context, ncfg_buf_t *out, char *err,
+    size_t err_size), void *context, void (*free_context)(void *context))
+{
+	if (!delivering || !work) {
+		return 0;
+	}
+	/* A slot that is already carrying deferred work is a seam calling this
+	 * twice for one request, which is a bug in the seam rather than something
+	 * to paper over: refuse it and let the caller do the work itself. */
+	if (delivering->after) {
+		return 0;
+	}
+	delivering->after = work;
+	delivering->after_free = free_context;
+	delivering->after_context = context;
+	return 1;
+}
+
 /* Wake the loop and wait for it, then give the slot back. Called with the lock
  * released and a filled slot in hand. */
 static int wait_for_the_loop(ncfg_main_mailbox_t *mailbox, ncfg_main_waiting_t *slot)
 {
-	int result;
+	int   result;
+	int (*after)(void *, ncfg_buf_t *, char *, size_t);
+	void (*after_free)(void *);
+	void       *after_context;
+	ncfg_buf_t *out;
+	char       *err;
+	size_t      err_size;
 
 	/* Outside the lock, because a write is a syscall and the loop has to be
 	 * able to take this lock to answer. */
@@ -258,11 +291,56 @@ static int wait_for_the_loop(ncfg_main_mailbox_t *mailbox, ncfg_main_waiting_t *
 		(void)pthread_cond_wait(&mailbox->settled, &mailbox->lock);
 	}
 	result = slot->result;
+	/*
+	 * Taken out from under the lock, because the slot is about to be somebody
+	 * else's. Everything the work needs is in `context` -- the seam copied it
+	 * on the loop -- and `out` and `err` belong to this thread.
+	 */
+	after = slot->after_ready ? slot->after : NULL;
+	after_free = slot->after_free;
+	after_context = slot->after_context;
+	out = slot->out;
+	err = slot->err;
+	err_size = slot->err_size;
+	slot->after = NULL;
+	slot->after_free = NULL;
+	slot->after_context = NULL;
+	slot->after_ready = 0;
 	/* A slot nobody is in holds no descriptor, which is what lets every walk
 	 * below read `stream_fd` without also asking whether the slot is live. */
 	slot->stream_fd = -1;
 	slot->in_use = 0;
 	(void)pthread_mutex_unlock(&mailbox->lock);
+	/*
+	 * **After the slot is released, which is the whole point.** The loop is
+	 * free, the mailbox has a slot back, and the ten seconds this may take are
+	 * spent on the connection's own thread where they cost nobody else
+	 * anything. A shut daemon leaves `after_ready` clear, so what happens here
+	 * is the free and not the wait.
+	 */
+	if (after) {
+		/*
+		 * **And the server's lock too, which is the second of the two.**
+		 * Getting off the loop is not enough on its own: `server.c` holds its
+		 * own mutex across the whole answer, so a second connection's request
+		 * would not even be read while this one waits. Both have to go, and
+		 * removing either alone changes nothing a clock can see.
+		 *
+		 * This is the thread that holds it -- the connection's own -- which is
+		 * why the park belongs here and not where the work was handed back.
+		 * A caller that is not inside an answer gets 0 and loses nothing but
+		 * the concurrency.
+		 */
+		int parked = ncfg_daemon_answer_park();
+
+		result = after(after_context, out, err, err_size);
+		if (parked) {
+			ncfg_daemon_answer_resume();
+		}
+	}
+	if (after_free) {
+		after_free(after_context);
+	}
 	return result;
 }
 
@@ -427,8 +505,10 @@ void ncfg_main_mailbox_settle(ncfg_main_mailbox_t *mailbox)
 				result = 0;
 			}
 		} else if (mailbox->answer) {
+			delivering = slot;
 			result = mailbox->answer(mailbox->answer_context, request, peer, arrival, out,
 			    err, err_size);
+			delivering = NULL;
 		} else {
 			/*
 			 * Named rather than silent. A loop with no answer path is what
@@ -444,6 +524,10 @@ void ncfg_main_mailbox_settle(ncfg_main_mailbox_t *mailbox)
 
 		(void)pthread_mutex_lock(&mailbox->lock);
 		slot->result = result;
+		/* Only a delivery that got this far arms the deferred half. `shut`
+		 * answers a slot without coming through here, and a waiter released
+		 * that way frees the context instead of starting the wait. */
+		slot->after_ready = slot->after != NULL;
 		slot->answered = 1;
 		(void)pthread_cond_broadcast(&mailbox->settled);
 		(void)pthread_mutex_unlock(&mailbox->lock);
