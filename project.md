@@ -9515,6 +9515,66 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.283 The lock covered the acting and the race was in the observing
+
+`apply_race.sh` had one failure and it is the one the script exists for: five
+rounds of two simultaneous applies, **five failed actions, one per round**,
+every one a `route.add` for a route the other apply had installed between this
+one's observation and its action.
+
+An apply is observe, plan, act. The C took the apply lock in
+`ncfg_main_world_executor_open` -- which happens after `ncfg apply` has
+observed and planned, so the lock covered the third of the three. Two applies
+read a machine with no route on it, both planned the same `route.add`, and the
+second met `EEXIST`.
+
+**Tolerating `EEXIST` would have been the wrong fix and the script says why**:
+for a route it means the *key* exists, not that its gateway is what netcfgd
+asked for, so a tolerant add would report success over a route pointing
+somewhere else. The asymmetry that hides it is worth keeping too -- `addr.add`
+uses `NLM_F_REPLACE`, so adding an address that is already there is success,
+while a route is added with `NLM_F_CREATE` alone.
+
+The Rust takes the lock at the top of `command_apply` and hands it to the
+executor, which holds it for its life; `KernelExecutor::new` takes none of its
+own. Its comment says exactly why the two are separate: *"the lock has to be
+taken before the observation the plan is built from, and the executor is built
+after it."*
+
+So the C does the same. `ncfg_cli_machine_t` grows `serialise` and
+`unserialise`, the apply calls the first before it compiles anything, and the
+world it later opens is told the lock is the caller's -- **neither taking nor
+releasing one it was handed**, because `flock` belongs to the open file
+description and a second `open` in the same process would wait out the whole
+patience against itself.
+
+**The daemon needs none of this and that is not an inconsistency.** It plans
+*inside* the apply, after its executor is open, so a lock taken at executor-open
+already covers its plan. The Rust's daemon has the same arrangement with the
+same comment.
+
+### The release is on seven paths, and one of them is why it is not in `close`
+
+The obvious home for the release is beside `executor_close`. It cannot live
+there: a plan with nothing in it returns before an executor exists, and an
+apply that held the lock past its own exit would block the next one for as
+long as the process lived. So every path out of `command_apply` gives it back,
+and the test drives the empty-plan path for exactly that reason.
+
+### And the control missed its own target the first time
+
+The sabotage removed the `serialise` call, rebuilt with `make -C c`, and
+reported the live script red and the unit test **green** -- which reads as a
+unit test blind to the defect. `make -C c` does not relink the test binaries;
+`make -C c tests/cli_apply_test` does. Rebuilt properly, four unit checks go
+red.
+
+That is the third time in this port that a control has been aimed at a stale
+binary, and `build-and-commit.md` names it: *never conclude that a test passes
+or fails from a binary the build step did not rebuild.* The rule is easy to
+hold and easy to drop, and it drops at exactly the moment a sabotage is
+producing the answer that would end the investigation.
+
 ## 10.282 A safety notice a log level could switch off, and the one check the flag cannot pass
 
 `log_shape.sh` has one failure and it is not fixable from here. What the

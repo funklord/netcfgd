@@ -1164,6 +1164,28 @@ typedef struct {
 	    ncfg_executor_t *out, char *err, size_t err_size);
 	/* Release what `executor_open` filled in, and the lock it took. */
 	void (*executor_close)(void *context, ncfg_executor_t *executor);
+	/*
+	 * Serialise this apply against every other one, **before anything is
+	 * observed**.
+	 *
+	 * An apply is observe, plan, act, and a lock taken when the executor opens
+	 * covers only the last of the three. Two applies then observe a machine
+	 * with no route on it, both plan the same `route.add`, and the second gets
+	 * `EEXIST` -- which is a failed action rather than a tolerable one,
+	 * because `EEXIST` for a route means the *key* exists and says nothing
+	 * about where its gateway points. `tests/live/apply_race.sh` measured five
+	 * failures in five rounds. Decision 0184.
+	 *
+	 * Optional, and a NULL one is not an error: a program embedding this
+	 * library with no machine seam plans and explains and changes nothing, and
+	 * the fake executors in the tests take no lock either -- a lock nobody can
+	 * see is not a check.
+	 *
+	 * `unserialise` gives it back. Called on every path out of an apply,
+	 * including the ones that failed before an executor existed.
+	 */
+	int  (*serialise)(void *context, const char *run_dir, char *err, size_t err_size);
+	void (*unserialise)(void *context);
 } ncfg_cli_machine_t;
 
 /*

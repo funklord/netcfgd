@@ -55,6 +55,8 @@ typedef struct {
 	ncfg_daemon_state_t     state;
 	ncfg_main_world_where_t where;
 	ncfg_secret_resolver_t  secrets;
+	ncfg_lock_t             serialised;
+	int                     have_lock;
 	char                    config_dir[NCFG_MAIN_LOOP_PATH_MAX];
 	char                    ctrl_dir[NCFG_MAIN_LOOP_PATH_MAX];
 	/* Room for the leaf this composes onto the configuration directory, so
@@ -105,6 +107,12 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	 * the world takes the same answers one layer up, and taking them here is
 	 * what makes this executor the daemon's rather than a second one.
 	 */
+	/* The lock this apply already holds, taken before it observed. The world
+	 * neither takes nor releases one it was handed: `flock` belongs to the
+	 * open file description, so a second `open` here would wait out the whole
+	 * patience against this same process. */
+	held->world.lock = held->serialised;
+	held->world.lock_is_the_callers = held->have_lock;
 	held->where.run_dir = run_dir;
 	held->where.proc_root = "/proc";
 	/*
@@ -135,6 +143,12 @@ static int machine_executor_open(void *context, const char *config_dir, const ch
 	        err_size)) {
 		return 0;
 	}
+	/* `ncfg_main_world_open` memsets, so the hand-over is repeated after it
+	 * rather than before. Assigned in both places deliberately: the value
+	 * above documents what the world is being built with, and this is what
+	 * survives. */
+	held->world.lock = held->serialised;
+	held->world.lock_is_the_callers = held->have_lock;
 	if (!ncfg_main_world_executor_open(&held->world, out, err, err_size)) {
 		ncfg_main_world_close(&held->world);
 		return 0;
@@ -155,6 +169,51 @@ static void machine_executor_close(void *context, ncfg_executor_t *executor)
 	held->open = 0;
 }
 
+/*
+ * Take the apply lock before this apply observes anything.
+ *
+ * **The whole of an apply is observe, plan, act**, and a lock taken when the
+ * executor opens covers only the last. Two applies then plan the same
+ * `route.add` against a machine neither has changed yet, and the second gets
+ * `EEXIST` -- a failed action, because for a route `EEXIST` means the key
+ * exists and says nothing about where its gateway points, so tolerating it
+ * would report success over a route going somewhere else. 0184.
+ */
+static int machine_serialise(void *context, const char *run_dir, char *err, size_t err_size)
+{
+	apply_world_t *held = context;
+	char           path[NCFG_MAIN_LOOP_PATH_MAX + 16];
+	int            waited = 0;
+
+	if (held->have_lock) {
+		return 1;
+	}
+	if (!run_dir || !run_dir[0]) {
+		ncfg_error_set(err, err_size,
+		    "an apply needs a run directory to take the apply lock in");
+		return 0;
+	}
+	(void)snprintf(path, sizeof(path), "%s/apply.lock", run_dir);
+	ncfg_lock_init(&held->serialised);
+	if (!ncfg_lock_take_within(&held->serialised, path, NCFG_MAIN_APPLY_PATIENCE_MS, &waited,
+	    err, err_size)) {
+		return 0;
+	}
+	held->have_lock = 1;
+	return 1;
+}
+
+static void machine_unserialise(void *context)
+{
+	apply_world_t *held = context;
+
+	if (!held->have_lock) {
+		return;
+	}
+	ncfg_lock_release(&held->serialised);
+	held->have_lock = 0;
+}
+
 const ncfg_cli_machine_t *ncfg_main_cli_machine(void)
 {
 	static ncfg_cli_machine_t machine;
@@ -163,5 +222,7 @@ const ncfg_cli_machine_t *ncfg_main_cli_machine(void)
 	machine.context = &the_world;
 	machine.executor_open = machine_executor_open;
 	machine.executor_close = machine_executor_close;
+	machine.serialise = machine_serialise;
+	machine.unserialise = machine_unserialise;
 	return &machine;
 }

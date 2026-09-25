@@ -599,13 +599,18 @@ int ncfg_main_world_executor_open(void *context, ncfg_executor_t *out, char *err
 		    "apply lock against itself");
 		return 0;
 	}
-	(void)snprintf(path, sizeof(path), "%s/apply.lock", world->run_dir);
-	if (!ncfg_lock_take_within(&world->lock, path, world->patience_ms, &held, err, err_size)) {
-		return 0;
+	if (!world->lock_is_the_callers) {
+		(void)snprintf(path, sizeof(path), "%s/apply.lock", world->run_dir);
+		if (!ncfg_lock_take_within(&world->lock, path, world->patience_ms, &held, err,
+		    err_size)) {
+			return 0;
+		}
 	}
 	world->kernel = ncfg_kernel_new(err, err_size);
 	if (!world->kernel) {
-		ncfg_lock_release(&world->lock);
+		if (!world->lock_is_the_callers) {
+			ncfg_lock_release(&world->lock);
+		}
 		return 0;
 	}
 	/*
@@ -684,8 +689,11 @@ void ncfg_main_world_executor_close(void *context, ncfg_executor_t *executor)
 	/* The lock after the socket, which is the order the Rust's `Drop` gives
 	 * and is the one that matters: the lock covers the acting, so releasing it
 	 * while a socket is still open would let the next apply start against a
-	 * machine this one has not finished with. */
-	ncfg_lock_release(&world->lock);
+	 * machine this one has not finished with. A lock the caller took is the
+	 * caller's to drop, and it holds it past this point deliberately. */
+	if (!world->lock_is_the_callers) {
+		ncfg_lock_release(&world->lock);
+	}
 	world->open = 0;
 }
 
