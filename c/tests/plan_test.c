@@ -2178,6 +2178,186 @@ static void a_radio_that_is_switched_off_is_said(void)
 #undef RADIO_LINK
 }
 
+/*
+ * The two hooks that fire on a value moving rather than on a transition.
+ *
+ * `pre_up` and its five siblings bracket something this plan is doing, so they
+ * are planned where that happens. `carrier` and `lease` are the other kind:
+ * nothing in the plan causes them, and what makes one fire is the difference
+ * between what is true now and what the hook was last told -- which is why
+ * there is a record at all, and why both of these fire once per event rather
+ * than once per reconcile.
+ */
+static void a_carrier_hook_fires_when_the_cable_moves(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define CARRIER_IFACE \
+	"\"devices\":[],\"interfaces\":[{\"name\":\"eth0\",\"hooks\":[{\"phase\":\"carrier\"," \
+	"\"path\":\"/run/netcfgd/hooks/eth0.carrier.0\",\"sha256\":\"ab\"}]}]"
+#define LINK_CARRIER(carrier) \
+	"{\"name\":\"eth0\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":" carrier "," \
+	"\"ownership\":\"unknown\"}"
+#define TOLD(phase, value) \
+	",\"hook_state\":[{\"interface\":\"eth0\",\"phase\":\"" phase "\",\"value\":\"" value \
+	"\"}]"
+
+	plan = plan_of("{}", CARRIER_IFACE, "\"links\":[" LINK_CARRIER("true") "]", NULL,
+	    &document, &observed);
+	if (plan) {
+		check(has_name(plan, "hook.run"),
+		    "a cable the hook has never been told about fires it");
+	} else {
+		check(0, "the first-observation fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", CARRIER_IFACE,
+	    "\"links\":[" LINK_CARRIER("true") "]" TOLD("carrier", "up"), NULL, &document,
+	    &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"),
+		    "and an unchanged cable does not fire it again");
+	} else {
+		check(0, "the unchanged fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", CARRIER_IFACE,
+	    "\"links\":[" LINK_CARRIER("false") "]" TOLD("carrier", "up"), NULL, &document,
+	    &observed);
+	if (plan) {
+		check(has_name(plan, "hook.run"), "unplugging fires it");
+	} else {
+		check(0, "the unplugged fixture planned");
+	}
+	release(plan, document, observed);
+
+	/* An interface that declares no `carrier` hook is the control: this pass
+	 * must not plan a `hook.run` for every link whose cable it can see. */
+	plan = plan_of("{}", "\"devices\":[],\"interfaces\":[{\"name\":\"eth0\"}]",
+	    "\"links\":[" LINK_CARRIER("true") "]", NULL, &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"),
+		    "and an interface with no carrier hook plans none");
+	} else {
+		check(0, "the no-hook fixture planned");
+	}
+	release(plan, document, observed);
+#undef CARRIER_IFACE
+#undef LINK_CARRIER
+}
+
+/*
+ * A `lease` hook fires on an address netcfgd did not install.
+ *
+ * netcfgd does not implement DHCP (0004) and never sees the protocol, so "a
+ * lease arrived" is not an event it is told about. The trigger is an address
+ * on an interface whose document asks for DHCP, which netcfgd does not own --
+ * and that works for any client rather than for a list of them.
+ */
+static void a_lease_hook_fires_on_an_address_netcfgd_did_not_install(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define LEASE_IFACE \
+	"\"devices\":[],\"interfaces\":[{\"name\":\"eth0\"," \
+	"\"addressing\":[{\"source\":\"dhcp4\"}]," \
+	"\"hooks\":[{\"phase\":\"lease\",\"path\":\"/run/netcfgd/hooks/eth0.lease.0\"," \
+	"\"sha256\":\"ab\"}]}]"
+#define LEASE_LINK \
+	"\"links\":[{\"name\":\"eth0\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"unknown\"}]"
+#define ADDRESS(value, extra) \
+	",\"addresses\":[{\"interface\":\"eth0\",\"address\":\"" value "\"," \
+	"\"ownership\":\"unknown\"" extra "}]"
+
+	plan = plan_of("{}", LEASE_IFACE, LEASE_LINK ADDRESS("192.168.77.5/24", ""), NULL,
+	    &document, &observed);
+	if (plan) {
+		check(has_name(plan, "hook.run"), "an address netcfgd did not install fires it");
+	} else {
+		check(0, "the lease fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", LEASE_IFACE,
+	    LEASE_LINK ADDRESS("192.168.77.5/24", "") TOLD("lease", "192.168.77.5/24"), NULL,
+	    &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"), "and the same lease does not fire it again");
+	} else {
+		check(0, "the unchanged-lease fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", LEASE_IFACE,
+	    LEASE_LINK ADDRESS("192.168.77.9/24", "") TOLD("lease", "192.168.77.5/24"), NULL,
+	    &document, &observed);
+	if (plan) {
+		check(has_name(plan, "hook.run"), "and a lease that moved fires it again");
+	} else {
+		check(0, "the moved-lease fixture planned");
+	}
+	release(plan, document, observed);
+
+	/*
+	 * **Three controls, and each is an address the kernel made rather than a
+	 * lease.** One netcfgd owns, one the kernel tags as its own -- `IFA_PROTO`
+	 * 1, 2 and 3 -- and a link-local, which is what a pre-5.18 kernel reports
+	 * with no tag at all and is the case a SLAAC address would otherwise be
+	 * read as.
+	 */
+	plan = plan_of("{}", LEASE_IFACE, LEASE_LINK
+	    ",\"addresses\":[{\"interface\":\"eth0\",\"address\":\"192.168.77.5/24\","
+	    "\"ownership\":\"ours\"}]", NULL, &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"), "an address netcfgd installed is not a lease");
+	} else {
+		check(0, "the owned-address fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", LEASE_IFACE, LEASE_LINK ADDRESS("192.168.77.5/24", ",\"proto\":2"),
+	    NULL, &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"), "and neither is one the kernel tags as its own");
+	} else {
+		check(0, "the kernel-tagged fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", LEASE_IFACE, LEASE_LINK ADDRESS("169.254.3.4/16", ""), NULL,
+	    &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"),
+		    "and neither is a link-local, which is what an untagged kernel reports");
+	} else {
+		check(0, "the link-local fixture planned");
+	}
+	release(plan, document, observed);
+
+	/* And the family the document asked for: an interface wanting only DHCPv4
+	 * must not read a v6 address as its lease. */
+	plan = plan_of("{}", LEASE_IFACE, LEASE_LINK ADDRESS("2001:db8::5/64", ""), NULL,
+	    &document, &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"),
+		    "and a v6 address is not the lease an interface asking for dhcp4 wanted");
+	} else {
+		check(0, "the wrong-family fixture planned");
+	}
+	release(plan, document, observed);
+#undef LEASE_IFACE
+#undef LEASE_LINK
+#undef ADDRESS
+#undef TOLD
+}
+
 int main(void)
 {
 	the_frozen_witness();
@@ -2217,6 +2397,8 @@ int main(void)
 	a_plan_with_nothing_to_plan_against_is_refused();
 	an_edited_tunnel_configuration_restarts_the_tunnel();
 	a_radio_that_is_switched_off_is_said();
+	a_carrier_hook_fires_when_the_cable_moves();
+	a_lease_hook_fires_on_an_address_netcfgd_did_not_install();
 
 	printf("\nplan: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

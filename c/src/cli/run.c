@@ -1350,6 +1350,86 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
 }
 
 /*
+ * What the daemon did, as it comes back over the socket.
+ *
+ * **This printed nothing at all, and an apply through the daemon was silent.**
+ * The comment here said no journal was encoded yet; by the time one was, the
+ * arm that checks for it was added and the printing was not -- so `ncfg apply
+ * --confirm-within N` did the work, got the record of it, freed it and exited
+ * 0 with an empty terminal. `tests/live/hooks.sh` is what noticed, by looking
+ * for a refusal that the daemon had made and nobody had shown.
+ *
+ * **The record's own error is printed under it**, and dropping it is the same
+ * defect one level down: the Rust's comment on this line records that a
+ * failure over the socket once said `Failed hook.run` and nothing about why,
+ * while the same failure applied locally printed the reason (0063).
+ *
+ * The shape is the daemon's rather than the local apply's -- `Done hook.run`
+ * rather than `ok hook.run wlan0  hooks[pre_up]: ...` -- because what comes
+ * over the wire is the outcome and the op's name, and inventing the columns
+ * the local renderer fills would mean inventing their contents.
+ */
+static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_options_t *options)
+{
+	static const struct {
+		const char *wire;
+		const char *shown;
+	} outcomes[] = { { "done", "Done" }, { "failed", "Failed" },
+		{ "skipped", "Skipped" }, { "reverted", "Reverted" } };
+	uint32_t records;
+	uint32_t count;
+	uint32_t at;
+	int      failed = 0;
+
+	if (!payload->doc) {
+		return fail("the daemon's journal could not be read");
+	}
+	records = ncfg_json_member(payload->doc, payload->object, "records");
+	count = ncfg_json_count(payload->doc, records);
+	for (at = 0; at < count; at++) {
+		uint32_t    record = ncfg_json_at(payload->doc, records, at);
+		const char *outcome = ncfg_json_string(payload->doc,
+		    ncfg_json_member(payload->doc, record, "outcome"), NULL);
+		const char *op = ncfg_json_string(payload->doc,
+		    ncfg_json_member(payload->doc, record, "op"), NULL);
+		const char *why = ncfg_json_string(payload->doc,
+		    ncfg_json_member(payload->doc, record, "error"), NULL);
+		const char *shown = outcome;
+		size_t      which;
+
+		for (which = 0; which < sizeof(outcomes) / sizeof(outcomes[0]); which++) {
+			if (outcome && strcmp(outcome, outcomes[which].wire) == 0) {
+				shown = outcomes[which].shown;
+				break;
+			}
+		}
+		if (strcmp(shown ? shown : "", "Failed") == 0) {
+			failed = 1;
+		}
+		if (!options->json) {
+			ncfg_out_writef("%s %s\n", shown ? shown : "?", op ? op : "?");
+			if (why) {
+				/* Five spaces, under the outcome word, which is where the
+				 * local renderer puts an action's detail too. */
+				ncfg_out_writef("     %s\n", why);
+			}
+		}
+	}
+	/*
+	 * A window the operator asked for is worth a line: the point of the flag
+	 * is to override a default, and silence would look the same as the
+	 * default having been applied. Zero is the operator declining one, and
+	 * saying a window is open would be a false statement about the safety net.
+	 */
+	if (!options->json && options->confirm.value > 0) {
+		ncfg_out_writef("confirm window open for %llds -- run `ncfg confirm` to keep "
+		    "this, or `ncfg revert` to undo it now\n",
+		    (long long)options->confirm.value);
+	}
+	return failed ? NCFG_CLI_EXIT_FAILED : NCFG_CLI_EXIT_OK;
+}
+
+/*
  * `ncfg apply --confirm-within N`, which is the daemon's to carry out.
  *
  * **One implementation of the safety net, in the program that is still
@@ -1378,16 +1458,15 @@ static int apply_through_daemon(const ncfg_cli_options_t *options)
 		return code;
 	}
 	/*
-	 * A journal is what an apply answers with. Nothing in this build encodes
-	 * one yet, so reaching here means the daemon answered something else --
-	 * which is a fact about the two halves disagreeing rather than about this
-	 * machine, and is said as one.
+	 * A journal is what an apply answers with. Anything else is the two halves
+	 * disagreeing rather than a fact about this machine, and is said as one.
 	 */
 	if (message.u.response.kind != NCFG_PROTO_RESP_JOURNAL) {
 		ncfg_proto_message_free(&message);
 		return fail("the daemon answered an apply with something that is not a "
 		    "journal");
 	}
+	code = say_journal(&message.u.response.u.payload, options);
 	ncfg_proto_message_free(&message);
 	return code;
 }

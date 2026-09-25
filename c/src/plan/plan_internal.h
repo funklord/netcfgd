@@ -490,6 +490,11 @@ void ncfg_plan_radio_supplicant(ncfg_builder_t *builder, const ncfg_interface_t 
     const ncfg_plan_ids_t *base, ncfg_plan_ids_t *out);
 int  ncfg_plan_radio_supplicant_wanted(const ncfg_document_t *desired,
     const ncfg_observed_t *observed, const char *name);
+/* 0004: a `lease` hook fires when an address netcfgd did not install appears
+ * on an interface whose document asks for DHCP. Over every interface, because
+ * the trigger is an observation rather than a transition this plan makes. */
+void ncfg_plan_lease_hooks(ncfg_builder_t *builder);
+
 void ncfg_plan_radio_warn(ncfg_builder_t *builder);
 
 /*
