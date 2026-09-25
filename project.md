@@ -9515,6 +9515,72 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.286 A counter that was not atomic, in a daemon that is threaded
+
+Comparing the two programs **by script** hid this, and comparing them by
+*check* is what found it. A script neither passes can fail for different
+reasons in each, and 24 checks across 8 scripts turned out to be the C's
+alone -- six of those scripts were in the "fails for the machine" bucket.
+
+`tests/live/wifi_trouble.sh` had five. Four were one defect:
+
+    a join that works says so, in the past tense      expected 1, actual 0
+    a join that fails is reported as a failure        expected 1, actual 0
+    and carries the supplicant's own reason           expected 1, actual 0
+    and the count of attempts the supplicant reported expected 1, actual 0
+
+`ncfg wifi connect` was timing out at twenty seconds -- and the supplicant had
+announced `CTRL-EVENT-CONNECTED` in the same second. A probe in the wait loop
+saw the event arrive. **And run by hand it worked**, which is the tell: the
+same fixture, the same build, a different answer.
+
+    static unsigned long next_serial;
+    ...
+    snprintf(client->local, ..., "%s/%s%ld-%lu", dir, REPLY_PREFIX,
+        (long)getpid(), next_serial++);
+
+The comment above it says the path "must be unique per process *and* per
+connection: two clients in one process binding the same name is an error".
+Nothing made it so. `next_serial++` is a read, an add and a store, and **the
+daemon is threaded** -- `server.c` runs a thread per connection and
+`daemon_watchers.c` attaches to every radio from another. Two threads reaching
+that line together take the same number, the second `unlink`s the first's
+socket and binds the name itself, and nothing fails: the first client's events
+go to the second client's socket.
+
+`_Atomic` and `atomic_fetch_add`, which is the spelling `deliver.c` already
+uses for its staging ticket -- and for the same reason, stated there as "the
+pid because the second writer is another process, the counter because it need
+not be".
+
+**The test asserts the sockets rather than the counter**, because a test that
+read the serial would be testing the fix. Eight connections at once, and each
+still has a reply socket of its own -- which is exactly what the losing client
+stopped having. Threads are deliberately not used: a race that reproduces one
+time in fifty is a test that fails one time in fifty, and the live script is
+where the race is driven.
+
+**Its first version passed vacuously and was caught by its own report.** With
+the fake not yet started, no connection opened, and `alive == opened` read
+`0 == 0` -- "each has a reply socket of its own" said about no connections at
+all. The check names `opened > 0` now.
+
+### And the wifi picture, measured rather than assumed
+
+`wifi.sh`'s three C-only failures were a different fault, fixed with it:
+`wireless_interface` asked the *daemon* which radios exist, and that list is
+built from `ObservedLink::wireless` -- the kernel's view. The Rust asks the
+**configuration**, and its error says so: *"no wireless device in the
+configuration"*. A `device` block with a `wifi` section on something the
+kernel does not call a radio was invisible, which is `wpa_supplicant -Dwired`
+on `lo` -- how a wired 802.1X port is configured, and how that script tests a
+radio without one. It needs no daemon either, so a missing one had become the
+error for a question the configuration answers.
+
+`wifi.sh` now stops exactly where the Rust stops, on the same sentence: a real
+`wpa_supplicant -Dwired -i lo` does not complete a join. That script is
+environmental for both.
+
 ## 10.285 The supplicant's streams, settled by the fake's own comment
 
 10.284 left this open and the answer was already written down, in

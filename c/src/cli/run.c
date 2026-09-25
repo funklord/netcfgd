@@ -297,55 +297,81 @@ static int ask_for_ok(const ncfg_cli_options_t *options, const ncfg_proto_reques
  * the kernel would be a sentence that sends somebody to edit a file about a
  * fact that came from somewhere else.
  */
+/* Compile the configuration. Declared here because `wireless_interface` asks
+ * the document which radio it means, and the definition is with the verbs that
+ * use it. */
+static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *run_dir,
+    size_t run_dir_size, ncfg_provenance_t *provenance, int runs_hooks, char *err,
+    size_t err_size);
+
+/*
+ * Which wireless interface, when the command line did not say.
+ *
+ * Naming an interface every time is friction on the machine this is for -- a
+ * laptop with one radio -- so one is the answer and several is a list.
+ *
+ * **From the configuration rather than from the kernel**, which is the Rust's
+ * source and is the one that answers. This asked the daemon for its radio
+ * list, which is built from `ObservedLink::wireless` -- the kernel's own view
+ * -- so a `device` block with a `wifi` section on something the kernel does
+ * not call a radio was invisible. That is not a corner: `tests/live/wifi.sh`
+ * drives `wpa_supplicant -Dwired` on `lo`, which is how a wired 802.1X port is
+ * configured and how the suite tests a radio without one.
+ *
+ * It also needs no daemon. Every `ncfg wifi` verb is the daemon's to carry
+ * out, but working out *which* radio is a question the configuration answers,
+ * and asking the socket first made a missing daemon the error for a question
+ * that had nothing to do with it.
+ */
 static int wireless_interface(const ncfg_cli_options_t *options, const char *given, char *out,
     size_t out_size, int *code)
 {
-	ncfg_proto_request_t request;
-	ncfg_proto_message_t message;
-	ncfg_buf_t           listed;
-	size_t               at;
-	size_t               count;
+	char             run_dir[NCFG_CLI_TEXT_MAX];
+	char             err[NCFG_ERROR_MAX];
+	ncfg_document_t *document;
+	ncfg_buf_t       listed;
+	const char      *only = NULL;
+	size_t           count = 0;
+	size_t           at;
 
 	if (given) {
 		(void)snprintf(out, out_size, "%s", given);
 		return 1;
 	}
-	memset(&request, 0, sizeof(request));
-	request.kind = NCFG_PROTO_REQ_RADIOS;
-	if (!ask_or_fail(options, &request, &message, code)) {
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
+	if (!document) {
+		*code = fail(err);
 		return 0;
-	}
-	if (message.u.response.kind != NCFG_PROTO_RESP_RADIOS) {
-		ncfg_proto_message_free(&message);
-		*code = fail("the daemon sent something that is not a radio list");
-		return 0;
-	}
-	count = message.u.response.u.radios.count;
-	if (count == 1) {
-		(void)ncfg_cli_text(message.u.response.u.radios.items[0].interface, out, out_size);
-		ncfg_proto_message_free(&message);
-		return 1;
 	}
 	ncfg_buf_init(&listed, 0);
-	for (at = 0; at < count; at++) {
-		char name[NCFG_CLI_TEXT_MAX];
+	for (at = 0; at < document->device_count; at++) {
+		const ncfg_device_t *device = &document->devices[at];
 
-		if (at > 0) {
+		if (!device->wifi || !device->name) {
+			continue;
+		}
+		if (count > 0u) {
 			ncfg_buf_add_text(&listed, ", ");
 		}
-		ncfg_buf_add_text(&listed,
-		    ncfg_cli_text(message.u.response.u.radios.items[at].interface, name,
-		    sizeof(name)));
+		ncfg_buf_add_text(&listed, device->name);
+		only = device->name;
+		count++;
 	}
-	ncfg_proto_message_free(&message);
-	if (count == 0) {
-		*code = fail("no wireless device on this machine. Name the interface, or "
-		    "`ncfg wifi radios` lists what netcfgd can see");
+	if (count == 1u) {
+		(void)snprintf(out, out_size, "%s", only);
+		ncfg_buf_free(&listed);
+		ncfg_document_free(document);
+		return 1;
+	}
+	if (count == 0u) {
+		*code = fail("no wireless device in the configuration. Name the interface, or "
+		    "add a `device` block with a `wifi` section.");
 	} else {
-		*code = failf("this machine has %zu wireless devices (%s); name the one you "
-		    "mean", count, ncfg_buf_text(&listed));
+		*code = failf("the configuration has %zu wireless devices (%s); name the one "
+		    "you mean", count, ncfg_buf_text(&listed));
 	}
 	ncfg_buf_free(&listed);
+	ncfg_document_free(document);
 	return 0;
 }
 

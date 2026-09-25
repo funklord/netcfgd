@@ -14,6 +14,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,7 +58,23 @@ struct ncfg_supplicant_client {
  * has more than one thread, and the Rust's atomic was for a `static` shared by
  * a library that might.
  */
-static unsigned long next_serial;
+/*
+ * Which connection this is, so that two in one process never bind one name.
+ *
+ * **Atomic, because the daemon is threaded and this was not.** A plain `++` is
+ * a read, an add and a store, so two threads reaching it together take the
+ * same serial -- and the path below is then the same for both. The second
+ * `unlink`s the first's socket and binds the name itself, which does not fail
+ * and does not warn: what it does is send the first client's events to the
+ * second's socket.
+ *
+ * Found through `tests/live/wifi_trouble.sh`, where a join that had just been
+ * told `CTRL-EVENT-CONNECTED` timed out at twenty seconds -- intermittently,
+ * because it needs the watcher thread to open a connection in the same instant
+ * as the request thread. The comment below always said the name must be unique
+ * per connection; nothing made it so.
+ */
+static _Atomic unsigned long next_serial;
 
 static long long now_ms(void)
 {
@@ -194,7 +211,7 @@ ncfg_supplicant_client_t *ncfg_supplicant_connect_within(const char *dir, const 
 	 * clients in one process binding the same name is an error, and a stale
 	 * file from a crashed run would be too. */
 	written = snprintf(client->local, sizeof(client->local), "%s/%s%ld-%lu", dir,
-	    REPLY_PREFIX, (long)getpid(), next_serial++);
+	    REPLY_PREFIX, (long)getpid(), atomic_fetch_add(&next_serial, 1ul));
 	if (written < 0 || (size_t)written >= sizeof(client->local)) {
 		ncfg_error_set(err, err_size,
 		    "a reply socket under %s would be a longer path than a unix socket may have",
