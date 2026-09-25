@@ -271,8 +271,38 @@ static void a_connection_carries_a_request_and_its_answer(const char *base)
 	check(seen.calls == 0, "and the seam was never asked for it");
 
 	(void)close(fd);
+	{
+		/*
+		 * **A second server over the same path, and the reason this check
+		 * was reversed.** It used to read "stopping takes the socket file
+		 * with it", and that was measured to be a defect rather than a
+		 * tidiness: a unix socket is removed by *path*, and by the time a
+		 * daemon closes, that path need not be its own any more.
+		 *
+		 * Start netcfgd, start a second over it -- the bind deliberately
+		 * unlinks the first's entry, because a stale socket must not stop a
+		 * start -- then stop the second cleanly. The path was gone and the
+		 * **first daemon was still running and unreachable**: every `ncfg`
+		 * command got `No such file or directory` from a daemon listening
+		 * perfectly well on a socket with no name.
+		 *
+		 * So the successor is the assertion rather than the absence, because
+		 * the absence is what the defect looked like.
+		 */
+		ncfg_daemon_server_t *successor;
+		char                  why[NCFG_ERROR_MAX];
+
+		successor = ncfg_daemon_serve(&how, why, sizeof(why));
+		check(successor != NULL, "a second server binds the same path over the first");
+		if (successor) {
+			ncfg_daemon_server_stop(successor);
+			check(testdir_exists(path),
+			    "  and stopping it leaves the path, which the first is still on");
+		}
+	}
 	ncfg_daemon_server_stop(server);
-	check(!testdir_exists(path), "and stopping takes the socket file with it");
+	check(testdir_exists(path),
+	    "and a stop leaves the socket file, so a restart walks over its own leftovers");
 }
 
 /*

@@ -9515,6 +9515,54 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.279 An assertion reversed, because tidying up removed somebody else's socket
+
+`restart.sh` had one failure: *the socket file is left behind, as it is on a
+real stop* -- expected present, and the C had removed it.
+
+This is not a gap. `ncfg_daemon_server_close` unlinked the path deliberately
+and `daemon_test.c` asserted it: *and stopping takes the socket file with it*.
+Two documents of this project's own, agreeing with each other and disagreeing
+with the Rust, which leaves it.
+
+**What settled it is a measurement neither of them had.** A unix socket is
+removed by *path*, and by the time a daemon is closing, that path need not be
+its own any more:
+
+    netcfgd A starts, binds <run>/netcfgd.sock
+    netcfgd B starts over it -- the bind unlinks A's entry and binds its own,
+        deliberately, because a stale socket must not stop a start
+    B is stopped cleanly; its close unlinks the path
+    -> the path is gone and A is still running
+
+A is then **listening perfectly well on a socket with no name**, and every
+`ncfg` command gets `No such file or directory` from a daemon that is right
+there. Run and confirmed: `A alive: yes  B alive: yes`, then `socket after B
+stops: absent`. There is no single-instance guard, so the arrangement needs
+nothing unusual -- a slow stop overlapping a start is enough.
+
+Nothing is lost by leaving it. The bind removes a stale one, a unit with
+`RuntimeDirectory=` has the whole directory taken away at stop, and a client
+meeting the leftover gets `Connection refused` -- which distinguishes a daemon
+that is not running from a netcfgd that was never installed, where
+`No such file or directory` does not.
+
+**The test was reversed rather than deleted, and it asserts the reason rather
+than the behaviour.** The old check was the absence of a file; the absence is
+what the defect looked like, so a new version asserting presence would be
+"the Rust does it this way" written as a test. What it asserts now is the
+successor: a second server binds the same path, is stopped, and the path
+survives because the first is still on it. Sabotaged -- the `unlink` put back
+-- that takes two unit checks and `restart.sh` red.
+
+**Worth saying plainly: a test of this project's own was wrong, and matching
+the Rust is not why it changed.** `working-practice.md` asks that a
+discrepancy between a document and the code be held open rather than resolved
+quickly, and the reason given is that the answer is often a third thing
+neither side named. This is that: the Rust's behaviour is right, and the
+argument for it is not "the Rust does it" but a running daemon that cannot be
+reached.
+
 ## 10.278 The hooks nobody wrote, the staging file nobody removed, and errno through a formatter
 
 `write_full.sh` had eight failures across three defects, and only one of them

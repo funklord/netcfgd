@@ -784,7 +784,27 @@ void ncfg_daemon_server_stop(ncfg_daemon_server_t *server)
 	if (server->listener >= 0) {
 		(void)close(server->listener);
 	}
-	(void)unlink(server->path);
+	/*
+	 * **The socket file is left behind, and removing it here was a defect.**
+	 *
+	 * A unix socket is removed by *path*, and by the time a daemon is closing
+	 * that path need not be this daemon's any more. Measured: start netcfgd,
+	 * start a second one over it -- the bind below unlinks the first's entry
+	 * and binds its own, deliberately, because a stale socket must not stop a
+	 * start -- then stop the second cleanly. The path is gone and **the first
+	 * daemon is still running and now unreachable**: every `ncfg` command gets
+	 * `No such file or directory` from a daemon that is listening perfectly
+	 * well on a socket with no name.
+	 *
+	 * Nothing is lost by leaving it. The bind above removes a stale one, a
+	 * unit with `RuntimeDirectory=` has the whole directory taken away at
+	 * stop, and a client meeting the leftover gets `Connection refused` --
+	 * which is a better answer than `No such file or directory`, because it
+	 * distinguishes a daemon that is not running from a netcfgd that was never
+	 * installed. The Rust leaves it and `tests/live/restart.sh` asserts that
+	 * it does, since a restart over the last run's leftovers is only reachable
+	 * if the last run leaves some.
+	 */
 	(void)pthread_mutex_destroy(&server->lock);
 	free(server);
 }
