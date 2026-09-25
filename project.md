@@ -9515,6 +9515,51 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.292 The third way out of a choice that had been written as two
+
+10.282 recorded `log_shape`'s one failure as undecidable, naming two ways to
+close it and rejecting both: weaken the safety notice so a log level can hide
+it, or let the C daemon bind without reconciling and take this workstation's
+socket from the Rust one running the network. Both rejections were right. The
+entry's mistake was believing the list was complete.
+
+The check counts every line the daemon printed at `NCFG_LOG=warning` and wants
+none. It is **the only check in that file that counts raw lines** -- the four
+around it identify a log line by its `[subsystem]` tag, which is what the
+logger writes and what the notice deliberately has not got. So the check was
+not asking whether the filter works; it was asking whether this particular
+program's entire startup output is empty, which is a fact about the Rust's
+inventory rather than about the behaviour its own name describes.
+
+Measured before changing it, both builds, one config:
+
+    C     NCFG_LOG unset      3 lines, 2 bracketed
+    C     NCFG_LOG=warning    1 line,  0 bracketed
+    Rust  NCFG_LOG unset      1 line,  1 bracketed
+    Rust  NCFG_LOG=warning    0 lines, 0 bracketed
+
+**The C's filter was already perfect.** Every log line it emits at startup is
+gone at `warning`, exactly as the Rust's are; the survivor is the notice, which
+is not a log line and is beyond every level's reach on purpose.
+
+So the check counts bracketed lines now, and it lost nothing. Sabotaged by
+making `ncfg_log_set_accepted` ignore its argument, the run goes red with
+`actual: 1` -- one bracketed line through at `warning` -- and **that check is
+the only one of the nine that fails**, which is the sabotage arriving through
+the check under test rather than being intercepted by a neighbour.
+
+With this, **no check in the live suite fails for the C port and passes for
+the Rust.** 10.291's sweep found exactly one and this was it.
+
+**The shape is worth more than the fix, because it is the third instance in
+one session.** A live check that encodes one implementation's output inventory
+rather than the behaviour under test: two counted a phrase and wanted exactly
+one, this counted lines and wanted none. Each time the port said something
+correct and extra; each time the check's own name -- *says so*, *names the
+setting*, *silences it* -- described a behaviour while its body measured a
+tally. **When a live check wants an exact count, the question to ask is what
+it would say about a second correct implementation.**
+
 ## 10.291 The whole live suite, measured against the Rust: one check apart
 
 Swept all 79 scripts under `tests/live/` against both builds, sequentially,
@@ -9524,7 +9569,12 @@ each in its own network namespace under `timeout 200`:
     scripts passing        C 58/79     Rust 59/79
     checks failing for the C and not the Rust                        1
 
-The one is `log_shape`'s "a level below what is emitted silences it
+**That one has since been closed by 10.292, and the entry is left with its
+measurement rather than rewritten**: the sweep found what it found on the day,
+and nothing else in it moved, because nothing else was touched. `log_shape`
+now passes for both builds, nine checks each.
+
+The one was `log_shape`'s "a level below what is emitted silences it
 completely". At `NCFG_LOG=warning` the C correctly silences both of its
 startup log lines; what remains is the `--try-the-c-daemon` notice, which
 10.282 put outside the log system on purpose so that no level can hide it.
@@ -10077,35 +10127,38 @@ its refusal with `fail`, straight to stderr, which nothing filters. Its
 counterpart -- *starting anyway* -- was the one that could vanish. It is said
 the same way now, and survives every level.
 
-### And the check that cannot pass
+### And the check, which was read as unpassable and was not
 
     said=$(say warning)
     check "a level below what is emitted silences it completely" \
         "$(printf '%s' "$said" | grep -c .)" "0"
 
 The Rust's startup at `warning` emits nothing, because everything it says at
-startup is an info and a note. The C emits that one line -- and it emits it
+startup is an info and a note. The C emits the notice above -- and emits it
 *because the live seam passes `--try-the-c-daemon`*, which this suite must
 pass for the daemon to start at all.
 
-There is no version of this that passes without one of two changes, and
-**neither is mine to make**:
+**This entry used to say there were two ways out and that neither was mine to
+make**: weaken the notice so a level can filter it, which is the defect fixed
+above put back, or let the daemon bind and serve without reconciling, which on
+this workstation would take `/run/netcfgd/netcfgd.sock` from the Rust daemon
+running the network. Both readings stand. What was wrong was the word
+**two** -- and closing it is 10.292.
 
-- **Weaken the notice** so a level can filter it, which is the defect fixed
-  above put back.
-- **Let the daemon bind and serve without reconciling**, so `log_shape.sh`
-  needs no flag. That reads the gate's own sentence more literally than
-  exiting does -- it says the *reconcile loop* does not start by default --
-  and it would make a C netcfgd useful for `status` and `plan` against a
-  running machine. It is also the dangerous one: the bind deliberately unlinks
-  a stale socket, so a C netcfgd started with no flags on this workstation
-  would take `/run/netcfgd/netcfgd.sock` from the Rust daemon that is running
-  the network.
+The third way out is that the check counts the wrong thing. It is the only
+check in that file that counts raw LINES; the four around it identify a log
+line by its `[subsystem]` tag, which is what the logger puts there and what
+the notice deliberately has not got. Counting lines made the check a claim
+about one implementation's entire startup output rather than about the filter
+it names, so no build carrying an unfilterable notice could pass it however
+well its filter worked.
 
-So it is recorded rather than decided. **The failure disappears on its own
-when the flag does**: the gate exists because no netcfgd written in C has run
-a machine for any length of time, and `c_daemon_tryout.sh` is the arrangement
-that is meant to earn its removal.
+**The general shape, and it is the third time this session:** a live check
+that encodes one implementation's output inventory instead of the behaviour
+under test. The other two counted a phrase and wanted exactly one. This one
+counted lines and wanted none. In all three the port said something correct
+and extra, and in all three the check's own name -- *says so*, *names the
+setting*, *silences it* -- described the behaviour rather than the tally.
 
 ## 10.281 The record was published before the observation was finished
 

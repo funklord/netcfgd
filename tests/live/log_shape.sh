@@ -124,11 +124,21 @@ contains "a note is marked, and marked the way flog marks one" "$said" "[confirm
 
 # ------------------------------------------------------------ turned down
 
-# `warning` accepts critical, error and warning -- and this startup emits an
-# info and a note, so a correct filter leaves nothing at all.
+# `warning` accepts critical, error and warning, and everything this startup
+# logs is an info or a note -- so a correct filter leaves no log line at all.
+#
+# **Log lines, not lines, and the difference is the whole of what this counts.**
+# The subject is the filter, and `[subsystem]` is how every other check in this
+# file identifies a line the logger produced. Counting raw lines made the check
+# a claim about one implementation's entire startup output instead: the C port
+# also prints a safety notice about `--try-the-c-daemon` that is deliberately
+# beyond every level's reach and is deliberately not a log line (project.md
+# 10.282), so a build carrying it could not pass however well its filter
+# worked. Measured on both: at `warning` each emits zero bracketed lines, and
+# the C's two log lines are gone exactly as the Rust's are.
 said=$(say warning)
 check "a level below what is emitted silences it completely" \
-	"$(printf '%s' "$said" | grep -c .)" "0"
+	"$(printf '%s' "$said" | grep -c '\[')" "0"
 
 # The control, and it is the one that matters: silence is also what a daemon
 # that failed to start produces, so the level has to be shown letting the same
