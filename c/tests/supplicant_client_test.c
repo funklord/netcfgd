@@ -54,6 +54,7 @@
 #include <sys/time.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <dirent.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -1083,6 +1084,73 @@ static void the_canary_goes_everywhere_a_credential_goes(const char *dir,
 
 /* ==================================================================== main */
 
+/*
+ * Two connections in one process never bind the same reply socket.
+ *
+ * **The daemon is threaded and the counter that made these unique was not.**
+ * `next_serial++` is a read, an add and a store, so two threads reaching it
+ * together take the same number -- and the path built from it is then the same
+ * for both. The second `unlink`s the first's socket and binds the name itself,
+ * which fails at nothing: what it does is send the first client's events to
+ * the second's socket.
+ *
+ * What that cost is in `tests/live/wifi_trouble.sh`: a join whose supplicant
+ * had already announced `CTRL-EVENT-CONNECTED` timed out at twenty seconds,
+ * intermittently, because it needs the watcher thread to open a connection in
+ * the same instant as the request thread.
+ *
+ * **The assertion is the sockets, not the counter.** A test that read the
+ * serial would be testing the fix rather than the property; what has to be
+ * true is that both connections are still addressable at once, which is
+ * exactly what the losing client stopped being. Threads are deliberately not
+ * used here -- a race that reproduces one time in fifty is a test that fails
+ * one time in fifty -- so this opens them in sequence, which the unpatched
+ * counter also survives. The live script is where the race is driven; this is
+ * what says the invariant out loud so it cannot be lost quietly.
+ */
+static void two_connections_do_not_share_a_reply_socket(const char *dir)
+{
+	enum { HOW_MANY = 8 };
+	ncfg_supplicant_client_t *held[HOW_MANY];
+	char                      message[NCFG_ERROR_MAX];
+	size_t                    at;
+	size_t                    opened = 0;
+	size_t                    alive = 0;
+	DIR                      *listing;
+	struct dirent            *entry;
+
+	for (at = 0; at < HOW_MANY; at++) {
+		message[0] = '\0';
+		held[at] = ncfg_supplicant_connect(dir, "wlan0", message, sizeof(message));
+		if (held[at]) {
+			opened++;
+		}
+	}
+	check(opened == (size_t)HOW_MANY, "eight connections to one supplicant all open");
+
+	/* Every one of them still has a socket of its own, which is what a shared
+	 * name takes away: the loser's file is gone and its events go elsewhere. */
+	listing = opendir(dir);
+	if (listing) {
+		while ((entry = readdir(listing)) != NULL) {
+			if (strncmp(entry->d_name, "netcfgd-", 8u) == 0) {
+				alive++;
+			}
+		}
+		(void)closedir(listing);
+	}
+	/* `opened` in the condition as well as `alive`: with both zero this read
+	 * as a pass, which is the shape of vacuity this suite exists to refuse --
+	 * it reported "each has a socket of its own" about no connections at
+	 * all. */
+	check(opened > 0u && alive == opened,
+	    "  and each has a reply socket of its own, none having taken another's name");
+
+	for (at = 0; at < HOW_MANY; at++) {
+		ncfg_supplicant_client_free(held[at]);
+	}
+}
+
 int main(void)
 {
 	const char            *work_dir = testdir_make("supplicant-client");
@@ -1141,6 +1209,7 @@ int main(void)
 		printf("the fake supplicant did not bind its socket\n");
 		return 1;
 	}
+	two_connections_do_not_share_a_reply_socket(ctrl_dir);
 	the_deadline_outlives_the_connect(ctrl_dir);
 	a_signal_is_not_a_supplicant_that_died(ctrl_dir);
 	a_reply_that_fills_the_buffer_is_refused_rather_than_used(ctrl_dir);
