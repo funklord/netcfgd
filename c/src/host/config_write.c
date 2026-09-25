@@ -378,8 +378,14 @@ int ncfg_config_install_drop_in(const char *config_dir, const char *factory_dir,
 		return 0;
 	}
 	free(conf_d);
-	if (!ncfg_config_write_atomically(path, text, strlen(text), 0644u, denied, err,
-	    err_size)) {
+	if (!ncfg_config_write_atomically(path, text, strlen(text), 0644u, denied, said,
+	    sizeof(said))) {
+		/* **The file, then why.** `ncfg_config_write_atomically` reports about
+		 * the DIRECTORY, because that is where an atomic replace fails and
+		 * naming it is what sends a reader to the right mount. On its own that
+		 * leaves an operator who asked to write `thing` reading a sentence
+		 * about `conf.d`, with nothing saying which file was refused. */
+		ncfg_error_set(err, err_size, "could not write %s: %s", path, said);
 		free(previous);
 		free(path);
 		return 0;

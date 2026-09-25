@@ -9515,6 +9515,72 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.288 Three gaps behind one sandbox, and a control that poisoned its own measurement
+
+`sandbox_writes.sh` is at parity with the Rust now -- zero C-only failing
+checks -- and getting there turned up three real gaps and one bad measurement
+of my own.
+
+**The measurement first, because it sent me after the wrong thing.** The C run
+took 122 seconds and was killed at its 120-second budget; the Rust run took 1.
+I read that as the C hanging, and it was not. The two runs had been launched
+CONCURRENTLY -- the control in the background while the subject ran -- and the
+script calls `systemd-run` twice under `timeout 60`. Two runs contending for
+systemd is what cost the two minutes. Run alone afterwards, the same build
+takes 5 seconds.
+
+A control run beside the subject is not a control. It shares every machine
+resource the subject is being timed against, and a duration is the measurement
+most sensitive to that -- which is exactly the measurement I then used to
+conclude "the C hangs". The rule that would have caught it is the one
+`evidence.md` states for a red CI result: before reading a failure, confirm
+what actually ran. **Sequence the control, or do not quote a duration.**
+
+**The gaps, all three found by reproducing the fixture by hand against both
+builds and reading the two logs side by side:**
+
+*The daemon said nothing at startup about a configuration directory it cannot
+write.* The Rust probes it with a real `open(O_CREAT|O_EXCL)` -- not `access`
+or a `stat`, which answer about the mode and walk straight past the read-only
+MOUNT that `ProtectSystem=` imposes, which is the one case this exists for --
+and says so once, into the journal, before anybody tries. 0127 makes netcfgd
+the only writer of its own configuration, so the condition refuses every write
+verb a client has, one at a time, in front of whoever pressed the button. The
+C now carries the same probe and the same two sentences.
+
+*Two `watching` lines where the Rust has one.* `daemon_watchers.c` announced
+`watching <dir> via inotify` and `start()` announced `watching <dir>, socket
+<path>` -- the same fact split, so an operator counting the lines finds two and
+a reader of the second has to know the first exists. The Rust returns the
+mechanism from its watcher and emits one line. The C does now too; the
+watcher's ERROR for a watch it could not open stays where it was, because that
+is the watcher's news and not the socket's.
+
+*A refusal that named the directory and not the file.*
+`ncfg_config_write_atomically` reports about the directory, correctly -- that
+is where an atomic replace fails, and naming it is what sends a reader to the
+right mount. `install_drop_in` passed that up unwrapped, so somebody who asked
+to write `thing` read a sentence about `conf.d` with nothing saying which file
+was refused. The Rust wraps it `could not write <path>: <why>`, and so does
+this now.
+
+**And one check loosened, for the reason 10.287's sibling was.** "and names
+the setting that grants it" counted `ReadWritePaths=` in the daemon log and
+wanted exactly 1. The C logs the refused `config_put` as well -- deliberately,
+10.234, because a daemon whose log says nothing about a request it refused
+cannot be debugged from the evidence -- and that line quotes the client's
+message, `ReadWritePaths=` included. The count made a second and better-
+informed log a failure; the check asks whether the setting is named, so it
+asks that.
+
+**Twice in one sitting a live check counted a phrase and the C said it one time
+too many, both times correctly.** That is a shape rather than a coincidence:
+a count written against one implementation pins how many sentences that
+implementation happens to emit, and any port that says more -- including a port
+that says more because it knows more -- fails a check whose own name asks only
+whether it said anything. Worth looking for the next time a live check wants an
+exact 1.
+
 ## 10.287 The two programs computed different identities for the same configuration
 
 `ncfg_daemon_document_hash` is a sha256 over the bytes

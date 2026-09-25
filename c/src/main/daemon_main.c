@@ -49,10 +49,13 @@
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /*
  * The text, and the six options the parser below has an arm for.
@@ -703,6 +706,59 @@ static const char *rfkill_device_from_environment(void)
 	return set && set[0] ? set : NCFG_RFKILL_DEVICE;
 }
 
+/*
+ * Say at startup that the configuration directory cannot be written.
+ *
+ * **Written to rather than asked about.** `access(2)` and a `stat` answer
+ * about the mode and walk straight past a read-only MOUNT, which is what
+ * `ProtectSystem=` imposes and is the one case this exists for. So the probe
+ * is a real `open` with `O_CREAT | O_EXCL`, removed again immediately.
+ *
+ * Said once here rather than once per write: 0127 makes netcfgd the only
+ * writer of its own configuration, so this condition refuses every write verb
+ * a client has -- one at a time, in front of whoever pressed the button. It is
+ * true from the moment the daemon starts, so that is where it is reported,
+ * into `systemctl status` and the journal, before anybody tries.
+ *
+ * The probe carries this process's pid so two daemons cannot collide, and it
+ * is a dotfile so the config loader would ignore it even if a crash left one
+ * behind (0121).
+ *
+ * Only a refusal is reported. A full disk or a name that already exists is
+ * some other problem, and guessing here would put a sentence about sandboxes
+ * in front of somebody whose disk is full.
+ */
+static void report_writability(const char *config)
+{
+	char probe[NCFG_MAIN_PATH_MAX];
+	int  fd;
+
+	if (!config || config[0] == '\0') {
+		return;
+	}
+	if (snprintf(probe, sizeof(probe), "%s/.netcfgd-write-probe.%ld", config,
+	        (long)getpid()) >= (int)sizeof(probe)) {
+		return;
+	}
+	fd = open(probe, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+	if (fd >= 0) {
+		(void)close(fd);
+		(void)unlink(probe);
+		return;
+	}
+	if (errno != EACCES && errno != EPERM && errno != EROFS) {
+		return;
+	}
+	ncfg_log_emitf("config", NCFG_LOG_ERROR,
+	    "cannot write %s (%s), so no client can store configuration: `ncfg wifi add`, "
+	    "`ncfg config put`, `ncfg secret set`, `ncfg profile save` and the gui's write "
+	    "buttons will all be refused", config, strerror(errno));
+	ncfg_log_emitf("config", NCFG_LOG_ERROR,
+	    "  netcfgd is the only writer of that directory (0127). Under systemd this is "
+	    "`ProtectSystem=`, and the unit has to name the path in `ReadWritePaths=` -- "
+	    "`systemctl cat netcfgd` shows what yours says");
+}
+
 static int start(const options_t *options)
 {
 	ncfg_main_where_t        where;
@@ -956,8 +1012,17 @@ static int start(const options_t *options)
 		    ncfg_cli_principal_render(&policy.remote.agent, rendered, sizeof(rendered)),
 		    policy.remote.observe, policy.remote.wifi, policy.remote.admin);
 	}
-	ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s, socket %s", where.config,
+	/* One line, carrying how the configuration is watched and where the
+	 * daemon can be reached -- the shape the Rust emits. `has_watch` is false
+	 * when the watch could not be opened, which `daemon_watchers.c` has
+	 * already said in its own words; the line still names the directory,
+	 * because what is being watched is true either way. */
+	ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s via %s, socket %s", where.config,
+	    watchers.has_watch
+	        ? ncfg_watch_mechanism_name(ncfg_watch_mechanism(&watchers.watch))
+	        : "nothing",
 	    ncfg_daemon_server_path(local));
+	report_writability(where.config);
 
 	/* Before anything else acts: a window found here was opened by a daemon
 	 * that is no longer running, so nobody can have confirmed it. */

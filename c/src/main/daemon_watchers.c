@@ -578,9 +578,14 @@ int ncfg_main_watchers_open(ncfg_main_watchers_t *watchers, const ncfg_main_watc
 			    "until something else wakes the loop", what->config_dir, message);
 		} else {
 			watchers->has_watch = 1;
-			ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s via %s",
-			    what->config_dir,
-			    ncfg_watch_mechanism_name(ncfg_watch_mechanism(&watchers->watch)));
+			/* **Not announced here**, because the daemon says it once: the
+			 * mechanism and the socket are one fact about how this daemon can
+			 * be reached and changed, and `start()` emits them together as
+			 * the Rust does. Said in both places, an operator counting
+			 * `watching` lines in a log finds two and a reader of the second
+			 * has to know the first exists. The failure above is still said
+			 * here, because a watcher that could not open is this function's
+			 * news and not the socket's. */
 			add(watchers, NCFG_MAIN_SOURCE_CONFIG,
 			    ncfg_watch_descriptor(&watchers->watch), drain_config,
 			    &watchers->watch, what->config_dir);
