@@ -1843,6 +1843,197 @@ static void fifty_events_are_one_observation(const char *base)
 	harness_stop(&harness);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Work the seam hands back, to be done on the waiting thread
+ * ------------------------------------------------------------------------ */
+
+/*
+ * The property is a thread and not a value: a seam that defers runs on the
+ * loop, and the work it hands back runs on the CONNECTION's thread.
+ *
+ * A wifi scan waits ten seconds, and the whole reason for the hand-back is
+ * that those ten seconds are spent where they cost nobody else anything. A
+ * version that ran the work on the loop after all would answer every request
+ * correctly and be exactly as slow as the thing it replaced -- which is why
+ * the check cannot be on the answer. `stream_fixture` records `pthread_self()`
+ * for the same reason and it is the same argument.
+ */
+static int       deferrals;
+static int       deferred_ran;
+static int       deferred_freed;
+static pthread_t deferred_seam_thread;
+static pthread_t deferred_work_thread;
+
+static int deferred_work(void *context, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	(void)out;
+	(void)err;
+	(void)err_size;
+	deferred_ran++;
+	deferred_work_thread = pthread_self();
+	return *(int *)context;
+}
+
+static void deferred_free(void *context)
+{
+	(void)context;
+	deferred_freed++;
+}
+
+static int deferring_answer_fixture(void *context, const ncfg_proto_request_t *request,
+    const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
+    size_t err_size)
+{
+	(void)peer;
+	(void)arrival;
+	(void)out;
+	(void)err;
+	(void)err_size;
+	answers++;
+	answered_kind = request->kind;
+	deferred_seam_thread = pthread_self();
+	if (ncfg_main_answer_after_the_loop(deferred_work, context, deferred_free)) {
+		deferrals++;
+		/* Deliberately the wrong answer, so that a build which ignored the
+		 * hand-back and kept this would be caught by the result check below
+		 * rather than passing on a coincidence. */
+		return 0;
+	}
+	return 1;
+}
+
+static void work_handed_back_runs_on_the_waiting_thread(const char *base)
+{
+	ncfg_main_sources_t      sources;
+	ncfg_main_mailbox_t      mailbox;
+	ncfg_main_run_t          run;
+	ncfg_main_round_report_t report;
+	harness_t                harness;
+	caller_t                 caller;
+	pthread_t                thread;
+	char                     err[NCFG_ERROR_MAX];
+	int                      answer_is = 7;
+	int                      took = 0;
+	int                      at;
+
+	printf("\n-- a seam may hand the waiting back to the thread that is waiting\n");
+	if (!harness_start(&harness, base, "defer")) {
+		check(0, "a daemon state over this test's own directories");
+		harness_stop(&harness);
+		return;
+	}
+	err[0] = '\0';
+	if (!ncfg_main_mailbox_open(&mailbox, deferring_answer_fixture, stream_fixture,
+	        &answer_is, -1, err, sizeof(err))) {
+		check(0, "a mailbox whose seam defers");
+		harness_stop(&harness);
+		return;
+	}
+	ncfg_main_sources_init(&sources);
+	memset(&run, 0, sizeof(run));
+	run.sources = &sources;
+	run.mailbox = &mailbox;
+	run.loop = &harness.loop;
+	run.ticks = fake_ticks;
+
+	answers = 0;
+	deferrals = 0;
+	deferred_ran = 0;
+	deferred_freed = 0;
+	memset(&caller, 0, sizeof(caller));
+	caller.mailbox = &mailbox;
+	caller.request.kind = NCFG_PROTO_REQ_APPLY;
+	if (pthread_create(&thread, NULL, the_connection_thread, &caller) != 0) {
+		check(0, "a thread standing in for a connection");
+		ncfg_main_mailbox_close(&mailbox);
+		harness_stop(&harness);
+		return;
+	}
+	/* Bounded, for the reason every round loop in this file is: a test that
+	 * waited on another thread without one would hang the suite rather than
+	 * fail it. */
+	for (at = 0; at < 2000; at++) {
+		clock_is_expired();
+		err[0] = '\0';
+		if (!ncfg_main_round(&run, &report, err, sizeof(err))) {
+			detail("a round failed", err);
+			break;
+		}
+		if (report.request_count > 0u) {
+			took = 1;
+			break;
+		}
+	}
+	check(took && deferrals == 1, "the seam hands the slow half back");
+	if (!took) {
+		ncfg_main_mailbox_shut(&mailbox);
+	}
+	(void)pthread_join(thread, NULL);
+	check(deferred_ran == 1, "and it is run");
+	check(!pthread_equal(deferred_work_thread, deferred_seam_thread),
+	    "not on the thread the seam ran on, which is the loop's");
+	check(pthread_equal(deferred_work_thread, thread),
+	    "but on the connection's own, which is the whole point of handing it back");
+	check(caller.result == answer_is,
+	    "and the work's result is the request's, not the seam's");
+	check(deferred_freed == 1, "the context is freed exactly once");
+	ncfg_main_mailbox_close(&mailbox);
+	harness_stop(&harness);
+}
+
+/*
+ * And a daemon on its way down frees the work rather than starting it.
+ *
+ * `ncfg_main_mailbox_shut` answers every waiting slot so that no connection
+ * thread is left on the condition. A slot carrying deferred work has to be
+ * answered the same way, and what must not happen is that the waiter wakes,
+ * finds work attached and begins a ten-second wait against a daemon that is
+ * closing. Nothing observable distinguishes the two but the work running, so
+ * that is what is checked.
+ */
+static void shutting_down_frees_the_deferred_work_rather_than_running_it(const char *base)
+{
+	ncfg_main_mailbox_t mailbox;
+	caller_t            caller;
+	pthread_t           thread;
+	char                err[NCFG_ERROR_MAX];
+	int                 answer_is = 7;
+	int                 at;
+
+	printf("\n-- and a daemon going down frees it rather than waiting on it\n");
+	(void)base;
+	err[0] = '\0';
+	if (!ncfg_main_mailbox_open(&mailbox, deferring_answer_fixture, stream_fixture,
+	        &answer_is, -1, err, sizeof(err))) {
+		check(0, "a mailbox whose seam defers");
+		return;
+	}
+	answers = 0;
+	deferrals = 0;
+	deferred_ran = 0;
+	deferred_freed = 0;
+	memset(&caller, 0, sizeof(caller));
+	caller.mailbox = &mailbox;
+	caller.request.kind = NCFG_PROTO_REQ_APPLY;
+	if (pthread_create(&thread, NULL, the_connection_thread, &caller) != 0) {
+		check(0, "a thread standing in for a connection");
+		ncfg_main_mailbox_close(&mailbox);
+		return;
+	}
+	/* Shut without ever running a round, so the seam is never reached and the
+	 * slot is answered by the shutdown. Bounded, and repeated because the
+	 * thread may not have taken its slot yet when the first shut runs. */
+	for (at = 0; at < 2000 && !caller.arrived; at++) {
+		ncfg_main_mailbox_shut(&mailbox);
+	}
+	(void)pthread_join(thread, NULL);
+	check(caller.result == 0 && deferred_ran == 0,
+	    "a slot answered by the shutdown starts no deferred wait");
+	check(deferrals == 0 || deferred_freed == 1,
+	    "and anything the seam had already handed back is freed");
+	ncfg_main_mailbox_close(&mailbox);
+}
+
 /*
  * The reconcile runs before the request is served, and that is the order.
  *
@@ -2406,6 +2597,8 @@ int main(void)
 
 	fifty_events_are_one_observation(base);
 	the_pass_sees_a_waiting_request_before_anything_answers_it(base);
+	work_handed_back_runs_on_the_waiting_thread(base);
+	shutting_down_frees_the_deferred_work_rather_than_running_it(base);
 	a_subscription_crosses_to_the_loops_thread(base);
 	a_request_arriving_ends_the_wait(base);
 	a_mailbox_that_is_shut_or_full_refuses_rather_than_holding_on();
