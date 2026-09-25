@@ -804,9 +804,14 @@ static int stop_access_point(const char *run_dir, const char *device, int patien
 		 * still on the air with its passphrase in memory.
 		 */
 		ok = 0;
+		/* The phrase is `wedged.c`'s and the Rust's, and the path is this
+		 * message's own: one wording for one state across the tree, plus the
+		 * file the operator would go and look at. It said "its control socket
+		 * at %s is there and did not answer", which is the same fact spelled a
+		 * second way in the one program that also spells it the first. */
 		ncfg_error_set(err, err_size,
-		    "could not stop the access point on %s: its control socket at %s is "
-		    "there and did not answer: %s", device, path, detail);
+		    "could not stop the access point on %s: it is running and did not answer "
+		    "its control socket at %s: %s", device, path, detail);
 	}
 
 	if (ncfg_hostapd_config_path(run_dir, device, path, sizeof(path), detail, sizeof(detail))) {
