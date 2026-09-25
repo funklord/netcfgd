@@ -1024,6 +1024,33 @@ static int start(const options_t *options)
 	    ncfg_daemon_server_path(local));
 	report_writability(where.config);
 
+	/*
+	 * **Observe once before anything reads the state**, which the Rust does
+	 * inside `State::new` -- reload and reobserve together, so no caller ever
+	 * meets a state that has a configuration and no machine.
+	 *
+	 * This did not, and the cost was the case commit-confirm exists for at
+	 * its worst. A daemon that died inside a window restarted, found the
+	 * window, announced the revert, and then refused it: "nothing has been
+	 * observed of this machine, so the plan back to the last-good
+	 * configuration did not run". The planner is right to refuse -- a revert
+	 * with no observation is a plan against a machine nobody has looked at --
+	 * so the fix is the observation, not the refusal. The change stayed live
+	 * with no process left that could take it back, which is exactly what
+	 * `apply --confirm-within` promises will not happen.
+	 *
+	 * A failure here is not fatal: the loop observes on its own first pass,
+	 * and a daemon that cannot see the machine at startup has worse news to
+	 * give than this. It is said, because the two callers below quietly do
+	 * less without it.
+	 */
+	err[0] = '\0';
+	if (!ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err))) {
+		ncfg_log_emitf("observe", NCFG_LOG_WARNING,
+		    "the machine could not be observed at startup (%s), so a confirm window "
+		    "found here cannot be reverted until the first pass of the loop", err);
+	}
+
 	/* Before anything else acts: a window found here was opened by a daemon
 	 * that is no longer running, so nobody can have confirmed it. */
 	reverted = resolve_any_window(&world, &state, loop.armed, &subscribers);

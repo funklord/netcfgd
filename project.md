@@ -9515,6 +9515,50 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.289 The revert that announced itself and did not run
+
+`confirm.sh` passes end to end against the C port now. Three of its checks
+were failing and all three were one gap.
+
+The case is commit-confirm's own worst one: the operator applied something,
+the machine went away before they could confirm, and what comes back has to
+undo it with no help from the process that applied it. The C found the window
+and said so -- and then refused:
+
+    [confirm] !: a confirm window was open when this daemon started
+    [confirm] !: reverting to 261d783b215d (the daemon restarted inside the window)
+    [confirm] Error: revert: nothing has been observed of this machine, so the
+              plan back to the last-good configuration did not run
+
+**The planner is right and the caller was wrong.** A revert with no
+observation is a plan against a machine nobody has looked at, so refusing is
+correct; what was missing is the look. The Rust's `State::new` does `reload()`
+and `reobserve()` together, so no caller can ever meet a state that has a
+configuration and no machine. The C reloaded at startup and left the first
+observation to the loop's first pass -- which happens after the window is
+resolved.
+
+So the change stayed live, with no process left anywhere that could take it
+back. That is precisely the promise `apply --confirm-within` makes.
+
+**What makes this one worth reading twice is the shape of the symptom.** Two
+of the three checks the operator would look at were green: the daemon FOUND
+the window and the daemon SAID why. Only the third -- is the address still on
+the interface -- disagreed, and a log read on its own says the revert
+happened. An announcement is not an outcome, and this daemon printed the
+announcement before doing the work rather than after.
+
+Fixed by observing once before anything reads the state, with the failure
+reported rather than fatal: the loop observes on its own first pass anyway,
+and a daemon that cannot see the machine at startup has worse news to give
+than this one. It is said out loud because the two callers after it quietly do
+less without it -- which is the whole defect, one line up.
+
+**Evidence is the before-and-after on one change rather than a sabotage.** The
+same script, the same build but for this, run twice: three checks red, then
+forty-nine green. A synthetic sabotage would have told me less, because the
+run without the fix IS the sabotage and it was the one I started from.
+
 ## 10.288 Three gaps behind one sandbox, and a control that poisoned its own measurement
 
 `sandbox_writes.sh` is at parity with the Rust now -- zero C-only failing
