@@ -120,6 +120,30 @@ typedef struct {
  */
 void ncfg_json_write_init(ncfg_json_writer_t *writer, ncfg_buf_t *buf);
 
+/*
+ * Re-indent finished compact JSON, in `serde_json::to_string_pretty`'s shape.
+ *
+ * **A second pass over the bytes rather than a mode on the writer**, and that
+ * is the whole design. Every writer here is compact by construction, the
+ * frozen witnesses in `doc/schema/` are compared against compact output, and
+ * the control socket sends compact -- so a mode would put a branch in each of
+ * those places to serve one that is none of them. This serves exactly the
+ * human boundary: `ncfg <verb> --json` on a terminal.
+ *
+ * The shape is serde's, because a script written against the Rust's output has
+ * to keep working: two spaces per level, `": "` between a key and its value,
+ * one array element or object member per line, and an empty array or object
+ * written `[]` or `{}` on the line it started. Strings are copied through
+ * without being re-escaped, escapes and all, so this cannot change a value.
+ *
+ * 0 where the input is not the compact JSON this writer produces -- an
+ * unterminated string, brackets that do not balance -- and `out` is then not
+ * to be printed. A caller with nothing better to do may print the compact form
+ * instead, which is what `ncfg` does: a document the operator asked for is
+ * worth more badly laid out than not at all.
+ */
+int ncfg_json_pretty(const char *compact, ncfg_buf_t *out);
+
 /* Containers. Each end must match the begin that is open, or it is a misuse. */
 void ncfg_json_write_object_begin(ncfg_json_writer_t *writer);
 void ncfg_json_write_object_end(ncfg_json_writer_t *writer);

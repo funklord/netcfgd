@@ -9515,6 +9515,84 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.275 The compact convention met the terminal, and a proof that compared two empty files
+
+`nat.sh` had four failures. Every value in the C's answer was correct and the
+whitespace around it was not.
+
+`uplinks()` reads the masqueraded interfaces out of `ncfg status --json` with
+
+    sed -n '/"nat": \[/,/\]/p'
+
+which needs a space after the colon and a newline per element. The Rust prints
+every `--json` verb through `serde_json::to_string_pretty`; this port writes
+compact everywhere, so the block was not there to find and the helper returned
+the empty string on all four calls. Measured directly: for the same
+configuration both programs answer `nat = ["wan0"]`.
+
+### Where the convention was right and where it had never been asked
+
+`plan.h` calls compact "the port's convention" and it is right about what it is
+about: the control socket, the files under `/run`, and the frozen witnesses in
+`doc/schema/` that are compared against compact bytes. None of those is
+somebody at a terminal, and `project.md` has said "JSON for humans and `/run`
+introspection" since the beginning.
+
+So `ncfg_cli_out_json` lays the document out at the one boundary that is a
+person -- **a second pass over the finished bytes rather than a mode on the
+writer**, which leaves every writer, every witness and the wire untouched and
+puts the whole change in one function and four call sites.
+
+**Which verbs get it is decided by whether the Rust prints JSON for them at
+all**, and that rule had to be discovered rather than assumed. `status`,
+`plan`, `apply` and `explain` are printed by both, so they match. `wifi`,
+`modem`, `control`, `profile`, `secret`, `reset` and the bare `ok` are the
+other kind: the Rust **ignores `--json` for them** and prints its text table,
+so there is no shape to match and this port chose one object on one line for
+`jq`. An earlier version of this laid out everything and took 56 checks in
+`cli_test.c` red -- each of them asserting that line, which is how the
+distinction was found.
+
+### `show --json` is left compact, and is the copyright holder's to settle
+
+It is the one verb where three of this project's own documents agree with each
+other and disagree with the Rust. `cli_test.c` asserts `ncfg show` prints one
+object on one line; `plan.h` records compact as the convention; `agree_gate.py`
+says in as many words that "the Rust prints this one indented and the C prints
+it compact" and compares the two as values because of it. The Rust
+pretty-prints it.
+
+Laying it out would make those three wrong at once, and `nat.sh` does not read
+that verb -- so it is recorded here rather than decided while fixing a live
+script. **The question: should `ncfg show --json` match the Rust byte for
+byte, at the cost of the one-line rule those three documents carry?** What
+makes it more than a preference is 0263: a module replaces its Rust half only
+once it passes the Rust's own tests, and the Rust's own tests read this output
+with `sed`.
+
+### The proof that proved nothing
+
+The first evidence offered for the layout being right was that the C's
+`show --json` came out byte-identical to the Rust's on a hand-written
+configuration. **Both files were zero bytes.** The fixture used a `bridge { }`
+block spelling neither program compiles, stderr was sent to `/dev/null`, and
+`diff` was given two empty files and agreed with itself.
+
+It is this document's own rule met from the inside: a passing check is not
+evidence until you know it checked something. What replaced it compares the
+agree gate's own corpus -- four configurations both programs do compile -- and
+**exits non-zero if either side prints nothing**, because an empty comparison
+is exactly what the first version could not tell from a match. Four of four
+byte-identical, 623 to 2307 bytes each.
+
+The layout's own test carries the same shape from the other side: seven
+`(compact, laid out)` pairs taken from what the Rust actually prints rather
+than from the crate's documentation, because the two rules that matter are the
+ones a reading misses -- an empty container stays on its opener's line, and a
+string is a value that consumes the opener's pending break. The first
+implementation got both wrong and put every object's first key on the brace's
+line. Sabotaged, six of the seven go red.
+
 ## 10.274 One rule written in one of five places, and the round it silently cancelled
 
 `wedged.sh` had six failures and passes on one change.
