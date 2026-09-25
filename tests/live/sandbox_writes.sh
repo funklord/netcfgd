@@ -321,8 +321,16 @@ check "and that there was nobody to ask instead" \
 # anybody tries. Reported from an install that met it the other way round.
 check "the daemon says at startup that it cannot write its configuration" \
 	"$(grep -c 'so no client can store configuration' "$work/daemon5.log" || true)" "1"
+# Presence, not a count, and for the same reason the `no record` check in
+# acl.sh is: one is how many such lines a particular implementation emits, and
+# this check's name asks whether the setting is named at all. The C port also
+# logs the refused `config_put` itself -- deliberately, because a daemon whose
+# log says nothing about a request it refused cannot be debugged from the
+# evidence -- and that line quotes the client's message, `ReadWritePaths=`
+# included. Counting made a second, better-informed log a failure.
 check "and names the setting that grants it" \
-	"$(grep -c 'ReadWritePaths=' "$work/daemon5.log" || true)" "1"
+	"$([ "$(grep -c 'ReadWritePaths=' "$work/daemon5.log" || true)" -gt 0 ] && echo named || echo silent)" \
+	"named"
 
 # The control, and it is the half that decides whether the check above means
 # anything: a warning printed unconditionally would pass that grep on every
