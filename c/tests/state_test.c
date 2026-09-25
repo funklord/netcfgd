@@ -661,11 +661,11 @@ static void the_desired_document_and_its_projections(const char *run_dir)
 	/* `cat /run/netcfgd/desired/eth0.json` answers a question about one
 	 * interface without a reader having to find it inside the whole file --
 	 * and the slice is proved to be that interface before it is written. */
-	check(one && strstr(one, "\"name\":\"eth0\"") && !strstr(one, "wlan0"),
+	check(one && strstr(one, "\"name\": \"eth0\"") && !strstr(one, "wlan0"),
 	    "each interface has a file of its own, carrying itself and nothing else");
 	free(one);
 	one = testdir_read(join(desired_dir, "wlan0.json"), &length);
-	check(one && strstr(one, "\"name\":\"wlan0\"") && !strstr(one, "eth0"),
+	check(one && strstr(one, "\"name\": \"wlan0\"") && !strstr(one, "eth0"),
 	    "for every interface, not only the first");
 	free(one);
 
@@ -743,14 +743,14 @@ static void the_observation_is_written_whole(const char *run_dir)
 	 * belonging to the other link. A projection that carried the whole-host
 	 * lists would be the file it exists to save a reader from.
 	 */
-	check(one && strstr(one, "\"link\":{\"name\":\"eth0\"") != NULL &&
+	check(one && strstr(one, "\"link\": {\n    \"name\": \"eth0\"") != NULL &&
 	        strstr(one, "10.0.0.1/24") != NULL && strstr(one, "10.0.0.254") != NULL,
 	    "each link has a file carrying itself, its addresses and its routes");
 	check(one && strstr(one, "wlan0") == NULL && strstr(one, "10.9.9.9") == NULL,
 	    "  and nothing belonging to another link");
 	free(one);
 	one = testdir_read(join(observed_dir, "wlan0.json"), NULL);
-	check(one && strstr(one, "10.9.9.9/24") != NULL && strstr(one, "\"routes\":[]") != NULL,
+	check(one && strstr(one, "10.9.9.9/24") != NULL && strstr(one, "\"routes\": []") != NULL,
 	    "for every link, and a link with no routes says so with an empty list");
 	free(one);
 	check(!testdir_exists(stale),

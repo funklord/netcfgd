@@ -2463,10 +2463,34 @@ int ncfg_document_write(const ncfg_document_t *document, ncfg_buf_t *buf, char *
 	return 1;
 }
 
+/*
+ * THE CANONICAL ENCODING IS LAID OUT, AND THAT IS NOT A PRESENTATION CHOICE.
+ *
+ * `ncfg_daemon_document_hash` is a sha256 over exactly these bytes, and the
+ * hash is a document's identity -- what `confirm` compares to tell "the same
+ * configuration" from "a different one", what a revert names, and what
+ * survives in `/run` across a restart. So the layout is part of the wire
+ * format rather than a matter of taste, and a program that writes the same
+ * document differently computes a different identity for it.
+ *
+ * The Rust's `to_json_canonical` is `serde_json::to_string_pretty`. This wrote
+ * compact, so the two programs disagreed about the identity of every
+ * configuration -- measured on the same one-interface config, the same parsed
+ * content and the same key order, differing only in whitespace, and therefore
+ * in every hash taken over it. A C daemon taking over from the Rust one would
+ * have read the confirm window's `document` and found it did not match the
+ * configuration it had just compiled from the same file.
+ *
+ * Written compact and laid out afterwards rather than by a second writer,
+ * which is what keeps one encoder authoritative about the content: the layout
+ * pass moves whitespace and cannot move a field.
+ */
 int ncfg_document_write_canonical(ncfg_document_t *document, ncfg_buf_t *buf, char *err,
     size_t err_size)
 {
-	if (!document) {
+	ncfg_buf_t compact;
+
+	if (!document || !buf) {
 		ncfg_error_set(err, err_size, "no document to write");
 		return 0;
 	}
@@ -2474,5 +2498,16 @@ int ncfg_document_write_canonical(ncfg_document_t *document, ncfg_buf_t *buf, ch
 	if (!ncfg_document_validate(document, err, err_size)) {
 		return 0;
 	}
-	return ncfg_document_write(document, buf, err, err_size);
+	ncfg_buf_init(&compact, 0);
+	if (!ncfg_document_write(document, &compact, err, err_size)) {
+		ncfg_buf_free(&compact);
+		return 0;
+	}
+	if (!ncfg_json_pretty(ncfg_buf_text(&compact), buf)) {
+		ncfg_error_set(err, err_size, "the document could not be laid out");
+		ncfg_buf_free(&compact);
+		return 0;
+	}
+	ncfg_buf_free(&compact);
+	return 1;
 }

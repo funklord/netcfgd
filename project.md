@@ -9515,6 +9515,73 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.287 The two programs computed different identities for the same configuration
+
+`ncfg_daemon_document_hash` is a sha256 over the bytes
+`ncfg_document_write_canonical` produces, and that hash is what tells "the
+same configuration" from "a different one" -- what `confirm` compares before
+it arms, what a revert names, and what sits in `/run` across a restart. The
+Rust's `to_json_canonical` is `serde_json::to_string_pretty`. The C's wrote
+compact.
+
+So **every configuration had two identities, one per program**, and a C daemon
+taking over from the Rust one would have read the confirm window's `document`,
+compiled the same file, and concluded the configuration had changed.
+
+Measured on the same one-interface config before the fix, by running each
+daemon under `unshare -rn` against one `netcfgd.conf` and comparing
+`/run/netcfgd/desired.json`:
+
+    same parsed content:   True
+    same key order:        True    (c re-indented == rust, byte for byte)
+    differing:             whitespace only
+    and therefore:         a different sha256 for every configuration
+
+After: 907 bytes each, `cmp` silent,
+`e534d3b6de07116f0573e9e02e659cc7e9db340ac7aedc3eda108644912d2e52` from both.
+The content had agreed all along -- what disagreed was the one thing the hash
+covers and nobody was comparing.
+
+**It is not a presentation choice, which is why the layout lives inside the
+canonical writer rather than at the terminal.** `ncfg show` prints canonical
+text, so it changed with it, and that settles 10.275 the same way: the Rust's
+`ncfg show` is indented, so the question of compact-versus-indented was never
+open, only unmeasured. The `cli_test` check asserting **one line** was
+asserting the opposite of the reference implementation.
+
+**Written compact and laid out afterwards, rather than by a second writer.**
+One encoder stays authoritative about the content and the layout pass moves
+whitespace, so this cannot become a second place for a member to be added or
+skipped. `ncfg_json_pretty` was already there for `show --json`.
+
+The same treatment went to every other JSON file under `/run`, because the
+Rust writes all of them with `to_string_pretty` and an operator running `cat`
+should not be able to tell which program wrote the file:
+`ncfg_observed_write_canonical` lays itself out for symmetry (no hash rides on
+it -- the argument there is only the reader's), and `owned.json`,
+`provenance.json` and the per-link observed projections go through a new
+`ncfg_write_json_atomically`, which refuses a text that will not lay out
+rather than writing it flat.
+
+Proved end to end rather than by reading: both daemons run on one config,
+`observed.json` **byte-identical at 5654 bytes**, and the `desired/`
+projections likewise -- the Rust builds those from `&Interface` directly, so
+they keep struct order and the C's slices of the canonical text match them.
+
+**One divergence is left, deliberately.** The Rust's per-link *observed*
+projections pass through `serde_json::json!`, whose `Map` is a `BTreeMap`, so
+their keys come out alphabetical where every other file's are in struct
+order. That ordering is an artifact of how that one function happens to build
+its value rather than a decision anybody took, no hash rides on it, and no
+check reads it -- so the C lays those files out and leaves them in model
+order. Recorded because the next person to diff the two trees will find it.
+
+**What it took to prove the layout check could fail.** The first sabotage did
+not compile, `make` left the previous test binary in place, and the check
+reported `ok` -- the stale-binary trap of 10.2xx met for the fourth time this
+port. A sabotage that does not build is not a sabotage; the binary's mtime is
+the cheapest thing to look at before believing either colour.
+
 ## 10.286 A counter that was not atomic, in a daemon that is threaded
 
 Comparing the two programs **by script** hid this, and comparing them by

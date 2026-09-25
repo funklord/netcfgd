@@ -826,7 +826,7 @@ int main(int argc, char **argv)
 		check(observed != NULL, "an empty observation can be built");
 		if (observed) {
 			ncfg_buf_init(&buf, 0);
-			check(ncfg_observed_write_canonical(observed, &buf, message, sizeof(message)) &&
+			check(ncfg_observed_write(observed, &buf, message, sizeof(message)) &&
 			    strcmp(ncfg_buf_text(&buf),
 			    "{\"links\":[],\"addresses\":[],\"routes\":[],\"backends\":[],\"dns\":[],"
 			    "\"rules\":[],\"bridge_vlans\":[],\"delegations\":[],\"reports\":[],"
@@ -835,6 +835,17 @@ int main(int argc, char **argv)
 			    "\"forwarding_applied\":[],\"nat\":[],\"nat_conflicts\":[],"
 			    "\"hook_state\":[],\"address_proto_supported\":false}") == 0,
 			    "and writes exactly the members the Rust does not skip");
+			/* The canonical form is that same content laid out, which is what
+			 * `/run/netcfgd/observed.json` holds and what the Rust writes
+			 * there. Asserted against the compact text above rather than
+			 * against a second copy of the member list: one list, checked
+			 * once, and the layout checked as a layout. */
+			ncfg_buf_free(&buf);
+			ncfg_buf_init(&buf, 0);
+			check(ncfg_observed_write_canonical(observed, &buf, message,
+			    sizeof(message)) &&
+			    strncmp(ncfg_buf_text(&buf), "{\n  \"links\": [],\n", 17) == 0,
+			    "and the canonical form is that, laid out");
 			ncfg_buf_free(&buf);
 
 			/*
