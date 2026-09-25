@@ -350,6 +350,54 @@ static int serve_monitor(ncfg_daemon_server_t *server, int fd)
  * not end it**: a refusal is an answer, and a client that asked for something
  * beyond its tier is entitled to ask for something else.
  */
+/*
+ * THE LOCK A SEAM MAY PUT DOWN, AND THE ONE CASE IT IS FOR.
+ *
+ * `ncfg_daemon_answer_fn`'s contract says an implementation must not block on
+ * anything but its own work. A wifi scan does: it waits up to ten seconds for
+ * the supplicant to announce results.
+ *
+ * **There are two serialisers between a client and an answer, and both have to
+ * go for a wait to cost nobody else anything.** This one is the first: the
+ * answer runs under it, so a second connection's request is not even read
+ * while the first is being answered. The second is netcfgd's own mailbox,
+ * which hands every request to the reconcile loop's thread -- `loop_internal.h`
+ * says what it does about it. Removing either alone changes nothing
+ * measurable, which is how the first attempt at this was read as a fix that
+ * had not worked.
+ *
+ * **The caller owes the snapshot.** Nothing the answering seam reached through
+ * its context may be touched between the two calls; whoever parks copies what
+ * it still needs first. That is the same bargain the Rust's clone makes when
+ * it spawns a thread, and it is the part nothing here can enforce.
+ *
+ * Thread-local, because the lock is held by exactly this thread for exactly
+ * the length of the call. It is therefore NULL on any other thread -- notably
+ * the loop's, which is where netcfgd's seam actually runs -- and `park`
+ * answering 0 there is correct rather than a failure: the work has not reached
+ * the thread that holds this lock yet.
+ *
+ * `ncfg_daemon_server_stop` takes and releases this lock rather than holding
+ * it across its joins, so a parked thread can always take it back and finish.
+ */
+static _Thread_local ncfg_daemon_server_t *answering;
+
+int ncfg_daemon_answer_park(void)
+{
+	if (!answering) {
+		return 0;
+	}
+	pthread_mutex_unlock(&answering->lock);
+	return 1;
+}
+
+void ncfg_daemon_answer_resume(void)
+{
+	if (answering) {
+		pthread_mutex_lock(&answering->lock);
+	}
+}
+
 static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *peer,
     const ncfg_proto_request_t *request)
 {
@@ -409,9 +457,11 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 		return 1;
 	}
 	pthread_mutex_lock(&server->lock);
+	answering = server;
 	built = server->answer
 	    ? server->answer(server->context, request, peer, server->arrival, &line, err, sizeof(err))
 	    : 0;
+	answering = NULL;
 	pthread_mutex_unlock(&server->lock);
 	if (!built) {
 		/*

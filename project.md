@@ -9515,6 +9515,93 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.290 Two serialisers, and removing either one changed nothing a clock could see
+
+A wifi scan waits up to ten seconds for the supplicant to announce results.
+`tests/live/wifi_trouble.sh` asks for `wifi status` on an unrelated interface
+while a silent scan is out and measured it **queued for nine seconds**. That
+check is the last one in the eight-script gap set that the Rust passed and the
+C did not, and it took three attempts because the daemon has **two** things
+serialising a request and each of them alone accounts for the whole nine
+seconds.
+
+    server.c    holds its own mutex across `server->answer`, so a second
+                connection's request is not read while the first is answered
+    the mailbox hands every request to the reconcile loop's thread, so an
+                answer that waits is a loop that is not looping
+
+**Removing either alone measures identically to removing neither**, which is
+the part worth carrying. The first attempt put a park/resume pair in
+`server.c` and the check still said nine seconds; the second moved the wait
+off the loop and it still said nine seconds. Neither run was evidence that the
+change had not worked -- both were evidence that something else was also
+holding, and there was no way to tell those apart from the outside. What
+separated them was a probe printing whether the hand-off had been accepted:
+`handed=1` with the clock unchanged is a fact no timing could have given.
+
+**Where each half lives.** The snapshot and the decision stay on the loop,
+where everything else is. The wait is handed back through a new
+`ncfg_main_answer_after_the_loop` and runs in `wait_for_the_loop`, on the
+connection's own thread -- which is where `server.c` already argues blocking
+belongs, one thread per connection so a client that waits waits alone -- and
+the server's lock is put down around it.
+
+**No new thread, which is where this departs from the Rust and is better for
+it.** The Rust's loop spawns one and clones the document into it because the
+thread outlives the borrow. Here the waiting thread already exists and already
+owns `out` and `err`, so there is no lifetime question to answer and nothing
+to join on the way down. A slot answered by `ncfg_main_mailbox_shut` leaves
+`after_ready` clear, so a daemon going down frees the snapshot instead of
+starting a ten-second wait.
+
+**The snapshot is still owed, and it is the same bargain.** Between the
+hand-back and the work, nothing may point into `desk->state`: the reconcile
+loop frees and replaces the observation every tick. So `ncfg_wifi_scan` now
+takes the one rfkill switch rather than the whole observation -- a parameter
+that cannot be held across the wait is a parameter it must not have -- and the
+document is copied by writing it and reading it back. A copy that cannot be
+made is not a reason to refuse the scan; it is a reason not to defer, and the
+scan runs where it always did.
+
+### The thirteen failures that were not mine
+
+Mid-way through, the same script went from 2 failures to 15 -- the daemon not
+attaching to the event socket, netlink answering `ENOTSOCK`, a hot loop
+reporting a burst that never ended. It looked like a memory fault in exactly
+the code I had just written, which is the most expensive shape of wrong
+explanation there is.
+
+**`c/Makefile` has no header dependencies.** I had changed
+`ncfg_main_waiting_t` in `loop_internal.h` -- a struct embedded in the mailbox
+which is embedded in the daemon's own frame -- and run a plain `make`. Half
+the tree was compiled against the old layout and half against the new, so
+every descriptor the mailbox owned was read at the wrong offset.
+
+Two things made it legible rather than a day's hunt. The controlled
+comparison: stash the change, rebuild, re-run -- 2 failures -- restore,
+rebuild, re-run -- 15. That is not a theory about a memory fault, it is a fact
+about one change. And the trap is already written down in this project, met
+for the fourth time in this port. **A rule you have written down and walked
+into anyway is one whose trigger is wrong, not one whose text is wrong**: the
+text says "after editing a header, `make clean`", and the moment it needs to
+fire is not when I edit a header, it is when a rebuild is *quick*. A `make`
+that relinks in two seconds after a struct changed is the signal.
+
+### And a supplicant of my own, left running
+
+The 15-failure run was first blamed on interference, and checking for that
+turned up an orphaned `fake_supplicant.py` holding a scratch directory from my
+own debugging -- a copy of a live script whose cleanup I had neutered to keep
+its work directory, and which killed the daemon but not the fake. Nine minutes
+old, 11 MB, nothing to reap it. `running-code.md` asks for exactly that sweep
+after a run and it found exactly what it exists to find, on the one run where
+I had edited the cleanup out.
+
+It was not the cause -- the stale objects were -- but the check was right to
+run and wrong to stop at. **An orphan found is not an explanation earned**:
+the comfortable answer was there and the controlled comparison is what
+actually settled it.
+
 ## 10.289 The revert that announced itself and did not run
 
 `confirm.sh` passes end to end against the C port now. Three of its checks

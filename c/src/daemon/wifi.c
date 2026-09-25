@@ -107,7 +107,7 @@ static const ncfg_observed_link_t *link_named(const ncfg_observed_t *observed,
  * two paths answering the same question are two paths that can disagree, and
  * this one is the reconciled view.
  */
-static const ncfg_observed_rfkill_t *blocked_switch(const ncfg_observed_t *observed,
+const ncfg_observed_rfkill_t *ncfg_wifi_blocked_switch(const ncfg_observed_t *observed,
     const char *interface)
 {
 	const ncfg_observed_link_t *link = link_named(observed, interface);
@@ -773,11 +773,10 @@ static int scan_report(const ncfg_document_t *document, ncfg_supplicant_client_t
 }
 
 int ncfg_wifi_scan(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
-    const ncfg_observed_t *observed, const char *interface, ncfg_buf_t *out, char *err,
-    size_t err_size)
+    const ncfg_observed_rfkill_t *switched_off, const char *interface, ncfg_buf_t *out,
+    char *err, size_t err_size)
 {
 	ncfg_supplicant_client_t     *client;
-	const ncfg_observed_rfkill_t *switched_off;
 	char                          body[NCFG_SUPPLICANT_REPLY_MAX];
 	char                          stale[NCFG_ERROR_MAX];
 	char                          why[NCFG_ERROR_MAX];
@@ -802,7 +801,6 @@ int ncfg_wifi_scan(const ncfg_wifi_where_t *where, const ncfg_document_t *docume
 		}
 		return 0;
 	}
-	switched_off = blocked_switch(observed, interface);
 	if (switched_off) {
 		/*
 		 * **A switched-off radio cannot scan, so do not ask it to.** Without
@@ -985,7 +983,7 @@ int ncfg_wifi_status(const ncfg_wifi_where_t *where, const ncfg_document_t *docu
 	}
 	state = ncfg_supplicant_status_field(pairs, count, "wpa_state");
 	bssid = ncfg_supplicant_status_field(pairs, count, "bssid");
-	switched_off = blocked_switch(observed, interface);
+	switched_off = ncfg_wifi_blocked_switch(observed, interface);
 
 	ncfg_json_write_init(&writer, out);
 	ncfg_json_write_object_begin(&writer);

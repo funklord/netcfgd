@@ -769,6 +769,26 @@ ncfg_daemon_server_t *ncfg_daemon_serve(const ncfg_daemon_serve_t *how, char *er
     size_t err_size);
 
 /*
+ * Put this server's lock down for the length of a wait, and pick it up again.
+ *
+ * `ncfg_daemon_answer_fn` says an implementation must not block on anything
+ * but its own work. A wifi scan does, and under this lock a second connection
+ * is not even read while the first is being answered.
+ *
+ * **The caller owes the snapshot, and nothing enforces it.** Between the park
+ * and the resume, nothing the seam reached through its context may be touched.
+ *
+ * `park` answers whether the lock was actually held. It is 0 on any thread but
+ * the one inside an answer -- a test driving the seam directly, or netcfgd's
+ * own dispatcher, which runs on the reconcile loop's thread and reaches this
+ * only once the work has been handed back to the waiting connection. `resume`
+ * is a no-op in that case. Always pair them.
+ */
+int  ncfg_daemon_answer_park(void);
+void ncfg_daemon_answer_resume(void);
+
+
+/*
  * Stop accepting, end every connection, join every thread, unlink the socket.
  *
  * **It leaves nothing behind**, which is a requirement rather than a courtesy:
@@ -1964,10 +1984,29 @@ int ncfg_wifi_set_radio(ncfg_daemon_state_t *state, const char *interface, int a
  * not scan (ret=-100)" -- a translation of ENETDOWN rather than the fact that
  * somebody pressed the button. The cached results are still returned, because
  * they are what the radio last saw.
+ *
+ * **It takes the one switch rather than the whole observation, and that is
+ * not tidying.** This waits, so netcfgd answers it away from the thread that
+ * holds the daemon's state -- and once that is so, the observation may be
+ * freed and replaced under it by the reconcile loop's next tick. A parameter
+ * that cannot be held across the wait is a parameter this function must not
+ * have. `switched_off` is copied by its caller and outlives the call; NULL
+ * means the radio is not blocked. The Rust's `wifi::scan` takes the same two,
+ * for the same reason, and clones them into the thread it spawns.
  */
 int ncfg_wifi_scan(const ncfg_wifi_where_t *where, const ncfg_document_t *document,
-    const ncfg_observed_t *observed, const char *interface, ncfg_buf_t *out, char *err,
-    size_t err_size);
+    const ncfg_observed_rfkill_t *switched_off, const char *interface, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
+/*
+ * Which switch, if any, is holding this interface's radio off.
+ *
+ * Split out so a caller that is about to park the server's lock can take its
+ * own copy of the answer before the observation it points into goes away. The
+ * pointer is borrowed from `observed` and is only valid while that is.
+ */
+const ncfg_observed_rfkill_t *ncfg_wifi_blocked_switch(const ncfg_observed_t *observed,
+    const char *interface);
 
 /*
  * `STATUS`, resolved back to the document where possible.

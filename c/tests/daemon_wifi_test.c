@@ -992,7 +992,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 
 	printf("\n-- 0194: a scan is two things, and the results say when they are old\n");
 	ncfg_buf_init(&out, 0);
-	check(ncfg_wifi_scan(&where, document, observed, "wlan0", &out, err, sizeof(err)),
+	check(ncfg_wifi_scan(&where, document, ncfg_wifi_blocked_switch(observed, "wlan0"), "wlan0", &out, err, sizeof(err)),
 	    "a scan comes back");
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
@@ -1028,7 +1028,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 	 */
 	ncfg_buf_init(&out, 0);
 	check(tell_fake(ctrl_dir, "wlan0", "FAIL_NEXT_SCAN -16"), "the radio is told to refuse");
-	check(ncfg_wifi_scan(&where, document, observed, "wlan0", &out, err, sizeof(err)),
+	check(ncfg_wifi_scan(&where, document, ncfg_wifi_blocked_switch(observed, "wlan0"), "wlan0", &out, err, sizeof(err)),
 	    "a scan that did not finish still answers");
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
@@ -1047,7 +1047,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 	 */
 	ncfg_buf_init(&out, 0);
 	mark = log_mark();
-	check(ncfg_wifi_scan(&where, document, off, "wlan0", &out, err, sizeof(err)),
+	check(ncfg_wifi_scan(&where, document, ncfg_wifi_blocked_switch(off, "wlan0"), "wlan0", &out, err, sizeof(err)),
 	    "a switched-off radio still answers with what it last saw");
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;

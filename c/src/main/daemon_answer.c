@@ -43,6 +43,7 @@
 #include "ncfg/log.h"
 #include "ncfg/secrets.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -658,6 +659,113 @@ static int answer_radio_set(ncfg_main_desk_t *desk, const ncfg_proto_radio_set_t
 	    start_the_supplicant, desk->loop, out, err, err_size);
 }
 
+/*
+ * A scan, split at the wait.
+ *
+ * **Ten seconds is what this can take**, waiting for the supplicant to
+ * announce results, and everything a request means runs on the loop's thread.
+ * Under that arrangement a scan of a radio with nothing to look at stops the
+ * whole daemon: `tests/live/wifi_trouble.sh` asks for `wifi status` on an
+ * unrelated interface while a silent scan is out and measured it queued for
+ * nine seconds. 0111 is the record of what a blocking wait costs here, and its
+ * answer was to stop waiting in the loop rather than to wait faster.
+ *
+ * So the half that needs the daemon's state runs here, on the loop, as
+ * everything else does: read the switch, copy the document. The half that only
+ * needs the copies is handed back to the connection's own thread, where
+ * `server.c` already argues blocking belongs.
+ *
+ * **The copies are the price and they are the Rust's.** Its loop clones the
+ * document into the thread it spawns, and clones the one rfkill switch beside
+ * it, because the thread outlives the borrow. Here the borrow ends when this
+ * function returns -- the reconcile loop frees and replaces the observation on
+ * every tick and may replace the document on a reload -- so nothing the
+ * deferred half touches may point into `desk`. The document is copied by
+ * writing it and reading it back, which `document.h` says reproduces one; that
+ * is a serialise and a parse against a ten-second wait.
+ *
+ * **A copy that cannot be made is not a reason to refuse the scan.** It is a
+ * reason not to defer: the scan runs here, exactly as it did before, and the
+ * only thing lost is that the daemon is busy while it does. The same is true
+ * when there is no slot to defer into, which is what a test driving the seam
+ * directly looks like.
+ */
+typedef struct {
+	const ncfg_wifi_where_t *where;
+	ncfg_document_t         *document;
+	ncfg_observed_rfkill_t   switched_off;
+	int                      blocked;
+	char                     interface[NAME_MAX_BYTES];
+} scan_snapshot_t;
+
+static int scan_with_the_snapshot(void *context, ncfg_buf_t *out, char *err, size_t err_size)
+{
+	scan_snapshot_t *taken = context;
+
+	return ncfg_wifi_scan(taken->where, taken->document,
+	    taken->blocked ? &taken->switched_off : NULL, taken->interface, out, err, err_size);
+}
+
+static void scan_snapshot_free(void *context)
+{
+	scan_snapshot_t *taken = context;
+
+	if (!taken) {
+		return;
+	}
+	ncfg_document_free(taken->document);
+	if (taken->blocked) {
+		free(taken->switched_off.switch_);
+	}
+	free(taken);
+}
+
+static int scan_off_the_loop(ncfg_main_desk_t *desk, const char *interface, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	const ncfg_observed_rfkill_t *borrowed;
+	scan_snapshot_t              *taken;
+	ncfg_buf_t                    text;
+	char                          ignored[NCFG_ERROR_MAX];
+	int                           done;
+
+	taken = calloc(1u, sizeof(*taken));
+	if (!taken) {
+		return ncfg_wifi_scan(&desk->where, desk->state->desired,
+		    ncfg_wifi_blocked_switch(desk->state->observed, interface), interface, out, err,
+		    err_size);
+	}
+	/* `where` is the daemon's own paths and outlives every request; everything
+	 * else here is copied. */
+	taken->where = &desk->where;
+	(void)snprintf(taken->interface, sizeof(taken->interface), "%s", interface);
+	borrowed = ncfg_wifi_blocked_switch(desk->state->observed, interface);
+	if (borrowed) {
+		taken->switched_off = *borrowed;
+		/* The switch name is the only pointer in it, and it belongs to the
+		 * observation this is about to stop holding. */
+		taken->switched_off.switch_ = borrowed->switch_ ? strdup(borrowed->switch_) : NULL;
+		taken->blocked = 1;
+	}
+	ncfg_buf_init(&text, 0);
+	if (desk->state->desired &&
+	    ncfg_document_write(desk->state->desired, &text, ignored, sizeof(ignored))) {
+		taken->document = ncfg_document_read(ncfg_buf_text(&text),
+		    strlen(ncfg_buf_text(&text)), ignored, sizeof(ignored));
+	}
+	ncfg_buf_free(&text);
+	if ((!desk->state->desired || taken->document) &&
+	    ncfg_main_answer_after_the_loop(scan_with_the_snapshot, taken, scan_snapshot_free)) {
+		/* The result is the deferred half's. What is returned here is not
+		 * read: `wait_for_the_loop` replaces it with the work's. */
+		return 1;
+	}
+	done = ncfg_wifi_scan(&desk->where, taken->document ? taken->document : desk->state->desired,
+	    taken->blocked ? &taken->switched_off : NULL, interface, out, err, err_size);
+	scan_snapshot_free(taken);
+	return done;
+}
+
 /* The four that take an interface and read through the supplicant or hostapd.
  * One place that gets the name off the wire, because four call sites each
  * getting it themselves is four chances to forget the NUL. */
@@ -670,8 +778,7 @@ static int answer_for_interface(ncfg_main_desk_t *desk, ncfg_proto_request_kind_
 		return 0;
 	}
 	if (kind == NCFG_PROTO_REQ_WIFI_SCAN) {
-		return ncfg_wifi_scan(&desk->where, desk->state->desired, desk->state->observed,
-		    interface, out, err, err_size);
+		return scan_off_the_loop(desk, interface, out, err, err_size);
 	}
 	if (kind == NCFG_PROTO_REQ_WIFI_STATUS) {
 		return ncfg_wifi_status(&desk->where, desk->state->desired, desk->state->observed,

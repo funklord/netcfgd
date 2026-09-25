@@ -515,7 +515,55 @@ typedef struct {
 	int                         taken;
 	int                         answered;
 	int                         result;
+	/*
+	 * WORK THE LOOP HANDED BACK, TO BE DONE ON THE WAITING THREAD.
+	 *
+	 * The mailbox exists so the pass sees a request before anything acts on
+	 * it, and that is why every answer runs on the loop's thread. A wifi scan
+	 * cannot: it waits up to ten seconds for the supplicant to announce
+	 * results, and ten seconds on the loop is ten seconds in which no other
+	 * request is answered and no reconcile happens -- measured at nine, by
+	 * `tests/live/wifi_trouble.sh` asking for `wifi status` on an unrelated
+	 * interface while a silent scan was out.
+	 *
+	 * So the seam splits such a request in two. What needs the daemon's state
+	 * -- deciding, and copying what the wait will need -- happens on the loop
+	 * as everything else does. What only needs the copy is handed back here,
+	 * and `ncfg_main_mailbox_answer` runs it after the slot is released, on
+	 * the connection's own thread. That is where `server.c` already argues
+	 * blocking belongs: one thread per connection, so a client that waits
+	 * waits alone.
+	 *
+	 * The Rust spawns a thread and clones the document into it. This needs no
+	 * thread, because it already has one -- and no lifetime question either,
+	 * since `out` and `err` belong to the thread that will run the work.
+	 *
+	 * `after_ready` is set only by a normal delivery. A slot answered by
+	 * `ncfg_main_mailbox_shut` leaves it clear, so a daemon on its way down
+	 * frees the context and does not start a ten-second wait.
+	 */
+	int                       (*after)(void *context, ncfg_buf_t *out, char *err,
+	                              size_t err_size);
+	void                      (*after_free)(void *context);
+	void                       *after_context;
+	int                         after_ready;
 } ncfg_main_waiting_t;
+
+/*
+ * Hand the slow half of this request back to the thread that is waiting.
+ *
+ * Called from inside an answer seam, on the loop's thread, by an
+ * implementation that has just taken its own copy of everything the work
+ * needs. Returns 1 when the deferral was accepted and 0 when there is no slot
+ * to defer into -- a test driving the seam directly, say -- in which case the
+ * caller does the work itself and nothing is lost but the concurrency.
+ *
+ * `work` is given the same `out` and `err` the seam was, and its result
+ * becomes the request's. `free_context` is called afterwards, and also when
+ * the daemon shuts before the work could start.
+ */
+int ncfg_main_answer_after_the_loop(int (*work)(void *context, ncfg_buf_t *out, char *err,
+    size_t err_size), void *context, void (*free_context)(void *context));
 
 typedef struct {
 	pthread_mutex_t       lock;
