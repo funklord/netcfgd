@@ -443,6 +443,250 @@ static void plan_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interfac
 }
 
 /*
+ * What a hook has already been told, for the two phases that remember.
+ *
+ * netcfgd's own memory rather than kernel state -- `observed.h` is careful
+ * about the distinction, and it is the whole of what makes an event hook fire
+ * once per event rather than once per reconcile. NULL where nothing has been
+ * recorded, which is a hook that has never run and is not the same as one told
+ * something that has since changed.
+ */
+static const char *hook_told(const ncfg_observed_t *observed, const char *interface, int phase)
+{
+	size_t at;
+
+	if (!observed || !interface) {
+		return NULL;
+	}
+	for (at = 0; at < observed->hook_state_count; at++) {
+		const ncfg_observed_hook_state_t *state = &observed->hook_state[at];
+
+		if (state->phase == phase && state->interface &&
+		    strcmp(state->interface, interface) == 0) {
+			return state->value;
+		}
+	}
+	return NULL;
+}
+
+/* Whether this interface declares a hook for `phase`. */
+static int declares_hook(const ncfg_interface_t *interface, int phase)
+{
+	size_t at;
+
+	for (at = 0; at < interface->hook_count; at++) {
+		if (interface->hooks[at].phase == phase) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Every hook for one phase, carrying a value, with a reason naming what moved.
+ *
+ * The lifecycle phases go through `plan_hooks` above: they carry no value and
+ * their reason is the hook's own path, because "what changed" is the
+ * transition the hook brackets. `lease` and `carrier` are the other kind --
+ * they fire on a value moving, so the value is in the environment and the
+ * reason says what it moved from.
+ */
+static void plan_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    int phase, const char *now, const char *before, const ncfg_plan_ids_t *deps)
+{
+	ncfg_op_t     op;
+	ncfg_reason_t reason;
+	size_t        at;
+
+	for (at = 0; at < interface->hook_count; at++) {
+		if (interface->hooks[at].phase != phase) {
+			continue;
+		}
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_HOOK_RUN;
+		op.u.hook.iface = interface->name;
+		op.u.hook.phase = phase;
+		op.u.hook.path = interface->hooks[at].path;
+		op.u.hook.value = now;
+		reason = ncfg_plan_reason_differs(interface->name,
+		    ncfg_hook_phase_name((ncfg_hook_phase_t)phase), now,
+		    before ? before : "<absent>");
+		/* No inverse, as every hook: netcfgd cannot know what a script did. */
+		(void)ncfg_builder_push(builder, &op, &reason, deps ? deps->ids : NULL,
+		    deps ? deps->count : 0u, NULL);
+	}
+}
+
+/*
+ * Run a `carrier` hook where the cable has come or gone since it last ran.
+ *
+ * **The one event on a laptop that nothing else reports** (0068): `pre_up`
+ * runs before there is a cable and `post_up` after the addressing, and neither
+ * fires when somebody unplugs one.
+ *
+ * **Where in the plan it goes depends on which way it went**, which is the
+ * reasoning `down` needed (0063). Lost: early, at the interface's own gate --
+ * teardown runs last, so the routes and addresses are still there, which is
+ * what lets a script stop a service that is using them. Gained: after the
+ * addressing, like `post_up` -- a script that reacts to a cable by connecting
+ * somewhere needs the network to work, and before the addresses it does not.
+ */
+static void plan_carrier_hook(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing)
+{
+	const ncfg_observed_link_t *link;
+	ncfg_plan_ids_t             deps;
+	const char                 *now;
+	const char                 *told;
+	size_t                      at;
+
+	if (!declares_hook(interface, NCFG_HOOK_PHASE_CARRIER)) {
+		return;
+	}
+	link = ncfg_observed_link(builder->observed, interface->name);
+	if (!link) {
+		return;
+	}
+	now = link->carrier ? "up" : "down";
+	told = hook_told(builder->observed, interface->name, NCFG_HOOK_PHASE_CARRIER);
+	if (told && strcmp(told, now) == 0) {
+		return;
+	}
+	memset(&deps, 0, sizeof(deps));
+	if (base) {
+		for (at = 0; at < base->count; at++) {
+			ncfg_plan_ids_push(builder->plan, &deps, base->ids[at]);
+		}
+	}
+	if (link->carrier && addressing) {
+		for (at = 0; at < addressing->count; at++) {
+			ncfg_plan_ids_push(builder->plan, &deps, addressing->ids[at]);
+		}
+	}
+	plan_event_hooks(builder, interface, NCFG_HOOK_PHASE_CARRIER, now, told, &deps);
+}
+
+/*
+ * Whether this address is a lease rather than something the kernel made.
+ *
+ * netcfgd does not implement DHCP (0004) and never sees the protocol, so "a
+ * lease arrived" is not an event it is told about. What it has is an address
+ * on an interface that **it did not install**, and that works for any client.
+ *
+ * Three exclusions, each an address the kernel made rather than a lease: one
+ * netcfgd owns or knows the origin of, one the kernel tags as its own -- the
+ * `IFA_PROTO` values `kernel_lo`, `kernel_ra` and `kernel_ll` -- and, by value,
+ * a link-local or loopback. The last is there because a kernel older than 5.18
+ * reports no `IFA_PROTO` at all and every address would otherwise look like a
+ * lease; a SLAAC address is the case that matters, being neither netcfgd's nor
+ * a lease and indistinguishable from one without the tag.
+ */
+static int address_is_a_lease(const ncfg_observed_address_t *address)
+{
+	static const int64_t kernel_protos[] = { 1, 2, 3 };
+	ncfg_address_t       value;
+	size_t               at;
+
+	if (address->origin.has || address->ownership == NCFG_OWNERSHIP_OURS) {
+		return 0;
+	}
+	if (address->proto.has) {
+		for (at = 0; at < sizeof(kernel_protos) / sizeof(kernel_protos[0]); at++) {
+			if (address->proto.value == kernel_protos[at]) {
+				return 0;
+			}
+		}
+	}
+	if (!address->address || !ncfg_address_parse(address->address, &value, NULL, 0)) {
+		return 0;
+	}
+	if (!value.is_ipv6) {
+		/* 169.254/16 and 127/8. */
+		return !(value.bytes[0] == 169u && value.bytes[1] == 254u) && value.bytes[0] != 127u;
+	}
+	/* fe80::/10, and ::1. */
+	if ((value.bytes[0] == 0xfeu) && (value.bytes[1] & 0xc0u) == 0x80u) {
+		return 0;
+	}
+	for (at = 0; at < 15u; at++) {
+		if (value.bytes[at] != 0u) {
+			return 1;
+		}
+	}
+	return value.bytes[15] != 1u;
+}
+
+/*
+ * Run a `lease` hook where the lease has moved since it last ran.
+ *
+ * **It fires once per lease, not once per reconcile**, which is why there is a
+ * record at all. The record is written whether or not the hook succeeded: a
+ * failing `lease` hook that kept the plan non-empty would be a plan that never
+ * converges, and the failure is in the journal instead.
+ *
+ * The first apply of a fresh interface will not fire it -- the client is being
+ * started in this same plan and the address arrives seconds later. The daemon
+ * gets there on the netlink event; `ncfg apply` needs a second run, which is
+ * the shape a PPPoE session has too.
+ */
+void ncfg_plan_lease_hooks(ncfg_builder_t *builder)
+{
+	size_t i;
+
+	for (i = 0; i < builder->desired->interface_count; i++) {
+		const ncfg_interface_t *interface = &builder->desired->interfaces[i];
+		ncfg_plan_ids_t         gate;
+		const char             *leased = NULL;
+		const char             *told;
+		int                     wants_v4 = 0;
+		int                     wants_v6 = 0;
+		size_t                  at;
+
+		if (!interface->name || !declares_hook(interface, NCFG_HOOK_PHASE_LEASE)) {
+			continue;
+		}
+		for (at = 0; at < interface->addressing_count; at++) {
+			if (interface->addressing[at].kind == (int)NCFG_ADDRESS_SOURCE_DHCP4) {
+				wants_v4 = 1;
+			} else if (interface->addressing[at].kind ==
+			    (int)NCFG_ADDRESS_SOURCE_DHCP6) {
+				wants_v6 = 1;
+			}
+		}
+		if (!wants_v4 && !wants_v6) {
+			continue;
+		}
+		for (at = 0; at < builder->observed->address_count && !leased; at++) {
+			const ncfg_observed_address_t *address = &builder->observed->addresses[at];
+			ncfg_address_t                 value;
+
+			if (!address->interface || strcmp(address->interface, interface->name) != 0) {
+				continue;
+			}
+			if (!address_is_a_lease(address) ||
+			    !ncfg_address_parse(address->address, &value, NULL, 0)) {
+				continue;
+			}
+			/* The family the document asked for, so a SLAAC address on an
+			 * interface that asked only for DHCPv4 is not read as its lease. */
+			if ((value.is_ipv6 && wants_v6) || (!value.is_ipv6 && wants_v4)) {
+				leased = address->address;
+			}
+		}
+		if (!leased) {
+			continue;
+		}
+		told = hook_told(builder->observed, interface->name, NCFG_HOOK_PHASE_LEASE);
+		if (told && strcmp(told, leased) == 0) {
+			continue;
+		}
+		memset(&gate, 0, sizeof(gate));
+		ncfg_builder_gate(builder, interface->name, &gate);
+		plan_event_hooks(builder, interface, NCFG_HOOK_PHASE_LEASE, leased, told, &gate);
+	}
+}
+
+/*
  * Take an interface down, in the order the phases describe.
  *
  *   `pre_down`   the interface still works: addresses, routes, all of it.
@@ -725,6 +969,14 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 		plan_hooks(builder, interface, NCFG_HOOK_PHASE_POST_UP, &deps, NULL);
 		ncfg_plan_ids_free(&deps);
 	}
+	/*
+	 * **Outside the `bringing_up` gate above**, and that is the whole
+	 * difference between this and `post_up`: a cable going out is an event on
+	 * an interface nothing else in this plan touches, so a pass that ran only
+	 * where something was being brought up would never see one. The pass takes
+	 * the addressing as a dependency only when the cable came *in*.
+	 */
+	plan_carrier_hook(builder, interface, &base, &addressing);
 
 	ncfg_plan_ids_free(&base);
 	ncfg_plan_ids_free(&up_deps);

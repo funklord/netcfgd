@@ -9515,6 +9515,77 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.280 Two event hooks nobody planned, and a journal nobody printed
+
+`hooks.sh` had seventeen failures across three defects.
+
+### `carrier` and `lease` were phases with a model and no pass
+
+The C knew both: `value.h` names them, `observed.h` carries the record of what
+a hook was last told and explains carefully that it is netcfgd's own memory
+rather than kernel state, the executor sets `NCFG_ADDR` and `NCFG_REASON` for
+them, and `owned.c` writes the record. **The planner never asked.**
+
+They are the other kind of hook. `pre_up` and its five siblings bracket
+something the plan is doing, so they are planned where that happens.
+`carrier` and `lease` fire on a **value moving** -- nothing in the plan causes
+them, and what makes one fire is the difference between what is true now and
+what the hook was last told. That difference is the whole reason the record
+exists, and it is what makes them fire once per event rather than once per
+reconcile.
+
+**Where the carrier hook goes depends on which way the cable went** (0068,
+0063). Lost: early, at the interface's own gate, because teardown runs last
+and the routes and addresses are still there -- which is what lets a script
+stop a service using them. Gained: after the addressing, like `post_up`,
+because a script that reacts to a cable by connecting somewhere needs the
+network to work. And it is planned **outside** the `bringing_up` gate: a cable
+going out is an event on an interface nothing else in the plan touches, so a
+pass that ran only where something was being brought up would never see one.
+
+**The lease trigger is an address netcfgd did not install** (0004). netcfgd
+never sees DHCP, so "a lease arrived" is not an event it is told about; what
+it has is an address on an interface whose document asks for DHCP and which it
+does not own. Three exclusions, each an address the kernel made: one netcfgd
+owns or knows the origin of, one the kernel tags `IFA_PROTO` 1-3, and by
+value a link-local or loopback -- the last because a kernel older than 5.18
+reports no tag at all and a SLAAC address would otherwise read as a lease.
+
+### And an apply through the daemon printed nothing whatever
+
+`ncfg apply --confirm-within N` is the daemon's to carry out -- one
+implementation of the safety net, in the program still running when the window
+expires -- and the C delegates it correctly. Then `apply_through_daemon`
+checked that the answer was a journal, **freed it, and returned 0 with an
+empty terminal.**
+
+Its own comment explains how: *"Nothing in this build encodes one yet, so
+reaching here means the daemon answered something else."* By the time a
+journal was encoded, the arm that checks for one was added and the printing
+was not. The sentence stopped being true and the code it justified stayed --
+`evidence.md`'s claim that outlived its subject, in a comment rather than a
+document, and load-bearing.
+
+What it cost is the whole of this script's last failure: the daemon **had**
+made the refusal -- *`hooked0.down.4` has changed since the configuration was
+compiled* -- and nobody showed it. The hash check, the veto, the skipped
+actions behind it: all correct, all invisible.
+
+**The record's own error is printed under it**, which is the same defect one
+level down and the Rust carries a comment saying so: a failure over the socket
+once said `Failed hook.run` and nothing about why, while the same failure
+applied locally printed the reason (0063).
+
+### What made this hard to see
+
+The first reading was that my own previous commit had broken it -- `ncfg
+apply` now materialises hook bodies, so it would overwrite the tampering the
+script relies on. That is true of a plain apply, measured in both programs:
+the Rust rewrites a tampered hook exactly as this port now does. It is not
+what happens here, because `--confirm-within` never reaches the compile. **A
+plausible explanation of a symptom, arrived at from a change I had just made
+and refuted only by running the other program.**
+
 ## 10.279 An assertion reversed, because tidying up removed somebody else's socket
 
 `restart.sh` had one failure: *the socket file is left behind, as it is on a

@@ -681,6 +681,13 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * planning cost scale with the number of routes an operator wrote.
 	 */
 	ncfg_plan_standby_collect(&builder);
+	/*
+	 * The two event hooks that fire on an observation rather than on a
+	 * transition this plan makes. `carrier` is planned per interface inside
+	 * the link pass, because where it goes depends on which way the cable
+	 * went; `lease` has one place and it is here.
+	 */
+	ncfg_plan_lease_hooks(&builder);
 	warn_unmanaged(&builder);
 	warn_inert_devices(&builder);
 	warn_unported(&builder);
