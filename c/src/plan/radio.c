@@ -167,6 +167,63 @@ static void warn_bridged_station(ncfg_builder_t *builder)
 }
 
 /*
+ * Say when a radio the document wants to use is switched off.
+ *
+ * **The gap this closes is not a missing feature, it is a missing sentence.**
+ * A blocked radio looks exactly like a network that will not associate: the
+ * supplicant starts, the scan comes back empty, nothing fails, and the
+ * operator has no way to tell that the hardware is off -- which on a laptop is
+ * one keystroke away at all times.
+ *
+ * **Nothing is refused and nothing is unblocked.** A supplicant on a blocked
+ * radio costs nothing and is right the moment the switch comes back, and the
+ * block is somebody's deliberate act; 0062 is why netcfgd will not undo one.
+ *
+ * **Over the document's interfaces rather than its devices**, which is the
+ * Rust's walk and is the wider of the two: an `rfkill` switch belongs to the
+ * phy, and an interface asking for addressing on a blocked radio is exactly
+ * the arrangement that produces the silence above. A walk over devices would
+ * miss an interface whose device block is absent.
+ *
+ * **The clause is spelled here and not taken from `ncfg_rfkill_remedy`**,
+ * which is a departure from that function's own rule that one wording serves
+ * every caller. It writes a whole sentence for `status` and `explain` -- "the
+ * radio is switched off at phy0 ..." -- and this one is a clause inside a
+ * longer sentence that names the interface first and says what netcfgd does
+ * next. The Rust keeps the same two wordings for the same two shapes. What
+ * must not drift is the *remedy*, and both spellings of it are checked by
+ * `tests/live/rfkill.sh` against the same two phrases.
+ */
+static void warn_blocked_radios(ncfg_builder_t *builder)
+{
+	size_t i;
+
+	for (i = 0; i < builder->desired->interface_count; i++) {
+		const ncfg_interface_t     *interface = &builder->desired->interfaces[i];
+		const ncfg_observed_link_t *link;
+		const char                 *remedy;
+		const char                 *at;
+
+		if (!interface->name) {
+			continue;
+		}
+		link = ncfg_observed_link(builder->observed, interface->name);
+		if (!link || !link->rfkill || !ncfg_rfkill_blocked(link->rfkill)) {
+			continue;
+		}
+		remedy = link->rfkill->hard
+		    ? "a hardware switch, which nothing in software can clear -- the button or "
+		      "slider on the machine"
+		    : "a soft block, which `rfkill unblock wifi` clears";
+		at = link->rfkill->switch_ ? link->rfkill->switch_ : "an unnamed switch";
+		ncfg_plan_warnf(builder->plan, interface->name,
+		    "the radio for %s is switched off at %s: %s. netcfgd configures it anyway, "
+		    "and it will associate when the switch comes back",
+		    interface->name, at, remedy);
+	}
+}
+
+/*
  * A radio the document declares and states no `interface` block for.
  *
  * **This is what the blanket sentence that used to stand in `wifi.c` narrowed
@@ -214,4 +271,5 @@ void ncfg_plan_radio_warn(ncfg_builder_t *builder)
 		    device->name, device->name);
 	}
 	warn_bridged_station(builder);
+	warn_blocked_radios(builder);
 }

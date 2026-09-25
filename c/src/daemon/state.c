@@ -333,5 +333,30 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
 	}
 	ncfg_observed_free(state->observed);
 	state->observed = fresh;
+	/*
+	 * **Published, which is where a daemon's observation differs from a
+	 * CLI's.** `ncfg status` writes this file on its way past and says why --
+	 * answering "why is it like this?" from a file is the product, and it
+	 * should not require an apply first. A daemon observes far more often
+	 * than anybody runs `ncfg`, and it was the one observer that published
+	 * nothing: `/run/netcfgd/` held `desired.json`, `owned.json` and
+	 * `plan.last.json`, and no account at all of the machine those were
+	 * decided against.
+	 *
+	 * `tests/live/rfkill_stream.sh` is what noticed, by using the file's
+	 * modification time as the answer to "did the event make it look again" --
+	 * a reasonable instrument that had nothing to read.
+	 *
+	 * **Best effort, as the Rust has it.** A `/run` that will not take it is
+	 * not a failure to observe: the observation is in hand and every consumer
+	 * inside this process has it, and refusing here would disarm drift
+	 * detection over a full disk.
+	 */
+	if (state->paths.run) {
+		char why[NCFG_ERROR_MAX];
+
+		(void)ncfg_state_write_observed(state->paths.run, state->observed, why,
+		    sizeof(why));
+	}
 	return 1;
 }

@@ -61,6 +61,22 @@
  * can be handed something else, but this is the only path netcfgd uses. */
 #define NCFG_RFKILL_DEVICE "/dev/rfkill"
 
+/*
+ * What a test puts in front of it.
+ *
+ * **The name only. Nothing in this module reads it**, which is the rule the
+ * line above states: every path here is a parameter. The daemon reads this
+ * when it builds the set of descriptors it watches, exactly as it reads
+ * `NCFG_WPA_SUPPLICANT`.
+ *
+ * **Overridable for the reason the supplicant's directory is**, and the Rust's
+ * own comment says it: a network namespace is not a device namespace, so
+ * `unshare -rn` is no protection and a test that could not move this would be
+ * reading -- and a test that wrote would be flipping -- the switches on the
+ * machine it runs on.
+ */
+#define NCFG_RFKILL_DEVICE_ENV "NCFG_RFKILL_DEV"
+
 /* What happened to a switch. */
 typedef struct {
 	/* The kernel's index for this switch. */

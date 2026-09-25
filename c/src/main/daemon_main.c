@@ -689,6 +689,20 @@ static ncfg_daemon_server_t *bind_one(const char *path, ncfg_arrival_t arrival,
 	return server;
 }
 
+/*
+ * Where to watch for switch events, from the environment or the kernel's own.
+ *
+ * `rfkill.h` owns the spelling and deliberately reads nothing itself; this is
+ * the one place a netcfgd resolves it, beside where it resolves the run
+ * directory and the two daemon programs.
+ */
+static const char *rfkill_device_from_environment(void)
+{
+	const char *set = getenv(NCFG_RFKILL_DEVICE_ENV);
+
+	return set && set[0] ? set : NCFG_RFKILL_DEVICE;
+}
+
 static int start(const options_t *options)
 {
 	ncfg_main_where_t        where;
@@ -844,7 +858,15 @@ static int start(const options_t *options)
 	 * -- and is somewhere a test can drive. */
 	memset(&watch, 0, sizeof(watch));
 	watch.config_dir = where.config;
-	watch.rfkill_device = NCFG_RFKILL_DEVICE;
+	/*
+	 * **Asked for rather than assumed**, which is the same seam the two
+	 * program paths take and was missing here in the same way: the constant
+	 * on its own ignored `NCFG_RFKILL_DEV`, so a live script handing netcfgd
+	 * a fifo was watched on `/dev/rfkill` instead and its events went
+	 * nowhere. An empty value is no value, because a device path of "" is an
+	 * open that fails for a reason nobody can read.
+	 */
+	watch.rfkill_device = rfkill_device_from_environment();
 	watch.supplicant_dir = ctrl_dir[0] ? ctrl_dir : NULL;
 	watch.kernel = 1;
 	watch.poll_config = options->poll_config;
