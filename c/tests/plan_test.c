@@ -2095,6 +2095,89 @@ static void a_plan_with_nothing_to_plan_against_is_refused(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * A radio the document wants to use, switched off at the kill switch.
+ *
+ * **The gap this closes is a missing sentence, not a missing feature.** A
+ * blocked radio looks exactly like a network that will not associate: the
+ * supplicant starts, the scan comes back empty, nothing fails, and on a laptop
+ * the switch is one keystroke away at all times.
+ *
+ * The two blocks have different answers and saying the wrong one wastes
+ * somebody's evening, so each is asserted by its own remedy rather than by the
+ * warning merely being present. `tests/live/rfkill.sh` greps for the same two
+ * phrases against a fake `/sys`, which is the other end of this.
+ */
+static void a_radio_that_is_switched_off_is_said(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define RADIO_LINK(rfkill) \
+	"{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"unknown\",\"wireless\":true" rfkill "}"
+
+	plan = plan_of("{}", "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]",
+	    "\"links\":[" RADIO_LINK(",\"rfkill\":{\"switch\":\"phy0\",\"soft\":true,"
+	                            "\"hard\":false}") "]",
+	    NULL, &document, &observed);
+	if (plan) {
+		check(warned_about(plan, "switched off at phy0"),
+		    "a soft-blocked radio is said to be switched off, and where");
+		check(warned_about(plan, "`rfkill unblock wifi` clears"),
+		    "  with the command that clears it");
+		check(warned_about(plan, "associate when the switch comes back"),
+		    "  and that netcfgd configures it anyway");
+	} else {
+		check(0, "the soft-block fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]",
+	    "\"links\":[" RADIO_LINK(",\"rfkill\":{\"switch\":\"phy0\",\"soft\":false,"
+	                            "\"hard\":true}") "]",
+	    NULL, &document, &observed);
+	if (plan) {
+		check(warned_about(plan, "nothing in software can clear"),
+		    "a hard-blocked radio is told the truth instead");
+		check(!warned_about(plan, "`rfkill unblock wifi` clears"),
+		    "  and not told to run a command that cannot work");
+	} else {
+		check(0, "the hard-block fixture planned");
+	}
+	release(plan, document, observed);
+
+	/*
+	 * **Both controls, because a warning on every radio tells nobody
+	 * anything.** An rfkill switch that is not blocking is the ordinary state
+	 * of every laptop, and a link with no switch at all is every wired
+	 * interface on the machine.
+	 */
+	plan = plan_of("{}", "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]",
+	    "\"links\":[" RADIO_LINK(",\"rfkill\":{\"switch\":\"phy0\",\"soft\":false,"
+	                            "\"hard\":false}") "]",
+	    NULL, &document, &observed);
+	if (plan) {
+		check(!warned_about(plan, "switched off at"),
+		    "a radio whose switch is on is not warned about");
+	} else {
+		check(0, "the unblocked fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]",
+	    "\"links\":[" RADIO_LINK("") "]", NULL, &document, &observed);
+	if (plan) {
+		check(!warned_about(plan, "switched off at"),
+		    "and neither is a link with no kill switch at all");
+	} else {
+		check(0, "the no-switch fixture planned");
+	}
+	release(plan, document, observed);
+#undef RADIO_LINK
+}
+
 int main(void)
 {
 	the_frozen_witness();
@@ -2133,6 +2216,7 @@ int main(void)
 	an_absent_optional_member_is_written_as_null();
 	a_plan_with_nothing_to_plan_against_is_refused();
 	an_edited_tunnel_configuration_restarts_the_tunnel();
+	a_radio_that_is_switched_off_is_said();
 
 	printf("\nplan: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

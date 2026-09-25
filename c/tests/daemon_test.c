@@ -1276,6 +1276,34 @@ static void the_observation_comes_through_a_seam(const char *base)
 	    "and so is a link appearing");
 	check(state.observed->link_count == 2, "which is the observation now held");
 
+	/*
+	 * **And every observation is published**, which is where a daemon's
+	 * differs from `ncfg status`'s. That verb writes `observed.json` on its
+	 * way past because answering "why is it like this?" from a file is the
+	 * product; the daemon observes far more often than anybody runs `ncfg`
+	 * and was the one observer that published nothing, so `/run/netcfgd/`
+	 * held the desired document, the ownership record and the last plan, and
+	 * no account of the machine those were decided against.
+	 *
+	 * The count is the assertion rather than the file's presence: a write
+	 * that happened once on the first observation and never again would
+	 * satisfy "the file is there", and the thing being tested is that the
+	 * record follows the observation.
+	 */
+	{
+		char   published[600];
+		char  *held;
+		size_t length = 0u;
+
+		(void)snprintf(published, sizeof(published), "%s/observed.json", run_dir);
+		held = testdir_read(published, &length);
+		check(held != NULL && length > 0u,
+		    "every observation is published where `ncfg status` publishes its own");
+		check(held && strstr(held, "eth1") != NULL,
+		    "  and it is the observation just taken, not the first one");
+		free(held);
+	}
+
 	text = NULL;
 	check(!ncfg_daemon_state_reobserve(&state, &moved, err, sizeof(err)),
 	    "a kernel that cannot be read is reported");

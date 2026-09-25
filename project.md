@@ -9515,6 +9515,79 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.277 Two rfkill scripts, two seams nobody supplied, and the daemon that published nothing
+
+`rfkill.sh` and `rfkill_stream.sh` both pass. Three separate gaps, and two of
+them are the same shape as 10.271's.
+
+### The plan said nothing about a radio that is switched off
+
+`status` named the block and `plan` did not, because the C's planner had no
+pass for it. The Rust's `warn_blocked_radios` exists for a reason worth
+keeping: **a blocked radio looks exactly like a network that will not
+associate.** The supplicant starts, the scan comes back empty, nothing fails,
+and on a laptop the switch is one keystroke away at all times. Nothing is
+refused and nothing is unblocked -- 0062 is why netcfgd will not undo
+somebody's deliberate act -- so the whole of the fix is a sentence.
+
+**It walks the document's interfaces rather than its devices**, which is the
+Rust's walk and the wider of the two: an interface asking for addressing on a
+blocked radio is exactly the arrangement that produces the silence, and a walk
+over devices misses one whose `device` block is absent.
+
+**The clause is spelled in the planner rather than taken from
+`ncfg_rfkill_remedy`**, which is a departure from that function's own rule
+that one wording serves every caller -- recorded because it is a departure.
+That helper writes a standalone sentence for `status` and `explain`; this one
+is a clause inside a longer sentence that names the interface first and says
+what netcfgd does next. The Rust keeps the same two wordings for the same two
+shapes. What must not drift is the *remedy*, and `rfkill.sh` greps both
+spellings for the same two phrases.
+
+### `NCFG_RFKILL_DEV` was read by nobody
+
+`daemon_main.c` assigned `watch.rfkill_device = NCFG_RFKILL_DEVICE`, a
+literal. `rfkill.h` says in as many words that the path is "a parameter
+everywhere below, so that a test can be handed something else" -- and the one
+caller that supplies the parameter handed it the constant. So a live script
+pointing netcfgd at a fifo was watched on `/dev/rfkill` instead, and its
+records went nowhere.
+
+**Third instance of the same shape in a week**: the supplicant program, the
+supplicant control directory, and now this. Every layer present -- the header
+arguing for the seam, the struct carrying it, the callee honouring it -- and
+the one assignment that makes it live absent. Nothing fails; the default is
+simply always taken, and the only way to see it is a test that set the
+variable and was ignored.
+
+**Why it matters beyond the test** is in the Rust's own comment: a network
+namespace is not a device namespace, so `unshare -rn` is no protection. A
+suite that could not move this path would be reading the switches on the
+machine it runs on -- and one that wrote would be flipping them.
+
+### The daemon observed constantly and published nothing
+
+`ncfg status` writes `observed.json` on its way past and says why: answering
+"why is it like this?" from a file is the product, and it should not require
+an apply first. The daemon observes far more often than anybody runs `ncfg`
+and was **the one observer that published nothing** -- `/run/netcfgd/` held
+`desired.json`, `owned.json` and `plan.last.json`, and no account at all of
+the machine those were decided against.
+
+`ncfg_daemon_state_reobserve` writes it now, best effort as the Rust has it: a
+`/run` that will not take the file is not a failure to observe, and refusing
+would disarm drift detection over a full disk.
+
+**What found it was an instrument, not a symptom.** `rfkill_stream.sh` uses
+the file's modification time as the answer to "did the event make it look
+again" -- a reasonable choice with nothing to read. The unit test asserts the
+*contents* rather than the file's presence, because a write that happened once
+on the first observation and never again would satisfy "the file is there",
+and what is being tested is that the record follows the observation.
+
+Sabotaged separately and with a full rebuild, each change takes both its unit
+checks and its live script red.
+
 ## 10.276 Sorted by the writer that could not sort, and a test that re-aimed itself
 
 `stations.sh` had one failure:
