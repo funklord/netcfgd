@@ -9515,6 +9515,42 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.285 The supplicant's streams, settled by the fake's own comment
+
+10.284 left this open and the answer was already written down, in
+`tests/live/fake_supplicant.py`, beside the flag netcfgd passes:
+
+> `-s` -- Log to syslog. netcfgd passes it so a real supplicant's faults are
+> readable at all -- before that it daemonised and wrote to a stdout nothing
+> was reading.
+
+So a real `wpa_supplicant` started by netcfgd logs to **syslog**. The file
+this port was redirecting its streams into could only ever hold whatever it
+said before that took effect -- and the journal has that too, because the
+Rust inherits here and the C's redirect was a generalisation of
+`ncfg_hostapd_start`'s arrangement, which its own comment admitted.
+
+`ncfg_backend_run` takes a NULL `log_path` now, meaning "let the child inherit
+this process's streams", and the supplicant passes NULL. hostapd, radvd and
+openvpn keep their files, which is what the Rust does and what `ap.sh` reads.
+
+**What it costs is named rather than glossed**: a supplicant that will not
+start used to be quoted in its own words out of that file, where the Rust
+says only `exited with {status}`. It says the status now, with the driver,
+because `nl80211` versus `wext` is the half of such a failure that says where
+to look. The words are on netcfgd's streams and in syslog, which is where an
+operator is already looking.
+
+`enterprise.sh` passes: thirteen checks that read what netcfgd sent the
+supplicant, all of them off the daemon's own output.
+
+**The unit test was rewritten rather than deleted, and it asserts the new
+property.** It read a quotation out of the log file; it asserts now that the
+message names the driver and the status, that it names no file, and that
+**nothing is written to the log path** -- which is the observable consequence
+of inheriting and is what a reader needs to see asserted. Sabotaged by putting
+the redirect back: one unit check and thirteen live checks go red.
+
 ## 10.284 A refusal justified by a sentence that had stopped being true
 
 `enterprise.sh` failed at its first hard step: `ncfg wifi activate radio0`

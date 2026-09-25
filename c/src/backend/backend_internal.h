@@ -86,6 +86,14 @@ int ncfg_backend_write_file(const char *path, const void *bytes, size_t length, 
 /*
  * Run `program` with `argv`, sending both its output streams to `log_path`.
  *
+ * **A NULL `log_path` lets the child inherit this process's streams**, which
+ * is what the supplicant wants and the other three daemons do not. netcfgd
+ * starts `wpa_supplicant -s`, so a real one's faults go to syslog and the file
+ * would hold only whatever it said before that took effect; the Rust inherits
+ * here for the same reason and redirects hostapd. What the file costs is
+ * visible: everything a supplicant says reaches the journal with netcfgd's own
+ * output, or it reaches a file nobody is watching.
+ *
  * `argv` is NULL-terminated and `argv[0]` is the program's own name. The exit
  * status is what `waitpid` reported; `*exited_ok` is 1 only where the child
  * exited with status 0.
