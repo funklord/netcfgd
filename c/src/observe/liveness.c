@@ -94,6 +94,51 @@ static int dhcp_pid_file(const char *run_dir, const char *program, const char *i
 }
 
 /*
+ * Whether netcfgd has a pid file for this backend at all.
+ *
+ * **The rule the whole pass turns on, and it was applied to one kind out of
+ * five.** A pid file netcfgd's own directory does not have is "cannot tell":
+ * a daemon started before this build existed, one whose file was cleaned
+ * away, or one an operator started themselves. Only a file that *is* there
+ * and names something which is not this daemon says it has gone.
+ *
+ * The DHCP arm has said so since 10.206 and the other four did not, so a
+ * record naming a running supplicant with no pid file beside it was read as
+ * "not running" -- which took `answering` off the supplicant round entirely,
+ * because that pass only asks about backends the record still calls up. A
+ * wedged supplicant went unreported, and so did a working one.
+ *
+ * Each path is composed by the module that writes it rather than here, so a
+ * directory layout change cannot make the check and the read disagree.
+ */
+static int backend_pid_file(const ncfg_observed_backend_t *backend, const char *run_dir)
+{
+	char path[512];
+	int  named = 0;
+
+	switch ((ncfg_backend_kind_t)backend->kind) {
+	case NCFG_BACKEND_SUPPLICANT:
+		named = ncfg_supplicant_pid_path(run_dir, backend->interface, path, sizeof(path),
+		    NULL, 0);
+		break;
+	case NCFG_BACKEND_ACCESS_POINT:
+		named = ncfg_hostapd_pid_path(run_dir, backend->interface, path, sizeof(path),
+		    NULL, 0);
+		break;
+	case NCFG_BACKEND_ROUTER_ADVERT:
+		named = ncfg_ra_pid_path(run_dir, backend->interface, path, sizeof(path), NULL, 0);
+		break;
+	case NCFG_BACKEND_OPENVPN:
+		named = ncfg_openvpn_pid_path(run_dir, backend->interface, path, sizeof(path),
+		    NULL, 0);
+		break;
+	default:
+		return 0;
+	}
+	return named && access(path, F_OK) == 0;
+}
+
+/*
  * Whether this kind can be asked at all, and the answer if it can.
  *
  * `*answerable` separates "netcfgd asked and it is gone" from "netcfgd has no
@@ -108,12 +153,25 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 	*answerable = 1;
 	switch ((ncfg_backend_kind_t)backend->kind) {
 	case NCFG_BACKEND_SUPPLICANT:
-		return ncfg_supplicant_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_ACCESS_POINT:
-		return ncfg_hostapd_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_ROUTER_ADVERT:
-		return ncfg_ra_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_OPENVPN:
+		/* The file's absence is the test, not the pid's -- see
+		 * `backend_pid_file`, and the DHCP arm below for the same rule
+		 * written out in the one place it was already applied. */
+		if (!backend_pid_file(backend, run_dir)) {
+			*answerable = 0;
+			return 0;
+		}
+		if (backend->kind == (int)NCFG_BACKEND_SUPPLICANT) {
+			return ncfg_supplicant_running_pid(run_dir, backend->interface);
+		}
+		if (backend->kind == (int)NCFG_BACKEND_ACCESS_POINT) {
+			return ncfg_hostapd_running_pid(run_dir, backend->interface);
+		}
+		if (backend->kind == (int)NCFG_BACKEND_ROUTER_ADVERT) {
+			return ncfg_ra_running_pid(run_dir, backend->interface);
+		}
 		return ncfg_openvpn_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_DHCP6:
