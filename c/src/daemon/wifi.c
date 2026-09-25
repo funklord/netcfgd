@@ -39,6 +39,7 @@
 #include "ncfg/wifi_profile.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -1254,6 +1255,25 @@ int ncfg_wifi_disconnect(const ncfg_wifi_where_t *where, const ncfg_document_t *
  */
 #define STATION_WALK_MAX 2007
 
+/*
+ * By address, which is what makes two runs of `wifi clients` agree.
+ *
+ * hostapd's own walk order is its hash order and is not stable across runs;
+ * the Rust sorts before returning and `stations.sh` asserts the result.
+ * `strcmp` rather than a numeric compare because the addresses have already
+ * been normalised to lowercase `aa:bb:cc:dd:ee:ff` by
+ * `ncfg_hostapd_parse_station`, so byte order and address order are the same
+ * order.
+ */
+static int by_address(const void *left, const void *right)
+{
+	const ncfg_hostapd_station_t *one = left;
+	const ncfg_hostapd_station_t *other = right;
+
+	return strcmp(one->address, other->address);
+}
+
+
 /* Whether the document's access control names this address. Answered from the
  * document rather than from hostapd, deliberately: the document is the
  * authority, and the difference between the two is the thing worth seeing. */
@@ -1288,6 +1308,11 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	ncfg_json_writer_t         writer;
 	ncfg_supplicant_client_t  *client;
 	size_t                     at;
+	size_t                     count;
+	size_t                     length = 0u;
+	ncfg_buf_t                 collected;
+	char                      *bytes;
+	ncfg_hostapd_station_t    *found;
 	char                       ctrl_dir[512];
 	char                       command[64];
 	char                       body[NCFG_SUPPLICANT_REPLY_MAX];
@@ -1328,6 +1353,58 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 		    why);
 		return 0;
 	}
+	/*
+	 * **Walked into a buffer rather than into the document**, because the
+	 * order hostapd answers in is not the order this reports. The Rust sorts
+	 * by address before it returns, and `stations.sh` asserts it: *sorted by
+	 * address, so the output does not reorder itself between runs*. A writer
+	 * fed straight from the walk cannot sort, and this one was -- so the list
+	 * came out in hostapd's own order, which is its internal hash order and
+	 * differs between runs of the same machine.
+	 *
+	 * An `ncfg_buf_t` rather than an array of `STATION_WALK_MAX`: that is
+	 * 2007 entries and a quarter of a megabyte on the stack for a command
+	 * that usually finds three. The buffer grows to what was found, its
+	 * failure is sticky and read once, and `ncfg_buf_take` hands over memory
+	 * from `malloc` -- aligned for any type, which is what makes the cast
+	 * below defined rather than merely working.
+	 */
+	ncfg_buf_init(&collected, 0);
+	(void)snprintf(command, sizeof(command), "%s", "STA-FIRST");
+	for (at = 0; at < STATION_WALK_MAX; at++) {
+		ncfg_hostapd_station_t station;
+
+		if (!ncfg_supplicant_ask(client, command, body, sizeof(body), why, sizeof(why))) {
+			/* The walk ends on an empty reply and on `FAIL`, which is what
+			 * hostapd answers for an address it does not know -- both mean
+			 * "no more", and neither is an error worth showing somebody. */
+			break;
+		}
+		if (!ncfg_hostapd_parse_station(body, &station)) {
+			break;
+		}
+		ncfg_buf_add(&collected, &station, sizeof(station));
+		if ((size_t)snprintf(command, sizeof(command), "STA-NEXT %s", station.address) >=
+		    sizeof(command)) {
+			break;
+		}
+	}
+	ncfg_supplicant_client_free(client);
+	if (ncfg_buf_failed(&collected)) {
+		ncfg_buf_free(&collected);
+		ncfg_error_set(err, err_size,
+		    "the stations on %s would not fit in memory, so the list is refused rather "
+		    "than reported short", interface);
+		return 0;
+	}
+	bytes = ncfg_buf_take(&collected, &length);
+	ncfg_buf_free(&collected);
+	found = bytes ? (ncfg_hostapd_station_t *)(void *)bytes : NULL;
+	count = found ? length / sizeof(*found) : 0u;
+	if (count > 1u) {
+		qsort(found, count, sizeof(*found), by_address);
+	}
+
 	ncfg_json_write_init(&writer, out);
 	ncfg_json_write_object_begin(&writer);
 	ncfg_json_write_member_string(&writer, "response", "ap_stations");
@@ -1344,38 +1421,24 @@ int ncfg_wifi_ap_stations(const ncfg_wifi_where_t *where, const ncfg_document_t 
 	}
 	ncfg_json_write_key(&writer, "stations");
 	ncfg_json_write_array_begin(&writer);
-	(void)snprintf(command, sizeof(command), "%s", "STA-FIRST");
-	for (at = 0; at < STATION_WALK_MAX; at++) {
-		ncfg_hostapd_station_t station;
+	for (at = 0; at < count; at++) {
+		const ncfg_hostapd_station_t *station = &found[at];
 
-		if (!ncfg_supplicant_ask(client, command, body, sizeof(body), why, sizeof(why))) {
-			/* The walk ends on an empty reply and on `FAIL`, which is what
-			 * hostapd answers for an address it does not know -- both mean
-			 * "no more", and neither is an error worth showing somebody. */
-			break;
-		}
-		if (!ncfg_hostapd_parse_station(body, &station)) {
-			break;
-		}
 		ncfg_json_write_object_begin(&writer);
-		ncfg_json_write_member_string(&writer, "address", station.address);
-		ncfg_json_write_member_bool(&writer, "authorized", station.authorized);
+		ncfg_json_write_member_string(&writer, "address", station->address);
+		ncfg_json_write_member_bool(&writer, "authorized", station->authorized);
 		ncfg_json_write_member_bool(&writer, "listed",
-		    acl_lists(access_point, station.address));
-		write_optional_int(&writer, "signal", station.signal_dbm);
-		write_optional_int(&writer, "connected_seconds", station.connected_seconds);
-		write_optional_int(&writer, "inactive_msec", station.inactive_msec);
-		write_optional_int(&writer, "rx_bytes", station.rx_bytes);
-		write_optional_int(&writer, "tx_bytes", station.tx_bytes);
+		    acl_lists(access_point, station->address));
+		write_optional_int(&writer, "signal", station->signal_dbm);
+		write_optional_int(&writer, "connected_seconds", station->connected_seconds);
+		write_optional_int(&writer, "inactive_msec", station->inactive_msec);
+		write_optional_int(&writer, "rx_bytes", station->rx_bytes);
+		write_optional_int(&writer, "tx_bytes", station->tx_bytes);
 		ncfg_json_write_object_end(&writer);
-		if ((size_t)snprintf(command, sizeof(command), "STA-NEXT %s", station.address) >=
-		    sizeof(command)) {
-			break;
-		}
 	}
 	ncfg_json_write_array_end(&writer);
 	ncfg_json_write_object_end(&writer);
-	ncfg_supplicant_client_free(client);
+	free(bytes);
 	return finish(&writer, out, "ap_stations", err, err_size);
 }
 
