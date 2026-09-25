@@ -1276,6 +1276,33 @@ static void leaving_without_forgetting(void)
 	ncfg_document_free(iwd);
 }
 
+/*
+ * One station by address, because a position is not what these assert.
+ *
+ * **They were written by index and the index moved.** hostapd answers the walk
+ * in its own hash order; this report is sorted by address, and when that sort
+ * landed, two checks about `aa:bb:cc:dd:ee:ff` and `66:77:88:99:aa:bb` quietly
+ * re-aimed at each other's station. Both still read as sentences about "the
+ * one with no statistics" and "the one that has not authenticated", and
+ * neither was about that station any more.
+ *
+ * NULL where the address is not in the report, which every caller checks --
+ * an assertion over a station that is not there would otherwise pass by
+ * dereferencing nothing.
+ */
+static const ncfg_proto_station_t *station_at(const ncfg_proto_stations_t *report,
+    const char *address)
+{
+	size_t at;
+
+	for (at = 0; at < report->station_count; at++) {
+		if (says(report->stations[at].address, address)) {
+			return &report->stations[at];
+		}
+	}
+	return NULL;
+}
+
 static void who_is_associated_with_an_access_point(void)
 {
 	ncfg_document_t     *document = compiled("ap.conf",
@@ -1305,11 +1332,25 @@ static void who_is_associated_with_an_access_point(void)
 		check(says(report->access_control, "deny"),
 		    "  and which way the list reads, since `listed` means opposite things");
 		check(report->station_count == 3u, "  every station hostapd knows about");
-		check(report->station_count == 3u && report->stations[0].listed == 1 &&
-		    report->stations[1].listed == 0,
+		/*
+		 * **Sorted by address**, which is what makes two runs of `ncfg wifi
+		 * clients` agree: hostapd's walk order is its hash order. The fake
+		 * answers `00:11`, `aa:bb`, `66:77` in that order deliberately, so a
+		 * report that echoed the walk would fail here.
+		 */
+		check(report->station_count == 3u &&
+		        says(report->stations[0].address, "00:11:22:33:44:55") &&
+		        says(report->stations[1].address, "66:77:88:99:aa:bb") &&
+		        says(report->stations[2].address, "aa:bb:cc:dd:ee:ff"),
+		    "  sorted by address rather than in the order hostapd walks them");
+		check(station_at(report, "00:11:22:33:44:55") &&
+		        station_at(report, "00:11:22:33:44:55")->listed == 1 &&
+		        station_at(report, "66:77:88:99:aa:bb") &&
+		        station_at(report, "66:77:88:99:aa:bb")->listed == 0,
 		    "  a station on the deny list that is still connected is marked");
-		check(report->station_count == 3u && report->stations[0].signal.present &&
-		    report->stations[0].signal.value == -52,
+		check(station_at(report, "00:11:22:33:44:55") &&
+		        station_at(report, "00:11:22:33:44:55")->signal.present &&
+		        station_at(report, "00:11:22:33:44:55")->signal.value == -52,
 		    "  the statistics where the driver answered");
 		/*
 		 * **hostapd genuinely omits them.** `hostapd_get_sta_info` writes
@@ -1317,10 +1358,12 @@ static void who_is_associated_with_an_access_point(void)
 		 * `signal=` is a normal reply and not a malformed one -- a reader that
 		 * required it would drop a client that is really there.
 		 */
-		check(report->station_count == 3u && !report->stations[1].signal.present &&
-		    !report->stations[1].rx_bytes.present,
+		check(station_at(report, "aa:bb:cc:dd:ee:ff") &&
+		        !station_at(report, "aa:bb:cc:dd:ee:ff")->signal.present &&
+		        !station_at(report, "aa:bb:cc:dd:ee:ff")->rx_bytes.present,
 		    "  and none of them where it did not, rather than zeroes nobody measured");
-		check(report->station_count == 3u && report->stations[2].authorized == 0,
+		check(station_at(report, "66:77:88:99:aa:bb") &&
+		        station_at(report, "66:77:88:99:aa:bb")->authorized == 0,
 		    "  a station that has not finished authenticating is shown differently");
 		ncfg_proto_message_free(&message);
 	}

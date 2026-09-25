@@ -9515,6 +9515,61 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.276 Sorted by the writer that could not sort, and a test that re-aimed itself
+
+`stations.sh` had one failure:
+
+    expected: 00:11:22:33:44:55 66:77:88:99:aa:bb aa:bb:cc:dd:ee:ff
+    actual:   00:11:22:33:44:55 aa:bb:cc:dd:ee:ff 66:77:88:99:aa:bb
+
+The Rust's `stations()` collects the walk into a `Vec` and sorts by address
+before returning; the script's comment says why -- *so the output does not
+reorder itself between runs*. hostapd's walk order is its own hash order, and
+`STA-FIRST`/`STA-NEXT` is the only listing it offers.
+
+**The C could not sort, structurally.** It wrote each station into the JSON
+document as the walk produced it, so by the time the second station was known
+the first was already bytes. That is a pleasant shape -- one pass, no
+allocation -- and it forecloses any answer that depends on the whole list.
+
+The walk collects into an `ncfg_buf_t` now and the document is written
+afterwards. **A buffer rather than an array of `STATION_WALK_MAX`**: that cap
+is 2007, hostapd's own `MAX_AID`, and a quarter of a megabyte of stack for a
+command that usually finds three. The buffer grows to what was found, its
+failure is sticky and read once, and `ncfg_buf_take` hands over memory from
+`malloc` -- aligned for any type, which is what makes the cast to
+`ncfg_hostapd_station_t *` defined rather than merely working.
+
+### The test moved with the data and said the same words
+
+Two checks in `daemon_wifi_test` went red, and reading why is the part worth
+keeping. They were written by index -- `stations[1]` had no statistics,
+`stations[2]` had not authenticated -- against the fake's deliberate walk
+order `00:11`, `aa:bb`, `66:77`. Sorted, position 1 and position 2 swap, so
+each assertion now described **the other station** while reading as exactly
+the same sentence about "the one with no statistics".
+
+They are keyed by address now, through a `station_at` that returns NULL for an
+address the report does not hold, because an assertion over a station that is
+not there would otherwise pass by finding nothing. And the ordering itself is
+asserted, which nothing did: the fake answers `00:11`, `aa:bb`, `66:77` in
+that order on purpose, so a report echoing the walk fails on the first check
+rather than on two unrelated-looking ones.
+
+### And the sabotage that did not reach the thing it was aimed at
+
+The first control removed the `qsort`, rebuilt **only the test binary**, and
+reported the unit check red and `stations.sh` green -- reading as a live
+script that could not see the defect. `make -C c tests/daemon_wifi_test`
+rebuilds one binary; `ncfg` and `netcfgd` were still the sorted build, so the
+live script exercised code with the sort in it.
+
+`build-and-commit.md` names this exactly: *never conclude that a test passes
+or fails from a binary the build step did not rebuild*. Re-run with a full
+`make`, both go red -- and the same stale-binary confusion had already cost a
+round a minute earlier, when a restored source with `make` reporting nothing
+to do left a test failing against an object nobody had relinked.
+
 ## 10.275 The compact convention met the terminal, and a proof that compared two empty files
 
 `nat.sh` had four failures. Every value in the C's answer was correct and the
