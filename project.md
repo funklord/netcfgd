@@ -9515,6 +9515,45 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.291 The whole live suite, measured against the Rust: one check apart
+
+Swept all 79 scripts under `tests/live/` against both builds, sequentially,
+each in its own network namespace under `timeout 200`:
+
+    checks run             C 1269      Rust 1269
+    scripts passing        C 58/79     Rust 59/79
+    checks failing for the C and not the Rust                        1
+
+The one is `log_shape`'s "a level below what is emitted silences it
+completely". At `NCFG_LOG=warning` the C correctly silences both of its
+startup log lines; what remains is the `--try-the-c-daemon` notice, which
+10.282 put outside the log system on purpose so that no level can hide it.
+That check and that notice are in genuine conflict, and the conflict ends when
+the gate does. **It is the only one.** Every other failing script fails for
+the Rust too -- no `mac80211_hwsim`, no bluetooth, no `dhcpcd`, no `mbimcli`,
+`systemd-run` refusing inside a namespace -- which is the floor the machine
+imposes on both.
+
+**The equal check counts are the guard and they are why the 1 means
+anything.** A script that dies early produces FEWER checks rather than failing
+ones, so a port that had quietly stopped running half the suite would score
+zero C-only failures and look perfect. 1269 against 1269 is what rules that
+out; without it the headline is the vacuous pass of `evidence.md` wearing a
+parity report's clothes.
+
+**Two measurements were thrown away to get this one, and both for the same
+reason.** The first C sweep was run with the control launched CONCURRENTLY,
+and the two contended for `systemd-run` badly enough that a script taking 5
+seconds alone was killed at a 120-second budget -- read, at the time, as the C
+hanging. The second was run while I rebuilt the tree underneath it, including
+a `make clean` that deleted `c/netcfgd` for part of the run. Neither sweep was
+wrong about anything it measured; both were measuring something other than the
+build.
+
+So: **a sweep is an artifact with a build in it, and the build has to hold
+still.** The same rule as not running the control beside the subject, applied
+to the subject instead.
+
 ## 10.290 Two serialisers, and removing either one changed nothing a clock could see
 
 A wifi scan waits up to ten seconds for the supplicant to announce results.
