@@ -1316,3 +1316,122 @@ int ncfg_reconcile_pass(ncfg_reconcile_t *loop, const ncfg_reconcile_wake_t *wak
 	}
 	return 1;
 }
+
+/*
+ * Start the supplicant one radio now wants, before the activation answers.
+ *
+ * **Written is not running, and that gap was reported as "the buttons don't
+ * work properly".** netcfgd applies nothing on a configuration change by
+ * itself -- `on_drift` defaults to `report` -- so `ncfg wifi activate` used to
+ * leave a correct drop-in that nothing had run, and the operator got "cannot
+ * reach the supplicant" from the very next scan. What the synchronous step
+ * buys is a truthful answer: told the radio is netcfgd's, a client can scan at
+ * once.
+ *
+ * **Restricted twice, and the second restriction is a failure paid for.** To
+ * the interface that was asked about, and to *starting a supplicant*. It was
+ * the whole interface plan for a day in the Rust, and addressing is in that
+ * plan: activating a radio ran `dhcpcd`, which cannot get a lease on a link
+ * that has not associated with anything, so handing netcfgd a radio was
+ * refused because DHCP had not finished on it. Filtering on `backend.start`
+ * alone is not enough either -- it covers the DHCP client too.
+ *
+ * The rest is not skipped, only deferred: the reconcile loop applies it on the
+ * next pass, where a client that will not settle is a report rather than a
+ * refusal.
+ *
+ * **The dependencies are dropped rather than carried.** An action kept out of
+ * a larger plan would name ids that are not in this one, and an apply walking
+ * those would skip on an edge to nowhere. What is being asked for here is
+ * exactly "start the supplicant now", and a supplicant start's prerequisites
+ * are the link's, which the loop reconciles.
+ */
+int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *interface,
+    char *err, size_t err_size)
+{
+	ncfg_plan_t   *full;
+	ncfg_plan_t   *wanted;
+	ncfg_journal_t journal;
+	ncfg_executor_t executor;
+	char           message[NCFG_ERROR_MAX];
+	size_t         at;
+	int            moved = 0;
+	int            code = 1;
+
+	if (!loop || !loop->state || !interface) {
+		ncfg_error_set(err, err_size, "there is no loop to start a supplicant from");
+		return 0;
+	}
+	if (!loop->state->desired || !loop->state->observed) {
+		ncfg_error_set(err, err_size,
+		    "the radio was taken on, and the supplicant was not started: this daemon "
+		    "has no %s to plan from yet",
+		    loop->state->desired ? "observation of the machine" : "compiled "
+		    "configuration");
+		return 0;
+	}
+	message[0] = '\0';
+	full = ncfg_plan_build(loop->state->desired, loop->state->observed, NULL, message,
+	    sizeof(message));
+	if (!full) {
+		ncfg_error_set(err, err_size,
+		    "the radio was taken on, and the supplicant was not started: %s", message);
+		return 0;
+	}
+	wanted = ncfg_plan_new(err, err_size);
+	if (!wanted) {
+		ncfg_plan_free(full);
+		return 0;
+	}
+	for (at = 0; at < full->action_count; at++) {
+		const ncfg_action_t *action = &full->actions[at];
+		const char          *on = ncfg_op_interface(&action->op);
+
+		if (action->op.kind != NCFG_OP_BACKEND_START ||
+		    action->op.u.backend.kind != NCFG_BACKEND_SUPPLICANT) {
+			continue;
+		}
+		if (!on || strcmp(on, interface) != 0) {
+			continue;
+		}
+		(void)ncfg_plan_add(wanted, &action->op, &action->reason, NULL, 0u,
+		    action->has_inverse ? &action->inverse : NULL);
+	}
+	ncfg_plan_free(full);
+	if (wanted->action_count == 0u) {
+		/* **Nothing to do is success**: the radio may already be up from a
+		 * previous activation, and reporting that as a failure would make a
+		 * switch complain about being already on. */
+		ncfg_plan_free(wanted);
+		return 1;
+	}
+	message[0] = '\0';
+	if (!ncfg_daemon_open_executor(&loop->world, &executor, message, sizeof(message))) {
+		ncfg_error_set(err, err_size,
+		    "the radio was taken on, and the supplicant was not started: %s", message);
+		ncfg_plan_free(wanted);
+		return 0;
+	}
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(wanted, &executor, &journal, message, sizeof(message));
+	ncfg_daemon_record_what_ran(loop->state, "activate", wanted, &journal);
+	ncfg_daemon_close_executor(&loop->world, &executor);
+	(void)ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message));
+	ncfg_daemon_state_publish(loop->state);
+
+	if (ncfg_journal_failure(&journal)) {
+		const ncfg_record_t *failure = ncfg_journal_failure(&journal);
+
+		/* The executor's own sentence, because it names the action and the
+		 * reason -- including the one an operator most needs here, which is
+		 * that another manager is still holding the radio. */
+		ncfg_error_set(err, err_size,
+		    "the radio was taken on, and the supplicant was not started: %s: %s",
+		    failure->op, failure->error ? failure->error : "no reason was recorded");
+		code = 0;
+	}
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(wanted);
+	return code;
+}

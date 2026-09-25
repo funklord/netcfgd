@@ -614,6 +614,20 @@ static int answer_profile_save(ncfg_main_desk_t *desk, const ncfg_proto_profile_
 	return ncfg_daemon_ok_encode(out, err, err_size);
 }
 
+/*
+ * The activation's apply seam: start this radio's supplicant now.
+ *
+ * A thin adapter rather than the work, because the work needs a plan, an
+ * executor and the run directory's record -- all of which belong to the loop.
+ * `ncfg_wifi_apply_fn`'s contract is the whole of what is promised here:
+ * nothing to do is success, and a failure is a sentence naming what failed.
+ */
+static int start_the_supplicant(void *context, const char *interface, char *err,
+    size_t err_size)
+{
+	return ncfg_daemon_start_supplicant_request(context, interface, err, err_size);
+}
+
 static int answer_radio_set(ncfg_main_desk_t *desk, const ncfg_proto_radio_set_t *set,
     ncfg_buf_t *out, char *err, size_t err_size)
 {
@@ -623,18 +637,25 @@ static int answer_radio_set(ncfg_main_desk_t *desk, const ncfg_proto_radio_set_t
 		return 0;
 	}
 	/*
-	 * **No apply seam, deliberately, and it is not skipped silently.**
-	 * `ncfg_wifi_set_radio` refuses an activation with no way to apply, which
-	 * is the whole point of that argument being required: activation that
-	 * wrote a correct file and left the operator with "cannot reach the
-	 * supplicant" is the defect the synchronous step was added to close. What
-	 * an implementation needs here is a plan restricted to this interface and
-	 * to starting a supplicant, and `backend.start` is one of the thirty-five
-	 * ops this build's executor refuses -- so a seam here could only ever
-	 * report that. Handing one back writes nothing further and is answered.
+	 * **The apply seam, which this refused to supply on a reason that stopped
+	 * being true.** The comment here said `backend.start` was among the ops
+	 * this build's executor refused, so a seam could only ever report that --
+	 * and `netcfgd --supported` now answers `backend.start supplicant: true`,
+	 * as it does for every op that is not a deliberate refusal. The sentence
+	 * outlived its subject and took `ncfg wifi activate` with it: every
+	 * activation was refused, on every build, with a message about a caller
+	 * that was given no way to start a supplicant.
+	 *
+	 * `desk->loop` is that way. It needs the loop rather than the state
+	 * because applying anything needs an executor, and the executor is the
+	 * world's -- which is `ncfg_reconcile_world_t`'s whole bargain.
 	 */
-	return ncfg_wifi_set_radio(desk->state, interface, set->activate ? 1 : 0, NULL, NULL, out,
-	    err, err_size);
+	if (!desk->loop) {
+		return ncfg_wifi_set_radio(desk->state, interface, set->activate ? 1 : 0, NULL,
+		    NULL, out, err, err_size);
+	}
+	return ncfg_wifi_set_radio(desk->state, interface, set->activate ? 1 : 0,
+	    start_the_supplicant, desk->loop, out, err, err_size);
 }
 
 /* The four that take an interface and read through the supplicant or hostapd.

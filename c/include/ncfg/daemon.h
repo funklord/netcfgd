@@ -3012,6 +3012,20 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
  * 0 with a sentence where no window is open, which is an answer to send the
  * client rather than a failure of this daemon.
  */
+/*
+ * Start the supplicant one radio now wants, before an activation answers.
+ *
+ * Restricted to the interface asked about and to starting its *supplicant* --
+ * see the definition for the failure that second restriction is paid for.
+ * Nothing to do is success, because a radio already up from a previous
+ * activation is the state being asked for.
+ *
+ * 0 with a sentence naming the action that failed and why, which is what an
+ * operator needs when another manager is still holding the radio.
+ */
+int ncfg_daemon_start_supplicant_request(ncfg_reconcile_t *loop, const char *interface,
+    char *err, size_t err_size);
+
 int ncfg_daemon_confirm_request(ncfg_reconcile_t *loop, char *err, size_t err_size);
 
 /*

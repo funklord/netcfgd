@@ -9515,6 +9515,79 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.284 A refusal justified by a sentence that had stopped being true
+
+`enterprise.sh` failed at its first hard step: `ncfg wifi activate radio0`
+refused, on every build, with
+
+    `radio0` cannot be activated here: this caller was given no way to start
+    the radio's supplicant
+
+`answer_radio_set` passed NULL for the apply seam, and said why:
+
+> What an implementation needs here is a plan restricted to this interface and
+> to starting a supplicant, and `backend.start` is one of the thirty-five ops
+> this build's executor refuses -- so a seam here could only ever report that.
+
+`netcfgd --supported` answers `backend.start supplicant: true`, and has since
+the executor stopped refusing anything that is a port gap -- the same fact the
+daemon's own startup refusal was rewritten around. **The comment outlived its
+subject and took the verb with it.** Nothing failed and nothing was silent: a
+refusal that names a reason reads as a decision, and this one named a reason
+that had been true.
+
+`ncfg_daemon_start_supplicant_request` is the seam. It plans, keeps the
+`backend.start` actions for *this interface* whose kind is `supplicant`,
+applies them, records what ran, re-observes and publishes.
+
+**Restricted twice, and the second restriction is a failure paid for
+elsewhere.** It was the whole interface plan for a day in the Rust, and
+addressing is in that plan: activating a radio ran `dhcpcd`, which cannot get
+a lease on a link that has not associated with anything, so handing netcfgd a
+radio was refused because DHCP had not finished on it. Filtering on
+`backend.start` alone is not enough either -- it covers the DHCP client too.
+The rest is deferred rather than skipped; the loop applies it on the next
+pass, where a client that will not settle is a report rather than a refusal.
+
+**The dependencies are dropped rather than carried**, because an action lifted
+out of a larger plan names ids that are not in the smaller one, and an apply
+walking those would skip on an edge to nowhere.
+
+### The thirteen that remain are one divergence, and it is not a defect
+
+Every one of them reads `$work/daemon.log` for what netcfgd sent the
+supplicant -- `SET preassoc_mac_addr 0`, `SET_NETWORK 0 key_mgmt`, the path a
+materialised certificate was handed over at. The fake supplicant prints each
+command it receives, and where that lands is the whole question.
+
+**The Rust redirects hostapd's streams to a file and lets the supplicant's
+inherit.** The C redirects both, and its comment says where the second came
+from: *"which is `ncfg_hostapd_start`'s arrangement"*. So this is a
+port-introduced generalisation rather than an inherited decision, and it is
+not obviously wrong -- it is what lets a supplicant that will not start be
+quoted in its own words:
+
+    wpa_supplicant would not start on wlan0 (driver nl80211): <what it said>.
+    Its output is in <run>/supplicant/wlan0.log
+
+The Rust says `exited with {status}` and nothing more.
+
+For a **real** supplicant the two are nearly equivalent: `-B` forks after the
+control interface is up and closes its streams, so the file holds the pre-fork
+diagnostics and nothing else -- which is exactly what the quoting reads. For
+the **fake**, which stays in the foreground, the whole control-socket
+conversation goes wherever its stdout points. The fixture's expectation is a
+property of the fake.
+
+**So it is the holder's, with a real cost on each side.** Match the Rust --
+inherit the supplicant's streams -- and every diagnostic reaches the journal
+with netcfgd's own, at the price of the quoted refusal. Keep the file and the
+quoting stands, at the price of thirteen checks in the Rust's own suite, which
+0263 makes the bar for replacing a module.
+
+There is no arrangement that does both without teeing a pipe into the daemon's
+poll loop, which is machinery neither program has.
+
 ## 10.283 The lock covered the acting and the race was in the observing
 
 `apply_race.sh` had one failure and it is the one the script exists for: five
