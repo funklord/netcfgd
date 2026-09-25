@@ -725,12 +725,14 @@ int ncfg_confirm_revert(ncfg_daemon_state_t *state, ncfg_confirm_armed_t *armed,
 		 * clean revert announced itself as a broken one.
 		 */
 		(void)ncfg_daemon_state_reobserve(state, NULL, NULL, 0u);
+		ncfg_daemon_state_publish(state);
 	}
 	ncfg_confirm_armed_free(armed);
 
 	replan_onto_last_good(state, executor);
 	(void)ncfg_confirm_clear_window(state->paths.run, NULL, 0u);
 	(void)ncfg_daemon_state_reobserve(state, NULL, NULL, 0u);
+	ncfg_daemon_state_publish(state);
 
 	if (event) {
 		memset(event, 0, sizeof(*event));

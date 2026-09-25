@@ -915,6 +915,16 @@ int ncfg_daemon_state_reload(ncfg_daemon_state_t *state, char *err, size_t err_s
  * `*moved` is set to 1 or 0. Returns 0 where the kernel could not be read, in
  * which case the previous observation is kept and `moved` is 0.
  */
+/*
+ * Write the observation where `ncfg status` writes its own.
+ *
+ * Called when an observation is finished rather than when it is taken: the
+ * reconcile pass publishes after the probe verdicts are stamped and
+ * re-derived, and a caller with no probes publishes as soon as it has
+ * re-observed. See the definition for what publishing too early cost.
+ */
+void ncfg_daemon_state_publish(const ncfg_daemon_state_t *state);
+
 int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *err,
     size_t err_size);
 

@@ -30,6 +30,7 @@
  *   where nothing would warn. What a fixture states is what the case is about;
  *   everything else is whatever the schema says.
  */
+#include "ncfg/observe.h"
 #include "ncfg/base.h"
 #include "ncfg/document.h"
 #include "ncfg/linkset.h"
@@ -232,6 +233,67 @@ static int row_is_in_set(const ncfg_link_entry_t *row, const char *set)
 
 int main(void)
 {
+	/*
+	 * ---- derive a second time, once the probe verdicts are stamped ----
+	 *
+	 * **`observe.h` asks for this in as many words** -- "the daemon calls
+	 * `ncfg_observe_derive` a second time once the probe verdicts are stamped
+	 * on, which is why running it twice has to cost nothing" -- and nothing
+	 * called it.
+	 *
+	 * The observation's first derive runs before any probe has been asked, so
+	 * every link is `reachable: <absent>` and a set chooses on metric alone.
+	 * The planner reads the same observation *after* the stamp and moves the
+	 * default route to the member that answers -- so the machine was right and
+	 * the record of it named the other member, with no reason on the one that
+	 * had lost. `tests/live/linkset.sh` asserts against that record because
+	 * the daemon is the only producer of a probe verdict.
+	 *
+	 * What this asserts is that the second derive is **not** a no-op: the same
+	 * observation, derived twice with a verdict arriving between, answers
+	 * differently.
+	 */
+	{
+		ncfg_document_t *document = document_of(
+		    "{\"name\":\"eth0\",\"preference\":100},{\"name\":\"wwan0\",\"preference\":700}",
+		    "", "{\"name\":\"" NCFG_LINKSET_UPLINK "\",\"members\":[\"eth0\",\"wwan0\"]}");
+		char                  links[1024] = "";
+		ncfg_observed_t      *observed;
+		ncfg_observed_link_t *better;
+		char                  err[NCFG_ERROR_MAX];
+
+		add_link(links, sizeof(links), "eth0", 1, 1, NULL);
+		add_link(links, sizeof(links), "wwan0", 1, 1, NULL);
+		observed = observed_of(links);
+
+		err[0] = '\0';
+		check(ncfg_observe_derive(observed, document, err, sizeof(err)),
+		    "an observation derives its linkset choices");
+		check(observed->linkset_count == 1u && observed->linksets[0].active &&
+		        strcmp(observed->linksets[0].active, "eth0") == 0,
+		    "  and with nobody probed the better-ranked member wins");
+
+		better = changeable_link(observed, "eth0");
+		if (better) {
+			better->reachable.has = 1;
+			better->reachable.value = 0;
+		}
+		err[0] = '\0';
+		check(ncfg_observe_derive(observed, document, err, sizeof(err)),
+		    "deriving again, once a verdict is stamped, is allowed");
+		check(observed->linkset_count == 1u && observed->linksets[0].active &&
+		        strcmp(observed->linksets[0].active, "wwan0") == 0,
+		    "  and the set moves to the member that answers");
+		check(observed->linkset_count == 1u && observed->linksets[0].member_count == 2u &&
+		        observed->linksets[0].members[0].ineligible.has &&
+		        observed->linksets[0].members[0].ineligible.value ==
+		            NCFG_INELIGIBLE_PROBE,
+		    "  saying the one that lost lost to a probe");
+
+		ncfg_observed_free(observed);
+		ncfg_document_free(document);
+	}
+
 	/* ---- the whole point, in one assertion: two links that work, one in use ---- */
 	{
 		ncfg_document_t *document = document_of(

@@ -333,30 +333,46 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
 	}
 	ncfg_observed_free(state->observed);
 	state->observed = fresh;
-	/*
-	 * **Published, which is where a daemon's observation differs from a
-	 * CLI's.** `ncfg status` writes this file on its way past and says why --
-	 * answering "why is it like this?" from a file is the product, and it
-	 * should not require an apply first. A daemon observes far more often
-	 * than anybody runs `ncfg`, and it was the one observer that published
-	 * nothing: `/run/netcfgd/` held `desired.json`, `owned.json` and
-	 * `plan.last.json`, and no account at all of the machine those were
-	 * decided against.
-	 *
-	 * `tests/live/rfkill_stream.sh` is what noticed, by using the file's
-	 * modification time as the answer to "did the event make it look again" --
-	 * a reasonable instrument that had nothing to read.
-	 *
-	 * **Best effort, as the Rust has it.** A `/run` that will not take it is
-	 * not a failure to observe: the observation is in hand and every consumer
-	 * inside this process has it, and refusing here would disarm drift
-	 * detection over a full disk.
-	 */
-	if (state->paths.run) {
-		char why[NCFG_ERROR_MAX];
-
-		(void)ncfg_state_write_observed(state->paths.run, state->observed, why,
-		    sizeof(why));
-	}
 	return 1;
+}
+
+/*
+ * **Published, which is where a daemon's observation differs from a CLI's.**
+ *
+ * `ncfg status` writes this file on its way past and says why -- answering
+ * "why is it like this?" from a file is the product, and it should not require
+ * an apply first. A daemon observes far more often than anybody runs `ncfg`,
+ * and it was the one observer that published nothing: `/run/netcfgd/` held
+ * `desired.json`, `owned.json` and `plan.last.json`, and no account at all of
+ * the machine those were decided against. `tests/live/rfkill_stream.sh` is
+ * what noticed, by using the file's modification time as the answer to "did
+ * the event make it look again" -- an instrument with nothing to read.
+ *
+ * **Separate from `ncfg_daemon_state_reobserve`, and that is the whole of what
+ * this function is for.** The first version published inside it, which put the
+ * write *before* the probe verdicts are stamped on and before the second
+ * `ncfg_observe_derive` those verdicts require -- so the record said the
+ * machine was on the better-ranked member of a linkset while the planner had
+ * already moved the default route to the one that answers. Everything was
+ * right except the account of it. `tests/live/linkset.sh` asserts against this
+ * file deliberately, because the daemon is the only producer of a probe
+ * verdict and so the only thing that can be asked what it decided.
+ *
+ * So a caller publishes when its observation is *finished*: for the reconcile
+ * pass that is after the stamp and the re-derive, and for a caller with no
+ * probes to stamp it is as soon as `reobserve` returns.
+ *
+ * **Best effort, as the Rust has it.** A `/run` that will not take it is not a
+ * failure to observe: the observation is in hand and every consumer inside
+ * this process has it, and refusing here would disarm drift detection over a
+ * full disk.
+ */
+void ncfg_daemon_state_publish(const ncfg_daemon_state_t *state)
+{
+	char why[NCFG_ERROR_MAX];
+
+	if (!state || !state->paths.run || !state->observed) {
+		return;
+	}
+	(void)ncfg_state_write_observed(state->paths.run, state->observed, why, sizeof(why));
 }

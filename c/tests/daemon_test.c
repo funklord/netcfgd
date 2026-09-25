@@ -1307,18 +1307,20 @@ static void the_observation_comes_through_a_seam(const char *base)
 	check(state.observed->link_count == 2, "which is the observation now held");
 
 	/*
-	 * **And every observation is published**, which is where a daemon's
-	 * differs from `ncfg status`'s. That verb writes `observed.json` on its
-	 * way past because answering "why is it like this?" from a file is the
-	 * product; the daemon observes far more often than anybody runs `ncfg`
-	 * and was the one observer that published nothing, so `/run/netcfgd/`
-	 * held the desired document, the ownership record and the last plan, and
-	 * no account of the machine those were decided against.
+	 * **Observing and publishing are two steps, and the order is the point.**
 	 *
-	 * The count is the assertion rather than the file's presence: a write
-	 * that happened once on the first observation and never again would
-	 * satisfy "the file is there", and the thing being tested is that the
-	 * record follows the observation.
+	 * The daemon writes `observed.json` where `ncfg status` writes its own,
+	 * because answering "why is it like this?" from a file is the product --
+	 * and it was the one observer that published nothing, so `/run/netcfgd/`
+	 * held the desired document, the ownership record and the last plan and no
+	 * account of the machine those were decided against.
+	 *
+	 * The first version published inside `reobserve`, which is **before** the
+	 * probe verdicts are stamped on and before the second `ncfg_observe_derive`
+	 * those verdicts require. The record then named the better-ranked member of
+	 * a linkset while the planner had already moved the default route to the
+	 * one that answers. So this asserts that re-observing publishes nothing,
+	 * which is the property that was wrong, and then that publishing does.
 	 */
 	{
 		char   published[600];
@@ -1327,10 +1329,16 @@ static void the_observation_comes_through_a_seam(const char *base)
 
 		(void)snprintf(published, sizeof(published), "%s/observed.json", run_dir);
 		held = testdir_read(published, &length);
+		check(held == NULL,
+		    "re-observing publishes nothing, because the observation is not finished");
+		free(held);
+
+		ncfg_daemon_state_publish(&state);
+		held = testdir_read(published, &length);
 		check(held != NULL && length > 0u,
-		    "every observation is published where `ncfg status` publishes its own");
+		    "and publishing writes it where `ncfg status` writes its own");
 		check(held && strstr(held, "eth1") != NULL,
-		    "  and it is the observation just taken, not the first one");
+		    "  the observation just taken, rather than the first one");
 		free(held);
 	}
 
