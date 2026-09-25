@@ -9515,6 +9515,76 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.278 The hooks nobody wrote, the staging file nobody removed, and errno through a formatter
+
+`write_full.sh` had eight failures across three defects, and only one of them
+is about a full disk.
+
+### `hooks.h` stated the rule and no caller obeyed it
+
+> A caller that compiles to **read** the configuration has a document that
+> names them and no reason to put them on disk; the one that runs them does.
+
+Every verb took `ncfg_pending_hooks_sink`, the writing one, and **no verb ever
+called `ncfg_pending_hooks_write`**. The only caller of that function anywhere
+in the tree was the daemon's configuration load. So `ncfg apply` planned
+`hook.run` against a path under `<run>/hooks/` that nothing had created:
+
+    cannot read <run>/hooks/d0.pre_up.0: No such file or directory
+    ncfg: stopped at action 0 (hook.run); 0 done, 2 not attempted
+
+An operator's `pre_up` never ran, and `ncfg plan` said nothing wrong, because
+a plan is right about what it intends.
+
+`compile_config` takes a `runs_hooks` flag now. `apply` passes 1 and gets the
+writing sink and the write; the five read-only verbs pass 0 and get
+`ncfg_hook_sink_unwritten`, which hashes exactly what would have been written
+and names no file. **Both halves are asserted**, because writing from every
+verb would also make the apply case pass: `ncfg plan` must leave no `hooks/`
+directory behind at all.
+
+### A staging file that a failed write left for ever
+
+`ncfg_backend_write_file` opens with `O_CREAT` and reports the failure of the
+*write*, so on a full disk what is left beside `resolv.conf` is a dot-file
+holding a **prefix** of the new one. Nothing comes back to tidy it and the
+next writer picks a new name, so it accumulates. The rename path had removed
+its own temporary since it was written; this path never had.
+
+**The unit fixture is `RLIMIT_FSIZE`**, which fails the write and nothing
+else: the create succeeds at zero bytes and the first write past the limit
+returns `EFBIG`. SIGXFSZ has to be ignored, or the process is killed rather
+than the write refused -- which would read as a suite that crashed rather than
+a check that failed. That reaches the case every other refusal in `dns_test`
+cannot: all of them refuse at the `open`, with a file where a directory has to
+be, and the write is a separate syscall with separate failures. 0180 named
+this gap and could not close it without a mount; a resource limit needs none.
+
+### And `errno` did not survive being turned into a sentence
+
+The line under all of it: `ncfg_error_setv` called `vsnprintf` and returned.
+`vsnprintf` is permitted to set `errno` on success and glibc's does for some
+conversions -- so a function that reported a failure and then let its caller
+ask **which** failure was handing over whatever the formatting left behind.
+
+The resolver's staging write is exactly that caller. It falls back to writing
+in place for a read-only `/etc` -- the sandbox grants the file and refuses a
+new directory entry -- and must **not** for a full disk, where the fallback
+would truncate a working `resolv.conf` and then fail to refill it. The test is
+`errno == EACCES || EPERM || EROFS`, read after a call that formats a message.
+
+`ncfg_error_setv` saves and restores it now. **Saved there rather than at each
+caller**: there is one of these and there are hundreds of those, and a rule
+that has to be remembered at every site is one that will be missed at some of
+them. The test's control is the *value* rather than non-zeroness -- a restored
+`errno` and one nothing touched are the same observation unless the formatter
+is given something to work at.
+
+**It had never bitten**, as far as anything here shows, which is the
+uncomfortable part: the branch it protects is the difference between an
+unchanged resolver and an empty one, and it was resting on a library call not
+happening to disturb a global.
+
 ## 10.277 Two rfkill scripts, two seams nobody supplied, and the daemon that published nothing
 
 `rfkill.sh` and `rfkill_stream.sh` both pass. Three separate gaps, and two of

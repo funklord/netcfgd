@@ -11,6 +11,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -100,6 +101,42 @@ int main(void)
 		ncfg_buf_init(&buf, 4u);
 		check(!ncfg_buf_failed(&buf), "while a fresh buffer is not");
 		ncfg_buf_free(&buf);
+	}
+
+	/*
+	 * **`errno` survives a message being formatted**, because callers read it
+	 * afterwards to decide what to do. `vsnprintf` may set `errno` on success
+	 * and glibc's does for some conversions, so a function that reported a
+	 * failure and then let its caller ask *which* failure was handing over
+	 * whatever the formatting left behind.
+	 *
+	 * The case that found it: the resolver's staging write falls back to
+	 * writing in place for a read-only `/etc` and must NOT for a full disk --
+	 * that fallback would truncate a working `resolv.conf` and then fail to
+	 * refill it. The test is `errno == EACCES || EPERM || EROFS`, read after a
+	 * call that formats a message.
+	 *
+	 * The control is the value being preserved rather than merely non-zero: a
+	 * saved-and-restored `errno` and an `errno` nothing touched are the same
+	 * observation unless the formatting is made to do something.
+	 */
+	{
+		char   message[NCFG_ERROR_MAX];
+		double wide = 1.0 / 3.0;
+
+		errno = EROFS;
+		ncfg_error_set(message, sizeof(message), "a read-only filesystem: %s",
+		    strerror(EROFS));
+		check(errno == EROFS, "`errno` survives a message being formatted");
+
+		/* Something for the formatter to work at, since a plain `%s` is the
+		 * case least likely to touch it. */
+		errno = ENOSPC;
+		ncfg_error_set(message, sizeof(message), "%.*f %e %g %s %d", 40, wide, wide,
+		    wide, "and text", 42);
+		check(errno == ENOSPC, "  including one the formatter has to work at");
+		check(strstr(message, "and text") != NULL,
+		    "  and the message is still the message");
 	}
 
 	if (failures == 0) {

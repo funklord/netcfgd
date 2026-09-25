@@ -695,8 +695,26 @@ static int command_simple(const ncfg_cli_options_t *options, ncfg_proto_request_
  * document. Zeroed by the caller, filled in here, and freed by the caller
  * however the compile ended.
  */
+/*
+ * Compile the configuration, and put the hook bodies on disk where a verb is
+ * going to run them.
+ *
+ * **`hooks.h` states the rule and nothing here obeyed it**: "a caller that
+ * compiles to read the configuration has a document that names them and no
+ * reason to put them on disk; the one that runs them does." Every verb got the
+ * writing sink and none of them ever called `ncfg_pending_hooks_write`, so
+ * `ncfg apply` planned `hook.run` against a path in `<run>/hooks/` that
+ * nothing had created -- `cannot read ...: No such file or directory`, and an
+ * operator's `pre_up` never ran.
+ *
+ * So `runs_hooks` picks the sink. `apply` is the one caller that passes 1, and
+ * it is also where the write's failure has to be the command's: a hook body
+ * netcfgd could not write is a script that will not run, and reporting the
+ * apply as successful is 0180's whole subject.
+ */
 static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *run_dir,
-    size_t run_dir_size, ncfg_provenance_t *provenance, char *err, size_t err_size)
+    size_t run_dir_size, ncfg_provenance_t *provenance, int runs_hooks, char *err,
+    size_t err_size)
 {
 	char                  config_dir[NCFG_CLI_TEXT_MAX];
 	char                  factory_dir[NCFG_CLI_TEXT_MAX];
@@ -714,13 +732,14 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 		ncfg_config_sources_free(&sources);
 		return NULL;
 	}
-	pending = ncfg_pending_hooks_new(run_dir, err, err_size);
-	if (!pending) {
+	pending = runs_hooks ? ncfg_pending_hooks_new(run_dir, err, err_size) : NULL;
+	if (runs_hooks && !pending) {
 		ncfg_config_sources_free(&sources);
 		return NULL;
 	}
-	document = ncfg_config_compile_with_provenance(&sources, ncfg_pending_hooks_sink(pending),
-	    provenance, &diags, err, err_size);
+	document = ncfg_config_compile_with_provenance(&sources,
+	    pending ? ncfg_pending_hooks_sink(pending) : ncfg_hook_sink_unwritten(), provenance,
+	    &diags, err, err_size);
 	if (!document) {
 		size_t at;
 
@@ -751,6 +770,20 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 		}
 	}
 	ncfg_lower_diags_free(&diags);
+	/*
+	 * **After the document, because a configuration that does not compile has
+	 * no hooks to write** -- and before anything acts on it, because the
+	 * runner opens these files rather than being handed their contents.
+	 *
+	 * A failure here fails the compile. The alternative is an apply that
+	 * reports success having silently not run somebody's `pre_up`, which is
+	 * the case 0180 exists for: the file is opened and the write is what
+	 * fails, so what is on disk is a prefix of the operator's script.
+	 */
+	if (document && pending && !ncfg_pending_hooks_write(pending, err, err_size)) {
+		ncfg_document_free(document);
+		document = NULL;
+	}
 	ncfg_pending_hooks_free(pending);
 	ncfg_config_sources_free(&sources);
 	return document;
@@ -769,7 +802,7 @@ static int command_show(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
 	char             err[NCFG_ERROR_MAX];
-	ncfg_document_t *document = compile_config(options, run_dir, sizeof(run_dir), NULL, err,
+	ncfg_document_t *document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err,
 	    sizeof(err));
 	int              code;
 
@@ -881,7 +914,7 @@ static int command_status(const ncfg_cli_options_t *options)
 	ncfg_observed_t *observed = NULL;
 	int              code = NCFG_CLI_EXIT_OK;
 
-	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
 	if (!observe_now(options, run_dir, document, &observed, err, sizeof(err))) {
 		ncfg_document_free(document);
 		return fail(err);
@@ -1049,7 +1082,7 @@ static int command_plan(const ncfg_cli_options_t *options)
 	ncfg_plan_t        *plan;
 	int                 code = NCFG_CLI_EXIT_OK;
 
-	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
 	if (!document) {
 		return fail(err);
 	}
@@ -1152,7 +1185,7 @@ static int command_explain(const ncfg_cli_options_t *options, const char **posit
 	 * observation half of the answer is given anyway -- it is worth having on
 	 * its own, and this is the command for the moment it is all there is.
 	 */
-	document = compile_config(options, run_dir, sizeof(run_dir), &provenance, err,
+	document = compile_config(options, run_dir, sizeof(run_dir), &provenance, 0, err,
 	    sizeof(err));
 	if (!document) {
 		(void)fprintf(stderr, "ncfg: the configuration does not compile, so this "
@@ -1244,7 +1277,7 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
 			    (int)NCFG_CLI_TEXT_MAX, positional[0]);
 		}
 	}
-	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 0, err, sizeof(err));
 
 	if (clock_gettime(CLOCK_MONOTONIC, &deadline) != 0) {
 		ncfg_document_free(document);
@@ -1456,7 +1489,7 @@ static int command_apply(const ncfg_cli_options_t *options)
 		    "program embedding this library without one can plan and explain and "
 		    "cannot change anything");
 	}
-	document = compile_config(options, run_dir, sizeof(run_dir), NULL, err, sizeof(err));
+	document = compile_config(options, run_dir, sizeof(run_dir), NULL, 1, err, sizeof(err));
 	if (!document) {
 		return fail(err);
 	}

@@ -217,7 +217,19 @@ int ncfg_dns_replace(const char *path, const char *text, char *err, size_t err_s
 		 * back there would truncate the resolver's configuration and then fail
 		 * to refill it -- an empty `resolv.conf` being worse than an unchanged
 		 * one. */
-		if (errno == EACCES || errno == EPERM || errno == EROFS) {
+		int why = errno;
+
+		/*
+		 * **The staging file goes, whether or not it was ever complete.**
+		 * `ncfg_backend_write_file` opens with `O_CREAT` and reports the
+		 * failure of the *write*, so on a full disk what is left beside the
+		 * resolver's own configuration is a dot-file holding a prefix of the
+		 * new one -- for ever, since nothing comes back to tidy it and the
+		 * next writer picks a new name. The rename path below has removed its
+		 * own temporary since it was written; this path did not.
+		 */
+		(void)unlink(temporary);
+		if (why == EACCES || why == EPERM || why == EROFS) {
 			return in_place(path, text, staging, err, err_size);
 		}
 		ncfg_error_set(err, err_size, "%s", staging);

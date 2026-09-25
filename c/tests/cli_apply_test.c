@@ -576,6 +576,57 @@ static void a_failing_action_stops_the_apply(void)
  * owes a script silence on. Asserting the whole stream empty asserted a
  * property of whoever ran the suite.
  */
+/*
+ * An apply puts the hook bodies on disk; a read-only verb does not.
+ *
+ * **`hooks.h` states the rule and nothing obeyed it.** "A caller that compiles
+ * to read the configuration has a document that names them and no reason to
+ * put them on disk; the one that runs them does." Every verb took the writing
+ * sink and no verb ever called `ncfg_pending_hooks_write`, so `ncfg apply`
+ * planned `hook.run` against a path in `<run>/hooks/` that nothing had
+ * created. What the operator saw was `cannot read ...: No such file or
+ * directory` and a `pre_up` that never ran -- and `plan` said nothing, because
+ * a plan is right about what it intends.
+ *
+ * Both halves are asserted, because writing them from every verb would also
+ * make this pass: `ncfg plan` must leave no `hooks/` behind at all, which is
+ * what "the directory is created only when there is something to put in it"
+ * means for a machine that is only being asked questions.
+ */
+static void an_apply_materialises_the_hook_bodies(void)
+{
+	static const char *const WITH_HOOK =
+	    "interface eth0 {\n\tconfig = \"null\"\n\tpre_up {\n\techo ran\n\t}\n}\n";
+	char  config_dir[600];
+	char  run_dir[600];
+	char  path[1024];
+	char *argv[6];
+	const char *said;
+	const char *complaint;
+	char *body;
+
+	fixture("hookbody", WITH_HOOK, config_dir, sizeof(config_dir), run_dir, sizeof(run_dir));
+	argv[0] = (char *)"ncfg";
+	argv[1] = (char *)"plan";
+	argv[2] = (char *)"--config-dir";
+	argv[3] = config_dir;
+	argv[4] = (char *)"--run-dir";
+	argv[5] = run_dir;
+	(void)ran(argv, 6, &recording_machine, &said, &complaint);
+	(void)snprintf(path, sizeof(path), "%s/hooks/eth0.pre_up.0", run_dir);
+	body = testdir_read(path, NULL);
+	check(body == NULL, "`ncfg plan` writes no hook body, having nothing to run");
+	free(body);
+
+	argv[1] = (char *)"apply";
+	(void)ran(argv, 6, &recording_machine, &said, &complaint);
+	body = testdir_read(path, NULL);
+	check(body != NULL, "`ncfg apply` writes the body the plan points `hook.run` at");
+	check(body && strstr(body, "echo ran") != NULL,
+	    "  holding the script the operator wrote");
+	free(body);
+}
+
 static void json_answers_with_the_journal_alone(void)
 {
 	char        config_dir[600];
@@ -727,6 +778,7 @@ int main(void)
 	an_empty_plan_opens_nothing();
 	a_plan_is_carried_out();
 	a_failing_action_stops_the_apply();
+	an_apply_materialises_the_hook_bodies();
 	json_answers_with_the_journal_alone();
 	a_machine_that_will_not_open_changes_nothing();
 	a_confirm_window_never_opens_the_machine();
