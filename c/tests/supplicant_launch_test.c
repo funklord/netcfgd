@@ -918,7 +918,22 @@ static void a_socket_nothing_answers_is_cleared(void)
 	fixture_device.name = text("wlan-test0");
 }
 
-/* A supplicant that will not start says why, and where the rest of it is. */
+/*
+ * A supplicant that will not start says which one, on which driver, and how it
+ * ended.
+ *
+ * **This asserted a quotation out of a log file, and that behaviour is gone on
+ * purpose.** The supplicant's streams are inherited now rather than redirected
+ * -- netcfgd starts it `-s`, so a real one logs to syslog and the file held
+ * only whatever it said before that took effect. The Rust inherits here and
+ * redirects hostapd, and `tests/live/enterprise.sh` reads thirteen facts out
+ * of what the supplicant said on the daemon's own streams.
+ *
+ * So what is asserted is the message that remains and the file that no longer
+ * exists. The words themselves are on this process's stderr, where a unit test
+ * capturing them would be asserting about its own harness rather than about
+ * netcfgd; the live script is where they are read.
+ */
 static void a_program_that_refuses_says_why_and_where(void)
 {
 	ncfg_service_t service = a_context();
@@ -931,14 +946,17 @@ static void a_program_that_refuses_says_why_and_where(void)
 	fixture_device.name = text("wlan-refuse");
 	message[0] = '\0';
 	refused(ncfg_service_backend_start(&service, NCFG_BACKEND_SUPPLICANT, "wlan-refuse",
-	    message, sizeof(message)), message, "No such device",
-	    "a start quotes what the supplicant said rather than only its status");
-	refused(0, message, "Its output is in", "  and says where the rest of it is");
+	    message, sizeof(message)), message, "driver nl80211,wext",
+	    "a start that failed names the driver, which is where a failure sends you");
+	refused(0, message, "exited with status",
+	    "  and how it ended, since its own words are on netcfgd's streams");
+	check(strstr(message, "Its output is in") == NULL,
+	    "  and names no file, because there is no longer one to read");
 	check(ncfg_supplicant_log_path(run_dir, "wlan-refuse", log, sizeof(log), NULL, 0),
-	    "the log has a path under the run directory");
+	    "the log still has a path under the run directory");
 	body = testdir_read(log, NULL);
-	check(body != NULL && strstr(body, "Failed to initialize interface") != NULL,
-	    "  and holds what it said before it would have forked");
+	check(body == NULL,
+	    "  and nothing is written to it, which is what inheriting the streams means");
 	free(body);
 	fixture_device.name = text("wlan-test0");
 

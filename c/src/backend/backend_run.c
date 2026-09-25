@@ -234,10 +234,18 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		ncfg_error_set(err, err_size, "a program was asked for with no name");
 		return 0;
 	}
-	log = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-	if (log < 0) {
-		ncfg_error_set(err, err_size, "cannot write %s: %s", log_path, strerror(errno));
-		return 0;
+	if (log_path) {
+		log = open(log_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+		if (log < 0) {
+			ncfg_error_set(err, err_size, "cannot write %s: %s", log_path,
+			    strerror(errno));
+			return 0;
+		}
+	} else {
+		/* Inherited, which is this function's NULL case: the child's streams
+		 * stay this process's, so whatever it says lands wherever netcfgd's
+		 * own output does. */
+		log = -1;
 	}
 
 	/*
@@ -260,7 +268,9 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		if (complaint[1] >= 0) {
 			(void)close(complaint[1]);
 		}
-		(void)close(log);
+		if (log >= 0) {
+			(void)close(log);
+		}
 		return 0;
 	}
 	child = fork();
@@ -268,7 +278,9 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		ncfg_error_set(err, err_size, "could not run %s: %s", program, strerror(errno));
 		(void)close(complaint[0]);
 		(void)close(complaint[1]);
-		(void)close(log);
+		if (log >= 0) {
+			(void)close(log);
+		}
 		return 0;
 	}
 	if (child == 0) {
@@ -276,10 +288,12 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		 * daemonize, or a test's stand-in, must be killable as a group rather
 		 * than leaving whatever it spawned attached to netcfgd's. */
 		(void)setpgid(0, 0);
-		if (dup2(log, STDOUT_FILENO) < 0 || dup2(log, STDERR_FILENO) < 0) {
+		if (log >= 0 && (dup2(log, STDOUT_FILENO) < 0 || dup2(log, STDERR_FILENO) < 0)) {
 			_exit(127);
 		}
-		(void)close(log);
+		if (log >= 0) {
+			(void)close(log);
+		}
 		(void)close(complaint[0]);
 		/* The cast is const-correctness only: `execv` does not modify the
 		 * vector, and C has no way to say so in the prototype. */
@@ -293,7 +307,9 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 		}
 		_exit(127);
 	}
-	(void)close(log);
+	if (log >= 0) {
+		(void)close(log);
+	}
 	(void)close(complaint[1]);
 	{
 		int why = 0;

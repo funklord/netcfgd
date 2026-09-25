@@ -30,19 +30,6 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-/*
- * `wpa_supplicant`'s vocabulary for a start that failed.
- *
- * Read out of the daemon rather than guessed: an interface that is not there
- * is `Could not read interface wlan0 flags: No such device`, a driver it was
- * not built with is `Unsupported driver 'xyz'`, and both are followed by
- * `Failed to initialize interface` and then `Failed to initialize
- * wpa_supplicant`. So the reason is at the top and the tail is the narration,
- * which is `ncfg_backend_complaints`' whole assumption. Matched
- * case-insensitively, one line at a time.
- */
-static const char *const SUPPLICANT_MARKERS[] = { "error", "cannot", "could not", "failed",
-	"unsupported", "unknown", "invalid", "no such", "usage:" };
 
 /* Mode 0700 for `<run>/supplicant`, which is the mode `ncfg_service_set_
  * profiles` already makes it with: the digest of what a radio was handed sits
@@ -240,7 +227,6 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 	char                   log[NCFG_SUPPLICANT_PATH_MAX];
 	char                   socket_path[NCFG_SUPPLICANT_PATH_MAX];
 	char                   parent[NCFG_SUPPLICANT_PATH_MAX];
-	char                   said[NCFG_ERROR_MAX];
 	ncfg_supplicant_args_t args;
 	struct stat            about;
 	char                  *found = NULL;
@@ -354,12 +340,23 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 		free(found);
 		return 0;
 	}
-	/* The two streams go to a file rather than a pipe, which is
-	 * `ncfg_hostapd_start`'s arrangement: the supplicant closes them when it
-	 * daemonises, and a file leaves the reason it would not start somewhere an
-	 * operator can read after the fact rather than only in whatever captured
-	 * netcfgd's own stderr. */
-	if (!ncfg_backend_run(program, args.argv, log, &exited_ok, &status, err, err_size)) {
+	/*
+	 * **Inherited rather than sent to a file, which is `ncfg_hostapd_start`'s
+	 * arrangement and not this one's.** It was that one for a while, on the
+	 * reasoning that copied it across: a file leaves the reason a daemon would
+	 * not start somewhere an operator can read after the fact.
+	 *
+	 * The supplicant is the one backend where that buys nothing. netcfgd
+	 * starts it `-s`, so a real one logs to syslog -- the journal has its
+	 * faults either way -- and the file would hold only whatever it managed to
+	 * say before that took effect. The Rust inherits here for the same reason
+	 * and redirects hostapd, and `tests/live/enterprise.sh` reads thirteen
+	 * facts out of what the supplicant said, on the daemon's own streams.
+	 *
+	 * What it costs is the quoting below, which had a file to read and now has
+	 * an exit status. That is the Rust's answer too.
+	 */
+	if (!ncfg_backend_run(program, args.argv, NULL, &exited_ok, &status, err, err_size)) {
 		free(found);
 		return 0;
 	}
@@ -372,18 +369,14 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 		 * property `backend.stop` relies on when it reads nothing listening as
 		 * nothing running.
 		 */
-		if (ncfg_backend_complaints(log, SUPPLICANT_MARKERS,
-		    sizeof(SUPPLICANT_MARKERS) / sizeof(SUPPLICANT_MARKERS[0]), NULL, 0u, 2u,
-		    said, sizeof(said))) {
-			ncfg_error_set(err, err_size,
-			    "wpa_supplicant would not start on %s (driver %s): %s. Its output is "
-			    "in %s", iface, driver ? driver : "", said, log);
-		} else {
-			ncfg_error_set(err, err_size,
-			    "wpa_supplicant would not start on %s (driver %s): it exited with "
-			    "status %d. Its output is in %s", iface, driver ? driver : "",
-			    status, log);
-		}
+		/* Its own words are on netcfgd's streams and in syslog, rather than
+		 * in a file this could quote from. Named as the Rust names it, with
+		 * the driver -- which is the half of a `nl80211` failure that says
+		 * where to look. */
+		ncfg_error_set(err, err_size,
+		    "wpa_supplicant would not start on %s (driver %s): it exited with status "
+		    "%d. What it said is in the journal beside this, and in syslog",
+		    iface, driver ? driver : "", status);
 		return 0;
 	}
 	return 1;
