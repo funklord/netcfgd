@@ -1119,16 +1119,24 @@ int ncfg_main_netcfgd(int argc, char **argv)
 		return will_not_reconcile();
 	}
 	/*
-	 * **Said every time, at the level nothing filters.** Somebody who typed
-	 * the flag knows what they did; the person who finds this in a log a week
-	 * later, or inherits a machine running it, does not. It names the build,
-	 * what is watching (nothing, from here -- that is the operator's to
-	 * arrange) and how to stop.
+	 * **Said every time, at the level nothing filters** -- which is what this
+	 * comment always claimed and what the code did not do.
+	 *
+	 * It went through `ncfg_log_emitf` at `warning`, so `NCFG_LOG=error` and
+	 * `NCFG_LOG=critical` suppressed it completely. Measured: zero lines about
+	 * the flag at either. A machine could therefore be running this port's
+	 * reconcile loop with nothing anywhere saying so -- and the person who
+	 * needs that sentence is not the one who typed the flag, it is the one who
+	 * finds the machine a week later.
+	 *
+	 * So it is said the way the refusal it replaces is said: straight to
+	 * stderr, outside the levels. The pair was inconsistent as well as wrong
+	 * -- `will_not_reconcile` writes with `fail`, which nothing filters, while
+	 * its counterpart could vanish.
 	 */
-	ncfg_log_emitf("daemon", NCFG_LOG_WARNING,
-	    "starting the C port's reconcile loop because `--try-the-c-daemon` was given. "
-	    "This build has never run a machine for long; the refusal it replaces is in "
-	    "`netcfgd --help` and in daemon_main.c. Stop it with SIGTERM and start the Rust "
-	    "daemon to hand the machine back");
+	(void)fail("starting the C port's reconcile loop because `--try-the-c-daemon` was "
+	    "given. This build has never run a machine for long; the refusal it replaces "
+	    "is in `netcfgd --help` and in daemon_main.c. Stop it with SIGTERM and start "
+	    "the Rust daemon to hand the machine back");
 	return start(&options);
 }

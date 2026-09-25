@@ -9515,6 +9515,60 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.282 A safety notice a log level could switch off, and the one check the flag cannot pass
+
+`log_shape.sh` has one failure and it is not fixable from here. What the
+investigation found instead is a defect in the thing the failure is about.
+
+### The notice claimed a property it did not have
+
+`daemon_main.c` says of the `--try-the-c-daemon` notice:
+
+> **Said every time, at the level nothing filters.** Somebody who typed the
+> flag knows what they did; the person who finds this in a log a week later,
+> or inherits a machine running it, does not.
+
+It went through `ncfg_log_emitf` at `NCFG_LOG_WARNING`. Measured:
+`NCFG_LOG=error` and `NCFG_LOG=critical` each printed **zero** lines about the
+flag. A machine could be running this port's reconcile loop with nothing
+anywhere saying so -- and the audience the comment names is exactly the one a
+log level would have hidden it from.
+
+**The pair was inconsistent as well as wrong.** `will_not_reconcile` writes
+its refusal with `fail`, straight to stderr, which nothing filters. Its
+counterpart -- *starting anyway* -- was the one that could vanish. It is said
+the same way now, and survives every level.
+
+### And the check that cannot pass
+
+    said=$(say warning)
+    check "a level below what is emitted silences it completely" \
+        "$(printf '%s' "$said" | grep -c .)" "0"
+
+The Rust's startup at `warning` emits nothing, because everything it says at
+startup is an info and a note. The C emits that one line -- and it emits it
+*because the live seam passes `--try-the-c-daemon`*, which this suite must
+pass for the daemon to start at all.
+
+There is no version of this that passes without one of two changes, and
+**neither is mine to make**:
+
+- **Weaken the notice** so a level can filter it, which is the defect fixed
+  above put back.
+- **Let the daemon bind and serve without reconciling**, so `log_shape.sh`
+  needs no flag. That reads the gate's own sentence more literally than
+  exiting does -- it says the *reconcile loop* does not start by default --
+  and it would make a C netcfgd useful for `status` and `plan` against a
+  running machine. It is also the dangerous one: the bind deliberately unlinks
+  a stale socket, so a C netcfgd started with no flags on this workstation
+  would take `/run/netcfgd/netcfgd.sock` from the Rust daemon that is running
+  the network.
+
+So it is recorded rather than decided. **The failure disappears on its own
+when the flag does**: the gate exists because no netcfgd written in C has run
+a machine for any length of time, and `c_daemon_tryout.sh` is the arrangement
+that is meant to earn its removal.
+
 ## 10.281 The record was published before the observation was finished
 
 `linkset.sh` had two failures, and the machine was already right. One default
