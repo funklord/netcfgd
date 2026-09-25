@@ -1003,9 +1003,14 @@ static void show_prints_the_document_canonically(const char *text, size_t length
 	wrote = ncfg_cli_print_document(document, err, sizeof(err));
 	printed = capture_end();
 	check(wrote, "`ncfg show` writes a document");
-	check(printed[0] == '{' && strchr(printed, '\n') == strrchr(printed, '\n') &&
-	    strrchr(printed, '\n') != NULL,
-	    "and it is one object on one line, which is what `jq` was going to get");
+	/* Laid out, because the canonical encoding is: the hash that identifies a
+	 * configuration is taken over exactly these bytes, so the layout is the
+	 * Rust's or the two programs disagree about what document this is. This
+	 * asserted one line until the two were measured against each other on the
+	 * same config -- same content, same key order, different whitespace, and
+	 * therefore a different sha256 for every configuration. */
+	check(printed[0] == '{' && strstr(printed, "\n  \"schema_version\": {\n") != NULL,
+	    "and it is laid out the way the canonical encoding its hash covers is");
 	check(strstr(printed, "\"schema_version\"") != NULL,
 	    "and it is the whole document, not a summary of one");
 	ncfg_document_free(document);

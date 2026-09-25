@@ -243,8 +243,8 @@ int ncfg_state_write_provenance(const char *run_dir, ncfg_provenance_t *provenan
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
-	    NCFG_RUN_FILE_MODE, err, err_size);
+	ok = ncfg_write_json_atomically(path, ncfg_buf_text(&buf), NCFG_RUN_FILE_MODE, err,
+	    err_size);
 	free(path);
 	ncfg_buf_free(&buf);
 	return ok;
@@ -713,8 +713,8 @@ static int write_observed_projection(const char *dir, const ncfg_observed_t *obs
 		ncfg_buf_free(&buf);
 		return 0;
 	}
-	ok = ncfg_write_atomically(file, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
-	    NCFG_RUN_FILE_MODE, err, err_size);
+	ok = ncfg_write_json_atomically(file, ncfg_buf_text(&buf), NCFG_RUN_FILE_MODE, err,
+	    err_size);
 	free(file);
 	ncfg_buf_free(&buf);
 	return ok;

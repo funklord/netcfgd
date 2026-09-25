@@ -68,6 +68,29 @@ int ncfg_write_atomically(const char *path, const void *bytes, size_t length, un
 	return ncfg_host_write_atomically(path, bytes, length, (mode_t)mode, err, err_size);
 }
 
+int ncfg_write_json_atomically(const char *path, const char *compact, unsigned int mode,
+    char *err, size_t err_size)
+{
+	ncfg_buf_t laid_out;
+	int        ok;
+
+	if (!compact) {
+		ncfg_error_set(err, err_size, "there is no text to write");
+		return 0;
+	}
+	ncfg_buf_init(&laid_out, 0);
+	if (!ncfg_json_pretty(compact, &laid_out)) {
+		ncfg_error_set(err, err_size, "`%s` could not be laid out, so it was not written",
+		    path ? path : "");
+		ncfg_buf_free(&laid_out);
+		return 0;
+	}
+	ok = ncfg_write_atomically(path, ncfg_buf_text(&laid_out),
+	    strlen(ncfg_buf_text(&laid_out)), mode, err, err_size);
+	ncfg_buf_free(&laid_out);
+	return ok;
+}
+
 char *ncfg_state_boot_id(void)
 {
 	size_t length = 0;
@@ -744,8 +767,8 @@ int ncfg_owned_write(const char *run_dir, const ncfg_owned_state_t *owned, char 
 	 * (0055), so tightening it is a decision to take deliberately rather than
 	 * in passing.
 	 */
-	ok = ncfg_write_atomically(path, ncfg_buf_text(&buf), strlen(ncfg_buf_text(&buf)),
-	    NCFG_RUN_FILE_MODE, err, err_size);
+	ok = ncfg_write_json_atomically(path, ncfg_buf_text(&buf), NCFG_RUN_FILE_MODE, err,
+	    err_size);
 	free(path);
 	ncfg_buf_free(&buf);
 	return ok;

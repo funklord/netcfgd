@@ -146,6 +146,23 @@ const char *ncfg_state_resolve_dir(const char *explicit_dir, char *out, size_t o
 int ncfg_write_atomically(const char *path, const void *bytes, size_t length, unsigned int mode,
     char *err, size_t err_size);
 
+/*
+ * The same, for a file under `/run` that holds JSON: laid out on the way.
+ *
+ * EVERY JSON FILE NETCFGD WRITES UNDER `/run` IS INDENTED, because the Rust
+ * writes all of them with `serde_json::to_string_pretty` and an operator who
+ * `cat`s one should not be able to tell which program was running. The
+ * canonical encodings lay themselves out -- a document's does because its
+ * sha256 is the document's identity -- and this is for the files built by a
+ * writer of their own: `owned.json` and `provenance.json`.
+ *
+ * `compact` is the text a `ncfg_json_writer_t` produced. A text that will not
+ * lay out is refused rather than written flat, because a `/run` file in the
+ * wrong shape is the thing this exists to prevent.
+ */
+int ncfg_write_json_atomically(const char *path, const char *compact, unsigned int mode,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * The ownership record
  * ------------------------------------------------------------------------ */

@@ -1382,15 +1382,39 @@ int ncfg_observed_write(const ncfg_observed_t *observed, ncfg_buf_t *buf, char *
 	return 1;
 }
 
+/*
+ * Laid out, for the reason `ncfg_document_write_canonical` is: this is what
+ * lands in `/run/netcfgd/observed.json`, the Rust writes it with
+ * `serde_json::to_string_pretty`, and a file an operator reads with `cat`
+ * should not depend on which of the two programs wrote it.
+ *
+ * No hash rides on this one -- an observation is not compared by identity the
+ * way a document is -- so the argument here is only the reader's. It is still
+ * the same rule, kept in the same place, because a project where one canonical
+ * encoding is laid out and the other is not has two rules to remember.
+ */
 int ncfg_observed_write_canonical(ncfg_observed_t *observed, ncfg_buf_t *buf, char *err,
     size_t err_size)
 {
-	if (!observed) {
+	ncfg_buf_t compact;
+
+	if (!observed || !buf) {
 		ncfg_error_set(err, err_size, "no observation to write");
 		return 0;
 	}
 	ncfg_observed_canonicalize(observed);
-	return ncfg_observed_write(observed, buf, err, err_size);
+	ncfg_buf_init(&compact, 0);
+	if (!ncfg_observed_write(observed, &compact, err, err_size)) {
+		ncfg_buf_free(&compact);
+		return 0;
+	}
+	if (!ncfg_json_pretty(ncfg_buf_text(&compact), buf)) {
+		ncfg_error_set(err, err_size, "the observation could not be laid out");
+		ncfg_buf_free(&compact);
+		return 0;
+	}
+	ncfg_buf_free(&compact);
+	return 1;
 }
 
 /* ------------------------------------------------------------------------ *
