@@ -64,6 +64,8 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <sys/resource.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -793,6 +795,95 @@ static void a_delivery_writes_the_file_and_the_record(const char *base)
  * the same rule the secret resolver's exec provider follows. The stand-in here
  * is a script this test wrote; no resolver is involved.
  */
+/*
+ * A staging write that fails after the open leaves nothing beside the target.
+ *
+ * **The case the other refusals here cannot reach.** Every one of them refuses
+ * at the `open` -- a file where a directory has to be -- and the write is a
+ * separate syscall with separate failures. `ncfg_backend_write_file` opens
+ * with `O_CREAT`, so a write that fails afterwards leaves a dot-file holding a
+ * *prefix* of the new resolver configuration, beside the resolver's own, for
+ * ever: nothing comes back to tidy it and the next writer picks a new name.
+ *
+ * `RLIMIT_FSIZE` is the fixture, because it fails the write and nothing else:
+ * the create succeeds at zero bytes, and the first write past the limit
+ * returns `EFBIG`. A full filesystem is the real cause and needs a mount;
+ * `tests/live/write_full.sh` drives that end with a 256 KiB tmpfs.
+ *
+ * SIGXFSZ has to be ignored or the process is killed rather than the write
+ * refused -- which would read as a suite that crashed rather than a check that
+ * failed.
+ */
+static void a_staging_write_that_fails_leaves_nothing_behind(const char *base)
+{
+	ncfg_dns_server_t  servers[1];
+	ncfg_dns_policy_t  policy;
+	ncfg_dns_scope_t   scope;
+	ncfg_dns_targets_t targets;
+	struct rlimit      was;
+	struct rlimit      tiny;
+	struct sigaction   ignore;
+	struct sigaction   restored;
+	char               run[512];
+	char               resolv[1024];
+	char               message[NCFG_ERROR_MAX];
+	DIR               *directory;
+	struct dirent     *entry;
+	size_t             left_behind = 0;
+
+	(void)testdir_in(base, "stagefail", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a run directory for the staging case");
+	(void)testdir_in(run, "resolv.conf", resolv, sizeof(resolv));
+
+	servers[0] = server_of((char *)(void *)"10.0.0.1");
+	policy = policy_of(servers, 1u, NULL, 0u);
+	scope.name = "eth0";
+	scope.policy = &policy;
+	memset(&targets, 0, sizeof(targets));
+	targets.resolv_conf = resolv;
+	targets.run_dir = run;
+
+	if (getrlimit(RLIMIT_FSIZE, &was) != 0) {
+		check(0, "the file size limit could be read");
+		return;
+	}
+	memset(&ignore, 0, sizeof(ignore));
+	ignore.sa_handler = SIG_IGN;
+	(void)sigaction(SIGXFSZ, &ignore, &restored);
+	tiny = was;
+	tiny.rlim_cur = 4;
+	if (setrlimit(RLIMIT_FSIZE, &tiny) != 0) {
+		(void)sigaction(SIGXFSZ, &restored, NULL);
+		check(0, "the file size limit could be lowered");
+		return;
+	}
+
+	message[0] = '\0';
+	check(!ncfg_dns_deliver(&scope, 1u, &targets, NULL, NULL, message, sizeof(message)),
+	    "a delivery whose write cannot finish is refused");
+	check(strstr(message, "resolv.conf") != NULL,
+	    "  naming the file it was trying to write");
+
+	(void)setrlimit(RLIMIT_FSIZE, &was);
+	(void)sigaction(SIGXFSZ, &restored, NULL);
+
+	directory = opendir(run);
+	if (!directory) {
+		check(0, "the run directory could be read back");
+		return;
+	}
+	while ((entry = readdir(directory)) != NULL) {
+		/* Anything beginning with a dot and naming this writer. The leading
+		 * dot is deliberate in the staging name -- a `*.conf` glob does not
+		 * match one -- so that is what identifies it. */
+		if (entry->d_name[0] == '.' && strstr(entry->d_name, "netcfgd") != NULL) {
+			left_behind++;
+		}
+	}
+	(void)closedir(directory);
+	check(left_behind == 0u, "  and leaves no staging file beside the resolver");
+}
+
 static void the_exec_mode_feeds_a_script_on_stdin(const char *base)
 {
 	ncfg_dns_server_t  servers[1];
@@ -1000,6 +1091,7 @@ int main(void)
 	scopes_that_disagree_about_the_mode_are_refused();
 	the_none_mode_touches_nothing(base);
 	a_delivery_writes_the_file_and_the_record(base);
+	a_staging_write_that_fails_leaves_nothing_behind(base);
 	the_exec_mode_feeds_a_script_on_stdin(base);
 	a_forwarder_with_no_directory_is_refused(base);
 
