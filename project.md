@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.297 The machine is on the C, and the way back was a copy of the C
+
+`debian-nabbe` runs the C daemon as of 2026-09-26 14:26. Verified rather than
+taken from the report:
+
+    /usr/sbin/netcfgd        1,145,336 bytes, byte-identical to c/netcfgd
+                             and not the Rust it replaced
+    systemctl is-active      active, MainPID 110873
+    wlp0s20f3                10.0.125.56/16, default via 10.0.0.1, gateway
+                             answers ping
+    wpa_supplicant  pid 1256      8d18h old   never restarted
+    dhcpcd master   pid 3061114   1d18h old   never restarted
+    /run/netcfgd             the full set, provenance.json among it at 608 bytes
+
+**The daemon's whole account of itself is one line**: `[config] watching
+/etc/netcfgd via inotify, socket /run/netcfgd/netcfgd.sock`. No errors, no
+warnings, and in particular no "cannot write /etc/netcfgd" -- the startup
+writability report added earlier today is silent, which is what it says when the
+directory is writable. The tryout's log had one more, and it is a feature
+earning its keep on a real machine: `removed 2 reply socket(s) in
+/run/wpa_supplicant left by processes that are gone`.
+
+`provenance.json` being there is today's other fix landing outside a fixture.
+`ncfg status` renders the machine through the live socket.
+
+**systemd's "Found left-over process ... service implementation deficiencies" is
+not a regression**, and that was checked rather than assumed: 784 of them since
+Aug 27, every one under the Rust. It is netcfgd deliberately holding the network
+across a restart (0134) meeting systemd's generic complaint about a cgroup that
+does not empty.
+
+### The fallback was the wrong binary, and the check that found it nearly did not
+
+The plan was `cp -a /usr/sbin/netcfgd /usr/sbin/netcfgd.rust` before installing,
+so that a bad switch could be undone on the machine itself. The file exists. It
+is **1,145,336 bytes -- a copy of the C**, not the 2,972,016-byte Rust it was
+supposed to preserve.
+
+`cp -a` preserves mtime, and the copy carries 14:03 while the install that is
+live carries 14:26. So an install had already happened when the copy was taken,
+and what got snapshotted was the new daemon rather than the old one. Restoring
+that file would reinstall the C.
+
+**My first check printed "way back present" and would have let it through.** It
+tested existence, and existence was never the question -- the question was
+whether the bytes are a Rust. That is `evidence.md`'s wrong-population case in
+its purest form: a guard over the right path, the right name and the wrong
+content, reporting success exactly as loudly as a real one. What separated them
+was `cmp` against three candidates and a `strings` count for `rustc`.
+
+So the machine has no working way back, and the only copy of the binary that was
+running is in a session scratchpad under `/tmp` -- which is a tmpfs here and is
+nobody's idea of a rollback. `target/release/netcfgd` is a Rust and is
+reproducible from the tree, which is the durable answer; it is a *different*
+build from the one that was running, and for a rollback that is a feature rather
+than a caveat.
+
+**The general shape, because it will recur: a rollback artifact is worth exactly
+as much as the last time somebody checked what is in it.** An install is the one
+moment that invalidates it, and it is also the moment nobody looks.
+
 ## 10.296 A netcfgd written in C has now run this machine
 
 The sentence the gate stood on -- "no netcfgd written in C has run a machine
