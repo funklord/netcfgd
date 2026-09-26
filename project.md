@@ -9515,6 +9515,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.298 Installing two packages bought two scripts and one real defect
+
+`wireguard.sh` and `tunnel.sh` had never run on this machine -- the first wanted
+`wireguard-tools`, the second `openvpn`. The copyright holder installed both.
+The suite had been reporting parity over 65 of 79 scripts; these are two of the
+fourteen it could not speak about at all.
+
+    wireguard   29 checks each side, all passing        new coverage, parity
+    tunnel      22 checks each side, C 3 failing to
+                the Rust's 2                            A C-ONLY DEFECT
+
+**`openvpn` was on the machine and not on `PATH`.** It is `/sbin/openvpn` and
+`/usr/sbin/openvpn`, which is why the `live` target exports
+`PATH:/sbin:/usr/sbin` and why the first attempt still said "openvpn is not
+installed". The script was right and the environment was the thing that had
+changed.
+
+### The report outlived the tunnel
+
+    FAIL the report claims no routes once the tunnel is stopped
+           expected: 0
+           actual:   2
+
+The routes themselves were gone -- the next check, "and the routes with it",
+passed. What survived was netcfgd's *claim* about them, which `tunnel.sh`'s own
+comment says is the point: "a route netcfgd holds for a tunnel that is gone
+black-holes traffic another interface would have carried".
+
+**The comment beside the bug described the fix.** `backend_ops.c` already said
+"a stop with no tunnel recorded still has a report to remove, so an absent entry
+is not a refusal" -- and the line under it passed `tunnel ? tunnel->report :
+NULL`. `tunnel` comes from the desired document, and a stop is reached by taking
+the tunnel **out** of the configuration, so `tunnel` is NULL exactly when there
+is a report to remove. NULL made the removal a no-op.
+
+The Rust computes `report_path(&self.run_dir, iface)` and passes it in, so its
+stop never depended on the document still describing what it is stopping.
+
+Fixed with `ncfg_state_report_path`, which exists for this and says so: it is
+"the run directory's layout and not any one backend's", and "a writer that
+composed the path for itself is a report written where nothing looks for it".
+
+**Sabotaged rather than assumed**: the derivation removed, rebuilt, and the same
+run reproduces `actual: 2` over a full 22 checks -- so the fix is load-bearing
+and the check is aimed at it.
+
+### What this says about the parity number
+
+10.291 and the sweeps after it reported zero C-only failing checks, and that was
+true of what could be measured. **It was measured over 65 scripts, and this
+defect was sitting in the 66th.** Two packages moved a script out of "cannot
+run" and it immediately found something -- which is the honest reading of the
+other thirteen: they are not passing, they are unmeasured, and the difference
+matters exactly as much as this defect does.
+
+The cheapest remaining ones are the same shape: `hwsim` wants
+`mac80211_hwsim`, which needs a run as root; `bluetooth` wants `/dev/vhci`;
+`association` wants a probe built with `cargo build -p netcfgd-host --example`.
+
 ## 10.297 The machine is on the C, and the way back was a copy of the C
 
 `debian-nabbe` runs the C daemon as of 2026-09-26 14:26. Verified rather than

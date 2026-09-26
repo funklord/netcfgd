@@ -85,6 +85,7 @@
 #include "ncfg/openvpn.h"
 #include "ncfg/observed.h"
 #include "ncfg/ra.h"
+#include "ncfg/state.h"
 #include "ncfg/supplicant.h"
 
 #include <stdint.h>
@@ -832,6 +833,8 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 	const ncfg_service_tunnel_t *tunnel;
 	const char                  *run_dir;
 	const char                  *supplicant_dir;
+	const char                  *report = NULL;
+	char                         derived[BACKEND_PATH_MAX];
 
 	if (!run_dir_of(service, "backend.stop", iface, &run_dir, err, err_size)) {
 		return 0;
@@ -849,10 +852,30 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		 * word. The report is the tunnel's and goes with it; a stop with no
 		 * tunnel recorded still has a report to remove, so an absent entry is
 		 * not a refusal.
+		 *
+		 * **And the path comes from the run directory when the document has no
+		 * entry, which is the case this is for.** The sentence above was
+		 * already here and the code did the opposite: it passed the document's
+		 * `report` or NULL, and a stop is reached precisely by taking the
+		 * tunnel OUT of the configuration -- so `tunnel` is NULL exactly when
+		 * there is a report to remove, and NULL is what made the removal a
+		 * no-op. `tests/live/tunnel.sh` caught it the first time openvpn was
+		 * installed on this machine: the routes went, the report claiming two
+		 * of them stayed, and a route netcfgd claims for a tunnel that is gone
+		 * black-holes traffic another interface would have carried.
+		 *
+		 * `ncfg_state_report_path` rather than a path composed here, for the
+		 * reason `state.h` gives about it: the reader looks there, and a writer
+		 * that composes its own is a report written where nothing looks.
 		 */
 		tunnel = tunnel_on(service, iface);
-		return ncfg_openvpn_stop(run_dir, iface, tunnel ? tunnel->report : NULL, err,
-		    err_size);
+		if (tunnel && tunnel->report && tunnel->report[0] != '\0') {
+			report = tunnel->report;
+		} else if (ncfg_state_report_path(run_dir, iface, derived, sizeof(derived), NULL,
+		        0)) {
+			report = derived;
+		}
+		return ncfg_openvpn_stop(run_dir, iface, report, err, err_size);
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_DHCP6:
 		/*
