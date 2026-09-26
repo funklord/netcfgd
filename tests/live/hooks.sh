@@ -36,7 +36,7 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+build="${NCFG_LIVE_BUILD:-$repo/c}"
 export build
 
 # **The C port's reconcile loop runs by default now** (0265), so this probe

@@ -50,7 +50,7 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+build="${NCFG_LIVE_BUILD:-$repo/c}"
 export build
 
 # **A skip is a failure when `NCFG_LIVE` says the environment should be able to

@@ -318,11 +318,12 @@ sudo make install-gui
 
 [fmake](../fmake) is one Python file with nothing beyond the standard
 library, so it builds the client on a machine that has not got this
-project's toolchain set up. It covers the client and not the daemon: the
-daemon and the CLI are a Cargo workspace of twenty-one crates, and fmake
-drives `rustc` directly — one crate root, one artifact — so it resolves no
-workspace, no inter-crate dependency and nothing from a registry. `make
-build` is the way for that half.
+project's toolchain set up. It covers the client; whether it can build the
+daemon has not been tried since the daemon became C (0266) — the reason it
+could not before was that the daemon was a Cargo workspace of twenty-one
+crates and fmake drives `rustc` one crate root at a time, and that reason is
+gone. Until somebody runs it and sees, `make build` is the way for that
+half.
 
 Then pick your init: `make install-systemd`, `install-openrc` or
 `install-procd`. Installing does **not** enable or start anything, and does
@@ -375,13 +376,20 @@ ncfg status                # what the machine looks like now
 **To build the daemon and the CLI** — Debian and derivatives:
 
 ```sh
-sudo apt install build-essential cargo rustc libncurses-dev pkgconf python3
+sudo apt install build-essential libncurses-dev pkgconf python3
 ```
 
-`rustc` must be **1.85 or newer**. Debian trixie's is exactly that; older
-releases need rustup. `libncurses-dev` is for `ncfg tui` and is the only
-library the daemon links beyond libc — `--no-default-features` drops both.
-`python3` runs the style gate and several test scripts, not the daemon.
+The daemon and the CLI are **C** since 0266, so there is no toolchain here
+beyond a C compiler. `libncurses-dev` is for `ncfg tui` and is the only
+library the daemon links beyond libc. `python3` runs the style gate and
+several test scripts, not the daemon.
+
+**`cargo` and `rustc` (1.85 or newer) are needed only for
+`adapter/netcfgd-nm`**, the shim that serves NetworkManager's own D-Bus API;
+0264 records that its C replacement is not written yet. `make build` and
+`make install` need neither. The Rust implementation of the daemon is still
+in the tree and still built by the gates that compare the two programs --
+`make agree` is the main one -- but nothing ships it.
 
 **To build the Qt client**, additionally `qt6-base-dev`. Note that the Qt
 client links `libQt6DBus`, so the "no D-Bus" property above is the *core's*
@@ -390,7 +398,9 @@ here. The client is not in any package yet; `make install-gui` is opt-in.
 
 **To cross-compile** (`make cross`), the linker for the target —
 `gcc-aarch64-linux-gnu`, `gcc-arm-linux-gnueabihf` or `gcc-mips-linux-gnu` —
-plus `rustup target add <triple>`, which a distro `rustc` cannot do.
+plus `rustup target add <triple>`, which a distro `rustc` cannot do. That
+target still cross-compiles the Rust; it has not been pointed at the C build
+since 0266.
 
 ## What you need at run time, and only if you use it
 

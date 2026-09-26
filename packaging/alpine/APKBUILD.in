@@ -18,7 +18,7 @@ arch="all"
 license="MIT OR Apache-2.0"
 # ncurses for the TUI, which is a default-on feature of the one binary.
 depends="ncurses-libs"
-makedepends="cargo make ncurses-dev"
+makedepends="make ncurses-dev"
 # No -doc and no -openrc subpackage: the init script is four lines of shell and
 # splitting it out would mean a machine that installed netcfgd and got no way
 # to run it. The default subpackages that would apply here are empty anyway.
@@ -38,9 +38,13 @@ builddir="$srcdir/$pkgname-$pkgver"
 options="!check"
 
 build() {
-	# `--locked` because a package built from a different dependency set than
-	# the tree was tested with is not the thing that was tested.
-	cargo build --release --workspace --locked
+	# **Nothing to do here since 0266**, and that is the point rather than an
+	# omission: the daemon is C with no dependency to lock, so `make install`
+	# in `package()` builds it. This ran `cargo build --release --workspace
+	# --locked` when the shipped binary was Rust; `--locked` mattered then
+	# because a package built from a different dependency set is not the thing
+	# that was tested.
+	:
 }
 
 package() {
