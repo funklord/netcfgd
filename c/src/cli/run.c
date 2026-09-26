@@ -715,11 +715,23 @@ static int command_simple(const ncfg_cli_options_t *options, ncfg_proto_request_
  * write them anyway, because the compiler did it on their behalf. `ncfg plan`'s
  * own help says it changes nothing.
  *
- * **`provenance` is NULL for every caller but `explain`.** A positions table is
- * the one thing here a caller either wants entirely or not at all, and one
- * nobody reads is a second structure that has to go on agreeing with the
- * document. Zeroed by the caller, filled in here, and freed by the caller
- * however the compile ended.
+ * **`provenance` is the caller's only when it wants the table**, which is
+ * `explain` and nothing else: zeroed by the caller, filled in here, and freed
+ * by the caller however the compile ended.
+ *
+ * **But one is built and written either way**, which it was not, and the
+ * omission was a real inconsistency rather than a missing feature. This writes
+ * `desired.json` to `/run` on every compile; it was leaving `provenance.json`
+ * alone, so `/run` could hold a document compiled from one configuration
+ * beside a provenance recorded from another, and `ncfg explain` reads both.
+ * The Rust writes it on every compile and says why -- "so that what is in
+ * /run describes the current configuration whichever binary last ran" -- and
+ * `make footprint` is what noticed, on the day it was pointed at this binary.
+ *
+ * A failure to write is not a failure of the compile, for the reason
+ * `command_show` gives about the document beside it: `/run` may be read-only
+ * in a container, and the caller asked for a configuration rather than for a
+ * file.
  */
 /*
  * Compile the configuration, and put the hook bodies on disk where a verb is
@@ -748,6 +760,8 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 	ncfg_lower_diags_t    diags = { NULL, 0, 0, 0 };
 	ncfg_pending_hooks_t *pending;
 	ncfg_document_t      *document;
+	ncfg_provenance_t     mine;
+	ncfg_provenance_t    *table = provenance;
 
 	(void)ncfg_config_resolve_dir(options->config_dir, config_dir, sizeof(config_dir));
 	(void)ncfg_config_resolve_factory_dir(options->factory_dir, factory_dir,
@@ -763,8 +777,12 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 		ncfg_config_sources_free(&sources);
 		return NULL;
 	}
+	if (!table) {
+		memset(&mine, 0, sizeof(mine));
+		table = &mine;
+	}
 	document = ncfg_config_compile_with_provenance(&sources,
-	    pending ? ncfg_pending_hooks_sink(pending) : ncfg_hook_sink_unwritten(), provenance,
+	    pending ? ncfg_pending_hooks_sink(pending) : ncfg_hook_sink_unwritten(), table,
 	    &diags, err, err_size);
 	if (!document) {
 		size_t at;
@@ -809,6 +827,14 @@ static ncfg_document_t *compile_config(const ncfg_cli_options_t *options, char *
 	if (document && pending && !ncfg_pending_hooks_write(pending, err, err_size)) {
 		ncfg_document_free(document);
 		document = NULL;
+	}
+	if (document) {
+		char ignored[NCFG_ERROR_MAX];
+
+		(void)ncfg_state_write_provenance(run_dir, table, ignored, sizeof(ignored));
+	}
+	if (table == &mine) {
+		ncfg_provenance_free(&mine);
 	}
 	ncfg_pending_hooks_free(pending);
 	ncfg_config_sources_free(&sources);
