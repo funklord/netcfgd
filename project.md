@@ -9515,6 +9515,43 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.300 Five of the fourteen unmeasured scripts, measured
+
+10.298 said the parity number had been taken over 65 of 79 scripts and that the
+other fourteen were unmeasured rather than passing. Five of them have answers
+now, and the count is worth keeping because the point of 10.298 was that
+"unmeasured" and "passing" are different claims.
+
+    wireguard    wireguard-tools installed   29 checks each side, parity
+    tunnel       openvpn installed           22 each side; found a C-only
+                                             defect, fixed in 10.298, now parity
+    hwsim        run as root                 every check passes, both builds
+    association  probe built, run as root    passes against the C
+    bluetooth    /dev/vhci already there     one check fails, IDENTICALLY for
+                                             both -- shared, not the port's
+
+**Two packages, one root run and one probe moved five scripts out of "cannot
+run", and exactly one of them held a port defect.** That is the honest ratio,
+and it cuts both ways: four of the five confirmed parity, so the earlier claim
+was not wrong -- it was narrower than it sounded.
+
+What is still unmeasured, and why, so nobody has to re-derive it:
+
+    c_daemon_tryout   needs a real default route; a namespace has none
+    c_dns_delivery    cannot bind-mount over /etc/resolv.conf from here
+    dhcpcd            makes its own namespace; was run inside one
+    dhcpcd_orphan     the same
+    slaac             the same
+    fake_mbimcli      "nothing asked for" -- no modem asked of it
+    fake_umbim        the same
+    gui_wifi          looks for a GUI live fixture nobody has built
+    wifi              runs, and stops partway
+
+Three of those -- `dhcpcd`, `dhcpcd_orphan`, `slaac` -- are the same cause and
+would run from a sweep that did not wrap each script in `unshare` itself. That
+is the cheapest remaining group and it is a change to the harness rather than to
+either program.
+
 ## 10.299 Association, roaming, and a C probe so the comparison stays honest
 
 The copyright holder ran the root-only scripts. `hwsim.sh` is the one
@@ -9582,20 +9619,43 @@ Not in `all` and not in `test`: a probe is only useful with a daemon running and
 root to read the socket, and nothing in `make test` can assert against a machine
 the suite does not own.
 
-### And a bluetooth failure that is not yet attributable
+### And a bluetooth failure that is shared, which the control run settled
 
-`bluetooth.sh` ran against the C and failed one check: "netcfgd reports the
-adapter it can see" wanted `hci1` in `ncfg status` and got the ordinary link
-listing.
+`bluetooth.sh` failed one check against the C: "netcfgd reports the adapter it
+can see" wanted `hci1` in `ncfg status` and got the ordinary link listing.
 
-**Not called a port gap, because the control run has not happened.** What the
-code says: both models carry Bluetooth adapters in the observation --
-`c/src/observe/host.c` lists them and `crates/netcfgd-model/src/observed.rs`
-sorts them -- and **neither client mentions bluetooth anywhere**, so neither
-`ncfg status` looks likely to print an adapter. That is a prior and not a
-result. This session has produced four confident wrong attributions from
-exactly this position, and the one command that settles it is the same script
-against the Rust.
+**Run against the Rust it fails identically** -- same check, same expected, same
+actual. So it is **not a port gap**, and the prior from reading the code was
+right: both models carry Bluetooth adapters in the observation
+(`c/src/observe/host.c` lists them, `crates/netcfgd-model/src/observed.rs` sorts
+them) and neither client mentions bluetooth anywhere, so neither `ncfg status`
+prints an adapter.
+
+**What it is instead is a gap in the product, in both implementations, with a
+test already written for it.** The observation carries the adapters and no
+renderer shows them, so `bluetooth.sh`'s last check has never passed for
+anything. That is worth raising rather than fixing here: fixing the C alone
+would be a divergence made in passing, which `harmonization.md` forbids, and
+the decision is which surface should show an adapter -- `ncfg status`, a
+`bluetooth` verb, or neither, with the test corrected.
+
+**Written down because the attribution nearly went the other way.** The failure
+arrived from a C-only run, in a session that had already produced several
+confident wrong attributions from exactly that position, and the temptation was
+to read it as the port's. One command against the Rust cost a minute and moved
+it out of the port's column entirely.
+
+### The probe, proved on the machine
+
+`association.sh` against `NCFG_LIVE_BUILD=c` passes:
+
+    wlp0s20f3 is associated, and ncfg calls it `OpenPC.se`
+    the observation agrees: wlp0s20f3 -> `OpenPC.se`
+    and no wired link claims one
+
+So the C's socket path and the C's own observation path agree about a live
+association on a real radio -- which is what the script exists to ask, and the
+first time it has been able to ask it of this build.
 
 ## 10.298 Installing two packages bought two scripts and one real defect
 

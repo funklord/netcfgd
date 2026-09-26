@@ -43,6 +43,12 @@ c/tests/*_test
 # tracked -- a pattern here would be a promise about whatever lands next.
 c/netcfgd
 c/ncfg
+# The live probes `make -C c examples` builds. A shape rather than two literal
+# names, unlike the pair above, and the difference is the directory: `c/examples`
+# holds nothing but a `.c` per probe and the binary beside it, so the promise a
+# pattern makes here is one the directory keeps.
+c/examples/*
+!c/examples/*.c
 gui/tests/build/
 # The live GUI probe builds beside its own project file, which is in a
 # subdirectory so that `make -C gui test` does not discover and run it without
