@@ -9515,6 +9515,69 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.302 The C gives a radio its networks after starting DHCP, and the Rust before
+
+The corrected harness ran 1400 checks against each build -- up from 1269 -- and
+found **one** check failing for the C and not the Rust:
+`wifi_journey.sh`'s "and the supplicant is given the networks again".
+
+It is a real C-only defect, it is not a regression from anything today, and it
+has an operational consequence: **a rotated wifi passphrase can fail to reach
+the supplicant.**
+
+### Both logs, at the same moment
+
+    RUST    ok   wifi.set_profiles radio0  networks: the document's
+            FAIL backend.start radio0  addressing[0]: Dhcp4
+            stopped at action 1 (backend.start); 1 done, 0 not attempted
+
+    C       FAIL backend.start radio0  addressing[0]: dhcp4
+            skip wifi.set_profiles radio0  networks: the document's
+            stopped at action 0 (backend.start); 0 done, 1 not attempted
+
+Same stop-at-first-failure policy, opposite order. The environmental failure is
+shared and is the fixture's, not either program's -- `unshare -rn` shares `/run`,
+so dhcpcd cannot lock `/run/dhcpcd/radio0-4.pid` as a namespaced non-root user.
+What differs is what had already been done when it hit.
+
+**The Rust's order is the right one.** An address is meaningless before
+association, so the networks belong on the radio before a DHCP client is started
+against it. In the Rust they are planned as part of the interface's prerequisite
+-- `plan_prerequisite` reaches `plan_supplicant_networks` -- which runs before
+`plan_source` handles addressing. In the C, `ncfg_plan_wifi` is a whole-document
+pass called near the end of `ncfg_plan_build`, after `nat`.
+
+`ncfg_plan_wifi` emits exactly one op kind, `NCFG_OP_WIFI_SET_PROFILES`, so the
+change is contained. It is still not a tail-end edit: **plan ordering is asserted
+by action id across the suite and the frozen witnesses**, so moving a pass
+renumbers expectations, which is a pass of its own with its own re-blessing.
+
+### Why five sweeps missed it, which is the part worth keeping
+
+The check ran in every sweep. It **passed** in the one before this and fails
+consistently now -- and the source at that commit fails it too, twice, when
+rebuilt and re-run. So the earlier pass is an anomaly nobody can reproduce, and
+the "zero C-only failing checks" it contributed to was wrong for a reason no
+amount of re-reading that sweep would have revealed.
+
+What settled it was five runs of the C against three of the Rust: **C 5/5 fail,
+Rust 3/3 pass.** A single run is not a measurement of an intermittent anything,
+and the one that agreed with what I wanted got quoted four times.
+
+### And two instrument errors while chasing it
+
+Both are the same shape as the ones this file already records, which is why they
+are here rather than glossed:
+
+* A debug copy of the script in the scratchpad resolved `$repo` from its own
+  path, so it could not find `fake_supplicant.py`, ran **zero checks**, and
+  reported "fails: 0". I nearly wrote down that the test passes when run
+  directly. The check that caught it is the one this file keeps arriving at:
+  count what the run actually asserted before believing its verdict.
+* Reversing each of today's two C changes in turn, then both together, to see
+  whether either caused it -- they did not, and that is the only reason the
+  attribution above is "not a regression" rather than a guess.
+
 ## 10.301 Four scripts were never unrunnable, and two were never tests
 
 Asked to make `dhcpcd`, `dhcpcd_orphan` and `slaac` run. They run. So does
