@@ -118,7 +118,7 @@ export NCFG_CONFIG_DIR="$work/etc"
 NCFG_RUN_DIR="$work/run-rust" "$repo/target/debug/netcfgd" --no-apply-on-start \
 	> "$work/rust.log" 2>&1 &
 rust_pid=$!
-NCFG_RUN_DIR="$work/run-c" "$repo/c/netcfgd" --try-the-c-daemon --no-apply-on-start \
+NCFG_RUN_DIR="$work/run-c" "$repo/c/netcfgd" --no-apply-on-start \
 	> "$work/c.log" 2>&1 &
 c_pid=$!
 
@@ -224,7 +224,7 @@ writes() {
 }
 
 if writes rust "$repo/target/debug/netcfgd" &&
-	writes c "$repo/c/netcfgd" --try-the-c-daemon
+	writes c "$repo/c/netcfgd"
 then
 	check "the writing verbs answer alike" \
 		"$(cat "$work/c.said")" "$(cat "$work/rust.said")"

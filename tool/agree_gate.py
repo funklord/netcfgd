@@ -345,12 +345,13 @@ DAEMON_CASES = [
 # The one place the two daemons' own output is allowed to differ, written as
 # the exact lines each side produces so that it expires by failing.
 #
-# `--try-the-c-daemon` is the C port's alone and must stay that way: the Rust
-# daemon runs when it is started, and this one refuses unless somebody at the
-# keyboard says they are watching (project.md 10.232). A Rust that grew the
-# flag would be a Rust that had acquired the C's refusal, which should not
-# happen quietly -- and a C that lost it would leave this gate carrying an
-# exception for a divergence that has gone.
+# **`--try-the-c-daemon` was here and is gone, and the gate is why anybody
+# noticed.** The exception was written so that it would expire by failing: a C
+# that lost the flag would leave this list carrying lines the help no longer
+# has, and the run would go red rather than quietly approving the change. That
+# is what happened when 0265 made the reconcile loop the default and took the
+# flag out of `usage_text`. The flag is still accepted, so a unit file carrying
+# it starts; it is not documented, so the two helps agree about it again.
 #
 # **Whole lines, not fragments, and that is not fussiness.** The first version
 # of this recorded the substring `--try-the-c-daemon`, and a sabotage that
@@ -367,11 +368,6 @@ DAEMON_DIFFERENCES = {
 		# asking of it. project.md 10.247.
 		("c", "  --supported            what this build carries out, as JSON lines, asked"),
 		("c", "                         of the code that decides rather than listed"),
-		("c", "  --try-the-c-daemon     run the loop anyway. This build refuses by"),
-		("c", "                         default and prints why; read that first, and"),
-		("c", "                         have something watching the machine when you"),
-		("c", "                         use this -- tests/live/c_daemon_tryout.sh is"),
-		("c", "                         what it was written for"),
 	],
 }
 

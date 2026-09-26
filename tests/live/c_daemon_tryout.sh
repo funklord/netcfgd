@@ -7,13 +7,14 @@
 #
 # ## What this is for
 #
-# `netcfgd --try-the-c-daemon` is the only way this build's reconcile loop
-# runs, and `daemon_main.c` says why the default is a refusal: no netcfgd
-# written in C has run a machine, and a loop is the one part of the program
-# that acts with nobody at the keyboard. This is the "somebody watching" that
-# refusal asks for. It is not a test in the `make check` sense -- it proves
-# nothing on its own -- it is the arrangement that makes the evidence
-# collectable without the machine being the thing that pays for it.
+# This build's reconcile loop runs by default now (0265). It did not always:
+# `--try-the-c-daemon` used to be the only way to start it, because no netcfgd
+# written in C had run a machine and a loop is the one part of the program that
+# acts with nobody at the keyboard. This script is the "somebody watching" that
+# refusal asked for, and **removing the refusal did not remove the need for
+# it** -- it is still the only arrangement here that lets a real machine carry
+# a C daemon for a while with something ready to hand the network back. It is
+# not a test in the `make check` sense; it proves nothing on its own.
 #
 # ## What it does to the machine, and what it undoes
 #
@@ -196,7 +197,7 @@ fi
 
 if [ -n "$dry_run" ]; then
 	say "--dry-run: would stop netcfgd.service, start"
-	say "  $daemon --try-the-c-daemon --no-apply-on-start"
+	say "  $daemon --no-apply-on-start"
 	say "  and watch $gateway plus $resolve, handing back on $failures misses"
 	restored=yes   # nothing was changed, so there is nothing to put back
 	exit 0
@@ -212,7 +213,7 @@ systemctl stop netcfgd
 # out what the C daemon did must not be a log anything else has written to.
 log=$(mktemp "${TMPDIR:-/tmp}/netcfgd-c-tryout.XXXXXX.log")
 say "starting the C daemon, log in $log"
-"$daemon" --try-the-c-daemon --no-apply-on-start >>"$log" 2>&1 &
+"$daemon" --no-apply-on-start >>"$log" 2>&1 &
 c_pid=$!
 sleep 2
 if ! kill -0 "$c_pid" 2>/dev/null; then
