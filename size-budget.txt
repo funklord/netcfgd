@@ -730,4 +730,29 @@ netcfgd
 # Recorded rather than left to ride the tolerance, which it was doing: the gate
 # passed at 2,972,192 against a 3,057,138 ceiling. Same reason as every entry
 # above it.
-total 2972192
+
+# **THE BASIS CHANGED WITH 0266: THIS NOW MEASURES THE C BINARY.**
+#
+# Everything above is the Rust's ratchet, kept as the history of the number and
+# not as a description of what is weighed. `make size` read
+# `target/release/netcfgd` until 0266 made the C what `make install` installs,
+# and a gate ratcheting a binary nobody ships has stopped ratcheting -- at a
+# third the size it would have passed for a reason that has nothing to do with
+# the budget holding.
+#
+# Two things about the new number are not comparable with the ones above, and
+# saying so is this paragraph's purpose rather than a caveat on it:
+#
+#   * The Rust release profile sets `strip = true`, so every figure above is a
+#     stripped binary; the C build does not strip. This measures what lands in
+#     SBINDIR -- 1,145,336 -- and a packager's `dh_strip` takes it to 1,023,360
+#     afterwards. Both measured rather than one inferred from the other.
+#   * It is one binary rather than two, which the last Rust figure already was:
+#     `ncfg` is a symlink to `netcfgd`, as the header above hoped for.
+#
+# So 2,972,192 -> 1,145,336 is 1.86 MiB off the installed daemon, or about
+# 1.95 MiB stripped against stripped. **That is not a saving this gate noticed
+# and it is not one it should take credit for** -- it is a different program --
+# which is exactly why the limit is re-seeded from a fresh measurement here
+# rather than left to pass by a wide margin.
+total 1145336

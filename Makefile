@@ -1580,14 +1580,20 @@ linkage:
 # passed. A gate nobody can read the output of is one step from a gate nobody
 # runs.
 size:
-	@$(CARGO) build --release --quiet
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
+	@# **The C, because the C is what `make install` installs** (0266). This
+	@# measured `target/release/netcfgd` until then, so after 0266 it was
+	@# ratcheting a binary nobody ships -- and at a third the size the gate
+	@# would have passed for a reason that has nothing to do with the budget
+	@# holding. The basis changed with it: the Rust profile stripped on the way
+	@# out and the C build does not, so the number here is what lands in
+	@# `$(SBINDIR)` rather than what a packager's `dh_strip` leaves behind.
+	@$(MAKE) --no-print-directory -C c
 	@tol=$$(awk '/^tolerance_percent/ {print $$2}' size-budget.txt); \
 	limit=$$(awk '/^total/ {print $$2}' size-budget.txt); \
 	total=0; \
 	while read -r name value; do \
 		case "$$name" in ''|\#*|tolerance_percent|total) continue ;; esac; \
-		bin=target/release/$$name; \
+		bin=c/$$name; \
 		[ -f "$$bin" ] || continue; \
 		actual=$$(stat -c%s "$$bin"); \
 		total=$$(( total + actual )); \
@@ -1614,22 +1620,23 @@ size:
 # fixture. A feature that creates a directory unasked has leaked, and the leak
 # is a bug rather than a preference.
 footprint:
-	@$(CARGO) build --quiet
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
+	@# The C, for 0266's reason and the size gate's. `c/ncfg` is the symlink
+	@# the C build makes itself, so there is no `ncfg-link` step here any more.
+	@$(MAKE) --no-print-directory -C c
 	@# `ncfg` is a symlink cargo cannot make, and nothing else in `check`
 	@# creates the debug one -- `size` makes the release one. So after a
 	@# `make clean` this ran a binary that was not there, `|| true` swallowed
 	@# it, and the gate reported "/run does not match" for an empty /run. The
 	@# check was pointing at the wrong thing entirely, which is why the
 	@# missing binary is now its own sentence.
-	@[ -x ./target/debug/ncfg ] || { \
-		echo "footprint: ./target/debug/ncfg is missing, so this would check nothing"; \
+	@[ -x ./c/ncfg ] || { \
+		echo "footprint: ./c/ncfg is missing, so this would check nothing"; \
 		exit 1; }
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; \
 	mkdir -p "$$work/run"; \
 	NCFG_CONFIG_DIR="$$work/etc" NCFG_RUN_DIR="$$work/run" \
-		./target/debug/ncfg plan >/dev/null 2>&1 || true; \
+		./c/ncfg plan >/dev/null 2>&1 || true; \
 	fail=0; \
 	for pair in "etc:expected-etc.txt" "run:expected-run.txt"; do \
 		dir=$${pair%%:*}; want=tests/footprint/$${pair##*:}; \
@@ -1722,10 +1729,26 @@ footprint:
 # memory", and 32 KB of it is real. The other 300 KB of the raise is text and
 # noise, which is why both figures are printed on every run.
 #
-# 5120 is the observed peak plus a band wider than the observed spread
+# 5120 was the observed peak plus a band wider than the observed spread
 # (4880 + 240; the spread across seven runs is 164). Still a ratchet: raising
 # it stays a deliberate edit with the measurement in the commit.
-RSS_LIMIT_KB ?= 5120
+#
+# **3072 SINCE 0266, BECAUSE THE DAEMON MEASURED IS NOW THE C ONE.** Everything
+# above this paragraph is about the Rust binary and is kept because it is the
+# history of the band, not because it still describes what runs.
+#
+# Method, so the number can be re-taken rather than believed: the same fixture
+# this gate uses (`tests/footprint/etc`, `--no-apply-on-start`, two seconds),
+# three runs, reading `VmHWM` from `/proc/<pid>/status`.
+#
+#     c      2840  2848  2900      RssAnon 344..348   Pss 1154..1190
+#     rust   4800  4856  4720      RssAnon 540..544   Pss 2931..3031
+#
+# So the C peaks about 1.9 MB lower and allocates about 195 KB less. 3072 is
+# 5.9% above the highest of the three, which is the headroom 5120 had over the
+# Rust's 4856 -- the band is the same shape, moved down with the measurement,
+# rather than a round number chosen because it looked safe.
+RSS_LIMIT_KB ?= 3072
 
 # **The control directory is redirected too, and was not (0224).**
 # `--config-dir` and `--run-dir` send this daemon's own state into a scratch
@@ -1744,11 +1767,11 @@ RSS_LIMIT_KB ?= 5120
 # `/run/wpa_supplicant` during a `make check` that was only supposed to be
 # measuring how much memory the daemon uses.
 rss:
-	@$(CARGO) build --release --quiet
+	@$(MAKE) --no-print-directory -C c
 	@work=$$(mktemp -d); \
 	cp -r tests/footprint/etc "$$work/etc"; mkdir -p "$$work/run" "$$work/wpa"; \
 	NCFG_WPA_CTRL_DIR="$$work/wpa" \
-	./target/release/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
+	./c/netcfgd --config-dir "$$work/etc" --run-dir "$$work/run" \
 		--no-apply-on-start >/dev/null 2>&1 & \
 	pid=$$!; \
 	sleep 2; \

@@ -9515,6 +9515,83 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.295 Pointing the budget gates at the C found a gap in the C
+
+10.294 left the three budget gates measuring a binary nobody ships and said it
+wanted a pass of its own. This is that pass, and the first thing it did was
+fail.
+
+    size        target/release/netcfgd -> c/netcfgd,   total 2972192 -> 1145336
+    rss         target/release/netcfgd -> c/netcfgd,   RSS_LIMIT_KB 5120 -> 3072
+    footprint   target/debug/ncfg      -> c/ncfg
+
+### `footprint` went red, and it was right
+
+    footprint: /run does not match tests/footprint/expected-run.txt
+    footprint:   8d7
+    footprint:   < ./provenance.json
+
+**The C's `ncfg plan` wrote every file the Rust's did except
+`provenance.json`.** Isolated by running both on the fixture and listing
+`/run`: sixteen entries each, identical but for that one.
+
+The C had decided this on purpose. `compile_config`'s comment said "`provenance`
+is NULL for every caller but `explain`" and argued a positions table nobody
+reads is a second structure that has to go on agreeing with the document. The
+Rust writes one on every compile and says why: *so that what is in /run
+describes the current configuration whichever binary last ran.*
+
+**The Rust is right, and the C's own behaviour is what makes it right.** This
+already wrote `desired.json` on every compile. So `/run` could hold a document
+compiled from one configuration beside a provenance recorded from another, and
+`ncfg explain` reads both. The argument for not building the table was about
+cost; the cost of not building it was an inconsistent published surface.
+
+Fixed where the compile is: a local provenance when the caller did not ask for
+one, written either way, and a write failure is not a failure of the command --
+`/run` may be read-only in a container, and `command_show` beside it already
+says so about the document.
+
+**Nothing else caught this.** The agree gate compares stdout, exit status and
+the *configuration* directory; the live suite starts daemons rather than reading
+`/run` after a plan. A gate re-pointed at a new subject found it on its first
+run, which is the argument for re-pointing gates rather than retiring them.
+
+### The numbers, with the method beside them
+
+`rss`, same fixture and two-second wait the gate uses, `VmHWM` from
+`/proc/<pid>/status`, three runs each:
+
+    c      2840  2848  2900      RssAnon 344..348   Pss 1154..1190
+    rust   4800  4856  4720      RssAnon 540..544   Pss 2931..3031
+
+3072 is 5.9% above the highest of the three, which is the headroom 5120 had
+over the Rust's 4856 -- **the band moved down with the measurement rather than
+being rounded to something that looked safe.**
+
+`size` is re-seeded at 1,145,336, and the basis changed with it: the Rust
+release profile strips and the C build does not, so this measures what lands in
+`SBINDIR` rather than what a packager's `dh_strip` leaves. Both measured --
+1,145,336 as built, 1,023,360 stripped -- rather than one inferred from the
+other. `size-budget.txt` says so where the number is, because the file is a
+ratchet log and a reader comparing 2,972,192 with 1,145,336 would otherwise be
+comparing a stripped binary with an unstripped one.
+
+### All three were made to fail before being believed
+
+A budget gate that cannot fail is the most expensive kind, because its silence
+reads as a measurement.
+
+    size        64 KB of padding into a real source file, rebuilt: over its
+                1179696 ceiling by 31224, with the arithmetic right
+    rss         make rss RSS_LIMIT_KB=2000: "over limit", rc=2
+    footprint   already proved it -- the provenance finding above IS the gate
+                failing, and it failed for a fault rather than a fixture
+
+The `size` sabotage is the one worth keeping in mind: padding a source file
+proves the gate reads the binary the build produced, where lowering the number
+in the budget file would only have proved the comparison works.
+
 ## 10.294 The C is what ships, and the Rust stays as the instrument
 
 Instructed by the copyright holder; `doc/decision/0266` is the record. `make
