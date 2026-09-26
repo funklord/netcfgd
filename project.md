@@ -9565,12 +9565,21 @@ its purest form: a guard over the right path, the right name and the wrong
 content, reporting success exactly as loudly as a real one. What separated them
 was `cmp` against three candidates and a `strings` count for `rustc`.
 
-So the machine has no working way back, and the only copy of the binary that was
-running is in a session scratchpad under `/tmp` -- which is a tmpfs here and is
-nobody's idea of a rollback. `target/release/netcfgd` is a Rust and is
-reproducible from the tree, which is the durable answer; it is a *different*
-build from the one that was running, and for a rollback that is a feature rather
-than a caveat.
+For about an hour the machine therefore had no working way back, with the only
+copy of the binary that had been running sitting in a session scratchpad under
+`/tmp` -- a tmpfs here, and nobody's idea of a rollback.
+
+**Closed the same afternoon**: `/usr/sbin/netcfgd.rust` is
+`target/release/netcfgd` now, 2,972,192 bytes, which is a Rust reproducible from
+the tree with `make rust` rather than a file that happened to survive. It is a
+*different* build from the one that was running, and for a rollback that is a
+feature rather than a caveat.
+
+Checked the way the first one should have been, and by two means that do not
+share a failure: `cmp` against all three candidates, and `strings` for `rustc`
+-- 20 in the fallback against **0** in the running daemon, the C carrying none,
+which makes it a discriminator rather than a second opinion from the same
+instrument.
 
 **The general shape, because it will recur: a rollback artifact is worth exactly
 as much as the last time somebody checked what is in it.** An install is the one
