@@ -9515,6 +9515,92 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.294 The C is what ships, and the Rust stays as the instrument
+
+Instructed by the copyright holder; `doc/decision/0266` is the record. `make
+build` builds the C, `make install` installs it, and every package from this
+tree ships it. **The Rust is not deleted.**
+
+### The sizes, which is what was asked
+
+Both are multicall binaries -- `ncfg` is a symlink to `netcfgd` -- so this is
+one binary against one:
+
+    rust netcfgd   release, opt-level="z", lto, stripped   2,972,192   2.83 MiB
+    c netcfgd      -Os, stripped                           1,023,360   0.98 MiB
+    c netcfgd      -Os, as built                           1,145,336   1.09 MiB
+
+**2.9 times smaller, about 1.86 MiB off the installed daemon.** Source runs the
+other way, which is what C costs: 103,906 lines of Rust core against 140,355 of
+C plus 92,581 of C tests, or 65,123 against 145,809 counting only non-comment
+lines -- about 2.2 times either way, with roughly 42% of the C's non-test lines
+being comment.
+
+### Why the Rust stays, which was the decision worth asking about
+
+Because it is the instrument that proved the C correct, and the proof is a
+**comparison**. `agree_gate.py` is eleven configurations, twenty-seven
+read-only invocations and ten sequences of writing verbs, every one of them
+"do the two programs agree". `c_daemon_answers.sh` runs both daemons side by
+side. The 79-script parity result is a comparison. Delete the Rust and a future
+C regression has nothing to be measured against.
+
+So what is retired is the **shipped artifact**, not the source. That costs a
+tree that stays large and a `make check` that still wants a Rust toolchain, and
+it buys `make agree` still answering.
+
+### Two things relied on `build` producing the Rust, and both failed loudly
+
+Which is the good outcome, and both were found by running the gates rather than
+by reading.
+
+`agree` used to lean on `build` having made `target/debug/ncfg`. The gate fails
+rather than skips when a binary is missing -- `agree_gate.py` says so in as many
+words -- so a clean tree would have gone red for a reason that has nothing to do
+with the two programs agreeing. It builds the release binary and its symlink
+itself now, which is `linkage`'s "built here rather than trusted" applied one
+gate over. Verified by deleting both symlinks and watching it rebuild and pass.
+
+`make test` failed on `a_reader_that_goes_away_is_not_a_crash`, which refuses to
+run when `ncfg` is absent and says "run `make build`". `cargo test` builds
+binaries but cannot make a symlink, and the symlink came from `build`. Same fix,
+and verified the same way: delete the symlink, `make test`, rc=0.
+
+**Both are gates that would rather fail than test nothing, and that is why this
+change was cheap.** A suite that skipped quietly would have gone green over a
+Rust binary nobody had built, and the first symptom would have been a
+comparison that had silently stopped comparing.
+
+### What could not be retired
+
+**`adapter/netcfgd-nm` is Rust and stays Rust**: its own cargo workspace, built
+by `make nm`, shipped as `netcfgd-nm.service`, and the way NetworkManager's own
+clients reach netcfgd. 0264 decided its C replacement is "not yet". So `cargo`
+and `rustc` remain Debian build dependencies, and `debian/control` now carries a
+comment saying they are the adapter's and not the daemon's -- that being exactly
+the line a tidying pass would delete, producing a package with no shim in it.
+
+The Qt client is C++ and was never in question.
+
+### What this leaves wrong, and is not fixed here
+
+**The three budget gates measure a binary nobody ships.** `size` checks
+`target/release/netcfgd` against `size-budget.txt`, `rss` measures the release
+Rust daemon's resident set, `footprint` reads what the debug Rust daemon left in
+`/run`. All three pass and all three are now about the wrong artifact.
+
+Deliberately not re-pointed. `size-budget.txt` is calibrated, and the C is a
+third the size -- so the gate would pass for a reason that has nothing to do
+with the budget holding. **Moving a budget in the same change that moves what it
+measures is how a ratchet stops ratcheting.** It wants a pass of its own, and
+the `footprint` half is the easy one: 10.287 measured the two programs writing
+byte-identical files under `/run`.
+
+`make live` and `make cross` still drive the Rust. Neither is a shipping
+question. And one stale sentence is left in Rust source -- the test above
+advises `make build`, which no longer builds it -- recorded rather than edited,
+because the standing rule here is that the Rust is recorded and not fixed.
+
 ## 10.293 The gate came off, and what it was holding up was a decision
 
 The copyright holder instructed it: the C port's reconcile loop runs by

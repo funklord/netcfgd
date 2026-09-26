@@ -50,7 +50,7 @@
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+build="${NCFG_LIVE_BUILD:-$repo/c}"
 export build
 
 if [ "$(id -u)" != "0" ]; then

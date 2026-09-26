@@ -34,7 +34,7 @@ still_running() {
 }
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
+build="${NCFG_LIVE_BUILD:-$repo/c}"
 export build
 supplicant=
 for candidate in /usr/sbin /sbin /usr/local/sbin /usr/bin; do

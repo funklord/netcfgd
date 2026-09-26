@@ -3,6 +3,10 @@ Section: net
 Priority: optional
 Maintainer: Nabeel Sowan <nabeel@vibes.se>
 Homepage: https://github.com/netcfgd/netcfgd
+# cargo and rustc are for `adapter/netcfgd-nm` and nothing else since 0266: the
+# daemon and the client are C, and `make build` needs neither. The adapter is
+# still Rust over zbus, 0264 having decided its C replacement is "not yet", so
+# removing these would build a package with no NetworkManager shim in it.
 Build-Depends: debhelper-compat (= 13), cargo (>= 1.85), rustc (>= 1.85),
  libncurses-dev, pkgconf,
  qt6-base-dev <pkg.netcfgd.gui>,

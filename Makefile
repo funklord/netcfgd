@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -81,7 +81,18 @@ ADAPTERS = adapter/netcfgd-nm
 
 all: build
 
+# **The C port is what this builds and what this ships** (0266). The Rust is
+# still here and still built by the gates that compare the two programs --
+# `agree`, `conformance`, `test`, `linkage` and the budget gates each build what
+# they need -- but it is no longer what `make` produces or what `make install`
+# installs.
+#
+# `make rust` is the old behaviour, for anyone who wants the other binary
+# without going through a gate.
 build:
+	@$(MAKE) --no-print-directory -C c
+
+rust:
 	$(CARGO) build --workspace
 	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
 
@@ -321,6 +332,14 @@ conformance: client/tests/client_test
 	$(CARGO) test -p netcfgd-cli both_client_implementations_extract_the_same_facts
 
 test: client/tests/client_test
+	@# **The `ncfg` symlink first**, for the reason `agree` grew the same two
+	@# lines in 0266: `cargo test` builds the binaries but cannot make a
+	@# symlink, and the one in `target/debug` used to come from `build`, which
+	@# no longer produces the Rust at all. Without this, a `netcfgd-cli` test
+	@# that refuses to test nothing fails with "ncfg is not built" -- correctly,
+	@# and for a reason that has nothing to do with the code under test.
+	$(CARGO) build --workspace --quiet
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=debug
 	$(CARGO) test --workspace
 
 FORCE:
@@ -431,10 +450,12 @@ SYSCONFDIR ?= /etc
 # constraints avoiding. The unit files are text; they link nothing and require
 # nothing.
 install:
-	$(CARGO) build --release
-	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
+	@# **The C port's binary** (0266). Built here rather than trusted, for
+	@# `linkage`'s reason: what is sitting in `c/` depends on the last build,
+	@# and a package must not ship whatever happened to be left there.
+	@$(MAKE) --no-print-directory -C c
 	install -d $(DESTDIR)$(SBINDIR) $(DESTDIR)$(BINDIR) $(DESTDIR)$(SYSCONFDIR)/netcfgd
-	install -m 0755 target/release/netcfgd $(DESTDIR)$(SBINDIR)/netcfgd
+	install -m 0755 c/netcfgd $(DESTDIR)$(SBINDIR)/netcfgd
 	@# One binary, two names. Absolute, so it points at the installed daemon
 	@# rather than at whatever happens to sit beside it -- which means it
 	@# dangles inside a DESTDIR staging root and resolves once that root is
@@ -2244,6 +2265,15 @@ example:
 # every other verb observes the machine, so two runs of it are answering
 # questions about two moments.
 agree: c-test
+	@# **Both programs built here rather than trusted**, which is `linkage`'s
+	@# reason and became this gate's on the day `build` stopped producing the
+	@# Rust one (0266). `c-test` above builds the C. The Rust binary and the
+	@# `ncfg` symlink beside it were made by `build`; nothing in `check` makes
+	@# them before this runs now, and the gate fails rather than skips when a
+	@# binary is missing -- so without these two lines a clean tree would go red
+	@# here for a reason that has nothing to do with the two programs agreeing.
+	@$(CARGO) build --release --quiet
+	@$(MAKE) --no-print-directory ncfg-link PROFILE=release
 	@python3 tool/agree_gate.py
 
 # What the C build carries out, against the frozen witnesses.
