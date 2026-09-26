@@ -9515,6 +9515,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.301 Four scripts were never unrunnable, and two were never tests
+
+Asked to make `dhcpcd`, `dhcpcd_orphan` and `slaac` run. They run. So does
+`c_dns_delivery`. **None of them was ever blocked by this machine** -- all four
+were blocked by the sweep harness, and the harness was mine.
+
+    dhcpcd           40 checks   pass both   was "makes its own namespace"
+    dhcpcd_orphan    13 checks   pass both   was "cannot make a namespace here"
+    slaac            14 checks   pass both   was "makes its own namespace"
+    c_dns_delivery   10 checks   pass both   was "cannot bind-mount /etc/resolv.conf"
+
+**77 checks that no sweep in this session had ever run**, and the messages were
+telling me why the whole time: "this script makes its own namespace and has been
+run inside one", and "run under unshare -m". I read them as properties of the
+machine because they arrived in the same column as "openvpn is not installed".
+
+The harness wrapped every script in `unshare -rn`. `make live` does not: it
+drives 45 that way, one with `-rmn`, and **29 with no namespace at all**,
+because a script that makes its own refuses a pre-made one. The Makefile knew
+per script and the sweep carried a uniform guess.
+
+### And the obvious fix was wrong, which is the more useful half
+
+Taking the Makefile's table wholesale broke `ap`, which went from pass to fail
+immediately. **`make live` runs as root**, so a script it drives with no
+namespace still has `CAP_NET_ADMIN`. A non-root sweep has none: `unshare -r`
+maps this uid to root inside the namespace, so there the namespace *is* the
+capability, and honouring `none` for all 29 took it away.
+
+So the rule is neither uniform nor the Makefile's: **`-rn` by default, because
+that is what supplies privilege here, and the Makefile's answer only for the
+four that refuse it.** Named rather than derived -- "has an internal `unshare`"
+looked like the principle and `ap` has one and still needs the wrapper, so the
+predicate would have been wrong in the same direction as the first guess.
+
+Caught by comparing against the previous run rather than by reading the new one:
+`ap new rc=1 old rc=0`, nine scripts in.
+
+### Two entries in the denominator were not tests
+
+`fake_mbimcli` is "an mbimcli with no modem behind it", invoked by `helper.sh`.
+`fake_umbim` is "a fake `umbim`, for tests/live/umbim.sh". **They are
+stand-ins**, and this sweep had been running them as though they were tests and
+counting "nothing asked for" as a failure. They are out of the list: 77 tests,
+not 79.
+
+So every figure this session reported over "79 scripts" had a denominator with
+two fakes in it, and "59/79 passing" counted two things that can never pass.
+
+### What the shape of this is
+
+The list of "cannot run here" was never a measurement -- it was **the set of
+things my instrument could not run**, and the two are not the same set. Six of
+the fourteen turned out to be the instrument: four wrappers and two fakes. The
+messages distinguishing them were in the output of every sweep.
+
+`evidence.md` has the general form under manufactured absence: a probe that
+cannot see somewhere reports absence rather than uncertainty. This is that,
+scaled to a whole suite, and it survived four full sweeps because the number it
+produced -- zero C-only failures -- was the number I wanted.
+
 ## 10.300 Five of the fourteen unmeasured scripts, measured
 
 10.298 said the parity number had been taken over 65 of 79 scripts and that the
