@@ -9515,6 +9515,106 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.293 The gate came off, and what it was holding up was a decision
+
+The copyright holder instructed it: the C port's reconcile loop runs by
+default. `doc/decision/0265` is the record, and it supersedes 0263's status
+note rather than editing it.
+
+**The refusal had stopped being about code some time ago.** Its own sentence
+said so -- "what is missing is evidence ... and a loop is the one part of this
+program that acts with nobody at the keyboard" -- and that is a claim no commit
+can close. It was always going to end by somebody deciding.
+
+### What came off, and the one thing that stayed
+
+    usage_text                 the flag is no longer documented
+    will_not_reconcile()       gone, with the two-paragraph refusal it printed
+    may_reconcile / allow_     the latch and its seam, gone from main_internal.h
+    the startup notice         gone -- it announced a gate that no longer exists
+    --try-the-c-daemon         ACCEPTED, and says once that it did nothing
+
+The flag stays accepted because a unit file carrying it must start rather than
+fail on an unknown option, and it says so because of this project's own house
+rule: **a setting nobody can act on must not be silently ignored** -- which is
+what `log_shape.sh` already asks of an unrecognised `NCFG_LOG`.
+
+**Taking it out of `--help` did more than tidy.** 34 live scripts probe the
+help for the flag and pass it only when it is there, so they stopped passing it
+the moment this landed. The suite is now a test of the default rather than of
+the flag, which is the strongest evidence available for a change of this kind
+and it cost nothing to arrange.
+
+### Two gates caught their own exceptions, which is what they were for
+
+`agree_gate.py` recorded the flag's five `--help` lines as a permitted
+divergence, written as whole lines "so that it expires by failing". Removing
+the flag made it fail, naming the stale exception and saying that if the
+divergence has closed the exception can go. Verified both ways rather than
+read: with a stale line restored it exits 1 and prints which line the C no
+longer has; without, it exits 0. **Status and print, not one of them** -- this
+session has already paid for reading a pipeline's tail instead of its status.
+
+`main_test.c`'s block did not simply get deleted. Two of the things it asserted
+survive the decision and one is new: the facts that used to stop this build are
+still asserted closed in both directions, no init script passes the retired
+flag, and **the flag is still accepted** -- which is 0265's compatibility
+promise and the half a tidying pass would take away without noticing.
+
+### And a change from earlier the same day, reverted rather than defended
+
+10.292 rewrote `log_shape.sh`'s level check to count `[subsystem]` lines
+instead of raw lines, because the C printed an unfilterable safety notice that
+the raw count caught. **That notice is gone with the gate**, so the reason for
+the rewrite is gone -- and the raw count is the stronger check, since it also
+catches output that is not a log line at all.
+
+So it is reverted. Measured first: the C now emits **zero lines** at
+`NCFG_LOG=warning`, so the original passes for both programs, and both were run
+to confirm it.
+
+The reason to write this down is the shape of the temptation. 10.292 found a
+structural argument for the narrower check -- it was the only one in that file
+counting raw lines, its four neighbours all key on the tag -- and that argument
+is still true. It was also **found after the fact, to justify a change the
+notice had forced**, and a frame that arrives with the answer is the one to
+distrust. A change whose cause has been removed is not made right by an
+argument discovered for it afterwards.
+
+### And the suite with the flag gone
+
+Swept all 79 scripts again with the default on and nothing passing
+`--try-the-c-daemon`:
+
+    checks run             C 1269      Rust 1269
+    scripts passing        C 59/79     Rust 59/79
+    checks failing for the C and not the Rust                        0
+    scripts failing for the C and not the Rust                        0
+    and the reverse                                                  0
+
+The difference set is empty **in both directions**, which is more than 10.291
+could say: it had the C one script behind on `log_shape`. Equal check counts are
+the guard, for the reason 10.291 gives -- a script that dies early produces
+fewer checks rather than failing ones, so a suite that had quietly stopped
+running would score zero C-only failures and read as perfect.
+
+**34 of those scripts stopped passing a flag to get a daemon on the day this
+landed**, so the run is evidence about the default rather than about the flag.
+
+### The hazard the gate was incidentally covering
+
+Neither implementation refuses to start when another netcfgd is already
+listening. Both unlink an existing socket before binding -- `server.c` and
+`server.rs`, deliberately, so a stale socket cannot stop a start -- so a second
+daemon leaves the first running, holding the network, and unreachable.
+
+That is the reference implementation's behaviour and 0265 does not change it.
+What changed is that the C will now do it without a flag, and the flag had been
+standing between typing `netcfgd` on this workstation and taking the network
+off the Rust daemon running it. **Recorded and not fixed**, because a guard the
+Rust has not got is a divergence, and adding one in passing is what
+`harmonization.md` forbids.
+
 ## 10.292 The third way out of a choice that had been written as two
 
 10.282 recorded `log_shape`'s one failure as undecidable, naming two ways to

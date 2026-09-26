@@ -28,11 +28,12 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
 export build
 
-# **The C port's reconcile loop refuses to run unless it is told somebody is
-# watching**, and every script here that starts a daemon meets that refusal.
-# The flag is asked of the binary rather than inferred from the path, so a
-# build carrying neither property is left exactly as it was -- the Rust daemon
-# has no such option and would refuse it.
+# **The C port's reconcile loop runs by default now** (0265), so this probe
+# finds nothing and `daemon_flags` stays empty. It is kept rather than deleted
+# because it is asked of the binary rather than inferred from the path: a build
+# from before that decision still needs the flag, and one that never had it --
+# the Rust daemon, which would refuse the option -- is left exactly as it was.
+# The probe is dead weight the day nobody builds such a daemon any more.
 daemon_flags=
 if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
 	daemon_flags=--try-the-c-daemon

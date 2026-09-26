@@ -28,11 +28,12 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 build="${NCFG_LIVE_BUILD:-$repo/target/debug}"
 export build
 
-# **The C port's reconcile loop refuses to run unless it is told somebody is
-# watching**, and every script here that starts a daemon meets that refusal.
-# The flag is asked of the binary rather than inferred from the path, so a
-# build carrying neither property is left exactly as it was -- the Rust daemon
-# has no such option and would refuse it.
+# **The C port's reconcile loop runs by default now** (0265), so this probe
+# finds nothing and `daemon_flags` stays empty. It is kept rather than deleted
+# because it is asked of the binary rather than inferred from the path: a build
+# from before that decision still needs the flag, and one that never had it --
+# the Rust daemon, which would refuse the option -- is left exactly as it was.
+# The probe is dead weight the day nobody builds such a daemon any more.
 daemon_flags=
 if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
 	daemon_flags=--try-the-c-daemon
@@ -124,21 +125,21 @@ contains "a note is marked, and marked the way flog marks one" "$said" "[confirm
 
 # ------------------------------------------------------------ turned down
 
-# `warning` accepts critical, error and warning, and everything this startup
-# logs is an info or a note -- so a correct filter leaves no log line at all.
+# `warning` accepts critical, error and warning -- and this startup emits an
+# info and a note, so a correct filter leaves nothing at all.
 #
-# **Log lines, not lines, and the difference is the whole of what this counts.**
-# The subject is the filter, and `[subsystem]` is how every other check in this
-# file identifies a line the logger produced. Counting raw lines made the check
-# a claim about one implementation's entire startup output instead: the C port
-# also prints a safety notice about `--try-the-c-daemon` that is deliberately
-# beyond every level's reach and is deliberately not a log line (project.md
-# 10.282), so a build carrying it could not pass however well its filter
-# worked. Measured on both: at `warning` each emits zero bracketed lines, and
-# the C's two log lines are gone exactly as the Rust's are.
+# **Counting every line rather than every log line, and that is the stronger
+# check.** It went the other way for a few hours: the C port used to print a
+# safety notice about `--try-the-c-daemon` that no level could filter, this
+# counted it, and the check was rewritten to count only lines carrying a
+# `[subsystem]` tag. 0265 removed the notice with the gate it was about, so the
+# reason for that rewrite is gone -- and the stricter form also catches output
+# that is not a log line at all, which the narrower one waved through. Reverted
+# rather than kept: a change whose cause has been removed is not made right by
+# an argument found for it afterwards.
 said=$(say warning)
 check "a level below what is emitted silences it completely" \
-	"$(printf '%s' "$said" | grep -c '\[')" "0"
+	"$(printf '%s' "$said" | grep -c .)" "0"
 
 # The control, and it is the one that matters: silence is also what a daemon
 # that failed to start produces, so the level has to be shown letting the same

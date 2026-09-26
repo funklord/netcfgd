@@ -868,23 +868,28 @@ static void the_statuses_are_three_different_things(void)
 }
 
 /*
- * This build does not reconcile, and the reason is no longer the ownership
- * record.
+ * The guard is gone, and what is left of it is asserted rather than assumed.
  *
- * **What this check is for has not changed: the guard must not be deleted
- * quietly.** What has changed is the reason it guards, so the check moves with
- * it -- and it moves in both directions, because a guard still standing for a
- * fact that is no longer true is the other way this goes wrong.
+ * **This used to say "this build does not reconcile".** It reconciles now, by
+ * default, which 0265 decided -- so `ncfg_main_netcfgd_may_reconcile` and the
+ * refusal it fronted are gone, and the checks that asked whether the guard
+ * still answered 0 went with them. Deleting the whole function would have been
+ * wrong: two things it asserted are still worth holding, and one of them is
+ * new.
  *
- * The version before this one asserted that nothing in `src/apply/kernel_link.c`
- * mentioned an alternative name. That file has never held `create_link` -- it
- * is `kernel.c`'s -- so the grep could not have gone red however the marking
- * landed. It is replaced here by two behavioural checks and one that reads the
- * file the marking is actually in.
+ * What stays:
  *
- * So: the two facts that used to stop this build are closed and are asserted
- * closed; the facts that stop it now are asserted still true; and the guard
- * itself still answers 0 and is still asked.
+ *   * The facts that used to stop this build are still asserted closed, in
+ *     both directions, for the reason the old comment gave: a check standing
+ *     for a fact that is no longer true is as bad as a missing one.
+ *   * `--try-the-c-daemon` is still **accepted**. That is the compatibility
+ *     promise of 0265 and it is the half a tidying pass would take away: a
+ *     unit file carrying the retired flag has to start, not fail on an unknown
+ *     option, and nothing else in this tree would notice if it stopped.
+ *   * No init script passes it. The reason has changed -- it used to be that
+ *     an installer handing every machine the flag would make the refusal
+ *     worthless -- and what it is now is that a retired flag should not be
+ *     acquiring new callers on its way out.
  */
 static void this_build_does_not_reconcile(void)
 {
@@ -894,27 +899,19 @@ static void this_build_does_not_reconcile(void)
 	ncfg_op_t          op;
 	char               message[NCFG_ERROR_MAX];
 
-	check(!ncfg_main_netcfgd_may_reconcile(),
-	    "this build does not reconcile, and says so rather than starting");
-	if (main_source) {
-		check(strstr(main_source, "may_reconcile()") != NULL,
-		    "  and the entry point still asks before it starts anything");
-		free(main_source);
-	} else {
-		check(0, "  and the entry point still asks before it starts anything");
-	}
-
 	/*
-	 * And the other half: the flag is what changes the answer, and it changes
-	 * it back. A latch nothing could set would be a refusal with no way past
-	 * it, which is not what this is -- and a latch that stayed set would make
-	 * every check after this one run against a program that reconciles.
+	 * **The loop is not asked for permission any more**, so there is nothing
+	 * here to call. What used to stand in this spot was a latch, two checks
+	 * that it defaulted to refusing, and a source grep for the call that
+	 * consulted it. All four described a gate 0265 removed.
+	 *
+	 * Nothing replaces them, and that is the honest outcome rather than a hole:
+	 * the old comment said as much about the other direction -- "a test that
+	 * proved this daemon reconciles would be a daemon reconciling the machine
+	 * running the suite". The live suite is what exercises the default now, on
+	 * 34 scripts that no longer pass a flag to get a daemon.
 	 */
-	ncfg_main_netcfgd_allow_reconcile(1);
-	check(ncfg_main_netcfgd_may_reconcile(),
-	    "  unless this invocation was told to, which is `--try-the-c-daemon`");
-	ncfg_main_netcfgd_allow_reconcile(0);
-	check(!ncfg_main_netcfgd_may_reconcile(), "  and the default is put back");
+	free(main_source);
 
 	/*
 	 * **Three source checks stood here and all three are gone**, which is the
@@ -931,10 +928,12 @@ static void this_build_does_not_reconcile(void)
 	 */
 	/*
 	 * **And no init script passes it**, which is a grep of the packaging
-	 * rather than of this program. The refusal is worth nothing if the thing
-	 * that installs netcfgd hands every machine the flag -- and that is a file
-	 * nobody reading `daemon_main.c` would think to check. One check per init
-	 * this project ships, named, so that a fifth arriving without one is a
+	 * rather than of this program. The reason has moved with 0265: it used to
+	 * be that an installer handing every machine the flag would make the
+	 * refusal worthless, and it is now that a flag on its way out should not be
+	 * picking up callers -- a unit file that acquired it would be carrying a
+	 * line that does nothing but print a note on every start. One check per
+	 * init this project ships, named, so that a fifth arriving without one is a
 	 * file this test does not read rather than a silent pass.
 	 */
 	{
@@ -954,7 +953,11 @@ static void this_build_does_not_reconcile(void)
 		}
 	}
 
-	/* The parser is what sets it, from that spelling and no other. */
+	/*
+	 * The parser is what sets it, from that spelling and no other -- and it
+	 * still accepts it, which after 0265 is the point of the field. A parse
+	 * that failed here is a unit file that will not start.
+	 */
 	{
 		char       *argv[3];
 		options_t   options;
