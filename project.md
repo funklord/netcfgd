@@ -9515,6 +9515,88 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.299 Association, roaming, and a C probe so the comparison stays honest
+
+The copyright holder ran the root-only scripts. `hwsim.sh` is the one
+`wifi.sh` structurally cannot cover -- it drives a real supplicant with no
+radio, so everything up to "and then it joins" was verified and the joining was
+not.
+
+**Both builds pass every check, and the outputs are the same run for run:**
+
+    association, on a simulated radio                    ok both
+    SAE negotiated from the transitional offer           ok both
+    a scan finds the access point and calls it secured   ok both
+    a DHCP lease over the air, with the metric           ok both
+    preferred the better-metric network of two           ok both
+    moved to another network on a running supplicant     ok both
+    reassociated to another AP on the same network       ok both
+    and that is a roam, named by the AP it moved to      ok both
+
+So the C associates, authenticates with SAE, scans, leases, prefers by metric,
+switches networks and roams. That is the largest single piece of coverage this
+port has gained, and it was unavailable until somebody ran the suite as root.
+
+`association.sh` passed too, against the live daemon on the real radio:
+`wlp0s20f3 is associated, and ncfg calls it OpenPC.se` / `the observation
+agrees`. Note what that run compared, though -- see below.
+
+**One shared script error, in both runs**: `tests/live/hwsim.sh: 1: -m: not
+found`. It appears identically under each build, so it is the script's and not
+either program's, and it did not stop the run.
+
+### The probe, and why a Rust one could not stand in
+
+`association.sh` compares two paths through **one** implementation: `ncfg wifi
+status` resolves the association through the control socket, the probe resolves
+it through the observation path, and they share only `network_for`. The comment
+says what that buys: "agreement is evidence the wiring is right, and a
+disagreement names which side is wrong rather than just that something is."
+
+The probe was a Rust example, and `$build` is `c/` since 0266 -- so there was
+nothing for the script to find. The run above worked because it was pointed at
+the Rust build, which means it compared **the C's socket path against the
+Rust's observation path**. That is worth having and it is not what the script is
+for: a disagreement there would no longer say which side is wrong, only that two
+programs differ.
+
+So `c/examples/live_association.c` is the C's, built by `make -C c examples`,
+printing the same three tab-separated columns in the same order because the
+script reads column three of the row whose column one is the interface. It goes
+through `ncfg_observe_current` -- the call a reconcile pass makes -- rather than
+reaching for `ncfg_supplicant_associated`, for the reason the Rust's header
+gives: a probe that called the interesting function directly would prove the
+function and say nothing about whether the observation is wired to it, which is
+the half that has been wrong before.
+
+It refuses without root and exits 2, checked: the supplicant's socket is
+`root:root`, and a refused connection is indistinguishable from an unassociated
+radio in the result. `association.sh` asserts that refusal happens, so a probe
+that stopped refusing would make every later assertion vacuous.
+
+**Plain stdio rather than `ncfg_host_read_file`**, which lives in
+`src/host/host_internal.h`. An example is a caller from outside the library, and
+reaching into an internal header would make this the one program that does.
+
+Not in `all` and not in `test`: a probe is only useful with a daemon running and
+root to read the socket, and nothing in `make test` can assert against a machine
+the suite does not own.
+
+### And a bluetooth failure that is not yet attributable
+
+`bluetooth.sh` ran against the C and failed one check: "netcfgd reports the
+adapter it can see" wanted `hci1` in `ncfg status` and got the ordinary link
+listing.
+
+**Not called a port gap, because the control run has not happened.** What the
+code says: both models carry Bluetooth adapters in the observation --
+`c/src/observe/host.c` lists them and `crates/netcfgd-model/src/observed.rs`
+sorts them -- and **neither client mentions bluetooth anywhere**, so neither
+`ncfg status` looks likely to print an adapter. That is a prior and not a
+result. This session has produced four confident wrong attributions from
+exactly this position, and the one command that settles it is the same script
+against the Rust.
+
 ## 10.298 Installing two packages bought two scripts and one real defect
 
 `wireguard.sh` and `tunnel.sh` had never run on this machine -- the first wanted

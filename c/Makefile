@@ -113,9 +113,24 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test clean FORCE
+.PHONY: all test examples clean FORCE
 
 all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
+
+# Probes a live test drives, which are programs rather than tests: they take a
+# reading off a running machine and print it, and something else decides whether
+# the reading is right. Not in `all`, because they are only useful with a daemon
+# running and root to read the supplicant's socket -- and not in `test`, because
+# nothing here can assert against a machine this suite does not own.
+#
+# `tests/live/association.sh` looks for `$(EXAMPLES)` by that exact path, the
+# Rust example of the same name being what it looks for in the other build.
+EXAMPLES = examples/live_association
+
+examples: $(EXAMPLES)
+
+examples/%: examples/%.c $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
 $(LIB): $(OBJS)
 	$(AR) rcs $@ $(OBJS)
@@ -203,4 +218,5 @@ tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 # two literal names rather than a wildcard, because this directory is not one
 # whose contents a build produced.
 clean:
-	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) .build-flags
+	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) $(EXAMPLES) \
+	    .build-flags
