@@ -9515,6 +9515,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.296 A netcfgd written in C has now run this machine
+
+The sentence the gate stood on -- "no netcfgd written in C has run a machine
+for any length of time" -- is false as of 2026-09-26. The copyright holder ran
+`tests/live/c_daemon_tryout.sh` on `debian-nabbe`, whose only route off the
+machine is the radio, and reported the network stayed up.
+
+**What I observed afterwards, rather than what was reported.** The holder's
+account is that it stayed up; the process table says how:
+
+    wpa_supplicant   pid 1256       8 days old      never restarted
+    dhcpcd master    pid 3061114    1d18h old       never restarted, ppid 1
+    dhcpcd helpers   pid 101545/8   10 min old      children of the master's
+                                                    privileged proxy
+    default route    via 10.0.0.1 dev wlp0s20f3 proto dhcp src 10.0.125.56
+    owned.json       routes: []
+
+So the C daemon **adopted a machine that was already running** and restarted
+neither backend. That is `adopt.sh`'s property -- a netcfgd that cannot
+recognise its own work can never remove it either (0132, 0134) -- holding
+outside a network namespace for the first time. The two young processes are the
+master dhcpcd's own forked helpers, a BPF ARP prober and a BOOTP proxy, so one
+client held one lease throughout.
+
+**The route's `proto` changed and that is not a fault.** It carried none before
+the window and carries `proto dhcp` after, because dhcpcd renewed inside the
+window and re-installed it with a proper tag. netcfgd claims no routes at all,
+which is right for an interface whose config is `dhcp`: what netcfgd owns there
+is the backends, and the address and route are the client's. `ip -d route`
+shows nothing with netcfgd's own `proto 110`.
+
+**I nearly reported that change as a formatting artifact.** The before reading
+was taken with `ip -br` and the after with `ip`, so the first guess was that
+brief mode omits `proto`. It does not -- checked by running both forms against
+the same route -- and the change was real. The instrument was innocent this
+time, which is worth recording precisely because the last several instrument
+suspicions in this session were not.
+
+**What I have not read is the daemon's own log.** The tryout writes one per run
+and it is root-owned at 0600, 192 bytes for this run. Everything above is the
+machine's state after the fact rather than the daemon's account of what it did,
+and those are different witnesses.
+
+This does not settle installation. The tryout runs `c/netcfgd` directly and
+restores the Rust daemon on its way out, which it did -- `systemctl is-active
+netcfgd` is active on the Aug 5 Rust binary again.
+
 ## 10.295 Pointing the budget gates at the C found a gap in the C
 
 10.294 left the three budget gates measuring a binary nobody ships and said it
