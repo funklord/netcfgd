@@ -801,6 +801,30 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 		ncfg_plan_vxlan(&builder, &desired->devices[i]);
 		ncfg_plan_bridge_vlans(&builder, &desired->devices[i]);
 	}
+	/*
+	 * **The radio's networks before anything addressed over them**, which is
+	 * where this had to move and why.
+	 *
+	 * It ran after `nat`, near the end. So a plan that both handed a rotated
+	 * passphrase to the supplicant and started a DHCP client put the client
+	 * first -- and an apply stops at the first action that fails, so a DHCP
+	 * client that would not start meant the supplicant never got the
+	 * passphrase. `tests/live/wifi_journey.sh` measured exactly that: the C
+	 * stopped at action 0 with `skip wifi.set_profiles`, the Rust had already
+	 * done it at action 0 and stopped at action 1.
+	 *
+	 * An address is meaningless before association, so the Rust's order is the
+	 * right one. It gets there by planning the supplicant's networks inside the
+	 * interface's prerequisite, before `plan_source` reaches addressing.
+	 *
+	 * **Here rather than earlier, because the op is gated.**
+	 * `ncfg_builder_gate` collects the ids of ops already pushed for that
+	 * interface, so this has to run after the device loop above -- link
+	 * creation and `device_up` -- or the profiles would be handed over before
+	 * the link is up. After that loop and before this one is the only position
+	 * that satisfies both.
+	 */
+	ncfg_plan_wifi(&builder);
 	for (i = 0; i < desired->interface_count; i++) {
 		ncfg_plan_interface_contents(&builder, &desired->interfaces[i]);
 	}
@@ -836,7 +860,9 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * without forwarding does nothing, and the pass warns where the document
 	 * asks for one and not the other. */
 	ncfg_plan_nat(&builder);
-	ncfg_plan_wifi(&builder);
+	/* `ncfg_plan_wifi` was here and is now above the interface loop -- see the
+	 * comment there. `access_control` stays: a station list is hostapd's and
+	 * nothing is addressed over it. */
 	ncfg_plan_access_control(&builder);
 	/*
 	 * Last of the reports, and after every pass that could have taken a key

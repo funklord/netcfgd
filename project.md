@@ -9548,9 +9548,16 @@ against it. In the Rust they are planned as part of the interface's prerequisite
 pass called near the end of `ncfg_plan_build`, after `nat`.
 
 `ncfg_plan_wifi` emits exactly one op kind, `NCFG_OP_WIFI_SET_PROFILES`, so the
-change is contained. It is still not a tail-end edit: **plan ordering is asserted
-by action id across the suite and the frozen witnesses**, so moving a pass
-renumbers expectations, which is a pass of its own with its own re-blessing.
+change is contained.
+
+**This paragraph predicted the cost wrongly and the prediction is worth keeping
+beside the answer.** It said plan ordering is asserted by action id across the
+suite and the frozen witnesses, so moving a pass would renumber expectations and
+need its own re-blessing. It needed neither: see 10.303. The witnesses pin op
+*shapes* -- `doc/schema/plan.json` is a catalogue of all 48 op forms with their
+inverses, assembled to fix the JSON of each kind -- and a catalogue has no
+execution order to renumber. Guessing what a gate pins, rather than opening it,
+is how a change acquires an imaginary price.
 
 ### Why five sweeps missed it, which is the part worth keeping
 
