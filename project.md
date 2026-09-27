@@ -12190,6 +12190,60 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.303 The ordering moved, and the re-bless it was supposed to need was empty
+
+`ncfg_plan_wifi` runs between the device loop and the interface-contents loop
+now, rather than after `nat`. So the supplicant gets its networks before
+anything is addressed over them, which is what 10.302 measured the Rust doing.
+
+**The position is forced from both sides**, which is why there was only one
+place to put it. The op is gated through `ncfg_builder_gate`, and that collects
+the ids of ops already pushed for the interface -- so it has to run after link
+creation and `device_up`, or the profiles are handed over before the link is up.
+And it has to run before `ncfg_plan_interface_contents`, which is what plans
+addressing. Between the two loops satisfies both and nothing else does.
+
+### No witness needed re-blessing, and 10.302 said it would
+
+The prediction was that plan ordering is asserted by action id across the suite
+and the frozen witnesses, so moving a pass would renumber expectations and cost
+a re-bless. It cost neither.
+
+`doc/schema/plan.json` holds **48 actions and they are a catalogue**: every op
+kind with its inverse, `link.create` beside `link.delete`, `addr.add` beside
+`addr.del`, assembled to pin the JSON shape of each one. It is not a plan
+produced from a fixture, so it has no execution order to renumber. All three
+witness tests passed untouched.
+
+Checked rather than argued: **`make schema-bless` rewrites every witness and
+leaves no diff.** That is the cheap proof that nothing was stale, and it is
+worth preferring to reading the gate -- a blesser that changes nothing is a
+witness that was already right.
+
+**The general form, which this session has now paid for twice in a day:**
+guessing what a gate pins gives a change an imaginary price. The other instance
+was the opposite sign -- a budget gate assumed harmless turned out to be
+measuring a binary nobody shipped (10.295). Open the file.
+
+### What the change cost, measured
+
+    checks run                C 1400   Rust 1400
+    scripts passing           C 63/77  Rust 63/77
+    C-only failing checks     0
+    scripts that stopped passing              none
+
+`wifi_journey`'s "and the supplicant is given the networks again" passes three
+runs out of three, leaving only the convergence check the Rust fails too. So the
+suite has no check that fails for this build and passes for the Rust.
+
+One script moved from failing to passing between the two sweeps --
+`c_daemon_watch` -- and **the reorder is not credited with it.** That script
+drives the tryout harness against a fake daemon for two minutes and is the
+likeliest thing in the suite to be timing-dependent; nothing in it touches
+wifi profiles. An unexplained improvement is not evidence for the change that
+happened to be in flight, which is the same discipline that kept the earlier
+anomalous pass from being read as a regression.
+
 ## 10.302 The C gives a radio its networks after starting DHCP, and the Rust before
 
 The corrected harness ran 1400 checks against each build -- up from 1269 -- and
