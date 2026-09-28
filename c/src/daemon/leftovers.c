@@ -486,8 +486,19 @@ void ncfg_leftovers_report(const char *run_dir)
 	 * "unclean termination of a previous run" immediately above this, and the
 	 * whole point of the line is to answer it.
 	 */
+	/*
+	 * **`INFO` for the all-clear and `ERROR` for the finding, and the split is
+	 * the whole point of the file.**
+	 *
+	 * This shipped at `NOTE`, which `ncfg_log_label` renders as `!` -- so the
+	 * line saying everything is accounted for arrived looking like a warning,
+	 * six times, directly under systemd's warning. That is this file's own
+	 * argument used against it: a reader skimming for trouble sees seven
+	 * alarming lines where the truth is "nothing here needs you". `INFO` has
+	 * no label at all, deliberately, because the ordinary line is a sentence.
+	 */
 	if (unaccounted == 0u) {
-		ncfg_log_emitf("adopt", NCFG_LOG_NOTE,
+		ncfg_log_emitf("adopt", NCFG_LOG_INFO,
 		    "%zu process(es) in netcfgd's control group, all accounted for; systemd "
 		    "reports these as left over on every start because `KillMode=process` is "
 		    "what keeps the network up across a restart (0134, 0142)",
@@ -502,14 +513,14 @@ void ncfg_leftovers_report(const char *run_dir)
 		const ncfg_leftover_finding_t *finding = &findings[at];
 
 		if (finding->verdict == NCFG_LEFTOVER_HELPER) {
-			ncfg_log_emitf("adopt", NCFG_LOG_NOTE, "  %s %d, %s pid %d",
+			ncfg_log_emitf("adopt", NCFG_LOG_INFO, "  %s %d, %s pid %d",
 			    finding->process.program, (int)finding->process.pid,
 			    verdict_name(finding->verdict), (int)finding->anchor);
 			continue;
 		}
 		if (finding->verdict == NCFG_LEFTOVER_CLAIMED ||
 		    finding->verdict == NCFG_LEFTOVER_RECORDED) {
-			ncfg_log_emitf("adopt", NCFG_LOG_NOTE, "  %s %d, %s",
+			ncfg_log_emitf("adopt", NCFG_LOG_INFO, "  %s %d, %s",
 			    finding->process.program, (int)finding->process.pid,
 			    verdict_name(finding->verdict));
 			continue;
@@ -527,7 +538,7 @@ void ncfg_leftovers_report(const char *run_dir)
 		    verdict_name(finding->verdict));
 	}
 	if (found_count > count) {
-		ncfg_log_emitf("adopt", NCFG_LOG_NOTE,
+		ncfg_log_emitf("adopt", NCFG_LOG_INFO,
 		    "  and %zu more not listed; %u is as many as this reports",
 		    found_count - count, (unsigned)NCFG_LEFTOVER_MAX);
 	}
