@@ -307,7 +307,7 @@ static int drain_radio(void *context, ncfg_main_harvest_t *harvest, char *err, s
 
 			if (ncfg_main_supplicant_event_line(radio->interface, &event, &severity, said,
 			        sizeof(said))) {
-				ncfg_log_emitf("supplicant", (ncfg_severity_t)severity, "%s", said);
+				ncfg_log_aboutf("supplicant", radio->interface, (ncfg_severity_t)severity, "%s", said);
 			}
 		}
 		if (!ncfg_supplicant_event_is(&event, "CTRL-EVENT-CONNECTED")) {
@@ -863,7 +863,7 @@ static void attach(ncfg_main_watchers_t *watchers, const char *name)
 		}
 	}
 	if (!radio) {
-		ncfg_log_emitf("supplicant", NCFG_LOG_WARNING,
+		ncfg_log_aboutf("supplicant", interface, NCFG_LOG_WARNING,
 		    "this daemon watches at most %d radios, so %s is not being watched; roaming "
 		    "and authentication failures will go unreported for it",
 		    NCFG_MAIN_RADIOS_MAX, interface);
@@ -889,7 +889,7 @@ static void attach(ncfg_main_watchers_t *watchers, const char *name)
 	 * about.
 	 */
 	if (!ncfg_supplicant_attach(client, message, sizeof(message))) {
-		ncfg_log_emitf("supplicant", NCFG_LOG_WARNING,
+		ncfg_log_aboutf("supplicant", interface, NCFG_LOG_WARNING,
 		    "%s: cannot watch this radio's events (%s); roaming, authentication "
 		    "failures and refused associations will go unreported for it", interface,
 		    message);
@@ -953,7 +953,7 @@ void ncfg_main_watchers_refresh(void *context, ncfg_main_sources_t *sources)
 		    inode == radio->inode && still_watched(watchers, radio)) {
 			continue;
 		}
-		ncfg_log_emitf("supplicant", NCFG_LOG_NOTE,
+		ncfg_log_aboutf("supplicant", radio->interface, NCFG_LOG_NOTE,
 		    "%s: the control socket was replaced or went away, so this radio's events "
 		    "were going nowhere; re-attaching", radio->interface);
 		forget_radio(watchers, radio);

@@ -827,7 +827,7 @@ int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
 			return 0;
 		}
 		if (adopted > 0) {
-			ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+			ncfg_log_aboutf("dhcp", iface, NCFG_LOG_INFO,
 			    "adopted the dhcp6 client already running on %s (pid %d); it is "
 			    "netcfgd's, by the `-p %s` it was started with and the privilege it "
 			    "runs with", iface, (int)adopted, pid_path);
@@ -858,7 +858,7 @@ int ncfg_dhcp6_start(const char *run, const char *iface, const char *request,
 		switch (ncfg_dhcpcd_whose(run, iface, NCFG_DHCP_FAMILY_V6, machine, recited,
 		    sizeof(recited))) {
 		case NCFG_DHCPCD_OURS:
-			ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+			ncfg_log_aboutf("dhcp", iface, NCFG_LOG_INFO,
 			    "adopted the dhcp6 client already running on %s; it is netcfgd's, by "
 			    "the `-f %s` it recites", iface, config);
 			return 1;
@@ -952,7 +952,7 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 		return 0;
 	}
 	if (adopted > 0) {
-		ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+		ncfg_log_aboutf("dhcp", iface, NCFG_LOG_INFO,
 		    "adopted the dhcp client already running on %s (pid %d); it is netcfgd's, by "
 		    "the `-p %s` it was started with and the privilege it runs with", iface,
 		    (int)adopted, pid_path);
@@ -964,7 +964,7 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 	switch (ncfg_dhcpcd_whose(run, iface, NCFG_DHCP_FAMILY_V4, machine, recited,
 	    sizeof(recited))) {
 	case NCFG_DHCPCD_OURS:
-		ncfg_log_emitf("dhcp", NCFG_LOG_INFO,
+		ncfg_log_aboutf("dhcp", iface, NCFG_LOG_INFO,
 		    "adopted the dhcp client already running on %s; it is netcfgd's, by the `-f "
 		    "%s` it recites", iface, config);
 		return 1;
@@ -1192,7 +1192,7 @@ int ncfg_dhcp_stop(const char *run, const char *iface, const char *family,
 		 * success with a note naming the daemon, which is 0141 keeping a
 		 * stranger's process a person's decision rather than this function's.
 		 */
-		ncfg_log_emitf("dhcp", NCFG_LOG_NOTE,
+		ncfg_log_aboutf("dhcp", iface, NCFG_LOG_NOTE,
 		    "not stopping the dhcpcd on %s: it recites `-f %s`, which is not netcfgd's, "
 		    "so netcfgd has no client of its own to stop there", iface, recited);
 	} else {

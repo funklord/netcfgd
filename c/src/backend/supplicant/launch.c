@@ -270,7 +270,7 @@ int ncfg_supplicant_start(const char *run, const char *dir, const char *iface,
 		return 0;
 	}
 	if (adopted > 0) {
-		ncfg_log_emitf("supplicant", NCFG_LOG_INFO,
+		ncfg_log_aboutf("supplicant", iface, NCFG_LOG_INFO,
 		    "adopted the supplicant already running on %s (pid %d); it is netcfgd's, by "
 		    "the `-P %s` it was started with and the privilege it runs with", iface,
 		    (int)adopted, pid_path);
