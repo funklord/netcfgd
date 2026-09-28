@@ -12306,6 +12306,45 @@ information after it had been believed. **A green suite is evidence about the
 cases somebody thought of**, and nobody had thought of the one where netcfgd's
 own record cannot name its own client.
 
+### The all-clear arrived looking like an alarm
+
+Shipped at `NOTE`, which `ncfg_log_label` renders as `!`. So the first real run
+printed seven `!` lines saying nothing was wrong, directly underneath systemd's
+warning -- **this file's own argument used against it**, since a reader
+skimming for trouble sees seven alarming lines where the truth is "nothing here
+needs you". `INFO` now, which has no label at all because the ordinary line is
+a sentence; `ERROR` is kept for the finding. The split is the whole point.
+
+### What the same restart turned up, which was not the port
+
+The daemon was fine -- `ncfg wifi scan` answered in 2 seconds with twelve
+access points, `ncfg wifi status` instantly. What was not fine had been running
+for days:
+
+    258640   target/debug/netcfgd   1d 16h   1179s CPU   HOST network namespace
+    333392   target/debug/netcfgd   1d 16h   1791s CPU   isolated
+    333036   c/netcfgd (deleted)    1d 16h    420s CPU   isolated
+    + 10 fake_supplicant.py, the oldest 3d 22h
+
+Three orphaned daemons from earlier live-test runs, in a hot retry loop
+spawning `dhcpcd` for the test dummy `radio0` -- **2087 attempts an hour**,
+every one failing `pidfile_lock: /run/dhcpcd/radio0-4.pid: Permission denied`,
+about 57 minutes of CPU burned between them. Killed with `SIGTERM`; the spam
+went from 0.6 a second to zero.
+
+**One of them was in the host network namespace**, which is the part worth
+carrying. They ran as an ordinary user, so they had no `CAP_NET_ADMIN` and
+could not reach the root-only supplicant socket -- they could not contend for
+the radio. But nothing about the leak guarantees that: a run left with more
+privilege, or a `radio0` that happened to exist, is `0177`'s two-daemon failure
+waiting to happen on the machine the suite is running on.
+
+The suite's scripts trap `EXIT`, `INT` and `TERM` and clean up properly. What
+defeats that is a run stopped by something the script cannot catch, which is
+what `running-code.md` says about a task-kill not being a signal. **The sweep
+it asks for afterwards matters most on the runs nobody let finish**, and those
+are the runs least likely to prompt one.
+
     binary   1145296 -> 1145960 (+664), inside the size gate's 3% tolerance
     tests    23 checks; the dhcpcd table and a wlan0/wlan01 pair, both watched
              failing with `is_claimed` stubbed out
