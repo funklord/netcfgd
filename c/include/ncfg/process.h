@@ -197,6 +197,22 @@ pid_t ncfg_process_pid_by_marker_as(const char *marker, uid_t asking);
 int ncfg_process_program_of(pid_t pid, char *name, size_t name_size);
 
 /*
+ * The parent of a process, or 0 where there is no answer.
+ *
+ * For walking a process up to something a caller recognises. dhcpcd is the
+ * case that needs it: netcfgd records the client it started, and that client
+ * forks a privileged proxy, a control proxy and a BPF helper which appear in
+ * no record anywhere and are perfectly legitimate. They are reached from the
+ * one netcfgd does know by their parent, and by nothing else.
+ *
+ * **0 ends a walk**, being what pid 1 reports and what an unreadable or
+ * departed process reports, so a loop upwards terminates on it without a
+ * second test. A caller should still bound the walk: a parent chain is data
+ * from `/proc` rather than a structure this process owns.
+ */
+pid_t ncfg_process_parent_of(pid_t pid);
+
+/*
  * Every pid whose program name is one of `names`, lowest first.
  *
  * The scan `ncfg_process_pid_by_marker` does, asked a different question: that

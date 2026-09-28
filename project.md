@@ -9515,6 +9515,91 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.306 The warning that is also what a real fault looks like
+
+netcfgd reads its own control group at startup now and says what it inherited.
+0267 has the decision; this is what the measuring turned up.
+
+### systemd cannot be told, and the control is what proved it
+
+`KillMode=process` leaves the backends running on purpose (0134, 0142), so
+systemd reports them on every start as *"unclean termination of a previous run,
+or service implementation deficiencies"*. Four throwaway user units on systemd
+257, started, stopped and started again:
+
+    control: nothing survives      found-leftover=0   remains-running=0
+    baseline: child survives       found-leftover=1   remains-running=1
+    Delegate=yes                   found-leftover=1   remains-running=1
+    Delegate=yes + sub-cgroup      found-leftover=1   remains-running=1
+
+**No directive suppresses it and the check recurses.** A survivor parked in a
+delegated sub-cgroup of the unit is found just the same, so the only
+arrangement that silences systemd is one where nothing of netcfgd's is left
+under the unit at all -- which is the thing `KillMode=process` exists to
+prevent.
+
+**The first version of that table said 8 for every row, including the
+control.** Leftover sleeps from one trial were still in the cgroup when the
+next started, so each trial was partly measuring its predecessor. Nothing about
+the four baseline rows looked wrong -- they agreed with each other and with the
+expected answer, which is what made them convincing. **The control is the only
+row that could have disagreed**, and it did: a trial in which nothing survives
+cannot honestly report six left-over processes. The harness refuses to start a
+trial over a non-empty group now, which is the guard's-failure-is-the-caller's-
+failure rule pointed at a measurement.
+
+Worth keeping separately: the instinct on seeing the control fail was to doubt
+the journal window, and `--since @epoch` was duly checked and is fine. **The
+instrument was right and the fixture was dirty**, and those two produce the
+same symptom.
+
+### Why the noise is expensive, which is not the obvious reason
+
+Not that it is noisy. **The two lines systemd prints every ordinary restart are
+the two lines a real unclean stop prints.** 0177 is the measured cost: netcfgd
+started beside an orphaned supplicant of its own, systemd logged exactly that,
+and the orphan and the new supplicant deauthenticated each other until the
+association went. The signal existed and was indistinguishable from the noise.
+
+### What netcfgd can say that systemd cannot
+
+Whose process it is. Three verdicts -- recorded, helper, unaccounted -- and the
+middle one is the whole design: **dhcpcd is four processes**, a client plus a
+privileged proxy, a control proxy and a BPF helper, and only the client is in
+any record. `process.h` already said so. A classifier without the parent walk
+reports four unaccounted processes on a healthy machine, which is the noise
+problem rebuilt one layer up.
+
+The walk follows parents **only through processes in the control group**,
+because init reparents an orphan and every orphan's chain therefore reaches pid
+1. It is bounded as well: the parent numbers come from `/proc`, two reads can
+catch the table mid-change, and an unbounded loop in the startup path is a
+daemon that never starts.
+
+### It runs before the first pass, and that is not an implementation detail
+
+The question is what netcfgd *inherited*. Adoption is what turns an inherited
+process back into netcfgd's, so a report taken afterwards calls every survivor
+accounted for and can never see the case it exists for.
+
+### What is tested and what is not
+
+The classifier is pure over an injected table, so `leftovers_test` drives it
+over the table this machine produced on 2026-09-28 and ends with the sabotage:
+the same table with the anchor's record removed must turn four processes
+unaccounted. The walk was then deleted and the suite watched failing exactly
+the four helper checks -- **through the check under test**, not through
+something upstream.
+
+**The `/proc` half is not covered by any of that**, and saying so is the point.
+`ncfg_process_in_our_service` answers false under `unshare`, which is every run
+of the live suite, so no test on this machine can exercise the gathering. What
+will exercise it is the next daemon restart, and that is a measurement to take
+rather than a property to assume.
+
+    binary   1145296 -> 1145832 (+536), inside the size gate's 3% tolerance
+    check    all gates green; module-order 50 attributed headers
+
 ## 10.305 The GUI's live probes, and the banner the daemon could not raise
 
 `tests/live/gui_wifi.sh` runs. It had not, and the reason was four characters

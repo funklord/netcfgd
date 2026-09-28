@@ -381,6 +381,39 @@ int ncfg_process_program_of(pid_t pid, char *name, size_t name_size)
 	return 1;
 }
 
+/*
+ * The parent of a process, or 0 where there is no answer.
+ *
+ * **`status` rather than `stat`, and that is a parsing fact rather than a
+ * preference.** A program's name sits in `stat`'s second field inside
+ * parentheses and may contain a space or a `)` of its own -- dhcpcd renames
+ * itself to `dhcpcd: [BPF ARP] wlp0s20f3 10.0.125.56` with `setproctitle`, so
+ * counting fields from the left of `stat` is wrong for precisely the processes
+ * a caller walks a parent chain for. `status` puts one field per line behind a
+ * name, which is why `ncfg_process_uids` already reads it.
+ *
+ * 0 for a process that has gone, for a `/proc` that will not answer, and for
+ * pid 1, whose `PPid` is 0 already. A walk upwards therefore ends on 0 without
+ * needing a second test, and cannot be walked off the top.
+ */
+pid_t ncfg_process_parent_of(pid_t pid)
+{
+	char        path[64];
+	char        text[PROC_TEXT_MAX];
+	const char *line;
+	uint32_t    parent = 0;
+
+	if (!proc_path(path, sizeof(path), pid, "status") ||
+	    !read_proc_text(path, text, sizeof(text))) {
+		return 0;
+	}
+	line = line_with_prefix(text, "PPid:");
+	if (!line || !field_u32(line, 0, &parent)) {
+		return 0;
+	}
+	return (pid_t)parent;
+}
+
 size_t ncfg_process_pids_of_programs(const char *const *names, size_t name_count,
     ncfg_process_ref_t *out, size_t out_max)
 {
