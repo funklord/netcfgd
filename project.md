@@ -12190,6 +12190,69 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.308 The subsystem is a path
+
+`[dhcp]` is `[dhcp.wlp0s20f3]` where an interface is in scope. 10.307 asked for
+it: one machine's log has to read as one timeline and still filter down to a
+link, and a flat subsystem makes `grep '\[dhcp\]'` possible and "one link"
+impossible.
+
+### The separator is measured, not chosen
+
+flog takes the subsystem as a free `const char *` and imposes nothing, so the
+convention belongs to its users. fuzzypickles already spells names `peer-wire`,
+`log-relay`, `group-repl`, `lan-discover` -- **a hyphen joins words inside one
+name there**, so a hyphen cannot also separate levels without making
+`peer-wire` ambiguous between one level and two. Nothing in any sibling used a
+dot for anything. So `.` between levels, `-` inside one.
+
+**netcfgd is the first tree here to need a separator, which makes this a
+pattern the others will follow rather than a local choice.** Worth deciding
+once, in `claude-guidelines`, rather than six times.
+
+### What the shape had to avoid
+
+`ncfg_log_aboutf(subsystem, about, severity, ...)` composes; a NULL or empty
+`about` renders exactly what the flat form rendered, so no call site is forced
+to invent a name and one that gains an interface later is a one-word change
+rather than a buffer and a `snprintf`.
+
+**The filter is a named function and not a `strncmp`, because a prefix test
+that ignores the level boundary accepts `dhcpcd` when asked for `dhcp`.** That
+is the same fault this tree met one layer up the same day -- a claim on
+`wlan0` must not quieten an alarm about `wlan01` (0268) -- and it has a test of
+its own in both places.
+
+Two call sites in `daemon_watchers.c` deliberately keep the flat form: they are
+about the radio *directory* rather than one radio, and putting a directory
+event under a link that did not cause it would be worse than leaving it at the
+root.
+
+### The demonstration that failed, which is the part worth keeping
+
+The test passed 21 checks including one that captures stderr and reads the
+rendered prefix back. Then `NCFG_LOG_SUBSYSTEM=dhcp ./ncfg status` changed
+nothing at all.
+
+**`ncfg_log_accept_from_env` is called from `daemon_main.c` and from nowhere
+else, so the CLI has never honoured `NCFG_LOG` either** -- a gap that predates
+this and was invisible until something wanted the variable. The filter is the
+daemon's; the CLI ignores both variables.
+
+What is worth carrying is not the gap but how it surfaced. Every one of those
+21 checks drove `ncfg_log_accept_subsystem` directly, which is precisely how a
+filter that nothing reads from the environment passes all of them -- *a correct
+function is not a working feature*, and the setter having a caller is not the
+same as the variable having a reader. The suite now sets the variable and calls
+`ncfg_log_accept_from_env` itself, which is the closest a unit test gets to the
+daemon's own path.
+
+**Whether the CLI should read them is open and is not this change's to take.**
+
+    make check   green; log_test 23 checks, boundary sabotage watched failing
+                 3 of them including the end-to-end one
+    binary       1145960 -> 1146176 (+216), inside the size gate's 3% tolerance
+
 ## 10.307 Fifty-two minutes of nothing, and what a timeline has to carry
 
 An afternoon's troubleshooting, kept because the holder's direction for fuzznet

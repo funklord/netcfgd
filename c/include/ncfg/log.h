@@ -146,6 +146,81 @@ void ncfg_log_emit(const char *subsystem, ncfg_severity_t severity, const char *
 void ncfg_log_emitf(const char *subsystem, ncfg_severity_t severity, const char *format, ...);
 
 /*
+ * The longest subsystem path this will carry, including its NUL.
+ *
+ * Two levels of the names in use plus an interface is well inside it --
+ * `supplicant.wlp0s20f3` is 20. A path that does not fit is truncated at a
+ * level boundary rather than mid-name, because half a name is a path that
+ * matches the wrong filter.
+ */
+#define NCFG_LOG_SUBSYSTEM_MAX 64u
+
+/*
+ * A SUBSYSTEM IS A PATH, AND `.` SEPARATES ITS LEVELS
+ *
+ * `[dhcp]` became `[dhcp.wlp0s20f3]` so that one machine's log can be read as
+ * one timeline and still be filtered down to a link. The root level is the
+ * name this file already used -- `dhcp`, `supplicant`, `confirm`, `netlink` --
+ * and what follows it is the thing the message is about.
+ *
+ * **`.` for levels and `-` inside a level, and that is measured rather than
+ * chosen.** flog takes the subsystem as a free string and imposes no
+ * separator, so the convention is its users'. fuzzypickles already spells
+ * names `peer-wire`, `log-relay`, `group-repl` and `lan-discover` -- a hyphen
+ * joins words *within* one name there, so a hyphen cannot also separate levels
+ * without making `peer-wire` ambiguous between one level and two. Nothing in
+ * any sibling used a dot for anything, which leaves it free.
+ *
+ * **Why it is worth having at all.** An afternoon's troubleshooting needed a
+ * link's supplicant, its DHCP client and the daemon's own passes laid on one
+ * timeline, and the events that anchored it came from the backends rather than
+ * from netcfgd (project.md 10.307). A flat subsystem makes
+ * `journalctl | grep '\[dhcp\]'` possible and `... one link` impossible;
+ * a path makes both, with no index and no second copy of anything.
+ */
+
+/*
+ * Emit about a particular thing, composing `<subsystem>.<about>`.
+ *
+ * `about` is usually an interface. NULL or empty renders exactly what
+ * `ncfg_log_emitf` renders, so a caller with nothing to name is not forced to
+ * invent one -- and a call site that gains an interface later is a one-word
+ * change rather than a buffer and a `snprintf`.
+ *
+ * **A `.` inside `about` is left alone.** An interface name cannot contain one
+ * and a caller naming something with more structure means it.
+ */
+void ncfg_log_aboutf(const char *subsystem, const char *about, ncfg_severity_t severity,
+    const char *format, ...);
+
+/*
+ * Whether a subsystem path lies at or under a filter path.
+ *
+ * `dhcp` matches `dhcp` and `dhcp.wlp0s20f3`; it does not match `dhcpcd`. That
+ * last one is the whole reason this is a function rather than a `strncmp` at
+ * the point of use: a prefix test that ignores the level boundary quietly
+ * accepts a neighbour, which is the same fault as an interface claim on
+ * `wlan0` covering `wlan01` -- met in this tree the same day, one layer up.
+ *
+ * An empty or NULL filter matches everything, which is the unfiltered default.
+ */
+int ncfg_log_subsystem_matches(const char *subsystem, const char *filter);
+
+/*
+ * Emit only what lies at or under this path. NULL or empty clears it.
+ *
+ * **Startup only, before any thread exists**, which is where
+ * `ncfg_log_accept_from_env` applies it and the only place netcfgd sets it. The
+ * level beside it is atomic because it is genuinely written at runtime by the
+ * `verbosity` request; this is not, and pretending otherwise would be a
+ * thread-safety claim nothing here backs.
+ */
+void ncfg_log_accept_subsystem(const char *filter);
+
+/* The filter in force, or an empty string. Never NULL. */
+const char *ncfg_log_accepted_subsystem(void);
+
+/*
  * Write a program's output to stdout, or leave.
  *
  * **`ncfg status | head -1` aborted with a Rust panic.** Exit status 134, and
