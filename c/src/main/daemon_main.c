@@ -42,6 +42,7 @@
 #include "ncfg/config.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/dns.h"
+#include "ncfg/leftovers.h"
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/rfkill.h"
@@ -1047,6 +1048,28 @@ static int start(const options_t *options)
 	        : "nothing",
 	    ncfg_daemon_server_path(local));
 	report_writability(where.config);
+
+	/*
+	 * **What was already here, before anything is adopted or applied.**
+	 *
+	 * systemd prints `Found left-over process N ... This usually indicates
+	 * unclean termination of a previous run` on every start, because
+	 * `KillMode=process` deliberately leaves the backends up (0134, 0142) --
+	 * and measured on systemd 257, no unit setting suppresses it while a
+	 * process of netcfgd's remains anywhere under the unit's cgroup. So the
+	 * two sentences a real unclean stop produces are the two printed every
+	 * ordinary restart, and 0177 is what that cost once.
+	 *
+	 * netcfgd can answer what systemd cannot: whose process it is. This reads
+	 * the control group and says, of each survivor, whether the previous run
+	 * wrote it down.
+	 *
+	 * **Here and not later**, because the question is what netcfgd inherited:
+	 * adoption is what turns an inherited process back into netcfgd's, so a
+	 * report after the first pass would call every survivor accounted for and
+	 * could never see the case this exists for.
+	 */
+	ncfg_leftovers_report(where.run);
 
 	/*
 	 * **Observe once before anything reads the state**, which the Rust does
