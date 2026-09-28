@@ -118,6 +118,49 @@ static void print_link_settings(const ncfg_observed_link_t *link,
 }
 
 /*
+ * The Bluetooth adapters, which are not links and so are not in the walk above.
+ *
+ * **The observation has carried these all along and nothing showed them.**
+ * `observed.json` holds them -- `tests/live/bluetooth.sh` asserts that and
+ * always passed -- while `ncfg status` listed links only, so the check beside
+ * it, "netcfgd reports the adapter it can see", had never passed for either
+ * implementation. A reader with no adapter in the output cannot tell an absent
+ * adapter from an unreported one.
+ *
+ * Its own section because an adapter is its own thing: `observed.h` says why it
+ * is not a link -- no address, no mtu, no place in netlink -- and a PAN
+ * connection through it produces a `bnep0` that IS a link and appears above
+ * with no special case.
+ *
+ * Nothing at all where there are none, which is section 4.6's rule for the run
+ * directory applied to the output: what is shown reflects use rather than
+ * capability, and a machine with no Bluetooth should not gain a heading saying
+ * so.
+ *
+ * The switch is spelled the way a link's is, deliberately -- the same words in
+ * the same shape, because it is the same question about a different radio.
+ */
+static void print_bluetooth(const ncfg_observed_t *observed)
+{
+	size_t at;
+
+	for (at = 0; at < observed->bluetooth_count; at++) {
+		const ncfg_observed_bluetooth_t *adapter = &observed->bluetooth[at];
+
+		if (!adapter->name) {
+			continue;
+		}
+		ncfg_out_writef("%s bluetooth\n", adapter->name);
+		if (adapter->rfkill && ncfg_rfkill_blocked(adapter->rfkill)) {
+			const char *which = adapter->rfkill->hard ? "hardware" : "software";
+
+			ncfg_out_writef("    radio off [%s block at %s]\n", which,
+			    adapter->rfkill->switch_ ? adapter->rfkill->switch_ : "");
+		}
+	}
+}
+
+/*
  * What each linkset settled on, and why each loser lost.
  *
  * **The losers are the point.** "This machine is on the modem" is visible from
@@ -259,6 +302,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 			    ownership_word(route->ownership));
 		}
 	}
+	print_bluetooth(observed);
 	print_linksets(observed);
 	/*
 	 * Printed once rather than per interface: the conflict is with a table,

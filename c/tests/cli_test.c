@@ -728,6 +728,23 @@ static void the_status_listing_is_what_an_operator_reads(const char *text, size_
 	 */
 	line(printed, "    192.168.0.1/24 [Ours]", "an address carries its ownership");
 	line(printed, "    172.16.1.1/24 [Foreign]", "and somebody else's says so");
+
+	/*
+	 * **The adapter, which the observation has always carried and nothing
+	 * showed.** `observed.json` holds it and `tests/live/bluetooth.sh` asserts
+	 * that half and always passed; the half beside it -- that `ncfg status`
+	 * reports the adapter netcfgd can see -- had never passed for either
+	 * implementation, because the listing walked links and an adapter is not
+	 * one.
+	 *
+	 * Asserted here rather than left to the live script, which needs
+	 * `/dev/vhci` and real root and so never runs in `make check`. The witness
+	 * carries `hci0` with a soft block, so both lines are available without a
+	 * fixture of this test's own.
+	 */
+	line(printed, "hci0 bluetooth", "a Bluetooth adapter is listed, not being a link");
+	line(printed, "    radio off [software block at hci0]",
+	    "and its own switch is reported the way a link's is");
 	line(printed, "    172.16.2.1/24 [Unknown]",
 	    "and the third answer is a third word, not a blank");
 

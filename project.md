@@ -12190,6 +12190,51 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.304 The adapter the observation always carried and nothing showed
+
+`ncfg status` reports Bluetooth adapters now. 10.301 recorded the gap and left
+it for the holder to place; the instruction was to close it, and `ncfg status`
+is where `tests/live/bluetooth.sh` already asserts it belongs.
+
+**The observer was never at fault.** That script has two checks and they split
+exactly along the seam:
+
+    and the switch it read is the adapter's own      observed.json     PASSED
+    netcfgd reports the adapter it can see           ncfg status       FAILED
+
+The observation carried `hci0` and its rfkill all along -- `c/src/observe/host.c`
+reads `/sys/class/bluetooth`, needing no D-Bus -- and the listing walked links.
+An adapter is not a link: `observed.h` says why, with no address, no mtu and no
+place in netlink, which is why it has a list of its own. So the renderer had
+nothing to walk and said nothing, and **a reader could not tell an absent
+adapter from an unreported one.**
+
+**This was a gap in both implementations**, which is why 10.301 raised it rather
+than fixing it: patching one would have been a divergence. It is the C's alone
+to close now, 0266 having made the C what ships, and the agree gate does not
+mind -- `status` is one of the three verbs it excludes by name, beside `plan`
+and `explain`, because the two programs are not answering the same question in
+them.
+
+    hci0 bluetooth
+        radio off [software block at hci0]
+
+Its own section, after the links. The switch is spelled the way a link's is,
+word for word, because it is the same question about a different radio. Nothing
+at all where there are no adapters -- section 4.6's rule for the run directory
+applied to the output, so a machine without Bluetooth does not gain a heading
+saying so.
+
+**Tested in `cli_test` rather than left to the live script**, and that is the
+part worth copying. `bluetooth.sh` needs `/dev/vhci` and real root, so it never
+runs in `make check`: a fix verified only there is a fix nothing defends. The
+observed witness already carries `hci0` with a soft block, so both lines are
+assertable with no fixture of the test's own -- and both were watched failing
+with the call removed.
+
+Confirmed on the machine as well: it has a real `hci0`, and `ncfg status` prints
+it.
+
 ## 10.303 The ordering moved, and the re-bless it was supposed to need was empty
 
 `ncfg_plan_wifi` runs between the device loop and the interface-contents loop
