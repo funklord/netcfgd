@@ -9515,6 +9515,100 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.307 Fifty-two minutes of nothing, and what a timeline has to carry
+
+An afternoon's troubleshooting, kept because the holder's direction for fuzznet
+and a distributed log arrived in the middle of it and this is the worked
+example.
+
+### What happened
+
+    12:17:24      laptop suspends
+    12:53:24      resumes; the radio disconnects, which is what a resume does
+    12:53:59      netcfgd restarted (an install)
+    12:55:15      config_put refused: wifi-EMP-XYLEM.conf:5:2:
+                    an EAP network needs an `identity`
+    12:55:17      refused again, same line
+    12:55:17.853  the file is written -- the third attempt succeeded
+    -- 52 minutes in which netcfgd emits nothing at all --
+    13:47:12      netcfgd restarted (another install)
+    13:47:40      joins EMP-XYLEM on the first attempt
+
+**The refusal cost two seconds and the valid configuration cost fifty-two
+minutes.** netcfgd refused an incomplete EAP block naming the file, the line,
+the column and the missing field; the operator fixed it inside three seconds,
+which is the refusal working exactly as designed. Then the correct
+configuration sat unapplied, because **writing a network block does not join
+it** -- every dialog that writes one ends with *"Run apply to make the machine
+match it."* What eventually applied it was a daemon restart being done for an
+unrelated reason.
+
+**The reported symptom was "stuck on scanning", and the radio was scanning,
+correctly, the whole time.** Nothing was broken. There was simply no standing
+indication anywhere that the machine did not match its own configuration, and
+the one prompt that said so was a sentence in a dialog already dismissed.
+
+**Whether that gap should close, and how, is the holder's.** The options are
+not equivalent -- applying on write would make a config edit a live change,
+which is the opposite of what commit-confirm exists for.
+
+### Two wrong turns, both caught by measuring
+
+**The restart was blamed first and did not do it.** The disconnect is at
+12:53:23 and the restart at 12:53:59: the radio dropped 36 seconds *before*
+netcfgd stopped. Reading the two timestamps in the right order is the whole
+refutation.
+
+**Then the refusal was blamed, and that was wrong too** -- it was reported to
+the holder as the likely cause and a question asked on top of it. The file
+mtime killed it: `12:55:17.853` against a refusal at `12:55:17` says the
+operator had already fixed it. **A cause that explains the symptom is not
+thereby the cause**, and the second guess felt better than the first precisely
+because the first had just been disproved.
+
+### What a distributed log has to carry, from this example
+
+The holder's direction: all sub-tool output auditable in one direct timeline,
+with flog's hierarchical logs making it filterable.
+
+**The head start is larger than it looks.** `log.h` is already shaped after
+flog -- severity vocabulary name for name, flog's rendering, its mask as a
+threshold, and its subsystem as the fourth argument (0187). And netcfgd already
+captures six backends to their own files: `ncfg_dhcp_log_path`,
+`ncfg_hostapd_log_path`, `ncfg_openvpn_log_path`, `ncfg_pppoe_log_path`,
+`ncfg_ra_log_path`, `ncfg_supplicant_log_path`.
+
+**What is missing, measured rather than assumed.** The backends also log to the
+journal under their own identifiers -- `dhcpcd[3061115]`, `wpa_supplicant[1256]`
+-- independently of netcfgd, so their output exists twice with two sets of
+timestamps and no shared hierarchy. **Every event that anchored the timeline
+above came from those identifiers rather than from netcfgd**: the disconnect,
+the connect, the lease. A log carrying only netcfgd's own lines would have
+answered none of it. And the subsystem field is flat today (`dhcp`,
+`supplicant`, `confirm`, `netlink`, `portal`) where the direction asks for a
+hierarchy -- `dhcp.wlp0s20f3.dhcpcd` is the shape that makes a filter cheap.
+
+Three properties this investigation actually depended on, each a real
+constraint rather than a wish:
+
+- **Absence has to be readable as evidence.** The finding *was* "netcfgd
+  emitted nothing for fifty-two minutes". A stream of events cannot say that,
+  and once it is distributed, "nothing happened" and "the messages were lost"
+  become the same observation. That is `evidence.md`'s empty-result rule
+  arriving at the transport, and it is the hard one.
+- **Sub-second ordering across sources.** 853 milliseconds decided whether the
+  operator had fixed the config or given up on it. Per-node clocks at second
+  granularity destroy exactly that.
+- **The log is not sufficient by itself.** The mtime, `/proc/<pid>/ns/net` and
+  cgroup membership were each load-bearing here, and none of them is a log
+  line. A timeline that cannot be correlated with the filesystem and the
+  process table would not have found the orphaned daemon in the host network
+  namespace either.
+
+Nothing is built and nothing is proposed. Recorded so the requirement has its
+evidence attached, per *Describing a thing thoroughly is a way of proposing
+it*: the cost and the ownership are the holder's, and this is the cost.
+
 ## 10.306 The warning that is also what a real fault looks like
 
 netcfgd reads its own control group at startup now and says what it inherited.
