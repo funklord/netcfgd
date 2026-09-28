@@ -731,6 +731,7 @@ int ncfg_supplicant_wait_for_connect(ncfg_supplicant_client_t *client, int patie
     char *err, size_t err_size)
 {
 	long long deadline = now_ms() + patience_ms;
+	int       saw_invalid_pmkid = 0;
 
 	for (;;) {
 		ncfg_supplicant_event_t event;
@@ -741,6 +742,16 @@ int ncfg_supplicant_wait_for_connect(ncfg_supplicant_client_t *client, int patie
 		char                    count[64];
 
 		if (left <= 0) {
+			if (saw_invalid_pmkid) {
+				/* The one thing the supplicant did say, which the wait
+				 * above deliberately did not treat as the answer. */
+				ncfg_error_set(err, err_size,
+				    "it did not join within %ds; the access point kept refusing "
+				    "the station with status 53 (the cached key identifier is "
+				    "not one it holds)",
+				    patience_ms / 1000);
+				return 0;
+			}
 			ncfg_error_set(err, err_size,
 			    "it did not join within %ds, and the supplicant did not say why",
 			    patience_ms / 1000);
@@ -781,6 +792,41 @@ int ncfg_supplicant_wait_for_connect(ncfg_supplicant_client_t *client, int patie
 		if (strcmp(name, "CTRL-EVENT-AUTH-REJECT") == 0 ||
 		    strcmp(name, "CTRL-EVENT-ASSOC-REJECT") == 0) {
 			if (ncfg_supplicant_event_field(&event, "status_code", why, sizeof(why))) {
+				/*
+				 * **Status 53 is not an outcome, and treating it as one
+				 * cost an operator an evening.** `INVALID_PMKID` says the
+				 * station offered a cached PMKID this access point no
+				 * longer holds -- a stale PMKSA entry, which the
+				 * supplicant *itself* removes the instant it sees the
+				 * rejection and then retries. Measured on the reporting
+				 * machine, to the microsecond:
+				 *
+				 *     .326605  CTRL-EVENT-ASSOC-REJECT status_code=53
+				 *     .326681  PMKSA-CACHE-REMOVED
+				 *     .327158  netcfgd said the join was refused
+				 *     .631164  the supplicant tried again by itself
+				 *     .783095  CTRL-EVENT-CONNECTED
+				 *
+				 * netcfgd gave up 385 microseconds after the rejection and
+				 * the join succeeded 456 milliseconds later, so
+				 * `wifi_connect` reported a refusal for a network that was
+				 * already coming up. Three times in a week, and each time
+				 * the person retried by hand and it worked -- because the
+				 * first attempt had cleared the cache for them.
+				 *
+				 * This is the same class as the disconnect below, which
+				 * this loop has always waited through for exactly this
+				 * reason: a step on the way to joining is not the result
+				 * of joining. The wait is bounded by `patience_ms`, so a
+				 * point that really does keep refusing still ends -- and
+				 * `saw_invalid_pmkid` is what stops that ending in the
+				 * timeout's "the supplicant did not say why", which would
+				 * be a worse message than the one being skipped here.
+				 */
+				if (strcmp(why, "53") == 0) {
+					saw_invalid_pmkid = 1;
+					continue;
+				}
 				ncfg_error_set(err, err_size,
 				    "the access point refused this station, status %s", why);
 			} else {

@@ -12190,6 +12190,60 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.309 The join that was refused and connected anyway
+
+`wifi_connect` reported a refusal for a network that was already coming up.
+Reported as *"again I had to fiddle around for it to switch networks"*, three
+times in seven days, and the microseconds settle it:
+
+    19:31:49.281063  Trying to associate with `OpenPC.se`
+    19:31:49.326605  CTRL-EVENT-ASSOC-REJECT status_code=53
+    19:31:49.326681  PMKSA-CACHE-REMOVED
+    19:31:49.326773  PMKSA-CACHE-REMOVED
+    19:31:49.327158  netcfgd: `wifi_connect` was refused
+    19:31:49.631164  the supplicant tried again, by itself
+    19:31:49.783095  CTRL-EVENT-CONNECTED
+
+**netcfgd gave up 385 microseconds after the rejection and the join succeeded
+456 milliseconds later.** The operator read "refused", retried by hand, and it
+worked -- because the first attempt had already fixed the problem for them.
+
+**Status 53 is `INVALID_PMKID` and it is self-clearing.** The station offered a
+cached key identifier this access point no longer holds; the supplicant removes
+the stale entry the instant it sees the rejection and retries. netcfgd was the
+only party that did not know that, and it had no idea what 53 meant -- the
+string appears nowhere in the tree.
+
+So a 53 is waited through. **This is not an exemption, it is the rule the loop
+already had**: the comment under it has always said a disconnect is a step on
+the way to joining rather than the outcome, "and treating it as the outcome
+would fail every successful switch between networks". A refusal the supplicant
+recovers from by itself is the same sentence. The wait is bounded by 20s of
+patience against a 456ms recovery, and a point that really does keep refusing
+now ends naming 53 rather than with the timeout's "the supplicant did not say
+why".
+
+### The test passed against the sabotage, and that is the entry
+
+The first version queued two `TROUBLE` events -- the refusal, then the connect
+-- and asserted the join succeeded. It passed. It also passed with the fix
+deleted, because **`ncfg_supplicant_command` skips unsolicited events while
+reading its own reply**, so sending the second event consumed the first. The
+test was asserting that a connect event produces a connect.
+
+Nothing about the green run distinguished the two. What found it was
+sabotaging the fix and reading the exit status -- and the first attempt at
+*that* was wrong too, a `grep -E 'FAILED|failed'` that matched check labels
+containing the word "failed" and reported a red run as green. **Three sloppy
+greps in one session, each one reading as the answer it was looking for.**
+
+The fixture is `REJECT_FIRST <status>` in `supplicantfake.h`, which broadcasts
+the refusal and the outcome with no command between them -- the shape the real
+supplicant produces. It is modelled on `DISCONNECT_FIRST`, which exists for
+exactly the same reason one layer along.
+
+    make check   green; the sabotage fails one check, the right one
+
 ## 10.308 The subsystem is a path
 
 `[dhcp]` is `[dhcp.wlp0s20f3]` where an interface is in scope. 10.307 asked for

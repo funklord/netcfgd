@@ -158,6 +158,12 @@ struct fake {
 	int                huge_next;
 	int                refuse_psk;
 	int                disconnect_first;
+	/* A status code the next join is refused with *before* it succeeds. What a
+	 * real supplicant does on `INVALID_PMKID`: it refuses, drops the stale
+	 * cache entry itself, retries, and connects -- all inside half a second.
+	 * A fake that could not produce that would let a client treating the
+	 * refusal as the outcome pass. */
+	char               reject_first[64];
 	char               fail_scan[64];
 	char               fail_join[64];
 	unsigned long      canary_seen;
@@ -286,6 +292,12 @@ static inline void fake_handle(struct fake *state, char *command, const struct s
 		fake_reply(state, from, from_length, "OK\n", 3u);
 		return;
 	}
+	if (starts_with(command, "REJECT_FIRST ")) {
+		put(state->reject_first, sizeof(state->reject_first),
+		    command + strlen("REJECT_FIRST "));
+		fake_reply(state, from, from_length, "OK\n", 3u);
+		return;
+	}
 	if (strcmp(command, "DISCONNECT_FIRST") == 0) {
 		/* What a real supplicant does: `SELECT_NETWORK` leaves whatever the
 		 * radio was on before it, so a disconnect is the ordinary first step
@@ -372,6 +384,21 @@ static inline void fake_handle(struct fake *state, char *command, const struct s
 			state->disconnect_first = 0;
 			fake_broadcast(state, "<3>CTRL-EVENT-DISCONNECTED "
 			    "bssid=00:11:22:33:44:55 reason=3 locally_generated=1");
+		}
+		if (state->reject_first[0] != '\0') {
+			char refusal[128];
+
+			(void)snprintf(refusal, sizeof(refusal),
+			    "<3>CTRL-EVENT-ASSOC-REJECT bssid=00:11:22:33:44:55 status_code=%s",
+			    state->reject_first);
+			state->reject_first[0] = '\0';
+			/* Broadcast with no command in between, which is the whole
+			 * point: a test that sent two `TROUBLE`s instead would have the
+			 * first event eaten by the second command's reply read, and
+			 * would pass against a client that treated the refusal as
+			 * final. That version was written, sabotaged and found to be
+			 * inert. */
+			fake_broadcast(state, refusal);
 		}
 		fake_broadcast(state, event);
 		return;

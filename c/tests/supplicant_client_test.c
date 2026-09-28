@@ -769,6 +769,35 @@ static void a_join_is_waited_for_and_says_why_it_failed(const char *dir)
 	    !ncfg_supplicant_wait_for_connect(client, 1000, message, sizeof(message)) &&
 	    strstr(kept(message), "status 17") != NULL,
 	    "and a refusal by the access point is reported with its status code");
+
+	/*
+	 * **Status 53 is a step on the way, not the outcome**, and this is the
+	 * same case as the disconnect above rather than a special exemption.
+	 * `INVALID_PMKID` means the station offered a cached key identifier the
+	 * access point no longer holds; the supplicant removes the stale entry
+	 * itself and retries within half a second. Measured on the reporting
+	 * machine, netcfgd gave up 385 microseconds after the rejection and the
+	 * join completed 456 milliseconds later -- so `wifi_connect` reported a
+	 * refusal for a network that was already coming up, three times in a week.
+	 *
+	 * `REJECT_FIRST` and not two `TROUBLE`s: the first version of this test
+	 * sent the refusal and the connect as separate commands, and the reply
+	 * read for the second ate the first event. It passed with the fix
+	 * sabotaged, which is the only reason anybody noticed.
+	 */
+	check(ncfg_supplicant_command(client, "REJECT_FIRST 53", message, sizeof(message)) &&
+	    ncfg_supplicant_command(client, "SELECT_NETWORK 0", message, sizeof(message)) &&
+	    ncfg_supplicant_wait_for_connect(client, 3000, message, sizeof(message)),
+	    "while status 53 is waited through, because the supplicant retries itself");
+
+	/* And no other status gains that: 17 is the access point saying it is
+	 * full, which no amount of waiting changes. */
+	check(ncfg_supplicant_command(client, "REJECT_FIRST 17", message, sizeof(message)) &&
+	    ncfg_supplicant_command(client, "SELECT_NETWORK 0", message, sizeof(message)) &&
+	    !ncfg_supplicant_wait_for_connect(client, 1000, message, sizeof(message)) &&
+	    strstr(kept(message), "status 17") != NULL,
+	    "and a refusal that is not 53 is still the outcome it always was");
+
 	ncfg_supplicant_client_free(client);
 }
 
