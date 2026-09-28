@@ -966,10 +966,27 @@ static int start(const options_t *options)
 	desk.config_dir = where.config;
 	desk.factory_dir = where.factory;
 	desk.subscribers = &subscribers;
-	/* The machine's, and the same answer the reconcile pass gives a radio
-	 * back on: two readings of "who else is managing this" would be two
-	 * answers to one question. */
-	ncfg_contention_machine(&desk.contention);
+	/* **The world's, not the machine's read a second time.**
+	 *
+	 * The same answer the reconcile pass gives a radio back on: two readings
+	 * of "who else is managing this" would be two answers to one question.
+	 * This said that and then called `ncfg_contention_machine` itself, which
+	 * is the machine's `/run` and `/proc` and nothing else -- while the world
+	 * had already layered `NCFG_RUN_ROOT` and `NCFG_PROC` over them for the
+	 * reason `contention_roots_from_environment` gives. So under a fixture the
+	 * two readings genuinely disagreed, in the direction that hides the
+	 * finding: the pass saw the claim and every answer to a `plan` request
+	 * said there was no other manager.
+	 *
+	 * What it cost is a banner. `gui/src/wifi_view.cpp` reads contention out
+	 * of the plan rather than asking separately, so `live_wifi` asserting that
+	 * a radio NetworkManager has claimed is called out by name -- with the
+	 * `nmcli` command that hands it over -- failed against a daemon that had
+	 * been told exactly where to look. Borrowing the field rather than
+	 * recomputing it is what makes the sentence above true; `world` is opened
+	 * further up this function and outlives the desk.
+	 */
+	desk.contention = world.contention;
 	/* The loop's own selection, borrowed rather than copied: a client is told
 	 * where this daemon has got to, not where a second copy of the rule
 	 * would. */

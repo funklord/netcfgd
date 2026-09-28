@@ -12190,6 +12190,79 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.305 The GUI's live probes, and the banner the daemon could not raise
+
+`tests/live/gui_wifi.sh` runs. It had not, and the reason was four characters
+of shell rather than anything about the port:
+
+    26:  build="${NCFG_LIVE_BUILD:-$repo/c}"      the daemon's directory
+    86:  build="$repo/gui/tests/live/build/$name"  the probe's, inside the loop
+    220: "$build/netcfgd"                          the last probe's, and not there
+
+The loop that builds the fourteen probes reassigned the variable that names the
+daemon, so after it `build` held `.../build/live_wifi` and the script looked for
+a daemon in it. It is `export`ed as well, which 65 of these scripts do, so the
+probes were handed the wrong value too. The failure was identical for both
+builds -- this is the script's bug and predates the port -- and it reported
+*"the daemon never started"*, which is the sentence a real fault would use.
+
+The loop-local is `probe_build` now. Nothing else moved: the second loop, which
+runs what the first built, spells the path out in full and never read the
+variable.
+
+**Fourteen probes, 334 checks, none of which had ever run here.** Thirteen
+passed on the first run that reached them. That is the whole argument for
+fixing a harness before trusting it: a test that cannot run is a test that
+cannot disagree, and this file has the sentence twice already in its own
+comments.
+
+### What the fourteenth found
+
+`live_wifi` failed two checks, and they are the pair that matters:
+
+    a radio another daemon manages is called out          PASSED
+    by name                                               FAILED
+    with the command that hands it over                   FAILED
+
+A banner appeared and said `wifi.set_profiles cannot be undone` -- the plan's
+warning about an irreversible op -- where it should have named NetworkManager
+and offered `nmcli device set wlan0 managed no`. `gui/src/wifi_view.cpp` shows
+every warning for the radio rather than the first, so the contention warning was
+not missing from the banner. It was missing from the plan.
+
+**Two readings of `/run` and `/proc`, and the code said they were one.**
+`daemon_world.c` layers `NCFG_RUN_ROOT` and `NCFG_PROC` over the machine's
+defaults, for the reason `contention_roots_from_environment` records -- without
+it `displace.sh` could never make the case fire (10.266). The desk that answers
+requests called `ncfg_contention_machine` itself:
+
+    /* The machine's, and the same answer the reconcile pass gives a radio
+     * back on: two readings of "who else is managing this" would be two
+     * answers to one question. */
+    ncfg_contention_machine(&desk.contention);
+
+The comment states the invariant and the line below it breaks the invariant.
+Under a fixture the reconcile pass saw the claim and every answer to a `plan`
+request said there was no other manager -- **a disagreement in the direction
+that hides the finding**, since the half an operator reads is the one that went
+quiet. `desk.contention = world.contention` now, borrowed rather than
+recomputed; `world` is opened further up the same function and outlives it.
+
+On a real machine the two were always the same, because there the machine's
+`/run` *is* the right one. So this cost nothing in production and cost the only
+test that could have seen it -- which is the same shape as the environment seam
+in 10.266, met one layer further in.
+
+### What it did not need
+
+No re-bless and no agree-gate exception. `plan` is one of the three verbs
+`tool/agree_gate.py` excludes by name, so the gate had nothing to say either
+way, and 10.303's lesson applies again: the cost was predicted and the
+prediction was worth checking rather than believing.
+
+    gui_wifi.sh   14 probes, 334 checks, exit 0
+    displace.sh   16 checks, exit 0, no skips
+
 ## 10.304 The adapter the observation always carried and nothing showed
 
 `ncfg status` reports Bluetooth adapters now. 10.301 recorded the gap and left
