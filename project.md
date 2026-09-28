@@ -12272,7 +12272,43 @@ of the live suite, so no test on this machine can exercise the gathering. What
 will exercise it is the next daemon restart, and that is a measurement to take
 rather than a property to assume.
 
-    binary   1145296 -> 1145832 (+536), inside the size gate's 3% tolerance
+### The verdict dhcpcd needed, found by predicting the output
+
+**The first version would have fired on a healthy machine**, with four `ERROR`
+lines per start for the whole dhcpcd family. 0268 has it; the part worth
+keeping here is how it surfaced.
+
+netcfgd writes a pid file for udhcpc and odhcp6c because it starts them with
+`-p` -- the only call to `ncfg_dhcp_pid_path` in the start path passes the
+literal `"udhcpc"`. **dhcpcd never gets one**: it destroys its argv with
+`setproctitle`, so there is no marker to scan, and 0143 identifies it by asking
+its control socket which config file it was started with. After four days of
+correct running:
+
+    /run/netcfgd/dhcpcd/   one config symlink, no .pid
+    owned.json             dhcp4 on wlp0s20f3, running: true
+
+The record claims the backend and names no process. So a classifier that knew
+only about pid files called the healthy family unaccounted -- **the exact
+failure this was written to remove, rebuilt one layer up and in netcfgd's own
+voice.**
+
+A fourth verdict, CLAIMED, and a second pass so a claimed ancestor anchors a
+helper the way a recorded one does. Two of dhcpcd's three helpers carry no
+interface in their own titles, so one pass could not have done it.
+
+**The method is the transferable part.** The code built, passed 16 checks and
+every gate, and was one command from being installed. What caught it was
+predicting what the first real run would print and then checking the
+prediction against the run directory and the start path -- rather than
+installing and reading the output, which would have produced the same
+information after it had been believed. **A green suite is evidence about the
+cases somebody thought of**, and nobody had thought of the one where netcfgd's
+own record cannot name its own client.
+
+    binary   1145296 -> 1145960 (+664), inside the size gate's 3% tolerance
+    tests    23 checks; the dhcpcd table and a wlan0/wlan01 pair, both watched
+             failing with `is_claimed` stubbed out
     check    all gates green; module-order 50 attributed headers
 
 ## 10.305 The GUI's live probes, and the banner the daemon could not raise
