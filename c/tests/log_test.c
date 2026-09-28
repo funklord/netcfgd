@@ -3,7 +3,7 @@
  * rendered.
  *
  * WHY THE BOUNDARY IS THE POINT
- *   A subsystem is a path now -- `dhcp.wlp0s20f3` -- so that one machine's log
+ *   A subsystem is a path now -- `dhcp/wlp0s20f3` -- so that one machine's log
  *   reads as one timeline and still filters down to a link. The filter is
  *   therefore a prefix test, and a prefix test that ignores the level boundary
  *   accepts `dhcpcd` when asked for `dhcp`.
@@ -47,11 +47,11 @@ static void check(int condition, const char *what)
 static void a_filter_matches_its_own_level_and_below(void)
 {
 	check(ncfg_log_subsystem_matches("dhcp", "dhcp"), "a path matches itself");
-	check(ncfg_log_subsystem_matches("dhcp.wlp0s20f3", "dhcp"),
+	check(ncfg_log_subsystem_matches("dhcp/wlp0s20f3", "dhcp"),
 	    "and a path below it matches");
-	check(ncfg_log_subsystem_matches("dhcp.wlp0s20f3.lease", "dhcp"),
+	check(ncfg_log_subsystem_matches("dhcp/wlp0s20f3/lease", "dhcp"),
 	    "however deep it goes");
-	check(ncfg_log_subsystem_matches("dhcp.wlp0s20f3", "dhcp.wlp0s20f3"),
+	check(ncfg_log_subsystem_matches("dhcp/wlp0s20f3", "dhcp/wlp0s20f3"),
 	    "and a filter may name the whole path");
 }
 
@@ -67,15 +67,15 @@ static void a_neighbour_is_not_a_child(void)
 	    "nor does `dhcp-relay`, since `-` joins words inside one level");
 	check(!ncfg_log_subsystem_matches("supplicant", "dhcp"),
 	    "and an unrelated path does not match at all");
-	check(!ncfg_log_subsystem_matches("dhcp", "dhcp.wlp0s20f3"),
+	check(!ncfg_log_subsystem_matches("dhcp", "dhcp/wlp0s20f3"),
 	    "a parent does not match a filter naming its child");
 }
 
 static void an_absent_filter_matches_everything(void)
 {
-	check(ncfg_log_subsystem_matches("anything.at.all", NULL),
+	check(ncfg_log_subsystem_matches("anything/at/all", NULL),
 	    "a NULL filter accepts everything, which is the default");
-	check(ncfg_log_subsystem_matches("anything.at.all", ""),
+	check(ncfg_log_subsystem_matches("anything/at/all", ""),
 	    "and so does an empty one");
 	check(!ncfg_log_subsystem_matches(NULL, "dhcp"),
 	    "a path that is not there matches a filter that is");
@@ -83,8 +83,8 @@ static void an_absent_filter_matches_everything(void)
 
 static void the_filter_round_trips(void)
 {
-	ncfg_log_accept_subsystem("dhcp.wlp0s20f3");
-	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp.wlp0s20f3") == 0,
+	ncfg_log_accept_subsystem("dhcp/wlp0s20f3");
+	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp/wlp0s20f3") == 0,
 	    "the filter reads back as it was set");
 	ncfg_log_accept_subsystem(NULL);
 	check(ncfg_log_accepted_subsystem()[0] == '\0',
@@ -171,7 +171,7 @@ static void the_path_reaches_the_rendered_line(void)
 	ncfg_log_accept(NCFG_LOG_INFO);
 
 	check(captured(emit_with_an_interface, line, sizeof(line)) &&
-	        strstr(line, "[dhcp.wlp0s20f3]") != NULL,
+	        strstr(line, "[dhcp/wlp0s20f3]") != NULL,
 	    "an interface reaches the rendered prefix as a second level");
 	check(strstr(line, "leased 10.0.0.1") != NULL, "and the message survives with it");
 
@@ -196,7 +196,7 @@ static void the_filter_keeps_a_neighbour_out(void)
 	ncfg_log_accept_subsystem("dhcp");
 
 	check(captured(emit_under_the_filter, line, sizeof(line)) &&
-	        strstr(line, "[dhcp.wlp0s20f3]") != NULL,
+	        strstr(line, "[dhcp/wlp0s20f3]") != NULL,
 	    "a path under the filter is still emitted");
 	check(captured(emit_a_neighbour, line, sizeof(line)) && line[0] == '\0',
 	    "and `dhcpcd` is not emitted under a filter of `dhcp`");
@@ -221,12 +221,12 @@ static void the_filter_keeps_a_neighbour_out(void)
 static void the_environment_is_actually_read(void)
 {
 	ncfg_log_accept_subsystem(NULL);
-	if (setenv("NCFG_LOG_SUBSYSTEM", "dhcp.wlp0s20f3", 1) != 0) {
+	if (setenv("NCFG_LOG_SUBSYSTEM", "dhcp/wlp0s20f3", 1) != 0) {
 		check(0, "the environment could be set for the test");
 		return;
 	}
 	ncfg_log_accept_from_env();
-	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp.wlp0s20f3") == 0,
+	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp/wlp0s20f3") == 0,
 	    "NCFG_LOG_SUBSYSTEM reaches the filter through accept_from_env");
 
 	/* And it is read even with no level asked for beside it, which is the
@@ -234,7 +234,7 @@ static void the_environment_is_actually_read(void)
 	ncfg_log_accept_subsystem(NULL);
 	(void)unsetenv("NCFG_LOG");
 	ncfg_log_accept_from_env();
-	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp.wlp0s20f3") == 0,
+	check(strcmp(ncfg_log_accepted_subsystem(), "dhcp/wlp0s20f3") == 0,
 	    "and is read with no NCFG_LOG set beside it");
 	(void)unsetenv("NCFG_LOG_SUBSYSTEM");
 	ncfg_log_accept_subsystem(NULL);

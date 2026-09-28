@@ -199,7 +199,7 @@ int ncfg_log_subsystem_matches(const char *subsystem, const char *filter)
 	/* The boundary, which is the whole function: `dhcp` is a prefix of
 	 * `dhcpcd` as a string and is not an ancestor of it as a path. Accept only
 	 * where the filter ends the path or ends a level of it. */
-	return subsystem[length] == '\0' || subsystem[length] == '.';
+	return subsystem[length] == '\0' || subsystem[length] == '/';
 }
 
 void ncfg_log_accept_subsystem(const char *filter)
@@ -314,7 +314,7 @@ void ncfg_log_aboutf(const char *subsystem, const char *about, ncfg_severity_t s
 	if (!about || about[0] == '\0') {
 		(void)snprintf(path, sizeof(path), "%s", subsystem ? subsystem : "netcfgd");
 	} else {
-		(void)snprintf(path, sizeof(path), "%s.%s", subsystem ? subsystem : "netcfgd",
+		(void)snprintf(path, sizeof(path), "%s/%s", subsystem ? subsystem : "netcfgd",
 		    about);
 	}
 	if ((int)severity > (int)ncfg_log_accepted() ||

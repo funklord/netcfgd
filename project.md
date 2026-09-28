@@ -12197,18 +12197,46 @@ it: one machine's log has to read as one timeline and still filter down to a
 link, and a flat subsystem makes `grep '\[dhcp\]'` possible and "one link"
 impossible.
 
-### The separator is measured, not chosen
+### The separator is fuzznet's, and this tree invented one first
 
-flog takes the subsystem as a free `const char *` and imposes nothing, so the
-convention belongs to its users. fuzzypickles already spells names `peer-wire`,
-`log-relay`, `group-repl`, `lan-discover` -- **a hyphen joins words inside one
-name there**, so a hyphen cannot also separate levels without making
-`peer-wire` ambiguous between one level and two. Nothing in any sibling used a
-dot for anything. So `.` between levels, `-` inside one.
+`/` between levels, `-` inside one. **It is not netcfgd's to choose and never
+was: fuzznet already writes `persist/file`, `trust/anchor`, `record/ledger`,
+`chunk/reasm`, `chain/manifest`, `catalog/sweep` and `catalog/edge`** -- and
+fuzznet is where the distributed log will live. fuzzypickles spells
+single-level names `peer-wire`, `log-relay`, `group-repl`, so a hyphen joins
+words within one level in both trees and cannot also separate them.
 
-**netcfgd is the first tree here to need a separator, which makes this a
-pattern the others will follow rather than a local choice.** Worth deciding
-once, in `claude-guidelines`, rather than six times.
+**This shipped as `.` for one commit, and the error is the part worth
+keeping.** The probe that concluded "nothing in any sibling used a dot, which
+leaves it free" was a grep for `flog_printf(<p>, "...")`, and fuzznet logs
+through per-module macros -- `CATALOG_LOG(c, "catalog/sweep", ...)` -- so it
+matched nothing and the absence was manufactured. A convention was then
+invented on top of it and committed.
+
+**What makes it the fourth-ways-to-manufacture-an-absence case rather than
+simple carelessness** is that the probe was run against two trees and reported
+the same empty answer for both, which read as corroboration. fuzzypickles
+answered honestly because it calls flog directly; fuzznet could not answer at
+all. Two trees agreeing is one witness when the same instrument asked both --
+and the instrument was blind to exactly the tree whose answer mattered, since
+it owns the log everything else will feed.
+
+The dot is also worse on its merits once the root names a host or a process,
+which is where this is going: a hostname contains dots and a path does not
+contain them at a level boundary.
+
+### The depth is not two, and the design is a call hierarchy
+
+Set by the holder 2026-09-28: the intent is `netcfgd/read_cert/read_file/
+open_file` -- the *call* hierarchy, so a reader can tell which path through the
+code produced a message -- with a root that distinguishes the **process**,
+because several will feed one log.
+
+Nothing in the implementation assumes two levels: the match is per level, and
+`ncfg_log_aboutf` composes one more onto whatever it is handed. What does not
+exist yet is any machinery for composing a call path as it descends, which is
+the part that would need a context argument threaded through the callees or a
+per-thread stack. Not built, and not this change's to design.
 
 ### What the shape had to avoid
 
