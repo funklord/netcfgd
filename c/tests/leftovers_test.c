@@ -53,7 +53,8 @@ static void check(int condition, const char *what)
 }
 
 /* One row of a process table, spelled so the cases below read as tables. */
-static ncfg_leftover_process_t row(pid_t pid, pid_t parent, const char *program)
+static ncfg_leftover_process_t row(pid_t pid, pid_t parent, const char *program,
+    const char *command)
 {
 	ncfg_leftover_process_t out;
 
@@ -61,6 +62,7 @@ static ncfg_leftover_process_t row(pid_t pid, pid_t parent, const char *program)
 	out.pid = pid;
 	out.parent = parent;
 	(void)snprintf(out.program, sizeof(out.program), "%s", program);
+	(void)snprintf(out.command, sizeof(out.command), "%s", command ? command : "");
 	return out;
 }
 
@@ -103,11 +105,14 @@ static pid_t anchor_of(const ncfg_leftover_finding_t *found, size_t count, pid_t
 
 static void real_table(ncfg_leftover_process_t *out)
 {
-	out[0] = row(1256, 1, "wpa_supplicant");
-	out[1] = row(3061114, 1, "dhcpcd");          /* orphaned to init */
-	out[2] = row(3061115, 3061114, "dhcpcd");    /* privileged proxy */
-	out[3] = row(3061116, 3061114, "dhcpcd");    /* control proxy */
-	out[4] = row(975891, 3061115, "dhcpcd");     /* BPF ARP, two deep */
+	out[0] = row(1256, 1, "wpa_supplicant",
+	    "/usr/sbin/wpa_supplicant -B -Dnl80211,wext -s -i wlp0s20f3");
+	/* The titles are `setproctitle`'s, copied from `ps` on the machine: the
+	 * client names the interface and two of its three helpers do not. */
+	out[1] = row(3061114, 1, "dhcpcd", "dhcpcd: wlp0s20f3 [ip4]");
+	out[2] = row(3061115, 3061114, "dhcpcd", "dhcpcd: [privileged proxy] wlp0s20f3 [ip4]");
+	out[3] = row(3061116, 3061114, "dhcpcd", "dhcpcd: [control proxy] wlp0s20f3 [ip4]");
+	out[4] = row(975891, 3061115, "dhcpcd", "dhcpcd: [BPF ARP] 10.0.125.56");
 }
 
 static void the_machine_that_prompted_this_is_all_accounted_for(void)
@@ -118,7 +123,8 @@ static void the_machine_that_prompted_this_is_all_accounted_for(void)
 	size_t                  count;
 
 	real_table(found);
-	count = ncfg_leftovers_classify(found, REAL_COUNT, recorded, 2u, out, REAL_COUNT);
+	count = ncfg_leftovers_classify(found, REAL_COUNT, recorded, 2u, NULL, 0u, out,
+	    REAL_COUNT);
 	check(count == REAL_COUNT, "every process in the group gets a verdict");
 	check(verdict_of(out, count, 1256) == NCFG_LEFTOVER_RECORDED,
 	    "the supplicant is recorded, by the pid file netcfgd wrote");
@@ -148,7 +154,8 @@ static void with_the_anchor_unrecorded_its_helpers_are_unaccounted(void)
 	size_t                  unaccounted = 0u;
 
 	real_table(found);
-	count = ncfg_leftovers_classify(found, REAL_COUNT, recorded, 1u, out, REAL_COUNT);
+	count = ncfg_leftovers_classify(found, REAL_COUNT, recorded, 1u, NULL, 0u, out,
+	    REAL_COUNT);
 	for (at = 0u; at < count; at++) {
 		if (out[at].verdict == NCFG_LEFTOVER_UNACCOUNTED) {
 			unaccounted++;
@@ -158,6 +165,77 @@ static void with_the_anchor_unrecorded_its_helpers_are_unaccounted(void)
 	                         "helpers");
 	check(verdict_of(out, count, 1256) == NCFG_LEFTOVER_RECORDED,
 	    "and leaves the supplicant alone, so the change is the record and not the walk");
+}
+
+/*
+ * **The case this machine actually presents, and the one that nearly shipped
+ * wrong.**
+ *
+ * netcfgd writes a pid file for udhcpc and odhcp6c because it starts them with
+ * `-p`. It writes none for dhcpcd, which destroys its argv with `setproctitle`
+ * and is identified by asking its control socket which config file it was
+ * started with (0143). So on a dhcpcd machine -- the default -- nothing under
+ * the run directory names the client, and a classifier that knew only about
+ * pid files reported the whole healthy family as evidence of an unclean stop.
+ *
+ * That was measured before it was fixed: `/run/netcfgd/dhcpcd/` held one config
+ * symlink and no `.pid` after four days of correct running, while `owned.json`
+ * said `dhcp4` on `wlp0s20f3` was running.
+ */
+static void a_dhcpcd_family_with_no_pid_file_is_not_an_alarm(void)
+{
+	ncfg_leftover_process_t found[REAL_COUNT];
+	ncfg_leftover_finding_t out[REAL_COUNT];
+	const pid_t             recorded[] = {1256}; /* the supplicant, and nothing else */
+	const char             *claimed[] = {"wlp0s20f3"};
+	size_t                  count;
+	size_t                  at;
+	size_t                  unaccounted = 0u;
+
+	real_table(found);
+	count = ncfg_leftovers_classify(found, REAL_COUNT, recorded, 1u, claimed, 1u, out,
+	    REAL_COUNT);
+	for (at = 0u; at < count; at++) {
+		if (out[at].verdict == NCFG_LEFTOVER_UNACCOUNTED) {
+			unaccounted++;
+		}
+	}
+	check(unaccounted == 0u, "a dhcpcd family netcfgd cannot name by pid raises no alarm");
+	check(verdict_of(out, count, 3061114) == NCFG_LEFTOVER_CLAIMED,
+	    "the client is claimed, by the interface the record says it is running on");
+	check(verdict_of(out, count, 975891) == NCFG_LEFTOVER_HELPER,
+	    "and its BPF helper, whose own title names no interface, is a helper of it");
+	/* **On 3061115 rather than on the client**, and that is the honest answer
+	 * rather than a near miss: the privileged proxy's own title carries the
+	 * interface too, so it is claimed in its own right and is the nearest
+	 * ancestor netcfgd can account for. The anchor names what was recognised,
+	 * not the root of the family. */
+	check(anchor_of(out, count, 975891) == 3061115,
+	    "anchored on the nearest ancestor netcfgd can account for");
+	check(verdict_of(out, count, 3061115) == NCFG_LEFTOVER_CLAIMED,
+	    "and that ancestor is itself claimed, which is why the walk stopped there");
+}
+
+/*
+ * And the claim is a whole word, because interface names nest.
+ *
+ * A record claiming `wlan0` must not quieten a process on `wlan01`. This is the
+ * one place a weak marker could withhold an alarm about the wrong thing.
+ */
+static void a_claim_on_one_interface_does_not_cover_another(void)
+{
+	ncfg_leftover_process_t found[2];
+	ncfg_leftover_finding_t out[2];
+	const char             *claimed[] = {"wlan0"};
+	size_t                  count;
+
+	found[0] = row(70, 1, "dhcpcd", "dhcpcd: wlan01 [ip4]");
+	found[1] = row(71, 1, "dhcpcd", "dhcpcd: wlan0 [ip4]");
+	count = ncfg_leftovers_classify(found, 2u, NULL, 0u, claimed, 1u, out, 2u);
+	check(verdict_of(out, count, 70) == NCFG_LEFTOVER_UNACCOUNTED,
+	    "a claim on wlan0 does not cover a process on wlan01");
+	check(verdict_of(out, count, 71) == NCFG_LEFTOVER_CLAIMED,
+	    "while the interface actually claimed is covered");
 }
 
 /*
@@ -180,9 +258,9 @@ static void a_chain_that_leaves_the_group_stops_there(void)
 	 */
 	const pid_t recorded[] = {1, 500};
 
-	found[0] = row(4242, 999, "udhcpc"); /* 999 is deliberately not a member */
-	found[1] = row(600, 500, "openvpn"); /* 500 is recorded, so this is a helper */
-	count = ncfg_leftovers_classify(found, 2u, recorded, 2u, out, 2u);
+	found[0] = row(4242, 999, "udhcpc", "udhcpc -i wlan9"); /* 999 is not a member */
+	found[1] = row(600, 500, "openvpn", "openvpn --config x"); /* 500 is recorded */
+	count = ncfg_leftovers_classify(found, 2u, recorded, 2u, NULL, 0u, out, 2u);
 	check(verdict_of(out, count, 4242) == NCFG_LEFTOVER_UNACCOUNTED,
 	    "a chain through a non-member stops there rather than reaching pid 1");
 	check(verdict_of(out, count, 600) == NCFG_LEFTOVER_HELPER,
@@ -197,9 +275,9 @@ static void a_parent_cycle_terminates(void)
 	const pid_t             recorded[] = {7};
 	size_t                  count;
 
-	found[0] = row(10, 11, "a");
-	found[1] = row(11, 10, "b");
-	count = ncfg_leftovers_classify(found, 2u, recorded, 1u, out, 2u);
+	found[0] = row(10, 11, "a", "a");
+	found[1] = row(11, 10, "b", "b");
+	count = ncfg_leftovers_classify(found, 2u, recorded, 1u, NULL, 0u, out, 2u);
 	check(count == 2u, "a cycle in the parent chain returns rather than looping");
 	check(verdict_of(out, count, 10) == NCFG_LEFTOVER_UNACCOUNTED,
 	    "and reaches no conclusion it has not earned");
@@ -210,7 +288,7 @@ static void nothing_in_the_group_is_not_a_finding(void)
 {
 	ncfg_leftover_finding_t out[1];
 
-	check(ncfg_leftovers_classify(NULL, 0u, NULL, 0u, out, 1u) == 0u,
+	check(ncfg_leftovers_classify(NULL, 0u, NULL, 0u, NULL, 0u, out, 1u) == 0u,
 	    "no processes means no findings");
 }
 
@@ -268,6 +346,8 @@ static void the_recorded_pids_come_out_of_the_run_directory(void)
 int main(void)
 {
 	the_machine_that_prompted_this_is_all_accounted_for();
+	a_dhcpcd_family_with_no_pid_file_is_not_an_alarm();
+	a_claim_on_one_interface_does_not_cover_another();
 	with_the_anchor_unrecorded_its_helpers_are_unaccounted();
 	a_chain_that_leaves_the_group_stops_there();
 	a_parent_cycle_terminates();

@@ -7,6 +7,8 @@
 #include "ncfg/leftovers.h"
 
 #include "ncfg/log.h"
+#include "ncfg/observed.h"
+#include "ncfg/state.h"
 #include "ncfg/process.h"
 
 #include <dirent.h>
@@ -132,6 +134,39 @@ static pid_t pid_of_name(const char *name)
 	return (pid_t)value;
 }
 
+/*
+ * A process' command line, NULs turned into spaces.
+ *
+ * Empty rather than absent on failure, which is the honest reading: a kernel
+ * thread has no command line at all, and a process that has gone since the
+ * `readdir` has nothing left to read. Both mean "no interface name here", and
+ * `is_claimed` treats an empty command as matching nothing.
+ */
+static void read_command(pid_t pid, char *out, size_t out_size)
+{
+	char   path[64];
+	FILE  *file;
+	size_t got;
+	size_t at;
+
+	out[0] = '\0';
+	if ((size_t)snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)pid) >= sizeof(path)) {
+		return;
+	}
+	file = fopen(path, "re");
+	if (!file) {
+		return;
+	}
+	got = fread(out, 1u, out_size - 1u, file);
+	(void)fclose(file);
+	for (at = 0u; at < got; at++) {
+		if (out[at] == '\0') {
+			out[at] = ' ';
+		}
+	}
+	out[got] = '\0';
+}
+
 size_t ncfg_leftovers_in_our_service(ncfg_leftover_process_t *out, size_t out_max)
 {
 	DIR           *proc;
@@ -161,6 +196,7 @@ size_t ncfg_leftovers_in_our_service(ncfg_leftover_process_t *out, size_t out_ma
 		if (out && total < out_max) {
 			out[total].pid = pid;
 			out[total].parent = ncfg_process_parent_of(pid);
+			read_command(pid, out[total].command, sizeof(out[total].command));
 			if (!ncfg_process_program_of(pid, out[total].program,
 			        sizeof(out[total].program))) {
 				/* A process that went between the readdir and the read. It
@@ -173,6 +209,54 @@ size_t ncfg_leftovers_in_our_service(ncfg_leftover_process_t *out, size_t out_ma
 		total++;
 	}
 	(void)closedir(proc);
+	return total;
+}
+
+size_t ncfg_leftovers_claimed_interfaces(const char *run_dir,
+    char out[][NCFG_LEFTOVER_IFACE_MAX], size_t out_max)
+{
+	ncfg_owned_state_t owned;
+	char               why[NCFG_ERROR_MAX];
+	size_t             at;
+	size_t             total = 0u;
+
+	memset(&owned, 0, sizeof(owned));
+	why[0] = '\0';
+	if (!run_dir || !ncfg_owned_read(run_dir, &owned, why, sizeof(why))) {
+		return 0u;
+	}
+	for (at = 0u; at < owned.backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &owned.backends[at];
+		size_t                         seen;
+
+		/* `running` is a memory rather than an observation (0078), which is
+		 * exactly what is wanted: the question is what the previous run
+		 * believed it had left behind. */
+		if (!backend->running || !backend->interface) {
+			continue;
+		}
+		if (strlen(backend->interface) + 1u > NCFG_LEFTOVER_IFACE_MAX) {
+			/* Skipped rather than truncated: a truncated name matches the
+			 * wrong interface by prefix, and this verdict withholds an
+			 * alarm. */
+			continue;
+		}
+		/* One entry per name, since several kinds share an interface. */
+		for (seen = 0u; seen < total && seen < out_max; seen++) {
+			if (strcmp(out[seen], backend->interface) == 0) {
+				break;
+			}
+		}
+		if (seen < total && seen < out_max) {
+			continue;
+		}
+		if (out && total < out_max) {
+			(void)snprintf(out[total], NCFG_LEFTOVER_IFACE_MAX, "%s",
+			    backend->interface);
+		}
+		total++;
+	}
+	ncfg_owned_free(&owned);
 	return total;
 }
 
@@ -206,8 +290,55 @@ static const ncfg_leftover_process_t *entry_for(const ncfg_leftover_process_t *f
 	return NULL;
 }
 
+/* Whether `command` names `iface` as a whole word.
+ *
+ * Whole word because interface names nest: `wlan0` is a prefix of `wlan01`, and
+ * a substring test would let a claim about one withhold an alarm about the
+ * other. The separators are what a command line puts around an argument, plus
+ * the `:` and brackets dhcpcd's `setproctitle` uses. */
+static int names_interface(const char *command, const char *iface)
+{
+	size_t      length = strlen(iface);
+	const char *at = command;
+
+	if (length == 0u) {
+		return 0;
+	}
+	while ((at = strstr(at, iface)) != NULL) {
+		char before = at == command ? ' ' : at[-1];
+		char after = at[length];
+
+		if (!(before >= 'a' && before <= 'z') && !(before >= 'A' && before <= 'Z') &&
+		    !(before >= '0' && before <= '9') &&
+		    !(after >= 'a' && after <= 'z') && !(after >= 'A' && after <= 'Z') &&
+		    !(after >= '0' && after <= '9')) {
+			return 1;
+		}
+		at += length;
+	}
+	return 0;
+}
+
+/* Whether the record claims a backend on an interface this process names. */
+static int is_claimed(const ncfg_leftover_process_t *process, const char *const *claimed,
+    size_t claimed_count)
+{
+	size_t at;
+
+	if (process->command[0] == '\0') {
+		return 0;
+	}
+	for (at = 0u; at < claimed_count; at++) {
+		if (claimed[at] && names_interface(process->command, claimed[at])) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t found_count,
-    const pid_t *recorded, size_t recorded_count, ncfg_leftover_finding_t *out, size_t out_max)
+    const pid_t *recorded, size_t recorded_count, const char *const *claimed,
+    size_t claimed_count, ncfg_leftover_finding_t *out, size_t out_max)
 {
 	size_t at;
 	size_t written = 0u;
@@ -215,16 +346,31 @@ size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t foun
 	if (!found || !out || out_max == 0u) {
 		return 0u;
 	}
-	for (at = 0u; at < found_count && written < out_max; at++) {
-		ncfg_leftover_finding_t *finding = &out[written];
-		pid_t                    parent;
-		size_t                   steps;
-
-		finding->process = found[at];
-		finding->anchor = 0;
+	/*
+	 * **Two passes, because a helper's anchor may itself be claimed rather than
+	 * recorded.** dhcpcd is exactly that: the client is known only through the
+	 * record's claim on its interface, and its three helpers are known only
+	 * through the client. A single pass that resolved each process
+	 * independently would ask the helpers' own command lines -- and dhcpcd's
+	 * `[privileged proxy]` title does not always carry the interface.
+	 */
+	for (at = 0u; at < found_count && at < out_max; at++) {
+		out[at].process = found[at];
+		out[at].anchor = 0;
 		if (is_recorded(found[at].pid, recorded, recorded_count)) {
-			finding->verdict = NCFG_LEFTOVER_RECORDED;
-			written++;
+			out[at].verdict = NCFG_LEFTOVER_RECORDED;
+		} else if (is_claimed(&found[at], claimed, claimed_count)) {
+			out[at].verdict = NCFG_LEFTOVER_CLAIMED;
+		} else {
+			out[at].verdict = NCFG_LEFTOVER_UNACCOUNTED;
+		}
+		written++;
+	}
+	for (at = 0u; at < written; at++) {
+		pid_t  parent;
+		size_t steps;
+
+		if (out[at].verdict != NCFG_LEFTOVER_UNACCOUNTED) {
 			continue;
 		}
 		/*
@@ -233,17 +379,17 @@ size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t foun
 		 * because two reads caught the table mid-change would otherwise be an
 		 * unbounded loop at daemon startup.
 		 */
-		finding->verdict = NCFG_LEFTOVER_UNACCOUNTED;
-		parent = found[at].parent;
+		parent = out[at].process.parent;
 		for (steps = 0u; steps < NCFG_LEFTOVER_WALK_MAX; steps++) {
 			const ncfg_leftover_process_t *above;
+			size_t                         index;
 
 			if (parent <= 0) {
 				break;
 			}
 			if (is_recorded(parent, recorded, recorded_count)) {
-				finding->verdict = NCFG_LEFTOVER_HELPER;
-				finding->anchor = parent;
+				out[at].verdict = NCFG_LEFTOVER_HELPER;
+				out[at].anchor = parent;
 				break;
 			}
 			above = entry_for(found, found_count, parent);
@@ -254,9 +400,21 @@ size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t foun
 				 * process by whatever pid 1 is. */
 				break;
 			}
+			/* A claimed ancestor anchors just as a recorded one does; that is
+			 * what the first pass was for. */
+			for (index = 0u; index < written; index++) {
+				if (out[index].process.pid == parent &&
+				    out[index].verdict == NCFG_LEFTOVER_CLAIMED) {
+					out[at].verdict = NCFG_LEFTOVER_HELPER;
+					out[at].anchor = parent;
+					break;
+				}
+			}
+			if (out[at].verdict == NCFG_LEFTOVER_HELPER) {
+				break;
+			}
 			parent = above->parent;
 		}
-		written++;
 	}
 	return written;
 }
@@ -267,6 +425,9 @@ static const char *verdict_name(ncfg_leftover_verdict_t verdict)
 	switch (verdict) {
 	case NCFG_LEFTOVER_RECORDED:
 		return "recorded by the previous run";
+	case NCFG_LEFTOVER_CLAIMED:
+		return "a backend the record claims on an interface it names, with no pid "
+		       "written down";
 	case NCFG_LEFTOVER_HELPER:
 		return "a helper of";
 	case NCFG_LEFTOVER_UNACCOUNTED:
@@ -280,6 +441,9 @@ void ncfg_leftovers_report(const char *run_dir)
 	static ncfg_leftover_process_t found[NCFG_LEFTOVER_MAX];
 	static ncfg_leftover_finding_t findings[NCFG_LEFTOVER_MAX];
 	static pid_t                   recorded[NCFG_LEFTOVER_MAX];
+	static char                    claimed[NCFG_LEFTOVER_MAX][NCFG_LEFTOVER_IFACE_MAX];
+	static const char             *claimed_names[NCFG_LEFTOVER_MAX];
+	size_t                         claimed_count;
 	size_t                         found_count;
 	size_t                         recorded_count;
 	size_t                         count;
@@ -299,10 +463,17 @@ void ncfg_leftovers_report(const char *run_dir)
 		return;
 	}
 	recorded_count = ncfg_leftovers_recorded_pids(run_dir, recorded, NCFG_LEFTOVER_MAX);
+	claimed_count = ncfg_leftovers_claimed_interfaces(run_dir, claimed, NCFG_LEFTOVER_MAX);
+	if (claimed_count > NCFG_LEFTOVER_MAX) {
+		claimed_count = NCFG_LEFTOVER_MAX;
+	}
+	for (at = 0u; at < claimed_count; at++) {
+		claimed_names[at] = claimed[at];
+	}
 	count = ncfg_leftovers_classify(found, found_count < NCFG_LEFTOVER_MAX ? found_count :
 	                                                                        NCFG_LEFTOVER_MAX,
 	    recorded, recorded_count < NCFG_LEFTOVER_MAX ? recorded_count : NCFG_LEFTOVER_MAX,
-	    findings, NCFG_LEFTOVER_MAX);
+	    claimed_names, claimed_count, findings, NCFG_LEFTOVER_MAX);
 	for (at = 0u; at < count; at++) {
 		if (findings[at].verdict == NCFG_LEFTOVER_UNACCOUNTED) {
 			unaccounted++;
@@ -336,7 +507,8 @@ void ncfg_leftovers_report(const char *run_dir)
 			    verdict_name(finding->verdict), (int)finding->anchor);
 			continue;
 		}
-		if (finding->verdict == NCFG_LEFTOVER_RECORDED) {
+		if (finding->verdict == NCFG_LEFTOVER_CLAIMED ||
+		    finding->verdict == NCFG_LEFTOVER_RECORDED) {
 			ncfg_log_emitf("adopt", NCFG_LOG_NOTE, "  %s %d, %s",
 			    finding->process.program, (int)finding->process.pid,
 			    verdict_name(finding->verdict));

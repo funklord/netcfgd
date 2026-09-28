@@ -75,11 +75,48 @@
  */
 #define NCFG_LEFTOVER_WALK_MAX 16u
 
+/*
+ * How much of a process' command line is kept.
+ *
+ * Enough for dhcpcd's renamed self -- `dhcpcd: [BPF ARP] wlp0s20f3 10.0.125.56`
+ * is 41 -- and for a supplicant's real argv. It is read to look for an
+ * interface name and printed nowhere, so a truncated tail costs nothing but a
+ * missed match on a pathological command line.
+ */
+#define NCFG_LEFTOVER_COMMAND_MAX 256u
+
+/* An interface name, `IFNAMSIZ` without pulling in a kernel header. */
+#define NCFG_LEFTOVER_IFACE_MAX 16u
+
 typedef enum {
 	/* A pid the previous run wrote down: the backends netcfgd started. */
 	NCFG_LEFTOVER_RECORDED = 0,
-	/* Reached from a recorded pid by its parent chain. dhcpcd's privileged,
-	 * control and BPF helpers are this and are in no record anywhere. */
+	/*
+	 * The record claims a backend on an interface this process names, and
+	 * carries no pid for it.
+	 *
+	 * **dhcpcd is why this verdict exists and it is not an edge case.**
+	 * netcfgd writes a pid file for udhcpc and odhcp6c because it starts them
+	 * with `-p`; dhcpcd is told nothing of the sort, destroys its argv with
+	 * `setproctitle`, and is identified by asking its control socket which
+	 * config file it was started with (0143). So on any machine using dhcpcd
+	 * -- which is the default -- netcfgd's record says `dhcp4 running` on an
+	 * interface and names no process.
+	 *
+	 * Without this verdict the healthy case reports four unaccounted
+	 * processes, which is the noise this file exists to remove, rebuilt one
+	 * layer up and in netcfgd's own voice.
+	 *
+	 * **The match is an interface name in a command line, which `dhcp.h` calls
+	 * the weakest marker netcfgd uses -- and this is the right place for a
+	 * weak one.** It is only ever used to *withhold* an alarm, never to
+	 * license an action. Being wrong means staying quiet about a process that
+	 * deserved a mention, in a report nothing acts on automatically.
+	 */
+	NCFG_LEFTOVER_CLAIMED,
+	/* Reached from a recorded or claimed pid by its parent chain. dhcpcd's
+	 * privileged, control and BPF helpers are this and are in no record
+	 * anywhere. */
 	NCFG_LEFTOVER_HELPER,
 	/* Neither, which is what a run that did not stop cleanly leaves. */
 	NCFG_LEFTOVER_UNACCOUNTED
@@ -89,6 +126,9 @@ typedef struct {
 	pid_t pid;
 	pid_t parent;
 	char  program[NCFG_PROGRAM_MAX];
+	/* The command line with its NULs turned into spaces, or empty where it
+	 * could not be read. Only ever searched for an interface name. */
+	char  command[NCFG_LEFTOVER_COMMAND_MAX];
 } ncfg_leftover_process_t;
 
 typedef struct {
@@ -115,7 +155,20 @@ typedef struct {
  * pid 1 happened to be.
  */
 size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t found_count,
-    const pid_t *recorded, size_t recorded_count, ncfg_leftover_finding_t *out, size_t out_max);
+    const pid_t *recorded, size_t recorded_count, const char *const *claimed,
+    size_t claimed_count, ncfg_leftover_finding_t *out, size_t out_max);
+
+/*
+ * The interfaces `owned.json` says netcfgd has a backend running on.
+ *
+ * What turns "a dhcpcd nobody wrote a pid for" into "the dhcp4 backend the
+ * record claims on this interface". Returns how many were found, which may
+ * exceed `out_max`; each is at most `NCFG_LEFTOVER_IFACE_MAX` bytes including
+ * its NUL, and a longer one is skipped rather than truncated -- a truncated
+ * name would match the wrong interface by prefix.
+ */
+size_t ncfg_leftovers_claimed_interfaces(const char *run_dir,
+    char out[][NCFG_LEFTOVER_IFACE_MAX], size_t out_max);
 
 /*
  * Every pid the run directory records, from `<run>/<backend>/<name>.pid`.
