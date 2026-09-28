@@ -83,8 +83,8 @@ probes=$(ls "$repo"/gui/tests/live/*.pro 2>/dev/null || true)
 
 for project in $probes; do
 	name=$(basename "$project" .pro)
-	build="$repo/gui/tests/live/build/$name"
-	mkdir -p "$build"
+	probe_build="$repo/gui/tests/live/build/$name"
+	mkdir -p "$probe_build"
 	# **A probe that will not compile is a failure, not a skip.** The skip was
 	# written for a machine without a complete Qt, and it caught something
 	# else entirely: a probe gone stale against the code it tests. When 0154
@@ -94,12 +94,12 @@ for project in $probes; do
 	#
 	# The two are told apart by asking whether Qt is there, once, above. Past
 	# that point a build failure is the tree's fault and says so.
-	(cd "$build" && qmake6 "$project" >/dev/null 2>&1 && make >> "$build_log" 2>&1) || true
+	(cd "$probe_build" && qmake6 "$project" >/dev/null 2>&1 && make >> "$build_log" 2>&1) || true
 	# **The artifact, not the build's exit status.** The build is refused
 	# outright inside the namespace (see above), so its failure says nothing;
 	# a probe that is missing afterwards says everything, and a probe that is
 	# present was built by the Makefile a moment ago.
-	[ -x "$build/$name" ] || {
+	[ -x "$probe_build/$name" ] || {
 		cat "$build_log" >&2
 		echo "gui_wifi.sh: FAIL: $name is not built" >&2
 		echo "gui_wifi.sh:   qt6 is present, so this is a stale probe rather" >&2
