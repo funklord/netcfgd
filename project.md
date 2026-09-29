@@ -12194,6 +12194,128 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.322 The local/network boundary runs at block level, and four keys cross it
+
+10.315 called this the bulk of the design. Measured against the language as it
+is, it is smaller than that -- **the boundary follows the block structure the
+document already has**, and the interesting part is a set of four keys that do
+not classify at all.
+
+### The inventory
+
+    lower_global      30 key-ish strings
+    lower_interface   39
+    lower_network     38
+    lower_device      65
+    lower_rule        19
+
+**A per-key table over that is the thing the holder's instruction forbids** --
+"without too many special cases" is falsified by a hundred and ninety
+judgements, however carefully each is made. So the question this entry asks is
+whether a rule classifies most of them, and it does.
+
+### The rule
+
+**A key is local when its value names something only this machine can see, and
+network-wide when its value describes the network the machine joins or serves
+and two machines could hold it identically.**
+
+That is a test a reader can apply, not a list they must consult, and it sorts
+the blocks wholesale:
+
+    network, access_point      NETWORK-WIDE, entire. An `ssid`, its security,
+                               its EAP identity -- every machine joining that
+                               network holds the same value and is correct.
+    device                     LOCAL, entire. A NIC's name, its MAC, its
+                               offloads: nothing here is true of another box.
+    global.control, .remote    LOCAL. Who on THIS machine may ask, which 0128
+                               already settles per socket.
+    global.dns*, .connectivity LOCAL-looking and network-wide in fact: what
+                               counts as online, and which resolvers to use,
+                               are the site's answers.
+    interface                  MIXED, and it is the only block that genuinely
+                               is. `mac`, `kind`, `master`, `backend`,
+                               `command`, `args`, `config` name hardware and
+                               paths on this box. `vlans`, `advertise`,
+                               `radvd`, `guard`, `nat`, `lifetime` describe the
+                               network this interface is part of or serves.
+
+**The paths are a hard local, not a preference.** The brief already says a
+non-local document may reference only paths that already exist on the device,
+because "a document that can carry shell is remote code execution with extra
+steps". So `backend`, `command`, `args` and `config` cannot be network-wide
+whatever else is decided.
+
+### The four that cross, and they do not classify
+
+    address    prefix    prefixes    routes
+
+**Their schema is the site's and their value is the machine's.** Which subnet
+an interface is on is a fact about the network that every machine in it shares;
+which address within it this machine holds is a fact about this machine and is
+different on every one. Classifying them either way is wrong: network-wide
+gives every node the same address, local gives the site no way to say what the
+subnet is.
+
+**They are not a boundary question at all. They are 10.316's missing layer
+arriving in a concrete place.** A site says "this VLAN is 10.78.60.0/22" and a
+host's address is *derived* from that -- statically assigned, drawn from a
+pool, or left to DHCP, which is what this machine already does. netcfgd has no
+model above one host, so it has nowhere to put the first half of that sentence.
+
+So the honest shape: **four keys want a derivation rather than a
+classification, and the derivation needs the site model that does not exist
+yet.** Everything else in the language sorts by the rule above.
+
+### Corrected before committing: it is not two scopes, and the set is open
+
+**The holder, 2026-09-29: there are several scopes and probably more than
+these** -- host-scoped in two flavours, **replicated and not**, estate-wide,
+and less-than-estate-wide.
+
+Everything above was written against a binary local/network split, which is
+the same error as 10.314: measuring carefully against a model nobody had
+stated. The block-level sort survives, because the rule it uses is about what
+a value describes rather than about how many scopes exist. **The four crossing
+keys do not survive -- they dissolve**, which is the good news.
+
+    prefix, prefixes    the subnet is a fact about a VLAN or a zone
+                        -> estate-wide, or less-than-estate
+    address             which address THIS host holds within it
+                        -> host-scoped, replicated
+    routes              either, by the same reading
+
+They failed to classify because a binary split had nowhere to put "a fact
+about one host that the estate should nonetheless see". With that scope
+present they are ordinary, and the derivation between them -- subnet from the
+zone, address within it -- is the link rather than the problem.
+
+### Why "probably more than these" needs no new machinery
+
+**A scope is a cell's subject.** fuzznet's `state/` is
+`(issuer, subject, kind) -> value`, so estate-wide is a cell whose subject is
+the estate, less-than-estate one whose subject is that group, and host-scoped
+one whose subject is the host. **Adding a scope is adding a kind of subject,
+not a mechanism**, which is what makes an open set affordable -- and it is why
+this should be expressed in fuzznet's terms rather than in a netcfgd enum that
+would need widening every time.
+
+**And host-scoped-not-replicated is the one with no cell at all.** It never
+enters the shared database, which is what keeps constraint 2 true: a machine
+that never joins an estate has no subject, no cells and no site machinery, and
+its configuration is the file on its disk exactly as today. The irreducibly
+local keys -- `mac`, `backend`, `command`, `args`, `config`, `control` -- are
+that scope, and the path ones are there by the brief's rule rather than by
+preference.
+
+### What this is and is not
+
+A proposal, measured, and not a decision. The block-level sort is checkable by
+reading the rule against any key somebody doubts, and the scope set is the
+holder's. What is deliberately not done is the table itself -- writing 190
+entries before the rule and the scopes are agreed would be the special-case
+sprawl the instruction names, done thoroughly.
+
 ## 10.321 The lease term measured, and why it is not one number
 
 10.319 left the lease term as "a number nobody has measured". Measured, it is
