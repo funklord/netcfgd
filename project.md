@@ -9515,6 +9515,90 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.315 Two scopes, both first class, and where that meets the constraints
+
+**Set by the copyright holder 2026-09-29.** Local and network-wide
+configuration are separate use cases and both are valid. Some machines will
+only ever run netcfgd alone; some will use it to automate networks of
+thousands of nodes. **Both expectations are to be met in full**, and the
+strength of doing so is in merging the two worlds **without enormous amounts of
+custom scripting**.
+
+That last clause is the requirement, not the preamble. A site model that
+produces per-host configuration through a layer of operator-written glue has
+reproduced the thing it was meant to replace; the merge is netcfgd's job or it
+is not a feature.
+
+### What it does to each constraint, read rather than assumed
+
+**Constraint 1 -- config files are the only authority -- survives, and the
+mechanism is already named.** Anything netcfgd does must trace to a file under
+`/etc/netcfgd/`. Network-wide configuration arriving over the wire does not,
+*unless it is derived into one first*. That is exactly the "custom output
+module" reading of 10.314: the site model is resolved, rendered into
+netcfgd's own configuration language, and from there everything downstream --
+the compiler, the planner, `ncfg plan`, commit-confirm -- is unchanged and
+still reading a file. **Preserving constraint 1 is not a cost of that design,
+it is the argument for it.**
+
+**Constraint 2 -- the filesystem reflects use -- is directly served by the
+split** and is how the single-machine case stays whole. A machine that never
+joins a network-wide deployment must show no site machinery at all: no
+directory, no block, no key in `netcfgd.conf.example` implying it might be
+doing something. That constraint already has CI behind it.
+
+**Constraint 9 does not bite.** A controller model for real networks of real
+size is the opposite of the overgrown VM topology 0036 refuses.
+
+**Constraint 6 needs a ruling, and this entry will not make it.** The one-way
+rule says no change to the model, config language or socket API may be
+justified *solely* by an adapter's needs -- a concept an adapter wants must
+independently be something a local user would want in their own config file.
+
+A site-scoped concept fails that test by construction. *"This WLAN spans forty
+access points"* is not something a single-machine operator wants in their file,
+and never will be.
+
+**The reading that resolves it is that constraint 6 governs ADAPTERS** --
+northbound projections of netcfgd onto somebody else's model, NM and
+RESTCONF/YANG, things whose needs are somebody else's design leaking inward.
+A network-wide scope is not that: it is netcfgd's own second use case, stated
+by the holder as co-equal with the first. Under that reading constraint 6 is
+untouched and still does its job against adapters.
+
+**But that is a reading, and the wrong one blocks the entire feature.** Someone
+applying constraint 6 literally to the site model refuses it on principle, and
+they would be quoting the rules correctly. So it is the holder's to say
+whether constraint 6 means adapters or means everything, and this is recorded
+rather than decided -- `working-practice.md` on flagging a contradiction
+instead of spending it.
+
+### The questions that need answers before any of it is built
+
+- **Where does the boundary run?** Which options are local-only, which are
+  network-wide, and which are meaningful in both. That is a per-key decision
+  across the whole language and it is the bulk of the design.
+- **What happens when both say something?** A site sets a WLAN's security and
+  the local file sets it too. Precedence, and whether the local operator can
+  override, is a policy question with a security dimension -- an override is
+  either an escape hatch or a hole depending on who holds the machine.
+- **Does the host document stay the unit netcfgd applies?** If a derivation
+  produces one, everything below it is unchanged and this remains a front-end
+  question. If not, the reconciler learns about sites and the blast radius is
+  the whole tree. The first answer looks obviously right, which is a reason to
+  state it and check it rather than assume it.
+
+### What must not happen, which is the directive's own clause
+
+**Not two config languages.** A site schema that is a second grammar with its
+own spellings would put the merge back in the operator's hands, and the
+spellings-versus-document discipline in `render.c` exists because this tree
+already knows what two vocabularies for one concept cost.
+
+**Not a scripting seam.** "Merging without enormous amounts of custom
+scripting" is falsified the moment the answer to "how does a site setting reach
+a host" is a hook the operator writes.
+
 ## 10.314 The shared database measured, and the one thing it cannot be
 
 **Result: fuzznet's database needs nothing new for netcfgd, and the 512-byte
