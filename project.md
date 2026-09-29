@@ -9515,6 +9515,85 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.317 No controller, and the one primitive fuzznet does not have
+
+**The holder, 2026-09-29, correcting 10.316's suggested resolution:** netcfgd
+is not going to be a single point of failure like UniFi. **Each node marshals
+its own config and is part of site replication and control.** Nodes relay
+orders via each other. Not every command will be known purely via shared data,
+though consensus-queuing should be built from **data plus pseudorandom** as far
+as it will go.
+
+10.316 offered a controller holding the site with leaves holding less. That is
+withdrawn, and it was the wrong shape for a reason worth keeping: it answered a
+capacity question by centralising, which is the one move this design exists to
+refuse.
+
+### The capacity problem dissolves, and fuzznet already had the answer
+
+`catalog/shard.h`:
+
+>  an ordinary blob per key-range, with a signed index mapping range to blob
+>  root, **the index replicated to every host while the shards are fetched on
+>  demand**.
+
+So every node holds the index and participates in replication, and no node
+holds the whole site. That is the objection in 10.316 answered without a
+controller and without netcfgd asking for anything. The shard size is
+deliberately the **privacy control** rather than a performance knob -- a fetch
+reveals interest in a key *range*, so the estate is the anonymity set -- which
+is a property netcfgd should not tune for its own convenience.
+
+### Relaying orders is built
+
+`wire/relay.h` with `fzn_hop.hops_left`, and the header records that the byte
+sat in every frame unread for a long time -- "a byte on the wire paying for a
+feature that did not exist". It exists now: budget, spend, service.
+
+### What is missing, and it is the one thing
+
+**fuzznet has no primitive for a set of nodes to agree, without a coordinator,
+on which of them does a job.** Checked with word boundaries rather than
+substrings, because `grep -i elect` matches `select` in twenty-six headers and
+reads as a finding:
+
+    \belect    0 headers
+    \bquorum   0 headers
+    \bleader   1, and it is `claim.h` saying what it is NOT
+
+The near miss is `claim/`, and reading it is what makes the gap precise. It is
+a mutex over a job among **processes of one user on one machine** sharing one
+identity and one store, forced by the ratchet -- "two processes advancing one
+chain desynchronise it". Its own reasoning is the useful part:
+
+>  WHY A CLAIM RATHER THAN AN ELECTION. The processes are interchangeable: the
+>  same software with the same job, so it does not matter which one wins.
+>  There is no better and worse candidate to choose between.
+
+**That is the same move the holder's design makes and for a different reason.**
+`claim/` avoids arbitration by interchangeability; consensus-queuing from data
+plus pseudorandom avoids it by determinism -- every node computes the same
+answer from state it already holds, so there is nothing to agree about. Both
+replace a protocol with a property, which is why the second belongs in the same
+library as the first rather than in netcfgd.
+
+### So this is the signal, and it is netcfgd's to send
+
+Per 10.313 the steering pattern is: meet the limit, measure it, and report it
+as fuzznet's to answer, framed as a primitive rather than a feature request.
+raidcfgd's reply-cap report is the worked example -- they stopped rather than
+write a bridge that could not carry one.
+
+The primitive, stated as netcfgd would need it: **given a set of members and a
+key, every member independently computes the same ordered list of who is
+responsible**, so that placement, relay routing and job queuing all fall out of
+shared data with no round trip and no coordinator. Nodes are not
+interchangeable here, which is exactly why `claim/`'s answer does not extend.
+
+**Not written into fuzznet's tree yet.** That is an edit to another project and
+the local checkout is 145 commits behind its own remote (10.310), so where and
+against what it is written is worth getting right rather than guessing.
+
 ## 10.316 Trying the site model for fit, and the one place it does not
 
 **The holder's experiment, 2026-09-29**: blend the network-wide machinery into
