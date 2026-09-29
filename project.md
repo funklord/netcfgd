@@ -12252,6 +12252,57 @@ lead to different work, and this entry deliberately does not pick one --
 The question is recorded for the holder, with the measurement above as its
 basis.
 
+### Corrected within the hour: this measured the wrong model
+
+**The holder's clarification, 2026-09-29: the shared database holds data like
+Ubiquiti's UniFi -- a network one can reason about and deploy, not a collection
+of hosts.** Everything above measured whether fuzznet could replicate
+*netcfgd's per-machine document*, answered yes, and answered a question nobody
+had asked.
+
+A UniFi-shaped model is **site-scoped**: networks, VLANs, WLANs and their
+security, devices with roles, port profiles -- from which each device's own
+configuration is *derived*. Replicating finished per-host documents is the
+thing that model exists to stop doing.
+
+**fuzznet's primitive for it is `state/`, not `record/` alone, and it fits
+exactly:**
+
+>  A permission, a rule and a configuration setting are the same object at
+>  this layer: a value some issuer set, for some subject, of some kind, and
+>  the current one is whichever that issuer set most recently.
+
+>  The value of a cell is a function of the SET of records applied to it,
+>  never of the order they arrived in. Two hosts that have admitted the same
+>  records answer the same question the same way, whatever order the network
+>  handed them over in.
+
+A record's `subject` is **not** its `issuer`, so one signer makes statements
+about many things -- a site's networks, its WLANs, its devices. And the layer
+"resolves records into current values and interprets none of them", because
+the shape is configuration rather than design. **So the site schema is
+netcfgd's to define and fuzznet is already the right shape to carry it.**
+
+### Which relocates the gap entirely
+
+It is not in fuzznet. **netcfgd has no model above one machine** -- `site`
+appears zero times in `document.h`, and the document is "this machine"
+throughout, by constraint rather than by omission. A site model, and the
+derivation of a host's document from it, is new modelling work in netcfgd and
+is the largest thing this integration has turned up.
+
+It also reopens the storage question above rather than settling it: if the
+shared content is site-level cells rather than host documents, then "the
+netifrc-like config files" are plainly the *rendered output* of a derivation,
+which is the reading netcfgd already has a renderer for.
+
+**The lesson is the one this integration keeps paying for, arriving from the
+other side.** Three times the answer was already in the tree and I designed
+instead of looking. Here I looked, measured carefully, and measured the wrong
+thing -- because the requirement had not been stated yet and I supplied one
+from what netcfgd happens to hold today. **A careful measurement of an assumed
+requirement is not cheaper than a guess, it is a guess with numbers on it.**
+
 ## 10.313 netcfgd steers fuzznet, and steering has a shape already
 
 **Set by the copyright holder 2026-09-29.** netcfgd's job is to steer fuzznet
