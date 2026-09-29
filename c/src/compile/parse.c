@@ -850,6 +850,29 @@ static ncfg_ast_value_t *parse_list(parser_t *parser, ncfg_span_t span)
 	return list;
 }
 
+/*
+ * Close a list's span at its `]`.
+ *
+ * **A list's span covered its opening bracket alone**, which made a
+ * diagnostic about a list underline one character and made the value's source
+ * text unrecoverable from the tree. Measured while building the document
+ * walker: slicing `[offset, length)` out of the source gave `[` for every
+ * list and the written value for everything else, so the one node kind that
+ * needs a slice most -- several addresses, several servers -- was the one
+ * that could not be sliced.
+ *
+ * Every other value's span is the token's, which already spans what was
+ * written. This makes a list's do the same.
+ */
+static void close_list(ncfg_ast_value_t *list, const ncfg_token_t *bracket)
+{
+	size_t end = bracket->span.offset + bracket->span.length;
+
+	if (end > list->span.offset) {
+		list->span.length = end - list->span.offset;
+	}
+}
+
 /* The entries of a list, with the depth counter already raised. Takes `list`,
  * and frees it on every failing path. */
 static ncfg_ast_value_t *parse_list_entries(parser_t *parser, ncfg_ast_value_t *list)
@@ -867,6 +890,7 @@ static ncfg_ast_value_t *parse_list_entries(parser_t *parser, ncfg_ast_value_t *
 			return NULL;
 		}
 		if (peek(parser)->kind == NCFG_TOKEN_RBRACKET) {
+			close_list(list, peek(parser));
 			drop(parser);
 			break;
 		}
@@ -887,6 +911,7 @@ static ncfg_ast_value_t *parse_list_entries(parser_t *parser, ncfg_ast_value_t *
 			continue;
 		}
 		if (next->kind == NCFG_TOKEN_RBRACKET) {
+			close_list(list, next);
 			drop(parser);
 			break;
 		}

@@ -29,6 +29,15 @@ gui/build-*/
 # left the tree dirty for whoever else was working in it.
 c/src/*/*.o
 c/src/*/*/*.o
+# The dependency files beside them, added 2026-09-29 when `c/` grew header
+# tracking at all -- project.md 10.328. Same two levels and the same reason:
+# a build writes one per object, and one per test binary and example beside
+# their sources.
+c/src/*/*.d
+c/src/*/*/*.d
+c/tests/*.d
+c/examples/*.d
+c/ncfg_json.d
 # The shared JSON reader's object, which `c/` builds under its own name rather
 # than beside the source in `client/` -- one file, two builds, two objects, so
 # that a sanitized build here cannot poison the archive `client/` links.

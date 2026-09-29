@@ -102,7 +102,31 @@ TESTS = $(patsubst %.c,%,$(TEST_SRCS))
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
 CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client
+CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -MMD -MP
+
+# HEADER DEPENDENCIES, AND WHAT THEIR ABSENCE COST
+#
+# **This build had none until 2026-09-29.** No `-MMD`, no `.d` files, nothing
+# `-include`d -- so editing a header rebuilt nothing that included it, and a
+# `make` after a header change reported a clean build having compiled none of
+# the files the change affected.
+#
+# `build-and-commit.md` names this failure class first and describes the
+# symptom exactly: "a struct that gains a field ends up with one layout in the
+# library and another in the test binary linked against it. That surfaces as a
+# pile of nonsense assertion failures, not as a build error." What it cost
+# here was an enum whose members were reordered in a header: the library held
+# the old numbering, a freshly compiled test held the new one, and three
+# assertions failed in a way that read as a defect in the code under test. The
+# walker was correct throughout.
+#
+# `-MP` adds a phony target per header, so deleting or renaming one is a
+# rebuild rather than "No rule to make target". The list below covers every
+# object AND every test binary -- a test compiled straight from its `.c` gets
+# a `.d` too, and leaving those out is the half of this rule that the
+# guideline calls out by name.
+DEPS = $(OBJS:.o=.d) $(PROGRAM_OBJS:.o=.d) $(SHARED_OBJS:.o=.d) \
+       $(addsuffix .d,$(TESTS)) $(addsuffix .d,$(EXAMPLES))
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
@@ -219,4 +243,18 @@ tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
 # whose contents a build produced.
 clean:
 	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) $(EXAMPLES) \
-	    .build-flags
+	    $(DEPS) .build-flags
+
+# Read back what the compiler wrote. A `.d` that is generated and never
+# included is the whole mechanism switched off with the flags still on, which
+# looks exactly like this build did before it had either.
+#
+# **Last in the file, and that is load-bearing rather than tidy.** Make's
+# default goal is the first target of the first rule it READS, and an included
+# `.d` is a rule -- so with this line above `all:` the default goal became
+# `src/apply/apply.o`, the first object in the first dependency file. A plain
+# `make` then compiled one object, printed one line and exited 0, with the
+# daemon unbuilt. It looked exactly like a build with nothing to do, which is
+# `build-and-commit.md`'s rule about a target that quietly does nothing,
+# arriving through the fix for the rule above it.
+-include $(DEPS)

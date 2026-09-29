@@ -9519,6 +9519,150 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.328 The document walker, and the cell two interfaces share
+
+`compile/walk.c`. Every key in a document, its value as written, and the
+verdict on whether it may travel -- the producer for
+`bridge/record_encode.h`, and the reader half of 10.324's mirror.
+
+### It walks text, and slices rather than re-spells
+
+The value handed back is a **slice of the source**: the bytes the operator or
+the renderer wrote. So the input is text, and a caller holding a document
+renders it first, which is the path a config file takes anyway.
+
+**That is what keeps the value encoder count at one.** `render.c` writes a
+value and `parse.c` reads it, deliberately disciplined against each other; a
+walker that re-spelled an AST node would be a third thing for both to disagree
+with. A slice means `key = <slice>` re-parses to the value it came from, which
+is a property a test asserts rather than a sentence this entry claims.
+
+### Nothing is skipped silently
+
+    PROGRAM         a hook body is shell, an include is a path
+    HOST_PRIVATE    the key never leaves the machine
+    PRIVILEGED      the VALUE names a file to open as root
+    UNREGISTERED    the key has no wire number yet
+    UNKNOWN_BLOCK   this build cannot read the block at all
+
+A key that may not travel is reported with its reason rather than passed over.
+A walk that quietly emitted less than it was asked for is this tree's recurring
+failure -- a build with no backend, a gate over an empty file list -- and here
+it would be a host whose configuration half-replicated with nothing to say so.
+
+**The reasons are ordered by permanence, not by cost.** A caller telling an
+operator why a value did not replicate wants the answer still true tomorrow:
+"this is a path" outlives "this key has no number yet", and reporting the
+second would invite somebody to close a registry gap that changes nothing for
+the value in front of them.
+
+### The refusal 10.327 could not place
+
+`dot1x.ca_cert = "/etc/ssl/certs/ca.pem"` is withheld as PRIVILEGED;
+`dot1x.client_cert = "@secret:client"` is not. That is the distinction
+`record_encode.c` cannot make -- it takes bytes and has no document model --
+and here the written value is in hand. The condition named in 10.327 is met,
+so the three cert keys can be numbered when somebody wants them.
+
+The match is on the leaf name and is deliberately wider than the three sites
+calling `ncfg_as_cert_source`: over-matching withholds a value that could have
+travelled, which an operator sees and can ask about, while under-matching sends
+a root-readable path to every host in the estate.
+
+### Two findings it turned up, both in the build rather than the code
+
+**A list's span covered its opening bracket alone.** Every list sliced to `[`.
+`parse.c` gained `close_list`, and the fix is load-bearing twice over: a
+diagnostic about a list had been underlining one character.
+
+**The C port had no header dependency tracking at all** -- no `-MMD`, no `.d`
+files, nothing `-include`d. Editing a header rebuilt nothing, and `make`
+reported a clean build having compiled none of the affected files.
+
+`build-and-commit.md` names this class first and describes the symptom
+exactly: "a struct that gains a field ends up with one layout in the library
+and another in the test binary linked against it. That surfaces as a pile of
+nonsense assertion failures, not as a build error." What it cost here was an
+enum reordered in a header: the library held the old numbering, a freshly
+compiled test held the new one, and three assertions failed in a way that read
+as a defect in the walker. The walker was correct throughout, and the first
+move was to go looking at it.
+
+Measured after the fix: touching `ncfg/base.h` rebuilds **185** objects, and
+185 `.d` files name it -- the two counts taken separately, one from the build
+and one from `grep -l`. Touching `ncfg/scope.h` rebuilds two sources and
+relinks the two test binaries that include it.
+
+**And the fix introduced the failure it was written against, for an hour.**
+Make's default goal is the first target of the first rule it READS, and an
+included `.d` is a rule -- so with `-include $(DEPS)` placed above `all:` the
+default goal became `src/apply/apply.o`. A plain `make` compiled one object,
+printed one line, exited 0, and left the daemon unbuilt. It looked exactly
+like a build with nothing to do. The line lives at the end of the file now and
+says why.
+
+### The finding that is not netcfgd's to settle: two interfaces share a cell
+
+**A key's identity on the wire has nowhere to put the instance.** fuzznet's
+state is `(issuer, subject, kind) -> value`; a `kind` names the key and a
+subject names the host, the group or the estate. Neither names *which
+interface*.
+
+    interface "wlan0" { mtu = 1500 }
+    interface "eth0"  { mtu = 9000 }
+
+Both are host-scoped, both carry `0x00020003`, and both address one cell. The
+second overwrites the first, and every host in the estate agrees about the
+wrong answer. `walk_test` asserts exactly this pair -- same number, different
+values, different labels -- so the collision is pinned rather than implied.
+
+The walker carries the label. **The encoder has nowhere to put it**, and that
+is the gap.
+
+Three shapes, and only one works:
+
+- **Fold the instance into the subject**: `subject = H(tag, host, block,
+  label)`. Works, and it costs the property that a host's subject IS its
+  public key -- so reading a host's configuration stops being
+  `fzn_state_get(state, host_key, kind)` and needs the labels known in
+  advance. A wire decision, free today and not later.
+- **Fold it into the body**: one cell holds every instance, last writer wins.
+  Wrong for the same reason the collision is.
+- **One stream per instance**: streams number contiguously per issuer and a
+  journal refuses a gap, so this trades a collision for a stall.
+
+**And it exposes something the scope table conflates.** `subject_matches` in
+`record_encode.c` maps a scope one-to-one onto a subject kind, which reads
+"how far it travels" and "what it is about" as one question. They are two.
+`interface.dns` is estate-scoped and is about *this host's wlan0*: everyone
+may see it, and it describes one link on one machine. The current encoder
+cannot express that at all, and neither can this entry without deciding what
+the scopes mean.
+
+**Whose decision: the copyright holder's**, because it is a wire decision and
+because it moves what a scope is. Nothing is blocked meanwhile -- the walker
+and the encoder both work and both refuse correctly -- and nothing should be
+built on the subject derivation until it is settled.
+
+### What is checked
+
+    eleven statements, counted rather than assumed          liveness
+    a key that travels carries its number and its scope
+    the label separates two interfaces under one number     the finding, pinned
+    a hook is reported rather than passed over
+    a host-private key is withheld as one
+    a path credential is withheld, `@secret:` is not        the 10.327 refusal
+    an unknown block is one report, not its keys
+    a visit that stops stops the walk
+    a document that does not parse visits nothing
+    every emitted slice re-parses AND comes back spelled the same
+    a list slices to the whole list
+
+Sabotaged four ways, each caught by the check meant for it: the credential
+refusal removed, hooks skipped, the list-span fix reverted, and every slice
+shortened by one byte -- which the round trip catches and mere re-parsing
+would not, a truncated value being a shorter value that still parses.
+
 ## 10.327 The record encoder, and the one refusal it turned out not to own
 
 `bridge/record_encode.c`. Given a key, its value and who the statement is
