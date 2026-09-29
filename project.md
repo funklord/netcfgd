@@ -12194,6 +12194,80 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.321 The lease term measured, and why it is not one number
+
+10.319 left the lease term as "a number nobody has measured". Measured, it is
+not a number at all, and that is the finding rather than a failure to produce
+one.
+
+### What an order legitimately takes, from this tree's own bounds
+
+    NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS      60 s   per hook
+    NCFG_SUPPLICANT_CONNECT_PATIENCE_MS    20 s   per association
+    NCFG_SUPPLICANT_SCAN_PATIENCE_MS       10 s
+    NCFG_CLI_WAIT_ONLINE_DEFAULT           30 s
+    NCFG_DHCP_STOP_PATIENCE_MS              3 s
+
+And what the reads actually cost here, timed against the running daemon:
+
+    ncfg status          10 ms
+    ncfg plan            14 ms
+    ncfg wifi status      6 ms
+    ncfg wifi scan     2485 ms
+
+DHCP acquisition, measured from the journal rather than assumed -- first
+solicit to lease, twice on 2026-09-28:
+
+    13:47:49.369 -> 13:47:53.940    4.571 s
+    19:31:51.374 -> 19:31:58.269    6.895 s
+
+### The arithmetic, and where it stops being bounded
+
+**This machine** carries five configuration files, one wifi interface and **no
+hooks**. Its worst legitimate apply is an association plus a lease: about 20 +
+7, call it **27 seconds**.
+
+**A machine with hooks is a different quantity entirely.** A hook may run for
+60 seconds by default and an interface has four phases -- `pre_up`, `post_up`,
+`pre_down`, `post_down` -- so one hooked interface adds **240 seconds** before
+anything else. Five interfaces with hooks is twenty minutes of entirely
+legitimate work.
+
+**So the legitimate upper bound is a function of the configuration and has no
+constant.** A lease safe for the hooked case is measured in tens of minutes,
+which means a dead taker stalls its item for tens of minutes. A lease short
+enough to be useful against a dead taker reclaims a healthy apply while its
+hooks are still running.
+
+### Which makes it two numbers with different owners
+
+**An estimate the taker derives**, from what it is about to do: it knows its
+hook count and their timeouts, its interfaces, and whether an association is
+involved. That is the same move as the idempotence class -- **derived rather
+than chosen** -- and it is the only party that can compute it.
+
+**A ceiling the site sets**, because a taker that derives its own lease is a
+taker that can hold one for ever. A wedged taker is exactly the case
+`claim.h` says no backend can distinguish from slow work, so the ceiling is
+what converts an unbounded hold into a bounded one. **That is the policy
+number, and the hook timeout is what it should be chosen against**, being the
+dominant term by an order of magnitude.
+
+### One interaction worth stating before it is discovered
+
+Reclaiming a leased apply does not merely duplicate work. netcfgd holds an
+apply lock, so a second taker meets it rather than running beside it -- which
+is safer than two concurrent applies and is a failure mode with its own
+behaviour, not a no-op. A reclaim policy written without knowing that would
+predict duplicated effort and get a refusal instead.
+
+### What the measurement does not choose
+
+The ceiling's value, which is a policy judgement rather than a measurement --
+what this entry supplies is the term it has to dominate. And the taker's
+estimate needs the hook count at claim time, which is knowable and is not
+plumbed anywhere today.
+
 ## 10.320 An order's idempotence is a property of its verb
 
 **Settled by the copyright holder 2026-09-29**, closing the question 10.319
