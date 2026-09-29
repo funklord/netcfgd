@@ -38,19 +38,33 @@
 CC ?= gcc
 
 PROGRAM = netcfgd-remote
-SRCS    = netcfgd-remote.c
+SRCS    = netcfgd-remote.c record_encode.c
 
 FUZZNET     = ../fuzznet
 CLIENT      = ../client
 CLIENT_LIB  = $(CLIENT)/libncfg_client.a
 FUZZNET_BLD = build
 
+# The C port, for the one source this directory needs out of it.
+#
+# **One source, not the library.** `compile/scope.c` holds the scope table and
+# the kind registry, and it includes nothing but `ncfg/scope.h` and
+# `<string.h>` -- so compiling it here costs one object and states the
+# dependency exactly. Linking `../c/libncfg.a` would work, an archive
+# contributing only what resolves, and would make this build wait on the
+# daemon's and put the whole of it within reach of a program that must stay
+# small: section 3 of the brief keeps fuzznet away from the process holding
+# CAP_NET_ADMIN, and the same argument runs the other way.
+CORE        = ../c
+CORE_SRCS   = $(CORE)/src/compile/scope.c
+
 # The client's floor, name for name, so moving between these directories costs
 # nothing. `-Wno-pedantic` is deliberately absent: this file is ours.
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
 CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated -I$(CLIENT)
+CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated -I$(CLIENT) \
+	   -I$(CORE)/include
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
@@ -129,21 +143,30 @@ FUZZNET_OBJS = $(shell find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' 2>/dev/null | 
 client:
 	@$(MAKE) --no-print-directory -C $(CLIENT)
 
-$(PROGRAM): $(SRCS) fuzznet client
-	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(FUZZNET_OBJS) $(CLIENT_LIB) $(LDFLAGS) -o $@
+$(PROGRAM): $(SRCS) $(CORE_SRCS) fuzznet client
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(CORE_SRCS) $(FUZZNET_OBJS) $(CLIENT_LIB) \
+		$(LDFLAGS) -o $@
 
 # The read path against a frame the library builds, which is the control the
 # program itself cannot show: every answer `--peek` gives by hand is a refusal,
 # and a program that can only refuse looks like one that refuses everything.
-test: tests/peek_test $(PROGRAM)
+test: tests/peek_test tests/record_encode_test $(PROGRAM)
 	./tests/peek_test
+	./tests/record_encode_test
 
 tests/peek_test: tests/peek_test.c fuzznet
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< $(FUZZNET_OBJS) $(LDFLAGS) -o $@
 
+# The encoder against fuzznet itself, which is the half the tables cannot
+# check: every other assertion in that file asks netcfgd about netcfgd.
+tests/record_encode_test: tests/record_encode_test.c record_encode.c $(CORE_SRCS) fuzznet
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< record_encode.c $(CORE_SRCS) $(FUZZNET_OBJS) \
+		$(LDFLAGS) -o $@
+
 # By name, and nothing by pattern this directory does not own. fuzznet's build
 # output is fuzznet's to remove, through its own clean.
 clean:
-	rm -f $(PROGRAM) tests/peek_test
-	@echo "clean: removed $(PROGRAM) and tests/peek_test; fuzznet's objects"
+	rm -f $(PROGRAM) tests/peek_test tests/record_encode_test
+	@echo "clean: removed $(PROGRAM), tests/peek_test and tests/record_encode_test;"
+	@echo "clean:   fuzznet's objects"
 	@echo "clean:   are its own to clean"
