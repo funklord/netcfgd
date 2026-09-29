@@ -9515,6 +9515,84 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.313 netcfgd steers fuzznet, and steering has a shape already
+
+**Set by the copyright holder 2026-09-29.** netcfgd's job is to steer fuzznet
+into being three things:
+
+- a **remote command platform**;
+- a **shared database**;
+- a shared database with a **custom output module** -- netcfgd's netifrc-like
+  configuration files as the storage backend.
+
+**And the instruction that governs all three: these are not to be implemented
+haphazardly, but through generic primitives in fuzznet.**
+
+### What that means in practice, which raidcfgd has already demonstrated
+
+raidcfgd is not on this machine, so what follows is fuzznet's record of what
+they asked for rather than anything read in their tree. Four of fuzznet's
+headers carry it, and the pattern is identical each time: **a consumer met a
+limit, stopped, reported a measurement, and fuzznet answered with a primitive.**
+
+The sharpest is `node/remote.h`, on the reply-size cap:
+
+>  REPORTED BY raidcfgd 2026-09-22, measured in their tree: their smallest
+>  `status` reading is 3,230 bytes against a 512-byte cap, and their largest
+>  21,772. **They stopped rather than write a bridge that could not carry one,
+>  which is the right way round -- the cap was fuzznet's to answer for.**
+
+What fuzznet then built was not a bigger cap. It was multi-frame replies using
+the `index` and `chunks` fields `wire/frame.situ` had carried since it was
+written and nothing had used -- and with the kind *derived* rather than passed,
+so a caller cannot construct a CHUNK frame claiming to be the only piece.
+
+`node/local.h` is the same shape: raidcfgd wanted a gid-to-verb bound, the
+local access method had no seam to put a verb in -- its body carried a literal
+`(void)line;` -- so fuzznet grew `on_local` and `local/vocabulary.h`. Not a
+raidcfgd feature; the seam the remote method already had.
+
+**So steering is: meet the limit, measure it, stop, and report it as fuzznet's
+to answer.** It is `harmonization.md`'s rule about a dependency -- signalled,
+never edited from the consumer -- with the extra requirement that what gets
+signalled is framed as a *primitive fuzznet is missing* rather than as a
+netcfgd feature request.
+
+### The three, measured against what is already there
+
+**Remote command platform: the seam exists and netcfgd is on it.** `on_remote`
+is "where a consumer's handler (its vocabulary) acts", called only after the
+caller is authenticated and authorised -- a DROPPED frame never reaches a
+consumer. And the vocabulary has a sanctioned extension point rather than a
+list to be added to: `request->parsed` is `FZN_VERB_NONE` for a verb fuzznet
+does not offer, **"which is a consumer's own verb rather than an error"**.
+
+**Shared database: `record/` and `catalog/` exist** -- ledger, journal, store,
+sync, and a catalogue with shards, retention and sweep. Not yet measured
+against what netcfgd would ask of it, and that measurement is the next real
+piece of work rather than a design.
+
+**Custom output module: the seam is a vtable and it is already there.** Two of
+them:
+
+    fzn_persist_ops        load / save / list / remove, by slot and subject
+    fzn_record_store_ops   put / get, by issuer and stream
+
+netcfgd's configuration files as a storage backend is an implementation of one
+of those, in netcfgd's tree, filling ops fuzznet declares. **That is the whole
+answer to "not haphazardly": the custom output module is not a change to
+fuzznet at all**, and if it turns out it cannot be expressed through those
+ops, that is the measurement to report rather than the moment to add a hook.
+
+### What this changes about how the integration proceeds
+
+Three increments so far each began by my naming a decision that the tree had
+already made -- the process shape (0128 and the brief), the crypto backend
+(fuzznet vendors it), and the capability-to-tier mapping (0128 again, and it
+does not exist by design). The correction rate is the finding: **the default
+assumption should be that fuzznet or netcfgd's own records have already
+answered it**, and the first action is the grep rather than the design.
+
 ## 10.312 There was no mapping to build, and the half nobody had asked
 
 **0128 decided this in August and the daemon has implemented it since.** The
