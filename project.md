@@ -9579,6 +9579,43 @@ to ask for, and asking for it beside the first matters: a queue that never
 fails needs no relay, and a relay is only a fallback if something says when
 the queue has failed.
 
+### A third scale, and it splits the requirement in two
+
+**The holder, same day: fuzznet needs two fully equivalent daemons on one host,
+without thrashing data, duplicating work, or confusing other hosts.** Three
+symptoms, and `claim/` already answers two of them completely.
+
+*Thrashing data* is what it is for: exactly one process holds the four mutable
+things `persist.h` names -- trust anchor, prekey secret, pinned peers, ratchet
+chains -- and the ratchet is what forces it, since "two processes advancing one
+chain desynchronise it".
+
+*Confusing other hosts* falls out of the same ownership rather than needing a
+second mechanism: **"one writer per (issuer, stream) is a consequence of there
+being one owner"**, so two daemons cannot collide on the per-issuer sequence
+the whole ordering model rests on.
+
+And its release rule is the part worth not re-deriving: the claim is released
+by the holder's **death, observed rather than inferred**, because "a heartbeat
+can declare a slow or paused holder dead while it is still running". It detects
+death and not hang, says so, and offers no way to steal from a live holder --
+"there is no function for it".
+
+**The third symptom is the one left over, and it is this section's primitive
+again.** `claim/` makes one daemon the owner and the other a standby, which
+answers *duplicating work* by there being only one worker. Two **fully
+equivalent** daemons both doing work must divide it instead, and dividing it is
+members-and-a-key once more -- at a third scale, inside one host.
+
+So the same function is wanted between two daemons on a host, between peers
+choosing which range to fetch, and between nodes choosing which runs a job.
+**Three consumers is a better argument for generalising than netcfgd's one**,
+and it is the holder's own: generalise it until everything can use it.
+
+Worth putting to fuzznet rather than assuming: whether "fully equivalent" means
+active/standby, which `claim/` already delivers, or active/active, which needs
+the assignment primitive inside the host as well as across it.
+
 ### What this does not settle
 
 Whether the ordering function is rendezvous hashing, a keyed permutation, or
