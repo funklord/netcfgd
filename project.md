@@ -9595,6 +9595,51 @@ is the half netcfgd already has -- `c/src/compile/render.c` and its two
 siblings turn a document back into configuration text, in the language's own
 spellings.
 
+### A third option, and it is better than both: mirror it
+
+**The holder, same day: "or maybe we just create a mirrored writer/reader --
+hooks to read and write files".** That is not a compromise between the two
+above, it is the shape that removes the problem both have.
+
+A rendered projection is one-way: the estate writes, the operator reads, and
+an edit is silently overwritten on the next render. A byte-exact store cannot
+be a human-editable file at all. **A mirror is bidirectional** -- netcfgd
+renders records into the netifrc-style format, and reads an operator's edit of
+that file back as intent, turning it into a record that replicates.
+
+**And netcfgd already has every piece of it, which is the strongest argument
+for the shape.**
+
+    render.c + parse.c   the two directions, already written and already
+                         disciplined against each other
+    hook `sha256`        "a content hash, so drift can notice a changed" file
+    on_drift             report | reconcile | ignore
+
+**The reader is `on_drift` applied to a new object.** That policy exists for
+the machine drifting from its document -- 0165, a foreign overwrite of
+`resolv.conf` that was never put back. A file netcfgd wrote being edited is
+drift of a different object and takes the same three answers: say so, take the
+edit as intent, or leave it. A new mechanism is not needed; a new subject for
+an existing one is.
+
+**The round trip is semantic rather than byte-exact, which is what makes it
+possible.** The store keeps the record and its signature; the file is a
+rendering, and the reader's job is to recover the *value* rather than the
+bytes. `render.c`'s header already records why that is survivable here: the
+spellings are duplicated between renderer and parser deliberately, "so that a
+key added to one is under the nose of whoever adds it to the other".
+
+Two hazards it does not remove, both named rather than solved:
+
+**Whose write wins, continuously.** 10.315 asked what happens when local and
+estate both set a value, as a one-off. A mirror makes it perpetual: an estate
+change and an operator edit can cross. That is the same precedence question and
+it now has a clock in it.
+
+**Reading your own writes as intent.** The hash answers it -- a file matching
+what was last written is not an edit -- and it has to be got right or the
+mirror oscillates, each side reacting to the other's last move.
+
 ### And it moves who authors a file, which constraint 1 does not currently say
 
 Constraint 1 is that config files are the only authority. A rendered file
@@ -9606,6 +9651,12 @@ promises them it is authoritative.
 
 That is not an objection to the design; it is a sentence the constraint will
 need, and better found now than by an operator whose edit vanished.
+
+**The mirror softens this considerably**, which is the other reason to prefer
+it: an operator's edit is read back rather than overwritten, so the file is
+authoritative in the sense the constraint means and not merely in the
+mechanical one. What remains is that an edit may *lose*, to an estate change
+that crosses it -- which is a precedence answer rather than a broken promise.
 
 ## 10.323 The scopes are fuzznet's, and netcfgd wrote them anyway
 
