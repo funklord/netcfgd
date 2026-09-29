@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -121,7 +121,8 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage c-test agree ledger module-order
+                 example adapters gui linkage c-test agree ledger module-order \
+                 registry
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -2326,6 +2327,13 @@ ledger: c-test
 # build: it reads the tree, so it answers on a machine that cannot compile.
 module-order:
 	@python3 tool/module_order_gate.py
+
+# The scope and kind tables name configuration keys as strings, and nothing in
+# C connects those strings to the lowering that recognises them. This reads the
+# lowering's own `strcmp` chains and refuses a row naming a key the block does
+# not have -- which is what the first kind registry needed and did not have.
+registry:
+	@python3 tool/registry_gate.py
 
 # The clean ladder, matching the sibling projects: `clean` removes build
 # products, `veryclean` adds the build directories themselves, `distclean`

@@ -11,11 +11,24 @@
  *     * **the narrow direction is the default**, so a key nobody classified is
  *       not published. Widening a scope offers configuration its author never
  *       offered anybody; narrowing one only fails to share;
- *     * **`prefix` and `address` differ**, which is the pair a local/network
- *       boolean could not express and the reason scopes exist at all;
- *     * **paths never travel**, which is the brief's rule rather than a
- *       preference -- a document that can carry shell is remote code
- *       execution with extra steps.
+ *     * **`advertise.prefix` and `config` differ**, which is the pair a
+ *       local/network boolean could not express and the reason scopes exist
+ *       at all;
+ *     * **a program's path never travels**, which is the brief's rule rather
+ *       than a preference -- a document that can carry shell is remote code
+ *       execution with extra steps;
+ *     * **an exception covers what is under it**, so a sub-block settles its
+ *       keys in one row and a key nobody named takes the block's answer
+ *       rather than inventing one;
+ *     * **an alias is resolved, not registered**, so two spellings of one
+ *       field cannot acquire two numbers.
+ *
+ * WHAT THIS FILE CANNOT CHECK, AND WHAT DOES
+ *   That a registered path names a key the language actually has. Nothing in
+ *   C connects these strings to `compile/lower_*.c`, and the first version of
+ *   the registry carried six rows that were not keys -- `tool/registry_gate.py`
+ *   reads the lowering's own `strcmp` chains and is what catches that class.
+ *   project.md 10.326.
  */
 #include "ncfg/scope.h"
 
@@ -112,32 +125,87 @@ static void every_block_is_classified_exactly_once(void)
 }
 
 /*
- * **The pair the whole design turns on.** A subnet is the zone's and an
- * address within it is this machine's, and a table that gave them one answer
- * would be the boolean scopes replaced.
+ * **The pair the whole design turns on**, with the keys read rather than
+ * remembered. A prefix this link ANNOUNCES is a fact about the segment; the
+ * addressing this machine takes within it is `config`, and a table that gave
+ * them one answer would be the boolean scopes replaced.
  */
 static void a_subnet_and_an_address_are_different_scopes(void)
 {
-	check(scope_in("interface", "prefix") == NCFG_SCOPE_GROUP,
-	    "a subnet is the zone's, not this machine's");
-	check(scope_in("interface", "address") == NCFG_SCOPE_HOST,
-	    "while the address within it is this machine's, and replicated");
-	check(scope_in("interface", "prefix") != scope_in("interface", "address"),
+	check(scope_in("interface", "advertise.prefix") == NCFG_SCOPE_GROUP,
+	    "a prefix a link announces is the segment's, not this machine's");
+	check(scope_in("interface", "config") == NCFG_SCOPE_HOST,
+	    "while the addressing within it is this machine's, and replicated");
+	check(scope_in("interface", "advertise.prefix") != scope_in("interface", "config"),
 	    "so the two do not collapse into one answer");
 }
 
-/* Paths and hardware never travel, whatever block they sit in. */
+/* Programs, paths and hardware never travel, whatever block they sit in. */
 static void paths_and_hardware_stay_on_the_machine(void)
 {
 	check(scope_in("interface", "mac") == NCFG_SCOPE_HOST_PRIVATE, "a MAC stays");
-	check(scope_in("interface", "command") == NCFG_SCOPE_HOST_PRIVATE, "a command stays");
-	check(scope_in("interface", "config") == NCFG_SCOPE_HOST_PRIVATE, "a config path stays");
+	check(scope_in("interface", "probe.command") == NCFG_SCOPE_HOST_PRIVATE,
+	    "a probe's command stays");
+	check(scope_in("interface", "probe.args") == NCFG_SCOPE_HOST_PRIVATE,
+	    "and its argument vector with it");
 	/* And the one exception that points downward out of an estate-wide block:
 	 * a network's hooks are paths on whoever runs them. */
 	check(scope_in("network", "hooks") == NCFG_SCOPE_HOST_PRIVATE,
 	    "and a network's hooks stay, although the block around them travels");
 	check(scope_in("network", "ssid") == NCFG_SCOPE_ESTATE,
 	    "while the network itself does travel, so the exception is not the rule");
+	/* An access point's radio is this machine's; what it offers is not. */
+	check(scope_in("access_point", "device") == NCFG_SCOPE_HOST_PRIVATE,
+	    "which radio offers a network is this machine's business");
+	check(scope_in("access_point", "ssid") == NCFG_SCOPE_ESTATE,
+	    "while what it offers is the estate's");
+}
+
+/*
+ * **An exception covers what is under it.** `interface.kind` is one row and
+ * settles thirteen link types; a fixture asserting only the row would pass
+ * against a lookup that had no inheritance at all.
+ */
+static void a_sub_block_settles_what_is_under_it(void)
+{
+	check(scope_in("interface", "kind") == NCFG_SCOPE_HOST_PRIVATE,
+	    "an interface's link type is this machine's topology");
+	check(scope_in("interface", "kind.bridge.members") == NCFG_SCOPE_HOST_PRIVATE,
+	    "and so is every key under it, without a row of its own");
+	check(scope_in("interface", "kind.wireguard.peer.public_key") == NCFG_SCOPE_HOST_PRIVATE,
+	    "however deep it goes");
+	/* The other direction: inheriting must not reach past a nearer answer. */
+	check(scope_in("interface", "advertise.dns") == NCFG_SCOPE_ESTATE,
+	    "a key's own row wins over the sub-block it sits in");
+	check(scope_in("interface", "advertise.prefix") == NCFG_SCOPE_GROUP,
+	    "and two keys in one sub-block may differ");
+	/* And an unclassified sub-block takes the block, not an invention. */
+	check(scope_in("interface", "probe.timeout") == NCFG_SCOPE_HOST,
+	    "a key nobody named takes its block's answer");
+}
+
+/*
+ * **An alias is one field with two spellings**, so it must resolve rather than
+ * be registered: a second number for `lookup` would make two meanings of one.
+ */
+static void a_second_spelling_is_the_same_key(void)
+{
+	ncfg_block_t rule;
+	ncfg_block_t global;
+
+	check(ncfg_block_from_name("rule", &rule) && ncfg_block_from_name("global", &global),
+	    "the rule and global blocks resolve");
+	check(ncfg_kind_of(rule, "lookup") == ncfg_kind_of(rule, "table"),
+	    "`lookup` and `table` are one field, so they carry one number");
+	check(ncfg_kind_of(rule, "table") != NCFG_KIND_NONE, "and it is a real one");
+	check(ncfg_kind_of(global, "dns.servers") == ncfg_kind_of(global, "dns"),
+	    "a dns key written inside the sub-block is the same key");
+	check(scope_in("global", "dns.search") == NCFG_SCOPE_ESTATE,
+	    "and it inherits the scope of the spelling it resolves to");
+	check(strcmp(ncfg_key_canonical(rule, "lookup"), "table") == 0,
+	    "which the caller can ask about directly");
+	check(strcmp(ncfg_key_canonical(rule, "from"), "from") == 0,
+	    "a key that is already canonical is returned unchanged");
 }
 
 /*
@@ -173,12 +241,15 @@ static void nothing_host_private_has_a_kind(void)
 	static const struct {
 		const char *block;
 		const char *key;
-	} PRIVATE[] = { { "interface", "mac" }, { "interface", "command" },
-		{ "interface", "args" }, { "interface", "config" },
-		{ "interface", "backend" }, { "interface", "kind" },
+	} PRIVATE[] = { { "interface", "mac" }, { "interface", "probe.command" },
+		{ "interface", "probe.args" }, { "interface", "advertise.backend" },
+		{ "interface", "kind" }, { "interface", "kind.bridge.members" },
 		{ "interface", "master" }, { "interface", "ethtool" },
-		{ "interface", "qdisc" }, { "network", "hooks" }, { "device", "mac" },
-		{ "bluetooth", "address" } };
+		{ "interface", "ethtool.gro" }, { "interface", "qdisc" },
+		{ "interface", "qdisc.bandwidth" }, { "network", "hooks" },
+		{ "device", "mac" }, { "device", "mtu" }, { "bluetooth", "address" },
+		{ "global", "hostname" }, { "global", "control.admin" },
+		{ "global", "remote.agent" }, { "access_point", "device" } };
 	size_t at;
 	int    leaked = 0;
 
@@ -212,13 +283,23 @@ static void no_number_is_used_twice(void)
 		const char *key;
 	} REGISTERED[] = { { "global", "dns" }, { "global", "dns_mode" },
 		{ "global", "dns_search" }, { "global", "dns_domains" },
-		{ "global", "connectivity" }, { "interface", "address" },
-		{ "interface", "prefix" }, { "interface", "prefixes" },
-		{ "interface", "routes" }, { "interface", "mtu" }, { "interface", "vlans" },
-		{ "interface", "nat" }, { "interface", "dns" }, { "interface", "mtu" } };
+		{ "global", "connectivity.requires" }, { "global", "connectivity.ignore" },
+		{ "interface", "config" }, { "interface", "routes" }, { "interface", "mtu" },
+		{ "interface", "vlans" }, { "interface", "nat" }, { "interface", "dns" },
+		{ "interface", "advertise.prefix" }, { "interface", "advertise.dns" },
+		{ "interface", "probe.timeout" }, { "interface", "dot1x.identity" },
+		{ "network", "ssid" }, { "network", "config" }, { "network", "wifi.psk" },
+		{ "network", "wifi.roam.signal" }, { "network", "dns.dns" },
+		{ "access_point", "ssid" }, { "access_point", "channel" },
+		{ "access_point", "wifi.psk" }, { "access_point", "access_control.allow" },
+		{ "rule", "from" }, { "rule", "to" }, { "rule", "table" }, { "rule", "action" },
+		{ "linkset", "members" },
+		/* The same key twice, which is not a collision. */
+		{ "interface", "mtu" } };
 	size_t at;
 	size_t other;
 	int    collisions = 0;
+	int    numbered = 0;
 
 	for (at = 0u; at < sizeof(REGISTERED) / sizeof(REGISTERED[0]); at++) {
 		ncfg_block_t a;
@@ -231,6 +312,7 @@ static void no_number_is_used_twice(void)
 		if (ka == NCFG_KIND_NONE) {
 			continue;
 		}
+		numbered++;
 		for (other = at + 1u; other < sizeof(REGISTERED) / sizeof(REGISTERED[0]);
 		    other++) {
 			ncfg_block_t b;
@@ -250,6 +332,12 @@ static void no_number_is_used_twice(void)
 			collisions++;
 		}
 	}
+	/* **The liveness half.** Every row here is registered, so a run that
+	 * skipped most of them would be comparing nothing and saying so in the
+	 * same words. This caught exactly that, when the list still named keys a
+	 * rewrite had moved. */
+	check(numbered == (int)(sizeof(REGISTERED) / sizeof(REGISTERED[0])),
+	    "every row in the list above has a number, so the comparison ran");
 	check(collisions == 0, "no two keys carry the same wire number");
 }
 
@@ -262,9 +350,51 @@ static void zero_is_reserved_and_an_unknown_key_gets_it(void)
 	    "an unregistered key has no number, so it cannot be written wrongly");
 	check(ncfg_kind_is_taken(NCFG_KIND_NONE),
 	    "zero is permanently taken, so nothing allocates it");
-	check(ncfg_kind_is_taken(ncfg_kind_of(interface, "address")),
+	check(ncfg_kind_is_taken(ncfg_kind_of(interface, "config")),
 	    "and a number in use reads as taken");
 	check(!ncfg_kind_is_taken(0x00FFFFFFu), "while a free one does not");
+}
+
+/*
+ * **A deliberate absence, pinned.** These three are estate-wide by scope and
+ * carry no number, because one spelling accepts either a stored secret or a
+ * PATH -- and a path is an instruction to open a file as root. A scope is a
+ * property of a key and cannot say "in one of its two forms", so the registry
+ * declines to carry them at all.
+ *
+ * Without this case, completing the registry looks like tidying: the keys are
+ * right there in the block, everything around them has a number, and nothing
+ * would say why they do not.
+ */
+static void the_three_cert_keys_are_unregistered_on_purpose(void)
+{
+	static const char *const CERTS[] = { "dot1x.ca_cert", "dot1x.client_cert",
+		"dot1x.private_key" };
+	ncfg_block_t interface;
+	size_t       at;
+	int          numbered = 0;
+	int          narrowed = 0;
+
+	if (!ncfg_block_from_name("interface", &interface)) {
+		check(0, "the interface block resolves");
+		return;
+	}
+	for (at = 0u; at < sizeof(CERTS) / sizeof(CERTS[0]); at++) {
+		if (ncfg_kind_of(interface, CERTS[at]) != NCFG_KIND_NONE) {
+			printf("       %s has a number: a path form can now travel\n", CERTS[at]);
+			numbered++;
+		}
+		if (ncfg_scope_of(interface, CERTS[at]) == NCFG_SCOPE_HOST_PRIVATE) {
+			narrowed++;
+		}
+	}
+	check(numbered == 0, "a key that accepts a root-readable path carries no wire number");
+	check(narrowed == 0,
+	    "and the reason is the value's two forms, not the key being host-private");
+	/* The neighbour that does travel, so the absence is about these three
+	 * rather than about `dot1x` being unreachable. */
+	check(ncfg_kind_of(interface, "dot1x.identity") != NCFG_KIND_NONE,
+	    "while the rest of the block is registered, so this is not a gap in reach");
 }
 
 int main(void)
@@ -274,7 +404,10 @@ int main(void)
 	a_subnet_and_an_address_are_different_scopes();
 	paths_and_hardware_stay_on_the_machine();
 	the_unknown_direction_is_the_narrow_one();
+	a_sub_block_settles_what_is_under_it();
+	a_second_spelling_is_the_same_key();
 	nothing_host_private_has_a_kind();
+	the_three_cert_keys_are_unregistered_on_purpose();
 	no_number_is_used_twice();
 	zero_is_reserved_and_an_unknown_key_gets_it();
 

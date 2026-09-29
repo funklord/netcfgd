@@ -87,6 +87,18 @@ const char *ncfg_block_name(ncfg_block_t block);
 /*
  * HOW FAR A KEY TRAVELS
  *
+ * **A key is identified by its PATH within the block, not by its name.** The
+ * language nests -- `advertise { prefix ... }`, `probe { command ... }`,
+ * `wifi { psk ... }` -- and one spelling means different things at different
+ * depths: `backend` is a router-advertisement daemon inside `advertise` and a
+ * supplicant inside a radio's `wifi`; `dns` is a key, a sub-block, and a key
+ * inside that sub-block. A flat name collapses those, which is how the first
+ * version of this table came to carry six entries that were not keys at all
+ * and to give one number to two meanings (project.md 10.326).
+ *
+ * So `key` is `"mtu"`, `"advertise.prefix"`, `"wifi.roam.signal"`. NULL asks
+ * for the block's default.
+ *
  * **A block default and a short exception list, not a table of every key.**
  * The language has around a hundred and ninety key strings across five
  * lowering files, and the holder's instruction is to merge the two worlds
@@ -96,13 +108,24 @@ const char *ncfg_block_name(ncfg_block_t block);
  * So the rule does the work and the exceptions are the design: **a key is
  * host-private when its value names something only this machine can see, and
  * wider when it describes the network and two machines could hold it
- * identically.** `network` and `access_point` are estate-wide entire;
- * `device` is host-private entire; `interface` is the only genuinely mixed
- * block and carries most of the exceptions.
+ * identically.** `network` and `access_point` are estate-wide entire; `device`
+ * is host-private entire; `interface` is the only genuinely mixed block and
+ * carries most of the exceptions.
  *
- * `key` of NULL asks for the block's default.
+ * **An exception covers what is under it**, so `interface.kind` settles every
+ * key of every link type -- a bridge's members, a tunnel's endpoints -- in one
+ * row. The walk goes key, then parent, then block, so the narrow direction is
+ * what inherits and widening something requires naming it.
+ *
+ * **A second spelling is resolved first and never registered separately**, via
+ * `ncfg_key_canonical`: a record carries a meaning, and `lookup` and `table`
+ * are one field.
  */
 ncfg_scope_t ncfg_scope_of(ncfg_block_t block, const char *key);
+
+/* The spelling this one means, where the language accepts two for one field.
+ * Returns `key` itself where it is already canonical, and NULL for NULL. */
+const char *ncfg_key_canonical(ncfg_block_t block, const char *key);
 
 /* What the block would answer with no exception, for a caller that wants to
  * know whether a key was one. */
@@ -136,17 +159,27 @@ ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block);
  * fails loudly at the point of writing instead of quietly acquiring a
  * neighbour's meaning.
  *
- * **THE REGISTRY IS INCOMPLETE AND CANNOT BE GATED, WHICH IS RECORDED RATHER
- * THAN GLOSSED.** The language recognises keys through chains of `strcmp` in
- * `compile/lower_*.c` and nothing enumerates them, so no test can assert that
- * every travelling key has a number -- the exhaustiveness used for request
- * kinds and for blocks has no analogue here. What makes the gap safe rather
- * than dangerous is the zero above: a missing key cannot be written wrongly,
- * only not at all. project.md 10.325 records what would close it.
+ * **COMPLETENESS CANNOT BE GATED; SOUNDNESS NOW IS.** The language recognises
+ * keys through chains of `strcmp` in `compile/lower_*.c` and nothing
+ * enumerates them, so no test can assert that every travelling key has a
+ * number -- the exhaustiveness used for request kinds and for blocks has no
+ * analogue here. What makes that gap safe rather than dangerous is the zero
+ * above: a missing key cannot be written wrongly, only not at all.
+ *
+ * The other direction is checkable and is checked. `tool/registry_gate.py`
+ * reads those same `strcmp` literals and refuses a registered path whose leaf
+ * is not among them, which is what would have caught the first version of this
+ * table registering `address`, `radvd` and `auto` -- one a key that does not
+ * exist and two that are values. What it cannot check is the NESTING: it sees
+ * the leaf, not which sub-block the leaf belongs to. project.md 10.325 and
+ * 10.326.
  */
 #define NCFG_KIND_NONE 0u
 
-/* The number this key travels under, or `NCFG_KIND_NONE`. */
+/* The number this key travels under, or `NCFG_KIND_NONE`. Takes the same
+ * path spelling as `ncfg_scope_of`, and resolves an alias the same way --
+ * but does NOT inherit from a parent, because a parent's number is the
+ * parent's and a child taking it would put two meanings under one number. */
 unsigned ncfg_kind_of(ncfg_block_t block, const char *key);
 
 /* Whether a number has ever been assigned, including to a retired key. For a
