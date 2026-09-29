@@ -2528,6 +2528,21 @@ typedef struct {
 	char        summary[NCFG_DRIFT_SUMMARY_MAX];
 	/* `reconciling`, `reported only`, or what to do about a refusal. */
 	char        action[NCFG_DRIFT_ACTION_MAX];
+	/*
+	 * Whether this pass is going to put it back.
+	 *
+	 * **Set where the policy is already known**, rather than re-derived by
+	 * whoever wants to know: the loop that writes `action` has the answer
+	 * in hand, and a second lookup elsewhere is a second thing to get
+	 * wrong. A refusal and a stranded credential are never acted on and
+	 * say so here, which a caller comparing `action` text could only guess
+	 * at.
+	 *
+	 * It exists because "netcfgd can see this and is not going to change
+	 * it" is the one thing an operator has to be told without having
+	 * written a `drift` hook first.
+	 */
+	int         acting;
 } ncfg_drift_t;
 
 typedef struct {

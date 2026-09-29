@@ -472,19 +472,55 @@ static void roam_hooks(ncfg_reconcile_t *loop, const ncfg_reconcile_roam_t *roam
 }
 
 /*
- * Tell the `drift` hooks what has just moved.
+ * Say what has just moved: in the log, and to the `drift` hooks.
  *
  * **Not through the plan**, which every other phase goes through, and the
  * reason is the phase's whole point: drift under `report` produces no apply at
  * all, so a planned hook action would never be executed and the one policy
  * whose purpose is "tell me, do not touch it" would be the one where nothing
- * told anybody. The hook *is* the telling.
+ * told anybody.
+ *
+ * **This used to say "the hook IS the telling", and that was the gap.** A hook
+ * tells whoever wrote one. An operator who has not written one -- which is
+ * every operator until they have a reason to -- got nothing at all: the drift
+ * went to a `/run` marker and to any client connected at that instant, and the
+ * journal stayed empty. 10.307 is fifty-two minutes of exactly that shape, and
+ * `drift.sh` had already written down the argument for why `report` must tell
+ * somebody without noticing that it only told a script.
+ *
+ * So the log line goes out first and the hook runs after it, both under the
+ * same "is this new" test -- see below for why that matters.
  *
  * Recorded whether or not the script succeeded, and whether or not the
  * interface declared one: a hook that failed and was retried on every
  * observation is the storm this exists to avoid, and recording it for an
  * interface with no hook costs one line in `/run` and keeps "has this drift
  * been seen" independent of whether anybody was listening.
+ */
+static void announce_drift(const ncfg_drift_t *drift)
+{
+	/*
+	 * **Only what this pass is not going to put back.** A drift that is
+	 * about to be reconciled is announced by the reconcile itself, and a
+	 * second line per pass saying it is coming would be noise on the path
+	 * that works. What has no other voice is the one nobody will act on.
+	 */
+	if (drift->acting) {
+		return;
+	}
+	ncfg_log_emitf("drift", NCFG_LOG_WARNING,
+	    "%s: %s [%s] -- this machine does not match its configuration, and this "
+	    "pass will not change it; `ncfg plan` lists what is outstanding",
+	    drift->interface ? drift->interface : "?", drift->summary, drift->action);
+}
+
+/*
+ * **Why `ncfg_reconcile_restrict` stays silent about what it drops, and must.**
+ * An action dropped there because its interface is not reconciled is the
+ * NORMAL case under `report`, and that function runs every pass -- so naming
+ * each drop there would print the same lines for as long as the drift stood.
+ * The de-duplication lives here, keyed on the drift text in `/run`, which is
+ * why this is the right place for the sentence and that one is not.
  */
 static void drift_hooks(ncfg_reconcile_t *loop, const ncfg_drifts_t *drifts)
 {
@@ -507,6 +543,10 @@ static void drift_hooks(ncfg_reconcile_t *loop, const ncfg_drifts_t *drifts)
 		if (!ncfg_reconcile_tells(last, drift->summary)) {
 			continue;
 		}
+		/* Before the hook, so that a hook which hangs or fails still leaves
+		 * the fact in the journal -- the failure this closes is the absence
+		 * of any record at all. */
+		announce_drift(drift);
 		run_hooks(&loop->world, interface, NCFG_HOOK_PHASE_DRIFT, drift->summary,
 		    "NCFG_ACTION", drift->action);
 		tell(&told, drift->interface, drift->summary);
