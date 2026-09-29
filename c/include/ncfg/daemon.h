@@ -233,6 +233,46 @@ const char *ncfg_tier_name(ncfg_tier_t tier);
 ncfg_tier_t ncfg_tier_of(ncfg_proto_request_kind_t kind);
 
 /*
+ * WHETHER AN ORDER MAY BE RUN TWICE
+ *
+ * A queued order may be leased and retried, or it must stall rather than risk
+ * running twice. **That is a property of the verb and never a field a caller
+ * sets** -- settled by the copyright holder 2026-09-29, project.md 10.320. A
+ * class a caller never writes is a class a caller cannot write wrong, and a
+ * field would be the thing a compromised caller marks idempotent to have its
+ * non-idempotent order retried, which turns a queue's failure mitigation into
+ * the attack.
+ *
+ * **The criterion is whether the order fully determines the effect it asks
+ * for.** `config_put(name, text)` does: the file ends up holding that text
+ * however many times it runs. `profile_save(name)` does not -- `profile_save.c`
+ * writes "what the machine is running" into a profile, so a retry a minute
+ * later captures something else under the same name.
+ *
+ * **Expiry answers "too late"; this answers "twice", and conflating them
+ * misclassifies things.** `wifi_connect` looks dangerous to retry because an
+ * operator may have moved on -- but that is staleness, which an order's
+ * freshness bounds. What this asks is narrower: given that the order is still
+ * valid, does running it again do what running it once did.
+ */
+typedef enum {
+	/*
+	 * **Zero on purpose, and it is the one improvement on `ncfg_tier_of`'s
+	 * shape.** `NCFG_TIER_OBSERVE` is 0, so a request kind missing from that
+	 * table silently becomes the weakest tier and only a test stands between
+	 * that and a new verb arriving unguarded. Here the silent default is the
+	 * refusing one: a verb nobody classified will not be leased, will stall,
+	 * and will need a person -- so the table's omission and the test that
+	 * catches omissions point the same way instead of opposite ways.
+	 */
+	NCFG_ORDER_AT_MOST_ONCE = 0,
+	/* Running it again does what running it once did. */
+	NCFG_ORDER_IDEMPOTENT = 1
+} ncfg_order_class_t;
+
+ncfg_order_class_t ncfg_order_class_of(ncfg_proto_request_kind_t kind);
+
+/*
  * Where a connection came from (0128).
  *
  * **Observed rather than claimed**: it is which socket the connection arrived
