@@ -9515,6 +9515,68 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.314 The shared database measured, and the one thing it cannot be
+
+**Result: fuzznet's database needs nothing new for netcfgd, and the 512-byte
+record body is not the gap it looks like.**
+
+### What netcfgd would put in it, measured on this machine
+
+    /etc/netcfgd/conf.d, all of it    1,903 bytes   a laptop, two networks
+    desired.json                      2,358 bytes
+    observed.json                    15,398 bytes
+    FZN_RECORD_BODY_MAX                 512 bytes
+
+The first reading of that table is raidcfgd's reply-cap finding again. It is
+not: **a record is a signed statement, not a payload.** The bulk goes in
+`blob/` -- content-addressed, a Merkle tree over *sealed* leaves, with two
+verifiers so a relay that has never held the content key can still refuse a
+stranger's garbage -- and a record carries the 32-byte root. 512 is ample for
+a statement about a blob and would be the wrong number for the blob itself.
+
+So the composition is: `blob/` for the configuration bytes, `record/` for the
+signed statement naming which blob is current, `journal` for what was
+received against `ledger` for what a peer has acknowledged -- kept apart
+because *"every distributed configuration bug lives in the gap between
+them"* -- and `sync` for which ranges are missing and which way round.
+
+### netcfgd has already steered this layer without anybody noticing
+
+`record/`, `catalog/` and `persist/` cite netcfgd nowhere; that layer was built
+for fuzzypickles and raidcfgd. But **`blob/` carries netcfgd's constraint as
+the reason for its API shape**: the read-at-offset source and sink were refused
+partly because "netcfgd's constraint is that message boundaries are preserved
+END TO END", so those calls return leaf indices and never bytes. Fifteen of
+fuzznet's headers cite netcfgd, including "netcfgd reached that sentence first"
+about origin.
+
+The brief did that. It was written in August as requirements rather than
+design, and the requirements landed in somebody else's primitives.
+
+### The one thing the config files cannot be
+
+**Both storage seams round-trip opaque bytes keyed by a 32-byte public key.**
+
+    fzn_persist_ops        load/save/list/remove   (slot, subject pubkey) -> bytes
+    fzn_record_store_ops   put/get                 (issuer pubkey, stream) -> bytes
+
+A netifrc-like configuration file cannot round-trip an arbitrary signed record,
+and should not try: the file is the operator's, human-edited and
+human-readable, and constraint 1 makes it the source of truth locally. Storing
+somebody else's opaque signed bytes in it would make it neither.
+
+**What netcfgd already has instead is the renderer.** `c/src/compile/render.c`
+and its two siblings turn a document back into configuration text, in the
+language's spellings rather than the document's. A shared database whose
+content is netcfgd *documents*, rendered out through that, is a thing this tree
+can already do half of.
+
+So "the netifrc-like config files as storage backend" has two readings that
+lead to different work, and this entry deliberately does not pick one --
+`working-practice.md` on holding a discrepancy open rather than spending it.
+The question is recorded for the holder, with the measurement above as its
+basis.
+
 ## 10.313 netcfgd steers fuzznet, and steering has a shape already
 
 **Set by the copyright holder 2026-09-29.** netcfgd's job is to steer fuzznet
