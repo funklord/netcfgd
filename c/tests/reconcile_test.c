@@ -628,6 +628,21 @@ static void drift_is_read_out_of_the_plan(void)
 		    "will never happen");
 		detail("refusal", drifts.at[2].action);
 	}
+	/*
+	 * **`acting` is what decides whether anybody is told**, and it is set
+	 * here rather than re-derived by the pass: a caller comparing the
+	 * `action` TEXT would have to know that "reconciling" is the one word
+	 * meaning "say nothing", and would get a refusal wrong -- no policy
+	 * makes that pass act, whatever the interface's own setting is.
+	 */
+	if (drifts.count >= 3u) {
+		check(drifts.at[0].acting == 1,
+		    "an interface netcfgd puts back needs no warning: the reconcile says so");
+		check(drifts.at[1].acting == 0,
+		    "one under `report` does, or nothing tells an operator without a hook");
+		check(drifts.at[2].acting == 0,
+		    "and a refusal does, on an interface whose own policy is `reconcile`");
+	}
 	{
 		size_t at;
 		int    mentioned = 0;

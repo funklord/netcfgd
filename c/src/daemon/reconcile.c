@@ -376,6 +376,7 @@ void ncfg_reconcile_drift(const ncfg_plan_t *plan, const ncfg_document_t *docume
 		    or_unknown(action->reason.observed), or_unknown(action->reason.desired));
 		(void)snprintf(one->action, sizeof(one->action), "%s",
 		    policy == NCFG_DRIFT_POLICY_RECONCILE ? "reconciling" : "reported only");
+		one->acting = policy == NCFG_DRIFT_POLICY_RECONCILE ? 1 : 0;
 	}
 
 	/* A guard refusing something is worth saying out loud: it is exactly the
@@ -392,6 +393,8 @@ void ncfg_reconcile_drift(const ncfg_plan_t *plan, const ncfg_document_t *docume
 		    or_unknown(refusal->op), or_unknown(refusal->guard));
 		(void)snprintf(one->action, sizeof(one->action), "blocked; %s",
 		    or_unknown(refusal->override_with));
+		/* A guard refused it, so no policy can make this pass act. */
+		one->acting = 0;
 	}
 
 	/* And a credential nobody can revoke, for a stronger version of the same
@@ -408,6 +411,8 @@ void ncfg_reconcile_drift(const ncfg_plan_t *plan, const ncfg_document_t *docume
 		    or_unknown(stranded->credential));
 		(void)snprintf(one->action, sizeof(one->action), "undecided; %s or %s",
 		    or_unknown(stranded->remove_with), or_unknown(stranded->consent_with));
+		/* Nothing is waiting on this one, which is why it needs saying. */
+		one->acting = 0;
 	}
 }
 

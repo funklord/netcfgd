@@ -12195,6 +12195,94 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.330 "The hook is the telling", and the operators who had not written one
+
+A drift netcfgd can see and will not act on is now a line in its own log,
+once, when it appears. Before this it was a `/run` marker, an event to whoever
+happened to be connected at that instant, and a `drift` hook -- and the hook is
+the only one of the three a person reads.
+
+### The sentence that was the bug
+
+`reconcile_pass.c` said it in as many words, and had said it correctly for its
+own purpose:
+
+>  drift under `report` produces no apply at all, so a planned hook action
+>  would never be executed and the one policy whose purpose is "tell me, do not
+>  touch it" would be the one where nothing told anybody. **The hook *is* the
+>  telling.**
+
+The first half is right and is why the phase exists outside the plan. The last
+sentence is true only for an operator who has written a hook -- which is every
+operator until something makes them want one. `drift.sh` carries the same
+argument in its own header, three years of care into making `report` tell
+somebody, and neither file noticed that the somebody had to be a script.
+
+**Measured**: a machine under `on_drift = "report"`, an address removed behind
+netcfgd's back, no `on drift` block in the configuration. The daemon detected
+it, decided not to act, recorded the decision in `/run`, and wrote nothing to
+its log at all.
+
+### What is said, and what deliberately is not
+
+`ncfg_drift_t` gained `acting` -- whether this pass is going to put it back --
+**set where the policy is already known** rather than re-derived by whoever
+wants it. A caller comparing the `action` text would have to know that
+`reconciling` is the one word meaning "stay quiet", and would get a refusal
+wrong: no policy makes a refused action run, whatever the interface's own
+setting says.
+
+    reconcile     acting     silent here; the reconcile announces itself
+    report        not        warned
+    a refusal     not        warned -- somebody is waiting for a change
+                             that is never going to happen
+    stranded      not        warned -- nothing is waiting on it, which is
+                             why it would otherwise go unsaid
+    ignore        --         never reaches this at all, by choice
+
+**The reconcile case stays silent on purpose.** A second line per pass saying a
+change is coming is noise on the path that works, and an operator who learns to
+skip one line skips the other.
+
+**And `ncfg_reconcile_restrict` stays silent too, which is not an oversight.**
+An action dropped there for a `report` interface is the normal case and that
+function runs every pass, so naming each drop would print the same lines for as
+long as the drift stood. The de-duplication lives in the drift path, keyed on
+the drift text in `/run`, which is why the sentence belongs there and not in
+the filter. Both files now say so, so the next reader does not "fix" the quiet
+one.
+
+### It does not close 10.307, and saying so is the point
+
+That machine's radio is under the default policy, which is `reconcile`, so
+none of the above would have fired for it. **The fifty-two minutes remain
+unexplained**, and this entry is not the explanation -- it closes the class
+that 10.307 is an instance of the shape of, not 10.307's own case.
+
+Keeping the two apart is the rule that entry already paid for twice: a cause
+that explains the symptom is not thereby the cause, and a comfortable
+explanation that ends an investigation costs more than no explanation, because
+no explanation keeps somebody looking.
+
+What is now true is narrower and checkable: **a machine that does not match its
+configuration and is not going to be corrected says so in the journal, whether
+or not anybody wrote a hook.** What netcfgd should do about newly-written
+configuration remains the holder's, as 10.307 records.
+
+### What the drift checks say
+
+    a reconciled drift is marked acting, a reported one is not   reconcile_test
+    a refusal is not acting, on a `reconcile` interface          reconcile_test
+    with no hook at all, the daemon says it out loud             drift.sh
+    naming the interface, and what is outstanding                drift.sh
+    once, not on every netlink event while the drift stands      drift.sh
+    and nothing on the reconcile path, which fixed it            drift.sh
+
+The live half is the one worth having: the unit test proves the flag and could
+not notice that nothing read it. Sabotaged both ways -- the flag inverted for a
+refusal and for `report`, each caught by its own assertion; and the
+announcement removed, which fails four live checks and no unit ones.
+
 ## 10.329 The instance folded into the subject, and a sabotage that refused to fail
 
 **The copyright holder, 2026-09-29: fold the instance into the subject.**

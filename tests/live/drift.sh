@@ -120,6 +120,27 @@ runs() {
 	grep -c '^drift ' "$log" 2>/dev/null || true
 }
 
+# The same configuration with no `on drift` block at all, which is what every
+# machine looks like until somebody has a reason to write one.
+write_config_without_a_hook() {
+	cat > "$work/etc/netcfgd.conf" <<CONF
+device drifty0 {
+	kind     = "dummy"
+}
+interface drifty0 {
+	config   = "10.9.0.1/24"
+	on_drift = "$1"
+}
+CONF
+}
+
+# What the daemon said about drift in its own log, rather than what it told a
+# script. `grep -c` counts lines and exits 1 on none, so the `|| true` is what
+# keeps `set -e` out of the assertion.
+said() {
+	grep -c 'does not match its configuration' "$work/daemon.log" 2>/dev/null || true
+}
+
 start_daemon() {
 	"$build/netcfgd" $daemon_flags > "$work/daemon.log" 2>&1 &
 	daemon=$!
@@ -180,6 +201,51 @@ kill "$daemon"
 wait "$daemon" 2>/dev/null || true
 daemon=
 
+# ------------------------------------------------- report, with no hook
+#
+# **The case the hook cannot cover, and the one that cost fifty-two minutes.**
+# The comment above `drift_hooks` used to say "the hook IS the telling", which
+# is true only for an operator who has written one. project.md 10.307 is a
+# machine that did not match its configuration for most of an hour with the
+# journal empty throughout, and 10.330 is this.
+#
+# Nothing here declares a hook, so every assertion below is about the daemon's
+# own log.
+
+: > "$log"
+rm -rf "$work/run"
+mkdir -p "$work/run"
+ip link del drifty0 2>/dev/null || true
+
+write_config_without_a_hook report
+start_daemon
+check "the interface converged with no hook configured" \
+	"$(ip -br addr show drifty0 2>/dev/null | grep -c 10.9.0.1 || true)" 1
+check "and the daemon has said nothing about drift yet" "$(said)" 0
+
+ip addr del 10.9.0.1/24 dev drifty0
+sleep 1
+
+check "a drift netcfgd will not put back is said out loud" "$(said)" 1
+check "naming the interface" \
+	"$(grep -c 'drifty0.*does not match its configuration' "$work/daemon.log" || true)" 1
+check "and saying what is outstanding rather than only that something is" \
+	"$(grep -c 'ncfg plan' "$work/daemon.log" || true)" 1
+
+# The same storm test as the hook's, because the log is on the same
+# de-duplication and a warning per netlink event is worse than a script per
+# netlink event: it is the thing an operator reads.
+for _ in 1 2 3; do
+	ip link add drift-noise type dummy
+	ip link del drift-noise
+done
+sleep 1
+check "and says it once, not on every event while the drift stands" "$(said)" 1
+
+kill "$daemon"
+wait "$daemon" 2>/dev/null || true
+daemon=
+
 # --------------------------------------------------------------- reconcile
 
 : > "$log"
@@ -201,6 +267,10 @@ check "and says so, rather than saying what report says" \
 	"$(grep -c 'action=reconciling' "$log" || true)" 1
 check "and netcfgd put the address back" \
 	"$(ip -br addr show drifty0 2>/dev/null | grep -c 10.9.0.1 || true)" 1
+# **And said nothing about it in those words**, which is the other half of the
+# choice: the reconcile announces itself, and a second warning per pass on the
+# path that works is noise an operator learns to skip.
+check "and did not warn, because it fixed it" "$(said)" 0
 
 if [ "$failures" -eq 0 ]; then
 	echo "drift.sh: all checks passed"
