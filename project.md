@@ -9515,6 +9515,86 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.316 Trying the site model for fit, and the one place it does not
+
+**The holder's experiment, 2026-09-29**: blend the network-wide machinery into
+the local without many special cases. Add site configuration -- not hidden,
+just not in the same tab. Allow configuring hosts other than the local one,
+made obvious in the GUI by a side tree whose **root is the local host**. Scope
+the data the same way: site-wide config always in the database, and
+host-specific replicated config deleted on every other host when that host is
+deleted.
+
+Tried against what exists rather than reasoned about. Three of the four fit
+without new primitives; the fourth does not fit at all and is the finding.
+
+### The tab is a seventeenth view
+
+`main_window.cpp` is a `QTabWidget` and there are sixteen `*_view.cpp` beside
+each other. A site view is the seventeenth and needs no new shape. The picker
+is a tree in the same window, left of the tabs, choosing whose configuration
+the tabs are showing.
+
+**The root being the local host is a presentation choice that contradicts the
+data, deliberately.** In the database the site is above the host; in the tree
+the local machine is the root and everything else hangs off it. That is right
+for the reason constraint 2 exists -- a person who opens the GUI on their
+laptop sees their laptop -- and it is worth writing down so nobody later
+"fixes" the tree to match the model and quietly makes the single-machine case
+feel like an afterthought.
+
+### The scoping is fuzznet's cell, unchanged
+
+`state/` is already `(issuer, subject, kind) -> value`, so site-wide is a cell
+whose subject is the site and host-specific is a cell whose subject is the
+host. No second mechanism, no special case: the same apply, the same conflict
+report, the same ordering.
+
+### The cascade delete works, and the primitive was paid for
+
+Deleting a host is clearing every cell whose subject is that host; the clears
+replicate and every host converges on absence. It holds because **a clear is a
+tombstone rather than an erasure**, keeping the writer and the sequence, and
+fuzznet measured what the other design cost:
+
+>  Measured, when `fzn_state_clear` wiped the entry: a record fifty sequences
+>  BELOW the clear was accepted afterwards and set the value again, because
+>  with the sequence gone there was nothing left to call it stale. **A
+>  revocation that any replay undoes is not a revocation.**
+
+Capacity fails in the right direction too: tombstones are forgotten first and
+a **live** setting is refused rather than evicted, because evicting one
+"silently reverts it to whatever a consumer's default is, which is the kind of
+change nobody can trace back".
+
+### Where it does not fit: every host holding every host
+
+The instruction says host-specific replicated config is deleted on all other
+hosts -- which means every host holds every other host's configuration. That is
+what makes the delete rule necessary, and it is the part that does not scale.
+
+`fzn_state_init(state, entries, capacity)` takes storage from its caller, so
+netcfgd sizes it. A site of a thousand nodes at even a few dozen cells each is
+tens of thousands of entries **on every node**, and constraint 7 says
+`ncfg plan` survives to the smallest build -- netcfgd is meant to run on
+routers, which `node/node.h` also records. A node that cannot hold the site is
+not a node with a smaller view; it is a node returning `FZN_STATE_ERR_FULL` and
+refusing live settings.
+
+**So the missing decision is who replicates what**, and the shape the rest of
+the design already suggests is UniFi's own: a controller-capable host holds the
+whole site, and a leaf node holds the site-wide cells plus the cells whose
+subject is itself. That keeps a router small, keeps the tree view honest for
+whoever is running the controller, and leaves the delete rule meaningful --
+but it means "deleted on all other hosts" is really "deleted wherever it was
+held", which is a weaker and more implementable sentence.
+
+**Not decided here.** It is a capacity question with a constraint behind it,
+and the alternative -- everyone holds everything, sized for the largest site
+netcfgd intends to support -- is a legitimate answer that simply costs
+memory on the smallest device. Which of the two is a question for the holder,
+and the numbers above are what it should be decided on.
+
 ## 10.315 Two scopes, both first class, and where that meets the constraints
 
 **Set by the copyright holder 2026-09-29.** Local and network-wide
