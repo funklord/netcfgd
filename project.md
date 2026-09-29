@@ -12190,6 +12190,70 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.320 An order's idempotence is a property of its verb
+
+**Settled by the copyright holder 2026-09-29**, closing the question 10.319
+left open. An order's idempotence class -- whether it may be leased and retried
+or must stall rather than risk running twice -- is derived from its verb and is
+never a field a caller sets.
+
+### Why that is the strong form, and it is not netcfgd's argument
+
+**A class a caller never writes is a class a caller cannot write wrong.**
+fuzznet states the same principle independently, about the order of checks in
+`fzn_seal_build` rather than about verbs: *"a consumer who does not write the
+order cannot write it wrong."* Two trees reaching it separately is worth more
+than either statement.
+
+The alternative is worse than merely weaker. A field is a thing a compromised
+or buggy caller marks idempotent to get its non-idempotent order retried, which
+turns the queue's failure mitigation into the attack. Derivation removes the
+field, so there is nothing to forge.
+
+### It lands on a shape this tree already has and already tests
+
+`ncfg_tier_of(kind)` is the twin: a pure function from request kind to the tier
+it needs, in the security-critical path, backed by a designated-initialiser
+table. An idempotence class is the same function over the same enum.
+
+**And the discipline to copy is already written**, in
+`authorize_test.c`'s exhaustiveness case:
+
+>  A table compared against itself proves nothing, which is why this list is
+>  spelled out by hand from `doc/socket-protocol.md` section 4 and the
+>  `tier_of` match. The Rust gets this from an exhaustive match; C cannot, so
+>  the exhaustiveness is the assertion at the bottom of this function: every
+>  kind from 0 to `NCFG_PROTO_REQ_COUNT` must appear here exactly once, so a
+>  request added to the protocol and forgotten by the table fails here rather
+>  than defaulting to something nobody chose.
+
+Both halves are load-bearing and neither is optional here: the hand-written
+list because a table checked against itself is one witness twice, and the
+exhaustiveness assertion because C has no exhaustive match to fail the build.
+
+### One improvement on that shape, and the reason to take it
+
+`NCFG_TIER_OBSERVE = 0`, so a request kind missing from the tier table silently
+becomes the **weakest** tier, and only the test stands between that and a new
+verb arriving unguarded. That arrangement is safe today and its safety is a
+test rather than a property.
+
+**The idempotence enum should be ordered so that zero is the stalling class.**
+Then a verb nobody classified defaults to at-most-once -- refusing to lease,
+stalling loudly, needing a human -- and the silent default and the test point
+the same way instead of opposite ways. The tier table cannot be rearranged,
+since `OBSERVE = 0` is in the protocol; a new enum has no such excuse.
+
+That is the `evidence.md` habit applied to a default rather than to a check:
+**make the direction a mistake falls in the safe one**, so the guard and the
+absence of the guard agree.
+
+### What this leaves
+
+The verb-to-class table itself, which is a per-verb judgement across the
+protocol and wants writing with the same care as the tier list. And the lease
+term for the idempotent class, still a number nobody has measured.
+
 ## 10.319 A data-driven order queue, and where the choice actually lies
 
 **The holder, 2026-09-29: plan the order queue so that two readers of one queue
