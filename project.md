@@ -65,6 +65,10 @@ Note the crate name and the installed binary name need not match — if anything
    **This is the one constraint written in a language rather than in a property, and the language is not settled.** The copyright holder has said netcfgd may be rewritten in C or C++ at some point, so constraint 4 is the only one of the nine that a rewrite would have to restate rather than carry across. What it is really bounding is *audit surface* -- one place where syscalls and pointer arithmetic live, one thing to review to that bar, one fuzz target set, one Makefile gate that reads "everything except this one name" ([0012](doc/decision/0012-one-audited-crate-not-one-protocol.md)). That property is expressible in C: one directory, and a gate naming which translation units may call into the kernel. What is *not* expressible is the guarantee -- `forbid(unsafe_code)` is checked by the compiler and refuses to build, while a directory convention is checked by whoever is looking. **State the property when restating it, and do not claim the guarantee.** Only three decision records lean on it as load-bearing (0012, 0027, [0133](doc/decision/0133-reuse-was-never-the-question-the-form-of-reuse-was.md)); 35 of 160 mention Rust at all (re-counted 2026-09-06 with `grep -rl 'Rust\|rust\b' doc/decision/`), and the rest are about networking and would survive a rewrite untouched. **The transition, if it is attempted, is planned in [doc/c-transition.md](doc/c-transition.md) and nowhere else** -- deliberately a separate file rather than a section here, on the holder's instruction, so that abandoning it is one deletion rather than an unpicking. It carries the measurement that decides the question: serde is 508,084 bytes, 18.3% of the installed binary, of which the JSON library itself is 28,688 and the rest is generated codecs -- so the cheap experiment is to replace those codecs *in Rust* and re-measure before writing any C.
 5. **The desired-state document never contains secret material.** Only `SecretRef` indirections. This is invariant across local files, `/run` state, and any future wire transmission.
 6. **The one-way rule.** No change to the model, config language or socket API may be justified *solely* by an adapter's needs (NM, RESTCONF/YANG, or anything else). If an adapter wants a concept, it must independently be something a local user would want in their own config file.
+
+   **It governs adapters, and not netcfgd's own network-wide scope.** Settled by the copyright holder 2026-09-29, [0271](doc/decision/0271-the-one-way-rule-governs-adapters.md), because the literal reading refuses the site model on principle while quoting this rule correctly: *"this WLAN spans forty access points"* is not something a single-machine operator wants in their file and never will be.
+
+   **The test is whose model a concept comes from, not which scope it serves.** An adapter is somebody else's design pressing inward -- NetworkManager's, RESTCONF's -- and this rule exists so that pressure cannot reshape netcfgd. Local and network-wide are both netcfgd's own use cases, stated co-equal by the holder, so neither is subject to it. **That is a boundary and not a loophole**: a concept does not escape this rule by being described as network-wide, only by being netcfgd's own. An adapter wanting a site concept is still an adapter wanting a concept, and still answers here.
 7. **`ncfg plan` survives to the smallest build.** Not being a black box is the product; a black box on an embedded device with no console is worse than one on a laptop.
 8. **Size budgets are CI gates from commit 1.** Budgets adopted later are budgets already blown.
 9. **Virtual networking features that are not directly useful for real-world networking, or are not very common use cases, are deferred indefinitely.** An overgrown VM topology is not a use case, it is a failure. This is why Open vSwitch is not on any list; `ifb`, `veth`, `dummy`, `vrf` and `macvlan` are here already and earn their places. See [0036](doc/decision/0036-the-shim-is-not-the-roadmap.md).
@@ -10014,12 +10018,13 @@ A network-wide scope is not that: it is netcfgd's own second use case, stated
 by the holder as co-equal with the first. Under that reading constraint 6 is
 untouched and still does its job against adapters.
 
-**But that is a reading, and the wrong one blocks the entire feature.** Someone
-applying constraint 6 literally to the site model refuses it on principle, and
-they would be quoting the rules correctly. So it is the holder's to say
-whether constraint 6 means adapters or means everything, and this is recorded
-rather than decided -- `working-practice.md` on flagging a contradiction
-instead of spending it.
+**~~But that is a reading, and the wrong one blocks the entire feature.~~
+Settled 2026-09-29: constraint 6 governs adapters, and 0271 records it.** The
+reading above is the ruling now, with one thing the entry did not say and the
+record does: it is a boundary rather than a loophole. A concept does not
+escape the one-way rule by being called network-wide, only by being netcfgd's
+own -- an adapter wanting a site concept is still an adapter wanting a
+concept.
 
 ### The questions that need answers before any of it is built
 
