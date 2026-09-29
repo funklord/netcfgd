@@ -9519,6 +9519,134 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.327 The record encoder, and the one refusal it turned out not to own
+
+`bridge/record_encode.c`. Given a key, its value and who the statement is
+about, it fills in what `fzn_record_sign` needs -- and refuses the cases that
+must not become a record at all. It does not sign, allocate or hold a key: the
+issuer, the sequence and the clock are facts about a node rather than about a
+configuration key.
+
+**In `bridge/` because it cites fuzznet's constants rather than copying them,
+and the daemon does not link fuzznet.** `FZN_RECORD_BODY_MAX`,
+`FZN_SUBJECT_LEN` and `FZN_STREAM_RESERVED` are fuzznet's to move. It takes
+exactly one source out of `c/` -- `compile/scope.c`, which includes nothing but
+its own header and `<string.h>` -- rather than the library, so that the
+program section 3 keeps small stays small.
+
+### The body is the value as the language spells it
+
+Not a second encoding. 10.324 settled the mirror: netcfgd's format is what
+records are rendered into and read back from, so a body carrying the
+language's own text round-trips through `render.c` and `parse.c`, which are
+already disciplined against each other.
+
+**A newline in a body is legitimate and is not an injection**, which was
+checked in `lex.c` rather than assumed. A string "runs to its closing quote,
+across lines if need be", because the netifrc spelling puts several addresses
+in one value, and `ncfg_render_quote` escapes the quote and the backslash. The
+obvious guess is the other way, and a refusal written on it would have refused
+a whole class of real configuration.
+
+What is refused is a NUL: it survives a record and truncates on the way back
+out through any of the C string paths that render it, so the two directions
+would disagree about a value that verified.
+
+### One stream per scope, which is fuzznet's argument rather than a choice
+
+`record/record.h` says a stream exists because of PARTIAL ENTITLEMENT. An
+issuer numbers each stream from 1 independently, `fzn_journal_admit` refuses a
+gap, and a recipient not allowed to see some of an issuer's records "develops
+holes it is not permitted to fill" -- then asks for the missing one for ever.
+
+A host that may see its own configuration and not the estate's is exactly that
+recipient. So:
+
+    NCFG_STREAM_HOST    FZN_STREAM_RESERVED + 0
+    NCFG_STREAM_GROUP   FZN_STREAM_RESERVED + 1
+    NCFG_STREAM_ESTATE  FZN_STREAM_RESERVED + 2
+
+Nothing is lost by splitting them: two scopes are two cells, and `state/`
+orders within a writer, which is (issuer, stream). What does need ordering -- a
+set and a clear of one key -- shares a scope by construction.
+
+**The stream is DERIVED and the signature offers no way to pass one.** A caller
+that could name it could put an estate-wide value in the host track, where a
+host entitled to its own configuration would read it as its own.
+
+**The numbers are netcfgd's and mean nothing to anybody else**, a stream being
+scoped to its issuer. What is not netcfgd's is the floor, and a static assert
+holds it if `FZN_STREAM_RESERVED` moves.
+
+### The subject, and the byte that keeps two names apart
+
+A host's subject is its public key. A group's and the estate's are a name
+hashed to 32 bytes, through the caller's `fzn_hash_ops_t` as every fuzznet seam
+takes it -- domain-separated with a versioned tag, a NUL, the scope byte and
+another NUL, so that a group called `roof` and an estate called `roof` address
+different cells and neither can collide with another consumer's derivation.
+
+**`fzn_hash_ops_t` returns NONZERO on success, and this file had it backwards
+first.** `session/commitment.h` states it in capitals with a paragraph on why
+it is worth one: reading success as failure refuses a good hash, which is loud,
+while reading failure as success hands the caller whatever was on the stack.
+It failed in the loud direction and five checks went red at once.
+
+### The refusal it does not own, correcting 10.325
+
+That entry said a record encoder refusing `NCFG_CERT_SOURCE_PATH` is what would
+let `dot1x.ca_cert`, `dot1x.client_cert` and `dot1x.private_key` be numbered.
+**It cannot live here.** A cert source is a document type; this takes bytes;
+and giving it `ncfg/document.h` would pull the model into the unprivileged
+network-facing program that section 3 exists to keep small.
+
+So the refusal belongs wherever a document field becomes a value, which is not
+written. The three keys stay unregistered and are refused as unregistered --
+asserted, so that a later reader does not conclude the reason has gone.
+
+**The condition moved and the gap did not close**, which is worth more than the
+one word it would have taken to write as though it had.
+
+### What is checked, and the one check that is not this tree talking to itself
+
+    a host-private key is refused, by its own code            encoder test
+    a key with no number cannot be said                       encoder test
+    the stream comes from the scope, three distinct tracks    encoder test
+    a subject must match the scope, all three ways            encoder test
+    a refusal writes nothing into the fields                  encoder test
+    the bound is fuzznet's, at the boundary and one past it   encoder test
+    a multi-line value is ordinary, a NUL is not              encoder test
+    a group and an estate of one name differ                  encoder test
+    sign, open, verify, and read every field back out         the control
+
+**The last is the point of the file.** Every other assertion asks netcfgd about
+netcfgd. That one takes the fields through `fzn_record_sign`,
+`fzn_record_open` and `fzn_record_verify` and reads the kind, stream, subject
+and body out of the signed bytes -- comparing the kind against the REGISTRY and
+the stream against the CONSTANT rather than against the struct the encoder just
+filled, which would be the same witness twice one call further along.
+
+Sabotaged five ways, each caught by the check meant for it: the host-private
+refusal removed, the three streams collapsed into one, the scope byte dropped
+from the domain separation, and a wrong kind put on the wire -- which only the
+control sees.
+
+**And the fifth is the two-layer proof.** A MAC cannot travel because the
+registry gives it no number AND because the encoder refuses a host-private
+scope. Removing both at once is what shows they are independent: the encoder
+test goes red and so does `scope_test`, separately, and removing either alone
+leaves the other red. That is the one failure with no recall -- a value that
+must not leave the machine, once signed and admitted, is held by everyone who
+admitted it.
+
+### It runs in `make check` now, which it would not have
+
+`bridge/` was reached by nothing in the root Makefile: its tests ran when
+somebody typed `cd bridge && make test`. The encoder is the piece least able to
+afford that, deciding what leaves the machine, so `bridge-test` is in
+`PORTABLE_GATES` -- about eight seconds incrementally, and one fuzznet build
+the first time on a clean tree.
+
 ## 10.326 A key is a path, and the first registry named six things that were not keys
 
 **Written 2026-09-29, correcting 10.325 and the headline pair in 10.322.**

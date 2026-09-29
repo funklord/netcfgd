@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -122,7 +122,7 @@ ncfg-link:
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
                  example adapters gui linkage c-test agree ledger module-order \
-                 registry
+                 registry bridge-test
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -316,6 +316,22 @@ c-test:
 
 client-test: client/tests/client_test
 	@$(MAKE) --no-print-directory -C client test
+
+# The fuzznet-facing side, which `make check` reached through nothing until the
+# record encoder landed there.
+#
+# **A gate that runs only when somebody types `cd bridge && make test` is a
+# gate that has stopped running**, and the encoder is the piece least able to
+# afford that: it decides what leaves this machine. So it joins the portable
+# gates, at the price of the submodule -- which this tree's own rule already
+# accepts, since `bridge/Makefile` fetches fuzznet itself and fails loudly
+# rather than building less than it was asked for.
+#
+# Measured incrementally at about eight seconds, fuzznet's own objects being
+# cached in `bridge/build`. The first run on a clean tree pays for a fuzznet
+# build, once.
+bridge-test:
+	@$(MAKE) --no-print-directory -C bridge test
 
 # The two client implementations, asked the same questions.
 #
