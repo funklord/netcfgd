@@ -8,6 +8,21 @@
  *   express the case that breaks it: **a fact about one host that the estate
  *   should nonetheless see**, which is what an interface's address is.
  *
+ * THE SCOPE VOCABULARY IS FUZZNET'S, AND THIS ENUM IS A PLACEHOLDER
+ *   **Settled by the copyright holder 2026-09-29: the scopes are a general
+ *   feature of fuzznet, not netcfgd's.** Every consumer of a shared estate
+ *   needs the same four-or-more answers about how far a value travels, and a
+ *   second vocabulary here is how two trees come to disagree about one
+ *   concept.
+ *
+ *   So `ncfg_scope_t` exists only until fuzznet carries it, and it is named
+ *   and shaped to be replaced rather than reconciled: when that type lands,
+ *   this enum goes and the table in `compile/scope.c` is retyped onto it. What
+ *   stays netcfgd's is the **table**, because which scope `prefix` belongs to
+ *   is a fact about netcfgd's language that no other consumer can know.
+ *
+ *   Signalled to fuzznet rather than assumed -- project.md 10.323.
+ *
  * A SCOPE IS A CELL'S SUBJECT, WHICH IS WHY THE SET CAN GROW
  *   fuzznet's `state/` is `(issuer, subject, kind) -> value`. Estate-wide is a
  *   cell whose subject is the estate, group-wide one whose subject is that

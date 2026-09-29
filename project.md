@@ -9519,6 +9519,55 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.323 The scopes are fuzznet's, and netcfgd wrote them anyway
+
+**The holder, 2026-09-29: the scopes are part of fuzznet and general features
+of it.** They are not netcfgd's to define.
+
+**And 10.322 had already argued that, in netcfgd's own words** -- "a scope is a
+cell's subject", "adding a scope is adding a kind of subject, not a mechanism",
+"this should be expressed in fuzznet's terms rather than in a netcfgd enum that
+would need widening every time" -- and then `ncfg_scope_t` was written into
+`ncfg/scope.h` an hour later.
+
+**That is a worse shape than the three earlier misses in this integration.**
+Those were things the tree had already decided that nobody had looked up. This
+one was reasoned out correctly, written down correctly, and then contradicted by
+the next commit. Recognising that a concept belongs to a dependency and
+implementing it locally regardless is how a vendored copy of somebody's idea
+becomes permanent -- and `harmonization.md` names the cost: two consumers each
+patch the same rough edge differently, and the library then has three behaviours
+and no owner.
+
+### What was split, and where each half went
+
+**The vocabulary is signalled**, as fuzznet's section 402: four scopes,
+host-private through estate, with the reasoning netcfgd has for each and one
+property asked to be designed in -- the narrowest at zero, because widening a
+scope publishes configuration its author never offered anybody while narrowing
+one only fails to share. netcfgd has that asymmetry both ways already and it
+bit once, in `NCFG_TIER_OBSERVE`.
+
+**The table stays here**, and that half is not fuzznet's business: which scope
+`prefix` belongs to, against `address`, against a `mac`, is a fact about
+netcfgd's configuration language that no other consumer can know or should
+carry.
+
+**`ncfg_scope_t` stays as a placeholder and says so in its own header** -- named
+and shaped to be replaced rather than reconciled, with the condition written
+down: when fuzznet carries the type, the enum goes and `compile/scope.c` is
+retyped onto it. An unmarked placeholder is the thing that becomes a parallel
+vocabulary; a marked one is a dependency nobody has to discover.
+
+### The habit this is the fourth instance of
+
+The process shape, the crypto backend, the capability-to-tier mapping, and now
+this. Three were answers already in a tree nobody read; this one was an answer
+netcfgd wrote and then ignored. **The remedy for the first three was to grep
+before designing. The remedy for this one is different: re-read what you just
+concluded before implementing against it**, because the conclusion and the
+implementation were minutes apart and still disagreed.
+
 ## 10.322 The local/network boundary runs at block level, and four keys cross it
 
 10.315 called this the bulk of the design. Measured against the language as it
