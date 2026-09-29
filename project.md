@@ -12190,6 +12190,81 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.311 The crypto backend was already chosen, one level down
+
+0270 has the decision. The measuring is here, and most of it is about a wrong
+inference drawn from correct evidence.
+
+### What 0269 got wrong, within a day of writing it
+
+It said netcfgd "must choose a crypto backend, and fuzznet deliberately does
+not choose for it", on two measurements that were both true:
+`wire/seal.o` carries no undefined AEAD or `crypto_` symbol, and there was no
+Monocypher in the submodule.
+
+**There was no Monocypher in the submodule because `git submodule add` does not
+recurse.** fuzznet vendors it -- `MONO_VENDORED := monocypher` in its Makefile,
+and a `monocypher` entry in its own `.gitmodules` -- pinned at `ab2b16d`, which
+is tag **4.0.3**, which is the version its golden vector was produced against.
+
+What the wrong reading produced: a second Monocypher submodule at netcfgd's own
+root, pinned by hand at 4.0.3 because fuzzypickles pins it there. Removed
+before it was committed, on reading one line of fuzznet's Makefile.
+
+**An uninitialised nested submodule and an absent dependency are
+indistinguishable from the consumer's side**, and only one of the two readings
+invents work. The remedy cost one `cat fuzznet/.gitmodules` and is this tree's
+own rule pointed outward: ask what the dependency already decided before
+deciding for it.
+
+### The failure the guard is written against, tested rather than assumed
+
+fuzznet gates its Monocypher bindings on finding `src/monocypher.c` and, when
+it cannot, **skips them with a notice rather than failing**. That is right for
+fuzznet, whose crypto is a vtable a consumer may fill some other way. For
+netcfgd it means a green build of a bridge that can refuse frames and never
+accept one -- raidcfgd's silent-backend failure arriving one level of nesting
+down.
+
+So the fetch guard tests for `fuzznet/monocypher/src/monocypher.c` and not for
+`fuzznet/Makefile` alone. Deinitialised the nested submodule, ran `make
+fuzznet`, watched it detect the absence, fetch recursively, and report
+`monocypher: 4.0.3`.
+
+### The positive control, and the first version of it that proved nothing
+
+`bridge/tests/peek_test` builds a frame with the real AEAD and reads it back --
+11 checks where 0269 could show only refusals.
+
+**The first version tested fuzznet and not netcfgd.** Every check called
+`fzn_seal_peek` directly, so every one would have passed against a
+`netcfgd-remote` that read the wrong descriptor, printed the wrong field, or
+was linked against objects it had not been compiled for. *A correct function is
+not a working feature*, and the seam the program exists to hold was the one the
+test skipped.
+
+Three checks now run the actual binary with the frame on its actual stdin.
+Sabotaging the program's own `printf` fails exactly one of them, which is how
+it was established that they were looking at the program at all.
+
+It is deliberately **not** a copy of fuzznet's golden vector: that array has
+provenance and answers "do two independently written builds agree", and copying
+it here would be a second copy of somebody else's fixture answering a question
+netcfgd is not asking.
+
+### A filename filter that was a claim about somebody else's naming
+
+The bridge links every fuzznet object that does not define `main`, and the
+first filter matched `/test/|_test\.o|main\.o`. Turning the crypto on built
+`node/fuzznetd.c`, which carries a `main`, matches none of those, and the link
+failed with *multiple definition of `main`*.
+
+It asks `nm` now. **A filter over names is a guess about a tree this one does
+not own; the objects know which of them has an entry point.**
+
+    bridge/netcfgd-remote   969,512 -> 1,236,488 bytes with the crypto linked
+    make check              green; peek_test 11 checks
+
 ## 10.310 fuzznet is in the tree, linked by a program that admits what it is not
 
 0269 has the decision. What belongs here is the measuring.

@@ -119,3 +119,5 @@ adapter/netcfgd-tde/build/
 # The bridge program (bridge/Makefile). fuzznet keeps its own build output
 # out of the way through its own .gitignore, inside the submodule.
 bridge/netcfgd-remote
+
+bridge/tests/peek_test

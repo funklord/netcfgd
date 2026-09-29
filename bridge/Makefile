@@ -14,6 +14,7 @@
 #
 # TARGETS
 #   make            -- the program
+#   make test       -- build and run the checks
 #   make fuzznet    -- fetch and build the submodule, nothing else
 #   make clean      -- what this build produced, by name
 #   make DEBUG=1    -- unoptimized and symbol-rich (-Og -g)
@@ -47,7 +48,7 @@ FUZZNET_BLD = build
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
 CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -I$(FUZZNET) -I$(FUZZNET)/wire/generated
+CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
@@ -64,7 +65,7 @@ endif
 FUZZNET_DEFS = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 	       -DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
 
-.PHONY: all fuzznet clean
+.PHONY: all fuzznet test clean
 
 all: $(PROGRAM)
 
@@ -78,7 +79,14 @@ all: $(PROGRAM)
 # clone is not a compile, and a build with no network should fail naming the
 # submodule rather than timing out inside something else.
 fuzznet:
-	@if [ ! -e $(FUZZNET)/Makefile ]; then \
+	@# **`--recursive`, and that is not tidiness.** fuzznet vendors Monocypher
+	@# as a submodule of its own and the crypto is a vtable: without it the
+	@# bindings are not built, `MONOCYPHER_DIR` finds no `src/monocypher.c`,
+	@# and fuzznet's own Makefile SKIPS them with a notice rather than
+	@# failing. The build would then succeed having produced a library that
+	@# cannot verify a frame -- which is raidcfgd's silent-backend failure
+	@# (build-and-commit.md) arriving one level of nesting down.
+	@if [ ! -e $(FUZZNET)/Makefile ] || [ ! -e $(FUZZNET)/monocypher/src/monocypher.c ]; then \
 		if ! command -v git >/dev/null 2>&1; then \
 			echo "bridge: fuzznet is absent and git is not installed to fetch it." >&2; \
 			exit 1; \
@@ -89,25 +97,45 @@ fuzznet:
 			exit 1; \
 		fi; \
 		echo "bridge: fetching the fuzznet submodule at the commit this tree pins"; \
-		git -C .. submodule update --init -- fuzznet || { \
+		git -C .. submodule update --init --recursive -- fuzznet || { \
 			echo "bridge: could not fetch the fuzznet submodule." >&2; \
 			exit 1; \
 		}; \
 	fi
 	@$(MAKE) --no-print-directory -C $(FUZZNET) BUILD_DIR=$(FUZZNET_BLD) all
 
-# Every object fuzznet's build produced, minus the ones carrying a `main` or
-# belonging to its suites. Asked of the tree rather than listed: fuzznet grows
-# modules, and a list here would be a second thing to keep true and the one
-# place it went wrong would be the module somebody had just added.
+# Every object fuzznet's build produced, minus the ones that define `main`.
+#
+# **Asked of the objects with `nm`, not guessed from their names.** The first
+# version of this filtered `/test/|_test\.o|main\.o`, which is a claim about
+# fuzznet's file naming rather than about what is in the files -- and it was
+# wrong the moment the build grew: `node/fuzznetd.c` carries a `main`, is named
+# nothing like any of those, and the link failed with "multiple definition of
+# `main'" as soon as Monocypher turned that target on.
+#
+# A list written here would be worse still: fuzznet grows modules, and the one
+# place a list went wrong would be the module somebody had just added. The
+# objects know which of them has an entry point; nothing else has to.
 FUZZNET_OBJS = $(shell find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' 2>/dev/null | \
-	       grep -vE '/test/|_test\.o|main\.o')
+	       while read -r o; do \
+	               nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \
+	       done)
 
 $(PROGRAM): $(SRCS) fuzznet
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(FUZZNET_OBJS) $(LDFLAGS) -o $@
 
+# The read path against a frame the library builds, which is the control the
+# program itself cannot show: every answer `--peek` gives by hand is a refusal,
+# and a program that can only refuse looks like one that refuses everything.
+test: tests/peek_test $(PROGRAM)
+	./tests/peek_test
+
+tests/peek_test: tests/peek_test.c fuzznet
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< $(FUZZNET_OBJS) $(LDFLAGS) -o $@
+
 # By name, and nothing by pattern this directory does not own. fuzznet's build
 # output is fuzznet's to remove, through its own clean.
 clean:
-	rm -f $(PROGRAM)
-	@echo "clean: removed $(PROGRAM); fuzznet's objects are its own to clean"
+	rm -f $(PROGRAM) tests/peek_test
+	@echo "clean: removed $(PROGRAM) and tests/peek_test; fuzznet's objects"
+	@echo "clean:   are its own to clean"
