@@ -12471,9 +12471,31 @@ choosing which range to fetch, and between nodes choosing which runs a job.
 **Three consumers is a better argument for generalising than netcfgd's one**,
 and it is the holder's own: generalise it until everything can use it.
 
-Worth putting to fuzznet rather than assuming: whether "fully equivalent" means
-active/standby, which `claim/` already delivers, or active/active, which needs
-the assignment primitive inside the host as well as across it.
+**Answered by the holder 2026-09-29: active/active, both daemons work.** So
+`claim/` alone does not cover it, and the two things it protects turn out to
+have different granularity.
+
+**Record issuance already permits two writers.** The key is `(issuer, stream)`
+-- `fzn_record_store_ops` takes both and `claim.h` states the invariant as "one
+writer per (issuer, stream)" -- so two daemons on different streams satisfy it
+without either being an owner. Single ownership is sufficient for that
+invariant, not necessary, which the header's wording slightly obscures.
+
+**The ratchet is the hard case and does not partition that way**, being per
+direction per peer, so it divides by peer instead.
+
+**Both divisions are the same assignment problem one scale down**: which daemon
+owns which stream, and which owns which peer's chains, is members-and-a-key
+with two processes instead of a hundred hosts. That is the strongest form of
+the generalisation argument yet -- the function that decides which host fetches
+a range decides which of two local daemons advances a chain.
+
+Sent to fuzznet as their section 398. It is numbered 398 and not 397 because
+that tree took 397 between the fetch and the append, and the number had been
+read before the fetch -- **a stale fact used a few minutes later**, caught by
+their own docs gate rather than by netcfgd noticing. Running the dependency's
+gate before pushing into it is what made that a renumber rather than a broken
+build for whoever fetches next.
 
 ### What this does not settle
 
