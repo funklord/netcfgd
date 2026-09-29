@@ -31,6 +31,8 @@
  */
 #include "wire/seal.h"
 
+#include "ncfg_client.h"
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -67,19 +69,70 @@ static int peek_from_stdin(void)
 	return 0;
 }
 
+/*
+ * Ask the daemon what this connection may do.
+ *
+ * **This is the whole of 0128 from the agent's side, and it had never been
+ * asked.** That record splits remote access in two: the agent decides who the
+ * caller is, because it terminates fuzznet's protocol and the daemon sees only
+ * a unix socket; and the daemon decides what remote can *ever* do, whoever it
+ * is, because origin is which socket you arrived on and there is no field to
+ * forge. The second half is the property worth having -- a compromised agent
+ * reaches what the remote policy allows and not the machine.
+ *
+ * `ncfg_client_tiers` is the daemon answering exactly that question about the
+ * caller in front of it, so pointing it at the remote socket is the bound
+ * being read back rather than inferred. `control_exposure.sh` already checks
+ * who may *open* that socket; nothing has ever connected to it and been told
+ * what it may do.
+ *
+ * Read-only, and it sends no configuration. An agent that could not ask this
+ * would have to discover the bound by being refused.
+ */
+static int tiers_of(const char *socket_path)
+{
+	char            message[512] = "";
+	ncfg_client_t  *client;
+	ncfg_tiers_t    tiers;
+	int             ok;
+
+	client = ncfg_client_open(socket_path, message, sizeof(message));
+	if (!client) {
+		(void)fprintf(stderr, "netcfgd-remote: %s\n", message);
+		return 1;
+	}
+	memset(&tiers, 0, sizeof(tiers));
+	ok = ncfg_client_tiers(client, &tiers, message, sizeof(message));
+	ncfg_client_close(client);
+	if (!ok) {
+		(void)fprintf(stderr, "netcfgd-remote: %s\n", message);
+		return 1;
+	}
+	(void)printf("observe %d  wifi %d  admin %d\n", tiers.observe, tiers.wifi, tiers.admin);
+	return 0;
+}
+
 static void usage(void)
 {
-	(void)printf("netcfgd-remote --peek   read one frame on stdin and say what it is\n");
+	(void)printf("netcfgd-remote --peek            read one frame on stdin, say what it is\n");
+	(void)printf("netcfgd-remote --tiers [socket]  ask the daemon what this connection may do\n");
 	(void)printf("netcfgd-remote --version\n");
 	(void)printf("\n");
-	(void)printf("The UDP listener, the connection to netcfgd and the mapping from a\n");
-	(void)printf("capability to netcfgd's observe/wifi/admin tiers are not built yet.\n");
+	(void)printf("The UDP listener and forwarding a received frame's request are not\n");
+	(void)printf("built yet. There is no capability-to-tier mapping to build: 0128 makes\n");
+	(void)printf("the remote policy a set of tiers rather than principals, and the daemon\n");
+	(void)printf("enforces it by which socket a connection arrived on.\n");
 }
 
 int main(int argc, char **argv)
 {
 	if (argc == 2 && strcmp(argv[1], "--peek") == 0) {
 		return peek_from_stdin();
+	}
+	if (argc >= 2 && strcmp(argv[1], "--tiers") == 0) {
+		/* NULL is the client library's own default path, which is the local
+		 * socket. Naming the remote one is the case this exists for. */
+		return tiers_of(argc > 2 ? argv[2] : NULL);
 	}
 	if (argc == 2 && strcmp(argv[1], "--version") == 0) {
 		(void)printf("netcfgd-remote -- Copyright (C) 2026 Nabeel Sowan "

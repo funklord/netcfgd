@@ -2209,6 +2209,13 @@ live:
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
 	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
+	@# What a remote connection may DO, which is the other half of the one
+	@# above: that checks who may open the remote socket (0159), this asks the
+	@# daemon what a caller on it is allowed, and the discriminator is that the
+	@# same daemon answers differently on its two sockets. No namespace, for
+	@# the same reason -- it binds unix sockets and needs a real uid. Skipped
+	@# where `bridge/` is not built, since the bridge is what connects.
+	@NCFG_LIVE=1 sh tests/live/remote_tiers.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"

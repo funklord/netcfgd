@@ -12190,6 +12190,71 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.312 There was no mapping to build, and the half nobody had asked
+
+**0128 decided this in August and the daemon has implemented it since.** The
+capability-to-tier mapping I had named as the next design decision does not
+exist and should not: that record makes the remote policy **a set of tiers
+rather than principals**, because every remote caller arrives as the agent and
+`user:alice` in a remote policy would be a sentence the daemon cannot evaluate
+and an operator would reasonably believe.
+
+    global { remote { observe = true  wifi = true  admin = false } }
+
+The split is *the agent authenticates, the daemon bounds*. The agent decides
+who the caller is, because it terminates fuzznet's protocol and the daemon sees
+a unix socket it could not check a signature on. The daemon decides what remote
+can **ever** do, whoever it is, because origin is which socket a connection
+arrived on -- a property observed rather than a claim evaluated, with no field
+to forge in either direction.
+
+All of it is built: `ncfg_remote_policy_t`, `ncfg_arrival_t`, `lower_remote_key`
+in the compiler, `ncfg_main_remote_is_open` gating the socket's existence, and
+`bind_one(where.remote_socket, NCFG_ARRIVED_REMOTE, agent, 1u, ...)`.
+
+**Third time in this integration that the answer was already in the tree** --
+the process shape, the crypto backend, and now this. The cost of not looking
+has been measured twice already; the cost of looking is one `grep`.
+
+### What was genuinely missing
+
+**Nothing had ever connected to the remote socket and been told what it may
+do.** `control_exposure.sh` covers who may *open* it, which is 0159's question
+and a different one. The bound itself -- the property the whole split exists
+for -- was unexercised, because until `bridge/` there was nothing to connect
+with.
+
+`tests/live/remote_tiers.sh` asks it now, through `ncfg_client_tiers`, which is
+the daemon answering about the caller in front of it rather than anything
+inferred:
+
+    a local connection gets the local policy          observe 1  wifi 1  admin 1
+    and the same daemon bounds the same caller
+      on the remote socket                            observe 1  wifi 1  admin 0
+
+**The second line alone would pass against a daemon that answered the same way
+to everyone.** What discriminates is that one running daemon answers
+differently on its two sockets: same process, same uid, one socket apart. That
+is origin deciding, and it is the arrangement a wrong implementation fails.
+
+Sabotaged by making `remote_allows` return 1 for `NCFG_TIER_ADMIN`: the run
+fails that check and prints `expected admin 0, actual admin 1`. Restored,
+green.
+
+Two cases beside it for the absence: no `remote` block means no socket, and the
+bridge cannot reach one -- constraint 2 where the difference is a security
+property rather than tidiness.
+
+### What the bridge gained
+
+`--tiers [socket]`, which is read-only and sends no configuration. An agent
+without it would have to discover the bound by being refused. It links
+`client/libncfg_client.a` now as well as fuzznet, which is the seam 0128
+describes: fuzznet outward, netcfgd's own local hop inward, in one unprivileged
+program.
+
+    make check   green; remote_tiers 5 checks; peek_test 11
+
 ## 10.311 The crypto backend was already chosen, one level down
 
 0270 has the decision. The measuring is here, and most of it is about a wrong
