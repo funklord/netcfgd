@@ -12261,12 +12261,42 @@ is safer than two concurrent applies and is a failure mode with its own
 behaviour, not a no-op. A reclaim policy written without knowing that would
 predict duplicated effort and get a refusal instead.
 
+### The taker's half, plumbed
+
+`ncfg_apply_stated_patience_seconds(document)` walks the hooks on every
+interface and every network at their own timeouts, and adds one association's
+patience where any network is configured. Beside `idempotence.c` and not in
+it: both answer a question the queue asks about a piece of work, one from the
+verb alone and this from the document the verb will act on.
+
+Three judgements in it, each with a test that fails when reversed:
+
+**Hooks sum rather than maximise**, because the phases run in sequence -- a
+four-phase interface waits for four timeouts, so the answer is 240 and not 60.
+That is the number the whole measurement turned on, and a maximising version
+passes every other case in the file. Sabotaged to `max`: that one check fails
+and no other.
+
+**A stated zero is honoured.** `ncfg_optint_t` distinguishes absent from
+present, so a hook written with `timeout = 0` is an author saying something,
+and substituting the default would be this code overruling the document --
+which section 1 puts the other way round.
+
+**One association between all networks, not one each.** A radio joins one; the
+rest are alternatives it did not pick, and charging per network would make a
+machine listing ten fallbacks look like one performing ten associations.
+
+**It is named `stated` because it is a floor and not a bound.** Address
+acquisition is bounded nowhere in this tree -- dhcpcd answers when it answers,
+and the two measured here took 4.571 and 6.895 seconds -- so nothing in the
+function invents a term for it. Under-counting is the direction that reclaims
+live work, so the shortfall is in the name and the header rather than hidden
+in a number that looks complete.
+
 ### What the measurement does not choose
 
 The ceiling's value, which is a policy judgement rather than a measurement --
-what this entry supplies is the term it has to dominate. And the taker's
-estimate needs the hook count at claim time, which is knowable and is not
-plumbed anywhere today.
+what this entry supplies is the term it has to dominate.
 
 ## 10.320 An order's idempotence is a property of its verb
 

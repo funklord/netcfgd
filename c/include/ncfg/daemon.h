@@ -273,6 +273,37 @@ typedef enum {
 ncfg_order_class_t ncfg_order_class_of(ncfg_proto_request_kind_t kind);
 
 /*
+ * HOW LONG AN APPLY AGAINST THIS DOCUMENT MAY LEGITIMATELY TAKE, IN SECONDS
+ *
+ * A leased order needs a term, and 10.321 measured that there is no constant
+ * to use: the legitimate duration is a function of the configuration. One
+ * hooked interface adds four phases at `NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS`
+ * each, so 240 seconds before anything else happens, while this machine --
+ * one radio, no hooks -- has a worst apply of about 27. A lease safe for the
+ * first stalls a dead taker for tens of minutes; one useful against a dead
+ * taker reclaims the second mid-hook.
+ *
+ * So the taker derives its own estimate, which is the same move as the order
+ * class beside this: **the only party that can compute it is the one about to
+ * do the work.**
+ *
+ * **WHAT THIS SUMS IS WHAT THIS TREE STATES, AND THAT IS NOT EVERYTHING.**
+ * Hook timeouts are real numbers in the document, and the supplicant's
+ * association patience is a real constant. **Address acquisition is not
+ * bounded anywhere in this tree** -- dhcpcd answers when it answers, and the
+ * two acquisitions measured on the reporting machine took 4.571 and 6.895
+ * seconds. Nothing here invents a term for it, because a number nobody
+ * measured is what 10.321 refused to produce.
+ *
+ * The consequence is that this is a **floor on the legitimate duration rather
+ * than a ceiling on it**, and a caller using it as a lease adds its own
+ * margin. That is the honest shape: under-counting is the direction that
+ * reclaims live work, so the number is stated as incomplete rather than
+ * dressed up as a bound.
+ */
+unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired);
+
+/*
  * Where a connection came from (0128).
  *
  * **Observed rather than claimed**: it is which socket the connection arrived
