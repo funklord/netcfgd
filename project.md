@@ -12190,6 +12190,92 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.319 A data-driven order queue, and where the choice actually lies
+
+**The holder, 2026-09-29: plan the order queue so that two readers of one queue
+follow a procedure eliminating multiple takers, with failure mitigation.** A
+plan, not an implementation, and it rests on the primitive signalled to fuzznet
+as section 396 rather than on anything netcfgd would build alone.
+
+### The normal path has no arbitration in it, and that is the design
+
+The assignment function -- members and a key in, an ordered list of who is
+responsible out -- is asked about the **item**, not about the queue. Reader A
+computes the list for item X and acts only if it is first; reader B computes
+the same list from the same data, sees A ahead of it, and does not try.
+
+**So in the ordinary case there is exactly one taker and nothing is
+arbitrated.** That is what makes this data-driven rather than a lock: no round
+trip, no holder, no waiter. Two readers is not the contended case, it is the
+case the function exists to make uncontended.
+
+### Taking is a cell, so agreement is fuzznet's already
+
+A take is a state write: subject the item, kind `taken`, value the taker and
+its term. It is a signed sequenced record, so it replicates and every host
+converges on who holds it by the rules `state/` already enforces -- max-seq
+within one writer, and the value a function of the SET of records rather than
+their arrival order.
+
+### Contention is possible only through disagreement about membership
+
+Two readers take the same item only when they computed different lists, which
+means they held different member sets -- a partition, or a node added or
+removed while both were deciding. **fuzznet detects exactly this and declines
+to resolve it**: a different issuer holding the same subject and kind is
+`FZN_STATE_ERR_CONFLICT`, "reported, never resolved here".
+
+Resolution must therefore be netcfgd's, and it must be **deterministic rather
+than first-wins**. Both claimants are named in the conflicting records, so both
+sides hold the same inputs: run the same ordering function over the union of
+the claimants and the loser retracts by clearing its own claim. No round trip,
+and no possibility of the two sides deciding differently, which is the property
+first-wins cannot offer across a partition.
+
+### Failure mitigation is a choice, and pretending otherwise is the trap
+
+Across hosts there is no observed death. `claim/` can release on the holder's
+death because it is local and the kernel witnesses it; it says plainly why the
+alternative is unsafe -- "a heartbeat can declare a slow or paused holder dead
+while it is still running". **Nothing about being distributed makes that
+warning less true, so a lease is an inference and always will be.**
+
+That leaves two honest policies and no third:
+
+- **At-most-once.** Nothing reclaims without proof. A taker that dies stalls
+  its item indefinitely. Safe, and a queue that silently stalls has failed.
+- **At-least-once.** A lease expires -- `frame/freshness.c` already expires
+  things -- and the item is reclaimed, accepting that a slow taker may still be
+  running. Requires the work to be idempotent.
+
+**The choice belongs to the order and not to the queue.** "Apply this
+configuration" is idempotent and can carry a lease; "reboot", "rotate this key"
+and "reissue this certificate" are not, and must stall rather than risk running
+twice. So an order declares its class, and the reclaim policy follows from the
+order rather than from a queue-wide setting somebody picks once.
+
+**And a stall must be loud.** An at-most-once item whose taker is presumed dead
+but unproven is the failure this design accepts; accepting it silently would be
+the same fault as the `[adopt]` all-clear printing as a warning (10.306) with
+the polarity reversed -- a real condition rendered as nothing.
+
+### Which is where the relay earns its place
+
+A stalled at-most-once item is precisely when an authority reissues the order
+by hand, and a **signed order relayed through hosts that will not execute it**
+is how that reaches a node the queue could not settle for. That is the second
+half of section 396, and this is the argument for asking for both together:
+the relay is not a parallel feature, it is the escape hatch for the stall the
+safe policy deliberately creates.
+
+### What is not decided here
+
+The ordering function is fuzznet's (396). Whether an order's idempotence class
+is a field, a capability or a property of its verb is netcfgd's and is not
+settled. And the term length for a leased take is a number nobody has measured
+-- it trades a dead taker's stall against a slow taker's double execution, and
+it should be chosen against a measurement rather than by taste.
+
 ## 10.318 fuzznet names the same gap, and declines it twice
 
 **The holder, 2026-09-29: fuzznet already has a need for distributed
