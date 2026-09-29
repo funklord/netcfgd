@@ -18,10 +18,23 @@ _Static_assert(NCFG_STREAM_ESTATE > NCFG_STREAM_GROUP &&
         NCFG_STREAM_GROUP > NCFG_STREAM_HOST,
     "the three scope streams must be distinct");
 
-/* The derivation's tag. Versioned, because changing how a name becomes a
- * subject would silently re-point every cell that name addresses -- the
- * records would still verify and would be about something else. */
-static const char SUBJECT_TAG[] = "netcfgd subject v1";
+/*
+ * The derivation's tag, versioned because changing how an object becomes a
+ * subject silently re-points every cell -- the records would still verify and
+ * would be about something else.
+ *
+ * **v2 as of 2026-09-29**, when the instance was folded in (project.md 10.329).
+ * v1 hashed a scope and a name and had no room for a label, so two interfaces
+ * shared a cell. Nothing had ever derived a v1 subject outside a test, so
+ * nothing is stranded -- and the tag is bumped anyway, because a reader
+ * holding records needs to be able to tell which derivation produced them and
+ * that is the entire job of the string.
+ */
+static const char SUBJECT_TAG[] = "netcfgd subject v2";
+
+/* What a transcript may carry per component. A label is an interface name or
+ * an SSID; a root name is a site's. Bounded because nothing here allocates. */
+#define SUBJECT_COMPONENT_MAX 256u
 
 uint32_t ncfg_record_stream_of(ncfg_scope_t scope)
 {
@@ -42,57 +55,106 @@ uint32_t ncfg_record_stream_of(ncfg_scope_t scope)
 	}
 }
 
-/* Which subject a scope's records are about. The pairing is the whole of what
- * `NCFG_RECORD_ERR_SUBJECT` checks, and it is one-to-one: a host-scoped key is
- * a statement about a host, a group-scoped one about a group. */
-static int subject_matches(ncfg_scope_t scope, ncfg_record_subject_t which)
+/*
+ * Which root a block's objects hang from.
+ *
+ * **Derived from the block's default scope rather than from a second table.**
+ * An `interface` is a thing on a machine and a `network` is a thing in the
+ * estate, and the block defaults already say which of those a block is. A
+ * host-private block roots at the host because there is nowhere else for it to
+ * be -- and nothing in one travels anyway, so the answer costs nothing.
+ */
+ncfg_record_root_t ncfg_record_root_of(ncfg_block_t block)
 {
-	switch (scope) {
-	case NCFG_SCOPE_HOST:
-		return which == NCFG_RECORD_SUBJECT_HOST;
+	switch (ncfg_block_default_scope(block)) {
 	case NCFG_SCOPE_GROUP:
-		return which == NCFG_RECORD_SUBJECT_GROUP;
+		return NCFG_ROOT_GROUP;
 	case NCFG_SCOPE_ESTATE:
-		return which == NCFG_RECORD_SUBJECT_ESTATE;
+		return NCFG_ROOT_ESTATE;
+	case NCFG_SCOPE_HOST:
 	case NCFG_SCOPE_HOST_PRIVATE:
 	case NCFG_SCOPE_COUNT:
 	default:
-		return 0;
+		return NCFG_ROOT_HOST;
 	}
 }
 
-ncfg_record_err_t ncfg_record_subject_of_name(const fzn_hash_ops_t *hash,
-    ncfg_record_subject_t which, const char *name, uint8_t out[FZN_SUBJECT_LEN])
+/* Append a length-prefixed component. Two bytes of length, big-endian, then
+ * the bytes -- so a label containing any byte at all, an SSID included, cannot
+ * be read as the end of one component and the start of the next. */
+static int put_component(uint8_t *into, size_t cap, size_t *at, const void *bytes, size_t len)
 {
-	/* The tag, a NUL, the scope byte, a NUL, then the name. The separators
-	 * are what stop a group named `x\1estate` reaching an estate's cell:
-	 * without them the concatenation is ambiguous, which is the whole of
-	 * what domain separation is for. */
-	uint8_t transcript[sizeof(SUBJECT_TAG) + 2u + 256u];
-	size_t  name_len;
-	size_t  at;
+	if (len > SUBJECT_COMPONENT_MAX || *at + 2u + len > cap) {
+		return 0;
+	}
+	into[(*at)++] = (uint8_t)(len >> 8);
+	into[(*at)++] = (uint8_t)(len & 0xffu);
+	if (len > 0u) {
+		memcpy(into + *at, bytes, len);
+		*at += len;
+	}
+	return 1;
+}
 
-	if (!hash || !hash->hash || !name || !out) {
+ncfg_record_err_t ncfg_record_subject_of(const fzn_hash_ops_t *hash, ncfg_block_t block,
+    const ncfg_record_rootref_t *root, const char *label, size_t label_len,
+    uint8_t out[FZN_SUBJECT_LEN])
+{
+	/* The tag with its NUL, the root kind, then three length-prefixed
+	 * components: the root, the block's name, the label. */
+	uint8_t transcript[sizeof(SUBJECT_TAG) + 1u + 3u * (2u + SUBJECT_COMPONENT_MAX)];
+	size_t  at = 0u;
+
+	if (!hash || !hash->hash || !root || !out) {
 		return NCFG_RECORD_ERR_MALFORMED;
 	}
-	if (which != NCFG_RECORD_SUBJECT_GROUP && which != NCFG_RECORD_SUBJECT_ESTATE) {
-		/* A host's subject is its public key. Deriving one from a name
-		 * would invent a second way to address a host, and the two
-		 * would disagree the first time a host was renamed. */
+	if ((int)block < 0 || (int)block >= (int)NCFG_BLOCK_COUNT) {
+		return NCFG_RECORD_ERR_MALFORMED;
+	}
+	/* **The check the first version made against the wrong thing.** It
+	 * compared the subject to the KEY's scope, which conflated how far a
+	 * value travels with what it is about. This compares the root to the
+	 * BLOCK, which is the question that has an answer. */
+	if (root->kind != ncfg_record_root_of(block)) {
 		return NCFG_RECORD_ERR_SUBJECT;
 	}
-	name_len = strlen(name);
-	if (name_len > 256u) {
-		return NCFG_RECORD_ERR_TOO_LARGE;
+	if (label_len > 0u && !label) {
+		return NCFG_RECORD_ERR_MALFORMED;
 	}
 
-	at = 0u;
-	memcpy(transcript + at, SUBJECT_TAG, sizeof(SUBJECT_TAG)); /* with its NUL */
-	at += sizeof(SUBJECT_TAG);
-	transcript[at++] = (uint8_t)which;
-	transcript[at++] = 0u;
-	memcpy(transcript + at, name, name_len);
-	at += name_len;
+	memcpy(transcript, SUBJECT_TAG, sizeof(SUBJECT_TAG)); /* with its NUL */
+	at = sizeof(SUBJECT_TAG);
+	transcript[at++] = (uint8_t)root->kind;
+
+	if (root->kind == NCFG_ROOT_HOST) {
+		if (!root->key) {
+			return NCFG_RECORD_ERR_MALFORMED;
+		}
+		if (!put_component(transcript, sizeof(transcript), &at, root->key,
+		        (size_t)FZN_PUBKEY_LEN)) {
+			return NCFG_RECORD_ERR_TOO_LARGE;
+		}
+	} else {
+		if (!root->name) {
+			return NCFG_RECORD_ERR_MALFORMED;
+		}
+		if (!put_component(transcript, sizeof(transcript), &at, root->name,
+		        strlen(root->name))) {
+			return NCFG_RECORD_ERR_TOO_LARGE;
+		}
+	}
+	/* The block's own spelling, so that `interface "x"` and `linkset "x"`
+	 * on one host are two objects. */
+	if (!put_component(transcript, sizeof(transcript), &at, ncfg_block_name(block),
+	        strlen(ncfg_block_name(block)))) {
+		return NCFG_RECORD_ERR_TOO_LARGE;
+	}
+	/* And the label, which is what separates two interfaces. Absent for a
+	 * block that takes none, where the zero length is itself the answer
+	 * rather than a missing component. */
+	if (!put_component(transcript, sizeof(transcript), &at, label, label_len)) {
+		return NCFG_RECORD_ERR_TOO_LARGE;
+	}
 
 	/* **Nonzero is success**, which `session/commitment.h` states in capitals
 	 * and this file got backwards first. The header explains why it is worth
@@ -106,15 +168,17 @@ ncfg_record_err_t ncfg_record_subject_of_name(const fzn_hash_ops_t *hash,
 	return NCFG_RECORD_OK;
 }
 
-ncfg_record_err_t ncfg_record_encode(ncfg_block_t block, const char *path,
-    ncfg_record_subject_t which, const uint8_t subject[FZN_SUBJECT_LEN], const char *value,
-    size_t value_len, ncfg_record_fields_t *out)
+ncfg_record_err_t ncfg_record_encode(const fzn_hash_ops_t *hash, ncfg_block_t block,
+    const ncfg_record_rootref_t *root, const char *label, size_t label_len, const char *path,
+    const char *value, size_t value_len, ncfg_record_fields_t *out)
 {
-	ncfg_scope_t scope;
-	unsigned     kind;
-	size_t       at;
+	ncfg_scope_t      scope;
+	unsigned          kind;
+	size_t            at;
+	uint8_t           subject[FZN_SUBJECT_LEN];
+	ncfg_record_err_t derived;
 
-	if (!path || !subject || !out || (!value && value_len > 0u)) {
+	if (!path || !out || (!value && value_len > 0u)) {
 		return NCFG_RECORD_ERR_MALFORMED;
 	}
 	if ((int)block < 0 || (int)block >= (int)NCFG_BLOCK_COUNT) {
@@ -136,9 +200,6 @@ ncfg_record_err_t ncfg_record_encode(ncfg_block_t block, const char *path,
 	if (kind == NCFG_KIND_NONE) {
 		return NCFG_RECORD_ERR_UNREGISTERED;
 	}
-	if (!subject_matches(scope, which)) {
-		return NCFG_RECORD_ERR_SUBJECT;
-	}
 	if (value_len > (size_t)FZN_RECORD_BODY_MAX) {
 		return NCFG_RECORD_ERR_TOO_LARGE;
 	}
@@ -151,6 +212,13 @@ ncfg_record_err_t ncfg_record_encode(ncfg_block_t block, const char *path,
 			return NCFG_RECORD_ERR_NOT_TEXT;
 		}
 	}
+	/* Last, because it is the only step that can cost a hash -- and every
+	 * refusal above is about the key rather than about the object, so
+	 * nothing below would change their answer. */
+	derived = ncfg_record_subject_of(hash, block, root, label, label_len, subject);
+	if (derived != NCFG_RECORD_OK) {
+		return derived;
+	}
 
 	memset(out, 0, sizeof(*out));
 	out->kind = (uint32_t)kind;
@@ -159,7 +227,7 @@ ncfg_record_err_t ncfg_record_encode(ncfg_block_t block, const char *path,
 	 * may see its own configuration would read it as its own. */
 	out->stream = ncfg_record_stream_of(scope);
 	out->scope = scope;
-	memcpy(out->subject, subject, (size_t)FZN_SUBJECT_LEN);
+	memcpy(out->subject, subject, sizeof(subject));
 	out->body = (const uint8_t *)value;
 	out->body_len = value_len;
 	return NCFG_RECORD_OK;
@@ -177,9 +245,9 @@ const char *ncfg_record_why(ncfg_record_err_t err)
 	case NCFG_RECORD_ERR_HOST_PRIVATE:
 		return "this key is host-private and must not leave the machine";
 	case NCFG_RECORD_ERR_SUBJECT:
-		return "the subject is not the kind this key's scope is about";
+		return "the root is not the one this block's objects hang from";
 	case NCFG_RECORD_ERR_TOO_LARGE:
-		return "the value is larger than a record body carries";
+		return "the value, the label or the root name is larger than this carries";
 	case NCFG_RECORD_ERR_NOT_TEXT:
 		return "the value holds a NUL, and the language spells values as text";
 	default:

@@ -121,11 +121,12 @@ static int path_push(char *path, size_t cap, size_t *len, const char *name)
 }
 
 static void walk_items(walk_t *walk, const ncfg_ast_items_t *items, ncfg_block_t block,
-    const char *block_name, const char *label, char *path, size_t path_len);
+    const char *block_name, const char *label, size_t label_len, char *path, size_t path_len);
 
 /* One `key = value`, once its path is known. */
 static void walk_assignment(walk_t *walk, const ncfg_ast_assignment_t *assignment,
-    ncfg_block_t block, const char *block_name, const char *label, const char *path)
+    ncfg_block_t block, const char *block_name, const char *label, size_t label_len,
+    const char *path)
 {
 	ncfg_walk_item_t item;
 
@@ -133,6 +134,7 @@ static void walk_assignment(walk_t *walk, const ncfg_ast_assignment_t *assignmen
 	item.block = block;
 	item.block_name = block_name;
 	item.label = label;
+	item.label_len = label_len;
 	item.path = path;
 	item.span = assignment->span;
 	item.value = walk->text + assignment->value->span.offset;
@@ -174,7 +176,7 @@ static void walk_assignment(walk_t *walk, const ncfg_ast_assignment_t *assignmen
  * that a caller mirroring a file knows the file holds something the estate
  * will never see. */
 static void walk_program(walk_t *walk, ncfg_block_t block, const char *block_name,
-    const char *label, const char *path, ncfg_span_t span)
+    const char *label, size_t label_len, const char *path, ncfg_span_t span)
 {
 	ncfg_walk_item_t item;
 
@@ -184,13 +186,14 @@ static void walk_program(walk_t *walk, ncfg_block_t block, const char *block_nam
 	item.block = block;
 	item.block_name = block_name;
 	item.label = label;
+	item.label_len = label_len;
 	item.path = path;
 	item.span = span;
 	report(walk, &item);
 }
 
 static void walk_items(walk_t *walk, const ncfg_ast_items_t *items, ncfg_block_t block,
-    const char *block_name, const char *label, char *path, size_t path_len)
+    const char *block_name, const char *label, size_t label_len, char *path, size_t path_len)
 {
 	size_t at;
 
@@ -212,13 +215,14 @@ static void walk_items(walk_t *walk, const ncfg_ast_items_t *items, ncfg_block_t
 				over.block = block;
 				over.block_name = block_name;
 				over.label = label;
+				over.label_len = label_len;
 				over.path = path;
 				over.span = item->as.assignment.span;
 				report(walk, &over);
 				break;
 			}
 			walk_assignment(walk, &item->as.assignment, block, block_name, label,
-			    path);
+			    label_len, path);
 			break;
 		case NCFG_AST_ITEM_BLOCK:
 			if (!path_push(path, WALK_PATH_MAX, &path_len, item->as.block.head)) {
@@ -228,17 +232,17 @@ static void walk_items(walk_t *walk, const ncfg_ast_items_t *items, ncfg_block_t
 			 * of the key path: the path names the KEY and the label
 			 * names an instance, and folding one into the other
 			 * would give two instances one number. */
-			walk_items(walk, &item->as.block.items, block, block_name, label, path,
-			    path_len);
+			walk_items(walk, &item->as.block.items, block, block_name, label,
+			    label_len, path, path_len);
 			break;
 		case NCFG_AST_ITEM_HOOK:
 			if (path_push(path, WALK_PATH_MAX, &path_len, item->as.hook.phase)) {
-				walk_program(walk, block, block_name, label, path,
+				walk_program(walk, block, block_name, label, label_len, path,
 				    item->as.hook.span);
 			}
 			break;
 		case NCFG_AST_ITEM_INCLUDE:
-			walk_program(walk, block, block_name, label, path,
+			walk_program(walk, block, block_name, label, label_len, path,
 			    item->as.include.span);
 			break;
 		default:
@@ -272,12 +276,14 @@ static void walk_block(walk_t *walk, const ncfg_ast_block_t *block)
 		item.block = (ncfg_block_t)NCFG_BLOCK_COUNT;
 		item.block_name = block->head;
 		item.label = block->label;
+		item.label_len = block->label_length;
 		item.path = "";
 		item.span = block->span;
 		report(walk, &item);
 		return;
 	}
-	walk_items(walk, &block->items, which, block->head, block->label, path, 0u);
+	walk_items(walk, &block->items, which, block->head, block->label, block->label_length,
+	    path, 0u);
 }
 
 int ncfg_walk(const char *text, size_t length, ncfg_walk_fn visit, void *ctx, char *err,
@@ -309,7 +315,7 @@ int ncfg_walk(const char *text, size_t length, ncfg_walk_fn visit, void *ctx, ch
 		if (item->kind == NCFG_AST_ITEM_BLOCK) {
 			walk_block(&walk, &item->as.block);
 		} else if (item->kind == NCFG_AST_ITEM_INCLUDE) {
-			walk_program(&walk, (ncfg_block_t)NCFG_BLOCK_COUNT, "", NULL, "",
+			walk_program(&walk, (ncfg_block_t)NCFG_BLOCK_COUNT, "", NULL, 0u, "",
 			    item->as.include.span);
 		}
 		/* An assignment outside any block is not a key of any block, so
