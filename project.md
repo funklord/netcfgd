@@ -9573,11 +9573,41 @@ That is the `evidence.md` habit applied to a default rather than to a check:
 **make the direction a mistake falls in the safe one**, so the guard and the
 absence of the guard agree.
 
-### What the decision does not itself supply
+### The table, written
 
-The verb-to-class table itself, which is a per-verb judgement across the
-protocol and wants writing with the same care as the tier list. And the lease
-term for the idempotent class, still a number nobody has measured.
+`c/src/daemon/idempotence.c`, and the short column is the interesting one.
+**Twenty-nine of thirty-two verbs are idempotent, and that is netcfgd's model
+rather than generosity**: a client says what it wants to be true and the daemon
+converges the machine onto it, so a verb whose argument is an end state repeats
+by construction. `apply` is the purest case -- convergence converges -- and
+`config_delete` is the one people find surprising, since deleted twice is
+deleted.
+
+Three are not, and they share one shape: **their effect depends on what is
+ambient when they run rather than on what the order says.** `confirm` confirms
+whichever window is open, so a retry after one closed and another opened
+confirms a change nobody confirmed -- commit-confirm's own failure arriving
+through the mechanism meant to make orders reliable. `revert` undoes whatever
+is current. `profile_save` files "what the machine is running", so a retry a
+minute later files something else under the same name.
+
+**`wifi_connect` and `wifi_disconnect` are deliberately idempotent**, and they
+are the pair worth arguing about. Retrying either looks dangerous because the
+operator may have moved on -- but that is staleness, which an order's freshness
+bounds, and this table answers the narrower question of whether running a
+still-valid order twice does what running it once did. Conflating them would
+have made the table a second and worse expiry.
+
+Two sabotages, each failing its own check: marking `confirm` idempotent fails
+the criterion case naming the verb, and dropping `reload` from the
+hand-written list fails the exhaustiveness case naming the verb. The list is
+spelled out from the criterion rather than read back from the table, because a
+table compared against itself is one witness twice.
+
+### What is still not supplied
+
+The lease term for the idempotent class, still a number nobody has measured --
+it trades a dead taker's stall against a slow taker's double execution.
 
 ## 10.319 A data-driven order queue, and where the choice actually lies
 
