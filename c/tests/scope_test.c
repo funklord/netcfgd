@@ -159,6 +159,114 @@ static void the_unknown_direction_is_the_narrow_one(void)
 	    "and a name that is not a block is refused rather than guessed");
 }
 
+/* ------------------------------------------------------------------------ *
+ * The kind registry
+ * ------------------------------------------------------------------------ */
+
+/*
+ * **The cross-check between the two tables, which is the one that matters.**
+ * A number on a host-private key means something that must never leave the
+ * machine has been given a way to travel. Neither table can catch that alone.
+ */
+static void nothing_host_private_has_a_kind(void)
+{
+	static const struct {
+		const char *block;
+		const char *key;
+	} PRIVATE[] = { { "interface", "mac" }, { "interface", "command" },
+		{ "interface", "args" }, { "interface", "config" },
+		{ "interface", "backend" }, { "interface", "kind" },
+		{ "interface", "master" }, { "interface", "ethtool" },
+		{ "interface", "qdisc" }, { "network", "hooks" }, { "device", "mac" },
+		{ "bluetooth", "address" } };
+	size_t at;
+	int    leaked = 0;
+
+	for (at = 0u; at < sizeof(PRIVATE) / sizeof(PRIVATE[0]); at++) {
+		ncfg_block_t block;
+
+		if (!ncfg_block_from_name(PRIVATE[at].block, &block)) {
+			continue;
+		}
+		if (ncfg_scope_of(block, PRIVATE[at].key) != NCFG_SCOPE_HOST_PRIVATE) {
+			printf("       %s.%s is not host-private any more\n", PRIVATE[at].block,
+			    PRIVATE[at].key);
+			leaked++;
+		} else if (ncfg_kind_of(block, PRIVATE[at].key) != NCFG_KIND_NONE) {
+			printf("       %s.%s is host-private and has a wire number\n",
+			    PRIVATE[at].block, PRIVATE[at].key);
+			leaked++;
+		}
+	}
+	check(leaked == 0, "no host-private key carries a number it could travel under");
+}
+
+/* A number used twice gives two keys one meaning, and every signature still
+ * verifies. Checked over the registry by asking it about itself, which is the
+ * one question a table may be asked about itself honestly: not what a number
+ * means, but whether it is unique. */
+static void no_number_is_used_twice(void)
+{
+	static const struct {
+		const char *block;
+		const char *key;
+	} REGISTERED[] = { { "global", "dns" }, { "global", "dns_mode" },
+		{ "global", "dns_search" }, { "global", "dns_domains" },
+		{ "global", "connectivity" }, { "interface", "address" },
+		{ "interface", "prefix" }, { "interface", "prefixes" },
+		{ "interface", "routes" }, { "interface", "mtu" }, { "interface", "vlans" },
+		{ "interface", "nat" }, { "interface", "dns" }, { "interface", "mtu" } };
+	size_t at;
+	size_t other;
+	int    collisions = 0;
+
+	for (at = 0u; at < sizeof(REGISTERED) / sizeof(REGISTERED[0]); at++) {
+		ncfg_block_t a;
+		unsigned     ka;
+
+		if (!ncfg_block_from_name(REGISTERED[at].block, &a)) {
+			continue;
+		}
+		ka = ncfg_kind_of(a, REGISTERED[at].key);
+		if (ka == NCFG_KIND_NONE) {
+			continue;
+		}
+		for (other = at + 1u; other < sizeof(REGISTERED) / sizeof(REGISTERED[0]);
+		    other++) {
+			ncfg_block_t b;
+
+			if (!ncfg_block_from_name(REGISTERED[other].block, &b)) {
+				continue;
+			}
+			if (ncfg_kind_of(b, REGISTERED[other].key) != ka) {
+				continue;
+			}
+			/* The same key twice in the list above is not a collision. */
+			if (a == b && strcmp(REGISTERED[at].key, REGISTERED[other].key) == 0) {
+				continue;
+			}
+			printf("       %s.%s and %s.%s share a number\n", REGISTERED[at].block,
+			    REGISTERED[at].key, REGISTERED[other].block, REGISTERED[other].key);
+			collisions++;
+		}
+	}
+	check(collisions == 0, "no two keys carry the same wire number");
+}
+
+static void zero_is_reserved_and_an_unknown_key_gets_it(void)
+{
+	ncfg_block_t interface;
+
+	check(ncfg_block_from_name("interface", &interface), "the interface block resolves");
+	check(ncfg_kind_of(interface, "a_key_that_does_not_exist") == NCFG_KIND_NONE,
+	    "an unregistered key has no number, so it cannot be written wrongly");
+	check(ncfg_kind_is_taken(NCFG_KIND_NONE),
+	    "zero is permanently taken, so nothing allocates it");
+	check(ncfg_kind_is_taken(ncfg_kind_of(interface, "address")),
+	    "and a number in use reads as taken");
+	check(!ncfg_kind_is_taken(0x00FFFFFFu), "while a free one does not");
+}
+
 int main(void)
 {
 	every_block_has_the_default_the_rule_gives_it();
@@ -166,6 +274,9 @@ int main(void)
 	a_subnet_and_an_address_are_different_scopes();
 	paths_and_hardware_stay_on_the_machine();
 	the_unknown_direction_is_the_narrow_one();
+	nothing_host_private_has_a_kind();
+	no_number_is_used_twice();
+	zero_is_reserved_and_an_unknown_key_gets_it();
 
 	printf("scope_test: %d check(s)\n", checks);
 	if (failures == 0) {
