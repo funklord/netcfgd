@@ -2080,6 +2080,13 @@ live:
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
 	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
+	@# What a remote connection may DO, which is the other half of the one
+	@# above: that checks who may open the remote socket (0159), this asks the
+	@# daemon what a caller on it is allowed, and the discriminator is that the
+	@# same daemon answers differently on its two sockets. No namespace, for
+	@# the same reason -- it binds unix sockets and needs a real uid. Skipped
+	@# where `bridge/` is not built, since the bridge is what connects.
+	@NCFG_LIVE=1 sh tests/live/remote_tiers.sh
 	@# Writing files under the sandbox a systemd unit imposes. No
 	@# outer namespace: it makes its own mount namespace, and it must, because
 	@# a chmod reproduces the symptom for an unprivileged process and not for

@@ -41,6 +41,8 @@ PROGRAM = netcfgd-remote
 SRCS    = netcfgd-remote.c
 
 FUZZNET     = ../fuzznet
+CLIENT      = ../client
+CLIENT_LIB  = $(CLIENT)/libncfg_client.a
 FUZZNET_BLD = build
 
 # The client's floor, name for name, so moving between these directories costs
@@ -48,7 +50,7 @@ FUZZNET_BLD = build
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
 CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated
+CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -I$(FUZZNET) -I$(FUZZNET)/wire/generated -I$(CLIENT)
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
@@ -65,7 +67,7 @@ endif
 FUZZNET_DEFS = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 	       -DFZN_CLAIM_FILE_ON -DFZN_SPOOL_FILE_ON
 
-.PHONY: all fuzznet test clean
+.PHONY: all fuzznet client test clean
 
 all: $(PROGRAM)
 
@@ -121,8 +123,14 @@ FUZZNET_OBJS = $(shell find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' 2>/dev/null | 
 	               nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \
 	       done)
 
-$(PROGRAM): $(SRCS) fuzznet
-	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(FUZZNET_OBJS) $(LDFLAGS) -o $@
+# The client library is netcfgd's own local hop, which the brief says netcfgd
+# already has: the agent speaks fuzznet outward and this inward, and linking
+# both in one program is the seam 0128 describes.
+client:
+	@$(MAKE) --no-print-directory -C $(CLIENT)
+
+$(PROGRAM): $(SRCS) fuzznet client
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(FUZZNET_OBJS) $(CLIENT_LIB) $(LDFLAGS) -o $@
 
 # The read path against a frame the library builds, which is the control the
 # program itself cannot show: every answer `--peek` gives by hand is a refusal,
