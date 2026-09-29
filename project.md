@@ -12248,7 +12248,7 @@ That is the `evidence.md` habit applied to a default rather than to a check:
 **make the direction a mistake falls in the safe one**, so the guard and the
 absence of the guard agree.
 
-### What this leaves
+### What the decision does not itself supply
 
 The verb-to-class table itself, which is a per-verb judgement across the
 protocol and wants writing with the same care as the tier list. And the lease
