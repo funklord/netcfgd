@@ -9519,6 +9519,94 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.324 `kind` is a wire number, and a pluggable store is byte-exact
+
+**The holder, 2026-09-29: fuzznet deals with all replication, get and set, and
+carries a default storage; netcfgd wants a pluggable backend as well, for its
+netifrc-style format.** Both halves measured against what fuzznet actually
+offers.
+
+### The database is generic, and the calls are key-based one way only
+
+`record.h` states the genericity as a design position rather than an accident:
+
+>  `kind` and `subject` and `body` are the consumer's... **A library that knew
+>  a `kind` meant "revoke" would have chosen one project's permission taxonomy
+>  and called it the model.** What this module owns is authenticity and ORDER;
+>  what a statement means is above it.
+
+So `body` is opaque bytes and `kind` is an opaque `uint32_t` that netcfgd
+assigns meaning to. **Reads are key-based:**
+
+    const fzn_state_entry_t *fzn_state_get(const fzn_state_t *state,
+        const uint8_t subject[FZN_SUBJECT_LEN], uint32_t kind);
+
+**Writes are not, and that asymmetry is deliberate.** `fzn_state_apply` takes a
+signed record and the cell it lands in is derived from the record's own
+`subject` and `kind`. There is no set-a-key path, because a write must be
+authenticated and sequenced to replicate at all -- so the API has no way to
+bypass that even by accident.
+
+### `kind` is a compatibility surface with a protocol field's weight
+
+A `kind` is a `uint32_t` on the wire, inside records other hosts hold and have
+signed. **Once a number is assigned to a configuration key it cannot move**:
+every estate holding records under it would keep them, and a renumbering makes
+a host read somebody's `mtu` as their `dns_mode` while every signature still
+verifies. `record/store.h`'s `MISPLACED` guards the adjacent fault and says why
+the class is dangerous -- such a record "may be perfectly well signed, which is
+why a signature check further up would not have caught this".
+
+So the `key -> kind` table wants the discipline of a protocol registry, not of
+an enum:
+
+- **assigned once, never reused**, including for a key that is removed -- a
+  retired number stays retired, because records under it outlive the key;
+- **explicit numbers, never implicit ordinals**, since an enum's order is a
+  thing somebody reorders while tidying and a wire value is not;
+- **and the table is the schema**, so it belongs beside `doc/socket-protocol.md`
+  in how it is reviewed rather than beside an internal header.
+
+None of that is written yet. `compile/scope.c` says which *subject* a key
+belongs to; the number is the second half and has not been started.
+
+### A pluggable store must round-trip bytes, which decides the format question
+
+10.314 recorded two readings of "the netifrc-like config files as storage
+backend" and declined to pick one. The measurement picks one.
+
+    int (*put)(void *ctx, const uint8_t issuer[32], uint32_t stream,
+               uint64_t seq, const uint8_t *bytes, size_t len);
+    int (*get)(void *ctx, ..., uint8_t *out, size_t cap, size_t *len_out,
+               int *found_out);
+
+A backend stores **raw record bytes** under `(issuer, stream, seq)` and must
+return them identically. A record is "a view over its own bytes" and the
+signature covers all of them, so **bytes re-derived from a rendered form are a
+different record and verify as nothing.**
+
+Which means netcfgd's format can be a *store* only by carrying the record bytes
+verbatim -- at which point it is a container wearing a config file's name, and
+not the human-editable thing the requirement is about.
+
+**The reading that survives: fuzznet's default storage stays authoritative for
+records, and netcfgd's format is what those records are rendered into.** That
+is the half netcfgd already has -- `c/src/compile/render.c` and its two
+siblings turn a document back into configuration text, in the language's own
+spellings.
+
+### And it moves who authors a file, which constraint 1 does not currently say
+
+Constraint 1 is that config files are the only authority. A rendered file
+satisfies it **mechanically** -- netcfgd still reads a file under
+`/etc/netcfgd/` and everything downstream is unchanged -- while changing who
+wrote it. An operator editing an estate-scoped value in a generated file is
+editing something the next render overwrites, and constraint 1 as worded
+promises them it is authoritative.
+
+That is not an objection to the design; it is a sentence the constraint will
+need, and better found now than by an operator whose edit vanished.
+
 ## 10.323 The scopes are fuzznet's, and netcfgd wrote them anyway
 
 **The holder, 2026-09-29: the scopes are part of fuzznet and general features
