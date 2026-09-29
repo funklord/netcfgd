@@ -12308,13 +12308,54 @@ local keys -- `mac`, `backend`, `command`, `args`, `config`, `control` -- are
 that scope, and the path ones are there by the brief's rule rather than by
 preference.
 
-### What this is and is not
+### Written: `ncfg/scope.h` and `compile/scope.c`
 
-A proposal, measured, and not a decision. The block-level sort is checkable by
-reading the rule against any key somebody doubts, and the scope set is the
-holder's. What is deliberately not done is the table itself -- writing 190
-entries before the rule and the scopes are agreed would be the special-case
-sprawl the instruction names, done thoroughly.
+Four scopes, with the narrowest at zero:
+
+    NCFG_SCOPE_HOST_PRIVATE = 0   never replicated; no cell at all
+    NCFG_SCOPE_HOST               about this host, replicated
+    NCFG_SCOPE_GROUP              less than the estate -- name provisional
+    NCFG_SCOPE_ESTATE             the whole estate
+
+**Zero is the narrowest and the direction is what matters.** Widening a scope
+publishes configuration its author never offered anybody; narrowing one only
+fails to share. So an omission and the test that catches omissions point the
+same way -- the arrangement `NCFG_TIER_OBSERVE` lacks and the order class has.
+
+**Eight block defaults and twenty-eight key exceptions, not a table of 190.**
+That is the instruction made structural rather than promised: the rule does the
+work, and the exceptions are short enough to argue with one at a time.
+
+    global, device, bluetooth   host-private
+    interface, linkset          host
+    rule                        group
+    network, access_point       estate
+
+The exceptions go both ways out of `interface`, which is the only genuinely
+mixed block: `mac`, `kind`, `master`, `ethtool`, `qdisc` and the four path keys
+down to host-private, and `vlans`, `nat`, `guard`, the router-advertisement
+keys and the resolver keys up. **`prefix` goes to group while `address` stays
+at host**, which is the pair a boolean could not express, and a test asserts
+they do not collapse into one answer.
+
+**Paths are host-private by the brief's rule rather than by preference** --
+a non-local document may reference only paths that already exist on the device.
+That is why `network`'s hooks are the one exception pointing *downward* out of
+an estate-wide block, with a check beside it confirming the block itself still
+travels so the exception is not mistaken for the rule.
+
+Two sabotages, each failing its own checks: deleting `prefix`'s exception
+fails the subnet-versus-address pair, and deleting a block's default fails the
+exhaustiveness case. The second is worth noting for where it landed -- an
+unlisted block falls to zero, which is host-private, so even undetected it
+would not have published anything.
+
+### What is still the holder's
+
+The name of the middle scope, which was described and not named. Whether there
+are more than four. And the per-key judgements themselves, which are twenty-
+eight assertions a reader can disagree with individually -- which was the point
+of keeping them a list rather than folding them into prose.
 
 ## 10.321 The lease term measured, and why it is not one number
 
