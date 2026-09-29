@@ -12190,6 +12190,73 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.310 fuzznet is in the tree, linked by a program that admits what it is not
+
+0269 has the decision. What belongs here is the measuring.
+
+### The shape was decided in August and cost nothing to rediscover
+
+`doc/shared-protocol-brief.md` section 3 already fixed it: **the daemon never
+grows a network listener**, so whatever speaks UDP is a separate unprivileged
+process holding an ordinary local socket, exactly as the NetworkManager shim
+does for D-Bus. Reading that before designing anything saved inventing a shape
+and then finding the record that forbade it -- *working-practice.md*'s "check
+whether the project has already decided it somewhere else under a different
+name", paying out for once without anybody having to look hard.
+
+### A measurement that was stale within the hour
+
+The first pass measured fuzznet at `c535fae`, the HEAD of the checkout beside
+this tree: `make all` clean, 81 objects, a netcfgd-style probe linking and
+correctly refusing a zeroed frame at 674,600 bytes.
+
+`git submodule add` then pinned **`97719d9`**, because that sibling checkout is
+**145 commits behind its own remote**. Re-measured at the pin: 107 objects and
+969,272 bytes.
+
+Nothing was decided on the stale numbers, only because the pin was re-measured
+before anything was written down. **A sibling checkout is whatever its session
+last fetched**, which is exactly `harmonization.md`'s argument for vendoring --
+arriving here as a measurement rather than as advice, and arriving inside the
+one hour it took to act on it.
+
+### What is proven, and the half that is not
+
+    a zeroed 256-byte frame   fuzznet refused the frame (-2)   exit 1
+    empty stdin               nothing to read on stdin         exit 2
+
+`-2` is `FZN_SEAL_ERR_SHAPE`, the right answer for 256 zero bytes. So the seam
+is real: netcfgd's build links fuzznet's wire layer and gets a genuine answer
+out of it.
+
+**Every one of those is fuzznet saying no.** A program that can only refuse
+looks identical to one that refuses everything, and the positive control is
+what tells them apart. It is not written, and the reason is not effort.
+
+### The next decision, which the attempt to write that control uncovered
+
+**netcfgd has to choose a crypto backend and fuzznet deliberately will not
+choose for it.** Measured rather than read: `wire/seal.o` carries no undefined
+AEAD or `crypto_` symbol, and there is no Monocypher in the submodule. The
+crypto is a vtable the consumer fills. fuzznet's own golden-frame test is gated
+on Monocypher for the same reason, and its header says the vector's provenance
+is a consumer session's -- *"a frame this file recomputed from the code beside
+it would freeze whatever that code currently does, including whatever it does
+wrong"*, which is this tree's own independent-corroboration rule written in
+somebody else's words.
+
+So the first thing the next increment settles is what performs the AEAD and the
+hash. Until it does, a frame that verifies cannot be produced, and the bridge
+can be shown refusing and not accepting.
+
+### One number worth knowing before it surprises somebody
+
+`bridge/netcfgd-remote` is **969,512 bytes**, almost all of it fuzznet, because
+fuzznet builds objects and no archive so the linker has no member granularity
+to exploit. A tree that gates on size elsewhere should know this program is a
+megabyte before it has opened a socket. Whether that matters is a question for
+when it does something.
+
 ## 10.309 The join that was refused and connected anyway
 
 `wifi_connect` reported a refusal for a network that was already coming up.
