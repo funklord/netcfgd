@@ -1,0 +1,96 @@
+/*
+ * scope.h -- how far a configuration key travels.
+ *
+ * WHY SCOPES AND NOT A BOOLEAN
+ *   project.md 10.322. netcfgd serves a machine that will only ever be one
+ *   machine and an estate of thousands, both in full, and the strength is in
+ *   merging them without custom scripting. A local/network boolean cannot
+ *   express the case that breaks it: **a fact about one host that the estate
+ *   should nonetheless see**, which is what an interface's address is.
+ *
+ * A SCOPE IS A CELL'S SUBJECT, WHICH IS WHY THE SET CAN GROW
+ *   fuzznet's `state/` is `(issuer, subject, kind) -> value`. Estate-wide is a
+ *   cell whose subject is the estate, group-wide one whose subject is that
+ *   group, host-scoped one whose subject is the host. **Adding a scope is
+ *   adding a kind of subject, not a mechanism**, so the holder's "probably
+ *   more than these" costs a value here and nothing structural.
+ *
+ *   `HOST_PRIVATE` is the scope with no cell at all. It never enters the
+ *   shared database, which is what keeps constraint 2 true: a machine that
+ *   never joins an estate has no subject, no cells, and the file on its disk
+ *   exactly as today.
+ */
+#ifndef NCFG_SCOPE_H
+#define NCFG_SCOPE_H
+
+typedef enum {
+	/*
+	 * **Zero, and the direction matters more here than the value.** A key
+	 * nobody classified must not be replicated: widening a scope publishes
+	 * configuration the author never offered to anyone, and narrowing it only
+	 * fails to share something. The safe default is therefore the narrowest,
+	 * and it sits at zero so an omission and the test that catches omissions
+	 * point the same way -- the arrangement `NCFG_TIER_OBSERVE` does not have
+	 * and `NCFG_ORDER_AT_MOST_ONCE` does.
+	 */
+	NCFG_SCOPE_HOST_PRIVATE = 0,
+	/* About this host, and replicated so the estate can see and manage it.
+	 * An interface's address is the case this exists for. */
+	NCFG_SCOPE_HOST,
+	/*
+	 * Less than the estate: a zone, a building, a VLAN domain.
+	 *
+	 * **The name is provisional.** The holder said "less-than-estate-wide"
+	 * and did not name it; `group` is a placeholder and renaming it is a
+	 * spelling change here and in the table, not a design one.
+	 */
+	NCFG_SCOPE_GROUP,
+	/* The whole estate. */
+	NCFG_SCOPE_ESTATE,
+	NCFG_SCOPE_COUNT
+} ncfg_scope_t;
+
+/* The language's top-level blocks, as `lower.c` dispatches on them. */
+typedef enum {
+	NCFG_BLOCK_GLOBAL = 0,
+	NCFG_BLOCK_DEVICE,
+	NCFG_BLOCK_INTERFACE,
+	NCFG_BLOCK_NETWORK,
+	NCFG_BLOCK_ACCESS_POINT,
+	NCFG_BLOCK_BLUETOOTH,
+	NCFG_BLOCK_RULE,
+	NCFG_BLOCK_LINKSET,
+	NCFG_BLOCK_COUNT
+} ncfg_block_t;
+
+/* The block of that name, or 0 for one this build does not know. */
+int ncfg_block_from_name(const char *name, ncfg_block_t *out);
+
+/* Its spelling in the language. */
+const char *ncfg_block_name(ncfg_block_t block);
+
+/*
+ * HOW FAR A KEY TRAVELS
+ *
+ * **A block default and a short exception list, not a table of every key.**
+ * The language has around a hundred and ninety key strings across five
+ * lowering files, and the holder's instruction is to merge the two worlds
+ * *without too many special cases* -- which a hundred and ninety judgements
+ * falsifies however carefully each is made.
+ *
+ * So the rule does the work and the exceptions are the design: **a key is
+ * host-private when its value names something only this machine can see, and
+ * wider when it describes the network and two machines could hold it
+ * identically.** `network` and `access_point` are estate-wide entire;
+ * `device` is host-private entire; `interface` is the only genuinely mixed
+ * block and carries most of the exceptions.
+ *
+ * `key` of NULL asks for the block's default.
+ */
+ncfg_scope_t ncfg_scope_of(ncfg_block_t block, const char *key);
+
+/* What the block would answer with no exception, for a caller that wants to
+ * know whether a key was one. */
+ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block);
+
+#endif /* NCFG_SCOPE_H */
