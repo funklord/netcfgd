@@ -108,4 +108,49 @@ ncfg_scope_t ncfg_scope_of(ncfg_block_t block, const char *key);
  * know whether a key was one. */
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block);
 
+/*
+ * THE KIND REGISTRY
+ *
+ * A configuration key that travels is carried as a record, and a record's
+ * `kind` is a `uint32_t` **on the wire, inside records other hosts hold and
+ * have signed**. So a number assigned to a key cannot move: every estate
+ * holding records under it keeps them, and a renumbering makes a host read
+ * somebody's `mtu` as their `dns_mode` while every signature still verifies.
+ * `record/store.h`'s MISPLACED guards the adjacent fault and says why the
+ * class is dangerous -- such a record "may be perfectly well signed, which is
+ * why a signature check further up would not have caught this".
+ *
+ * **This is a protocol registry, not an enum.** Three rules follow:
+ *
+ *   - **Numbers are explicit, never ordinals.** An enum's order is something
+ *     somebody reorders while tidying; a wire value is not.
+ *   - **Assigned once and never reused**, including for a key that is removed.
+ *     A retired number stays retired, because records under it outlive the key
+ *     -- see `RETIRED` in `compile/scope.c`.
+ *   - **Only a key that travels gets one.** A host-private key never becomes a
+ *     record, so it needs no wire number and must not have one.
+ *
+ * **Zero is not a kind.** A key with no number returns 0, which means "cannot
+ * be represented as a record yet" rather than a kind whose number happens to
+ * be low -- so a zeroed field is never a valid lookup, and an unregistered key
+ * fails loudly at the point of writing instead of quietly acquiring a
+ * neighbour's meaning.
+ *
+ * **THE REGISTRY IS INCOMPLETE AND CANNOT BE GATED, WHICH IS RECORDED RATHER
+ * THAN GLOSSED.** The language recognises keys through chains of `strcmp` in
+ * `compile/lower_*.c` and nothing enumerates them, so no test can assert that
+ * every travelling key has a number -- the exhaustiveness used for request
+ * kinds and for blocks has no analogue here. What makes the gap safe rather
+ * than dangerous is the zero above: a missing key cannot be written wrongly,
+ * only not at all. project.md 10.325 records what would close it.
+ */
+#define NCFG_KIND_NONE 0u
+
+/* The number this key travels under, or `NCFG_KIND_NONE`. */
+unsigned ncfg_kind_of(ncfg_block_t block, const char *key);
+
+/* Whether a number has ever been assigned, including to a retired key. For a
+ * test, and for whoever allocates the next one. */
+int ncfg_kind_is_taken(unsigned kind);
+
 #endif /* NCFG_SCOPE_H */

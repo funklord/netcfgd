@@ -12194,6 +12194,68 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
+## 10.325 The kind registry, and the gate it cannot have
+
+`ncfg_kind_of(block, key)` in `compile/scope.c`, kept as a protocol registry
+rather than an enum: explicit numbers, assigned once, never reused, and
+**only for a key that travels** -- a host-private key never becomes a record,
+so it needs no wire number and must not have one.
+
+Thirty-six numbers so far, grouped by block for a reader and **not computed
+from one**: a structured number would make the block taxonomy part of the wire
+format, so splitting or renaming a block later would move every key under it.
+
+    0x0001xxxx  global        5 keys      0x0004xxxx  access_point  empty
+    0x0002xxxx  interface    31 keys      0x0005xxxx  rule          empty
+    0x0003xxxx  network       empty       0x0006xxxx  linkset       empty
+
+`device` and `bluetooth` have no range at all, being host-private entire.
+
+**Four of the six ranges are reserved and empty**, which is the incompleteness
+the next section is about rather than an oversight: `global` and `interface`
+are the blocks netcfgd already replicates against, and the rest get numbers
+when something writes them. A key in an empty range answers `NCFG_KIND_NONE`
+today, which is the right answer for a key nothing can yet carry.
+
+**`RETIRED` is empty and kept anyway**, because the moment it is needed is the
+moment somebody is removing a key and is least likely to invent it. A record
+signed under a retired number outlives the key it described, so reissuing that
+number gives an old record a new meaning with a valid signature.
+
+### The gate it cannot have, which is the entry
+
+**Nothing enumerates the language's keys.** They are recognised by chains of
+`strcmp` in `compile/lower_*.c`, so no test can assert that every travelling
+key has a number -- the exhaustiveness used for request kinds (over the enum)
+and for blocks (over `NCFG_BLOCK_COUNT`) has no analogue here.
+
+**What makes the gap safe rather than dangerous is where zero points.**
+`NCFG_KIND_NONE` is 0 and means "cannot be a record yet", so an unregistered
+key fails at the point of writing instead of quietly acquiring a neighbour's
+meaning. The registry can therefore be filled in over time without any window
+in which a key travels under the wrong number.
+
+**What would close it** is the inversion: have the lowering consult the
+registry rather than the registry chase the lowering, so a key that cannot be
+scoped and numbered cannot be lowered at all. That is a real change to
+`compile/` and is not started. A cheaper approximation is a `tool/` gate
+grepping `strcmp(key, "...")` out of the lowering files and checking each name
+is either numbered or host-private -- this tree already has gates that read
+source that way, and it would catch an added key on the commit that added it.
+
+### What is checked, including the one across both tables
+
+    no host-private key carries a number it could travel under
+    no two keys carry the same wire number
+    an unregistered key has no number, so it cannot be written wrongly
+    zero is permanently taken, so nothing allocates it
+
+**The first is the one neither table could catch alone.** A number on a
+host-private key means something that must never leave the machine has been
+given a way to travel, and the scope table would still say host-private while
+the registry happily hands out a number. Sabotaged by giving `interface.mac` a
+number: the run fails naming the key.
+
 ## 10.324 `kind` is a wire number, and a pluggable store is byte-exact
 
 **The holder, 2026-09-29: fuzznet deals with all replication, get and set, and

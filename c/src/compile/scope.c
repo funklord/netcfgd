@@ -164,6 +164,123 @@ static const struct {
 
 #define EXCEPTION_COUNT (sizeof(EXCEPTIONS) / sizeof(EXCEPTIONS[0]))
 
+/*
+ * THE KIND REGISTRY -- see `scope.h` for the rules this table is kept under.
+ *
+ * **Numbers are grouped by block for a reader's sake and are not computed from
+ * one.** A structured number would make the block taxonomy part of the wire
+ * format, so renaming or splitting a block later would move every key under
+ * it. The grouping is a convention for whoever allocates the next number; the
+ * number itself is written out.
+ *
+ *     0x0001xxxx  global        0x0004xxxx  access_point
+ *     0x0002xxxx  interface     0x0005xxxx  rule
+ *     0x0003xxxx  network       0x0006xxxx  linkset
+ *
+ * `device` and `bluetooth` have no range because they are host-private
+ * entire: nothing in them travels, so nothing in them has a number.
+ */
+static const struct {
+	ncfg_block_t block;
+	const char  *key;
+	unsigned     kind;
+} KINDS[] = {
+	/* global -- only the keys that travel, which are the resolver and
+	 * reachability answers. The rest of the block is this machine's policy
+	 * about itself. */
+	{ NCFG_BLOCK_GLOBAL, "dns", 0x00010001u },
+	{ NCFG_BLOCK_GLOBAL, "dns_mode", 0x00010002u },
+	{ NCFG_BLOCK_GLOBAL, "dns_search", 0x00010003u },
+	{ NCFG_BLOCK_GLOBAL, "dns_domains", 0x00010004u },
+	{ NCFG_BLOCK_GLOBAL, "connectivity", 0x00010005u },
+
+	/* interface -- the block travels by default, so this is everything
+	 * except the nine host-private exceptions above. `address` and `prefix`
+	 * are adjacent numbers and different scopes, which is the pair the whole
+	 * design turns on. */
+	{ NCFG_BLOCK_INTERFACE, "address", 0x00020001u },
+	{ NCFG_BLOCK_INTERFACE, "prefix", 0x00020002u },
+	{ NCFG_BLOCK_INTERFACE, "prefixes", 0x00020003u },
+	{ NCFG_BLOCK_INTERFACE, "routes", 0x00020004u },
+	{ NCFG_BLOCK_INTERFACE, "mtu", 0x00020005u },
+	{ NCFG_BLOCK_INTERFACE, "vlans", 0x00020006u },
+	{ NCFG_BLOCK_INTERFACE, "nat", 0x00020007u },
+	{ NCFG_BLOCK_INTERFACE, "guard", 0x00020008u },
+	{ NCFG_BLOCK_INTERFACE, "advertise", 0x00020009u },
+	{ NCFG_BLOCK_INTERFACE, "radvd", 0x0002000au },
+	{ NCFG_BLOCK_INTERFACE, "odhcpd", 0x0002000bu },
+	{ NCFG_BLOCK_INTERFACE, "lifetime", 0x0002000cu },
+	{ NCFG_BLOCK_INTERFACE, "preference", 0x0002000du },
+	{ NCFG_BLOCK_INTERFACE, "dns", 0x0002000eu },
+	{ NCFG_BLOCK_INTERFACE, "dns_mode", 0x0002000fu },
+	{ NCFG_BLOCK_INTERFACE, "dns_search", 0x00020010u },
+	{ NCFG_BLOCK_INTERFACE, "dns_domains", 0x00020011u },
+	{ NCFG_BLOCK_INTERFACE, "forwarding", 0x00020012u },
+	{ NCFG_BLOCK_INTERFACE, "enabled", 0x00020013u },
+	{ NCFG_BLOCK_INTERFACE, "managed", 0x00020014u },
+	{ NCFG_BLOCK_INTERFACE, "auto", 0x00020015u },
+	{ NCFG_BLOCK_INTERFACE, "probe", 0x00020016u },
+	{ NCFG_BLOCK_INTERFACE, "on_drift", 0x00020017u },
+	{ NCFG_BLOCK_INTERFACE, "require_lease", 0x00020018u },
+	{ NCFG_BLOCK_INTERFACE, "timeout", 0x00020019u },
+	{ NCFG_BLOCK_INTERFACE, "interval", 0x0002001au },
+	{ NCFG_BLOCK_INTERFACE, "hold_down", 0x0002001bu },
+	{ NCFG_BLOCK_INTERFACE, "up_after", 0x0002001cu },
+	{ NCFG_BLOCK_INTERFACE, "down_after", 0x0002001du },
+	{ NCFG_BLOCK_INTERFACE, "other", 0x0002001eu },
+	{ NCFG_BLOCK_INTERFACE, "other_config", 0x0002001fu }
+};
+
+#define KIND_COUNT (sizeof(KINDS) / sizeof(KINDS[0]))
+
+/*
+ * **Numbers that have been used and must never be used again.**
+ *
+ * Empty today and kept anyway, because the moment it is needed is the moment
+ * somebody is removing a key and is least likely to invent the list. A record
+ * signed under a retired number outlives the key it described, so reissuing
+ * that number gives an old record a new meaning -- with a valid signature.
+ */
+static const unsigned RETIRED[] = { 0u };
+#define RETIRED_COUNT (sizeof(RETIRED) / sizeof(RETIRED[0]))
+
+unsigned ncfg_kind_of(ncfg_block_t block, const char *key)
+{
+	size_t at;
+
+	if (!key || (int)block < 0 || (int)block >= (int)NCFG_BLOCK_COUNT) {
+		return NCFG_KIND_NONE;
+	}
+	for (at = 0u; at < KIND_COUNT; at++) {
+		if (KINDS[at].block == block && strcmp(KINDS[at].key, key) == 0) {
+			return KINDS[at].kind;
+		}
+	}
+	/* Not registered. Zero means "cannot be a record yet", which fails at the
+	 * point of writing rather than acquiring a neighbour's meaning. */
+	return NCFG_KIND_NONE;
+}
+
+int ncfg_kind_is_taken(unsigned kind)
+{
+	size_t at;
+
+	if (kind == NCFG_KIND_NONE) {
+		return 1; /* reserved, so never allocatable */
+	}
+	for (at = 0u; at < KIND_COUNT; at++) {
+		if (KINDS[at].kind == kind) {
+			return 1;
+		}
+	}
+	for (at = 0u; at < RETIRED_COUNT; at++) {
+		if (RETIRED[at] == kind) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 ncfg_scope_t ncfg_scope_of(ncfg_block_t block, const char *key)
 {
 	size_t at;
