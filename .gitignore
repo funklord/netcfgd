@@ -97,3 +97,7 @@ debian/debhelper-build-stamp
 
 # The TDE adapter builds with CMake, which wants its own binary directory.
 adapter/netcfgd-tde/build/
+
+# The bridge program (bridge/Makefile). fuzznet keeps its own build output
+# out of the way through its own .gitignore, inside the submodule.
+bridge/netcfgd-remote

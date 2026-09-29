@@ -1,3 +1,6 @@
 [submodule "qtty"]
 	path = qtty
 	url = git@github.com:funklord/qtty.git
+[submodule "fuzznet"]
+	path = fuzznet
+	url = git@github.com:funklord/fuzznet.git
