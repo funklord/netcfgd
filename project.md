@@ -9515,6 +9515,78 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.318 fuzznet names the same gap, and declines it twice
+
+**The holder, 2026-09-29: fuzznet already has a need for distributed
+consensus-queuing, so it may want generalising until everything can use it --
+and the signed order relay beside it, for when the queuing breaks down.**
+
+That is right, and fuzznet says so in its own words. 10.317 concluded the
+primitive was absent from netcfgd's side of the fence; it is absent from
+fuzznet's own too, **and fuzznet has already written down where.**
+
+`spool/plan.h`, on what its iterator cannot express:
+
+>  WHAT IT CANNOT EXPRESS, said rather than implied: rarest-first. That needs
+>  what the OTHER peers hold, which is not in this store and is **the
+>  multi-peer assignment problem this file does not solve.**
+
+`spool/transfer.h` then names its own job in the negative against that
+sentence: it solves *"the part of that problem that does not need to know what
+other peers hold -- not choosing WHICH range is most valuable, but making sure
+two peers are not sent the same one and that a peer which goes quiet does not
+take a range with it."*
+
+**So the same problem is declined in two adjacent files, and the half that is
+solved is the single-host half.** Two peers not being sent the same range is
+one host arbitrating its own outgoing work. Which host should fetch which
+range, given what the estate holds, is the distributed half and it has no
+owner.
+
+### Why that is one primitive with netcfgd's, not two
+
+netcfgd needs: given the nodes and a job, every node independently computes the
+same answer about who runs it. fuzznet needs: given the peers and a range,
+every peer independently computes the same answer about who fetches it.
+
+**Those are the same function with different nouns** -- members and a key, in,
+an agreed ordering of responsibility, out. Placement, relay routing, fetch
+assignment and job queuing are then four consumers of one thing rather than
+four hand-rolled answers, which is the whole of 10.313's instruction not to
+implement haphazardly.
+
+It also explains why `claim/` does not stretch to it and should not be made
+to. That file is explicit that it avoids an election **by interchangeability**
+-- "the same software with the same job, so it does not matter which one
+wins". Peers holding different ranges are not interchangeable, and neither are
+nodes in different parts of a site. The property that replaces arbitration
+there has to be **determinism** instead, which is what the holder's
+data-plus-pseudorandom framing is.
+
+### The relay is the other half, and the design says when it is used
+
+**Signed order relaying is the fallback for when consensus-queuing breaks
+down**, which makes it a different thing from the frame relay fuzznet already
+has. `wire/relay.h` carries `hops_left` with a budget, spend and service -- a
+*frame* reaching a host it could not reach directly. An order is more than
+that: it is a statement somebody signed, which must be carried by hosts that
+may not execute it, must not be executed twice, and must stop being valid.
+
+fuzznet has every part of that already -- records are signed and sequenced,
+`frame/freshness.c` expires, `chain/` authorises, relay carries -- **and
+nothing composes them into "an order".** That composition is the second thing
+to ask for, and asking for it beside the first matters: a queue that never
+fails needs no relay, and a relay is only a fallback if something says when
+the queue has failed.
+
+### What this does not settle
+
+Whether the ordering function is rendezvous hashing, a keyed permutation, or
+something fuzznet prefers, is fuzznet's -- netcfgd's part is the requirement
+and the two call sites, not the algorithm. 10.313 is explicit that what gets
+signalled is framed as a primitive fuzznet is missing rather than a design
+netcfgd has chosen for it.
+
 ## 10.317 No controller, and the one primitive fuzznet does not have
 
 **The holder, 2026-09-29, correcting 10.316's suggested resolution:** netcfgd
