@@ -12195,66 +12195,184 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.326 A key is a path, and the first registry named six things that were not keys
 
-`ncfg_kind_of(block, key)` in `compile/scope.c`, kept as a protocol registry
+**Written 2026-09-29, correcting 10.325 and the headline pair in 10.322.**
+
+Asked for the remaining kind ranges, the four unwritten blocks were enumerated
+from `compile/lower_*.c` rather than from memory. That enumeration condemned
+the two ranges already written.
+
+**The language nests and the registry was flat.** A key is reached as
+`advertise { prefix ... }`, `probe { command ... }`, `wifi { roam { signal
+... } } }`, and one spelling means different things at different depths:
+
+    backend        a router-advertisement daemon inside `advertise`,
+                   a supplicant inside a radio's `wifi`
+    config         addressing on an interface and on a network,
+                   a FILE PATH inside `kind { openvpn { } }`
+    members        a linkset's, a bridge's, a bond's
+    priority       a rule's, a bridge's, and a retired wifi key
+    dns            a key, a sub-block, and a key inside that sub-block
+
+A `(block, name)` pair cannot tell those apart, so the table could give one
+number to two meanings -- the exact fault the registry exists to prevent,
+built into its key.
+
+**Six rows named nothing at all.** `interface.address` is not a key: the
+addressing is written as `config`, and `address` is a key only of `bluetooth`.
+`radvd`, `odhcpd` and `auto` are VALUES of `advertise.backend`. `advertise`
+and `probe` are sub-block heads. Twelve more were real keys registered a level
+too shallow, and two real keys -- `config` and `ipv6_token` -- were missing.
+
+**And 10.322's headline pair was wrong in both halves.** It turned on `prefix`
+against `address`; `prefix` is an `advertise` key and `address` is not a key.
+The pair it was reaching for is real and now reads **`interface.advertise.prefix`
+against `interface.config`**: what this link announces to the segment, against
+what address this machine takes within it. The argument is unchanged and the
+illustration is now one somebody can type.
+
+### How it was written wrong, which is the part worth keeping
+
+Both tables were built from a survey of key strings that pooled every
+`strcmp(key, "...")` in the lowering into one list per FILE, and read block
+heads and enumerated values out of the same list. Every name in them came from
+the code; none of them came from the code with its context.
+
+**A list of literals grepped out of a parser is not a grammar**, and the
+difference is invisible in the output: `radvd` is in the source, spelled
+exactly so, three lines from keys that are keys.
+
+### The gate
+
+`tool/registry_gate.py`, in `PORTABLE_GATES` as `make registry`. It re-reads
+those `strcmp` chains, classifies each literal by the VARIABLE it is compared
+against -- `key` for an assignment, `head` for a sub-block, neither for a value
+-- and refuses a registered path whose leaf the block cannot reach.
+
+**Pooling the spellings across blocks was tried first and passed the
+sabotage.** `interface.address` was accepted, because `address` is a real key
+somewhere in the language. Attribution is per file now, with the many-to-many
+rows written out (`ncfg_lower_dns_key` serves three blocks;
+`ncfg_lower_wifi_key` serves three), and the case that prompted the gate is
+one of its four controls.
+
+    advertise.prefix    interface    must pass    a real path
+    advertise.radvd     interface    must fail    a value, not a key
+    address             interface    must fail    another block's key
+    address             bluetooth    must pass    the same key where it lives
+
+Sabotaged four ways, each caught by the check meant to catch it: the three
+original faults re-inserted one at a time, and the block attribution removed,
+which fires the control rather than the finding.
+
+**What it cannot see, and this is pinned rather than implied**: completeness,
+still; nesting WITHIN a block, so `interface.advertise.mtu` would pass; and
+whether the `OWNERS` attribution is right -- too narrow and it rejects real
+keys loudly, but nothing here proves it correct.
+
+### Renumbering was free exactly once
+
+Nothing had written a record under any of those numbers, here or anywhere, so
+they were corrected rather than retired and `RETIRED` is still empty. That was
+the last moment it was free. The never-reuse rule binds from this commit,
+which is why the correction went in before the four remaining ranges rather
+than after them.
+
+## 10.325 The kind registry, and the gate it half has
+
+`ncfg_kind_of(block, path)` in `compile/scope.c`, kept as a protocol registry
 rather than an enum: explicit numbers, assigned once, never reused, and
 **only for a key that travels** -- a host-private key never becomes a record,
 so it needs no wire number and must not have one.
 
-Thirty-six numbers so far, grouped by block for a reader and **not computed
+**A key is identified by its path within the block**, not by its name --
+`mtu`, `advertise.prefix`, `wifi.roam.signal`. 10.326 has why, and what the
+flat version cost.
+
+Eighty-nine numbers, grouped by block for a reader and **not computed
 from one**: a structured number would make the block taxonomy part of the wire
 format, so splitting or renaming a block later would move every key under it.
 
-    0x0001xxxx  global        5 keys      0x0004xxxx  access_point  empty
-    0x0002xxxx  interface    31 keys      0x0005xxxx  rule          empty
-    0x0003xxxx  network       empty       0x0006xxxx  linkset       empty
+    0x0001xxxx  global         6      0x0004xxxx  access_point  11
+    0x0002xxxx  interface     34      0x0005xxxx  rule          12
+    0x0003xxxx  network       25      0x0006xxxx  linkset        1
 
 `device` and `bluetooth` have no range at all, being host-private entire.
-
-**Four of the six ranges are reserved and empty**, which is the incompleteness
-the next section is about rather than an oversight: `global` and `interface`
-are the blocks netcfgd already replicates against, and the rest get numbers
-when something writes them. A key in an empty range answers `NCFG_KIND_NONE`
-today, which is the right answer for a key nothing can yet carry.
 
 **`RETIRED` is empty and kept anyway**, because the moment it is needed is the
 moment somebody is removing a key and is least likely to invent it. A record
 signed under a retired number outlives the key it described, so reissuing that
 number gives an old record a new meaning with a valid signature.
 
-### The gate it cannot have, which is the entry
+**A second spelling resolves rather than registering.** `lookup` and `table`
+are one field in `ncfg_lower_rule`; the four dns keys are written with or
+without their prefix depending on whether they sit inside a `dns` block. An
+alias that took a number of its own would be two numbers for one meaning,
+which is the collision hazard from the other end. `ncfg_key_canonical` runs
+before both tables.
 
-**Nothing enumerates the language's keys.** They are recognised by chains of
-`strcmp` in `compile/lower_*.c`, so no test can assert that every travelling
-key has a number -- the exhaustiveness used for request kinds (over the enum)
+### Three keys that have no number, on purpose
+
+`dot1x.ca_cert`, `dot1x.client_cert` and `dot1x.private_key` are estate-wide
+by scope and deliberately unregistered.
+
+`ncfg_as_cert_source` accepts either form under one spelling: `@secret:NAME`
+is content netcfgd already holds and grants nothing, while a bare string is a
+path -- "an instruction to open it *as root*; a caller who is not root cannot
+send one" (`document.h`). **A scope is a property of a key and cannot say
+"this key may travel in one of its two forms"**, so a number here would let a
+replicated record carry the privileged form under a key the table calls safe.
+
+What closes it is a record encoder that refuses `NCFG_CERT_SOURCE_PATH`. Until
+then they answer `NCFG_KIND_NONE`, which is exactly true: they cannot be
+carried yet. A test pins the absence, because otherwise filling them in looks
+like tidying.
+
+**The credential keys that DO travel are safe for a reason worth naming.**
+`ncfg_as_secret` refuses a bare string and takes only `@secret:NAME`, whose
+value lives in `/etc/netcfgd/secrets/NAME` at 0600 on each machine. So
+`wifi.psk` carries a name the estate agrees on and the passphrase stays where
+it was put, which is what makes an estate-wide `network` block replicable at
+all.
+
+### What is checked, and by which instrument
+
+    no host-private key carries a number it could travel under      C test
+    no two keys carry the same wire number                          C test
+    every row in that comparison had a number, so it ran            C test
+    an exception covers the whole sub-tree under it                 C test
+    an alias resolves to one number and one scope                   C test
+    the three cert keys stay unregistered                           C test
+    every registered path names a key its block has                 make registry
+
+**The first is the one neither table could catch alone.** A number on a
+host-private key means something that must never leave the machine has been
+given a way to travel, and the scope table would still say host-private while
+the registry happily hands out a number.
+
+**The third was added after the second passed vacuously.** A rewrite moved the
+keys the uniqueness check compared; the rows stopped resolving, the loop
+skipped them all, and "no two keys carry the same wire number" printed exactly
+as it does over a real comparison.
+
+### Completeness still cannot be gated
+
+Nothing enumerates the language's keys -- they are recognised by chains of
+`strcmp` in `compile/lower_*.c` -- so no test can assert that every travelling
+key has a number. The exhaustiveness used for request kinds (over the enum)
 and for blocks (over `NCFG_BLOCK_COUNT`) has no analogue here.
 
 **What makes the gap safe rather than dangerous is where zero points.**
 `NCFG_KIND_NONE` is 0 and means "cannot be a record yet", so an unregistered
 key fails at the point of writing instead of quietly acquiring a neighbour's
-meaning. The registry can therefore be filled in over time without any window
-in which a key travels under the wrong number.
+meaning. The registry can be filled in over time with no window in which a key
+travels under the wrong number.
 
 **What would close it** is the inversion: have the lowering consult the
 registry rather than the registry chase the lowering, so a key that cannot be
 scoped and numbered cannot be lowered at all. That is a real change to
-`compile/` and is not started. A cheaper approximation is a `tool/` gate
-grepping `strcmp(key, "...")` out of the lowering files and checking each name
-is either numbered or host-private -- this tree already has gates that read
-source that way, and it would catch an added key on the commit that added it.
-
-### What is checked, including the one across both tables
-
-    no host-private key carries a number it could travel under
-    no two keys carry the same wire number
-    an unregistered key has no number, so it cannot be written wrongly
-    zero is permanently taken, so nothing allocates it
-
-**The first is the one neither table could catch alone.** A number on a
-host-private key means something that must never leave the machine has been
-given a way to travel, and the scope table would still say host-private while
-the registry happily hands out a number. Sabotaged by giving `interface.mac` a
-number: the run fails naming the key.
+`compile/` and is not started.
 
 ## 10.324 `kind` is a wire number, and a pluggable store is byte-exact
 
@@ -12600,12 +12718,45 @@ exhaustiveness case. The second is worth noting for where it landed -- an
 unlisted block falls to zero, which is host-private, so even undetected it
 would not have published anything.
 
+### Corrected 2026-09-29: three of the spellings above are not keys
+
+**The argument holds and the illustrations did not.** When the four unwritten
+kind ranges were enumerated from `compile/lower_*.c`, the key names this entry
+turns on were read for the first time rather than remembered -- 10.326.
+
+    prefix, prefixes   not interface keys: they are `advertise.prefix` and
+                       `advertise.prefixes`, inside the router-advertisement
+                       sub-block. The scope judgement is unchanged.
+    address            not a key at all. The addressing is written as
+                       `config`, and `address` is a key only of `bluetooth`.
+    config             NOT a path, so the paragraph above listing it beside
+                       `backend`, `command` and `args` is wrong about it: it
+                       is the addressing spec, and it is the "which address
+                       THIS host holds" half of the pair. It is host-scoped
+                       and replicated.
+    backend            an `advertise` key naming which RA daemon is installed
+                       here, and not a path either. Host-private for the
+                       hardware-and-software reason, not the path reason.
+    command, args      a probe's, so `probe.command` and `probe.args`. These
+                       two are the path case, and they are the whole of it in
+                       this block.
+
+**So the pair is `advertise.prefix` against `config`**: what this link
+announces to the segment, against what address this machine takes within it.
+Everything this entry argues about why a boolean cannot express that is
+unaffected -- what changed is that the example can now be typed into a config
+file. `make registry` refuses a table row naming a key the block does not
+have, which is the instrument this entry lacked.
+
 ### What is still the holder's
 
 The name of the middle scope, which was described and not named. Whether there
-are more than four. And the per-key judgements themselves, which are twenty-
-eight assertions a reader can disagree with individually -- which was the point
-of keeping them a list rather than folding them into prose.
+are more than four. And the per-key judgements themselves, which a reader can
+disagree with individually -- which was the point of keeping them a list rather
+than folding them into prose. Two moved on the evidence above and are open
+like the rest: `preference` and `guard` came back from group to the block's
+host default, being this machine's ranking of its own links and its own
+reason for leaving one alone.
 
 ## 10.321 The lease term measured, and why it is not one number
 
