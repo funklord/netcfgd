@@ -78,7 +78,8 @@ typedef struct {
 	ncfg_walk_what_t what;
 	ncfg_withheld_t  withheld;
 	char             block[32];
-	char             label[32];
+	char             label[64];
+	size_t           label_len;
 	char             path[64];
 	char             value[128];
 	size_t           value_len;
@@ -120,8 +121,8 @@ static int collect(void *ctx, const ncfg_walk_item_t *item)
 	slot->withheld = item->withheld;
 	copy_into(slot->block, sizeof(slot->block), item->block_name,
 	    item->block_name ? strlen(item->block_name) : 0u);
-	copy_into(slot->label, sizeof(slot->label), item->label,
-	    item->label ? strlen(item->label) : 0u);
+	copy_into(slot->label, sizeof(slot->label), item->label, item->label_len);
+	slot->label_len = item->label_len;
 	copy_into(slot->path, sizeof(slot->path), item->path,
 	    item->path ? strlen(item->path) : 0u);
 	copy_into(slot->value, sizeof(slot->value), item->value, item->value_len);
@@ -212,6 +213,26 @@ static void the_label_tells_two_instances_apart(void)
 	check(wlan && strcmp(wlan->label, "wlan0") == 0 && eth &&
 	        strcmp(eth->label, "eth0") == 0,
 	    "so the label is the only thing that separates them, and it is carried");
+}
+
+/*
+ * **A label arrives with its length**, because a network's label is an SSID
+ * and an SSID is 32 arbitrary bytes. `bridge/record_encode.h` hashes it into a
+ * subject and takes it the same way; handing over the pointer alone would
+ * shorten a network whose name holds a NUL, and two of those would share a
+ * cell -- the fault 10.329 exists to close, arriving by a second route.
+ */
+static void a_label_arrives_with_its_length(void)
+{
+	collected_t   all;
+	const seen_t *mtu;
+
+	(void)walked(&all, SOURCE);
+	mtu = find(&all, "wlan0", "mtu");
+	check(mtu != NULL && mtu->label_len == 5u,
+	    "a label's length is carried, not recomputed from the pointer");
+	check(mtu != NULL && strlen(mtu->label) == mtu->label_len,
+	    "and agrees with the bytes for a label that is ordinary text");
 }
 
 static void a_hook_is_reported_rather_than_passed_over(void)
@@ -402,6 +423,7 @@ int main(void)
 	the_walk_reaches_every_statement();
 	a_key_that_travels_carries_its_number_and_scope();
 	the_label_tells_two_instances_apart();
+	a_label_arrives_with_its_length();
 	a_hook_is_reported_rather_than_passed_over();
 	a_host_private_key_is_withheld_as_one();
 	a_credential_written_as_a_path_is_withheld();

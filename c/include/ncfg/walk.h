@@ -94,8 +94,15 @@ typedef struct {
 	ncfg_block_t     block;
 	const char      *block_name;
 	/* The block's label -- an interface's name, a network's id -- or NULL
-	 * where the block takes none. `global` has none. */
+	 * where the block takes none. `global` has none.
+	 *
+	 * **With a length, because a label can be an SSID** and an SSID is 32
+	 * arbitrary bytes rather than a C string. `bridge/record_encode.h`
+	 * hashes it into a subject and takes it the same way; passing the
+	 * pointer alone would silently shorten a network whose name holds a
+	 * NUL, and two such networks would then share a cell. */
 	const char      *label;
+	size_t           label_len;
 	/* The key's path within the block: `mtu`, `advertise.prefix`. Empty
 	 * for a report about the block itself. */
 	const char      *path;

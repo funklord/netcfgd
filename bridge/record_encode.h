@@ -95,21 +95,63 @@
 #define NCFG_STREAM_GROUP  (FZN_STREAM_RESERVED + 1u)
 #define NCFG_STREAM_ESTATE (FZN_STREAM_RESERVED + 2u)
 
-/* What a record about a key is a statement about. The caller says which it is
- * holding, and this refuses one that does not match the key's scope -- a
- * 32-byte subject is opaque, so nothing else could tell an estate's from a
- * host's. */
+/*
+ * A SUBJECT IS A CONFIGURED OBJECT, NOT A MACHINE
+ *
+ * **Settled by the copyright holder 2026-09-29: fold the instance into the
+ * subject.** project.md 10.328 measured what the first version cost -- fuzznet
+ * addresses a cell by `(issuer, subject, kind)`, a kind names the KEY, and
+ * with a host for a subject `wlan0`'s MTU and `eth0`'s MTU were one cell. The
+ * second write won and every host in the estate agreed about the wrong answer.
+ *
+ * So a subject is `(root, block, label)`: this host's `wlan0`, the estate's
+ * `network "home"`, this group's `rule "uplink"`. The 32 bytes are a hash over
+ * those three, and the label is what separates two interfaces.
+ *
+ * **What it costs, which is the reason it was a decision rather than a fix.**
+ * A host's subject is no longer its public key. Reading a host's configuration
+ * is not `fzn_state_get(state, host_key, kind)` any more: a reader derives the
+ * subject for the object it wants, so it has to know the labels. Enumerating
+ * what a host holds becomes a question for the estate's own records rather
+ * than one the state answers by itself.
+ *
+ * THE ROOT COMES FROM THE BLOCK, THE STREAM FROM THE KEY, AND THOSE ARE TWO
+ * QUESTIONS
+ *
+ * The first version mapped a key's SCOPE onto a subject one-to-one, which read
+ * "how far does this travel" and "what is this about" as one question. They
+ * are not. `interface.dns` is estate-scoped and is about one link on one
+ * machine: everyone may see it, and it describes `wlan0` here.
+ *
+ * An `interface` is a thing on a machine and a `network` is a thing in the
+ * estate, whatever the scope of any key inside them -- so the ROOT is a
+ * property of the block, and `ncfg_record_root_of` derives it from
+ * `ncfg_block_default_scope` rather than from a second table. The key's own
+ * scope still chooses the stream, which is the other question.
+ */
 typedef enum {
-	/* This machine, named by its public key. `FZN_SUBJECT_LEN` is 32 so
-	 * that it can hold one, which `record/record.h` states is the common
-	 * case. */
-	NCFG_RECORD_SUBJECT_HOST = 0,
-	/* A zone, a building, a VLAN domain: a name hashed to 32 bytes by
-	 * `ncfg_record_subject_of_name`. */
-	NCFG_RECORD_SUBJECT_GROUP,
-	/* The estate, by the same derivation. */
-	NCFG_RECORD_SUBJECT_ESTATE
-} ncfg_record_subject_t;
+	/* Named by a 32-byte public key: the machine itself. */
+	NCFG_ROOT_HOST = 0,
+	/* Named by a name, hashed in with everything else. */
+	NCFG_ROOT_GROUP,
+	NCFG_ROOT_ESTATE
+} ncfg_record_root_t;
+
+/* Which root a block's objects hang from. Derived from the block's default
+ * scope, so adding a block puts it somewhere by the same rule that scopes it
+ * -- and a host-private block roots at the host, having nowhere else to be. */
+ncfg_record_root_t ncfg_record_root_of(ncfg_block_t block);
+
+/* Where a subject hangs from: a host by its key, or a group or estate by its
+ * name. `kind` must be the one `ncfg_record_root_of` gives the block, which is
+ * checked rather than assumed. */
+typedef struct {
+	ncfg_record_root_t kind;
+	/* NCFG_ROOT_HOST. */
+	const uint8_t     *key;
+	/* NCFG_ROOT_GROUP and NCFG_ROOT_ESTATE. */
+	const char        *name;
+} ncfg_record_rootref_t;
 
 typedef enum {
 	NCFG_RECORD_OK = 0,
@@ -124,12 +166,13 @@ typedef enum {
 	 * registry that gives host-private keys no number, and checked anyway:
 	 * it is the one refusal whose failure is silent and permanent. */
 	NCFG_RECORD_ERR_HOST_PRIVATE = -3,
-	/* The subject is not the kind this key's scope takes -- an estate-wide
-	 * key handed a host, or the reverse. */
+	/* The root is not the one this block's objects hang from -- an
+	 * interface rooted at the estate, a network rooted at a host. */
 	NCFG_RECORD_ERR_SUBJECT = -4,
-	/* Over `FZN_RECORD_BODY_MAX`. Its own code because it is a sizing
-	 * answer a caller can act on, which is the distinction
-	 * `fzn_record_err_t` already draws. */
+	/* Over `FZN_RECORD_BODY_MAX`, or a name or label longer than a subject
+	 * transcript carries. Its own code because it is a sizing answer a
+	 * caller can act on, which is the distinction `fzn_record_err_t`
+	 * already draws. */
 	NCFG_RECORD_ERR_TOO_LARGE = -5,
 	/* A NUL inside a value the language spells as text. It would survive
 	 * the record and truncate on the way back out through any of the C
@@ -138,8 +181,8 @@ typedef enum {
 	NCFG_RECORD_ERR_NOT_TEXT = -6
 } ncfg_record_err_t;
 
-/* Everything a record carries that comes from the KEY rather than from the
- * node. The caller adds its issuer, its sequence and the time, and calls
+/* Everything a record carries that comes from the KEY and the object it is
+ * about. The caller adds its issuer, its sequence and the time, and calls
  * `fzn_record_sign`.
  *
  * `body` borrows the caller's value and is not copied, on the same terms as
@@ -154,35 +197,50 @@ typedef struct {
 } ncfg_record_fields_t;
 
 /*
- * A subject for a named group or estate.
+ * The subject for one configured object.
  *
- * **Domain-separated, and the scope is inside the separation.** A group called
- * `roof` and an estate called `roof` are different subjects, and neither may
- * collide with what another consumer of the same library hashes into its own
- * subjects. The tag is versioned because changing the derivation later would
- * silently re-point every cell.
+ * Exported beside `ncfg_record_encode`, which derives its own, because a
+ * READER needs one without encoding anything: `fzn_state_get` takes a subject
+ * and a kind, so asking what the estate currently says about `wlan0`'s MTU
+ * starts here.
  *
- * `hash` is the caller's binding, as every other fuzznet seam takes it --
- * `session/hash_monocypher.h` seats the one this tree uses. Refuses
- * `NCFG_RECORD_SUBJECT_HOST`: a host's subject is its public key and is not
- * derived from anything.
+ * `label` is the block's label -- an interface's name, a network's id -- and
+ * NULL where the block takes none. It is taken with a length because a label
+ * can be an SSID, and an SSID is 32 arbitrary bytes rather than a C string.
+ *
+ * **Every component is length-prefixed in the transcript rather than separated
+ * by a byte.** A separator has to be a byte no component can contain, and a
+ * label can be an SSID, which is 32 arbitrary bytes. It is kept as
+ * unconditional robustness rather than as a fix for a reachable fault:
+ * measured by sabotage, a trailing-NUL scheme passes every test in this
+ * module, because only the label is length-taken and it is last. The prefix
+ * stays correct if a root ever becomes length-taken or a component is added
+ * after the label -- project.md 10.329 records that the tests cannot tell the
+ * two schemes apart, so the claim is not stronger than that.
+ *
+ * `hash` is the caller's binding, as every other fuzznet seam takes it.
  */
-ncfg_record_err_t ncfg_record_subject_of_name(const fzn_hash_ops_t *hash,
-    ncfg_record_subject_t which, const char *name, uint8_t out[FZN_SUBJECT_LEN]);
+ncfg_record_err_t ncfg_record_subject_of(const fzn_hash_ops_t *hash, ncfg_block_t block,
+    const ncfg_record_rootref_t *root, const char *label, size_t label_len,
+    uint8_t out[FZN_SUBJECT_LEN]);
 
 /*
- * Fill in the fields for one key's value.
+ * Fill in the fields for one key's value on one object.
  *
  * `path` is the key's path within the block, exactly as `ncfg_scope_of` and
  * `ncfg_kind_of` take it -- `mtu`, `advertise.prefix`, `wifi.roam.signal`.
  * `value` is the value as the language spells it, and is borrowed.
  *
+ * **The subject is derived here rather than passed in.** A caller that could
+ * hand over 32 opaque bytes could hand over the wrong ones, and nothing
+ * downstream can tell what a subject is about.
+ *
  * On any refusal `*out` is left untouched, so a caller cannot half-fill a
  * record it was told not to make.
  */
-ncfg_record_err_t ncfg_record_encode(ncfg_block_t block, const char *path,
-    ncfg_record_subject_t which, const uint8_t subject[FZN_SUBJECT_LEN], const char *value,
-    size_t value_len, ncfg_record_fields_t *out);
+ncfg_record_err_t ncfg_record_encode(const fzn_hash_ops_t *hash, ncfg_block_t block,
+    const ncfg_record_rootref_t *root, const char *label, size_t label_len,
+    const char *path, const char *value, size_t value_len, ncfg_record_fields_t *out);
 
 /* The stream a scope's records go in, or 0 for a scope that has none --
  * host-private, which is every scope that does not travel. Exposed because a

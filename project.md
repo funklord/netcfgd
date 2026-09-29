@@ -12195,6 +12195,104 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.329 The instance folded into the subject, and a sabotage that refused to fail
+
+**The copyright holder, 2026-09-29: fold the instance into the subject.**
+10.328 measured what the first version cost -- `wlan0`'s MTU and `eth0`'s MTU
+were one cell, the second write won, and every host in the estate agreed about
+the wrong answer. This is that decision implemented.
+
+A subject is now **`(root, block, label)`**: this host's `wlan0`, the estate's
+`network "home"`, this group's `rule "uplink"`. The 32 bytes are a hash over
+those three, and the label is what separates two interfaces.
+
+### The root is the block's and the stream is the key's
+
+That is the conflation 10.328 named, and it is gone. The first version mapped a
+key's SCOPE onto a subject one-to-one, which asked "how far does this travel"
+and "what is this about" as one question.
+
+An `interface` is a thing on a machine and a `network` is a thing in the
+estate, whatever the scope of any key inside them. So the root is a property of
+the BLOCK, and `ncfg_record_root_of` derives it from
+`ncfg_block_default_scope` rather than from a second table -- a block added
+later roots itself by the same rule that scopes it, and a host-private block
+roots at the host, having nowhere else to be.
+
+The key's own scope still chooses the stream. The case that was previously
+inexpressible now has a test: `interface.dns` is estate-scoped, is about one
+link on one machine, and encodes -- estate track, host-rooted subject.
+
+### What it costs, said rather than discovered later
+
+**A host's subject is no longer its public key.** Reading a host's
+configuration is not `fzn_state_get(state, host_key, kind)` any more: a reader
+derives the subject for the object it wants, so it has to know the labels.
+Enumerating what a host holds becomes a question for the estate's own records
+rather than one the state answers by itself.
+
+`ncfg_record_subject_of` is exported beside the encoder for exactly that
+reader, since asking what the estate says about `wlan0`'s MTU has to start
+somewhere.
+
+### The tag is v2
+
+`"netcfgd subject v1"` hashed a scope and a name and had no room for a label.
+Nothing had ever derived a v1 subject outside a test, so nothing is stranded --
+and the tag is bumped anyway, because a reader holding records needs to be able
+to tell which derivation produced them and that is the entire job of the
+string. It is the one place where the registry's "corrected rather than
+retired" argument does not apply: a version tag is not a scarce number.
+
+### The sabotage that refused to fail, which is the honest part
+
+The transcript length-prefixes each component. The header said that was because
+a separator has to be a byte no component can contain and an SSID can contain
+any of them.
+
+**Replacing the prefix with a trailing NUL leaves every test green.** Measured,
+not reasoned: only the LABEL is taken with a length -- a root name arrives as a
+C string and cannot hold a NUL -- and the label is the last component, where a
+trailing separator cannot be confused with the start of anything. The
+ambiguity a separator scheme is vulnerable to needs a NUL inside a component
+that is not last, and no caller can construct one.
+
+So the prefixing is kept as unconditional robustness and the claim is
+corrected: it costs two bytes per component, it stays correct if a root ever
+becomes length-taken or a component is added after the label, and **no test
+here shows it is doing anything today.** A sabotage that passes is a result,
+and the alternative -- quietly leaving a header claiming a guarantee the suite
+cannot demonstrate -- is the thing this tree keeps finding in other people's
+gates.
+
+### The walker carries the label's length now
+
+A network's label is an SSID, and an SSID is 32 arbitrary bytes rather than a C
+string. `ncfg_walk_item_t` gained `label_len`, because handing the encoder a
+pointer alone would shorten a network whose name holds a NUL -- and two of
+those would share a cell, which is 10.328's fault arriving by a second route.
+
+### What the subject checks say
+
+    two interfaces on one host differ                  the decision, pinned
+    one link name on two machines is two objects
+    one label under two blocks is two objects
+    an estate-scoped key about one link encodes        the conflation, gone
+    the root must match the block, both ways
+    a host-private key is refused as such
+    the stream comes from the scope, three tracks
+    two keys on one object share a subject
+    a label arrives with its length                    walk_test
+    sign, open, verify, and the subject derived again  the control
+
+**The control compares the record's subject against an independently derived
+one**, not against the struct the encoder filled -- which would be the same
+witness twice, one call further along.
+
+Sabotaged four ways. Three were caught by the check meant for them: the label
+dropped from the transcript, the block's name dropped, and the root-against-
+block check removed. The fourth is the section above.
+
 ## 10.328 The document walker, and the cell two interfaces share
 
 `compile/walk.c`. Every key in a document, its value as written, and the
@@ -12315,10 +12413,10 @@ may see it, and it describes one link on one machine. The current encoder
 cannot express that at all, and neither can this entry without deciding what
 the scopes mean.
 
-**Whose decision: the copyright holder's**, because it is a wire decision and
-because it moves what a scope is. Nothing is blocked meanwhile -- the walker
-and the encoder both work and both refuse correctly -- and nothing should be
-built on the subject derivation until it is settled.
+**Settled the same day: fold the instance into the subject** -- the first
+option, taken by the copyright holder. 10.329 is the implementation, including
+what the cost above turned out to be in practice and the separation of root
+from scope that came with it.
 
 ### What is checked
 
