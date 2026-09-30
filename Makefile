@@ -2091,6 +2091,12 @@ live:
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
+	@# Write a file, touch nothing else, does the machine change. Thirty
+	@# scripts here write configuration while a daemon runs and every one of
+	@# them then calls `ncfg apply` or drives the daemon by hand, so the one
+	@# question project.md 10.307 asks had no witness at all. It calls `apply`
+	@# nowhere, which is the point of it.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
 	@# A linkset choosing between two links, and the case metrics cannot
 	@# handle on their own: a link that is up, has carrier and reaches
 	@# nothing keeps its better metric while doing so, and only a probe tells

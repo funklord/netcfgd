@@ -12195,6 +12195,100 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.331 The 10.307 reproduction, what it refuted, and what it found
+
+`tests/live/config_arrives.sh`. Write a file, touch nothing else, does the
+machine change. It calls `apply` nowhere, and a future edit adding one to make
+it pass has removed the test rather than fixed it.
+
+**No live test covered the path.** Thirty scripts write configuration while a
+daemon runs; every one of them then calls `ncfg apply` or starts the daemon
+with `--no-apply-on-start` and drives it by hand. The one question 10.307 asks
+had no witness at all, which is why the theories about it could not be settled
+by reading.
+
+### What it refuted, in the order the theories died
+
+**Written configuration IS applied**, on all three shapes: a value changed in
+`netcfgd.conf`, the same arriving as a drop-in under `conf.d/`, and a whole
+interface the daemon had never seen. Ten seconds each, on an idle namespace.
+
+Two hypotheses died before that, both by measurement rather than argument:
+
+- **`on_drift_default` calloc'd to `report`.** `value.h` warns about exactly
+  this, so it was the first suspect. `ncfg_document_new` runs `ncfg_type_init`,
+  which applies the `reconcile` fallback; every document built through it is
+  correct.
+- **The watch covering `/etc` and not `conf.d/`.** The daemon's own log prints
+  one directory, which looked like the answer. `daemon_watchers.c` passes both,
+  and the drop-in test passes.
+
+**And the reproduction's first run was its own fault, which is worth keeping.**
+Sections 2 and 3 failed, and the cause was a drop-in redefining a block without
+`override`. The compiler refused it in one sentence naming both files and the
+line -- and the refusal failed the WHOLE load, so section 3's new interface
+never arrived either. Two failing checks, one cause, and the cause was the test.
+`ncfg show` said so immediately; running the compiler by hand on the fixture
+was faster than reading anything.
+
+### What it found, which is a real defect and not 10.307
+
+**A configuration the daemon cannot compile is silent.** `reload()` announces
+`NCFG_PROTO_EVENT_RELOADED` with `ok = 0` and the diagnostics -- to whoever is
+connected at that instant -- and writes nothing to the log. The previous
+document stands, the machine correctly does not move, and from outside that is
+indistinguishable from a write nobody noticed.
+
+Measured: a deliberately broken drop-in, a machine that stayed exactly as it
+was, and a journal holding two lines, neither about it.
+
+**The same defect as 10.330's drift, one layer up, found the same way.** An
+event to a listener is not a record, and the listener is usually nobody. That
+is twice in one day from one root, which makes it a shape worth carrying rather
+than two fixes: **netcfgd announces to clients and forgets to write it down.**
+
+Both edges are said now. The failure names the file and the line, once per
+distinct diagnostic -- the watch fires per write and a broken file stays
+broken, so the alternative is a line per pass while somebody is already having
+a bad time. And recovery is said, because an operator told the configuration is
+broken has no other way to learn it is not.
+
+The de-duplication is a bounded copy of the diagnostics, so two failures
+agreeing for `NCFG_LOG_MAX` bytes are said once. That is the trade a fixed
+buffer buys and it fails in the safe direction: the first is always said, and a
+second costs a line rather than the fact.
+
+### 10.307 is still not explained
+
+None of this is that afternoon. Its drop-in compiled -- `config_put` answered
+successfully at 12:55:17.853, which is how the file came to exist at all -- so
+the silent-compile-failure path was not the one it took. What this closes is
+another way to arrive at the same fifty-two minutes, and it closes the path
+that had no witness.
+
+What remains untested is the shape 10.307 actually had: a `network` block added
+to a running daemon, where the action lands on a radio. That needs
+`fake_supplicant.py`, which `switch_network.sh` already drives, and is the next
+thing to write.
+
+### What the arrival checks say
+
+    the daemon converged on what it was started with
+    a value changed in netcfgd.conf reaches the machine, with no apply
+    a drop-in under conf.d reaches it too                  the 10.307 shape
+    an interface that did not exist is created
+    a configuration that will not compile is said out loud the finding
+    naming the file and the line
+    and said once, not on every pass
+    and the machine keeps what did compile
+    and says so when it compiles again
+    and the waiting configuration is then applied
+    and it never warned that the machine does not match
+
+Sabotaged three ways, each caught by the checks meant for it: the announcement
+removed (four red), the de-duplication removed (one), and the recovery line
+removed (one).
+
 ## 10.330 "The hook is the telling", and the operators who had not written one
 
 A drift netcfgd can see and will not act on is now a line in its own log,

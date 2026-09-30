@@ -348,6 +348,49 @@ static void publish_sims(ncfg_reconcile_t *loop)
 }
 
 /*
+ * Say in the log that the configuration directory stopped compiling, or
+ * started again.
+ *
+ * **The announcement above reaches whoever is connected at that instant, and
+ * that was the whole of the telling.** A reload that cannot compile leaves the
+ * previous document standing and the machine exactly as it was -- so from
+ * outside it is indistinguishable from a write nobody noticed, which is
+ * project.md 10.307's shape and was measured in `config_arrives.sh`: a
+ * deliberately broken drop-in, a machine that correctly did not move, and a
+ * journal with nothing in it at all.
+ *
+ * The same defect as 10.330's drift, one layer up and found the same way: an
+ * event to a listener is not a record, and the listener is usually nobody.
+ *
+ * **Both edges are said**, because an operator who has been told the
+ * configuration is broken needs to be told when it is not. Recovery is the
+ * cheaper half and the one nothing else would ever mention.
+ */
+static void say_reload(ncfg_reconcile_t *loop, int compiled)
+{
+	const char *why = loop->state->diagnostics ? loop->state->diagnostics : "";
+
+	if (compiled) {
+		if (loop->said[0] != '\0') {
+			loop->said[0] = '\0';
+			ncfg_log_emitf("config", NCFG_LOG_NOTE,
+			    "the configuration compiles again");
+		}
+		return;
+	}
+	/* Said once per distinct failure: the watch fires per write and a broken
+	 * file stays broken, so the alternative is this line on every pass. */
+	if (strncmp(loop->said, why, sizeof(loop->said) - 1u) == 0) {
+		return;
+	}
+	(void)snprintf(loop->said, sizeof(loop->said), "%s", why);
+	ncfg_log_emitf("config", NCFG_LOG_ERROR,
+	    "the configuration does not compile, so netcfgd is still running the one it "
+	    "had and the machine will not change: %s",
+	    why[0] != '\0' ? why : "no diagnostic was recorded");
+}
+
+/*
  * Recompile, and say whether the desired document actually moved.
  *
  * Comparing the document either side is what makes the exclusion true rather
@@ -379,6 +422,7 @@ static int reload(ncfg_reconcile_t *loop)
 	event.ok = compiled ? 1u : 0u;
 	event.diagnostics = ncfg_proto_str(loop->state->diagnostics);
 	ncfg_daemon_announce(&loop->world, &event);
+	say_reload(loop, compiled);
 
 	/*
 	 * After the recompile and whether or not the document moved: a reload that
