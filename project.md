@@ -9519,6 +9519,107 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.334 Status 53 on real hardware, from the journal rather than a window
+
+The live capture attached for three minutes and recorded **nothing**: a station
+that is associated and idle emits no control events, so a capture window only
+works if somebody moves the radio during it. The listener behaved correctly --
+attached, ran its deadline, detached, no hang -- and had nothing to hear.
+
+**The journal had thirteen days of it already.** netcfgd inherits the
+supplicant's stdout, so every event since the supplicant started is in
+`journalctl -u netcfgd`. That is a retrospective capture needing nothing from
+anybody, and it is where the evidence was.
+
+### The fix's premise, confirmed
+
+Two `status_code=53` rejections, both on 2026-09-28:
+
+    12:00:55  PMKSA-CACHE-ADDED
+    12:00:55  Trying to associate
+    12:00:56  CTRL-EVENT-ASSOC-REJECT status_code=53
+    12:00:56  PMKSA-CACHE-REMOVED
+    12:00:56  [supplicant] Warning: the access point refused this station, status 53
+    12:00:56  SME: Trying to authenticate ... PMKSA-CACHE-ADDED
+    12:00:56  Associated with <bssid>
+
+**Rejected and associated inside one second**, with `PMKSA-CACHE-REMOVED`
+between them. That is exactly what the fix was written on -- 53 is a stale key
+identifier, the supplicant clears its own cache and the next attempt works --
+and it had never been seen happen. It has now.
+
+### And the defect it fixes, caught in the act
+
+The second occurrence, seven and a half hours later:
+
+    19:31:49  CTRL-EVENT-ASSOC-REJECT status_code=53
+    19:31:49  PMKSA-CACHE-REMOVED
+    19:31:49  [control] !: `wifi_connect` was refused: `<ssid>` did not join
+                on wlp0s20f3: the access point refused this station, status 53
+    19:31:49  SME: Trying to authenticate ... PMKSA-CACHE-ADDED
+
+**netcfgd failed the operator's join on a rejection that cleared itself, and
+the radio joined anyway.** That is "I had to fiddle around for it to switch
+networks", with a timestamp.
+
+**Both predate the fix**, which is `0a0bff7` at 19:41 on the same day -- ten
+minutes after the second one, which is what it was written in response to. The
+log tags date the binaries independently of the commit: the first says
+`[supplicant]` and the second `[supplicant/wlp0s20f3]`, so the hierarchical
+subsystem had landed between them and the status-53 wait had not.
+
+So the fix remains **unseen to fire**, and is no longer unevidenced: its
+premise is measured, and the behaviour it removes is on the record.
+
+### A non-finding, kept because it looked like one
+
+131 `CTRL_IFACE: Detach monitor that cannot receive messages` lines over
+thirteen days, clustered on the days of heaviest restarting and otherwise
+arriving hourly. The hourly pattern is not a cause: it is the GTK rekey, which
+is the next event an idle supplicant tries to deliver, and delivery is when it
+discovers a monitor whose socket is gone.
+
+`client.c` already sends `DETACH` on free and its comment names that exact
+journal line. What leaves one behind is a netcfgd that exits without running
+the free -- which a restart does. **Not a defect**, and said so rather than
+counted as one: a proxy was reported as a defect once already today (10.333)
+and once is the budget.
+
+### The event vocabulary a real supplicant used, which the fake should answer to
+
+Thirteen days, one station, two networks -- one WPA3-SAE and one enterprise:
+
+    CTRL-EVENT-CONNECTED - Connection to <bssid> completed [id=N id_str=]
+    CTRL-EVENT-DISCONNECTED bssid=<bssid> reason=N
+    CTRL-EVENT-DISCONNECTED bssid=<bssid> reason=N locally_generated=N
+    CTRL-EVENT-ASSOC-REJECT bssid=<bssid> status_code=N
+    CTRL-EVENT-BEACON-LOSS
+    CTRL-EVENT-REGDOM-CHANGE init=DRIVER type=COUNTRY alpha2=XX
+    CTRL-EVENT-REGDOM-CHANGE init=DRIVER type=WORLD
+    CTRL-EVENT-SUBNET-STATUS-UPDATE status=N
+    CTRL-EVENT-DSCP-POLICY clear_all
+    CTRL-EVENT-CHANNEL-SWITCH freq=N ht_enabled=N ch_offset=N ch_width=N ...
+    CTRL-EVENT-STARTED-CHANNEL-SWITCH ...
+    CTRL-EVENT-EAP-STARTED, -PROPOSED-METHOD (and `-> NAK`), -METHOD,
+      -PEER-CERT, -PEER-ALT, -SUCCESS (and "based on lower layer success")
+
+**`CONNECTED` matches what the fake emits**, `id=` field included, which is the
+one field 0239 turns on -- so that part of the fixture is faithful to a real
+supplicant and now measurably so.
+
+**The EAP family is the gap that matters.** netcfgd has a `dot1x` path and the
+fake emits none of these, so every enterprise-network test drives a station
+that never authenticates. That is reachable without a radio -- the events are
+text on a socket -- and is the one item on this list that a machine with no
+wifi can still close.
+
+**The corpus itself is not in this repository and must not be.** It carries the
+holder's employer's internal PKI -- issuing and root CA subjects, four internal
+DNS names -- and the enterprise SSID, none of which the SSID redaction caught.
+It lives in a session scratch directory and dies with it, which for that
+content is the right end. What is above is the shape, which is what the fake
+needs.
+
 ## 10.333 A retraction, and the one thing it left standing
 
 **There was no read-path defect.** It was reported here as one, on a machine
