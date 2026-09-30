@@ -69,6 +69,7 @@
 #include "ncfg/explain.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lex.h"
+#include "ncfg/log.h"
 #include "ncfg/observed.h"
 #include "ncfg/secrets.h"
 #include "ncfg/portal.h"
@@ -2928,6 +2929,25 @@ typedef struct {
 	int      holding;
 	/* Reclaims in a row, which `NCFG_RESOLV_PATIENCE` bounds. */
 	unsigned reclaims;
+	/*
+	 * The compile failure this loop has already said out loud.
+	 *
+	 * A reload that cannot compile leaves the previous document standing and
+	 * the machine exactly as it was, which from outside is indistinguishable
+	 * from a write nobody noticed -- project.md 10.307 and 10.331. So it is
+	 * said in the log, and this is what stops it being said again on every
+	 * pass for as long as the file stays broken: the watch fires per event
+	 * and a broken file does not fix itself.
+	 *
+	 * **Bounded, so two different failures agreeing for this many bytes are
+	 * said once.** That is the trade a fixed buffer buys, and it is the safe
+	 * direction: the first one is always said, and what a second costs is a
+	 * line rather than the fact.
+	 *
+	 * Empty means "the configuration compiled last time", which is what makes
+	 * recovery sayable too.
+	 */
+	char     said[NCFG_LOG_MAX];
 } ncfg_reconcile_t;
 
 /* What one pass did. For a caller that wants to say so, and for a test that
