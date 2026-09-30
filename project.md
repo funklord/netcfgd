@@ -9519,6 +9519,97 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.337 Why EMP-XYLEM is disabled: `SELECT_NETWORK`, and nothing that looks
+
+Answered, and it is not the access point's doing. **One deliberate join takes
+every other network out of autoconnect for good**, and nothing anywhere
+notices.
+
+### The chain, each link read rather than inferred
+
+**1. `SELECT_NETWORK` disables the others, on purpose.** `daemon/wifi.c`:
+
+>  `SELECT_NETWORK` rather than `ENABLE_NETWORK`: it disables the others, which
+>  is what "join this one" means. `ENABLE` would leave the supplicant free to
+>  pick a different network it also knows about, and the operator would have
+>  asked for one thing and got another.
+
+That reasoning is right for "join this one now" and is not the defect.
+
+**2. Nothing re-enables them.** `wifi_ops.c` adds and enables every network in
+the document -- and only runs when the plan says to, which is when the recorded
+set changes. The record is a hash of the SET, not of which are enabled. On the
+reporting machine `/run/netcfgd/supplicant/wlp0s20f3.networks.sha256` is dated
+**2026-09-26 13:55** and has not been rewritten since, across a netcfgd restart
+on 09-29 21:30: the set did not change, so nothing was written, so nothing was
+re-enabled.
+
+**3. Nothing observes the enabled state.** `observe/supplicants.c` asks
+`LIST_NETWORKS` in exactly one place, `emptied()`, and uses one bit of the
+answer:
+
+    refuted = count == 0u;
+
+The entries it parses carry the flags -- `ncfg_supplicant_entry_t.flags`, whose
+own comment says *"`[DISABLED]` and `[TEMP-DISABLED]` mean different things"* --
+and they are freed unread. There is an `entry_is_current` and no
+`entry_is_disabled`.
+
+**4. So the machine diverges from its document, permanently and invisibly.**
+`autoconnect` defaults to 1 for a network, so the document says EMP-XYLEM is a
+network this machine should join when it is in range. The supplicant says
+`[DISABLED]`. Both have said so since some join of OpenPC.se, and no pass
+between them compares the two.
+
+**5. And 10.330's warning cannot fire**, which is the part worth noticing. That
+entry made a drift netcfgd will not act on say so out loud -- and this is a
+drift netcfgd never *sees*. A reconciler's blind spot is upstream of its
+reporting, and nothing about the reporting fix reaches this.
+
+### It is the reported symptom, end to end
+
+The holder: *"Again I had to fiddle around for it to switch networks."* After
+one `ncfg wifi connect OpenPC.se` -- or the same through the GUI -- EMP-XYLEM is
+no longer a candidate the supplicant will pick, so switching back is not
+something the radio can do on its own. It needs another deliberate join. Which
+is fiddling, and is the only route back.
+
+The journal agrees: EMP-XYLEM authenticated successfully as late as
+2026-09-28 18:46, eleven EAP exchanges over the period, no
+`CTRL-EVENT-SSID-TEMP-DISABLED` and no `DISABLE_NETWORK` anywhere. **Nothing
+failed.** It was selected away from and left that way.
+
+### What would close it, and the choice inside it
+
+The data is already parsed. `emptied()` frees flags it has in hand, so reading
+them costs nothing new:
+
+- **Observe it.** An entry whose flags carry `[DISABLED]` where the document
+  says `autoconnect`, reported as drift. That alone makes 10.330's warning
+  speak, which turns a silent divergence into a sentence.
+- **Reconcile it.** Send `ENABLE_NETWORK` for those, which is the same shape as
+  every other reconcile in this tree: observed does not match desired, so put
+  it back.
+
+**The choice is whether a reconcile pass should undo `SELECT_NETWORK`.** It is
+not obvious: an operator who asked for one network may mean "and stay there",
+and a pass that re-enables the others hands the supplicant back the freedom
+`SELECT_NETWORK` was chosen to take away. The answers differ --
+re-enable always; re-enable only when the document changes; re-enable only
+what `autoconnect` names and leave the selection alone; or treat a selection as
+state netcfgd records, so the next pass knows it was asked for.
+
+**Whose decision: the copyright holder's**, because it decides what `ncfg wifi
+connect` means after the command returns. Nothing is blocked meanwhile, and the
+observation half -- seeing it and saying it -- is useful under every one of
+those answers.
+
+**And the fixture can already produce it.** `fake_supplicant.py`'s `DISABLE
+<ssid> <flags>` exists to put a network into `LIST_NETWORKS` carrying the flags
+a real supplicant would give it, *"the state no test could produce before"*.
+Whatever is decided, it is testable without a radio -- which matters, because
+the radio goes tomorrow.
+
 ## 10.336 A hard-coded metric that went stale, and the decision it was about
 
 `nm.sh` asserted `metric = 3924` from `autoconnect-priority 42` and had been
