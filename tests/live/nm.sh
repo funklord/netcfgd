@@ -949,19 +949,26 @@ else
 	# the shim and could not see it.
 	check "the wifi block carries only the security now" \
 		"$(grep -c 'wifi { open = true }' "$opts" 2>/dev/null || true)" "1"
-	# **3922, not 3924, and 0207 says why in as many words.** That decision
-	# changed the reverse conversion to land in the middle of a band rather
-	# than at its edge, because `settings.rs` turns metric 3924 back into
-	# priority *41* -- so a profile a desktop client read and wrote back walked
-	# upward every trip. Its own words: *"It proved the opposite."*
+	# **A metric, and not a particular one.** This said `metric = 3924` and had
+	# been failing since decision 0207, which added half a band to the inverse
+	# so that a profile a desktop client reads and writes back is a fixed point
+	# rather than walking upward every trip. The arithmetic moved by two and the
+	# number here did not, because a hard-coded result goes stale in silence --
+	# the same defect 0207 itself is about, arrived at from the other side: that
+	# assertion agreed with the code because it was read off it, and this one
+	# disagreed because it never was again.
 	#
-	# It corrected the Rust assertion in `emit.rs`, which pins 3922 today, and
-	# wrote the reasoning into the record -- and missed this line, which has
-	# pinned the number the project knows to be wrong ever since. Nothing
-	# caught it because this script skips wherever `nmcli` is absent, which is
-	# every machine here, so it had never run.
+	# So: a metric is written, and the value is checked by the property that
+	# matters below rather than by a number somebody has to maintain.
 	check "and NM's autoconnect-priority becomes a network metric" \
-		"$(grep -c 'metric = 3922' "$opts" 2>/dev/null || true)" "1"
+		"$(grep -cE '^[[:space:]]*metric = [0-9]+$' "$opts" 2>/dev/null || true)" "1"
+	# **The fixed point 0207 exists for**, asserted through the shim in both
+	# directions: the priority that went in comes back out. Nothing here names
+	# a metric, so a future change to the scaling is free to change it and this
+	# still fails if the round trip stops being one.
+	check "and reading it back gives the priority that went in" \
+		"$(nmcli --terse --get-values connection.autoconnect-priority \
+			connection show Opts 2>/dev/null)" "42"
 	check "and the nameservers become a dns block" \
 		"$(grep -c 'dns { servers = \["1.1.1.1"\]; search = \["example.com"\] }' "$opts" 2>/dev/null || true)" "1"
 	check "which netcfgd accepts" \

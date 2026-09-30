@@ -12195,6 +12195,49 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.336 A hard-coded metric that went stale, and the decision it was about
+
+`nm.sh` asserted `metric = 3924` from `autoconnect-priority 42` and had been
+failing since decision 0207. **The test was wrong and the code was right.**
+
+    priority 42, ceiling 4096
+      (42 * 4096) / 999              = 172  ->  metric 3924   what nm.sh said
+      (42 * 4096 + 4096/2) / 999     = 174  ->  metric 3922   what 0207 does
+
+0207 added half a band to the inverse so that a profile a desktop client reads
+and writes back is a fixed point rather than walking upward every trip -- 100,
+103, 107, 111, far enough to cross another network's metric and prefer one the
+operator did not choose. The arithmetic moved by two and the number in the test
+did not.
+
+**It is the same defect 0207 itself is about, from the other side.**
+`settings.rs` says why that function is not restated: *"a round trip checked
+against a restatement of this arithmetic checks nothing -- 0207 is about an
+assertion that agreed with the defect because it was read off the code it was
+meant to test."* That assertion agreed because it was read off the code. This
+one disagreed because it never was again. **A magic number in a test fails both
+ways**, and which way is luck.
+
+### What replaced it, which cannot go stale
+
+Two checks, and the second is the property:
+
+    a metric is written at all        `^\s*metric = [0-9]+$`
+    the priority read back is 42      through nmcli, both directions
+
+Neither names a metric, so a future change to the scaling is free to move it.
+Sabotaged by removing the midpoint correction: **only the round trip goes red**,
+which is the discrimination wanted -- the first check catches the key being
+dropped, the second catches the arithmetic drifting. The old check caught the
+drift too, by going red and staying red, which is worse than catching it.
+
+**And the sabotage had to be rebuilt to land.** The first attempt edited
+`emit.rs` and ran `nm.sh`, which takes `adapter/netcfgd-nm/target/debug/` as it
+finds it and skips when it is absent -- so a stale binary answered, nothing
+failed, and the run printed no summary at all. `build-and-commit.md` names that
+one: never conclude a test passes or fails from a binary the build step did not
+rebuild.
+
 ## 10.335 The EAP exchange, from the capture -- and a fixture that emitted into the void
 
 `fake_supplicant.py` speaks one 802.1X authentication now, taken from the
@@ -12278,11 +12321,10 @@ expected three. Found by sweeping every script that drives the fake for a
 pinned count rather than by running them, since one of them needs
 NetworkManager. It is the only one.
 
-**And `nm.sh` fails a check that is not this.** *"NM's autoconnect-priority
-becomes a network metric"*, expected 1, got 0 -- **verified pre-existing** by
-stashing all three changed files and running it at HEAD, where it fails
-identically. Recorded here rather than fixed, because it is somebody's separate
-defect and the evidence that it is not this one's is the point.
+**And `nm.sh` failed a check that was not this.** *"NM's autoconnect-priority
+becomes a network metric"*, expected 1, got 0 -- verified pre-existing by
+stashing all three changed files and running it at HEAD, where it failed
+identically. Fixed in 10.336, where it turns out to have been the test.
 
 ### What netcfgd does with these events: nothing, and what that costs
 
