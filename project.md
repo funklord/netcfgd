@@ -9519,6 +9519,107 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.333 A retraction, and the one thing it left standing
+
+**There was no read-path defect.** It was reported here as one, on a machine
+the holder was using, and it was wrong.
+
+### What was claimed, and what settled it
+
+`ncfg status --json` said `answering: false` for the supplicant on
+`wlp0s20f3`, five samples out of five, with no `network` on the link. The
+supplicant answered `wpa_cli` as root perfectly -- SSID, BSSID, `wpa_state=
+COMPLETED`. The conclusion drawn was that netcfgd's read path was blind, and
+that this was the strongest candidate yet for 10.307.
+
+One file refutes it. `/run/netcfgd/observed.json`, which the daemon writes as
+root:
+
+    answering = True
+    network   = OpenPC.se
+
+**netcfgd had been seeing the supplicant correctly throughout.** What was
+measured was `ncfg status` run as an ordinary user, and wpa_supplicant binds
+its control socket 0770 root:root. Confirmed directly: connecting as that user
+gives `PermissionError: [Errno 13]`.
+
+`evidence.md` has this twice over, and both were quoted in the same session
+they were broken in: *ask the object you mean, not something correlated with
+it*, and **where a gate leaves an artifact behind, that artifact outranks
+anything measurable about the run that produced it.** `observed.json` is the
+artifact. It was read sixth.
+
+**The proxy was not even wrong about itself.** `ncfg status` reported
+truthfully what its own process could reach. The error was entirely in reading
+a statement about the observer as a statement about the machine -- which is,
+exactly, the defect the next section fixes.
+
+### What it left standing, which is real and small
+
+`answering: false` is a statement about the SUPPLICANT -- `access_control.c`
+says so: *"a connection that fails is `answering: false` -- a statement"*. A
+process that may not open the socket is not entitled to make it.
+
+`observed.h` already had the vocabulary: *"`answering` absent means the kind
+has no control socket, or nothing asked"*. A refused connection is nothing
+asked. So `may_ask` checks write permission on the socket path, and on
+`EACCES` or `EPERM` the observation leaves `answering` absent rather than
+asserting something it cannot know.
+
+A socket that is genuinely gone still reads `false`, because that IS a
+statement about the supplicant.
+
+Verified on the reporting machine: as an ordinary user it now answers
+`<absent>` where it answered `False`.
+
+**It has no test of its own, and that is stated rather than implied.** The
+condition needs a root-owned socket and a non-root reader; the live suite runs
+under `unshare -rn`, where the caller is uid 0 in the namespace and permissions
+do not bite. What the suite does prove is that a MISSING socket still reads
+`false` -- the case `may_ask` must not disturb.
+
+### And the capture tool, which produced two hangs of its own
+
+**The socket picker took `ls | head -1`.** In a directory netcfgd is using that
+returns `netcfgd-<pid>-<n>` -- netcfgd's own client socket -- so every command
+failed with "Operation not permitted", the script printed a success line for
+each, and the capture was six files of one error. It skips what netcfgd binds
+and what the supplicant binds beside the real socket, keeps only names that are
+links on this machine, and **refuses rather than chooses** when more than one
+survives. A `PING` control now runs before anything is captured, because a tool
+whose job is to bring evidence back reported six captures and brought none.
+
+**And the event listener stopped itself.** `timeout 1 wpa_cli -p ... -i ...`:
+with no command argument `wpa_cli` enters interactive mode and reads the
+terminal, took SIGTTIN as a background process group, and STOPPED -- after
+which `timeout`'s SIGTERM did nothing, **because a stopped process does not act
+on SIGTERM**. `running-code.md` carries that mechanism from a crash handler
+attaching gdb: *"a stopped process ignores SIGTERM -- which means pkill will
+appear to work and clean up nothing."* Same ending by a different route, in a
+script written after quoting it.
+
+It attaches to the control socket directly now, the way netcfgd does: no
+terminal is read, so no signal can stop it; the deadline is its own; and
+`timeout -k` is the belt, SIGKILL being the one signal a stopped process cannot
+ignore. Measured against a socket that never answers -- 3-second deadline, exits
+by itself in 4 seconds, removes its own reply socket -- and against a missing
+one and an unreadable one, each a sentence rather than a traceback.
+
+`STATUS-VERBOSE` and `GET_CAPABILITY key_mgmt` are gone: both answer `Unknown
+command` on wpa_supplicant 2.10.
+
+### What the radio gave up before the retraction
+
+    ssid=OpenPC.se  key_mgmt=SAE  pmf=1  wpa_state=COMPLETED
+    network id / ssid / bssid / flags
+    0  EMP-XYLEM  any  [DISABLED]
+    1  OpenPC.se  any  [CURRENT]
+
+**`EMP-XYLEM` is `[DISABLED]`.** The supplicant has given up on it and will not
+try it again until something re-enables it, which is the likeliest reading of
+the holder's "I had to fiddle around for it to switch networks". It is a real
+lead, it is radio-dependent, and this machine has two days of radio left.
+
 ## 10.332 10.307's own shape, driven -- and what two days of radio are worth
 
 `tests/live/network_arrives.sh`. A `network` block written into `conf.d/`
