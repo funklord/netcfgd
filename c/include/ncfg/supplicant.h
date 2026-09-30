@@ -319,6 +319,21 @@ void ncfg_supplicant_entries_free(ncfg_supplicant_entry_t *entries, size_t count
 /* Whether this is the network currently selected. */
 int ncfg_supplicant_entry_is_current(const ncfg_supplicant_entry_t *entry);
 
+/*
+ * Whether the supplicant has been told to leave this network alone.
+ *
+ * **`[DISABLED]` only, never `[TEMP-DISABLED]`.** The two mean opposite things
+ * about whose problem it is: the first is something netcfgd or an operator did
+ * and it stands until undone -- `SELECT_NETWORK` disables every other network,
+ * which is what "join this one" means -- while the second is the supplicant
+ * blacklisting a network it could not get onto, and it clears that itself.
+ *
+ * project.md 10.337: a network left disabled by an earlier join is a machine
+ * that has stopped matching its own configuration, and nothing in this tree
+ * read this flag until that was traced.
+ */
+int ncfg_supplicant_entry_is_disabled(const ncfg_supplicant_entry_t *entry);
+
 /* One `key=value` line of `STATUS`. */
 typedef struct {
 	char *key;

@@ -349,6 +349,64 @@ awaits '[ "$(associated)" = Enterprise ]' || true
 check "and netcfgd comes through eleven events it does not read" \
 	"$(associated)" "Enterprise"
 
+# ----------------------------- a network left disabled, which nothing saw
+#
+# **project.md 10.337.** `ncfg wifi connect` sends `SELECT_NETWORK`, which
+# disables every other network on purpose -- and nothing re-enables them and
+# nothing looked. The supplicant's own list is the only place it shows, so
+# `ncfg status` asks and says so.
+#
+# `DISABLE <flags> <ssid>` puts a network into `LIST_NETWORKS` carrying the
+# flags a real supplicant would give it, which is the state no test could
+# produce before that command existed.
+
+send_event "DISABLE [DISABLED] HomeFiber"
+# A network the document does not name, so netcfgd has no opinion about it.
+send_event "DISABLE [DISABLED] Distant"
+# **The trap.** `[TEMP-DISABLED]` contains the substring `DISABLED`, and the
+# two mean opposite things: administratively disabled stands until undone,
+# while temporarily disabled is the supplicant blacklisting a network it could
+# not get onto and clearing that itself. A predicate written with `strstr`
+# reports this one and is wrong.
+send_event "DISABLE [TEMP-DISABLED] Cafe"
+sleep 1
+
+# **`|| status_rc=$?`, not `; status_rc=$?`.** Under `set -e` a failing command
+# aborts the script, so the assignment never runs and the whole test dies with
+# the child's code -- which prints no summary at all. Measured: sabotaging the
+# document guard segfaults `ncfg status`, the run exited 139, and reading it
+# through `grep FAIL` showed nothing and looked like a pass. `evidence.md`:
+# never reduce a check's output before you know it passed.
+status_rc=0
+"$ncfg" status > "$work/status.out" 2>&1 || status_rc=$?
+
+# **The exit status, read.** Without it a check counting lines in the output
+# cannot tell a clean run from a crash: sabotaging the document guard leaves a
+# NULL dereference, and `ncfg status` died after printing the first network --
+# so "a network the document does not name is not mentioned" passed because
+# the program never got that far. `evidence.md`: a count and an exit code are
+# halves of one result.
+# **The total, which is the check that discriminates.** Greps for particular
+# names cannot see a note about a network none of them mention: sabotaging the
+# document guard made `ncfg_wifi_network_for` match `Distant` onto some other
+# block and print a line about THAT, which every per-name check passed over.
+# One disabled network the document wants means one line.
+check "and exactly one network is named, not every disabled one" \
+	"$(grep -ac 'configured to join automatically' "$work/status.out" || true)" 1
+
+check "and status itself succeeded, which a line count cannot tell you" \
+	"$status_rc" 0
+
+check "status says a network configured to autoconnect has been left disabled" \
+	"$(grep -c 'HomeFiber. is configured to join automatically' "$work/status.out" \
+		|| true)" 1
+check "and says what joins it, rather than only that something is wrong" \
+	"$(grep -c 'ncfg wifi connect HomeFiber' "$work/status.out" || true)" 1
+check "a network the document does not name is not netcfgd's to mention" \
+	"$(grep -c 'Distant' "$work/status.out" || true)" 0
+check "and a temporarily disabled one is the supplicant's own affair" \
+	"$(grep -c 'Cafe. is configured to join automatically' "$work/status.out" || true)" 0
+
 # ---------------------------------------------------------------- and quiet
 
 check "and it never warned that the machine does not match" \

@@ -30,6 +30,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/config.h"
+#include "ncfg/daemon.h"
 #include "ncfg/explain.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
@@ -37,6 +38,7 @@
 #include "ncfg/observe.h"
 #include "ncfg/plan.h"
 #include "ncfg/state.h"
+#include "ncfg/supplicant.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -958,6 +960,110 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
  * the Rust already -- and the exit status stays 0, because the question asked
  * was about the kernel and the kernel answered.
  */
+/*
+ * Say so if a network the document wants joined has been left disabled.
+ *
+ * WHY THIS IS A NOTE AND NOT A PLAN ACTION
+ *   project.md 10.337. `ncfg wifi connect` sends `SELECT_NETWORK`, which
+ *   disables every other network -- deliberately, because that is what "join
+ *   this one" means. Nothing re-enables them: the supplicant's network set is
+ *   rewritten only when its recorded hash changes, and the hash is over the
+ *   SET rather than over which of them are enabled. So one deliberate join
+ *   takes the others out of autoconnect until something puts them back, while
+ *   the document goes on saying `autoconnect`.
+ *
+ *   **Whether a reconcile should undo that is not settled**, and it is the
+ *   holder's: an operator who asked for one network may mean "and stay there".
+ *   So this says it and changes nothing, which is useful under every answer
+ *   that decision could take.
+ *
+ * WHY IT ASKS THE SUPPLICANT RATHER THAN READING THE OBSERVATION
+ *   The observation does not carry the flag. `observe/supplicants.c` reads
+ *   `LIST_NETWORKS` in one place and uses `count == 0` from it, freeing
+ *   entries whose flags it holds -- and adding the field to the observed model
+ *   is a cross-language change, because `observed_test.c` compares it byte for
+ *   byte against a witness the Rust model round-trips too.
+ *
+ * SILENT WHERE IT CANNOT ASK, WHICH IS THE ORDINARY CASE FOR A PERSON
+ *   The control socket is root-owned and 0770, so an unprivileged `ncfg
+ *   status` cannot open it -- and 10.333 is what happens when that is reported
+ *   as a fact about the machine instead of about the caller. No connection is
+ *   no sentence.
+ */
+static void warn_about_disabled_networks(const ncfg_document_t *document,
+    const ncfg_observed_t *observed)
+{
+	char directory[NCFG_SUPPLICANT_PATH_MAX];
+	size_t at;
+
+	if (!document || document->network_count == 0u || !observed) {
+		return;
+	}
+	if (!ncfg_supplicant_ctrl_dir(directory, sizeof(directory), NULL, 0)) {
+		return;
+	}
+	for (at = 0; at < observed->backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &observed->backends[at];
+		ncfg_supplicant_client_t      *client;
+		ncfg_supplicant_entry_t       *entries = NULL;
+		size_t                         count = 0;
+		size_t                         one;
+		char                           body[NCFG_SUPPLICANT_REPLY_MAX];
+		char                           why[NCFG_ERROR_MAX];
+		int                            said = 0;
+
+		if (backend->kind != NCFG_BACKEND_SUPPLICANT || !backend->running ||
+		    !backend->interface) {
+			continue;
+		}
+		client = ncfg_supplicant_connect_within(directory, backend->interface,
+		    NCFG_SUPPLICANT_IMPATIENT_MS, NULL, 0);
+		if (!client) {
+			continue;
+		}
+		body[0] = '\0';
+		why[0] = '\0';
+		if (ncfg_supplicant_ask(client, "LIST_NETWORKS", body, sizeof(body), why,
+		        sizeof(why)) &&
+		    ncfg_supplicant_parse_network_list(body, &entries, &count, why, sizeof(why))) {
+			for (one = 0; one < count; one++) {
+				const ncfg_wifi_network_t *network;
+
+				if (!ncfg_supplicant_entry_is_disabled(&entries[one])) {
+					continue;
+				}
+				/* The tree's own matcher, so this agrees with what a
+				 * join credits a network by rather than comparing
+				 * SSIDs a second way. No bssid and no security to
+				 * narrow by: a `LIST_NETWORKS` row carries neither. */
+				network = ncfg_wifi_network_for(document->networks,
+				    document->network_count, &entries[one].ssid, NULL, -1);
+				/* A network the document does not name is not this
+				 * machine's business, and one it names with
+				 * `autoconnect = false` is disabled because it asked
+				 * to be. */
+				if (!network || !network->autoconnect) {
+					continue;
+				}
+				if (!said) {
+					ncfg_out_line("");
+					said = 1;
+				}
+				ncfg_out_writef("`%s` is configured to join automatically and "
+				    "%s has it disabled,\n",
+				    network->id ? network->id : "?", backend->interface);
+				ncfg_out_line("so this machine will not join it on its own. An "
+				    "earlier `ncfg wifi connect`");
+				ncfg_out_writef("to another network does that. `ncfg wifi connect "
+				    "%s` joins it now.\n",
+				    network->id ? network->id : "?");
+			}
+		}
+		ncfg_supplicant_entries_free(entries, count);
+		ncfg_supplicant_client_free(client);
+	}
+}
+
 static int command_status(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
@@ -991,6 +1097,9 @@ static int command_status(const ncfg_cli_options_t *options)
 		ncfg_buf_free(&buf);
 	} else {
 		ncfg_cli_print_status(observed);
+		/* After the listing, like the two notes under `plan`: it is a fact
+		 * about the machine rather than a member of the answer. */
+		warn_about_disabled_networks(document, observed);
 	}
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);

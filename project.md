@@ -9519,6 +9519,87 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.338 Seeing a network left disabled, and three ways a test hid a crash
+
+10.337 traced why EMP-XYLEM is `[DISABLED]`: `SELECT_NETWORK` disables every
+other network, nothing re-enables them, and nothing looked. This is the looking
+half. Whether a reconcile should undo it is still the holder's, and nothing
+here changes behaviour.
+
+    `EMP-XYLEM` is configured to join automatically and wlp0s20f3 has it
+    disabled, so this machine will not join it on its own. An earlier
+    `ncfg wifi connect` to another network does that. `ncfg wifi connect
+    EMP-XYLEM` joins it now.
+
+A note under `ncfg status`, beside the two that already work that way -- the
+empty-config note and the contention warning, both facts about the machine
+rather than members of the answer.
+
+### Why the CLI and not the observed model
+
+The observation does not carry the flag: `observe/supplicants.c` reads
+`LIST_NETWORKS` in one place and uses `count == 0`, freeing entries whose
+flags it holds. Adding a field there is a **cross-language** change --
+`observed_test.c` compares the observation byte for byte against
+`doc/schema/observed.json`, which the Rust model round-trips too, and the Rust
+is the comparison instrument rather than something to edit. So the check asks
+the supplicant where it already has the document and the observation to hand.
+
+**Silent where it cannot ask**, which is the ordinary case for a person: the
+control socket is root-owned and 0770, and 10.333 is what happens when that is
+reported as a fact about the machine. No connection is no sentence. Confirmed
+on the reporting machine -- an unprivileged `ncfg status` says nothing.
+
+### `[DISABLED]` and not `[TEMP-DISABLED]`
+
+`ncfg_supplicant_entry_is_disabled` matches the bracketed token rather than the
+substring. `strstr(flags, "DISABLED")` matches both, and they mean opposite
+things about whose problem it is: administratively disabled stands until
+undone, while temporarily disabled is the supplicant blacklisting a network it
+could not get onto and clearing that itself. The sibling
+`entry_is_current` can afford a substring because no other flag contains
+`CURRENT`; this one cannot.
+
+Measured against the exact `LIST_NETWORKS` body the fake produces:
+
+    HomeFiber  [DISABLED]       disabled=1
+    Distant    [DISABLED]       disabled=1
+    Cafe       [TEMP-DISABLED]  disabled=0
+
+### Three ways the test hid a crash, which is the entry
+
+Four sabotages. The predicate reduced to `strstr` and the note removed
+entirely were caught at once. **The third -- removing the guard that skips a
+network the document does not name -- took four attempts to see**, and each
+failure was a different way of not reading the result.
+
+**1. `|| true` swallowed it.** `"$ncfg" status > out 2>&1 || true` let a
+segfaulting status look like a quiet one. The sabotage leaves a NULL
+dereference on `network->id`, so status died part-way through printing -- after
+the first network and before the second -- and every per-name check passed
+over the absence.
+
+**2. Per-name greps could not see it.** With the guard gone,
+`ncfg_wifi_network_for` matches an unknown SSID onto some other block, so the
+extra line names a network none of the greps mention. The discriminator is the
+TOTAL: one disabled network the document wants means one line.
+
+**3. `set -e` aborted before the status was recorded.** Replacing `|| true`
+with `; status_rc=$?` made it worse rather than better: under `set -e` the
+failing command ends the script, so the assignment never ran, the test died
+with 139 and printed no summary at all. `|| status_rc=$?` is the spelling that
+keeps the script alive and the code.
+
+**4. And I read that crashed run as a pass, twice**, by filtering the output
+through `grep -E '^FAIL|check\(s\)'` -- which matched nothing, because there
+was no summary. `evidence.md`: never reduce a check's output before you know it
+passed, and a count and an exit code are halves of one result. Both rules, in
+one sabotage, on the same afternoon they were quoted elsewhere.
+
+The four checks now: the network is named, what joins it is named, exactly one
+is named, and **status itself exited 0**. The last is the one that found the
+other three.
+
 ## 10.337 Why EMP-XYLEM is disabled: `SELECT_NETWORK`, and nothing that looks
 
 Answered, and it is not the access point's doing. **One deliberate join takes
