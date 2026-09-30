@@ -46,10 +46,15 @@ import sys
 # scale and must give 100; -100 is the bottom and must give 0; -53 is what a
 # real NetworkManager reported as 79 while the shim was written, and is the one
 # cross-check available for the conversion.
+#
+# **The enterprise entry is appended, never inserted.** `network_id` is the
+# index into this list and tests assert `id=0` and `id=1`; putting an entry in
+# the middle would renumber networks nobody touched.
 NETWORKS = [
     ("00:11:22:33:44:55", 2412, -53, "[WPA2-PSK-CCMP][ESS]", "HomeFiber"),
     ("66:77:88:99:aa:bb", 5180, -40, "[ESS]", "Cafe"),
     ("cc:dd:ee:ff:00:11", 2437, -100, "[WPA2-PSK-CCMP][WPS][ESS]", "Distant"),
+    ("22:33:44:55:66:77", 5200, -60, "[WPA2-EAP-CCMP][ESS]", "Enterprise"),
 ]
 
 # The one this fake radio claims to be associated with.
@@ -77,6 +82,68 @@ def network_id(entry):
 	in order would hand out.
 	"""
 	return NETWORKS.index(entry)
+
+# One 802.1X authentication, as a real supplicant emits it.
+#
+# **Taken from a journal rather than from memory**, which is the whole reason
+# this exists: `evidence.md` says a stand-in reproduces the half of a tool you
+# have seen, and nothing here had ever seen an EAP exchange. netcfgd has a
+# `dot1x` path, and until this every test of it drove a station that
+# authenticated by never trying.
+#
+# Captured from wpa_supplicant 2.10 against a real enterprise network, eleven
+# authentications over thirteen days, all identical in shape (project.md
+# 10.334). The order below is chronological from that log, not a guess at a
+# plausible one.
+#
+# Two details that look like defects in a fixture and are not:
+#
+#   * **`depth=2` twice.** The root certificate is announced once per chain
+#     verification and the supplicant verifies twice, so 22 `PEER-CERT` lines
+#     covered 11 authentications of a three-certificate chain.
+#   * **`method=13 -> NAK` before `method=25`.** The server proposes EAP-TLS,
+#     the station refuses it, and PEAP is what they settle on. A fake that
+#     emitted only the accepted method would never exercise a reader that has
+#     to skip the refused one.
+#
+# The subjects and DNS names are invented -- `example.invalid`, which cannot
+# resolve -- because the real ones are an employer's internal PKI. The SHAPE is
+# the measured thing and the contents are not.
+EAP_EXCHANGE = [
+	"CTRL-EVENT-EAP-STARTED EAP authentication started",
+	"CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=13 -> NAK",
+	"CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=25",
+	"CTRL-EVENT-EAP-METHOD EAP vendor 0 method 25 (PEAP) selected",
+	"CTRL-EVENT-EAP-PEER-CERT depth=2 subject='/C=SE/O=Example/CN=Example Root CA'"
+	" hash=1111111111111111111111111111111111111111111111111111111111111111",
+	"CTRL-EVENT-EAP-PEER-CERT depth=2 subject='/C=SE/O=Example/CN=Example Root CA'"
+	" hash=1111111111111111111111111111111111111111111111111111111111111111",
+	"CTRL-EVENT-EAP-PEER-CERT depth=1 subject='/C=SE/O=Example/CN=Example Issuing CA'"
+	" hash=2222222222222222222222222222222222222222222222222222222222222222",
+	"CTRL-EVENT-EAP-PEER-CERT depth=0"
+	" subject='/C=SE/O=Example/CN=radius.example.invalid'"
+	" hash=3333333333333333333333333333333333333333333333333333333333333333",
+	"CTRL-EVENT-EAP-PEER-ALT depth=0 DNS:radius.example.invalid",
+	"CTRL-EVENT-EAP-PEER-ALT depth=0 DNS:radius2.example.invalid",
+	"CTRL-EVENT-EAP-SUCCESS EAP authentication completed successfully",
+]
+
+# The other success line the same supplicant emitted, once in thirteen days,
+# and the reason it is here rather than folded into the list above: a reader
+# matching the exact sentence would pass eleven times and fail on the twelfth.
+# `EAP lower-layer` is how a test asks for it.
+EAP_SUCCESS_LOWER = (
+    "CTRL-EVENT-EAP-SUCCESS EAP authentication completed successfully"
+    " (based on lower layer success)"
+)
+
+# **No failure sequence, deliberately.** Nothing in the captured thirteen days
+# failed an authentication, so every `CTRL-EVENT-EAP-FAILURE` this could emit
+# would be invented -- and a fixture whose failure path is invented is how a
+# reader comes to expect text no supplicant sends. `TROUBLE <event text>` is
+# how a test drives an event this file has not measured, which keeps the
+# invention in the test that wants it rather than in the fake everything else
+# shares.
 
 # What `LIST_NETWORKS` reports, as `(id, ssid, flags)`.
 #
@@ -216,6 +283,32 @@ def answer(command):
 	# supplicant answer and netcfgd handles it; inventing a success would make
 	# a test pass for a command that did nothing.
 	return "FAIL\n"
+
+
+def announce(server, attached, lines):
+	"""Send each line to every attached monitor, as an event.
+
+	Factored out when the EAP sequence arrived: the same four lines were
+	written at five call sites, and a sequence of eleven events written that
+	way is a loop somebody gets subtly wrong once.
+
+	`<3>` is the priority prefix a real supplicant puts on control events, and
+	the callers that already carried it keep it: it is part of what netcfgd
+	parses, so a fake that dropped it would be testing a different protocol.
+	"""
+	for line in lines:
+		for listener in attached:
+			try:
+				server.sendto(line.encode(), listener)
+			except OSError:
+				pass
+		# **Printed, like every command is.** An event this fake emitted was
+		# invisible from outside: the log carried what netcfgd SENT and
+		# nothing about what it was told, so a test asserting on an event
+		# sequence had nothing to read and passed whether or not the sequence
+		# was ever sent. Measured -- removing the EAP exchange entirely left
+		# `network_arrives.sh` green. project.md 10.335.
+		print("-> %s" % line, flush=True)
 
 
 def reply(server, sender, payload):
@@ -375,6 +468,18 @@ def serve(ctrl_dir, interface, pidfile):
 			# apart" -- which was true of the fake and not of a supplicant.
 			# `CONNECTED` carries the configured network's id, so a `JOIN`
 			# names a different one and a `ROAM` names the same one.
+			# `EAP` and `EAP lower-layer` drive one 802.1X exchange without a
+			# join, for a test about the authentication rather than about the
+			# association. Not a wpa_supplicant command, like `JOIN` and
+			# `ROAM`: what it stands for needs a RADIUS server.
+			elif command == "EAP" or command == "EAP lower-layer":
+				lines = list(EAP_EXCHANGE)
+				if command.endswith("lower-layer"):
+					lines[-1] = EAP_SUCCESS_LOWER
+				announce(server, attached, [f"<3>{line}" for line in lines])
+				reply(server, sender, b"OK\n")
+				print(command, flush=True)
+				continue
 			elif command.startswith("JOIN "):
 				wanted = command.split(None, 1)[1]
 				match = [n for n in NETWORKS if n[4] == wanted]
@@ -383,15 +488,19 @@ def serve(ctrl_dir, interface, pidfile):
 					print(f"{command} (no such network)", flush=True)
 					continue
 				ASSOCIATED[0] = match[0]
+				# **An enterprise network authenticates before it connects**,
+				# which is the order the capture shows and the reason this is
+				# here rather than only behind the `EAP` command: a test that
+				# joins an EAP network should see what a station joining one
+				# actually sees, without having to know to ask.
+				if "EAP" in match[0][3]:
+					announce(server, attached,
+					         [f"<3>{line}" for line in EAP_EXCHANGE])
 				event = (
 				    "<3>CTRL-EVENT-CONNECTED - Connection to "
 				    f"{match[0][0]} completed [id={network_id(match[0])} id_str=]"
 				)
-				for listener in attached:
-					try:
-						server.sendto(event.encode(), listener)
-					except OSError:
-						pass
+				announce(server, attached, [event])
 				reply(server, sender, b"OK\n")
 				print(command, flush=True)
 				continue

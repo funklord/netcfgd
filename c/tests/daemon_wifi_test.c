@@ -998,21 +998,26 @@ static void the_scan_and_why_it_may_be_stale(void)
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
 
 		check(message.u.response.kind == NCFG_PROTO_RESP_WIFI_SCAN &&
-		    says(scan->interface, "wlan0") && scan->access_point_count == 3u,
+		    says(scan->interface, "wlan0") && scan->access_point_count == 4u,
 		    "  with every access point the radio saw");
-		check(scan->access_point_count == 3u && scan->access_points[0].signal == -40 &&
+		/* **Four since the fake learned an enterprise network** (10.335), and
+		 * the ordering is what this asserts rather than the membership: -60
+		 * arrived in the middle, so a sort that had quietly stopped sorting
+		 * would now put it at the end where it used to be able to hide. */
+		check(scan->access_point_count == 4u && scan->access_points[0].signal == -40 &&
 		    scan->access_points[1].signal == -53 &&
-		    scan->access_points[2].signal == -100,
+		    scan->access_points[2].signal == -60 &&
+		    scan->access_points[3].signal == -100,
 		    "  strongest first, because that is the order the question is asked in");
-		check(scan->access_point_count == 3u &&
+		check(scan->access_point_count == 4u &&
 		    says(scan->access_points[1].ssid, HOMEFIBER_HEX) &&
 		    says(scan->access_points[1].name, "HomeFiber"),
 		    "  the name as hex and as text, which is what makes it identifiable");
-		check(scan->access_point_count == 3u &&
+		check(scan->access_point_count == 4u &&
 		    says(scan->access_points[1].configured, "home") &&
 		    !ncfg_proto_str_present(scan->access_points[0].configured),
 		    "  0013's boundary is visible: only a configured network is labelled");
-		check(scan->access_point_count == 3u && scan->access_points[1].secured == 1 &&
+		check(scan->access_point_count == 4u && scan->access_points[1].secured == 1 &&
 		    scan->access_points[0].secured == 0 &&
 		    scan->access_points[1].enterprise == 0 && scan->access_points[0].owe == 0,
 		    "  and what joining each one would need");
@@ -1033,7 +1038,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
 
-		check(ncfg_proto_str_present(scan->stale) && scan->access_point_count == 3u,
+		check(ncfg_proto_str_present(scan->stale) && scan->access_point_count == 4u,
 		    "  with the previous results and the reason they are the previous ones");
 		ncfg_proto_message_free(&message);
 	}
@@ -1055,7 +1060,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 		check(ncfg_proto_str_present(scan->stale) &&
 		    memmem(scan->stale.bytes, scan->stale.length, "rfkill unblock", 14u) != NULL,
 		    "  and says which switch is holding it off and what clears that one");
-		check(scan->access_point_count == 3u, "  the cached results are worth more than none");
+		check(scan->access_point_count == 4u, "  the cached results are worth more than none");
 		ncfg_proto_message_free(&message);
 	}
 	heard = log_since(mark);

@@ -12195,6 +12195,115 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.335 The EAP exchange, from the capture -- and a fixture that emitted into the void
+
+`fake_supplicant.py` speaks one 802.1X authentication now, taken from the
+journal in 10.334 rather than from memory. netcfgd has a `dot1x` path, and
+until this every test of it drove a station that authenticated by never
+trying.
+
+    CTRL-EVENT-EAP-STARTED EAP authentication started
+    CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=13 -> NAK
+    CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=25
+    CTRL-EVENT-EAP-METHOD EAP vendor 0 method 25 (PEAP) selected
+    CTRL-EVENT-EAP-PEER-CERT depth=2 ...      (twice)
+    CTRL-EVENT-EAP-PEER-CERT depth=1 ...
+    CTRL-EVENT-EAP-PEER-CERT depth=0 ...
+    CTRL-EVENT-EAP-PEER-ALT depth=0 DNS:...
+    CTRL-EVENT-EAP-SUCCESS EAP authentication completed successfully
+
+Chronological from eleven authentications over thirteen days, all identical in
+shape. **The subjects and DNS names are invented** -- `example.invalid`, which
+cannot resolve -- because the real ones are an employer's internal PKI. The
+shape is the measured thing and the contents are not.
+
+Two details that read as fixture bugs and are faithful: **`depth=2` twice**,
+the root announced once per chain verification and the supplicant verifying
+twice; and **`method=13 -> NAK` before `method=25`**, the server proposing
+EAP-TLS and the station refusing it, so a reader has to skip a proposal that
+was declined.
+
+**No failure sequence, and that is a decision.** Nothing in the captured
+thirteen days failed an authentication, so every `CTRL-EVENT-EAP-FAILURE` this
+could emit would be invented -- and a fixture whose failure path is invented
+teaches a reader to expect text no supplicant sends. `TROUBLE <event text>`
+already lets a test drive an unmeasured event, which keeps the invention in the
+test that wants it.
+
+### The fixture was emitting into the void, which two sabotages found
+
+The first version emitted the exchange on an EAP join and asserted that netcfgd
+still followed the station. **Removing the emission entirely left every check
+green.** So did injecting a bogus `CONNECTED` for `00:00:00:00:00:00` into the
+middle of it.
+
+The reason is the one this file had already written down for the `JOIN Cafe`
+check and not applied to the new one: `associated()` reads netcfgd's view of
+`STATUS`, and the fake answers `STATUS` from whatever `JOIN` set, events or no
+events. **The same trap, twice, in the same file, with the warning already in
+it.**
+
+What was missing is that **the fake printed every command it was SENT and
+nothing it EMITTED.** So an event sequence had nothing to read it by. `announce`
+prints each line now, and the checks read them:
+
+    the station authenticates before it associates          EAP-STARTED
+    through a method it first refused                        method=13 -> NAK
+    and the certificate chain arrives deepest first          depth=2
+    and it succeeds                                          EAP-SUCCESS
+    and netcfgd comes through eleven events it does not read  the association
+
+Sabotaged four ways. The emission removed: four red. The refused proposal
+removed: one. **Both `depth=2` lines removed: one** -- and removing only one of
+the two is correctly a no-op, because the check asserts the depth is announced
+and not that it is announced twice. The duplicate is recorded above as a
+curiosity, not asserted as a property; saying which is which is the difference
+between a test and a test that reads well.
+
+### Growing a shared fixture broke a test that pinned it
+
+`NETWORKS` in the fake is its scan advertisement, and a fourth entry changed
+what every consumer of `SCAN_RESULTS` sees. The comment written with the entry
+said "appended, never inserted, because `network_id` is the index" -- which
+reasoned about the IDS and not about the COUNT, and `daemon_wifi_test.c` pins
+the count at five places and the per-index signals at one.
+
+Updated to four, and the ordering check is better for it: `-60` arrived in the
+middle, so a sort that had quietly stopped sorting would now put it at the end
+where it used to be able to hide.
+
+**`make check` found that one and could not have found the other.** The live
+suite is not in `make check`, and `nm.sh` counted the scan through `nmcli` and
+expected three. Found by sweeping every script that drives the fake for a
+pinned count rather than by running them, since one of them needs
+NetworkManager. It is the only one.
+
+**And `nm.sh` fails a check that is not this.** *"NM's autoconnect-priority
+becomes a network metric"*, expected 1, got 0 -- **verified pre-existing** by
+stashing all three changed files and running it at HEAD, where it fails
+identically. Recorded here rather than fixed, because it is somebody's separate
+defect and the evidence that it is not this one's is the point.
+
+### What netcfgd does with these events: nothing, and what that costs
+
+Its reader knows six event kinds -- `CONNECTED`, `ASSOC-REJECT`,
+`AUTH-REJECT`, `SCAN-RESULTS`, `SCAN-FAILED`, `SSID-TEMP-DISABLED` -- and no
+EAP one. So the eleven above pass it by, and the association still completes,
+because `CONNECTED` follows `EAP-SUCCESS` and `CONNECTED` is one it reads. The
+new check is that it comes through them.
+
+**The cost is the diagnosis, not the connection.** A failed enterprise
+authentication reaches netcfgd as `SSID-TEMP-DISABLED` or a disconnect, so it
+can say a join failed and cannot say it failed to AUTHENTICATE -- a wrong
+password, an expired certificate, a rejected identity. On an enterprise network
+that is the most common failure and the one where the sentence matters most.
+
+**Not fixed here, and the reason is 10.334's.** The failure events have never
+been captured, so a reader written for them would be written against invented
+text. What the capture holds is the success path; the failure path needs a real
+authentication to fail, which needs the radio and the access point -- and there
+are hours of that left rather than days.
+
 ## 10.334 Status 53 on real hardware, from the journal rather than a window
 
 The live capture attached for three minutes and recorded **nothing**: a station
