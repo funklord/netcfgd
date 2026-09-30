@@ -59,9 +59,11 @@
 #include "ncfg/service.h"
 #include "ncfg/supplicant.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The supplicant backend on this interface, by kind as well as by name. */
 static ncfg_observed_backend_t *supplicant_on(ncfg_observed_t *observed, const char *interface)
@@ -200,6 +202,42 @@ static void note_association(ncfg_observed_t *observed, ncfg_supplicant_client_t
 	link->network = observe_dup(network->id);
 }
 
+/*
+ * Whether this process may talk to that socket at all.
+ *
+ * **`answering: false` is a statement about the SUPPLICANT, and a caller who
+ * may not open the socket is not entitled to make it.** wpa_supplicant binds
+ * its control socket 0770 root:root, so an ordinary user running `ncfg status`
+ * gets EACCES on connect -- and the observation then said the supplicant was
+ * not answering, of a supplicant answering the daemon perfectly.
+ *
+ * Measured on this machine: `/run/netcfgd/observed.json`, which the daemon
+ * writes as root, says `answering: true` and names the network, while
+ * `ncfg status` run as an ordinary user said false five times out of five.
+ * Both readings were correct about what their own process could reach, and one
+ * of them was reported as a fact about the machine. project.md 10.333.
+ *
+ * `observed.h` already has the vocabulary: absent means "nothing asked", which
+ * is exactly what a refused connection is.
+ */
+static int may_ask(const char *directory, const char *interface)
+{
+	char remote[NCFG_SUPPLICANT_PATH_MAX];
+	int  written;
+
+	written = snprintf(remote, sizeof(remote), "%s/%s", directory, interface);
+	if (written < 0 || (size_t)written >= sizeof(remote)) {
+		return 1; /* Not a path this can judge; let the connect answer. */
+	}
+	/* Write permission is what `connect` needs on a unix socket. A socket
+	 * that is not there at all is a different answer and stays `false`: the
+	 * supplicant is gone, which IS a statement about it. */
+	if (access(remote, W_OK) == 0) {
+		return 1;
+	}
+	return errno != EACCES && errno != EPERM;
+}
+
 int ncfg_observe_supplicants(ncfg_observed_t *observed, const char *run_dir,
     const ncfg_secret_resolver_t *secrets, const ncfg_document_t *desired, int patience_ms,
     char *err, size_t err_size)
@@ -237,6 +275,16 @@ int ncfg_observe_supplicants(ncfg_observed_t *observed, const char *run_dir,
 		backend = supplicant_on(observed, interface);
 		if (!backend) {
 			ncfg_supplicant_client_free(client);
+			continue;
+		}
+		if (!client && !may_ask(directory, interface)) {
+			/*
+			 * Absent rather than false: this process is not allowed to
+			 * ask, so it has nothing to say about whether the supplicant
+			 * answers. The daemon, which runs as root, does.
+			 */
+			backend->answering.has = 0;
+			backend->answering.value = 0;
 			continue;
 		}
 		backend->answering.has = 1;
