@@ -300,6 +300,55 @@ awaits '[ "$(associated)" = Cafe ]' || true
 check "and netcfgd sees the station on the network it moved to" \
 	"$(associated)" "Cafe"
 
+# ------------------------------------------- an enterprise network arrives
+#
+# **Eleven events netcfgd does not read, in the middle of a join it does.**
+# `fake_supplicant.py` emits the measured 802.1X sequence when the joined
+# network carries `EAP` flags -- STARTED, a proposed method refused, the one
+# selected, three certificates, the subject-alt names, SUCCESS -- and netcfgd
+# reads none of them: its reader knows six event kinds and no EAP one
+# (project.md 10.335). So what this asserts is that it survives them, which is
+# the risk a reader of unknown lines carries and which no test drove before the
+# fake could produce any.
+
+cat > "$work/etc/conf.d/70-enterprise.conf" <<'CONF'
+network "Enterprise" {
+	wifi { psk = "@secret:Enterprise" }
+	metric = 300
+}
+CONF
+printf 'hunter2hunter2' > "$work/etc/secrets/Enterprise"
+chmod 0600 "$work/etc/secrets/Enterprise"
+
+awaits '[ "$(told_about Enterprise)" -ge 1 ]' || true
+check "an enterprise network arrives like any other" \
+	"$([ "$(told_about Enterprise)" -ge 1 ] && echo yes || echo no)" yes
+
+# The fake prints every event it emits, so the exchange is readable from the
+# daemon's log. **That had to be added for this to gate anything**: with the
+# EAP emission removed entirely, every check here stayed green, because
+# `associated()` reads netcfgd's view of STATUS and the fake answers STATUS
+# from whatever `JOIN` set. Same weakness as the `JOIN Cafe` check above, found
+# the same way.
+emitted() {
+	grep -c -- "-> <3>$1" "$work/daemon.log" 2>/dev/null || true
+}
+
+send_event "JOIN Enterprise"
+awaits '[ "$(emitted CTRL-EVENT-EAP-SUCCESS)" -ge 1 ]' || true
+check "the station authenticates before it associates" \
+	"$([ "$(emitted CTRL-EVENT-EAP-STARTED)" -ge 1 ] && echo yes || echo no)" yes
+check "through a method it first refused, which a reader has to skip" \
+	"$([ "$(emitted 'CTRL-EVENT-EAP-PROPOSED-METHOD vendor=0 method=13 -> NAK')" -ge 1 ] &&
+	  echo yes || echo no)" yes
+check "and the certificate chain arrives deepest first" \
+	"$([ "$(emitted 'CTRL-EVENT-EAP-PEER-CERT depth=2')" -ge 1 ] && echo yes || echo no)" yes
+check "and it succeeds" \
+	"$([ "$(emitted CTRL-EVENT-EAP-SUCCESS)" -ge 1 ] && echo yes || echo no)" yes
+awaits '[ "$(associated)" = Enterprise ]' || true
+check "and netcfgd comes through eleven events it does not read" \
+	"$(associated)" "Enterprise"
+
 # ---------------------------------------------------------------- and quiet
 
 check "and it never warned that the machine does not match" \
