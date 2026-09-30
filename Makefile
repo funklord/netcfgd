@@ -2097,6 +2097,11 @@ live:
 	@# question project.md 10.307 asks had no witness at all. It calls `apply`
 	@# nowhere, which is the point of it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
+	@# The same question one layer up, on a radio and a supplicant netcfgd
+	@# started, which is the shape 10.307 actually had. `switch_network.sh`
+	@# shares this fixture and drives it with `ncfg apply` at every step; this
+	@# one asks whether the daemon does it unasked.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/network_arrives.sh"
 	@# A linkset choosing between two links, and the case metrics cannot
 	@# handle on their own: a link that is up, has carrier and reaches
 	@# nothing keeps its better metric while doing so, and only a probe tells

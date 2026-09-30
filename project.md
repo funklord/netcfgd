@@ -12195,6 +12195,89 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.332 10.307's own shape, driven -- and what two days of radio are worth
+
+`tests/live/network_arrives.sh`. A `network` block written into `conf.d/`
+while the daemon runs, on a radio, through a supplicant netcfgd started. That
+is what 10.307 actually held, and what `config_arrives.sh` deliberately does
+not: dummy links and ordinary keys leave two layers untested, either of which
+could swallow the work.
+
+It calls `apply` nowhere. `switch_network.sh` shares this fixture and drives it
+with `ncfg apply` at every step, which is right for what that script asks and
+wrong for this one.
+
+### The result: it works, which is the third refutation
+
+A network added to a running daemon reaches the supplicant, the station stays
+on the network it was on while that happens, and netcfgd follows it when it
+moves. 10.307 remains unexplained -- and the path now has a witness that will
+catch a regression, which it did not have when that entry was written.
+
+### Which check gates the arrival, measured because the obvious answer was wrong
+
+Sabotaged by watching `/etc` and not `conf.d/` -- the exact failure the
+daemon's own log made look likely, since it prints one directory. **Only "a
+network added while the daemon runs reaches the supplicant" went red.**
+
+The check after it -- netcfgd seeing the station on the new network -- **passed
+with the network never having reached the radio at all**, because `associated()`
+reads what netcfgd observed from `STATUS`, and the fake reports whatever station
+it was told to be on whether or not anybody configured it. It is named for what
+it proves now, and the file says which of the two carries the weight.
+
+**And the observable was wrong first.** The SSID goes over as hex --
+`SET_NETWORK 0 ssid 486f6d654669626572` -- because an SSID is 32 arbitrary
+bytes and quoting them is the problem hex exists to avoid. A grep for the
+quoted form matched nothing and read exactly like a network that never reached
+the radio.
+
+### Two days of radio left, and what that is actually worth
+
+**The holder, 2026-09-30: two more days of testing on this machine, then the
+work continues on one with no wifi.**
+
+`mac80211_hwsim.ko` is in the stock Debian kernel package, so **virtual radios
+survive the move** and so does everything driven by `fake_supplicant.py`, which
+is a Python script on a unix socket. That is most of the wifi suite, and it
+narrows the urgent list rather than widening it.
+
+What does not survive, and cannot be recovered afterwards:
+
+- **A real access point.** This machine holds an enterprise (EAP) network and
+  an ordinary WPA2 one. No fixture can produce either.
+- **A real driver and a real association failure.** 802.11 status 53,
+  `INVALID_PMKID`, is a fix this tree carries and has never seen fire on
+  hardware. It needs a real switch between networks.
+- **What a real supplicant SAYS**, which is the one that decays quietly.
+  `evidence.md`: *"a stand-in reproduces the half of a tool you have seen."*
+  The fake's `STATUS` fields, its `SCAN_RESULTS` header, its `LIST_NETWORKS`
+  flags and the shape of its events were written from the runs their author
+  had met, and every one is checkable against a real radio only while there is
+  one.
+
+`tool/capture-supplicant.sh` is the third of those made cheap: five read
+commands over the control socket and a bounded passive attach for events. It
+sends no command that changes state -- no `SELECT_NETWORK`, no `DISCONNECT`, no
+`SCAN`, the last because a scan is a state change on a radio somebody is using
+and the supplicant's own results are what a fake needs anyway.
+
+**It resolves `wpa_cli` rather than trusting PATH**, because Debian ships it in
+`/usr/sbin`: `command -v` is false for an ordinary user and true under `sudo`,
+which reads as "not installed" on a machine where it is installed. Measured
+here, in that order.
+
+### What the network checks say
+
+    the daemon joined the one network it started with, unasked
+    and told the supplicant about it
+    and knows nothing of a network nobody configured
+    a network added while the daemon runs reaches the supplicant   the gate
+    and the station is still on the one it was on
+    and netcfgd sees the station on the network it moved to
+    and it never warned that the machine does not match
+    nor that the configuration stopped compiling
+
 ## 10.331 The 10.307 reproduction, what it refuted, and what it found
 
 `tests/live/config_arrives.sh`. Write a file, touch nothing else, does the
