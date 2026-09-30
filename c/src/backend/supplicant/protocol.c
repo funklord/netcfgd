@@ -876,6 +876,38 @@ int ncfg_supplicant_entry_is_current(const ncfg_supplicant_entry_t *entry)
 	return entry && entry->flags && strstr(entry->flags, "CURRENT") != NULL;
 }
 
+int ncfg_supplicant_entry_is_disabled(const ncfg_supplicant_entry_t *entry)
+{
+	const char *at;
+
+	if (!entry || !entry->flags) {
+		return 0;
+	}
+	/*
+	 * **`[DISABLED]` and not `[TEMP-DISABLED]`, which the obvious spelling
+	 * gets wrong.** `strstr(flags, "DISABLED")` matches both, and the two mean
+	 * opposite things about whose problem it is: administratively disabled is
+	 * something netcfgd or an operator did and it stays until undone, while
+	 * temporarily disabled is the supplicant blacklisting a network it could
+	 * not get onto and clearing that itself. `entry->flags`' own comment in
+	 * `supplicant.h` says they differ; the sibling above can afford a
+	 * substring because no other flag contains `CURRENT`.
+	 *
+	 * So the bracket is part of the match, and the search continues rather
+	 * than stopping at the first `[`: a real supplicant writes them
+	 * concatenated -- `[CURRENT][DISABLED]` cannot occur but
+	 * `[TEMP-DISABLED][P2P-PERSISTENT]` can, and a match keyed on the string
+	 * starting with `[DISABLED]` would answer no for a network whose flags
+	 * merely begin with something else.
+	 */
+	for (at = entry->flags; (at = strchr(at, '[')) != NULL; at++) {
+		if (strncmp(at, "[DISABLED]", 10u) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* ------------------------------------------------------------------- status */
 
 void ncfg_supplicant_status_free(ncfg_supplicant_status_pair_t *pairs, size_t count)
