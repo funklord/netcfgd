@@ -113,3 +113,4 @@ bridge/netcfgd-remote
 
 bridge/tests/peek_test
 bridge/tests/record_encode_test
+bridge/tests/record_emit_test

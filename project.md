@@ -9519,6 +9519,87 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.342 What this machine would actually replicate
+
+The walker and the encoder both existed and nothing joined them, so the
+question the whole chain was built to answer had never been asked of a
+document. `bridge/record_emit.c` asks it: text in, the records it would put on
+the wire out, and a tally of what it would not.
+
+Put to `/etc/netcfgd/conf.d/*.conf` read-only, 2026-10-01:
+
+    13 statements, every one accounted for
+     9 records
+     4 withheld, all host-private
+     0 refused, 0 unregistered
+
+Thirteen against thirteen assignments counted independently with `grep`, which
+is what makes the nine a measurement rather than a number the walker liked.
+The four are `control.observe`, `control.wifi`, `control.admin` and one
+`wifi.autoconnect` -- host-private by scope, which is the answer the design
+wants: this machine's configuration is nearly all estate-shareable, and what
+is not is not an accident.
+
+**The tally is the point and not the total.** A configuration producing nine
+records and withholding four is a different thing from one producing nine and
+withholding forty, and a single number cannot tell them apart.
+
+## 10.343 A written passphrase travelled, because the refusal lived in the compiler
+
+`scope.c` gives `wifi.psk` a wire number and states the ground in bold: "a
+credential travels as a reference and never as a value", because
+`ncfg_as_secret` refuses a bare string. It does -- read, not taken on the
+comment's word, and it emits a diagnostic rather than falling through.
+
+**A walk parses and does not lower.** So a document holding a literal
+passphrase -- one the compiler rejects and the daemon would never run --
+walked clean, and `ncfg_records_of` handed the passphrase to the encoder as
+the body of a record. Measured with a two-line fixture before it was fixed.
+
+The walker already owned this class of refusal and its leaf list was the wrong
+half. `CREDENTIAL_LEAVES` covers `ca_cert`, `client_cert` and `private_key` --
+the keys whose value may be a secret **or** a path -- and the strict keys were
+assumed safe because the compiler refuses them. The property was true of the
+compiler and *assumed* of the walker, which is an unstated precondition rather
+than a shared one.
+
+**The strict leaves were enumerated from the call sites, not guessed:** every
+`ncfg_as_secret` in `lower_kind.c` and `lower_network.c` is reached under
+`psk`, `password` or `preshared_key`. `private_key` stays in the dual list on
+purpose -- two keys share that leaf, wireguard's strict and dot1x's a cert
+source, and nothing at this layer tells them apart. The dual verdict withholds
+either way.
+
+`NCFG_WITHHELD_PLAINTEXT` is a separate reason from `PRIVILEGED` because the
+two are different facts an operator acts on differently: a path is a file this
+host can read, and this is the passphrase itself.
+
+**Proven in both directions, which is what a value-dependent verdict needs.**
+Deleting the branch fails the two plaintext checks and leaves the controls
+green; widening the leaf list to every key fails the controls and leaves the
+plaintext checks green. And the holder's real configuration is unchanged at
+nine records -- a change that refused the key would have passed the first test
+and broken the machine.
+
+**`NCFG_EMIT_REASONS` was a literal `6u` and is now derived from the enum.**
+`record_emit.c` guards the index with `<`, so adding a reason would have kept
+compiling, kept passing, and silently counted the new one as nothing.
+
+## 10.344 A proof that could not have failed, offered for the wrong tree
+
+**`bridge/` was diagnosed as missing header dependency tracking, and it is
+not missing it -- it does not need it.** `c/` had the gap (10.328) and the
+inference from one Makefile to its sibling was wrong. Every target in
+`bridge/Makefile` lists `fuzznet` as a prerequisite, `fuzznet` is `.PHONY`, so
+every target relinks from source on every invocation and a stale header cannot
+survive. The proof offered for the fix was vacuous in the way that is hardest
+to notice: one compile command before touching a header and one after, a count
+that reads as a pass and could not have read as anything else, **because the
+rule always runs.** The instrument also wrote a `.d` naming one source of
+seven -- `gcc` overwrites a single `-MF` file per translation unit, so it
+recorded whichever compiled last. Reverted; only the `clean` message, which
+was short by one test independently, was kept.
+
 ## 10.341 The field test: it joined on its own, and the fixture held
 
 The holder took the machine to the site with the enterprise network, 2026-10-01,

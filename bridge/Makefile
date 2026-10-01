@@ -56,7 +56,16 @@ FUZZNET_BLD = build
 # small: section 3 of the brief keeps fuzznet away from the process holding
 # CAP_NET_ADMIN, and the same argument runs the other way.
 CORE        = ../c
+# `scope.c` for the tables, and the front end for `record_emit.c`, which has to
+# read a configuration before it can say what of it would travel. Six pure
+# sources -- no kernel, no sockets, nothing that opens anything -- which is why
+# they are named rather than the whole of `libncfg.a` being linked: an archive
+# would prune to the same set today and would stop doing so the moment the
+# compiler grew a dependency, in the one program section 3 keeps small.
 CORE_SRCS   = $(CORE)/src/compile/scope.c
+CORE_FRONT  = $(CORE)/src/compile/walk.c $(CORE)/src/compile/parse.c \
+	      $(CORE)/src/compile/lex.c $(CORE)/src/compile/ast.c \
+	      $(CORE)/src/base/buf.c $(CORE)/src/base/error.c
 
 # The client's floor, name for name, so moving between these directories costs
 # nothing. `-Wno-pedantic` is deliberately absent: this file is ours.
@@ -150,9 +159,10 @@ $(PROGRAM): $(SRCS) $(CORE_SRCS) fuzznet client
 # The read path against a frame the library builds, which is the control the
 # program itself cannot show: every answer `--peek` gives by hand is a refusal,
 # and a program that can only refuse looks like one that refuses everything.
-test: tests/peek_test tests/record_encode_test $(PROGRAM)
+test: tests/peek_test tests/record_encode_test tests/record_emit_test $(PROGRAM)
 	./tests/peek_test
 	./tests/record_encode_test
+	./tests/record_emit_test
 
 tests/peek_test: tests/peek_test.c fuzznet
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< $(FUZZNET_OBJS) $(LDFLAGS) -o $@
@@ -163,10 +173,18 @@ tests/record_encode_test: tests/record_encode_test.c record_encode.c $(CORE_SRCS
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< record_encode.c $(CORE_SRCS) $(FUZZNET_OBJS) \
 		$(LDFLAGS) -o $@
 
+# The join between the two: a document in, the records it would put on the wire
+# out, and the tally of what it would not. Needs the front end, which the
+# program itself does not.
+tests/record_emit_test: tests/record_emit_test.c record_emit.c record_encode.c \
+		$(CORE_SRCS) $(CORE_FRONT) fuzznet
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< record_emit.c record_encode.c $(CORE_SRCS) \
+		$(CORE_FRONT) $(FUZZNET_OBJS) $(LDFLAGS) -o $@
+
 # By name, and nothing by pattern this directory does not own. fuzznet's build
 # output is fuzznet's to remove, through its own clean.
 clean:
-	rm -f $(PROGRAM) tests/peek_test tests/record_encode_test
-	@echo "clean: removed $(PROGRAM), tests/peek_test and tests/record_encode_test;"
-	@echo "clean:   fuzznet's objects"
-	@echo "clean:   are its own to clean"
+	rm -f $(PROGRAM) tests/peek_test tests/record_encode_test tests/record_emit_test
+	@echo "clean: removed $(PROGRAM), tests/peek_test, tests/record_encode_test and"
+	@echo "clean:   tests/record_emit_test; fuzznet's objects are its own to clean"
+
