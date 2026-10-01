@@ -8,6 +8,7 @@
  * writable and removed afterwards -- and both of those are this file's problem
  * rather than the caller's.
  */
+#include "ncfg/log.h"
 #include "ncfg/supplicant.h"
 
 #include "supplicant_internal.h"
@@ -300,6 +301,25 @@ int ncfg_supplicant_client_descriptor(const ncfg_supplicant_client_t *client)
 	return client ? client->fd : -1;
 }
 
+/*
+ * A reply on one line, for a log that is read with `journalctl`.
+ *
+ * `LIST_NETWORKS` and `SCAN_RESULTS` answer in several lines, and a log entry
+ * that spans lines cannot be grepped as one record -- which is the whole point
+ * of putting the exchange in the journal rather than in a capture file.
+ * `NCFG_LOG_MAX` truncates what is still too long, so this bounds the shape and
+ * not the size.
+ */
+static void on_one_line(const char *from, char *out, size_t out_size)
+{
+	size_t at = 0u;
+
+	for (; from[at] != '\0' && at + 1u < out_size; at++) {
+		out[at] = (from[at] == '\n' || from[at] == '\r') ? '|' : from[at];
+	}
+	out[at] = '\0';
+}
+
 int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const char *command,
     const char *label, char *body, size_t body_size, int *kind, char *err, size_t err_size)
 {
@@ -333,6 +353,24 @@ int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const cha
 		    client->interface, strerror(errno));
 		return 0;
 	}
+
+	/*
+	 * **The exchange, in the journal, under the interface.**
+	 *
+	 * `label` and never `command`: the two differ exactly for the commands
+	 * that carry a credential, where `session.c` passes the redacted form
+	 * built by `ncfg_supplicant_setting_redacted`. That parameter existed for
+	 * error messages; logging it is safe for the same reason and by the same
+	 * construction, and logging `command` here would put a PSK in the journal.
+	 *
+	 * This module had no logging at all, which is why the investigation in
+	 * project.md 10.337 needed `tool/capture-supplicant.sh`: netcfgd sends
+	 * `SELECT_NETWORK`, that disables every other network, and nothing
+	 * anywhere recorded that it had been sent. `ncfg_log_aboutf`'s own
+	 * comment cites 10.307 as the afternoon that wanted one timeline -- the
+	 * facility was built for this and the wire was the one thing not on it.
+	 */
+	ncfg_log_aboutf("supplicant", client->interface, NCFG_LOG_VERBOSE, "-> %s", label);
 
 	/* Events share this socket once anything has attached, and they arrive
 	 * interleaved with replies. Reading one as the answer to a command is the
@@ -412,6 +450,31 @@ int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const cha
 
 			if (kind) {
 				*kind = answered;
+			}
+			/*
+			 * The outcome at VERBOSE and the body at DEBUG, because they
+			 * answer different questions: "did that command take" is what
+			 * a reconcile trace needs, and the listing behind it is what
+			 * you want only once the trace has pointed at a command.
+			 *
+			 * **A body is safe to log here and that is a property of this
+			 * tree, not of the protocol.** A reply can carry a credential
+			 * only in answer to `GET_NETWORK`, and netcfgd issues none --
+			 * checked across `c/src` rather than assumed. A call site that
+			 * adds one makes this line a leak, which is why it is written
+			 * down here next to the logging rather than in a design note.
+			 */
+			ncfg_log_aboutf("supplicant", client->interface, NCFG_LOG_VERBOSE,
+			    "<- %s: %s", label,
+			    answered == NCFG_SUPPLICANT_REPLY_OK      ? "OK"
+			        : answered == NCFG_SUPPLICANT_REPLY_FAIL ? "FAIL"
+			                                                 : "data");
+			if (ncfg_log_accepted() >= NCFG_LOG_DEBUG) {
+				char shown[NCFG_LOG_MAX];
+
+				on_one_line(body, shown, sizeof(shown));
+				ncfg_log_aboutf("supplicant", client->interface,
+				    NCFG_LOG_DEBUG, "<- %s", shown);
 			}
 		}
 		return 1;

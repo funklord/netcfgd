@@ -86,6 +86,7 @@
 #include "ncfg/process.h"
 #include "ncfg/secrets.h"
 #include "ncfg/service.h"
+#include "ncfg/log.h"
 #include "ncfg/supplicant.h"
 
 /* The one question the driver and the population both have to answer the same
@@ -599,6 +600,68 @@ static void the_paths_are_the_mark(void)
 	refused(ncfg_supplicant_pid_path(run_dir, "wlan-test0", small, sizeof(small), message,
 	    sizeof(message)), message, "longer",
 	    "a path that would not fit is a failure rather than a shorter one");
+}
+
+/* The command line as one string, which is how both of the cases below read
+ * it: a flag's presence and its position are one question. */
+static void joined_argv(const ncfg_supplicant_args_t *args, char *out, size_t out_size)
+{
+	size_t at;
+
+	out[0] = '\0';
+	for (at = 0; at < args->count; at++) {
+		(void)strncat(out, args->argv[at], out_size - strlen(out) - 1u);
+		(void)strncat(out, " ", out_size - strlen(out) - 1u);
+	}
+}
+
+/*
+ * The supplicant's verbosity follows netcfgd's own level.
+ *
+ * **Both shapes, because the default is the one the other tests see.** Every
+ * case in this file runs at `INFO`, where the new flag is absent -- so the
+ * exact-command-line assertion above passes whether this works or not, and a
+ * check that only confirmed the quiet shape would be confirming the status quo.
+ *
+ * The level is process-wide, so it is put back: a case after this one that ran
+ * at `DEBUG` by inheritance would be a different test from the one its author
+ * wrote, and the exact-command-line check is next door.
+ */
+static void the_subtool_verbosity_follows_the_daemons(void)
+{
+	ncfg_supplicant_args_t args;
+	char                   message[NCFG_ERROR_MAX];
+	char                   quiet[512];
+	char                   loud[512];
+	ncfg_severity_t        was = ncfg_log_accepted();
+
+	printf("\n-- the subtool's verbosity\n");
+	ncfg_log_accept(NCFG_LOG_INFO);
+	message[0] = '\0';
+	check(recorded(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant",
+	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", "/run/wpa_supplicant",
+	    "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)), message),
+	    "a command line is built at the ordinary level");
+	joined_argv(&args, quiet, sizeof(quiet));
+	check(strstr(quiet, " -d ") == NULL,
+	    "  and carries no debug flag, which is what every other case here sees");
+
+	ncfg_log_accept(NCFG_LOG_DEBUG);
+	message[0] = '\0';
+	check(recorded(ncfg_supplicant_arguments("/usr/sbin/wpa_supplicant",
+	    NCFG_SUPPLICANT_DRIVER_RADIO, "wlan-test0", "/run/wpa_supplicant",
+	    "/run/netcfgd/supplicant/wlan-test0.pid", &args, message, sizeof(message)), message),
+	    "and one is built at `debug`");
+	joined_argv(&args, loud, sizeof(loud));
+	check(strstr(loud, " -d ") != NULL,
+	    "  which asks the supplicant for its own debug output, on the one knob");
+	check(strstr(loud, " -dd ") == NULL,
+	    "  and not `-dd`, which logs every frame and is a separate decision");
+	check(strcmp(quiet, loud) != 0,
+	    "  so the level reached the command line rather than the two agreeing");
+	check(args.argv[args.count] == NULL, "  still NULL-terminated with the flag on");
+
+	ncfg_log_accept(was);
 }
 
 static void the_command_line_is_what_a_supplicant_is_started_with(void)
@@ -1298,6 +1361,7 @@ int main(int argc, char **argv)
 
 	the_paths_are_the_mark();
 	the_command_line_is_what_a_supplicant_is_started_with();
+	the_subtool_verbosity_follows_the_daemons();
 	a_start_runs_the_program_and_fills_what_it_started();
 	a_handle_survives_the_run_directory();
 	a_marked_process_that_answers_nothing_is_not_adopted();

@@ -131,9 +131,34 @@ int ncfg_supplicant_arguments(const char *program, const char *driver, const cha
 	 * operator most needs to read. The Rust's comment records an hour of a
 	 * real outage diagnosed without it.
 	 */
+	/*
+	 * **And the subtool's own verbosity follows netcfgd's, on one knob.**
+	 *
+	 * `NCFG_LOG=debug` is the setting an operator already reaches for, and
+	 * until this line it raised netcfgd's half of a conversation while leaving
+	 * the supplicant at its default -- so a trace showed what netcfgd asked
+	 * and not what the radio did about it. Two knobs for one question is how
+	 * `tool/capture-supplicant.sh` came to exist: the way to get the
+	 * supplicant talking was to run a second program alongside, by hand, and
+	 * everything it captured then had to be reconciled with the journal by
+	 * timestamp.
+	 *
+	 * `-d` and deliberately not `-dd`. The second logs every frame and makes
+	 * the journal the bottleneck on a busy radio; a level that cannot be left
+	 * on is a level nobody has when the fault happens, which is the whole
+	 * complaint. If `-dd` is ever wanted it is a third setting and not a
+	 * sharper reading of this one.
+	 *
+	 * It reads the accepted level rather than taking a parameter because the
+	 * level is already process-wide and set once at startup: a parameter would
+	 * be the same value threaded through four callers that have no opinion
+	 * about it. `supplicant_launch_test.c` sets the level and asserts both
+	 * shapes, which is what makes that reading checkable.
+	 */
 	if (!push(out, program) || !push(out, "-B") || !push(out, out->driver) ||
 	    !push(out, "-s") || !push(out, "-i") || !push(out, iface) || !push(out, "-C") ||
-	    !push(out, dir) || !push(out, "-P") || !push(out, pid_path)) {
+	    !push(out, dir) || !push(out, "-P") || !push(out, pid_path) ||
+	    (ncfg_log_accepted() >= NCFG_LOG_DEBUG && !push(out, "-d"))) {
 		ncfg_error_set(err, err_size,
 		    "the command line for wpa_supplicant on %s is longer than this build will "
 		    "build", iface);

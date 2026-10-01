@@ -9519,6 +9519,94 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.345 The control exchange was on no log at all
+
+The holder's question, 2026-10-01: can netcfgd log everything, including a
+subtool's output when configured to, rather than needing a logging script
+started by hand. Measured rather than answered from memory, and the answer was
+no in one specific place -- the place that cost this document its hardest
+investigations.
+
+**Where subtool output goes today, measured on `debian-nabbe`:**
+
+    dhcpcd           the journal (netcfgd's cgroup) and /run/netcfgd/dhcp/*.log
+    wpa_supplicant   syslog only, under its OWN tag, at default verbosity
+    netcfgd itself   stderr -> the journal, 7 levels, subsystem filter
+
+So two journal queries and two vocabularies. But the gap that mattered is
+narrower and worse: **`backend/supplicant/client.c` held no logging
+whatsoever** -- zero `ncfg_log` calls in the module that owns every control
+exchange. netcfgd sends `SELECT_NETWORK`, which disables every other network
+on the radio, and nothing anywhere recorded that it had been sent. That is
+the whole of why 10.337 needed `tool/capture-supplicant.sh`: the request that
+caused the fault was the one thing not written down.
+
+**The facility was already there and already cites the symptom.**
+`ncfg_log_aboutf` exists to put a link's supplicant, its DHCP client and the
+daemon's passes on one timeline, and its own comment names 10.307 as the
+afternoon that wanted one. Twelve subsystems use it. The wire was the one
+thing not on it.
+
+**The request is logged by its label, which makes redaction a property rather
+than a rule.** `ncfg_supplicant_request_labelled` already took a `label`
+distinct from the `command` for exactly the commands that carry a credential,
+`session.c` passing the form `ncfg_supplicant_setting_redacted` builds. That
+parameter existed for error messages; logging it is safe by the same
+construction. Proven by sabotage: logging `command` instead puts the canary
+secret on stderr and `supplicant_client_test`'s sweep goes red.
+
+A reply body is logged at `DEBUG`, and that is safe for a reason belonging to
+this tree rather than to the protocol: a reply can carry a credential only in
+answer to `GET_NETWORK`, and netcfgd issues none -- checked across `c/src`.
+Written beside the logging, because a call site that adds one makes that line
+a leak.
+
+**And the subtool's verbosity now follows netcfgd's own, on one knob.**
+`NCFG_LOG=debug` raised netcfgd's half of the conversation and left
+wpa_supplicant at its default, so a trace showed what netcfgd asked and not
+what the radio did about it. The launch pushes `-d` at `DEBUG`. Deliberately
+not `-dd`: that logs every frame, and a level nobody can leave on is a level
+nobody has when the fault happens, which is the complaint.
+
+**`-s` is kept and the named log file is still not used, which is the right
+way round.** The journal is the one timeline; a file in `/run` is one more
+place to look.
+
+**But the dead path is a real finding and is not fixed here.**
+`launch.c` computes a log path into `log` at line 255 and passes **`NULL`**
+to `ncfg_backend_run`. Every other backend -- openvpn, dhcp, pppoe, hostapd,
+ra -- passes its `log`; the supplicant alone does not, and three cases in
+`supplicant_launch_test.c` assert that `ncfg_supplicant_log_path` works. A
+correct function, tested, with no consumer: `evidence.md`'s own shape, and
+`-Wunused` cannot see it because the buffer is written to. Whether the
+supplicant should write a file at all is a design question about where subtool
+output belongs, and it is the holder's; the measurement is here so it can be
+answered once.
+
+## 10.346 Two more measurements that could not discriminate
+
+**`supplicant_client_test`'s stderr sweep was asserting about an empty file.**
+It checks that nothing this module writes to stderr carries the canary secret,
+which is exactly where `ncfg_log` writes -- and the default level is `INFO`
+while the new exchange logging is `VERBOSE` and `DEBUG`. It passed, and it
+would have passed with the redaction deleted. It runs at `DEBUG` now and names
+the redacted form it expects to **find**, so an empty capture fails rather
+than agrees. The liveness half is what makes the silence evidence, which is
+the same argument the fake's own canary count already made about the wire.
+
+**A Rust test fails intermittently under `cargo test --workspace` only.**
+`probe::tests::an_interface_with_a_lease_runs_the_probe` panicked with "the
+probe did not run with a lease present" during one `make check`, and passed on
+every rerun since: alone three times, in its own crate's full suite twice
+parallel and once single-threaded, and twice more under `--workspace`. It is
+not reproducible on demand and the C side is untouched by it. Cross-crate
+interference on shared state is the shape; recorded rather than fixed, per the
+standing rule. **Worth knowing for the gate rather than for the probe:** that
+failure stopped `make check` at `Makefile:360`, before the C port's suites run
+at all -- so a red `make check` here had verified nothing about the change in
+front of it, and the C suites had to be run directly. A gate that stops early
+has not checked what comes after it.
+
 ## 10.342 What this machine would actually replicate
 
 The walker and the encoder both existed and nothing joined them, so the
