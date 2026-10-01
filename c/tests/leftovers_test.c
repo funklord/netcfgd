@@ -205,15 +205,30 @@ static void a_dhcpcd_family_with_no_pid_file_is_not_an_alarm(void)
 	    "the client is claimed, by the interface the record says it is running on");
 	check(verdict_of(out, count, 975891) == NCFG_LEFTOVER_HELPER,
 	    "and its BPF helper, whose own title names no interface, is a helper of it");
-	/* **On 3061115 rather than on the client**, and that is the honest answer
-	 * rather than a near miss: the privileged proxy's own title carries the
-	 * interface too, so it is claimed in its own right and is the nearest
-	 * ancestor netcfgd can account for. The anchor names what was recognised,
-	 * not the root of the family. */
-	check(anchor_of(out, count, 975891) == 3061115,
-	    "anchored on the nearest ancestor netcfgd can account for");
-	check(verdict_of(out, count, 3061115) == NCFG_LEFTOVER_CLAIMED,
-	    "and that ancestor is itself claimed, which is why the walk stopped there");
+	/*
+	 * **These two said 3061115 until 2026-10-01, and the old answer is what
+	 * misled a reader.**
+	 *
+	 * The privileged proxy's own title carries the interface, so it was
+	 * claimed in its own right and the walk stopped on it: the BPF helper
+	 * reported the proxy, and the proxy reported the record. Nothing was
+	 * hidden -- every verdict was an accounted-for one -- but the log then read
+	 * as several backends the record claims with no pid written down, where
+	 * there is one client and its helpers. A session reading that journal on
+	 * the holder's machine reported it as processes accumulating across
+	 * restarts. It was dhcpcd's privilege separation: one client, a privileged
+	 * proxy, a control proxy and two per-address helpers.
+	 *
+	 * So a claimed process whose parent is also accounted for is now a helper
+	 * of it, and the walk runs past a helper rather than stopping on one --
+	 * which keeps the recorded case's property that a helper names the thing
+	 * netcfgd recorded and not the intermediate. Both halves are needed: the
+	 * first without the second anchors a grandchild on a proxy.
+	 */
+	check(anchor_of(out, count, 975891) == 3061114,
+	    "anchored on the client rather than on the proxy between them");
+	check(verdict_of(out, count, 3061115) == NCFG_LEFTOVER_HELPER,
+	    "and the proxy is a helper of that client, not a backend of its own");
 }
 
 /*

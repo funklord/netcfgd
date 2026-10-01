@@ -12195,6 +12195,75 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.340 Six dhcpcd processes that are one, and the verdict that said otherwise
+
+**There is no leak.** Reading the journal after an install, a session flagged
+six dhcpcd processes in netcfgd's control group as accumulation across
+restarts and put it to the holder that way. The process table answers it:
+
+    1146693  dhcpcd: wlp0s20f3 [ip4]                        parent 1
+    1146694    [privileged proxy] wlp0s20f3 [ip4]            parent 1146693
+    1146695    [control proxy] wlp0s20f3 [ip4]               parent 1146693
+    1988730      [BPF ARP] wlp0s20f3 10.0.125.56             parent 1146694
+    1988758      [BOOTP proxy] 10.0.125.56                   parent 1146694
+
+One client in dhcpcd's privilege-separated model: a client, a privileged
+proxy, a control proxy, and two per-address helpers. The two young pids are
+those helpers being recreated, which is why they appeared to churn across
+restarts while the trio stayed.
+
+### What misled the reader, which is the part worth fixing
+
+`ncfg_leftovers_classify` runs two passes, and the second visited only
+`UNACCOUNTED` processes. Three of those five carry `wlp0s20f3` in their own
+argv, so they matched the record's claim on that interface, were CLAIMED in
+pass one, and never reached the pass that would have called them helpers. The
+log then said, three times, *"a backend the record claims on an interface it
+names, with no pid written down."*
+
+**Nothing was hidden** -- CLAIMED and HELPER are both accounted-for verdicts and
+the sweep refuses neither. What the wording cost was a reader, and the reader
+it cost was the session that wrote this file's own comment about dhcpcd. That
+comment said the `[privileged proxy]` title *"does not always carry the
+interface"*, which is true; the case that matters is when it does.
+
+### The fix is two halves and needs both
+
+- **Pass two reconsiders CLAIMED**, so a claimed process whose parent is also
+  accounted for becomes a helper of it. RECORDED is left alone: a process
+  netcfgd wrote a pid down for is a backend in its own right whatever its
+  parentage.
+- **The anchor walk still runs past a HELPER**, which was tried the other way
+  and reverted. Accepting a helper as an anchor made a grandchild report the
+  proxy between them, losing the recorded case's property that *a helper names
+  the recorded process it hangs off, not its parent*. Two checks said so.
+
+Together: one claimed client, four helpers, every one of them naming the
+client.
+
+Sabotaged both halves separately -- the reconsideration removed, and the anchor
+widened to accept a helper -- and each fails two checks, a different two.
+
+**Two previously-pinned checks changed, which is the part to be suspicious
+of.** They asserted the old answer and the entry beside them called it *"the
+honest answer rather than a near miss"*. It was honest and it was the thing
+that read as several backends, so they are re-pinned with the misreading
+recorded beside them rather than quietly edited to fit.
+
+### And `make -C c` does not build the tests, for the third time today
+
+The first run of `leftovers_test` after the change reported 23 of 23 passing.
+It was the previous binary: `make -C c` builds the library and the program, and
+`make tests/leftovers_test` builds the test. Rebuilt, it failed two checks
+immediately -- the two pinning the behaviour being changed, which is exactly
+what should have happened.
+
+`build-and-commit.md` names this and today has supplied three instances: a
+Rust adapter answered from `target/debug` while `nm.sh` tested a stale one
+(10.336), and this twice. The rule is not subtle and the trap is not either;
+what makes it recur is that the stale run usually looks like the answer you
+expected.
+
 ## 10.339 The reconcile half, the answer taken, and what it costs `wifi connect`
 
 10.337 named four answers and said the choice was the holder's. **The holder,
