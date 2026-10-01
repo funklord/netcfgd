@@ -2930,6 +2930,20 @@ typedef struct {
 	/* Reclaims in a row, which `NCFG_RESOLV_PATIENCE` bounds. */
 	unsigned reclaims;
 	/*
+	 * How many times the counter above has filled and been swept.
+	 *
+	 * Only so that the line saying so can be told apart from itself.
+	 * `ncfg_reconcile_sweeps` zeroes `reclaims` when it fires, so a second
+	 * episode is a second genuine run of take-backs -- and it printed a
+	 * sentence identical to the first, which reads as a log that repeated
+	 * rather than a fault that recurred. Two readers made that mistake,
+	 * including the one who went looking for a duplicate to remove.
+	 *
+	 * Not a de-duplication: suppressing the second line would hide the thing
+	 * worth knowing, which is that it happened again.
+	 */
+	unsigned resolv_episodes;
+	/*
 	 * The compile failure this loop has already said out loud.
 	 *
 	 * A reload that cannot compile leaves the previous document standing and

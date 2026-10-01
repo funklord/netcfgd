@@ -355,10 +355,12 @@ size_t ncfg_resolv_sweep(const char *run_dir, const ncfg_resolv_machine_t *machi
 		}
 	}
 
-	if (signalled == 0u) {
-		ncfg_log_emitf("resolv", NCFG_LOG_WARNING,
-		    "resolv.conf has been taken back %d times and netcfgd found nothing it could "
-		    "signal", (int)NCFG_RESOLV_PATIENCE);
-	}
+	/*
+	 * **The "nothing to signal" line is the caller's now.** It is the same
+	 * sentence every time this runs, and what distinguishes one occurrence
+	 * from the next -- which episode it is -- is state this function does not
+	 * have and should not grow: it is a library call taking a directory and a
+	 * seam, and six callers in the suite drive it with neither.
+	 */
 	return signalled;
 }
