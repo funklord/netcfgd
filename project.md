@@ -12241,6 +12241,62 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.350 A reason that asserted nothing had changed
+
+Found by watching the applied-action logging of 10.347 on the real daemon, which
+is what that logging is for. One search domain added to
+`/etc/netcfgd/conf.d/50-dns.conf` produced:
+
+    netcfgd: [apply] dns.apply  dns: write_resolv_conf (was write_resolv_conf)
+
+Desired equal to observed, an action running, and the search domain that had
+actually changed named nowhere.
+
+**The gate and the explanation were asking different questions.**
+`ncfg_plan_dns` decides whether to act with `policy_matches`, which renders both
+policies to JSON and compares the text -- the right way to decide, because it
+cannot miss a field somebody adds to `ncfg_dns_policy_t` later. It then built
+the reason from `->mode.mode` alone. So any difference in servers, search
+domains, routing domains or options produced a reason saying the mode was
+unchanged, which it was.
+
+`plan.h` says reasons exist so that `ncfg plan` "can say *why* rather than only
+*what*", and that "an action list without reasons is a black box with extra
+steps". A reason that is present and vacuous is worse than an absent one: it
+asserts that nothing changed.
+
+**`dns_difference` walks the facets and names the first that differs**, with
+both values interned through `ncfg_plan_internf` the way `plan/wireguard.c`
+already renders its own. The string lists compare by CONTENT rather than count,
+because a search domain replaced rather than added leaves the count alone and
+would have fallen through -- the same vacuous line, one case narrower. Where the
+whole-policy gate and the facet walk disagree the reason says `differs`, so a
+field added to the struct and not to the walk degrades honestly instead of
+naming the wrong one.
+
+**Proven the same way it was found, on the daemon.** The demonstration was run
+again with the fix installed, against the same one-line change:
+
+    before   dns.apply  dns: write_resolv_conf (was write_resolv_conf)
+    after    dns.apply  dns.search: netcfgd-log-demo.invalid (was <none>)
+
+`<none>` rather than `vibes.se` is right and worth saying, because it looks
+wrong: the lease's search domain belongs to the interface scope, and the globals
+scope went from no list to one.
+
+**Not unit-tested, and that is a gap rather than a decision.** Four fixture
+shapes in `plan_test.c` were tried and every one planned `link.up` alone: a
+host-wide `dns.apply` needs a scope, and what builds one is not the shape any of
+them had. The test was removed rather than left red, so what defends this is a
+manual reproduction that nothing re-runs. Understanding
+`ncfg_dns_scopes_of`'s preconditions well enough to write the fixture is its own
+small piece of work, and it is the thing still owed here.
+
+**The demonstration was worth more than the thing it demonstrated.** It was run
+to witness the 10.347 logging on real hardware, since a converged machine logs
+nothing and absence looks identical to a broken build. It witnessed that, and
+the first line it produced was a defect nobody was looking for.
+
 ## 10.349 fuzznet is overhauling logging, and this work is provisional
 
 Reported by the copyright holder, 2026-10-01: **fuzznet is now overhauling a

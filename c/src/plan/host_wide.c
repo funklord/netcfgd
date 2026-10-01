@@ -68,6 +68,130 @@
  * the third list to keep in step with the struct and the writer, and the list
  * maintained by hand is the one this project has already got wrong twice.
  */
+/*
+ * Whether two author-ordered string lists say the same thing.
+ *
+ * Contents and not just the count: a search domain REPLACED rather than added
+ * leaves the count alone, and a reason that fell through to "differs" there
+ * would be the vacuous line this whole exercise is about, one case narrower.
+ * Order matters because these lists are author-ordered -- `resolv.conf` tries
+ * search domains in the order given, so two orderings are two behaviours.
+ */
+static int lists_match(char **left, size_t left_count, char **right, size_t right_count)
+{
+	size_t at;
+
+	if (left_count != right_count) {
+		return 0;
+	}
+	for (at = 0u; at < left_count; at++) {
+		const char *a = left[at] ? left[at] : "";
+		const char *b = right[at] ? right[at] : "";
+
+		if (strcmp(a, b) != 0) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* A string list on one line, for a reason that has to name what changed. */
+static const char *joined(ncfg_plan_t *plan, char **items, size_t count)
+{
+	char   line[256];
+	size_t at;
+	size_t used = 0u;
+
+	if (count == 0u) {
+		return "<none>";
+	}
+	line[0] = '\0';
+	for (at = 0u; at < count && used + 1u < sizeof(line); at++) {
+		int wrote = snprintf(line + used, sizeof(line) - used, "%s%s", used ? " " : "",
+		    items[at] ? items[at] : "");
+
+		if (wrote <= 0) {
+			break;
+		}
+		used += (size_t)wrote;
+		if (used >= sizeof(line)) {
+			used = sizeof(line) - 1u;
+			break;
+		}
+	}
+	line[used] = '\0';
+	return ncfg_plan_internf(plan, "%s", line);
+}
+
+/*
+ * Which part of a resolver policy differs, named, with both values.
+ *
+ * **Why this is not `policy_matches` with an out-parameter.** That function
+ * answers by rendering both policies to JSON and comparing the text, which is
+ * the right way to decide whether to ACT -- it cannot miss a field somebody
+ * adds to the struct later. It is the wrong way to say WHY: the answer is
+ * "these two documents are not the same string".
+ *
+ * So the gate stays whole-policy and this walks the facets, and the two
+ * disagreeing is a condition worth knowing about rather than a bug: if this
+ * finds nothing while `policy_matches` said they differ, the difference is in
+ * a field added to `ncfg_dns_policy_t` and not added here, and the reason says
+ * exactly that instead of naming the wrong field.
+ *
+ * The order is the order an operator would look: what netcfgd is doing with
+ * the resolver, then who it asks, then how names are completed.
+ */
+static const char *dns_difference(ncfg_plan_t *plan, const ncfg_dns_policy_t *want,
+    const ncfg_dns_policy_t *have, const char **desired, const char **observed)
+{
+	*desired = "<absent>";
+	*observed = "<absent>";
+	if (!want) {
+		return "dns";
+	}
+	if (!have) {
+		*desired = ncfg_dns_mode_name((ncfg_dns_mode_t)want->mode.mode);
+		return "dns";
+	}
+	if (want->mode.mode != have->mode.mode) {
+		*desired = ncfg_dns_mode_name((ncfg_dns_mode_t)want->mode.mode);
+		*observed = ncfg_dns_mode_name((ncfg_dns_mode_t)have->mode.mode);
+		return "dns.mode";
+	}
+	if (want->server_count != have->server_count) {
+		*desired = ncfg_plan_internf(plan, "%zu", want->server_count);
+		*observed = ncfg_plan_internf(plan, "%zu", have->server_count);
+		return "dns.servers";
+	}
+	if (!lists_match(want->search, want->search_count, have->search, have->search_count)) {
+		*desired = joined(plan, want->search, want->search_count);
+		*observed = joined(plan, have->search, have->search_count);
+		return "dns.search";
+	}
+	if (want->domain_count != have->domain_count) {
+		*desired = ncfg_plan_internf(plan, "%zu", want->domain_count);
+		*observed = ncfg_plan_internf(plan, "%zu", have->domain_count);
+		return "dns.domains";
+	}
+	if (!lists_match(want->options, want->option_count, have->options, have->option_count)) {
+		*desired = joined(plan, want->options, want->option_count);
+		*observed = joined(plan, have->options, have->option_count);
+		return "dns.options";
+	}
+	/*
+	 * Everything this knows how to name agrees, and the caller only asks
+	 * after the whole-policy compare said they differ. Say that, rather than
+	 * repeating the mode and asserting that nothing changed -- which is what
+	 * this function was written to stop: a `dns.apply` whose reason read
+	 * `dns: write_resolv_conf (was write_resolv_conf)` was watched running on
+	 * a real machine, and the search domain that had actually changed was
+	 * named nowhere (project.md 10.350).
+	 */
+	*desired = "differs";
+	*observed = "differs";
+	return "dns";
+}
+
 static int policy_matches(const ncfg_dns_policy_t *left, const ncfg_dns_policy_t *right)
 {
 	ncfg_buf_t         first;
@@ -284,10 +408,15 @@ void ncfg_plan_dns(ncfg_builder_t *builder)
 		op.kind = NCFG_OP_DNS_APPLY;
 		op.u.dns.scope = scopes[i].name;
 		op.u.dns.policy = scopes[i].policy;
-		reason = ncfg_plan_reason_differs(global ? NULL : scopes[i].name, "dns",
-		    ncfg_dns_mode_name((ncfg_dns_mode_t)scopes[i].policy->mode.mode),
-		    previous ? ncfg_dns_mode_name((ncfg_dns_mode_t)previous->mode.mode) :
-		        "<absent>");
+		{
+			const char *desired;
+			const char *observed;
+			const char *field = dns_difference(builder->plan, scopes[i].policy,
+			    previous, &desired, &observed);
+
+			reason = ncfg_plan_reason_differs(global ? NULL : scopes[i].name, field,
+			    desired, observed);
+		}
 		if (previous) {
 			memset(&inverse, 0, sizeof(inverse));
 			inverse.kind = NCFG_OP_DNS_APPLY;
