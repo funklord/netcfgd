@@ -24,39 +24,6 @@
 
 #include <stdio.h>
 
-/*
- * The longest action line this renders.
- *
- * A reason is four short strings -- an interface, a dotted field path and two
- * values -- and a ceiling on the line is `buf.h`'s rule applied to a stack
- * buffer: a rendered value a client chose the length of has to be bounded
- * somewhere. Truncation shows, which is the point; a line silently built to
- * whatever arrived would not.
- */
-#define DESCRIBE_MAX 1024
-
-/*
- * One line saying what an action does and why.
- *
- * `<absent>` on either side is the planner's word, not this one's: a field
- * that is not there is a value, and rendering it as an empty string would make
- * "the document says nothing" and "the document says the empty string" the
- * same line.
- */
-static const char *describe(const char *op, const ncfg_reason_t *reason, char *out,
-    size_t out_size)
-{
-	char where[80];
-
-	where[0] = '\0';
-	if (reason->interface) {
-		(void)snprintf(where, sizeof(where), " %s", reason->interface);
-	}
-	(void)snprintf(out, out_size, "%s%s  %s: %s (was %s)", op ? op : "?", where,
-	    reason->field ? reason->field : "", reason->desired ? reason->desired : "",
-	    reason->observed ? reason->observed : "");
-	return out;
-}
 
 /*
  * What a guard stopped, and the exact command that consents to it.
@@ -69,12 +36,12 @@ static void print_refusals(const ncfg_plan_t *plan)
 
 	for (at = 0; at < plan->refusal_count; at++) {
 		const ncfg_refusal_t *refusal = &plan->refusals[at];
-		char                  line[DESCRIBE_MAX];
+		char                  line[NCFG_DESCRIBE_MAX];
 
 		ncfg_out_writef("refused: %s on %s -- %s depends on it\n", refusal->op,
 		    refusal->interface, refusal->guard);
 		ncfg_out_writef("         would have been: %s\n",
-		    describe(refusal->op, &refusal->reason, line, sizeof(line)));
+		    ncfg_action_describe(refusal->op, &refusal->reason, line, sizeof(line)));
 		ncfg_out_writef("         to allow it:     %s\n", refusal->override_with);
 	}
 }
@@ -114,10 +81,10 @@ void ncfg_cli_print_plan(const ncfg_plan_t *plan)
 	} else {
 		for (at = 0; at < plan->action_count; at++) {
 			const ncfg_action_t *action = &plan->actions[at];
-			char                 line[DESCRIBE_MAX];
+			char                 line[NCFG_DESCRIBE_MAX];
 
 			ncfg_out_writef("%3u  %s\n", (unsigned)action->id,
-			    describe(ncfg_op_name(&action->op), &action->reason, line,
+			    ncfg_action_describe(ncfg_op_name(&action->op), &action->reason, line,
 			    sizeof(line)));
 		}
 	}
@@ -151,7 +118,7 @@ void ncfg_cli_print_journal(const ncfg_journal_t *journal)
 	}
 	for (at = 0; at < journal->record_count; at++) {
 		const ncfg_record_t *record = &journal->records[at];
-		char                 line[DESCRIBE_MAX];
+		char                 line[NCFG_DESCRIBE_MAX];
 		const char          *mark;
 
 		switch (record->outcome) {
@@ -176,7 +143,7 @@ void ncfg_cli_print_journal(const ncfg_journal_t *journal)
 			break;
 		}
 		ncfg_out_writef("%s %s\n", mark,
-		    describe(record->op, &record->reason, line, sizeof(line)));
+		    ncfg_action_describe(record->op, &record->reason, line, sizeof(line)));
 		if (record->error) {
 			ncfg_out_writef("     %s\n", record->error);
 		}
