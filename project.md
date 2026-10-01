@@ -12293,6 +12293,62 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.352 Extracting `netcfgd-modem-at-proposal` so it can be deleted
+
+The proposal tree is **not a git repository** -- no `.git`, not a submodule,
+referenced from nothing -- so deleting it is unrecoverable and the bar for this
+pass was that nothing of value outlive it unrecorded.
+
+**Taken on this pass, both into `helper/modem-quirks`:**
+
+- **`ESM cause 29` and `33` mean different things and now say so.** The table
+  had 29 as a measurement datum only. 29 is the request refused -- wrong APN
+  name, or credentials the network did not accept -- and 33 is the request
+  understood and not permitted. Reading one as the other has somebody phoning
+  the operator about an entitlement when the APN is misspelled, or sweeping
+  APNs that were all fine.
+- **Why `at=` is usually not the first port that answers.** A module presents
+  several AT-capable ttys and ModemManager holds the PRIMARY one where it is
+  running, so the index worth recording is a secondary; aiming a helper at the
+  primary gets a timeout that looks like a module fault and is contention. The
+  field definition said "that a modem manager does not hold" without saying
+  why.
+
+**Found while extracting, and not fixed here.** The table records `at=3` for
+the only module anybody has measured, and `helper/netcfgd-modem-at`'s own usage
+examples show `-p /dev/ttyUSB2`. The note added above says an example is
+illustrative rather than a default, which is the honest reading, but the two
+numbers sitting in one tree invite the wrong one to be copied.
+
+**Deliberately not taken, listed so nobody re-derives the question:**
+
+    mask_bits and its three mask test cases   the helper reports no addressing
+                                              by design; the 27.007 encoding it
+                                              guarded is recorded as the trap
+    the IPv6 pass-through reasoning           moot for the same reason
+    the file-based fake modem                 superseded by a pty fake with real
+                                              termios; 0208 paid for the better
+                                              one
+    `config = "reported"`                     the shipped design takes a lease
+    connect/disconnect/stop, `-d`             deliberately diverged, 10.351
+
+**What dies with it.** The decision record's 149 lines of text. Its substance
+is distributed now -- the `usbnet` finding and the no-retry argument in this
+document, the three quirks and the two causes in the table, the 27.007
+encoding in the helper -- so nothing is lost that anybody needs. But if a
+record is ever cut for this, that file was the draft, and after the deletion
+there is no copy of it anywhere.
+
+**Four passes, four findings, and the reason is worth more than any of them.**
+Asked the same question four times, each pass examined a surface the last had
+not: the file list, then the README, then the decision record, then the two
+source files compared by behaviour rather than by size. Every pass found
+something real -- the stale claims, the no-retry argument, the 27.007
+encoding, the diverged command surface. **A "yes" given after the first pass
+would have been wrong four times over, and it would have been given
+confidently**, because each pass had genuinely audited everything it had
+looked at.
+
 ## 10.351 The modem proposal landed as code and never as a document
 
 Asked whether everything from `netcfgd-modem-at-proposal` had been folded in.
