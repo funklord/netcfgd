@@ -50,6 +50,7 @@
 #include "ncfg/portal.h"
 #include "ncfg/state.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -891,6 +892,26 @@ static void guard_resolv(ncfg_reconcile_t *loop, const ncfg_plan_t *applied,
 		return;
 	}
 	report->signalled = ncfg_resolv_sweep(loop->state->paths.run, loop->world.resolv);
+	if (loop->resolv_episodes < UINT_MAX) {
+		loop->resolv_episodes++;
+	}
+	if (report->signalled == 0u) {
+		/*
+		 * Said here rather than inside the sweep, which is this function's
+		 * own rule one line up: whoever sweeps says what they are sweeping.
+		 * The sweep is a library call with no memory between runs, and the
+		 * episode number is the whole content of this line beyond the first
+		 * time it is printed.
+		 */
+		ncfg_log_emitf("resolv", NCFG_LOG_WARNING,
+		    "resolv.conf has been taken back %d times and netcfgd found nothing it "
+		    "could signal (the %u%s time since this daemon started)",
+		    (int)NCFG_RESOLV_PATIENCE, loop->resolv_episodes,
+		    loop->resolv_episodes == 1u   ? "st"
+		        : loop->resolv_episodes == 2u ? "nd"
+		        : loop->resolv_episodes == 3u ? "rd"
+		                                      : "th");
+	}
 }
 
 /*

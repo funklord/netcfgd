@@ -12195,6 +12195,82 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.348 Three reported faults, none of which was one
+
+Asked to fix the roam severity and the duplicated warning reported at the end
+of 10.347. Measured, **all three things named there are correct code**, and
+the report was wrong in three different ways. The findings are kept because
+each one is a way of misreading a log, and the log is what this work is about.
+
+**The roam is not at warning.** `!` is the label for `NCFG_LOG_NOTE`, not for
+`WARNING`, which renders as `Warning:`. So `!: wlp0s20f3: joined ...` is a
+note, and `daemon_wake.c` says why in as many words: "an association is rare on
+a desk and one per move on a laptop, which is the rate somebody reading a day's
+log wants". Four in six hours, on a laptop that moved between sites, is exactly
+the predicted rate.
+
+**The label is deliberately flog's and is not netcfgd's to change.**
+`process_test.c` asserts the whole table against flog's -- "the labels are
+flog's, including the ones it does not print" -- and names itself "the one
+place that could drift from it". So the `!` that reads as an alarm is a
+cross-project vocabulary, and changing it here would be local drift away from a
+sibling rather than a fix.
+
+**The repeated warning is two episodes, not one message twice.**
+`ncfg_reconcile_sweeps` zeroes the counter when it fires, so each line is a
+fresh run of `NCFG_RESOLV_PATIENCE` take-backs. De-duplicating it would have
+suppressed the second occurrence of a real fault -- the exact inversion of the
+complaint, since what the operator needs to know is that it happened again.
+
+**What was actually wrong is that the two cannot be told apart**, and that is
+worth one line: both printed an identical sentence, so a reader sees a log that
+repeated rather than a fault that recurred. Two readers made that mistake,
+including the one sent to remove the duplicate. The line now carries which
+episode it is, and the sentence moved from `ncfg_resolv_sweep` to
+`guard_resolv` -- the caller's own stated rule, "whoever sweeps says what they
+are sweeping", and the sweep is a library call with no memory between runs.
+
+**Not covered by a test, and said rather than left quiet.** Driving two
+episodes needs a reclaim the reconcile harness cannot force, and `guard_resolv`
+is static. The ordinal rendering was checked directly; the two-lines-differ
+property is not asserted anywhere.
+
+**Why this entry exists at all.** Every one of the three was reported by a
+worker who had read the log for an afternoon and the code for an hour. A log
+whose severity label is more alarming than its severity, and whose recurrences
+are indistinguishable from repeats, produces exactly this: confident reports of
+faults that are not there, costing the time of whoever checks them.
+
+## 10.349 fuzznet is overhauling logging, and this work is provisional
+
+Reported by the copyright holder, 2026-10-01: **fuzznet is now overhauling a
+harmonized log system to cover all of these cases directly.**
+
+Their statement, not a measurement taken here, and recorded in their voice
+because netcfgd cannot see that tree's plans. What follows is this project's
+reading of it and is marked as such.
+
+It bears on everything in 10.345 through 10.348, which is why it is written
+down beside them rather than left in conversation. Those entries settled, for
+netcfgd alone: where subtool output goes, which severity a roam is, how a
+subtool's verbosity is reached, what an applied action looks like on the log,
+and how a recurrence is told from a repeat. Every one of those is a question a
+harmonized system would answer once for every project that adopts it -- and
+10.348 has already found this tree deferring to a sibling on exactly this axis,
+since the severity labels are flog's by assertion.
+
+**So the netcfgd-local decisions above are provisional**, and the cost of
+having made them is small by construction: they are a call site each, the
+vocabulary is already somebody else's, and nothing here invented a second
+framework. The one thing not to do while that overhaul is in flight is to grow
+more logging machinery in this tree -- a second answer to a question being
+settled elsewhere is what `harmonization.md` exists to prevent.
+
+What netcfgd holds that such a system will want is the measurement rather than
+the code: a declarative reconciler needs its decisions and its actions on the
+same timeline as the tools it drives, the interface belongs in the subsystem
+path so one link can be selected, and a converged pass must say nothing at all.
+
 ## 10.347 The daemon was the quietest thing in its own log
 
 The holder, 2026-10-01: the logging is the blocking feature, and it is poorly
