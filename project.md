@@ -9550,6 +9550,17 @@ control socket is root-owned and 0770, and 10.333 is what happens when that is
 reported as a fact about the machine. No connection is no sentence. Confirmed
 on the reporting machine -- an unprivileged `ncfg status` says nothing.
 
+**And confirmed in the other direction, on the machine that reported the
+symptom.** The holder, 2026-10-01, running it as root: *"ran it, EMP-XYLEM
+shows up."* So the note fires against a real wpa_supplicant, on the real
+network list, naming the real network -- the whole of 10.337's trace closed
+end to end on hardware, hours before that hardware goes.
+
+That is worth distinguishing from the live checks above, which drive
+`fake_supplicant.py`. The fixture proves the logic and could not have proven
+that a real supplicant's `LIST_NETWORKS` spells the flag the way this reads
+it.
+
 ### `[DISABLED]` and not `[TEMP-DISABLED]`
 
 `ncfg_supplicant_entry_is_disabled` matches the bracketed token rather than the
