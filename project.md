@@ -1620,11 +1620,12 @@ address could never renew; networkd was running and configuring nothing; and
 the module's own `qcautoconnect` dialled a third context. Three contenders, no
 owner. The modem-side one is invisible to `contention.rs` and is what
 [0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md)'s quirk
-table is for. **It is built now** -- `helper/modem-quirks`, whose first entries
-are the three this document's modem produced: a SIM reported inserted with the
-socket empty while detection is off, `AT+CSIM` and `AT+CRSM` refused on every
-file while `AT+CCHO` and `AT+CGLA` work, and an ICCID that holds steady under a
-profile whose IMSI does not.
+table is for. **It is built now** -- `helper/modem-quirks`, which carries what
+this document's modem produced: a SIM reported inserted with the socket empty
+while detection is off, `AT+CSIM` and `AT+CRSM` refused on every file while
+`AT+CCHO` and `AT+CGLA` work, and an IMSI that moves under a multi-IMSI profile
+while the ICCID does not. The table is where those live; this paragraph names
+them and does not hold them.
 
 **`helper/netcfgd-modem-umbim` exists now, and 0045 had been waiting for it
 since it was written.** That record says the contract is the decision and the
@@ -4379,10 +4380,36 @@ report is a contract rather than one script's output format:
 `helper/netcfgd-modem-at` speaks ECM plus AT, for the large class of modems that
 offer neither MBIM nor QMI and have no control node for `mbimcli` to open at
 all. **Some of this has met hardware and the connected path has not** — that
-helper's exchanges, its `+CGCONTRDP` parsing and its drop detection were written
-against a real Quectel EG916Q-GL, whose eUICC carries a bootstrap profile with
-no data entitlement, so every activation ended in a reject cause and no bearer
-has ever come up.
+helper's exchanges, its APN readback from `+CGCONTRDP` and its drop detection
+were written against a real Quectel EG916Q-GL, whose eUICC carries a bootstrap
+profile with no data entitlement, so every activation ended in a reject cause
+and no bearer has ever come up. It reports no addressing on purpose: on ECM the
+module runs a DHCP server and the host takes a lease, so a helper reporting an
+address it did not obtain would be a second writer for a job DHCP already does.
+
+**A helper must not retry a failed activation, and hardware supplied the
+argument.** A failure carries a cause and the causes are not equivalent --
+`+CEER: "ESM",29,"ESM_USER_AUTHENTICATION_FAILED"` and
+`+CEER: "ESM",33,"ESM_REQUESTED_SERVICE_OPTION_NOT_SUBSCRIBED"` both came from
+a real network on a real subscription, and neither is transient. 3GPP attaches
+back-off timers that a client is required to honour, T3396 for ESM and T3402
+for EMM, so **retrying through one is how a subscription gets temporarily
+barred** — which turns a configuration problem into an outage nobody can debug
+from the device. So the helper prints `AT+CEER` and exits, which
+[0045](doc/decision/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
+already prescribed; what was missing was the reason, and a modem supplied it.
+
+**And an argument about what "complete" would have to mean here, offered by the
+bring-up that produced the AT helper as their opinion rather than as a
+proposal.** Back-off handling and SIM PIN retry counters are the two places
+hand-rolled cellular code does damage software cannot undo -- three wrong PIN
+attempts means PUK, and no amount of correct code afterwards reverses it. Any
+serious attempt to stand in for ModemManager has to implement both properly;
+**a component that does neither and says so is honest, while one that does them
+badly is worse than the thing it replaces.** That is not an argument against
+the cellular half, and it is the reason this project's half is a contract with
+plural writers rather than a modem stack: netcfgd installs what a report says
+and owns neither timer.
 
 **An OpenVPN tunnel**: netcfgd owns the lifecycle and never reads the `.ovpn`
 ([0046](doc/decision/0046-the-ovpn-file-is-the-operators.md)) — 253 top-level

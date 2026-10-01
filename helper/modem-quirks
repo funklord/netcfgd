@@ -95,6 +95,15 @@
 # an eUICC -- the module blocks it. The ICCID is the only discriminator, which
 # is what `netcfgd-modem-at iccid` is for.
 #
+# **The IMSI is not one, and this is why the line above says ICCID.** A
+# multi-IMSI profile answered `204047650800131` and later `208090157800127`
+# from the same card with the ICCID unchanged, which is the feature working:
+# such a profile carries several and picks one per network search. So anything
+# keyed on IMSI -- a cache, a report, a log correlation, a quirk row -- is
+# wrong across a search, and wrong intermittently, which is the expensive way
+# to be wrong. The ICCID identifies the card and the IMSI identifies a
+# subscription the card is currently using.
+#
 # **`AT+CFUN=1,1` is not a safe reset on every board.** On one i.MX93 carrier it
 # rebooted the whole SoC -- uptime back to minutes, `/tmp` cleared -- and the
 # same command on an i.MX91 with the same module was harmless. It is the
