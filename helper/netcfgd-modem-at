@@ -34,6 +34,26 @@
 # interface and nothing else. A helper reporting an address it did not obtain
 # would be a second writer for a job DHCP already does.
 #
+# **If you ever change that, here is the trap, written down because nothing
+# else in this workspace records it.** `AT+CGCONTRDP` reports an IPv4 address
+# and its netmask as EIGHT dotted octets in one field:
+#
+#     +CGCONTRDP: 1,5,"apn","10.1.2.3.255.255.255.0","10.1.2.1","8.8.8.8",...
+#
+# That is `10.1.2.3` with mask `255.255.255.0` -- not an address, and not a
+# malformed one either: 3GPP 27.007 defines the field that way, and IPv6 gets
+# thirty-two octets by the same rule. A reader that takes the field as an
+# address gets `10.1.2.3.255.255.255.0`, and one that splits on the fourth dot
+# without converting the mask gets a `/32`.
+#
+# **It is the one place a helper here could produce a WRONG address rather
+# than no address**, which is why it is recorded even though this helper
+# reports none: a wrong address installs, routes and blackholes, where a
+# missing one fails visibly. It was measured on the module this helper was
+# written against; the proposal that brought the helper in carried three mask
+# cases in its test set for this single field, and both the parsing and those
+# cases left with the addressing decision above.
+#
 # It does not configure the interface either -- that is netcfgd's, and two
 # writers on one interface is the failure the whole arrangement avoids.
 #
