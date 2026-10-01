@@ -12268,6 +12268,32 @@ Sabotaged three ways, each caught by the check meant for it: the `[DISABLED]`
 predicate widened to include `[TEMP-DISABLED]`, the document guard removed so
 any disabled network refutes, and the refutation removed altogether.
 
+### It fired on the machine, and converged -- which the fixture could not show
+
+Installed on the reporting machine 2026-10-01. Two restarts landed a minute
+apart, and the accident is what makes the evidence complete:
+
+    02:59:35  netcfgd 1988708 starts (the new binary, install already done)
+    02:59:35  /run/netcfgd/supplicant/wlp0s20f3.networks.sha256 rewritten
+                -- five days newer than the 09-26 stamp it had carried
+    03:00:23  netcfgd 1988967 starts
+    03:01:55  the record still reads 02:59:35
+
+**The first pass rewrote the set and the second found nothing to do.** That
+second silence is the proof rather than the first pass being it: a daemon that
+still saw `[DISABLED]` on a network the document wants would have refuted again
+and rewritten again. It did not, so `REMOVE_NETWORK all` had cleared the flag
+and both networks came back enabled.
+
+**Convergence is the half the fixture is structurally unable to demonstrate**,
+because the fake answers that command without clearing the list it reports --
+`network_arrives.sh` says so and asserts only that the rewrite happened. The
+machine supplied the rest, hours before the radio went.
+
+And the association survived it: `wlp0s20f3` kept `10.0.125.56/16` across both
+restarts, which is what `KillMode=process` is for and what sending no
+`SELECT_NETWORK` preserves.
+
 **Two of those sabotages first reported a pass against unsabotaged code**,
 because the shell ate the `&&` in the anchor I was substituting on. The
 `assert` on the match count is what said so. A sabotage that did not apply and
