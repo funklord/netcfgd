@@ -12195,6 +12195,76 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.341 The field test: it joined on its own, and the fixture held
+
+The holder took the machine to the site with the enterprise network, 2026-10-01,
+and ran the capture after the radio had already joined. Both halves of that are
+results.
+
+### The reconcile, confirmed where the fixture could not reach
+
+    network id / ssid / bssid / flags
+    0  EMP-XYLEM  any  [CURRENT]
+    1  OpenPC.se  any
+
+**Neither is `[DISABLED]`.** OpenPC.se carries empty flags -- enabled, not
+current. Five days earlier the same list read `EMP-XYLEM [DISABLED]` and
+`OpenPC.se [CURRENT]`, which is 10.337's whole subject.
+
+So: the pass re-enabled EMP-XYLEM, and with it enabled **the radio joined it
+with nobody asking**, at a site where the other network is out of range. That
+is the thing which was impossible before -- a disabled network is not a
+candidate -- and it is the first end-to-end confirmation that did not go
+through `fake_supplicant.py`. `STATUS` says `key_mgmt=WPA2/IEEE 802.1X/EAP`,
+`wpa_state=COMPLETED`, an address on the site's subnet.
+
+**And OpenPC.se stayed enabled**, which is the return trip working before it
+happens: the document ranks it better, so the station should move back on its
+own.
+
+### The EAP sequence, checked against an authentication it was not derived from
+
+10.335 took the exchange from eleven authentications over thirteen days, all at
+one place against one access point. The journal from the site carries a
+twelfth, on a different access point at 5660 MHz and Wi-Fi 6 rather than 5
+GHz Wi-Fi 5, and it matches line for line:
+
+    EAP-STARTED
+    PROPOSED-METHOD vendor=0 method=13 -> NAK
+    PROPOSED-METHOD vendor=0 method=25
+    METHOD EAP vendor 0 method 25 (PEAP) selected
+    PEER-CERT depth=2  (twice)
+    PEER-CERT depth=1
+    PEER-CERT depth=0
+    PEER-ALT depth=0   (seven)
+    EAP-SUCCESS
+    CONNECTED ... [id=0 id_str=]
+
+**Including the two details that read as fixture bugs**: the root announced
+twice, and EAP-TLS proposed and refused before PEAP is settled on. Both were
+recorded as faithful on the strength of eleven samples from one place; a
+twelfth from another place is the first evidence that they are the protocol
+rather than that access point's habit.
+
+**One honest difference: the fake emits two `PEER-ALT` lines and the real
+exchange has seven.** The count is a property of the server certificate's
+subject-alt names and nothing asserts it, so the fixture is a faithful shape
+with a shortened list -- said here rather than left for somebody to find and
+take as a defect.
+
+### What was not captured, and will not be now
+
+The listener started after the join, so the capture's `events` file is empty
+again -- the same lesson as 10.334, which the journal covers for a join that
+has already happened and cannot cover for one that has not. **A failed
+enterprise authentication is still uncaptured**, and this was the last site
+visit before the machine moves to one with no radio.
+
+So netcfgd will go on being unable to say why an enterprise join failed, and
+`fake_supplicant.py` will go on having no failure path, until a radio and an
+access point are in the same room again. Recorded as the gap it is rather than
+closed with invented events.
+
 ## 10.340 Six dhcpcd processes that are one, and the verdict that said otherwise
 
 **There is no leak.** Reading the journal after an install, a session flagged
