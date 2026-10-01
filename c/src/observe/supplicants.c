@@ -133,19 +133,52 @@ static ncfg_optbool_t record_says(const char *run_dir, const char *interface,
 /*
  * Whether `LIST_NETWORKS` refutes the record.
  *
- * Only in one direction, and only from empty: a supplicant holding nothing
- * while the document names networks cannot be holding them, whatever the
- * record says. The reverse proves nothing -- a supplicant holding *some*
- * networks may still hold the wrong ones, and `LIST_NETWORKS` carries no
- * passphrase to tell.
+ * TWO REFUTATIONS, AND BOTH ARE ONE-DIRECTIONAL
+ *   **Empty.** A supplicant holding nothing while the document names networks
+ *   cannot be holding them, whatever the record says. The reverse proves
+ *   nothing -- a supplicant holding *some* networks may still hold the wrong
+ *   ones, and `LIST_NETWORKS` carries no passphrase to tell.
+ *
+ *   **Disabled.** A network the document says to join automatically, which the
+ *   supplicant has been told to leave alone, is a machine that has stopped
+ *   matching its configuration -- project.md 10.337. The record says netcfgd
+ *   handed the set over and it did; what the record cannot say is that
+ *   something disabled one afterwards.
+ *
+ * WHAT MAKES THIS A RECONCILE RATHER THAN A REPORT
+ *   Refuting the record is what `plan/wifi.c` acts on: `networks_match` false
+ *   becomes `NCFG_OP_WIFI_SET_PROFILES`, which re-adds every network and
+ *   enables each one. So this is an ordinary plan action -- `on_drift` governs
+ *   it, a `report` interface says so and changes nothing, the drift hook and
+ *   10.330's log line cover it, and a confirm window can revert it. Nothing
+ *   new was needed but the question.
+ *
+ * THE ANSWER THIS TAKES, OF THE FOUR 10.337 NAMES
+ *   *Re-enable what `autoconnect` names, and leave the current association
+ *   alone.* `set_profiles` sends no `SELECT_NETWORK`, and `ENABLE_NETWORK`
+ *   does not deselect, so the station stays where it is.
+ *
+ *   **The edge, stated rather than discovered: `ncfg wifi connect` stops
+ *   pinning future autoconnect.** `SELECT_NETWORK` disables the others, this
+ *   pass re-enables them, and the supplicant is then free to move to a network
+ *   that ranks better. Joining the WORSE network deliberately therefore holds
+ *   only until the next pass.
+ *
+ *   That is not a regression hiding in a fix; it is the document winning, which
+ *   is this project's first constraint. A document whose networks all say
+ *   `autoconnect` means "either of these, by metric", and a machine where one
+ *   is disabled does not match it. What is genuinely missing is a way to SAY
+ *   "only this one, for now" -- `autoconnect = false` on the others says it
+ *   permanently and nothing says it temporarily. That is a language gap and is
+ *   recorded as one, not closed here.
  */
-static int emptied(ncfg_supplicant_client_t *client, const ncfg_document_t *desired)
+static int refuted(ncfg_supplicant_client_t *client, const ncfg_document_t *desired)
 {
 	char                     body[NCFG_SUPPLICANT_REPLY_MAX];
 	ncfg_supplicant_entry_t *entries = NULL;
 	size_t                   count = 0;
+	size_t                   at;
 	char                     why[NCFG_ERROR_MAX];
-	int                      refuted;
 
 	if (desired->network_count == 0u) {
 		return 0;
@@ -158,9 +191,31 @@ static int emptied(ncfg_supplicant_client_t *client, const ncfg_document_t *desi
 	if (!ncfg_supplicant_parse_network_list(body, &entries, &count, why, sizeof(why))) {
 		return 0;
 	}
-	refuted = count == 0u;
+	if (count == 0u) {
+		ncfg_supplicant_entries_free(entries, count);
+		return 1;
+	}
+	for (at = 0u; at < count; at++) {
+		const ncfg_wifi_network_t *network;
+
+		if (!ncfg_supplicant_entry_is_disabled(&entries[at])) {
+			continue;
+		}
+		/* The tree's own matcher, so this agrees with what a join credits a
+		 * network by. A `LIST_NETWORKS` row carries neither bssid nor
+		 * security to narrow by. */
+		network = ncfg_wifi_network_for(desired->networks, desired->network_count,
+		    &entries[at].ssid, NULL, -1);
+		/* A network the document does not name is not netcfgd's to enable, and
+		 * one it names with `autoconnect = false` is disabled because it asked
+		 * to be. */
+		if (network && network->autoconnect) {
+			ncfg_supplicant_entries_free(entries, count);
+			return 1;
+		}
+	}
 	ncfg_supplicant_entries_free(entries, count);
-	return refuted;
+	return 0;
 }
 
 /* Which network this radio is associated to, written onto the link. */
@@ -298,7 +353,7 @@ int ncfg_observe_supplicants(ncfg_observed_t *observed, const char *run_dir,
 		if (desired) {
 			ncfg_optbool_t matches = record_says(run_dir, interface, desired, secrets);
 
-			if (emptied(client, desired)) {
+			if (refuted(client, desired)) {
 				/* The supplicant is holding nothing and the document names
 				 * networks, which refutes whatever the record says. */
 				matches.has = 1;

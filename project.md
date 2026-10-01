@@ -12195,6 +12195,85 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
 ## 10.325 The kind registry, and the gate it cannot have
+## 10.339 The reconcile half, the answer taken, and what it costs `wifi connect`
+
+10.337 named four answers and said the choice was the holder's. **The holder,
+2026-10-01: do the reconcile half.** This is answer (c) -- *re-enable what
+`autoconnect` names, leave the current association alone* -- with the reasoning
+for taking it and the one thing it costs.
+
+### Why (c) and not the other three
+
+- **(a) re-enable always** makes `SELECT_NETWORK`'s exclusivity last one tick,
+  which defeats the command without saying so.
+- **(b) only when the document changes** is today's behaviour and is the bug:
+  the record hashes the SET, so a disabled network never changes it. It would
+  fix a machine on its next unrelated config edit, which is arbitrary.
+- **(d) record the selection as state** makes netcfgd hold something sticky
+  that outlives a restart and appears in no config file, against the first
+  constraint.
+- **(c)** leaves the document the authority. A document whose networks all say
+  `autoconnect` means *either of these, by metric*, and a machine where one is
+  disabled does not match it.
+
+### It needed no new machinery, only the question
+
+`emptied()` became `refuted()`. It already read `LIST_NETWORKS` to catch an
+empty list; it now also refutes when a network the document wants joined
+carries `[DISABLED]`. Refuting the record is what `plan/wifi.c` acts on, so
+this is an ordinary `wifi.set_profiles` action: `on_drift` governs it, a
+`report` interface says so and changes nothing, 10.330's log line and the drift
+hook cover it, and a confirm window can revert it.
+
+**And it converges, which was the question to settle before building it.**
+`set_profiles` sends `REMOVE_NETWORK all` before the first `ADD_NETWORK`
+(`wifi_ops.c`), so the rewrite wipes the flags and the next observation finds
+nothing disabled. Read out of the source rather than asserted: the fake answers
+that command without clearing the list it reports, so the fixture cannot show
+convergence and the test says so instead of implying it.
+
+### What it costs, said rather than discovered
+
+**`ncfg wifi connect` stops pinning future autoconnect.** `SELECT_NETWORK`
+disables the others, this pass re-enables them, and the supplicant is then free
+to move to a network that ranks better. Deliberately joining the WORSE network
+now holds only until the next pass.
+
+That is the document winning, which is the first constraint -- but it leaves a
+real gap: **there is no way to say "only this one, for now".**
+`autoconnect = false` on the others says it permanently; nothing says it
+temporarily. A `wifi connect --only` or a recorded, expiring selection would,
+and either is a language change rather than part of this. **Recorded as a gap,
+not closed.**
+
+### What the checks say, and the two the negative direction needed
+
+    a disabled network nobody configured provokes nothing     the negative
+    a network disabled behind netcfgd's back is handed back    the positive
+
+**The negative direction needed the radio to itself.** A refutation that fires
+too widely is indistinguishable from a correct one once something legitimate is
+disabled, so `Distant` (not in the document) and `Cafe` (`[TEMP-DISABLED]`) are
+disabled first, alone, and the assertion is that the rewrite count does not
+move. `evidence.md`: a control has to be able to fail the way the thing it
+controls for fails.
+
+**And the positive check had to count from a baseline.** `>= 2` rewrites was
+already true before the disable -- each drop-in earlier in the script is a
+document change and each causes one -- so the first version of this check
+passed with the refutation removed entirely. It compares against the count
+taken immediately before.
+
+Sabotaged three ways, each caught by the check meant for it: the `[DISABLED]`
+predicate widened to include `[TEMP-DISABLED]`, the document guard removed so
+any disabled network refutes, and the refutation removed altogether.
+
+**Two of those sabotages first reported a pass against unsabotaged code**,
+because the shell ate the `&&` in the anchor I was substituting on. The
+`assert` on the match count is what said so. A sabotage that did not apply and
+a check that cannot fail are indistinguishable from the output, which is why
+the assert is not optional.
+
 ## 10.338 Seeing a network left disabled, and three ways a test hid a crash
 
 10.337 traced why EMP-XYLEM is `[DISABLED]`: `SELECT_NETWORK` disables every
