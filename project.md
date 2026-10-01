@@ -9644,6 +9644,23 @@ honest answer rather than a near miss"*. It was honest and it was the thing
 that read as several backends, so they are re-pinned with the misreading
 recorded beside them rather than quietly edited to fit.
 
+### Confirmed on the machine, both halves at once
+
+Installed 2026-10-01 12:41. The adopt lines now read:
+
+    dhcpcd 2067374, a backend the record claims on an interface it names,
+                    with no pid written down
+    dhcpcd 2067375, a helper of pid 2067374
+    dhcpcd 2067376, a helper of pid 2067374
+    dhcpcd 2067462, a helper of pid 2067374
+    dhcpcd 2067503, a helper of pid 2067374
+
+One client and four helpers where there were five backends. **And the last two
+are grandchildren** -- the BPF and BOOTP helpers hang off the privileged proxy,
+not off the client -- so their naming the client is the second half
+demonstrated: the walk ran past a helper to the thing netcfgd could account
+for. The widening that broke that is the one two checks refused.
+
 ### And `make -C c` does not build the tests, for the third time today
 
 The first run of `leftovers_test` after the change reported 23 of 23 passing.
