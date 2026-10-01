@@ -360,15 +360,30 @@ check "and netcfgd comes through eleven events it does not read" \
 # flags a real supplicant would give it, which is the state no test could
 # produce before that command existed.
 
-send_event "DISABLE [DISABLED] HomeFiber"
-# A network the document does not name, so netcfgd has no opinion about it.
+# **Counted before, because the count alone cannot discriminate.** Each drop-in
+# above is a document change and each causes a rewrite, so `>= 2` was already
+# true before the disable -- measured by sabotage, where removing the
+# refutation entirely left the check green.
+rewrites_before=$(grep -ac '^REMOVE_NETWORK all' "$work/daemon.log" || true)
+
+# **The two that must NOT provoke a rewrite, first and on their own.** A
+# refutation that fires too widely cannot be told from a correct one once
+# something legitimate is disabled, so the negative direction needs the radio
+# to itself -- which is `evidence.md` on a control having to be able to fail
+# the way the thing it controls for fails.
+#
+# `Distant` is not in the document, so netcfgd has no opinion about it. And
+# `[TEMP-DISABLED]` contains the substring `DISABLED` while meaning the
+# opposite thing: the supplicant blacklisting a network it could not get onto,
+# which it clears itself. A predicate written with `strstr` reports it, and a
+# netcfgd that reconciled it would fight the supplicant's own backoff.
 send_event "DISABLE [DISABLED] Distant"
-# **The trap.** `[TEMP-DISABLED]` contains the substring `DISABLED`, and the
-# two mean opposite things: administratively disabled stands until undone,
-# while temporarily disabled is the supplicant blacklisting a network it could
-# not get onto and clearing that itself. A predicate written with `strstr`
-# reports this one and is wrong.
 send_event "DISABLE [TEMP-DISABLED] Cafe"
+sleep 2
+check "a disabled network nobody configured provokes nothing" \
+	"$(grep -ac '^REMOVE_NETWORK all' "$work/daemon.log" || true)" "$rewrites_before"
+
+send_event "DISABLE [DISABLED] HomeFiber"
 sleep 1
 
 # **`|| status_rc=$?`, not `; status_rc=$?`.** Under `set -e` a failing command
@@ -406,6 +421,31 @@ check "a network the document does not name is not netcfgd's to mention" \
 	"$(grep -c 'Distant' "$work/status.out" || true)" 0
 check "and a temporarily disabled one is the supplicant's own affair" \
 	"$(grep -c 'Cafe. is configured to join automatically' "$work/status.out" || true)" 0
+
+# ------------------------------------------------- and the daemon puts it back
+#
+# **The reconcile half.** A network the document wants joined that the
+# supplicant has disabled refutes netcfgd's record of what it handed over, so
+# `plan/wifi.c` plans `wifi.set_profiles` and the pass rewrites the set --
+# which sends `REMOVE_NETWORK all` and then adds and enables each network
+# again. An ordinary plan action: `on_drift` governs it and a confirm window
+# could revert it.
+#
+# **What this can show and what it cannot.** The fake answers `REMOVE_NETWORK
+# all` with OK and does not clear the list it reports, so `LIST_NETWORKS` keeps
+# saying `[DISABLED]` and the daemon keeps rewriting -- an artifact of the
+# fixture, not of netcfgd. On a real supplicant `REMOVE_NETWORK all` empties
+# the list, so the next observation finds nothing disabled and the pass stops.
+# That is read out of `wifi_ops.c`, which sends the clear before the first
+# `ADD_NETWORK`, rather than asserted here.
+#
+# So the assertion is that it acted at all, which is the link that was missing:
+# a disabled network used to refute nothing.
+awaits '[ "$(grep -ac "^REMOVE_NETWORK all" "$work/daemon.log" || true)" \
+	-gt "$rewrites_before" ]' || true
+check "a network disabled behind netcfgd's back is handed back to the radio" \
+	"$([ "$(grep -ac '^REMOVE_NETWORK all' "$work/daemon.log" || true)" \
+	    -gt "$rewrites_before" ] && echo yes || echo no)" yes
 
 # ---------------------------------------------------------------- and quiet
 
