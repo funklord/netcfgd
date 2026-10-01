@@ -46,6 +46,13 @@
 # address gets `10.1.2.3.255.255.255.0`, and one that splits on the fourth dot
 # without converting the mask gets a `/32`.
 #
+# **And the real masks are not the friendly ones.** A cellular bearer is
+# usually a `/30`, and `255.255.255.240` is an ordinary answer -- so a parser
+# that rounds to a byte boundary, or assumes the `/24` that a worked example
+# always shows, is wrong on the common case rather than on an edge one. The
+# proposal this helper came from spent three of its fourteen test cases on
+# masks for that reason: a `/30`, a non-byte-aligned `/28`, and the `/24`.
+#
 # **It is the one place a helper here could produce a WRONG address rather
 # than no address**, which is why it is recorded even though this helper
 # reports none: a wrong address installs, routes and blackholes, where a
