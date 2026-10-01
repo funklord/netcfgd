@@ -350,6 +350,26 @@ typedef struct {
 	const char *observed;
 } ncfg_reason_t;
 
+/*
+ * One line saying what an action does and why: `<op> <iface>  <field>:
+ * <desired> (was <observed>)`.
+ *
+ * Takes the op NAME rather than the op, because the three things that render
+ * an action hold different shapes of it -- a plan holds `ncfg_op_t`, a journal
+ * record and a refusal hold the name already copied -- and a renderer taking
+ * the name serves all three. `NCFG_DESCRIBE_MAX` is the ceiling, and
+ * truncation shows.
+ *
+ * It was a `static` in `cli/plan.c` until the apply loop needed the same line
+ * for the log. A second copy would have been two renderings of one fact, which
+ * drift apart in the direction nobody notices: the operator reading `ncfg
+ * apply` and the operator reading the journal would be told the same action in
+ * two wordings, and neither would be wrong.
+ */
+#define NCFG_DESCRIBE_MAX 1024
+const char *ncfg_action_describe(const char *op, const ncfg_reason_t *reason, char *out,
+    size_t out_size);
+
 /* One step of a plan. */
 typedef struct {
 	/* Position in the plan, and the handle `depends_on` refers to. */

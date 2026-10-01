@@ -12,6 +12,7 @@
  */
 #include "ncfg/plan.h"
 
+#include <stdio.h>
 #include <stddef.h>
 
 const char *ncfg_op_name(const ncfg_op_t *op)
@@ -356,4 +357,29 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 		return NULL;
 	}
 	return NULL;
+}
+
+/*
+ * One line saying what an action does and why.
+ *
+ * `plan.h` says why this is here rather than in the one caller that had it.
+ *
+ * `<absent>` on either side is the planner's word, not this one's: a field
+ * that is not there is a value, and rendering it as an empty string would make
+ * "the document says nothing" and "the document says the empty string" the
+ * same line.
+ */
+const char *ncfg_action_describe(const char *op, const ncfg_reason_t *reason, char *out,
+    size_t out_size)
+{
+	char where[80];
+
+	where[0] = '\0';
+	if (reason->interface) {
+		(void)snprintf(where, sizeof(where), " %s", reason->interface);
+	}
+	(void)snprintf(out, out_size, "%s%s  %s: %s (was %s)", op ? op : "?", where,
+	    reason->field ? reason->field : "", reason->desired ? reason->desired : "",
+	    reason->observed ? reason->observed : "");
+	return out;
 }

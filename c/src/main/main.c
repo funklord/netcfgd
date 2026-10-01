@@ -16,6 +16,7 @@
 #include "loop_internal.h"
 #include "main_internal.h"
 
+#include "ncfg/log.h"
 #include "ncfg/cli.h"
 
 int main(int argc, char **argv)
@@ -39,6 +40,28 @@ int main(int argc, char **argv)
 		 * is the command line's answer and arrives with the call, not this
 		 * one's: a second parse of `argv` here is a second answer.
 		 */
+		/*
+		 * **Quiet by default, and `NCFG_LOG` still obeyed.**
+		 *
+		 * Two things were wrong and one line fixes both. The client never
+		 * read `NCFG_LOG` at all -- only the daemon did -- so
+		 * `NCFG_LOG=debug ncfg status` turned nothing up, which is the
+		 * first thing anybody would try. And the default is `INFO`, while
+		 * a command's report is its STDOUT: now that applying an action
+		 * logs one, `ncfg apply` would print every action twice, once as
+		 * its own output and once as a log line beside it.
+		 *
+		 * So the floor is `WARNING` and `accept_from_env` overrides it when
+		 * asked. A warning still reaches the operator, which is what the
+		 * `!` lines on an unprivileged `ncfg status` are; what goes is the
+		 * running commentary that duplicates the thing being printed.
+		 *
+		 * Here and not in `ncfg_cli_main_on`, because this is a policy of
+		 * the PROGRAM: a test driving the same entry point, or an embedder
+		 * with its own logging, inherits nothing from it.
+		 */
+		ncfg_log_accept(NCFG_LOG_WARNING);
+		ncfg_log_accept_from_env();
 		return ncfg_cli_main_on(argc, argv, ncfg_main_cli_machine());
 	case NCFG_MAIN_PROGRAM_DAEMON:
 		return ncfg_main_netcfgd(argc, argv);

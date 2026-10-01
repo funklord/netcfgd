@@ -9519,6 +9519,77 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.347 The daemon was the quietest thing in its own log
+
+The holder, 2026-10-01: the logging is the blocking feature, and it is poorly
+designed -- or incomplete. Measured, it is incomplete, and the earlier half of
+that diagnosis in 10.345 was wrong in a way worth keeping.
+
+**`journalctl -u netcfgd` already carries everything.** 10.345's table said
+wpa_supplicant was on a separate timeline under its own tag; it is under its
+own tag and under the unit, because it runs in netcfgd's control group. One
+query gets the lot. There is no fragmentation to fix and the claim should not
+have been made from the tag alone.
+
+**What there is, counted over six hours on `debian-nabbe`:**
+
+    wpa_supplicant   68 lines
+    dhcpcd           49
+    systemd          24
+    netcfgd          14
+
+And the fourteen are startup, four roams and one warning said twice. **Not one
+of them says what the daemon changed** -- while in that window it configured an
+interface, started dhcpcd and wrote resolv.conf.
+
+**The structural version of the same fact:**
+
+    plan/      0 log calls across 29 files
+    apply/    17 across 19
+    daemon/   73 across 19
+
+The two layers that decide and act carry 17 calls across 48 files; the loop
+around them carries 73. A declarative reconciler whose reconcile leaves no
+record is one that can only be diagnosed by watching the things it drives,
+which is what every investigation in this document has had to do.
+
+**So every applied action is logged, in `ncfg_apply`, inside the loop.** One
+site covers all six callers and any added later. Inside the loop rather than
+after it because the ordering is the value: the line lands between the
+supplicant's and dhcpcd's own, on the timeline that already exists, instead of
+in a block to be matched up by timestamp afterwards. `INFO` for a change and
+`ERROR` for a failure, so an operator filtering for trouble gets the failure
+without the commentary -- and a converged pass builds no actions and so says
+nothing at all.
+
+**The renderer was a `static` in `cli/plan.c` and is now
+`ncfg_action_describe`.** A second copy would have been two renderings of one
+fact, drifting in the direction nobody notices: `ncfg apply` and the journal
+telling an operator the same action in two wordings, neither wrong. The
+interface is blanked for the log line alone, because `ncfg_log_aboutf` puts it
+in the subsystem path -- which is what makes `NCFG_LOG_SUBSYSTEM=apply/wlan0`
+select one link -- and saying it twice is what the first version did.
+
+**And the client now reads `NCFG_LOG`, which it never had.** Only the daemon
+called `accept_from_env`, so `NCFG_LOG=debug ncfg status` turned nothing up --
+the first thing anybody would try. The floor is `WARNING` rather than the
+`INFO` default, because a command's report is its stdout: with actions logging
+at `INFO`, `ncfg apply` would have printed each one twice. Warnings still
+reach the operator; what goes is commentary duplicating the thing being
+printed.
+
+Proven by sabotage at both levels: removing the change line fails three checks
+and the failure line two, each its own and nothing else. The suite is held at
+`WARNING` with the two cases that are about the log turning it up deliberately
+-- sixty applied actions between the check lines is noise, and a case that
+forgot to raise the level would be reading an empty file.
+
+**Two things seen and not fixed, both visible in those fourteen lines.** A roam
+between APs on one ESS is logged at warning severity, four times -- ordinary
+operation flagged as a problem. And the resolv.conf warning repeats identically
+with no new information. Both are severity and de-duplication decisions rather
+than missing records, which is a different piece of work from this one.
+
 ## 10.345 The control exchange was on no log at all
 
 The holder's question, 2026-10-01: can netcfgd log everything, including a

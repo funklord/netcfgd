@@ -21,6 +21,7 @@
 #include "ncfg/apply.h"
 
 #include "ncfg/base.h"
+#include "ncfg/log.h"
 #include "ncfg/service.h"
 
 #include <string.h>
@@ -310,6 +311,60 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 		message[0] = '\0';
 		if (executor->execute(executor->state, &action->op, message, sizeof(message))) {
 			record.outcome = NCFG_OUTCOME_DONE;
+			/*
+			 * **What netcfgd did, at the moment it did it.**
+			 *
+			 * Measured before this was written: over six hours on the
+			 * holder's machine the journal held 68 lines from
+			 * wpa_supplicant, 49 from dhcpcd and 14 from netcfgd -- and
+			 * not one of the 14 said what the daemon had changed. The two
+			 * layers that decide and act, `plan/` and `apply/`, carried 17
+			 * log calls across 48 files between them while the loop around
+			 * them carried 73. A declarative reconciler whose reconcile
+			 * leaves no record is one you can only diagnose by watching
+			 * the things it drives.
+			 *
+			 * Inside the loop and not after it, because the ordering is
+			 * the point: this lands between the supplicant's lines and
+			 * dhcpcd's, on the one timeline `journalctl -u netcfgd`
+			 * already gives, rather than in a block afterwards that has to
+			 * be read back against them by timestamp.
+			 *
+			 * `INFO`, which costs nothing when converged: a pass that
+			 * changes nothing builds no actions and so says nothing. The
+			 * volume is the number of changes made, which is the number an
+			 * operator wants to see.
+			 */
+			/*
+			 * `message` is the render buffer and not a second one. It is
+			 * dead on this branch -- `record.error` is set only where the
+			 * execute failed -- and this daemon is gated on a measured RSS
+			 * ceiling, so a 1024-byte frame per apply for a line that is
+			 * about to be truncated to `NCFG_LOG_MAX` anyway is a cost
+			 * with nothing bought. It holds 512 of the 1024
+			 * `NCFG_DESCRIBE_MAX` allows, which is where a long line
+			 * loses its tail; `sizeof` is passed so the cut is the
+			 * buffer's and shows.
+			 */
+			{
+				/*
+				 * The interface, once. `ncfg_log_aboutf` puts it in
+				 * the subsystem path -- which is what makes
+				 * `NCFG_LOG_SUBSYSTEM=apply/wlp0s20f3` select one
+				 * link -- and `ncfg_action_describe` puts it in the
+				 * line, because its other two callers print no
+				 * subsystem at all. Blanking it here is cheaper than
+				 * a second renderer and keeps `ncfg apply`'s wording
+				 * the same as the journal's.
+				 */
+				ncfg_reason_t said = record.reason;
+
+				said.interface = NULL;
+				ncfg_log_aboutf("apply", record.interface, NCFG_LOG_INFO, "%s",
+				    ncfg_action_describe(record.op, &said, message,
+				        sizeof(message)));
+			}
+			message[0] = '\0';
 		} else {
 			stopped = 1;
 			record.outcome = NCFG_OUTCOME_FAILED;
@@ -318,6 +373,14 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 			 * `"outcome":"failed"` is what makes it visible instead of
 			 * reading as a failure nobody described. */
 			record.error = message[0] ? message : "the executor failed and said nothing";
+			/*
+			 * At `ERROR`, carrying the executor's own words -- and saying
+			 * that the rest of the plan stops here, which is the part an
+			 * operator cannot infer from a single failed line.
+			 */
+			ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
+			    "%s failed: %s -- the rest of this plan is skipped", record.op,
+			    record.error);
 		}
 		ncfg_journal_push(journal, &record);
 	}

@@ -34,6 +34,7 @@
  *   easiest to state as four records with four different outcomes -- which is
  *   how the Rust states it too.
  */
+#include "ncfg/log.h"
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
@@ -284,6 +285,152 @@ static void release(ncfg_plan_t *plan, ncfg_document_t *document, ncfg_observed_
  * does. An executor that grouped by interface or sorted by op kind would take
  * both back, and neither would be visible in a check on the *set* of ops.
  */
+/*
+ * Run `body` with stderr pointed at a file, and hand back what it wrote.
+ *
+ * `log_test.c`'s arrangement, because the thing under test writes to stderr and
+ * a check about logging has to read what came out rather than trust that a
+ * call was made.
+ */
+static int said_while(void (*body)(void), char *out, size_t out_size)
+{
+	char   path[] = "/tmp/ncfg-apply-log-XXXXXX";
+	int    fd = mkstemp(path);
+	int    saved = dup(STDERR_FILENO);
+	FILE  *read_back;
+	size_t got = 0u;
+
+	out[0] = '\0';
+	if (fd < 0 || saved < 0) {
+		return 0;
+	}
+	fflush(stderr);
+	(void)dup2(fd, STDERR_FILENO);
+	body();
+	fflush(stderr);
+	(void)dup2(saved, STDERR_FILENO);
+	(void)close(saved);
+	(void)close(fd);
+	read_back = fopen(path, "r");
+	if (read_back) {
+		got = fread(out, 1, out_size - 1u, read_back);
+		(void)fclose(read_back);
+	}
+	out[got] = '\0';
+	(void)unlink(path);
+	return 1;
+}
+
+/* The body for the case below, so `said_while` can take it. */
+static void apply_a_small_plan(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_executor_t  executor;
+	recorder_t       recorder;
+	ncfg_journal_t   journal;
+	char             message[NCFG_ERROR_MAX];
+	ncfg_plan_t     *plan = plan_of(
+	    "\"devices\":[{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"},\"mtu\":9000}],"
+	    "\"interfaces\":[{\"name\":\"eth0\"}]",
+	    "\"links\":[" LINK("eth0") "]", NULL, &document, &observed);
+
+	recorder_init(&recorder, &executor);
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	ncfg_journal_free(&journal);
+	release(plan, document, observed);
+}
+
+/* The failing body for the case below, the same shape as
+ * `a_failure_stops_the_plan_and_the_rest_is_recorded_as_skipped`: the link is
+ * already up when the address is refused, so there is both a change made and a
+ * change skipped for the log to be right about. */
+static void apply_a_plan_that_fails(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_executor_t  executor;
+	recorder_t       recorder;
+	ncfg_journal_t   journal;
+	char             message[NCFG_ERROR_MAX];
+	ncfg_plan_t     *plan = plan_of(
+	    "\"devices\":[{\"name\":\"eth0\",\"kind\":{\"kind\":\"physical\"},\"mtu\":9000}],"
+	    "\"interfaces\":[{\"name\":\"eth0\","
+	    "\"addressing\":[{\"source\":\"static\",\"address\":\"192.168.1.10/24\"}],"
+	    "\"routes\":[{\"destination\":\"default\",\"via\":\"192.168.1.1\"}]}]",
+	    "\"links\":[" LINK("eth0") "]", NULL, &document, &observed);
+
+	recorder_init(&recorder, &executor);
+	recorder.fail_at = 2;
+	recorder.failure = "Cannot assign requested address";
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	(void)ncfg_apply(plan, &executor, &journal, message, sizeof(message));
+	ncfg_journal_free(&journal);
+	release(plan, document, observed);
+}
+
+/*
+ * What netcfgd changed is on the log, under the interface it changed.
+ *
+ * **The gap this closes, measured.** Over six hours on the holder's machine
+ * `journalctl -u netcfgd` held 68 lines from wpa_supplicant, 49 from dhcpcd and
+ * 14 from netcfgd, and not one of the 14 said what the daemon had done;
+ * `plan/` and `apply/` carried 17 log calls across 48 files while the loop
+ * around them carried 73.
+ *
+ * The level is raised deliberately and put back. `main` holds the whole suite
+ * at `WARNING` so that sixty applied actions do not drown the check lines --
+ * which means a case asserting about the log has to turn it up, and a case
+ * that forgot would be reading an empty file.
+ */
+static void what_was_applied_is_on_the_log(void)
+{
+	char            said[4096];
+	ncfg_severity_t was = ncfg_log_accepted();
+
+	ncfg_log_accept(NCFG_LOG_INFO);
+	check(said_while(apply_a_small_plan, said, sizeof(said)),
+	    "a plan is applied with stderr captured");
+	ncfg_log_accept(was);
+
+	check(strstr(said, "[apply/eth0]") != NULL,
+	    "the line is filed under the interface, which is what selects one link");
+	check(strstr(said, "link.set_mtu") != NULL,
+	    "and names the op that ran");
+	check(strstr(said, "mtu: 9000 (was 1500)") != NULL,
+	    "and why it ran, which is the half a bare op name leaves out");
+	check(strstr(said, "eth0  mtu") == NULL,
+	    "and says the interface once, the subsystem path already carrying it");
+}
+
+/*
+ * An action that failed says so, and says the rest is skipped.
+ *
+ * Separate from the case above because the two levels are the point: a change
+ * is `INFO` and a failure is `ERROR`, so an operator filtering for trouble gets
+ * the failure without the running commentary.
+ */
+static void a_failure_is_on_the_log_as_one(void)
+{
+	char            said[4096];
+	ncfg_severity_t was = ncfg_log_accepted();
+
+	ncfg_log_accept(NCFG_LOG_ERROR);
+	check(said_while(apply_a_plan_that_fails, said, sizeof(said)),
+	    "a plan with a failing action is applied with stderr captured");
+	ncfg_log_accept(was);
+
+	check(strstr(said, "failed:") != NULL,
+	    "the failure is on the log at `error`, where the changes are not");
+	check(strstr(said, "skipped") != NULL,
+	    "and says the rest of the plan did not run, which one line cannot imply");
+	check(strstr(said, "link.set_mtu  mtu") == NULL,
+	    "and no applied-action line came with it at this level");
+}
+
 static void a_plan_is_carried_out_in_the_order_it_was_planned(void)
 {
 	ncfg_document_t *document;
@@ -2696,6 +2843,11 @@ static void what_an_apply_did_is_recorded(void)
 
 int main(void)
 {
+	/* The suite at `WARNING`: applying now logs every action at `INFO`, and
+	 * sixty of them between the check lines is noise nobody reads. The two
+	 * cases that are ABOUT the log turn it up and put it back. */
+	ncfg_log_accept(NCFG_LOG_WARNING);
+
 	a_plan_is_carried_out_in_the_order_it_was_planned();
 	addresses_go_in_before_the_routes_that_need_them();
 	the_hook_phases_bracket_a_bring_up();
@@ -2705,6 +2857,9 @@ int main(void)
 	a_failure_stops_the_plan_and_the_rest_is_recorded_as_skipped();
 	a_silent_failure_is_still_described();
 	an_unfinished_plan_is_refused_rather_than_half_applied();
+
+	what_was_applied_is_on_the_log();
+	a_failure_is_on_the_log_as_one();
 
 	only_done_actions_with_an_inverse_are_undone();
 	the_inverses_run_newest_first();
