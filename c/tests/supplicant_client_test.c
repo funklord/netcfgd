@@ -43,6 +43,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/log.h"
 #include "ncfg/secrets.h"
 #include "ncfg/supplicant.h"
 
@@ -1227,6 +1228,17 @@ int main(void)
 		(void)dup2(log, STDERR_FILENO);
 		(void)close(log);
 	}
+	/*
+	 * **At `DEBUG`, or the stderr sweep below is about an empty file.**
+	 *
+	 * The control exchange logs the request at `VERBOSE` and the reply body at
+	 * `DEBUG`, and the default is `INFO` -- so this sweep asserted that no
+	 * credential appears in log output while no log output was being produced.
+	 * It passed, and it would have passed with the redaction deleted. The
+	 * liveness check in the sweep is the other half: it names the redacted
+	 * form it expects to FIND, so an empty capture fails rather than agrees.
+	 */
+	ncfg_log_accept(NCFG_LOG_DEBUG);
 
 	a_name_that_is_a_path_is_refused_without_looking(ctrl_dir);
 	an_ordinary_name_still_gets_the_ordinary_answer(work_dir);
@@ -1277,6 +1289,8 @@ int main(void)
 		size_t length = 0;
 		char  *said = testdir_read(stderr_path, &length);
 
+		check(said && strstr(said, "-> SET_NETWORK 0 psk") != NULL,
+		    "the control exchange is on the log, so this sweep is reading something");
 		check(said && !strstr(said, CANARY),
 		    "nothing this module said on stderr carries the material");
 		free(said);
