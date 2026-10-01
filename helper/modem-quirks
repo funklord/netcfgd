@@ -30,6 +30,13 @@
 #   helper=     at | mbim                 -- which helper can drive it
 #   at=         N                         -- ttyUSB index that answers AT and
 #                                            that a modem manager does not hold
+#
+# **Why `at=` is usually not the first port that answers.** A module presents
+# several AT-capable ttys and ModemManager, where it is running, holds the
+# PRIMARY one -- so the index to record here is a secondary. Pointing a helper
+# at the primary on such a machine gets a timeout that looks like a module
+# fault and is contention. The row below says 3 for the one module measured;
+# an example showing 2 is illustrative and not a default.
 #   autoconnect=yes | no                  -- the module dials its own context
 #                                            on registration
 #   note=       free text, no spaces around `=`
@@ -121,6 +128,14 @@
 #
 # **An eUICC with no enabled profile presents as no SIM.** That is not a fault
 # and no APN will change it.
+#
+# **`ESM cause 29` is the APN or its credentials; `33` is the subscription.**
+# Worth keeping apart because they send you to different places: 29 is the
+# request being refused -- wrong APN name, or a username and password the
+# network did not accept -- and 33 is the request being understood and not
+# permitted. Reading 29 as 33 has somebody phoning the operator about an
+# entitlement when the APN is misspelled, and reading 33 as 29 has them
+# sweeping APNs that were all fine.
 #
 # **`ESM cause 33` is the subscription, not the APN.**
 # `REQUESTED_SERVICE_OPTION_NOT_SUBSCRIBED`: the profile is live enough to
