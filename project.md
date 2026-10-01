@@ -9623,6 +9623,21 @@ The proposal tree is **not a git repository** -- no `.git`, not a submodule,
 referenced from nothing -- so deleting it is unrecoverable and the bar for this
 pass was that nothing of value outlive it unrecorded.
 
+**Asked whether every surface had been checked, which it had not.** 819 lines
+across six files; 371 had been read in full and two files only through a
+`grep` of their comments. Reading the remaining 425 found one more fact worth
+keeping and settled two others as already covered -- the helper's `monitor`
+tail states the contract's empty-versus-missing rule, which
+`doc/interface-report.md:192` already says better, and its `still_connected`
+checks `+CGATT` and `+CGACT` together, which the shipped helper also does.
+
+**Taken from the test's second case, into the 27.007 note in the helper:** a
+cellular bearer is **usually a `/30`**, and `255.255.255.240` is an ordinary
+answer. So a parser that rounds to a byte boundary, or assumes the `/24` every
+worked example shows, is wrong on the common case rather than on an edge one.
+That proposal spent three of its fourteen cases on masks for exactly that, and
+the fact makes the trap concrete where the encoding alone left it abstract.
+
 **Taken on this pass, both into `helper/modem-quirks`:**
 
 - **`ESM cause 29` and `33` mean different things and now say so.** The table
