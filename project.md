@@ -987,9 +987,14 @@ them because no test had ever carried those keys.
 **What to pick up next, in order.**
 
 1. **Live with it on real hardware.** *What would prove it* is the bar and
-   nothing on it has moved: no real radio, no real modem, no day of somebody
-   depending on this machine. Every remaining item there needs a person and a
-   device rather than a design.
+   almost nothing on it has moved: no real radio, no day of somebody depending
+   on this machine. **The modem half has moved and is now narrower than the
+   rest** -- `helper/netcfgd-modem-at` was written against a real Quectel
+   EG916Q-GL read out over its console, and what it has never done is carry
+   traffic: that module's eUICC holds a bootstrap profile with no data
+   entitlement, so every activation ends in a reject cause rather than a
+   bearer. It needs a SIM with a live subscription and nothing else. The
+   remaining items need a person and a device rather than a design.
 2. **The renderer's last refusals need a decision, not code.** `wireguard`,
    `openvpn`, `tunnel`, `pppoe` and `tun` are what is left, and they are not
    more keys: a WireGuard block carries a private key and OpenVPN names an
@@ -1644,10 +1649,13 @@ broken cellular link still satisfies.
 returning `(1,3)` means ECM and RNDIS only -- no `/dev/cdc-wdm*` and no
 `/dev/wwan*` exist, so `helper/netcfgd-modem-mbim` cannot work on such a device
 at all: there is no control node for `mbimcli` to open. That is an ordinary
-Quectel configuration rather than an oddity, and it is the gap. What it needs
-is a second helper speaking AT over a tty, writing the same interface report --
-which [0045](doc/decision/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
-already makes the supported way to add one.
+Quectel configuration rather than an oddity, and it was the gap.
+**`helper/netcfgd-modem-at` closes it** -- a second helper speaking AT over a
+tty and writing the same interface report, which
+[0045](doc/decision/0045-the-contract-is-the-decision-and-the-helper-is-plural.md)
+already makes the supported way to add one. The measurements in this paragraph
+are that modem's own, read out over its console rather than taken from a
+datasheet, and so are the first entries in `helper/modem-quirks`.
 
 **Nothing owning the link is the failure netcfgd exists for, observed
 elsewhere.** On that board NetworkManager configured the ECM interface, took
@@ -1656,7 +1664,11 @@ address could never renew; networkd was running and configuring nothing; and
 the module's own `qcautoconnect` dialled a third context. Three contenders, no
 owner. The modem-side one is invisible to `contention.rs` and is what
 [0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md)'s quirk
-table -- designed, unbuilt -- is for.
+table is for. **It is built now** -- `helper/modem-quirks`, whose first entries
+are the three this document's modem produced: a SIM reported inserted with the
+socket empty while detection is off, `AT+CSIM` and `AT+CRSM` refused on every
+file while `AT+CCHO` and `AT+CGLA` work, and an ICCID that holds steady under a
+profile whose IMSI does not.
 
 **`helper/netcfgd-modem-umbim` exists now, and 0045 had been waiting for it
 since it was written.** That record says the contract is the decision and the
@@ -4408,7 +4420,16 @@ withdraws it when the report empties. The helper is deliberately plural
 — `helper/netcfgd-modem-mbim` is a reference, and `umbim` or ModemManager are
 equally valid writers. netcfgd never speaks MBIM, QMI or D-Bus
 ([0044](doc/decision/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md)).
-Nothing here has met hardware.
+
+**There are three reference helpers now**, which is the first real test that the
+report is a contract rather than one script's output format:
+`helper/netcfgd-modem-at` speaks ECM plus AT, for the large class of modems that
+offer neither MBIM nor QMI and have no control node for `mbimcli` to open at
+all. **Some of this has met hardware and the connected path has not** — that
+helper's exchanges, its `+CGCONTRDP` parsing and its drop detection were written
+against a real Quectel EG916Q-GL, whose eUICC carries a bootstrap profile with
+no data entitlement, so every activation ended in a reject cause and no bearer
+has ever come up.
 
 **An OpenVPN tunnel**: netcfgd owns the lifecycle and never reads the `.ovpn`
 ([0046](doc/decision/0046-the-ovpn-file-is-the-operators.md)) — 253 top-level
@@ -5091,8 +5112,12 @@ different property and the one this list is about.
   Running is still untried, on any architecture. A cross build proves the tree
   compiles for another machine, which is the step before anybody can try it,
   not a substitute for trying.
-- **The modem path has never met hardware** — Next item 1, written entirely
-  against a fake copied from libmbim's own output.
+- **No modem bearer has ever carried traffic** — Next item 1, and narrower
+  than "never met hardware", which this line said until the AT helper falsified
+  it. `helper/netcfgd-modem-mbim` is still written entirely against a fake
+  copied from libmbim's own output and has seen no modem;
+  `helper/netcfgd-modem-at` was written against a real Quectel EG916Q-GL, and
+  what neither has done is bring up a bearer.
 - **Suspend and resume have never been exercised**, per item 3, and it is the
   most-travelled path a laptop has.
 - ~~**systemd-networkd detection has never been run against systemd-networkd.**~~
@@ -12240,6 +12265,63 @@ worker who had read the log for an afternoon and the code for an hour. A log
 whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
+
+## 10.351 The modem proposal landed as code and never as a document
+
+Asked whether everything from `netcfgd-modem-at-proposal` had been folded in.
+It had not, and the split is clean: **the code and the measurements are here,
+the document never caught up, and one decision number was spent on something
+else.**
+
+**In, and in one case further along than proposed:**
+
+    helpers/netcfgd-modem-at      helper/netcfgd-modem-at, 11 KB -> 25 KB
+    tests/live/helper-at.sh       tests/live/modem_at.sh, plus a
+                                  fake_at_modem.py the proposal did not have
+    patches/Makefile.diff         the `live:` target runs it
+    the usbnet finding            project.md, as prose
+    the three quirks              helper/modem-quirks
+    the bootstrap-profile finding helper/modem-quirks
+
+**Not in: decision 0123 was never created, and the number is spent** --
+`0123-a-hook-that-never-exits-is-killed.md` holds it. The proposal's own
+document patch cited `[0123]` four times for the modem finding, so had it been
+applied as written those references would dangle. The finding is therefore
+prose that nothing can cite by number, which is the one thing
+`doc/decision/` exists to provide.
+
+**And five claims in this document were false**, each falsified by work sitting
+in the tree, now rewritten rather than appended to:
+
+    Next item 1        "no real modem"
+    the usbnet finding "what it needs IS a second helper"
+    the contention par 0043's quirk table "designed, unbuilt"
+    the Cellular part  "Nothing here has met hardware", naming one helper
+    honest limits      "written entirely against a fake"
+
+The wording taken is the proposal's own, because it is more careful than
+anything written here would have been: **some of it has met hardware and the
+connected path has not.** The AT helper's exchanges and parsing were read off a
+real Quectel EG916Q-GL; no bearer has carried traffic, because that module's
+eUICC holds a bootstrap profile with no data entitlement.
+
+**This is the sentence class `evidence.md` warns is hardest to catch** -- a
+claim whose falsifier is a commit nobody connects to it. Nothing in the
+ordinary course of work brings "nothing has met hardware" together with the
+helper that met it, and the helper landed in September while the sentence
+stayed until October.
+
+**The tree does do this correctly elsewhere, which is the useful part.** The
+same section records `helper/netcfgd-modem-umbim` arriving -- "exists now, and
+0045 had been waiting for it since it was written". So the habit is there and
+the AT helper simply never got it. What distinguished the two is that umbim
+closed a gap this document had named in the same paragraph, while the AT
+helper arrived from outside the tree with its own README.
+
+**Two things left, and both are the holder's.** Whether to cut a record for the
+finding under a new number, since records are not edited once accepted and 0123
+is gone; and whether "met hardware" is the right phrase at all for a helper
+that has exchanged AT commands with a real modem and never carried a packet.
 
 ## 10.350 A reason that asserted nothing had changed
 
