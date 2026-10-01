@@ -76,7 +76,22 @@ typedef enum {
 	/* A block this build does not know. Its whole contents are withheld
 	 * under one report rather than key by key, because nothing here can
 	 * say what a key inside it means. */
-	NCFG_WITHHELD_UNKNOWN_BLOCK
+	NCFG_WITHHELD_UNKNOWN_BLOCK,
+	/* The VALUE is a credential written out, under a key that accepts
+	 * nothing but a stored reference. Permanent for this value and not for
+	 * the key, as `PRIVILEGED` is -- and a separate reason from it because
+	 * the two are different facts and an operator acts on them
+	 * differently: a path is a file this host can read, and this is the
+	 * passphrase itself. `scope.c` states the property these keys rest on,
+	 * "a credential travels as a reference and never as a value"; this is
+	 * where that is true of a document rather than of a compile. */
+	NCFG_WITHHELD_PLAINTEXT,
+	/* How many reasons there are, for an array indexed by one. Derived
+	 * here so that a reason added above grows the array that counts it: a
+	 * caller carrying its own number keeps compiling, keeps passing, and
+	 * silently stops counting the newest reason -- which is the shape of
+	 * every vacuous tally in `evidence.md`. */
+	NCFG_WITHHELD_REASONS
 } ncfg_withheld_t;
 
 /*

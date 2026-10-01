@@ -286,6 +286,53 @@ static void a_credential_written_as_a_path_is_withheld(void)
 	    "it is withheld for the other reason, which is the one that will change");
 }
 
+/*
+ * A credential written out, under a key that takes nothing but a reference.
+ *
+ * Its own fixture rather than an addition to `SOURCE`: the first case in this
+ * file counts every statement the walk reaches, so a key added to the shared
+ * text makes an unrelated assertion fail and somebody edits the number.
+ *
+ * The four checks are two pairs, and the second pair is the control. A branch
+ * that withheld the KEY would pass the first two and fail the third; one that
+ * withheld every literal string would pass the first three and fail the
+ * fourth.
+ */
+static void a_credential_written_out_is_withheld(void)
+{
+	static const char TEXT[] =
+	    "network \"Written\" {\n"
+	    "\twifi {\n"
+	    "\t\tpsk = \"a-literal-passphrase\"\n"
+	    "\t}\n"
+	    "}\n"
+	    "network \"Referenced\" {\n"
+	    "\tssid = \"Referenced\"\n"
+	    "\twifi {\n"
+	    "\t\tpsk = \"@secret:home\"\n"
+	    "\t}\n"
+	    "}\n";
+	collected_t   all;
+	const seen_t *written;
+	const seen_t *referenced;
+	const seen_t *ssid;
+
+	(void)walked(&all, TEXT);
+	written = find(&all, "Written", "wifi.psk");
+	referenced = find(&all, "Referenced", "wifi.psk");
+	ssid = find(&all, "Referenced", "ssid");
+
+	check(written && written->withheld == NCFG_WITHHELD_PLAINTEXT,
+	    "a passphrase written into the document is withheld as plaintext");
+	check(written && written->what == NCFG_WALK_WITHHELD,
+	    "and withheld means withheld: nothing of it is offered to an encoder");
+	check(referenced && referenced->what == NCFG_WALK_EMIT,
+	    "while `@secret:` under the same key travels, so it is the value "
+	    "that decides and not the key");
+	check(ssid && ssid->what == NCFG_WALK_EMIT,
+	    "and an ordinary string under an ordinary key is untouched by it");
+}
+
 static void a_block_this_build_does_not_know_is_one_report(void)
 {
 	collected_t   all;
@@ -427,6 +474,7 @@ int main(void)
 	a_hook_is_reported_rather_than_passed_over();
 	a_host_private_key_is_withheld_as_one();
 	a_credential_written_as_a_path_is_withheld();
+	a_credential_written_out_is_withheld();
 	a_block_this_build_does_not_know_is_one_report();
 	a_visit_that_stops_stops_the_walk();
 	a_document_that_does_not_parse_visits_nothing();

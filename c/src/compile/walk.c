@@ -43,6 +43,32 @@ typedef struct {
  */
 static const char *const CREDENTIAL_LEAVES[] = { "ca_cert", "client_cert", "private_key" };
 
+/*
+ * The keys whose value may be a stored secret and NOTHING else.
+ *
+ * Enumerated from the call sites rather than guessed: every `ncfg_as_secret`
+ * in `lower_kind.c` and `lower_network.c` is reached under one of these three
+ * spellings, and that function emits a diagnostic for a bare string rather
+ * than falling through to a path -- which is what makes these strict where
+ * `CREDENTIAL_LEAVES` above is dual.
+ *
+ * **They are here because a compile-time refusal does not reach this path.**
+ * `scope.c` gives `wifi.psk` a wire number on the stated ground that
+ * "`ncfg_as_secret` refuses a bare string", and it does. But a walk parses and
+ * does not lower, so a document holding a literal passphrase -- one the
+ * compiler would reject and the daemon would never run -- walked clean and the
+ * passphrase went out as a record. The property was true of the compiler and
+ * assumed of the walker, which is an unstated precondition rather than a
+ * shared one.
+ *
+ * `private_key` stays in the dual list and deliberately not here: two keys
+ * share that leaf, wireguard's being strict and dot1x's a cert source, and
+ * nothing at this layer tells them apart. The dual verdict withholds either
+ * way, so over-matching there costs a value that could have travelled and
+ * under-matching here would cost the key itself.
+ */
+static const char *const SECRET_LEAVES[] = { "psk", "password", "preshared_key" };
+
 /* The one spelling `ncfg_as_secret` accepts, so anything else under one of the
  * keys above is a path. Named here rather than guessed: `lower_value.c`
  * refuses a bare string precisely so that "a config file stays safe to
@@ -63,6 +89,19 @@ static int names_a_credential(const char *path)
 
 	for (at = 0u; at < sizeof(CREDENTIAL_LEAVES) / sizeof(CREDENTIAL_LEAVES[0]); at++) {
 		if (strcmp(leaf, CREDENTIAL_LEAVES[at]) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int names_a_secret(const char *path)
+{
+	const char *leaf = leaf_of(path);
+	size_t      at;
+
+	for (at = 0u; at < sizeof(SECRET_LEAVES) / sizeof(SECRET_LEAVES[0]); at++) {
+		if (strcmp(leaf, SECRET_LEAVES[at]) == 0) {
 			return 1;
 		}
 	}
@@ -163,6 +202,9 @@ static void walk_assignment(walk_t *walk, const ncfg_ast_assignment_t *assignmen
 		 */
 		item.what = NCFG_WALK_WITHHELD;
 		item.withheld = NCFG_WITHHELD_PRIVILEGED;
+	} else if (names_a_secret(path) && !is_secret_reference(item.value, item.value_len)) {
+		item.what = NCFG_WALK_WITHHELD;
+		item.withheld = NCFG_WITHHELD_PLAINTEXT;
 	} else if (item.kind == NCFG_KIND_NONE) {
 		item.what = NCFG_WALK_WITHHELD;
 		item.withheld = NCFG_WITHHELD_UNREGISTERED;
@@ -342,6 +384,11 @@ const char *ncfg_withheld_why(ncfg_withheld_t withheld)
 		return "this key has no wire number yet, so it cannot be carried";
 	case NCFG_WITHHELD_UNKNOWN_BLOCK:
 		return "this build does not know this block, so nothing in it can be read";
+	case NCFG_WITHHELD_PLAINTEXT:
+		return "the value is a credential written out, not a reference: write "
+		       "`@secret:NAME` so the name travels and the secret stays here";
+	case NCFG_WITHHELD_REASONS:
+		break;
 	default:
 		break;
 	}
