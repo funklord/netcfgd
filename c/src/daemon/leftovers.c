@@ -366,11 +366,35 @@ size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t foun
 		}
 		written++;
 	}
+	/*
+	 * **CLAIMED is reconsidered here, not just UNACCOUNTED, and that was a
+	 * reporting defect rather than a safety one.** The comment above says
+	 * dhcpcd's `[privileged proxy]` title "does not always carry the
+	 * interface" -- which is true, and the case that matters is when it DOES.
+	 * Then the helper matches `names_interface` on its own argv, is CLAIMED in
+	 * the pass above, and never reaches this one: one client with four helpers
+	 * is reported as five backends the record claims with no pid written down.
+	 *
+	 * Measured on the reporting machine 2026-10-01, where the five are
+	 * `wlp0s20f3 [ip4]`, `[privileged proxy] wlp0s20f3 [ip4]`, `[control
+	 * proxy] wlp0s20f3 [ip4]`, `[BPF ARP] wlp0s20f3 ...` and `[BOOTP proxy]
+	 * ...`. Three of the five carry the interface.
+	 *
+	 * Nothing was hidden -- CLAIMED and HELPER are both accounted for, and the
+	 * sweep refuses neither -- but the log read as an accumulation across
+	 * restarts, and it was read that way, by the session that wrote this
+	 * paragraph. A verdict naming the parent says one client; five verdicts
+	 * naming a record say five of something.
+	 *
+	 * RECORDED is left alone: a process netcfgd wrote a pid down for is a
+	 * backend in its own right whatever its parentage.
+	 */
 	for (at = 0u; at < written; at++) {
 		pid_t  parent;
 		size_t steps;
 
-		if (out[at].verdict != NCFG_LEFTOVER_UNACCOUNTED) {
+		if (out[at].verdict != NCFG_LEFTOVER_UNACCOUNTED &&
+		    out[at].verdict != NCFG_LEFTOVER_CLAIMED) {
 			continue;
 		}
 		/*
@@ -400,8 +424,18 @@ size_t ncfg_leftovers_classify(const ncfg_leftover_process_t *found, size_t foun
 				 * process by whatever pid 1 is. */
 				break;
 			}
-			/* A claimed ancestor anchors just as a recorded one does; that is
-			 * what the first pass was for. */
+			/*
+			 * A claimed ancestor anchors just as a recorded one does; that is
+			 * what the first pass was for.
+			 *
+			 * **A HELPER ancestor deliberately does not**, and widening it to
+			 * include one was tried and reverted. The walk continues past a
+			 * helper to whatever that helper hangs off, which is what keeps
+			 * *"a helper names the recorded process it hangs off, not its
+			 * parent"* true -- the grandchild of a client reports the client
+			 * rather than the proxy in between. Accepting HELPER here broke
+			 * that case and two checks said so.
+			 */
 			for (index = 0u; index < written; index++) {
 				if (out[index].process.pid == parent &&
 				    out[index].verdict == NCFG_LEFTOVER_CLAIMED) {
