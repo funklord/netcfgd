@@ -9617,6 +9617,76 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.364 The secret agent registry, and the poll that was starving the loop
+
+The tenth slice of 0264's port serves `AgentManager`. **It also found a defect
+that had made every live measurement since 10.359 suspect**, which is worth more
+than the slice.
+
+### The shim answered nothing, and the cause was its own heartbeat
+
+A `Register` call sat until its client gave up. So did a property read. The
+object was registered, the method ran -- the registry showed the agent arriving
+and leaving -- and no reply ever came.
+
+Bisected: with the heartbeat disabled, `Register` answers instantly.
+
+**With no cache every property is socket round trips**, and as the interfaces
+landed one sweep grew to ten devices times thirty-one properties times three
+client calls each. A sweep then took longer than the one-second tick,
+`dbus_connection_read_write_dispatch` never ran, and the shim stopped serving
+while looking perfectly alive.
+
+**It was latent from the day the poll was added** and became visible only when
+enough interfaces existed to cross a second. Which means the measurement in
+10.359 -- "no `PropertiesChanged` in eight seconds on a converged machine" --
+was taken on a loop that may already have been starving, and so was evidence of
+less than it appeared. The detector's own test is what carries that claim now,
+and this is the second time in this port that **a quiet bus turned out to be
+quiet for the wrong reason.**
+
+A tick now looks at ONE object and moves on, so a full sweep takes as many
+seconds as there are objects. A client learns of a change within N seconds
+rather than never. The real fix -- one fetch per tick shared by every getter --
+is the cache `emit.rs` keeps, and it belongs in its own slice rather than inside
+a bisect.
+
+### Three things the registry gets right on purpose
+
+- **The key is the bus's sender, never an argument.** An agent is identified by
+  the connection it registered from, which the bus reports and a client cannot
+  choose. A registry keyed on something the caller supplied would let one
+  process register as another -- the property `authorize.h` already rests on.
+- **`Unregister` takes no argument, and that is its security.** NM's method is
+  about the caller. Implementing it as "remove the name you were given" would
+  let any local process unregister a desktop's agent and quietly become the
+  thing that answers for secrets.
+- **An agent whose connection goes away is dropped**, which needs a message
+  filter and `NameOwnerChanged` rather than a method table: nobody calls to say
+  so. Without it the registry only grows and the shim would eventually ask a
+  dead name for a passphrase and wait. Only an empty `new_owner` counts -- a
+  name changing hands is not an agent leaving.
+
+Proven live: a `dbus-send` registers and exits, and the shim logs the agent on
+`:1.1` going away with none left. One client exercised both halves, because a
+one-shot client is a connection that closes.
+
+A second `Register` from one connection **replaces** rather than adds, or the
+shim would ask one agent twice for one secret. That one is asserted.
+
+### What is not here
+
+The asking side. An agent supplies a credential and netcfgd's provider stores
+it, with the configuration keeping a `@secret:` reference -- one direction only,
+and `GetSecrets` on a profile still refuses (0029, and `settings.c` where it
+does). The trigger is an activation whose `psk` references a secret that does
+not exist, and this shim has no activation path: the writes refuse. So the
+registry is in place and nothing consults it yet.
+
+The capability mask is remembered and not acted on. Its one flag is "this agent
+can show a VPN hint" and netcfgd has no VPN secrets to ask for, so storing it
+keeps the agent's statement without pretending to honour it.
+
 ## 10.363 Access points, keyed on the only identity that holds still
 
 The ninth slice of 0264's port. The radio's `AccessPoints` lists real scan

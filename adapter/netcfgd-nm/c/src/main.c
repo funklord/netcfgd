@@ -15,6 +15,7 @@
 #include "nmc/ipconfig.h"
 #include "nmc/active.h"
 #include "nmc/accesspoint.h"
+#include "nmc/agent.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -28,6 +29,7 @@
 #define NMC_IP6_PATH      "/org/freedesktop/NetworkManager/IP6Config"
 #define NMC_ACTIVE_PATH   "/org/freedesktop/NetworkManager/ActiveConnection"
 #define NMC_AP_PATH       "/org/freedesktop/NetworkManager/AccessPoint"
+#define NMC_AGENT_PATH    "/org/freedesktop/NetworkManager/AgentManager"
 
 static void asked_to_stop(int signal_number)
 {
@@ -41,38 +43,64 @@ typedef struct {
 	nmc_watch_t        *watch;
 	nmc_store_t        *store;
 	const nmc_object_t *manager;
+	/* Which object this tick looks at. See `beat`. */
+	size_t              cursor;
 } heartbeat_t;
 
 /*
- * One pass over everything that has properties, emitting what moved.
+ * **One object per tick, round-robin, and that is a defect fix rather than a
+ * refinement.**
  *
- * **Every wake, which is once a second.** NM pushes a signal the moment it
- * acts; this polls, because netcfgd offers no change notification to the
- * adapter and the alternative is a client that never learns. One second is the
- * loop's existing wake and costs one sweep of the properties -- which is a
- * socket round trip each, and is the cost `state.h` records as wrong for a
- * tray and right for being correct first.
+ * This used to sweep everything every wake. With no cache, every property is
+ * socket round trips -- and as the interfaces landed, one sweep grew past ten
+ * devices times thirty-one properties times three calls each. A sweep then took
+ * longer than the tick, `dbus_connection_read_write_dispatch` never ran, and
+ * **the shim answered nothing at all**: a `Register` call sat until its client
+ * gave up, and so did every property read.
+ *
+ * It was latent from the day the poll was added and became visible only when
+ * enough interfaces existed to cross one second. It also means the measurement
+ * that said "no signals in eight seconds on a converged machine" (10.359) was
+ * taken on a loop that may already have been starving, which is why the
+ * detector has a direct test and not only that observation.
+ *
+ * So a tick looks at ONE object and moves on. A full sweep takes as many
+ * seconds as there are objects, which is the right trade for change
+ * notification: a client learns within N seconds instead of never.
+ *
+ * The real fix is one fetch per tick shared by every getter, which is the cache
+ * `emit.rs` keeps -- and it belongs with the next slice rather than inside a
+ * bisect.
  */
 static void beat(void *context)
 {
 	heartbeat_t *beat_on = context;
 	const char  *names[256];
 	size_t       count;
-	size_t       at;
+	size_t       which;
 
-	(void)nmc_watch_poll(beat_on->watch, beat_on->connection, beat_on->manager);
 	count = nmc_store_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
 	    beat_on->store);
-	for (at = 0u; at < count; at++) {
+	/* The manager is index 0 and each device follows it. */
+	if (beat_on->cursor > count) {
+		beat_on->cursor = 0u;
+	}
+	which = beat_on->cursor++;
+	if (which == 0u) {
+		(void)nmc_watch_poll(beat_on->watch, beat_on->connection, beat_on->manager);
+		return;
+	}
+	which--;
+	if (which < count) {
 		char               path[96];
-		nmc_device_slot_t *slot = nmc_store_resolve(beat_on->store, names[at]);
+		nmc_device_slot_t *slot = nmc_store_resolve(beat_on->store, names[which]);
 		nmc_object_t       device;
 
 		if (!slot) {
-			continue;
+			return;
 		}
 		(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/Devices/%s",
-		    names[at]);
+		    names[which]);
 		device.path = path;
 		device.interfaces = nmc_device_interfaces_for(slot);
 		device.data = slot;
@@ -103,6 +131,7 @@ int main(int argc, char **argv)
 	nmc_store_t            store;
 	nmc_connections_t      connections;
 	nmc_aps_t              aps;
+	nmc_agents_t           agents;
 	nmc_watch_t           *watch;
 	heartbeat_t            heartbeat;
 	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
@@ -112,18 +141,23 @@ int main(int argc, char **argv)
 	const nmc_interface_t *ip6_interfaces[] = { &nmc_ip6config_interface, NULL };
 	const nmc_interface_t *active_interfaces[] = { &nmc_active_interface, NULL };
 	const nmc_interface_t *ap_interfaces[] = { &nmc_accesspoint_interface, NULL };
+	const nmc_interface_t *agent_interfaces[] = { &nmc_agentmanager_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
 	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
 		&nmc_compat_interface, NULL };
 	const nmc_object_t     objects[] = {
-		{ NMC_MANAGER_PATH, manager_interfaces, &state }
+		{ NMC_MANAGER_PATH, manager_interfaces, &state },
+		/* Its own path, as NM serves it, and its data is the registry
+		 * rather than the state: nothing else reads the agents yet. */
+		{ NMC_AGENT_PATH, agent_interfaces, &agents }
 	};
 
 	nmc_state_init(&state, NULL);
 	nmc_store_init(&store, &state);
 	nmc_connections_init(&connections, &state);
 	nmc_aps_init(&aps, &state);
+	nmc_agents_init(&agents);
 	state.store = (struct nmc_store *)&store;
 	state.connections = (struct nmc_connections *)&connections;
 	state.access_points = &aps;
@@ -169,6 +203,15 @@ int main(int argc, char **argv)
 	 * treats a lost bus as an orderly end.
 	 */
 	dbus_connection_set_exit_on_disconnect(connection, FALSE);
+
+	/*
+	 * Before the name is claimed, so no agent can register into a registry
+	 * that is not yet watching for it going away.
+	 */
+	if (!nmc_agents_watch(&agents, connection, err, sizeof(err))) {
+		fprintf(stderr, "netcfgd-nm: %s\n", err);
+		return 1;
+	}
 
 	claimed = dbus_bus_request_name(connection, NMC_BUS_NAME, DBUS_NAME_FLAG_DO_NOT_QUEUE,
 	    &problem);
@@ -242,11 +285,14 @@ int main(int argc, char **argv)
 		heartbeat.watch = watch;
 		heartbeat.store = &store;
 		heartbeat.manager = &objects[0];
+		heartbeat.cursor = 0u;
 		if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]),
 		        subtrees, sizeof(subtrees) / sizeof(subtrees[0]), beat, &heartbeat, err,
 		        sizeof(err))) {
 			fprintf(stderr, "netcfgd-nm: %s\n", err);
 			nmc_watch_free(watch);
+			nmc_agents_unwatch(&agents, connection);
+			nmc_agents_free(&agents);
 			nmc_aps_free(&aps);
 			nmc_connections_free(&connections);
 			nmc_store_free(&store);
@@ -255,6 +301,8 @@ int main(int argc, char **argv)
 		}
 	}
 	nmc_watch_free(watch);
+	nmc_agents_unwatch(&agents, connection);
+	nmc_agents_free(&agents);
 	nmc_aps_free(&aps);
 	nmc_connections_free(&connections);
 	nmc_store_free(&store);
