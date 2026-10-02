@@ -97,6 +97,10 @@ void nmc_window_end(void)
 		ncfg_radios_free(&the_facts.radios);
 		the_facts.have_radios = 0;
 	}
+	if (the_facts.have_inventory) {
+		ncfg_inventory_free(&the_facts.inventory);
+		the_facts.have_inventory = 0;
+	}
 	if (the_facts.have_scan) {
 		ncfg_scan_free(&the_facts.scan);
 		the_facts.have_scan = 0;
@@ -112,6 +116,7 @@ void nmc_window_end(void)
 	memset(&the_facts.devices, 0, sizeof(the_facts.devices));
 	memset(&the_facts.links, 0, sizeof(the_facts.links));
 	memset(&the_facts.radios, 0, sizeof(the_facts.radios));
+	memset(&the_facts.inventory, 0, sizeof(the_facts.inventory));
 	memset(&the_facts.scan, 0, sizeof(the_facts.scan));
 	memset(&the_facts.status, 0, sizeof(the_facts.status));
 	memset(&the_facts.saved, 0, sizeof(the_facts.saved));
@@ -147,6 +152,8 @@ NMC_LIST_IN_WINDOW(nmc_state_devices, ncfg_devices_t, have_devices, devices,
     ncfg_client_devices)
 NMC_LIST_IN_WINDOW(nmc_state_links, ncfg_links_t, have_links, links, ncfg_client_links)
 NMC_LIST_IN_WINDOW(nmc_state_radios, ncfg_radios_t, have_radios, radios, ncfg_client_radios)
+NMC_LIST_IN_WINDOW(nmc_state_inventory, ncfg_inventory_t, have_inventory, inventory,
+    ncfg_client_inventory)
 NMC_LIST_IN_WINDOW(nmc_state_saved, ncfg_saved_networks_t, have_saved, saved,
     ncfg_client_saved_networks)
 

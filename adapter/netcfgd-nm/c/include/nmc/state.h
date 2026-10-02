@@ -81,12 +81,14 @@ typedef struct {
 	int            have_devices;
 	int            have_links;
 	int            have_radios;
+	int            have_inventory;
 	int            have_scan;
 	int            have_status;
 	int            have_saved;
 	ncfg_devices_t devices;
 	ncfg_links_t   links;
 	ncfg_radios_t  radios;
+	ncfg_inventory_t inventory;
 	ncfg_scan_t    scan;
 	ncfg_wifi_status_t status;
 	ncfg_saved_networks_t saved;
@@ -108,6 +110,16 @@ void nmc_window_end(void);
 const ncfg_devices_t *nmc_state_devices(nmc_state_t *state);
 const ncfg_links_t   *nmc_state_links(nmc_state_t *state);
 const ncfg_radios_t  *nmc_state_radios(nmc_state_t *state);
+/*
+ * The document's link-shaped blocks and the machine's links, as one list with a
+ * `subject` saying which each row is.
+ *
+ * **It is the only thing that answers which `interface` blocks exist.** The
+ * device list is devices and the saved list is networks; an interface block has
+ * no list of its own, and the inventory's `subject` field exists precisely so a
+ * caller can tell the document's two link-shaped blocks apart.
+ */
+const ncfg_inventory_t *nmc_state_inventory(nmc_state_t *state);
 
 /*
  * The last scan results for `interface`, once per window.

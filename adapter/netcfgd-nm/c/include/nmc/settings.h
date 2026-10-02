@@ -13,13 +13,36 @@
 
 #include <stddef.h>
 
-/* One saved network with a path of its own. Numbers never reused, as devices. */
+/*
+ * Which of netcfgd's two link-shaped blocks a profile came from.
+ *
+ * **They differ in more than their settings dictionary.** A wifi profile can be
+ * activated on any radio -- an SSID is in range of whatever radio can hear it --
+ * and an interface profile IS the interface. NM's types say so: `802-11-wireless`
+ * carries no device, and `802-3-ethernet` is bound to one.
+ */
+typedef enum {
+	NMC_PROFILE_NETWORK = 0,
+	NMC_PROFILE_INTERFACE
+} nmc_profile_kind_t;
+
+/* One profile with a path of its own. Numbers never reused, as devices. */
 typedef struct {
-	char        *id;     /* the network's id in netcfgd's document */
-	unsigned     number;
-	char         label[12];
-	int          present;
-	nmc_state_t *state;
+	char              *id; /* a `network` block's id, or an `interface`'s name */
+	nmc_profile_kind_t kind;
+	unsigned           number;
+	char               label[12];
+	int                present;
+	/*
+	 * Derived once, when the slot is made, and not recomputed per call.
+	 *
+	 * It cannot change while the slot lives: it is a function of the kind and
+	 * the id, and those are what the slot is keyed on. A getter deriving it
+	 * again would be a second answer to a settled question, and it has to
+	 * outlive the call that returns it.
+	 */
+	char               uuid[40];
+	nmc_state_t       *state;
 } nmc_connection_slot_t;
 
 typedef struct {
@@ -41,7 +64,17 @@ int  nmc_connections_refresh(nmc_connections_t *store);
  * A lookup and never arithmetic -- the two stores number independently, so
  * `/Devices/3` and `/Settings/3` are unrelated (project.md 10.362, 10.366).
  */
-const char *nmc_connections_path_of(nmc_connections_t *store, const char *id);
+const char *nmc_connections_path_of(nmc_connections_t *store, nmc_profile_kind_t kind,
+    const char *id);
+
+/*
+ * The slot a uuid names, or NULL.
+ *
+ * For `GetConnectionByUuid`, which is how a client that stored a reference finds
+ * the profile again -- and the reason the uuid is derived rather than generated:
+ * the reference survives a restart because nothing made it up in the first place.
+ */
+nmc_connection_slot_t *nmc_connections_by_uuid(nmc_connections_t *store, const char *uuid);
 
 void  *nmc_connections_resolve_for_bus(const char *tail, void *context);
 size_t nmc_connections_enumerate_for_bus(const char **names, size_t max, void *context);

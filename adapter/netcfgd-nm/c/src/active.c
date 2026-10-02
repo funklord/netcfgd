@@ -196,7 +196,7 @@ static int say_connection(DBusMessageIter *into, void *object, char *err, size_t
 	nmc_device_network_of(slot, network, sizeof(network));
 	if (network[0] != '\0' && slot && slot->state) {
 		path = nmc_connections_path_of((nmc_connections_t *)slot->state->connections,
-		    network);
+		    NMC_PROFILE_NETWORK, network);
 	}
 	return put_path(into, path ? path : "/");
 }

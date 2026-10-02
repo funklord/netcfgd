@@ -550,7 +550,8 @@ static int say_available(DBusMessageIter *into, void *object, char *err, size_t 
 	saved = nmc_state_saved(slot->state);
 	for (at = 0u; saved && at < saved->count; at++) {
 		const char *path = nmc_connections_path_of(
-		    (nmc_connections_t *)slot->state->connections, saved->items[at].id);
+		    (nmc_connections_t *)slot->state->connections, NMC_PROFILE_NETWORK,
+		    saved->items[at].id);
 
 		if (path) {
 			(void)dbus_message_iter_append_basic(&array, DBUS_TYPE_OBJECT_PATH, &path);
