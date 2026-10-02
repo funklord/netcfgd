@@ -16,6 +16,7 @@
  *   together.
  */
 #include "nmc/device.h"
+#include "nmc/settings.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -397,6 +398,47 @@ NMC_CONST(say_no_paths, return put_empty(into, "o");)
 /* LLDP is a protocol netcfgd does not speak. */
 NMC_CONST(say_no_lldp, return put_empty(into, "a{sv}");)
 
+/*
+ * The connections that could be activated on this device.
+ *
+ * **Every saved network for a radio, and none for anything else**, which is what
+ * netcfgd's document supports: a `network` block describes a wifi network, and
+ * nothing in it can be activated on an ethernet port. A client reads this to
+ * decide what to offer, so listing wifi profiles under a wired device would
+ * offer a join that cannot happen.
+ *
+ * Not filtered by what is in range. NM's own list is "configured and applicable
+ * to this device", and in-range-ness belongs to the access points -- a network
+ * saved for home is still available on the radio while you are at work, in the
+ * sense this property means.
+ */
+static int say_available(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	const nmc_device_slot_t     *slot = object;
+	DBusMessageIter              array;
+	const ncfg_saved_networks_t *saved;
+	size_t                       at;
+
+	(void)err;
+	(void)err_size;
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "o", &array)) {
+		return 0;
+	}
+	if (nmc_device_type_now(slot) != NM_DEVICE_TYPE_WIFI || !slot->state) {
+		return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+	}
+	saved = nmc_state_saved(slot->state);
+	for (at = 0u; saved && at < saved->count; at++) {
+		const char *path = nmc_connections_path_of(
+		    (nmc_connections_t *)slot->state->connections, saved->items[at].id);
+
+		if (path) {
+			(void)dbus_message_iter_append_basic(&array, DBUS_TYPE_OBJECT_PATH, &path);
+		}
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+}
+
 /* ------------------------------------------------------------ the table */
 
 static const nmc_property_t PROPERTIES[] = {
@@ -428,7 +470,7 @@ static const nmc_property_t PROPERTIES[] = {
 	{ "Dhcp4Config", "o", NMC_READ, say_no_object, NULL },
 	{ "Dhcp6Config", "o", NMC_READ, say_no_object, NULL },
 	{ "ActiveConnection", "o", NMC_READ, say_active, NULL },
-	{ "AvailableConnections", "ao", NMC_READ, say_no_paths, NULL },
+	{ "AvailableConnections", "ao", NMC_READ, say_available, NULL },
 	{ "Ports", "ao", NMC_READ, say_no_paths, NULL },
 	{ "LldpNeighbors", "aa{sv}", NMC_READ, say_no_lldp, NULL }
 };

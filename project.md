@@ -9617,6 +9617,74 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.366 The device-to-connection join, and the machine disproving arithmetic
+
+The twelfth slice of 0264's port closes the one join 10.362 refused to guess at.
+`Connection.Active.Connection` and `Device.AvailableConnections` answer real
+paths now.
+
+### The machine itself shows why it had to be a lookup
+
+10.362 left `Connection` as `/` because the settings objects are numbered by the
+CONNECTION store and the active connection by the DEVICE store, so the path
+cannot be computed from the device's number. That was a refusal on principle.
+**This machine turns it into a measurement:**
+
+    saved networks, in netcfgd's order   EMP-XYLEM, OpenPC.se
+    so /Settings/1 is                   EMP-XYLEM
+       /Settings/2 is                   OpenPC.se
+
+    device 1 (the radio) is on          OpenPC.se
+    its Connection resolves to          /Settings/2          correct
+    arithmetic would have given         /Settings/1          EMP-XYLEM
+
+So the shortcut and the lookup **disagree on the only machine this has run on**,
+and the shortcut is wrong. A client following it would have been shown the
+settings of a network the radio is not on -- including, at an enterprise network's
+settings object, the wrong identity.
+
+The join is `nmc_connections_path_of`: a device's link reports its `network` id,
+and the connection store is asked for that id's slot. Still `/` for a device
+carrying no network block, which is every wired link here.
+
+### `AvailableConnections`: every saved network for a radio, none for anything else
+
+What netcfgd's document supports. A `network` block describes a wifi network and
+nothing in it can be activated on an ethernet port, so listing wifi profiles
+under a wired device would offer a join that cannot happen. Verified: the radio
+offers both, `enp0s31f6` offers none.
+
+**Not filtered by what is in range.** NM's own list means "configured and
+applicable to this device"; in-range-ness belongs to the access points. A network
+saved for home is still available on the radio while you are at work, in the sense
+this property means.
+
+### Saved networks joined the window
+
+The join reads the list per property -- `AvailableConnections`, `Connection`, and
+every `Settings.Connection` getter -- so it is fetched once per dispatch like the
+others.
+
+### What the test can and cannot hold
+
+**The join was proven on the machine and cannot be proven here.** It needs two
+stores populated from a running daemon, and the demonstration that matters is the
+disagreement with arithmetic -- which a fixture cannot stage without becoming the
+thing it is testing.
+
+What is asserted is the direction it fails in: **no answer rather than a wrong
+one.** A path invented for an id nothing knows would point a client at another
+network's settings, which is the same fault as the arithmetic with extra steps.
+
+### One tool mistake worth recording
+
+The header declaration for the new function did not land, because the edit used a
+string replace **without asserting the match count** -- the anchor had been
+reworded and `replace` silently did nothing. The compiler caught it as an
+implicit declaration, so the cost was a minute; the rule `evidence.md` states for
+mechanical edits applies to a single one, and this is the second time this port
+has paid for skipping it.
+
 ## 10.365 The per-dispatch window, and the latency that was never the fetching
 
 The eleventh slice of 0264's port. A `GetAll` on one device went from **3150 ms

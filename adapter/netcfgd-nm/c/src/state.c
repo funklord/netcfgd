@@ -98,10 +98,15 @@ void nmc_window_end(void)
 		ncfg_scan_free(&the_facts.scan);
 		the_facts.have_scan = 0;
 	}
+	if (the_facts.have_saved) {
+		ncfg_saved_networks_free(&the_facts.saved);
+		the_facts.have_saved = 0;
+	}
 	memset(&the_facts.devices, 0, sizeof(the_facts.devices));
 	memset(&the_facts.links, 0, sizeof(the_facts.links));
 	memset(&the_facts.radios, 0, sizeof(the_facts.radios));
 	memset(&the_facts.scan, 0, sizeof(the_facts.scan));
+	memset(&the_facts.saved, 0, sizeof(the_facts.saved));
 	scanned_for[0] = '\0';
 }
 
@@ -133,6 +138,8 @@ NMC_LIST_IN_WINDOW(nmc_state_devices, ncfg_devices_t, have_devices, devices,
     ncfg_client_devices)
 NMC_LIST_IN_WINDOW(nmc_state_links, ncfg_links_t, have_links, links, ncfg_client_links)
 NMC_LIST_IN_WINDOW(nmc_state_radios, ncfg_radios_t, have_radios, radios, ncfg_client_radios)
+NMC_LIST_IN_WINDOW(nmc_state_saved, ncfg_saved_networks_t, have_saved, saved,
+    ncfg_client_saved_networks)
 
 const ncfg_scan_t *nmc_state_scan(nmc_state_t *state, const char *interface)
 {

@@ -106,23 +106,17 @@ static nmc_connection_slot_t *add(nmc_connections_t *store, const char *id)
 
 int nmc_connections_refresh(nmc_connections_t *store)
 {
-	ncfg_client_t         *client = nmc_state_client(store->state);
-	ncfg_saved_networks_t  saved;
-	char                   err[256] = "";
-	size_t                 at;
+	const ncfg_saved_networks_t *saved = nmc_state_saved(store->state);
+	size_t                       at;
 
-	if (!client) {
-		return 0;
-	}
-	memset(&saved, 0, sizeof(saved));
-	if (!ncfg_client_saved_networks(client, &saved, err, sizeof(err))) {
+	if (!saved) {
 		return 0;
 	}
 	for (at = 0u; at < store->count; at++) {
 		store->slots[at].present = 0;
 	}
-	for (at = 0u; at < saved.count; at++) {
-		const char            *id = saved.items[at].id;
+	for (at = 0u; at < saved->count; at++) {
+		const char            *id = saved->items[at].id;
 		nmc_connection_slot_t *slot;
 
 		if (!id || id[0] == '\0') {
@@ -136,8 +130,37 @@ int nmc_connections_refresh(nmc_connections_t *store)
 			slot->present = 1;
 		}
 	}
-	ncfg_saved_networks_free(&saved);
 	return 1;
+}
+
+/*
+ * The object path for a network's id, or NULL where it has no slot.
+ *
+ * **This is the device-to-connection join**, and it is a lookup rather than
+ * arithmetic for a reason worth keeping: the connection store numbers by the
+ * order networks were first seen and the device store by the order devices
+ * were, so `/Devices/3` and `/Settings/3` are unrelated. Computing one path
+ * from the other's number would hand a client the settings of whatever
+ * connection happened to share a number -- which is what 10.362 refused to do
+ * and left as `/`.
+ */
+const char *nmc_connections_path_of(nmc_connections_t *store, const char *id)
+{
+	nmc_connection_slot_t *slot;
+	static char            path[96];
+
+	if (!store || !id || id[0] == '\0') {
+		return NULL;
+	}
+	(void)nmc_connections_refresh(store);
+	slot = slot_for(store, id);
+	if (!slot || !slot->present) {
+		return NULL;
+	}
+	/* One buffer, overwritten per call, which is safe for the callers there
+	 * are: each appends the path immediately. */
+	(void)snprintf(path, sizeof(path), "%s/%u", NMC_SETTINGS_PATH, slot->number);
+	return path;
 }
 
 void *nmc_connections_resolve_for_bus(const char *tail, void *context)
@@ -427,32 +450,26 @@ const nmc_interface_t nmc_settings_interface = {
 static int saved_for(const nmc_connection_slot_t *slot, ncfg_saved_network_t *out, char *keep,
     size_t keep_size)
 {
-	ncfg_client_t        *client;
-	ncfg_saved_networks_t saved;
-	char                  err[256] = "";
-	size_t                at;
-	int                   found = 0;
+	const ncfg_saved_networks_t *saved;
+	size_t                       at;
+	int                          found = 0;
 
 	memset(out, 0, sizeof(*out));
 	keep[0] = '\0';
 	if (!slot || !slot->id) {
 		return 0;
 	}
-	client = nmc_state_client(slot->state);
-	if (!client) {
+	saved = nmc_state_saved(slot->state);
+	if (!saved) {
 		return 0;
 	}
-	memset(&saved, 0, sizeof(saved));
-	if (!ncfg_client_saved_networks(client, &saved, err, sizeof(err))) {
-		return 0;
-	}
-	for (at = 0u; at < saved.count; at++) {
-		if (!saved.items[at].id || strcmp(saved.items[at].id, slot->id) != 0) {
+	for (at = 0u; at < saved->count; at++) {
+		if (!saved->items[at].id || strcmp(saved->items[at].id, slot->id) != 0) {
 			continue;
 		}
 		/* Only the scalars and one copied string: the list is freed below
 		 * and a borrowed pointer would dangle. */
-		*out = saved.items[at];
+		*out = saved->items[at];
 		out->id = NULL;
 		out->name = NULL;
 		out->ssid = NULL;
@@ -460,13 +477,12 @@ static int saved_for(const nmc_connection_slot_t *slot, ncfg_saved_network_t *ou
 		out->proto = NULL;
 		out->credential = NULL;
 		(void)snprintf(keep, keep_size, "%s",
-		    saved.items[at].name && saved.items[at].name[0] != '\0'
-		        ? saved.items[at].name
+		    saved->items[at].name && saved->items[at].name[0] != '\0'
+		        ? saved->items[at].name
 		        : slot->id);
 		found = 1;
 		break;
 	}
-	ncfg_saved_networks_free(&saved);
 	return found;
 }
 

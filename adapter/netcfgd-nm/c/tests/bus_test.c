@@ -607,6 +607,35 @@ int main(void)
 		nmc_state_free(&state);
 	}
 
+	/*
+	 * The device-to-connection join fails closed.
+	 *
+	 * **The join itself was proven on the machine and could not be proven
+	 * here**: it needs two stores populated from a running daemon, and the
+	 * demonstration that matters is that the answer differs from arithmetic --
+	 * device 1 is on `OpenPC.se` which is `/Settings/2`, where the device's own
+	 * number would have given `/Settings/1`, `EMP-XYLEM`. A fixture cannot
+	 * stage that disagreement without becoming the thing it is testing.
+	 *
+	 * What is checkable is the direction it fails in: no answer rather than a
+	 * wrong one. A path invented for an id nothing knows would point a client
+	 * at another network's settings.
+	 */
+	{
+		nmc_state_t       state;
+		nmc_connections_t store;
+
+		nmc_state_init(&state, NULL);
+		nmc_connections_init(&store, &state);
+		check(nmc_connections_path_of(&store, "no-such-network") == NULL,
+		    "an id with no slot has no path, rather than a computed one");
+		check(nmc_connections_path_of(&store, "") == NULL, "and neither has an empty id");
+		check(nmc_connections_path_of(NULL, "x") == NULL, "nor a store that is not there");
+		check(nmc_connections_path_of(&store, NULL) == NULL, "nor a missing id");
+		nmc_connections_free(&store);
+		nmc_state_free(&state);
+	}
+
 	printf("\nbus_test: %d check(s)\n", checks);
 	if (failures == 0) {
 		printf("bus_test: all checks passed\n");
