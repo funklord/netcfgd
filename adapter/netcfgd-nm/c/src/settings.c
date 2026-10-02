@@ -231,6 +231,19 @@ int nmc_connections_refresh(nmc_connections_t *store)
 	return 1;
 }
 
+const nmc_connection_slot_t *nmc_connections_slot_of(nmc_connections_t *store,
+    nmc_profile_kind_t kind, const char *id)
+{
+	nmc_connection_slot_t *slot;
+
+	if (!store || !id || id[0] == '\0') {
+		return NULL;
+	}
+	(void)nmc_connections_refresh(store);
+	slot = slot_for(store, kind, id);
+	return slot && slot->present ? slot : NULL;
+}
+
 nmc_connection_slot_t *nmc_connections_by_uuid(nmc_connections_t *store, const char *uuid)
 {
 	size_t at;
@@ -1009,6 +1022,11 @@ static const nmc_method_t CONNECTION_METHODS[] = {
 	{ "GetSettings", "", "a{sa{sv}}", get_settings },
 	{ "GetSecrets", "s", "a{sa{sv}}", refuse_secrets },
 	{ "Update", "a{sa{sv}}", "", refuse_read_only },
+	/* NM's newer spelling, and **the one `nmcli` actually calls**: with only
+	 * `Update` declared, a modify got "this interface has no such method in
+	 * this build" from the dispatcher instead of netcfgd's explanation. A
+	 * refusal that never runs is not a refusal. */
+	{ "Update2", "a{sa{sv}}ua{sv}", "a{sv}", refuse_read_only },
 	{ "UpdateUnsaved", "a{sa{sv}}", "", refuse_read_only },
 	{ "Delete", "", "", refuse_read_only },
 	{ "Save", "", "", refuse_read_only },

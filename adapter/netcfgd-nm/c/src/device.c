@@ -17,6 +17,7 @@
  */
 #include "nmc/device.h"
 #include "nmc/store.h"
+#include "nmc/active.h"
 #include "nmc/settings.h"
 
 #include <stdio.h>
@@ -345,7 +346,7 @@ NMC_FACT(say_autoconnect, return put_bool(into, facts.known && facts.configured)
  * and nothing assigns out of the rest of it -- and the comparison is
  * case-insensitive because netcfgd's rendering is not this function's to assume.
  */
-static int routable(const char *addresses)
+int nmc_device_routable(const char *addresses)
 {
 	const char *at = addresses;
 
@@ -409,7 +410,7 @@ static dbus_uint32_t state_and_reason(const nmc_device_slot_t *slot, dbus_uint32
 		*reason = NM_DEVICE_STATE_REASON_CARRIER;
 		return NM_DEVICE_STATE_UNAVAILABLE;
 	}
-	return routable(facts.addresses) ? NM_DEVICE_STATE_ACTIVATED
+	return nmc_device_routable(facts.addresses) ? NM_DEVICE_STATE_ACTIVATED
 	                                : NM_DEVICE_STATE_DISCONNECTED;
 }
 
@@ -503,7 +504,7 @@ NMC_CONST(say_no_object, return put_path(into, "/");)
 		(void)err_size;                                                               \
 		facts_for(object, &facts);                                                    \
 		if (!facts.known ||                                                           \
-		    ((only_when_addressed) && facts.addresses[0] == '\0')) {                   \
+		    ((only_when_addressed) && !nmc_device_routable(facts.addresses))) {         \
 			return put_path(into, "/");                                            \
 		}                                                                             \
 		(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/%s/%u",     \
