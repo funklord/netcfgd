@@ -562,7 +562,7 @@ static DBusHandlerResult answer_method(DBusConnection *connection, DBusMessage *
 	if (!reply) {
 		return DBUS_HANDLER_RESULT_NEED_MEMORY;
 	}
-	if (!method->call(call, reply, object->data, err, sizeof(err))) {
+	if (!method->call(connection, call, reply, object->data, err, sizeof(err))) {
 		dbus_message_unref(reply);
 		return fail(connection, call, DBUS_ERROR_FAILED,
 		    err[0] ? err : "the call failed and said nothing");

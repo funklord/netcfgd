@@ -38,6 +38,17 @@ int  nmc_connections_refresh(nmc_connections_t *store);
 void  *nmc_connections_resolve_for_bus(const char *tail, void *context);
 size_t nmc_connections_enumerate_for_bus(const char **names, size_t max, void *context);
 
+/*
+ * Whether this pointer is the settings object's data rather than a connection's.
+ *
+ * The two interfaces share one write handler and are handed different object
+ * data -- the settings path gets the state, a connection gets its slot -- so
+ * the handler has to tell them apart before reaching for a member. Asked by
+ * identity rather than by a tag: the state is one object and its address is
+ * what distinguishes it.
+ */
+int nmc_connections_is_state(const void *data);
+
 /* Its object data is an `nmc_state_t *`; the connection's is a slot. */
 extern const nmc_interface_t nmc_settings_interface;
 extern const nmc_interface_t nmc_connection_interface;

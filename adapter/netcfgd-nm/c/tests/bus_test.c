@@ -19,6 +19,7 @@
 #include "nmc/subtypes.h"
 #include "nmc/emit.h"
 #include "nmc/settings.h"
+#include "nmc/authorize.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -347,6 +348,85 @@ int main(void)
 		check(nmc_settings_interface.method_count == 6u &&
 		        nmc_connection_interface.method_count == 7u,
 		    "and six and seven methods, which is what NM has");
+	}
+
+	/*
+	 * The write policy, every arm.
+	 *
+	 * **A live bus can only reach one of these.** This machine's `admin` tier
+	 * is a group, so the real shim answers the group arm and nothing else --
+	 * the other four would need a different document or a different uid. They
+	 * are the arms where being wrong is expensive, so they are checked here.
+	 */
+	{
+		nmc_principal_t p;
+		char            why[NMC_ERROR_MAX];
+
+		/* Parsing, including the two that must not become `any`. */
+		nmc_principal_parse("root", &p);
+		check(p.kind == NMC_PRINCIPAL_ROOT, "`root` parses");
+		nmc_principal_parse("any", &p);
+		check(p.kind == NMC_PRINCIPAL_ANY, "`any` parses");
+		nmc_principal_parse("user:nabbe", &p);
+		check(p.kind == NMC_PRINCIPAL_USER && strcmp(p.name, "nabbe") == 0,
+		    "`user:NAME` parses with its name");
+		nmc_principal_parse("group:netcfgd", &p);
+		check(p.kind == NMC_PRINCIPAL_GROUP && strcmp(p.name, "netcfgd") == 0,
+		    "`group:NAME` parses with its name");
+		nmc_principal_parse("anyone", &p);
+		check(p.kind == NMC_PRINCIPAL_UNKNOWN,
+		    "a spelling this build does not know is UNKNOWN, not `any`");
+		nmc_principal_parse(NULL, &p);
+		check(p.kind == NMC_PRINCIPAL_UNKNOWN,
+		    "and so is nothing at all, which is what an unreachable daemon gives");
+
+		/* Root may, whatever the document says: root can edit the file this
+		 * would write, so refusing would be theatre. */
+		nmc_principal_parse("root", &p);
+		check(nmc_may_write(0u, &p, why, sizeof(why)) == 1, "root may write");
+		nmc_principal_parse("group:netcfgd", &p);
+		check(nmc_may_write(0u, &p, why, sizeof(why)) == 1,
+		    "  and is not stopped by a group it is not in");
+
+		nmc_principal_parse("any", &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 1,
+		    "`any` lets an ordinary user write");
+
+		nmc_principal_parse("root", &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
+		    "a tier kept to root refuses an ordinary user");
+		check(strstr(why, "keeps to root") != NULL,
+		    "  and says so, with where to change it");
+
+		nmc_principal_parse("group:netcfgd", &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
+		    "a group tier refuses, because a bus cannot see a caller's groups");
+		check(strstr(why, "will not guess") != NULL,
+		    "  and says it will not guess, which is the honest refusal");
+		check(strstr(why, "ncfg") != NULL,
+		    "  and names what can do it instead");
+
+		/*
+		 * **The one that matters most.** A principal this build cannot
+		 * read -- a typo in `control`, or a daemon that could not be asked
+		 * -- must refuse. A parser falling back to `any` would turn a
+		 * misspelling in netcfgd.conf into an open door.
+		 */
+		nmc_principal_parse("gruop:netcfgd", &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
+		    "an unreadable principal refuses rather than widening");
+		nmc_principal_parse(NULL, &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
+		    "and so does none at all, so an unreachable daemon is not an open door");
+
+		/* A user tier, against a name that does exist on this machine and
+		 * one that cannot. */
+		nmc_principal_parse("user:root", &p);
+		check(nmc_may_write(0u, &p, why, sizeof(why)) == 1,
+		    "`user:root` admits uid 0, which it would anyway");
+		nmc_principal_parse("user:nosuchuser-netcfgd", &p);
+		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
+		    "and a user tier naming nobody admits nobody");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);
