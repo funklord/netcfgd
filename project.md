@@ -9617,6 +9617,92 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.357 Devices on the bus, and a wifi card reported as ethernet
+
+The third slice of 0264's port. **Ten devices from the running daemon appear as
+NetworkManager objects**, `busctl tree` walks to each, and a path for a device
+that has gone is refused rather than resolved.
+
+### A subtree, because the set changes
+
+NM serves a device at `/org/freedesktop/NetworkManager/Devices/<n>` and the set
+moves as a cable is plugged or a radio is rfkilled. Registering a path per
+device would mean telling the bus layer about every change -- the cache this
+port does not have -- so libdbus's **fallback handler** takes the whole subtree
+and the tail is resolved when a message arrives. The set is never stale because
+it is never stored.
+
+**A number, once given, is never reused.** `state.rs` says why and it is a
+contract rather than tidiness: a client caches object paths, so handing
+`/Devices/3` to a second device because the first went away makes every cached
+path a lie. Slots only grow; a device that disappears keeps its number and
+answers `UnknownObject`, which is what a client with a stale path must be told
+and is a different answer from silently resolving to somebody else.
+
+Two small refusals worth keeping. `sscanf(tail, "%u%c", ...)` must convert
+**one** field, because `sscanf("3x", "%u")` succeeds and would resolve
+`/Devices/3x` to device 3. And a tail containing `/` is refused, or
+`.../Devices/3/anything` would answer as the device.
+
+### `busctl tree` showed the manager and no devices
+
+The paths were served and reachable and nothing said they existed: an object's
+introspection has to advertise its child nodes, and this one did not. The
+children now come from `dbus_connection_list_registered` rather than from a
+list here -- libdbus already knows what is registered beneath a path, so a
+subtree added later advertises itself with no second list to forget.
+
+### The defect the first live read found: a wifi card called an ethernet port
+
+`DeviceType` answered **1**, `ETHERNET`, for `wlp0s20f3`.
+
+The map was over netcfgd's **device kind**, and netcfgd reports every device in
+this document as `"physical"` -- its device kinds describe how a device is
+CONFIGURED. NM's `DeviceType` is about what the kernel made, and that is
+`ncfg_link_t.kind`: `wireguard`, `bridge`, `gre`, and `""` for a real NIC, with
+`wireless` beside it to separate a radio from an ethernet port, both of which
+are `""`.
+
+**It would not have been found by reading.** The table looked right, every
+entry in it was a plausible kind, and nothing in netcfgd's device list says
+"this spelling is not what you think". What found it was one real device read
+over the bus. With the link kinds instead, all ten are right:
+
+    wlp0s20f3  2 WIFI        enp0s31f6  1 ETHERNET    lo       32 LOOPBACK
+    docker0   13 BRIDGE      wg-drop   29 WIREGUARD   gre0     17 IP_TUNNEL
+    wg-test   29 WIREGUARD   gretap0   17 IP_TUNNEL   sit0     17 IP_TUNNEL
+    erspan0   17 IP_TUNNEL
+
+**`GENERIC` and not `UNKNOWN` for a kind this build has not mapped**: libnm
+hides UNKNOWN from some views while GENERIC is "a device with no special
+handling", so the difference is whether a user can see their own interface in a
+list. And loopback is decided **by name**, which is a proxy written down as
+one: NM reads `IFF_LOOPBACK` and the client carries no interface flags.
+
+The map is exposed as `nmc_device_type_of` for its test rather than for a
+second caller -- it is pure, it is a table, and it got one wrong. The first
+case asserted is the defect.
+
+### Twenty-nine checks, and what they still cannot reach
+
+The property counts are asserted -- twenty-four on the manager, thirty-one on
+the device -- rather than names being sampled, because a property that falls
+out of a table is invisible to a sample.
+
+What no unit test here reaches is the marshalling and the resolution, which
+needed the bus: ten devices listed, each introspected, a stale path refused.
+0264's oracle is still the measure and still unrun -- `tests/live/nm.sh`
+unchanged but for a path.
+
+### Still absent, by name
+
+`Ip4Config`, `Dhcp4Config` and `ActiveConnection` answer `/`, NM's "no object",
+which is not an empty string -- that is not a valid object path and libnm would
+reject the reply. Those are `ipconfig.rs` and `active.rs`. The device subtype
+interfaces -- `.Wireless` with its two signals, `.Wired`, `.Bridge` -- are not
+served yet, so a client sees a device of the right type with none of its
+type-specific properties.
+
 ## 10.356 The adapter's client was already written, and the manager is on the bus
 
 The second slice of 0264's port. **`client.rs` has no counterpart to write**:

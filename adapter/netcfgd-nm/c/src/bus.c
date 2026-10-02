@@ -151,7 +151,8 @@ static int render_args(char *out, size_t out_size, size_t *used, const char *sig
 	return 1;
 }
 
-int nmc_bus_introspect(const nmc_object_t *object, char *out, size_t out_size)
+int nmc_bus_introspect(const nmc_object_t *object, const char *const *children,
+    size_t child_count, char *out, size_t out_size)
 {
 	size_t used = 0u;
 	size_t at;
@@ -238,6 +239,11 @@ int nmc_bus_introspect(const nmc_object_t *object, char *out, size_t out_size)
 			return 0;
 		}
 	}
+	for (at = 0u; at < child_count; at++) {
+		if (!say(out, out_size, &used, "\t<node name=\"%s\"/>\n", children[at])) {
+			return 0;
+		}
+	}
 	return say(out, out_size, &used, "</node>\n");
 }
 
@@ -281,16 +287,34 @@ static DBusHandlerResult answer_introspect(DBusConnection *connection, DBusMessa
 	char        *xml = malloc(NMC_INTROSPECT_MAX);
 	DBusMessage *reply;
 	const char  *text;
+	char       **children = NULL;
+	size_t       count = 0u;
 
 	if (!xml) {
 		return DBUS_HANDLER_RESULT_NEED_MEMORY;
 	}
-	if (!nmc_bus_introspect(object, xml, NMC_INTROSPECT_MAX)) {
+	/*
+	 * **The children come from libdbus rather than from a list here.** It
+	 * knows what has been registered beneath this path -- object or fallback
+	 * -- so a subtree added later advertises itself with no second list to
+	 * update. `dbus_connection_list_registered` answers for one level, which
+	 * is what a node listing is.
+	 */
+	if (!dbus_connection_list_registered(connection, object->path, &children)) {
+		children = NULL;
+	}
+	for (count = 0u; children && children[count] != NULL; count++) {
+		/* Counting is all this loop does. */
+	}
+	if (!nmc_bus_introspect(object, (const char *const *)children, count, xml,
+	        NMC_INTROSPECT_MAX)) {
+		dbus_free_string_array(children);
 		free(xml);
 		return fail(connection, call, DBUS_ERROR_FAILED,
 		    "the introspection document for this object does not fit this build's "
 		    "buffer, so none is offered rather than half of one");
 	}
+	dbus_free_string_array(children);
 	reply = dbus_message_new_method_return(call);
 	if (!reply) {
 		free(xml);
@@ -562,6 +586,110 @@ static DBusHandlerResult handle(DBusConnection *connection, DBusMessage *message
 	return answer_method(connection, message, object, interface);
 }
 
+/* ------------------------------------------------------------- a subtree */
+
+/*
+ * The node listing for the prefix itself.
+ *
+ * Children only, and no interfaces: the prefix is not an object. NM serves
+ * nothing at `/org/freedesktop/NetworkManager/Devices` either, and a client
+ * that asked would be told so by the empty interface list rather than by an
+ * error.
+ */
+static DBusHandlerResult answer_subtree_root(DBusConnection *connection, DBusMessage *call,
+    const nmc_subtree_t *subtree)
+{
+	const char  *names[256];
+	size_t       count = 0u;
+	size_t       at;
+	char         xml[8192];
+	size_t       used = 0u;
+	DBusMessage *reply;
+	const char  *text = xml;
+
+	if (subtree->enumerate) {
+		count = subtree->enumerate(names, sizeof(names) / sizeof(names[0]),
+		    subtree->context);
+	}
+	xml[0] = '\0';
+	if (!say(xml, sizeof(xml), &used, "%s<node>\n",
+	        DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE)) {
+		return fail(connection, call, DBUS_ERROR_FAILED, "the node listing does not fit");
+	}
+	for (at = 0u; at < count; at++) {
+		if (!say(xml, sizeof(xml), &used, "\t<node name=\"%s\"/>\n", names[at])) {
+			return fail(connection, call, DBUS_ERROR_FAILED,
+			    "there are more children than this build will list");
+		}
+	}
+	if (!say(xml, sizeof(xml), &used, "</node>\n")) {
+		return fail(connection, call, DBUS_ERROR_FAILED, "the node listing does not fit");
+	}
+	reply = dbus_message_new_method_return(call);
+	if (!reply) {
+		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+	}
+	if (!dbus_message_append_args(reply, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID)) {
+		dbus_message_unref(reply);
+		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+	}
+	return send_and_drop(connection, reply);
+}
+
+static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *message, void *user)
+{
+	const nmc_subtree_t *subtree = user;
+	const char          *path = dbus_message_get_path(message);
+	size_t               prefix_length;
+	const char          *tail;
+	void                *data;
+	nmc_object_t         resolved;
+
+	if (dbus_message_get_type(message) != DBUS_MESSAGE_TYPE_METHOD_CALL || !path) {
+		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+	}
+	prefix_length = strlen(subtree->prefix);
+	if (strcmp(path, subtree->prefix) == 0) {
+		if (dbus_message_is_method_call(message, DBUS_INTERFACE_INTROSPECTABLE,
+		        "Introspect")) {
+			return answer_subtree_root(connection, message, subtree);
+		}
+		/* Nothing else is served at the prefix, and saying so is better
+		 * than an unresolvable child. */
+		return fail(connection, message, DBUS_ERROR_UNKNOWN_OBJECT,
+		    "nothing is served at this path; its children are");
+	}
+	if (strncmp(path, subtree->prefix, prefix_length) != 0 || path[prefix_length] != '/') {
+		return DBUS_HANDLER_RESULT_NOT_YET_HANDLED;
+	}
+	tail = path + prefix_length + 1u;
+	/*
+	 * **One level, deliberately.** A tail with a `/` in it is a path this
+	 * subtree does not serve, and resolving the first component of it would
+	 * answer for `.../Devices/3/anything` as though it were the device.
+	 */
+	if (strchr(tail, '/') != NULL) {
+		return fail(connection, message, DBUS_ERROR_UNKNOWN_OBJECT,
+		    "this object has no children");
+	}
+	data = subtree->resolve ? subtree->resolve(tail, subtree->context) : NULL;
+	if (!data) {
+		/* What a client holding a path to a device that has gone is
+		 * told. Not an empty answer, which it would cache. */
+		return fail(connection, message, DBUS_ERROR_UNKNOWN_OBJECT,
+		    "no such object; it may have gone since the path was handed out");
+	}
+	resolved.path = path;
+	resolved.interfaces = subtree->interfaces;
+	resolved.data = data;
+	return handle(connection, message, &resolved);
+}
+
+static const DBusObjectPathVTable FALLBACK_VTABLE = {
+	.unregister_function = NULL,
+	.message_function = fallback,
+};
+
 static const DBusObjectPathVTable VTABLE = {
 	.unregister_function = NULL,
 	.message_function = handle,
@@ -570,7 +698,7 @@ static const DBusObjectPathVTable VTABLE = {
 /* -------------------------------------------------------------- the loop */
 
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
-    char *err, size_t err_size)
+    const nmc_subtree_t *subtrees, size_t subtree_count, char *err, size_t err_size)
 {
 	size_t at;
 
@@ -599,6 +727,20 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 		}
 		dbus_error_free(&problem);
 	}
+	for (at = 0u; at < subtree_count; at++) {
+		DBusError problem;
+
+		dbus_error_init(&problem);
+		if (!dbus_connection_try_register_fallback(connection, subtrees[at].prefix,
+		        &FALLBACK_VTABLE, (void *)&subtrees[at], &problem)) {
+			snprintf(err, err_size, "cannot serve the subtree at %s: %s",
+			    subtrees[at].prefix,
+			    dbus_error_is_set(&problem) ? problem.message : "already registered");
+			dbus_error_free(&problem);
+			return 0;
+		}
+		dbus_error_free(&problem);
+	}
 	/*
 	 * **A bounded wait rather than a blocking one, so the stop flag is
 	 * reachable.** `dbus_connection_read_write_dispatch` with -1 returns
@@ -616,6 +758,9 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 	}
 	for (at = 0u; at < count; at++) {
 		(void)dbus_connection_unregister_object_path(connection, objects[at].path);
+	}
+	for (at = 0u; at < subtree_count; at++) {
+		(void)dbus_connection_unregister_object_path(connection, subtrees[at].prefix);
 	}
 	return 1;
 }

@@ -23,7 +23,7 @@
 CC ?= gcc
 
 PROGRAM = netcfgd-nm
-SRCS    = src/bus.c src/compat.c src/state.c src/manager.c
+SRCS    = src/bus.c src/compat.c src/state.c src/manager.c src/store.c src/device.c
 OBJS    = $(SRCS:.c=.o)
 DEPS    = $(SRCS:.c=.d) src/main.d tests/bus_test.d
 

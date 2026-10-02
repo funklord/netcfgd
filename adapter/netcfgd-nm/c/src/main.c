@@ -8,6 +8,7 @@
 #include "nmc/bus.h"
 #include "nmc/compat.h"
 #include "nmc/manager.h"
+#include "nmc/device.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -15,6 +16,7 @@
 
 #define NMC_BUS_NAME     "org.freedesktop.NetworkManager"
 #define NMC_MANAGER_PATH "/org/freedesktop/NetworkManager"
+#define NMC_DEVICES_PATH "/org/freedesktop/NetworkManager/Devices"
 
 static void asked_to_stop(int signal_number)
 {
@@ -40,6 +42,8 @@ int main(int argc, char **argv)
 	int                    claimed;
 	char                   err[NMC_ERROR_MAX] = "";
 	nmc_state_t            state;
+	nmc_store_t            store;
+	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
 	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
@@ -49,6 +53,8 @@ int main(int argc, char **argv)
 	};
 
 	nmc_state_init(&state, NULL);
+	nmc_store_init(&store, &state);
+	state.store = (struct nmc_store *)&store;
 
 	if (argc > 1) {
 		if (strcmp(argv[1], "--session") == 0) {
@@ -101,12 +107,21 @@ int main(int argc, char **argv)
 	}
 	dbus_error_free(&problem);
 
-	if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]), err,
-	        sizeof(err))) {
-		fprintf(stderr, "netcfgd-nm: %s\n", err);
-		nmc_state_free(&state);
-		return 1;
+	{
+		const nmc_subtree_t subtrees[] = {
+			{ NMC_DEVICES_PATH, device_interfaces, nmc_store_resolve_for_bus,
+			    nmc_store_enumerate_for_bus, &store }
+		};
+
+		if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]),
+		        subtrees, sizeof(subtrees) / sizeof(subtrees[0]), err, sizeof(err))) {
+			fprintf(stderr, "netcfgd-nm: %s\n", err);
+			nmc_store_free(&store);
+			nmc_state_free(&state);
+			return 1;
+		}
 	}
+	nmc_store_free(&store);
 	nmc_state_free(&state);
 	return 0;
 }

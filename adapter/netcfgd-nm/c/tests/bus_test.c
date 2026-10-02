@@ -15,6 +15,7 @@
 #include "nmc/bus.h"
 #include "nmc/compat.h"
 #include "nmc/manager.h"
+#include "nmc/device.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -40,7 +41,7 @@ int main(void)
 	const nmc_object_t           object = { "/org/freedesktop/NetworkManager", interfaces,
 		    NULL };
 
-	check(nmc_bus_introspect(&object, xml, sizeof(xml)) == 1,
+	check(nmc_bus_introspect(&object, NULL, 0u, xml, sizeof(xml)) == 1,
 	    "the manager object introspects");
 
 	check(strstr(xml, "<node>") && strstr(xml, "</node>"),
@@ -70,7 +71,7 @@ int main(void)
 	{
 		char small[200];
 
-		check(nmc_bus_introspect(&object, small, sizeof(small)) == 0,
+		check(nmc_bus_introspect(&object, NULL, 0u, small, sizeof(small)) == 0,
 		    "a buffer too small is refused");
 		check(strstr(small, "org.netcfgd.Compat") == NULL,
 		    "  and nothing half-written is left in it to be parsed");
@@ -84,7 +85,7 @@ int main(void)
 		const nmc_object_t     bare = { "/org/freedesktop/NetworkManager/Devices",
 			    none, NULL };
 
-		check(nmc_bus_introspect(&bare, xml, sizeof(xml)) == 1,
+		check(nmc_bus_introspect(&bare, NULL, 0u, xml, sizeof(xml)) == 1,
 		    "an object with no interfaces of its own still introspects");
 		check(strstr(xml, "\"org.freedesktop.DBus.Properties\"") != NULL,
 		    "  and still offers Properties");
@@ -124,7 +125,7 @@ int main(void)
 		check(all_typed,
 		    "  every one has a name, a getter, and one valid complete type");
 
-		check(nmc_bus_introspect(&manager, xml, sizeof(xml)) == 1,
+		check(nmc_bus_introspect(&manager, NULL, 0u, xml, sizeof(xml)) == 1,
 		    "both interfaces introspect together at one path");
 		check(strstr(xml, "name=\"Version\" type=\"s\"") != NULL,
 		    "  Version is a string, which is what clients gate on");
@@ -135,6 +136,38 @@ int main(void)
 		check(strstr(xml, "\"org.netcfgd.Compat\"") != NULL &&
 		        strstr(xml, "\"org.freedesktop.NetworkManager\"") != NULL,
 		    "  and one object serving two interfaces names both");
+	}
+
+	/*
+	 * The device type map, which is pure and got one wrong.
+	 *
+	 * **The first case is the defect.** netcfgd reports its radio with a
+	 * device kind of "physical", and a table over THAT called a wifi card an
+	 * ethernet port -- so the kernel's link kind and the radio flag are what
+	 * this reads, and an empty kind with `wireless` is the case that was
+	 * broken.
+	 */
+	{
+		check(nmc_device_type_of("", 1, "wlp0s20f3") == 2u,
+		    "a real NIC with a radio is WIFI, which is the case that was wrong");
+		check(nmc_device_type_of("", 0, "enp0s31f6") == 1u,
+		    "and the same empty kind without one is ETHERNET");
+		check(nmc_device_type_of("", 0, "lo") == 32u,
+		    "lo is LOOPBACK, by a name that stands in for IFF_LOOPBACK");
+		check(nmc_device_type_of("wireguard", 0, "wg0") == 29u, "wireguard is WIREGUARD");
+		check(nmc_device_type_of("bridge", 0, "br0") == 13u, "bridge is BRIDGE");
+		check(nmc_device_type_of("gre", 0, "gre0") == 17u &&
+		        nmc_device_type_of("sit", 0, "sit0") == 17u &&
+		        nmc_device_type_of("erspan", 0, "erspan0") == 17u,
+		    "and gre, sit and erspan share NM's one tunnel type");
+		/* GENERIC and not UNKNOWN: libnm hides UNKNOWN from some views, so
+		 * the difference is whether a user sees their own interface. */
+		check(nmc_device_type_of("some_new_kind", 0, "x0") == 14u,
+		    "a kind this build has not mapped is GENERIC, not UNKNOWN");
+		check(nmc_device_type_of(NULL, 0, NULL) == 14u,
+		    "and nothing at all is answered rather than crashed on");
+		check(nmc_device_interface.property_count == 31u,
+		    "the device declares thirty-one properties, as NM's own does");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);
