@@ -12,6 +12,8 @@
 #include "nmc/subtypes.h"
 #include "nmc/emit.h"
 #include "nmc/settings.h"
+#include "nmc/ipconfig.h"
+#include "nmc/active.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -21,6 +23,9 @@
 #define NMC_MANAGER_PATH "/org/freedesktop/NetworkManager"
 #define NMC_DEVICES_PATH "/org/freedesktop/NetworkManager/Devices"
 #define NMC_SETTINGS_PATH "/org/freedesktop/NetworkManager/Settings"
+#define NMC_IP4_PATH      "/org/freedesktop/NetworkManager/IP4Config"
+#define NMC_IP6_PATH      "/org/freedesktop/NetworkManager/IP6Config"
+#define NMC_ACTIVE_PATH   "/org/freedesktop/NetworkManager/ActiveConnection"
 
 static void asked_to_stop(int signal_number)
 {
@@ -100,6 +105,9 @@ int main(int argc, char **argv)
 	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
 	const nmc_interface_t *settings_interfaces[] = { &nmc_settings_interface, NULL };
 	const nmc_interface_t *connection_interfaces[] = { &nmc_connection_interface, NULL };
+	const nmc_interface_t *ip4_interfaces[] = { &nmc_ip4config_interface, NULL };
+	const nmc_interface_t *ip6_interfaces[] = { &nmc_ip6config_interface, NULL };
+	const nmc_interface_t *active_interfaces[] = { &nmc_active_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
 	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
@@ -192,7 +200,29 @@ int main(int argc, char **argv)
 			    .interfaces = connection_interfaces,
 			    .resolve = nmc_connections_resolve_for_bus,
 			    .enumerate = nmc_connections_enumerate_for_bus,
-			    .context = &connections }
+			    .context = &connections },
+			/*
+			 * All three keyed by the DEVICE's number and resolving
+			 * through its store, because netcfgd has one addressing
+			 * and one active thing per interface -- so a second
+			 * numbering would be a second thing able to disagree
+			 * about which config belongs to which device.
+			 */
+			{ .prefix = NMC_IP4_PATH,
+			    .interfaces = ip4_interfaces,
+			    .resolve = nmc_store_resolve_for_bus,
+			    .enumerate = nmc_store_enumerate_for_bus,
+			    .context = &store },
+			{ .prefix = NMC_IP6_PATH,
+			    .interfaces = ip6_interfaces,
+			    .resolve = nmc_store_resolve_for_bus,
+			    .enumerate = nmc_store_enumerate_for_bus,
+			    .context = &store },
+			{ .prefix = NMC_ACTIVE_PATH,
+			    .interfaces = active_interfaces,
+			    .resolve = nmc_store_resolve_for_bus,
+			    .enumerate = nmc_store_enumerate_for_bus,
+			    .context = &store }
 		};
 
 		heartbeat.connection = connection;

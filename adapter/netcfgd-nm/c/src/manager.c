@@ -21,6 +21,7 @@
  */
 #include "nmc/manager.h"
 #include "nmc/store.h"
+#include "nmc/device.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -226,8 +227,52 @@ NMC_CONST_U32(say_radio_flags, 0u)
 /* netcfgd's commit-confirm is not reachable through this interface. Empty is
  * the truthful answer to "which checkpoints exist here"; an error is not. */
 NMC_CONST_EMPTY(say_checkpoints, "o")
-/* Not tracked yet, and an empty list is what "none" looks like to libnm. */
-NMC_CONST_EMPTY(say_active_connections, "o")
+/*
+ * The active connections: one per device that holds an address.
+ *
+ * The same list as `Devices` filtered, rather than a store of its own -- a
+ * device carrying traffic IS an active connection here, and keeping a second
+ * list would be a second thing able to disagree with the first.
+ */
+static int say_active_connections(DBusMessageIter *into, void *object, char *err,
+    size_t err_size)
+{
+	nmc_state_t    *state = object;
+	nmc_store_t    *store = state ? (nmc_store_t *)state->store : NULL;
+	DBusMessageIter array;
+	const char     *names[256];
+	size_t          count = 0u;
+	size_t          at;
+
+	(void)err;
+	(void)err_size;
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "o", &array)) {
+		return 0;
+	}
+	if (store) {
+		count = nmc_store_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
+		    store);
+	}
+	for (at = 0u; at < count; at++) {
+		char               path[96];
+		nmc_device_slot_t *slot = nmc_store_resolve(store, names[at]);
+		char               addresses[1024] = "";
+
+		if (!slot) {
+			continue;
+		}
+		nmc_device_addresses_of(slot, addresses, sizeof(addresses));
+		if (addresses[0] == '\0') {
+			continue;
+		}
+		(void)snprintf(path, sizeof(path),
+		    "/org/freedesktop/NetworkManager/ActiveConnection/%s", names[at]);
+		if (!put_device_path(&array, path)) {
+			break;
+		}
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+}
 
 /*
  * Every device netcfgd reports, as object paths.
