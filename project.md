@@ -12293,6 +12293,81 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.360 The settings interfaces, with every write refused on purpose
+
+The sixth slice of 0264's port. `...Settings` serves at the settings path and a
+`...Settings.Connection` per saved network beneath it -- the holder's two
+networks appear, and `GetSettings` answers NM's nested `a{sa{sv}}` with
+`EMP-XYLEM` in it.
+
+### Every write refuses, and that is the design rather than an omission
+
+`AddConnection`, `Update`, `Delete`, `Save`, `ClearSecrets`, `GetSecrets`,
+`LoadConnections`, `ReloadConnections` and `SaveHostname` are **declared and
+refused**, naming why and pointing at `ncfg wifi add`.
+
+A write means reaching `ncfg_client_config_put`, and doing it correctly means
+establishing **who is asking** -- the caller's uid off the message, against
+netcfgd's own `control` policy -- before touching a file. **0264 found the Rust
+shim exporting a method with no authorization at all**, and a port is exactly
+when a defect like that is carried across. A half-built write path is how it
+would be rewritten, so the writes refuse until the authorization is its own
+slice with its own tests.
+
+`NotSupported` in spirit and `Failed` on the wire, deliberately not
+`AccessDenied`: the second says "not you", which would have a client retry as
+root, and nobody can do this yet. And `CanModify` is **false** -- a `true` would
+have clients offer an "Add network" button that fails when pressed.
+
+### `Writable` is not ported, and a test says so
+
+0264 found it exported from the Rust's `Settings.Connection` by accident: it
+sits inside the `#[zbus::interface]` block where `authorize` and `republish`
+correctly sit outside it. With no authorization, **any local process could call
+`Writable("anything")` and learn from the reply whether
+`/etc/netcfgd/conf.d/nm-<name>.conf` exists.** NetworkManager has no such
+method, so it is also a difference a client introspecting the shim can see.
+
+It is absent here, and `bus_test` **asserts the absence** rather than trusting
+that nobody adds it back. `Filename` reports the path this build would write
+and does not probe it -- whether the file exists is exactly what the defect
+leaked.
+
+### One path cannot be both an object and a fallback
+
+The first run of this slice did not start at all:
+
+    netcfgd-nm: cannot serve the subtree at /org/.../Settings:
+                A handler is already registered for /org/.../Settings
+
+An object was registered at the settings path and a fallback at the same path
+for its children. **libdbus refused the second, loudly, with the reason** --
+which is the behaviour worth having and is why this cost a minute rather than
+an afternoon. `nmc_subtree_t` gained `root_interfaces`, so a subtree serves its
+own prefix: `/Settings` serves `...Settings` and `/Settings/N` serves
+`...Settings.Connection`, which is NM's own shape. `/Devices` keeps NULL there,
+because NM serves nothing at that path either.
+
+### Three answers that are exact rather than placeholders
+
+- **`VersionId` is 0 and stays 0.** NM's clients compare it to notice a change,
+  and netcfgd publishes no revision -- so a client comparing two zeroes learns
+  nothing, where one comparing two 1s would conclude the connection had not
+  changed when it might have.
+- **`Unsaved` is false for everything.** netcfgd's document IS the store, so a
+  connection a client can see is one already written.
+- **`hostname` of `"none"` or `"from_dhcp"` becomes empty.** Those are netcfgd's
+  words for "not a static name" and NM's field is the name itself; passing them
+  through would be a machine whose hostname a client believes is the literal
+  string `from_dhcp`.
+
+`GetSettings` answers two groups -- `connection` and `802-11-wireless` -- and no
+`802-11-wireless-security`, because **secrets are not in `GetSettings` even in
+NM**. They come from `GetSecrets`, which refuses: a secret in netcfgd is a
+reference and the value lives at 0600 outside the document on purpose, so
+answering it over this bus would undo the whole arrangement. That is the
+holder's decision rather than a slice of a port.
+
 ## 10.359 The signal mechanism, and why a quiet bus proved nothing
 
 The fifth slice of 0264's port, and the one 10.356 said would have to carry the

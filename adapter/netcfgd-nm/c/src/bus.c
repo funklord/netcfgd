@@ -614,6 +614,22 @@ static DBusHandlerResult handle(DBusConnection *connection, DBusMessage *message
  * that asked would be told so by the empty interface list rather than by an
  * error.
  */
+/* One string reply, which both introspection paths here need. */
+static DBusHandlerResult send_text(DBusConnection *connection, DBusMessage *call,
+    const char *text)
+{
+	DBusMessage *reply = dbus_message_new_method_return(call);
+
+	if (!reply) {
+		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+	}
+	if (!dbus_message_append_args(reply, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID)) {
+		dbus_message_unref(reply);
+		return DBUS_HANDLER_RESULT_NEED_MEMORY;
+	}
+	return send_and_drop(connection, reply);
+}
+
 static DBusHandlerResult answer_subtree_root(DBusConnection *connection, DBusMessage *call,
     const nmc_subtree_t *subtree)
 {
@@ -622,14 +638,28 @@ static DBusHandlerResult answer_subtree_root(DBusConnection *connection, DBusMes
 	size_t       at;
 	char         xml[8192];
 	size_t       used = 0u;
-	DBusMessage *reply;
-	const char  *text = xml;
 
 	if (subtree->enumerate) {
 		count = subtree->enumerate(names, sizeof(names) / sizeof(names[0]),
 		    subtree->context);
 	}
 	xml[0] = '\0';
+	/*
+	 * **The prefix's own interfaces, where it has them.** Without this a
+	 * client introspecting `/Settings` is shown its children and not the
+	 * `...Settings` interface it serves, and libnm reads the document to
+	 * decide what to call.
+	 */
+	if (subtree->root_interfaces) {
+		const nmc_object_t root = { subtree->prefix, subtree->root_interfaces,
+			subtree->root_data };
+
+		if (!nmc_bus_introspect(&root, names, count, xml, sizeof(xml))) {
+			return fail(connection, call, DBUS_ERROR_FAILED,
+			    "the introspection document for this path does not fit");
+		}
+		return send_text(connection, call, xml);
+	}
 	if (!say(xml, sizeof(xml), &used, "%s<node>\n",
 	        DBUS_INTROSPECT_1_0_XML_DOCTYPE_DECL_NODE)) {
 		return fail(connection, call, DBUS_ERROR_FAILED, "the node listing does not fit");
@@ -643,15 +673,7 @@ static DBusHandlerResult answer_subtree_root(DBusConnection *connection, DBusMes
 	if (!say(xml, sizeof(xml), &used, "</node>\n")) {
 		return fail(connection, call, DBUS_ERROR_FAILED, "the node listing does not fit");
 	}
-	reply = dbus_message_new_method_return(call);
-	if (!reply) {
-		return DBUS_HANDLER_RESULT_NEED_MEMORY;
-	}
-	if (!dbus_message_append_args(reply, DBUS_TYPE_STRING, &text, DBUS_TYPE_INVALID)) {
-		dbus_message_unref(reply);
-		return DBUS_HANDLER_RESULT_NEED_MEMORY;
-	}
-	return send_and_drop(connection, reply);
+	return send_text(connection, call, xml);
 }
 
 static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *message, void *user)
@@ -671,6 +693,14 @@ static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *messa
 		if (dbus_message_is_method_call(message, DBUS_INTERFACE_INTROSPECTABLE,
 		        "Introspect")) {
 			return answer_subtree_root(connection, message, subtree);
+		}
+		if (subtree->root_interfaces) {
+			nmc_object_t root;
+
+			root.path = path;
+			root.interfaces = subtree->root_interfaces;
+			root.data = subtree->root_data;
+			return handle(connection, message, &root);
 		}
 		/* Nothing else is served at the prefix, and saying so is better
 		 * than an unresolvable child. */

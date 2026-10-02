@@ -18,6 +18,7 @@
 #include "nmc/device.h"
 #include "nmc/subtypes.h"
 #include "nmc/emit.h"
+#include "nmc/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -293,6 +294,59 @@ int main(void)
 		free(first);
 		free(again);
 		free(other);
+	}
+
+	/*
+	 * The settings interfaces, and one check that is a guard rather than a
+	 * description.
+	 *
+	 * **`Writable` must not be a method here.** 0264 found the Rust shim
+	 * exporting it from `Settings.Connection` by accident, with no
+	 * authorization, so any local process could call `Writable("anything")`
+	 * and learn whether `/etc/netcfgd/conf.d/nm-<name>.conf` exists.
+	 * NetworkManager has no such method. A port is exactly when a defect like
+	 * that gets carried across, so this asserts the absence rather than
+	 * trusting that nobody adds it back.
+	 */
+	{
+		size_t at;
+		int    writable = 0;
+		int    every_write_refuses = 1;
+
+		for (at = 0u; at < nmc_connection_interface.method_count; at++) {
+			const char *name = nmc_connection_interface.methods[at].name;
+
+			if (strcmp(name, "Writable") == 0) {
+				writable = 1;
+			}
+		}
+		check(!writable,
+		    "`Writable` is not a method on Settings.Connection, which is 0264's defect "
+		    "not ported");
+
+		/* Every write refusing is this build's position, and a write that
+		 * quietly started working without authorization is the thing worth
+		 * catching. They share one handler, so one pointer comparison holds
+		 * all of them. */
+		for (at = 0u; at < nmc_connection_interface.method_count; at++) {
+			const nmc_method_t *method = &nmc_connection_interface.methods[at];
+
+			if (strcmp(method->name, "GetSettings") == 0) {
+				continue;
+			}
+			if (method->call == nmc_connection_interface.methods[0].call) {
+				every_write_refuses = 0;
+			}
+		}
+		check(every_write_refuses,
+		    "and every method but GetSettings shares the refusing handler");
+
+		check(nmc_settings_interface.property_count == 3u &&
+		        nmc_connection_interface.property_count == 4u,
+		    "the settings interfaces declare three and four properties");
+		check(nmc_settings_interface.method_count == 6u &&
+		        nmc_connection_interface.method_count == 7u,
+		    "and six and seven methods, which is what NM has");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

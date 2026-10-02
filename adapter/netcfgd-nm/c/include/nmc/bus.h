@@ -148,6 +148,20 @@ typedef struct {
 	 * unused interface, it is a lie a client acts on.
 	 */
 	const nmc_interface_t *const *(*interfaces_for)(void *object);
+	/*
+	 * What the PREFIX itself serves, or NULL for nothing.
+	 *
+	 * **Because a path cannot be both an object and a fallback.** libdbus
+	 * refuses the second registration, loudly -- which is how this member
+	 * came to exist: `/Settings` serves `...Settings` and `/Settings/N`
+	 * serves `...Settings.Connection`, so registering an object at the one
+	 * and a fallback at the other's parent is the same path twice.
+	 *
+	 * `/Devices` is the other case and wants NULL: NM serves nothing there
+	 * either.
+	 */
+	const nmc_interface_t *const *root_interfaces;
+	void                         *root_data;
 	void *(*resolve)(const char *tail, void *context);
 	/* Write up to `max` child names into `names`; answer how many. */
 	size_t (*enumerate)(const char **names, size_t max, void *context);
