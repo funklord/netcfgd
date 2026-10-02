@@ -80,14 +80,30 @@ QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
 # than an error, so both ends land on the same message they always did -- now
 # a report of something attempted rather than an instruction.
 .PHONY: qtty
+# **Three reasons it can be absent, and they are three messages (0263).**
+# `build-and-commit.md` asks that git's absence be reported as its own
+# condition rather than as a repository that is not one -- and the earlier
+# version collapsed "no git installed", "not a checkout" and "the fetch
+# failed" into one sentence that guessed between them in parentheses. The
+# remedy differs per case: install git, unpack a release that carries qtty,
+# or look at the network. Presence of the program is established before git
+# is asked anything, which is the spelling that decision asks for.
 qtty:
-	@if [ ! -f $(QTTY_DIR)/qtty.pro ] && git -C .. rev-parse --git-dir >/dev/null 2>&1; then \
+	@if [ -f $(QTTY_DIR)/qtty.pro ]; then \
+		:; \
+	elif ! command -v git >/dev/null 2>&1; then \
+		echo "gui: $(QTTY_DIR) is empty and git is not installed, so the terminal"; \
+		echo "gui:   frontend cannot be fetched. Install git, or build from a release"; \
+		echo "gui:   that carries qtty."; \
+	elif ! git -C .. rev-parse --git-dir >/dev/null 2>&1; then \
+		echo "gui: $(QTTY_DIR) is empty and this is not a git checkout, so there is"; \
+		echo "gui:   no submodule to fetch."; \
+	else \
 		echo "gui: $(QTTY_DIR) is empty; fetching the submodule for the terminal frontend"; \
 		GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=/bin/true \
 		GIT_SSH_COMMAND='ssh -oBatchMode=yes -oStrictHostKeyChecking=accept-new' \
 		timeout 600 git -C .. submodule update --init -- qtty || \
-			echo "gui:   could not fetch it (no network, no key, or a source tree \
-without git). Building the window only."; \
+			echo "gui:   could not fetch it: no network, or no key for the remote."; \
 	fi; \
 	if [ -f $(QTTY_DIR)/qtty.pro ]; then \
 		$(MAKE) -C $(QTTY_DIR); \

@@ -9499,6 +9499,38 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.158 The vendored frontend may be absent, and 0173 stands
+
+`build-and-commit.md` requires a build that vendors a sibling to fetch it **and
+fail** when it cannot, because a build that silently produces less is worse than
+one that stops. `gui/Makefile` does the first and not the second: a clone whose
+`qtty` submodule is absent and unfetchable builds the window, says it has no
+terminal frontend, and succeeds.
+
+**Raised as a layer conflict rather than resolved, and ruled on by the copyright
+holder 2026-10-02: the project decision wins, 0173 stands.** That rule and 0173
+were both written on 2026-09-07 and neither saw the other; what 0173 decided,
+for the report *"netcfgd-tui is the same as netcfgd-gui, and there is no --tui
+argument"*, was that the loss be **announced** rather than that the build stop.
+
+The two are compatible because the global rule's argument is about silence. Its
+incident is raidcfgd building no ossa backend at all and saying nothing, so the
+captured fixtures drifted from the library they capture. Here the absence is
+stated at three moments: when the fetch cannot happen, when `gui.pro`
+configures, and when somebody types `netcfgd-tui`. An absent backend is a hole
+in what netcfgd can see; an absent qtty is a window instead of a terminal, in a
+program that names the other command.
+
+**The half of the rule that was not satisfied is closed rather than argued
+with.** It asks that git's absence be reported as its own condition rather than
+as a repository that is not one, and the recipe had collapsed three causes into
+one sentence that guessed between them in parentheses -- *"no network, no key,
+or a source tree without git"*. Those have three different remedies, so they
+are three messages, with the program's presence established before git is asked
+anything. Proven with the recipe's own bytes against an empty `QTTY_DIR`;
+the fetch-failure branch is not demonstrated, because exercising it means
+taking the network off the machine. Decision 0263.
+
 ## 10.157 Five red runs, and only the last was a defect in the program
 
 Five consecutive `make check` failures in one sitting, on a machine that had
