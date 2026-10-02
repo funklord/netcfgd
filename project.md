@@ -9617,6 +9617,95 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.354 The NM adapter's C port: the dispatcher, and one interface on it
+
+Instructed by the copyright holder, 2026-10-02: port the adapter to C over
+`libdbus-1`, which is the answer 0264 had already chosen and 10.353 found
+unblocked. **What exists is the foundation and one interface, proven on a
+bus.** The Rust goes on shipping; nothing is switched over.
+
+**It lives at `adapter/netcfgd-nm/c/`, mirroring the daemon's own
+arrangement** -- `crates/` and `c/` at the top level, `netcfgd-nm/` and
+`netcfgd-nm/c/` here. 0264 is explicit that the gate `make nm-containment`
+must be re-pointed *before* the Rust adapter is removed and not after, so
+building beside it is the only order that does not break a gate.
+
+### The interface is data, and that is the whole design
+
+`zbus` generated introspection, property access and method dispatch from
+`#[zbus::interface]`. libdbus generates nothing: a handler is handed a
+`DBusMessage` and everything after is the program's. Written per interface that
+is eleven interfaces' worth of `strcmp` chains, each able to disagree with the
+introspection XML beside it -- **and a client reads the XML, so a disagreement
+is a defect a client sees and the program does not.**
+
+So `nmc_interface_t` is a table of properties and methods, and `Introspect` is
+rendered from the same table the dispatcher routes with. There is no second
+list to forget. `org.freedesktop.DBus.Properties` is implemented once, in
+`bus.c`, for every object.
+
+Three decisions in it worth keeping:
+
+- **`get` appends the value and the dispatcher opens the variant**, using the
+  signature from the table. A property cannot then disagree with the signature
+  it published, which is why the signature is in the table rather than inferred
+  from whatever `get` happened to write.
+- **An argument is a COMPLETE type**, so libdbus's signature iterator does the
+  walking: `a{sv}` is one argument and four characters, and splitting per byte
+  would publish four.
+- **A property declared writable with no setter is refused as a build error**,
+  not as a read-only property. Those are different answers -- one says "you may
+  not" and the other says this build is wrong -- and saying the first for the
+  second is how a missing setter survives.
+
+### `org.netcfgd.Compat` first, because its right answer is a constant
+
+Three properties, two plain strings and one `a{sb}`, which exercises the whole
+dispatcher -- a variant, a container inside a variant, introspection from a
+table -- against something that cannot be wrong for an interesting reason.
+Design section 9.3's interface, where the shim stops pretending about
+`Version`.
+
+### What is proven, and by what
+
+`make test` is twelve checks on the introspection document, which is pure and
+so checkable without a bus. The one worth naming is the refusal: **a buffer too
+small produces nothing rather than a prefix**, because a truncated
+introspection document is valid XML describing half an interface and a client
+believes what arrived.
+
+The half a unit test cannot reach was done on a private bus in the scratchpad,
+`dbus-daemon` on its own socket:
+
+    Properties.GetAll   the three properties, the a{sb} nested in its variant
+    Properties.Get      variant string "1.44.0"
+    Introspect          busctl parsed it and rendered the signatures
+    an unknown property org.freedesktop.DBus.Error.UnknownProperty
+
+**`busctl` is the evidence that matters there.** It is a foreign client
+parsing the XML this build generated, which is 0264's own argument for
+`tests/live/nm.sh` being the oracle: a witness that is not ours.
+
+### What remains, sized rather than estimated
+
+8,687 lines of Rust in fourteen modules. `client.rs` has a head start that the
+daemon's port did not -- `client/libncfg_client.a` is already C and
+`c/include/ncfg/proto.h` carries `ncfg_proto_request_t` -- and `emit.rs` at
+1,177 lines is the hard one, because signals and change tracking are a
+mechanism this header has no member for yet.
+
+**0264's acceptance test is unchanged and is not negotiable**: a C shim is
+right when `tests/live/nm.sh` passes unchanged but for a path -- 1,269 lines,
+37 `nmcli` and 45 `busctl` invocations, judging the shim by what libnm
+believes.
+
+**Three defects 0264 found in the Rust are not to be ported.** `Writable` is
+an exported D-Bus method that should be a private helper, and is the one method
+on its interface with no authorization: any local process can call
+`Writable("anything")` and learn whether a file exists. It becomes a plain
+function here. `save`'s `# Errors` section contradicts its body. The policy
+gate's blind spot was already corrected.
+
 ## 10.353 Nothing has to stay Rust, and the condition for that was met
 
 The copyright holder, 2026-10-02: nothing needs to stay Rust, they never said

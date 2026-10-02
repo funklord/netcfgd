@@ -107,6 +107,18 @@ debian/debhelper-build-stamp
 # The TDE adapter builds with CMake, which wants its own binary directory.
 adapter/netcfgd-tde/build/
 
+# The NM adapter's C port, which builds in place the way `c/` does: one object
+# beside each source, one test binary, and a `.d` per object now that it has
+# header tracking from the start. Named by shape, two levels, because `src/`
+# and `tests/` are the only directories it has and both hold nothing but
+# sources and what the compiler leaves beside them.
+adapter/netcfgd-nm/c/netcfgd-nm
+adapter/netcfgd-nm/c/src/*.o
+adapter/netcfgd-nm/c/src/*.d
+adapter/netcfgd-nm/c/tests/*.o
+adapter/netcfgd-nm/c/tests/*.d
+adapter/netcfgd-nm/c/tests/bus_test
+
 # The bridge program (bridge/Makefile). fuzznet keeps its own build output
 # out of the way through its own .gitignore, inside the submodule.
 bridge/netcfgd-remote
