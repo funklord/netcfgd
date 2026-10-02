@@ -18,6 +18,7 @@
  *   mechanism `bus.h` has no member for, which is `emit.rs`'s slice.
  */
 #include "nmc/subtypes.h"
+#include "nmc/accesspoint.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -189,6 +190,43 @@ static int say_mode(DBusMessageIter *into, void *object, char *err, size_t err_s
 	return put_u32(into, NM_802_11_MODE_INFRA);
 }
 
+/*
+ * Every access point netcfgd's last scan reported.
+ *
+ * **Reached through the state rather than through the device**, because a scan
+ * belongs to a radio and this shim scans one -- so the list is the same whichever
+ * radio asks, and keeping a per-device copy would be a second list able to
+ * disagree. A machine with two radios wants a store per radio, which is a change
+ * to `nmc_aps_t` and not to this.
+ */
+static int say_access_points(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	const nmc_device_slot_t *slot = object;
+	DBusMessageIter          array;
+	const char              *names[256];
+	size_t                   count = 0u;
+	size_t                   at;
+
+	(void)err;
+	(void)err_size;
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "o", &array)) {
+		return 0;
+	}
+	if (slot && slot->state && slot->state->access_points) {
+		count = nmc_aps_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
+		    slot->state->access_points);
+	}
+	for (at = 0u; at < count; at++) {
+		char        path[96];
+		const char *as_path = path;
+
+		(void)snprintf(path, sizeof(path),
+		    "/org/freedesktop/NetworkManager/AccessPoint/%s", names[at]);
+		(void)dbus_message_iter_append_basic(&array, DBUS_TYPE_OBJECT_PATH, &as_path);
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+}
+
 static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "HwAddress", "s", NMC_READ, say_hw_address, NULL },
 	{ "PermHwAddress", "s", NMC_READ, say_no_string, NULL },
@@ -197,9 +235,7 @@ static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "Bitrate", "u", NMC_READ, say_zero, NULL },
 	{ "WirelessCapabilities", "u", NMC_READ, say_zero, NULL },
 	{ "LastScan", "x", NMC_READ, say_last_scan, NULL },
-	/* Scan results are their own object family and their own slice. An empty
-	 * list is "none known", which is true before a scan is published. */
-	{ "AccessPoints", "ao", NMC_READ, say_no_paths, NULL },
+	{ "AccessPoints", "ao", NMC_READ, say_access_points, NULL },
 	{ "ActiveAccessPoint", "o", NMC_READ, say_root_path, NULL }
 };
 

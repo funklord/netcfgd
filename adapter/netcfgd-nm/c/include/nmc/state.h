@@ -38,6 +38,10 @@ typedef struct {
 	const char        *socket_path;
 	struct nmc_store       *store;
 	struct nmc_connections *connections;
+	/* `void *` rather than a third forward declaration: `accesspoint.h`
+	 * includes this, so naming its type here would be the cycle the other two
+	 * avoid, and a third `struct` tag for one pointer is noise. */
+	void                   *access_points;
 } nmc_state_t;
 
 void nmc_state_init(nmc_state_t *state, const char *socket_path);
