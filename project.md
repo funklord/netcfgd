@@ -9617,6 +9617,51 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.372 A probe test that races its own script, and 35 unreachable commits
+
+Two findings from this session that are nobody's slice, recorded because the
+machine they were found on is going away.
+
+**`probe::tests::require_lease_false_runs_the_probe_with_no_lease_at_all` failed
+once and passed on re-run.** The message:
+
+    the probe left no marker: verdict None, started-failures 1, detail
+    Some("cannot run /tmp/ncfg-probe-lease-97639-5/probe.sh: Text file busy
+    (os error 26)")
+
+`ETXTBSY` on an exec means the file was still open for writing when the kernel
+was asked to run it, so the test writes `probe.sh` and execs it without the
+write having been closed -- or something else held it. It is a fault in the test
+rather than in `probe.rs`: the probe reported honestly that it could not run what
+it was given.
+
+**Non-reproduction is not evidence against it, it is what "intermittent" means.**
+One re-run passed and so did a full `make check` afterwards, which says nothing
+-- the window is between a write and an exec, and it opens under load. This was
+found while four `make check` runs and a dozen namespaced live runs were
+competing for the machine, which is exactly the condition CI provides.
+
+It is in the Rust daemon's own suite, so it is recorded and not fixed: Rust
+defects in this tree are written down rather than touched. What to look for is
+the file handle, not the path.
+
+**And `git fsck` reports 35 dangling commits reachable from no pushed ref**,
+three of which are dropped stashes -- `On c-port: scan deferral wip` (2026-09-25),
+`On master: 0249-wip` (2026-09-16), and `WIP on c-port: 3b220cb` (2026-10-01).
+They are not rewrite debris by their subjects; the other 32 are plausibly the
+pre-reformat rewrite's intermediate states, and
+`origin/backup/pre-reformat-master` does not contain any of the 35.
+
+I could not preserve them. Pushing them needs a ref each -- a dangling commit has
+no branch -- and a bulk `refs/salvage/*` push was refused by this session's
+permission check, so **this is the holder's to do** before the machine is gone:
+
+    git fsck --no-reflogs --lost-found | awk '/dangling commit/{print $3}'
+    git branch salvage/<short-sha> <sha>     # per commit worth keeping
+    git push origin 'refs/heads/salvage/*'
+
+The three stashes are the ones with a name on them and are where to start.
+
 ## 10.371 One question, one answer: the activation, and the instrument that found it
 
 The oracle is at **66 of 117**, from 56. Everything here was found by
