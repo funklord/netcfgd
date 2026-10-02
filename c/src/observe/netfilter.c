@@ -51,8 +51,8 @@
  * kernel that would not answer is 1 with an empty reply, which is not.
  */
 static int dump(const ncfg_observe_kernel_t *kernel,
-    int (*build)(ncfg_buf_t *, uint32_t, char *, size_t), ncfg_netlink_reply_t *reply,
-    char *err, size_t err_size)
+    int (*build)(ncfg_buf_t *, uint32_t, char *, size_t), const char *about,
+    ncfg_netlink_reply_t *reply, char *err, size_t err_size)
 {
 	ncfg_buf_t message;
 	ncfg_buf_t body;
@@ -91,10 +91,21 @@ static int dump(const ncfg_observe_kernel_t *kernel,
 		 */
 		ncfg_netlink_reply_free(reply);
 		memset(reply, 0, sizeof(*reply));
+		/*
+		 * **`about` is why this says which dump, and it is not
+		 * decoration.** There are two -- rules and chains -- and both
+		 * fail together on a process that may not ask netlink, so an
+		 * operator saw this sentence twice, identically, each copy
+		 * claiming both outcomes. Two failures are two facts; a line
+		 * that cannot be told from the one above it reads as a log
+		 * repeating itself rather than as a second request refused.
+		 * project.md 10.355, and the same shape as the resolv.conf
+		 * episode count in 10.348.
+		 */
 		ncfg_log_emitf("observe", NCFG_LOG_NOTE,
-		    "the nftables dump was not answered (%s), so this observation reports no "
-		    "NAT installed and no conflicting table",
-		    why[0] ? why : "no sentence was given");
+		    "the nftables %s dump was not answered (%s), so this observation reports "
+		    "nothing from it",
+		    about, why[0] ? why : "no sentence was given");
 	}
 	return 1;
 }
@@ -139,7 +150,7 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *ob
 	char                 note[NCFG_ERROR_MAX];
 
 	note[0] = '\0';
-	if (!dump(kernel, ncfg_nft_build_rule_dump, &reply, err, err_size)) {
+	if (!dump(kernel, ncfg_nft_build_rule_dump, "rule", &reply, err, err_size)) {
 		return 0;
 	}
 	for (at = 0; at < reply.count; at++) {
@@ -209,7 +220,7 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *
 	char                 note[NCFG_ERROR_MAX];
 
 	note[0] = '\0';
-	if (!dump(kernel, ncfg_nft_build_chain_dump, &reply, err, err_size)) {
+	if (!dump(kernel, ncfg_nft_build_chain_dump, "chain", &reply, err, err_size)) {
 		return 0;
 	}
 	for (at = 0; at < reply.count; at++) {
