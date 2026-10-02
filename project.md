@@ -12293,6 +12293,82 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.362 Active connections and IP configs, numbered by their device
+
+The eighth slice of 0264's port. Three more object families -- `IP4Config`,
+`IP6Config` and `Connection.Active` -- and the device and manager now point at
+them instead of at `/`.
+
+**All three are keyed by the DEVICE's number and resolve through its store.**
+netcfgd has one addressing and one active thing per interface, so a second
+numbering would be a second thing able to disagree about which config belongs to
+which device. It also inherits the device store's rule for nothing: numbers are
+never reused, so a client holding `/IP4Config/3` can never be handed the config
+of a different device that took the number later.
+
+### Read off the running daemon
+
+    ActiveConnections   /ActiveConnection/{1,2,7} -- the devices holding addresses
+    Devices/1.Ip4Config /IP4Config/1
+    IP4Config/1         address 192.168.167.233, prefix 24
+    ActiveConnection/1  Id OpenPC.se, Type 802-11-wireless, State 2, Default true
+
+### Four answers where the shape of the lie mattered
+
+- **`Addresses` is network byte order, which is NM's oldest wart.** The `aau`
+  form predates `AddressData` and carries the address as a `u` in network order,
+  so on a little-endian machine the number looks byte-reversed and a client
+  reading it expects exactly that. Host order would give every such client a
+  different address.
+- **`Gateway` is empty, which is not "no gateway".** `ncfg_link_t` says WHETHER a
+  link carries the default route, not what the next hop is. Empty is NM's
+  "unknown"; `0.0.0.0` would be a claim, and a client showing it has been told
+  something false where one showing none has been told nothing.
+- **An object is named only where it exists.** A device with no addresses
+  answers `/` for `Ip4Config` and `ActiveConnection`, because pointing at one
+  would have a client follow the path to learn what the absent path already said.
+- **IPv6's `Addresses` is empty rather than built.** `a(ayuay)` wants the address
+  back as sixteen bytes, and `AddressData` beside it carries the same addresses
+  in the form every current client reads. Getting the byte form subtly wrong is
+  worse than not offering it.
+
+### The nameservers are the machine's, and that is said at the getter
+
+NM's field is per-connection; netcfgd writes one `resolv.conf` for the machine.
+Showing the machine's is right in practice and wrong only where someone runs
+per-interface scopes -- and the alternative, an empty list, has a client display
+"no DNS" for a connection that resolves names perfectly, which is **wrong in a
+way a person sees**. On this machine it is empty anyway, because
+`ncfg_client_dns` reports the servers the DOCUMENT names and this one uses the
+lease's.
+
+`Searches` carries netcfgd's search list and `Domains` is empty, because NM
+separates them: `Domains` routes a name to a resolver and `Searches` is what is
+appended to a bare hostname. netcfgd's `search` is the second, and putting it in
+both would have a client route on a search domain.
+
+### What the test holds
+
+The property counts -- seventeen, thirteen, eleven -- and the check worth more
+than them: **every signature is one valid complete type**, judged by
+`dbus_signature_validate_single`, which is the same judge libdbus uses so this
+cannot disagree with the bus about what is well formed. These carry the most
+intricate types in the shim, hand-written in a table, and a malformed one is a
+property that marshals nothing and a client that rejects the reply.
+
+And the two legacy array types are pinned apart: v4's `aau` against v6's
+`a(ayuay)`, which are the easiest pair in the whole port to transpose and would
+both marshal.
+
+### The one join this slice could not make
+
+`Connection.Active.Connection` answers `/`. The settings objects are numbered by
+the CONNECTION store and this one by the DEVICE store, so the path cannot be
+computed from the device's number -- and guessing it would hand a client the
+settings of whatever connection happened to share the number. Joining them means
+one store asking the other, which is a slice rather than an arithmetic
+coincidence.
+
 ## 10.361 The write authorization, and the deputy it refuses to be
 
 The seventh slice of 0264's port, and the one the previous slice held writes

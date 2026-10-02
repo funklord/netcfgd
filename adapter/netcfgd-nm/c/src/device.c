@@ -50,6 +50,9 @@ typedef struct {
 	char name[64];
 	char kind[32];
 	char mac[48];
+	char addresses[1024];
+	char network[128];
+	int  default_route;
 	int  present;
 	int  configured;
 	int  managed;
@@ -140,6 +143,11 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 					(void)snprintf(out->mac, sizeof(out->mac), "%s",
 					    one->mac);
 				}
+				(void)snprintf(out->addresses, sizeof(out->addresses), "%s",
+				    one->addresses ? one->addresses : "");
+				(void)snprintf(out->network, sizeof(out->network), "%s",
+				    one->network ? one->network : "");
+				out->default_route = one->default_route;
 				break;
 			}
 			ncfg_links_free(&links);
@@ -366,10 +374,38 @@ NMC_CONST(say_metered, return put_u32(into, NM_METERED_GUESS_NO);)
 /* Per-address-family connectivity is not measured per device. */
 NMC_CONST(say_ip4_connectivity, return put_u32(into, 0u);)
 NMC_CONST(say_ip6_connectivity, return put_u32(into, 0u);)
-/* The IP and DHCP config objects are their own interfaces and their own slice;
- * `/` is NM's "no object" and is not an empty string, which is not a valid
- * object path and would make libnm reject the reply. */
+/* `/` is NM's "no object", and is not an empty string -- that is not a valid
+ * object path and libnm would reject the reply. */
 NMC_CONST(say_no_object, return put_path(into, "/");)
+
+/*
+ * This device's own IP config and active connection, by its own number.
+ *
+ * **An object is named only where it exists.** A device with no addresses has
+ * no active connection, and pointing at one would have a client follow the path
+ * and read a `State` of deactivated -- which is a round trip to learn what the
+ * absent path already said.
+ */
+#define NMC_OWN(name, family, only_when_addressed)                                            \
+	static int name(DBusMessageIter *into, void *object, char *err, size_t err_size)       \
+	{                                                                                     \
+		facts_t facts;                                                                \
+		char    path[96];                                                             \
+		(void)err;                                                                    \
+		(void)err_size;                                                               \
+		facts_for(object, &facts);                                                    \
+		if (!facts.known ||                                                           \
+		    ((only_when_addressed) && facts.addresses[0] == '\0')) {                   \
+			return put_path(into, "/");                                            \
+		}                                                                             \
+		(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/%s/%u",     \
+		    (family), ((const nmc_device_slot_t *)object)->number);                     \
+		return put_path(into, path);                                                  \
+	}
+
+NMC_OWN(say_ip4_config, "IP4Config", 1)
+NMC_OWN(say_ip6_config, "IP6Config", 1)
+NMC_OWN(say_active, "ActiveConnection", 1)
 NMC_CONST(say_no_paths, return put_empty(into, "o");)
 /* LLDP is a protocol netcfgd does not speak. */
 NMC_CONST(say_no_lldp, return put_empty(into, "a{sv}");)
@@ -400,11 +436,11 @@ static const nmc_property_t PROPERTIES[] = {
 	{ "PhysicalPortId", "s", NMC_READ, say_physical_port_id, NULL },
 	{ "Ip4Connectivity", "u", NMC_READ, say_ip4_connectivity, NULL },
 	{ "Ip6Connectivity", "u", NMC_READ, say_ip6_connectivity, NULL },
-	{ "Ip4Config", "o", NMC_READ, say_no_object, NULL },
-	{ "Ip6Config", "o", NMC_READ, say_no_object, NULL },
+	{ "Ip4Config", "o", NMC_READ, say_ip4_config, NULL },
+	{ "Ip6Config", "o", NMC_READ, say_ip6_config, NULL },
 	{ "Dhcp4Config", "o", NMC_READ, say_no_object, NULL },
 	{ "Dhcp6Config", "o", NMC_READ, say_no_object, NULL },
-	{ "ActiveConnection", "o", NMC_READ, say_no_object, NULL },
+	{ "ActiveConnection", "o", NMC_READ, say_active, NULL },
 	{ "AvailableConnections", "ao", NMC_READ, say_no_paths, NULL },
 	{ "Ports", "ao", NMC_READ, say_no_paths, NULL },
 	{ "LldpNeighbors", "aa{sv}", NMC_READ, say_no_lldp, NULL }
@@ -471,4 +507,39 @@ dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot)
 
 	facts_for(slot, &facts);
 	return nmc_device_type_of(facts.kind, facts.wireless, facts.name);
+}
+
+/*
+ * The link's addresses, comma-separated and in netcfgd's order.
+ *
+ * Handed over as the daemon gave them rather than parsed here, because the
+ * order is the daemon's answer -- `ncfg_link_t` says "already ordered" -- and a
+ * client shows the first one.
+ */
+void nmc_device_addresses_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.addresses);
+}
+void nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.network);
+}
+
+void nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	(void)snprintf(out, out_size, "%s", slot && slot->name ? slot->name : "");
+}
+
+int nmc_device_default_route_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return facts.known && facts.default_route;
 }

@@ -20,6 +20,8 @@
 #include "nmc/emit.h"
 #include "nmc/settings.h"
 #include "nmc/authorize.h"
+#include "nmc/ipconfig.h"
+#include "nmc/active.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -427,6 +429,72 @@ int main(void)
 		nmc_principal_parse("user:nosuchuser-netcfgd", &p);
 		check(nmc_may_write(1000u, &p, why, sizeof(why)) == 0,
 		    "and a user tier naming nobody admits nobody");
+	}
+
+	/*
+	 * The three newest interfaces, and the check that is worth more than the
+	 * counts: **every signature is one valid complete type.**
+	 *
+	 * These carry the most intricate types in the whole shim -- `aa{sv}`,
+	 * `a(ayuay)`, `a(ayuayu)` -- hand-written in a table, and a malformed one
+	 * is a property that marshals nothing and a client that rejects the
+	 * reply. `dbus_signature_validate_single` is the same judge libdbus uses,
+	 * so this cannot disagree with the bus about what is well formed.
+	 */
+	{
+		const nmc_interface_t *const three[] = { &nmc_active_interface,
+			&nmc_ip4config_interface, &nmc_ip6config_interface };
+		size_t which;
+		int    all_single = 1;
+
+		for (which = 0u; which < sizeof(three) / sizeof(three[0]); which++) {
+			size_t at;
+
+			for (at = 0u; at < three[which]->property_count; at++) {
+				const nmc_property_t *property = &three[which]->properties[at];
+
+				if (!dbus_signature_validate_single(property->signature, NULL)) {
+					printf("    (%s.%s is not one complete type: %s)\n",
+					    three[which]->name, property->name,
+					    property->signature);
+					all_single = 0;
+				}
+			}
+		}
+		check(all_single,
+		    "every signature on Active, IP4Config and IP6Config is one complete type");
+
+		check(nmc_active_interface.property_count == 17u,
+		    "Connection.Active declares seventeen properties, as NM's does");
+		check(nmc_ip4config_interface.property_count == 13u &&
+		        nmc_ip6config_interface.property_count == 11u,
+		    "and the two IP configs thirteen and eleven");
+
+		/* The legacy array types differ between the families and are the
+		 * easiest pair to transpose: v4 carries `aau` and v6 `a(ayuay)`.
+		 * Getting them the wrong way round would marshal and be wrong. */
+		{
+			size_t at;
+			const char *v4 = NULL;
+			const char *v6 = NULL;
+
+			for (at = 0u; at < nmc_ip4config_interface.property_count; at++) {
+				if (strcmp(nmc_ip4config_interface.properties[at].name,
+				        "Addresses") == 0) {
+					v4 = nmc_ip4config_interface.properties[at].signature;
+				}
+			}
+			for (at = 0u; at < nmc_ip6config_interface.property_count; at++) {
+				if (strcmp(nmc_ip6config_interface.properties[at].name,
+				        "Addresses") == 0) {
+					v6 = nmc_ip6config_interface.properties[at].signature;
+				}
+			}
+			check(v4 && strcmp(v4, "aau") == 0,
+			    "IP4Config.Addresses is `aau`, NM's oldest shape");
+			check(v6 && strcmp(v6, "a(ayuay)") == 0,
+			    "and IP6Config.Addresses `a(ayuay)`, which is not the same thing");
+		}
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

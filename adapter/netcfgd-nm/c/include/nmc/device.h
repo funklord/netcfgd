@@ -25,6 +25,10 @@ dbus_uint32_t nmc_device_type_of(const char *kind, int wireless, const char *nam
 void          nmc_device_address_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 void          nmc_device_kind_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 int           nmc_device_carrier_of(const nmc_device_slot_t *slot);
+void          nmc_device_addresses_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
+void          nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
+void          nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
+int           nmc_device_default_route_of(const nmc_device_slot_t *slot);
 dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
 
 #endif /* NMC_DEVICE_H */
