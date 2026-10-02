@@ -417,3 +417,45 @@ const nmc_interface_t nmc_device_interface = {
 	.methods = NULL,
 	.method_count = 0u
 };
+
+/* ------------------------------------------- what the subtypes ask of us */
+
+/*
+ * The four facts `subtypes.c` needs, each fetched the same way a property is.
+ *
+ * **Shared rather than re-derived**, because a client reading `HwAddress` from
+ * `.Device` and from `.Wired` and being told two things has caught the shim
+ * disagreeing with itself. The cost is another round trip per call, which is
+ * the position `state.h` records.
+ */
+void nmc_device_address_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.mac);
+}
+
+void nmc_device_kind_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.kind);
+}
+
+int nmc_device_carrier_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return facts.known && facts.carrier;
+}
+
+dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return nmc_device_type_of(facts.kind, facts.wireless, facts.name);
+}

@@ -16,6 +16,7 @@
 #include "nmc/compat.h"
 #include "nmc/manager.h"
 #include "nmc/device.h"
+#include "nmc/subtypes.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -168,6 +169,47 @@ int main(void)
 		    "and nothing at all is answered rather than crashed on");
 		check(nmc_device_interface.property_count == 31u,
 		    "the device declares thirty-one properties, as NM's own does");
+	}
+
+	/*
+	 * The subtype chooser's invariants.
+	 *
+	 * **The mapping itself is proven on a bus and the SHAPE is proven here.**
+	 * Which subtype a kind gets needs a client to fetch the kind, so the
+	 * cases that matter were read off ten real devices. What a unit test can
+	 * hold is the structure: `.Device` first, exactly one subtype, and a
+	 * NULL at the end -- a list missing `&nmc_device_interface` would serve a
+	 * device with no `Interface` property at all, and introspection would
+	 * look plausible.
+	 */
+	{
+		/* No client, so the facts come back empty: an empty kind with no
+		 * radio is ETHERNET, and the name `lo` is LOOPBACK. Those are the
+		 * two arms reachable without a daemon, and reaching them is the
+		 * point -- the chooser is being exercised, not mocked. */
+		nmc_device_slot_t             wired = { (char *)"eth-test", 1u, 1, "1", NULL };
+		nmc_device_slot_t             loop = { (char *)"lo", 2u, 1, "2", NULL };
+		const nmc_interface_t *const *list;
+		size_t                        count;
+
+		list = nmc_device_interfaces_for(&wired);
+		for (count = 0u; list && list[count] != NULL; count++) {
+			/* Counting. */
+		}
+		check(count == 2u, "a device serves its own interface and exactly one subtype");
+		check(list && list[0] == &nmc_device_interface,
+		    "  with `.Device` first, so `Interface` is always there");
+		check(list && list[1] &&
+		        strcmp(list[1]->name, "org.freedesktop.NetworkManager.Device.Wired") == 0,
+		    "  and an empty kind with no radio is Wired");
+
+		list = nmc_device_interfaces_for(&loop);
+		check(list && list[1] &&
+		        strcmp(list[1]->name,
+		            "org.freedesktop.NetworkManager.Device.Loopback") == 0,
+		    "while `lo` is Loopback, which carries no properties and is served anyway");
+		check(list && list[1] && list[1]->property_count == 0u,
+		    "  because a marker interface is how libnm knows what it is");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);
