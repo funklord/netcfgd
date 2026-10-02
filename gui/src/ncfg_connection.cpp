@@ -103,10 +103,18 @@ bool ncfg_connection::reopen_if_broken()
 	if (client == nullptr || !ncfg_client_broken(client)) {
 		return false;
 	}
-	/* The same path as it was opened on. `open` closes first, so the dead
-	 * client goes with it. */
+	/* The same path as it was opened on -- **copied**, not passed by
+	 * reference. `open` closes first, so the dead client goes with it, and
+	 * `close` clears `path`: handing it `path` directly hands it a reference
+	 * to the member it is about to empty, so the reopen asked for an empty
+	 * path and got `ncfg_client_default_socket()` instead of the socket this
+	 * connection was living on. On a machine with no daemon at the default
+	 * path that fails, which is how the test caught it; on a machine running
+	 * netcfgd it SUCCEEDS, against the system daemon rather than the one the
+	 * caller named, and the test passes. */
+	const QString where = path;
 	QString ignored;
-	return open(path, &ignored);
+	return open(where, &ignored);
 }
 
 bool ncfg_connection::open(const QString &socket_path, QString *error)

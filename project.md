@@ -9499,6 +9499,254 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.157 Five red runs, and only the last was a defect in the program
+
+Five consecutive `make check` failures in one sitting, on a machine that had
+been away from this tree for a fortnight. **Three were guards asking the wrong
+question**, one is open and unattributed, and **the fifth was a real defect in
+shipped code whose own test had been passing for the wrong reason.** The order
+matters: each fix uncovered the next, so the last one had been unreachable
+behind four earlier failures all morning.
+
+The three share one mistake about three different things: a guard asked whether
+something was *there* where what it needed to know was whether it *worked*. A program was
+present and could not run the subcommand; a binary was present and was not this
+build; a filesystem was ordinary and the kernel had no instances left to give.
+
+**Each failure accused the thing it was protecting.** That is the cost and it is
+not the lost time -- a guard that reports its own unmet premise as a fault in
+the code sends the next person to read something correct, which is the most
+expensive kind of red there is.
+
+### The first: the program, not the subcommand
+
+`make check` was red on this machine and could not have been anything else:
+
+    udevadm: missing or unknown command
+    make: *** [Makefile:1171: packaging] Error 2
+
+`udevadm verify` arrived in systemd 254. The guard around it was `command -v
+udevadm`, which answers yes on the udevadm 251 this machine has -- so the one
+world that cannot run the check is the world that runs it, and the whole
+`packaging` target fails where it meant to skip. The comment above it had been
+written against two machines, absent and current: *"skipped loudly where
+udevadm is absent, which is every machine this project targets that does not
+run systemd"*. The machine in between has the program and not the subcommand.
+
+`udevadm verify --help` is the probe -- exit 0 where the subcommand exists, 2
+where it does not -- and it asks the binary the check will actually run rather
+than comparing a number out of `--version`.
+
+### The sweep that cleared this file could not have caught it
+
+The four-gates list above swept about fifty candidates in this tree for guards
+that report success having checked nothing, and dismissed the correct idiom by
+name: `if cond; then check; fi` rather than `A && B || C`. **This check uses
+that idiom and gets the predicate wrong**, which is a different fault in the
+same line -- the idiom decides whether a real failure survives the guard, the
+predicate decides whether the guard is asking about the thing. A sweep keyed on
+one cannot see the other, and the modem rules check was written after it
+anyway.
+
+### The two skips are different facts and now say so
+
+*Not installed* is a machine this project supports and does not ship systemd
+on. *udevadm 251 has no `verify`* is a machine that does, where the rules file
+is unverified for a reason somebody can act on and the check starts working
+after an upgrade. One message for both reads as the first on a machine that is
+the second.
+
+Proven in four worlds, with the recipe's own bytes extracted from the Makefile
+rather than retyped: this machine skips and names its version; a stub carrying
+`verify` runs the check; **the same stub refusing the rules file fails the
+target**, which is the arm that had to keep working and the only one that
+proves the gate is still a gate; and a PATH with no udevadm gives the
+not-installed line.
+
+### The second: the binary exists, but it is not this build
+
+The same run then went red in `test`, and the message pointed at the program:
+
+    ncfg --help panicked when its reader had gone:
+    thread 'main' panicked at library/std/src/io/stdio.rs:1123:9:
+    failed printing to stdout: Broken pipe (os error 32)
+
+which is precisely the defect 0261 had fixed a fortnight earlier. The binary
+under test was three weeks older than the fix. `cargo test --workspace` builds
+every test harness in the tree and **does not relink `target/debug/netcfgd`**,
+and `target/debug/ncfg` is a symlink `ncfg-link` makes rather than an artifact
+cargo has any opinion about -- so a test that runs the program runs whatever
+the last `make build` happened to leave there. `test` and `conformance` depend
+on `build` now.
+
+The test guards its own premise and the guard cannot see this: it asserts the
+binary **exists**, which catches the absent case loudly -- *"ncfg is not built,
+so nothing would be tested"* -- and says nothing about which source it was
+built from. Presence standing in for freshness, one line below presence
+standing in for capability.
+
+**What it cost is the diagnosis, not the run.** A missing binary accuses the
+build; a stale one accuses the code, in the voice of a test written to defend
+exactly that code. Twenty minutes went on reading a crate that was correct. The
+neighbouring lesson in 10.156 is the same sentence from the other end -- a
+broken test impersonating a plausible bug in the thing it was testing -- and
+`build-and-commit.md` states the rule outright: never conclude that a test
+passes or fails from a binary the build step did not rebuild. The Makefile
+dependency is now the only thing holding that, and it is worth knowing that is
+where it lives.
+
+### The third: the filesystem was ordinary and the budget was not
+
+With both of those fixed the run went red a third time, in `netcfgd-sys`:
+
+    assertion `left == right` failed: expected inotify on an ordinary
+    Linux filesystem
+      left: Polling
+     right: Inotify
+
+Measured rather than assumed: `inotify_init1` on this machine returns
+**`EMFILE`**, with 126 of the 128 `fs.inotify.max_user_instances` held -- by an
+ordinary TDE desktop and by **571 orphaned `dbus-daemon --session` processes**,
+which is the leak `running-code.md` records having cleaned once already. Three
+readings of the count agreed, and a fresh process asking for an instance was
+refused on its first attempt, which is the reading that decides: the count is a
+moment, the refusal is the condition.
+
+**`watch.rs`'s own first paragraph is about exactly this case** -- *"the
+fallback is not defensive programming for its own sake: `inotify_init1` fails
+with `EMFILE` when `fs.inotify.max_user_instances` is exhausted, which happens
+on real machines running enough watchers"*. So the module documents the
+condition, the fallback handles it correctly, and the test called it impossible
+and blamed the filesystem. The watcher did the right thing and was reported as
+broken for doing it.
+
+The test asks the kernel for an instance before deciding. One available and a
+watcher that polled anyway is a real defect and still fails; none available and
+the preference is unanswerable here, so it says so -- and `NCFG_LIVE` turns that
+skip into a failure, which is `wg.rs`'s bargain and the reason this is not a
+quiet green. Cargo captures a passing test's stdout, so a skip line is invisible
+in an ordinary run; `make live` is where a machine in this state gets told.
+
+**What is proven and what is not.** The skip passes here; `NCFG_LIVE=1` fails
+naming `EMFILE` and the sysctl; and sabotaging the mechanism assertion turns it
+red at the line, so it is not decoration. **The available-instance arm could not
+be reached on this machine at all** -- it is the old assertion unchanged, and
+nothing here demonstrates it, which is the half a reader should not take on
+trust.
+
+The 571 session buses are not netcfgd's and are not touched: the live desktop's
+own bus is plausibly among processes with that argv, and 571 kills to green a
+gate is not a trade this tree gets to make. It is reported as a machine
+condition, with the number, and `running-code.md` carries the method and the
+PID-recheck guard for whoever clears it.
+
+**netcfgd's own gate is cleared as the source, by measurement rather than by
+argument.** All 571 are reparented to init, 458 of them dating from 2026-09-18
+and a trickle to 2026-10-01; **none is newer than 22:47 that day**, across four
+full `make check` runs today -- and `make check` runs `gui`, which drives qtty's
+tray test with `DBUS_SESSION_BUS_ADDRESS` deliberately pointing at a
+non-existent socket, which was the obvious suspect for a Qt autolaunch. It did
+not fire once.
+
+**And the reading that said otherwise was an instrument error worth keeping.**
+A first pass had 571 and a second, minutes later, had 574, which read as a leak
+in progress -- so the thing was nearly reported as live. The first number came
+from matching `--syslog --fork --session` in argv and the second from
+`pgrep -c -x dbus-daemon`, which also counts the system bus, at-spi's, and a
+`--nofork --session` one: **two populations, three apart, quoted as one
+population growing by three.** A count inherits its detector, and the
+comparison was between detectors rather than between moments.
+
+### And a fourth, which is open: a probe test that failed once
+
+With the three closed, the next run failed in `netcfgd-daemon`:
+
+    the probe did not run with a lease present
+    probe::tests::an_interface_with_a_lease_runs_the_probe
+
+It has not reproduced since: **twelve runs of that crate's lib tests and four
+of the whole workspace, all green**, which is not evidence against it. An
+intermittent that does not reproduce is doing the only thing its name promises,
+and this one is recorded open rather than closed.
+
+**Four hypotheses, each killed by a measurement rather than by reasoning**, and
+they are listed because the next person should not pay for them twice:
+
+- *Two tests sharing a fixture.* Both lease tests call
+  `TestDir::new("probe-lease")` with the same tag, so one touching `ran` or
+  dropping the directory would explain it exactly. `TestDir` appends the pid
+  and an atomic serial: the paths cannot collide.
+- *The probe outran its timeout.* `run` polls `try_wait` to a deadline, and the
+  fixture allows `timeout = 5` for a `/bin/sh` that runs `touch`.
+- *The poll loop spins and starves the child.* It sleeps 50 ms per turn.
+- *`fork` failed for want of process slots.* `ulimit -u` is 773425 against 790
+  processes owned by this user.
+
+What is left is the shape the first three findings had: the test asserted on an
+outcome and said nothing about the cause, while the runner had recorded one.
+`detail_of` exists in that module and is documented as being *"for a failure
+message that explains itself"* -- and this was the one assertion in the module
+not using it. It does now, so a recurrence names whatever `spawn` or the exit
+status actually said. **That is not a fix and is not offered as one**; it is the
+instrument the next occurrence needs, put in place while the failure is known
+to be possible rather than after somebody has lost an afternoon to it.
+
+The remaining untested suspicion, written down so it is not re-derived: writing
+a script and exec'ing it from a multi-threaded process can fail with `ETXTBSY`
+where another thread forks while the file is still open for writing, which
+parallel tests do by construction. That would arrive as a `spawn` error, which
+is what the new message will print. It is a suspicion and nothing here supports
+it yet.
+
+### And the fifth, which was real: a reopen that asked for the wrong socket
+
+    reconnect: and the connection reopens itself                   FAILED
+    reconnect: which leaves it open again                          FAILED
+    reconnect: and answering questions                             FAILED
+                 not connected
+
+Every run, not intermittently. `ncfg_connection::reopen_if_broken` ended:
+
+    QString ignored;
+    return open(path, &ignored);
+
+`open` calls `close()` first -- correctly, so the dead client goes with it --
+and `close()` does `path.clear()`. The argument is `const QString &`, bound to
+the member being cleared, so by the time `open` reads it the string is empty and
+`ncfg_client_open(nullptr)` falls through to `ncfg_client_default_socket()`.
+**A reopen asked for the default socket rather than the one the connection had
+been living on.**
+
+### Which is why it was green where it was written
+
+The consequence is not "reconnect fails". It is that **reconnect succeeds
+against the wrong daemon** wherever one is listening at the default path -- and
+that is every machine running netcfgd, including the one this landed from, which
+had just been switched to netcfgd (10.67, 10.82). Measured over all four cells,
+`NCFG_RUN_DIR` steering what the default resolves to:
+
+    nothing at the default path     broken: 3 FAILED      fixed: all pass
+    a daemon at the default path    broken: ALL PASS      fixed: all pass
+
+The bottom-left cell is the finding. The test is well made -- a real daemon,
+killed and restarted on the same socket -- and it cannot see this, because
+everything it asserts afterwards is true of a connection to *some* working
+daemon. **What made the test tell the truth was running it on a machine with no
+netcfgd**, which is a property of where the gate ran rather than of anything in
+the suite.
+
+A fallback is the shape that makes this happen: it converts "the caller named
+nothing" into a plausible success, so the error cannot reach the place that
+would show it. `ncfg_client_default_socket` is right to exist -- a CLI with no
+argument must go somewhere -- and the cost is that an *accidentally* empty path
+is indistinguishable from an omitted one.
+
+The fix is three words, `const QString where = path`, with the reason above it
+in the file. 0259's own work was not wrong: `is_open()` tests
+`ncfg_client_broken` as that decision says, and the pointer test it replaced is
+gone. The reopen beside it was passing a reference into a function that empties
+it, which no amount of reading `is_open` would reveal.
+
 ## 10.156 A test that disarms the process it shares
 
 Two symptoms in `netcfgd-sys`, neither mentioning its cause: **thirty seconds**
