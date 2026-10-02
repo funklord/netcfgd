@@ -9639,10 +9639,10 @@ With both of those fixed the run went red a third time, in `netcfgd-sys`:
 Measured rather than assumed: `inotify_init1` on this machine returns
 **`EMFILE`**, with 126 of the 128 `fs.inotify.max_user_instances` held -- by an
 ordinary TDE desktop and by **571 orphaned `dbus-daemon --session` processes**,
-which is the leak `running-code.md` records having cleaned once already. Three
-readings of the count agreed, and a fresh process asking for an instance was
-refused on its first attempt, which is the reading that decides: the count is a
-moment, the refusal is the condition.
+whose origin is measured two paragraphs down. Three readings of the count
+agreed, and a fresh process asking for an instance was refused on its first
+attempt, which is the reading that decides: the count is a moment, the refusal
+is the condition.
 
 **`watch.rs`'s own first paragraph is about exactly this case** -- *"the
 fallback is not defensive programming for its own sake: `inotify_init1` fails
@@ -9672,13 +9672,32 @@ gate is not a trade this tree gets to make. It is reported as a machine
 condition, with the number, and `running-code.md` carries the method and the
 PID-recheck guard for whoever clears it.
 
-**netcfgd's own gate is cleared as the source, by measurement rather than by
-argument.** All 571 are reparented to init, 458 of them dating from 2026-09-18
-and a trickle to 2026-10-01; **none is newer than 22:47 that day**, across four
-full `make check` runs today -- and `make check` runs `gui`, which drives qtty's
-tray test with `DBUS_SESSION_BUS_ADDRESS` deliberately pointing at a
-non-existent socket, which was the obvious suspect for a Qt autolaunch. It did
-not fire once.
+**netcfgd is cleared as the source, and the first version of this paragraph
+said so for a reason that was not the reason.** It read the population as *"the
+leak `running-code.md` records having cleaned once already"*, which that
+document associates with an fmake selftest -- an attribution nothing here
+established, made from a co-occurrence in somebody else's record. Asked by the
+holder whether netcfgd started them, the population was measured properly, and
+`/proc/<pid>/environ` answers it: a daemonised `dbus-daemon` chdirs to `/`, so
+`cwd` says nothing, while the environment it was launched in survives.
+
+    beerssh 161   respec 97   raidcfgd 82   hembygd 67
+    hydra 63      ossacli 59  fmake 31      claude-guidelines 11
+
+Eight trees, 571 total, **netcfgd zero** -- and fmake, the tree the first
+version blamed, is 31 of them. Every one was launched from a Claude Code session
+with **no `DBUS_SESSION_BUS_ADDRESS` set at all**, 571 of 571: something wanted
+a session bus, found none, `dbus-launch` started one, and nothing reaps it.
+
+**Two methods agree, which is what makes this a clearance rather than an
+absence.** No orphan's environment names this tree; and a `gui` test run with
+the variable deliberately unset adds none, because netcfgd's Qt front end talks
+to the daemon over its own unix socket and uses no D-Bus. The `-nm` shim does,
+and is Rust rather than Qt and a separate binary.
+
+The start times are also real rather than proxied: `/proc/<pid>` mtime agrees
+with field 22 of `/proc/<pid>/stat` to within a second or two, and the machine
+booted 2026-09-12, so the 458 from 2026-09-18 are not a boot artifact.
 
 **And the reading that said otherwise was an instrument error worth keeping.**
 A first pass had 571 and a second, minutes later, had 574, which read as a leak
