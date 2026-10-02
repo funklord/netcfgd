@@ -17384,3 +17384,40 @@ already reported, or reproduced its own evidence before the sweep. The lesson
 is not about care: a cleanup keyed on a pattern is a cleanup that cannot tell
 its own work from somebody else's, and in a tree several sessions share, that
 is the same defect this document keeps finding in netcfgd's own code.
+
+## From fmake: what `--eject deb` found in this tree's `fmake.toml`
+
+Written from fmake's tree on 2026-09-15, after packaging a copy of this
+one at `6f756f4` with fmake's `--eject deb` (fmake's sections 227-236)
+and comparing with `debian/`. fmake builds one of this tree's five
+packages -- `netcfgd-gui`; the daemon, CLI, `-nm`, `-modem` and
+`-trinity` are the Cargo workspace fmake does not build, as the README
+says -- and that package built and passed lintian (one warning, the man
+page the hand-written package lacks too) once the copy declared three
+things fmake already models and this tree's `fmake.toml` does not:
+
+- `[project] test-env = ["QT_QPA_PLATFORM=offscreen"]`: `access_frame`
+  aborts for want of a display under `make test`; `gui/Makefile` sets
+  it per test.
+- `[target.client_test] test-args = ["doc/schema/socket.json"]`: run
+  from the tree root it looks for `../doc/schema/socket.json`. (fmake's
+  own README shows exactly this key, taken from this tree.)
+- `test-group = "live"` on the eight `gui/tests/live/live_*.cpp`: they
+  need a running daemon, and `make test` in the ejected Makefile ran
+  them with the rest. `@test live` in each file says the same thing
+  where the file is. Since fmake's section 242 (2026-09-17) a `live/`
+  directory under a test directory is the `live` group
+  by itself, so none of the eight needs the key any more; whether to
+  drop them is this tree's call.
+
+Two facts about this tree that fmake cannot express and did not try
+to: the licence is `MIT or Apache-2.0` in `debian/copyright` with no
+text at the root, and fmake identifies a licence from a `LICENSE` file
+by its text -- a dual licence has no single text, and the copy used a
+GPL-3 text as a fixture, which says nothing about netcfgd. And the
+`netcfgd-tui` symlink beside `netcfgd-gui` is an alias fmake's install
+model has no row for.
+
+`Build-Depends` came out as `qt6-base-dev, qt6-base-dev-tools` -- the
+second derived from the moc the build ran, which the first attempt
+lacked and a clean chroot would have missed. Nothing here was changed.
