@@ -331,6 +331,36 @@ int main(int argc, char **argv)
 	(void)signal(SIGINT, asked_to_stop);
 	(void)signal(SIGTERM, asked_to_stop);
 
+	/*
+	 * **Ask netcfgd before the name is claimed.**
+	 *
+	 * A shim owning `org.freedesktop.NetworkManager` while unable to answer
+	 * anything is worse than one that is not running: a client finds a daemon
+	 * and gets errors from it, rather than finding none and saying so -- and
+	 * having found one, it stops looking for an alternative.
+	 *
+	 * `nmc_store_refresh` is the probe rather than `nmc_state_client`, because
+	 * opening a client is not asking it anything: it answers 0 only where
+	 * netcfgd could not be asked, which is exactly the condition. The work is
+	 * not wasted either -- the device numbers exist before the first client
+	 * call rather than being assigned inside it.
+	 *
+	 * `main.rs` refuses here in the same words, and `tests/live/nm.sh` greps
+	 * for them: the wording is a contract between the two implementations and
+	 * not decoration.
+	 */
+	nmc_window_begin();
+	if (!nmc_store_refresh(&store)) {
+		nmc_window_end();
+		fprintf(stderr,
+		    "netcfgd-nm: netcfgd did not answer on %s\n"
+		    "netcfgd-nm:   refusing to claim %s without it\n",
+		    state.socket_path ? state.socket_path : ncfg_client_default_socket(),
+		    NMC_BUS_NAME);
+		return 1;
+	}
+	nmc_window_end();
+
 	dbus_error_init(&problem);
 	connection = dbus_bus_get(session ? DBUS_BUS_SESSION : DBUS_BUS_SYSTEM, &problem);
 	if (!connection) {
@@ -362,8 +392,8 @@ int main(int argc, char **argv)
 	if (claimed != DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER) {
 		fprintf(stderr,
 		    "netcfgd-nm: cannot claim %s: %s\n"
-		    "netcfgd-nm:   something already owns it -- NetworkManager itself, or "
-		    "another shim.\n",
+		    "netcfgd-nm:   Stop NetworkManager first, or the other shim: only "
+		    "one process owns a bus name.\n",
 		    NMC_BUS_NAME,
 		    dbus_error_is_set(&problem) ? problem.message : "the name is taken");
 		dbus_error_free(&problem);

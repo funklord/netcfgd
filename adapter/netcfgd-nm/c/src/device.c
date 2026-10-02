@@ -20,6 +20,9 @@
 
 #include <stdio.h>
 #include <string.h>
+/* For `strncasecmp`: glibc reaches it through <string.h> and musl does not, and
+ * netcfgd packages for Alpine. */
+#include <strings.h>
 
 /* NM's device types, by the numbers libnm reads. */
 #define NM_DEVICE_TYPE_UNKNOWN    0u
@@ -43,7 +46,11 @@
 #define NM_DEVICE_STATE_DISCONNECTED 30u
 #define NM_DEVICE_STATE_ACTIVATED   100u
 
-#define NM_DEVICE_STATE_REASON_NONE 0u
+#define NM_DEVICE_STATE_REASON_NONE    0u
+/* Nothing has happened yet, which is what a link nobody brought up is. */
+#define NM_DEVICE_STATE_REASON_UNKNOWN 1u
+/* No cable. NM's 40, and the one reason a client renders as a sentence. */
+#define NM_DEVICE_STATE_REASON_CARRIER 40u
 #define NM_METERED_GUESS_NO         4u
 
 /* One device's current facts, copied out so nothing is owned here. */
@@ -51,6 +58,7 @@ typedef struct {
 	char name[64];
 	char kind[32];
 	char mac[48];
+	char policy[16];
 	char addresses[1024];
 	char network[128];
 	int  default_route;
@@ -60,6 +68,7 @@ typedef struct {
 	int  mtu;
 	int  wireless;
 	int  carrier;
+	int  up;
 	int  known;
 } facts_t;
 
@@ -102,6 +111,8 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 			    device->kind ? device->kind : "");
 			(void)snprintf(out->mac, sizeof(out->mac), "%s",
 			    device->mac ? device->mac : "");
+			(void)snprintf(out->policy, sizeof(out->policy), "%s",
+			    device->policy ? device->policy : "");
 			out->present = device->present;
 			out->configured = device->configured;
 			out->managed = device->managed;
@@ -127,6 +138,7 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 			    one->kind ? one->kind : "");
 			out->wireless = one->wireless;
 			out->carrier = one->carrier;
+			out->up = one->up;
 			out->default_route = one->default_route;
 			if (one->mtu > 0) {
 				out->mtu = one->mtu;
@@ -140,6 +152,29 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 			    one->network ? one->network : "");
 			break;
 		}
+	}
+	/*
+	 * **A radio is either the kernel's answer or the document's, and the two
+	 * disagree in both directions.** `ncfg_link_t.wireless` is what the kernel
+	 * says, which is 0 for a device the document declares a radio over a link
+	 * the kernel calls something else -- a dummy under test, or hardware whose
+	 * driver says nothing. netcfgd's planner starts a supplicant on a managed
+	 * device with a `wifi` block whatever the kernel calls the link, so a client
+	 * that asked only the kernel would be told the device is not wireless while
+	 * a supplicant ran on it.
+	 *
+	 * `ncfg_device_t.policy` is that answer, already decided by the daemon and
+	 * carried for exactly this reason -- the header says the rule belongs in one
+	 * place rather than in each front end. The radios list is the WRONG source
+	 * and was tried first: it is built from the kernel's flag on purpose, so
+	 * that somebody can take on a radio nobody has configured, and a device
+	 * declared over a dummy never appears in it.
+	 *
+	 * Managed as well as declared, because an unmanaged device is one netcfgd
+	 * does not touch: its `wifi` block says what would happen, not what is.
+	 */
+	if (out->managed && strcmp(out->policy, "wifi") == 0) {
+		out->wireless = 1;
 	}
 }
 
@@ -280,10 +315,56 @@ NMC_FACT(say_autoconnect, return put_bool(into, facts.known && facts.configured)
  * `ACTIVATED` for a managed, configured, present device is the claim a client
  * acts on; everything short of that is said exactly.
  */
-dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot)
+/*
+ * Whether any of these addresses is one a client would call being connected.
+ *
+ * **Link-local does not count, and that is the whole function.** Every link with
+ * IPv6 enabled gets an `fe80::` address the moment it comes up, so a test for
+ * "has an address" reports every configured-but-addressless interface as
+ * ACTIVATED -- which is what this did, and what `tests/live/nm.sh` caught on a
+ * dummy with an empty `interface` block. `169.254.` is the same thing for IPv4,
+ * and means the opposite of connected: it is what a host assigns itself when
+ * DHCP found nobody.
+ *
+ * Prefix matching rather than parsing, which is `state.rs`'s rule and is enough:
+ * `fe80:` is the whole of the IPv6 range in practice -- the block is `fe80::/10`
+ * and nothing assigns out of the rest of it -- and the comparison is
+ * case-insensitive because netcfgd's rendering is not this function's to assume.
+ */
+static int routable(const char *addresses)
+{
+	const char *at = addresses;
+
+	while (at && *at != '\0') {
+		size_t span = strcspn(at, ",");
+
+		while (span > 0u && (*at == ' ' || *at == '\t')) {
+			at++;
+			span--;
+		}
+		if (span > 0u && strncasecmp(at, "fe80:", 5u) != 0 &&
+		    strncmp(at, "169.254.", 8u) != 0) {
+			return 1;
+		}
+		at += span;
+		if (*at == ',') {
+			at++;
+		}
+	}
+	return 0;
+}
+
+/*
+ * The state and why, which is one decision and so is written once.
+ *
+ * `nmc_device_state_now` is the state half of it. Splitting them was how the
+ * device state came to be computed twice in this file.
+ */
+static dbus_uint32_t state_and_reason(const nmc_device_slot_t *slot, dbus_uint32_t *reason)
 {
 	facts_t facts;
 
+	*reason = NM_DEVICE_STATE_REASON_NONE;
 	facts_for(slot, &facts);
 	if (!facts.known) {
 		return NM_DEVICE_STATE_UNKNOWN;
@@ -294,7 +375,35 @@ dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot)
 	if (!facts.managed) {
 		return NM_DEVICE_STATE_UNMANAGED;
 	}
-	return facts.configured ? NM_DEVICE_STATE_ACTIVATED : NM_DEVICE_STATE_DISCONNECTED;
+	/*
+	 * **What is, not what should be, and `device.rs`'s mapping exactly.** This
+	 * asked `configured` -- netcfgd's word for "the document describes this
+	 * device" -- and so reported a down link with no carrier and no address as
+	 * `DISCONNECTED` and an interface block with no `config` in it as
+	 * `ACTIVATED`. Both are the document's answer to a question a client asks
+	 * about the machine: NM's `State` is what the device is doing.
+	 *
+	 * `up` before `carrier` because they are separate answers and the reasons
+	 * differ -- a link that is down was not brought up, one with no carrier has
+	 * no cable -- and `StateReason` says which.
+	 */
+	if (!facts.up) {
+		*reason = NM_DEVICE_STATE_REASON_UNKNOWN;
+		return NM_DEVICE_STATE_UNAVAILABLE;
+	}
+	if (!facts.carrier) {
+		*reason = NM_DEVICE_STATE_REASON_CARRIER;
+		return NM_DEVICE_STATE_UNAVAILABLE;
+	}
+	return routable(facts.addresses) ? NM_DEVICE_STATE_ACTIVATED
+	                                : NM_DEVICE_STATE_DISCONNECTED;
+}
+
+dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot)
+{
+	dbus_uint32_t reason;
+
+	return state_and_reason(slot, &reason);
 }
 
 static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_size)
@@ -304,13 +413,18 @@ static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_
 	return put_u32(into, nmc_device_state_now(object));
 }
 
-/* `(uu)`: the state, and why. netcfgd gives no reason, and NONE is the honest
- * one rather than a guess at which of NM's forty applies. */
+/*
+ * `(uu)`: the state, and why.
+ *
+ * Two of NM's forty reasons are answerable from what netcfgd observes, and they
+ * are the two a client renders: a link nobody brought up, and a cable that is
+ * not in. Everything else is NONE rather than a guess.
+ */
 static int say_state_reason(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
 	DBusMessageIter pair;
-	dbus_uint32_t   state = nmc_device_state_now(object);
-	dbus_uint32_t   reason = NM_DEVICE_STATE_REASON_NONE;
+	dbus_uint32_t   reason;
+	dbus_uint32_t   state = state_and_reason(object, &reason);
 
 	(void)err;
 	(void)err_size;

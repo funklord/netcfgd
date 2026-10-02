@@ -129,8 +129,11 @@ int main(void)
 
 		check(nmc_manager_interface.property_count == 24u,
 		    "the manager declares twenty-four properties, as NM's own does");
-		check(nmc_manager_interface.method_count == 2u,
-		    "and the two device getters this slice implements");
+		/* Two device getters, the name lookup every client resolves a
+		 * device through, and the lowercase `state` older clients call. The
+		 * activation pair is a write and waits for the authorization gate. */
+		check(nmc_manager_interface.method_count == 4u,
+		    "and the four methods a libnm client reaches for");
 		for (at = 0u; at < nmc_manager_interface.property_count; at++) {
 			const nmc_property_t *property = &nmc_manager_interface.properties[at];
 
@@ -510,15 +513,53 @@ int main(void)
 	 * must not produce 255 or wrap.
 	 */
 	{
-		check(nmc_ap_strength(-50) == 100u, "-50 dBm and better is full strength");
-		check(nmc_ap_strength(-40) == 100u, "  and anything stronger clamps there");
+		/*
+		 * **These numbers were wrong and this block agreed with them.** They
+		 * were written beside a linear `2 * (dBm + 100)`, which is the formula
+		 * everybody writes and is not NM's -- so the test and the code were one
+		 * witness, and the run that disagreed was `tests/live/nm.sh` comparing
+		 * against a figure a real NetworkManager produced. The curve is
+		 * `nm_wifi_utils_level_to_quality`: perfect at -40, hopeless at -100,
+		 * interpolated across the sixty between.
+		 *
+		 * -53 is the calibration point and the only one here taken from a
+		 * running daemon rather than from this implementation. The rest are the
+		 * ends and the shape.
+		 */
+		check(nmc_ap_strength(-53) == 79u,
+		    "-53 dBm is 79, which is what a real NetworkManager answered");
+		check(nmc_ap_strength(-40) == 100u, "-40 dBm is perfect, which is the top of it");
+		check(nmc_ap_strength(-20) == 100u, "  and anything stronger clamps there");
 		check(nmc_ap_strength(-100) == 0u, "-100 dBm is none");
 		check(nmc_ap_strength(-120) == 0u, "  and anything weaker clamps there, not wraps");
-		check(nmc_ap_strength(-60) == 80u, "-60 dBm is 80, which is the live radio's answer");
-		check(nmc_ap_strength(-75) == 50u, "and -75 is half");
+		check(nmc_ap_strength(-70) == 50u, "-70 is the halfway point of the curve");
+		check(nmc_ap_strength(-50) == 84u,
+		    "and -50 is 84, where the linear formula this replaced said 100");
 		/* A positive reading is nonsense from a radio and must still answer a
 		 * byte rather than overflow one. */
 		check(nmc_ap_strength(10) == 100u, "a nonsensical positive reading clamps");
+
+		/*
+		 * **One number pinning four constants**, which is the only check here
+		 * taken from a running daemon rather than from this implementation. A
+		 * WPA2/WPA3 transition access point reported `RsnFlags` 1416, and
+		 * three of these four were wrong before it was asserted -- `GROUP_CCMP`
+		 * collided with `KEY_MGMT_PSK`, so every cipher claim also claimed a
+		 * pre-shared key and a WPA3-only network rendered as "WPA2 WPA3".
+		 *
+		 * A collision cannot be seen by reading one constant, and it survives a
+		 * test written per flag. The sum is what catches it.
+		 */
+		check(nmc_ap_flags_of(1, 0, 0, "psk", "wpa2wpa3") == 1416u,
+		    "a WPA2/WPA3 network is RsnFlags 1416, as a real daemon reported");
+		check(nmc_ap_flags_of(1, 0, 0, "psk", "wpa3") == 1160u,
+		    "and WPA3 alone drops the PSK bit, which the collision hid");
+		check(nmc_ap_flags_of(1, 0, 0, "psk", "wpa2") == 392u, "while WPA2 alone keeps it");
+		check(nmc_ap_flags_of(1, 1, 0, NULL, NULL) == 648u,
+		    "an unconfigured enterprise network is 802.1X over the same ciphers");
+		check(nmc_ap_flags_of(0, 0, 1, NULL, NULL) == 2184u,
+		    "and an unconfigured OWE one is OWE, not OWE-in-transition");
+		check(nmc_ap_flags_of(0, 0, 0, "open", NULL) == 0u, "an open network is none");
 
 		check(nmc_accesspoint_interface.property_count == 11u,
 		    "the access point declares eleven properties, as NM's does");

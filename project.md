@@ -9617,6 +9617,108 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.368 The oracle pointed at the port, and what it found in one run
+
+0264 names `tests/live/nm.sh` as the acceptance test for the C shim, and it was
+still starting the Rust binary. **An oracle aimed at the implementation being
+replaced says nothing about the replacement**, and the cost of that was not a
+missing check or two: the first run against the C shim did not reach its second
+check. `NCFG_NM_SHIM` points it back, which is what makes a failure here
+readable -- the same 36 checks against the other binary separate "the port is
+wrong" from "the check was always wrong", and both were passing when it was
+switched.
+
+Where it stands: **28 of 36, from 1.** The eight that remain are two coherent
+pieces of work, named at the end.
+
+**It claimed NM's name with no netcfgd behind it.** The first check tests exactly
+that and the shim ran for its ten seconds. `main.rs` refuses before claiming,
+because a shim owning `org.freedesktop.NetworkManager` while unable to answer is
+worse than one not running -- a client finds a daemon, gets errors, and stops
+looking for an alternative. `nmc_store_refresh` is the probe, not
+`nmc_state_client`: opening a client is not asking it anything. The refusal says
+"refusing to claim", which `nm.sh` greps for, so the wording is a contract
+between the two implementations rather than decoration.
+
+**libnm learns what exists from `GetManagedObjects` at `/org/freedesktop`, and
+`bus.h` said NetworkManager serves no object manager.** That claim came from
+0264's design document where it was an open question; `main.rs` had already
+answered it against a running NetworkManager 1.52 and serves one. Without it
+`nmcli general status` says "NetworkManager is not running" against a shim
+answering every property correctly -- which is what the oracle's readiness wait
+was reporting, and what no amount of reading properties by hand would have
+shown. It is built by walking the same tables the dispatcher routes with and the
+same `enumerate` callback `Introspect` uses, so there is no second list of what
+exists. Registered as an object and not a fallback, which is the opposite of
+what the depth suggests: a fallback there would answer `GetManagedObjects` for
+`/org/freedesktop/NetworkManager/Bogus`.
+
+**`GetDeviceByIpIface` was missing and fourteen checks were failing on an empty
+path.** Every device the oracle reads properties off is resolved by name through
+it first, so bridges, vlans and tunnels were all reporting nothing about
+themselves while the fault was one method up. `state`, the lowercase method, is
+there too: NM serves both it and the property, and older clients call the method.
+
+**The device state asked the document and NM's `State` is about the machine.** It
+answered `configured` -- netcfgd's word for "the document describes this device"
+-- so a down link with no carrier read as DISCONNECTED and an `interface` block
+with no `config` read as ACTIVATED. It is `up`, then `carrier`, then whether
+there is a routable address, which is `device.rs`'s mapping; `StateReason` now
+carries the two of NM's forty that are answerable, since a link nobody brought up
+and a cable that is not in are different sentences to a client.
+
+**Link-local does not count as having an address, and that is a function of its
+own.** Every link with IPv6 gets an `fe80::` the moment it comes up, so "has an
+address" reported every addressless interface as ACTIVATED. `169.254.` is the
+same thing for IPv4 and means the opposite of connected.
+
+**A radio is either the kernel's answer or the document's, and the radios list is
+the wrong source -- which was tried first.** netcfgd builds that list from
+`ncfg_link_t.wireless` deliberately, so somebody can take on a radio nobody has
+configured; a managed device with a `wifi` block over a dummy is therefore never
+in it, and that is `nm.sh`'s whole wireless fixture. `ncfg_device_t.policy`
+is the answer, already decided by the daemon and carried for exactly this reason
+-- its header says the rule belongs in one place rather than in each front end.
+The access point store had the same fault from the same source and is fixed the
+same way, which is why the scan went from four access points to none.
+
+**`Strength` was the linear formula everybody writes, and the unit test agreed
+with it.** NM's is `nm_wifi_utils_level_to_quality`: perfect at -40 dBm,
+hopeless at -100, interpolated across the sixty between. The test asserted
+`2 * (dBm + 100)` because it was written beside the code -- one witness twice --
+and what disagreed was a figure a real NetworkManager produced: 79 for -53 dBm,
+where the old formula gives 94. Every applet's signal-bars widget is calibrated
+against NM's numbers.
+
+**Three of the access point security constants were wrong, and one collided.**
+`GROUP_CCMP` was 0x100, which is `KEY_MGMT_PSK` -- so every cipher claim also
+claimed a pre-shared key, and a network the document pins to WPA3 rendered as
+"WPA2 WPA3". `PAIR_CCMP` was `GROUP_WEP40`'s bit and `OWE` was OWE-in-transition's.
+**A collision cannot be seen by reading one constant and survives a test written
+per flag**, so the whole ladder is written out and the mapping is a function
+`bus_test` checks by its SUM: 1416 for a WPA2/WPA3 network, which is a real
+transition access point's reported `RsnFlags` and pins four constants at once.
+
+**And the security a configured network reports now comes from the document.** A
+scan reports three collapsed facts; the document says `psk` with which
+generation, `eap`, or `owe`. The network an applet is about to be asked to join
+is almost always one the document describes, so this is the commonest case
+rather than an edge.
+
+Open, and the eight failures are exactly these two:
+
+- **The subtype properties are still stubs.** A bridge's `Slaves`, a vlan's
+  `Parent` and `VlanId`, a wireguard device's `PublicKey`, `ListenPort` and
+  `FwMark` answer placeholders. netcfgd observes all six.
+- **`InterfacesRemoved` is not emitted**, so a device that goes stays in a
+  libnm client's cache: 10.367 emits `DeviceRemoved`, which libnm reads as a
+  hint about an object it expects to know already. The membership diff that
+  drives it is in place and the signals are declared.
+
+**`make live` is red where it was green, and that is the honest state.** Leaving
+the oracle pointed at the Rust shim would have kept a passing run that tested
+nothing about the port.
+
 ## 10.367 The signals, and a removal check that was the thing at fault
 
 The thirteenth slice of 0264's port emits what NM emits rather than leaving a

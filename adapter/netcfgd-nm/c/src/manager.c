@@ -376,6 +376,70 @@ static int get_devices(DBusConnection *connection, DBusMessage *call, DBusMessag
 	return say_device_paths(&out, object, err, err_size);
 }
 
+/*
+ * `GetDeviceByIpIface`: the name a person types, to the path a client holds.
+ *
+ * **Through the store, which is the only thing that knows the numbers.** A path
+ * computed from a position in the device list would be a second numbering, and
+ * the store's whole contract is that a number is never reused -- so a client
+ * holding `/Devices/1` keeps holding it. `nmc_store_path_for` is the lookup
+ * `say_device_paths` already builds its answer from.
+ *
+ * It was missing, and it is not a small omission: `tests/live/nm.sh` resolves
+ * every device it then reads properties off this way, so fourteen checks about
+ * bridges, vlans and tunnels were failing on an empty path rather than on
+ * anything those devices said.
+ */
+static int get_device_by_name(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	nmc_state_t *state = object;
+	nmc_store_t *store = state ? (nmc_store_t *)state->store : NULL;
+	const char  *name = NULL;
+	const char  *path;
+
+	(void)connection;
+	if (!dbus_message_get_args(call, NULL, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID)) {
+		snprintf(err, err_size, "this takes one interface name");
+		return 0;
+	}
+	/* The store is refreshed by the enumeration the device list already does,
+	 * and a name netcfgd has stopped reporting has a slot that is not present
+	 * -- which `nmc_store_path_for` answers NULL for, as it should: a client
+	 * asking for a device that has gone wants to be told so. */
+	(void)nmc_store_enumerate_for_bus(NULL, 0u, store);
+	path = nmc_store_path_for(store, name);
+	if (!path) {
+		snprintf(err, err_size, "netcfgd reports no interface called %s",
+		    name ? name : "");
+		return 0;
+	}
+	return dbus_message_append_args(reply, DBUS_TYPE_OBJECT_PATH, &path,
+	           DBUS_TYPE_INVALID)
+	    ? 1
+	    : 0;
+}
+
+/*
+ * `state`, the method, beside `State`, the property.
+ *
+ * NM serves both and older clients call the lowercase method, so a shim with
+ * only the property is one those clients read as a daemon that does not work.
+ * One function behind both, for `get_devices`' reason.
+ */
+static int state_method(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	DBusMessageIter out;
+
+	(void)connection;
+	(void)call;
+	(void)err;
+	(void)err_size;
+	dbus_message_iter_init_append(reply, &out);
+	return say_state(&out, object, err, err_size);
+}
+
 /* ------------------------------------------------------------ the tables */
 
 static const nmc_property_t PROPERTIES[] = {
@@ -407,7 +471,10 @@ static const nmc_property_t PROPERTIES[] = {
 
 static const nmc_method_t METHODS[] = {
 	{ "GetDevices", "", "ao", get_devices },
-	{ "GetAllDevices", "", "ao", get_devices }
+	{ "GetAllDevices", "", "ao", get_devices },
+	{ "GetDeviceByIpIface", "s", "o", get_device_by_name },
+	/* Lowercase, which is NM's spelling for this one and not a slip. */
+	{ "state", "", "u", state_method }
 };
 
 /*

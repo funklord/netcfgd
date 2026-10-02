@@ -4,16 +4,44 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* `strcasecmp`: glibc reaches it through <string.h> and musl does not. */
+#include <strings.h>
 
 /* NM's access point flags and security bits. */
 #define NM_802_11_AP_FLAGS_NONE     0x0u
 #define NM_802_11_AP_FLAGS_PRIVACY  0x1u
-#define NM_802_11_AP_SEC_NONE       0x0u
-#define NM_802_11_AP_SEC_PAIR_CCMP  0x10u
-#define NM_802_11_AP_SEC_GROUP_CCMP 0x100u
-#define NM_802_11_AP_SEC_KEY_MGMT_PSK   0x100u
+/*
+ * `NM80211ApSecurityFlags`, and **three of these were wrong in a way that
+ * cannot be seen by reading one of them.** `GROUP_CCMP` was 0x100, which is
+ * `KEY_MGMT_PSK` -- so every cipher claim silently also claimed a pre-shared
+ * key, and a WPA3-only network was rendered "WPA2 WPA3" by nmcli. `PAIR_CCMP`
+ * was 0x10, which is `GROUP_WEP40`, and `OWE` was 0x1000, which is OWE in
+ * transition mode.
+ *
+ * The whole ladder is written out rather than the four in use, because that is
+ * what makes a collision visible: four values with gaps between them look
+ * fine, and a reader can only check them against each other.
+ *
+ * One number pins them. A WPA2/WPA3 transition access point on the network
+ * `enums.rs` was written against reported `RsnFlags` 1416, which is
+ * `PAIR_CCMP | GROUP_CCMP | KEY_MGMT_PSK | KEY_MGMT_SAE` and nothing else --
+ * so four of these are confirmed by a real daemon's answer, and `bus_test`
+ * asserts the sum.
+ */
+#define NM_802_11_AP_SEC_NONE            0x0u
+#define NM_802_11_AP_SEC_PAIR_WEP40      0x1u
+#define NM_802_11_AP_SEC_PAIR_WEP104     0x2u
+#define NM_802_11_AP_SEC_PAIR_TKIP       0x4u
+#define NM_802_11_AP_SEC_PAIR_CCMP       0x8u
+#define NM_802_11_AP_SEC_GROUP_WEP40     0x10u
+#define NM_802_11_AP_SEC_GROUP_WEP104    0x20u
+#define NM_802_11_AP_SEC_GROUP_TKIP      0x40u
+#define NM_802_11_AP_SEC_GROUP_CCMP      0x80u
+#define NM_802_11_AP_SEC_KEY_MGMT_PSK    0x100u
 #define NM_802_11_AP_SEC_KEY_MGMT_802_1X 0x200u
-#define NM_802_11_AP_SEC_KEY_MGMT_OWE    0x1000u
+#define NM_802_11_AP_SEC_KEY_MGMT_SAE    0x400u
+#define NM_802_11_AP_SEC_KEY_MGMT_OWE    0x800u
+#define NM_802_11_AP_SEC_KEY_MGMT_OWE_TM 0x1000u
 #define NM_802_11_MODE_INFRA        2u
 
 /*
@@ -28,15 +56,96 @@
  */
 unsigned char nmc_ap_strength(int dbm)
 {
-	long scaled = 2L * ((long)dbm + 100L);
+	long clamped = (long)dbm;
+	long below;
+	long quality;
 
-	if (scaled < 0L) {
+	/*
+	 * **`nm_wifi_utils_level_to_quality`, and not the linear percentage this
+	 * used to compute.** `2 * (dBm + 100)` is the formula everybody writes and
+	 * it is not NM's: NM treats -40 dBm as perfect and -100 as hopeless and
+	 * interpolates across those sixty, which is not a linear map of anything
+	 * physical. It matters because every applet's signal-bars widget is
+	 * calibrated against NM's numbers rather than against dBm.
+	 *
+	 * It cannot be checked by reading a dBm and a `Strength` for one access
+	 * point, since NM exposes only the percentage. What it can be checked
+	 * against is a real daemon's answer: NetworkManager on the machine
+	 * `accesspoint.rs` was written on reported 79, and 79 is what this gives
+	 * for -53 dBm, an ordinary level for a router in the same room. The old
+	 * formula gave 94 for it.
+	 */
+	if (clamped < -100L) {
+		clamped = -100L;
+	}
+	if (clamped > -40L) {
+		clamped = -40L;
+	}
+	below = -(clamped + 40L); /* 0 at -40 dBm, 60 at -100 */
+	quality = 100L - (100L * below) / 60L;
+	if (quality < 0L) {
 		return 0u;
 	}
-	if (scaled > 100L) {
+	if (quality > 100L) {
 		return 100u;
 	}
-	return (unsigned char)scaled;
+	return (unsigned char)quality;
+}
+
+dbus_uint32_t nmc_ap_flags_of(int secured, int enterprise, int owe, const char *written,
+    const char *proto)
+{
+	/*
+	 * **CCMP claimed rather than observed, which is a narrowing and not a
+	 * guess.** netcfgd reports three collapsed facts and not the cipher suites;
+	 * CCMP is mandatory for WPA2 and is everything netcfgd will join, and a
+	 * client reading these bits is deciding which credential to ask for rather
+	 * than which cipher to negotiate. `WpaFlags` stays none for the same
+	 * reason, inverted: claiming the WPA1 era would have a client offer TKIP.
+	 */
+	const dbus_uint32_t ciphers = NM_802_11_AP_SEC_PAIR_CCMP | NM_802_11_AP_SEC_GROUP_CCMP;
+
+	if (written && written[0] != '\0') {
+		if (strcmp(written, "psk") == 0) {
+			/*
+			 * The generation the document pins, and BOTH where it pins
+			 * neither: a network accepting WPA2 and WPA3 alike has two key
+			 * managements on offer rather than a third kind.
+			 */
+			dbus_uint32_t key = NM_802_11_AP_SEC_KEY_MGMT_PSK |
+			    NM_802_11_AP_SEC_KEY_MGMT_SAE;
+
+			if (proto && strcmp(proto, "wpa2") == 0) {
+				key = NM_802_11_AP_SEC_KEY_MGMT_PSK;
+			} else if (proto && strcmp(proto, "wpa3") == 0) {
+				key = NM_802_11_AP_SEC_KEY_MGMT_SAE;
+			}
+			return ciphers | key;
+		}
+		if (strcmp(written, "eap") == 0) {
+			return ciphers | NM_802_11_AP_SEC_KEY_MGMT_802_1X;
+		}
+		if (strcmp(written, "owe") == 0) {
+			return ciphers | NM_802_11_AP_SEC_KEY_MGMT_OWE;
+		}
+		/* "open" is a network with no security, which is what none means. */
+		return NM_802_11_AP_SEC_NONE;
+	}
+	/*
+	 * Not written down: the scan's three facts, which is all there is. OWE
+	 * first, because `secured` is false for it -- a network that encrypts
+	 * without a credential was reported as open until that was ordered this way.
+	 */
+	if (owe) {
+		return ciphers | NM_802_11_AP_SEC_KEY_MGMT_OWE;
+	}
+	if (enterprise) {
+		return ciphers | NM_802_11_AP_SEC_KEY_MGMT_802_1X;
+	}
+	if (secured) {
+		return ciphers | NM_802_11_AP_SEC_KEY_MGMT_PSK;
+	}
+	return NM_802_11_AP_SEC_NONE;
 }
 
 /* ------------------------------------------------------------- the store */
@@ -106,6 +215,37 @@ static const char *radio_of(nmc_aps_t *store, ncfg_client_t *client)
 			    radios.items[0].interface);
 		}
 		ncfg_radios_free(&radios);
+	}
+	/*
+	 * **The radios list is the kernel's and misses one the document declares.**
+	 * netcfgd builds it from `ncfg_link_t.wireless` on purpose, so that a radio
+	 * nobody has configured can still be taken on -- which means a managed
+	 * device with a `wifi` block over a link the kernel calls something else is
+	 * not in it, and `tests/live/nm.sh` is exactly that case. So the document is
+	 * asked second, through the same `policy` word `device.c` reads.
+	 *
+	 * Second and not first: where both answer, the kernel's radio is a real one
+	 * and is the better default for a machine with hardware.
+	 */
+	if (store->interface[0] == '\0') {
+		ncfg_devices_t devices;
+
+		memset(&devices, 0, sizeof(devices));
+		if (ncfg_client_devices(client, &devices, err, sizeof(err))) {
+			size_t at;
+
+			for (at = 0u; at < devices.count; at++) {
+				const ncfg_device_t *one = &devices.items[at];
+
+				if (one->managed && one->name && one->policy &&
+				    strcmp(one->policy, "wifi") == 0) {
+					(void)snprintf(store->interface,
+					    sizeof(store->interface), "%s", one->name);
+					break;
+				}
+			}
+			ncfg_devices_free(&devices);
+		}
 	}
 	return store->interface[0] != '\0' ? store->interface : NULL;
 }
@@ -264,6 +404,43 @@ static int say_strength(DBusMessageIter *into, void *object, char *err, size_t e
 }
 
 /*
+ * What the DOCUMENT says this network's security is, or NULL for one it does not
+ * name.
+ *
+ * **Exact where a scan is a guess, and this is the network that matters.** A
+ * scan reports three collapsed facts -- secured, enterprise, owe -- while the
+ * document says `psk` with which generation, `eap`, or `owe`. The network an
+ * applet is about to be asked to join is almost always one the document
+ * describes, so answering `WPA2-PSK` for a network written down as WPA3 is the
+ * wrong answer in the commonest case: a client offers SAE or does not.
+ *
+ * Keyed on the hex SSID rather than on the name, because an SSID is up to 32
+ * arbitrary octets and need not be text -- the hex is what both sides always
+ * have.
+ */
+static const ncfg_saved_network_t *written_down(const nmc_ap_slot_t *slot)
+{
+	const ncfg_saved_networks_t *saved;
+	size_t                       at;
+
+	if (!slot || slot->ssid_hex[0] == '\0') {
+		return NULL;
+	}
+	saved = nmc_state_saved(slot->state);
+	if (!saved) {
+		return NULL;
+	}
+	for (at = 0u; at < saved->count; at++) {
+		const ncfg_saved_network_t *one = &saved->items[at];
+
+		if (one->ssid && strcasecmp(one->ssid, slot->ssid_hex) == 0) {
+			return one;
+		}
+	}
+	return NULL;
+}
+
+/*
  * `Flags` carries one bit that matters: whether joining needs a credential.
  *
  * **OWE counts as privacy.** It encrypts with no credential, so `secured` is
@@ -273,9 +450,18 @@ static int say_strength(DBusMessageIter *into, void *object, char *err, size_t e
  */
 static int say_flags(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
-	const nmc_ap_slot_t *slot = object;
-	dbus_uint32_t        flags = (slot->secured || slot->owe) ? NM_802_11_AP_FLAGS_PRIVACY
-	                                                         : NM_802_11_AP_FLAGS_NONE;
+	const nmc_ap_slot_t        *slot = object;
+	const ncfg_saved_network_t *written = written_down(slot);
+	/* The document's answer where it has one, so `Flags` and `RsnFlags` cannot
+	 * disagree about whether a network is open. */
+	int                         private_network = slot->secured || slot->owe;
+	dbus_uint32_t               flags;
+
+	if (written && written->security) {
+		private_network = strcmp(written->security, "open") != 0 &&
+		    written->security[0] != '\0';
+	}
+	flags = private_network ? NM_802_11_AP_FLAGS_PRIVACY : NM_802_11_AP_FLAGS_NONE;
 
 	(void)err;
 	(void)err_size;
@@ -297,18 +483,14 @@ static int say_flags(DBusMessageIter *into, void *object, char *err, size_t err_
  */
 static int say_rsn_flags(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
-	const nmc_ap_slot_t *slot = object;
-	dbus_uint32_t        flags = NM_802_11_AP_SEC_NONE;
+	const nmc_ap_slot_t        *slot = object;
+	const ncfg_saved_network_t *written = written_down(slot);
+	dbus_uint32_t               flags;
 
 	(void)err;
 	(void)err_size;
-	if (slot->owe) {
-		flags = NM_802_11_AP_SEC_KEY_MGMT_OWE;
-	} else if (slot->enterprise) {
-		flags = NM_802_11_AP_SEC_KEY_MGMT_802_1X | NM_802_11_AP_SEC_PAIR_CCMP;
-	} else if (slot->secured) {
-		flags = NM_802_11_AP_SEC_KEY_MGMT_PSK | NM_802_11_AP_SEC_PAIR_CCMP;
-	}
+	flags = nmc_ap_flags_of(slot->secured, slot->enterprise, slot->owe,
+	    written ? written->security : NULL, written ? written->proto : NULL);
 	return dbus_message_iter_append_basic(into, DBUS_TYPE_UINT32, &flags) ? 1 : 0;
 }
 
