@@ -20,6 +20,7 @@
  *   put a dialog on a desktop for a daemon that is restarting.
  */
 #include "nmc/manager.h"
+#include "nmc/store.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -43,6 +44,11 @@ static int say_string(DBusMessageIter *into, const char *text)
 }
 
 static int say_path(DBusMessageIter *into, const char *path)
+{
+	return dbus_message_iter_append_basic(into, DBUS_TYPE_OBJECT_PATH, &path) ? 1 : 0;
+}
+
+static int put_device_path(DBusMessageIter *into, const char *path)
 {
 	return dbus_message_iter_append_basic(into, DBUS_TYPE_OBJECT_PATH, &path) ? 1 : 0;
 }
@@ -222,7 +228,45 @@ NMC_CONST_U32(say_radio_flags, 0u)
 NMC_CONST_EMPTY(say_checkpoints, "o")
 /* Not tracked yet, and an empty list is what "none" looks like to libnm. */
 NMC_CONST_EMPTY(say_active_connections, "o")
-NMC_CONST_EMPTY(say_devices, "o")
+
+/*
+ * Every device netcfgd reports, as object paths.
+ *
+ * `Devices` and `AllDevices` answer the same list, and `GetDevices` and
+ * `GetAllDevices` answer it through the same function -- because a client that
+ * asks two ways and is told different things has caught the shim lying. NM
+ * distinguishes the two by realness, and every device netcfgd reports is real
+ * enough to configure, which is the distinction that matters here.
+ */
+static int say_device_paths(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	nmc_state_t    *state = object;
+	nmc_store_t    *store = state ? (nmc_store_t *)state->store : NULL;
+	DBusMessageIter array;
+	const char     *names[256];
+	size_t          count = 0u;
+	size_t          at;
+
+	(void)err;
+	(void)err_size;
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "o", &array)) {
+		return 0;
+	}
+	if (store) {
+		count = nmc_store_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
+		    store);
+	}
+	for (at = 0u; at < count; at++) {
+		char path[96];
+
+		(void)snprintf(path, sizeof(path),
+		    "/org/freedesktop/NetworkManager/Devices/%s", names[at]);
+		if (!put_device_path(&array, path)) {
+			break;
+		}
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+}
 /*
  * netcfgd has DNS policy and it is nothing like NM's global configuration
  * blob. Empty says "nothing set here", which is true of THIS INTERFACE;
@@ -275,14 +319,11 @@ static int get_devices(DBusMessage *call, DBusMessage *reply, void *object, char
 	DBusMessageIter out;
 
 	(void)call;
-	(void)object;
-	(void)err;
-	(void)err_size;
 	dbus_message_iter_init_append(reply, &out);
-	/* The method and the property answer from one place, because a client
-	 * that asks both and is told different things is a client that has
-	 * caught the shim lying. */
-	return say_empty(&out, "o");
+	/* The method and the property answer from one function, because a client
+	 * that asks both and is told different things has caught the shim
+	 * lying. */
+	return say_device_paths(&out, object, err, err_size);
 }
 
 /* ------------------------------------------------------------ the tables */
@@ -292,8 +333,8 @@ static const nmc_property_t PROPERTIES[] = {
 	{ "VersionInfo", "au", NMC_READ, say_version_info, NULL },
 	{ "State", "u", NMC_READ, say_state, NULL },
 	{ "Connectivity", "u", NMC_READ, say_connectivity, NULL },
-	{ "Devices", "ao", NMC_READ, say_devices, NULL },
-	{ "AllDevices", "ao", NMC_READ, say_devices, NULL },
+	{ "Devices", "ao", NMC_READ, say_device_paths, NULL },
+	{ "AllDevices", "ao", NMC_READ, say_device_paths, NULL },
 	{ "Checkpoints", "ao", NMC_READ, say_checkpoints, NULL },
 	{ "ActiveConnections", "ao", NMC_READ, say_active_connections, NULL },
 	{ "PrimaryConnection", "o", NMC_READ, say_no_path, NULL },

@@ -98,6 +98,36 @@ typedef struct {
 } nmc_object_t;
 
 /*
+ * A family of objects under one path prefix, resolved per message.
+ *
+ * **Why a prefix and not a registration per device.** NM serves a device at
+ * `/org/freedesktop/NetworkManager/Devices/<n>`, and the set changes as a cable
+ * is plugged or a radio is rfkilled. Registering and unregistering a path per
+ * device means the bus layer has to be told about every change, which is the
+ * cache `state.h` says this port does not have yet -- so libdbus's fallback
+ * handler takes the whole subtree and the tail is resolved when a message
+ * arrives. The set is then never stale, because it is never stored.
+ *
+ * `resolve` is handed the tail after the prefix and one `/` -- "3" for
+ * `.../Devices/3` -- and answers the object data or NULL for no such object.
+ * A NULL answer is `UnknownObject`, which is what a client holding a path to a
+ * device that has gone must be told.
+ *
+ * `enumerate` is for `Introspect` on the prefix itself, which lists child
+ * nodes. libnm never needs it -- it reads the `Devices` property -- but
+ * `busctl tree` does, and a subtree that introspects as empty looks broken to
+ * whoever is debugging it. NULL means "say no children".
+ */
+typedef struct {
+	const char                   *prefix;
+	const nmc_interface_t *const *interfaces;
+	void *(*resolve)(const char *tail, void *context);
+	/* Write up to `max` child names into `names`; answer how many. */
+	size_t (*enumerate)(const char **names, size_t max, void *context);
+	void *context;
+} nmc_subtree_t;
+
+/*
  * Serve `objects` on `connection` until `nmc_bus_stop` or the bus goes away.
  *
  * Returns 1 on an orderly stop and 0 with a sentence in `err` when a path
@@ -105,7 +135,7 @@ typedef struct {
  * runtime one, so it is worth failing loudly at startup.
  */
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
-    char *err, size_t err_size);
+    const nmc_subtree_t *subtrees, size_t subtree_count, char *err, size_t err_size);
 
 /* Ask the loop to return. Safe from a signal handler. */
 void nmc_bus_stop(void);
@@ -116,7 +146,13 @@ void nmc_bus_stop(void);
  * Exposed because the policy gate reads the served interface names, and
  * asking the program what it serves beats parsing the source for attributes
  * -- which is how `tool/dbus_policy_gate.py` came to miss one (0264).
+ *
+ * `children` are the node names to advertise beneath this path, or NULL for
+ * none. **Without them a client's tree walk stops here**, which is how
+ * `busctl tree` came to show the manager and not one device: the paths were
+ * served and reachable, and nothing said they existed.
  */
-int nmc_bus_introspect(const nmc_object_t *object, char *out, size_t out_size);
+int nmc_bus_introspect(const nmc_object_t *object, const char *const *children,
+    size_t child_count, char *out, size_t out_size);
 
 #endif /* NMC_BUS_H */
