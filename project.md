@@ -12293,6 +12293,29 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.355 One sentence twice, from two different refusals
+
+Measured at the start of 2026-10-02 and nearly lost with the session that found
+it: `NCFG_LOG=note ncfg status` emits "the nftables dump was not answered"
+**twice, identically**. One emission site, one caller, one observation -- so it
+looked like a duplicate and was not. There are two dumps, rules and chains, and
+on a process that may not ask netlink both fail, so both logged. Each copy
+claimed both outcomes: "reports no NAT installed and no conflicting table".
+
+Each now names which dump it was. Two failures are two facts, and a line that
+cannot be told from the one above it reads as a log repeating itself rather
+than a second request refused -- the resolv.conf shape from 10.348, a second
+time in a day, which is what makes it worth a rule rather than a fix: **when a
+helper logs, the message belongs to the CALLER's question, not the helper's
+mechanism.** The helper knew it had failed; only the caller knew what had been
+asked.
+
+**And the noise this was found inside has already gone**, by a change made for
+another reason. These are `NOTE`, and 10.347 set the client's floor to
+`WARNING` -- so an unprivileged `ncfg status`, which led with four alarming
+`!` lines about `EPERM`, now leads with its output. That was the intended
+effect of the floor and this is the first evidence of it on a real invocation.
+
 ## 10.354 The NM adapter's C port: the dispatcher, and one interface on it
 
 Instructed by the copyright holder, 2026-10-02: port the adapter to C over
