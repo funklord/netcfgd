@@ -30,5 +30,8 @@ void          nmc_device_network_of(const nmc_device_slot_t *slot, char *out, si
 void          nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 int           nmc_device_default_route_of(const nmc_device_slot_t *slot);
 dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
+/* The `State` property's number, so that the property, the `StateReason` pair
+ * and `StateChanged` are one computation and cannot drift apart. */
+dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot);
 
 #endif /* NMC_DEVICE_H */

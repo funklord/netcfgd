@@ -636,6 +636,88 @@ int main(void)
 		nmc_state_free(&state);
 	}
 
+	/*
+	 * The two signal detectors, driven without a bus.
+	 *
+	 * **Both are things whose failure mode is silence**, and a converged
+	 * machine is silent too -- which is why these are tested as predicates
+	 * rather than by watching the bus. `nmc_watch_moved` is tested the same
+	 * way and for the same reason; this is that argument applied to the two
+	 * detectors the membership and state signals rest on.
+	 */
+	{
+		nmc_watch_t  *watch = nmc_watch_new();
+		unsigned long was = 99u;
+
+		check(watch != NULL, "a watch for the state detector");
+		/* First sight remembers and says nothing: a signal per value at
+		 * startup is a storm, not news. */
+		check(nmc_watch_number(watch, "dev.state", 30u, &was) == 0,
+		    "a number seen for the first time is not a change");
+		check(nmc_watch_number(watch, "dev.state", 30u, &was) == 0,
+		    "and the same number again is still not one");
+		/* The positive control: it has to be able to fire, or the two
+		 * zeros above mean only that it ran. */
+		was = 99u;
+		check(nmc_watch_number(watch, "dev.state", 100u, &was) == 1 && was == 30u,
+		    "a number that moved is a change, carrying what it was");
+		/* Two keys must not share one memory -- the whole point of keying
+		 * on the path is that two devices cannot answer for each other. */
+		check(nmc_watch_number(watch, "other.state", 100u, &was) == 0,
+		    "a second key starts from its own first sight");
+		check(nmc_watch_number(watch, "dev.state", 100u, &was) == 0,
+		    "and the first key kept its own answer");
+		nmc_watch_free(watch);
+	}
+
+	{
+		nmc_watch_t *watch = nmc_watch_new();
+		const char  *one[] = { "0", "1" };
+		const char  *two[] = { "1", "2" };
+		const char  *added[8];
+		const char  *gone[8];
+		size_t       added_count = 9u;
+		size_t       gone_count = 9u;
+
+		check(watch != NULL, "a watch for the membership detector");
+		check(nmc_watch_set(watch, "devices", one, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 0,
+		    "a set seen for the first time announces nothing");
+		check(nmc_watch_set(watch, "devices", one, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 0,
+		    "and an unchanged set announces nothing either");
+		/* One in, one out, in a single call -- which is what a cable moving
+		 * between ports looks like, and the case a diff keyed on the count
+		 * alone would miss entirely. */
+		check(nmc_watch_set(watch, "devices", two, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 1 &&
+		        added_count == 1u && gone_count == 1u &&
+		        strcmp(added[0], "2") == 0 && strcmp(gone[0], "0") == 0,
+		    "a member in and a member out are both named, in one answer");
+		check(nmc_watch_set(watch, "devices", two, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 0,
+		    "and the new set is what the next call is compared against");
+		/* A removal's name points into the watch, so it has to survive the
+		 * call that reported it -- the first version of this shared one
+		 * buffer between keys and handed back freed memory. */
+		check(nmc_watch_set(watch, "aps", one, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 0,
+		    "a second key starts from its own first sight");
+		check(nmc_watch_set(watch, "aps", two, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 1 &&
+		        gone_count == 1u && strcmp(gone[0], "0") == 0,
+		    "and diffs against its own set, not the other key's");
+		check(nmc_watch_set(watch, "devices", two, 2u, added, &added_count, gone,
+		          &gone_count, 8u) == 0,
+		    "while the first key is still converged");
+		/* Emptying it is a removal of everything, not a first sight. */
+		check(nmc_watch_set(watch, "devices", NULL, 0u, added, &added_count, gone,
+		          &gone_count, 8u) == 1 &&
+		        added_count == 0u && gone_count == 2u,
+		    "a set that emptied names everything that went");
+		nmc_watch_free(watch);
+	}
+
 	printf("\nbus_test: %d check(s)\n", checks);
 	if (failures == 0) {
 		printf("bus_test: all checks passed\n");

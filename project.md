@@ -12293,6 +12293,81 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.367 The signals, and a removal check that was the thing at fault
+
+The thirteenth slice of 0264's port emits what NM emits rather than leaving a
+client to diff a list. `DeviceAdded`, `DeviceRemoved`, `NewConnection`,
+`ConnectionRemoved`, `AccessPointAdded`, `AccessPointRemoved` and both
+`StateChanged` shapes are on the bus, verified against a real one.
+
+**Two detectors, and both exist because `PropertiesChanged` cannot say what
+happened.** A property signal carries the new value, so a membership list
+changing tells a client that something moved and makes it diff to find out
+what, and a state arriving as one number makes "went to disconnected" and "has
+been disconnected" the same message. `nmc_watch_set` diffs a named set once
+here instead of in every client; `nmc_watch_number` keeps the old value, which
+the property detector structurally cannot -- it overwrites what it remembered.
+
+**The membership diffs run every tick, not round-robin.** Each is one windowed
+fetch, and a device appearing is the event a client most wants promptly: a
+cable going in should not wait for the cursor to come round. `Device.StateChanged`
+rides on the device the round-robin is already visiting, since that one is
+already paying for the poll.
+
+**Three things are found rather than computed, after 10.366.** The radio an
+access point signal belongs on comes from the scan store, which already records
+which radio it asked, by way of the device store, which already knows that
+name's path. And the two state numbers were lifted out of their property
+getters into `nmc_manager_state_now` and `nmc_device_state_now`, so the
+property, `Device.StateReason` and the signal are one computation -- the device
+state had already been written twice and would have become three.
+
+**The use-after-free I wrote and then found.** `nmc_watch_set` hands back
+removals as pointers into its own memory, which has to survive until that key is
+asked again. The first version kept one `previous` buffer for the whole watch,
+so two keys losing a member in one tick freed each other's answers. It is
+per-key now, and the test drives two keys alternately for exactly that reason.
+
+**The live probe, and the control that is the point of it.** `bus_test` drives
+both detectors and sabotages each, which answers "did it notice". It cannot
+answer whether the answer reaches a client, and this adapter has twice been
+quiet for the wrong reason (10.364). So `tests/live/c_nm_signals.sh` attaches
+`dbus-monitor` **before** the shim starts -- so the startup silence is observed
+rather than assumed -- then forces a dummy link in and out of the namespace and
+requires the bus to say so.
+
+**The first removal check was wrong and the code was right, which is the
+entry's real finding.** It removed a drop-in declaring a device, expecting
+`DeviceRemoved`. The device stayed, and should have: unconfiguring a device does
+not make its link go away, netcfgd still reports it, and the shim was correct to
+announce nothing. Measured separately before the code was touched -- `ncfg`
+reports `sig1` gone from its devices while `ip link` still shows it, which is
+two different questions. The forced event is now a link arriving and leaving,
+which is also what the signal is *for*: a client wants to know a cable went in,
+not that somebody edited a file.
+
+**Four sabotages, each read for which check failed.** Cutting `nmc_watch_number`
+fails the state detector's positive control alone; dropping the removal arm of
+`nmc_watch_set` fails three set checks; cutting `nmc_emit_path` fails the live
+probe's five bus checks; and making first sight announce fails the startup
+silence. The last two matter most, because a passing quiet check and a passing
+loud check look identical from the output.
+
+**Three of the live checks were vacuous and are not now.** Each compared a count
+of signals against a count of those carrying the right path, and two zeros
+agree -- so a bus with nothing on it satisfied them. Asked as a yes with the
+non-zero folded in, the sender sabotage takes five checks red instead of two.
+
+**`make check` could not reach any of this, and that is fixed.** `adapters`
+drives `cargo test` in each Rust adapter workspace and the C port is not one, so
+115 checks ran only when somebody typed them. `nm-c-test` joins the portable
+gates, for the reason `bridge-test` did, and was sabotaged once to watch it exit
+2 rather than trusted.
+
+Open: the writes themselves, behind 10.361's gate, and `tests/live/nm.sh` still
+points at the Rust shim's binary -- 0264's acceptance oracle is not pointed at
+the thing being accepted yet.
+
 ## 10.366 The device-to-connection join, and the machine disproving arithmetic
 
 The twelfth slice of 0264's port closes the one join 10.362 refused to guess at.

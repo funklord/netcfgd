@@ -63,6 +63,50 @@ int nmc_watch_moved(nmc_watch_t *watch, const char *path, const nmc_interface_t 
     const nmc_property_t *property, void *object);
 
 /*
+ * A number, remembered, with what it was before.
+ *
+ * **Because `PropertiesChanged` carries the new value and NM's `StateChanged`
+ * carries both.** A client cannot reconstruct a transition from the new state
+ * alone -- "went to disconnected" and "has been disconnected" are the same
+ * message -- so the old one has to be kept, and the property detector cannot
+ * supply it: it overwrites what it remembered.
+ *
+ * Answers 1 when the value moved, with `was` filled. First sight remembers and
+ * answers 0, for the reason the property detector does: a signal per value at
+ * startup is a storm.
+ */
+int nmc_watch_number(nmc_watch_t *watch, const char *key, unsigned long now,
+    unsigned long *was);
+
+/*
+ * A set of names, remembered, diffed.
+ *
+ * **For the signals that say what APPEARED rather than what changed.**
+ * `DeviceAdded`, `NewConnection` and `AccessPointAdded` are about membership, and
+ * a `PropertiesChanged` on the list carries the whole list -- which tells a
+ * client that something moved and makes it diff to find out what. NM says which,
+ * so this does the diffing once here rather than in every client.
+ *
+ * `added` and `gone` are filled with pointers into the CALLER's `names` for
+ * additions, and into the watch's own memory for removals -- so a removal's
+ * name is valid until the next call for the same key. Answers 0 where nothing
+ * moved, including first sight: the set is remembered and nothing is announced,
+ * or a client would be told every device appeared the moment the shim started.
+ */
+int nmc_watch_set(nmc_watch_t *watch, const char *key, const char *const *names, size_t count,
+    const char **added, size_t *added_count, const char **gone, size_t *gone_count,
+    size_t room);
+
+/* Send one signal carrying a single object path. */
+void nmc_emit_path(DBusConnection *connection, const char *path, const char *interface,
+    const char *member, const char *argument);
+
+/* Send one signal carrying one, two or three `u` arguments -- NM's state
+ * signals, whose shapes are `u`, `uu` and `uuu`. */
+void nmc_emit_numbers(DBusConnection *connection, const char *path, const char *interface,
+    const char *member, const dbus_uint32_t *values, size_t count);
+
+/*
  * The marshalled bytes of one property's value, for the test that proves the
  * comparison can tell two values apart. Answers 0 where the value could not be
  * read. `*out` is the caller's to `free`.

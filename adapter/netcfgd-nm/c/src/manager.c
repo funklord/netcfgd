@@ -106,17 +106,15 @@ static int rung_now(nmc_state_t *state, ncfg_rung_t *rung)
 	return 1;
 }
 
-static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_size)
+dbus_uint32_t nmc_manager_state_now(nmc_state_t *state)
 {
 	ncfg_rung_t rung = ncfg_rung_offline;
 
-	(void)err;
-	(void)err_size;
-	if (!rung_now(object, &rung)) {
+	if (!rung_now(state, &rung)) {
 		/* A netcfgd that cannot be reached is NM's UNKNOWN. A confident
 		 * DISCONNECTED would put a permanent warning on a desktop whose
 		 * network is fine and whose daemon is restarting. */
-		return say_u32(into, NM_STATE_UNKNOWN);
+		return NM_STATE_UNKNOWN;
 	}
 	/*
 	 * `CONNECTED_GLOBAL` rather than `_SITE` once routed: netcfgd tells the
@@ -124,8 +122,14 @@ static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_
 	 * one would put a warning triangle on every working desktop --
 	 * `manager.rs` argues this at length and the argument is unchanged.
 	 */
-	return say_u32(into,
-	    rung >= ncfg_rung_routed ? NM_STATE_CONNECTED_GLOBAL : NM_STATE_DISCONNECTED);
+	return rung >= ncfg_rung_routed ? NM_STATE_CONNECTED_GLOBAL : NM_STATE_DISCONNECTED;
+}
+
+static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	(void)err;
+	(void)err_size;
+	return say_u32(into, nmc_manager_state_now(object));
 }
 
 static int say_connectivity(DBusMessageIter *into, void *object, char *err, size_t err_size)
