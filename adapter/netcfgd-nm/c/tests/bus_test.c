@@ -23,6 +23,7 @@
 #include "nmc/ipconfig.h"
 #include "nmc/active.h"
 #include "nmc/accesspoint.h"
+#include "nmc/agent.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -521,6 +522,46 @@ int main(void)
 
 		check(nmc_accesspoint_interface.property_count == 11u,
 		    "the access point declares eleven properties, as NM's does");
+	}
+
+	/*
+	 * The agent registry's semantics.
+	 *
+	 * The two security properties -- the key is the bus's sender, and
+	 * `Unregister` touches only the caller's own -- live in the method
+	 * handlers and need a bus to exercise. What is checkable here is the
+	 * registry they rest on, including the one that would be a real fault:
+	 * **a second Register from one connection must replace, not add**, or the
+	 * shim would ask one agent twice for one secret.
+	 */
+	{
+		nmc_agents_t agents;
+
+		nmc_agents_init(&agents);
+		check(nmc_agents_count(&agents) == 0u, "a new registry holds nobody");
+		check(nmc_agents_add(&agents, ":1.4", "org.example.one", 0) == 1 &&
+		        nmc_agents_count(&agents) == 1u,
+		    "an agent registers");
+		check(nmc_agents_add(&agents, ":1.4", "org.example.renamed", 1) == 1 &&
+		        nmc_agents_count(&agents) == 1u,
+		    "and registering again from one connection replaces rather than adds");
+		check(nmc_agents_add(&agents, ":1.9", "org.example.two", 0) == 1 &&
+		        nmc_agents_count(&agents) == 2u,
+		    "while a second connection is a second agent");
+		check(nmc_agents_drop(&agents, ":1.4") == 1 && nmc_agents_count(&agents) == 1u,
+		    "dropping one leaves the other");
+		check(nmc_agents_drop(&agents, ":1.4") == 0,
+		    "and dropping it again says there was none, which is what makes "
+		    "Unregister idempotent");
+		check(nmc_agents_drop(&agents, ":1.99") == 0,
+		    "a name that never registered drops nothing");
+		check(nmc_agents_drop(&agents, ":1.9") == 1 && nmc_agents_count(&agents) == 0u,
+		    "and the last one can go");
+		nmc_agents_free(&agents);
+
+		check(nmc_agentmanager_interface.method_count == 3u &&
+		        nmc_agentmanager_interface.property_count == 0u,
+		    "AgentManager is three methods and no properties, as NM's is");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);
