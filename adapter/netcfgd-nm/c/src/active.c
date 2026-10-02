@@ -11,6 +11,7 @@
  * able to disagree.
  */
 #include "nmc/active.h"
+#include "nmc/settings.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -172,18 +173,32 @@ static int say_zero(DBusMessageIter *into, void *object, char *err, size_t err_s
 }
 
 /*
- * `Connection` points at the settings object for this network, and does not.
+ * `Connection` points at the settings object for the network this device joined.
  *
- * **It answers `/`, and the reason is the one thing this slice cannot shortcut.**
- * The settings objects are numbered by the CONNECTION store and this object by
- * the DEVICE store, so the path cannot be computed from the device's number --
- * and guessing it would hand a client the settings of whatever connection
- * happened to share the number. Joining them properly means one store asking the
- * other, which is the next slice rather than an arithmetic coincidence.
+ * **A lookup and never arithmetic.** The settings objects are numbered by the
+ * CONNECTION store and this one by the DEVICE store, so `/Devices/3` and
+ * `/Settings/3` are unrelated -- computing one from the other would hand a
+ * client the settings of whatever connection happened to share a number. 10.362
+ * answered `/` rather than guess; this asks the connection store for the id the
+ * device's link reports.
+ *
+ * Still `/` for a device carrying no `network` block, which is every wired link
+ * here: NM's "no object", and true.
  */
 static int say_connection(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
-	return say_no_path(into, object, err, err_size);
+	const nmc_device_slot_t *slot = object;
+	char                     network[128] = "";
+	const char              *path = NULL;
+
+	(void)err;
+	(void)err_size;
+	nmc_device_network_of(slot, network, sizeof(network));
+	if (network[0] != '\0' && slot && slot->state) {
+		path = nmc_connections_path_of((nmc_connections_t *)slot->state->connections,
+		    network);
+	}
+	return put_path(into, path ? path : "/");
 }
 
 static const nmc_property_t PROPERTIES[] = {

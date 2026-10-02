@@ -82,10 +82,12 @@ typedef struct {
 	int            have_links;
 	int            have_radios;
 	int            have_scan;
+	int            have_saved;
 	ncfg_devices_t devices;
 	ncfg_links_t   links;
 	ncfg_radios_t  radios;
 	ncfg_scan_t    scan;
+	ncfg_saved_networks_t saved;
 } nmc_facts_t;
 
 /* Open and close one window. Unbalanced calls leak a list until the next close,
@@ -118,6 +120,15 @@ const ncfg_radios_t  *nmc_state_radios(nmc_state_t *state);
  * same window gets its own fetch rather than the first one's answer.
  */
 const ncfg_scan_t *nmc_state_scan(nmc_state_t *state, const char *interface);
+
+/*
+ * The saved networks, once per window.
+ *
+ * In the window because the device-to-connection join reads it per property: a
+ * device's `AvailableConnections` and an active connection's `Connection` both
+ * need the list, and so does every `Settings.Connection` getter.
+ */
+const ncfg_saved_networks_t *nmc_state_saved(nmc_state_t *state);
 
 /*
  * A client, opening one if there is none.

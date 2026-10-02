@@ -35,6 +35,14 @@ void nmc_connections_free(nmc_connections_t *store);
 int  nmc_connections_refresh(nmc_connections_t *store);
 
 /* `nmc_subtree_t`'s callbacks, with an `nmc_connections_t *` as the context. */
+/*
+ * The device-to-connection join: a network's id as its object path, or NULL.
+ *
+ * A lookup and never arithmetic -- the two stores number independently, so
+ * `/Devices/3` and `/Settings/3` are unrelated (project.md 10.362, 10.366).
+ */
+const char *nmc_connections_path_of(nmc_connections_t *store, const char *id);
+
 void  *nmc_connections_resolve_for_bus(const char *tail, void *context);
 size_t nmc_connections_enumerate_for_bus(const char **names, size_t max, void *context);
 
