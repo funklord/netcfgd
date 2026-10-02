@@ -70,8 +70,14 @@ typedef struct {
 	 * before it reaches the handler. Empty string means no arguments. */
 	const char *in_signature;
 	const char *out_signature;
-	int (*call)(DBusMessage *call, DBusMessage *reply, void *object, char *err,
-	    size_t err_size);
+	/*
+	 * `connection` is handed over because **a method that cannot reach the
+	 * bus cannot ask who is calling**, and a write has to: the uid comes
+	 * from `GetConnectionUnixUser` and never from the message. See
+	 * `nmc/authorize.h`.
+	 */
+	int (*call)(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+	    void *object, char *err, size_t err_size);
 } nmc_method_t;
 
 /*

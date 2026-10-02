@@ -27,6 +27,7 @@
  *   introspecting the shim can see. It is not ported.
  */
 #include "nmc/settings.h"
+#include "nmc/authorize.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,11 +37,21 @@
 
 /* ------------------------------------------------------- the connection store */
 
+/* The one state this process has, remembered so the shared write handler can
+ * tell the settings object's data from a connection's slot. */
+static const nmc_state_t *the_state;
+
 void nmc_connections_init(nmc_connections_t *store, nmc_state_t *state)
 {
 	memset(store, 0, sizeof(*store));
 	store->state = state;
 	store->next = 1u;
+	the_state = state;
+}
+
+int nmc_connections_is_state(const void *data)
+{
+	return data != NULL && data == (const void *)the_state;
 }
 
 void nmc_connections_free(nmc_connections_t *store)
@@ -288,12 +299,13 @@ static int say_can_modify(DBusMessageIter *into, void *object, char *err, size_t
 	return put_bool(into, 0);
 }
 
-static int list_connections(DBusMessage *call, DBusMessage *reply, void *object, char *err,
-    size_t err_size)
+static int list_connections(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
 {
 	DBusMessageIter out;
 	nmc_state_t    *state = object;
 
+	(void)connection;
 	(void)call;
 	(void)err;
 	(void)err_size;
@@ -304,22 +316,78 @@ static int list_connections(DBusMessage *call, DBusMessage *reply, void *object,
 }
 
 /*
- * **Every write, refused by name.**
+ * The `admin` principal this machine's document names, or UNKNOWN.
  *
- * `NotSupported` and not `AccessDenied`: the second says "not you", which would
- * have a client retry as root, and nobody can do this yet. The sentence names
- * `ncfg` because that is where the operation lives today.
+ * Read per call rather than cached: `control` is ordinary configuration a person
+ * edits, and a policy cached at startup is a policy that goes on granting after
+ * it was narrowed. **The expensive direction is the safe one here** -- a round
+ * trip per write attempt, against a stale grant.
  */
-static int refuse_write(DBusMessage *call, DBusMessage *reply, void *object, char *err,
-    size_t err_size)
+static void admin_principal(nmc_state_t *state, nmc_principal_t *out)
 {
-	(void)call;
+	ncfg_client_t *client = nmc_state_client(state);
+	ncfg_globals_t globals;
+	char           problem[256] = "";
+
+	/* Unknown until something says otherwise, which `nmc_may_write` refuses:
+	 * a daemon that cannot be asked must not read as `any`. */
+	nmc_principal_parse(NULL, out);
+	if (!client) {
+		return;
+	}
+	memset(&globals, 0, sizeof(globals));
+	if (!ncfg_client_globals(client, &globals, problem, sizeof(problem))) {
+		return;
+	}
+	nmc_principal_parse(globals.control_admin, out);
+	ncfg_globals_free(&globals);
+}
+
+/*
+ * **Every write: authorized first, then refused for not being built.**
+ *
+ * The order is the point. An unauthorized caller is told so -- which is the
+ * answer that will still be right once writing works -- and an authorized one
+ * is told the operation does not exist yet. Doing it the other way round would
+ * mean the authorization arrived untested on the day the write did, which is
+ * exactly how 0264's unauthorized method came to exist.
+ *
+ * So the gate is live, tested and already deciding, with nothing behind it.
+ * `AccessDenied` for the first and `Failed` for the second, because a client
+ * retrying as root should succeed in the first case and never in the second.
+ */
+static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	nmc_state_t    *state = object;
+	nmc_principal_t admin;
+	unsigned long   uid = 0u;
+	char            why[NMC_ERROR_MAX] = "";
+
 	(void)reply;
-	(void)object;
+	/*
+	 * A connection object's data is its slot rather than the state, so the
+	 * state is reached through it. Both shapes pass through here, which is
+	 * why this is not simply `object`.
+	 */
+	if (state && !nmc_connections_is_state(state)) {
+		const nmc_connection_slot_t *slot = object;
+
+		state = slot ? slot->state : NULL;
+	}
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
 	(void)snprintf(err, err_size,
-	    "this build of the shim does not write connections: the authorization that "
-	    "decides who may is not built yet, and writing without it is the defect 0264 "
-	    "found. Use `ncfg wifi add` or edit /etc/netcfgd/conf.d");
+	    "you may change this machine's configuration and this build of the shim cannot: "
+	    "writing connections over the bus is not implemented. Use `ncfg wifi add` or edit "
+	    "/etc/netcfgd/conf.d");
 	return 0;
 }
 
@@ -468,8 +536,8 @@ static int say_version_id(DBusMessageIter *into, void *object, char *err, size_t
  * are not in `GetSettings` even in NM**: they come from `GetSecrets`, which
  * refuses here.
  */
-static int get_settings(DBusMessage *call, DBusMessage *reply, void *object, char *err,
-    size_t err_size)
+static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
 {
 	const nmc_connection_slot_t *slot = object;
 	ncfg_saved_network_t         saved;
@@ -477,6 +545,7 @@ static int get_settings(DBusMessage *call, DBusMessage *reply, void *object, cha
 	DBusMessageIter              out;
 	DBusMessageIter              groups;
 
+	(void)connection;
 	(void)call;
 	if (!saved_for(slot, &saved, shown, sizeof(shown))) {
 		(void)snprintf(err, err_size,

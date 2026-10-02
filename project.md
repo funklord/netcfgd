@@ -12293,6 +12293,91 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.361 The write authorization, and the deputy it refuses to be
+
+The seventh slice of 0264's port, and the one the previous slice held writes
+back for. **The gate is live, tested and already deciding, with nothing behind
+it** -- which is the order that matters.
+
+### The confused deputy, which is why this cannot be delegated
+
+**netcfgd authorizes its socket peer.** The adapter is that peer, so asking
+netcfgd "may this be done" answers for the ADAPTER and not for the client on
+the bus -- and the adapter is the more privileged of the two. A write forwarded
+on that answer gives every local process the adapter's rights.
+
+`ncfg_client_tiers` is the obvious wrong turn and is worth naming as one: it
+exists, it answers in a single call, and what it answers is what *this
+connection* may do. The question is what the *caller* may do, and only the bus
+can say who the caller is. So that function must not be used here, and the
+header says so where somebody would reach for it.
+
+### The uid comes from the bus, never from the message
+
+A sender name is whatever the client wrote in the header.
+`GetConnectionUnixUser` is the bus reporting the credentials of the connection
+it accepted, which the client cannot choose. `settings.rs` says that
+distinction is the whole security of this, and it is the one line of this slice
+that cannot be got wrong quietly.
+
+**No sender is a refusal, not a bypass.** A message with none means a
+peer-to-peer connection with no bus to ask -- an arrangement nobody designed
+for this shim, and not an invitation to skip the check.
+
+### Every arm, and the two that must fail closed
+
+The policy mirrors the Rust's, read from the document per call rather than
+cached: `control` is ordinary configuration a person edits, and a policy cached
+at startup goes on granting after it was narrowed. A round trip per write
+attempt is the cheaper mistake.
+
+    uid 0            allowed, whatever the document says -- root can edit the
+                     file this would write, so refusing would be theatre
+    any              allowed
+    user:NAME        allowed where the uid matches, refused naming the user
+    root             refused, saying where to change it
+    group:NAME       refused, and this is the interesting one
+    anything else    refused
+
+**The group arm is a refusal about the transport and not about the caller.** A
+message bus reports a connection's user and not its groups, so whether this
+caller is in the group cannot be known here -- and is not guessed. Reading
+`/etc/group` would miss supplementary groups from every other source, and
+`getgrouplist` answers for a NAME rather than for the process actually calling.
+`ncfg` sees the real credentials over a unix socket and can do this; a bus
+cannot. The refusal says so and names what can.
+
+**An unreadable principal refuses rather than widening.** A typo in `control`,
+or a daemon that could not be asked, leaves the principal `UNKNOWN` -- and a
+parser falling back to `any` would turn a misspelling in netcfgd.conf into an
+open door. Both are asserted.
+
+### Proven on the real policy, which reached exactly one arm
+
+This machine's `admin` tier is `group:netcfgd` and the caller was uid 1000, so
+the live shim answered the group refusal -- the uid from the bus, the policy
+from the running daemon, and the arm chosen by both. **A live bus can reach
+only that one**, which is why all six are driven directly: the other five would
+need a different document or a different uid, and they are the arms where being
+wrong is expensive.
+
+### Why the writes still refuse, in the right order
+
+An unauthorized caller is told so, which is the answer that will still be right
+once writing works. An authorized one is told the operation does not exist yet.
+Doing it the other way round would mean the authorization arrived untested on
+the day the write did -- **which is exactly how 0264's unauthorized method came
+to exist.** `AccessDenied` in spirit for the first and `Failed` for the second,
+because a client retrying as root should succeed in one case and never in the
+other.
+
+### One model change it needed
+
+`nmc_method_t.call` now takes the connection, because **a method that cannot
+reach the bus cannot ask who is calling.** Three existing handlers gained an
+unused parameter, which is the cheapest possible price for making the question
+askable at all.
+
 ## 10.360 The settings interfaces, with every write refused on purpose
 
 The sixth slice of 0264's port. `...Settings` serves at the settings path and a

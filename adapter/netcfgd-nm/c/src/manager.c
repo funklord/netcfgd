@@ -313,11 +313,12 @@ static int say_no_type(DBusMessageIter *into, void *object, char *err, size_t er
 
 /* ----------------------------------------------------------- the methods */
 
-static int get_devices(DBusMessage *call, DBusMessage *reply, void *object, char *err,
-    size_t err_size)
+static int get_devices(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
 {
 	DBusMessageIter out;
 
+	(void)connection;
 	(void)call;
 	dbus_message_iter_init_append(reply, &out);
 	/* The method and the property answer from one function, because a client
