@@ -9617,6 +9617,83 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.365 The per-dispatch window, and the latency that was never the fetching
+
+The eleventh slice of 0264's port. A `GetAll` on one device went from **3150 ms
+to 2 ms**. Most of that was not the thing the previous entry blamed.
+
+### The window: a cache whose lifetime is one message
+
+Every getter asked netcfgd directly, so a 31-property `GetAll` was sixty-two
+round trips -- a device list and a link list each. The lists are now fetched
+once per **dispatch**: opened when a message arrives, closed when its reply is
+built.
+
+**That is the only honest cache here, and the scoping is the argument.**
+`state.h` used to refuse a cache because a cache without invalidation is a bug;
+a cache that cannot outlive its question needs none. There is no window in which
+the world could move and this still be consulted.
+
+It is also a correctness fix, not only a cost one: `GetAll` returning a device's
+state from one fetch and its address from another could describe a device that
+existed in neither.
+
+Outside a window the accessors answer NULL, which is what makes it safe rather
+than fast -- nothing can hold a list past the message it belongs to, because
+outside a message there is no list. Nesting is allowed and only the outermost
+close frees; extra closes leave it shut rather than underflowing open. Both are
+asserted.
+
+### The measurement that mattered, and it was not the fetching
+
+**`Introspect` on a device makes no client calls at all and measured 174 ms**,
+against **3 ms for twenty calls to the bus itself.** That control is what proved
+the latency belonged to this loop rather than to the fetching or to `dbus-send`.
+
+Three faults in the loop, each found by a number:
+
+- **`read_write_dispatch` dispatches ONE message.** With a one-second wait
+  beside it the shim answered about one call per second, and `dbus-send` makes
+  two round trips -- so a `GetAll` measured 3.15 s while the fetches were
+  milliseconds. It drains the queue now.
+- **The tick and the wait were the same timer.** A tick that reads a wifi scan
+  takes about a second, and a client waited behind a poll it had nothing to do
+  with. The wait is 200 ms and a tick is every twenty-fifth wake, so neither
+  number is a guess at the other's cost.
+- **Replies were queued and flushed on the next cycle.** The order is now wait,
+  drain, push: `read_write_dispatch` takes one message, the drain takes whatever
+  else arrived in the same wake, and the flush pushes every reply before blocking
+  again.
+
+The scan joined the window too, because the change detector reads every property
+twice -- once to compare and once to send -- so an unwindowed scan was two scans
+per tick.
+
+### Two measurements of mine that were worthless, and why
+
+**The A/B was vacuous.** To measure the window's effect I disabled it by closing
+the window before the read -- which makes the accessors answer NULL, so the
+"without" case fetched nothing and answered empty facts in 7 ms. It looked like
+the window had made things 450 times slower. **A control that removes the work
+is not a control**, and the tell was there to read: the fast case could not have
+been answering anything.
+
+**And a "floor" row measured the wrong thing.** A timing helper hardcoded
+`--dest=org.freedesktop.NetworkManager`, so the row labelled "the bus itself"
+called the shim with the bus's object path and reported 201 ms as the floor. The
+real floor, measured with the destination actually changed, is 3 ms.
+
+Both are this document's own recurring shape: a number that arrives looking like
+evidence, from an instrument that could not have produced the answer it claims.
+
+### What remains expensive, said rather than left to be found
+
+A tick still does real work, so a call that coincides with one waits for it --
+which is why the figures above vary between 2 ms and 108 ms depending on where a
+tick lands. Bounding the tick to one object (10.364) and widening the interval to
+five seconds makes that rare rather than absent. Removing it entirely needs
+netcfgd to tell the adapter when something changed, which it does not.
+
 ## 10.364 The secret agent registry, and the poll that was starving the loop
 
 The tenth slice of 0264's port serves `AgentManager`. **It also found a defect

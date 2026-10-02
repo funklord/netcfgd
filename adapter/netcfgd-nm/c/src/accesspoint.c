@@ -113,10 +113,9 @@ static const char *radio_of(nmc_aps_t *store, ncfg_client_t *client)
 int nmc_aps_refresh(nmc_aps_t *store)
 {
 	ncfg_client_t *client = nmc_state_client(store->state);
-	const char    *interface;
-	ncfg_scan_t    scan;
-	char           err[256] = "";
-	size_t         at;
+	const char        *interface;
+	const ncfg_scan_t *scan;
+	size_t             at;
 
 	if (!client) {
 		return 0;
@@ -125,21 +124,24 @@ int nmc_aps_refresh(nmc_aps_t *store)
 	if (!interface) {
 		return 0;
 	}
-	memset(&scan, 0, sizeof(scan));
 	/*
-	 * **This asks netcfgd for results and does not ask it to scan.** A scan
-	 * takes seconds and takes the radio, and a property read must not do
-	 * either: a client polling `AccessPoints` would otherwise hold the radio
+	 * **Asks netcfgd for results and does not ask it to scan.** A scan takes
+	 * seconds and takes the radio, and a property read must not do either: a
+	 * client polling `AccessPoints` would otherwise hold the radio
 	 * permanently. `ncfg wifi scan` is how a scan is asked for.
+	 *
+	 * Through the window, so one tick reads one scan rather than two -- the
+	 * change detector reads every property twice.
 	 */
-	if (!ncfg_client_wifi_scan(client, interface, &scan, err, sizeof(err))) {
+	scan = nmc_state_scan(store->state, interface);
+	if (!scan) {
 		return 0;
 	}
 	for (at = 0u; at < store->count; at++) {
 		store->slots[at].present = 0;
 	}
-	for (at = 0u; at < scan.count; at++) {
-		const ncfg_access_point_t *entry = &scan.items[at];
+	for (at = 0u; at < scan->count; at++) {
+		const ncfg_access_point_t *entry = &scan->items[at];
 		nmc_ap_slot_t             *slot;
 
 		if (!entry->bssid || entry->bssid[0] == '\0') {
@@ -162,7 +164,6 @@ int nmc_aps_refresh(nmc_aps_t *store)
 		slot->enterprise = entry->enterprise;
 		slot->owe = entry->owe;
 	}
-	ncfg_scan_free(&scan);
 	return 1;
 }
 

@@ -79,6 +79,10 @@ static void beat(void *context)
 	size_t       count;
 	size_t       which;
 
+	/* The poll reads the same properties a dispatch does, so it wants the
+	 * same window -- otherwise one tick would be the sixty-two fetches that
+	 * starved this loop in the first place. */
+	nmc_window_begin();
 	count = nmc_store_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
 	    beat_on->store);
 	/* The manager is index 0 and each device follows it. */
@@ -88,6 +92,7 @@ static void beat(void *context)
 	which = beat_on->cursor++;
 	if (which == 0u) {
 		(void)nmc_watch_poll(beat_on->watch, beat_on->connection, beat_on->manager);
+		nmc_window_end();
 		return;
 	}
 	which--;
@@ -97,6 +102,7 @@ static void beat(void *context)
 		nmc_object_t       device;
 
 		if (!slot) {
+			nmc_window_end();
 			return;
 		}
 		(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/Devices/%s",
@@ -108,6 +114,7 @@ static void beat(void *context)
 			(void)nmc_watch_poll(beat_on->watch, beat_on->connection, &device);
 		}
 	}
+	nmc_window_end();
 }
 
 static void usage(void)
