@@ -360,10 +360,34 @@ static const nmc_method_t METHODS[] = {
 	{ "GetAllDevices", "", "ao", get_devices }
 };
 
+/*
+ * NM's own signals on this interface.
+ *
+ * Declared and not yet emitted, which is the honest half: a client reads the
+ * introspection document to decide whether to subscribe, so a signal nobody
+ * declared is a signal nobody waits for. `PropertiesChanged` IS emitted and is
+ * not declared here -- it belongs to `org.freedesktop.DBus.Properties`, which
+ * `bus.c` publishes for every object.
+ */
+static const nmc_signal_t SIGNALS[] = {
+	/* A device appearing or going. Emitting these needs the device set
+	 * diffed, which `nmc_watch_poll` does for properties and not yet for the
+	 * list -- so `Devices` changing is what a client currently sees. */
+	{ "DeviceAdded", "o" },
+	{ "DeviceRemoved", "o" },
+	/* NM's manager state, the same value `State` carries. */
+	{ "StateChanged", "u" },
+	/* NM emits this when its permission set changes. netcfgd's authorization
+	 * is a document, so this will fire when `control` changes. */
+	{ "CheckPermissions", "" }
+};
+
 const nmc_interface_t nmc_manager_interface = {
 	.name = "org.freedesktop.NetworkManager",
 	.properties = PROPERTIES,
 	.property_count = sizeof(PROPERTIES) / sizeof(PROPERTIES[0]),
 	.methods = METHODS,
-	.method_count = sizeof(METHODS) / sizeof(METHODS[0])
+	.method_count = sizeof(METHODS) / sizeof(METHODS[0]),
+	.signals = SIGNALS,
+	.signal_count = sizeof(SIGNALS) / sizeof(SIGNALS[0])
 };

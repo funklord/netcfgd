@@ -12293,6 +12293,80 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.359 The signal mechanism, and why a quiet bus proved nothing
+
+The fifth slice of 0264's port, and the one 10.356 said would have to carry the
+cache: `PropertiesChanged` is emitted when a property moves, NM's own signals
+are declared, and the interface model gained a signal member.
+
+### The cache is honest here and was not before
+
+`state.h` says every getter asks netcfgd and there is no cache, because **a
+cache without the change tracking that invalidates it is a bug.** This is that
+tracking, so this is where a cache is defensible: it holds the LAST VALUE SEEN,
+which is exactly what "did it change" needs and is nothing a getter would read.
+
+### Bytes, not renderings
+
+The comparison is over the **marshalled bytes** of the value. A comparison
+through a string would need to know every type the tables can declare --
+`a{sv}`, `aa{sv}`, `(uu)`, `ay` -- and would be a second marshaller to keep
+right. libdbus already has one, so a scratch message is built, the value
+appended, and `dbus_message_marshal` asked for the bytes. The header is
+identical every time (same type, same path, same member, serial 0 on a message
+never sent), so a difference in the bytes is a difference in the value.
+
+**That assumption is asserted rather than trusted**: equal values marshal to
+equal bytes and different values do not, checked directly.
+
+### First sight is not a change
+
+A property seen for the first time is remembered and nothing is emitted. The
+alternative is every client getting a `PropertiesChanged` naming everything the
+moment the shim starts, which is a storm at exactly the moment a desktop is
+busy.
+
+And a property that could not be READ is not a property that changed. netcfgd
+being away makes every getter fail at once, so treating failure as a change
+would turn a daemon restart into a signal per property on every device.
+
+### Why zero signals was not evidence
+
+The live run emitted **nothing in eight seconds** on a converged machine, which
+is the wanted answer -- and **a detector that can never fire emits nothing
+too.** The two are indistinguishable from the bus, so the quiet run proved
+nothing on its own.
+
+So `nmc_watch_moved` is exposed and driven directly with a value made to move:
+first sight 0, unchanged 0, **changed 1**, then 0 again because a change is
+reported once. That is the positive control, and the zero on the bus means
+something only beside it. The same case checks that a path seen for the first
+time is first sight whatever another path said, or two devices would mask each
+other's changes.
+
+### What is declared and not yet emitted, said plainly
+
+`Manager.DeviceAdded`, `DeviceRemoved`, `StateChanged`, `CheckPermissions`,
+`Device.StateChanged(uuu)` and `Wireless.AccessPointAdded`/`Removed` are in the
+introspection document and nothing sends them. **Declaring is the half that
+matters first**: a client reads the document to decide whether to subscribe, so
+a signal nobody declared is a signal nobody waits for. What a client currently
+sees instead is `PropertiesChanged` on `Devices` and on `State`.
+
+`Device.StateChanged` is three arguments for a reason worth keeping -- new, old
+and reason. A client cannot reconstruct the transition from
+`PropertiesChanged`, which carries only the new value.
+
+### The poll is a poll, and that is netcfgd's shape
+
+NM pushes a signal the moment it acts. This polls every wake -- one second, the
+loop's existing timer, so no second timer and no thread -- because **netcfgd
+offers the adapter no change notification at all**, and the alternative is a
+client that never learns. The cost is a sweep of the properties per second,
+each a socket round trip, which is the figure `state.h` records as wrong for a
+tray and right for being correct first. A notification path from netcfgd is the
+thing that would retire it.
+
 ## 10.358 One subtype per device, because libnm reads the document to classify
 
 The fourth slice of 0264's port. All eight device subtype interfaces are

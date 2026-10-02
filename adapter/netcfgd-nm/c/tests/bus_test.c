@@ -17,12 +17,24 @@
 #include "nmc/manager.h"
 #include "nmc/device.h"
 #include "nmc/subtypes.h"
+#include "nmc/emit.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int checks;
 static int failures;
+
+/* A property whose value is whatever the test last put in the int. */
+static int count_up(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	dbus_uint32_t value = (dbus_uint32_t)*(int *)object;
+
+	(void)err;
+	(void)err_size;
+	return dbus_message_iter_append_basic(into, DBUS_TYPE_UINT32, &value) ? 1 : 0;
+}
 
 static void check(int condition, const char *what)
 {
@@ -210,6 +222,77 @@ int main(void)
 		    "while `lo` is Loopback, which carries no properties and is served anyway");
 		check(list && list[1] && list[1]->property_count == 0u,
 		    "  because a marker interface is how libnm knows what it is");
+	}
+
+	/*
+	 * The change detector, which is the positive control the bus cannot give.
+	 *
+	 * **A converged machine emits nothing, and so does a detector that can
+	 * never fire.** Those are indistinguishable from outside, so watching a
+	 * quiet bus proves nothing on its own -- this drives the predicate
+	 * directly with a value that is made to move.
+	 */
+	{
+		static int                counter;
+		static const nmc_property_t COUNTING = { "Counter", "u", NMC_READ,
+			    count_up, NULL };
+		static const nmc_interface_t FAKE = { "org.netcfgd.Test", &COUNTING, 1u, NULL,
+			    0u, NULL, 0u };
+		nmc_watch_t *watch = nmc_watch_new();
+
+		check(watch != NULL, "a watch is made");
+		counter = 7;
+		check(nmc_watch_moved(watch, "/t", &FAKE, &COUNTING, &counter) == 0,
+		    "first sight is not a change, or a client gets everything at startup");
+		check(nmc_watch_moved(watch, "/t", &FAKE, &COUNTING, &counter) == 0,
+		    "and an unchanged value is still not one");
+		counter = 8;
+		check(nmc_watch_moved(watch, "/t", &FAKE, &COUNTING, &counter) == 1,
+		    "a changed value IS one -- the control the quiet bus cannot give");
+		check(nmc_watch_moved(watch, "/t", &FAKE, &COUNTING, &counter) == 0,
+		    "and it is reported once, not on every look after");
+
+		/* The same value under a different path is a different thing, or two
+		 * devices would mask each other's changes. */
+		check(nmc_watch_moved(watch, "/other", &FAKE, &COUNTING, &counter) == 0,
+		    "a path seen for the first time is first sight, whatever another said");
+
+		nmc_watch_forget(watch, "/t");
+		check(nmc_watch_moved(watch, "/t", &FAKE, &COUNTING, &counter) == 0,
+		    "and forgetting a path makes the next look first sight again");
+		nmc_watch_free(watch);
+	}
+
+	/*
+	 * What the comparison rests on: equal values marshal equal, different
+	 * ones do not. The poll compares bytes rather than renderings, so this is
+	 * the assumption that makes it correct for every type the tables declare.
+	 */
+	{
+		static int     value = 1;
+		static const nmc_property_t COUNTING = { "Counter", "u", NMC_READ, count_up,
+			    NULL };
+		unsigned char *first = NULL;
+		unsigned char *again = NULL;
+		unsigned char *other = NULL;
+		size_t         a = 0u;
+		size_t         b = 0u;
+		size_t         c = 0u;
+
+		value = 42;
+		check(nmc_watch_value_bytes(&COUNTING, &value, &first, &a) == 1 &&
+		        nmc_watch_value_bytes(&COUNTING, &value, &again, &b) == 1,
+		    "a value marshals twice");
+		check(a == b && first && again && memcmp(first, again, a) == 0,
+		    "  to identical bytes, so an unchanged value never looks changed");
+		value = 43;
+		check(nmc_watch_value_bytes(&COUNTING, &value, &other, &c) == 1,
+		    "and a different value marshals");
+		check(c != a || (other && memcmp(first, other, a) != 0),
+		    "  to different bytes, so a changed value never looks unchanged");
+		free(first);
+		free(again);
+		free(other);
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);
