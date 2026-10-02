@@ -9499,6 +9499,75 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.159 A profile could not be saved by anyone who uses wifi
+
+    ncfg: this configuration cannot be written out yet, so it was not saved.
+    What is in the way:
+      device wlan0: a wifi policy
+
+`render_device` put a radio's policy on the unrenderable list, and the list
+refuses the **whole** save -- so `ncfg profile save` worked on a wired machine
+and on nothing else. That is not a narrow population: netcfgd writes
+`device <iface> { wifi { autoconnect = true } }` into the configuration of every
+radio `ncfg wifi activate` touches, so the block is in the file of anybody who
+has ever activated one. Profiles were unavailable to exactly the people the
+feature is for, and the renderer was being honest about it rather than dropping
+the setting, which is why nothing was wrong on any other axis.
+
+### Present and empty is not absent, which is where the care went
+
+`device.wifi` is an `Option` and its presence is what makes a radio netcfgd's to
+drive, so `Some(default)` and `None` are different documents. A renderer that
+writes only non-defaults -- which is this one's rule everywhere -- would write
+nothing at all for the policy netcfgd itself installs, turning every managed
+radio into one netcfgd has no policy for. The block is therefore emitted even
+when every key is at its default. **This is 10.21 exactly, one block over**: an
+empty `dns { }` was rendered as nothing for the same reason, and 0007's scopes
+are why both matter.
+
+### What made it checkable rather than plausible
+
+**Production already proves the round trip**, which is the part worth knowing
+before trusting any of this: after writing the snapshot the daemon reloads the
+layered configuration, recompiles it, and compares against the running document
+-- and on a mismatch it refuses and puts everything back, with a diff. So a key
+this renderer got wrong cannot be lost quietly; it refuses the save. What the
+fix changes is whether the save *succeeds*.
+
+Three round-trip cases, and each was reverted and watched: dropping one rendered
+key fails the all-keys case alone; skipping the block when every value is
+default fails only the case named for the block netcfgd writes itself; rendering
+it unconditionally fails the no-radio case **and nineteen others**, because
+handing a policy to every bridge and vlan breaks every device round-trip in the
+file. Restoring the original refusal fails the two wifi cases with
+`cannot render: device wlan0: a wifi policy`, which is what says they exercise
+this fix rather than something adjacent.
+
+`tests/live/profile.sh` carries a radio in its configuration now, which makes
+its existing assertions cover this path end to end rather than adding a subject
+-- the test is still about whether a save reproduces the machine. Its first run
+failed naming the old refusal, because `target/debug/netcfgd` was three commits
+stale: 10.157's second finding, met live within the hour by the person who had
+just fixed it, on the one path `make test` does not cover because a live script
+runs the binary directly.
+
+### The trap next door, checked rather than assumed
+
+`write_profile_snapshot` builds the `override` set from the base document, and
+its own comment records that when the renderer learned bluetooth this list had
+to learn it too -- *"the renderer's new capability defeated by a list that had
+not moved"*. It did not need moving here: a wifi policy is a sub-block of a
+`device`, and `device {name}` is already in that set. Recorded because the
+comment is aimed at precisely this kind of change and the next one may not be so
+lucky.
+
+**Still unrenderable, so a profile is still refused for these:** a `match`
+block, ethtool settings, qdisc and `ingress_redirect` on a device; routing
+rules; hooks; dns options, dnssec, transport, a server with a port or sni, and
+`mode = "exec"`; some interface kinds; an address with lifetimes or a peer; a
+route with a scope or a proto. The list is in `render.rs` and each entry is one
+of these waiting to be found by whoever it stops.
+
 ## 10.158 The vendored frontend may be absent, and 0173 stands
 
 `build-and-commit.md` requires a build that vendors a sibling to fetch it **and
@@ -15678,7 +15747,15 @@ nothing. A wildcard, a generated starter config, or a refusal are the three
 answers; which one is the copyright holder's, because the first is a language
 change and the second writes configuration nobody asked for.
 
-**`device X { wifi { autoconnect = ... } }` is parsed and read by nothing.**
+~~**`device X { wifi { autoconnect = ... } }` is parsed and read by nothing.**~~
+**Closed by 10.130 and decision 0236**, which acted on it: a radio that does
+not join by itself is sent `DISABLE_NETWORK all` after its networks, and the
+flag reaches the digest so changing it is no longer inert.
+`backend/netcfgd-supplicant/src/network.rs:282` carries it and
+`crates/netcfgd-apply/src/kernel.rs:874` sends the command. Struck through
+2026-10-02 after this entry was read as live and offered as open work -- the
+crate it names was renamed, so a grep for the old path answered "no reader"
+for the wrong reason. **The original claim, for the record:**
 Set at `netcfgd-compile/src/lower.rs:1600` into `WifiDevicePolicy`; no reader
 in `netcfgd-plan`, `netcfgd-apply`, `netcfgd-daemon`, `netcfgd-observe` or
 `netcfgd-supplicant`. The only `autoconnect` the supplicant honours is the
@@ -15688,7 +15765,10 @@ in the file of anybody who has ever run `ncfg wifi activate`, doing nothing.
 It defaults to `true`, so this does not explain an intermittent -- it explains
 that turning it off has no effect.
 
-**`ncfg profile save` refuses on any machine with an activated radio.**
+~~**`ncfg profile save` refuses on any machine with an activated radio.**~~
+**Fixed 2026-10-02; see 10.159.** The renderer writes the block now, including
+when every key is at its default, because the policy's presence is itself a
+statement. **The original claim:**
 `render.rs:783` reports `device X: a wifi policy` as unrenderable, so the whole
 save is refused. That is the renderer being honest rather than dropping a
 setting, and it means profiles are unavailable to exactly the people who use

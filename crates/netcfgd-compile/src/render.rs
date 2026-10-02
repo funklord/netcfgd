@@ -18,7 +18,7 @@
 //! the nose of whoever adds it to the other.
 
 use netcfgd_model::control::Principal;
-use netcfgd_model::device::OnUnmanage;
+use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
@@ -782,10 +782,6 @@ fn render_device(
 	if device.r#match.is_some() {
 		missing.push(format!("device {name}: a match block"));
 	}
-	if device.wifi.is_some() {
-		missing.push(format!("device {name}: a wifi policy"));
-	}
-
 	if device.link_settings.is_some() {
 		missing.push(format!("device {name}: ethtool settings"));
 	}
@@ -828,6 +824,7 @@ fn render_device(
 	// things a profile silently loses. A cellular machine is the one most
 	// likely to want a profile at all -- the APN differs per SIM and the SIM
 	// order is the whole point of switching between them.
+	render_wifi_device(device.wifi.as_ref(), &mut body);
 	if let Some(modem) = &device.modem {
 		body.push_str("\tmodem {\n");
 		if !modem.sim.is_empty() {
@@ -844,6 +841,96 @@ fn render_device(
 	}
 	let head = opening("device", name, overrides);
 	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
+}
+
+/// The `wifi` block of a device: what the radio itself is told to do.
+///
+/// **Present and empty is not absent**, which is 10.21's lesson for `dns { }`
+/// arriving in a second block. `device.wifi` being `Some` is what makes a radio
+/// netcfgd's to drive, and netcfgd writes
+/// `device <iface> { wifi { autoconnect = true } }` into every radio
+/// `ncfg wifi activate` touches -- so a policy at every default still renders
+/// `wifi { }`. Writing nothing would turn every managed radio into one netcfgd
+/// has no policy for, which is a bigger change than any single key here.
+///
+/// Until this existed the whole save was refused, because a wifi policy went on
+/// the unrenderable list: honest, and it meant profiles were unavailable to
+/// exactly the people who use wifi. Each value is written only where it differs
+/// from the default, which is this renderer's rule everywhere, and the three
+/// enums are quoted because `lower_wifi_device` reads them with `as_string`.
+fn render_wifi_device(wifi: Option<&WifiDevicePolicy>, body: &mut String) {
+	let Some(wifi) = wifi else {
+		return;
+	};
+	body.push_str("\twifi {\n");
+	if wifi.backend != WifiBackend::default() {
+		let _ = writeln!(
+			body,
+			"\t\tbackend = {}",
+			quote(wifi_backend_name(wifi.backend))
+		);
+	}
+	if !wifi.autoconnect {
+		body.push_str("\t\tautoconnect = false\n");
+	}
+	if let Some(url) = &wifi.portal_check {
+		let _ = writeln!(body, "\t\tportal_check = {}", quote(url));
+	}
+	// Already uppercase: `lower_regdom` upcases on the way in, so this is the
+	// spelling that reads back as the same value rather than one the parser
+	// would have to normalise again.
+	if let Some(regdom) = &wifi.regdom {
+		let _ = writeln!(body, "\t\tregdom = {}", quote(regdom));
+	}
+	if wifi.powersave != Powersave::default() {
+		let _ = writeln!(
+			body,
+			"\t\tpowersave = {}",
+			quote(powersave_name(wifi.powersave))
+		);
+	}
+	if wifi.mac_policy != MacPolicy::default() {
+		let _ = writeln!(
+			body,
+			"\t\tmac_policy = {}",
+			quote(mac_policy_name(wifi.mac_policy))
+		);
+	}
+	if wifi.scan_randomization {
+		body.push_str("\t\tscan_randomization = true\n");
+	}
+	body.push_str("\t}\n");
+}
+
+/// A wifi backend, spelled as the parser reads it back.
+///
+/// `iwd` is rendered like any other. The compiler accepts it and netcfgd
+/// refuses it at use (0014), so a profile that dropped it would turn a
+/// configuration netcfgd explains itself about into one it silently approves.
+fn wifi_backend_name(backend: WifiBackend) -> &'static str {
+	match backend {
+		WifiBackend::Auto => "auto",
+		WifiBackend::WpaSupplicant => "wpa_supplicant",
+		WifiBackend::Iwd => "iwd",
+	}
+}
+
+/// A powersave setting, spelled as the parser reads it back.
+fn powersave_name(powersave: Powersave) -> &'static str {
+	match powersave {
+		Powersave::Default => "default",
+		Powersave::On => "on",
+		Powersave::Off => "off",
+	}
+}
+
+/// A hardware-address policy, spelled as the parser reads it back.
+fn mac_policy_name(policy: MacPolicy) -> &'static str {
+	match policy {
+		MacPolicy::Permanent => "permanent",
+		MacPolicy::PerNetwork => "per_network",
+		MacPolicy::PerConnection => "per_connection",
+	}
 }
 
 /// One value bare, several as a list.
@@ -1062,6 +1149,77 @@ mod tests {
 			"device eth0 {\n\
 			 \tmtu = 9000\n\
 			 \tmac = \"02:00:00:00:00:01\"\n\
+			 }\n\
+			 interface eth0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n",
+		);
+	}
+
+	/// Every key of a radio's own policy round-trips.
+	///
+	/// Until `render_wifi_device` existed this panicked on the refusal rather
+	/// than failing an assertion -- a wifi policy was on the unrenderable list,
+	/// so `ncfg profile save` was refused outright on any machine with an
+	/// activated radio. Each value here differs from its default, because a
+	/// renderer that writes only non-defaults is tested by nothing where every
+	/// value is the default one.
+	#[test]
+	fn a_radios_policy_round_trips() {
+		round_trips(
+			"device wlan0 {\n\
+			 \twifi {\n\
+			 \t\tbackend = \"wpa_supplicant\"\n\
+			 \t\tautoconnect = false\n\
+			 \t\tportal_check = \"http://example.com/generate_204\"\n\
+			 \t\tregdom = \"se\"\n\
+			 \t\tpowersave = \"off\"\n\
+			 \t\tmac_policy = \"per_network\"\n\
+			 \t\tscan_randomization = true\n\
+			 \t}\n\
+			 }\n\
+			 interface wlan0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n",
+		);
+	}
+
+	/// **The block netcfgd writes itself survives a save**, which is the case
+	/// that matters most and the one a non-default sweep would miss.
+	///
+	/// `ncfg wifi activate` writes `device <iface> { wifi { autoconnect = true
+	/// } }`, every value of it the default. `Some(default)` and `None` are
+	/// different documents -- the policy's presence is what makes the radio
+	/// netcfgd's to drive -- so a renderer that wrote nothing where there was
+	/// nothing to say would turn every managed radio into an unmanaged one, on
+	/// the machine of everybody who has ever activated a radio. 10.21 is the
+	/// same fault in `dns { }`.
+	#[test]
+	fn the_block_netcfgd_writes_itself_survives_a_save() {
+		round_trips(
+			"device wlan0 {\n\
+			 \twifi {\n\
+			 \t\tautoconnect = true\n\
+			 \t}\n\
+			 }\n\
+			 interface wlan0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 }\n",
+		);
+	}
+
+	/// And a device with no radio does not acquire one.
+	///
+	/// The other direction of the same `Option`, and the half most likely to
+	/// be wrong in a fix written for the first: rendering `wifi { }`
+	/// unconditionally would hand a policy to every bridge and vlan in the
+	/// document. `round_trips` catches it because `None` and `Some(default)`
+	/// compile to different documents.
+	#[test]
+	fn a_device_with_no_radio_gains_no_wifi_block() {
+		round_trips(
+			"device eth0 {\n\
+			 \tmtu = 1400\n\
 			 }\n\
 			 interface eth0 {\n\
 			 \tconfig = \"dhcp\"\n\

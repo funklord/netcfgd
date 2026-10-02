@@ -104,6 +104,21 @@ device lo {
 interface lo {
 	config = "null"
 }
+# A radio, with no `interface` block because nothing here is to be configured
+# by it -- the document is what this test is about. It is here because a wifi
+# policy was on the renderer's unrenderable list, so `ncfg profile save` was
+# refused outright on any machine with an activated radio, which is every
+# machine netcfgd writes `device <iface> { wifi { autoconnect = true } }` into.
+# Its presence makes the assertions below test that path: the daemon proves a
+# snapshot reproduces the running document before keeping it, so a key this
+# renderer got wrong would refuse the save rather than lose the key quietly.
+device wlan-test {
+	wifi {
+		autoconnect = false
+		regdom = "SE"
+		powersave = "off"
+	}
+}
 CONF
 
 # The operator's own profile, and the shipped one beside it. `mtu` because it
@@ -205,6 +220,14 @@ check "and the machine is running what was saved" \
 	"$("$ncfg" profile get 2>&1)" "weekend"
 check "the snapshot is where netcfgd files them" \
 	"$([ -f "$work/etc/profile/weekend/00-saved.conf" ] && echo yes || echo no)" "yes"
+# The radio's own block, and a key inside it. The save succeeding at all is
+# most of the evidence -- the daemon's proof would have refused it otherwise --
+# but a block written empty would pass that proof only by accident, so the
+# non-default key is named.
+snapshot=$(cat "$work/etc/profile/weekend/00-saved.conf")
+contains "a radio's policy is in the snapshot" "$snapshot" "wifi {"
+contains "and the keys inside it, not just the block" "$snapshot" "autoconnect = false"
+contains "including one the parser normalises" "$snapshot" "regdom = \"SE\""
 # The refusal is the daemon's too, and it must arrive as a sentence rather
 # than as a client-side guess about a directory it cannot see.
 again=$("$ncfg" profile save weekend 2>&1 || true)
