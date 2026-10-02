@@ -19,6 +19,7 @@
 #include "nmc/subtypes.h"
 #include "nmc/emit.h"
 #include "nmc/settings.h"
+#include "nmc/uuid.h"
 #include "nmc/authorize.h"
 #include "nmc/ipconfig.h"
 #include "nmc/active.h"
@@ -352,9 +353,12 @@ int main(void)
 		check(nmc_settings_interface.property_count == 3u &&
 		        nmc_connection_interface.property_count == 4u,
 		    "the settings interfaces declare three and four properties");
-		check(nmc_settings_interface.method_count == 6u &&
+		/* Seven on the settings object now: `GetConnectionByUuid` is how a
+		 * client that stored a derived uuid finds the profile again, and
+		 * deriving one is only worth it if that lookup exists. */
+		check(nmc_settings_interface.method_count == 7u &&
 		        nmc_connection_interface.method_count == 7u,
-		    "and six and seven methods, which is what NM has");
+		    "and seven methods each, which is what NM has");
 	}
 
 	/*
@@ -668,11 +672,21 @@ int main(void)
 
 		nmc_state_init(&state, NULL);
 		nmc_connections_init(&store, &state);
-		check(nmc_connections_path_of(&store, "no-such-network") == NULL,
+		check(nmc_connections_path_of(&store, NMC_PROFILE_NETWORK, "no-such-network") ==
+		        NULL,
 		    "an id with no slot has no path, rather than a computed one");
-		check(nmc_connections_path_of(&store, "") == NULL, "and neither has an empty id");
-		check(nmc_connections_path_of(NULL, "x") == NULL, "nor a store that is not there");
-		check(nmc_connections_path_of(&store, NULL) == NULL, "nor a missing id");
+		check(nmc_connections_path_of(&store, NMC_PROFILE_NETWORK, "") == NULL,
+		    "and neither has an empty id");
+		check(nmc_connections_path_of(NULL, NMC_PROFILE_NETWORK, "x") == NULL,
+		    "nor a store that is not there");
+		check(nmc_connections_path_of(&store, NMC_PROFILE_NETWORK, NULL) == NULL,
+		    "nor a missing id");
+		/* The kind is half the key: an `interface wlan0` and a
+		 * `network "wlan0"` are two profiles, and asking for one must not
+		 * answer with the other's path. */
+		check(nmc_connections_path_of(&store, NMC_PROFILE_INTERFACE, "no-such-network") ==
+		        NULL,
+		    "and the other kind of profile is looked up separately");
 		nmc_connections_free(&store);
 		nmc_state_free(&state);
 	}
@@ -757,6 +771,75 @@ int main(void)
 		        added_count == 0u && gone_count == 2u,
 		    "a set that emptied names everything that went");
 		nmc_watch_free(watch);
+	}
+
+	/*
+	 * The derived UUIDs, and the SHA-1 under them.
+	 *
+	 * **The SHA-1 vectors are FIPS 180's own**, taken from the standard rather
+	 * than from this implementation -- a vector produced by running this code
+	 * would be one witness twice, which is the failure the strength curve above
+	 * actually had. The third is 56 bytes, which is the length that forces the
+	 * padding into a second block and is where a hand-written SHA-1 goes wrong.
+	 *
+	 * The UUIDs are checked against the values the Rust shim's `uuid` crate
+	 * produces for this project's namespace, and those were reproduced a third
+	 * time with Python's `uuid5` before any of this was written. Three
+	 * independent implementations of one standard agreeing is corroboration;
+	 * this file agreeing with itself would not be.
+	 */
+	{
+		unsigned char digest[20];
+		char          text[64];
+		char          rendered[64];
+		size_t        at;
+		static const struct {
+			const char *in;
+			const char *out;
+		} VECTORS[] = {
+			{ "abc", "a9993e364706816aba3e25717850c26c9cd0d89d" },
+			{ "", "da39a3ee5e6b4b0d3255bfef95601890afd80709" },
+			{ "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq",
+			    "84983e441c3bd26ebaae4aa1f95129e5e54670f1" }
+		};
+		static const struct {
+			const char *identity;
+			const char *uuid;
+		} NAMED[] = {
+			{ "network:HomeFiber", "7b9da559-bfbe-5bf1-82b1-bc18e6e2e81a" },
+			{ "network:Prompted", "01db0f38-75b0-589c-8a47-a7e125a1b0e5" },
+			{ "interface:br0", "8f0a9738-ee3d-55fc-9d98-3acc6551e046" },
+			{ "interface:probe0", "495c0b54-eb91-5818-92fe-63725172fd96" },
+			{ "interface:quiet0", "1f16fe7c-80c6-59cb-b129-9909b682f491" }
+		};
+
+		for (at = 0u; at < sizeof(VECTORS) / sizeof(VECTORS[0]); at++) {
+			size_t byte;
+
+			nmc_sha1(VECTORS[at].in, strlen(VECTORS[at].in), digest);
+			rendered[0] = '\0';
+			for (byte = 0u; byte < 20u; byte++) {
+				(void)snprintf(rendered + byte * 2u, 3u, "%02x", digest[byte]);
+			}
+			check(strcmp(rendered, VECTORS[at].out) == 0,
+			    "the SHA-1 agrees with FIPS 180's published vector");
+		}
+		for (at = 0u; at < sizeof(NAMED) / sizeof(NAMED[0]); at++) {
+			nmc_uuid_of(NAMED[at].identity, text, sizeof(text));
+			check(strcmp(text, NAMED[at].uuid) == 0,
+			    "and the uuid agrees with the Rust shim's for this identity");
+		}
+		/* The prefix is what keeps two blocks of one name apart, which is the
+		 * whole reason the identity carries it. */
+		nmc_uuid_of("network:x", text, sizeof(text));
+		nmc_uuid_of("interface:x", rendered, sizeof(rendered));
+		check(strcmp(text, rendered) != 0,
+		    "a network and an interface of one name get different uuids");
+		/* Version 5 and the RFC 4122 variant, which is what makes it a UUID
+		 * rather than twenty bytes of hash. */
+		check(text[14] == '5', "the version nibble says 5");
+		check(text[19] == '8' || text[19] == '9' || text[19] == 'a' || text[19] == 'b',
+		    "and the variant bits are RFC 4122's");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

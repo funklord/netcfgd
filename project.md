@@ -12293,6 +12293,99 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.370 The profile model, derived uuids, and an outage I cannot pin on anything
+
+**Incomplete and pushed deliberately**, because access to the machine it was
+written on is ending. What is here builds, passes 134 unit checks and moves the
+oracle from 56 to 60 of 117; what is left is named at the end rather than
+guessed at.
+
+**Every `interface` block is a profile now, and a radio's and a tunnel's are
+not.** The store held only `network` blocks, so a client saw two profiles where
+NM would show seven -- and the rows `nmcli` printed for the other five were its
+own invention for devices it could not match to a profile, which is why the first
+reading of this looked like a shim serving too many. The exclusions are one
+sentence read twice: what you activate on a radio is a network, so an
+`802-3-ethernet` profile named `wlan0` would be a thing in every client's list
+that cannot be activated and is not an ethernet; and NM's own WireGuard profile
+carries the peers and the private key, which this shim will not project. Both are
+asked of the device list -- `policy` for the radio, the kind for the tunnel --
+rather than worked out from the configuration a second time.
+
+Which `interface` blocks exist is the inventory's `subject` field. That field
+exists so a caller can tell the document's two link-shaped blocks apart, which is
+exactly this question, and the device list could not answer it: devices are
+devices and an interface block has no list of its own.
+
+**The uuids are derived, and three implementations agree.** `UUIDv5` over this
+project's namespace and `network:<id>` or `interface:<name>` -- prefixed by kind
+so a `network "wlan0"` and an `interface wlan0` are two profiles rather than a
+collision that would be baffling. Derived rather than stored because a stored
+uuid is state outside the configuration files, and the payoff is that a client's
+reference survives a restart, a reinstall and another machine with the same
+files. That payoff needs `GetConnectionByUuid`, which was missing and is here.
+
+It needed a SHA-1, which nothing this adapter links provides, so there is one in
+`src/uuid.c` -- seventy lines, for this and nothing else, with the warning on it
+that SHA-1 is broken for anything needing collision resistance and a UUIDv5 needs
+none. **It is checked against FIPS 180's published vectors and not its own
+output**, including the 56-byte case that forces the padding into a second block,
+which is where a hand-written SHA-1 goes wrong. The UUIDs are checked against the
+Rust shim's `uuid` crate, and I reproduced all seven with Python's `uuid5` before
+writing any C -- so the scheme was confirmed by two implementations before mine
+existed, rather than mine being confirmed by itself.
+
+**The uuid was the id, and an id is not a uuid.** `GetSettings` answered
+`uuid: <the network's id>` on the argument that netcfgd names a network once and a
+second identifier would be a second thing able to disagree. That argument is
+right about identifiers and wrong about this field: a client stores the uuid and
+comes back with it, so `nmcli` printed the id in its UUID column and
+`GetConnectionByUuid` could never have matched anything a client had kept.
+
+**Three refusals where there was one.** `refuse_write` still answers the writes
+with no better sentence, but `GetSecrets`, `Update`/`Delete` and `AddConnection`
+have one and a client renders it -- a settings panel puts the error in front of a
+person, so "not implemented" where the real answer is "edit the file" sends them
+looking for a missing feature. `GetSecrets` is the one that is a security
+property rather than a gap, and it is the one refusal here that does **not**
+authorize first: an authorized caller gets the same no, so asking who is calling
+would only tell an unauthorized one that the answer depends on who they are.
+
+**Open, and this is the state to pick up from.** The oracle's 57 remaining
+failures are: the activation pair and `RequestScan`; the active connection's
+identity, which is the next thing and is half-written -- `Connection.Active.Id`
+and `Uuid` answer the device's own name, so `nmcli` cannot merge an activation
+into its profile row and prints it as a separate connection (the fix is to
+resolve the profile for a device -- its `network` where it has one, its own
+interface block otherwise -- and answer `Id`, `Uuid`, `Connection` and `Type`
+from that one lookup); the IP configuration reads that hang off an activation;
+and the writes proper, including the agent flow.
+
+### The outage, and what I could not establish
+
+The copyright holder reported a network outage on this machine during this work.
+By the time I looked, `wlp0s20f3` held a lease and a default route and the
+resolver had nameservers, so whatever it was had cleared.
+
+**I could not find a mechanism, and that is the finding rather than an
+acquittal.** What I ruled out, and how:
+
+- every live run was under `unshare -rn` with `NCFG_CONFIG_DIR`, `NCFG_RUN_DIR`
+  and `NCFG_RESOLV_CONF` pointed at a scratch directory, which is what stops a
+  test writing the resolver of the machine running it;
+- `make rss`, the one gate that starts a real `netcfgd`, gives it its own
+  config and run directories and `--no-apply-on-start`, so it plans nothing;
+- nothing was installed and nothing ran as root: every `sudo` in this work was
+  handed to the holder.
+
+What the process table did show is DHCP churn -- four `dhcpcd` BOOTP proxies for
+four different addresses within eight minutes, ending on the lease it holds now.
+That is consistent with the radio roaming or the lease server changing, and it is
+also consistent with something I have not thought to check. **An unexplained
+outage on a machine I was running network tooling on is not a coincidence
+anybody gets to keep**, and the honest record is that the state is gone and the
+cause is open.
+
 ## 10.369 Six properties, one window, and a count over work that never ran
 
 The eight failures 10.368 left were two pieces of work, and finishing them
