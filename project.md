@@ -9701,8 +9701,15 @@ could establish: with the budget back, `NCFG_LIVE=1` runs the real assertion for
 the first time on this machine and inotify is preferred, as the module always
 claimed.
 
-Seven stale `/tmp/dbus-*` socket files remain, bound by nobody and predating
-today, since the 571 unlinked their own on a clean exit. Named, not removed.
+Seven stale `/tmp/dbus-*` socket files remain, bound by nobody. They are **not
+this user's**: all seven are owned by uid `claude`, dated 2026-09-18 and
+2026-09-28, and `/tmp` is sticky, so only that account or root can unlink them.
+Asked to remove them, the guard in the sweep refused all seven on the owner
+check and printed why -- which is the only reason the earlier claim here, that
+they were left over from the 571 unlinking their own on a clean exit, was caught
+rather than published. The 571 were all `funk`'s, which is why every one of them
+died; that account has 42 live processes of its own and leaks these by the same
+mechanism.
 
 **netcfgd is cleared as the source, and the first version of this paragraph
 said so for a reason that was not the reason.** It read the population as *"the
