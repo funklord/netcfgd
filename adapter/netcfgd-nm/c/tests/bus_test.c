@@ -14,6 +14,7 @@
  */
 #include "nmc/bus.h"
 #include "nmc/compat.h"
+#include "nmc/manager.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -87,6 +88,53 @@ int main(void)
 		    "an object with no interfaces of its own still introspects");
 		check(strstr(xml, "\"org.freedesktop.DBus.Properties\"") != NULL,
 		    "  and still offers Properties");
+	}
+
+	/*
+	 * The manager interface's document, which is what libnm reads at
+	 * startup to decide whether this is NetworkManager at all.
+	 *
+	 * **Counted, not sampled.** A property that fell out of the table is
+	 * invisible to a spot check on four names, and the properties are the
+	 * whole of what a client reads here -- so the count is asserted and
+	 * changing the table deliberately means changing this number.
+	 */
+	{
+		const nmc_interface_t *both[] = { &nmc_manager_interface,
+			&nmc_compat_interface, NULL };
+		const nmc_object_t     manager = { "/org/freedesktop/NetworkManager", both,
+			    NULL };
+		size_t                 at;
+		int                    all_typed = 1;
+
+		check(nmc_manager_interface.property_count == 24u,
+		    "the manager declares twenty-four properties, as NM's own does");
+		check(nmc_manager_interface.method_count == 2u,
+		    "and the two device getters this slice implements");
+		for (at = 0u; at < nmc_manager_interface.property_count; at++) {
+			const nmc_property_t *property = &nmc_manager_interface.properties[at];
+
+			if (!property->name || !property->signature || !property->get ||
+			    !dbus_signature_validate_single(property->signature, NULL)) {
+				printf("    (%s has no valid single type)\n",
+				    property->name ? property->name : "a nameless property");
+				all_typed = 0;
+			}
+		}
+		check(all_typed,
+		    "  every one has a name, a getter, and one valid complete type");
+
+		check(nmc_bus_introspect(&manager, xml, sizeof(xml)) == 1,
+		    "both interfaces introspect together at one path");
+		check(strstr(xml, "name=\"Version\" type=\"s\"") != NULL,
+		    "  Version is a string, which is what clients gate on");
+		check(strstr(xml, "name=\"VersionInfo\" type=\"au\"") != NULL,
+		    "  and VersionInfo the packed array beside it");
+		check(strstr(xml, "name=\"GlobalDnsConfiguration\" type=\"a{sv}\"") != NULL,
+		    "  and the dict publishes its container type whole");
+		check(strstr(xml, "\"org.netcfgd.Compat\"") != NULL &&
+		        strstr(xml, "\"org.freedesktop.NetworkManager\"") != NULL,
+		    "  and one object serving two interfaces names both");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

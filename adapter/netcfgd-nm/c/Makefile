@@ -23,7 +23,7 @@
 CC ?= gcc
 
 PROGRAM = netcfgd-nm
-SRCS    = src/bus.c src/compat.c
+SRCS    = src/bus.c src/compat.c src/state.c src/manager.c
 OBJS    = $(SRCS:.c=.o)
 DEPS    = $(SRCS:.c=.d) src/main.d tests/bus_test.d
 
@@ -32,8 +32,12 @@ DEPS    = $(SRCS:.c=.d) src/main.d tests/bus_test.d
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
 CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude $(shell pkg-config --cflags dbus-1)
-LDLIBS  += $(shell pkg-config --libs dbus-1)
+# The client library netcfgd already has in C, which is why there is no
+# `client.c` here: `state.c` links what `ncfg` links.
+CLIENT  = ../../../client
+CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I$(CLIENT) \
+	   $(shell pkg-config --cflags dbus-1)
+LDLIBS  += $(CLIENT)/libncfg_client.a $(shell pkg-config --libs dbus-1)
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g
@@ -51,16 +55,22 @@ all: $(PROGRAM)
 %.o: %.c
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@
 
-$(PROGRAM): src/main.o $(OBJS)
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+# **Built here rather than trusted**, which is the root Makefile's rule for
+# every gate: what is sitting in `client/` depends on the last build.
+.PHONY: client
+client:
+	@$(MAKE) --no-print-directory -C $(CLIENT)
+
+$(PROGRAM): src/main.o $(OBJS) client
+	$(CC) $(CFLAGS) src/main.o $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 # The dispatcher against its own tables, with no bus: introspection is a pure
 # function of the tables and is the half that can be checked without one.
 test: tests/bus_test
 	./tests/bus_test
 
-tests/bus_test: tests/bus_test.o $(OBJS)
-	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDLIBS) -o $@
+tests/bus_test: tests/bus_test.o $(OBJS) client
+	$(CC) $(CFLAGS) tests/bus_test.o $(OBJS) $(LDFLAGS) $(LDLIBS) -o $@
 
 clean:
 	rm -f $(PROGRAM) tests/bus_test src/main.o tests/bus_test.o $(OBJS) $(DEPS)

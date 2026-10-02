@@ -12293,6 +12293,67 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.356 The adapter's client was already written, and the manager is on the bus
+
+The second slice of 0264's port. **`client.rs` has no counterpart to write**:
+`client/libncfg_client.a` and `client/ncfg_client.h` are the daemon's own
+local-hop library in C already, so `state.c` links what `ncfg` links and the
+371 lines of Rust become fifty of handle management. That is the one place
+this port starts ahead of the daemon's, which had to write its model first.
+
+**`org.freedesktop.NetworkManager` now answers at the manager path, with all
+twenty-four properties declared.** Declared even where the answer is an empty
+list, and that is the point rather than a shortcut: libnm reads the
+introspection document at startup to decide what to ask, so a property
+answering "nothing" is a shim being honest while one absent from the document
+is a shim libnm treats as not being NetworkManager.
+
+The answers are three kinds, and naming them is what keeps the next one
+honest. A **constant**, where NM's value and the shim's are the same --
+`Capabilities` is empty for a thing with no NM plugins. A **deliberate lie**,
+which is `Version`, because clients gate on it; design section 9.3 says so and
+`org.netcfgd.Compat` is where the truth is told. And **netcfgd's own answer**,
+through the client.
+
+**A property of the third kind whose daemon is absent answers NM's `UNKNOWN`,
+not a D-Bus error.** An error would put a dialog on a desktop for a daemon
+that is restarting. The client is dropped and reopened on the way in rather
+than at the call that broke it, so a restart costs one failed property instead
+of a shim that never reconnects.
+
+### Proven against the running daemon, by construction rather than by eye
+
+On a private bus in the scratchpad, `State` answered **70**,
+`CONNECTED_GLOBAL`. That is the positive control: a client that could not
+reach netcfgd makes this property answer `0`, so 70 is the socket round trip
+having happened. `Connectivity` answered `0` beside it, which is also right --
+the machine is *routed* and not *online*, no probe being configured, and
+`FULL` is reserved for a rung a probe confirmed.
+
+`busctl` renders the whole surface with correct signatures, which is the
+foreign witness 0264 wants.
+
+### What the test asserts, and what it refuses to sample
+
+Twenty checks. The property count is **asserted at twenty-four** rather than
+four names being spot-checked: a property that fell out of the table is
+invisible to a sample, and the properties are the whole of what a client reads
+here. Every one is then walked for a name, a getter, and a signature
+`dbus_signature_validate_single` accepts -- which catches `a{sv}` written as
+two types, the error a hand-kept table makes.
+
+### What this slice deliberately does not do
+
+**Every getter asks netcfgd; there is no cache.** A `GetAll` on the manager is
+therefore one socket round trip per property that needs one, which is wrong
+for a tray polling it and right for being correct first. The cache belongs
+with the signal emission it exists to drive -- `emit.rs`'s 1,177 lines -- and
+inventing one now would be a cache nothing invalidates.
+
+Devices, active connections and the primary connection answer empty. They need
+the object tree, which is `device.rs` and `active.rs`, and an empty list is
+what "none" looks like to libnm rather than a refusal.
+
 ## 10.355 One sentence twice, from two different refusals
 
 Measured at the start of 2026-10-02 and nearly lost with the session that found

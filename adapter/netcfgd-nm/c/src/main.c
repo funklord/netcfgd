@@ -7,6 +7,7 @@
  */
 #include "nmc/bus.h"
 #include "nmc/compat.h"
+#include "nmc/manager.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -38,10 +39,16 @@ int main(int argc, char **argv)
 	DBusConnection        *connection;
 	int                    claimed;
 	char                   err[NMC_ERROR_MAX] = "";
-	const nmc_interface_t *manager_interfaces[] = { &nmc_compat_interface, NULL };
+	nmc_state_t            state;
+	/* Both at the manager path, which is where NM serves its own and where
+	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
+	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
+		&nmc_compat_interface, NULL };
 	const nmc_object_t     objects[] = {
-		{ NMC_MANAGER_PATH, manager_interfaces, NULL }
+		{ NMC_MANAGER_PATH, manager_interfaces, &state }
 	};
+
+	nmc_state_init(&state, NULL);
 
 	if (argc > 1) {
 		if (strcmp(argv[1], "--session") == 0) {
@@ -97,7 +104,9 @@ int main(int argc, char **argv)
 	if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]), err,
 	        sizeof(err))) {
 		fprintf(stderr, "netcfgd-nm: %s\n", err);
+		nmc_state_free(&state);
 		return 1;
 	}
+	nmc_state_free(&state);
 	return 0;
 }
