@@ -12293,6 +12293,81 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.363 Access points, keyed on the only identity that holds still
+
+The ninth slice of 0264's port. The radio's `AccessPoints` lists real scan
+results and each is an object a client can read.
+
+### Why this store keys on the BSSID
+
+A scan list is the most volatile thing this shim serves: reordered by signal
+every scan, entries coming and going as a person walks about. The device and
+connection stores key on a name that does not move; here the only stable
+identity is the **BSSID**, which is one radio's MAC and is what a client holding
+`/AccessPoint/7` is actually pointing at.
+
+Keyed on anything else and the paths lie within a second: on the SSID, and two
+radios of one network share an object; on the list position, and **every path
+changes when somebody walks across a room.**
+
+### Reading results is not scanning, and the difference is the radio
+
+`nmc_aps_refresh` asks netcfgd for the last results and never asks it to scan. A
+scan takes seconds and takes the radio -- so a client polling `AccessPoints`
+would otherwise hold the radio permanently. `ncfg wifi scan` is how a scan is
+asked for.
+
+A stale list is still served. `ncfg_scan_t.stale` says why results are the
+previous scan's, and last-known is what a client shows while scanning: **hiding a
+stale list would blank a network chooser every time a scan was busy.**
+
+### One access point, read off the running daemon
+
+    AccessPoint/1  HwAddress a0:a4:7f:23:9a:cf   Frequency 5660
+                   Ssid 9 bytes: E M P - X Y L E M
+                   Flags 1 (PRIVACY)  RsnFlags 0x210  Strength 80  Mode 2
+
+`RsnFlags 0x210` is `802_1X | PAIR_CCMP`, which is right for that enterprise
+network, and `Strength 80` is -60 dBm through the curve below.
+
+### Four answers where the type or the curve was the decision
+
+- **`Ssid` is `ay`, decoded from netcfgd's hex, and never the display name.** An
+  SSID is up to 32 arbitrary octets and is not guaranteed text -- which is why
+  the daemon carries hex at all. Sending the display string would make a network
+  named in Shift-JIS and one rendered `(hidden)` indistinguishable, the exact
+  collapse `ncfg_client.h` says the daemon refuses to make.
+- **`Strength` is wpa_supplicant's curve**, `2 * (dBm + 100)` clamped. Not a
+  physical percentage of anything -- no such number exists -- and the point is
+  that a client's bars match what `wpa_cli` would have shown. A different curve
+  would put this shim and every other NM client at different bar counts for one
+  access point. The clamps are tested: a radio reporting -120 or +10 must not
+  wrap a byte.
+- **OWE counts as `PRIVACY`.** It encrypts with no credential, so netcfgd's
+  `secured` is false for it and the link is still not open. A client reading that
+  bit as "needs a password" is wrong either way; one reading it as "encrypted"
+  is wrong only for OWE, and only if this said no.
+- **`RsnFlags` claims CCMP, which is a narrowing and not a guess.** netcfgd
+  reports secured, enterprise and owe and not the cipher suites; CCMP is
+  mandatory for WPA2 and everything netcfgd will join, and a client reading these
+  bits is deciding which credential to ask for rather than which cipher to
+  negotiate. `WpaFlags` stays none, because claiming the WPA1 era would have a
+  client offer TKIP.
+
+### One thing copied rather than borrowed
+
+Every field a property answers is copied into the slot, because **the scan is
+freed before any property is read.** A getter holding a pointer into
+`ncfg_scan_t` would be reading freed memory a second later -- the sort of defect
+that works in testing and fails under a client that reads slowly.
+
+### What the list is, and what it is not yet
+
+One store for one radio. A machine with two radios wants a store per radio,
+which is a change to `nmc_aps_t` and not to the property that reads it -- said
+here so the next person does not take the single store for a decision about
+multi-radio machines.
+
 ## 10.362 Active connections and IP configs, numbered by their device
 
 The eighth slice of 0264's port. Three more object families -- `IP4Config`,

@@ -22,6 +22,7 @@
 #include "nmc/authorize.h"
 #include "nmc/ipconfig.h"
 #include "nmc/active.h"
+#include "nmc/accesspoint.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -495,6 +496,31 @@ int main(void)
 			check(v6 && strcmp(v6, "a(ayuay)") == 0,
 			    "and IP6Config.Addresses `a(ayuay)`, which is not the same thing");
 		}
+	}
+
+	/*
+	 * The signal mapping, which is pure and is the one number in this shim a
+	 * person sees as bars.
+	 *
+	 * **It is wpa_supplicant's curve on purpose**, not an invention: NM shows
+	 * what the supplicant reported, so a different curve here would put this
+	 * shim and every other NM client at different bar counts for one access
+	 * point. The clamps are what a test is for -- a radio reporting -120 or +10
+	 * must not produce 255 or wrap.
+	 */
+	{
+		check(nmc_ap_strength(-50) == 100u, "-50 dBm and better is full strength");
+		check(nmc_ap_strength(-40) == 100u, "  and anything stronger clamps there");
+		check(nmc_ap_strength(-100) == 0u, "-100 dBm is none");
+		check(nmc_ap_strength(-120) == 0u, "  and anything weaker clamps there, not wraps");
+		check(nmc_ap_strength(-60) == 80u, "-60 dBm is 80, which is the live radio's answer");
+		check(nmc_ap_strength(-75) == 50u, "and -75 is half");
+		/* A positive reading is nonsense from a radio and must still answer a
+		 * byte rather than overflow one. */
+		check(nmc_ap_strength(10) == 100u, "a nonsensical positive reading clamps");
+
+		check(nmc_accesspoint_interface.property_count == 11u,
+		    "the access point declares eleven properties, as NM's does");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

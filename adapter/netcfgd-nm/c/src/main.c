@@ -14,6 +14,7 @@
 #include "nmc/settings.h"
 #include "nmc/ipconfig.h"
 #include "nmc/active.h"
+#include "nmc/accesspoint.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -26,6 +27,7 @@
 #define NMC_IP4_PATH      "/org/freedesktop/NetworkManager/IP4Config"
 #define NMC_IP6_PATH      "/org/freedesktop/NetworkManager/IP6Config"
 #define NMC_ACTIVE_PATH   "/org/freedesktop/NetworkManager/ActiveConnection"
+#define NMC_AP_PATH       "/org/freedesktop/NetworkManager/AccessPoint"
 
 static void asked_to_stop(int signal_number)
 {
@@ -100,6 +102,7 @@ int main(int argc, char **argv)
 	nmc_state_t            state;
 	nmc_store_t            store;
 	nmc_connections_t      connections;
+	nmc_aps_t              aps;
 	nmc_watch_t           *watch;
 	heartbeat_t            heartbeat;
 	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
@@ -108,6 +111,7 @@ int main(int argc, char **argv)
 	const nmc_interface_t *ip4_interfaces[] = { &nmc_ip4config_interface, NULL };
 	const nmc_interface_t *ip6_interfaces[] = { &nmc_ip6config_interface, NULL };
 	const nmc_interface_t *active_interfaces[] = { &nmc_active_interface, NULL };
+	const nmc_interface_t *ap_interfaces[] = { &nmc_accesspoint_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
 	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
@@ -119,8 +123,10 @@ int main(int argc, char **argv)
 	nmc_state_init(&state, NULL);
 	nmc_store_init(&store, &state);
 	nmc_connections_init(&connections, &state);
+	nmc_aps_init(&aps, &state);
 	state.store = (struct nmc_store *)&store;
 	state.connections = (struct nmc_connections *)&connections;
+	state.access_points = &aps;
 	watch = nmc_watch_new();
 	if (!watch) {
 		fprintf(stderr, "netcfgd-nm: no memory to watch for changes\n");
@@ -222,7 +228,14 @@ int main(int argc, char **argv)
 			    .interfaces = active_interfaces,
 			    .resolve = nmc_store_resolve_for_bus,
 			    .enumerate = nmc_store_enumerate_for_bus,
-			    .context = &store }
+			    .context = &store },
+			/* The one family NOT keyed by a device: a scan result's
+			 * identity is its BSSID, so it has a store of its own. */
+			{ .prefix = NMC_AP_PATH,
+			    .interfaces = ap_interfaces,
+			    .resolve = nmc_aps_resolve_for_bus,
+			    .enumerate = nmc_aps_enumerate_for_bus,
+			    .context = &aps }
 		};
 
 		heartbeat.connection = connection;
@@ -234,6 +247,7 @@ int main(int argc, char **argv)
 		        sizeof(err))) {
 			fprintf(stderr, "netcfgd-nm: %s\n", err);
 			nmc_watch_free(watch);
+			nmc_aps_free(&aps);
 			nmc_connections_free(&connections);
 			nmc_store_free(&store);
 			nmc_state_free(&state);
@@ -241,6 +255,7 @@ int main(int argc, char **argv)
 		}
 	}
 	nmc_watch_free(watch);
+	nmc_aps_free(&aps);
 	nmc_connections_free(&connections);
 	nmc_store_free(&store);
 	nmc_state_free(&state);
