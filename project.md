@@ -9666,11 +9666,43 @@ be reached on this machine at all** -- it is the old assertion unchanged, and
 nothing here demonstrates it, which is the half a reader should not take on
 trust.
 
-The 571 session buses are not netcfgd's and are not touched: the live desktop's
-own bus is plausibly among processes with that argv, and 571 kills to green a
-gate is not a trade this tree gets to make. It is reported as a machine
-condition, with the number, and `running-code.md` carries the method and the
-PID-recheck guard for whoever clears it.
+**The 571 were cleared on the holder's instruction, 2026-10-02**, after being
+reported rather than acted on -- 571 kills to green a gate is not a trade a
+session gets to make unasked. All of them went on `SIGTERM` alone, none needed
+`SIGKILL`, and none was skipped on an identity recheck. Instances held fell from
+126 to 15, five in a row could then be had, and this machine's process count
+went from 790 to 209.
+
+**The bus the instruction set aside turned out not to exist.** Every TDE process
+carries `DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-Q5OOBARyPU`, and that
+socket is absent from the filesystem and has **zero** entries in
+`/proc/net/unix` -- so the desktop's own daemon had died at some earlier point
+and the whole session has been running on a stale address. Nothing needed
+excluding on that count, and the desktop was unchanged afterwards: `kdesktop`,
+`kicker`, `kded`, `konqueror`, `korgac` and `twin` all still up. **TDE uses DCOP
+rather than D-Bus**, which is why that can be true without anything appearing
+broken.
+
+**What was deliberately left alive**, because none of it is in that population:
+the system bus, at-spi's, and a `dbus-run-session` bus from hydra's tree with
+nine live clients. The one member of the 571 that did have a client was serving
+an equally orphaned `gnome-keyring-daemon` started in the same second from the
+same abandoned run, and that daemon exited when its bus went.
+
+**The method is `running-code.md`'s and the recheck earned its place.** The list
+is enumerated from `/proc` and written down rather than matched with
+`pgrep`/`pkill`, which would match the reaping script's own command line, and
+each pid's `comm` and argv are re-read immediately before it is signalled,
+because `kernel.pid_max` here is 32768 and 571 signals is long enough for a
+freed pid to be handed to something else.
+
+**And the skip was not hiding a defect**, which is the part only clearing it
+could establish: with the budget back, `NCFG_LIVE=1` runs the real assertion for
+the first time on this machine and inotify is preferred, as the module always
+claimed.
+
+Seven stale `/tmp/dbus-*` socket files remain, bound by nobody and predating
+today, since the 571 unlinked their own on a clean exit. Named, not removed.
 
 **netcfgd is cleared as the source, and the first version of this paragraph
 said so for a reason that was not the reason.** It read the population as *"the
