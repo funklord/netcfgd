@@ -12293,6 +12293,71 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.358 One subtype per device, because libnm reads the document to classify
+
+The fourth slice of 0264's port. All eight device subtype interfaces are
+served, and **each device gets exactly one**:
+
+    wlp0s20f3  .Wireless     enp0s31f6  .Wired       lo        .Loopback
+    docker0    .Bridge       wg-drop    .WireGuard   gre0      .Generic
+    wg-test    .WireGuard    gretap0    .Generic     sit0      .Generic
+    erspan0    .Generic
+
+**Serving all eight on every device would not be a harmless surplus.** libnm
+reads the introspection document to decide what a device is, so `.Wireless` on
+an ethernet port is a lie a client acts on -- it would offer scanning on a
+device with no radio. So `nmc_subtree_t` gained `interfaces_for`, which answers
+per resolved object rather than per subtree.
+
+That member being added is also how the positional initializer in `main.c`
+broke, loudly, at compile time. It is designated now, because a struct that
+gains a member should not be able to silently change what a call site meant.
+
+### What the subtypes answer, and the three that are exact rather than empty
+
+Most properties here answer empty because what they describe is a later slice.
+Three are not placeholders and are worth naming:
+
+- **`LastScan` is `-1`, not `0`.** NM's clock makes `0` a real instant, so zero
+  would tell a client the radio scanned at boot. `-1` is NM's own "never",
+  which is true until scan results are published.
+- **`PermHwAddress` is empty, not the current address.** A client comparing the
+  two to detect MAC randomisation would conclude there is none if this echoed
+  `HwAddress`. NM's own answer is empty when it cannot read the permanent one.
+- **`.Loopback` carries no properties and is served anyway.** A marker
+  interface is not an empty one: its presence is how libnm knows the device is
+  the loopback, and leaving it off would make `lo` a device of type 32 with
+  nothing corroborating it.
+
+**`HwAddress` and `Carrier` come from `device.c`'s own facts**, through four
+accessors, rather than being fetched again here. A client reading `HwAddress`
+from `.Device` and from `.Wired` and being told two different things has caught
+the shim disagreeing with itself.
+
+**`.Generic` for NM's tunnel type, deliberately.** NM serves `.IPTunnel` for a
+gre and this build does not; `.Generic` beside a `DeviceType` of 17 is a device
+a client can see and read, where serving no subtype makes libnm treat it as one
+whose class it cannot determine.
+
+### What the test holds, and what it cannot
+
+Thirty-four checks. The mapping was proven on the bus against ten real devices;
+what a unit test holds is the **shape** -- `.Device` first, exactly one subtype,
+NULL at the end. A list missing `&nmc_device_interface` would serve a device
+with no `Interface` property at all and would still introspect plausibly, which
+is the failure worth a check.
+
+Two arms are reachable without a daemon and are exercised rather than mocked:
+with no client the facts come back empty, so an empty kind with no radio is
+`Wired` and the name `lo` is `Loopback`.
+
+### Still absent
+
+`.Wireless` has two signals in the Rust and none here; signals need a mechanism
+`bus.h` has no member for, which is `emit.rs`'s slice and the hard one.
+`AccessPoints`, `Slaves`, `Parent` and `PublicKey` answer empty or `/` -- each
+is a family of objects or a kernel relationship the client does not carry yet.
+
 ## 10.357 Devices on the bus, and a wifi card reported as ethernet
 
 The third slice of 0264's port. **Ten devices from the running daemon appear as

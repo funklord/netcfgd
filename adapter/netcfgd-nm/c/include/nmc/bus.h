@@ -120,7 +120,20 @@ typedef struct {
  */
 typedef struct {
 	const char                   *prefix;
+	/* The interfaces every child serves, where they all serve the same ones.
+	 * `interfaces_for` overrides this per object and is what a family of
+	 * differing objects needs. */
 	const nmc_interface_t *const *interfaces;
+	/*
+	 * The interfaces THIS object serves, or NULL to use the list above.
+	 *
+	 * **Because a device serves exactly one subtype interface.** NM puts
+	 * `.Device` on every device and `.Wireless` on precisely the ones that
+	 * are radios, and libnm reads the introspection document to decide what
+	 * a device is -- so serving `.Wireless` on an ethernet port is not an
+	 * unused interface, it is a lie a client acts on.
+	 */
+	const nmc_interface_t *const *(*interfaces_for)(void *object);
 	void *(*resolve)(const char *tail, void *context);
 	/* Write up to `max` child names into `names`; answer how many. */
 	size_t (*enumerate)(const char **names, size_t max, void *context);

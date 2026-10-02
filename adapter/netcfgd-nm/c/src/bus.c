@@ -680,8 +680,13 @@ static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *messa
 		    "no such object; it may have gone since the path was handed out");
 	}
 	resolved.path = path;
-	resolved.interfaces = subtree->interfaces;
+	resolved.interfaces = subtree->interfaces_for ? subtree->interfaces_for(data)
+	                                              : subtree->interfaces;
 	resolved.data = data;
+	if (!resolved.interfaces) {
+		return fail(connection, message, DBUS_ERROR_UNKNOWN_OBJECT,
+		    "this object serves nothing this build knows about");
+	}
 	return handle(connection, message, &resolved);
 }
 

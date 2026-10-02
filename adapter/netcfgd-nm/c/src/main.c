@@ -9,6 +9,7 @@
 #include "nmc/compat.h"
 #include "nmc/manager.h"
 #include "nmc/device.h"
+#include "nmc/subtypes.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -108,9 +109,15 @@ int main(int argc, char **argv)
 	dbus_error_free(&problem);
 
 	{
+		/* Designated, so a member added to `nmc_subtree_t` cannot
+		 * silently shift what these mean -- which it just did. */
 		const nmc_subtree_t subtrees[] = {
-			{ NMC_DEVICES_PATH, device_interfaces, nmc_store_resolve_for_bus,
-			    nmc_store_enumerate_for_bus, &store }
+			{ .prefix = NMC_DEVICES_PATH,
+			    .interfaces = device_interfaces,
+			    .interfaces_for = nmc_device_interfaces_for,
+			    .resolve = nmc_store_resolve_for_bus,
+			    .enumerate = nmc_store_enumerate_for_bus,
+			    .context = &store }
 		};
 
 		if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]),

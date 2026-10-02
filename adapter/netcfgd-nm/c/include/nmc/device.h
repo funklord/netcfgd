@@ -17,4 +17,14 @@ extern const nmc_interface_t nmc_device_interface;
  */
 dbus_uint32_t nmc_device_type_of(const char *kind, int wireless, const char *name);
 
+/*
+ * The facts a subtype interface needs, answered exactly as `.Device` answers
+ * them -- a client told two different `HwAddress`es has caught the shim
+ * disagreeing with itself.
+ */
+void          nmc_device_address_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
+void          nmc_device_kind_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
+int           nmc_device_carrier_of(const nmc_device_slot_t *slot);
+dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
+
 #endif /* NMC_DEVICE_H */
