@@ -445,11 +445,23 @@ else
 		"$(printf '%s' "$port_path" | grep -c '^/org/freedesktop/NetworkManager/Devices/' || true)" "1"
 	# A device that is *not* a master lists nothing, which is the check that
 	# would catch `slaves_of` answering with every link it can see.
+	# **The refusal and not its wording.** This grepped for "Unknown interface",
+	# which is zbus's sentence; the C shim refuses the same call with the same
+	# `UnknownInterface` error name and its own prose, and busctl prints the
+	# message rather than the name. A check keyed on the sentence was testing
+	# which library built the error. What it is for -- the interface is not
+	# served here -- is the call failing, and the preceding check establishes
+	# that the same property on a real bridge succeeds, so a shim serving
+	# `.Bridge` everywhere still fails this.
+	bridge_on_a_port=$(busctl --user --address="$address" get-property \
+		org.freedesktop.NetworkManager "$port_path" \
+		org.freedesktop.NetworkManager.Device.Bridge Slaves 2>&1) && refused=no ||
+		refused=yes
 	check "a dummy that is nobody's master has no interface saying otherwise" \
-		"$(busctl --user --address="$address" get-property \
-			org.freedesktop.NetworkManager "$port_path" \
-			org.freedesktop.NetworkManager.Device.Bridge Slaves 2>&1 |
-			grep -c "Unknown interface\|No such interface" || true)" "1"
+		"$refused" "yes"
+	check "and says which interface it does not serve" \
+		"$(printf '%s' "$bridge_on_a_port" |
+			grep -c 'org.freedesktop.NetworkManager.Device.Bridge' || true)" "1"
 fi
 
 # ---------------------------------------------------------------- wireguard
@@ -602,9 +614,14 @@ else
 			awk '{print $2}' | tr -d '"')
 		# The SSID as octets, which is how NM carries it. "HomeFiber" is
 		# 9 bytes starting with 72 ('H').
+		# **`|| ssid=` and not a bare assignment**, because `set -e` kills the
+		# script when a command substitution's command fails -- so one
+		# unimplemented property aborted the run here and the other 78 checks
+		# never ran. The count said 37 passed and the exit code said 1, and
+		# only the pair was the result.
 		ssid=$(busctl --user --address="$address" get-property \
 			org.freedesktop.NetworkManager "$active" \
-			org.freedesktop.NetworkManager.AccessPoint Ssid 2>/dev/null)
+			org.freedesktop.NetworkManager.AccessPoint Ssid 2>/dev/null) || ssid=
 		check "the radio reports which access point it is on" \
 			"$ssid" "ay 9 72 111 109 101 70 105 98 101 114"
 	fi

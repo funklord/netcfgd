@@ -547,6 +547,9 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].addresses);
 		free(links->items[i].network);
 		free(links->items[i].category);
+		free(links->items[i].master);
+		free(links->items[i].parent);
+		free(links->items[i].public_key);
 	}
 	free(links->items);
 	memset(links, 0, sizeof(*links));
@@ -798,11 +801,25 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		 * member_text gives "" for both -- which is what a screen wants, since
 		 * neither has a network to name. */
 		item->network = member_text(doc, link, "network");
+		/* Absent for most kinds; member_text gives "" for an absent member,
+		 * which is the answer rather than a missing one. */
+		item->master = member_text(doc, link, "master");
+		item->parent = member_text(doc, link, "parent");
+		item->vlan_id = (int)ncfg_json_int(doc,
+		    ncfg_json_member(doc, ncfg_json_member(doc, link, "vlan"), "id"), 0);
+		{
+			uint32_t tunnel = ncfg_json_member(doc, link, "wireguard");
+
+			item->public_key = member_text(doc, tunnel, "public_key");
+			item->listen_port = (int)ncfg_json_int(doc,
+			    ncfg_json_member(doc, tunnel, "listen_port"), 0);
+		}
 		/* "" from a daemon that does not report one, which a caller renders as
 		 * an unfiltered row rather than as a fault. */
 		item->category = member_text(doc, link, "category");
 		if (!item->name || !item->kind || !item->mac || !item->addresses ||
-		    !item->network || !item->category) {
+		    !item->network || !item->category || !item->master || !item->parent ||
+		    !item->public_key) {
 			set_error(err, err_size, "out of memory");
 			ncfg_links_free(out);
 			return 0;

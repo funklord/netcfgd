@@ -76,6 +76,34 @@ typedef struct {
  * bisect.
  */
 /*
+ * One object's appearance or departure, said to both audiences.
+ *
+ * `nmc_bus_announce` is what libnm reads to learn the object exists at all;
+ * `nmc_emit_path` is NM's own signal on the owning object, which a client that
+ * already has a cache watches. **Every membership change needs both** -- 10.367
+ * emitted only the second, and a device that went stayed in `nmcli device` for
+ * ever.
+ *
+ * The departed object's interfaces cannot be asked of it: by the time anybody
+ * notices, the slot resolves to nothing. `interfaces` is therefore the caller's
+ * to supply, and for a device that means the set it had -- which is why a
+ * removal is announced with the subtree's plain list rather than with
+ * `interfaces_for`, whose answer depends on facts that have gone.
+ */
+static void announce_object(heartbeat_t *beat_on, const char *path,
+    const nmc_interface_t *const *interfaces, void *data, const char *owner,
+    const char *interface, const char *member, int added)
+{
+	nmc_object_t object;
+
+	object.path = path;
+	object.interfaces = interfaces;
+	object.data = data;
+	nmc_bus_announce(beat_on->connection, &object, added);
+	nmc_emit_path(beat_on->connection, owner, interface, member, path);
+}
+
+/*
  * The membership signals: what appeared and what went.
  *
  * **Every tick rather than round-robin**, because each is one windowed fetch and
@@ -102,16 +130,24 @@ static void announce_membership(heartbeat_t *beat_on)
 	if (nmc_watch_set(beat_on->watch, "devices", names, count, added, &added_count, gone,
 	        &gone_count, sizeof(added) / sizeof(added[0]))) {
 		for (at = 0u; at < added_count; at++) {
-			(void)snprintf(path, sizeof(path),
-			    "/org/freedesktop/NetworkManager/Devices/%s", added[at]);
-			nmc_emit_path(beat_on->connection, NMC_MANAGER_PATH,
-			    "org.freedesktop.NetworkManager", "DeviceAdded", path);
+			nmc_device_slot_t *slot = nmc_store_resolve(beat_on->store, added[at]);
+
+			(void)snprintf(path, sizeof(path), "%s/%s", NMC_DEVICES_PATH, added[at]);
+			announce_object(beat_on, path,
+			    slot ? nmc_device_interfaces_for(slot) : NULL, slot,
+			    NMC_MANAGER_PATH, "org.freedesktop.NetworkManager", "DeviceAdded",
+			    1);
 		}
 		for (at = 0u; at < gone_count; at++) {
-			(void)snprintf(path, sizeof(path),
-			    "/org/freedesktop/NetworkManager/Devices/%s", gone[at]);
-			nmc_emit_path(beat_on->connection, NMC_MANAGER_PATH,
-			    "org.freedesktop.NetworkManager", "DeviceRemoved", path);
+			/* The device's own interface, which every device served whatever
+			 * its subtype: the slot is gone, so its subtype cannot be asked
+			 * and a client drops the object on the path alone. */
+			static const nmc_interface_t *const WAS[] = { &nmc_device_interface,
+				NULL };
+
+			(void)snprintf(path, sizeof(path), "%s/%s", NMC_DEVICES_PATH, gone[at]);
+			announce_object(beat_on, path, WAS, NULL, NMC_MANAGER_PATH,
+			    "org.freedesktop.NetworkManager", "DeviceRemoved", 0);
 		}
 	}
 
@@ -119,16 +155,21 @@ static void announce_membership(heartbeat_t *beat_on)
 	    beat_on->connections);
 	if (nmc_watch_set(beat_on->watch, "connections", names, count, added, &added_count, gone,
 	        &gone_count, sizeof(added) / sizeof(added[0]))) {
+		static const nmc_interface_t *const AS_CONNECTION[] = {
+			&nmc_connection_interface, NULL
+		};
+
 		for (at = 0u; at < added_count; at++) {
 			(void)snprintf(path, sizeof(path), "%s/%s", NMC_SETTINGS_PATH, added[at]);
-			nmc_emit_path(beat_on->connection, NMC_SETTINGS_PATH,
-			    "org.freedesktop.NetworkManager.Settings", "NewConnection", path);
+			announce_object(beat_on, path, AS_CONNECTION,
+			    nmc_connections_resolve_for_bus(added[at], beat_on->connections),
+			    NMC_SETTINGS_PATH, "org.freedesktop.NetworkManager.Settings",
+			    "NewConnection", 1);
 		}
 		for (at = 0u; at < gone_count; at++) {
 			(void)snprintf(path, sizeof(path), "%s/%s", NMC_SETTINGS_PATH, gone[at]);
-			nmc_emit_path(beat_on->connection, NMC_SETTINGS_PATH,
-			    "org.freedesktop.NetworkManager.Settings", "ConnectionRemoved",
-			    path);
+			announce_object(beat_on, path, AS_CONNECTION, NULL, NMC_SETTINGS_PATH,
+			    "org.freedesktop.NetworkManager.Settings", "ConnectionRemoved", 0);
 		}
 	}
 
@@ -152,19 +193,24 @@ static void announce_membership(heartbeat_t *beat_on)
 		    beat_on->aps->interface);
 
 		if (radio) {
+			static const nmc_interface_t *const AS_AP[] = {
+				&nmc_accesspoint_interface, NULL
+			};
+
 			for (at = 0u; at < added_count; at++) {
-				(void)snprintf(path, sizeof(path),
-				    "/org/freedesktop/NetworkManager/AccessPoint/%s", added[at]);
-				nmc_emit_path(beat_on->connection, radio,
+				(void)snprintf(path, sizeof(path), "%s/%s", NMC_AP_PATH,
+				    added[at]);
+				announce_object(beat_on, path, AS_AP,
+				    nmc_aps_resolve_for_bus(added[at], beat_on->aps), radio,
 				    "org.freedesktop.NetworkManager.Device.Wireless",
-				    "AccessPointAdded", path);
+				    "AccessPointAdded", 1);
 			}
 			for (at = 0u; at < gone_count; at++) {
-				(void)snprintf(path, sizeof(path),
-				    "/org/freedesktop/NetworkManager/AccessPoint/%s", gone[at]);
-				nmc_emit_path(beat_on->connection, radio,
+				(void)snprintf(path, sizeof(path), "%s/%s", NMC_AP_PATH,
+				    gone[at]);
+				announce_object(beat_on, path, AS_AP, NULL, radio,
 				    "org.freedesktop.NetworkManager.Device.Wireless",
-				    "AccessPointRemoved", path);
+				    "AccessPointRemoved", 0);
 			}
 		}
 	}

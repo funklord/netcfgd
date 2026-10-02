@@ -701,7 +701,42 @@ static DBusHandlerResult answer_subtree_root(DBusConnection *connection, DBusMes
 	return send_text(connection, call, xml);
 }
 
+static DBusHandlerResult fallback_within(DBusConnection *connection, DBusMessage *message,
+    void *user);
+
+/*
+ * **The window opens HERE and not in `handle`, and that was a real defect.**
+ *
+ * This used to resolve the tail and ask `interfaces_for` which interfaces the
+ * object serves, and only then call `handle` -- which is where the window was
+ * opened. So the decision about what a device IS was made with no facts: every
+ * list netcfgd answers is window-scoped and returns NULL outside one, so
+ * `nmc_device_type_now` saw an empty kind, and an empty kind is a real network
+ * card. **Every device served `.Wired`** -- a bridge, a vlan, a tunnel, a radio
+ * -- while `DeviceType` on the same object said 13, 11, 29 or 2, because that
+ * property is read inside `handle` and is the same function asked in a window.
+ *
+ * One object answering two different questions about its own type is the kind of
+ * thing a client reads as a broken daemon, and no amount of reading the subtype
+ * tables finds it: they were right. `tests/live/nm.sh` found it as six
+ * properties returning nothing.
+ *
+ * Nesting is fine and is what makes this the right place: the window is a depth
+ * counter, so `handle`'s begin/end inside this one costs nothing and the facts
+ * are freed once, at the outermost close.
+ */
 static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *message, void *user)
+{
+	DBusHandlerResult answer;
+
+	nmc_window_begin();
+	answer = fallback_within(connection, message, user);
+	nmc_window_end();
+	return answer;
+}
+
+static DBusHandlerResult fallback_within(DBusConnection *connection, DBusMessage *message,
+    void *user)
 {
 	const nmc_subtree_t *subtree = user;
 	const char          *path = dbus_message_get_path(message);
@@ -932,6 +967,78 @@ static int say_managed(DBusConnection *connection, DBusMessage *call, DBusMessag
 		say_subtree(&array, &registry->subtrees[at]);
 	}
 	return dbus_message_iter_close_container(&out, &array) ? 1 : 0;
+}
+
+/*
+ * `InterfacesAdded` and `InterfacesRemoved`, on the object manager's path.
+ *
+ * **libnm learns that an object EXISTS from these and from nothing else.**
+ * `DeviceAdded` is read as a hint about an object a client is expected to know
+ * already, so a shim emitting only that leaves a device out of every libnm
+ * client's view -- and, going the other way, leaves a device that has gone in it
+ * for ever. That was the last of `tests/live/nm.sh`'s failures and it presents as
+ * `nmcli device` listing an interface the kernel does not have.
+ *
+ * The added signal carries the whole object, built by the same `say_object` the
+ * manager's reply uses, so a client that caches from either is told the same
+ * thing. The removed signal carries only the interface NAMES, which is what the
+ * specification asks for and is all a client needs to drop it.
+ *
+ * `nmc_window_begin` is NOT called here: both are sent from the tick, which
+ * already holds a window, and the added signal reads every property of the new
+ * object. A window of its own would be a second fetch of lists the caller has.
+ */
+void nmc_bus_announce(DBusConnection *connection, const nmc_object_t *object, int added)
+{
+	DBusMessage    *signal;
+	DBusMessageIter out;
+
+	if (!connection || !object || !object->path || !object->interfaces) {
+		return;
+	}
+	signal = dbus_message_new_signal(NMC_OBJECT_MANAGER_PATH,
+	    "org.freedesktop.DBus.ObjectManager",
+	    added ? "InterfacesAdded" : "InterfacesRemoved");
+	if (!signal) {
+		return;
+	}
+	dbus_message_iter_init_append(signal, &out);
+	if (!dbus_message_iter_append_basic(&out, DBUS_TYPE_OBJECT_PATH, &object->path)) {
+		dbus_message_unref(signal);
+		return;
+	}
+	if (added) {
+		DBusMessageIter interfaces;
+		size_t          at;
+
+		if (!dbus_message_iter_open_container(&out, DBUS_TYPE_ARRAY, "{sa{sv}}",
+		        &interfaces)) {
+			dbus_message_unref(signal);
+			return;
+		}
+		for (at = 0u; object->interfaces[at] != NULL; at++) {
+			say_interface(&interfaces, object->interfaces[at], object);
+		}
+		(void)dbus_message_iter_close_container(&out, &interfaces);
+	} else {
+		DBusMessageIter names;
+		size_t          at;
+
+		if (!dbus_message_iter_open_container(&out, DBUS_TYPE_ARRAY, "s", &names)) {
+			dbus_message_unref(signal);
+			return;
+		}
+		for (at = 0u; object->interfaces[at] != NULL; at++) {
+			const char *name = object->interfaces[at]->name;
+
+			if (!dbus_message_iter_append_basic(&names, DBUS_TYPE_STRING, &name)) {
+				break;
+			}
+		}
+		(void)dbus_message_iter_close_container(&out, &names);
+	}
+	(void)dbus_connection_send(connection, signal, NULL);
+	dbus_message_unref(signal);
 }
 
 static const nmc_method_t MANAGER_METHODS[] = {

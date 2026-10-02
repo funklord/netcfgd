@@ -61,6 +61,9 @@ static nmc_facts_t the_facts;
 /* Which interface `the_facts.scan` is for, so a second radio is not handed the
  * first one's results. */
 static char scanned_for[64];
+/* The interface the window's wifi status describes, for the same reason
+ * `scanned_for` exists: a second radio asking must get its own answer. */
+static char asked_about[64];
 
 void nmc_window_begin(void)
 {
@@ -98,6 +101,10 @@ void nmc_window_end(void)
 		ncfg_scan_free(&the_facts.scan);
 		the_facts.have_scan = 0;
 	}
+	if (the_facts.have_status) {
+		ncfg_wifi_status_free(&the_facts.status);
+		the_facts.have_status = 0;
+	}
 	if (the_facts.have_saved) {
 		ncfg_saved_networks_free(&the_facts.saved);
 		the_facts.have_saved = 0;
@@ -106,8 +113,10 @@ void nmc_window_end(void)
 	memset(&the_facts.links, 0, sizeof(the_facts.links));
 	memset(&the_facts.radios, 0, sizeof(the_facts.radios));
 	memset(&the_facts.scan, 0, sizeof(the_facts.scan));
+	memset(&the_facts.status, 0, sizeof(the_facts.status));
 	memset(&the_facts.saved, 0, sizeof(the_facts.saved));
 	scanned_for[0] = '\0';
+	asked_about[0] = '\0';
 }
 
 #define NMC_LIST_IN_WINDOW(name, type, have, field, fetch)                                    \
@@ -170,4 +179,32 @@ const ncfg_scan_t *nmc_state_scan(nmc_state_t *state, const char *interface)
 	(void)snprintf(scanned_for, sizeof(scanned_for), "%s", interface);
 	the_facts.have_scan = 1;
 	return &the_facts.scan;
+}
+
+const ncfg_wifi_status_t *nmc_state_wifi_status(nmc_state_t *state, const char *interface)
+{
+	ncfg_client_t *client;
+	char           err[256] = "";
+
+	if (!state || the_facts.depth == 0 || !interface || interface[0] == '\0') {
+		return NULL;
+	}
+	if (the_facts.have_status && strcmp(asked_about, interface) == 0) {
+		return &the_facts.status;
+	}
+	client = nmc_state_client(state);
+	if (!client) {
+		return NULL;
+	}
+	if (the_facts.have_status) {
+		ncfg_wifi_status_free(&the_facts.status);
+		the_facts.have_status = 0;
+	}
+	memset(&the_facts.status, 0, sizeof(the_facts.status));
+	if (!ncfg_client_wifi_status(client, interface, &the_facts.status, err, sizeof(err))) {
+		return NULL;
+	}
+	(void)snprintf(asked_about, sizeof(asked_about), "%s", interface);
+	the_facts.have_status = 1;
+	return &the_facts.status;
 }

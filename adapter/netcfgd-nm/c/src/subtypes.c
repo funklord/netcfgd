@@ -8,14 +8,18 @@
  * would offer scanning on a device with no radio.
  *
  * WHAT IS HERE AND WHAT IS NOT
- *   Every interface is served with its properties declared, and the ones whose
- *   answer needs a subsystem this port has not reached answer empty. That is
- *   the same position `manager.c` takes and for the same reason: the interface
- *   being PRESENT is what classifies the device, and a client that then reads
- *   an empty access point list has been told the truth about this build.
+ *   Every interface is served with its properties declared. Six of them used to
+ *   answer placeholders and now answer from the observation: a bridge's ports, a
+ *   vlan's parent and tag, a tunnel's key and port, and which access point a
+ *   radio is on. What remains empty is what netcfgd does not observe -- a link's
+ *   negotiated speed, a permanent hardware address -- and an empty answer there
+ *   is the truth about this build rather than a gap.
  *
- *   `.Wireless` has two signals in the Rust and none here. Signals need a
- *   mechanism `bus.h` has no member for, which is `emit.rs`'s slice.
+ *   **Which interface a device gets is decided inside a window or not at all.**
+ *   `nmc_device_type_now` reads netcfgd's lists, which answer NULL outside one,
+ *   and an empty kind is a real network card -- so a decision made without a
+ *   window makes every device an ethernet port. `bus.c`'s `fallback` opens it
+ *   before resolving anything; see the comment there, which is the defect's.
  */
 #include "nmc/subtypes.h"
 #include "nmc/accesspoint.h"
@@ -116,14 +120,6 @@ static int say_zero(DBusMessageIter *into, void *object, char *err, size_t err_s
 	return put_u32(into, 0u);
 }
 
-static int say_no_paths(DBusMessageIter *into, void *object, char *err, size_t err_size)
-{
-	(void)object;
-	(void)err;
-	(void)err_size;
-	return put_empty(into, "o");
-}
-
 static int say_no_strings(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
 	(void)object;
@@ -132,14 +128,146 @@ static int say_no_strings(DBusMessageIter *into, void *object, char *err, size_t
 	return put_empty(into, "s");
 }
 
-static int say_root_path(DBusMessageIter *into, void *object, char *err, size_t err_size)
-{
-	const char *root = "/";
+/* ------------------------------------------- what netcfgd actually observes */
 
-	(void)object;
+/*
+ * Which access point this radio is on, as a path, or `/`.
+ *
+ * `/` is NM's "no object" and is the answer for a radio that is scanning, down,
+ * or associated to something no scan result covers. A path to an access point
+ * the radio is NOT on would have a client show the wrong network as connected,
+ * which is worse than showing none.
+ */
+static int say_active_ap(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	const nmc_device_slot_t *slot = object;
+	char                     name[64] = "";
+	const char              *path = NULL;
+	const char              *answer;
+
 	(void)err;
 	(void)err_size;
-	return dbus_message_iter_append_basic(into, DBUS_TYPE_OBJECT_PATH, &root) ? 1 : 0;
+	nmc_device_name_of(object, name, sizeof(name));
+	if (slot && slot->state && slot->state->access_points) {
+		path = nmc_aps_active_path(slot->state->access_points, name);
+	}
+	answer = path ? path : "/";
+	return dbus_message_iter_append_basic(into, DBUS_TYPE_OBJECT_PATH, &answer) ? 1 : 0;
+}
+
+static int say_ports(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	DBusMessageIter array;
+	char            paths[32][64];
+	size_t          count;
+	size_t          at;
+
+	(void)err;
+	(void)err_size;
+	count = nmc_device_ports_of(object, paths, sizeof(paths) / sizeof(paths[0]));
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "o", &array)) {
+		return 0;
+	}
+	for (at = 0u; at < count; at++) {
+		const char *path = paths[at];
+
+		if (!dbus_message_iter_append_basic(&array, DBUS_TYPE_OBJECT_PATH, &path)) {
+			break;
+		}
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
+}
+
+/* The parent's path, or `/` -- NM's "no object", which is what a device with no
+ * parent and a device whose parent has no slot both honestly answer. */
+static int say_parent(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	const char *path = nmc_device_parent_of(object);
+	const char *answer = path ? path : "/";
+
+	(void)err;
+	(void)err_size;
+	return dbus_message_iter_append_basic(into, DBUS_TYPE_OBJECT_PATH, &answer) ? 1 : 0;
+}
+
+static int say_vlan_id(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	(void)err;
+	(void)err_size;
+	/* 0 is not a valid tag, so it is unambiguous as "the kernel reported
+	 * none" -- better than a number this would have to invent. */
+	return put_u32(into, (dbus_uint32_t)nmc_device_vlan_id_of(object));
+}
+
+static int say_listen_port(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	int           port = nmc_device_listen_port_of(object);
+	dbus_uint16_t value;
+
+	(void)err;
+	(void)err_size;
+	/* A `q` and the daemon reports an int: a port outside the range is a
+	 * daemon this build does not understand, and 0 says so rather than
+	 * truncating into a plausible wrong port. */
+	value = (port > 0 && port <= 65535) ? (dbus_uint16_t)port : 0u;
+	return dbus_message_iter_append_basic(into, DBUS_TYPE_UINT16, &value) ? 1 : 0;
+}
+
+/*
+ * The interface's own public key, as bytes.
+ *
+ * **`ay` and base64 in, so it is decoded here.** NM types this as the raw
+ * 32-byte key and the kernel renders base64, which is what netcfgd carries. A
+ * client comparing it against a peer's configured key compares bytes, so sending
+ * the text would be a string in a field documented as a key.
+ *
+ * The PUBLIC key, which is published by design -- it is what a peer needs. The
+ * private one never crosses netcfgd's socket.
+ */
+static int say_public_key(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	static const char ALPHABET[] =
+	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	char            text[64] = "";
+	unsigned char   key[48];
+	size_t          held = 0u;
+	unsigned long   accumulator = 0u;
+	int             bits = 0;
+	size_t          at;
+	DBusMessageIter array;
+
+	(void)err;
+	(void)err_size;
+	nmc_device_public_key_of(object, text, sizeof(text));
+	for (at = 0u; text[at] != '\0' && held < sizeof(key); at++) {
+		const char *found;
+
+		if (text[at] == '=') {
+			break;
+		}
+		found = strchr(ALPHABET, text[at]);
+		if (!found || text[at] == '\0') {
+			/* Not base64. An empty key is the honest answer: a partial
+			 * decode would be bytes nobody's key matches. */
+			held = 0u;
+			break;
+		}
+		accumulator = (accumulator << 6) | (unsigned long)(found - ALPHABET);
+		bits += 6;
+		if (bits >= 8) {
+			bits -= 8;
+			key[held++] = (unsigned char)((accumulator >> bits) & 0xffu);
+		}
+	}
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_ARRAY, "y", &array)) {
+		return 0;
+	}
+	for (at = 0u; at < held; at++) {
+		if (!dbus_message_iter_append_basic(&array, DBUS_TYPE_BYTE, &key[at])) {
+			break;
+		}
+	}
+	return dbus_message_iter_close_container(into, &array) ? 1 : 0;
 }
 
 /* ----------------------------------------------------------------- Wired */
@@ -236,7 +364,7 @@ static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "WirelessCapabilities", "u", NMC_READ, say_zero, NULL },
 	{ "LastScan", "x", NMC_READ, say_last_scan, NULL },
 	{ "AccessPoints", "ao", NMC_READ, say_access_points, NULL },
-	{ "ActiveAccessPoint", "o", NMC_READ, say_root_path, NULL }
+	{ "ActiveAccessPoint", "o", NMC_READ, say_active_ap, NULL }
 };
 
 /* The two a client watches to keep a network list up to date. */
@@ -258,10 +386,10 @@ static const nmc_interface_t WIRELESS = {
 static const nmc_property_t BRIDGE_PROPERTIES[] = {
 	{ "HwAddress", "s", NMC_READ, say_hw_address, NULL },
 	{ "Carrier", "b", NMC_READ, say_carrier, NULL },
-	/* NM's spelling, kept because libnm reads this name. The device's own
-	 * `Ports` says the same thing in NM's newer vocabulary and both are
-	 * empty until the membership slice lands. */
-	{ "Slaves", "ao", NMC_READ, say_no_paths, NULL }
+	/* NM's spelling, kept because libnm reads this name. A bridge does not
+	 * record its ports: each port names its bridge, so this is `master` read
+	 * backwards across every link netcfgd reports. */
+	{ "Slaves", "ao", NMC_READ, say_ports, NULL }
 };
 
 static const nmc_interface_t BRIDGE = {
@@ -279,10 +407,8 @@ static const nmc_interface_t BOND = {
 static const nmc_property_t VLAN_PROPERTIES[] = {
 	{ "HwAddress", "s", NMC_READ, say_hw_address, NULL },
 	{ "Carrier", "b", NMC_READ, say_carrier, NULL },
-	/* The parent device's path, which needs the store to answer and the
-	 * kernel's link relationship, which the client does not carry. */
-	{ "Parent", "o", NMC_READ, say_root_path, NULL },
-	{ "VlanId", "u", NMC_READ, say_zero, NULL }
+	{ "Parent", "o", NMC_READ, say_parent, NULL },
+	{ "VlanId", "u", NMC_READ, say_vlan_id, NULL }
 };
 
 static const nmc_interface_t VLAN = {
@@ -293,34 +419,9 @@ static const nmc_interface_t VLAN = {
 
 /* ------------------------------------------------------------- WireGuard */
 
-/*
- * The public key as bytes, which NM types `ay` and not `s`.
- *
- * Empty until the WireGuard slice: netcfgd has the key and this build does not
- * fetch it, and an empty array is "not published" where a wrong-length one
- * would be a key a client might try to use.
- */
-static int say_no_bytes(DBusMessageIter *into, void *object, char *err, size_t err_size)
-{
-	(void)object;
-	(void)err;
-	(void)err_size;
-	return put_empty(into, "y");
-}
-
-static int say_u16_zero(DBusMessageIter *into, void *object, char *err, size_t err_size)
-{
-	dbus_uint16_t zero = 0u;
-
-	(void)object;
-	(void)err;
-	(void)err_size;
-	return dbus_message_iter_append_basic(into, DBUS_TYPE_UINT16, &zero) ? 1 : 0;
-}
-
 static const nmc_property_t WIREGUARD_PROPERTIES[] = {
-	{ "PublicKey", "ay", NMC_READ, say_no_bytes, NULL },
-	{ "ListenPort", "q", NMC_READ, say_u16_zero, NULL },
+	{ "PublicKey", "ay", NMC_READ, say_public_key, NULL },
+	{ "ListenPort", "q", NMC_READ, say_listen_port, NULL },
 	{ "FwMark", "u", NMC_READ, say_zero, NULL }
 };
 

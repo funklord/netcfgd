@@ -215,6 +215,45 @@ typedef struct {
 	 * link ranks" are the same question.
 	 */
 	char *network;
+	/*
+	 * The link this one is enslaved to -- a bridge or a bond -- and the link it
+	 * was created on top of. "" where there is none.
+	 *
+	 * **Two fields and not one, because they are read in opposite
+	 * directions.** `master` is what a bridge's port says about its bridge, so
+	 * a bridge's list of ports is this field read backwards across every link;
+	 * `parent` is what a vlan or a tunnel says about the interface it rides on.
+	 * A client that conflated them would list a vlan among its parent's bridge
+	 * ports.
+	 *
+	 * The daemon observes both and has put them on the wire since it sent a
+	 * link list at all -- the planner needs `master` to decide an enslavement
+	 * (0057) and `parent` to create a vlan (0060). This carries them for the
+	 * same reason `category` is carried: so one reader does not have to parse
+	 * the daemon's reply a second time to reach a field the first reader
+	 * dropped.
+	 */
+	char *master;
+	char *parent;
+	/*
+	 * A vlan's tag, or 0 for a link that is not one.
+	 *
+	 * 0 is not a valid vlan id, so it is unambiguous as "none" -- which is the
+	 * honest answer for a link the kernel reported without one, and better than
+	 * a number somebody guessed.
+	 */
+	int   vlan_id;
+	/*
+	 * A wireguard interface's own public key, base64 as the kernel renders it,
+	 * and the port it listens on. "" and 0 for every other kind.
+	 *
+	 * The PUBLIC key, which is published by design: it is what a peer needs and
+	 * is derived from the private one. The private key never crosses this
+	 * socket -- `private_key_loaded` is the only thing said about it, and it is
+	 * a boolean.
+	 */
+	char *public_key;
+	int   listen_port;
 } ncfg_link_t;
 
 typedef struct {

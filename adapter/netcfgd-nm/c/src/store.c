@@ -102,7 +102,20 @@ int nmc_store_refresh(nmc_store_t *store)
 			slot = add(store, name);
 		}
 		if (slot) {
-			slot->present = 1;
+			/*
+			 * **The kernel's answer and not merely "netcfgd listed it".**
+			 * This set 1 unconditionally, and netcfgd's device list is the
+			 * union of the document's devices and the machine's links -- so
+			 * a `device` block whose link has been deleted stayed present
+			 * for ever, and `nmcli device` listed an interface the kernel
+			 * did not have. `tests/live/nm.sh` is the case: unmanage a
+			 * device, delete its link, and the document still names it.
+			 *
+			 * A configured device with no link is a real state and is what
+			 * an operator looks at when they ask why nothing came up -- but
+			 * it is not an NM device. NM's `Devices` is what exists.
+			 */
+			slot->present = devices->items[at].present ? 1 : 0;
 		}
 	}
 	return 1;

@@ -30,6 +30,10 @@ typedef struct {
 	char         bssid[32];
 	unsigned     number;
 	char         label[12];
+	/* The whole object path, built once when the slot is made. A getter
+	 * answering with a path cannot build one into a buffer of its own: the
+	 * pointer has to outlive the call. */
+	char         path[64];
 	int          present;
 	/* Copied out of the scan, because the scan is freed before a property is
 	 * ever read: a getter holding a pointer into it would be reading freed
@@ -57,6 +61,15 @@ typedef struct {
 void nmc_aps_init(nmc_aps_t *store, nmc_state_t *state);
 void nmc_aps_free(nmc_aps_t *store);
 int  nmc_aps_refresh(nmc_aps_t *store);
+
+/*
+ * The path of the access point `interface` is associated with, or NULL.
+ *
+ * Asked of the supplicant through netcfgd and joined on the BSSID, which is the
+ * only identity that holds still: a radio can be on a network the document does
+ * not describe, and two radios of one network share an SSID.
+ */
+const char *nmc_aps_active_path(nmc_aps_t *store, const char *interface);
 
 void  *nmc_aps_resolve_for_bus(const char *tail, void *context);
 size_t nmc_aps_enumerate_for_bus(const char **names, size_t max, void *context);
