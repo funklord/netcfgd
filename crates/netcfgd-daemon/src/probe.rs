@@ -517,9 +517,14 @@ mod tests {
 		let mut probes = Probes::default();
 		probes.run_due(Some(&document), &leased("eth0", Some(16)));
 
+		// `detail_of` exists for exactly this, and this assertion was the one
+		// test in the module not using it -- so an intermittent failure under
+		// the parallel run said only that the probe had not run, where the
+		// runner knew why and had written it down.
 		assert!(
 			marker.exists(),
-			"the probe did not run with a lease present"
+			"the probe did not run with a lease present: {}",
+			detail_of(&probes, "eth0")
 		);
 		assert_eq!(verdict_of(&probes, "eth0"), Some(true));
 	}

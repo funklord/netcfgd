@@ -310,10 +310,20 @@ client-test: client/tests/client_test
 # of the workspace and needs the binary to exist. The Rust side *fails* rather
 # than skips when it is absent, so a missing binary is a red gate rather than a
 # green one that compared nothing.
-conformance: client/tests/client_test
+# Both depend on `build`, and on the debug binaries rather than on cargo
+# having compiled something. `cargo test --workspace` builds every test
+# harness and does not relink `target/debug/netcfgd`, and `target/debug/ncfg`
+# is a symlink `ncfg-link` makes rather than an artifact cargo knows about --
+# so a test that runs the program runs whatever the last `make build` left.
+# Measured: `a_reader_that_goes_away_is_not_a_crash` failed against a binary
+# three weeks older than the fix it asserts, reporting the CLI as crashing on
+# a closed pipe. The test does assert the binary exists, which catches the
+# absent case loudly and cannot see a stale one -- and a stale pass or a
+# stale failure both read as a verdict on the source.
+conformance: build client/tests/client_test
 	$(CARGO) test -p netcfgd-cli both_client_implementations_extract_the_same_facts
 
-test: client/tests/client_test
+test: build client/tests/client_test
 	$(CARGO) test --workspace
 
 FORCE:
@@ -1166,10 +1176,18 @@ packaging:
 	@# *assigns* an attribute instead of matching one, which udev accepts as a
 	@# sentence and refuses as a rule -- and a rules file that does not load
 	@# fails silently, leaving the port with no stable name and no message
-	@# anywhere. Skipped loudly where udevadm is absent, which is every machine
-	@# this project targets that does not run systemd.
-	@if command -v udevadm >/dev/null 2>&1; then \
+	@# anywhere. The guard asks for the subcommand rather than the program:
+	@# `udevadm verify` arrived in systemd 254, so `command -v udevadm`
+	@# answers yes on a machine that cannot run it -- which failed this
+	@# whole target on udevadm 251 rather than skipping. Skipped loudly in
+	@# both directions, and they are different facts: not installed is every
+	@# machine this project targets that does not run systemd, while too old
+	@# to ask is one that does.
+	@if udevadm verify --help >/dev/null 2>&1; then \
 		udevadm verify packaging/udev/71-netcfgd-modem.rules; \
+	elif command -v udevadm >/dev/null 2>&1; then \
+		echo "udev-rules: udevadm $$(udevadm --version) has no \`verify\`,"\
+		     "skipping the syntax check (systemd 254 or later)"; \
 	else \
 		echo "udev-rules: udevadm not installed, skipping the syntax check"; \
 	fi

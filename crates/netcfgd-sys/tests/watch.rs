@@ -228,14 +228,51 @@ fn a_directory_appearing_later_is_observed() {
 /// inotify is preferred where the system allows it. Asserted rather than
 /// assumed, because falling back silently would make the fallback the only
 /// path anyone ever exercises.
+///
+/// The condition it asserts is "the system allows it", and that has to be
+/// established rather than named. `watch.rs`'s own first paragraph says the
+/// fallback exists because `inotify_init1` returns `EMFILE` once
+/// `fs.inotify.max_user_instances` is exhausted -- so a machine in exactly
+/// that state is the fallback working, and the old message called it
+/// *"expected inotify on an ordinary Linux filesystem"*. Measured here with
+/// 126 of 128 instances held by an ordinary desktop and a pile of orphaned
+/// session buses: the filesystem was ordinary and the budget was gone, and the
+/// test reported a defect in the code that had just done the right thing.
+///
+/// So ask the kernel for an instance first. Where one cannot be had, the
+/// preference is unanswerable on this machine and the test says so loudly
+/// instead of failing; where one can, a watcher that still chose polling is a
+/// real defect and fails as before. That is a strictly stronger check than the
+/// one it replaces, which could not tell the two apart.
 #[test]
 fn inotify_is_used_where_it_is_available() {
 	let dir = scratch("mechanism");
+	let spare = netcfgd_sys::inotify::Inotify::new();
 	let watcher = Watcher::new(&[dir.to_path_buf()]);
-	assert_eq!(
-		watcher.mechanism(),
-		Mechanism::Inotify,
-		"expected inotify on an ordinary Linux filesystem"
-	);
+	match spare {
+		Ok(_) => assert_eq!(
+			watcher.mechanism(),
+			Mechanism::Inotify,
+			"an inotify instance was available and the watcher polled anyway"
+		),
+		Err(why) => {
+			assert_eq!(
+				watcher.mechanism(),
+				Mechanism::Polling,
+				"no inotify instance could be had ({why}), so inotify cannot be in use"
+			);
+			// `NCFG_LIVE` turns the skip into a failure, which is wg.rs's
+			// bargain and the reason this is not a quiet green: cargo captures
+			// a passing test's stdout, so the line below is invisible in an
+			// ordinary run and `make live` is where the machine gets told.
+			assert!(
+				std::env::var_os("NCFG_LIVE").is_none(),
+				"NCFG_LIVE is set and no inotify instance could be had ({why}), \
+				 so the preference went unchecked: compare \
+				 fs.inotify.max_user_instances against the instances in use"
+			);
+			println!("skipping the preference: this machine refused an inotify instance ({why})");
+		}
+	}
 	let _ = fs::remove_dir_all(&dir);
 }
