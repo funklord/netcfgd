@@ -74,6 +74,18 @@ typedef struct {
 	    size_t err_size);
 } nmc_method_t;
 
+/*
+ * One signal this interface may emit.
+ *
+ * Declared so introspection publishes it, which is the half that matters even
+ * before anything emits one: a client reads the document to decide whether to
+ * subscribe, and a signal nobody declared is a signal nobody waits for.
+ */
+typedef struct {
+	const char *name;
+	const char *signature;
+} nmc_signal_t;
+
 /* One interface: a name and what it answers for. */
 typedef struct {
 	const char           *name;
@@ -81,6 +93,8 @@ typedef struct {
 	size_t                property_count;
 	const nmc_method_t   *methods;
 	size_t                method_count;
+	const nmc_signal_t   *signals;
+	size_t                signal_count;
 } nmc_interface_t;
 
 /*
@@ -147,8 +161,14 @@ typedef struct {
  * could not be registered -- which is a programming error rather than a
  * runtime one, so it is worth failing loudly at startup.
  */
+/*
+ * `tick` is called once per wake, which is where a poll for changed properties
+ * belongs: the loop already wakes on a timer so the stop flag is reachable, and
+ * hanging the poll off that costs no second timer and no thread.
+ */
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
-    const nmc_subtree_t *subtrees, size_t subtree_count, char *err, size_t err_size);
+    const nmc_subtree_t *subtrees, size_t subtree_count, void (*tick)(void *context),
+    void *tick_context, char *err, size_t err_size);
 
 /* Ask the loop to return. Safe from a signal handler. */
 void nmc_bus_stop(void);

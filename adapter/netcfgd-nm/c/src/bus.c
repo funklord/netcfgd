@@ -139,9 +139,17 @@ static int render_args(char *out, size_t out_size, size_t *used, const char *sig
 		if (!one) {
 			return 0;
 		}
-		ok = say(out, out_size, used,
-		    "\t\t\t<arg name=\"arg%d\" type=\"%s\" direction=\"%s\"/>\n", index,
-		    one, direction);
+		/* **A signal's arguments carry no direction**, and emitting
+		 * `direction="out"` on one is a document `dbus-send --xml` and
+		 * some generators reject. NULL is how a signal asks for that. */
+		if (direction) {
+			ok = say(out, out_size, used,
+			    "\t\t\t<arg name=\"arg%d\" type=\"%s\" direction=\"%s\"/>\n",
+			    index, one, direction);
+		} else {
+			ok = say(out, out_size, used,
+			    "\t\t\t<arg name=\"arg%d\" type=\"%s\"/>\n", index, one);
+		}
 		dbus_free(one);
 		if (!ok) {
 			return 0;
@@ -222,6 +230,16 @@ int nmc_bus_introspect(const nmc_object_t *object, const char *const *children,
 				return 0;
 			}
 			if (!say(out, out_size, &used, "\t\t</method>\n")) {
+				return 0;
+			}
+		}
+		for (i = 0u; i < interface->signal_count; i++) {
+			const nmc_signal_t *signal = &interface->signals[i];
+
+			if (!say(out, out_size, &used, "\t\t<signal name=\"%s\">\n",
+			        signal->name) ||
+			    !render_args(out, out_size, &used, signal->signature, NULL) ||
+			    !say(out, out_size, &used, "\t\t</signal>\n")) {
 				return 0;
 			}
 		}
@@ -703,7 +721,8 @@ static const DBusObjectPathVTable VTABLE = {
 /* -------------------------------------------------------------- the loop */
 
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
-    const nmc_subtree_t *subtrees, size_t subtree_count, char *err, size_t err_size)
+    const nmc_subtree_t *subtrees, size_t subtree_count, void (*tick)(void *context),
+    void *tick_context, char *err, size_t err_size)
 {
 	size_t at;
 
@@ -754,6 +773,9 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 	 * is the granularity of the shutdown and costs a wakeup per second.
 	 */
 	while (!stopping) {
+		if (tick) {
+			tick(tick_context);
+		}
 		if (!dbus_connection_read_write_dispatch(connection, 1000)) {
 			/* The bus went away. That is an orderly end for a shim
 			 * whose whole job is answering it, and systemd restarts

@@ -410,12 +410,25 @@ static const nmc_property_t PROPERTIES[] = {
 	{ "LldpNeighbors", "aa{sv}", NMC_READ, say_no_lldp, NULL }
 };
 
+/*
+ * `StateChanged(uuu)` -- new state, old state, reason.
+ *
+ * Three arguments and not one, which is NM's shape and is the one a client
+ * cannot reconstruct: it needs the OLD state to know what transition happened,
+ * and a `PropertiesChanged` on `State` carries only the new one.
+ */
+static const nmc_signal_t SIGNALS[] = {
+	{ "StateChanged", "uuu" }
+};
+
 const nmc_interface_t nmc_device_interface = {
 	.name = "org.freedesktop.NetworkManager.Device",
 	.properties = PROPERTIES,
 	.property_count = sizeof(PROPERTIES) / sizeof(PROPERTIES[0]),
 	.methods = NULL,
-	.method_count = 0u
+	.method_count = 0u,
+	.signals = SIGNALS,
+	.signal_count = sizeof(SIGNALS) / sizeof(SIGNALS[0])
 };
 
 /* ------------------------------------------- what the subtypes ask of us */

@@ -203,10 +203,18 @@ static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "ActiveAccessPoint", "o", NMC_READ, say_root_path, NULL }
 };
 
+/* The two a client watches to keep a network list up to date. */
+static const nmc_signal_t WIRELESS_SIGNALS[] = {
+	{ "AccessPointAdded", "o" },
+	{ "AccessPointRemoved", "o" }
+};
+
 static const nmc_interface_t WIRELESS = {
 	.name = "org.freedesktop.NetworkManager.Device.Wireless",
 	.properties = WIRELESS_PROPERTIES,
-	.property_count = sizeof(WIRELESS_PROPERTIES) / sizeof(WIRELESS_PROPERTIES[0])
+	.property_count = sizeof(WIRELESS_PROPERTIES) / sizeof(WIRELESS_PROPERTIES[0]),
+	.signals = WIRELESS_SIGNALS,
+	.signal_count = sizeof(WIRELESS_SIGNALS) / sizeof(WIRELESS_SIGNALS[0])
 };
 
 /* ------------------------------------------------- Bridge, Bond and Vlan */

@@ -10,6 +10,7 @@
 #include "nmc/manager.h"
 #include "nmc/device.h"
 #include "nmc/subtypes.h"
+#include "nmc/emit.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -23,6 +24,53 @@ static void asked_to_stop(int signal_number)
 {
 	(void)signal_number;
 	nmc_bus_stop();
+}
+
+/* What the tick needs: the connection to send on, and what to look at. */
+typedef struct {
+	DBusConnection     *connection;
+	nmc_watch_t        *watch;
+	nmc_store_t        *store;
+	const nmc_object_t *manager;
+} heartbeat_t;
+
+/*
+ * One pass over everything that has properties, emitting what moved.
+ *
+ * **Every wake, which is once a second.** NM pushes a signal the moment it
+ * acts; this polls, because netcfgd offers no change notification to the
+ * adapter and the alternative is a client that never learns. One second is the
+ * loop's existing wake and costs one sweep of the properties -- which is a
+ * socket round trip each, and is the cost `state.h` records as wrong for a
+ * tray and right for being correct first.
+ */
+static void beat(void *context)
+{
+	heartbeat_t *beat_on = context;
+	const char  *names[256];
+	size_t       count;
+	size_t       at;
+
+	(void)nmc_watch_poll(beat_on->watch, beat_on->connection, beat_on->manager);
+	count = nmc_store_enumerate_for_bus(names, sizeof(names) / sizeof(names[0]),
+	    beat_on->store);
+	for (at = 0u; at < count; at++) {
+		char               path[96];
+		nmc_device_slot_t *slot = nmc_store_resolve(beat_on->store, names[at]);
+		nmc_object_t       device;
+
+		if (!slot) {
+			continue;
+		}
+		(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/Devices/%s",
+		    names[at]);
+		device.path = path;
+		device.interfaces = nmc_device_interfaces_for(slot);
+		device.data = slot;
+		if (device.interfaces) {
+			(void)nmc_watch_poll(beat_on->watch, beat_on->connection, &device);
+		}
+	}
 }
 
 static void usage(void)
@@ -44,6 +92,8 @@ int main(int argc, char **argv)
 	char                   err[NMC_ERROR_MAX] = "";
 	nmc_state_t            state;
 	nmc_store_t            store;
+	nmc_watch_t           *watch;
+	heartbeat_t            heartbeat;
 	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
@@ -56,6 +106,11 @@ int main(int argc, char **argv)
 	nmc_state_init(&state, NULL);
 	nmc_store_init(&store, &state);
 	state.store = (struct nmc_store *)&store;
+	watch = nmc_watch_new();
+	if (!watch) {
+		fprintf(stderr, "netcfgd-nm: no memory to watch for changes\n");
+		return 1;
+	}
 
 	if (argc > 1) {
 		if (strcmp(argv[1], "--session") == 0) {
@@ -120,14 +175,21 @@ int main(int argc, char **argv)
 			    .context = &store }
 		};
 
+		heartbeat.connection = connection;
+		heartbeat.watch = watch;
+		heartbeat.store = &store;
+		heartbeat.manager = &objects[0];
 		if (!nmc_bus_serve(connection, objects, sizeof(objects) / sizeof(objects[0]),
-		        subtrees, sizeof(subtrees) / sizeof(subtrees[0]), err, sizeof(err))) {
+		        subtrees, sizeof(subtrees) / sizeof(subtrees[0]), beat, &heartbeat, err,
+		        sizeof(err))) {
 			fprintf(stderr, "netcfgd-nm: %s\n", err);
+			nmc_watch_free(watch);
 			nmc_store_free(&store);
 			nmc_state_free(&state);
 			return 1;
 		}
 	}
+	nmc_watch_free(watch);
 	nmc_store_free(&store);
 	nmc_state_free(&state);
 	return 0;
