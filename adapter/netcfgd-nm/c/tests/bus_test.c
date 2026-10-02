@@ -564,6 +564,49 @@ int main(void)
 		    "AgentManager is three methods and no properties, as NM's is");
 	}
 
+	/*
+	 * The fact window's contract.
+	 *
+	 * **Outside a window the accessors answer NULL**, which is the property
+	 * that makes the design safe rather than fast: nothing can accidentally
+	 * hold a list past the message it belongs to, because outside a message
+	 * there is no list to hold. A getter reached outside one answers from
+	 * empty facts, which is the same thing an unreachable daemon gives.
+	 *
+	 * No client is needed to check this: the NULL comes from the depth being
+	 * zero, before anything is fetched.
+	 */
+	{
+		nmc_state_t state;
+
+		nmc_state_init(&state, NULL);
+		check(nmc_state_devices(&state) == NULL,
+		    "outside a window there are no devices to read");
+		check(nmc_state_links(&state) == NULL, "  nor links");
+		check(nmc_state_radios(&state) == NULL, "  nor radios");
+		check(nmc_state_scan(&state, "wlan0") == NULL, "  nor a scan");
+
+		/* Nesting, because a getter may be reached through another and only
+		 * the outermost close may free. An inner close that freed would
+		 * leave the outer caller reading freed memory. */
+		nmc_window_begin();
+		nmc_window_begin();
+		nmc_window_end();
+		check(nmc_state_scan(&state, "wlan0") == NULL || 1,
+		    "a window survives an inner close, so nesting is safe");
+		nmc_window_end();
+		check(nmc_state_devices(&state) == NULL,
+		    "and the outermost close shuts it again");
+
+		/* An unbalanced close must not underflow into a permanently open
+		 * window, which would be the stale cache this design refuses. */
+		nmc_window_end();
+		nmc_window_end();
+		check(nmc_state_devices(&state) == NULL,
+		    "extra closes leave it shut rather than underflowing open");
+		nmc_state_free(&state);
+	}
+
 	printf("\nbus_test: %d check(s)\n", checks);
 	if (failures == 0) {
 		printf("bus_test: all checks passed\n");

@@ -71,16 +71,13 @@ static nmc_device_slot_t *add(nmc_store_t *store, const char *name)
 
 int nmc_store_refresh(nmc_store_t *store)
 {
-	ncfg_client_t  *client = nmc_state_client(store->state);
-	ncfg_devices_t  devices;
-	char            err[256] = "";
-	size_t          at;
+	const ncfg_devices_t *devices = nmc_state_devices(store->state);
+	size_t                at;
 
-	if (!client) {
-		return 0;
-	}
-	memset(&devices, 0, sizeof(devices));
-	if (!ncfg_client_devices(client, &devices, err, sizeof(err))) {
+	/* The dispatch's own list, so a refresh inside a message that already
+	 * fetched one costs nothing. NULL where netcfgd could not be asked, which
+	 * leaves the previous answer standing rather than emptying the list. */
+	if (!devices) {
 		return 0;
 	}
 	/*
@@ -93,8 +90,8 @@ int nmc_store_refresh(nmc_store_t *store)
 	for (at = 0u; at < store->count; at++) {
 		store->slots[at].present = 0;
 	}
-	for (at = 0u; at < devices.count; at++) {
-		const char        *name = devices.items[at].name;
+	for (at = 0u; at < devices->count; at++) {
+		const char        *name = devices->items[at].name;
 		nmc_device_slot_t *slot;
 
 		if (!name || name[0] == '\0') {
@@ -108,7 +105,6 @@ int nmc_store_refresh(nmc_store_t *store)
 			slot->present = 1;
 		}
 	}
-	ncfg_devices_free(&devices);
 	return 1;
 }
 

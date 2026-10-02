@@ -6,6 +6,8 @@
  * neither for us: it hands over a `DBusMessage` and the program decides.
  */
 #include "nmc/bus.h"
+/* For the per-dispatch fact window this opens. */
+#include "nmc/state.h"
 
 #include <signal.h>
 #include <stdarg.h>
@@ -572,7 +574,30 @@ static DBusHandlerResult answer_method(DBusConnection *connection, DBusMessage *
 
 /* ------------------------------------------------------------ the handler */
 
+/*
+ * One dispatch, inside one window of facts.
+ *
+ * **Wrapped here and nowhere else**, because this is the only place every
+ * property read passes through: a window opened per getter would be no window
+ * at all, and one opened per connection would be the stale cache `state.h`
+ * refuses. `handle_within` does the work and this owns the lifetime, so every
+ * path out closes it -- which a single `return` is the cheapest way to promise.
+ */
+static DBusHandlerResult handle_within(DBusConnection *connection, DBusMessage *message,
+    void *user);
+
 static DBusHandlerResult handle(DBusConnection *connection, DBusMessage *message, void *user)
+{
+	DBusHandlerResult answer;
+
+	nmc_window_begin();
+	answer = handle_within(connection, message, user);
+	nmc_window_end();
+	return answer;
+}
+
+static DBusHandlerResult handle_within(DBusConnection *connection, DBusMessage *message,
+    void *user)
 {
 	const nmc_object_t    *object = user;
 	const char            *interface_name = dbus_message_get_interface(message);
@@ -750,11 +775,24 @@ static const DBusObjectPathVTable VTABLE = {
 
 /* -------------------------------------------------------------- the loop */
 
+/*
+ * How long a wake waits, and how many wakes make a tick.
+ *
+ * 200 ms is the worst case for answering a client, which is below what anybody
+ * notices. Twenty-five of them is five seconds between change sweeps, which is
+ * how long a client may wait to learn something moved -- and a sweep costs a
+ * socket round trip per object, so the interval is the thing to raise if that
+ * ever matters more than the latency.
+ */
+#define NMC_WAIT_MS        200
+#define NMC_WAKES_PER_TICK 25
+
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
     const nmc_subtree_t *subtrees, size_t subtree_count, void (*tick)(void *context),
     void *tick_context, char *err, size_t err_size)
 {
 	size_t at;
+	int    wakes = NMC_WAKES_PER_TICK; /* so the first sweep is prompt */
 
 	if (!connection || !objects) {
 		snprintf(err, err_size, "serving needs a connection and some objects");
@@ -802,16 +840,49 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 	 * stop would then sit until somebody happened to call it. One second
 	 * is the granularity of the shutdown and costs a wakeup per second.
 	 */
+	/*
+	 * **Dispatch often, poll rarely, and never let one wait for the other.**
+	 *
+	 * The tick used to run every wake with a one-second wait beside it, which
+	 * coupled two unrelated things: how fast a client gets an answer, and how
+	 * often properties are swept for changes. A tick that reads a wifi scan
+	 * takes about a second, so a `GetAll` measured 2.07 SECONDS -- it was
+	 * waiting behind a poll it had nothing to do with.
+	 *
+	 * So the wait is short and the tick is counted. A client is answered
+	 * within the wait; changes are noticed within the interval. Neither number
+	 * is a guess at the other's cost.
+	 */
 	while (!stopping) {
-		if (tick) {
+		if (tick && ++wakes >= NMC_WAKES_PER_TICK) {
+			wakes = 0;
 			tick(tick_context);
 		}
-		if (!dbus_connection_read_write_dispatch(connection, 1000)) {
+		/*
+		 * **Wait, then drain, then push -- in that order.**
+		 *
+		 * The order was wait-last, and it measured 174 ms per call on an
+		 * `Introspect` that makes no client calls at all, against 3 ms for
+		 * the same twenty calls to the bus itself. That control is what
+		 * proved the latency was this loop's and not the fetching or
+		 * `dbus-send`: a reply queued by the dispatch inside the wait was
+		 * not written until the NEXT cycle came round to flush it.
+		 *
+		 * `read_write_dispatch` dispatches one message, so the drain takes
+		 * whatever else arrived in the same wake, and the flush pushes
+		 * every reply the two of them produced before blocking again.
+		 */
+		if (!dbus_connection_read_write_dispatch(connection, NMC_WAIT_MS)) {
 			/* The bus went away. That is an orderly end for a shim
 			 * whose whole job is answering it, and systemd restarts
 			 * it when the bus comes back. */
 			break;
 		}
+		while (dbus_connection_get_dispatch_status(connection) ==
+		    DBUS_DISPATCH_DATA_REMAINS) {
+			(void)dbus_connection_dispatch(connection);
+		}
+		dbus_connection_flush(connection);
 	}
 	for (at = 0u; at < count; at++) {
 		(void)dbus_connection_unregister_object_path(connection, objects[at].path);

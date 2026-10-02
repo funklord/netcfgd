@@ -72,85 +72,72 @@ typedef struct {
  */
 static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 {
-	ncfg_client_t *client;
-	ncfg_devices_t devices;
-	char           err[256] = "";
-	size_t         at;
+	const ncfg_devices_t *devices;
+	const ncfg_links_t   *links;
+	size_t                at;
 
 	memset(out, 0, sizeof(*out));
 	if (!slot || !slot->name) {
 		return;
 	}
 	(void)snprintf(out->name, sizeof(out->name), "%s", slot->name);
-	client = nmc_state_client(slot->state);
-	if (!client) {
-		return;
-	}
-	memset(&devices, 0, sizeof(devices));
-	if (!ncfg_client_devices(client, &devices, err, sizeof(err))) {
-		return;
-	}
-	for (at = 0u; at < devices.count; at++) {
-		const ncfg_device_t *device = &devices.items[at];
-
-		if (!device->name || strcmp(device->name, slot->name) != 0) {
-			continue;
-		}
-		(void)snprintf(out->kind, sizeof(out->kind), "%s", device->kind ? device->kind : "");
-		(void)snprintf(out->mac, sizeof(out->mac), "%s", device->mac ? device->mac : "");
-		out->present = device->present;
-		out->configured = device->configured;
-		out->managed = device->managed;
-		out->mtu = device->mtu;
-		out->known = 1;
-		break;
-	}
-	ncfg_devices_free(&devices);
 	/*
-	 * **The links, because the device list cannot answer the type.** netcfgd
-	 * reports every device in this document with `kind = "physical"` -- its
-	 * device kinds describe how a device is CONFIGURED -- so a table mapping
-	 * that to NM's type called a wifi card an ethernet port. It showed up the
-	 * first time a real device was read over the bus, and would have put the
-	 * radio in libnm's wired list with no wifi operations on it.
-	 *
-	 * `ncfg_link_t.kind` is the KERNEL's link kind, which is the fact NM's
-	 * `DeviceType` is about: `wireguard`, `bridge`, `gre`, and `""` for a
-	 * real NIC. `wireless` beside it separates a radio from an ethernet port,
-	 * both of which are `""`. A failure here leaves the kind empty, which
-	 * reads as a real NIC -- the same answer as before and not a worse one.
+	 * **Both lists come from the dispatch's window**, so a `GetAll` over
+	 * thirty-one properties costs two fetches rather than sixty-two. It is
+	 * also the correctness half: every property in one reply then describes
+	 * one world, where separate fetches could describe a device that existed
+	 * in neither.
 	 */
-	{
-		ncfg_links_t links;
-		size_t       link;
+	devices = nmc_state_devices(slot->state);
+	links = nmc_state_links(slot->state);
+	if (devices) {
+		for (at = 0u; at < devices->count; at++) {
+			const ncfg_device_t *device = &devices->items[at];
 
-		memset(&links, 0, sizeof(links));
-		if (ncfg_client_links(client, &links, err, sizeof(err))) {
-			for (link = 0u; link < links.count; link++) {
-				const ncfg_link_t *one = &links.items[link];
-
-				if (!one->name || strcmp(one->name, slot->name) != 0) {
-					continue;
-				}
-				(void)snprintf(out->kind, sizeof(out->kind), "%s",
-				    one->kind ? one->kind : "");
-				out->wireless = one->wireless;
-				out->carrier = one->carrier;
-				if (one->mtu > 0) {
-					out->mtu = one->mtu;
-				}
-				if (one->mac && one->mac[0] != '\0') {
-					(void)snprintf(out->mac, sizeof(out->mac), "%s",
-					    one->mac);
-				}
-				(void)snprintf(out->addresses, sizeof(out->addresses), "%s",
-				    one->addresses ? one->addresses : "");
-				(void)snprintf(out->network, sizeof(out->network), "%s",
-				    one->network ? one->network : "");
-				out->default_route = one->default_route;
-				break;
+			if (!device->name || strcmp(device->name, slot->name) != 0) {
+				continue;
 			}
-			ncfg_links_free(&links);
+			(void)snprintf(out->kind, sizeof(out->kind), "%s",
+			    device->kind ? device->kind : "");
+			(void)snprintf(out->mac, sizeof(out->mac), "%s",
+			    device->mac ? device->mac : "");
+			out->present = device->present;
+			out->configured = device->configured;
+			out->managed = device->managed;
+			out->mtu = device->mtu;
+			out->known = 1;
+			break;
+		}
+	}
+	/*
+	 * The kernel's link kind, which is what NM's `DeviceType` is about --
+	 * netcfgd's device kind is `"physical"` for a wifi card and an ethernet
+	 * port alike (project.md 10.357). A failure here leaves the kind empty,
+	 * which reads as a real NIC and is the same answer as before.
+	 */
+	if (links) {
+		for (at = 0u; at < links->count; at++) {
+			const ncfg_link_t *one = &links->items[at];
+
+			if (!one->name || strcmp(one->name, slot->name) != 0) {
+				continue;
+			}
+			(void)snprintf(out->kind, sizeof(out->kind), "%s",
+			    one->kind ? one->kind : "");
+			out->wireless = one->wireless;
+			out->carrier = one->carrier;
+			out->default_route = one->default_route;
+			if (one->mtu > 0) {
+				out->mtu = one->mtu;
+			}
+			if (one->mac && one->mac[0] != '\0') {
+				(void)snprintf(out->mac, sizeof(out->mac), "%s", one->mac);
+			}
+			(void)snprintf(out->addresses, sizeof(out->addresses), "%s",
+			    one->addresses ? one->addresses : "");
+			(void)snprintf(out->network, sizeof(out->network), "%s",
+			    one->network ? one->network : "");
+			break;
 		}
 	}
 }
