@@ -14,10 +14,40 @@ typedef struct {
 	size_t         length;
 } seen_t;
 
-struct nmc_watch {
-	seen_t *at;
+/* One remembered number, for a signal that carries its own previous value. */
+typedef struct {
+	char          key[128];
+	unsigned long value;
+} number_t;
+
+/* One remembered set of names, for the membership signals. */
+typedef struct {
+	char    key[128];
+	char  **names;
 	size_t  count;
-	size_t  capacity;
+	/*
+	 * The previous names, kept until this key is asked again.
+	 *
+	 * **Per key and not one static buffer**, which the first version of this
+	 * got wrong: a shared buffer means two keys with removals in one tick free
+	 * each other's answers, and the caller is left holding pointers into
+	 * memory the next call released. Devices and connections can both lose a
+	 * member in one tick, so that was reachable rather than theoretical.
+	 */
+	char  **previous;
+	size_t  previous_count;
+} nameset_t;
+
+struct nmc_watch {
+	seen_t   *at;
+	size_t    count;
+	size_t    capacity;
+	number_t *numbers;
+	size_t    number_count;
+	size_t    number_capacity;
+	nameset_t *sets;
+	size_t     set_count;
+	size_t     set_capacity;
 };
 
 nmc_watch_t *nmc_watch_new(void)
@@ -37,6 +67,20 @@ void nmc_watch_free(nmc_watch_t *watch)
 		free(watch->at[at].bytes);
 	}
 	free(watch->at);
+	free(watch->numbers);
+	for (at = 0u; at < watch->set_count; at++) {
+		size_t which;
+
+		for (which = 0u; which < watch->sets[at].count; which++) {
+			free(watch->sets[at].names[which]);
+		}
+		free(watch->sets[at].names);
+		for (which = 0u; which < watch->sets[at].previous_count; which++) {
+			free(watch->sets[at].previous[which]);
+		}
+		free(watch->sets[at].previous);
+	}
+	free(watch->sets);
 	free(watch);
 }
 
@@ -276,4 +320,204 @@ size_t nmc_watch_poll(nmc_watch_t *watch, DBusConnection *connection, const nmc_
 		dbus_message_unref(signal);
 	}
 	return sent;
+}
+
+/* ------------------------------------------------ numbers, with the old one */
+
+int nmc_watch_number(nmc_watch_t *watch, const char *key, unsigned long now,
+    unsigned long *was)
+{
+	size_t at;
+
+	if (!watch || !key) {
+		return 0;
+	}
+	for (at = 0u; at < watch->number_count; at++) {
+		if (strcmp(watch->numbers[at].key, key) == 0) {
+			unsigned long before = watch->numbers[at].value;
+
+			watch->numbers[at].value = now;
+			if (before == now) {
+				return 0;
+			}
+			if (was) {
+				*was = before;
+			}
+			return 1;
+		}
+	}
+	if (watch->number_count == watch->number_capacity) {
+		size_t    bigger = watch->number_capacity ? watch->number_capacity * 2u : 32u;
+		number_t *grown = realloc(watch->numbers, bigger * sizeof(*grown));
+
+		if (!grown) {
+			return 0;
+		}
+		watch->numbers = grown;
+		watch->number_capacity = bigger;
+	}
+	(void)snprintf(watch->numbers[watch->number_count].key,
+	    sizeof(watch->numbers[watch->number_count].key), "%s", key);
+	watch->numbers[watch->number_count].value = now;
+	watch->number_count++;
+	/* First sight remembers and announces nothing. */
+	return 0;
+}
+
+/* ----------------------------------------------------------- name sets */
+
+static nameset_t *set_for(nmc_watch_t *watch, const char *key)
+{
+	size_t at;
+
+	for (at = 0u; at < watch->set_count; at++) {
+		if (strcmp(watch->sets[at].key, key) == 0) {
+			return &watch->sets[at];
+		}
+	}
+	if (watch->set_count == watch->set_capacity) {
+		size_t     bigger = watch->set_capacity ? watch->set_capacity * 2u : 8u;
+		nameset_t *grown = realloc(watch->sets, bigger * sizeof(*grown));
+
+		if (!grown) {
+			return NULL;
+		}
+		watch->sets = grown;
+		watch->set_capacity = bigger;
+	}
+	memset(&watch->sets[watch->set_count], 0, sizeof(watch->sets[watch->set_count]));
+	(void)snprintf(watch->sets[watch->set_count].key,
+	    sizeof(watch->sets[watch->set_count].key), "%s", key);
+	watch->set_count++;
+	return &watch->sets[watch->set_count - 1u];
+}
+
+static int holds(const nameset_t *set, const char *name)
+{
+	size_t at;
+
+	for (at = 0u; at < set->count; at++) {
+		if (set->names[at] && strcmp(set->names[at], name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+static int in_list(const char *const *names, size_t count, const char *name)
+{
+	size_t at;
+
+	for (at = 0u; at < count; at++) {
+		if (names[at] && strcmp(names[at], name) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int nmc_watch_set(nmc_watch_t *watch, const char *key, const char *const *names, size_t count,
+    const char **added, size_t *added_count, const char **gone, size_t *gone_count,
+    size_t room)
+{
+	nameset_t *set;
+	size_t     at;
+	int        first;
+	char     **kept;
+
+	*added_count = 0u;
+	*gone_count = 0u;
+	if (!watch || !key) {
+		return 0;
+	}
+	set = set_for(watch, key);
+	if (!set) {
+		return 0;
+	}
+	/*
+	 * **First sight is the empty set having never been seen, not an empty
+	 * set.** A key whose names array is NULL has not been looked at; one whose
+	 * count is 0 has. Without that distinction a shim starting with no devices
+	 * would announce the first one twice -- once as first sight and once as an
+	 * addition.
+	 */
+	first = set->names == NULL;
+	if (!first) {
+		for (at = 0u; at < count && *added_count < room; at++) {
+			if (names[at] && !holds(set, names[at])) {
+				added[(*added_count)++] = names[at];
+			}
+		}
+		for (at = 0u; at < set->count && *gone_count < room; at++) {
+			if (set->names[at] && !in_list(names, count, set->names[at])) {
+				gone[(*gone_count)++] = set->names[at];
+			}
+		}
+	}
+	/*
+	 * The new set is built before the old one is freed, and the removals above
+	 * point INTO the old one -- so the old names are freed by the caller's next
+	 * call rather than here. That is what the header promises: a removal's name
+	 * is valid until the next call for this key.
+	 */
+	kept = calloc(count ? count : 1u, sizeof(*kept));
+	if (!kept) {
+		return 0;
+	}
+	for (at = 0u; at < count; at++) {
+		kept[at] = names[at] ? strdup(names[at]) : NULL;
+	}
+	/*
+	 * This key's previous names are released now and the ones just replaced
+	 * become the previous -- so a `gone` pointer handed back above stays valid
+	 * until this key is asked again, and no other key's call can invalidate it.
+	 */
+	{
+		size_t which;
+
+		for (which = 0u; which < set->previous_count; which++) {
+			free(set->previous[which]);
+		}
+		free(set->previous);
+		set->previous = set->names;
+		set->previous_count = set->count;
+		set->names = kept;
+		set->count = count;
+	}
+	return (*added_count + *gone_count) > 0u ? 1 : 0;
+}
+
+/* ------------------------------------------------------------ the sending */
+
+void nmc_emit_path(DBusConnection *connection, const char *path, const char *interface,
+    const char *member, const char *argument)
+{
+	DBusMessage *signal = dbus_message_new_signal(path, interface, member);
+
+	if (!signal) {
+		return;
+	}
+	if (dbus_message_append_args(signal, DBUS_TYPE_OBJECT_PATH, &argument,
+	        DBUS_TYPE_INVALID)) {
+		(void)dbus_connection_send(connection, signal, NULL);
+	}
+	dbus_message_unref(signal);
+}
+
+void nmc_emit_numbers(DBusConnection *connection, const char *path, const char *interface,
+    const char *member, const dbus_uint32_t *values, size_t count)
+{
+	DBusMessage    *signal = dbus_message_new_signal(path, interface, member);
+	DBusMessageIter out;
+	size_t          at;
+
+	if (!signal) {
+		return;
+	}
+	dbus_message_iter_init_append(signal, &out);
+	for (at = 0u; at < count; at++) {
+		(void)dbus_message_iter_append_basic(&out, DBUS_TYPE_UINT32, &values[at]);
+	}
+	(void)dbus_connection_send(connection, signal, NULL);
+	dbus_message_unref(signal);
 }

@@ -280,24 +280,28 @@ NMC_FACT(say_autoconnect, return put_bool(into, facts.known && facts.configured)
  * `ACTIVATED` for a managed, configured, present device is the claim a client
  * acts on; everything short of that is said exactly.
  */
-static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_size)
+dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot)
 {
 	facts_t facts;
 
-	(void)err;
-	(void)err_size;
-	facts_for(object, &facts);
+	facts_for(slot, &facts);
 	if (!facts.known) {
-		return put_u32(into, NM_DEVICE_STATE_UNKNOWN);
+		return NM_DEVICE_STATE_UNKNOWN;
 	}
 	if (!facts.present) {
-		return put_u32(into, NM_DEVICE_STATE_UNAVAILABLE);
+		return NM_DEVICE_STATE_UNAVAILABLE;
 	}
 	if (!facts.managed) {
-		return put_u32(into, NM_DEVICE_STATE_UNMANAGED);
+		return NM_DEVICE_STATE_UNMANAGED;
 	}
-	return put_u32(into,
-	    facts.configured ? NM_DEVICE_STATE_ACTIVATED : NM_DEVICE_STATE_DISCONNECTED);
+	return facts.configured ? NM_DEVICE_STATE_ACTIVATED : NM_DEVICE_STATE_DISCONNECTED;
+}
+
+static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	(void)err;
+	(void)err_size;
+	return put_u32(into, nmc_device_state_now(object));
 }
 
 /* `(uu)`: the state, and why. netcfgd gives no reason, and NONE is the honest
@@ -305,23 +309,11 @@ static int say_state(DBusMessageIter *into, void *object, char *err, size_t err_
 static int say_state_reason(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
 	DBusMessageIter pair;
-	facts_t         facts;
-	dbus_uint32_t   state;
+	dbus_uint32_t   state = nmc_device_state_now(object);
 	dbus_uint32_t   reason = NM_DEVICE_STATE_REASON_NONE;
 
 	(void)err;
 	(void)err_size;
-	facts_for(object, &facts);
-	if (!facts.known) {
-		state = NM_DEVICE_STATE_UNKNOWN;
-	} else if (!facts.present) {
-		state = NM_DEVICE_STATE_UNAVAILABLE;
-	} else if (!facts.managed) {
-		state = NM_DEVICE_STATE_UNMANAGED;
-	} else {
-		state = facts.configured ? NM_DEVICE_STATE_ACTIVATED
-		                         : NM_DEVICE_STATE_DISCONNECTED;
-	}
 	if (!dbus_message_iter_open_container(into, DBUS_TYPE_STRUCT, NULL, &pair)) {
 		return 0;
 	}

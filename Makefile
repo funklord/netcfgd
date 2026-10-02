@@ -72,7 +72,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage live-container tde install-tde deb-tde help
 
 # Where each adapter lives. Each is its own cargo workspace with its own
 # lockfile, so that its dependencies cannot reach the core's -- see
@@ -122,7 +122,7 @@ ncfg-link:
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
                  example adapters gui linkage c-test agree ledger module-order \
-                 registry bridge-test
+                 registry bridge-test nm-c-test
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -332,6 +332,20 @@ client-test: client/tests/client_test
 # build, once.
 bridge-test:
 	@$(MAKE) --no-print-directory -C bridge test
+
+# The C shim's own suite, for the reason `bridge-test` gives.
+#
+# **It was reachable through nothing.** `adapters` drives `cargo test` in each
+# Rust adapter workspace and the C port is not one, so 115 checks -- the
+# dispatcher's tables, the two stores' path contracts, the write authorization
+# and both signal detectors -- ran only when somebody remembered to type it. The
+# detectors are the part least able to afford that: each one's failure mode is
+# silence, which is also what a converged machine looks like.
+#
+# It needs libdbus-1's headers, which the shim needs to build at all, so this
+# adds no requirement the tree did not already have.
+nm-c-test:
+	@$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c test
 
 # The two client implementations, asked the same questions.
 #
@@ -2180,6 +2194,12 @@ live:
 	@# NCFG_LIVE: nmcli comes from the network-manager package, which is exactly
 	@# what a netcfgd machine is expected not to have installed.
 	@unshare -rn sh -c "sh tests/live/nm.sh"
+	@# The shim's signals, with a link forced in and out so the bus has to say
+	@# something. Under NCFG_LIVE, unlike nm.sh: this needs dbus-daemon and
+	@# dbus-monitor and no NetworkManager, where nm.sh needs nmcli -- and a
+	@# quiet bus is what a converged machine and a broken emitter both look
+	@# like, so a skip here must be loud.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_nm_signals.sh"
 	@# The AT modem helper, against a modem that is a pty. No root and no
 	@# hardware: the fake is a real character device, so termios, CR-terminated
 	@# writes and byte-at-a-time reads are exercised rather than stubbed.
