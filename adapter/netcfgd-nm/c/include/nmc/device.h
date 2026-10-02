@@ -34,4 +34,21 @@ dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
  * and `StateChanged` are one computation and cannot drift apart. */
 dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot);
 
+/*
+ * What the subtype interfaces answer with, from the same `facts_for` the device
+ * interface uses.
+ *
+ * They live here rather than in `subtypes.c` because the facts are gathered here
+ * and gathering them twice is how two interfaces on one object come to disagree.
+ * The two that answer with a path reach the store through the slot's own state
+ * rather than taking one: a slot that could not reach the store would be a slot
+ * nothing could have resolved.
+ */
+size_t      nmc_device_ports_of(const nmc_device_slot_t *slot, char paths[][64], size_t room);
+const char *nmc_device_parent_of(const nmc_device_slot_t *slot);
+int         nmc_device_vlan_id_of(const nmc_device_slot_t *slot);
+int         nmc_device_listen_port_of(const nmc_device_slot_t *slot);
+void        nmc_device_public_key_of(const nmc_device_slot_t *slot, char *out,
+    size_t out_size);
+
 #endif /* NMC_DEVICE_H */

@@ -194,6 +194,8 @@ static nmc_ap_slot_t *add(nmc_aps_t *store, const char *bssid)
 	(void)snprintf(slot->bssid, sizeof(slot->bssid), "%s", bssid);
 	slot->number = store->next++;
 	(void)snprintf(slot->label, sizeof(slot->label), "%u", slot->number);
+	(void)snprintf(slot->path, sizeof(slot->path),
+	    "/org/freedesktop/NetworkManager/AccessPoint/%u", slot->number);
 	slot->state = store->state;
 	store->count++;
 	return slot;
@@ -305,6 +307,45 @@ int nmc_aps_refresh(nmc_aps_t *store)
 		slot->owe = entry->owe;
 	}
 	return 1;
+}
+
+/*
+ * The path of the access point a radio is associated with, or NULL.
+ *
+ * **Asked of the supplicant through netcfgd rather than inferred from the
+ * document.** A radio can be associated to a network the document does not
+ * describe -- an operator joined it by hand -- and the document can describe one
+ * the radio is not on. `ncfg_wifi_status_t.bssid` is what the supplicant
+ * actually reports, and the BSSID is the only identity this store keys on, so the
+ * join is exact rather than by SSID: two radios of one network share an SSID and
+ * are two access points.
+ *
+ * Through the window, which it earns with one caller rather than two: the change
+ * detector reads every property twice per tick -- once to compare, once to send
+ * -- so an unwindowed call is two requests per tick on a radio, and 10.365 is
+ * this adapter's tick taking a second over a wifi fetch and starving the loop.
+ */
+const char *nmc_aps_active_path(nmc_aps_t *store, const char *interface)
+{
+	const ncfg_wifi_status_t *status;
+	size_t                    at;
+
+	if (!store || !interface || interface[0] == '\0') {
+		return NULL;
+	}
+	status = nmc_state_wifi_status(store->state, interface);
+	if (!status || !status->bssid || status->bssid[0] == '\0') {
+		return NULL;
+	}
+	for (at = 0u; at < store->count; at++) {
+		if (store->slots[at].present &&
+		    strcasecmp(store->slots[at].bssid, status->bssid) == 0) {
+			/* The slot's own path, which outlives the window -- a pointer
+			 * into the status would not. */
+			return store->slots[at].path;
+		}
+	}
+	return NULL;
 }
 
 void *nmc_aps_resolve_for_bus(const char *tail, void *context)

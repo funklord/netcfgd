@@ -186,6 +186,21 @@ typedef struct {
  * belongs: the loop already wakes on a timer so the stop flag is reachable, and
  * hanging the poll off that costs no second timer and no thread.
  */
+/*
+ * Say that one object appeared or went, on the object manager's path.
+ *
+ * **Not the same thing as `Manager.DeviceAdded`, and a client needs both.**
+ * libnm learns what EXISTS from `org.freedesktop.DBus.ObjectManager`; the
+ * manager's own signals are hints about objects it expects to know already. So a
+ * device that appears has to be announced twice, to two interfaces, and one
+ * without the other leaves a client with either a device it cannot read or a
+ * device that no longer exists.
+ *
+ * Called from the tick, inside the window the tick already holds: the added
+ * form reads every property of the object.
+ */
+void nmc_bus_announce(DBusConnection *connection, const nmc_object_t *object, int added);
+
 int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_t count,
     const nmc_subtree_t *subtrees, size_t subtree_count, void (*tick)(void *context),
     void *tick_context, char *err, size_t err_size);

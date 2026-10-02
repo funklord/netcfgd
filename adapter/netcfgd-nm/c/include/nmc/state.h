@@ -82,11 +82,13 @@ typedef struct {
 	int            have_links;
 	int            have_radios;
 	int            have_scan;
+	int            have_status;
 	int            have_saved;
 	ncfg_devices_t devices;
 	ncfg_links_t   links;
 	ncfg_radios_t  radios;
 	ncfg_scan_t    scan;
+	ncfg_wifi_status_t status;
 	ncfg_saved_networks_t saved;
 } nmc_facts_t;
 
@@ -120,6 +122,20 @@ const ncfg_radios_t  *nmc_state_radios(nmc_state_t *state);
  * same window gets its own fetch rather than the first one's answer.
  */
 const ncfg_scan_t *nmc_state_scan(nmc_state_t *state, const char *interface);
+
+/*
+ * What this radio is doing, once per window.
+ *
+ * In the window for the reason the scan is, and the reason is measured rather
+ * than guessed: the change detector reads every property twice -- once to compare
+ * and once to send -- so an unwindowed call is two requests per tick on the one
+ * device that can least afford them. 10.365 is this adapter's tick taking a
+ * second because of a wifi fetch, and starving the dispatch loop.
+ *
+ * Like the scan, a second radio in one window replaces the first one's answer
+ * rather than being kept beside it.
+ */
+const ncfg_wifi_status_t *nmc_state_wifi_status(nmc_state_t *state, const char *interface);
 
 /*
  * The saved networks, once per window.

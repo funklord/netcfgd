@@ -204,6 +204,18 @@ check "and it carries a device path rather than the manager's" \
 	   paths=$(grep -A4 'member=DeviceAdded' "$work/monitor.log" |
 	       grep -c '/org/freedesktop/NetworkManager/Devices/')
 	   [ "$seen" -gt 0 ] && [ "$paths" -eq "$seen" ] && echo yes || echo no)" yes
+# **The signal libnm actually reads, which is a different one.** `DeviceAdded` is
+# read as a hint about an object a client is expected to know already; what tells
+# it the object EXISTS is the object manager's `InterfacesAdded`. A shim emitting
+# only the first leaves a device no libnm client can see, which is what
+# `tests/live/nm.sh` reported as nmcli listing one device out of six.
+check "and the object manager says the object exists" \
+	"$([ "$(saw InterfacesAdded)" -gt 0 ] && echo yes || echo no)" yes
+check "on /org/freedesktop, which is where NM puts its object manager" \
+	"$(seen=$(saw InterfacesAdded)
+	   there=$(grep 'member=InterfacesAdded' "$work/monitor.log" |
+	       grep -c 'path=/org/freedesktop;')
+	   [ "$seen" -gt 0 ] && [ "$there" -eq "$seen" ] && echo yes || echo no)" yes
 check "it is emitted on the manager, which is where NM emits it" \
 	"$(seen=$(saw DeviceAdded)
 	   there=$(grep 'member=DeviceAdded' "$work/monitor.log" |
@@ -220,6 +232,8 @@ ip link del probe1
 awaits '[ "$(saw DeviceRemoved)" -gt 0 ]' || true
 check "a device that goes is announced too" \
 	"$([ "$(saw DeviceRemoved)" -gt 0 ] && echo yes || echo no)" yes
+check "and the object manager says it has gone" \
+	"$([ "$(saw InterfacesRemoved)" -gt 0 ] && echo yes || echo no)" yes
 check "and that one is on the manager as well" \
 	"$(seen=$(saw DeviceRemoved)
 	   there=$(grep 'member=DeviceRemoved' "$work/monitor.log" |

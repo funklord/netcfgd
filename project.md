@@ -9617,6 +9617,97 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.369 Six properties, one window, and a count over work that never ran
+
+The eight failures 10.368 left were two pieces of work, and finishing them
+turned up a third nobody had named -- plus a reading of the result that was
+wrong in the way `evidence.md` has a section for.
+
+**Every device served `.Wired`, whatever it was.** `fallback` resolved the path
+and asked `interfaces_for` which interfaces the object serves, and only then
+called `handle` -- which is where the window was opened. So the decision about
+what a device IS was made with no facts at all: every list netcfgd answers is
+window-scoped and returns NULL outside one, so `nmc_device_type_now` saw an empty
+kind, and an empty kind is a real network card. **The same function asked inside
+the window answered correctly**, which is why `DeviceType` on one object said 13,
+11 or 29 while its introspection document said ethernet. One object answering two
+different questions about its own type is what a client reads as a broken daemon,
+and no amount of reading the subtype tables finds it -- they were right. The
+window opens in `fallback` now; nesting costs nothing, since it is a depth
+counter.
+
+**The six stubbed subtype properties are answered, and the wire already carried
+all of it.** `master`, `parent`, `vlan.id`, `wireguard.public_key` and
+`wireguard.listen_port` are in the daemon's status reply and were dropped by the
+C client's own parser -- the planner needs `master` to decide an enslavement and
+`parent` to create a vlan, so they have been on the socket since there was a link
+list. `ncfg_link_t` carries them now, which is where the rule belongs: the
+alternative was the shim parsing the daemon's reply a second time to reach a field
+the first reader threw away.
+
+`Slaves` is the one that is read backwards. A bridge does not record its ports;
+each port names its bridge, so a bridge's list is `master` read across every
+link. `PublicKey` is decoded from base64 to bytes, because NM types it as the raw
+32 octets and a client comparing it against a peer's key compares bytes -- the
+public one, which is published by design.
+
+**A configured device whose link has gone was present for ever.**
+`nmc_store_refresh` set `present = 1` for every name netcfgd listed, and
+netcfgd's device list is the union of the document's devices and the machine's
+links -- so `nmcli device` listed an interface the kernel did not have. It reads
+`ncfg_device_t.present`, which is the kernel's answer. A `device` block with no
+link is a real state and is what an operator looks at when they ask why nothing
+came up; it is not an NM device.
+
+**`InterfacesAdded` and `InterfacesRemoved`, which is how libnm learns an object
+exists at all.** `DeviceAdded` is read as a hint about an object a client already
+knows, so 10.367's signals left a new device unreadable and a departed one in the
+cache for ever. Every membership change is announced twice now, to the object
+manager and to the owning object. A removal cannot ask the object what interfaces
+it had -- the slot resolves to nothing by then -- so the caller supplies them.
+
+`tests/live/c_nm_signals.sh` covers both now -- ten checks rather than seven --
+and cutting `nmc_bus_announce` fails exactly the three that are about them and
+nothing else, which is the control being aimed rather than merely able to fire.
+
+**`ActiveAccessPoint` answered `/`.** It asks the supplicant through netcfgd and
+joins on the BSSID, which is the only identity that holds still: a radio can be
+associated to a network the document does not describe, and two radios of one
+network share an SSID. **The wifi status joins the window with one caller rather
+than two**, which is the rule the window usually waits for -- the change detector
+reads every property twice per tick, so unwindowed it is two requests per tick on
+the one device least able to afford them, and 10.365 is this adapter's tick taking
+a second over a wifi fetch and starving the dispatch loop.
+
+**And the reading. "37 passed, 0 failed" was a count over work that did not
+happen.** `ssid=$(busctl ... )` with no pipeline takes busctl's exit status, and
+`set -e` then killed the script -- so one unimplemented property aborted the run
+and the other eighty checks never executed. The run reported 37 ok and exit 1,
+and **neither was the result; the pair was.** Fixed, the position is **56 of 117**
+rather than 37 of 37.
+
+**And the first thing written about those 61 was a scope claim that was wrong.**
+It said they were the writes. Read one by one they are four groups: the
+activation pair and `RequestScan`; the refusals a read-only Settings must give;
+the profile model -- which interface blocks become connections, and the uuid
+derived from the configuration -- and then **nine IP configuration READS**, a
+gateway, nameservers, routes and addresses, which hang off an active connection
+that does not exist yet. So the writes are most of it and not all of it, and the
+reads among them are blocked by the model rather than by the write gate. None of
+it is a regression, and all of it is now visible instead of hidden behind an
+abort.
+
+**One oracle check tested which library built an error.** It grepped busctl's
+output for "Unknown interface", which is zbus's sentence; the C shim refuses the
+same call with the same `UnknownInterface` error name and its own prose, and
+busctl prints the message. It asserts the refusal, and that the message names the
+interface -- so a shim serving `.Bridge` on every device still fails it, because
+the preceding check requires the same property to succeed on a real bridge. The
+Rust shim passes all 116 with both script changes in, which is what says they are
+amendments and not accommodations.
+
+Open: the writes, behind 10.361's gate. Nothing else in the oracle is a read.
+
 ## 10.368 The oracle pointed at the port, and what it found in one run
 
 0264 names `tests/live/nm.sh` as the acceptance test for the C shim, and it was

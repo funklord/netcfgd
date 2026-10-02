@@ -16,6 +16,7 @@
  *   together.
  */
 #include "nmc/device.h"
+#include "nmc/store.h"
 #include "nmc/settings.h"
 
 #include <stdio.h>
@@ -61,6 +62,11 @@ typedef struct {
 	char policy[16];
 	char addresses[1024];
 	char network[128];
+	char master[64];
+	char parent[64];
+	char public_key[64];
+	int  vlan_id;
+	int  listen_port;
 	int  default_route;
 	int  present;
 	int  configured;
@@ -150,6 +156,14 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 			    one->addresses ? one->addresses : "");
 			(void)snprintf(out->network, sizeof(out->network), "%s",
 			    one->network ? one->network : "");
+			(void)snprintf(out->master, sizeof(out->master), "%s",
+			    one->master ? one->master : "");
+			(void)snprintf(out->parent, sizeof(out->parent), "%s",
+			    one->parent ? one->parent : "");
+			(void)snprintf(out->public_key, sizeof(out->public_key), "%s",
+			    one->public_key ? one->public_key : "");
+			out->vlan_id = one->vlan_id;
+			out->listen_port = one->listen_port;
 			break;
 		}
 	}
@@ -634,6 +648,95 @@ int nmc_device_carrier_of(const nmc_device_slot_t *slot)
 
 	facts_for(slot, &facts);
 	return facts.known && facts.carrier;
+}
+
+/*
+ * The links enslaved to this one, as object paths.
+ *
+ * **Read backwards across every link, because `master` points the other way.** A
+ * bridge does not list its ports; each port names its bridge, which is what
+ * netcfgd observes and what the planner acts on. So this is the only one of the
+ * subtype accessors that has to walk the whole list rather than find one row.
+ *
+ * Through the store, so a port's path is the number it already has. Answers how
+ * many were written, and writes none past `room`.
+ */
+size_t nmc_device_ports_of(const nmc_device_slot_t *slot, char paths[][64], size_t room)
+{
+	const ncfg_links_t *links;
+	size_t              kept = 0u;
+	size_t              at;
+
+	if (!slot || !slot->name || !slot->state) {
+		return 0u;
+	}
+	links = nmc_state_links(slot->state);
+	if (!links) {
+		return 0u;
+	}
+	for (at = 0u; at < links->count && kept < room; at++) {
+		const ncfg_link_t *one = &links->items[at];
+		const char        *path;
+
+		if (!one->master || strcmp(one->master, slot->name) != 0) {
+			continue;
+		}
+		path = nmc_store_path_for((nmc_store_t *)slot->state->store, one->name);
+		if (!path) {
+			/* A port netcfgd reports and the store has no slot for cannot
+			 * be named; silence is better than a path pointing elsewhere. */
+			continue;
+		}
+		(void)snprintf(paths[kept], 64u, "%s", path);
+		kept++;
+	}
+	return kept;
+}
+
+/*
+ * The device this one rides on, as a path, or NULL.
+ *
+ * A vlan's parent and a tunnel's are the same relationship and netcfgd reports
+ * both as `parent`. NULL where there is none or where the parent has no slot,
+ * which the caller turns into `/` -- NM's "no object" path, and the answer a
+ * client must be given rather than a path to somebody else.
+ */
+const char *nmc_device_parent_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	if (!slot || !slot->state) {
+		return NULL;
+	}
+	facts_for(slot, &facts);
+	if (facts.parent[0] == '\0') {
+		return NULL;
+	}
+	return nmc_store_path_for((nmc_store_t *)slot->state->store, facts.parent);
+}
+
+int nmc_device_vlan_id_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return facts.vlan_id;
+}
+
+int nmc_device_listen_port_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return facts.listen_port;
+}
+
+void nmc_device_public_key_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.public_key);
 }
 
 dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot)
