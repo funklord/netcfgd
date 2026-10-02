@@ -17,12 +17,12 @@
  *   to a bus surface -- a quirk expressed as a branch grows a second branch.
  *
  * WHAT THIS DELIBERATELY DOES NOT DO
- *   No signals yet. `Device.Wireless` has two and `emit.rs` is 1,177 lines of
- *   change tracking; that is its own piece of work and this header will gain a
- *   member rather than being rearranged for it.
  *
- *   No object manager. NetworkManager does not serve one, and the shim is
- *   judged by what libnm believes (0264).
+ *   No emitting. A table declares the signals an interface may send, so that
+ *   introspection publishes them -- a client reads the document to decide
+ *   whether to subscribe -- and `emit.c` is what decides a value moved and
+ *   sends. The one exception is the object manager below, whose whole reply is
+ *   built by walking these tables.
  */
 #ifndef NMC_BUS_H
 #define NMC_BUS_H

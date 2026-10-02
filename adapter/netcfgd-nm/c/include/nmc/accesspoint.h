@@ -66,4 +66,18 @@ extern const nmc_interface_t nmc_accesspoint_interface;
 /* dBm as NM's percentage, exposed for its test. */
 unsigned char nmc_ap_strength(int dbm);
 
+/*
+ * `RsnFlags` for one access point: what the scan saw, and what the document says
+ * where it names this network.
+ *
+ * `written` is `ncfg_saved_network_t.security` -- "psk", "eap", "open", "owe" --
+ * or NULL for a network the document does not name, and `proto` is the PSK
+ * generation beside it. Exposed because the flag values are a ladder of
+ * single-bit constants that a test can only check by their SUM: three of them
+ * were wrong, one colliding with another, and no per-flag assertion would have
+ * found it.
+ */
+dbus_uint32_t nmc_ap_flags_of(int secured, int enterprise, int owe, const char *written,
+    const char *proto);
+
 #endif /* NMC_ACCESSPOINT_H */

@@ -763,6 +763,200 @@ static DBusHandlerResult fallback(DBusConnection *connection, DBusMessage *messa
 	return handle(connection, message, &resolved);
 }
 
+/* --------------------------------------------------- the object manager */
+
+/*
+ * `org.freedesktop.DBus.ObjectManager`, at `/org/freedesktop`.
+ *
+ * **This header used to say NetworkManager serves none, and that was wrong.**
+ * The claim came from 0264's design document, where it was an open question; the
+ * Rust shim had already answered it against a running NetworkManager 1.52, and
+ * serves one. Without it `nmcli general status` says "NetworkManager is not
+ * running" against a shim answering every property correctly, which is how this
+ * was found -- by pointing the acceptance oracle at the port rather than at the
+ * implementation it replaces.
+ *
+ * libnm calls `GetManagedObjects` here to build its whole cache in one round
+ * trip, so the reply is every object this shim serves with every interface and
+ * every property. It is the most expensive message the shim answers, and it is
+ * answered inside one window like any other: without that it would be a fetch
+ * per property per device.
+ *
+ * The path is NM's and not derived from anything. An object manager conventionally
+ * sits at the root of what it manages, which would be
+ * `/org/freedesktop/NetworkManager`; NM puts it one level up, and libnm looks
+ * where NM puts it.
+ */
+#define NMC_OBJECT_MANAGER_PATH "/org/freedesktop"
+
+/* What `GetManagedObjects` has to walk: everything `nmc_bus_serve` registered. */
+typedef struct {
+	const nmc_object_t  *objects;
+	size_t               count;
+	const nmc_subtree_t *subtrees;
+	size_t               subtree_count;
+} registry_t;
+
+/* One `{sa{sv}}`: an interface name and all its property values. */
+static void say_interface(DBusMessageIter *into, const nmc_interface_t *interface,
+    const nmc_object_t *object)
+{
+	DBusMessageIter entry;
+	DBusMessageIter properties;
+	size_t          at;
+	char            err[NMC_ERROR_MAX] = "";
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	if (!dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &interface->name) ||
+	    !dbus_message_iter_open_container(&entry, DBUS_TYPE_ARRAY, "{sv}", &properties)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	for (at = 0u; at < interface->property_count; at++) {
+		const nmc_property_t *property = &interface->properties[at];
+		DBusMessageIter       pair;
+
+		if (!dbus_message_iter_open_container(&properties, DBUS_TYPE_DICT_ENTRY, NULL,
+		        &pair)) {
+			break;
+		}
+		if (!dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &property->name) ||
+		    !append_one(&pair, property, object, err, sizeof(err))) {
+			/*
+			 * **Skipped rather than failed.** One property that cannot
+			 * be read is one netcfgd had no answer for; refusing the
+			 * whole reply would leave libnm with no cache at all and
+			 * the client reporting that nothing is running.
+			 */
+			(void)dbus_message_iter_abandon_container_if_open(&properties, &pair);
+			continue;
+		}
+		(void)dbus_message_iter_close_container(&properties, &pair);
+	}
+	(void)dbus_message_iter_close_container(&entry, &properties);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
+/* One `{oa{sa{sv}}}`: an object path and every interface at it. */
+static void say_object(DBusMessageIter *into, const nmc_object_t *object)
+{
+	DBusMessageIter entry;
+	DBusMessageIter interfaces;
+	size_t          at;
+
+	if (!object->interfaces) {
+		return;
+	}
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	if (!dbus_message_iter_append_basic(&entry, DBUS_TYPE_OBJECT_PATH, &object->path) ||
+	    !dbus_message_iter_open_container(&entry, DBUS_TYPE_ARRAY, "{sa{sv}}",
+	        &interfaces)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	for (at = 0u; object->interfaces[at] != NULL; at++) {
+		say_interface(&interfaces, object->interfaces[at], object);
+	}
+	(void)dbus_message_iter_close_container(&entry, &interfaces);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
+/*
+ * Every object a subtree currently holds, appended.
+ *
+ * The children come from the subtree's own `enumerate`, which is the same
+ * callback `Introspect` uses -- so a client walking the tree and a client asking
+ * the manager are told the same thing, and there is no second list of what
+ * exists.
+ */
+static void say_subtree(DBusMessageIter *into, const nmc_subtree_t *subtree)
+{
+	const char  *names[256];
+	size_t       count = 0u;
+	size_t       at;
+
+	if (subtree->root_interfaces) {
+		const nmc_object_t root = { subtree->prefix, subtree->root_interfaces,
+			subtree->root_data };
+
+		say_object(into, &root);
+	}
+	if (!subtree->enumerate || !subtree->resolve) {
+		return;
+	}
+	count = subtree->enumerate(names, sizeof(names) / sizeof(names[0]), subtree->context);
+	for (at = 0u; at < count; at++) {
+		char         path[256];
+		nmc_object_t child;
+		void        *data = subtree->resolve(names[at], subtree->context);
+
+		if (!data) {
+			continue;
+		}
+		(void)snprintf(path, sizeof(path), "%s/%s", subtree->prefix, names[at]);
+		child.path = path;
+		child.interfaces = subtree->interfaces_for ? subtree->interfaces_for(data)
+		                                           : subtree->interfaces;
+		child.data = data;
+		say_object(into, &child);
+	}
+}
+
+static int say_managed(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	const registry_t *registry = object;
+	DBusMessageIter   out;
+	DBusMessageIter   array;
+	size_t            at;
+
+	(void)connection;
+	(void)call;
+	if (!registry) {
+		snprintf(err, err_size, "the object manager has nothing to manage");
+		return 0;
+	}
+	dbus_message_iter_init_append(reply, &out);
+	if (!dbus_message_iter_open_container(&out, DBUS_TYPE_ARRAY, "{oa{sa{sv}}}", &array)) {
+		snprintf(err, err_size, "no memory for the managed object list");
+		return 0;
+	}
+	for (at = 0u; at < registry->count; at++) {
+		say_object(&array, &registry->objects[at]);
+	}
+	for (at = 0u; at < registry->subtree_count; at++) {
+		say_subtree(&array, &registry->subtrees[at]);
+	}
+	return dbus_message_iter_close_container(&out, &array) ? 1 : 0;
+}
+
+static const nmc_method_t MANAGER_METHODS[] = {
+	{ "GetManagedObjects", "", "a{oa{sa{sv}}}", say_managed }
+};
+
+/*
+ * `InterfacesAdded` and `InterfacesRemoved` are declared here and emitted from
+ * the membership diffs in `main.c`: libnm learns that a device exists from
+ * these rather than from `DeviceAdded`, which it reads as a hint about an object
+ * it is expected to know about already.
+ */
+static const nmc_signal_t MANAGER_SIGNALS[] = {
+	{ "InterfacesAdded", "oa{sa{sv}}" },
+	{ "InterfacesRemoved", "oas" }
+};
+
+static const nmc_interface_t OBJECT_MANAGER = {
+	.name = "org.freedesktop.DBus.ObjectManager",
+	.methods = MANAGER_METHODS,
+	.method_count = sizeof(MANAGER_METHODS) / sizeof(MANAGER_METHODS[0]),
+	.signals = MANAGER_SIGNALS,
+	.signal_count = sizeof(MANAGER_SIGNALS) / sizeof(MANAGER_SIGNALS[0])
+};
+
 static const DBusObjectPathVTable FALLBACK_VTABLE = {
 	.unregister_function = NULL,
 	.message_function = fallback,
@@ -793,11 +987,29 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 {
 	size_t at;
 	int    wakes = NMC_WAKES_PER_TICK; /* so the first sweep is prompt */
+	/*
+	 * The object manager's own registration, and the registry behind it.
+	 *
+	 * **Static because libdbus keeps the pointer**, exactly as the comment
+	 * below says of the caller's arrays: an automatic here would be read by a
+	 * handler after this frame had gone. One per process is right -- a second
+	 * `nmc_bus_serve` in one process would be a second shim.
+	 */
+	static const nmc_interface_t *const MANAGER_INTERFACES[] = { &OBJECT_MANAGER, NULL };
+	static registry_t                   registry;
+	static nmc_object_t                 manager;
 
 	if (!connection || !objects) {
 		snprintf(err, err_size, "serving needs a connection and some objects");
 		return 0;
 	}
+	registry.objects = objects;
+	registry.count = count;
+	registry.subtrees = subtrees;
+	registry.subtree_count = subtree_count;
+	manager.path = NMC_OBJECT_MANAGER_PATH;
+	manager.interfaces = MANAGER_INTERFACES;
+	manager.data = &registry;
 	for (at = 0u; at < count; at++) {
 		DBusError problem;
 
@@ -827,6 +1039,30 @@ int nmc_bus_serve(DBusConnection *connection, const nmc_object_t *objects, size_
 		        &FALLBACK_VTABLE, (void *)&subtrees[at], &problem)) {
 			snprintf(err, err_size, "cannot serve the subtree at %s: %s",
 			    subtrees[at].prefix,
+			    dbus_error_is_set(&problem) ? problem.message : "already registered");
+			dbus_error_free(&problem);
+			return 0;
+		}
+		dbus_error_free(&problem);
+	}
+	{
+		DBusError problem;
+
+		dbus_error_init(&problem);
+		/*
+		 * An object and not a fallback, which is the opposite of what the
+		 * depth suggests. A fallback at `/org/freedesktop` would catch
+		 * every path beneath it that no deeper registration claims, and
+		 * `handle` would then answer for them as though they were this
+		 * path -- so `GetManagedObjects` would succeed on
+		 * `/org/freedesktop/NetworkManager/Bogus`. Registered as an
+		 * object, only this exact path routes here and the rest are the
+		 * unknown objects they are.
+		 */
+		if (!dbus_connection_try_register_object_path(connection, manager.path, &VTABLE,
+		        &manager, &problem)) {
+			snprintf(err, err_size, "cannot serve the object manager at %s: %s",
+			    manager.path,
 			    dbus_error_is_set(&problem) ? problem.message : "already registered");
 			dbus_error_free(&problem);
 			return 0;

@@ -39,7 +39,14 @@ if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
 	daemon_flags=--try-the-c-daemon
 fi
 export daemon_flags
-shim="$repo/adapter/netcfgd-nm/target/debug/netcfgd-nm"
+# **The C port, which is the thing 0264 asks this to accept.** It was pointed at
+# the Rust shim for as long as that was the only one; an oracle aimed at the
+# implementation that is being replaced says nothing about the replacement.
+#
+# `NCFG_NM_SHIM` points it back, which is what makes a failure here readable: the
+# same 115 checks against the other binary separate "the port is wrong" from
+# "the check was always wrong". Both were passing when this was switched.
+shim="${NCFG_NM_SHIM:-$repo/adapter/netcfgd-nm/c/netcfgd-nm}"
 # **Defined, because `set -u` is on and this was used undefined.** One wait
 # loop below asks `$ncfg plan`, and with the variable unset the script died
 # there with "parameter not set" rather than failing a check -- so the failure
@@ -289,6 +296,13 @@ until nmcli general status >/dev/null 2>&1; do
 	waited=$((waited + 1))
 	if [ "$waited" -gt 100 ]; then
 		cat "$work/nm.log" >&2
+		# What the CLIENT said, which the shim's own log cannot contain.
+		# Without this the failure is "nmcli was unhappy" and names
+		# nothing: an empty shim log reads the same whether the name was
+		# never claimed, a reply was malformed, or libnm refused what it
+		# got.
+		echo "nm.sh: nmcli said:" >&2
+		nmcli general status >&2 2>&1 || true
 		echo "nm.sh: the shim never answered" >&2
 		exit 1
 	fi
