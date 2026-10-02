@@ -9701,15 +9701,23 @@ could establish: with the budget back, `NCFG_LIVE=1` runs the real assertion for
 the first time on this machine and inotify is preferred, as the module always
 claimed.
 
-Seven stale `/tmp/dbus-*` socket files remain, bound by nobody. They are **not
-this user's**: all seven are owned by uid `claude`, dated 2026-09-18 and
-2026-09-28, and `/tmp` is sticky, so only that account or root can unlink them.
-Asked to remove them, the guard in the sweep refused all seven on the owner
-check and printed why -- which is the only reason the earlier claim here, that
-they were left over from the 571 unlinking their own on a clean exit, was caught
-rather than published. The 571 were all `funk`'s, which is why every one of them
-died; that account has 42 live processes of its own and leaks these by the same
-mechanism.
+Seven stale `/tmp/dbus-*` socket files were left bound by nobody, and **they
+were not this user's**: all seven owned by uid `claude`, dated 2026-09-18 and
+2026-09-28, with `/tmp` sticky, so neither `funk` nor a session running as it
+could unlink them. The holder removed them as root on 2026-10-02, and the end
+state is one `/tmp/dbus-*` socket left -- `funk`'s `dbus-run-session` bus from
+hydra's tree, still bound with its nine clients, which is the one that was meant
+to survive.
+
+**The owner check is the part worth keeping.** Asked to remove the seven, the
+sweep re-verified each at the moment of deletion -- a socket, owned by this
+user, still unbound -- and refused all seven on the second of those, printing
+the owner. That is the only reason the claim here that they were left over from
+the 571 unlinking their own was caught rather than published: the 571 were all
+`funk`'s, which is why every one of them died, while these belonged to an
+account with 42 live processes that leaks them by the same mechanism. **A
+cleanup keyed on a path cannot tell its own debris from another account's**, and
+on a machine with more than one agent uid that is not hypothetical.
 
 **netcfgd is cleared as the source, and the first version of this paragraph
 said so for a reason that was not the reason.** It read the population as *"the
