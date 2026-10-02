@@ -9617,6 +9617,51 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.353 Nothing has to stay Rust, and the condition for that was met
+
+The copyright holder, 2026-10-02: nothing needs to stay Rust, they never said
+it did, and carrying a Rust dependency for a project that benefits from C and
+the system libraries looks counterproductive.
+
+**They are right and this document was wrong.** 10.294 said
+"`adapter/netcfgd-nm` is Rust and stays Rust" and cited 0264 for it. 0264 says
+the opposite of "stays": the answer is **link `libdbus-1`**, and "not yet" --
+with "Nothing in this record is authority to write the module" in as many
+words. An overstatement in a log entry was then quoted back to the holder as
+though it were their instruction, which is the attribution failure
+`evidence.md` opens its cross-tree section with, arriving inside one tree.
+
+**And the "not yet" has expired without anybody revisiting it.** 0264 put the
+adapter last in 0263's order -- "the adapter is last, after `proto`, or it is a
+second copy of the model" -- because it consumes most of the model and all of
+the protocol. All eleven modules of that order exist in the C now:
+
+    base 2  json 1  model 10  compile 18  sys 22  proto 5
+    host 16  plan 29  apply 19  daemon 19  cli 18     (files)
+
+and every type 0264 named is there: `ncfg_proto_request_t`,
+`ncfg_proto_response_t`, `observed.h`, `document.h`, `ncfg_wifi_network`,
+`ncfg_dns_policy`, `ncfg_ssid`. **So the dependency order that scheduled this
+no longer gates it.** That is the deferral-whose-condition-was-met pattern
+`working-practice.md` names, and it is why the deferral was invisible: nobody
+re-reads a "not yet" while closing the thing it was waiting on.
+
+**What the Rust actually costs, measured rather than argued.**
+`debian/control` carries `cargo (>= 1.85), rustc (>= 1.85)` in Build-Depends,
+and its own comment says they are "for `adapter/netcfgd-nm` and nothing else
+since 0266". **One 8,699-line module is the sole reason this package needs a
+Rust toolchain.** The daemon's Rust is a test instrument that ships nothing; it
+costs `make check` a toolchain and the tree its size, not the package anything.
+
+**The remaining work, sized from 0264's own count** rather than guessed: eleven
+D-Bus interfaces, about twenty-seven methods, a hundred properties and two
+signals, over `libdbus-1` instead of `zbus` 5.
+
+**Not started.** 8,699 lines is not a thing to begin in passing, and 0264 is
+explicit that it is not authority to write it. What this entry does is remove
+the two reasons it was not being asked about: a record that said "stays" when
+it meant "not yet", and a schedule whose condition had quietly been satisfied.
+
 ## 10.352 Extracting `netcfgd-modem-at-proposal` so it can be deleted
 
 The proposal tree is **not a git repository** -- no `.git`, not a submodule,
@@ -14278,12 +14323,19 @@ comparison that had silently stopped comparing.
 
 ### What could not be retired
 
-**`adapter/netcfgd-nm` is Rust and stays Rust**: its own cargo workspace, built
-by `make nm`, shipped as `netcfgd-nm.service`, and the way NetworkManager's own
-clients reach netcfgd. 0264 decided its C replacement is "not yet". So `cargo`
-and `rustc` remain Debian build dependencies, and `debian/control` now carries a
-comment saying they are the adapter's and not the daemon's -- that being exactly
-the line a tidying pass would delete, producing a package with no shim in it.
+**~~`adapter/netcfgd-nm` is Rust and stays Rust~~ -- it is Rust *for now*, and
+"stays" was this entry overstating 0264.** That record decided the answer is
+**link `libdbus-1`**, and "not yet"; it says in as many words that nothing in it
+is authority to write the module. Those are different claims, and the wrong one
+was quoted back to the copyright holder on 2026-10-02 as though they had
+instructed it. See 10.353.
+
+The adapter is its own cargo workspace, built by `make nm`, shipped as
+`netcfgd-nm.service`, and the way NetworkManager's own clients reach netcfgd.
+So `cargo` and `rustc` remain Debian build dependencies while it does, and
+`debian/control` carries a comment saying they are the adapter's and not the
+daemon's -- that being exactly the line a tidying pass would delete, producing
+a package with no shim in it.
 
 The Qt client is C++ and was never in question.
 
