@@ -29,13 +29,15 @@
  * it here would be a cycle. The store is reached through this pointer by the
  * one interface that needs it -- the manager, listing device paths. */
 struct nmc_store;
+struct nmc_connections;
 
 typedef struct {
 	/* NULL until the first successful open, and again after netcfgd goes
 	 * away: the shim outlives the daemon and must answer while it is gone. */
 	ncfg_client_t     *client;
 	const char        *socket_path;
-	struct nmc_store  *store;
+	struct nmc_store       *store;
+	struct nmc_connections *connections;
 } nmc_state_t;
 
 void nmc_state_init(nmc_state_t *state, const char *socket_path);

@@ -11,6 +11,7 @@
 #include "nmc/device.h"
 #include "nmc/subtypes.h"
 #include "nmc/emit.h"
+#include "nmc/settings.h"
 
 #include <signal.h>
 #include <stdio.h>
@@ -19,6 +20,7 @@
 #define NMC_BUS_NAME     "org.freedesktop.NetworkManager"
 #define NMC_MANAGER_PATH "/org/freedesktop/NetworkManager"
 #define NMC_DEVICES_PATH "/org/freedesktop/NetworkManager/Devices"
+#define NMC_SETTINGS_PATH "/org/freedesktop/NetworkManager/Settings"
 
 static void asked_to_stop(int signal_number)
 {
@@ -92,9 +94,12 @@ int main(int argc, char **argv)
 	char                   err[NMC_ERROR_MAX] = "";
 	nmc_state_t            state;
 	nmc_store_t            store;
+	nmc_connections_t      connections;
 	nmc_watch_t           *watch;
 	heartbeat_t            heartbeat;
 	const nmc_interface_t *device_interfaces[] = { &nmc_device_interface, NULL };
+	const nmc_interface_t *settings_interfaces[] = { &nmc_settings_interface, NULL };
+	const nmc_interface_t *connection_interfaces[] = { &nmc_connection_interface, NULL };
 	/* Both at the manager path, which is where NM serves its own and where
 	 * 0264's policy gate expects to find `org.netcfgd.Compat`. */
 	const nmc_interface_t *manager_interfaces[] = { &nmc_manager_interface,
@@ -105,7 +110,9 @@ int main(int argc, char **argv)
 
 	nmc_state_init(&state, NULL);
 	nmc_store_init(&store, &state);
+	nmc_connections_init(&connections, &state);
 	state.store = (struct nmc_store *)&store;
+	state.connections = (struct nmc_connections *)&connections;
 	watch = nmc_watch_new();
 	if (!watch) {
 		fprintf(stderr, "netcfgd-nm: no memory to watch for changes\n");
@@ -172,7 +179,20 @@ int main(int argc, char **argv)
 			    .interfaces_for = nmc_device_interfaces_for,
 			    .resolve = nmc_store_resolve_for_bus,
 			    .enumerate = nmc_store_enumerate_for_bus,
-			    .context = &store }
+			    .context = &store },
+			/* One interface for every connection, so no
+			 * `interfaces_for`: a saved network is a saved network. */
+			{ .prefix = NMC_SETTINGS_PATH,
+			    /* The prefix serves `...Settings` and each child a
+			     * `...Settings.Connection`, which is NM's shape and
+			     * is why one path cannot be both an object and a
+			     * fallback. */
+			    .root_interfaces = settings_interfaces,
+			    .root_data = &state,
+			    .interfaces = connection_interfaces,
+			    .resolve = nmc_connections_resolve_for_bus,
+			    .enumerate = nmc_connections_enumerate_for_bus,
+			    .context = &connections }
 		};
 
 		heartbeat.connection = connection;
@@ -184,12 +204,14 @@ int main(int argc, char **argv)
 		        sizeof(err))) {
 			fprintf(stderr, "netcfgd-nm: %s\n", err);
 			nmc_watch_free(watch);
+			nmc_connections_free(&connections);
 			nmc_store_free(&store);
 			nmc_state_free(&state);
 			return 1;
 		}
 	}
 	nmc_watch_free(watch);
+	nmc_connections_free(&connections);
 	nmc_store_free(&store);
 	nmc_state_free(&state);
 	return 0;
