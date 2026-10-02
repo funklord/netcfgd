@@ -79,6 +79,15 @@ mount -o remount,bind,exec /run/netcfgd || skip "cannot permit execution under i
 
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR=/run/netcfgd
+# The dhcpcd hook, from this tree rather than from an install, exactly as
+# `dhcpcd.sh` does it. The `lease` section below asks for `Dhcp4`, and since
+# 0178 netcfgd refuses to start a client when its shipped hook is absent --
+# correctly, because a lease whose nameservers cannot be reported writes an
+# empty resolver. In an uninstalled tree that refusal stopped the apply at
+# action 0, so `hook.run` was never attempted and five lease checks failed
+# against a product that was doing the right thing. `dhcpcd.sh` was taught this
+# path when 0178 landed and this file was not.
+export NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0

@@ -359,14 +359,35 @@ done
 
 # The watcher rescans every pass, so it has to find the new socket and attach
 # to it. Bounded on the fake's own log rather than on a guess.
+#
+# **Thirty seconds, because ten was one reconcile tick of headroom.** The
+# rescan happens on the loop's five-second backstop, so ten seconds is two
+# ticks and a loaded machine spends that on scheduling alone: this passed three
+# times out of three run on its own and failed inside a full `make live`, with
+# the attach count at 0 and the roam count one short -- the second being a
+# consequence of the first rather than a separate fault. The bound is still a
+# bound; what it must not be is a race with the thing it waits for.
 waited=0
 while ! grep -q '^ATTACH' "$work/fake2.log" 2>/dev/null; do
 	waited=$((waited + 1))
-	[ "$waited" -gt 100 ] && break
+	[ "$waited" -gt 300 ] && break
 	sleep 0.1
 done
 check "a restarted supplicant is attached to again" \
 	"$(grep -c '^ATTACH' "$work/fake2.log" || true)" 1
+# **When that fails there is nothing to go on**, and it has failed: inside a
+# full `make live` it reports zero attaches in thirty seconds, while passing
+# three times out of three on its own and again when run straight after
+# `select.sh`, which is what precedes it. So it is load-sensitive rather than
+# marginal -- thirty seconds is six reconcile ticks -- and a count is not
+# enough to say why. The test is otherwise quiet about the daemon and the work
+# directory goes on exit, so the next occurrence leaves the logs behind.
+if [ "$(grep -c '^ATTACH' "$work/fake2.log" || true)" -eq 0 ]; then
+	echo "--- the attach never happened; netcfgd's last 30 lines ---" >&2
+	tail -30 "$work/daemon.log" >&2
+	echo "--- the restarted fake's own log ---" >&2
+	tail -20 "$work/fake2.log" >&2
+fi
 
 # And the events reach the hooks, which is the half that was lost. The first
 # CONNECTED on a new connection is an association, so two are needed to show a

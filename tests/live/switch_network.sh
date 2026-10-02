@@ -69,6 +69,28 @@ command -v python3 >/dev/null 2>&1 || skip "no python3"
 [ -x "$repo/target/debug/netcfgd" ] || skip "netcfgd is not built"
 [ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
+# **A mount namespace, made here rather than asked of the caller, and not
+# required.** The Makefile runs this under `unshare -rn` -- user and network,
+# no mount -- and a developer runs it bare. The route-metric section below is
+# the only part that needs one: dhcpcd creates `/run/dhcpcd` for its pidfile,
+# and inside a user namespace the host's /run belongs to a uid this process is
+# not, so it exited 1 with `mkdir: /run/dhcpcd: Permission denied` and no lease
+# ever arrived -- which the checks read as a metric fault. Everything above this
+# works without it, so a machine that cannot give one loses that section rather
+# than the file. Re-exec'ing once covers both callers; the guard stops it
+# recursing.
+if [ -z "${NCFG_SWITCHNET_NS:-}" ]; then
+	NCFG_SWITCHNET_NS=1
+	export NCFG_SWITCHNET_NS
+	if unshare -m true 2>/dev/null; then
+		exec unshare -m -- sh "$0" "$@"
+	fi
+fi
+
+# Before the work directory, and that ordering is load-bearing: `exec` replaces
+# the process and discards its EXIT trap, so a `$work` made before the re-exec
+# is one nothing ever removes. Measured the wrong way round first -- three runs,
+# three abandoned directories.
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-switch.XXXXXX")
 daemon=
 fake=
@@ -120,6 +142,13 @@ export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
 export NCFG_WPA_CTRL_DIR="$work/ctrl"
 export NCFG_SYS_CLASS_NET="$work/sys"
+# The dhcpcd hook, from this tree rather than an install, as `dhcpcd.sh` does.
+# The route-metric section below runs only where busybox udhcpd *and* dhcpcd
+# are both present, which is exactly the configuration where 0178 makes the
+# shipped hook mandatory -- so without this netcfgd refuses to start the client
+# and no lease ever arrives, which reads as a metric fault rather than a missing
+# file.
+export NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"
 # netcfgd starts this as its supplicant, so the backend is recorded and
 # observed the way a real one is -- which is what the association pass needs.
 # The fake parses netcfgd's own argv (`-i`, `-C`, `-P`, `-B`), which is what
@@ -341,7 +370,20 @@ check "and the old network's is gone rather than left beside it" \
 # The fixture is `dhcpcd.sh`'s: busybox udhcpd on the far end of the veth,
 # offering a router. Skipped rather than failed where there is no server, the
 # way that script does, because the machine is what is missing and not the code.
-if command -v busybox >/dev/null 2>&1 && busybox --list | grep -qx udhcpd &&
+#
+# dhcpcd also needs somewhere to write. `/run` gets the flags a real machine
+# has rather than a plain tmpfs -- systemd mounts it `noexec`, which is 0178's
+# whole subject -- so the hook has to come from outside it, which is what the
+# `NCFG_DHCPCD_HOOK` above is for.
+run_is_ours=no
+if [ -n "${NCFG_SWITCHNET_NS:-}" ] &&
+	mount -t tmpfs -o nosuid,nodev,noexec tmpfs /run 2>/dev/null; then
+	mkdir -p /var/lib/dhcpcd 2>/dev/null || true
+	mount -t tmpfs tmpfs /var/lib/dhcpcd 2>/dev/null || true
+	run_is_ours=yes
+fi
+if [ "$run_is_ours" = yes ] && command -v busybox >/dev/null 2>&1 &&
+	busybox --list | grep -qx udhcpd &&
 	command -v dhcpcd >/dev/null 2>&1; then
 	: > "$work/udhcpd.leases"
 	cat > "$work/udhcpd.conf" <<CONF
@@ -378,7 +420,12 @@ CONF
 	# `dhcp` in on a second apply is what a real machine does anyway: the
 	# radio associates before a lease is asked for.
 	sed -i 's/config = "null"/config = "dhcp"/' "$work/etc/netcfgd.conf"
-	timeout 60 "$ncfg" apply >/dev/null 2>&1 || true
+	# Into a file rather than /dev/null, because this apply's own output is
+	# where a failure to start the client says so -- and `|| true` means the
+	# status is not read either. With both discarded, dhcpcd exiting 1 for want
+	# of a writable /run presented as three metric checks failing with no
+	# diagnosis anywhere, and finding it needed this redirect added by hand.
+	timeout 60 "$ncfg" apply > "$work/apply-metric.log" 2>&1 || true
 	waited=0
 	while [ -z "$(lease_metric)" ] && [ "$waited" -lt 200 ]; do
 		waited=$((waited + 1))
@@ -437,7 +484,8 @@ CONF
 	# machine and nothing here would otherwise reap.
 	timeout 30 dhcpcd -4 -k wlan0 >/dev/null 2>&1 || true
 else
-	echo "note the route metric section needs busybox udhcpd and dhcpcd; skipped"
+	echo "note the route metric section needs busybox udhcpd, dhcpcd and a" \
+		"writable /run (run_is_ours=$run_is_ours); skipped"
 fi
 
 echo

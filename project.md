@@ -9499,6 +9499,95 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.160 `make live` walked four scripts deep, and what the rest of it says
+
+Asked to run it. It stopped at the seventh script, and each fix uncovered the
+next -- so the first thing worth recording is the denominator, because "make
+live fails" and "make live stops" are different claims and only the second was
+true.
+
+**Where it stands: 23 scripts pass before `roam.sh`; of the 49 after it, 42 pass
+and 7 fail.** The suite halts at the first failure, so that tail was invisible
+until each script was run with the Makefile's own invocation, extracted from the
+recipe rather than retyped.
+
+### Four fixed, and three of them were one product change nobody re-ran
+
+**Two were 0178 arriving in tests that were not moved with it.** netcfgd now
+refuses to start a DHCP client when its shipped hook is absent, which is right
+-- a lease whose nameservers cannot be reported writes an empty resolver, and
+10.68 is what that cost. In an uninstalled tree the refusal stops the apply at
+action 0, so everything behind it is *not attempted*: `hooks.sh` lost five lease
+checks and `exec_refused.sh` nine, every one of them reading back a message
+about the hook instead of the one it was written for. `NCFG_DHCPCD_HOOK` exists
+for exactly this and `dhcpcd.sh` was taught it when 0178 landed; these two were
+not. `dhcp.sh` is the third and is still open.
+
+**`switch_network.sh` needed a writable `/run`, and said "metric".** dhcpcd
+creates `/run/dhcpcd` for its pidfile; inside `unshare -rn` the host's `/run`
+belongs to a uid the process is not, so dhcpcd exited 1 with
+`mkdir: /run/dhcpcd: Permission denied` and no lease ever arrived -- presenting
+as three metric checks failing with no diagnosis anywhere. **The diagnosis was
+absent because the test discarded it**: `ncfg apply >/dev/null 2>&1 || true`
+throws away both the output and the status, and finding this needed that
+redirect replaced by hand. It writes to a log now, and the script takes its own
+mount namespace with a tmpfs over `/run` the way `dhcpcd.sh` has since 0178.
+
+**And that fix leaked a directory until the ordering was right.** The re-exec
+went in after `work=$(mktemp -d)`, and `exec` replaces the process and discards
+its EXIT trap -- so every run abandoned one. Three runs, three directories,
+caught by counting what the run left behind rather than by reading.
+
+**`wifi_trouble.sh` asserted a rule 0224 had removed.** It planted
+`netcfgd-1-9` and expected the reaper to spare it because pid 1 exists. That
+proxy went precisely because low pids belong to kernel threads outliving the
+boot, so a socket whose creator was long gone was kept for ever; what decides
+now is whether anything has the address bound. Under the rule netcfgd has, that
+socket is stale and sweeping it is correct -- **the test was wrong and not the
+daemon**. The survivor is held open by a live process now, named after it, and
+killing the holder before the sweep was watched turning the check red.
+
+### Open: a supplicant restart netcfgd does not notice under load
+
+`roam.sh`'s last two checks. Thirteen before them pass, including the event
+burst; then the fake supplicant is restarted and **netcfgd never re-attaches**.
+Deliberately not papered over, because it may be the product rather than the
+test: 10.85's whole subject is netcfgd being deaf to a supplicant that was
+talking.
+
+What is known, and what is dead:
+
+- It passes **three times out of three** run alone, and again run straight
+  after `select.sh`, which is what precedes it. Only the full suite produces
+  it.
+- **It is not a tight bound.** The wait was 10 seconds, two reconcile ticks;
+  widening it to 30 changed nothing, and zero attaches in 30 seconds is not
+  marginal slowness.
+- The restarted fake logs `ready` and no `ATTACH`, so it is listening and
+  netcfgd did not arrive.
+- netcfgd's last log lines are the previous check's event burst, each one a
+  roam report. The burst check itself passes, so the count was drained -- what
+  is not established is whether the watcher thread was still finishing work.
+- The burst is followed by a **fixed `sleep 3`**, which is a timing assumption
+  under load, and is the next thing to look at.
+
+The test now dumps netcfgd's last thirty lines and the fake's log when the
+attach count is zero, because a count was not enough to say why and the work
+directory goes on exit. That is an instrument, not a fix.
+
+### Open, and not yet classified
+
+`wifi_journey.sh` (1 check), `dhcpcd_orphan.sh` (2), `tunnel.sh` (2), `wifi.sh`,
+`acl.sh`, and `dhcp.sh` -- which is confirmed as the 0178 hook family and should
+go the way `hooks.sh` and `exec_refused.sh` went. `sandbox_writes.sh` is the one
+that is not a defect: it drives the unit's real sandbox and needs systemd and
+root, and under `NCFG_LIVE` it refuses to skip, which is the bargain that file
+already records.
+
+**None of the four fixes touched the daemon.** Every one was a test holding a
+premise the product had changed under it, which is what a suite that halts on
+the first failure will hide for as long as nobody runs it to the end.
+
 ## 10.159 A profile could not be saved by anyone who uses wifi
 
     ncfg: this configuration cannot be written out yet, so it was not saved.

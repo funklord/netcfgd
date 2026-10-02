@@ -50,7 +50,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-wifi-trouble.XXXXXX")
 daemon=
 fake=
 cleanup() {
-	for pid in $daemon $fake; do
+	for pid in $daemon $fake $holder; do
 		kill "$pid" 2>/dev/null || true
 		wait "$pid" 2>/dev/null || true
 	done
@@ -116,12 +116,43 @@ done
 # measured on the reporting machine as 18 entries growing to 20 across one
 # ordinary `systemctl restart`. The unit test covers the rule; this covers the
 # wiring, which is the half a unit test cannot see.
+#
+# **What decides is whether anything has the address bound (0224), not whether
+# the pid in the name is alive.** This fixture asserted the pid proxy that 0224
+# removed -- it planted `netcfgd-1-9` and expected the reaper to spare it
+# because pid 1 exists -- and the proxy went precisely because low pids belong
+# to kernel threads that outlive the boot, so a socket whose creator was long
+# gone was kept for ever. Under the rule netcfgd has, that socket is stale and
+# sweeping it is right, so the test was wrong and not the daemon.
+#
+# The one that must survive is therefore held open by a process that is still
+# running, and it is named after that process because the name is where a pid
+# belongs.
 python3 - "$work/ctrl" <<'PLANT'
 import socket, sys, os
-for name in ("netcfgd-0-9", "netcfgd-1-9"):
-	sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-	sock.bind(os.path.join(sys.argv[1], name))
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.bind(os.path.join(sys.argv[1], "netcfgd-0-9"))
 PLANT
+cat > "$work/hold-socket.py" <<'HOLD'
+import os, signal, socket, sys
+
+name = "netcfgd-%d-9" % os.getpid()
+sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+sock.bind(os.path.join(sys.argv[1], name))
+print(name, flush=True)
+# Held until killed. A process that exits stops being something that has the
+# address bound, which is the whole of what the reaper asks.
+signal.pause()
+HOLD
+python3 "$work/hold-socket.py" "$work/ctrl" > "$work/holder.log" 2>&1 &
+holder=$!
+waited=0
+while [ ! -s "$work/holder.log" ] && [ "$waited" -lt 50 ]; do
+	waited=$((waited + 1))
+	sleep 0.1
+done
+held=$(cat "$work/holder.log" 2>/dev/null)
+[ -n "$held" ] || { echo "wifi_trouble.sh: the socket holder never bound" >&2; exit 1; }
 
 "$repo/target/debug/netcfgd" > "$work/daemon.log" 2>&1 &
 daemon=$!
@@ -143,14 +174,16 @@ done
 check "netcfgd attached to the event socket" \
 	"$(grep -c '^ATTACH' "$work/fake.log" || true)" 1
 
-# Pid 0 never appears in /proc, so that socket's owner is gone. Pid 1 is alive on
-# any machine this runs on, and its socket is not the reaper's to take -- which is
-# the assertion that matters, a sweep that removes everything being far worse than
-# one that removes nothing.
-check "a reply socket from a dead process is swept at startup" \
+# Nothing has `netcfgd-0-9` bound, which is what makes it stale. The other is
+# bound by a live process, and leaving it is the assertion that matters: a sweep
+# that removes everything is far worse than one that removes nothing. The pair
+# cannot pass vacuously -- a reaper ignoring boundness fails one or the other
+# whichever way it errs -- and killing the holder before the sweep was watched
+# turning the second red.
+check "a reply socket nothing has bound is swept at startup" \
 	"$([ -e "$work/ctrl/netcfgd-0-9" ] && echo present || echo gone)" gone
-check "and one from a living process is left where it is" \
-	"$([ -e "$work/ctrl/netcfgd-1-9" ] && echo present || echo gone)" present
+check "and one something still has bound is left where it is" \
+	"$([ -e "$work/ctrl/$held" ] && echo present || echo gone)" present
 check "and the interface socket is not confused with either" \
 	"$([ -S "$work/ctrl/wlan0" ] && echo present || echo gone)" present
 

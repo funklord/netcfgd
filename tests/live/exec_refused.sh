@@ -73,6 +73,13 @@ mkdir -p "$work/etc" "$work/run" "$work/bin" "$work/noexec"
 export NCFG_CONFIG_DIR="$work/etc"
 export NCFG_RUN_DIR="$work/run"
 export NCFG_RESOLV_CONF="$work/resolv.conf"
+# The dhcpcd hook, from this tree rather than an install, as `dhcpcd.sh` does.
+# Since 0178 netcfgd refuses to start a client whose shipped hook is absent, and
+# that refusal happens *before* the client is looked for -- so in an uninstalled
+# tree every check here read back a message about the hook instead of the one
+# about the client it was written for. The subject of this file is what netcfgd
+# says when it cannot run a client, which it can only say once it gets that far.
+export NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"
 ncfg="$repo/target/debug/ncfg"
 
 failures=0
