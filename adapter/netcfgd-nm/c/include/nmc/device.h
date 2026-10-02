@@ -35,6 +35,22 @@ dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
 dbus_uint32_t nmc_device_state_now(const nmc_device_slot_t *slot);
 
 /*
+ * Whether any of these comma-separated addresses is one a client would call
+ * being connected.
+ *
+ * **Link-local does not count, and that is the whole function.** Every link with
+ * IPv6 gets an `fe80::` the moment it comes up, so a test for "has an address"
+ * calls every addressless interface connected -- and `169.254.` means the
+ * opposite of connected, being what a host assigns itself when DHCP found nobody.
+ *
+ * Exposed because the device state is not the only thing that asks: whether a
+ * device has an ACTIVE CONNECTION is the same question, and answering it two ways
+ * is how one object came to say a link was disconnected while the activation
+ * beside it said it was carrying something.
+ */
+int nmc_device_routable(const char *addresses);
+
+/*
  * What the subtype interfaces answer with, from the same `facts_for` the device
  * interface uses.
  *

@@ -21,6 +21,7 @@
  */
 #include "nmc/manager.h"
 #include "nmc/store.h"
+#include "nmc/active.h"
 #include "nmc/device.h"
 
 #include <stdio.h>
@@ -260,13 +261,19 @@ static int say_active_connections(DBusMessageIter *into, void *object, char *err
 	for (at = 0u; at < count; at++) {
 		char               path[96];
 		nmc_device_slot_t *slot = nmc_store_resolve(store, names[at]);
-		char               addresses[1024] = "";
 
 		if (!slot) {
 			continue;
 		}
-		nmc_device_addresses_of(slot, addresses, sizeof(addresses));
-		if (addresses[0] == '\0') {
+		/*
+		 * **One question, one answer.** This had its own test -- "has any
+		 * address" -- which is true of every link with IPv6 the moment it
+		 * comes up, so a link with nothing but an `fe80::` was listed here
+		 * while the device beside it said `DISCONNECTED`, and a tunnel was
+		 * listed with no profile to name. `nmc_active_exists` is what the
+		 * device's own property and the subtree's resolve ask too.
+		 */
+		if (!nmc_active_exists(slot)) {
 			continue;
 		}
 		(void)snprintf(path, sizeof(path),

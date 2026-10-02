@@ -489,7 +489,10 @@ int main(int argc, char **argv)
 			    .context = &store },
 			{ .prefix = NMC_ACTIVE_PATH,
 			    .interfaces = active_interfaces,
-			    .resolve = nmc_store_resolve_for_bus,
+			    /* Filtered, unlike the two above: an IP config exists
+			     * for any addressed device, and an activation needs a
+			     * profile as well -- see `nmc_active_exists`. */
+			    .resolve = nmc_active_resolve_for_bus,
 			    .enumerate = nmc_store_enumerate_for_bus,
 			    .context = &store },
 			/* The one family NOT keyed by a device: a scan result's

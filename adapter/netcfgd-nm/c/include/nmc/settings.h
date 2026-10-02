@@ -76,6 +76,14 @@ const char *nmc_connections_path_of(nmc_connections_t *store, nmc_profile_kind_t
  */
 nmc_connection_slot_t *nmc_connections_by_uuid(nmc_connections_t *store, const char *uuid);
 
+/*
+ * The slot for a profile, where the caller wants what is in it rather than its
+ * path -- the derived uuid, which an activation has to report so that a client
+ * can match the two.
+ */
+const nmc_connection_slot_t *nmc_connections_slot_of(nmc_connections_t *store,
+    nmc_profile_kind_t kind, const char *id);
+
 void  *nmc_connections_resolve_for_bus(const char *tail, void *context);
 size_t nmc_connections_enumerate_for_bus(const char **names, size_t max, void *context);
 

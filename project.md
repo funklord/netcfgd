@@ -12293,6 +12293,52 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.371 One question, one answer: the activation, and the instrument that found it
+
+The oracle is at **66 of 117**, from 56. Everything here was found by
+`tool/nm-compare.sh` rather than by reading either implementation.
+
+**The instrument is the extraction.** It brings both shims up against
+`tests/live/nm.sh`'s own fixture -- read out of that file rather than copied, so
+a difference found here is one the oracle will also see -- asks each the same
+questions through `nmcli`, and diffs. It existed as a scratch script for most of
+this port and produced most of its findings: the wifi card served as an ethernet,
+the state mapping, the radio determination, the security constant collision. It
+is in the tree now because the next person would otherwise rebuild it, and
+because `nm.sh` says which checks fail while this says what the difference IS,
+which is the half that says where to look.
+
+**Four properties were four answers to one question.** `Connection.Active`'s
+`Id`, `Uuid`, `Connection` and `Type` each worked it out separately: the id was
+the network's name or the device's, the uuid was the id, the path was looked up
+only for a network, and the type came from the device. A client cannot assemble
+that -- `nmcli` merges an activation into its profile's row by matching the uuid,
+so an activation whose uuid was a device name appeared as a connection of its
+own. Seven profiles and five phantom rows. One `profile_of` lookup now feeds all
+four: the device's `network` where its link reports one, its own `interface`
+block otherwise, and nothing where there is neither.
+
+**"Does this device have an activation" was asked three ways and each got one
+condition wrong.** It has to be carrying a routable address -- not merely any
+address, since every link with IPv6 has an `fe80::` the moment it comes up -- and
+it has to have a profile, because an activation is the join between a profile and
+a device. The device's own property tested the first wrongly, the manager's list
+tested only the first, and the subtree tested neither; so a link with nothing but
+a link-local address was listed as active while the device beside it said
+`DISCONNECTED`, and `wg0` was a connection with no name. `nmc_active_exists` is
+one function with three callers. The same `routable` test now also backs the two
+IP config properties, which had the any-address version.
+
+**A refusal that never runs is not a refusal.** `nmcli connection modify` got
+"this interface has no such method in this build" from the dispatcher while
+`Update` sat in the table refusing correctly -- nmcli calls `Update2`, NM's newer
+spelling. The sentence was right and unreachable, which is worse than a wrong
+sentence: the gate reported nothing and the client reported a missing feature.
+
+Open: `RequestScan`, the activation pair, the IP configuration's gateway and
+nameservers -- the only difference the differ still shows on its default
+questions -- and the writes.
+
 ## 10.370 The profile model, derived uuids, and an outage I cannot pin on anything
 
 **Incomplete and pushed deliberately**, because access to the machine it was
@@ -12351,15 +12397,9 @@ property rather than a gap, and it is the one refusal here that does **not**
 authorize first: an authorized caller gets the same no, so asking who is calling
 would only tell an unauthorized one that the answer depends on who they are.
 
-**Open, and this is the state to pick up from.** The oracle's 57 remaining
-failures are: the activation pair and `RequestScan`; the active connection's
-identity, which is the next thing and is half-written -- `Connection.Active.Id`
-and `Uuid` answer the device's own name, so `nmcli` cannot merge an activation
-into its profile row and prints it as a separate connection (the fix is to
-resolve the profile for a device -- its `network` where it has one, its own
-interface block otherwise -- and answer `Id`, `Uuid`, `Connection` and `Type`
-from that one lookup); the IP configuration reads that hang off an activation;
-and the writes proper, including the agent flow.
+**The activation's identity was named here as the next thing and is done in
+10.371.** What is left after that is `RequestScan`, the activation pair itself,
+the IP configuration reads, and the writes proper including the agent flow.
 
 ### The outage, and what I could not establish
 

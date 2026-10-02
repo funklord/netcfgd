@@ -356,9 +356,11 @@ int main(void)
 		/* Seven on the settings object now: `GetConnectionByUuid` is how a
 		 * client that stored a derived uuid finds the profile again, and
 		 * deriving one is only worth it if that lookup exists. */
+		/* Eight on the connection: `Update2` is NM's newer spelling and the
+		 * one nmcli calls, so without it the refusal never ran. */
 		check(nmc_settings_interface.method_count == 7u &&
-		        nmc_connection_interface.method_count == 7u,
-		    "and seven methods each, which is what NM has");
+		        nmc_connection_interface.method_count == 8u,
+		    "and seven and eight methods, which is what NM has");
 	}
 
 	/*
