@@ -9499,6 +9499,67 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.162 The salvage bundle holds nothing this tree has lost
+
+`~/mnt/dl180g6-03/src/netcfgd-salvage.tar.gz`, made on 2026-10-02 from
+`git fsck --no-reflogs --lost-found` on `debian-nabbe`: **35 commits reachable
+from no branch, tag or stash**, which a clone and a push would both have left
+behind. Its own `RESTORE.txt` and `MANIFEST.txt` are good -- they say what the
+commits are, how to unpack them, and that the three with names on them are
+dropped stashes. Triaged so that the archive can be deleted on a measurement
+rather than on a hope.
+
+**Verdict: nothing to recover.** The method, so it can be re-run or disputed:
+
+- Unpacked with the file's own instructions, `git fetch <bundle>
+  'refs/salvage/*:refs/salvage/*'`, into this repository rather than a clone,
+  because the bundle carries only the unique commits and their ancestors are
+  already here. `git bundle verify` listed five prerequisites, all present.
+- **24 of 35 have an upstream equivalent by patch-id**, which is what
+  `git cherry` answers; the three stashes are among them.
+- **Of the other 11, every one's content is present**, and the first instrument
+  said otherwise: reverse-applying each diff reported ten as "not applied",
+  which tests patch *context* and not content. The tree-wide reformat moved the
+  context under all of them. `sys: geneve ttl is attribute 3, and 4 is tos` is
+  the clearest case -- reverse-apply said absent, and
+  `IFLA_GENEVE_TTL: u16 = 3` is in `ops.rs` with the note that 4 is TOS.
+- The two `c:` commits are **10 of 10 added lines present on `origin/c-port`**,
+  which master's tree cannot contain by construction.
+- **198 distinct paths are touched and three exist on no published branch** --
+  all three under `docs/decisions/`, the name before the rename to
+  `doc/decision/`. Their current versions are supersets: 0119 is 139 lines
+  against 111, 0133 is 269 against 188, 0139 is identical.
+- The lines held only by the old copies are **earlier drafts, not lost work**.
+  0119's were two open questions -- a hold-down and what `ncfg explain` would
+  say about a withheld route -- and both are now implemented and documented as
+  `hold_down` and as the explain dialog. 0133's were a shorter statement of the
+  hostap-vendoring rejection, which today's version argues at greater length.
+
+So the bundle, and any `salvage/*` branches made from it, are debris. The 35
+refs were deleted again after the triage: the bundle reproduces them in one
+command for as long as it exists, and `refs/salvage/*` in a tree several
+sessions share is a trap for the next reader.
+
+### The one thing that is not in git, and is not mine to put there
+
+`netcfgd-capture.tar.gz`, beside the bundle, holds `doc/capture/xylem/` -- six
+files of real `wpa_supplicant` control-interface output from the corporate
+network: `mib`, `scan-results`, `status`, `version`, `events`,
+`list-networks`. **It is in no branch, no history and no `.gitignore`.**
+
+It is genuinely valuable: this tree holds that captured output is the standard
+a fake must be built to -- `fake_supplicant.py` and the mbim fake both exist
+because guessing a format from the documentation is guessing -- and this is the
+only capture taken from the network the wifi work was reported from. It is also
+SSIDs, BSSIDs and internal PKI material, which is why whoever made the archive
+put it in a separate file so that sending it would be a separate decision.
+
+**So it cannot be recovered into the repository and the archive cannot be
+deleted without deciding what happens to it.** That is the copyright holder's
+call and is recorded here rather than acted on. The absence of a `.gitignore`
+entry for `doc/capture/` is worth knowing in the same breath: a copy dropped
+into the tree would be committed by the next `git add` that names it.
+
 ## 10.161 `dhcp.sh` was right, and 0178 had been demanding the wrong hook
 
 The fifth of 10.160's list, and the first that was not the test's fault.
