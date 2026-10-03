@@ -462,12 +462,24 @@ seed_run_state deny
 warm_fake || true
 write_config '	access_control { deny = ["00:11:22:33:44:55"] }'
 warm_fake || true
+# **`wpa_key_mgmt` belongs here, and its absence masked the two sections
+# below.** The observation reads the running access point's generation out of
+# this file, and an access point that writes no key management at all is an
+# *open* one -- the same statement the document makes, so the two compare with
+# no special case. The document asks for `proto = "wpa2"`, which renders as
+# `WPA-PSK`, so a fixture without the line represented an AP started open and
+# every comparison after it reported the generation as the difference. The
+# passphrase section then read back `access_point.wifi.proto: WPA-PSK (was
+# open)` where it asserts `access_point.wifi.psk`, and the idempotence sections
+# planned a restart for a document nobody had changed. This section passed
+# throughout, because an ssid that differs is still the ssid.
 cat > "$work/run/hostapd/ap0.conf" <<'STARTED'
 # hostapd configuration for the `guest` access point.
 interface=ap0
 ssid2=6f6c64
 hw_mode=g
 channel=11
+wpa_key_mgmt=WPA-PSK
 STARTED
 
 "$ncfg" plan > "$work/identity.txt" 2>&1 || true

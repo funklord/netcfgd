@@ -9499,6 +9499,71 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.167 `acl.sh`: one missing line in a fixture, read as three faults
+
+Three failures, one cause.
+
+    FAIL an edited passphrase restarts the access point            3 / 0
+    FAIL an access point already running what the document says
+         is left alone                                             0 / 2
+    FAIL an access point whose process is there is not started
+         again                                                     0 / 1
+
+The first says netcfgd ignored an edited passphrase; the next two say it acted
+on an access point nobody had changed. Opposite complaints, so one of them was
+lying about the cause -- and the plan says which:
+
+    0  backend.stop ap0   access_point.wifi.proto: WPA-PSK (was open)
+    1  backend.start ap0  access_point.wifi.proto: WPA-PSK (was open)
+
+**The restart was planned all along, for a reason the check did not ask about.**
+The observation reads a running access point's generation out of the
+configuration hostapd was started with, and an access point that writes no key
+management at all *is* an open one -- the same statement the document makes, so
+the two compare with no special case. The fixture standing in for "what a
+previous apply left behind" had `interface`, `ssid2`, `hw_mode` and `channel`
+and no `wpa_key_mgmt`, while the document asks `proto = "wpa2"`. So every
+comparison after it reported the generation as the difference.
+
+The passphrase section was therefore asserting `access_point.wifi.psk` against a
+plan that said `access_point.wifi.proto`, and the idempotence sections were
+planning a restart for a document nobody had touched -- correctly, since what
+was running really did differ from what was asked for. One line,
+`wpa_key_mgmt=WPA-PSK`, and all three pass.
+
+**The section above them passed throughout, which is why this lasted.** It
+asserts an edited *ssid* restarts the access point, and an ssid that differs is
+still the ssid whatever else differs beside it. A fixture wrong in one field
+produced one honest pass and three failures that each named something other
+than the fault.
+
+### The suite on this machine
+
+**68 of the 69 scripts `make live` names now pass.** The run reports no `FAIL`
+line and no failing summary anywhere. The one that does not pass is
+`sandbox_writes.sh`, which drives the unit's real sandbox through `systemd-run`
+and refuses rather than skipping under `NCFG_LIVE` -- `ml350g6-01` has no
+systemd at all, pid 1 is `init`, so `make live` exits non-zero here however much
+is fixed. That is the file's own bargain and not a defect.
+
+Counting them needed care twice. `grep -c 'all checks passed'` answers 60 for
+46 scripts, because several print the line more than once -- the same count-over-
+lines trap 10.164 records one page up, in the arithmetic used to describe it.
+And two scripts report under other names: `control_helper.sh` prints `ok`, and
+`gui_wifi.sh` reports as the probes it runs. Taking the difference between the
+target's own list and what reported is what settled it.
+
+### What the eight scripts cost, and what they were
+
+Two were the daemon -- 0178's refusal demanded before netcfgd knew which client
+it would use, and a watcher resting on inode uniqueness -- and **both were found
+only because the tests were right**. Six were tests holding a premise the
+product had changed underneath: 0197's wait for a join, 0205's move of the SAE
+credential to its own field, the empty-resolver refusal, a reaper rule from
+0224, a fake that answered half of `ADD_NETWORK`, and a fixture missing one
+line. Not one was sloppiness, and every one was invisible for as long as the
+suite stopped before reaching it.
+
 ## 10.166 `wifi.sh`: a setup step that became an assertion, and a field that moved
 
 Two faults, and neither was the daemon's.
@@ -10315,12 +10380,30 @@ status actually said. **That is not a fix and is not offered as one**; it is the
 instrument the next occurrence needs, put in place while the failure is known
 to be possible rather than after somebody has lost an afternoon to it.
 
-The remaining untested suspicion, written down so it is not re-derived: writing
-a script and exec'ing it from a multi-threaded process can fail with `ETXTBSY`
-where another thread forks while the file is still open for writing, which
-parallel tests do by construction. That would arrive as a `spawn` error, which
-is what the new message will print. It is a suspicion and nothing here supports
-it yet.
+**Confirmed on 2026-10-03, by the message that assertion was given.** A second
+test in the same module failed in a `make check` run -- `require_lease_false_
+runs_the_probe_with_no_lease_at_all`, which already printed `detail_of` -- and
+it said:
+
+    the probe left no marker: verdict None, started-failures 1,
+    detail Some("cannot run /tmp/ncfg-probe-lease-6108-4/probe.sh:
+    Text file busy (os error 26)")
+
+`ETXTBSY`, which was this entry's untested suspicion: writing a script and
+exec'ing it from a process whose other threads fork is a race parallel tests run
+by construction, and the exec loses. Two tests, the same cause, and neither
+reproduces alone -- six and eight clean rounds respectively.
+
+**Fixed by not writing a program.** The four fixtures that wanted a marker
+touched now name `/bin/touch` with the marker as an argument, which
+`dhcp_document` passes through as `args`. The race is gone by construction
+rather than by retry: nothing writes the file that gets exec'd.
+
+`flapping` keeps a written script and says so in its own doc comment. It has to
+alternate its exit status across runs, which no installed binary does, so the
+script is the behaviour rather than a convenience -- and it remains narrowly
+exposed. It has not been observed failing; the shape that would fix it without
+a file is `/bin/sh` with the body as an argument.
 
 ### And the fifth, which was real: a reopen that asked for the wrong socket
 

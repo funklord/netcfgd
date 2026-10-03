@@ -382,6 +382,15 @@ mod tests {
 	/// changes its mind would let a broken implementation pass. This is the
 	/// flapping link the hold-down exists for, at the fastest period it can
 	/// have.
+	/// **This one keeps a written program, and knows what that costs.** The
+	/// probe has to alternate its exit status across runs, which no installed
+	/// binary does, so the script is the behaviour rather than a convenience --
+	/// unlike the four markers above, which `dhcp_document` now names with
+	/// `/bin/touch`. It is therefore still exposed to the `ETXTBSY` race in
+	/// 10.157, narrowly: write and exec in a process whose other threads fork.
+	/// It has not been observed failing. If it ever does, the shape that fixes
+	/// it without a file is `/bin/sh` with the body as an argument, where the
+	/// program exec'd is one nobody wrote.
 	fn flapping(dir: &TestDir) -> String {
 		let script = dir.join("flap.sh");
 		std::fs::write(
@@ -428,19 +437,35 @@ mod tests {
 	/// alternates on every single run.
 	///
 	/// A document with a DHCP interface and a probe, for the precondition.
-	fn dhcp_document(command: &str, require_lease: bool) -> Document {
+	/// `args` is how these tests name a marker file without writing a program.
+	///
+	/// **They used to write one, and it cost an intermittent nobody could
+	/// place.** A `#!/bin/sh` script written into the test's directory and
+	/// exec'd a moment later fails with `ETXTBSY` when another thread forks
+	/// while the file is still open for writing -- which a parallel test
+	/// harness does by construction, so two tests in this module failed
+	/// occasionally with `cannot run .../probe.sh: Text file busy (os error
+	/// 26)`. Naming a program that already exists removes the write, and with
+	/// it the race. 10.157.
+	fn dhcp_document(command: &str, args: &[&str], require_lease: bool) -> Document {
 		let mut sources = netcfgd_compile::SourceMap::new();
 		let line = if require_lease {
 			String::new()
 		} else {
 			"\t\trequire_lease = false\n".to_owned()
 		};
+		let args_line = if args.is_empty() {
+			String::new()
+		} else {
+			let quoted: Vec<String> = args.iter().map(|arg| format!("\"{arg}\"")).collect();
+			format!("\t\targs = [{}]\n", quoted.join(", "))
+		};
 		sources.add(
 			"netcfgd.conf",
 			format!(
 				"interface eth0 {{\n\tconfig = \"dhcp\"\n\tprobe {{\n\
 				 \t\tcommand = \"{command}\"\n\t\tinterval = 1\n\
-				 \t\ttimeout = 5\n\t\tdown_after = 1\n\t\tup_after = 1\n{line}\t}}\n}}\n"
+				 \t\ttimeout = 5\n\t\tdown_after = 1\n\t\tup_after = 1\n{args_line}{line}\t}}\n}}\n"
 			),
 		);
 		netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks)
@@ -476,15 +501,7 @@ mod tests {
 	fn an_interface_with_no_lease_is_down_without_running_the_probe() {
 		let dir = TestDir::new("probe-lease");
 		let marker = dir.join("ran");
-		let command = dir.join("probe.sh");
-		std::fs::write(
-			&command,
-			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
-		)
-		.expect("written");
-		make_executable(&command);
-
-		let document = dhcp_document(&command.display().to_string(), true);
+		let document = dhcp_document("/bin/touch", &[&marker.display().to_string()], true);
 		let mut probes = Probes::default();
 		probes.run_due(Some(&document), &Observed::default());
 
@@ -505,15 +522,7 @@ mod tests {
 	fn an_interface_with_a_lease_runs_the_probe() {
 		let dir = TestDir::new("probe-lease");
 		let marker = dir.join("ran");
-		let command = dir.join("probe.sh");
-		std::fs::write(
-			&command,
-			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
-		)
-		.expect("written");
-		make_executable(&command);
-
-		let document = dhcp_document(&command.display().to_string(), true);
+		let document = dhcp_document("/bin/touch", &[&marker.display().to_string()], true);
 		let mut probes = Probes::default();
 		probes.run_due(Some(&document), &leased("eth0", Some(16)));
 
@@ -538,15 +547,7 @@ mod tests {
 	fn a_route_from_another_source_is_not_a_lease() {
 		let dir = TestDir::new("probe-lease");
 		let marker = dir.join("ran");
-		let command = dir.join("probe.sh");
-		std::fs::write(
-			&command,
-			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
-		)
-		.expect("written");
-		make_executable(&command);
-
-		let document = dhcp_document(&command.display().to_string(), true);
+		let document = dhcp_document("/bin/touch", &[&marker.display().to_string()], true);
 		let mut probes = Probes::default();
 		// `proto 3` is boot/static, which is what netcfgd's own routes carry.
 		probes.run_due(Some(&document), &leased("eth0", Some(3)));
@@ -560,15 +561,7 @@ mod tests {
 	fn require_lease_false_runs_the_probe_with_no_lease_at_all() {
 		let dir = TestDir::new("probe-lease");
 		let marker = dir.join("ran");
-		let command = dir.join("probe.sh");
-		std::fs::write(
-			&command,
-			format!("#!/bin/sh\ntouch {}\nexit 0\n", marker.display()),
-		)
-		.expect("written");
-		make_executable(&command);
-
-		let document = dhcp_document(&command.display().to_string(), false);
+		let document = dhcp_document("/bin/touch", &[&marker.display().to_string()], false);
 		assert!(
 			!document.interfaces[0]
 				.probe
@@ -621,11 +614,6 @@ mod tests {
 				)
 			},
 		)
-	}
-
-	fn make_executable(path: &std::path::Path) {
-		use std::os::unix::fs::PermissionsExt as _;
-		std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).expect("chmod");
 	}
 
 	/// Paced at the real interval rather than driven synthetically, because the
