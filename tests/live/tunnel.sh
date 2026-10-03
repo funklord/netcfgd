@@ -300,10 +300,27 @@ check "and what netcfgd declines outright is still visible in the file" \
 # This is the failure decision 0007 opens on -- bring up a VPN and every query
 # on the machine silently goes to the corporate resolver. The host *is*
 # managing its resolver here, so this is a refusal rather than an absence.
-check "the host's resolver was written, so this is not a vacuous check" \
-	"$([ -f "$work/resolv.conf" ] && echo yes || echo no)" "yes"
+# **The control, and it had to move when the product did.** It used to be "the
+# file exists", on the assumption that a host managing its resolver always has
+# one written. netcfgd does not write a delivery with no servers in it any more
+# -- it leaves what is on disk alone, which is the fix for the machine that
+# "keeps rewriting an empty resolv.conf making it impossible to fix" -- so with
+# nothing delivered there was no file at all, and the control failed against a
+# daemon doing exactly the right thing.
+#
+# What replaces it is netcfgd's own account of the refusal, and it is a stronger
+# control than a file: it says the mode is in force, that the delivery was
+# computed, and that it came out empty. A host managing no resolver produces no
+# such sentence, which is the way the check below could have passed for the
+# wrong reason.
+check "netcfgd says it is leaving the resolver alone, so this is a refusal" \
+	"$("$ncfg" plan 2>&1 | grep -c 'leaving the existing file alone' || true)" "1"
+# Zero rather than empty when there is no file: `grep -c` on one that is not
+# there prints nothing and exits 2, and `|| true` would make that an empty
+# string compared against "0" -- which is how this check reported a blank
+# actual beside the control's failure rather than a number.
 check "and nothing was delivered, because the document did not ask" \
-	"$(grep -c '10.0.0.53' "$work/resolv.conf" 2>/dev/null || true)" "0"
+	"$(grep -c '10.0.0.53' "$work/resolv.conf" 2>/dev/null || echo 0)" "0"
 
 # It arrives the moment the document does ask. A `dns` block on the tunnel is
 # the operator saying this link answers for something; the server that answers

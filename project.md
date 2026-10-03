@@ -9499,6 +9499,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.165 A control that was right, and had outlived what it controlled for
+
+`tunnel.sh`, two checks:
+
+    FAIL the host's resolver was written, so this is not a vacuous check
+    FAIL and nothing was delivered, because the document did not ask
+
+The first is the test's **own positive control**, and it was doing its job:
+refusing to let the check below report a pass it had not earned. The scenario is
+0007's opening failure -- bring up a VPN and every query on the machine silently
+goes to the corporate resolver -- so "the tunnel's server was not delivered"
+means nothing unless the host's resolver is netcfgd's to write. The file's
+comment says exactly that.
+
+**What it asserted was that the file exists, and netcfgd stopped writing it.**
+A delivery with no servers used to be written anyway: `resolv.conf` truncated to
+a header, every tick, with `resolv_guard` defending the emptiness -- the machine
+that *"keeps rewriting an empty resolv.conf making it impossible to fix"*. The
+fix leaves what is on disk alone and warns instead. So with nothing delivered
+there was no file at all, and the control failed against a daemon doing the
+right thing.
+
+**The replacement is netcfgd's own account of the refusal**, which is a stronger
+control than a file: the warning says the mode is in force, that the delivery
+was computed, and that it came out empty. A host managing no resolver produces
+no such sentence.
+
+**Proven by the sabotage the control exists for.** Removing the global `dns`
+block from that scenario -- a host managing no resolver, which is the wrong
+reason the check could pass for -- turns the control red and leaves "and nothing
+was delivered" green. That is the vacuous pass, caught, and it is what says the
+new control discriminates rather than merely passing.
+
+The second failure was the same `grep -c` trap this suite keeps meeting: on a
+file that is not there it prints nothing and exits 2, so `|| true` yields an
+empty string where the check expects `0`. That is why its actual was blank
+rather than a number, and `|| echo 0` is the form that answers.
+
+### Where the suite stands on this machine
+
+77 scripts pass. `sandbox_writes.sh` refuses because it needs systemd and this
+machine has none, which halts `make live` before the tail; of the 19 after that
+halt, 18 pass and `wifi.sh` and `acl.sh` remain.
+
+**Four of the six failures triaged since 10.160 were the tests and two were the
+daemon**, and the two were found only because the tests were right: `dhcp.sh`
+hiding 0178's misplaced refusal, and `roam.sh` hiding a detector resting on
+inode uniqueness. The ones that were the tests were not sloppiness either --
+each was a premise the product had changed underneath, which is what a suite
+that halts on its first failure will keep for as long as nobody runs it to the
+end.
+
 ## 10.164 A fake that answered half of `ADD_NETWORK`, and the 38 scripts behind it
 
 `wifi_journey.sh`'s convergence check: rotate a passphrase, apply, and the next
