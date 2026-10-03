@@ -9499,6 +9499,49 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.161 `dhcp.sh` was right, and 0178 had been demanding the wrong hook
+
+The fifth of 10.160's list, and the first that was not the test's fault.
+
+    dhcp.sh: no udhcpc in PATH, so the busybox applet is what gets used
+    FAIL backend.start cli  addressing[0]: Dhcp4
+         the dhcpcd hook is not installed at /usr/libexec/netcfgd/dhcpcd-hook
+
+**The test hides dhcpcd on purpose** -- it builds a PATH with every directory
+holding one removed and symlinks the other tools back, so it drives the client
+it is written for. netcfgd demanded dhcpcd's hook anyway, because 0178 put that
+check above the code that chooses between `dhcpcd`, `udhcpc` and
+`busybox udhcpc`. So **a machine with busybox and no dhcpcd could start no v4
+client at all**, failing by name on a file it would never have used -- and that
+is exactly the population 0065's fallback exists for.
+
+dhcpcd is a candidate only where its hook is found now, the skip is logged at
+warning rather than done quietly, and the refusal still arrives when nothing
+else could be used -- with both halves in one sentence, because a dhcpcd-only
+machine would otherwise be told to install a client it already has. The `Dhcp6`
+arm keeps its unconditional demand, where dhcpcd is the only client there is.
+Decision 0264.
+
+### What the suite's shape cost here
+
+**The test had been failing since 0178 landed and nothing noticed**, because
+`make live` halts at its first failure and the four scripts ahead of it were
+failing for their own reasons. A suite that stops hides everything behind the
+stop, and the four fixes in 10.160 were the price of reaching this one.
+
+**The uniqueness guard earned its keep on the way in.** The first edit was
+anchored on `let hook = dhcpcd_hook_path()?;` and refused: the string appears
+twice, and the second is the `Dhcp6` arm where it is correct. Without the count
+assertion that edit would have gone into both sites, and the v6 change would
+have been wrong in a way nothing here tests.
+
+**And the product fix is proven by its own sabotage rather than by the green
+run.** Restoring the unconditional demand turns `dhcp.sh` red again and takes
+exactly one of `exec_refused.sh`'s two new checks with it -- the one asserting
+the *combined* message, since the old message named the hook too. `dhcpcd.sh`,
+which drives dhcpcd itself, passes unchanged either way, which is what says the
+fix did not buy this at dhcpcd's expense.
+
 ## 10.160 `make live` walked four scripts deep, and what the rest of it says
 
 Asked to run it. It stopped at the seventh script, and each fix uncovered the
@@ -17936,3 +17979,38 @@ model has no row for.
 `Build-Depends` came out as `qt6-base-dev, qt6-base-dev-tools` -- the
 second derived from the moc the build ran, which the first attempt
 lacked and a clean chroot would have missed. Nothing here was changed.
+
+## From fuzznet: the scope vocabulary, and logging to adopt, 2026-10-03
+
+Written from fuzznet's tree on 2026-10-03, at fuzznet `96fa137`. Nothing
+in this tree was changed; this tree builds nothing against fuzznet today,
+so none of it breaks anything here. It is what exists for when it does.
+
+- **The scope vocabulary this tree asked for (its sec 402) is built**:
+  fuzznet sec 420, `d2f5de3`, `state/scope.h` -- host-private at zero, so
+  an unknown byte reads as the narrowest, then host, group, estate;
+  widening by reach; `fzn_scope_subject` deriving a `state/` subject per
+  scope and id. Nobody told this tree when it landed. The placeholder enum
+  this tree keeps can go when it takes the type. Carriage does not yet
+  filter by reach.
+- **Estate logging, decided by the holder and built** (fuzznet secs 428
+  and 456 to 468). This tree is named there, with raidcfgd, as a natural
+  first adopter: a root daemon running external tools. What exists:
+  - `log/capture` and `log/capture_run` (sec 441, `524db86`): a tool's
+    output -- `ip`, `nft` -- made into entries, one line one entry, escaped
+    so a tool cannot forge a line, stdout and stderr at levels the caller
+    chooses, the closing entry with the exit status, secret arguments
+    written `***`.
+  - `log/entry`: every entry named `MACHINE/USER/PROGRAM/PID@STARTMS#POS`,
+    the classic positional line, no JSON (the holder's rule).
+  - `log/logger` (`FZN_LOG_FILE`): per-user files -- `/var/log/fuzznet`
+    for root -- rotation, a 256 KiB flight recorder dumped on a crash;
+    `log/pack` (`FZN_LOG_PACK`, links libzstd) with a hash-chain trailer;
+    `log/retain` prune and keep rules; `log/gather` for reading another
+    host's log, host-private unless that host says `--log-scope=estate`.
+  - Causes on the wire (sec 462): a request may carry the names of the
+    entries it was made for, so one grep follows work across hosts. **A
+    wire break** for anything speaking fuzznet's remote hop: a node built
+    before `ab316d8` answers such a request as an unknown one.
+- Adoption is a cross-project pass, per the guidelines; this is the signal
+  that it can start, not a request to start it.
