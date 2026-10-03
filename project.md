@@ -9499,6 +9499,99 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.163 An inode number is a name that gets reused, and 0240 rests on one
+
+10.160 left `roam.sh`'s last two checks open and said the next thing to look at
+was the fixed `sleep 3` after the event burst. It was not that. The cause is in
+the daemon and the test was right, which makes it the second of that list to end
+this way.
+
+**The watcher decides whether its connection is still good by comparing
+`(dev, ino)` of the control socket**, recorded at attach time against a `stat`
+each pass -- `socket_identity`, and `still_the_same_socket` whose own docstring
+says *"a different pair is one that went and returned, which is the case that
+used to be missed because the path looks identical either way"* (0240).
+
+**Measured on this machine: 200 bind/unlink cycles of one path produced one
+distinct inode, the same number 199 times in a row.** So the pair is not
+different, the premise is false, and the check reports "still the same
+supplicant" about a socket a different process now holds.
+
+### Why it passes alone and fails in the suite
+
+The check has one way to be right: `socket_identity` returns `None` while no
+file exists at the path, and `None` is not the recorded pair, so a pass landing
+in the gap between the old socket going and the new one arriving does drop the
+connection and re-attach. Run on its own, the watcher's quarter-second passes
+land in that gap. Inside `make live` the daemon is draining the event burst the
+previous check sends, no pass falls in the gap, and afterwards the inode matches
+for ever.
+
+So the green run was the accident and the red one is the behaviour. The daemon's
+own log says so by omission: in four reproductions it never once printed *"the
+control socket was replaced, so this radio's events were going nowhere"*.
+
+### What it means away from the test
+
+`systemctl restart wpa_supplicant` is this, and so is a supplicant that crashes
+and is restarted by anything. Where no watcher pass falls in the gap, **netcfgd
+keeps a connection to a socket nobody holds and hears nothing again** -- no
+roams, no `SSID-TEMP-DISABLED`, none of the authentication failures 10.85 exists
+to surface, and no message anywhere, because a dead connection reads exactly
+like a quiet radio. That is 10.85's subject reached by a different route and
+0240's fix defeated by the thing it was built on.
+
+**The same lesson is already in this tree, one function over.** 0224 took the
+reaper off `/proc/<pid>` for precisely this reason -- *"a pid is a name that
+gets reused"* -- and replaced it with a question to the kernel about the
+address. An inode number is the same kind of name, and the watcher is still
+asking one.
+
+### Fixed: ask the connection, which is what 0224 did one function over
+
+A connected unix datagram socket resolves to the socket at connect time, so once
+that peer is gone a send fails with `ECONNREFUSED` whatever now sits at the path
+-- the one observation that separates "replaced" from "unchanged" when the inode
+cannot. The watcher already holds a client and the supplicant answers `PING`, and
+`request` sends before it waits, so a dead peer costs no wait at all.
+
+Both costs were respected rather than discovered. The probe runs only on a pass
+that drained nothing, because 0240 cut this loop's chatter on purpose; and the
+watcher's client is already built with `IMPATIENT` for the reason 0111 records,
+so a supplicant that is bound and silent costs one second rather than ten.
+`connection_is_dead` is deliberately narrower than `supplicant_is_gone`: only
+`ECONNREFUSED` and `NotConnected` drop a connection here, because a reply that
+never arrives is 0141's wedged backend and re-attaching to it several times a
+second would be churn rather than recovery.
+
+**Proven, and the proof needed two instruments fixed first.**
+
+- Before: four full-suite runs, four failures, and no re-attach message in any
+  of them. After: the suite passes it.
+- **The first reading of that pass was worthless.** Grepping the suite log for
+  the re-attach messages returned zero, because the daemon writes to the test's
+  own `daemon.log` and the suite only sees it when the failure dump fires --
+  which a passing run does not. The artifact was never in the log being
+  searched.
+- **And one of the three paths said nothing at all.** The read-error branch
+  dropped the connection and logged nothing, so the recovery was working and
+  unattributable. It speaks now, which is how the mechanism became legible:
+  `roam.sh` prints which of the three fired, and it is
+  `note re-attached via: attached connection is dead` -- the probe, not the
+  inode check and not the gap.
+
+That last line is also what says the inode path is inert rather than merely
+unlucky: on the standalone run, which used to pass, the probe is what fires now
+too.
+
+**The existing unit test keeps its fixture and gains a caveat.**
+`a_replaced_control_socket_is_not_the_one_we_attached_to` asserts that `(66,
+9999)` is not `(66, 1234)`, which is true of the function and false of a real
+restart -- the fixture supplies a new inode where the filesystem supplies the
+old one. Kept, because a long enough gap can hand out a different number, and
+annotated, because a test whose fixture cannot occur is worth saying so in
+rather than deleting.
+
 ## 10.162 The salvage bundle holds nothing this tree has lost
 
 `~/mnt/dl180g6-03/src/netcfgd-salvage.tar.gz`, made on 2026-10-02 from

@@ -375,6 +375,17 @@ while ! grep -q '^ATTACH' "$work/fake2.log" 2>/dev/null; do
 done
 check "a restarted supplicant is attached to again" \
 	"$(grep -c '^ATTACH' "$work/fake2.log" || true)" 1
+# **And say which of the three ways it re-attached**, because a pass was
+# unattributable: the daemon's messages go to its own log, the suite only sees
+# them when the dump below fires on a failure, and the three paths mean
+# different things -- the socket's identity changed, the connection refused a
+# send, or a read reported the peer gone. A green check with no idea which one
+# fired is a coincidence until it is named.
+sed -n 's/.*\(control socket was replaced\).*/note re-attached via: \1/p;
+        s/.*\(attached connection is dead\).*/note re-attached via: \1/p;
+        s/.*\(event socket reported\).*/note re-attached via: \1/p' \
+	"$work/daemon.log" | sort -u
+
 # **When that fails there is nothing to go on**, and it has failed: inside a
 # full `make live` it reports zero attaches in thirty seconds, while passing
 # three times out of three on its own and again when run straight after

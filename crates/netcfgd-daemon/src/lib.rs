@@ -2785,9 +2785,60 @@ fn spawn_roam_watcher(commands: &Sender<Command>, ctrl_dir: PathBuf) {
 							// again on a later pass if it comes back, which is
 							// what an `ncfg apply` restarting one looks like
 							// from here.
-							Err(_) => {
+							//
+							// **Said rather than done silently.** This branch
+							// logged nothing, so a connection dropped and
+							// remade here left no trace at all -- and when the
+							// idle-pass probe below was added, the suite went
+							// green while both re-attach messages stayed
+							// absent, because a send error on a connected
+							// datagram socket is reported to the next
+							// operation and that is this read. The recovery
+							// was working and unattributable, which is one
+							// step from the silence 0240 and 10.85 are both
+							// about.
+							Err(error) => {
+								netcfgd_sys::log_note!(
+									"supplicant",
+									"{interface}: the event socket reported \
+									 {error}, so the supplicant it was attached \
+									 to has gone; re-attaching"
+								);
 								lost.push(interface.clone());
 								break;
+							}
+						}
+					}
+
+					// **A pass that drained nothing has not established that
+					// the radio is quiet.** `next_event` only receives, so a
+					// peer that has gone reports by timing out exactly as a
+					// quiet radio does -- and the inode comparison above
+					// cannot separate them either, because a rebound path
+					// keeps its inode number: 200 bind/unlink cycles of one
+					// path produced one inode, the same number 199 times
+					// (10.163). So the pair `still_the_same_socket` compares
+					// is equal across a restart, and 0240's detector reports
+					// "unchanged" about a socket a different process holds.
+					//
+					// Ask the connection instead, which is 0224's answer to
+					// the same shape one function over: `request` sends before
+					// it waits, and a send to a socket nobody holds fails at
+					// once with `ECONNREFUSED` whatever now sits at the path.
+					// Only on an idle pass, because 0240 cut this loop's
+					// chatter deliberately, and the reply wait is `IMPATIENT`
+					// by this client's own construction, which is the ten
+					// seconds 0111 is about.
+					if drained == 0 {
+						if let Err(error) = client.ping() {
+							if connection_is_dead(&error) {
+								netcfgd_sys::log_note!(
+									"supplicant",
+									"{interface}: the attached connection is dead \
+									 ({error}), so this radio's events were going \
+									 nowhere; re-attaching"
+								);
+								lost.push(interface.clone());
 							}
 						}
 					}
@@ -2851,6 +2902,22 @@ fn report_supplicant_event(interface: &str, event: &netcfgd_supplicant::protocol
 /// absence, because the safe direction here is the opposite of
 /// `nothing_is_listening`'s: an unrecognised failure should cost a reconnect,
 /// not a connection held open to a process that is not there.
+/// Whether an error says the socket this connection was made to is gone.
+///
+/// Narrower than [`supplicant_is_gone`] on purpose, because it decides whether
+/// to drop a connection on an *idle* pass rather than on a failed read. A
+/// reply that never arrives is a supplicant that has bound its socket and
+/// stopped answering -- 0141's wedged backend, which has its own handling and
+/// must not be re-attached several times a second -- while `ECONNREFUSED` is
+/// the kernel saying nobody holds the socket at all. Only the second is this
+/// function's business.
+fn connection_is_dead(error: &std::io::Error) -> bool {
+	matches!(
+		error.kind(),
+		std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotConnected
+	)
+}
+
 fn supplicant_is_gone(error: &std::io::Error) -> bool {
 	error.kind() != std::io::ErrorKind::InvalidData
 }
@@ -3623,6 +3690,18 @@ mod tests {
 		// The supplicant restarted. Same path, new socket, and this is the
 		// case that used to be missed -- everything observable about the path
 		// is unchanged.
+		//
+		// **This fixture's premise does not hold on a real filesystem, and the
+		// function is still right.** A restart reuses the inode number: 200
+		// bind/unlink cycles of one path produced one inode, the same number
+		// 199 times (10.163). So the real pair is `(66, 1234)` again, the
+		// assertion above it is what fires, and this detector reports
+		// "unchanged" about a socket a different process holds. That is why
+		// the watcher also asks the connection on an idle pass; see
+		// `connection_is_dead`. Kept because a `9999` can happen -- a long gap
+		// lets the filesystem hand out a different number -- and because a
+		// test whose fixture cannot occur is worth saying so in rather than
+		// deleting.
 		assert!(!still_the_same_socket(attached, Some((66, 9999))));
 
 		// Gone and not come back.
@@ -3631,5 +3710,29 @@ mod tests {
 		// A different filesystem with a colliding inode number is a different
 		// socket. Comparing inodes alone would call this the same one.
 		assert!(!still_the_same_socket(attached, Some((67, 1234))));
+	}
+
+	/// Only "nobody holds that socket" drops a connection on an idle pass.
+	///
+	/// The discriminating case is the timeout: a supplicant that has bound its
+	/// socket and stopped answering is 0141's wedged backend, which has its own
+	/// handling, and re-attaching to it several times a second would be churn
+	/// rather than recovery. `ECONNREFUSED` is the kernel saying the socket is
+	/// not there, which is the only thing this is allowed to act on.
+	#[test]
+	fn only_a_refused_connection_counts_as_a_dead_one() {
+		use std::io::{Error, ErrorKind};
+
+		assert!(connection_is_dead(&Error::from(
+			ErrorKind::ConnectionRefused
+		)));
+		assert!(connection_is_dead(&Error::from(ErrorKind::NotConnected)));
+
+		// A reply that did not arrive. Wedged, not gone.
+		assert!(!connection_is_dead(&Error::from(ErrorKind::WouldBlock)));
+		assert!(!connection_is_dead(&Error::from(ErrorKind::TimedOut)));
+
+		// A reply too large for the buffer says nothing about the peer (0224).
+		assert!(!connection_is_dead(&Error::from(ErrorKind::InvalidData)));
 	}
 }
