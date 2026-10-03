@@ -171,10 +171,44 @@ def answer(command):
 	# what lets a test assert that a D-Bus `ActivateConnection` became a
 	# `SELECT_NETWORK` on a control socket, rather than only that it returned
 	# without an error.
+	# **`ADD_NETWORK` is remembered, because a real one is.** It used to
+	# return an id and append nothing, so `LIST_NETWORKS` reported zero
+	# however many networks had been handed over -- and netcfgd reads zero
+	# listed against a document that wants some as "this supplicant was
+	# emptied", which short-circuits the digest comparison and plans
+	# `wifi.set_profiles` again. So the machine could never converge in this
+	# fixture: `wifi_journey.sh`'s convergence check failed on a daemon that
+	# was behaving correctly, and its "a rotated passphrase is planned" check
+	# above it passed for the wrong reason, since the plan was there either
+	# way. A fake that answers half of `ADD_NETWORK` is this suite's own
+	# version of the trap it keeps recording about stand-ins.
 	if command == "ADD_NETWORK":
-		return "0\n"
-	if command.startswith(("SET_NETWORK ", "ENABLE_NETWORK ", "SELECT_NETWORK ",
-	                       "DISABLE_NETWORK ", "REMOVE_NETWORK ", "SET ")):
+		KNOWN.append((len(KNOWN), "", ""))
+		return f"{len(KNOWN) - 1}\n"
+	# The ssid arrives separately, and `LIST_NETWORKS` reports it, so the
+	# entry has to learn it. Only `ssid` is tracked: it is the one field that
+	# comes back out, and a fake that stored the rest would be storing it for
+	# nobody.
+	if command.startswith("SET_NETWORK "):
+		parts = command.split(" ", 3)
+		if len(parts) == 4 and parts[2] == "ssid":
+			id = int(parts[1]) if parts[1].isdigit() else -1
+			if 0 <= id < len(KNOWN):
+				KNOWN[id] = (id, parts[3].strip().strip('"'), KNOWN[id][2])
+		return "OK\n"
+	# `REMOVE_NETWORK all` is what netcfgd sends before repopulating, and
+	# leaving the entries behind would make the next `LIST_NETWORKS` report
+	# the old set as well as the new one.
+	if command == "REMOVE_NETWORK all":
+		KNOWN.clear()
+		return "OK\n"
+	if command.startswith("REMOVE_NETWORK "):
+		id = command.split(" ", 1)[1].strip()
+		if id.isdigit():
+			KNOWN[:] = [(n, ssid, flags) for n, ssid, flags in KNOWN if n != int(id)]
+		return "OK\n"
+	if command.startswith(("ENABLE_NETWORK ", "SELECT_NETWORK ",
+	                       "DISABLE_NETWORK ", "SET ")):
 		return "OK\n"
 	if command == "DISCONNECT":
 		return "OK\n"

@@ -9499,6 +9499,63 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.164 A fake that answered half of `ADD_NETWORK`, and the 38 scripts behind it
+
+`wifi_journey.sh`'s convergence check: rotate a passphrase, apply, and the next
+plan should want nothing. It wanted `wifi.set_profiles` again, for ever.
+
+**The cause is the fake supplicant.** `ADD_NETWORK` returned an id and appended
+nothing, so `LIST_NETWORKS` reported zero networks however many had been handed
+over. netcfgd reads zero listed against a document that wants some as *this
+supplicant was emptied* -- `supplicant_was_emptied(listed, wanted)` is
+`listed == 0 && wanted > 0` -- and that **short-circuits the digest comparison
+entirely**, returning "does not match" without consulting the record. So the
+machine could not converge in this fixture whatever the daemon did.
+
+### Three prints that printed nothing, which is what found it
+
+The digest was the obvious suspect and the hypothesis was that the two sides
+disagreed. Printing the reader's digest beside the recorded one produced **no
+output at all**; so did printing the record path on the unreadable-record
+branch; so did printing the secrets directory above the `fingerprint` call. The
+function has no early return before any of them -- which left only that it is
+never called, and the call site is the `if` above with the emptied test in it.
+
+**An absence of output located this faster than any of the values would have**,
+and the three probes were each aimed at a mechanism that was not running.
+
+### The check above it was passing for the wrong reason
+
+*"a rotated passphrase is planned rather than ignored"* asserts that the plan
+contains `wifi.set_profiles` after a secret changes. With the fake always
+looking empty, the plan contained it whatever the secret said -- so the check
+could not have failed and proved nothing about rotation. It passes now with the
+digest actually being consulted, which is the first time it has meant what its
+name says.
+
+**And the count beside it is over lines rather than actions.** The plan prints
+the action and then a warning naming it, so `grep -c 'wifi.set_profiles'`
+answers 2 for one action. The failure was real either way, but the number was
+never the number of actions; the test prints the plan now when it is not zero.
+
+### What was behind it
+
+`make live` halts at its first failure, so one line in a shared fixture was
+hiding most of the suite. **Scripts passing went from 22 to 60**, and the halt
+moved to `sandbox_writes.sh`.
+
+Of the 19 scripts after that halt, **17 pass**; `tunnel.sh` (2 checks),
+`wifi.sh` and `acl.sh` remain. So the suite stands at 77 passing, three real
+failures, and one refusal that is not a defect.
+
+**`sandbox_writes.sh` cannot run on this machine and says so rather than
+skipping.** It drives the unit's real sandbox through `systemd-run`, and
+`ml350g6-01` has no systemd at all -- pid 1 is `init`, there is no `systemctl`.
+Under `NCFG_LIVE` it refuses to skip, which is that file's own bargain and the
+reason `make live` cannot be green here. Worth knowing beside 10.163's machine
+note: the two machines these trees are worked from differ in their init as well
+as their `/tmp`.
+
 ## 10.163 An inode number is a name that gets reused, and 0240 rests on one
 
 10.160 left `roam.sh`'s last two checks open and said the next thing to look at

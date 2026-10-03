@@ -268,6 +268,13 @@ check "and the supplicant is given the networks again" \
 	"changed"
 check "and the machine then converges" \
 	"$("$ncfg" plan 2>&1 | grep -c 'wifi.set_profiles' || true)" "0"
+# A count with no plan beside it says a number and not why. This one has been
+# failing with 2, and two is not one action twice -- it is what a count over
+# lines reports when something else in the plan names the action as well.
+if [ "$("$ncfg" plan 2>&1 | grep -c 'wifi.set_profiles' || true)" != "0" ]; then
+	echo "--- the plan that was supposed to be empty ---" >&2
+	"$ncfg" plan >&2 2>&1
+fi
 
 # ---------------------------------------------------------------------------
 # 5. The same journey in one command, from nothing.
