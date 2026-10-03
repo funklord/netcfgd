@@ -9503,6 +9503,16 @@ edited, because the hazard is real and one added line away.
 
 The fifth of 10.160's list, and the first that was not the test's fault.
 
+**This section's own history went the way this document keeps describing.** It
+was written while another session was working in the tree, and that session's
+`08f8cbe` -- a docs commit about fuzznet's signal -- staged `project.md`
+wholesale and took these lines with it, 78 insertions of which some were
+somebody else's. So `git log -S` on this heading finds a commit about something
+else, and the code it describes is in the commit after. It was pushed before
+anybody noticed, so it stands; naming it here is the only repair left, and
+`CLAUDE.md` says why: the index is shared, and the burden falls on whoever
+commits.
+
     dhcp.sh: no udhcpc in PATH, so the busybox applet is what gets used
     FAIL backend.start cli  addressing[0]: Dhcp4
          the dhcpcd hook is not installed at /usr/libexec/netcfgd/dhcpcd-hook

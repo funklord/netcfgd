@@ -2778,7 +2778,16 @@ fn start_backend(
 			// netcfgd had just created, and a shipped one arrives with nothing
 			// around it. The hook creates the leaf itself as well -- belt and
 			// braces, since it runs after a stop may have taken /run/netcfgd.
-			let hook = dhcpcd_hook_path()?;
+			//
+			// **The hook is dhcpcd's requirement and not every client's.** 0178
+			// added this check and put it above the candidate loop, so a machine
+			// with busybox and no dhcpcd could start no v4 client at all and
+			// failed naming a file it would never have used -- which is exactly
+			// the population 0065's fallback exists for. Asked here and acted on
+			// below: without it the other two are offered rather than nothing,
+			// and the skip is said out loud. The `Dhcp6` arm keeps the `?`,
+			// because there dhcpcd is the only client there is.
+			let hook = dhcpcd_hook_path();
 			let reported = report_dir(&run_dir_path());
 			std::fs::create_dir_all(&reported)
 				.map_err(|error| format!("{}: {error}", reported.display()))?;
@@ -2815,13 +2824,6 @@ fn start_backend(
 				Some(_) | None => {}
 			}
 
-			let dhcpcd = dhcpcd_start_args(
-				DHCPCD_V4,
-				iface,
-				metric.as_deref(),
-				&hook.display().to_string(),
-				&config.display().to_string(),
-			);
 			let udhcpc = udhcpc_start_args(iface, &script, &pidfile);
 
 			// Three candidates, not two. Debian packages busybox as one binary with
@@ -2831,7 +2833,34 @@ fn start_backend(
 			let busybox: Vec<String> = std::iter::once("udhcpc".to_owned())
 				.chain(udhcpc.iter().cloned())
 				.collect();
-			for (program, args) in [("dhcpcd", dhcpcd), ("udhcpc", udhcpc), ("busybox", busybox)] {
+			// dhcpcd is offered only where its hook can be found, and skipping
+			// it is said rather than done quietly: 0178's whole cost was that
+			// nothing said anything, and a machine that stopped using the client
+			// its operator installed without a word is that fault wearing the
+			// other shoe.
+			let mut candidates: Vec<(&str, Vec<String>)> = Vec::new();
+			match &hook {
+				Ok(path) => candidates.push((
+					"dhcpcd",
+					dhcpcd_start_args(
+						DHCPCD_V4,
+						iface,
+						metric.as_deref(),
+						&path.display().to_string(),
+						&config.display().to_string(),
+					),
+				)),
+				Err(why) => {
+					netcfgd_sys::log_warning!(
+						"dhcp",
+						"{iface}: not offering dhcpcd, because {why}"
+					);
+				}
+			}
+			candidates.push(("udhcpc", udhcpc));
+			candidates.push(("busybox", busybox));
+
+			for (program, args) in candidates {
 				match Command::new(program).args(&args).status() {
 					Ok(status) if status.success() => {
 						// Written after the client is up and only here, so the
@@ -2849,9 +2878,19 @@ fn start_backend(
 					Err(error) => return Err(ran_badly(program, &error)),
 				}
 			}
-			Err(format!(
-				"no DHCPv4 client found for {iface}; install dhcpcd, udhcpc or busybox"
-			))
+			// **The hook's absence has to arrive here**, or a dhcpcd-only
+			// machine -- which is most of them -- would be told to install a
+			// client it already has. This is 0178's refusal, moved to the one
+			// place that knows nothing else could have been used instead.
+			Err(match &hook {
+				Err(why) => format!(
+					"no DHCPv4 client could be started for {iface}: udhcpc and busybox are \
+					 not installed, and {why}"
+				),
+				Ok(_) => {
+					format!("no DHCPv4 client found for {iface}; install dhcpcd, udhcpc or busybox")
+				}
+			})
 		}
 		BackendKind::Dhcp6 => Err(format!(
 			"a dhcp6 client on {iface} needs to know whether the document asked for \

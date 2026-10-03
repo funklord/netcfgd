@@ -125,6 +125,17 @@ said=$(apply_with_path "$work/bin")
 contains "no client on PATH says which packages would provide one" \
 	"$said" "install dhcpcd, udhcpc or busybox"
 
+# **And the same with no dhcpcd hook, which is a different sentence.** The hook
+# is dhcpcd's alone, so netcfgd offers the other two clients without it rather
+# than refusing outright -- and when none of the three can be used, the one
+# message has to carry both halves, or a dhcpcd-only machine with no hook is
+# told to install a client it already has. That is most machines, which is why
+# this case is here and not left to inspection.
+said=$(NCFG_DHCPCD_HOOK="$work/no-such-hook" apply_with_path "$work/bin")
+contains "with no hook either, it says the hook is why dhcpcd was not used" \
+	"$said" "the dhcpcd hook is not installed"
+contains "and still says what to install" "$said" "udhcpc and busybox are not installed"
+
 # ------------------------------------------------- there, with no exec bit
 
 printf '#!/bin/sh\nexit 0\n' > "$work/bin/dhcpcd"
