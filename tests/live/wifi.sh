@@ -152,7 +152,23 @@ contains "an empty scan says so" "$("$ncfg" wifi scan)" "no access points"
 # so the JSON form is checked rather than assumed.
 contains "a scan serialises" "$("$ncfg" wifi scan --json)" '"access_points"'
 
-"$ncfg" wifi connect HomeFiber >/dev/null
+# **The join does not happen here, and this section does not need one.** Since
+# 0197 `ncfg wifi connect` waits for `CTRL-EVENT-CONNECTED` rather than
+# reporting `SELECT_NETWORK`'s OK, and this fake associates only when a test
+# says so -- `JOIN <ssid>`, which is not a supplicant command and exists
+# because an association needs an access point that is not here. So the command
+# times out, and under `set -e` that aborted the script before any of the
+# read-backs below ran: the whole section was lost to a setup step whose
+# outcome it never cared about.
+#
+# What it wants is the network *loaded*, which is exactly what the checks below
+# read back out of the running supplicant. So the status is allowed to be
+# non-zero and **the reason is asserted rather than ignored** -- a connect that
+# fails for any other cause still fails here, which `|| true` alone would have
+# swallowed.
+attempt=$("$ncfg" wifi connect HomeFiber 2>&1 || true)
+contains "connect loads the network, even where nothing joins" \
+	"$attempt" "did not join within"
 check "the SSID arrived intact" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 ssid)" '"HomeFiber"'
 # Read back out of a running supplicant rather than asserted against the
@@ -172,8 +188,16 @@ check "WPA3 means protected management frames" \
 # check that the inversion happens exactly once.
 check "the metric reaches the supplicant, inverted into a priority" \
 	"$("$cli" -p "$work/ctrl" -i lo get_network 0 priority)" "3996"
+# **`sae_password`, not `psk`, and the supplicant was right to refuse.** This
+# network is WPA3 -- the two checks above assert SAE and protected management
+# frames -- and 0205 gives SAE its own credential field, because a `psk` is
+# capped at 63 characters and `sae_password` is not. So nothing had set a psk
+# and `get_network 0 psk` answered FAIL, which is a real supplicant answering
+# honestly about a field netcfgd deliberately does not use here. The star is
+# all either field ever gives back: the value is write-only, which is why this
+# can only ask whether one arrived and not what it was.
 check "the passphrase resolved from the secrets directory" \
-	"$("$cli" -p "$work/ctrl" -i lo get_network 0 psk)" "*"
+	"$("$cli" -p "$work/ctrl" -i lo get_network 0 sae_password)" "*"
 
 # The boundary, from the outside: `connect` joins what the config describes
 # and cannot be talked into anything else.

@@ -9499,6 +9499,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.166 `wifi.sh`: a setup step that became an assertion, and a field that moved
+
+Two faults, and neither was the daemon's.
+
+### `set -e` turned a setup step into the end of the script
+
+    ncfg: `HomeFiber` did not join on `lo`: it did not join within 20s, and
+          the supplicant did not say why
+
+`"$ncfg" wifi connect HomeFiber >/dev/null`, with no `|| true` and `set -e`, so
+the script stopped there -- and everything after it, the whole read-back
+section, never ran. **The connect is a setup step**: what the checks below it
+want is the network *loaded*, which they read back out of the running
+supplicant. Since 0197 `connect` waits for `CTRL-EVENT-CONNECTED` rather than
+reporting `SELECT_NETWORK`'s OK, and nothing here joins -- the fake associates
+only when a test says `JOIN`, which exists because an association needs an
+access point that is not here.
+
+So the status is allowed to be non-zero and **the reason is asserted**:
+`did not join within` has to appear, so a connect that fails for any other
+cause still fails this test. `|| true` alone would have swallowed exactly that.
+`wifi_journey.sh` already had the `|| true` and so never showed this.
+
+### And then `psk` on a WPA3 network, which the supplicant refused correctly
+
+    FAIL the passphrase resolved from the secrets directory
+           expected: *
+           actual:   FAIL
+
+The network is WPA3 -- the two checks above it assert `SAE FT-SAE` and
+`ieee80211w 2` -- and 0205 gives SAE its own credential field, because a `psk`
+is capped at 63 characters and `sae_password` is not. Nothing had set a psk, so
+a real wpa_supplicant v2.10 answered `FAIL` about a field netcfgd deliberately
+does not use here. The check asks `sae_password` now.
+
+**Its control is the failure it started from.** `psk` answers `FAIL` and
+`sae_password` answers `*`, so the check does tell a credential that arrived
+from one that did not -- which is all it can ever ask, both fields being
+write-only. A star is not a value.
+
+### Where the suite stands
+
+**78 of 79 scripts pass**, with `acl.sh` the last one, and `sandbox_writes.sh`
+refusing for want of systemd -- which this machine does not have, so `make live`
+halts there before the tail whatever else is fixed.
+
+Of the seven triaged since 10.160, five were the tests and two were the daemon.
+**The five were not sloppiness**: a premise the product had changed under them
+(0178, 0197, 0205, the empty-resolver refusal), a control that outlived what it
+controlled for, and a fake that modelled half a command. Each was invisible for
+as long as the suite halted before it.
+
 ## 10.165 A control that was right, and had outlived what it controlled for
 
 `tunnel.sh`, two checks:
