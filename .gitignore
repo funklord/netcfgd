@@ -64,5 +64,23 @@ debian/debhelper-build-stamp
 .fmake/
 /netcfgd-gui
 
+# **Captured material, which is evidence rather than build output and is the
+# one thing here that must not be committed even once.** This tree's standard
+# for a fake is that it reproduces output captured from the real thing rather
+# than a format read off a manual page -- `fake_supplicant.py` and the mbim
+# fake both exist for that reason -- so a capture is worth keeping and worth
+# keeping *out*. What arrives in one is the network it was taken from: SSIDs,
+# BSSIDs and, in the capture this was added for, internal PKI material.
+#
+# The path is named rather than globbed as `*capture*`, for the reason the
+# debian entries above give: nothing tracked carries that word today -- so a
+# glob would break nothing now and would quietly stop tracking whatever
+# acquires it later, a decision record about this capture or a module that
+# reads one. 10.162 is the archive this came out of, where the capture
+# travelled in a separate file from the commits so that sending it stayed a
+# separate decision. Nothing under this path is in any branch or any history,
+# and this line is what keeps the next `git add` from changing that.
+doc/capture/
+
 # The TDE adapter builds with CMake, which wants its own binary directory.
 adapter/netcfgd-tde/build/
