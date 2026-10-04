@@ -1990,11 +1990,6 @@ live:
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
 	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
-	@# Writing files under the sandbox a systemd unit imposes. No
-	@# outer namespace: it makes its own mount namespace, and it must, because
-	@# a chmod reproduces the symptom for an unprivileged process and not for
-	@# root -- CAP_DAC_OVERRIDE walks through a mode and not through a mount.
-	@NCFG_LIVE=1 sh tests/live/sandbox_writes.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"
@@ -2084,6 +2079,21 @@ live:
 	@# bind a privileged port, and odhcp6c is not packaged for Debian -- the
 	@# script's header says how to build it, and skips without it.
 	@sh tests/live/delegation.sh
+	@# Writing files under the sandbox a systemd unit imposes. No
+	@# outer namespace: it makes its own mount namespace, and it must, because
+	@# a chmod reproduces the symptom for an unprivileged process and not for
+	@# root -- CAP_DAC_OVERRIDE walks through a mode and not through a mount.
+	@#
+	@# **Last, because it is the one script here that refuses rather than
+	@# skips.** It drives the unit's real sandbox through systemd, and under
+	@# `NCFG_LIVE` a machine with no systemd gets a failure rather than a quiet
+	@# pass -- which is right, and make stops at the first failing recipe line.
+	@# Anywhere earlier it therefore hides every script after it: on
+	@# `ml350g6-01`, which runs sysvinit, it halted the suite two thirds of the
+	@# way through and the whole tunnel, wifi, modem and bluetooth tail went
+	@# unexercised for as long as that was where it sat. Moved here so the
+	@# refusal is the last thing a run reports rather than the only thing.
+	@NCFG_LIVE=1 sh tests/live/sandbox_writes.sh
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \

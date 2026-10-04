@@ -9546,6 +9546,22 @@ and refuses rather than skipping under `NCFG_LIVE` -- `ml350g6-01` has no
 systemd at all, pid 1 is `init`, so `make live` exits non-zero here however much
 is fixed. That is the file's own bargain and not a defect.
 
+**Moved to the end of the target on the holder's instruction**, because make
+stops at the first failing recipe line and that refusal was two thirds of the
+way through: the whole tunnel, wifi, modem and bluetooth tail went unexercised
+by `make live` for as long as it sat there, and was only being checked by
+running the Makefile's own invocations by hand. Measured either side -- **46
+distinct scripts reported all-passed in a run before the move and 59 after**,
+with `tunnel.sh`, `wifi.sh` and `acl.sh` among the ones now reached. The refusal
+is the last thing a run reports rather than the only thing, the exit status is
+unchanged, and on a machine with systemd the move costs nothing because the
+script passes there.
+
+What a full run now covers, for the record: 59 scripts pass, six skip with named
+reasons -- `hostapd`, `nmcli` and `wireguard-tools` not installed, real root for
+`bluetooth.sh` and `hwsim.sh`, and `association.sh`'s independent reading -- and
+one refuses.
+
 Counting them needed care twice. `grep -c 'all checks passed'` answers 60 for
 46 scripts, because several print the line more than once -- the same count-over-
 lines trap 10.164 records one page up, in the arithmetic used to describe it.
