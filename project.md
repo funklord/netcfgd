@@ -9557,10 +9557,30 @@ is the last thing a run reports rather than the only thing, the exit status is
 unchanged, and on a machine with systemd the move costs nothing because the
 script passes there.
 
-What a full run now covers, for the record: 59 scripts pass, six skip with named
-reasons -- `hostapd`, `nmcli` and `wireguard-tools` not installed, real root for
-`bluetooth.sh` and `hwsim.sh`, and `association.sh`'s independent reading -- and
-one refuses.
+What a full run covers, for the record, and **this paragraph was a day old and
+already wrong** -- it said six skip, which stopped being true the moment the
+holder installed two packages, and nothing in a run would have corrected it:
+
+    2026-10-04   59 pass,  6 skip, 1 refuses
+    2026-10-05   61 pass,  4 skip, 1 refuses
+
+`hostapd` and `wireguard-tools` are installed now, so `ap.sh` and
+`wireguard.sh` run for the first time on this machine **and pass on their first
+exercise** -- a real hostapd driven through the access-point path, and a real
+`wg` through the tunnel one. The wireguard *unit* tests came alive with them:
+`a_tunnel_round_trips_through_the_kernel` passes, which is the test 10.12
+recorded as correctly FAILING under `NCFG_LIVE` on a machine without the
+capability, so the kernel path is now exercised rather than guarded.
+
+What still skips is four, each naming its reason: `nmcli` is not installed and
+is not going to be on this machine; `bluetooth.sh` and `hwsim.sh` need real
+root; and `association.sh` wants an independent reading it cannot take here,
+which is 10.12's own entry. One refuses, and that is the systemd one above.
+
+**The count is a property of the machine and the day**, which is why it is
+written with both. A sentence of this shape in a document that is read rather
+than re-derived is the shelf-life problem `evidence.md` names, and it caught
+this one inside twenty-four hours.
 
 Counting them needed care twice. `grep -c 'all checks passed'` answers 60 for
 46 scripts, because several print the line more than once -- the same count-over-
