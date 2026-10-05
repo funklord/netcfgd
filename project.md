@@ -9895,6 +9895,31 @@ refs were deleted again after the triage: the bundle reproduces them in one
 command for as long as it exists, and `refs/salvage/*` in a tree several
 sessions share is a trap for the next reader.
 
+### The box it came from is gone, which changes one half of this
+
+Stated by the copyright holder 2026-10-05: the tarball and the branches exist
+because there was no other way to move anything off `debian-nabbe`, and that
+machine no longer exists. The triage above was done without knowing that, so it
+is worth saying what it does and does not change.
+
+**It does not change the verdict on the bundle, and the reason is that every
+comparison was made against published refs.** The patch-id triage ran against
+`origin/master` and `origin/c-port`, and the path check against those plus
+`origin/backup/pre-reformat-master` -- not against a local clone that shared the
+dead machine's fate. Re-confirmed 2026-10-05: all three are on the remote, local
+`master` is level with it, and the three records the bundle alone held in their
+old `docs/decisions/` spelling are present at their renamed paths on
+`origin/master`. So the bundle was the transport and the remote is the
+destination; deleting the transport loses nothing.
+
+**It changes the capture completely.** `doc/capture/xylem/` was taken from that
+machine and travels only in `netcfgd-capture.tar.gz` beside the bundle. With the
+machine gone there is nowhere to take it again -- the access point it was
+captured from may still exist, but the capture does not, and the archive on
+`dl180g6-03` is the only copy of it anywhere. Deleting the archive is therefore
+not reclaiming space from a transport; it is destroying the one artifact in it
+that the remote does not hold.
+
 ### The one thing that is not in git, and is not mine to put there
 
 `netcfgd-capture.tar.gz`, beside the bundle, holds `doc/capture/xylem/` -- six
