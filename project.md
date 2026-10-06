@@ -9920,6 +9920,35 @@ captured from may still exist, but the capture does not, and the archive on
 not reclaiming space from a transport; it is destroying the one artifact in it
 that the remote does not hold.
 
+### Settled: it stays in a tarball outside the project, or not at all
+
+The copyright holder, 2026-10-06, asked where the capture should live:
+
+> We don't wanna keep a bunch of ephemeral stuff in a repo, it stays archived
+> in a tarball outside the project or not at all
+
+So it is not going into `doc/capture/` in the tree, and the `.gitignore` entry
+for that path is the standing half of this rather than a stopgap. What it needed
+was to stop depending on the archive that is being deleted: the capture sat
+inside `netcfgd-salvage.tar.gz`, and its provenance sat in that archive's
+`RESTORE.txt`, so deleting the transport would have taken both.
+
+**`netcfgd-capture-xylem.tar.gz` now sits beside it** in
+`dl180g6-03:/home/funk/src/`, holding the original `netcfgd-capture.tar.gz`
+**untouched** -- md5 `ebe14a759d35f0f2a9dc9b988e4902a4`, verified by extracting
+the new archive and hashing the inner file -- plus a `PROVENANCE.txt` carrying
+what the six files are, that they were taken on 2026-10-01 from the network
+10.82 is about, that `debian-nabbe` is gone so they cannot be taken again, that
+they hold SSIDs, BSSIDs and PKI and must not enter a repository, and where the
+bundle's triage is written down.
+
+Wrapping the inner tarball rather than repacking its contents is deliberate: the
+bytes that survive are the bytes that were captured, and the check is one hash
+rather than six modes and timestamps.
+
+**`netcfgd-salvage.tar.gz` is now disposable in full.** Everything it carried is
+either on the remote or in the archive beside it.
+
 ### The one thing that is not in git, and is not mine to put there
 
 `netcfgd-capture.tar.gz`, beside the bundle, holds `doc/capture/xylem/` -- six
