@@ -119,6 +119,19 @@ device wlan-test {
 		powersave = "off"
 	}
 }
+# A routing rule, for the same reason the radio above is here: one rule used to
+# put `N routing rule(s)` on the renderer's unrenderable list and refuse the
+# whole save, so policy routing and profiles were mutually exclusive -- and
+# policy routing is how a second uplink or a one-subnet VPN is written, which is
+# to say by the machines most likely to want more than one profile. It also
+# exercises the `override` set: a rule the base defines and the snapshot
+# restates is a redefinition without it, which is the trap the bluetooth comment
+# in `write_profile_snapshot` records.
+rule "profile-probe" {
+	priority = 1200
+	from = "192.0.2.0/24"
+	lookup = 99
+}
 CONF
 
 # The operator's own profile, and the shipped one beside it. `mtu` because it
@@ -228,6 +241,13 @@ snapshot=$(cat "$work/etc/profile/weekend/00-saved.conf")
 contains "a radio's policy is in the snapshot" "$snapshot" "wifi {"
 contains "and the keys inside it, not just the block" "$snapshot" "autoconnect = false"
 contains "including one the parser normalises" "$snapshot" "regdom = \"SE\""
+# The rule, and as an override: the base defines it, so restating it plainly
+# would be a redefinition the loader refuses. The save succeeding at all is most
+# of the evidence, since the daemon proves a snapshot reproduces the running
+# document before keeping it.
+contains "a routing rule is in the snapshot" "$snapshot" "rule \"profile-probe\""
+contains "marked override, because the base defines it" "$snapshot" "override rule"
+contains "and carries the selector it was given" "$snapshot" "from = \"192.0.2.0/24\""
 # The refusal is the daemon's too, and it must arrive as a sentence rather
 # than as a client-side guess about a directory it cannot see.
 again=$("$ncfg" profile save weekend 2>&1 || true)

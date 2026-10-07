@@ -1360,6 +1360,17 @@
 #	priority = 1100
 #}
 
+# `invert` matches everything the selectors do *not*, which is how one subnet is
+# carved out of a table rather than every other one enumerated into it. It
+# reaches the kernel as FIB_RULE_INVERT and changes nothing else about the rule.
+
+#rule "all-but-guests" {
+#	from     = "192.168.99.0/24"
+#	invert   = true
+#	lookup   = 100
+#	priority = 1200
+#}
+
 
 ##############################################################################
 # DHCP DETAIL

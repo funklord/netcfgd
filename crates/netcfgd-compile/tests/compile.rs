@@ -1130,6 +1130,36 @@ rule nodefault { priority = 90; lookup = 254; suppress_prefixlength = 0 }
 	);
 }
 
+/// `invert` survives the compiler, which until now nothing could put there.
+///
+/// The field reaches the kernel as `FIB_RULE_INVERT`, returns through the
+/// observation and is compared by `same_rule` -- a feature implemented at every
+/// layer but the one that lets an operator ask for it. A rule somebody else had
+/// installed inverted therefore read as drift against a `false` nobody had
+/// chosen.
+///
+/// Asserted both ways round, because a key that is accepted and ignored looks
+/// exactly like one that works when only the true case is tried.
+#[test]
+fn an_inverted_rule_compiles() {
+	let document = build_ok(
+		r#"
+rule carved { priority = 300; from = "10.1.0.0/16"; invert = true; lookup = 44 }
+rule plain  { priority = 400; from = "10.2.0.0/16"; lookup = 45 }
+"#,
+	);
+
+	assert!(document.rules[0].invert, "`invert = true` was dropped");
+	assert!(
+		!document.rules[1].invert,
+		"a rule that says nothing about it is not inverted"
+	);
+
+	// And it is the selectors that invert, not the action: the rendering keeps
+	// the lookup it was given.
+	assert_eq!(document.rules[0].table, Some(44));
+}
+
 /// The priority is mandatory even though the kernel would assign one: an
 /// unnumbered rule lands wherever the kernel puts it, two applies can order
 /// them differently, and then the document has stopped describing the system.

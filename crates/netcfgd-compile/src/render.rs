@@ -21,6 +21,7 @@ use netcfgd_model::control::Principal;
 use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
+use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
@@ -75,8 +76,8 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 	// Named rather than skipped, per the header: these have no rendering yet
 	// and a profile that quietly lacked them would be wrong in a way nobody
 	// would see until the rule or the access point was needed.
-	if !document.rules.is_empty() {
-		missing.push(format!("{} routing rule(s)", document.rules.len()));
+	for rule in &document.rules {
+		render_rule(rule, overrides, &mut text);
 	}
 	if !document.access_points.is_empty() {
 		missing.push(format!(
@@ -933,6 +934,79 @@ fn mac_policy_name(policy: MacPolicy) -> &'static str {
 	}
 }
 
+/// A policy routing rule, which belongs to no interface.
+///
+/// Every rule is written, and `priority` always: the model requires it because
+/// an unnumbered rule lands wherever the kernel puts it, so a profile that
+/// omitted it would restore a document that no longer describes the machine.
+/// Everything else is written where it differs from the default, which is this
+/// renderer's rule throughout.
+///
+/// Until this existed a single rule put `N routing rule(s)` on the unrenderable
+/// list and refused the whole save, so policy routing and profiles were
+/// mutually exclusive -- and policy routing is how a second uplink or a
+/// one-subnet VPN is expressed, which is to say by the machines most likely to
+/// want more than one profile.
+fn render_rule(rule: &RoutingRule, overrides: &Overrides, text: &mut String) {
+	let mut body = String::new();
+	let _ = writeln!(body, "\tpriority = {}", rule.priority);
+	if rule.family != RuleFamily::default() {
+		let _ = writeln!(body, "\tfamily = {}", quote(rule_family_name(rule.family)));
+	}
+	for (value, key) in [
+		(&rule.from, "from"),
+		(&rule.to, "to"),
+		(&rule.iif, "iif"),
+		(&rule.oif, "oif"),
+	] {
+		if let Some(value) = value {
+			let _ = writeln!(body, "\t{key} = {}", quote(value));
+		}
+	}
+	for (value, key) in [
+		(rule.fwmark, "fwmark"),
+		(rule.fwmask, "fwmask"),
+		(rule.table, "lookup"),
+		(rule.suppress_prefixlength, "suppress_prefixlength"),
+	] {
+		if let Some(value) = value {
+			let _ = writeln!(body, "\t{key} = {value}");
+		}
+	}
+	// **Written as `lookup`, which is the spelling the example file uses.** The
+	// compiler reads `table` as well and the model calls it that; a profile is
+	// read by people, so it gets the one the documentation teaches.
+	if rule.invert {
+		body.push_str("\tinvert = true\n");
+	}
+	if rule.action != RuleAction::default() {
+		let _ = writeln!(body, "\taction = {}", quote(rule_action_name(rule.action)));
+	}
+	let head = opening("rule", &rule.id, overrides);
+	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", quote(&rule.id));
+}
+
+/// A rule's address family, spelled as the parser reads it back.
+///
+/// `inet` and `ipv4` both parse; the first is written because it is what the
+/// kernel calls it and what `ip rule` prints.
+fn rule_family_name(family: RuleFamily) -> &'static str {
+	match family {
+		RuleFamily::Inet => "inet",
+		RuleFamily::Inet6 => "inet6",
+	}
+}
+
+/// A rule's action, spelled as the parser reads it back.
+fn rule_action_name(action: RuleAction) -> &'static str {
+	match action {
+		RuleAction::Lookup => "lookup",
+		RuleAction::Blackhole => "blackhole",
+		RuleAction::Unreachable => "unreachable",
+		RuleAction::Prohibit => "prohibit",
+	}
+}
+
 /// One value bare, several as a list.
 ///
 /// Both are legal and the compiler reads either. A single-element list is
@@ -1154,6 +1228,50 @@ mod tests {
 			 \tconfig = \"dhcp\"\n\
 			 }\n",
 		);
+	}
+
+	/// Every key of a routing rule round-trips.
+	///
+	/// Until `render_rule` existed one rule put `N routing rule(s)` on the
+	/// unrenderable list and refused the whole save, so a machine using policy
+	/// routing could save no profile at all. Each value here differs from its
+	/// default, because a renderer that writes only non-defaults is tested by
+	/// nothing where every value is the default one.
+	#[test]
+	fn a_routing_rules_keys_round_trip() {
+		round_trips(
+			"rule \"carved\" {\n\
+			 \tpriority = 300\n\
+			 \tfamily = \"inet6\"\n\
+			 \tfrom = \"2001:db8:1::/64\"\n\
+			 \tto = \"2001:db8:2::/64\"\n\
+			 \tiif = \"eth0\"\n\
+			 \toif = \"eth1\"\n\
+			 \tfwmark = 7\n\
+			 \tfwmask = 255\n\
+			 \tlookup = 44\n\
+			 \tsuppress_prefixlength = 0\n\
+			 \tinvert = true\n\
+			 \taction = \"prohibit\"\n\
+			 }\n",
+		);
+	}
+
+	/// And a rule that says the least it can round-trips too.
+	///
+	/// The compiler refuses a rule with no selector and no action, so the
+	/// smallest legal one still carries a lookup. What this checks is the other
+	/// direction from the case above: that a default family, a default action
+	/// and an absent `invert` are **not** written, since writing them would be
+	/// harmless here and a lie about what the operator asked for.
+	#[test]
+	fn a_minimal_routing_rule_gains_nothing() {
+		let document = compile("rule \"plain\" {\n\tpriority = 400\n\tlookup = 45\n}\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(!rendered.contains("family"), "{rendered}");
+		assert!(!rendered.contains("action"), "{rendered}");
+		assert!(!rendered.contains("invert"), "{rendered}");
+		assert_eq!(compile(&rendered), document, "rendered as:\n{rendered}");
 	}
 
 	/// Every key of a radio's own policy round-trips.

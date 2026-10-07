@@ -89,6 +89,7 @@ inet
 inet6
 ingress_bandwidth
 interval
+invert
 ip6gre
 ip6tnl
 ipip

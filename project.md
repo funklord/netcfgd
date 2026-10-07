@@ -9499,6 +9499,73 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.168 A rule nobody could write, and rules no profile could hold
+
+Two things in one piece of work, found by taking the next item off 10.159's own
+list of what `ncfg profile save` still refuses.
+
+### `invert` was implemented everywhere except where it could be asked for
+
+`RoutingRule::invert` reaches the kernel as `FIB_RULE_INVERT` in
+`netcfgd-sys/src/rule.rs`, comes back through the observation, and `same_rule`
+compares it -- and **`lower.rs` had no arm for it**, so no document could set it.
+A complete implementation of a feature with the one layer missing that makes it
+reachable.
+
+**It is the mirror of 10.66's `autoconnect`**, which was parsed and read by
+nothing. This was read by everything and parsed by nothing, and the second is
+worse in one way: a rule somebody else had installed inverted compared against a
+desired `false` that was never a choice, so netcfgd would replace it on sight
+and call that convergence.
+
+**A gate refused the new key before any of this was committed**, which is 0127's
+working as designed: every key the compiler accepts has to be classified, so one
+added later cannot default to "a client may send this". `invert` is ordinary and
+is in `tool/privilege-ordinary.txt` with its eight sibling rule keys -- it
+configures routing policy and grants nothing beyond it -- and the gate now counts
+176 keys where it counted 175.
+
+The arm is six lines. The test asserts both directions, because a key that is
+**accepted and ignored** looks exactly like one that works when only the true
+case is tried -- and the sabotage is exactly that: `let _ = flag` in place of
+the assignment, which turns the test red on the first assertion. `invert` is in
+`doc/netcfgd.conf.example` now as well, with the carve-out case it exists for;
+that file claims to be every feature with the syntax to use it, and 10.84
+records what it costs when it is not.
+
+### And a single rule refused every profile
+
+`render_device` was not the only hole: one routing rule put
+`N routing rule(s)` on the unrenderable list, which refuses the **whole** save.
+So policy routing and profiles were mutually exclusive -- and policy routing is
+how a second uplink or a one-subnet VPN is written, which is to say by the
+machines most likely to want more than one profile.
+
+`render_rule` writes `priority` always, because the model requires it and an
+unnumbered rule lands wherever the kernel puts it, and everything else only
+where it differs from its default. Two round-trip cases: every key at a
+non-default, and a minimal rule asserting that a default family, a default
+action and an absent `invert` are **not** written -- the direction a
+non-defaults renderer is otherwise tested by nothing in.
+
+**The trap next door fired this time.** 10.159 recorded checking
+`write_profile_snapshot`'s `override` set and finding it needed no change,
+because a wifi policy is a sub-block of a `device` the set already carried. A
+rule is a block of its own, so the set did need to learn it -- the comment there
+says a renderer that gains a block and a list that does not is a save refused
+for restating what the base already said, and sabotaging the four new lines
+produces exactly that: `profile.sh` loses three checks to a refusal. The comment
+was right about a case it had not seen.
+
+`tests/live/profile.sh` carries a rule now, asserted as an `override` because
+the base defines it, which is the half a unit test cannot reach.
+
+**And the stale binary caught me a third time.** `cargo build -p` relinks no
+`target/debug/netcfgd`, so the first run refused with `1 routing rule(s)` from a
+daemon three edits old. 10.157's Makefile fix covers `make test` and cannot
+cover a live script run directly, which that entry says in as many words. Three
+occurrences now, each predicted by the record and each still paid for.
+
 ## 10.167 `acl.sh`: one missing line in a fixture, read as three faults
 
 Three failures, one cause.
@@ -10189,11 +10256,14 @@ comment is aimed at precisely this kind of change and the next one may not be so
 lucky.
 
 **Still unrenderable, so a profile is still refused for these:** a `match`
-block, ethtool settings, qdisc and `ingress_redirect` on a device; routing
-rules; hooks; dns options, dnssec, transport, a server with a port or sni, and
-`mode = "exec"`; some interface kinds; an address with lifetimes or a peer; a
-route with a scope or a proto. The list is in `render.rs` and each entry is one
-of these waiting to be found by whoever it stops.
+block, ethtool settings, qdisc and `ingress_redirect` on a device;
+`access_point` blocks; hooks; dns options, dnssec, transport, a server with a
+port or sni, and `mode = "exec"`; some interface kinds; an address with
+lifetimes or a peer; a route with a scope or a proto. The list is in `render.rs`
+and each entry is one of these waiting to be found by whoever it stops.
+**Routing rules came off that list in 10.168**, which is where the next one
+should be taken from rather than from this sentence -- it was a day old and
+already wrong once.
 
 ## 10.158 The vendored frontend may be absent, and 0173 stands
 

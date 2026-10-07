@@ -1427,6 +1427,23 @@ fn lower_rule(block: &Block, diags: &mut Diagnostics) -> Option<RoutingRule> {
 			"oif" => rule.oif = as_interface_name(&assignment.value, diags),
 			"fwmark" => rule.fwmark = as_u32(&assignment.value, diags),
 			"fwmask" => rule.fwmask = as_u32(&assignment.value, diags),
+			// **Wired everywhere except here.** `invert` reaches the kernel as
+			// `FIB_RULE_INVERT`, comes back through the observation, and
+			// `same_rule` compares it -- and no document could set it, because
+			// this arm did not exist. So the field was a complete
+			// implementation of a feature nobody could ask for, and a rule
+			// somebody else had installed inverted read as drift against a
+			// desired `false` that was never a choice.
+			//
+			// It inverts the selectors rather than the action: a rule that
+			// matches everything *except* a prefix is how a policy carves one
+			// subnet out of a table, and writing it the other way round means
+			// enumerating the complement.
+			"invert" => {
+				if let Some(flag) = as_bool(&assignment.value, diags) {
+					rule.invert = flag;
+				}
+			}
 			"lookup" | "table" => rule.table = as_u32(&assignment.value, diags),
 			"suppress_prefixlength" => {
 				rule.suppress_prefixlength = as_u32(&assignment.value, diags);

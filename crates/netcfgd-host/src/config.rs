@@ -2679,6 +2679,17 @@ fn write_profile_snapshot(
 		for device in &base.bluetooth {
 			overrides.insert(format!("bluetooth {}", device.id));
 		}
+		// And again when it learned routing rules, which is the comment above
+		// earning its keep rather than a coincidence: a renderer that gains a
+		// block and a list that does not is a save refused for restating what
+		// the base already said.
+		for rule in &base.rules {
+			overrides.insert(format!("rule {}", rule.id));
+		}
+		// And again when it learned routing rules, which is the comment above
+		// earning its keep rather than a coincidence: a renderer that gains a
+		// block and a list that does not is a save refused for restating what
+		// the base already said.
 	}
 
 	// **What the base already says is not the profile's to restate**, and for
