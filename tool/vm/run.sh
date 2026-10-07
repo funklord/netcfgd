@@ -149,7 +149,28 @@ wrapper="$work/payload.sh"
 	echo '# The markers are what the host greps for: a payload that dies'
 	echo '# silently must not read as one that passed.'
 	echo 'echo "VM-PAYLOAD-BEGIN"'
-	cat "$payload"
+	# **The payload is a file the wrapper runs, not text pasted into it.**
+	# It was pasted, and that made `exit` in a payload exit the WRAPPER --
+	# skipping `status=$?`, the END marker and the `poweroff` under it. Measured
+	# once: a payload ending `exit 1` left the guest up until the outer
+	# `timeout` killed it 13 minutes later, and the host reported "ran the
+	# payload and it failed" for the right verdict by the wrong route, having
+	# seen no END marker at all. The two payloads that predate this both end in
+	# a bare `[ ... ]` test, which is why neither had met it.
+	#
+	# A contract that says "do not use `exit` in a payload" would be invisible
+	# at the only moment it matters, so the wrapper is arranged to make it
+	# unnecessary instead: `sh` on a separate file contains the exit and hands
+	# back its status.
+	#
+	# Delivered as base64 rather than through a heredoc because base64's
+	# alphabet cannot contain the delimiter -- a payload holding a line equal
+	# to it would otherwise truncate silently, and a payload is exactly the
+	# file most likely to contain shell terminators.
+	echo "base64 -d > /tmp/ncfg-payload.sh <<'NCFG_PAYLOAD_BASE64'"
+	base64 "$payload"
+	echo 'NCFG_PAYLOAD_BASE64'
+	echo 'sh /tmp/ncfg-payload.sh'
 	echo 'status=$?'
 	echo 'echo "VM-PAYLOAD-END rc=$status"'
 	echo 'poweroff'

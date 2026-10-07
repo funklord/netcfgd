@@ -9546,6 +9546,45 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.181 A payload was pasted into the wrapper, so its `exit` was the wrapper's
+
+`run.sh` built the guest's wrapper by `cat`-ing the payload into the middle of
+it:
+
+	echo "VM-PAYLOAD-BEGIN"
+	<the payload, pasted>
+	status=$?
+	echo "VM-PAYLOAD-END rc=$status"
+	poweroff
+
+So a payload ending in `exit 1` exited **the wrapper**, and the three lines
+under it never ran. Measured: the guest stayed up until the outer `timeout`
+killed it thirteen minutes later, no `VM-PAYLOAD-END` was ever printed, and the
+host reported *"ran the payload and it failed"* -- the right verdict reached by
+the wrong route, since that branch fires on the absence of `END rc=0` and the
+marker was absent because the payload had exited rather than because it failed.
+
+**Neither existing payload had met it, and that is why it survived.** Both end
+in a bare test -- `[ "$failed" -eq 0 ]` -- which leaves a status for `$?` to
+pick up and never exits. Nothing says they have to. The first payload written
+without that accident found it immediately.
+
+**A contract would have been invisible at the only moment it matters**, so the
+wrapper is arranged to make one unnecessary: the payload is written out and run
+with `sh`, which contains the exit and hands back its status. Delivered as
+base64 rather than through a heredoc, because base64's alphabet cannot contain
+the delimiter -- and a payload is exactly the file most likely to hold a line
+that looks like a shell terminator.
+
+**The hung guest is also a note on how to stop one.** `running-code.md` says a
+kill that does not signal leaves the work running; here the inverse applied and
+paid off. Signalling qemu by pid -- after re-reading `/proc/<pid>/cmdline` to
+confirm it was this run's work directory and not another session's VM -- let
+`run.sh`'s own EXIT trap run, which removed the work directory and left no
+orphan. Killing the task would have skipped the trap. And `pgrep -x
+qemu-system-x86_64` cannot match it at all: the name is over 15 characters, so
+`ps -C` is what answers.
+
 ## 10.180 The last two guest failures, and a skip that named the wrong absence
 
 Neither is a defect in netcfgd, and one was a defect in the asking.
@@ -9662,6 +9701,17 @@ comment contains a command substitution, and `make shell` runs it over the
 list it parses -- `SHELL_SCRIPTS`, now named once and used twice, because a
 second copy of that list is how this half would go on reporting a clean pass
 over a directory the parse half had already grown.
+
+**Signalled as an entry under *Open signals* in `claude-guidelines`'
+`project.md`, committed there as `2ec4194`.** The construct is shell's and not
+this tree's, so whether the check belongs in the shared `style_gate.py`, in a
+spread tool of its own, or nowhere is a pass's question -- and the measurement
+that would decide it is one nobody has taken: how many sites exist in the trees
+with more shell than this one's 90 scripts. The entry names beerssh's three
+`check-*.sh` as where to look, and notes that this sits beside an older signal
+about `.sh` being in neither of that gate's suffix lists. The two are the same
+construct from opposite sides: that one cannot indent-check a heredoc body,
+this one is about the body being executed.
 
 Controlled over seven cells before it was believed: it fires on a backtick, on
 `$(...)`, and on the `<<-` form; it is silent on a quoted delimiter, on an
