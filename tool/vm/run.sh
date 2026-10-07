@@ -115,6 +115,14 @@ mkdir -p "$work/ovl/etc/local.d" "$work/ovl/etc/runlevels/default"
 	echo '	mount --bind /.modloop/modules /lib/modules 2>/dev/null ||'
 	echo '		ln -sfn /.modloop/modules/* /lib/modules/ 2>/dev/null'
 	echo 'fi'
+	echo '# The repository, read-only, so a payload can reach the tree it is'
+	echo '# testing without an image being rebuilt. Read-only on both sides:'
+	echo '# qemu is told readonly and so is the mount, because a guest that'
+	echo '# could write here would be a test editing the source it is testing.'
+	echo 'mkdir -p /mnt/repo'
+	echo 'modprobe 9pnet_virtio 2>/dev/null'
+	echo 'mount -t 9p -o trans=virtio,version=9p2000.L,ro repo /mnt/repo 2>&1 ||'
+	echo '	echo "9p: the repository did not mount"'
 	echo '# The markers are what the host greps for: a payload that dies'
 	echo '# silently must not read as one that passed.'
 	echo 'echo "VM-PAYLOAD-BEGIN"'
@@ -218,6 +226,7 @@ apkovl=http://10.0.2.2:$port/test.apkovl.tar.gz" \
 		-netdev socket,id=lan,mcast=230.0.0.42:$mcast_port,localaddr=127.0.0.1 \
 		-device virtio-net-pci,netdev=lan,mac=52:54:00:12:34:0$i \
 		-drive file="$store/alpine-3.21.0-x86_64/boot/modloop-lts",format=raw,if=virtio,readonly=on \
+		-virtfs local,path="$repo",mount_tag=repo,security_model=none,readonly=on \
 		< /dev/null > "$work/console.$i.log" 2>&1 &
 	pids="$pids $!"
 	i=$((i + 1))

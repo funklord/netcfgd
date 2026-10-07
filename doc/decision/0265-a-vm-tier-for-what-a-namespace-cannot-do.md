@@ -222,6 +222,54 @@ was completely dead. That is correct for a diagnostic and is exactly the line
 somebody quotes later as a pass, so it says so in its own header. `cluster.sh`
 is the one that asserts, by comparing reachable peers against expected peers.
 
+**The repository reaches the guest over a read-only 9p share**, so no image is
+rebuilt in the loop: `repo /mnt/repo 9p ro,relatime,access=client,trans=virtio`,
+28 entries at the root. Read-only on both sides -- qemu is told `readonly` and
+so is the mount -- because a guest that could write there would be a test
+editing the source it is testing.
+
+### The one thing still blocking netcfgd's own tests, measured
+
+**The host's binary cannot run in the guest, and the symptom does not say so.**
+The host builds against glibc and the guest is musl:
+
+```text
+netcfgd: /mnt/repo/target/debug/netcfgd: not found
+```
+
+That is a file which plainly exists, reported as missing, because what is
+missing is its interpreter -- `/lib64/ld-linux-x86-64.so.2`. Worth recording in
+those words, because "not found" on an executable that is present reads as a
+broken share rather than as a libc mismatch.
+
+Only `x86_64-unknown-linux-gnu` is installed here; there is no musl target, and
+`packaging/alpine/APKBUILD.in` builds with Alpine's own cargo *inside* Alpine,
+so the existing Alpine packaging path offers no cross-build to borrow. Three
+ways, none of them chosen here because the choice is the holder's:
+
+- **Alpine guest, built inside it.** Needs nothing installed; minutes per run
+  with no persistent cache, and the network for crates. It would exercise the
+  musl build the APKBUILD produces and nothing currently checks.
+- **Debian guest, host binary over the share.** Matches the development libc,
+  so the existing live scripts run unmodified. Costs a Debian image and its own
+  unattended-boot plumbing, which Alpine's apkovl gave cheaply.
+- **A musl target on this host**, if Debian packages one -- one root action,
+  then the Alpine guest runs the cross-built binary directly.
+
+**`capability.sh` asserts, and its first version did not.** It ended with an
+`echo`, so its status was that echo's and `make vm` would have reported a pass
+with not one module loaded -- a gate over a capability it never checked, which
+is the shape this tree keeps finding and which went into its own new harness
+anyway. It counts failures and returns them now, and the assertion was watched
+failing: a module name that cannot exist gives
+`FAIL: not_a_real_module did not load` and `run.sh` exits 1.
+
+It also checks that `mac80211_hwsim` **made a radio** rather than merely
+loading, because a module can load and do nothing and a `modprobe` status
+cannot see that -- and `phy0` is what `hwsim.sh` actually wants. Likewise
+`/dev/vhci` as a device node rather than `hci_vhci` as a load, that node being
+what `bluetooth.sh` opens.
+
 **Deliberately not done here**: the nspawn tier, and procd -- which needs an
 OpenWrt image rather than an Alpine one and is the one of the three init
 systems this tier does not reach.
