@@ -22,7 +22,8 @@ use netcfgd_model::device::{AccessPoint, AclPolicy};
 use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{
-	BridgeVlan, InterfaceKind, LinkSettings, ProbePolicy, QdiscKind, QdiscPolicy, Toggle,
+	BridgeVlan, InterfaceKind, LinkSettings, ProbePolicy, QdiscKind, QdiscPolicy, RaBackend,
+	RaPolicy, Toggle,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
@@ -288,20 +289,32 @@ fn render_interface(
 	// refusal justified as permanent is read by the next person as a reason
 	// not to try, and this one was scoped to what one function could see while
 	// being written as a fact about the document.
-	for (present, what) in [
-		(!interface.hooks.is_empty(), "hooks"),
-		(interface.advertise.is_some(), "advertise"),
-		(interface.guard.is_some(), "guard"),
-	] {
-		if present {
-			missing.push(format!("interface {name}: {what}"));
-		}
+	if !interface.hooks.is_empty() {
+		// **Not a key this renderer has not got round to.** A `HookRef` holds
+		// a path and a sha256, not the shell: `lower` hands the body to
+		// `hooks.record(...)`, which materialises it to a file and returns a
+		// reference. So the body the config said is not in the document at
+		// all, and there is no path syntax to write instead -- a hook is only
+		// ever a brace body. Rendering one needs either a read of the
+		// materialised file, checked against the recorded hash, or new
+		// grammar, and both are decisions rather than fixes.
+		missing.push(format!("interface {name}: hooks"));
 	}
 
 	render_interface_keys(interface, &mut body);
 
 	if !interface.enabled {
 		body.push_str("\tenabled = false\n");
+	}
+	// The operator's own sentence about what depends on this interface, which
+	// `ncfg` quotes back when something would take it down. Losing it in a
+	// profile would turn a deliberate refusal into a link that goes down
+	// without comment, which is the opposite of what it was written for.
+	if let Some(guard) = &interface.guard {
+		let _ = writeln!(body, "\tguard = {}", quote(&guard.reason));
+	}
+	if let Some(advertise) = &interface.advertise {
+		render_advertise(advertise, name, &mut body, missing);
 	}
 	if let Some(forwarding) = interface.forwarding {
 		let _ = writeln!(body, "\tforwarding = {forwarding}");
@@ -988,6 +1001,73 @@ fn mac_policy_name(policy: MacPolicy) -> &'static str {
 		MacPolicy::PerNetwork => "per_network",
 		MacPolicy::PerConnection => "per_connection",
 	}
+}
+
+/// Router advertisements, which this machine sends on an interface it serves.
+///
+/// `prefixes` is written unconditionally because `lower_advertise` refuses a
+/// block without one -- a router advertising nothing is a configuration
+/// mistake rather than a default -- and each entry is written as the `@pd:`
+/// reference it came in as. **A prefix is never a literal in this language**,
+/// deliberately: it names the interface whose delegation supplies it, because
+/// no config file can know what an ISP will hand out.
+///
+/// `dns` is the one key whose default is *true*, so the omit-at-default rule
+/// writes it only when it is off. Getting that backwards would turn a router
+/// that advertises a resolver into one that does not, which looks like
+/// working DNS right up until the moment the host has no other source.
+///
+/// Two things keep a refusal, and both are spellings the language does not
+/// have. `RaBackend::Exec` is a fourth backend `lower_advertise` will not
+/// accept -- `netcfgd-ra` implements it, nothing can ask for it -- and
+/// `PrefixRef::index`, which selects between several delegations in one
+/// lease, is hardcoded to 0 by the parser. Writing either as a guess would be
+/// a profile that does not reload.
+fn render_advertise(policy: &RaPolicy, name: &str, body: &mut String, missing: &mut Unrenderable) {
+	let backend = match &policy.backend {
+		RaBackend::Auto => None,
+		RaBackend::Odhcpd => Some("odhcpd"),
+		RaBackend::Radvd => Some("radvd"),
+		RaBackend::Exec(_) => {
+			missing.push(format!(
+				"interface {name}: an advertise backend handed to a script"
+			));
+			return;
+		}
+	};
+	let mut prefixes = Vec::new();
+	for prefix in &policy.prefixes {
+		if prefix.index != 0 {
+			missing.push(format!(
+				"interface {name}: an advertised prefix selected by index"
+			));
+			return;
+		}
+		prefixes.push(quote(&if prefix.subnet == 0 {
+			format!("@pd:{}", prefix.source)
+		} else {
+			format!("@pd:{}/{}", prefix.source, prefix.subnet)
+		}));
+	}
+
+	body.push_str("\tadvertise {\n");
+	if let Some(backend) = backend {
+		let _ = writeln!(body, "\t\tbackend = {}", quote(backend));
+	}
+	let _ = writeln!(body, "\t\tprefixes = {}", list_or_scalar(&prefixes));
+	if policy.managed {
+		body.push_str("\t\tmanaged = true\n");
+	}
+	if policy.other_config {
+		body.push_str("\t\tother_config = true\n");
+	}
+	if !policy.dns {
+		body.push_str("\t\tdns = false\n");
+	}
+	if let Some(lifetime) = policy.lifetime {
+		let _ = writeln!(body, "\t\tlifetime = {lifetime}");
+	}
+	body.push_str("\t}\n");
 }
 
 /// Ingress shaping, undone back into the operator's own spelling.
@@ -2359,6 +2439,95 @@ mod tests {
 			 \tdevice = \"wlan0\"\n\
 			 \twifi { psk = \"@secret:ap\" }\n\
 			 }\n",
+		);
+	}
+
+	/// An interface's guard, which is a sentence rather than a setting.
+	///
+	/// Losing it in a profile turns a deliberate refusal -- `ncfg` quoting the
+	/// operator's own words back when something would take the link down --
+	/// into a link that goes down without comment.
+	#[test]
+	fn a_guard_round_trips() {
+		round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tguard = \"the office VPN\"\n}\n");
+	}
+
+	/// Every advertise key at a non-default.
+	#[test]
+	fn an_advertise_policy_round_trips() {
+		round_trips(
+			"interface lan0 {\n\
+			 \tconfig = \"192.0.2.1/24\"\n\
+			 \tadvertise {\n\
+			 \t\tbackend = \"radvd\"\n\
+			 \t\tprefixes = [\"@pd:wan0\", \"@pd:wan0/3\"]\n\
+			 \t\tmanaged = true\n\
+			 \t\tother_config = true\n\
+			 \t\tdns = false\n\
+			 \t\tlifetime = 1800\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **The default-true key, which is the one that can be got backwards.**
+	///
+	/// `dns` defaults to on, so the omit-at-default rule writes it only when
+	/// it is off -- and a renderer writing it only when *on* produces a
+	/// profile whose router stops advertising a resolver. That looks like
+	/// working DNS until the host has no other source, which is the failure
+	/// nobody connects to a profile they saved weeks earlier.
+	#[test]
+	fn an_advertise_block_at_its_defaults_says_nothing_extra() {
+		round_trips("interface lan0 { advertise { prefixes = \"@pd:wan0\" } }\n");
+		let document = compile("interface lan0 { advertise { prefixes = \"@pd:wan0\" } }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("prefixes = \"@pd:wan0\""), "{rendered}");
+		for absent in ["backend", "managed", "other_config", "dns", "lifetime"] {
+			assert!(
+				!rendered.contains(absent),
+				"{absent} is at its default and should not be written: {rendered}"
+			);
+		}
+	}
+
+	/// **A backend the language cannot spell is refused, not guessed.**
+	///
+	/// `RaBackend::Exec` is implemented in `netcfgd-ra` and
+	/// `lower_advertise` accepts only auto, radvd and odhcpd, so no document
+	/// can ask for it -- which means a renderer inventing a spelling would
+	/// write a profile that does not reload. Reached here by putting the
+	/// variant in after compiling, since the parser will not.
+	#[test]
+	fn an_advertise_backend_the_parser_lacks_is_refused() {
+		let mut document = compile("interface lan0 { advertise { prefixes = \"@pd:wan0\" } }\n");
+		let policy = document.interfaces[0].advertise.as_mut().expect("a policy");
+		policy.backend = RaBackend::Exec("/usr/local/bin/ra".to_owned());
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing
+				.iter()
+				.any(|what| what.contains("handed to a script")),
+			"{missing:?}"
+		);
+	}
+
+	/// And the same for a prefix picked by index, which the parser pins to 0.
+	#[test]
+	fn an_advertised_prefix_by_index_is_refused() {
+		let mut document = compile("interface lan0 { advertise { prefixes = \"@pd:wan0\" } }\n");
+		document.interfaces[0]
+			.advertise
+			.as_mut()
+			.expect("a policy")
+			.prefixes[0]
+			.index = 1;
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing
+				.iter()
+				.any(|what| what.contains("selected by index")),
+			"{missing:?}"
 		);
 	}
 

@@ -1036,23 +1036,33 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Eleven places in the model cannot be reached from the configuration
-  language at all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`,
-  `DnsServer`'s `port` and `sni`, `Device`'s `match`, `HookRef`'s `run_as` and
-  `timeout`, which 0258 found when the rule editor had to decide whether to
-  offer them, and -- found by 10.170 -- `Route`'s `scope` and `proto` and the
-  `DnsMode::Exec` variant. The example file documents a syntax for some of
-  them that does nothing. Either the parser gains the keys or the schema loses
-  the fields, and the schema is witnessed, so neither is a passing change.
-  `run_as` needs one thing more than grammar: a materialiser that writes the
-  script somewhere the named user can read, which 0700 under root is not.
+- **Seventeen places in the model are verified unreachable from the
+  configuration language, and that is a floor rather than a count.** 10.171
+  says why a cheap total here cannot be trusted: three greps were built for it
+  and each was wrong in a different direction, because the question is
+  interprocedural. The only exact instrument is the parser -- a one-block
+  configuration through `ncfg show`, which compiles and touches nothing.
 
-  **They are not one question, and the division is what to decide first.**
-  `DnsMode::Exec` is implemented end to end in `netcfgd-dns` and wants only a
-  key; `Route`'s two are read by nothing outside the model and a frozen plan
-  fixture, so they are schema with no behaviour on either side. The method for
-  all three is one command apiece -- `ncfg show` over a one-block
-  configuration, which compiles and touches nothing.
+  **They divide by shape, and the division is what to decide first.**
+
+      implemented, no way to ask      DnsMode::Exec (netcfgd-dns),
+                                      RaBackend::Exec (netcfgd-ra)
+      schema with no behaviour        Route scope/proto, PrefixRef::index,
+                                      Dhcp4 hostname_mode/client_id/
+                                      request_options, Dhcp6::rapid_commit
+      needs more than grammar         HookRef run_as, timeout
+      the rest, recorded by 0258       DnsPolicy options/dnssec/transport,
+                                      DnsServer port/sni, Device match
+
+  Either the parser gains the keys or the schema loses the fields, and the
+  schema is witnessed, so neither is a passing change. `run_as` needs one
+  thing more than grammar: a materialiser that writes the script somewhere the
+  named user can read, which 0700 under root is not. The example file
+  documents a syntax for some of these that does nothing.
+
+  **The first group is a pattern rather than a coincidence**: both are "hand
+  it to a script" escape hatches, implemented end to end in a backend, and
+  `RoutingRule::invert` was a third of the same kind before 10.168 closed it.
 
   **It was nine, and `RoutingRule::invert` is the one that closed** -- 10.168,
   by adding the parser arm, since every other layer already carried it and a
@@ -9532,6 +9542,98 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.171 The last two interface blocks, and three detectors that were each wrong
+
+`advertise` and `guard` were the last reachable entries on the renderer's
+refusal list for an interface, and both are small. A `guard` is the operator's
+own sentence about what depends on a link, which `ncfg` quotes back when
+something would take it down -- losing it in a profile turns a deliberate
+refusal into a link that goes down without comment. An `advertise` block is the
+router advertisement policy, and its one trap is that **`dns` defaults to
+on**: the omit-at-default rule therefore writes it only when it is off, and
+getting that backwards produces a profile whose router stops advertising a
+resolver, which looks like working DNS until the host has no other source.
+
+Two things inside it keep a refusal, because the language has no words for
+them: `RaBackend::Exec`, a fourth backend `netcfgd-ra` implements and
+`lower_advertise` will not accept, and `PrefixRef::index`, which selects
+between several delegations in one lease and is pinned to 0 by the parser.
+Both are reached in tests by putting the value in after compiling, since the
+parser will not.
+
+### Hooks are not a renderer gap and should stop being read as one
+
+The refusal stays, and the reason is now in the code rather than in whatever a
+reader assumes. A `HookRef` holds a **path and a sha256, not the shell**:
+`lower` hands the body to `hooks.record(...)`, which materialises it to a file
+and returns a reference, and the AST's `Hook.body` never reaches the document.
+There is also no path syntax -- a hook is only ever a brace body. So rendering
+one needs either a read of the materialised file, checked against the recorded
+hash, or new grammar. Both are decisions, and the hash exists for exactly the
+drift that read would have to tolerate.
+
+### Three detectors, each wrong in a different direction
+
+The count of model places no configuration can reach has been wrong three
+times in one session, so it got a sweep rather than a fourth increment. The
+sweep is the part worth keeping, because **every detector built for it was
+wrong, and each wrongness was visible only because some of the answers were
+already known.**
+
+- **Fields whose name never appears in `lower.rs`.** 204 desired-document
+  field names, 20 candidates. Sound in principle -- assigning a field requires
+  naming it -- and its positive control held: it found `dnssec`, `options`,
+  `transport`, `run_as` and `match`'s members, all already recorded. But it
+  **cannot tell two fields of the same name apart**, and `timeout` is both
+  `HookRef`'s and `ProbePolicy`'s. It reported `HookRef::timeout` reachable.
+  It is not; `lower_probe` is what mentions the word, and the record was right.
+- **Variants whose spelling never appears.** 43 candidates, and wrong in both
+  directions at once. It called every `BondMode` unreachable, because the
+  config spells them with hyphens and the guess used underscores -- and it
+  called `DnsMode::Exec` *reachable*, because `lower.rs` contains `"exec"`
+  belonging to the secret providers. The two cases already known to be
+  unreachable were the two it cleared.
+- **Variants whose constructor path never appears.** Exact where it applies, a
+  variant being constructible only by naming its path and `lower.rs` having no
+  glob imports -- and it reported `BondMode` 7/7 unconstructed, which is
+  false. `BondMode::parse` lives in the **model**, and `lower.rs` calls it. So
+  does `Principal::parse`. A path-only grep cannot follow the hop into a
+  helper, which is where this language keeps its string-to-variant mapping.
+
+**What that adds up to is not a better grep.** The question "can a
+configuration say this" is interprocedural, and the only exact instrument is
+the parser itself: a one-block configuration through `ncfg show`. That is what
+settled every entry in 10.170. It is also why **this entry publishes no
+total**: a cheap total here has been wrong four times, and a number with a
+method nobody can re-run is worth less than a list with one.
+
+### What is verified, and how
+
+Confirmed unreachable, by probe where a spelling was known and by reading
+where it was not:
+
+    the eight already recorded      DnsPolicy options/dnssec/transport,
+                                    DnsServer port/sni, Device match,
+                                    HookRef run_as/timeout
+    found by 10.170                 DnsMode::Exec, Route::scope, Route::proto
+    found by 10.171                 RaBackend::Exec, PrefixRef::index,
+                                    Dhcp4::hostname_mode, Dhcp4::client_id,
+                                    Dhcp4::request_options, Dhcp6::rapid_commit
+
+**The four DHCP fields are the inert shape rather than the `invert` shape**,
+and the distinction is the one that decides what to do with each. Their names
+appear nowhere in `lower.rs`; the model sets them only to their own defaults at
+`address.rs:108`-`111`; and nothing outside the model's own `frozen.rs` and
+`canonical.rs` reads them. A hostname to send, a client identifier, extra
+options to request and DHCPv6 rapid commit -- schema with no behaviour on
+either side.
+
+`DnsMode::Exec` and `RaBackend::Exec` are the other shape, and now there are
+three of them with `RoutingRule::invert`: each is a *"hand it to a script"*
+escape hatch, implemented end to end in a backend, with no way to ask for it.
+That is a pattern rather than three coincidences, and it is still the holder's
+call.
 
 ## 10.170 Shaping the download direction could not be saved, and why that was invisible
 
