@@ -241,7 +241,17 @@ for pid in $pids; do
 	wait "$pid" || rc=$?
 done
 
-out=${VM_LOG:-$repo/vm-console.log}
+# **Under the build directory, not at the repo root.** The first version wrote
+# `$repo/vm-console.log`, which drops an untracked file in the tree on every
+# run -- a line in `git status` that nobody put there, which is how a blanket
+# `git add` sweeps up something nobody meant to commit. `build/` is already
+# ignored, so this costs no ignore rule and leaves the tree as it was found.
+# `target/` because it is the one directory `.gitignore` covers at the root --
+# `build/` is NOT ignored in this tree, only `gui/build/` and `dist/` are, so
+# defaulting there would have reintroduced the untracked file by a new route.
+# Checked with `git check-ignore` rather than assumed from the name.
+out=${VM_LOG:-$repo/target/vm-console.log}
+mkdir -p "$(dirname "$out")"
 : > "$out"
 failed=0
 i=1
