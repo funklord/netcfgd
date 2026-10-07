@@ -9587,11 +9587,32 @@ boot and none of the point.
 
 Two radios and a `/dev/vhci` inside a guest, in about ten seconds of boot --
 every capability the eight skipping scripts name, plus an init system this
-machine cannot otherwise run. Images come from `tool/vm/fetch.sh` against a
+machine cannot otherwise run. **`make vm-cluster` boots two to five on a shared
+wire**, measured at three with every pair reachable, which is the cluster the
+question asked for. Images come from `tool/vm/fetch.sh` against a
 pinned published checksum into `$VM_DIR` (default `~/vm`, pointed at the 46 T
 store), and the guest is diskless so nothing is ever written there -- which
 matters because a guest disk over NFS corrupts in ways that look like guest
 faults.
+
+### The wire needed one flag, and the first passing run could not say so
+
+`localaddr=127.0.0.1` on the multicast socket is a requirement rather than a
+precaution: removed, with nothing else changed, 3 packets became 100% loss.
+Unbound, the socket leaves by whatever interface the host's routing picks.
+
+**The run that first passed had changed two things at once** -- that flag and an
+iproute2-only `ip -4 -br` that busybox answers with a usage message and an empty
+string, so a guest reported `guest 3 of 3 on ` and looked misconfigured. One
+result, two changes, no information about which mattered. The control is what
+separated them.
+
+**And it caught a trap in my own harness.** `wire.sh` is a diagnostic: it
+prints packet counters and deliberately does not fail, so `run.sh` reported
+`ok, 2 guest(s)` for the control run in which the wire was completely dead.
+Correct for a diagnostic, and exactly the line that gets quoted later as a
+pass, so the payload now says so in its own header. `cluster.sh` asserts;
+`wire.sh` reports.
 
 ### Three of the four failed boots failed by succeeding
 

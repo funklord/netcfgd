@@ -1,7 +1,8 @@
 #!/bin/sh
 # Boot a guest, run a script in it, and bring back what it said.
 #
-#     sh tool/vm/run.sh tool/vm/payload/capability.sh
+#     sh tool/vm/run.sh tool/vm/payload/capability.sh        # one guest
+#     sh tool/vm/run.sh tool/vm/payload/cluster.sh 3         # three, on a wire
 #
 # TERMINATION, because this starts a virtual machine and a web server.
 #   The guest runs under `timeout $VM_TIMEOUT` (default 180) and qemu is a
@@ -47,6 +48,7 @@ set -eu
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 store=${VM_DIR:-$HOME/vm}
 payload=${1:-}
+count=${2:-${VM_COUNT:-1}}
 timeout_s=${VM_TIMEOUT:-180}
 repo_url=${VM_REPO:-http://dl-cdn.alpinelinux.org/alpine/v3.21/main}
 
@@ -55,7 +57,11 @@ die() {
 	exit 1
 }
 
-[ -n "$payload" ] || die "usage: run.sh <payload.sh>"
+[ -n "$payload" ] || die "usage: run.sh <payload.sh> [count]"
+case "$count" in
+1 | 2 | 3 | 4 | 5) ;;
+*) die "count is 1 to 5, not \`$count'" ;;
+esac
 [ -f "$payload" ] || die "no such payload: $payload"
 for f in vmlinuz-lts initramfs-lts modloop-lts; do
 	[ -f "$store/alpine-3.21.0-x86_64/boot/$f" ] ||
@@ -99,6 +105,11 @@ mkdir -p "$work/ovl/etc/local.d" "$work/ovl/etc/runlevels/default"
 	echo '#!/bin/sh'
 	echo '# Written by tool/vm/run.sh.'
 	echo 'exec > /dev/console 2>&1'
+	echo '# Which guest this is, from the command line, so one payload can'
+	echo '# serve every member of the cluster.'
+	echo 'VM_INDEX=$(sed -n "s/.*vm_index=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
+	echo 'VM_COUNT=$(sed -n "s/.*vm_count=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
+	echo 'export VM_INDEX VM_COUNT'
 	echo 'mkdir -p /.modloop /lib/modules'
 	echo 'if mount -t squashfs -o ro /dev/vda /.modloop 2>/dev/null; then'
 	echo '	mount --bind /.modloop/modules /lib/modules 2>/dev/null ||'
@@ -168,35 +179,87 @@ echo "run: booting, up to ${timeout_s}s"
 # directory as the overlay -- the file is already in the store, so it is a
 # symlink and not a copy -- and `alpine_repo` points at the mirror, which the
 # guest reaches through user-net's NAT.
+# **The wire between guests is a multicast socket**, which is a shared L2
+# segment between N qemu processes with no bridge, no tap and no privilege --
+# and `localaddr=127.0.0.1` on it is a requirement rather than a precaution,
+# measured by removing it and changing nothing else:
+#
+#     with localaddr      3 packets transmitted, 0% packet loss
+#     without             3 packets transmitted, 100% packet loss
+#
+# Unbound, the socket leaves by whatever interface the host's routing chooses
+# and the guests never see each other. The first passing run had changed two
+# things at once -- this flag and a busybox incompatibility in the payload --
+# so it said nothing about which mattered; this is the one-variable control.
+#
+# so the "two to five machines" this tier was asked for costs nothing beyond
+# the guests themselves. The port is per-run, because two sessions on this
+# machine would otherwise share a segment and see each other's traffic.
+#
+# Each guest keeps user-net as its first NIC, for the overlay fetch and the
+# mirror, and the wire is its second. The MAC is per-index: identical MACs on
+# one segment is a switch learning the same address on every port, which looks
+# like the network dropping frames rather than like a configuration error.
+mcast_port=$(( 20000 + $$ % 20000 ))
+pids=
 rc=0
-timeout "$timeout_s" qemu-system-x86_64 \
-	-enable-kvm -m 1024 -smp 2 -nographic -no-reboot \
-	-kernel "$store/alpine-3.21.0-x86_64/boot/vmlinuz-lts" \
-	-initrd "$store/alpine-3.21.0-x86_64/boot/initramfs-lts" \
-	-append "console=ttyS0,115200 ip=dhcp quiet \
+i=1
+while [ "$i" -le "$count" ]; do
+	timeout "$timeout_s" qemu-system-x86_64 \
+		-enable-kvm -m 1024 -smp 2 -nographic -no-reboot \
+		-kernel "$store/alpine-3.21.0-x86_64/boot/vmlinuz-lts" \
+		-initrd "$store/alpine-3.21.0-x86_64/boot/initramfs-lts" \
+		-append "console=ttyS0,115200 ip=dhcp quiet \
 modules=loop,squashfs,virtio_net,virtio_pci,virtio_blk \
 alpine_repo=$repo_url \
+vm_index=$i vm_count=$count \
 apkovl=http://10.0.2.2:$port/test.apkovl.tar.gz" \
-	-netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-	-drive file="$store/alpine-3.21.0-x86_64/boot/modloop-lts",format=raw,if=virtio,readonly=on \
-	< /dev/null \
-	> "$work/console.log" 2>&1 || rc=$?
+		-netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+		-netdev socket,id=lan,mcast=230.0.0.42:$mcast_port,localaddr=127.0.0.1 \
+		-device virtio-net-pci,netdev=lan,mac=52:54:00:12:34:0$i \
+		-drive file="$store/alpine-3.21.0-x86_64/boot/modloop-lts",format=raw,if=virtio,readonly=on \
+		< /dev/null > "$work/console.$i.log" 2>&1 &
+	pids="$pids $!"
+	i=$((i + 1))
+done
 
-# The console log is kept whole and grepped afterwards, never piped into a
-# reducer: `evidence.md`'s rule, and the only time the output matters is the
-# run that failed.
+echo "run: $count guest(s) booting, up to ${timeout_s}s, wire on port $mcast_port"
+
+# Every guest is waited for, and the first non-zero status is kept rather than
+# the last: `wait` without this reports whichever finished last, so a failing
+# guest beside a passing one would be reported as a pass.
+for pid in $pids; do
+	wait "$pid" || rc=$?
+done
+
 out=${VM_LOG:-$repo/vm-console.log}
-tr -d '\r' < "$work/console.log" | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' > "$out"
+: > "$out"
+failed=0
+i=1
+while [ "$i" -le "$count" ]; do
+	# The console log is kept whole and read from a file, never piped into a
+	# reducer: `evidence.md`'s rule, and the only run whose output matters is
+	# the one that failed.
+	printf '===== guest %s =====\n' "$i" >> "$out"
+	tr -d '\r' < "$work/console.$i.log" |
+		sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' >> "$out"
 
-if ! grep -q "VM-PAYLOAD-BEGIN" "$out"; then
-	echo "run: the payload never started -- the guest did not reach it" >&2
-	echo "run: the whole console is in $out; its last lines were:" >&2
-	tail -12 "$out" >&2
+	if ! grep -q "VM-PAYLOAD-BEGIN" "$work/console.$i.log"; then
+		echo "run: guest $i never reached the payload" >&2
+		failed=1
+	elif ! grep -q "VM-PAYLOAD-END rc=0" "$work/console.$i.log"; then
+		echo "run: guest $i ran the payload and it failed" >&2
+		failed=1
+	fi
+	tr -d '\r' < "$work/console.$i.log" |
+		sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' |
+		sed -n '/VM-PAYLOAD-BEGIN/,/VM-PAYLOAD-END/p' |
+		sed "s/^/run: $i   /"
+	i=$((i + 1))
+done
+
+if [ "$failed" -ne 0 ]; then
+	echo "run: the whole console of every guest is in $out (qemu exited $rc)" >&2
 	exit 1
 fi
-sed -n '/VM-PAYLOAD-BEGIN/,/VM-PAYLOAD-END/p' "$out" | sed 's/^/run:   /'
-if ! grep -q "VM-PAYLOAD-END rc=0" "$out"; then
-	echo "run: the payload did not finish cleanly (qemu exited $rc)" >&2
-	exit 1
-fi
-echo "run: ok, and the console is in $out"
+echo "run: ok, $count guest(s), and the consoles are in $out"

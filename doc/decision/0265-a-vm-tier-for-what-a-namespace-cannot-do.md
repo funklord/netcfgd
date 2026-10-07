@@ -1,8 +1,8 @@
 # 0265: A VM tier, for exactly what a namespace cannot do
 
 Status: accepted; built and measured -- `make vm` boots a guest and runs a
-payload in it. What is left is named under "What this leaves" and is the
-multi-guest wire, the nspawn tier, and procd.
+payload in it, and `make vm-cluster` boots two to five on a shared wire. What
+is left is named under "What this leaves": the nspawn tier and procd.
 Date: 2026-10-07
 Milestone: a second test tier, asked for by the copyright holder
 
@@ -186,9 +186,45 @@ no image to rebuild in the loop, and the inter-guest wire is
 `-netdev socket,mcast=` -- a shared L2 segment between N qemu processes, with
 no bridge and no privilege.
 
-**Deliberately not done here**: the apkovl and the multi-guest wire, the nspawn
-tier, and procd -- which needs an OpenWrt image rather than an Alpine one and
-is the one of the three init systems this tier does not reach.
+**The wire is built and the requirement on it was measured.** `make vm-cluster`
+boots two to five guests on a qemu multicast socket -- a shared layer 2 segment
+between N qemu processes, with no bridge, no tap and no privilege. Three
+guests, every pair reachable:
+
+```text
+guest 1 of 3 at 10.42.0.1/24      peers: 2 of 2 reachable
+guest 2 of 3 at 10.42.0.2/24      peers: 2 of 2 reachable
+guest 3 of 3 at 10.42.0.3/24      peers: 2 of 2 reachable
+```
+
+**`localaddr=127.0.0.1` on that socket is a requirement, not a precaution**,
+and it was measured by removing it and changing nothing else:
+
+    with localaddr       3 packets transmitted, 0% packet loss
+    without              3 packets transmitted, 100% packet loss
+
+Unbound, the socket leaves by whatever interface the host's routing chooses and
+the guests never see each other. **The run that first passed had changed two
+things at once** -- this flag, and an iproute2-only `ip -4 -br` in the payload
+that busybox answers with a usage message and an empty string -- so it said
+nothing about which mattered. The control is what separates them, and
+`evidence.md`'s rule is why it was taken rather than assumed.
+
+The port is per-run, because two sessions on this machine would otherwise share
+a segment and see each other's traffic; the MAC is per-index, because identical
+MACs on one segment is a switch learning one address on every port, which looks
+like the network dropping frames rather than like a configuration error.
+
+**And the diagnostic payload reports rather than asserts, which is a trap worth
+naming.** `wire.sh` prints packet counters and neighbour tables and does not
+fail, so `run.sh` printed `ok, 2 guest(s)` for the control run in which the wire
+was completely dead. That is correct for a diagnostic and is exactly the line
+somebody quotes later as a pass, so it says so in its own header. `cluster.sh`
+is the one that asserts, by comparing reachable peers against expected peers.
+
+**Deliberately not done here**: the nspawn tier, and procd -- which needs an
+OpenWrt image rather than an Alpine one and is the one of the three init
+systems this tier does not reach.
 
 **And a VM is a process, which is the one way it is kinder than a container.**
 `running-code.md` warns that an outer `timeout` bounds a wrapper and not a

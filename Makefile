@@ -1807,12 +1807,22 @@ FUZZ_ARGS   ?=
 vm: vm-image
 	sh tool/vm/run.sh tool/vm/payload/capability.sh
 
+# Several guests on one wire, which is what the tier was asked for. Three by
+# default; `VM_COUNT` or a second argument to run.sh takes one to five.
+#
+# The wire is a qemu multicast socket -- real layer 2 between real kernels,
+# where `unshare -rn` plus veth gives real layer 2 inside ONE kernel, which
+# delegation.sh already uses. What this adds is everything above the wire.
+# Measured: three guests, every pair reachable, 0% loss.
+vm-cluster: vm-image
+	sh tool/vm/run.sh tool/vm/payload/cluster.sh $${VM_COUNT:-3}
+
 # Separate, because the fetch is the only part that needs the internet and it
 # is a no-op once the image is in place.
 vm-image:
 	sh tool/vm/fetch.sh
 
-.PHONY: vm vm-image
+.PHONY: vm vm-cluster vm-image
 
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
