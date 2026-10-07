@@ -21,7 +21,9 @@ use netcfgd_model::control::Principal;
 use netcfgd_model::device::{AccessPoint, AclPolicy};
 use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
-use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
+use netcfgd_model::interface::{
+	BridgeVlan, InterfaceKind, LinkSettings, ProbePolicy, QdiscKind, QdiscPolicy, Toggle,
+};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
@@ -70,8 +72,12 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 	for network in &document.networks {
 		render_network(network, overrides, &mut text, &mut missing);
 	}
+	let ingress = IngressShaping::of(document, &mut missing);
 	for device in &document.devices {
-		render_device(device, overrides, &mut text, &mut missing);
+		if ingress.derived.contains(&device.name) {
+			continue;
+		}
+		render_device(device, overrides, &ingress, &mut text, &mut missing);
 	}
 
 	// Named rather than skipped, per the header: these have no rendering yet
@@ -266,12 +272,22 @@ fn render_interface(
 	// Every one of these has a block or a key of its own that this does not
 	// write yet. Named so the operator knows what to keep by hand.
 	//
-	// `ingress_redirect` is here and cannot leave: it is not a config key at
-	// all. The compiler synthesises it, and the `ifb` device it points at,
-	// from `ingress_bandwidth` -- so rendering it would make the next compile
-	// synthesise a *second* one on top. What a snapshot would have to write
-	// back is the `ingress_bandwidth` it came from, which the document no
-	// longer holds by the time this sees it.
+	// **This comment used to say `ingress_redirect` was here and "cannot
+	// leave", and it was wrong twice.** It was wrong about the place: 0155
+	// pass 1a moved that field to `device` and the sentence stayed behind, so
+	// it described an entry this list has not had for some time. And it was
+	// wrong about the impossibility, by one step. The analysis above it was
+	// exactly right -- the compiler synthesises the redirect and the `ifb`
+	// from `ingress_bandwidth`, and rendering the redirect would make the next
+	// compile synthesise a second one -- and it closed with "the rate the
+	// snapshot would have to write back is one the document no longer holds".
+	// The document does hold it. It holds it on the derived device, which is
+	// not visible from here, and `IngressShaping` recovers it from there.
+	//
+	// Worth keeping as a warning about the shape rather than the instance: a
+	// refusal justified as permanent is read by the next person as a reason
+	// not to try, and this one was scoped to what one function could see while
+	// being written as a fact about the document.
 	for (present, what) in [
 		(!interface.hooks.is_empty(), "hooks"),
 		(interface.advertise.is_some(), "advertise"),
@@ -448,7 +464,7 @@ fn render_kind(kind: &InterfaceKind, name: &str, body: &mut String, missing: &mu
 			}
 			body.push_str("\t}\n");
 		}
-		other => missing.push(format!("interface {name}: kind {}", kind_name(other))),
+		other => missing.push(format!("device {name}: kind {}", kind_name(other))),
 	}
 }
 
@@ -516,6 +532,36 @@ fn render_probe(probe: &ProbePolicy, body: &mut String) {
 	body.push_str("\t}\n");
 }
 
+/// One static address, with the modifier words that follow it.
+///
+/// **The modifiers are part of the `config` string, not keys of their own**,
+/// which is why this is a `format!` and not three `writeln!`s: netcfgd's
+/// addressing syntax takes netifrc's shape, so a peer and a lifetime are
+/// trailing words that `address_entries` splits back out using its `MODIFIERS`
+/// table. The spellings here are that table's -- `peer`, `preferred_lft`,
+/// `valid_lft` -- and not the model's field names, which are
+/// `preferred_lifetime` and `valid_lifetime`.
+///
+/// All three were refusing the save until now, which made a point-to-point
+/// link and a deprecated address both profile-proof: `preferred_lft 0` is how
+/// an address is kept reachable while no longer being chosen as a source, and
+/// it is exactly the sort of thing that differs between one network and the
+/// next.
+fn static_address(address: &netcfgd_model::address::Static) -> String {
+	let mut text = address.address.clone();
+	if let Some(peer) = &address.peer {
+		text.push_str(" peer ");
+		text.push_str(peer);
+	}
+	if let Some(seconds) = address.preferred_lifetime {
+		let _ = write!(text, " preferred_lft {seconds}");
+	}
+	if let Some(seconds) = address.valid_lifetime {
+		let _ = write!(text, " valid_lft {seconds}");
+	}
+	text
+}
+
 /// Addressing, shared by an interface and by a wireless network.
 ///
 /// A `network` block takes the same `config` key an interface does, so this is
@@ -531,15 +577,7 @@ fn render_addressing(
 	let config: Vec<String> = sources
 		.iter()
 		.filter_map(|source| match source {
-			AddressSource::Static(address) => {
-				if address.peer.is_some()
-					|| address.preferred_lifetime.is_some()
-					|| address.valid_lifetime.is_some()
-				{
-					missing.push(format!("{whose}: an address with lifetimes or a peer"));
-				}
-				Some(quote(&address.address))
-			}
+			AddressSource::Static(address) => Some(quote(&static_address(address))),
 			AddressSource::Dhcp4(_) => Some(quote("dhcp")),
 			AddressSource::Dhcp6(_) => Some(quote("dhcp6")),
 			AddressSource::Slaac(_) => Some(quote("slaac")),
@@ -790,15 +828,13 @@ fn render_eap(eap: &EapConfig, body: &mut String) {
 fn render_device(
 	device: &Device,
 	overrides: &Overrides,
+	ingress: &IngressShaping,
 	text: &mut String,
 	missing: &mut Unrenderable,
 ) {
 	let name = &device.name;
 	if device.r#match.is_some() {
 		missing.push(format!("device {name}: a match block"));
-	}
-	if device.link_settings.is_some() {
-		missing.push(format!("device {name}: ethtool settings"));
 	}
 
 	let mut body = String::new();
@@ -811,11 +847,17 @@ fn render_device(
 		let _ = writeln!(body, "\tmaster = {}", quote(master));
 	}
 	render_bridge_vlans(&device.bridge_vlans, &mut body);
-	if device.qdisc.is_some() {
-		missing.push(format!("device {name}: qdisc"));
+	if let Some(qdisc) = &device.qdisc {
+		render_qdisc(
+			qdisc,
+			ingress.rates.get(name).copied(),
+			name,
+			&mut body,
+			missing,
+		);
 	}
-	if device.ingress_redirect.is_some() {
-		missing.push(format!("device {name}: ingress_redirect"));
+	if let Some(settings) = &device.link_settings {
+		render_ethtool(settings, &mut body);
 	}
 	// Settings of the adapter, which moved here from `interface` with 0155
 	// pass 1a. Rendered from the day they arrived rather than joining the list
@@ -946,6 +988,233 @@ fn mac_policy_name(policy: MacPolicy) -> &'static str {
 		MacPolicy::PerNetwork => "per_network",
 		MacPolicy::PerConnection => "per_connection",
 	}
+}
+
+/// Ingress shaping, undone back into the operator's own spelling.
+///
+/// **This is the one place the renderer reconstructs an input rather than
+/// describing the document**, and it has to, because `expand_ingress_shapers`
+/// does not merely add to what the operator wrote -- it moves it. One
+/// `ingress_bandwidth` on a device's qdisc becomes three things: the rate is
+/// `take`n off that qdisc, the device gains an `ingress_redirect`, and a
+/// second device `ifb-<name>` is synthesised to carry the rate on a `cake` of
+/// its own, flagged `ingress`. The kernel cannot queue what has already
+/// arrived, so the traffic is redirected onto an `ifb` where it has become
+/// egress; decision 0023's amendment covers why.
+///
+/// Rendering that faithfully would be wrong in both directions. The rate is no
+/// longer on the device the operator put it on, so writing each device as it
+/// stands loses it from one and invents a device for it in the other -- and
+/// recompiling the result would synthesise a *second* `ifb` for a document
+/// that already had one. So the derived device is skipped and its rate written
+/// back where it came from, and the round trip is what proves the inversion
+/// exact: the second compile re-derives what the first one derived.
+///
+/// **Three refusals were firing at once before this**, which is why it is
+/// worth the machinery rather than a fourth: `ingress_redirect`, `kind ifb`
+/// and the `ingress` qdisc are all unreachable from the configuration
+/// language *by name*, so each read as a field nothing could set -- and all
+/// three are set by the compiler for any machine that shapes its inbound line,
+/// which is most machines on a domestic connection. None of them could save a
+/// profile.
+struct IngressShaping {
+	/// Devices the compiler synthesised, which are not written at all.
+	derived: std::collections::HashSet<String>,
+	/// Shaped device name to the rate recovered from its `ifb`.
+	rates: std::collections::HashMap<String, u64>,
+}
+
+impl IngressShaping {
+	/// Work out which devices are derived, refusing where the shape is not
+	/// this compiler's.
+	///
+	/// **Strict on purpose.** A document reaches the renderer from the
+	/// compiler today, but nothing in the type says so, and the inversion is
+	/// only valid for a device that really is `expand_ingress_shapers`'
+	/// output. So every field the synthesis leaves at its default is checked,
+	/// and anything else -- an operator's own `ifb` with an MTU on it, a
+	/// redirect pointing at a device that is not there -- keeps an honest
+	/// refusal rather than being rendered wrongly. That is the same reason
+	/// `render_wifi_device` keeps a `regdom` check the parser already makes.
+	fn of(document: &netcfgd_model::Document, missing: &mut Unrenderable) -> Self {
+		let mut derived = std::collections::HashSet::new();
+		let mut rates = std::collections::HashMap::new();
+		for device in &document.devices {
+			let Some(target) = &device.ingress_redirect else {
+				continue;
+			};
+			let found = document
+				.devices
+				.iter()
+				.find(|candidate| candidate.name == *target)
+				.filter(|candidate| candidate.name == format!("ifb-{}", device.name))
+				.and_then(Self::rate_of);
+			match found {
+				Some(rate) => {
+					derived.insert(target.clone());
+					rates.insert(device.name.clone(), rate);
+				}
+				None => missing.push(format!(
+					"device {}: an ingress redirect to `{target}`, which is not a \
+					 device this build would have made for it",
+					device.name
+				)),
+			}
+		}
+		Self { derived, rates }
+	}
+
+	/// The rate an `ifb` carries, if it is one this build would have made.
+	///
+	/// Everything `expand_ingress_shapers` leaves alone is required to still
+	/// be alone: a field set on the synthesised device is operator intent that
+	/// this inversion would discard, and discarding it silently is the failure
+	/// the whole unrenderable list exists to avoid.
+	fn rate_of(device: &Device) -> Option<u64> {
+		let bare = device.kind == InterfaceKind::Ifb
+			&& device.managed
+			&& device.on_unmanage == OnUnmanage::default()
+			&& device.r#match.is_none()
+			&& device.wifi.is_none()
+			&& device.modem.is_none()
+			&& device.mtu.is_none()
+			&& device.mac.is_none()
+			&& device.link_settings.is_none()
+			&& device.master.is_none()
+			&& device.ingress_redirect.is_none()
+			&& device.bridge_vlans.is_empty();
+		if !bare {
+			return None;
+		}
+		let qdisc = device.qdisc.as_ref()?;
+		if !qdisc.ingress || qdisc.kind != QdiscKind::Cake || qdisc.ingress_bandwidth_bits.is_some()
+		{
+			return None;
+		}
+		qdisc.bandwidth_bits
+	}
+}
+
+/// A device's ethtool settings.
+///
+/// Every field is written only where it differs from its default, which for
+/// the five offloads and for `autoneg` means [`Toggle::Unmanaged`] -- *"whatever
+/// the driver defaults to, or somebody else set"*. That is not the same as
+/// `off`, and writing `unmanaged` explicitly would turn a block that declines
+/// to touch an offload into one that says so at length.
+///
+/// The block is written whenever the device has one at all, because
+/// `lower_device` only attaches it when `is_empty()` is false -- so a device
+/// carrying `link_settings` carries at least one non-default key, and the
+/// block cannot come out empty.
+fn render_ethtool(settings: &LinkSettings, body: &mut String) {
+	body.push_str("\tethtool {\n");
+	for (value, key) in [
+		(settings.autoneg, "autoneg"),
+		(settings.gro, "gro"),
+		(settings.gso, "gso"),
+		(settings.tso, "tso"),
+		(settings.rx_checksum, "rx_checksum"),
+		(settings.tx_checksum, "tx_checksum"),
+	] {
+		if value != Toggle::default() {
+			let _ = writeln!(body, "\t\t{key} = {}", quote(toggle_name(value)));
+		}
+	}
+	if let Some(speed) = settings.speed {
+		let _ = writeln!(body, "\t\tspeed = {speed}");
+	}
+	if let Some(duplex) = &settings.duplex {
+		let _ = writeln!(body, "\t\tduplex = {}", quote(duplex));
+	}
+	if let Some(wol) = &settings.wol {
+		let _ = writeln!(body, "\t\twol = {}", quote(wol));
+	}
+	if let Some(size) = settings.rx_ring {
+		let _ = writeln!(body, "\t\trx_ring = {size}");
+	}
+	if let Some(size) = settings.tx_ring {
+		let _ = writeln!(body, "\t\ttx_ring = {size}");
+	}
+	body.push_str("\t}\n");
+}
+
+/// A [`Toggle`] as the parser spells it.
+fn toggle_name(toggle: Toggle) -> &'static str {
+	match toggle {
+		Toggle::Unmanaged => "unmanaged",
+		Toggle::On => "on",
+		Toggle::Off => "off",
+	}
+}
+
+/// A device's root qdisc.
+///
+/// **Two spellings, and which one is written is decided by the content.** The
+/// language takes `qdisc = "cake"` for a scheduler with nothing to configure
+/// and a `qdisc { }` block where a rate is being set, and both come back as
+/// the same `QdiscPolicy` -- so a kind on its own is written as the short form
+/// it was almost certainly written in.
+///
+/// `ingress` is the one field with no key, and it keeps a refusal. Nothing in
+/// the language sets it: the planner sets it on the `cake` it puts on an `ifb`
+/// device of its own making, never on an interface an operator named. A
+/// document carrying it did not come through this compiler, which is the same
+/// reason `render_wifi_device` keeps its own `regdom` check.
+fn render_qdisc(
+	qdisc: &QdiscPolicy,
+	recovered: Option<u64>,
+	name: &str,
+	body: &mut String,
+	missing: &mut Unrenderable,
+) {
+	// A qdisc flagged `ingress` on a device this renderer is writing means the
+	// device was NOT recognised as one the compiler synthesised -- a derived
+	// one is skipped before it gets here. So the flag has arrived on an
+	// operator's own device, which no configuration can say, and refusing is
+	// the honest answer.
+	if qdisc.ingress {
+		missing.push(format!("device {name}: a qdisc metering arriving traffic"));
+	}
+	// `ingress_bandwidth_bits` is `take`n by `expand_ingress_shapers`, so a
+	// compiled document never still carries it here. It is written where it
+	// does survive, because the renderer is reachable from a document that did
+	// not come through this compiler, and dropping a shaped rate quietly is
+	// the one outcome worse than refusing.
+	let inbound = qdisc.ingress_bandwidth_bits.or(recovered);
+	if qdisc.bandwidth_bits.is_none() && inbound.is_none() {
+		let _ = writeln!(body, "\tqdisc = {}", quote(qdisc.kind.name()));
+		return;
+	}
+	let _ = writeln!(body, "\tqdisc {{");
+	let _ = writeln!(body, "\t\tkind = {}", quote(qdisc.kind.name()));
+	if let Some(bits) = qdisc.bandwidth_bits {
+		let _ = writeln!(body, "\t\tbandwidth = {}", quote(&rate(bits)));
+	}
+	if let Some(bits) = inbound {
+		let _ = writeln!(body, "\t\tingress_bandwidth = {}", quote(&rate(bits)));
+	}
+	body.push_str("\t}\n");
+}
+
+/// A rate in bits per second, in the largest unit that divides it exactly.
+///
+/// Exactness is the whole requirement: `rate_bits` multiplies, so any unit
+/// that divides the number reads back as the same number, and one that does
+/// not would lose a profile a few bits of its shaped rate every time it was
+/// saved. 100 Mbit/s is written `100mbit` and 100,000,001 bit/s is written
+/// `100000001bit`, which is ugly and correct.
+fn rate(bits: u64) -> String {
+	for (suffix, multiplier) in [
+		("gbit", 1_000_000_000_u64),
+		("mbit", 1_000_000),
+		("kbit", 1_000),
+	] {
+		if bits % multiplier == 0 {
+			return format!("{}{suffix}", bits / multiplier);
+		}
+	}
+	format!("{bits}bit")
 }
 
 /// An access point this machine serves.
@@ -2091,6 +2360,219 @@ mod tests {
 			 \twifi { psk = \"@secret:ap\" }\n\
 			 }\n",
 		);
+	}
+
+	/// Every ethtool key at a non-default, which is the whole block.
+	///
+	/// It was on the unrenderable list until now, so a wired machine with a
+	/// forced speed or a wake-on-LAN flag could save no profile at all -- and
+	/// those are settings of a particular socket on a particular switch, which
+	/// is to say exactly what differs between one site and the next.
+	#[test]
+	fn every_ethtool_key_round_trips() {
+		round_trips(
+			"device eth0 {\n\
+			 \tethtool {\n\
+			 \t\tautoneg = \"off\"\n\
+			 \t\tspeed = 100\n\
+			 \t\tduplex = \"full\"\n\
+			 \t\twol = \"g\"\n\
+			 \t\trx_ring = 4096\n\
+			 \t\ttx_ring = 4096\n\
+			 \t\tgro = \"off\"\n\
+			 \t\tgso = \"off\"\n\
+			 \t\ttso = \"on\"\n\
+			 \t\trx_checksum = \"on\"\n\
+			 \t\ttx_checksum = \"unmanaged\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **One offload set and the rest left alone**, which is the ordinary case
+	/// and the one that distinguishes `unmanaged` from `off`. A renderer
+	/// writing every toggle would turn a block declining to touch five
+	/// offloads into one that says `unmanaged` five times -- and worse, a
+	/// renderer treating the default as `off` would turn "leave this alone"
+	/// into "switch it off", which is a change to the hardware rather than to
+	/// the file.
+	#[test]
+	fn one_ethtool_key_does_not_write_the_others() {
+		let document = compile("device eth0 { ethtool { gro = \"off\" } }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("gro = \"off\""), "{rendered}");
+		for absent in [
+			"unmanaged",
+			"gso",
+			"tso",
+			"checksum",
+			"speed",
+			"wol",
+			"ring",
+		] {
+			assert!(
+				!rendered.contains(absent),
+				"{absent} should not be written: {rendered}"
+			);
+		}
+		round_trips("device eth0 { ethtool { gro = \"off\" } }\n");
+	}
+
+	/// A scheduler with nothing to configure, written in the short form.
+	///
+	/// Both spellings compile to the same `QdiscPolicy`, so the round trip
+	/// cannot tell them apart and the choice would otherwise be a claim in a
+	/// doc comment that nothing checks.
+	#[test]
+	fn a_bare_qdisc_is_written_in_the_short_form() {
+		round_trips("device eth0 { qdisc = \"fq_codel\" }\n");
+		let document = compile("device eth0 { qdisc { kind = \"fq_codel\" } }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("qdisc = \"fq_codel\""), "{rendered}");
+		assert!(!rendered.contains("qdisc {"), "{rendered}");
+	}
+
+	/// A shaper, where the rate is the point.
+	#[test]
+	fn a_shaped_qdisc_round_trips() {
+		round_trips(
+			"device eth0 {\n\
+			 \tqdisc {\n\
+			 \t\tkind = \"cake\"\n\
+			 \t\tbandwidth = \"100mbit\"\n\
+			 \t\tingress_bandwidth = \"40mbit\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **A rate no unit divides exactly.** `rate_bits` multiplies, so a
+	/// renderer picking a unit that does not divide the number loses bits off
+	/// a shaped rate on every save -- quietly, and compounding, since the next
+	/// save renders the number it read back.
+	#[test]
+	fn a_rate_that_divides_no_unit_round_trips() {
+		for spelling in ["100000001bit", "1001kbit", "7mbit", "2gbit", "999bit"] {
+			round_trips(&format!(
+				"device eth0 {{ qdisc {{ kind = \"cake\"; bandwidth = \"{spelling}\" }} }}\n"
+			));
+		}
+	}
+
+	/// **Ingress shaping, which is the renderer's only reconstruction.**
+	///
+	/// The round trip is the whole proof: the first compile derives an `ifb`
+	/// device, a redirect and a flagged qdisc from one `ingress_bandwidth`, and
+	/// the rendered profile must make the second compile derive exactly the
+	/// same three. A renderer describing the document instead would move the
+	/// rate onto a device the operator never wrote, and recompiling that would
+	/// synthesise a second `ifb` on top of the first.
+	///
+	/// The shaped-and-unshaped case matters separately: with no outbound rate
+	/// the operator's qdisc keeps only a kind, which is the short-form test's
+	/// condition, so the recovered inbound rate is the only thing forcing the
+	/// block form.
+	#[test]
+	fn an_ingress_shaper_round_trips() {
+		round_trips(
+			"device eth0 {\n\
+			 \tqdisc {\n\
+			 \t\tkind = \"cake\"\n\
+			 \t\tingress_bandwidth = \"40mbit\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// And the derived device itself is not written.
+	///
+	/// Asserted on the text as well as by the round trip, because an `ifb`
+	/// block in the profile is not merely redundant: `expand_ingress_shapers`
+	/// refuses outright when a document already declares the name it needs, so
+	/// a profile naming `ifb-eth0` would be one that cannot be loaded at all.
+	#[test]
+	fn the_derived_ifb_is_not_in_the_profile() {
+		let document =
+			compile("device eth0 { qdisc { kind = \"cake\"; ingress_bandwidth = \"40mbit\" } }\n");
+		assert_eq!(document.devices.len(), 2, "the compiler derives one");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(!rendered.contains("ifb-eth0"), "{rendered}");
+		assert!(!rendered.contains("ingress_redirect"), "{rendered}");
+		assert!(
+			rendered.contains("ingress_bandwidth = \"40mbit\""),
+			"{rendered}"
+		);
+	}
+
+	/// **An `ifb` carrying something of its own is refused, not inverted.**
+	///
+	/// The inversion is only valid for a device that really is the compiler's
+	/// output, and nothing in the type says a document came from the compiler.
+	/// Here an MTU is put on the derived device after the fact: that is
+	/// operator intent the inversion would discard, so the renderer declines
+	/// instead -- which is the same reason every other entry on the
+	/// unrenderable list exists.
+	#[test]
+	fn an_ifb_that_is_not_this_compilers_is_refused() {
+		let mut document =
+			compile("device eth0 { qdisc { kind = \"cake\"; ingress_bandwidth = \"40mbit\" } }\n");
+		let ifb = document
+			.devices
+			.iter_mut()
+			.find(|device| device.name == "ifb-eth0")
+			.expect("derived");
+		ifb.mtu = Some(1500);
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing.iter().any(|what| what.contains("ingress redirect")),
+			"{missing:?}"
+		);
+	}
+
+	/// **The pairing is by name, and that is correctness rather than
+	/// paranoia.**
+	///
+	/// `expand_ingress_shapers` always names the device it makes
+	/// `ifb-<shaped>`, so a redirect pointing at a bare `ifb` under any other
+	/// name did not come from here -- and inverting it would not round-trip:
+	/// the rendered `ingress_bandwidth` recompiles into `ifb-eth0`, which is a
+	/// different document from one naming `shaper0`. Without this case,
+	/// deleting the name check broke no test at all, which is what put the
+	/// case here.
+	#[test]
+	fn an_ifb_under_another_name_is_refused() {
+		let mut document =
+			compile("device eth0 { qdisc { kind = \"cake\"; ingress_bandwidth = \"40mbit\" } }\n");
+		for device in &mut document.devices {
+			if device.name == "ifb-eth0" {
+				device.name = "shaper0".to_owned();
+			} else if device.ingress_redirect.is_some() {
+				device.ingress_redirect = Some("shaper0".to_owned());
+			}
+		}
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing.iter().any(|what| what.contains("shaper0")),
+			"{missing:?}"
+		);
+	}
+
+	/// An address's trailing modifier words, all three and then each alone.
+	///
+	/// `preferred_lft 0` is the one worth naming: it is how an address is kept
+	/// reachable while no longer being chosen as a source, and until now it put
+	/// `an address with lifetimes or a peer` on the unrenderable list and
+	/// refused the whole save.
+	#[test]
+	fn an_addresss_modifiers_round_trip() {
+		round_trips(
+			"interface eth0 {\n\
+			 \tconfig = \"192.0.2.1/32 peer 192.0.2.2 preferred_lft 0 valid_lft 3600\"\n\
+			 }\n",
+		);
+		round_trips("interface eth0 { config = \"192.0.2.1/32 peer 192.0.2.2\" }\n");
+		round_trips("interface eth0 { config = \"192.0.2.1/24 preferred_lft 0\" }\n");
+		round_trips("interface eth0 { config = \"192.0.2.1/24 valid_lft 3600\" }\n");
 	}
 
 	/// **An access point that is deliberately open, which is why the `wifi`

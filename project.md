@@ -1036,15 +1036,37 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Eight model fields cannot be reached from the configuration language at
-  all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`, `DnsServer`'s
-  `port` and `sni`, `Device`'s `match`, and `HookRef`'s `run_as` and
+- **Eleven places in the model cannot be reached from the configuration
+  language at all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`,
+  `DnsServer`'s `port` and `sni`, `Device`'s `match`, `HookRef`'s `run_as` and
   `timeout`, which 0258 found when the rule editor had to decide whether to
-  offer them -- and which the example file documented a syntax for that does
-  nothing. Either the parser gains the keys or the schema loses the fields,
-  and the schema is witnessed, so neither is a passing change. `run_as` needs
-  one thing more than grammar: a materialiser that writes the script somewhere
-  the named user can read, which 0700 under root is not.
+  offer them, and -- found by 10.170 -- `Route`'s `scope` and `proto` and the
+  `DnsMode::Exec` variant. The example file documents a syntax for some of
+  them that does nothing. Either the parser gains the keys or the schema loses
+  the fields, and the schema is witnessed, so neither is a passing change.
+  `run_as` needs one thing more than grammar: a materialiser that writes the
+  script somewhere the named user can read, which 0700 under root is not.
+
+  **They are not one question, and the division is what to decide first.**
+  `DnsMode::Exec` is implemented end to end in `netcfgd-dns` and wants only a
+  key; `Route`'s two are read by nothing outside the model and a frozen plan
+  fixture, so they are schema with no behaviour on either side. The method for
+  all three is one command apiece -- `ncfg show` over a one-block
+  configuration, which compiles and touches nothing.
+
+  **It was nine, and `RoutingRule::invert` is the one that closed** -- 10.168,
+  by adding the parser arm, since every other layer already carried it and a
+  rule somebody had installed inverted compared against a `false` that was
+  never a choice. **Nothing here says the others go the same way**, and the
+  paragraph above is why: `invert` had a behavioural fault to fix, while these
+  are a question about whether the schema or the grammar is wrong. Closing one
+  by implementing it is not a precedent for the rest.
+
+  **And a field is reachable if anything sets it, which a key probe cannot
+  see.** 10.170 measured `Device`'s `ingress_redirect` as unreachable -- it is
+  an unknown device key -- and the compiler sets it for any machine that shapes
+  its inbound line. Whatever settles this list, the instrument has to ask what
+  writes a field rather than what parses a key.
 
   **It was nine, and `RoutingRule::invert` is the one that closed** -- 10.168,
   by adding the parser arm, since every other layer already carried it and a
@@ -9510,6 +9532,137 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.170 Shaping the download direction could not be saved, and why that was invisible
+
+Three more off 10.159's list -- a device's `ethtool` block, its `qdisc`, and an
+address carrying a peer or a lifetime -- and then the one underneath them, which
+is the reason this entry is not just a list of keys.
+
+The three are ordinary. `ethtool` settings are a forced speed, a duplex, a
+wake-on-LAN flag and five offloads, which are properties of one socket on one
+switch and so exactly what differs between one site and the next. An address's
+`peer`, `preferred_lft` and `valid_lft` are trailing words inside the `config`
+string rather than keys of their own, netcfgd's addressing syntax having
+netifrc's shape, so the spellings the renderer writes are `address_entries`'
+`MODIFIERS` table's and not the model's field names. `preferred_lft 0` is the
+one worth naming: it keeps an address reachable while stopping it being chosen
+as a source.
+
+### Choosing what to work on by measuring reachability, not by reading the list
+
+The list was taken as a list of renderer gaps and it is not. Probing each entry
+with `ncfg show` against a one-block configuration -- which compiles and touches
+nothing, so it answers "can a document contain this" directly -- splits it in
+two:
+
+    reachable, so a renderer gap     ethtool, qdisc, address peer/lifetimes
+    not reachable from the language  match, ingress_redirect, dns mode exec,
+                                     dns options/dnssec/transport, port/sni,
+                                     a route with a scope or a proto
+
+The second column is not the renderer's problem at all. Those are the open
+question this file already carries near the top -- whether the parser gains the
+keys or the schema loses the fields -- and it is explicitly not a worker's to
+settle. **Which makes the probe worth more than the three fixes**: without it
+the honest-looking move is to work down the list in order, and most of the list
+is somebody else's decision wearing a renderer bug's clothes.
+
+### And one entry was in neither column, which is the finding
+
+`a_shaped_qdisc_round_trips` failed on `ingress_bandwidth` with **three**
+refusals at once: `device eth0: ingress_redirect`, `interface ifb-eth0: kind
+ifb`, and `device ifb-eth0: a qdisc metering arriving traffic`. All three are
+unreachable *by name* -- `ingress_redirect` is an unknown device key, `ifb` is
+not a kind the parser knows, and no key sets `ingress` -- and my own probe had
+measured exactly that, one entry at a time, and concluded they could not occur.
+
+They occur because `expand_ingress_shapers` sets all three. One
+`ingress_bandwidth` on a device's qdisc becomes the rate `take`n off that
+qdisc, an `ingress_redirect` on the device, and a synthesised `ifb-<name>`
+carrying the rate on a `cake` flagged `ingress`. So **every machine shaping its
+inbound line could save no profile**, which is most machines on a domestic
+connection, and the probe that should have found it answered about the key
+rather than about the field. *A field is reachable if anything sets it, and a
+key is only one of the things that can.*
+
+**It is also the only place the renderer reconstructs an input rather than
+describing the document.** Writing each device as it stands is wrong in both
+directions: the rate is no longer on the device the operator put it on, so one
+device loses it and another invents it -- and recompiling that profile would
+synthesise a *second* `ifb` for a document that already had one, which
+`expand_ingress_shapers` refuses outright, so the profile would not load at
+all. The derived device is skipped and its rate written back where it came
+from, and the round trip is the proof the inversion is exact: the second
+compile re-derives what the first one derived.
+
+The inversion is strict, because nothing in the type says a document came from
+the compiler. Every field the synthesis leaves at a default is required to
+still be at it, and the `ifb` must be named `ifb-<shaped>`; anything else keeps
+an honest refusal. **The name check is correctness and not paranoia** -- a
+redirect to a bare `ifb` called `shaper0` would render as a rate whose recompile
+derives `ifb-eth0`, a different document -- and the test for it exists only
+because deleting the check broke nothing. Fourteen sabotages, thirteen caught
+by the test written for each, and the fourteenth reported NOT COVERED; the
+fifteenth run, with the case added, fails exactly that case.
+
+**A message had also been wrong since 0155 pass 1b.** `render_kind`'s refusal
+says `interface {name}: kind ...` and its only caller is `render_device`, the
+pass having moved `kind` off the interface. It is `device {name}` now.
+
+`doc/netcfgd.conf.example` documented `qdisc { kind; bandwidth }` and not
+`ingress_bandwidth` -- the key behind all of the above, and the download half of
+the one problem that section exists to solve. It is in now, with the `ifb` and
+the name collision named, since discovering a refusal about a device you did not
+write is a bad way to learn that netcfgd makes one.
+
+### Somebody had already worked it out, and closed the question
+
+`render_interface` carried a comment, written 2026-09-01 in `1ace05a3`,
+describing the whole mechanism correctly: the compiler synthesises the redirect
+and the `ifb` from `ingress_bandwidth`, so rendering the redirect would make the
+next compile synthesise a second one on top. Every clause of that is right. It
+closed by saying the rate a snapshot would have to write back is one *"the
+document no longer holds by the time this sees it"* -- and that is the one step
+that is wrong. The document holds it. It holds it on the derived device, which
+is not reachable from inside `render_interface`, and the inversion recovers it
+from there.
+
+**So the claim was true of what one function could see and was written as a fact
+about the document**, which is `evidence.md`'s *sweep for claims of
+impossibility* earning its keep: an absence claim that has been closed wastes a
+reader's time, while an impossibility claim that was never true tells the next
+person not to write the thing that works. This one told four weeks of readers
+exactly that, in a comment that reads as settled analysis -- which it mostly
+was.
+
+It was also in the wrong place. 0155 pass 1a moved `ingress_redirect` to
+`device` and the sentence stayed in `render_interface`, describing an entry that
+list has not carried since. The comment is rewritten rather than appended to,
+per the rule about a reader who finds both believing whichever sounds more
+careful.
+
+### Three more fields nothing can ask for
+
+Found by the same probe, and reported rather than fixed, because they belong to
+the open question above and not to this pass: `DnsMode::Exec`, `Route::scope`
+and `Route::proto`. The method is one command each, `ncfg show` over a
+one-block configuration:
+
+    global { dns { mode = "exec" } }        unknown dns mode `exec`
+    routes = "default via X scope link"     unknown route keyword `scope`
+    routes = "10/8 via X proto static"      unknown route keyword `proto`
+
+**`DnsMode::Exec` is the `invert` shape exactly**: `netcfgd-dns` implements it
+end to end -- `DnsMode::Exec(command) => hand_to_script(scopes, command)` -- and
+no document can request it. A whole resolver mode, written and tested, with the
+one layer missing that makes it reachable.
+
+The other two differ, and the difference decides what to do with them. Nothing
+reads `Route::scope` or `Route::proto` anywhere outside the model and a frozen
+plan fixture, so unlike `invert` and `Exec` there is no working implementation
+waiting for a key -- they are schema with no behaviour on either side. **These
+are measurements, not recommendations**, and all three are the holder's call.
 
 ## 10.169 An access point no profile could hold, and three providers nothing read
 

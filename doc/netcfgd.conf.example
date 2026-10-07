@@ -421,6 +421,30 @@
 #	config = "dhcp"
 #}
 
+# THE DOWNLOAD DIRECTION needs `ingress_bandwidth`, and it is not just a
+# second number on the same qdisc. The kernel cannot queue what has already
+# arrived, so netcfgd builds an `ifb` device called `ifb-eth0`, redirects
+# everything arriving on eth0 onto it, and shapes it there -- where it has
+# become egress. Decision 0023's amendment covers why that is allowed a filter
+# when nothing else is.
+#
+# Two consequences worth knowing rather than discovering. A configuration that
+# already declares a device called `ifb-eth0` is refused, because netcfgd needs
+# to create one of that name. And the shaper on the way in can only drop, not
+# delay, so it has to account for what the sender will retransmit -- which is
+# why the honest number is a little under the line rate rather than equal to it.
+
+#device eth0 {
+#	qdisc {
+#		kind              = "cake"
+#		bandwidth         = "40mbit"
+#		ingress_bandwidth = "90mbit"
+#	}
+#}
+#interface eth0 {
+#	config = "dhcp"
+#}
+
 # A STABLE IPv6 ADDRESS without giving away the hardware address.
 
 #interface eth0 {
