@@ -1,6 +1,8 @@
 # 0265: A VM tier, for exactly what a namespace cannot do
 
-Status: accepted; the fetch and the boot are built, the automation is not
+Status: accepted; built and measured -- `make vm` boots a guest and runs a
+payload in it. What is left is named under "What this leaves" and is the
+multi-guest wire, the nspawn tier, and procd.
 Date: 2026-10-07
 Milestone: a second test tier, asked for by the copyright holder
 
@@ -101,11 +103,67 @@ ISO as media it answered `Mounting boot media failed` and dropped to its
 recovery shell, with `alpine_dev=cdrom` making no difference. The ISO's own
 initramfs finds its own CD, which is what it is for.
 
-## What this leaves, and the one thing it rules out
+## What it took, and the shape of every failure on the way
 
-**Automation is not built, and driving the console is ruled out rather than
-untried.** Feeding qemu's stdin a timed sequence -- a boot line, then a login,
-then commands -- does not work, and the reason generalises:
+**It works**, and the measured result is the tier's whole justification:
+
+```text
+kernel: 6.12.1-3-lts                  the host is 6.12.107
+openrc: rc-status (OpenRC) 0.55.1     one of the three init systems shipped
+module: mac80211_hwsim loaded         phys: phy0 phy1
+module: hci_vhci loaded               vhci: present
+module: pppoe loaded
+VM-PAYLOAD-END rc=0
+```
+
+Two radios and a `/dev/vhci` inside a guest, in about ten seconds of boot.
+
+**Four boots failed first, and three of them failed by succeeding.** That is
+the shape worth keeping, because it is the one a harness cannot notice on its
+own:
+
+- the netboot initramfs given the ISO as media answered `Mounting boot media
+  failed`; it is not built to mount a CD, and `alpine_dev=cdrom` changed
+  nothing;
+- the ISO through ISOLINUX, boot line sent as one `printf`, arrived
+  **truncated mid-word** -- `boot: lts console=ttyS0,115200 ip=dhcp apk`;
+- the same sent a character at a time with a pause arrived with its **head**
+  eaten -- `boot: 15200 ip=dhcp apkovl=http://...` -- the prompt not yet
+  existing when the typing began.
+
+**The middle two then booted perfectly, having dropped the instruction that
+was the point of sending them.** ISOLINUX polls the serial port and loses
+characters at both ends, and no amount of sleeping fixes it: the start of the
+line needs the prompt to exist and the end needs it to still be reading, and
+nothing outside the guest can observe either. So nothing is typed. The kernel
+and initramfs are booted directly and the command line is an argument, where
+it cannot be misheard.
+
+- the fourth boot fetched the overlay, built a root from the mirror, powered
+  off in 10.3 seconds -- and said `Loading modules ...modprobe: can't change
+  directory to '/lib/modules'`, which is this tier with its one reason
+  removed. **`modloop` is not in the initramfs's own option list**, read out
+  of the extracted `init` rather than guessed: `modloop=` on the command line
+  reaches nothing. The squashfs is attached as a read-only disk and mounted by
+  the wrapper instead, which needs no cooperation from the guest's init.
+
+**And the payload ran on that fourth boot while printing nothing.** It was
+detectable only because it powered the guest off, which nothing else does:
+OpenRC's `local` service does not put its scripts' output on the serial port.
+The wrapper redirects to `/dev/console` explicitly. That is why the harness
+distinguishes *the payload never started* from *the payload failed* -- a guest
+that dies before reaching the script must not read as a pass, and for one boot
+it did.
+
+**One payload error is worth keeping too, because it reads as a missing
+capability.** `modprobe vhci` reports `module vhci not found in modules.dep`.
+The config symbol is `BT_HCIVHCI` and the module is `hci_vhci`; the name was
+wrong and the message is indistinguishable from the feature being absent.
+
+## What this leaves
+
+**Driving the console is ruled out rather than untried**, per the above, and
+the evidence is:
 
 ```text
 localhost login: tyS0,115200 quiet

@@ -226,7 +226,7 @@ nm-containment:
 shell:
 	@count=0; \
 	for script in helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
-	             packaging/probe/* packaging/hook/*; do \
+	             tool/vm/payload/*.sh packaging/probe/* packaging/hook/*; do \
 		[ -f "$$script" ] || continue; \
 		sh -n "$$script" || exit 1; \
 		count=$$((count + 1)); \
@@ -1794,6 +1794,26 @@ FUZZ_ARGS   ?=
 #
 # A script run by hand still has the caller's PATH, which is what the headers
 # in tests/live/ already tell people to set.
+# The VM tier (0265): what a namespace cannot do, which is its own kernel, its
+# own modules and its own init. Not in `check` and not in `live` -- it wants a
+# network for the first fetch, a writable /dev/kvm, and about a quarter of a
+# minute per guest. `live` stays the inner loop.
+#
+# Measured on the machine this was written on: a guest reaches a payload in
+# ten seconds, reports kernel 6.12.1-3-lts against the host's 6.12.107, runs
+# OpenRC 0.55.1, and loads mac80211_hwsim, hci_vhci and pppoe -- which gives
+# two radios at phy0 and phy1 and a /dev/vhci. Those are exactly the three
+# capabilities the eight skipping live scripts name.
+vm: vm-image
+	sh tool/vm/run.sh tool/vm/payload/capability.sh
+
+# Separate, because the fetch is the only part that needs the internet and it
+# is a no-op once the image is in place.
+vm-image:
+	sh tool/vm/fetch.sh
+
+.PHONY: vm vm-image
+
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
 	$(CARGO) build --workspace

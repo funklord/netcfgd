@@ -18,19 +18,26 @@
 #   -- `unshare -rn` plus veth already does that, and delegation.sh already
 #   runs a real kea talking to a real odhcp6c that way.
 #
-# WHY THE STANDARD ISO, AND WHY NO DISK IMAGE
-#   It boots diskless from the CD: the kernel, the initramfs and the modloop
-#   squashfs holding the modules all travel in the one file, and nothing is
-#   written to a disk image. So there is no qcow2, no overlay, and nothing is
-#   ever written over the network store this lives on -- which matters, because
-#   running a guest disk over NFS has locking and coherency problems that look
-#   like guest corruption.
+# WHY THE NETBOOT FLAVOUR, AND WHY NO DISK IMAGE
+#   It is three loose files -- a kernel, an initramfs and a modloop squashfs
+#   holding the modules -- so the guest boots diskless with the command line as
+#   an ARGUMENT. Nothing is written to a disk image: no qcow2, no overlay, and
+#   nothing ever written over the network store this lives on, which matters
+#   rather than being tidy, because a guest disk over NFS has locking and
+#   coherency problems that present as guest corruption.
 #
-#   The netboot flavour was tried first and carries the same three files
-#   loose. It is not simpler: the initramfs has to be told where the modloop
-#   is, which means serving it over http or attaching it as a filesystem the
-#   init will go looking through. The ISO already contains it, and the modules
-#   are the whole reason this tier exists.
+#   **The standard ISO was tried and dropped, and the reason is the command
+#   line.** The ISO carries the same three files and boots them through
+#   ISOLINUX, which has to be told the console and the overlay by typing at its
+#   boot prompt over the serial port -- and ISOLINUX polls that port and loses
+#   characters at both ends. One `printf` arrived truncated mid-word; a
+#   character at a time with a pause arrived with its head eaten, the prompt
+#   not yet existing when the typing began. Both boots then SUCCEEDED having
+#   dropped the instruction, which is the worst shape of failure available, and
+#   no amount of sleeping fixes it: the start needs the prompt to exist and the
+#   end needs it to still be reading, and nothing outside the guest can see
+#   either. Booting the kernel directly puts the command line somewhere it
+#   cannot be misheard.
 #
 #   It also brings OpenRC as the guest's real init, which is one of the three
 #   netcfgd ships and cannot otherwise be run.
@@ -67,16 +74,15 @@ set -eu
 version=3.21.0
 branch=v3.21
 arch=x86_64
-# `standard` and not `virt`, for the reason measured above.
-iso="alpine-standard-$version-$arch.iso"
-# Read once from $base/$iso.sha256, by hand, and pinned here.
-sha256=201e2ba601be5b861345a308591e3e547bf6d210945dfaab3e3251b8dea64b8b
+tarball="alpine-netboot-$version-$arch.tar.gz"
+# Read once from $base/$tarball.sha256, by hand, and pinned here.
+sha256=41010d3fd043b0f781c82067cd3ffe7cc6a014c9579f7a186f5176bf2e78f3cc
 base="https://dl-cdn.alpinelinux.org/alpine/$branch/releases/$arch"
 
 store=${VM_DIR:-$HOME/vm}
-dest="$store/$iso"
+dest="$store/alpine-$version-$arch"
 
-for tool in curl sha256sum; do
+for tool in curl sha256sum tar; do
 	command -v "$tool" >/dev/null 2>&1 || {
 		echo "fetch: $tool is not installed" >&2
 		exit 1
@@ -84,10 +90,11 @@ for tool in curl sha256sum; do
 done
 
 # Already here and intact is a no-op, so this is safe to call from a make
-# target -- and the hash is re-checked rather than trusted, because a truncated
-# download from an interrupted run is exactly what a later run would otherwise
-# find and boot.
-if [ -f "$dest" ] && printf '%s  %s\n' "$sha256" "$dest" | sha256sum -c - >/dev/null 2>&1; then
+# target. The three files the boot needs are checked by name and the tarball's
+# recorded hash by content, because the extracted files carry none of their own.
+if [ -f "$dest/boot/vmlinuz-lts" ] && [ -f "$dest/boot/initramfs-lts" ] &&
+	[ -f "$dest/boot/modloop-lts" ] && [ -f "$dest/.verified" ] &&
+	[ "$(cut -d' ' -f1 < "$dest/.verified")" = "$sha256" ]; then
 	echo "fetch: $dest is present and verified"
 	exit 0
 fi
@@ -96,21 +103,37 @@ mkdir -p "$store"
 work=$(mktemp -d "$store/fetch.XXXXXX")
 trap 'rm -rf "$work"' EXIT INT TERM
 
-echo "fetch: $base/$iso"
-curl -fsSL --max-time 900 -o "$work/$iso" "$base/$iso"
+echo "fetch: $base/$tarball"
+curl -fsSL --max-time 900 -o "$work/$tarball" "$base/$tarball"
 
-# Checked before it is put where a boot would find it, so a bad download never
-# becomes a file a later run trusts.
-if ! printf '%s  %s\n' "$sha256" "$work/$iso" | sha256sum -c - >/dev/null 2>&1; then
-	got=$(sha256sum "$work/$iso" | cut -d' ' -f1)
-	echo "fetch: $iso does not match the pinned checksum" >&2
+# Checked before anything is extracted, so a bad download never becomes files
+# on disk that a later run would find and boot.
+if ! printf '%s  %s\n' "$sha256" "$work/$tarball" | sha256sum -c - >/dev/null 2>&1; then
+	got=$(sha256sum "$work/$tarball" | cut -d' ' -f1)
+	echo "fetch: $tarball does not match the pinned checksum" >&2
 	echo "fetch:   expected $sha256" >&2
 	echo "fetch:   got      $got" >&2
 	echo "fetch: either the mirror served something else or the pin is stale;" >&2
-	echo "fetch:   check $base/$iso.sha256 and move the pin deliberately" >&2
+	echo "fetch:   check $base/$tarball.sha256 and move the pin deliberately" >&2
 	exit 1
 fi
 
-mv "$work/$iso" "$dest"
+rm -rf "$dest"
+mkdir -p "$dest"
+# No `--strip-components`: the tarball's own top level IS `boot/`, with no
+# wrapper above it, so stripping one component lands the files at the
+# destination root and leaves nothing at `boot/`. Found by the check below,
+# which is why it is a check rather than a comment.
+tar -xzf "$work/$tarball" -C "$dest"
+for f in vmlinuz-lts initramfs-lts modloop-lts; do
+	[ -f "$dest/boot/$f" ] || {
+		echo "fetch: the tarball did not contain boot/$f" >&2
+		exit 1
+	}
+done
+printf '%s %s\n' "$sha256" "$tarball" > "$dest/.verified"
+
 echo "fetch: $dest"
-ls -l "$dest" | awk '{ printf "fetch:   %10d  %s\n", $5, $9 }'
+for f in vmlinuz-lts initramfs-lts modloop-lts; do
+	ls -l "$dest/boot/$f" | awk '{ printf "fetch:   %10d  %s\n", $5, $9 }'
+done

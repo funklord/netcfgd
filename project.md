@@ -9577,27 +9577,53 @@ modules in `lts` and absent from `virt`. Those three are the whole reason for
 the tier, so `virt`'s 20 MB modloop against 192 MB would have bought a faster
 boot and none of the point.
 
-**A guest boots, on 6.12.1-3-lts against the host's 6.12.107.** The images are
-fetched by `tool/vm/fetch.sh` against a pinned published checksum into
-`$VM_DIR` (default `~/vm`, pointed at the 46 T NFS store), and the guest boots
-diskless from the ISO so nothing is ever written there -- which matters because
-a guest disk over NFS corrupts in ways that look like guest faults.
+**`make vm` works, and the result is the justification.** Inside a guest:
 
-### Driving the console is ruled out, with the evidence
+    kernel: 6.12.1-3-lts                  the host is 6.12.107
+    openrc: rc-status (OpenRC) 0.55.1     one of three init systems shipped
+    module: mac80211_hwsim loaded         phys: phy0 phy1
+    module: hci_vhci loaded               vhci: present
+    module: pppoe loaded
 
-Automation is not built, and one route is now closed rather than untried.
-Feeding qemu's stdin a timed sequence gave:
+Two radios and a `/dev/vhci` inside a guest, in about ten seconds of boot --
+every capability the eight skipping scripts name, plus an init system this
+machine cannot otherwise run. Images come from `tool/vm/fetch.sh` against a
+pinned published checksum into `$VM_DIR` (default `~/vm`, pointed at the 46 T
+store), and the guest is diskless so nothing is ever written there -- which
+matters because a guest disk over NFS corrupts in ways that look like guest
+faults.
 
-    localhost login: tyS0,115200 quiet
-    Password:
-    Login incorrect
+### Three of the four failed boots failed by succeeding
 
-qemu buffers the whole stream into one serial port while the **consumer** of
-that port changes underneath it: ISOLINUX took `lts console=t` and the leftover
-`tyS0,115200 quiet` arrived at a login prompt that did not exist when it was
-written. **A single input stream with a changing reader cannot be driven
-blind**, and sleeping longer only moves which consumer gets which fragment. The
-guest has to run its own script, which is what an apkovl is for.
+That is the half worth keeping, because a harness cannot notice it. The ISO
+boots through ISOLINUX, which has to be told the console and the overlay by
+typing at its prompt over the serial port -- and it polls that port and loses
+characters at **both** ends. One `printf` arrived truncated mid-word; a
+character at a time with a pause arrived with its head eaten, the prompt not
+yet existing when the typing began:
+
+    boot: lts console=ttyS0,115200 ip=dhcp apk
+    boot: 15200 ip=dhcp apkovl=http://10.0.2.2:41283/... quiet
+
+**Both then booted perfectly, having dropped the instruction that was the
+point.** No sleep fixes that shape: the start of the line needs the prompt to
+exist and the end needs it to still be reading, and nothing outside the guest
+can see either. So nothing is typed -- the kernel and initramfs are booted
+directly and the command line is an argument, where it cannot be misheard.
+
+The fourth boot then fetched the overlay, built a root, powered off in 10.3
+seconds, and said `modprobe: can't change directory to '/lib/modules'` --
+this tier with its one reason removed. **`modloop` is not in the initramfs's
+own option list**, read out of the extracted `init` rather than inferred, so
+`modloop=` on the command line reaches nothing. The squashfs is attached as a
+read-only disk and mounted by the wrapper, which asks nothing of the guest's
+init.
+
+**And on that boot the payload ran while printing nothing**, detectable only
+because it powered the guest off: OpenRC's `local` service does not put its
+scripts' output on the serial port. Hence the redirect to `/dev/console`, and
+hence the harness distinguishing *never started* from *failed* -- a guest that
+dies before the script must not read as a pass, and for one boot it did.
 
 ### And a gate that had never read two files
 
