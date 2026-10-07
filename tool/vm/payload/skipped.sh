@@ -32,7 +32,7 @@ echo "=== installing what the scripts need"
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update 2>&1 | tail -2
 for pkg in wpasupplicant iw ppp pppoe odhcp6c kea-dhcp6-server radvd \
-	network-manager bluez; do
+	network-manager bluez python3-gi; do
 	if apt-get -qq -y install "$pkg" >/dev/null 2>&1; then
 		echo "    $pkg: installed"
 	else
@@ -40,6 +40,24 @@ for pkg in wpasupplicant iw ppp pppoe odhcp6c kea-dhcp6-server radvd \
 	fi
 done
 echo
+
+# **Each script is invoked the way the Makefile invokes it, and the first
+# version of this was not.** `make live` runs them in three shapes: `nm.sh` and
+# `ppp.sh` under `unshare -rn`, `select.sh` bare with NCFG_LIVE, and the rest
+# bare because they make their own namespaces. Running all nine bare put
+# `nm.sh` on the guest's real network instead of in the namespace its own
+# header documents, where `lo` is down with no address -- so it reported
+# `loopback:connected` against an expected `loopback:unavailable` and that read
+# as a netcfgd fault when it was this payload's.
+#
+# A test's environment is part of the test. Inventing a simpler invocation
+# than the suite's produces failures that belong to the harness.
+needs_netns() {
+	case "$1" in
+	nm | ppp) return 0 ;;
+	*) return 1 ;;
+	esac
+}
 
 passed=0
 failed=0
@@ -54,7 +72,12 @@ for script in bluetooth hwsim ppp pppoe-session delegation killmode select nm \
 	# The status is the script's own, read from a file rather than through a
 	# pipe. The output is printed afterwards whatever happened, because the run
 	# whose output matters is the one that failed.
-	if NCFG_LIVE=1 sh "$path" > /tmp/out.$script 2>&1; then
+	if needs_netns "$script"; then
+		run="unshare -rn sh -c \"NCFG_LIVE=1 sh $path\""
+	else
+		run="NCFG_LIVE=1 sh $path"
+	fi
+	if sh -c "$run" > /tmp/out.$script 2>&1; then
 		verdict=passed
 		passed=$((passed + 1))
 	else

@@ -932,8 +932,19 @@ else
 	# the shim and could not see it.
 	check "the wifi block carries only the security now" \
 		"$(grep -c 'wifi { open = true }' "$opts" 2>/dev/null || true)" "1"
+	# **3922, not 3924, and 0207 says why in as many words.** That decision
+	# changed the reverse conversion to land in the middle of a band rather
+	# than at its edge, because `settings.rs` turns metric 3924 back into
+	# priority *41* -- so a profile a desktop client read and wrote back walked
+	# upward every trip. Its own words: *"It proved the opposite."*
+	#
+	# It corrected the Rust assertion in `emit.rs`, which pins 3922 today, and
+	# wrote the reasoning into the record -- and missed this line, which has
+	# pinned the number the project knows to be wrong ever since. Nothing
+	# caught it because this script skips wherever `nmcli` is absent, which is
+	# every machine here, so it had never run.
 	check "and NM's autoconnect-priority becomes a network metric" \
-		"$(grep -c 'metric = 3924' "$opts" 2>/dev/null || true)" "1"
+		"$(grep -c 'metric = 3922' "$opts" 2>/dev/null || true)" "1"
 	check "and the nameservers become a dns block" \
 		"$(grep -c 'dns { servers = \["1.1.1.1"\]; search = \["example.com"\] }' "$opts" 2>/dev/null || true)" "1"
 	check "which netcfgd accepts" \

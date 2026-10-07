@@ -9546,6 +9546,35 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.177 0207 fixed one copy of its number and the other had never run
+
+`nm.sh` pinned `metric = 3924` for NM's `autoconnect-priority 42`. The code
+gives 3922: `rank = (42 * 4096 + 2048) / 999 = 174`, and `metric = 4096 - 174`.
+
+**0207 says 3924 is wrong, in as many words.** Its subject is that
+`settings.rs` turns 3924 back into priority *41* rather than 42, so a profile a
+desktop client read and wrote back walked upward every trip -- 100, 103, 107,
+111 -- until the machine preferred a network the operator never chose. 3922 is
+the midpoint of the band and does return 42. That decision corrected the
+assertion in `emit.rs`, which pins 3922 today, wrote the reasoning into the
+record, and left this line pinning the number it had just finished proving
+wrong.
+
+**Nothing caught it because this script skips wherever `nmcli` is absent, which
+is every machine here.** So the stale pin was not a test that disagreed with
+the code; it was a test that had never been asked. It took a guest with
+NetworkManager installed and `NCFG_LIVE=1`, where a skip is a failure, for the
+line to run at all. `nm.sh` passes its 112 checks now.
+
+**The shape is worth more than the number.** A correction applied in two places
+is two edits, and the one in the half that cannot run is the one that gets
+missed. 0207 closes on *"an exact number in a test is only as good as the
+property it was derived from"* -- and this line shows the sentence has a second
+edge the decision did not need at the time: a number derived from a property
+somebody has since corrected is only as good as the *last time it ran*. The
+lens: for any value this project has deliberately changed, ask what else pins
+it, and whether that thing has ever executed.
+
 ## 10.176 A second test tier, for the eight scripts a namespace cannot run
 
 Asked for by the copyright holder 2026-10-07: a scripted cluster of small Linux
