@@ -223,10 +223,12 @@ nm-containment:
 # Verified by doing exactly that to `tests/live/rules.sh` and watching the gate
 # report a clean pass. That half is the shared tool's and is already signalled
 # in `claude-guidelines`; this half is this Makefile's.
+SHELL_SCRIPTS = helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
+                tool/vm/payload/*.sh packaging/probe/* packaging/hook/*
+
 shell:
 	@count=0; \
-	for script in helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
-	             tool/vm/payload/*.sh packaging/probe/* packaging/hook/*; do \
+	for script in $(SHELL_SCRIPTS); do \
 		[ -f "$$script" ] || continue; \
 		sh -n "$$script" || exit 1; \
 		count=$$((count + 1)); \
@@ -236,6 +238,11 @@ shell:
 		exit 1; \
 	fi; \
 	echo "shell: ok, $$count scripts parse"
+	@# And that none of them runs a command out of a heredoc comment, which
+	@# `sh -n` cannot see because the construct is valid. Here rather than as a
+	@# gate of its own: it asks about the same files for the same reason, and
+	@# the one thing `shell` could honestly claim was that they parse.
+	@python3 tool/heredoc_gate.py $(SHELL_SCRIPTS)
 
 # rustfmt and clippy, skipped loudly rather than failed when absent -- the rule
 # `gui` and `deny` already follow, and for the same reason each states: a gate

@@ -151,7 +151,7 @@ local 127.0.0.1
 # client's point-to-point pair. Both ends live in one network namespace here, so
 # the client's peer address would then also be a local address -- and the kernel
 # refuses a route whose gateway is one of its own, with EINVAL. That is what
-# `route.add 10.9.0.0/24 via 10.8.0.2` failed with on the first attempt at this,
+# route.add 10.9.0.0/24 via 10.8.0.2 failed with on the first attempt at this,
 # and it is an artefact of the test's topology rather than anything netcfgd does.
 #
 # Nothing is sent through the tunnel: this script checks what openvpn reports and

@@ -597,7 +597,7 @@ device $sta_dev {
 
 network "netcfgd-test" {
 	wifi   { psk = "@secret:test"; proto = "wpa2+wpa3" }
-	# So there is an `-m` for netcfgd to pass and to record. Without one it
+	# So there is an -m for netcfgd to pass and to record. Without one it
 	# starts the client with no metric at all, which is the ordinary machine
 	# and exercises nothing of 0241.
 	metric = 300

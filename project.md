@@ -9546,6 +9546,53 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.178 A heredoc comment is a command line
+
+`hwsim.sh` generated a netcfgd document with `cat > "$f" <<CONF`, and one line
+of the config it wrote read:
+
+	# So there is an `-m` for netcfgd to pass and to record.
+
+The delimiter is unquoted, so the body is expanded and those backticks are a
+command substitution. Measured on the guest console:
+`tests/live/hwsim.sh: 1: -m: not found` -- line *1*, because a substitution
+numbers its own text, which is why the message names no line anybody can find.
+The generated file got `# So there is an  for netcfgd to pass`, the word gone
+from the comment it existed to carry. `tunnel.sh` had the same shape in an
+`.ovpn` comment with `route.add 10.9.0.0/24 via 10.8.0.2` -- a command and
+three arguments.
+
+**Both words happened to name nothing, and that is the whole of why this was
+free.** These scripts run under `unshare -rn` as root and write config files.
+A comment naming a command in backticks runs it.
+
+**`sh -n` cannot see it and `make shell` was honest.** Reproduced on a
+three-line fixture: `sh -n` exits 0, both commands run, the heredoc is still
+written, and the script's own status is 0 -- so nothing fails and the only
+symptom is a line of stderr in a log that scrolled past. The gate claimed its
+scripts parse, and they parse. This needed a different lens, not a stricter
+version of that one.
+
+**What arms it is the thing that makes these files readable.** They explain
+themselves in markdown, where a backtick is how you name a flag, and the habit
+does not stop at the `cat` line. So it will recur, which is what earns a check
+rather than two fixes.
+
+`tool/heredoc_gate.py` asks whether a line the generated file will carry as a
+comment contains a command substitution, and `make shell` runs it over the
+list it parses -- `SHELL_SCRIPTS`, now named once and used twice, because a
+second copy of that list is how this half would go on reporting a clean pass
+over a directory the parse half had already grown.
+
+Controlled over seven cells before it was believed: it fires on a backtick, on
+`$(...)`, and on the `<<-` form; it is silent on a quoted delimiter, on an
+escaped backtick, on a bare variable, and on a substitution that is not in a
+comment. That last cell is the one that matters -- `tunnel.sh` interpolates
+`$(fingerprint ...)` into an openvpn option and `wireguard.sh` writes
+`$(wg genpsk)`, both deliberate, both of which a gate keyed on "unquoted
+heredoc" would have refused. 89 scripts, two sites, and the two sites are what
+it was seen to fail on.
+
 ## 10.177 0207 fixed one copy of its number and the other had never run
 
 `nm.sh` pinned `metric = 3924` for NM's `autoconnect-priority 42`. The code
