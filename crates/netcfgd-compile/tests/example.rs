@@ -149,6 +149,99 @@ fn every_example_compiles() {
 	assert!(failures.is_empty(), "{failures}");
 }
 
+/// Every example renders back as configuration, and recompiles to itself.
+///
+/// **A corpus somebody else curated**, which is what makes this worth having
+/// beside the renderer's own unit tests. Those use documents their author
+/// chose; this file claims to carry every feature with the syntax to use it,
+/// so it is the nearest thing to the whole language -- and `ncfg profile save`
+/// renders a running document, so a feature the renderer never learned is a
+/// machine that can save no profile at all. That failure has arrived four
+/// times: a wifi policy, a routing rule, an access point, and an
+/// ingress-shaped line.
+///
+/// **The exception is named rather than counted.** A snippet may be refused
+/// only if every reason names `hooks`, and nothing else: a `HookRef` holds a
+/// path and a sha256 rather than the shell, so the body is not in the document
+/// to write back. Naming it this way means a *new* refusal -- a key somebody
+/// adds to the parser and not to the renderer -- fails here with its own
+/// wording, instead of being absorbed into a tolerance.
+///
+/// The waiver is also asserted non-empty, because a list of permitted
+/// failures that has quietly stopped matching anything is the vacuous pass
+/// again: it would report success whether or not the renderer still refused
+/// hooks, and whether or not this test still reached them.
+#[test]
+fn every_example_renders_and_round_trips() {
+	let source = std::fs::read_to_string(EXAMPLE)
+		.unwrap_or_else(|error| panic!("cannot read {EXAMPLE}: {error}"));
+	let found = snippets(&source);
+	assert!(found.len() >= 20, "only {} examples found", found.len());
+
+	let mut failures = String::new();
+	let mut waived = 0usize;
+	let mut rendered_count = 0usize;
+	for snippet in &found {
+		let mut sources = SourceMap::new();
+		sources.add("netcfgd.conf.example", &snippet.text);
+		let Ok(document) = compile(&sources, &mut FakeHooks) else {
+			// `every_example_compiles` owns that failure and reports it
+			// better; reporting it twice would make one defect read as two.
+			continue;
+		};
+		let overrides = netcfgd_compile::render::Overrides::new();
+		let text = match netcfgd_compile::render::render(&document, &overrides) {
+			Ok(text) => text,
+			Err(missing) => {
+				if missing.iter().all(|what| what.contains("hooks")) {
+					waived += 1;
+				} else {
+					failures.push_str(&format!(
+						"\n{EXAMPLE}:{}: renders only partly, and not because of hooks:\n    {}\n",
+						snippet.line,
+						missing.join("\n    ")
+					));
+				}
+				continue;
+			}
+		};
+		rendered_count += 1;
+
+		// The round trip, which is what a profile save actually depends on:
+		// the daemon proves a snapshot reproduces the running document before
+		// keeping it, so a renderer that writes something subtly different
+		// refuses the save rather than producing a wrong file.
+		let mut back = SourceMap::new();
+		back.add("rendered.conf", &text);
+		match compile(&back, &mut FakeHooks) {
+			Ok(again) if again == document => {}
+			Ok(_) => failures.push_str(&format!(
+				"\n{EXAMPLE}:{}: renders to a different document:\n{}\n",
+				snippet.line, text
+			)),
+			Err(diagnostics) => failures.push_str(&format!(
+				"\n{EXAMPLE}:{}: renders to something that does not compile:\n{}\n{}\n",
+				snippet.line,
+				text,
+				diagnostics.render(&back)
+			)),
+		}
+	}
+
+	assert!(failures.is_empty(), "{failures}");
+	assert!(
+		waived > 0,
+		"no example was refused for hooks, so the waiver above is checking nothing -- \
+		 either the renderer learned them, in which case delete it, or this test has \
+		 stopped reaching them"
+	);
+	assert!(
+		rendered_count >= 20,
+		"only {rendered_count} examples rendered, which is too few for this to be a \
+		 measurement of the language"
+	);
+}
+
 /// The installed example must not be a file the loader reads.
 ///
 /// The whole safety of shipping a configuration file full of examples is that

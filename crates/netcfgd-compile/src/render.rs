@@ -22,15 +22,16 @@ use netcfgd_model::device::{AccessPoint, AclPolicy};
 use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{
-	BridgeVlan, InterfaceKind, LinkSettings, ProbePolicy, QdiscKind, QdiscPolicy, RaBackend,
-	RaPolicy, Toggle,
+	BridgeVlan, InterfaceKind, LinkSettings, OpenVpnConfig, PppoeConfig, ProbePolicy, QdiscKind,
+	QdiscPolicy, RaBackend, RaPolicy, Toggle, TunConfig, TunMode, TunnelConfig, WireGuardConfig,
 };
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::secret::{SecretProvider, SecretRef};
 use netcfgd_model::security::{CertSource, EapConfig, EapMethod, Security};
 use netcfgd_model::wifi::WifiNetwork;
 use netcfgd_model::{
-	AddressSource, Device, Document, DriftPolicy, HostnamePolicy, Interface, Route,
+	AddressSource, Device, Dhcp4, Dhcp6, Document, DriftPolicy, HostnamePolicy, Interface, Route,
+	Slaac, SlaacPrivacy,
 };
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -144,7 +145,13 @@ fn render_globals(document: &Document, text: &mut String, missing: &mut Unrender
 	}
 	match &globals.hostname_policy {
 		HostnamePolicy::None => {}
-		HostnamePolicy::FromDhcp => body.push_str("\thostname = \"from_dhcp\"\n"),
+		// **`dhcp`, which is the word the language has.** It wrote
+		// `from_dhcp` -- the variant's own name -- and `lower_globals` reads
+		// anything that is not `dhcp` as a literal hostname, so the profile
+		// did not merely lose the setting: it failed to parse, with
+		// "`from_dhcp` is not a hostname" pointing at a line netcfgd wrote
+		// itself. Found by rendering every example in `netcfgd.conf.example`.
+		HostnamePolicy::FromDhcp => body.push_str("\thostname = \"dhcp\"\n"),
 		HostnamePolicy::Static(name) => {
 			let _ = writeln!(body, "\thostname = {}", quote(name));
 		}
@@ -460,25 +467,170 @@ fn render_kind(kind: &InterfaceKind, name: &str, body: &mut String, missing: &mu
 		// profile is for, and refusing the kind meant `ncfg profile save`
 		// failed outright on one -- not the WAN saved wrongly, the whole save
 		// refused.
-		InterfaceKind::Pppoe(pppoe) => {
-			body.push_str("\tpppoe {\n");
-			let _ = writeln!(body, "\t\tparent = {}", quote(&pppoe.parent));
-			let _ = writeln!(body, "\t\tusername = {}", quote(&pppoe.username));
+		InterfaceKind::Pppoe(pppoe) => render_pppoe(pppoe, body),
+		InterfaceKind::WireGuard(wireguard) => render_wireguard(wireguard, body),
+		InterfaceKind::OpenVpn(openvpn) => render_openvpn(openvpn, body),
+		InterfaceKind::Tunnel(tunnel) => render_tunnel(tunnel, body),
+		InterfaceKind::Tun(tun) => render_tun(tun, body),
+		// Named rather than left as `_`, so a kind added later is a compile
+		// error here instead of a refusal somebody meets at `profile save`.
+		// `Ifb` is the only one left and is unreachable from the language:
+		// `expand_ingress_shapers` makes it, and `IngressShaping` skips the
+		// one it made -- so reaching this means a document that did not come
+		// through this compiler.
+		other @ InterfaceKind::Ifb => {
+			missing.push(format!("device {name}: kind {}", kind_name(other)));
+		}
+	}
+}
+
+/// An `OpenVPN` tunnel, which is a path and an optional credential.
+///
+/// Decision 0046's choice shows through here: what netcfgd holds is the path
+/// to the operator's `.ovpn`, not a rendering of one, so a profile carries the
+/// path and whatever is inside the file stays the operator's. That is also
+/// what makes this arm short -- `openvpn --help` lists 253 options and none of
+/// them is netcfgd's to write.
+/// A `PPPoE` session.
+///
+/// Moved out of `render_kind` rather than rewritten, when that function went
+/// past the line limit after learning four more kinds. `parent`, `username`
+/// and `password` are unconditional because the model requires all three: a
+/// session with no credential is one that cannot authenticate, which `lower`
+/// refuses rather than defaulting.
+fn render_pppoe(pppoe: &PppoeConfig, body: &mut String) {
+	body.push_str("\tpppoe {\n");
+	let _ = writeln!(body, "\t\tparent = {}", quote(&pppoe.parent));
+	let _ = writeln!(body, "\t\tusername = {}", quote(&pppoe.username));
+	let _ = writeln!(
+		body,
+		"\t\tpassword = {}",
+		quote(&secret_ref(&pppoe.password))
+	);
+	if let Some(service) = &pppoe.service {
+		let _ = writeln!(body, "\t\tservice = {}", quote(service));
+	}
+	if let Some(ac) = &pppoe.ac {
+		let _ = writeln!(body, "\t\tac = {}", quote(ac));
+	}
+	body.push_str("\t}\n");
+}
+
+fn render_openvpn(openvpn: &OpenVpnConfig, body: &mut String) {
+	body.push_str("\topenvpn {\n");
+	let _ = writeln!(body, "\t\tconfig = {}", quote(&openvpn.config));
+	if let Some(username) = &openvpn.username {
+		let _ = writeln!(body, "\t\tusername = {}", quote(username));
+	}
+	if let Some(password) = &openvpn.password {
+		let _ = writeln!(body, "\t\tpassword = {}", quote(&secret_ref(password)));
+	}
+	body.push_str("\t}\n");
+}
+
+/// An encapsulating tunnel.
+///
+/// The key is `mode` and not `kind`, which the model's own comment explains:
+/// [`InterfaceKind`] serialises with an internal tag named `kind`, so a
+/// variant whose inner struct also had one produced JSON with the field twice.
+/// The parser accepts both spellings and this writes the one the model uses.
+fn render_tunnel(tunnel: &TunnelConfig, body: &mut String) {
+	body.push_str("\ttunnel {\n");
+	let _ = writeln!(body, "\t\tmode = {}", quote(tunnel.mode.name()));
+	if let Some(local) = &tunnel.local {
+		let _ = writeln!(body, "\t\tlocal = {}", quote(&local.to_string()));
+	}
+	if let Some(remote) = &tunnel.remote {
+		let _ = writeln!(body, "\t\tremote = {}", quote(&remote.to_string()));
+	}
+	if let Some(parent) = &tunnel.parent {
+		let _ = writeln!(body, "\t\tparent = {}", quote(parent));
+	}
+	if let Some(ttl) = tunnel.ttl {
+		let _ = writeln!(body, "\t\tttl = {ttl}");
+	}
+	if let Some(key) = tunnel.key {
+		let _ = writeln!(body, "\t\tkey = {key}");
+	}
+	body.push_str("\t}\n");
+}
+
+/// A persistent tun or tap device.
+///
+/// **The mode is the block head, not a key.** `lower_link_kind` reads `tun`
+/// and `tap` as two spellings of one parser, so a `mode` written inside the
+/// block would be an unknown key -- and a renderer emitting `tun { }` for a
+/// tap device loses layer 2 in silence.
+fn render_tun(tun: &TunConfig, body: &mut String) {
+	let head = match tun.mode {
+		TunMode::Tun => "tun",
+		TunMode::Tap => "tap",
+	};
+	let _ = writeln!(body, "\t{head} {{");
+	if let Some(owner) = &tun.owner {
+		let _ = writeln!(body, "\t\towner = {}", quote(owner));
+	}
+	if let Some(group) = &tun.group {
+		let _ = writeln!(body, "\t\tgroup = {}", quote(group));
+	}
+	body.push_str("\t}\n");
+}
+
+/// A `WireGuard` interface and its peers.
+///
+/// **A VPN is the thing a profile is most likely to be about**, and this was
+/// the broadest kind left refusing a save: the office tunnel is up at the
+/// office and not at home, which is the whole shape of a profile.
+///
+/// Every credential is written as the reference it came in as -- the private
+/// key and each peer's optional preshared key -- for the reason the access
+/// point's psk is: a `SecretRef` holds a provider and a name and no value, so
+/// the exposure is not a leak but a prefix, and a name written bare reads back
+/// as a literal key.
+///
+/// A peer's `public_key` goes through [`netcfgd_model::Key`]'s own rendering
+/// rather than being formatted here, so the spelling the parser accepts and
+/// the spelling written are one function. `allowed_ips` is written even when
+/// empty is impossible -- `lower_wg_peer` requires at least one, a peer with
+/// none being a tunnel that carries nothing.
+fn render_wireguard(wireguard: &WireGuardConfig, body: &mut String) {
+	body.push_str("\twireguard {\n");
+	let _ = writeln!(
+		body,
+		"\t\tprivate_key = {}",
+		quote(&secret_ref(&wireguard.private_key))
+	);
+	if let Some(port) = wireguard.listen_port {
+		let _ = writeln!(body, "\t\tlisten_port = {port}");
+	}
+	if let Some(fwmark) = wireguard.fwmark {
+		let _ = writeln!(body, "\t\tfwmark = {fwmark}");
+	}
+	for peer in &wireguard.peers {
+		let _ = writeln!(body, "\t\tpeer {} {{", quote(&peer.name));
+		let _ = writeln!(
+			body,
+			"\t\t\tpublic_key = {}",
+			quote(&peer.public_key.to_string())
+		);
+		if let Some(preshared) = &peer.preshared_key {
 			let _ = writeln!(
 				body,
-				"\t\tpassword = {}",
-				quote(&secret_ref(&pppoe.password))
+				"\t\t\tpreshared_key = {}",
+				quote(&secret_ref(preshared))
 			);
-			if let Some(service) = &pppoe.service {
-				let _ = writeln!(body, "\t\tservice = {}", quote(service));
-			}
-			if let Some(ac) = &pppoe.ac {
-				let _ = writeln!(body, "\t\tac = {}", quote(ac));
-			}
-			body.push_str("\t}\n");
 		}
-		other => missing.push(format!("device {name}: kind {}", kind_name(other))),
+		if let Some(endpoint) = &peer.endpoint {
+			let _ = writeln!(body, "\t\t\tendpoint = {}", quote(endpoint));
+		}
+		let allowed: Vec<String> = peer.allowed_ips.iter().map(|ip| quote(ip)).collect();
+		let _ = writeln!(body, "\t\t\tallowed_ips = {}", list_or_scalar(&allowed));
+		if let Some(keepalive) = peer.keepalive {
+			let _ = writeln!(body, "\t\t\tkeepalive = {keepalive}");
+		}
+		body.push_str("\t\t}\n");
 	}
+	body.push_str("\t}\n");
 }
 
 /// The interface keys that are neither addressing nor topology.
@@ -542,6 +694,16 @@ fn render_probe(probe: &ProbePolicy, body: &mut String) {
 			let _ = writeln!(body, "\t\t{key} = {value}");
 		}
 	}
+	// **Dropped in silence until the example corpus was rendered**, and it
+	// defaults to ON -- so the key only ever appears to say "probe even with
+	// no lease", which is what a modem needs. `lower_probe`'s own comment
+	// gives the reason the default is that way round: an interface that asked
+	// for DHCP and has no lease has nothing a reachability probe could succeed
+	// over. A profile losing it turns a modem's working probe into one that
+	// waits for a lease it may never get.
+	if !probe.require_lease {
+		body.push_str("\t\trequire_lease = false\n");
+	}
 	body.push_str("\t}\n");
 }
 
@@ -581,6 +743,13 @@ fn static_address(address: &netcfgd_model::address::Static) -> String {
 /// one function rather than two: the network side was rendering nothing at
 /// all, and writing a second copy is how the two would come to disagree about
 /// what `slaac` spells.
+///
+/// **The match is exhaustive and deliberately has no catch-all.** It had one
+/// until every [`AddressSource`] variant was handled, at which point the arm
+/// was dead -- and a dead catch-all is worse than none, because an eighth
+/// variant would be absorbed into a refusal somebody meets at `profile save`
+/// rather than a compile error somebody meets while adding it. Whoever adds
+/// one decides here what a profile says about it.
 fn render_addressing(
 	sources: &[AddressSource],
 	whose: &str,
@@ -591,14 +760,99 @@ fn render_addressing(
 		.iter()
 		.filter_map(|source| match source {
 			AddressSource::Static(address) => Some(quote(&static_address(address))),
-			AddressSource::Dhcp4(_) => Some(quote("dhcp")),
-			AddressSource::Dhcp6(_) => Some(quote("dhcp6")),
-			AddressSource::Slaac(_) => Some(quote("slaac")),
-			AddressSource::LinkLocal => Some(quote("link_local")),
-			other => {
-				missing.push(format!("{whose}: {} addressing", other.kind_name()));
-				None
+			// **These three wrote the bare word and dropped everything else**,
+			// which is how `dhcp6 pd_length 56` became `dhcp6` and a
+			// delegation request vanished from a saved profile. Not a refusal
+			// either: `render` returned `Ok`, so only the daemon's round-trip
+			// proof stood between that and a profile missing the prefix the
+			// whole inside network is numbered from.
+			//
+			// Each arm now compares against the default it would have written
+			// and refuses anything else, rather than listing the fields it
+			// knows. That is the part worth keeping: a field added to `Dhcp4`
+			// tomorrow is refused by name instead of being silently dropped by
+			// a renderer nobody remembered to update, which is the failure
+			// this whole list exists to prevent and the one it kept having.
+			AddressSource::Dhcp4(dhcp4) => {
+				// `dhcp` takes no modifiers at all -- `address_source` runs it
+				// through `no_modifiers` -- so every field here is unreachable
+				// from the language and a non-default one did not come from a
+				// configuration file.
+				if *dhcp4 != Dhcp4::default() {
+					missing.push(format!("{whose}: a dhcp4 lease carrying options"));
+					return None;
+				}
+				Some(quote("dhcp"))
 			}
+			AddressSource::Dhcp6(dhcp6) => {
+				let plain = Dhcp6 {
+					prefix_delegation: dhcp6.prefix_delegation.clone(),
+					..Dhcp6::default()
+				};
+				if *dhcp6 != plain {
+					missing.push(format!("{whose}: a dhcp6 lease carrying options"));
+					return None;
+				}
+				let mut text = String::from("dhcp6");
+				if let Some(request) = &dhcp6.prefix_delegation {
+					// Each of `pd_hint` and `pd_length` implies `pd`, so the
+					// bare word is written only when neither is set -- which
+					// is also the spelling the example file uses.
+					if request.hint.is_none() && request.length.is_none() {
+						text.push_str(" pd");
+					}
+					if let Some(hint) = &request.hint {
+						let _ = write!(text, " pd_hint {hint}");
+					}
+					if let Some(length) = request.length {
+						let _ = write!(text, " pd_length {length}");
+					}
+				}
+				Some(quote(&text))
+			}
+			AddressSource::Slaac(slaac) => {
+				// **Destructured rather than compared, and clippy is why.**
+				// This was written as `Slaac { privacy, ..default }` and a
+				// `!=` against it, copying the `Dhcp6` arm above -- and
+				// `privacy` is Slaac's only field, so that compared the value
+				// with itself and could never fire. A guard that cannot fail
+				// is this tree's oldest lesson and it was written here anyway.
+				//
+				// The destructuring is what the guard was reaching for and is
+				// better than it was: a field added to `Slaac` does not fail
+				// at `profile save`, it fails to compile for whoever adds it.
+				let Slaac { privacy } = slaac;
+				let mut text = String::from("slaac");
+				if *privacy == SlaacPrivacy::PreferTemporary {
+					text.push_str(" privacy prefer_temporary");
+				}
+				Some(quote(&text))
+			}
+			AddressSource::LinkLocal => Some(quote("link_local")),
+			// `@pd:wan0`, `@pd:wan0/2`, `@pd:wan0=::1/64` -- the same shape as
+			// `@secret:`, and for the same reason: an indirection the document
+			// carries instead of a value, because no config file can know what
+			// an ISP will delegate. The suffix is written only where it differs
+			// from the `::1/64` the parser supplies, and `index` keeps a
+			// refusal: it selects between several delegations in one lease and
+			// `delegated_source` pins it to 0, so no spelling exists.
+			AddressSource::Delegated(delegated) => {
+				if delegated.prefix.index != 0 {
+					missing.push(format!("{whose}: a delegated prefix selected by index"));
+					return None;
+				}
+				let mut text = format!("@pd:{}", delegated.prefix.source);
+				if delegated.prefix.subnet != 0 {
+					let _ = write!(text, "/{}", delegated.prefix.subnet);
+				}
+				if delegated.suffix != "::1/64" {
+					let _ = write!(text, "={}", delegated.suffix);
+				}
+				Some(quote(&text))
+			}
+			// A value with nothing in it: the modem's own report is the
+			// address, so the word is the whole of what a document says.
+			AddressSource::Reported(_) => Some(quote("reported")),
 		})
 		.collect();
 	if !config.is_empty() {
@@ -823,6 +1077,20 @@ fn render_eap(eap: &EapConfig, body: &mut String) {
 	}
 	if let Some(password) = &eap.password {
 		let _ = writeln!(body, "\t\tpassword = {}", quote(&secret_ref(password)));
+	}
+	// **The one field here whose loss weakens a network rather than changing
+	// it**, which is `proto`'s lesson in a worse place. It is what stops the
+	// supplicant authenticating to a rogue RADIUS server presenting a
+	// certificate some trusted CA signed: without it the chain is checked and
+	// the *name* is not, so any certificate from any CA in the store is
+	// accepted. A profile that dropped it came back weaker than the
+	// configuration it was saved from, and said nothing.
+	//
+	// It was the one field of nine `render_eap` did not write, and the round
+	// trip over `netcfgd.conf.example` is what found it -- three of that
+	// file's enterprise examples set it.
+	if let Some(domain) = &eap.domain_suffix_match {
+		let _ = writeln!(body, "\t\tdomain_suffix_match = {}", quote(domain));
 	}
 	for (source, key) in [
 		(&eap.ca_cert, "ca_cert"),
@@ -2393,21 +2661,38 @@ mod tests {
 	/// The refusal, which is the other half of the contract. A wireguard
 	/// interface has no rendering here, and saying so by name is the whole
 	/// difference between a partial renderer and a lossy one.
+	/// A document carrying something unrenderable is refused, by name.
+	///
+	/// **The subject had to change, and that is the test working.** It used
+	/// `wireguard` until that kind was rendered, so the case now uses a hook
+	/// -- the one entry on the refusal list that is both reachable from the
+	/// configuration language and deliberately refused rather than pending. A
+	/// `HookRef` holds a path and a sha256 and not the shell, so there is
+	/// nothing in the document to write back.
+	///
+	/// Picking a refusal that is merely *not done yet* would make this test
+	/// fail every time somebody closed one, which is a test that punishes the
+	/// work it is meant to accompany.
 	#[test]
 	fn what_cannot_be_rendered_is_named() {
-		let document = compile(
-			"device wg0 {\n\
-			 \twireguard {\n\
-			 \t\tprivate_key = \"@secret:wg\"\n\
-			 \t}\n\
-			 }\n\
-			 interface wg0 {\n\
-			 \tconfig = \"10.0.0.2/32\"\n\
-			 }\n",
-		);
+		// The hook is attached rather than written in the configuration,
+		// because this module's `compile` helper uses `NoHooks` -- which
+		// refuses a hook with "this caller cannot accept hooks" rather than
+		// materialising one. That refusal is the compiler's and is a different
+		// subject from this one.
+		let mut document = compile("interface eth0 { config = \"dhcp\" }\n");
+		document.interfaces[0]
+			.hooks
+			.push(netcfgd_model::hook::HookRef {
+				phase: netcfgd_model::hook::HookPhase::PostUp,
+				path: "/etc/netcfgd/hook/eth0-post_up".to_owned(),
+				sha256: "0".repeat(64),
+				run_as: None,
+				timeout: None,
+			});
 		let missing = render(&document, &Overrides::new()).expect_err("refused");
 		assert!(
-			missing.iter().any(|what| what.contains("wireguard")),
+			missing.iter().any(|what| what.contains("hooks")),
 			"{missing:?}"
 		);
 	}
@@ -2440,6 +2725,322 @@ mod tests {
 			 \twifi { psk = \"@secret:ap\" }\n\
 			 }\n",
 		);
+	}
+
+	/// **The options on `dhcp6` and `slaac`, which were dropped in silence.**
+	///
+	/// Every one of these was found by rendering `netcfgd.conf.example` and
+	/// recompiling it, and **none of them was caught by any of this module's
+	/// other cases** -- the arms wrote the bare word and returned `Ok`, so
+	/// nothing short of comparing the documents could see it. They have their
+	/// own cases here as well as in that gate, because the gate's coverage is
+	/// whatever the documentation happens to contain: an example deleted for
+	/// being repetitive would take the only test of `pd_length` with it.
+	#[test]
+	fn the_addressing_options_round_trip() {
+		round_trips("interface eth0 { config = [\"dhcp\", \"dhcp6 pd\"] }\n");
+		round_trips("interface eth0 { config = \"dhcp6 pd_length 56\" }\n");
+		round_trips("interface eth0 { config = \"dhcp6 pd_hint 2001:db8::\" }\n");
+		round_trips("interface eth0 { config = \"dhcp6 pd_hint 2001:db8:: pd_length 56\" }\n");
+		round_trips("interface eth0 { config = \"slaac privacy prefer_temporary\" }\n");
+		round_trips("interface eth0 { config = \"slaac privacy none\" }\n");
+	}
+
+	/// And the bare words stay bare, which the round trip cannot show.
+	///
+	/// `dhcp6` with no delegation and `slaac` with privacy off are the
+	/// defaults, so a renderer writing ` pd` or ` privacy none` unconditionally
+	/// still round-trips -- and makes every profile claim a delegation request
+	/// the operator never made. For `pd` that is not cosmetic: it asks the ISP
+	/// for a prefix.
+	#[test]
+	fn plain_dhcp6_and_slaac_stay_plain() {
+		let document = compile("interface eth0 { config = [\"dhcp6\", \"slaac\"] }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("\"dhcp6\""), "{rendered}");
+		assert!(rendered.contains("\"slaac\""), "{rendered}");
+		for absent in ["pd", "privacy"] {
+			assert!(
+				!rendered.contains(absent),
+				"{absent} is not set and must not be written: {rendered}"
+			);
+		}
+
+		// **And a redundant `pd` beside a `pd_length` is not written.** This
+		// is the one assertion here the round trip cannot make: `pd` only sets
+		// "a delegation was asked for", which `pd_length` sets too, so
+		// `dhcp6 pd pd_length 56` compiles to exactly the same document.
+		// Nothing behavioural turns on it -- it is pinned because the arm's
+		// comment claims the minimal spelling, and a claim in a comment that
+		// no test makes is how this file keeps finding comments that stopped
+		// being true. The whole value is compared rather than searched for
+		// `pd`, which is a substring of `pd_length`.
+		let document = compile("interface eth0 { config = \"dhcp6 pd_length 56\" }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(
+			rendered.contains("config = \"dhcp6 pd_length 56\""),
+			"{rendered}"
+		);
+	}
+
+	/// A `dhcp4` lease carrying anything is refused rather than flattened.
+	///
+	/// `address_source` runs `dhcp` through `no_modifiers`, so every field of
+	/// `Dhcp4` is unreachable from the language and a non-default one did not
+	/// come from a configuration file. The arm compares against the default
+	/// rather than listing fields, so a field added later is refused by name
+	/// instead of being dropped by a renderer nobody updated -- which is the
+	/// failure the whole unrenderable list exists to prevent, and the one it
+	/// kept having.
+	#[test]
+	fn a_dhcp4_lease_with_options_is_refused() {
+		let mut document = compile("interface eth0 { config = \"dhcp\" }\n");
+		for source in &mut document.interfaces[0].addressing {
+			if let netcfgd_model::AddressSource::Dhcp4(dhcp4) = source {
+				dhcp4.metric = Some(250);
+			}
+		}
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing.iter().any(|what| what.contains("dhcp4 lease")),
+			"{missing:?}"
+		);
+	}
+
+	/// The probe's `require_lease`, whose default is on.
+	///
+	/// So the key appears only to say "probe with no lease", which is what a
+	/// modem needs -- and it was written nowhere, so a profile turned a
+	/// working cellular probe into one waiting for a lease it may never get.
+	#[test]
+	fn a_probes_require_lease_round_trips() {
+		round_trips(
+			"interface wwan0 {\n\
+			 \tconfig = \"dhcp\"\n\
+			 \tprobe {\n\
+			 \t\tcommand = \"/usr/share/netcfgd/probe/default\"\n\
+			 \t\targs = \"wwan0\"\n\
+			 \t\trequire_lease = false\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **`domain_suffix_match`, the field whose loss weakens a network.**
+	///
+	/// Without it the supplicant checks the certificate chain and not the
+	/// name, so any certificate from any CA in the store is accepted -- which
+	/// is what a rogue RADIUS server needs. It was the one field of nine
+	/// `render_eap` did not write, so an enterprise profile came back weaker
+	/// than the configuration it was saved from and said nothing.
+	#[test]
+	fn an_eap_domain_suffix_match_round_trips() {
+		round_trips(
+			"network \"corp\" {\n\
+			 \twifi {\n\
+			 \t\teap = \"tls\"\n\
+			 \t\tidentity = \"you@corp.example\"\n\
+			 \t\tca_cert = \"/etc/netcfgd/certs/corp-ca.pem\"\n\
+			 \t\tdomain_suffix_match = \"radius.corp.example\"\n\
+			 \t\tprivate_key = \"@secret:corp-key\"\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// The hostname taken from a lease, in the word the language has.
+	///
+	/// It wrote `from_dhcp`, the variant's own name, and `lower_globals` reads
+	/// anything that is not `dhcp` as a literal hostname -- so the profile did
+	/// not lose the setting, it **failed to parse**, with "`from_dhcp` is not
+	/// a hostname" pointing at a line netcfgd wrote itself.
+	#[test]
+	fn a_hostname_from_dhcp_round_trips() {
+		round_trips("global { hostname = \"dhcp\" }\n");
+		round_trips("global { hostname = \"host.example\" }\n");
+	}
+
+	/// A delegated prefix in every spelling the parser accepts.
+	///
+	/// `@pd:` is an indirection for the same reason `@secret:` is -- no config
+	/// file can know what an ISP will delegate -- so what a profile has to
+	/// write back is the reference and not the address it resolved to. A
+	/// renderer resolving it would pin a profile to one ISP lease.
+	#[test]
+	fn a_delegated_prefix_round_trips() {
+		round_trips("interface lan0 { config = \"@pd:wan0\" }\n");
+		round_trips("interface lan0 { config = \"@pd:wan0/2\" }\n");
+		round_trips("interface lan0 { config = \"@pd:wan0=::2/64\" }\n");
+		round_trips("interface lan0 { config = \"@pd:wan0/3=::1/64\" }\n");
+		round_trips("interface lan0 { config = [\"192.0.2.1/24\", \"@pd:wan0\"] }\n");
+	}
+
+	/// **The default suffix is not written**, which is the one thing the round
+	/// trip above cannot show on its own: `delegated_source` supplies
+	/// `::1/64` when no `=` is given, so a renderer writing the suffix
+	/// unconditionally still round-trips while making every profile noisier
+	/// than the file it came from.
+	#[test]
+	fn a_delegated_prefix_at_its_default_suffix_says_nothing_extra() {
+		let document = compile("interface lan0 { config = \"@pd:wan0\" }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("config = \"@pd:wan0\""), "{rendered}");
+		assert!(!rendered.contains("::1/64"), "{rendered}");
+	}
+
+	/// And a delegated prefix picked by index is refused, as the advertised
+	/// one is.
+	///
+	/// `PrefixRef::index` selects between several delegations in one lease and
+	/// `delegated_source` pins it to 0, so no document can set it and there is
+	/// no spelling to write. Reached by putting it in after compiling -- and
+	/// the case exists because the sabotage that removes the refusal was
+	/// caught by nothing, exactly as the advertise one was.
+	#[test]
+	fn a_delegated_prefix_by_index_is_refused() {
+		let mut document = compile("interface lan0 { config = \"@pd:wan0\" }\n");
+		for source in &mut document.interfaces[0].addressing {
+			if let netcfgd_model::AddressSource::Delegated(delegated) = source {
+				delegated.prefix.index = 1;
+			}
+		}
+		let missing = render(&document, &Overrides::new()).expect_err("refused");
+		assert!(
+			missing
+				.iter()
+				.any(|what| what.contains("selected by index")),
+			"{missing:?}"
+		);
+	}
+
+	/// An address something outside netcfgd reported, where the word is all
+	/// there is -- a modem's own report is the value (0047).
+	#[test]
+	fn a_reported_address_round_trips() {
+		round_trips("interface wwan0 { config = \"reported\" }\n");
+	}
+
+	/// **A `WireGuard` tunnel and its peers, which was the broadest kind left
+	/// refusing a save.** A VPN is the thing a profile is most likely to be
+	/// about -- the office tunnel is up at the office and not at home -- so a
+	/// renderer that could not write one left profiles unavailable to exactly
+	/// the machines that move.
+	#[test]
+	fn a_wireguard_tunnel_round_trips() {
+		round_trips(
+			"device wg0 {\n\
+			 \twireguard {\n\
+			 \t\tprivate_key = \"@secret:wg\"\n\
+			 \t\tlisten_port = 51820\n\
+			 \t\tfwmark = 51820\n\
+			 \t\tpeer \"office\" {\n\
+			 \t\t\tpublic_key = \"5mQ3HVK9lJ7Tr0ePjWcQnL8sKdFhGyBvAzXuM2NiRkc=\"\n\
+			 \t\t\tpreshared_key = \"@secret:wg-office\"\n\
+			 \t\t\tendpoint = \"vpn.example.com:51820\"\n\
+			 \t\t\tallowed_ips = [\"10.0.0.0/8\", \"192.168.0.0/16\"]\n\
+			 \t\t\tkeepalive = 25\n\
+			 \t\t}\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// A tunnel with one peer and nothing optional, which is the ordinary one.
+	///
+	/// Separate from the case above because a renderer writing an optional key
+	/// unconditionally round-trips whenever every optional key is set, and the
+	/// maximal case is exactly the one that cannot see it.
+	#[test]
+	fn a_minimal_wireguard_tunnel_round_trips() {
+		round_trips(
+			"device wg0 {\n\
+			 \twireguard {\n\
+			 \t\tprivate_key = \"@secret:wg\"\n\
+			 \t\tpeer \"home\" {\n\
+			 \t\t\tpublic_key = \"5mQ3HVK9lJ7Tr0ePjWcQnL8sKdFhGyBvAzXuM2NiRkc=\"\n\
+			 \t\t\tallowed_ips = \"0.0.0.0/0\"\n\
+			 \t\t}\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **Two peers, because a peer list is the thing a loop gets wrong.** One
+	/// peer passes a renderer that writes only the first, and the compiler
+	/// refuses two peers sharing a public key -- so a renderer reusing one
+	/// key across the list would be refused on reload rather than silently
+	/// merging the two.
+	#[test]
+	fn two_wireguard_peers_round_trip() {
+		round_trips(
+			"device wg0 {\n\
+			 \twireguard {\n\
+			 \t\tprivate_key = \"@secret:wg\"\n\
+			 \t\tpeer \"a\" {\n\
+			 \t\t\tpublic_key = \"5mQ3HVK9lJ7Tr0ePjWcQnL8sKdFhGyBvAzXuM2NiRkc=\"\n\
+			 \t\t\tallowed_ips = \"10.1.0.0/16\"\n\
+			 \t\t}\n\
+			 \t\tpeer \"b\" {\n\
+			 \t\t\tpublic_key = \"Qd8vT2pXsKmN4LcRfWyHbJgZaE3uBnV6oP1iYrAxM0s=\"\n\
+			 \t\t\tallowed_ips = \"10.2.0.0/16\"\n\
+			 \t\t}\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// An `OpenVPN` tunnel with a credential, and one without.
+	///
+	/// Both, because the username and password are optional here and not on a
+	/// `PPPoE` session: a `.ovpn` with inline certificates authenticates
+	/// without either, and that is the ordinary provider-supplied case.
+	#[test]
+	fn an_openvpn_tunnel_round_trips() {
+		round_trips(
+			"device tun0 {\n\
+			 \topenvpn {\n\
+			 \t\tconfig = \"/etc/openvpn/work.ovpn\"\n\
+			 \t\tusername = \"someone\"\n\
+			 \t\tpassword = \"@secret:ovpn\"\n\
+			 \t}\n\
+			 }\n",
+		);
+		round_trips("device tun1 { openvpn { config = \"/etc/openvpn/a.ovpn\" } }\n");
+	}
+
+	/// Every tunnel mode, and the keys one carries.
+	#[test]
+	fn every_tunnel_mode_round_trips() {
+		for mode in ["gre", "gretap", "ip6gre", "ipip", "sit", "ip6tnl", "geneve"] {
+			round_trips(&format!(
+				"device tnl0 {{ tunnel {{ mode = \"{mode}\" }} }}\n"
+			));
+		}
+		round_trips(
+			"device gre0 {\n\
+			 \ttunnel {\n\
+			 \t\tmode = \"gre\"\n\
+			 \t\tlocal = \"192.0.2.1\"\n\
+			 \t\tremote = \"198.51.100.1\"\n\
+			 \t\tparent = \"eth0\"\n\
+			 \t\tttl = 64\n\
+			 \t\tkey = 42\n\
+			 \t}\n\
+			 }\n",
+		);
+	}
+
+	/// **`tun` and `tap` are two block heads rather than a `mode` key**, so a
+	/// renderer writing one head for both loses layer 2 in silence -- and
+	/// writing a `mode` key inside the block would be refused as unknown.
+	#[test]
+	fn tun_and_tap_round_trip_as_their_own_heads() {
+		round_trips("device tun0 { tun { owner = \"someone\"; group = \"netdev\" } }\n");
+		round_trips("device tap0 { tap { } }\n");
+		let document = compile("device tap0 { tap { } }\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("tap {"), "{rendered}");
+		assert!(!rendered.contains("tun {"), "{rendered}");
 	}
 
 	/// An interface's guard, which is a sentence rather than a setting.

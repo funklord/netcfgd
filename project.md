@@ -1036,8 +1036,10 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Seventeen places in the model are verified unreachable from the
-  configuration language, and that is a floor rather than a count.** 10.171
+- **Twenty places in the model are verified unreachable from the
+  configuration language, and that is a floor rather than a count** -- it was
+  seventeen until 10.172 found three more while rendering them, two of those
+  by the very collision 10.171 had recorded as its blind spot. 10.171
   says why a cheap total here cannot be trusted: three greps were built for it
   and each was wrong in a different direction, because the question is
   interprocedural. The only exact instrument is the parser -- a one-block
@@ -1048,8 +1050,9 @@ anybody decides it is impossible.
       implemented, no way to ask      DnsMode::Exec (netcfgd-dns),
                                       RaBackend::Exec (netcfgd-ra)
       schema with no behaviour        Route scope/proto, PrefixRef::index,
-                                      Dhcp4 hostname_mode/client_id/
-                                      request_options, Dhcp6::rapid_commit
+                                      Dhcp4 hostname_mode/client_id/metric/
+                                      request_options/backend,
+                                      Dhcp6 mode/rapid_commit
       needs more than grammar         HookRef run_as, timeout
       the rest, recorded by 0258       DnsPolicy options/dnssec/transport,
                                       DnsServer port/sni, Device match
@@ -9542,6 +9545,133 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.172 The refusal list was never the measure, and nine things it could not see
+
+Four device kinds and two addressing sources were the last reachable entries on
+the renderer's refusal list: `WireGuard`, `OpenVPN`, `Tunnel`, `tun`/`tap`, a
+delegated prefix and a reported address. **`WireGuard` was the one that
+mattered** -- a VPN is the thing a profile is most likely to be about, the
+office tunnel being up at the office and not at home -- and the module's own
+`what_cannot_be_rendered_is_named` had been using `wireguard` as its example of
+the impossible, so it had to be repointed. It names a hook now, which is the
+only entry that is both reachable and refused on purpose.
+
+Two spellings in there are worth knowing rather than rediscovering. `tun` and
+`tap` are two **block heads** and not a `mode` key, so a renderer writing one
+head for both loses layer 2 in silence. And `@pd:` is an indirection for the
+same reason `@secret:` is: no config file can know what an ISP will delegate,
+so a profile has to write the reference back and not the address it resolved
+to -- resolving it would pin the profile to one lease.
+
+With every `AddressSource` variant handled the catch-all arm became dead, and
+it is gone: an eighth variant is now a compile error for whoever adds it rather
+than a refusal somebody meets at `profile save`. **The compiler is the witness
+that the match is exhaustive**, which no test could be.
+
+### Then the measure turned out to be wrong
+
+The refusal list had been driving three commits of this work, and it is **not a
+measure of what a profile can hold**. A refusal is what the renderer says when
+it knows it cannot write something. A field it simply never learned does not
+appear on it at all: `render` returns `Ok`, the document is wrong, and nothing
+anywhere says so. Only the daemon's round-trip proof stands between that and a
+bad profile -- and what the operator then sees is a save refused with a diff,
+rather than a sentence naming what is missing.
+
+So the list was finished and the question was not. What answers it is the round
+trip over a corpus somebody else curated: `doc/netcfgd.conf.example` claims to
+carry every feature with the syntax to use it, and `tests/example.rs` already
+compiles every snippet in it. Rendering each one and recompiling the result is
+three dozen lines on top of machinery that existed.
+
+**It found nine failures on its first run, in five causes, and none of the
+renderer's 88 unit tests had caught any of them** -- verified by sabotage, each
+cause re-broken one at a time with only the new gate going red:
+
+- **`global { hostname = "dhcp" }` rendered a profile that does not parse.**
+  It wrote `from_dhcp`, the variant's own name, and `lower_globals` reads
+  anything that is not `dhcp` as a literal hostname. So the failure was not a
+  lost setting but `` `from_dhcp` is not a hostname `` pointing at a line
+  netcfgd wrote itself.
+- **`domain_suffix_match` was the one field of nine `render_eap` did not
+  write**, and it is the field whose loss *weakens* a network rather than
+  changing it. Without it the supplicant checks the certificate chain and not
+  the name, so any certificate from any CA in the store is accepted -- which
+  is what a rogue RADIUS server needs. An enterprise profile came back weaker
+  than the configuration it was saved from, silently. Three of the example
+  file's own snippets set it.
+- **A probe's `require_lease` was written nowhere**, and its default is on, so
+  the key only ever appears to say "probe with no lease" -- which is what a
+  modem needs. A profile turned a working cellular probe into one waiting for
+  a lease it may never get.
+- **`dhcp6` wrote the bare word**, dropping `pd`, `pd_hint` and `pd_length`.
+  A saved profile stopped asking for a prefix delegation, which is what the
+  entire inside network is numbered from.
+- **`slaac` likewise**, dropping `privacy prefer_temporary`.
+
+The fix for the addressing three is not a longer list of fields. Each arm
+**compares against the default it would have written and refuses anything
+else**, so a field added to `Dhcp4` tomorrow is refused by name instead of
+being dropped by a renderer nobody remembered to update. That is the failure
+this list exists to prevent and the one it kept having.
+
+### The gate's own controls, and its limit
+
+The waiver is named rather than counted -- a snippet may be refused only if
+every reason mentions `hooks` -- so a new refusal fails with its own wording
+instead of being absorbed into a tolerance. The waiver is also asserted
+**non-empty**, because a permitted-failure list that has quietly stopped
+matching anything reports success whether or not the test still reaches it.
+And the rendered count has a floor, for the reason `every_example_compiles`
+already has one.
+
+**Its coverage is whatever the documentation happens to contain**, which is
+the limit to state rather than discover. So the five causes have unit tests of
+their own as well: an example deleted for being repetitive would otherwise take
+the only test of `pd_length` with it.
+
+### And clippy found the guard that could not fire
+
+The `Dhcp6` arm compares against the default it would have written, and the
+`slaac` arm was written the same way by copying it -- `Slaac { privacy, ..default }`
+and a `!=` against that. **`privacy` is Slaac's only field, so it compared the
+value with itself and could never fail.** A guard that cannot fire is the oldest
+entry in this tree's notes and it got written anyway, two screens below a
+comment saying so, inside the same change that was fixing five silent losses.
+
+`clippy::needless_update` caught it, which is worth noting for what it says
+about where the gate's value is: the lint is about a redundant struct update and
+has no idea what the comparison was for. **A style gate found a logic defect
+because the defect had a shape.**
+
+The fix is better than the guard was. `let Slaac { privacy } = slaac;`
+destructures, so a field added to `Slaac` does not slip through at
+`profile save` -- it fails to compile for whoever adds it. The same reasoning
+moved `render_kind`'s wildcard to `other @ InterfaceKind::Ifb`, and both are
+the lesson the addressing match had already taught twenty lines earlier.
+
+**And I read a narrower check's silence as a pass**, which is the other half.
+`cargo clippy -p netcfgd-compile --all-targets` printed nothing and I took the
+tree as clean; the Makefile runs `clippy --workspace --all-targets -- -D
+warnings`, and `too_many_lines` is a warning without that flag. `render_kind`
+was 147 lines over a limit of 100 the whole time. **The gate's own invocation is
+the only one that answers the gate's question**, and a hand-rolled narrower one
+answers a question nobody asked.
+
+Splitting it out gave `render_pppoe`, `render_openvpn`, `render_tunnel` and
+`render_tun` their own functions, so every kind with more than one line is one
+now.
+
+### And two more unreachable fields, by the blind spot 10.171 named
+
+`dhcp` takes no modifiers at all -- `address_source` runs it through
+`no_modifiers` -- so every field of `Dhcp4` is unreachable, including `metric`
+and `backend`. 10.171's field sweep missed both to exactly the collision it
+documented: a network has a `metric` and an advertise block a `backend`, so
+both words appear in `lower.rs` for other reasons. **The floor it published was
+a floor**, which is the one thing a count labelled that way gets to be right
+about.
 
 ## 10.171 The last two interface blocks, and three detectors that were each wrong
 
