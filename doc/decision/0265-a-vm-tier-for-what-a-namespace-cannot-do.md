@@ -322,7 +322,7 @@ this machine** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first report tha
 **Four scripts now run that never ran, and three of those four fail:**
 
     sandbox_writes.sh   PASSES    31 checks against 25 here, 3 of the 6 controls
-    hwsim.sh            1 failed  real wifi: SAE, metric preference, roam
+    hwsim.sh            PASSES    25 checks: SAE, a real lease, roam detection
     bluetooth.sh        1 failed  "netcfgd reports the adapter it can see"
     pppoe-session.sh    2 failed  resolv.conf handling
     nm.sh               4+ failed "the loopback is a loopback, not an ethernet"
@@ -338,14 +338,44 @@ running supplicant, that leaving one network for another is *not* a roam, and
 that reassociating to a second access point on the same network *is* one, named
 by the access point moved to. None of that had ever run anywhere.
 
-Its one failure is `never got an address over the radio`, with
-`backend.start wlan2 addressing[0]: Dhcp4 (was <absent>)`. **Not attributed.**
-dnsmasq was present and started -- the log shows
-`DHCP, IP range 10.55.0.100 -- 10.55.0.120` -- and `dhcpcd` was there too, since
-the script's own note about either being missing did not fire. So the address
-half genuinely ran and no lease arrived, which is either a netcfgd defect that
-no machine could previously see or something about data frames over hwsim. It
-needs an investigation of its own.
+**Its one failure was investigated and netcfgd was right.** The message said so
+in full:
+
+```text
+no DHCPv4 client could be started for wlan2: udhcpc and busybox are not
+installed, and the dhcpcd hook is not installed at
+/usr/libexec/netcfgd/dhcpcd-hook ... NCFG_DHCPCD_HOOK points at it in a tree
+that is not installed
+```
+
+That is 0178's refusal behaving as designed -- netcfgd will not start dhcpcd
+without its shipped hook, because a lease's nameservers would then never reach
+netcfgd and the resolver would be written empty -- and it is the same refusal
+`exec_refused.sh` asserts in both directions. dnsmasq was serving and dhcpcd was
+installed; netcfgd declined for a stated and correct reason.
+
+**The gap was in the script.** `hooks.sh`, `dhcpcd.sh`, `exec_refused.sh` and
+`switch_network.sh` all export
+`NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"` so an uninstalled tree
+can drive dhcpcd. `hwsim.sh` drives dhcp in 37 places and set it nowhere, so its
+address half could only ever pass where netcfgd happened to be installed or
+busybox happened to be present. Nothing noticed because the whole script skips
+without real root, so that half had never run anywhere.
+
+One environment variable later, all 25 of its checks pass:
+
+```text
+ok   took a DHCP lease over the radio (10.55.0.109)
+ok   and the lease route carries it
+ok   and dnsmasq recorded the lease it handed out
+ok   and wrote no lease into the host's /var/lib/dhcpcd
+```
+
+**Three defects, one shape.** The empty radio baseline, the missing hook
+pointer, and `pppoe-session.sh`'s unhonoured contract were all correct-looking
+code that needed a new environment rather than a new test to become visible.
+That is the argument for this tier, made three times in an afternoon by the tier
+itself.
 
 The other three failures are likewise recorded rather than diagnosed.
 `bluetooth.sh` printed `Bluetooth: hci0: Opcode 0x0c03 failed: -110` -- an

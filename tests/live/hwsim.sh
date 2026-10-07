@@ -382,8 +382,26 @@ echo "ok   the access point is beaconing"
 # directory is compiled in, so the only lever is the mount namespace and this
 # is the only place to pull it.
 innc() {
+	# **`NCFG_DHCPCD_HOOK` as well, and its absence is why the address half
+	# could not pass in an uninstalled tree.** Since 0178 netcfgd refuses to
+	# start dhcpcd when its shipped hook is missing, because a lease's
+	# nameservers would then never reach netcfgd and the resolver would be
+	# written empty -- so in a tree that has not been installed, with no
+	# udhcpc or busybox either, it correctly offers no client at all:
+	#
+	#     no DHCPv4 client could be started for wlan2: udhcpc and busybox are
+	#     not installed, and the dhcpcd hook is not installed at
+	#     /usr/libexec/netcfgd/dhcpcd-hook
+	#
+	# That is netcfgd being right and this script being silent about where the
+	# hook is. `hooks.sh`, `dhcpcd.sh`, `exec_refused.sh` and
+	# `switch_network.sh` all point at the in-tree copy; this one drives dhcp
+	# in 37 places and did not, and nothing noticed because the whole script
+	# skips on a machine without real root -- so its address half had never
+	# run anywhere until the VM tier ran it.
 	inns env NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" \
-		NCFG_WPA_CTRL_DIR="$work/ctrl" sh -c '
+		NCFG_WPA_CTRL_DIR="$work/ctrl" \
+		NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook" sh -c '
 		if [ -d /var/lib/dhcpcd ]; then
 			mount -t tmpfs tmpfs /var/lib/dhcpcd || exit 90
 			# A fresh tmpfs is empty. Anything visible is the host

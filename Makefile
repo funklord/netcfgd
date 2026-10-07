@@ -1841,10 +1841,10 @@ vm-sandbox: vm-image
 # installs what they need inside the guest first, so this one wants a network
 # and takes several minutes; `VM_TIMEOUT` is set high for that reason.
 #
-# It is expected to FAIL today, and the failures are the point: four scripts
-# now run that never ran, three of them fail, and 0265 records what is
-# established about each and what is not. Two cannot run at all -- delegation.sh
-# wants odhcp6c, which Debian does not package.
+# It is expected to FAIL today, and the failures are the point: four scripts now
+# run that never ran, two of them pass, and 0265 records what is established
+# about each remaining failure and what is not. Two cannot run at all --
+# delegation.sh wants odhcp6c, which Debian does not package.
 vm-skipped: vm-image
 	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/skipped.sh
 

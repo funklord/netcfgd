@@ -9602,7 +9602,7 @@ already passing here** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first
 report that `ppp.sh` was newly passing was wrong, read off each script's *first*
 `skip()` call rather than off what happened: a skip site is not a skip event.
 
-**Four now run that never ran.** `sandbox_writes.sh` passes; `hwsim.sh`,
+**Four now run that never ran.** `sandbox_writes.sh` and `hwsim.sh` pass;
 `bluetooth.sh`, `pppoe-session.sh` and `nm.sh` fail, and those failures are
 recorded rather than diagnosed -- a failing check is not evidence either, and
 `bluetooth.sh`'s `hci0: Opcode 0x0c03 failed: -110` points at the virtual
@@ -9615,9 +9615,20 @@ handing it the network, association, **SAE negotiated from a transitional
 offer**, a scan finding the access point, preference by metric between two
 networks, moving between networks on a running supplicant, that leaving one
 network for another is not a roam, and that reassociating to a second access
-point on the same network is one. Its single failure is `never got an address
-over the radio`, with dnsmasq demonstrably running and `dhcpcd` present, so the
-address half ran and no lease arrived. That is its own investigation.
+point on the same network is one. **Its single failure was investigated and netcfgd was
+right**: it refused to start dhcpcd because the shipped hook was not installed,
+which is 0178's behaviour and what `exec_refused.sh` asserts -- a lease's
+nameservers would otherwise never reach netcfgd and the resolver would be
+written empty. The gap was the script's: four siblings export
+`NCFG_DHCPCD_HOOK="$repo/packaging/hooks/dhcpcd-hook"` for an uninstalled tree
+and `hwsim.sh` drove dhcp in 37 places without it, so its address half could
+only pass where netcfgd happened to be installed. One variable later all 25 of
+its checks pass, including `took a DHCP lease over the radio (10.55.0.109)` and
+`wrote no lease into the host's /var/lib/dhcpcd`.
+
+**Three defects, one shape**: the empty radio baseline, the missing hook
+pointer, and `pppoe-session.sh`'s unhonoured contract were all correct-looking
+code that needed a new environment rather than a new test to become visible.
 
 **And the tier found two defects in the suite on its first serious use.**
 
