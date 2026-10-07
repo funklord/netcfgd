@@ -186,6 +186,43 @@ check "and it is left exactly where it was" \
 	"$(rule_at 2000 | grep -c 'from 172.16.0.0/12 lookup 200' || true)" "1"
 ip rule del priority 2000
 
+# **An `l3mdev` rule, which netcfgd could not express at all.** The kernel
+# takes the table from whichever VRF the packet is in, so such a rule has no
+# `lookup` by construction -- and the compiler required one, refusing the only
+# form the kernel accepts while compiling the form it refuses:
+#
+#     # ip rule add l3mdev pref 1500          -> 1500: from all lookup [l3mdev-table]
+#     # ip rule add l3mdev table 100          -> table can not be specified for l3mdev rules
+#
+# Every layer below the compiler already carried it, `FRA_L3MDEV` being written
+# and read back in `netcfgd-sys/src/rule.rs` and compared by `same_rule`. This
+# is the end-to-end proof, because a unit test on the compiler cannot say the
+# kernel agrees -- and the kernel's answer is the whole reason the rule shape is
+# what it is.
+write_config <<'CONF'
+device probe0 {
+	kind   = "dummy"
+}
+interface probe0 {
+	config = "10.9.9.1/24"
+}
+
+rule "vrf-local" {
+	priority = 1500
+	l3mdev   = true
+}
+CONF
+apply "an l3mdev rule"
+check "the l3mdev rule is installed" \
+	"$(rule_at 1500 | grep -c 'lookup \[l3mdev-table\]' || true)" "1"
+# And it converges, which is the half that catches a rule netcfgd installs and
+# then cannot recognise: `l3mdev` comes back through the observation as a
+# boolean, so a comparison that ignored it would re-plan this for ever.
+plan=$("$ncfg" plan 2>&1)
+check "and a second plan has nothing to do" \
+	"$(printf '%s' "$plan" | grep -c 'rule\.' || true)" "0"
+ip rule del priority 1500 2>/dev/null || true
+
 # Dropping the rule from the config withdraws it.
 write_config <<'CONF'
 device probe0 {

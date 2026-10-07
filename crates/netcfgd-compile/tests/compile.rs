@@ -1140,6 +1140,33 @@ rule nodefault { priority = 90; lookup = 254; suppress_prefixlength = 0 }
 ///
 /// Asserted both ways round, because a key that is accepted and ignored looks
 /// exactly like one that works when only the true case is tried.
+/// **An `l3mdev` rule has no `lookup`, and could not be written at all.**
+///
+/// The kernel takes the table from whichever VRF the packet is in, so such a
+/// rule carries no table by construction -- and `check_rule` required one,
+/// refusing the only form the kernel accepts. Measured on 6.12:
+/// `ip rule add l3mdev pref 1500` installs
+/// `from all lookup [l3mdev-table]`.
+#[test]
+fn an_l3mdev_rule_needs_no_lookup() {
+	let document = build_ok("rule \"vrf\" {\n\tpriority = 1500\n\tl3mdev = true\n}\n");
+	let rule = &document.rules[0];
+	assert!(rule.l3mdev, "the flag should survive");
+	assert!(rule.table.is_none(), "and it names no table");
+}
+
+/// And naming a table as well is refused, because the kernel refuses it.
+///
+/// `table can not be specified for l3mdev rules`, measured in a namespace on
+/// 6.12. This compiled before, so netcfgd planned a rule that always failed
+/// and planned it again on every reconcile.
+#[test]
+fn an_l3mdev_rule_with_a_table_is_refused() {
+	let rendered =
+		errors("rule \"vrf\" {\n\tpriority = 1500\n\tl3mdev = true\n\tlookup = 100\n}\n");
+	assert!(rendered.contains("also names a table"), "got: {rendered}");
+}
+
 #[test]
 fn an_inverted_rule_compiles() {
 	let document = build_ok(

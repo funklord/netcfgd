@@ -417,6 +417,14 @@
 #		bandwidth = "100mbit"
 #	}
 #}
+
+# A scheduler with nothing to configure takes the short form, which is the
+# same setting written as one line. `fq_codel` needs no rate: it has no shaper
+# to tell the line speed to, so there is nothing for a number to say.
+
+#device eth1 {
+#	qdisc = "fq_codel"
+#}
 #interface eth0 {
 #	config = "dhcp"
 #}
@@ -696,6 +704,21 @@
 #		rx_checksum  = "on"
 #		tx_checksum  = "on"
 #		wol          = "off"
+#	}
+#}
+
+# FORCING A LINK, which is what the other half of `ethtool` is for. `autoneg`
+# off is the only state in which `speed` and `duplex` mean anything -- a
+# switch port pinned by hand at the other end, which is the case that needs
+# this at all. The ring sizes are independent of it.
+
+#device eth1 {
+#	ethtool {
+#		autoneg  = "off"
+#		speed    = 1000
+#		duplex   = "full"
+#		rx_ring  = 4096
+#		tx_ring  = 4096
 #	}
 #}
 #interface eth0 { config = "dhcp" }
@@ -1112,6 +1135,9 @@
 #		members         = ["eth0", "eth1"]
 #		stp             = true
 #		forward_delay   = 4
+#		hello_time      = 2
+#		ageing_time     = 300
+#		priority        = 4096
 #		vlan_filtering  = false
 #	}
 #}
@@ -1152,11 +1178,13 @@
 #	wireguard {
 #		private_key = "@secret:wg0"
 #		listen_port = 51820
+#		fwmark      = 51820
 #		peer "office" {
-#			public_key   = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
-#			endpoint     = "vpn.example.com:51820"
-#			allowed_ips  = ["10.9.0.0/24", "192.168.50.0/24"]
-#			keepalive    = 25
+#			public_key    = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+#			preshared_key = "@secret:wg0-office"
+#			endpoint      = "vpn.example.com:51820"
+#			allowed_ips   = ["10.9.0.0/24", "192.168.50.0/24"]
+#			keepalive     = 25
 #		}
 #	}
 #}
@@ -1264,6 +1292,8 @@
 #		parent   = "eth0"
 #		username = "user@isp.example"
 #		password = "@secret:isp"
+#		service  = "internet"
+#		ac       = "concentrator-1"
 #	}
 #}
 #interface ppp0 {
@@ -1383,6 +1413,47 @@
 #	action   = "unreachable"
 #	priority = 1100
 #}
+
+# EVERY SELECTOR A RULE HAS. `from` and `to` are prefixes; `iif` and `oif` are
+# interface names, which is how "traffic that arrived on the guest bridge" is
+# said. `fwmark` with `fwmask` matches a marked packet -- the mask says which
+# bits of the mark to compare, so a firewall can use the other bits for
+# something else.
+
+#rule "marked-out" {
+#	family   = "ipv4"
+#	to       = "10.0.0.0/8"
+#	iif      = "br-guest"
+#	oif      = "wg0"
+#	fwmark   = 16
+#	fwmask   = 255
+#	lookup   = 120
+#	priority = 1200
+#}
+
+# `suppress_prefixlength` makes a rule stop short rather than answer: a lookup
+# whose match is shorter than the number given is ignored and the next rule is
+# tried. 0 therefore suppresses a default route and nothing else, which is the
+# standard way to consult a table for specific routes only.
+#
+# `l3mdev` matches on the VRF a packet belongs to instead of naming one, so one
+# rule serves every VRF rather than needing one per table.
+
+#rule "specifics-only" {
+#	family                = "ipv4"
+#	lookup                = 130
+#	suppress_prefixlength = 0
+#	priority              = 1300
+#}
+#rule "vrf-local" {
+#	family   = "ipv4"
+#	l3mdev   = true
+#	priority = 1400
+#}
+
+# Note there is no `lookup` there, and there cannot be: the kernel refuses a
+# rule that is both `l3mdev` and tabled, with "table can not be specified for
+# l3mdev rules". netcfgd refuses it too, at compile time rather than at apply.
 
 # `invert` matches everything the selectors do *not*, which is how one subnet is
 # carved out of a table rather than every other one enumerated into it. It

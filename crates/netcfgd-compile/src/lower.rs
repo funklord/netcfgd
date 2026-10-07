@@ -1511,9 +1511,51 @@ fn rule_is_complete(
 		return false;
 	}
 
+	// **`l3mdev` and a table are mutually exclusive, and the kernel says so
+	// first.** An l3mdev rule looks up the table belonging to whichever VRF
+	// the packet is in, which is the whole reason to write one -- so naming a
+	// table as well is a contradiction. Measured on 6.12 in a namespace:
+	//
+	//     # ip rule add l3mdev table 100 pref 1501
+	//     table can not be specified for l3mdev rules
+	//
+	// Checked here because the alternative is an apply that fails: this
+	// compiled before, so netcfgd planned a rule the kernel refuses and went
+	// on planning it on every reconcile.
+	if rule.l3mdev && rule.table.is_some() {
+		diags.push(
+			Diagnostic::new(
+				block.span,
+				format!("rule `{label}` is `l3mdev` and also names a table"),
+			)
+			.with_help(
+				"an `l3mdev` rule looks up the table of the VRF the packet is in, so it 				 takes no `lookup`; drop one or the other",
+			),
+		);
+		return false;
+	}
+
 	// A rule that looks nothing up and does nothing else is a rule that has no
 	// effect, and the most likely cause is a `lookup` somebody meant to write.
-	if rule.action == RuleAction::Lookup && rule.table.is_none() {
+	//
+	// **`l3mdev` is the exception, and leaving it out made the one usable form
+	// unwritable.** Such a rule has an action of `lookup` and no table by
+	// construction, per the check above -- and it is not a rule with no
+	// effect, because the VRF supplies the table. So the only form the kernel
+	// accepts was the one this refused, while the form it accepted was the one
+	// the kernel refuses: `l3mdev` was reachable from the language and usable
+	// in no valid document. Measured on 6.12:
+	//
+	//     # ip rule add l3mdev pref 1500
+	//     # ip rule show
+	//     1500:	from all lookup [l3mdev-table]
+	//
+	// Everything below the compiler already carried it -- `FRA_L3MDEV` is
+	// written in `netcfgd-sys/src/rule.rs`, read back in the same file, and
+	// compared by `same_rule` -- which is `RoutingRule::invert`'s shape again
+	// with one turn more: not unreachable, but reachable only as something
+	// that cannot work.
+	if rule.action == RuleAction::Lookup && rule.table.is_none() && !rule.l3mdev {
 		diags.push(
 			Diagnostic::new(
 				block.span,

@@ -9546,6 +9546,87 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.175 A key that was reachable and unusable, found by writing an example
+
+The render gate's corpus is `doc/netcfgd.conf.example`, so widening the corpus
+is extending a test rather than writing documentation -- which is the reason to
+do it, that file having yielded nine renderer defects from its existing
+contents. Asking which keys the parser accepts and no example assigns gives
+about thirty, once the privilege gate's extraction is filtered: it scans from a
+`match ....key.as_str()` to the `unknown ... key` arm and swallows nested
+*value* matches on the way, which its own documentation admits, so `wpa2`,
+`peap` and `off` arrive looking like keys.
+
+Examples went in for the bridge's `hello_time`, `ageing_time` and `priority`,
+WireGuard's `fwmark` and a peer's `preshared_key`, ethtool's `speed`, `duplex`
+and ring sizes, a PPPoE session's `service` and `ac`, the `qdisc = "fq_codel"`
+short form, and every selector a routing rule has. **Writing one of them found
+a defect in two directions.**
+
+### `l3mdev` was accepted by the compiler and usable in no valid document
+
+An `l3mdev` rule matches on whichever VRF a packet is in and looks up *that*
+VRF's table, so it carries no table of its own -- that is the whole reason to
+write one. `check_rule` refused a rule whose action is `lookup` with no table,
+with no exception for it. Asked of the kernel in a namespace on 6.12, which is
+how this project settles such questions:
+
+```text
+# ip rule add l3mdev pref 1500
+# ip rule show
+1500:	from all lookup [l3mdev-table]
+
+# ip rule add l3mdev table 100 pref 1501
+table can not be specified for l3mdev rules
+```
+
+So the two were mirror images, and both were wrong:
+
+    l3mdev alone        kernel accepts   netcfgd REFUSED
+    l3mdev + lookup     kernel refuses   netcfgd compiled
+
+The second is the worse one: netcfgd would plan a rule the kernel rejects, fail
+the apply, and plan it again on the next reconcile. The first means the only
+form that works could not be written at all.
+
+**Every layer below the compiler already had it.** `FRA_L3MDEV` is written in
+`netcfgd-sys/src/rule.rs`, read back in the same file, and compared by
+`same_rule`. That is `RoutingRule::invert`'s shape from 10.168 with one turn
+more -- not a field nothing could reach, but a field reachable *only* as
+something that cannot work, which no sweep for unreachable fields would have
+found because it is not unreachable.
+
+### Fixing the compiler made a latent renderer gap reachable, in the same run
+
+`render_rule` wrote thirteen of `RoutingRule`'s fourteen fields and dropped
+`l3mdev`. That gap had been **unreachable**: no document could carry such a
+rule, so nothing ever rendered one. The moment the compiler learned the
+exception, the example file carried one -- and the render gate failed on the
+same run, with the rule coming back as `rule "vrf-local" { priority = 1400 }`,
+which does not compile, because a rule with no lookup, no action and no
+`l3mdev` is exactly what the compiler refuses.
+
+**That is the better of the two failure modes and still a profile nobody can
+load**, and it is worth naming because a fix in one layer unsealing a defect in
+another is how this list keeps growing: 10.172's five silent losses were the
+same shape read from the other end.
+
+### Where it is pinned
+
+Three independent places, confirmed by removing the exception and watching all
+three go red: a unit test on the compiler, the example gate (the new example no
+longer compiles), and the renderer's round trip. `tests/live/rules.sh` carries
+the end-to-end case, which is the only one that can say the *kernel* agrees --
+netcfgd installs the rule, `ip rule show` reports
+`from all lookup [l3mdev-table]`, and a second plan has nothing to do, so the
+observation reads the flag back rather than re-planning for ever.
+
+**The sabotage sweep needed `--no-fail-fast` to tell the truth.** `cargo test`
+stops at the first failing binary, so the first run reported one test catching
+the change when three do -- a control intercepted by an earlier step, which is
+the same reading error as 10.172's and cost nothing here only because the
+number looked too small.
+
 ## 10.174 Four decision records sent a reader at work that was already done
 
 Looking for unbuilt work rather than defective work, the decision records are

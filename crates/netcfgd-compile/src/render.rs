@@ -1667,6 +1667,17 @@ fn render_rule(rule: &RoutingRule, overrides: &Overrides, text: &mut String) {
 	if rule.invert {
 		body.push_str("\tinvert = true\n");
 	}
+	// **Dropped until an `l3mdev` rule could be written at all.** The compiler
+	// required a `lookup` on every rule, which such a rule cannot have -- the
+	// VRF supplies the table -- so no document reached here carrying one and
+	// the gap was unreachable. It became reachable the moment that check
+	// learned the exception, and the round trip over the example file caught it
+	// in the same run: the rule came back as `rule "vrf-local" { priority }`,
+	// which does not compile, because a rule with no lookup, no action and no
+	// `l3mdev` is exactly what the compiler refuses.
+	if rule.l3mdev {
+		body.push_str("\tl3mdev = true\n");
+	}
 	if rule.action != RuleAction::default() {
 		let _ = writeln!(body, "\taction = {}", quote(rule_action_name(rule.action)));
 	}
@@ -3041,6 +3052,25 @@ mod tests {
 		let rendered = render(&document, &Overrides::new()).expect("renders");
 		assert!(rendered.contains("tap {"), "{rendered}");
 		assert!(!rendered.contains("tun {"), "{rendered}");
+	}
+
+	/// **An `l3mdev` rule, which has no `lookup` and must not grow one.**
+	///
+	/// The round trip is the whole test: such a rule carries no table, so a
+	/// renderer that drops the flag emits `rule "x" { priority = N }` -- and
+	/// that does not compile, a rule with no lookup, no action and no
+	/// `l3mdev` being exactly what the compiler refuses. So the failure is a
+	/// profile that cannot be loaded rather than one that loads wrong, which
+	/// is the better of the two and still a profile nobody can use.
+	#[test]
+	fn an_l3mdev_rule_round_trips() {
+		round_trips("rule \"vrf\" {\n\tpriority = 1500\n\tl3mdev = true\n}\n");
+		let document = compile("rule \"vrf\" {\n\tpriority = 1500\n\tl3mdev = true\n}\n");
+		let rendered = render(&document, &Overrides::new()).expect("renders");
+		assert!(rendered.contains("l3mdev = true"), "{rendered}");
+		// And no table is invented on the way, which the kernel refuses
+		// outright: "table can not be specified for l3mdev rules".
+		assert!(!rendered.contains("lookup"), "{rendered}");
 	}
 
 	/// An interface's guard, which is a sentence rather than a setting.
