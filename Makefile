@@ -1140,6 +1140,11 @@ packaging:
 	@# Every config key the compiler accepts is classified, so that a key
 	@# added later cannot default to "a client may send this". 0127.
 	@python3 tool/privilege_gate.py
+	@# Every op the plan can name is built by the planner and run by the
+	@# executor, or named as one that is not. Three were neither, and the
+	@# worse direction -- planned with no executor arm -- is a reconcile that
+	@# fails every time that op appears.
+	@python3 tool/op_gate.py
 	@# Neither program prints with `println!`, which panics when the reader
 	@# of a pipe goes away. A print site is never wrong, only absent from the
 	@# path a test drives. 0261.

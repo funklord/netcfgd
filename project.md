@@ -9546,6 +9546,101 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.173 Three words in the plan's vocabulary with no behaviour at either end
+
+The renderer work closed, so the next lens came from its last defect rather
+than from a list: **a transformation that silently drops something**, found by
+round-tripping a corpus. The other transformation in netcfgd is plan to
+execute, so the question is whether every `Op` is both built by the planner and
+run by the executor.
+
+Of 48 variants, **three appear in exactly one place in the whole tree** --
+`netcfgd-plan/tests/frozen.rs`, which pins their serialisation. Nothing builds
+them and nothing runs them, so each is a word in the plan's vocabulary with no
+behaviour at either end, frozen into the schema on the way past. A fourth,
+`CommitConfirm`, has an executor arm and no planner that builds one.
+
+They are three different kinds of leftover, which is why the waiver file takes
+a reason rather than a list of names:
+
+- **`WifiAssociate` and `WifiDisassociate` are superseded.** Association is
+  imperative and transient rather than desired state, so the daemon drives it
+  straight at the supplicant with `SELECT_NETWORK` in
+  `netcfgd-daemon/src/wifi.rs`. Planning it would be reconciling an act.
+- **`WifiSetRegdom` is the unwired half of a documented inertness.**
+  `doc/netcfgd.conf.example` says it in as many words -- *"the radio's is kept
+  in the document and reaches nothing"* -- and the only regdom that reaches
+  anything is an access point's, as hostapd's `country_code`. This op is what
+  would carry the radio's. **Wiring it would change behaviour the example file
+  documents and `ncfg plan` warns about**, so it is the holder's call and not a
+  gap to close in passing.
+- **`CommitConfirm` is never planned on purpose.** The daemon owns the commit
+  window and `confirm.rs` has its own machinery; the executor's arm is
+  defensive and says so.
+
+### The worse direction, which nothing is in today
+
+A variant defined and never built is dead weight. A variant **built with no
+executor arm is a plan step that always fails**: the executor's catch-all
+returns `"<name> is not implemented in this build"`, so every reconcile
+carrying that op would refuse. `tool/op_gate.py` checks both directions, and
+the second is the one worth the gate.
+
+### Why a grep is exact here, which it has not been all week
+
+Three detectors failed in 10.171 because the question was interprocedural. This
+one is not, and the reason is a property of the files rather than of the query.
+Rust makes you name a variant's path to construct it, and the two uses are
+spelled differently in this tree: `netcfgd-plan/src/lib.rs` writes `Op::X` only
+to build one -- **109 occurrences and not a single match arm** -- while
+`impl Op` in `action.rs` matches on `Self::X`.
+
+**So the gate checks that property instead of assuming it.** A `match op` added
+to the planner would make every arm read as a construction and the gate would
+go quiet in the same words it uses for a pass; an `Op::` occurrence that looks
+like a pattern fails the run and says why. It also strips line comments first,
+because `action.rs` mentions `Op::NatReplace` in prose and a gate that counted
+that would report a variant as handled because somebody wrote about it.
+
+### Two more vocabularies, swept and left alone
+
+The lens was pointed at the two other closed sets in the tree, and the method
+matters more than the results since both came back negative.
+
+**Hook phases: all eleven are fired.** The failure this looked for is worse
+than a dead op -- an operator writes `on portal { ... }`, nothing ever fires
+`Portal`, and the hook silently never runs, which is indistinguishable from a
+hook that runs and does nothing. `HookPhase::<name>` outside the model, the
+compiler and the tests gives between three and nine sites for every one of
+`PreUp`, `Up`, `PostUp`, `PreDown`, `Down`, `PostDown`, `Carrier`, `Lease`,
+`Roam`, `Portal` and `Drift`. So that family is swept and the next fault there
+needs a different lens.
+
+**Protocol requests: the same gate shape does not transfer, and the measurement
+said so before the conclusion did.** Of 32 `Request` variants, eight have a
+daemon handler and no `Request::X` anywhere in `netcfgd-cli` -- including
+`Show` and `Explain`, which are documented `ncfg` verbs. They are not missing:
+`command_show` compiles locally and never asks the daemon, and the other
+consumers are the C client and the GUI, which speak **wire names** rather than
+Rust paths. So "no Rust client builds one" is not the same claim as "nothing
+can send it", and a list of verbs the CLI does not send is not a defect at all.
+Measuring it honestly needs an instrument that reads C string literals as well
+as Rust, which is a different gate and not this one.
+
+### Seven sabotages, and the one that fired through the wrong check
+
+Each failure mode was broken deliberately and watched: an emitted op with its
+executor arm deleted, a planner that stops building one, a waiver naming
+something that is built, a waiver naming a variant that does not exist, a
+waiver with no reason, an extraction that finds nothing, and a `match op` in
+the planner. All seven went red.
+
+**The no-reason one went red through a different check first.** The sabotage
+truncated the waiver file rather than editing one line, so two other names
+disappeared and the gate complained about those instead -- a control that
+failed, and not through the check it was testing. Rewritten to replace exactly
+one entry, it reports what it should.
+
 ## 10.172 The refusal list was never the measure, and nine things it could not see
 
 Four device kinds and two addressing sources were the last reachable entries on

@@ -1,0 +1,11 @@
+# Ops the planner never builds, each with the reason it does not.
+#
+# `tool/op_gate.py` requires every `Op` variant to be built by the planner and
+# run by the executor, or named here. A name with no reason after it fails the
+# gate, as does one the planner has since learned to build -- the second is
+# what stops this file becoming a list nobody has re-read.
+
+WifiAssociate Superseded. Associating is imperative and transient rather than desired state, so the daemon drives it straight at the supplicant with SELECT_NETWORK (netcfgd-daemon/src/wifi.rs) instead of planning it.
+WifiDisassociate Superseded, with WifiAssociate and for the same reason.
+WifiSetRegdom The unwired half of an inertness doc/netcfgd.conf.example documents: "the radio's is kept in the document and reaches nothing". Only an access point's regdom reaches anything, as hostapd's country_code. Wiring this would change documented behaviour, so it is the holder's call rather than a gap to close.
+CommitConfirm Never planned on purpose: the daemon owns the commit window and confirm.rs has its own machinery for it. The executor's arm is deliberately defensive, and says so.
