@@ -9922,6 +9922,31 @@ scripts' output on the serial port. Hence the redirect to `/dev/console`, and
 hence the harness distinguishing *never started* from *failed* -- a guest that
 dies before the script must not read as a pass, and for one boot it did.
 
+### The guest reads the host's tree live, so a build is an edit
+
+**Found by nearly spoiling a run.** The guest mounts the repository over 9p,
+read-only, and runs `/mnt/repo/target/debug/netcfgd` from it. So a `cargo
+build` on the host while a guest is up replaces the binary the guest is about
+to exec, and a run that was measuring one artifact finishes having measured
+two. It cost nothing the day it happened -- the rebuild was a doc comment, and
+a doc comment cannot make a failing check pass, which is the only reason that
+run's verdict was still worth reading -- but nothing about the setup says so.
+
+It is the same hazard as editing a file while `make check` reads it, which this
+tree has already paid for twice, wearing a costume the tier invented: the
+reader is not a gate on this machine but a kernel on another, and `ps` shows
+one `qemu-system-x86_64` rather than a build log scrolling past. `ps -C
+qemu-system-x86_64` before a build is the whole check, and the honest rule is
+the one the other two incidents arrived at -- **do not write into the tree
+while something is reading it, and when you have, say which run is void rather
+than deciding the change was harmless.**
+
+The asymmetry is worth keeping. A rebuild that changes behaviour and a rebuild
+that changes a comment are indistinguishable from the guest's console, and only
+one of them invalidates the result -- so the judgement has to be made from the
+diff, on the host, by whoever ran the build. Nobody else will ever be in a
+position to make it.
+
 ### And a gate that had never read two files
 
 `make shell` parsed a fixed list -- `helper/*`, `tests/live/*.sh`,
