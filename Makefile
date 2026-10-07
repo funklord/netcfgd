@@ -1855,6 +1855,15 @@ vm-sandbox: vm-image
 vm-skipped: vm-image
 	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/skipped.sh
 
+# `delegation.sh`, the one live script that has never run anywhere: it needs
+# real root and `odhcp6c`, which Debian does not package. Its own target rather
+# than a step in `vm-skipped`, because the build pulls `build-essential` and
+# charging that to the other eight scripts is how a suite stops being run.
+# Longer, because two source builds happen before the test does.
+vm-delegation: vm-image
+	VM_GUEST=debian VM_TIMEOUT=1800 sh tool/vm/run.sh \
+		tool/vm/payload/delegation.sh
+
 # Separate, because the fetch is the only part that needs the internet and it
 # is a no-op once the images are in place. Both guests: Alpine for kernel and
 # module work, Debian for netcfgd's own suite and for systemd.

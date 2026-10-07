@@ -20,6 +20,12 @@
 # `NCFG_LIVE=1` for each: a skip becomes a failure, so a script that still
 # cannot run says so rather than reporting a pass over nothing. Nothing stops on
 # a failure -- one script failing must not hide the others.
+#
+# **`delegation.sh` is expected to fail here and has its own payload.** It wants
+# `odhcp6c`, which Debian does not package and which has to be built from
+# source -- so `tool/vm/payload/delegation.sh` and `make vm-delegation` do that
+# and run it, and this payload reports the honest absence rather than paying a
+# few hundred megabytes of `build-essential` on behalf of the other eight.
 set -u
 cd /mnt/repo || { echo "the repository is not mounted"; exit 1; }
 

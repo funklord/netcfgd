@@ -9546,6 +9546,66 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.182 Prefix delegation, proven end to end, by a profile nobody was testing
+
+`delegation.sh` had never run anywhere. It needs real root and `odhcp6c`, which
+Debian does not package -- so netcfgd's whole delegation chain was covered by
+fixtures and by nothing else: the document asks for a prefix, odhcp6c solicits
+`IA_PD`, kea delegates, netcfgd resolves `@pd:wan0` into addresses, radvd
+advertises them, a host autoconfigures.
+
+**All 24 checks pass in a guest**, and the three that no fixture could have
+reached are the ones worth naming. The ISP **renumbers** -- kea restarted on a
+different pool with an empty lease database, odhcp6c told to rebind -- and
+netcfgd moves the LAN onto the new prefix, *takes the old address away rather
+than keeping both*, and the advertisement follows rather than still announcing
+a block that was taken back. Then the teardown: dropping `dhcp6` from the
+document stops the client, empties the prefix file, removes the pid file,
+withdraws the address derived from the prefix and stops the advertiser. The
+prefix is the one value in that path that no config file contains, which is why
+only a real renewal could test it.
+
+`tool/vm/payload/delegation.sh` and `make vm-delegation` build the client.
+**Its own payload, not a step in `skipped.sh`**: the build pulls
+`build-essential`, and charging a few hundred megabytes to the other eight
+scripts is how a suite stops being run. `skipped.sh` goes on reporting the
+honest absence and its header names this payload.
+
+**Both sources are pinned by commit sha and fetched with git, not by a checksum
+over a tarball.** A git object's name is its content hash, so a wrong or
+tampered fetch cannot check out under the sha asked for; a checksum over
+GitHub's generated tarballs would be weaker *and* more fragile, since those are
+produced on demand and their bytes have changed across compression changes
+before -- the check would eventually fail for a reason that is not a finding.
+The pin is asserted after the checkout anyway, because a build of whatever was
+at the tip of master would look identical.
+
+**What stopped it on the first run was AppArmor, and the evidence named it.**
+Not inferred from the symptom -- read out of the guest's own audit log:
+
+	apparmor="DENIED" operation="capable" profile="kea-dhcp6" \
+	    capname="dac_read_search"
+	apparmor="DENIED" operation="capable" profile="kea-dhcp6" \
+	    capname="dac_override"
+
+Debian's package creates `/run/kea` owned by `_kea`, the script starts
+`kea-dhcp6` by hand as root, and the two capabilities root uses to bypass a DAC
+check are exactly what the profile refuses. kea died with *Permission denied*
+on its logger lockfile and then fatally on its PID file. **One real failure and
+five cascaded from it** -- no ISP, so no delegation, so no derived address, no
+advertisement and no host configuration. The run before the fix reported six
+failures and had one cause.
+
+**Unloaded rather than worked around, and the narrower fix was considered and
+rejected on its merits.** `chown root:root /run/kea` removes the need for the
+capability without weakening anything -- but it is not *known* to be
+sufficient, because the profile confines paths too and this script's kea config
+and log live under `/tmp`, which the profile has no reason to permit. It would
+have risked trading one denial for another and learning nothing. What makes the
+broad answer right rather than merely easier: **kea here is scaffolding
+standing in for the operator's ISP.** Its confinement is not a property of
+netcfgd, and the guest is discarded when the run ends.
+
 ## 10.181 A payload was pasted into the wrapper, so its `exit` was the wrapper's
 
 `run.sh` built the guest's wrapper by `cat`-ing the payload into the middle of
