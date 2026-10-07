@@ -215,9 +215,18 @@ nm-containment:
 # the SIM-select hook are shell this project installs onto other people's
 # machines, and neither was parsed by anything until they were added here. A
 # shipped script that does not parse is this gate's whole subject.
+# **A fixed list is what hid two scripts for months.** `tool/prove-red.sh` and
+# the VM tier's scripts live outside `helper/` and `tests/live/`, so nothing
+# parsed them -- and `style_gate.py` cannot cover the gap either, because `.sh`
+# is in neither its `indent_suffixes` nor its `text_suffixes`, so a shell script
+# with four-space indentation and trailing whitespace passes it silently.
+# Verified by doing exactly that to `tests/live/rules.sh` and watching the gate
+# report a clean pass. That half is the shared tool's and is already signalled
+# in `claude-guidelines`; this half is this Makefile's.
 shell:
 	@count=0; \
-	for script in helper/* tests/live/*.sh packaging/probe/* packaging/hook/*; do \
+	for script in helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
+	             packaging/probe/* packaging/hook/*; do \
 		[ -f "$$script" ] || continue; \
 		sh -n "$$script" || exit 1; \
 		count=$$((count + 1)); \

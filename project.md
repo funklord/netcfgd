@@ -9546,6 +9546,82 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.176 A second test tier, for the eight scripts a namespace cannot run
+
+Asked for by the copyright holder 2026-10-07: a scripted cluster of small Linux
+VMs, as an integral part of testing. Settled as
+[0265](doc/decision/0265-a-vm-tier-for-what-a-namespace-cannot-do.md); what
+follows is what the question turned up, because the measurement made the case
+differently from the way it would have been argued.
+
+**The gap is bigger than "some tests skip".** Eight live scripts name real
+root, module loading, `/dev/vhci`, `/dev/ppp` or systemd as the thing they
+lack. netcfgd ships **three** init integrations -- `packaging/systemd`,
+`packaging/openrc`, `packaging/procd` -- and this machine runs sysvinit, so not
+one is exercised anywhere and the unit's sandbox is checked statically only.
+And every kernel measurement in `doc/decision` says "measured on 6.12" because
+6.12 was the only kernel there was, the `l3mdev` answers in 10.175 included.
+
+**Two thirds of what sounds like it needs VMs does not.** Several hosts on a
+wire is `unshare -rn` plus veth, which `delegation.sh` already uses to run a
+real kea against a real odhcp6c. Separate init is `systemd-nspawn`, at
+container cost. **Only a separate kernel needs a VM** -- module loading,
+`/dev/vhci`, a kernel matrix -- so the tier is scoped to that and the nspawn
+tier is deferred rather than built, because `/dev/kvm` here is mode
+`crw-rw-rw-` and an Alpine guest is OpenRC natively, which is two of the three
+init systems without installing anything.
+
+**The flavour was decided by reading the shipped kernel configs**, which are
+plain text in the same tarball: `MAC80211_HWSIM`, `BT_HCIVHCI` and `PPPOE` are
+modules in `lts` and absent from `virt`. Those three are the whole reason for
+the tier, so `virt`'s 20 MB modloop against 192 MB would have bought a faster
+boot and none of the point.
+
+**A guest boots, on 6.12.1-3-lts against the host's 6.12.107.** The images are
+fetched by `tool/vm/fetch.sh` against a pinned published checksum into
+`$VM_DIR` (default `~/vm`, pointed at the 46 T NFS store), and the guest boots
+diskless from the ISO so nothing is ever written there -- which matters because
+a guest disk over NFS corrupts in ways that look like guest faults.
+
+### Driving the console is ruled out, with the evidence
+
+Automation is not built, and one route is now closed rather than untried.
+Feeding qemu's stdin a timed sequence gave:
+
+    localhost login: tyS0,115200 quiet
+    Password:
+    Login incorrect
+
+qemu buffers the whole stream into one serial port while the **consumer** of
+that port changes underneath it: ISOLINUX took `lts console=t` and the leftover
+`tyS0,115200 quiet` arrived at a login prompt that did not exist when it was
+written. **A single input stream with a changing reader cannot be driven
+blind**, and sleeping longer only moves which consumer gets which fragment. The
+guest has to run its own script, which is what an apkovl is for.
+
+### And a gate that had never read two files
+
+`make shell` parsed a fixed list -- `helper/*`, `tests/live/*.sh`,
+`packaging/probe/*`, `packaging/hook/*` -- so `tool/prove-red.sh` had never
+been syntax-checked, and neither had the new `tool/vm/fetch.sh`. It reads
+`tool/*.sh` and `tool/vm/*.sh` now, 79 scripts becoming 81, and the widened
+target was watched failing on a deliberately broken `tool/` script.
+
+**Why that was invisible is the worse half, and it is not this tree's to
+fix.** `style_gate.py` has `.sh` in neither `indent_suffixes` nor
+`text_suffixes`, so **no shell script in this repository is checked for
+indentation, trailing whitespace or a final newline**. Confirmed by control:
+`tests/live/rules.sh` was given a four-space indent and a trailing space, and
+the gate reported a clean pass over 617 files.
+
+That is the shared tool's, spread verbatim into sixteen trees, so
+`harmonization.md` forbids changing it in the copy -- and it is **already** an
+open signal in `claude-guidelines`, raised from raidcfgd with netcfgd's own
+numbers in it (87 files, 75 already compliant, nothing checking them). Nothing
+was added there. **Reading the signal list before writing to it is what stopped
+this becoming the second asking of a question that is visible from every tree**,
+which is the exact failure that section of `harmonization.md` exists to prevent.
+
 ## 10.175 A key that was reachable and unusable, found by writing an example
 
 The render gate's corpus is `doc/netcfgd.conf.example`, so widening the corpus
