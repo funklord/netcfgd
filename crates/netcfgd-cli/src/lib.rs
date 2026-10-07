@@ -1877,6 +1877,7 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		}
 	}
 	print_linksets(&observed);
+	print_bluetooth(&observed);
 	// Printed once rather than per interface: the conflict is with a table,
 	// not with a device, and repeating it under every link would make one
 	// problem look like several.
@@ -1898,6 +1899,61 @@ fn command_status(options: &Options) -> Result<ExitCode, String> {
 		);
 	}
 	Ok(ExitCode::SUCCESS)
+}
+
+/// The Bluetooth adapters, which are radios and not links.
+///
+/// **`Observed.bluetooth` had no reader anywhere.** One line writes it --
+/// `observed.bluetooth = bluetooth(&sys)` in the host observer, from
+/// `/sys/class/bluetooth` (0148) -- serde puts it in `observed.json`, and until
+/// this function nothing ever read it back.
+///
+/// Two things made that hard to see. `Document` has a `bluetooth` field too,
+/// the configuration block from 0149, and it is thoroughly wired: sorted by
+/// `canonicalize`, compared by `Document::eq`, warned about by the planner,
+/// listed and edited by the window (0260). A grep for `bluetooth` finds all of
+/// that and reads as a feature with readers everywhere. And the GUI table's
+/// columns are `id`, `address`, `profile`, `autoconnect` -- the block, not the
+/// adapter -- so the surface that looks like it shows adapters does not.
+///
+/// `tests/live/bluetooth.sh` has asserted since the day it was written that
+/// `ncfg status` names the adapter it can see. The commit that wrote that check
+/// touched no file under `crates/netcfgd-cli`, and the script needs real root
+/// and `/dev/vhci`, so it could not run here and nothing told anybody.
+///
+/// An adapter is its own list rather than an `ObservedLink` for the reason the
+/// model records: `hci0` has no address, no mtu and no place in netlink. So it
+/// prints after the links rather than among them, and a machine with no
+/// Bluetooth prints nothing at all.
+///
+/// **The switch is why this is worth a line.** An adapter whose rfkill is
+/// blocked is the whole answer to "why does Bluetooth not work here", and
+/// until now the only way to see it was to read `observed.json`. Shown the way
+/// a link's radio is shown, except that the adapter is named either way: a
+/// link has a line of its own already and an adapter does not.
+fn print_bluetooth(observed: &netcfgd_model::Observed) {
+	if observed.bluetooth.is_empty() {
+		return;
+	}
+	sayln!();
+	for adapter in &observed.bluetooth {
+		match &adapter.rfkill {
+			Some(rfkill) if rfkill.blocked() => {
+				let switch = if rfkill.hard { "hardware" } else { "software" };
+				sayln!(
+					"bluetooth {} radio off [{switch} block at {}]",
+					adapter.name,
+					rfkill.switch
+				);
+			}
+			// Said rather than left blank. `None` is "netcfgd cannot tell" --
+			// no CONFIG_RFKILL, or a driver registering no switch -- and an
+			// operator reading a bare adapter name would take it for "the
+			// switch is on", which is the one thing it does not say.
+			None => sayln!("bluetooth {} [no switch to read]", adapter.name),
+			Some(_) => sayln!("bluetooth {}", adapter.name),
+		}
+	}
 }
 
 /// What each linkset settled on, and why each loser lost.

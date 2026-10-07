@@ -9572,6 +9572,59 @@ reason is a diagnostic like any other, and `evidence.md`'s rule about an
 unproduced message applies: this one is produced only where the script cannot
 run, which is everywhere it has ever been read.
 
+## 10.179 An adapter netcfgd observed and never showed anybody
+
+`tests/live/bluetooth.sh` has two checks. The second reads `observed.json` and
+passes: the observer sees the virtual adapter. The first asks `ncfg status` to
+name it, and failed -- because **`Observed.bluetooth` had no reader anywhere in
+the tree.** One line writes it, `observed.bluetooth = bluetooth(&sys)` in the
+host observer; serde puts it in `observed.json`; nothing read it back.
+
+**Two things kept that invisible, and the first is the sharp one.**
+`Document` has a `bluetooth` field too -- the configuration block from 0149 --
+and it is thoroughly wired: sorted by `canonicalize`, compared by
+`Document::eq`, warned about by the planner, listed and edited by the window
+(0260). Of 18 `.bluetooth` occurrences in Rust, 17 are that one. So a grep for
+the name finds a feature with readers everywhere, and the field with none is
+the eighteenth. The window's bluetooth table looks like the answer and is not:
+its columns are `id`, `address`, `profile`, `autoconnect`, which is the block.
+
+Second, the check could not run. It needs real root and `/dev/vhci`, so it has
+asserted behaviour nobody wrote since the day it was written -- `git show` puts
+it at line 177 of the script's first version, in `4276eac9` on 2026-08-30, a
+commit that touched no file under `crates/netcfgd-cli`. 39 days, and the only
+reason it surfaced is a guest with its own kernel.
+
+`print_bluetooth` prints after the links, because an adapter is not a link and
+the model says why: `hci0` has no address, no mtu and no place in netlink.
+Controlled over five cells against a fake sysfs through `NCFG_SYS_ROOT` --
+soft block, hard block, both, unblocked, and no switch at all -- plus a machine
+with no adapter, which prints nothing and leaves no stray blank line. `None` is
+said rather than left blank: it means netcfgd cannot tell, and a bare adapter
+name would read as "the switch is on", which is the one thing it does not say.
+
+**The size entry was a guess until it was measured, and the guess was wrong.**
+Five pages for a dozen lines wanted explaining, so the function was stubbed
+down to one `sayln!` of a count -- no rfkill branch, none of the three
+messages -- and the release binary came out at **the same 2,992,672 bytes**.
+Confirmed a real rebuild rather than a stale artifact by asking the binary:
+`no switch to read` is absent from the stub's strings. So the cost is the field
+becoming reachable at all, in both binaries since `ncfg` observes for itself,
+and not the formatting. Recorded at the measured figure rather than riding the
+3% tolerance, which it was doing -- this one would have spent a quarter of it.
+
+**The lens this suggests does not work, which is worth more than a gate.** The
+obvious next question is whether other `Observed` fields have no reader, and
+the obvious tool is a sweep over its 24 fields for `.name` in Rust and `"name"`
+in the window's C++. Run against `HEAD` -- where this defect was live -- it
+flags **nothing**, because a name-keyed search cannot tell `Observed.bluetooth`
+from `Document.bluetooth`. The conflation that hid the bug defeats the tool
+built to find its siblings, and a gate reporting zero over a corpus containing
+the thing it was built from is a green light with no demonstrated ability to be
+anything else. Finding the next one needs a type-aware search. Not built, and
+the empty result is recorded with its method so the next reader knows the
+family has been swept with the wrong lens rather than swept clean.
+
 ## 10.178 A heredoc comment is a command line
 
 `hwsim.sh` generated a netcfgd document with `cat > "$f" <<CONF`, and one line

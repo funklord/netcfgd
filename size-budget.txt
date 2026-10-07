@@ -730,4 +730,25 @@ netcfgd
 # Recorded rather than left to ride the tolerance, which it was doing: the gate
 # passed at 2,972,192 against a 3,057,138 ceiling. Same reason as every entry
 # above it.
-total 2972192
+# the bluetooth adapters in `ncfg status`, +20,480 bytes to 2,992,672.
+#
+# Five pages for a dozen lines, which wanted explaining rather than asserting,
+# so it was measured: the function was stubbed down to one `sayln!` of
+# `observed.bluetooth.len()` -- no rfkill branch, none of the three messages --
+# and the release binary came out at **the same 2,992,672 bytes**. Verified as
+# a real rebuild rather than a stale artifact by asking the binary: the full
+# version's `no switch to read` is absent from the stub's.
+#
+# So what the five pages buy is not the printing. It is `Observed.bluetooth`
+# becoming reachable at all -- its first non-test reader in this tree, in both
+# binaries, since `ncfg` observes for itself. Writing less of it would have
+# saved nothing, and the next reader of this entry should not go looking for a
+# cheaper way to format three strings.
+#
+# The first version of this comment said the opposite, naming the format
+# machinery as the cost. The experiment that disproved it took two builds.
+#
+# Recorded rather than left to ride the tolerance, which it was doing: the gate
+# passed at 2,992,672 against a 3,061,357 ceiling. Same reason as every entry
+# above it, and this one would have spent a quarter of the 3% on its own.
+total 2992672
