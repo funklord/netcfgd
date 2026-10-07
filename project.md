@@ -9546,6 +9546,32 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.180 The last two guest failures, and a skip that named the wrong absence
+
+Neither is a defect in netcfgd, and one was a defect in the asking.
+
+`delegation.sh` wants `odhcp6c`, which Debian does not package. Its own header
+says so and gives the four lines that build it from OpenWrt's source, and 0050
+settled why that is the client. Nothing to do but build it in the guest, which
+is the image's business rather than this tree's.
+
+**`association.sh` wanted a running netcfgd and said it wanted `ncfg`.** It was
+the only one of the 69 live scripts to resolve the tool with `command -v`; the
+other 68 take it from `target/debug`. So on every machine here and in every
+guest -- the tree built, netcfgd not installed -- it skipped for an absence
+that was not real, and under `NCFG_LIVE=1` that skip became a failure naming a
+missing tool sitting in the same directory as the probe it had just found and
+accepted. It resolves the build's binary first now and falls back to `PATH`,
+and the skip that remains is the honest one: no daemon is running to compare
+against.
+
+**Worth separating from the skip itself.** Both versions skip on this machine,
+so nothing about the output changes here -- what changes is which requirement
+the message names, and that only matters to somebody acting on it. A skip
+reason is a diagnostic like any other, and `evidence.md`'s rule about an
+unproduced message applies: this one is produced only where the script cannot
+run, which is everywhere it has ever been read.
+
 ## 10.178 A heredoc comment is a command line
 
 `hwsim.sh` generated a netcfgd document with `cat > "$f" <<CONF`, and one line

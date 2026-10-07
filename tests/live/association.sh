@@ -48,13 +48,24 @@ fail() {
 }
 
 [ -x "$probe" ] || skip "the probe is not built (cargo build -p netcfgd-host --example live_association)"
-command -v ncfg >/dev/null 2>&1 || skip "no ncfg to take an independent reading with"
+# **The build's `ncfg`, not an installed one.** This was the only one of the
+# live scripts to ask `command -v`; the other 68 resolve it from
+# `target/debug`. So on a machine with the tree built and netcfgd not
+# installed -- every development machine here, and every VM guest -- it skipped
+# for an absence that was not real, and under `NCFG_LIVE=1` that skip is a
+# failure reporting a missing tool that is sitting beside the probe. The
+# binary there talks to the same socket; `ncfg` is a symlink to `netcfgd` and
+# answers `wifi status` either way.
+ncfg="$repo/target/debug/ncfg"
+[ -x "$ncfg" ] || ncfg=$(command -v ncfg 2>/dev/null || true)
+{ [ -n "$ncfg" ] && [ -x "$ncfg" ]; } ||
+	skip "no ncfg to take an independent reading with"
 [ -S /run/netcfgd/netcfgd.sock ] || skip "no netcfgd is running to compare against"
 
 # A radio that is not associated cannot answer the question this asks. Skipping
 # is the honest outcome: "no association found" would otherwise read as a pass
 # on a machine whose wifi is simply off.
-status=$(ncfg wifi status 2>/dev/null) || skip "ncfg wifi status did not answer"
+status=$("$ncfg" wifi status 2>/dev/null) || skip "ncfg wifi status did not answer"
 interface=$(printf '%s\n' "$status" | awk 'NR == 1 { print $1 }')
 state=$(printf '%s\n' "$status" | awk 'NR == 1 { print $2 }')
 [ -n "$interface" ] || skip "no wireless interface is managed"
