@@ -9546,6 +9546,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.174 Four decision records sent a reader at work that was already done
+
+Looking for unbuilt work rather than defective work, the decision records are
+the obvious place: 246 of them say `Status: accepted`, which does not
+distinguish decided from built, so the ones that name their own leftovers are
+where to look. **Two did, and both were wrong, and the cost is measured because
+it was mine: they sent me at work that had been finished the same day they were
+written.**
+
+- **0058** says *"the VLAN is still named and not built"*. 0059 built it on
+  2026-08-03, the same date 0058 carries, in `883f8608` -- and `links.sh` has
+  tested it live ever since, with a control that asserts the kernel still
+  ignores an in-place change.
+- **0058's "What is deliberately left"** names a macvlan's parent. So does
+  **0059's "What is left"**, which says it "is not done here: nothing has asked
+  for it". `2079a1fb`, same date, added it: a macvlan's parent sits beside the
+  VLAN's in `recreation_reason`, under a comment citing 0058's own reasoning.
+- **0069** says *"`ncfg secret set NAME` still does not exist"*. It is in
+  `ncfg --help` with a paragraph describing the prompt, standard input, the
+  0600 mode and `--replace`. `df6fce01`, same date again.
+- **0091** says `portal` *"has no captive-portal detection anywhere in the
+  tree, so there is nothing to fire it from"*. 0095 -- four records later -- is
+  titled *a portal check fetches the operator's url*, and
+  `run_portal_checks` is in the daemon. `613ce0cd`, the next day.
+
+### What was checked and found right, which is the half that stops a sweep
+
+**`pre_down` is not stale and nearly got filed as though it were.** Both 0091
+and 0095 call it "recognised and never run" -- and `plan_teardown` extends its
+dependencies with `plan_hooks(interface, HookPhase::PreDown, base)` before a
+single address is withdrawn, so it plainly runs. Read whole, the sentence
+corrects itself: *"it and `down` fire at the same point in a plan until there is
+a teardown ordering"*. The first clause reads as a gap and the rest of the same
+sentence is the accurate part, which is `evidence.md`'s *a correction carried in
+the next sentence*, met inside one sentence.
+
+**0057 is the house pattern and needed nothing.** Its status line already reads
+"the bridge and the bond are done here. **The rest of the list was taken up by
+0058** ... and closed by" -- a status field tracking what happened, which is
+exactly what the four above lack. The fix follows it: the status line says what
+closed each deferral and names the commit, and **no body is edited**, because
+an accepted record's body is the decision as it was taken.
+
+### The scope, re-derived rather than reported
+
+The first count was going to be nineteen records, from a grep for three heading
+spellings. That is wrong, and the correction is the point: deferral-shaped
+headings come in **dozens** of spellings in this corpus -- "What is still open"
+appears in 13 records, "What is left" in 8, "What is deliberately left" in 3,
+"What this leaves open" in 3, "What was left" in 3, and then a long tail of
+singletons like "What is not done", "What is still not here", "What is still
+missing".
+
+So what was actually swept is the eleven records whose heading is exactly
+*What is left*, *What is deliberately left* or *What this leaves* -- four of
+which carried something stale. **The larger population is not swept**, and
+"What is still open" is the obvious next lens, being both the commonest
+spelling and the one that says in its own words that it is a status claim.
+
 ## 10.173 Three words in the plan's vocabulary with no behaviour at either end
 
 The renderer work closed, so the next lens came from its last defect rather

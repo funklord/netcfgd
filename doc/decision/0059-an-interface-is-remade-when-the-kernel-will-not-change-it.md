@@ -1,6 +1,8 @@
 # 0059: An interface is remade when the kernel will not change it
 
-Status: accepted; this closes 0057's list
+Status: accepted; this closes 0057's list. The macvlan parent left under "What
+is left" was taken by `2079a1fb` on the same date, so that section records what
+was decided here rather than what the tree lacks.
 Date: 2026-08-03
 Milestone: the last shape on [0057](0057-a-link-kind-is-compared-like-a-daemon.md)'s list
 

@@ -1,6 +1,8 @@
 # 0069: Adding a network is writing a file
 
-Status: accepted
+Status: accepted; the `ncfg secret set NAME` that "What is left" says does not
+exist was written the same day, in `df6fce01`, so that section records what was
+missing here rather than what the tree lacks.
 Date: 2026-08-03
 Milestone: the last of the laptop list
 

@@ -1,6 +1,10 @@
 # 0091: a roam is something the supplicant tells netcfgd
 
-Status: accepted
+Status: accepted; the `portal` half of "What is left" -- that nothing in the
+tree could fire the phase -- was closed by
+[0095](0095-a-portal-check-fetches-the-operators-url.md) in `613ce0cd` the same
+day. `pre_down` is still deferred for 0063's reason, which that section states
+correctly: it fires, at the same point as `down`.
 Date: 2026-08-04
 Milestone: the third of the four phases that did not fire
 

@@ -1,7 +1,11 @@
 # 0058: A change carries the whole nest, minus what the kernel refuses
 
-Status: accepted; macvlan, tunnel and VXLAN are done, the VLAN is still named and
-not built
+Status: accepted; macvlan, tunnel and VXLAN are done here. The VLAN this left
+is taken by [0059](0059-an-interface-is-remade-when-the-kernel-will-not-change-it.md)
+the same day, in `883f8608`, and the macvlan parent under "What is deliberately
+left" by `2079a1fb` -- so the body's deferrals are the record of what was
+decided here and not a description of the tree. The remaining one is a veth's
+peer, which has nothing to compare.
 Date: 2026-08-03
 Milestone: the rest of [0057](0057-a-link-kind-is-compared-like-a-daemon.md)'s list
 
