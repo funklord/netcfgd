@@ -1837,13 +1837,24 @@ vm-debian: vm-image
 vm-sandbox: vm-image
 	VM_GUEST=debian sh tool/vm/run.sh tool/vm/payload/sandbox_writes.sh
 
+# Every live script that skips here, run in a guest that can run them. It
+# installs what they need inside the guest first, so this one wants a network
+# and takes several minutes; `VM_TIMEOUT` is set high for that reason.
+#
+# It is expected to FAIL today, and the failures are the point: four scripts
+# now run that never ran, three of them fail, and 0265 records what is
+# established about each and what is not. Two cannot run at all -- delegation.sh
+# wants odhcp6c, which Debian does not package.
+vm-skipped: vm-image
+	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/skipped.sh
+
 # Separate, because the fetch is the only part that needs the internet and it
 # is a no-op once the images are in place. Both guests: Alpine for kernel and
 # module work, Debian for netcfgd's own suite and for systemd.
 vm-image:
 	sh tool/vm/fetch.sh
 
-.PHONY: vm vm-cluster vm-debian vm-image vm-sandbox
+.PHONY: vm vm-cluster vm-debian vm-image vm-sandbox vm-skipped
 
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:

@@ -312,6 +312,71 @@ failures: a guest that cannot run it must say so rather than report a pass over
 nothing. The repository arrives on the read-only share and that is enough -- the
 script computes its own `$repo` from `$0` and writes only under `TMPDIR`.
 
+### What the other skipped scripts did, measured
+
+`make vm-skipped` runs the nine that skip here. **Three were already passing on
+this machine** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first report that
+`ppp.sh` was newly passing was wrong: that came from reading each script's FIRST
+`skip()` call as what would happen, and a skip *site* is not a skip *event*.
+
+**Four scripts now run that never ran, and three of those four fail:**
+
+    sandbox_writes.sh   PASSES    31 checks against 25 here, 3 of the 6 controls
+    hwsim.sh            1 failed  real wifi: SAE, metric preference, roam
+    bluetooth.sh        1 failed  "netcfgd reports the adapter it can see"
+    pppoe-session.sh    2 failed  resolv.conf handling
+    nm.sh               4+ failed "the loopback is a loopback, not an ethernet"
+
+**`hwsim.sh` is the headline and it is worth reading what it got through.** With
+three simulated radios -- `ap phy0/wlan0, ap2 phy1/wlan1, station phy2/wlan2` --
+netcfgd drove a real `wpa_supplicant` against a real `hostapd` and the script
+asserted, all passing: the access point beaconing, netcfgd starting a supplicant
+and handing it the network, association, **SAE negotiated from a transitional
+offer**, `ncfg` agreeing and naming the network block, a scan finding the access
+point, preference by metric between two networks, moving between networks on a
+running supplicant, that leaving one network for another is *not* a roam, and
+that reassociating to a second access point on the same network *is* one, named
+by the access point moved to. None of that had ever run anywhere.
+
+Its one failure is `never got an address over the radio`, with
+`backend.start wlan2 addressing[0]: Dhcp4 (was <absent>)`. **Not attributed.**
+dnsmasq was present and started -- the log shows
+`DHCP, IP range 10.55.0.100 -- 10.55.0.120` -- and `dhcpcd` was there too, since
+the script's own note about either being missing did not fire. So the address
+half genuinely ran and no lease arrived, which is either a netcfgd defect that
+no machine could previously see or something about data frames over hwsim. It
+needs an investigation of its own.
+
+The other three failures are likewise recorded rather than diagnosed.
+`bluetooth.sh` printed `Bluetooth: hci0: Opcode 0x0c03 failed: -110` -- an
+HCI_Reset timing out -- which points at the virtual adapter rather than at
+netcfgd, and is a reason to suspect the environment first.
+
+**Two cannot run at all.** `delegation.sh` wants `odhcp6c`, which Debian does
+not package, and `association.sh` wants an *installed* netcfgd with a running
+daemon and an associated radio.
+
+### Two defects the tier found immediately, in the suite rather than in netcfgd
+
+**`hwsim.sh` miscounted radios on any machine with none.** Its set difference was
+`echo "$before\n$after" | sort | uniq -u`, and where `before` is empty -- no
+wireless device whatsoever, which is every guest here -- the concatenation
+carries a blank line that `uniq -u` keeps. Three new phys counted as four and the
+script died with `expected 3 new phys, got:  phy0 phy1 phy2`, the double space
+being the empty entry. **It could not fire on a developer machine**, the baseline
+there never being empty: a test correct everywhere it had run, wrong the first
+time it ran somewhere new, which is the argument for this tier arriving
+unprompted. The count is `grep -c .` now too, `wc -l` reporting 1 for an empty
+set.
+
+**Two scripts ignored the `NCFG_LIVE` contract.** It says a skip is a failure,
+the environment being asserted able to run everything -- and 66 of 69 honoured
+it while `delegation.sh` and `pppoe-session.sh` printed "skipping" inline with no
+`skip()` at all. So `pppoe-session.sh` has been skipped silently by every
+`make live` on this machine, reporting a pass over a script that never ran. Both
+route through a `skip()` now: 68 of 68. (A first count said three; `umbim.sh` was
+a false positive, the word appearing only in its prose, and it has no skip path.)
+
 ### `generic`, not `genericcloud`, and it is Alpine's lesson again
 
 The first Debian guest was the `genericcloud` flavour, and it booted, ran

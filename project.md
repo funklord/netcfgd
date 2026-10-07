@@ -9595,6 +9595,47 @@ store), and the guest is diskless so nothing is ever written there -- which
 matters because a guest disk over NFS corrupts in ways that look like guest
 faults.
 
+### Running the skipped scripts found two defects in the suite itself
+
+`make vm-skipped` drives the nine that skip on this machine. **Three were
+already passing here** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first
+report that `ppp.sh` was newly passing was wrong, read off each script's *first*
+`skip()` call rather than off what happened: a skip site is not a skip event.
+
+**Four now run that never ran.** `sandbox_writes.sh` passes; `hwsim.sh`,
+`bluetooth.sh`, `pppoe-session.sh` and `nm.sh` fail, and those failures are
+recorded rather than diagnosed -- a failing check is not evidence either, and
+`bluetooth.sh`'s `hci0: Opcode 0x0c03 failed: -110` points at the virtual
+adapter before it points at netcfgd.
+
+**`hwsim.sh` is the one worth reading.** With three simulated radios it has
+netcfgd drive a real `wpa_supplicant` against a real `hostapd`, and every one of
+these passed: the access point beaconing, netcfgd starting a supplicant and
+handing it the network, association, **SAE negotiated from a transitional
+offer**, a scan finding the access point, preference by metric between two
+networks, moving between networks on a running supplicant, that leaving one
+network for another is not a roam, and that reassociating to a second access
+point on the same network is one. Its single failure is `never got an address
+over the radio`, with dnsmasq demonstrably running and `dhcpcd` present, so the
+address half ran and no lease arrived. That is its own investigation.
+
+**And the tier found two defects in the suite on its first serious use.**
+
+`hwsim.sh` miscounted radios on any machine with none. Its set difference was
+`echo "$before\n$after" | sort | uniq -u`, and an empty `before` -- no wireless
+device at all, which is every guest -- leaves a blank line that `uniq -u` keeps,
+so three new phys counted as four. The tell was in the message: `got:  phy0 phy1
+phy2`, the double space being the empty entry. **It could not fire on a machine
+with a radio**, the baseline there never being empty. A test correct everywhere
+it had run and wrong the first time it ran somewhere new.
+
+`delegation.sh` and `pppoe-session.sh` ignored the `NCFG_LIVE` contract, which
+says a skip is a failure. 66 of 69 honoured it; those two printed "skipping"
+inline with no `skip()`, so **`pppoe-session.sh` has been silently skipped by
+every `make live` on this machine** while reporting nothing wrong. Both route
+through a `skip()` now: 68 of 68. A first count said three -- `umbim.sh` matched
+on the word in its prose and has no skip path at all.
+
 ### A Debian guest runs netcfgd's own binary, with nothing installed here
 
 **Settled by the copyright holder 2026-10-07 on the ground that the alternative

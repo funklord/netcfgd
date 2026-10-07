@@ -51,11 +51,26 @@ set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
-if [ "$(id -u)" != "0" ]; then
-	echo "delegation.sh: needs real root: odhcp6c binds port 546 and kea binds 547."
-	echo "delegation.sh:   sudo sh tests/live/delegation.sh"
+# **A skip is a failure when `NCFG_LIVE` says the environment should be able to
+# run this**, which 66 of the suite's 69 skipping scripts honour and this one
+# did not. It mattered the moment the VM tier started driving these: in a guest
+# with `NCFG_LIVE=1` set, this skipped silently for want of `odhcp6c` while
+# every sibling refused by name, so a run that tested nothing read as a run that
+# passed.
+skip() {
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "delegation.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		exit 1
+	fi
+	echo "delegation.sh: skipping: $1"
 	exit 0
-fi
+}
+
+# The root check is a skip too, and it is the one that fires on a
+# development machine -- so it has to honour the contract as well. It did
+# not, which is why both of these exited 0 under `NCFG_LIVE=1` even after
+# the tool checks below were fixed.
+[ "$(id -u)" = "0" ] || skip "needs real root: odhcp6c binds port 546 and kea binds 547"
 
 if [ -z "${NCFG_PD_NS:-}" ]; then
 	NCFG_PD_NS=1
@@ -64,15 +79,10 @@ if [ -z "${NCFG_PD_NS:-}" ]; then
 fi
 
 for tool in odhcp6c kea-dhcp6 radvd ip; do
-	command -v "$tool" >/dev/null 2>&1 || {
-		echo "delegation.sh: skipping: no $tool (see the header for odhcp6c)"
-		exit 0
-	}
+	command -v "$tool" >/dev/null 2>&1 ||
+		skip "no $tool (see the header for odhcp6c)"
 done
-[ -x "$repo/target/debug/ncfg" ] || {
-	echo "delegation.sh: skipping: ncfg is not built"
-	exit 0
-}
+[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pd.XXXXXX")
 cleanup() {

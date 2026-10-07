@@ -53,12 +53,26 @@ still_running() {
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 
-if [ "$(id -u)" != "0" ]; then
-	echo "pppoe-session.sh: needs real root: /dev/ppp is root-only, and the"
-	echo "pppoe-session.sh:   rp-pppoe plugin opens it as it loads."
-	echo "pppoe-session.sh:   sudo sh tests/live/pppoe-session.sh"
+# **A skip is a failure when `NCFG_LIVE` says the environment should be able to
+# run this**, which 66 of the suite's 69 skipping scripts honour and this one
+# did not. It mattered as soon as the VM tier started driving these: in a guest
+# with `NCFG_LIVE=1`, this skipped silently for want of `pppd` while every
+# sibling refused by name, so a run that tested nothing read as a run that
+# passed.
+skip() {
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "pppoe-session.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		exit 1
+	fi
+	echo "pppoe-session.sh: skipping: $1"
 	exit 0
-fi
+}
+
+# The root check is a skip too, and it is the one that fires on a
+# development machine -- so it has to honour the contract as well. It did
+# not, which is why both of these exited 0 under `NCFG_LIVE=1` even after
+# the tool checks below were fixed.
+[ "$(id -u)" = "0" ] || skip "needs real root: /dev/ppp is root-only, and the rp-pppoe plugin opens it as it loads"
 
 # Re-exec into private network and mount namespaces. Everything below then
 # happens somewhere that can be thrown away: without this, the test would run
@@ -71,19 +85,11 @@ if [ -z "${NCFG_PPPOE_NS:-}" ]; then
 fi
 
 for tool in pppd pppoe-server ip; do
-	command -v "$tool" >/dev/null 2>&1 || {
-		echo "pppoe-session.sh: skipping: no $tool (apt install ppp pppoe | apk add ppp ppp-pppoe)"
-		exit 0
-	}
+	command -v "$tool" >/dev/null 2>&1 ||
+		skip "no $tool (apt install ppp pppoe | apk add ppp ppp-pppoe)"
 done
-[ -x "$repo/target/debug/ncfg" ] || {
-	echo "pppoe-session.sh: skipping: ncfg is not built"
-	exit 0
-}
-[ -c /dev/ppp ] || {
-	echo "pppoe-session.sh: skipping: no /dev/ppp (modprobe ppp_generic)"
-	exit 0
-}
+[ -x "$repo/target/debug/ncfg" ] || skip "ncfg is not built"
+[ -c /dev/ppp ] || skip "no /dev/ppp (modprobe ppp_generic)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pppoe.XXXXXX")
 cleanup() {
@@ -156,7 +162,7 @@ OPTIONS
 # server's child logs.
 plugin=$(ls /usr/lib/pppd/*/rp-pppoe.so 2>/dev/null | head -1)
 [ -n "$plugin" ] || {
-	echo "pppoe-session.sh: skipping: no rp-pppoe.so (apt install pppoe | apk add ppp-pppoe)"
+	skip "no rp-pppoe.so (apt install pppoe | apk add ppp-pppoe)"
 	exit 0
 }
 pppoe-server -I isp0 -L 10.99.0.1 -R 10.99.0.100 -N 1 -O "$work/ac.options" \

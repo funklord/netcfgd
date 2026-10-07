@@ -208,9 +208,21 @@ loaded_here=yes
 sleep 1
 after=$(ls /sys/class/ieee80211 | sort)
 
-phys=$(echo "$before
-$after" | sort | uniq -u)
-[ "$(echo "$phys" | wc -l)" = 3 ] || die "expected 3 new phys, got: $(echo "$phys" | tr '\n' ' ')"
+# **Empty lines are stripped, and a machine with no radio at all is why.** The
+# set difference was `echo "$before\n$after" | sort | uniq -u`, and where
+# `before` is empty -- a machine with no wireless device whatsoever, which is
+# every guest in the VM tier -- the concatenation carries a blank line that
+# `uniq -u` keeps as a unique entry. So three new phys counted as four and this
+# died with `expected 3 new phys, got:  phy0 phy1 phy2`, the double space after
+# the colon being the empty one. It could not fire on a machine with a real
+# radio, because there the baseline is never empty.
+#
+# Counted with `grep -c .` rather than `wc -l` for the same reason: `wc -l` on
+# an empty `$phys` reports 1, so "no new phys at all" would be one line away
+# from reading as one.
+phys=$(printf '%s\n%s\n' "$before" "$after" | grep -v '^$' | sort | uniq -u)
+[ "$(printf '%s\n' "$phys" | grep -c .)" = 3 ] ||
+	die "expected 3 new phys, got: $(printf '%s' "$phys" | tr '\n' ' ')"
 
 ap_phy=$(echo "$phys" | sed -n 1p)
 ap2_phy=$(echo "$phys" | sed -n 2p)
