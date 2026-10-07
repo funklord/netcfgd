@@ -2686,10 +2686,14 @@ fn write_profile_snapshot(
 		for rule in &base.rules {
 			overrides.insert(format!("rule {}", rule.id));
 		}
-		// And again when it learned routing rules, which is the comment above
-		// earning its keep rather than a coincidence: a renderer that gains a
-		// block and a list that does not is a save refused for restating what
-		// the base already said.
+		// And a third time for access points. Three in a row is why this is a
+		// list of its own with a comment rather than something a reader is
+		// expected to notice: the renderer and this set have to learn a block
+		// together, and nothing in either one fails if only one of them does
+		// -- the save is refused, by the compiler, for a redefinition.
+		for point in &base.access_points {
+			overrides.insert(format!("access_point {}", point.id));
+		}
 	}
 
 	// **What the base already says is not the profile's to restate**, and for

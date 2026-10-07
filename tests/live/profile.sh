@@ -79,6 +79,22 @@ contains() {
 		;;
 	esac
 }
+# The other direction, for the one assertion here that needs it: a station list
+# written under the wrong key is not a missing line but a present and wrong one,
+# and `contains` cannot say that. Reaching it needs the renderer and the parser
+# to be wrong together, which no single sabotage produces -- see the note beside
+# the `access_point` block for what that means about its weight.
+missing() {
+	case "$2" in
+	*"$3"*)
+		echo "FAIL $1"
+		echo "       expected NOT to contain: $3"
+		echo "       actual:                  $2"
+		failures=$((failures + 1))
+		;;
+	*) echo "ok   $1" ;;
+	esac
+}
 
 mkdir -p "$work/etc/conf.d" "$work/etc/profile/office" "$work/run" \
 	"$work/factory/profile/offline"
@@ -131,6 +147,39 @@ rule "profile-probe" {
 	priority = 1200
 	from = "192.0.2.0/24"
 	lookup = 99
+}
+# An access point, third on the same list and for the same reason -- and the
+# one whose absence was hardest to work around, because a machine serving a
+# hotspot is a machine whose configuration changes with where it is, which is
+# what profiles are for. Nothing here starts hostapd: an `access_point` block
+# plans work only alongside an `interface` block for the same radio, and the
+# subject is the document.
+#
+# **What the station list is here for, measured rather than assumed.** Both
+# sabotages written against it -- dropping `access_point` from the override set,
+# and writing a deny list under `allow` -- turn this script red, and *neither
+# one reaches the assertion written for it*. Both fail three checks earlier, at
+# `profile save` itself, because the daemon proves a snapshot reproduces the
+# running document before keeping it and a snapshot that does not is refused: so
+# the file the later checks read does not exist to be read.
+#
+# That is the same thing the comment above the assertions says and is worth
+# naming here too, because it decides what these lines are worth. They are not
+# the guard against a renderer fault -- the round-trip proof is, and it fires
+# first. They are what says *which* block was at fault when a save is refused,
+# and they are the guard against the one shape the proof cannot see: a renderer
+# and a parser wrong in mirroring directions, where the document compares equal
+# and the file on disk says something else.
+access_point "profile-ap" {
+	device = "wlan-test"
+	channel = 36
+	band = "5"
+	wifi {
+		psk = "@secret:profile-ap"
+	}
+	access_control {
+		deny = ["aa:bb:cc:dd:ee:ff"]
+	}
 }
 CONF
 
@@ -248,6 +297,14 @@ contains "including one the parser normalises" "$snapshot" "regdom = \"SE\""
 contains "a routing rule is in the snapshot" "$snapshot" "rule \"profile-probe\""
 contains "marked override, because the base defines it" "$snapshot" "override rule"
 contains "and carries the selector it was given" "$snapshot" "from = \"192.0.2.0/24\""
+# The access point, likewise as an override, and its station list by the key it
+# is under rather than by the addresses in it: `deny` and `allow` are one list
+# in the model and the key is the whole of the policy.
+contains "an access point is in the snapshot" "$snapshot" "access_point \"profile-ap\""
+contains "marked override, because the base defines it" "$snapshot" "override access_point"
+contains "its credential stays a reference" "$snapshot" "psk = \"@secret:profile-ap\""
+contains "and the station list keeps the policy it was given" "$snapshot" "deny = ["
+missing "which is not silently the other one" "$snapshot" "allow = ["
 # The refusal is the daemon's too, and it must arrive as a sentence rather
 # than as a client-side guess about a directory it cannot see.
 again=$("$ncfg" profile save weekend 2>&1 || true)

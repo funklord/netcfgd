@@ -18,6 +18,7 @@
 //! the nose of whoever adds it to the other.
 
 use netcfgd_model::control::Principal;
+use netcfgd_model::device::{AccessPoint, AclPolicy};
 use netcfgd_model::device::{MacPolicy, OnUnmanage, Powersave, WifiBackend, WifiDevicePolicy};
 use netcfgd_model::dns::{DnsMode, DnsPolicy};
 use netcfgd_model::interface::{BridgeVlan, InterfaceKind, ProbePolicy};
@@ -79,11 +80,8 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 	for rule in &document.rules {
 		render_rule(rule, overrides, &mut text);
 	}
-	if !document.access_points.is_empty() {
-		missing.push(format!(
-			"{} access_point block(s)",
-			document.access_points.len()
-		));
+	for point in &document.access_points {
+		render_access_point(point, overrides, &mut text);
 	}
 	for device in &document.bluetooth {
 		render_bluetooth(device, overrides, &mut text);
@@ -677,25 +675,7 @@ fn render_network(
 	}
 
 	body.push_str("\twifi {\n");
-	match &network.security {
-		Security::Open => body.push_str("\t\topen = true\n"),
-		Security::Owe => body.push_str("\t\towe = true\n"),
-		Security::Psk(psk) => {
-			let _ = writeln!(body, "\t\tpsk = {}", quote(&secret_ref(&psk.passphrase)));
-			// **Dropped in silence until 2026-09-04, and it is the one field
-			// here whose loss weakens a network rather than merely changing
-			// it.** The default is WPA2 and WPA3 together, so a profile saved
-			// from a `proto = "wpa3"` network came back accepting WPA2 -- a
-			// downgrade an operator had deliberately excluded. `profile save`
-			// refused rather than writing it, because the round-trip proof
-			// caught the difference, so nothing was ever lost on disk; what
-			// was lost was the ability to save such a profile at all.
-			if psk.proto != netcfgd_model::security::PskProto::default() {
-				let _ = writeln!(body, "\t\tproto = {}", quote(proto_name(psk.proto)));
-			}
-		}
-		Security::Eap(eap) => render_eap(eap, &mut body),
-	}
+	render_security(&network.security, &mut body);
 	if !network.autoconnect {
 		body.push_str("\t\tautoconnect = false\n");
 	}
@@ -738,6 +718,40 @@ fn render_network(
 
 	let head = opening("network", id, overrides);
 	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", quote(id));
+}
+
+/// The security of a network or an access point, inside an open `wifi` block.
+///
+/// **Shared because the parser shares it.** `lower_access_point` reads an
+/// access point's `wifi` block with `lower_network_wifi` through a throwaway
+/// station -- *"an access point's security is the same shape as a station's, so
+/// it is parsed by the same code"* -- and a second copy here would be the one
+/// place the two could drift. The depth is the same either way: a `wifi` block
+/// sits one level in, so its keys sit two.
+///
+/// A passphrase is written as the reference it came from and never as a value,
+/// which `secret_ref` is for: section 2 keeps secrets out of the document, and a
+/// profile is a document.
+fn render_security(security: &Security, body: &mut String) {
+	match security {
+		Security::Open => body.push_str("\t\topen = true\n"),
+		Security::Owe => body.push_str("\t\towe = true\n"),
+		Security::Psk(psk) => {
+			let _ = writeln!(body, "\t\tpsk = {}", quote(&secret_ref(&psk.passphrase)));
+			// **Dropped in silence until 2026-09-04, and it is the one field
+			// here whose loss weakens a network rather than merely changing
+			// it.** The default is WPA2 and WPA3 together, so a profile saved
+			// from a `proto = "wpa3"` network came back accepting WPA2 -- a
+			// downgrade an operator had deliberately excluded. `profile save`
+			// refused rather than writing it, because the round-trip proof
+			// caught the difference, so nothing was ever lost on disk; what
+			// was lost was the ability to save such a profile at all.
+			if psk.proto != netcfgd_model::security::PskProto::default() {
+				let _ = writeln!(body, "\t\tproto = {}", quote(proto_name(psk.proto)));
+			}
+		}
+		Security::Eap(eap) => render_eap(eap, body),
+	}
 }
 
 /// The keys of an 802.1X network, inside an open `wifi` block.
@@ -932,6 +946,63 @@ fn mac_policy_name(policy: MacPolicy) -> &'static str {
 		MacPolicy::PerNetwork => "per_network",
 		MacPolicy::PerConnection => "per_connection",
 	}
+}
+
+/// An access point this machine serves.
+///
+/// Until this existed one `access_point` block put `N access_point block(s)` on
+/// the unrenderable list and refused the whole save, so a machine serving a
+/// hotspot could save no profile -- and a machine that serves one is a machine
+/// whose configuration changes with where it is, which is what profiles are for.
+///
+/// The `wifi` block is written unconditionally, which is the one sub-block here
+/// that is not conditional: `lower_access_point` refuses an access point without
+/// one rather than defaulting it, saying it *"would be open"* and declining to
+/// guess. Everything else is written where it is set or differs from its
+/// default.
+fn render_access_point(point: &AccessPoint, overrides: &Overrides, text: &mut String) {
+	let mut body = String::new();
+	let _ = writeln!(body, "\tdevice = {}", quote(&point.device));
+	// The label is the SSID unless the document said otherwise, exactly as a
+	// network's is -- and then it is hex, because an SSID is 0..32 arbitrary
+	// octets and the label is text.
+	if point.ssid.as_bytes() != point.id.as_bytes() {
+		let _ = writeln!(body, "\tssid = {}", quote(&point.ssid.to_hex()));
+	}
+	if let Some(channel) = point.channel {
+		let _ = writeln!(body, "\tchannel = {channel}");
+	}
+	if let Some(band) = &point.band {
+		let _ = writeln!(body, "\tband = {}", quote(band));
+	}
+	if let Some(regdom) = &point.regdom {
+		let _ = writeln!(body, "\tregdom = {}", quote(regdom));
+	}
+	if point.hidden {
+		body.push_str("\thidden = true\n");
+	}
+	body.push_str("\twifi {\n");
+	render_security(&point.security, &mut body);
+	body.push_str("\t}\n");
+	// **One list, and which key it is under is the policy.** The compiler
+	// refuses a block carrying both an `allow` and a `deny`, so the policy is
+	// not a separate value to write -- and the list is written bracketed even
+	// for one station, because `access_control` is where a reader most needs to
+	// see that it is a list rather than a single permitted address.
+	if let Some(acl) = &point.access_control {
+		let key = match acl.policy {
+			AclPolicy::Deny => "deny",
+			AclPolicy::Allow => "allow",
+		};
+		let stations: Vec<String> = acl.stations.iter().map(|station| quote(station)).collect();
+		let _ = writeln!(
+			body,
+			"\taccess_control {{ {key} = [{}] }}",
+			stations.join(", ")
+		);
+	}
+	let head = opening("access_point", &point.id, overrides);
+	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", quote(&point.id));
 }
 
 /// A policy routing rule, which belongs to no interface.
@@ -2007,6 +2078,153 @@ mod tests {
 		assert!(
 			overridden.contains("\noverride interface eth0 {"),
 			"{overridden}"
+		);
+	}
+
+	/// The smallest access point a document can hold, which is the one the
+	/// compiler's two refusals leave: a radio and a `wifi` block.
+	#[test]
+	fn an_access_point_round_trips() {
+		round_trips(
+			"access_point \"Home\" {\n\
+			 \tdevice = \"wlan0\"\n\
+			 \twifi { psk = \"@secret:ap\" }\n\
+			 }\n",
+		);
+	}
+
+	/// **An access point that is deliberately open, which is why the `wifi`
+	/// block is written unconditionally.** Its security is `Open`, so a
+	/// renderer writing the block only for a credential would emit an access
+	/// point with no `wifi` block at all -- and the compiler refuses that one,
+	/// saying it *"would be open"*. The save would be refused for a document
+	/// that was open on purpose and said so.
+	#[test]
+	fn an_open_access_point_round_trips() {
+		round_trips(
+			"access_point \"Guests\" {\n\
+			 \tdevice = \"wlan0\"\n\
+			 \twifi { open = true }\n\
+			 }\n",
+		);
+	}
+
+	/// Every key at once, for the reason the network equivalent gives: these
+	/// arrived over several passes and a renderer written per key drops the
+	/// ones nobody came back for.
+	#[test]
+	fn a_fully_populated_access_point_round_trips() {
+		round_trips(
+			"access_point \"Guest\" {\n\
+			 \tdevice = \"wlan1\"\n\
+			 \tssid = \"47756573742057692d4669\"\n\
+			 \tchannel = 36\n\
+			 \tband = \"5\"\n\
+			 \tregdom = \"SE\"\n\
+			 \thidden = true\n\
+			 \twifi { psk = \"@secret:guest\"; proto = \"wpa3\" }\n\
+			 \taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n\
+			 }\n",
+		);
+	}
+
+	/// **Both station-list policies, because they are one list under two
+	/// keys.** The policy is not written as a value anywhere -- it *is* which
+	/// key the list is under -- so a renderer that wrote the wrong one would
+	/// produce a document that compiles, loads, and inverts the operator's
+	/// intent: a deny list of one station read back as an allow list is a
+	/// hotspot that admits exactly the station that was banned.
+	#[test]
+	fn both_station_list_policies_round_trip() {
+		for key in ["deny", "allow"] {
+			round_trips(&format!(
+				"access_point \"H\" {{\n\
+				 \tdevice = \"wlan0\"\n\
+				 \twifi {{ psk = \"@secret:h\" }}\n\
+				 \taccess_control {{ {key} = [\"aa:bb:cc:dd:ee:ff\", \"11:22:33:44:55:66\"] }}\n\
+				 }}\n"
+			));
+		}
+	}
+
+	/// An access point's PSK is written as the reference it came in as.
+	///
+	/// **Not against a leak, which the model forecloses**: a [`SecretRef`] is
+	/// a provider and a name and holds no value, so no renderer can write a
+	/// passphrase it does not have. What this guards is the `@secret:` prefix
+	/// itself -- written bare, the name reads back as a *literal* passphrase,
+	/// and the access point comes up with the string `ap-psk` as its key. The
+	/// round trip cannot see it either way, because both spellings compile to
+	/// a credential; only the text distinguishes them.
+	#[test]
+	fn an_access_points_credential_stays_a_reference() {
+		let document = compile(
+			"access_point \"Home\" {\n\
+			 \tdevice = \"wlan0\"\n\
+			 \twifi { psk = \"@secret:ap-psk\" }\n\
+			 }\n",
+		);
+		let rendered = render(&document, &Overrides::new()).expect("rendered");
+		assert!(rendered.contains("psk = \"@secret:ap-psk\""), "{rendered}");
+	}
+
+	/// **Every secret provider, because three of the four spellings were
+	/// written nowhere any test could read them.** `secret_ref` is the one
+	/// function every credential in the tree passes through, and it renders
+	/// the provider as a prefix: `@secret:keyring:home` and `@secret:home`
+	/// name different stores. Only the keyring arm had a case -- the `PPPoE`
+	/// password, whose own comment says why -- so a wrong prefix on `pass` or
+	/// `exec` would have produced a profile that loads, finds no credential
+	/// where it looked, and reports a wifi failure rather than a parse one.
+	///
+	/// The relationship asserted is distinctness as well as the round trip: a
+	/// renderer collapsing two providers to one spelling round-trips happily
+	/// if the parser then maps that spelling back to whichever it collapsed
+	/// to, and four equal strings would satisfy every individual case.
+	#[test]
+	fn every_secret_provider_round_trips_distinctly() {
+		let mut seen = Vec::new();
+		for provider in ["", "keyring:", "pass:", "exec:"] {
+			let text = format!(
+				"access_point \"H\" {{\n\
+				 \tdevice = \"wlan0\"\n\
+				 \twifi {{ psk = \"@secret:{provider}h\" }}\n\
+				 }}\n"
+			);
+			round_trips(&text);
+			let rendered = render(&compile(&text), &Overrides::new()).expect("rendered");
+			let line = rendered
+				.lines()
+				.find(|line| line.contains("psk ="))
+				.expect("a psk line")
+				.trim()
+				.to_owned();
+			assert!(
+				!seen.contains(&line),
+				"two providers rendered alike: {line} already in {seen:?}"
+			);
+			seen.push(line);
+		}
+		assert_eq!(seen.len(), 4, "{seen:?}");
+	}
+
+	/// An access point the base defines is restated with `override`, which is
+	/// the half that lives in `netcfgd-host` and is asserted here because the
+	/// renderer is where it is spelled.
+	#[test]
+	fn an_access_point_is_overridden_where_the_caller_says() {
+		let document = compile(
+			"access_point \"Home\" {\n\
+			 \tdevice = \"wlan0\"\n\
+			 \twifi { psk = \"@secret:ap\" }\n\
+			 }\n",
+		);
+		let mut overrides = Overrides::new();
+		overrides.insert("access_point Home".to_owned());
+		let rendered = render(&document, &overrides).expect("renders");
+		assert!(
+			rendered.contains("\noverride access_point \"Home\" {"),
+			"{rendered}"
 		);
 	}
 }

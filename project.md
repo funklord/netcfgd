@@ -1036,16 +1036,25 @@ anybody decides it is impossible.
   apart; what is not defensible is the artifact describing itself wrongly. The
   existing code's convention was followed rather than the header's wording, so
   the choice stays open.
-- **Nine model fields cannot be reached from the configuration language at
+- **Eight model fields cannot be reached from the configuration language at
   all** -- `DnsPolicy`'s `options`, `dnssec` and `transport`, `DnsServer`'s
-  `port` and `sni`, `Device`'s `match`, `RoutingRule::invert`, which 0257 found
-  when the rule editor had to decide whether to offer it, and `HookRef`'s
-  `run_as` and `timeout`, which 0258 found the same way -- and which the
-  example file documented a syntax for that does nothing. Either the parser
-  gains the keys or the schema loses the fields, and the schema is witnessed,
-  so neither is a passing change. `run_as` needs one thing more than grammar:
-  a materialiser that writes the script somewhere the named user can read,
-  which 0700 under root is not.
+  `port` and `sni`, `Device`'s `match`, and `HookRef`'s `run_as` and
+  `timeout`, which 0258 found when the rule editor had to decide whether to
+  offer them -- and which the example file documented a syntax for that does
+  nothing. Either the parser gains the keys or the schema loses the fields,
+  and the schema is witnessed, so neither is a passing change. `run_as` needs
+  one thing more than grammar: a materialiser that writes the script somewhere
+  the named user can read, which 0700 under root is not.
+
+  **It was nine, and `RoutingRule::invert` is the one that closed** -- 10.168,
+  by adding the parser arm, since every other layer already carried it and a
+  rule somebody had installed inverted compared against a `false` that was
+  never a choice. **Nothing here says the other eight go the same way**, and
+  the paragraph above is why: `invert` had a behavioural fault to fix, while
+  these eight are a question about whether the schema or the grammar is wrong.
+  Closing one by implementing it is not a precedent for the rest, and the
+  count is in this entry rather than in a count elsewhere because this is the
+  copy a reader would come to.
 - **`ncfg apply` without `--confirm` spawns backends as children of a
   short-lived CLI**, so which process owns dhcpcd depends on whether the
   operator typed a flag. Raised with the holder; unanswered.
@@ -2300,7 +2309,10 @@ seventh, found when the rule editor had to decide whether to offer it, and
 `HookRef`'s `run_as` and `timeout` are the eighth and ninth, found the same
 way. None of the three is in the list below, because the renderer refuses a
 document carrying a rule or a hook outright -- so unlike these six they were
-never a renderer's problem.) `lower_dns` reads four keys -- `servers`, `search`,
+never a renderer's problem. **`invert` has since been closed by 10.168** and
+the count is eight; this measurement is left as it was taken, and the live
+count is in the open questions near the top of this file, which is the copy
+a reader comes to.) `lower_dns` reads four keys -- `servers`, `search`,
 `domains`, `mode` -- and hardcodes `port: None, sni: None`; `lower_device`
 never assigns `r#match`. Nothing else in the tree writes any of them either,
 measured across `crates/`, `backend/` and `adapter/`.
@@ -9498,6 +9510,101 @@ Proven both ways: the count reports a real number (asserting 2 gives
 failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
+
+## 10.169 An access point no profile could hold, and three providers nothing read
+
+The third item off 10.159's list, and the broadest of them: one `access_point`
+block put `N access_point block(s)` on the renderer's unrenderable list, which
+refuses the **whole** save. So a machine serving a hotspot could save no profile
+at all -- and a machine that serves one is a machine whose configuration changes
+with where it is, which is the entire reason profiles exist. The two before it
+were a wifi policy and a routing rule; this is the same hole in the same list,
+and taking the items in order of breadth is why it came third rather than first.
+
+`render_access_point` writes `device` always, because the compiler refuses an
+access point without one, and everything else where it is set or differs from
+its default. Two parts of it are not that shape and both are deliberate:
+
+- **The `wifi` block is unconditional.** `lower_access_point` refuses an access
+  point with no `wifi` block rather than defaulting it -- saying it *"would be
+  open"* -- so a renderer writing the block only for a credential emits a
+  document its own compiler rejects. The case that proves it is
+  `wifi { open = true }`, an access point that is open **on purpose**: its
+  security is `Open`, and the sabotage that skips the block for `Open` is caught
+  by that test and by nothing else.
+- **`access_control` has no policy field to write.** The policy *is* which key
+  the list sits under, `deny` or `allow`, and the compiler refuses a block
+  carrying both. A renderer writing the wrong key produces a document that
+  compiles and loads and inverts the operator's intent: a deny list of one
+  station, read back as an allow list, is a hotspot that admits exactly the
+  station that was banned.
+
+**The override-set trap fired a third time**, as 10.168 said it would and as the
+comment in `write_profile_snapshot` has now said twice: a renderer that gains a
+block and a list that does not is a save refused for restating what the base
+already said.
+
+And the previous pass had left a **copy of that comment with no loop under it**
+-- the rules entry's text, duplicated, sitting above the closing brace. Nothing
+would ever have failed for it; it would have read to the next person as an
+entry whose loop had been deleted. It is the access point's loop now.
+
+**Nine sabotages, each caught by the test written for it**, and the instrument
+was wrong before any of them were. The sweep's first run reported "did not
+compile" for every single one, because its build-error detector matched
+`error: test failed` -- which is cargo reporting the test failure the sabotage
+was supposed to cause. **A detector whose failure condition includes the result
+it is looking for**, which is 10.84's shape and `evidence.md`'s, met from inside
+the tool written to avoid it. Two anchors also matched in `render_network` as
+well as in the function under test, so a sabotage would have proved the wrong
+test; the sweep slices the function's own body out of the file now and matches
+inside that.
+
+### The live assertions are a second witness, not the guard
+
+`tests/live/profile.sh` carries an access point with a station list, and
+sabotaging it showed the assertions are worth less than they look. **Both
+sabotages turn the script red and neither reaches the assertion written for
+it**: both fail three checks earlier, at `profile save`, because the daemon
+proves a snapshot reproduces the running document before keeping it and a
+snapshot that does not is refused -- so the file the later checks read never
+exists.
+
+That is `evidence.md`'s *a control has to be reached, not only able to fire*,
+and the comment first written beside those lines claimed the reverse. What they
+actually buy is naming *which* block was at fault when a save is refused, plus
+the one shape the round-trip proof cannot see: a renderer and a parser wrong in
+mirroring directions, where the document compares equal and the file on disk
+says something else. The file already said as much three lines up -- "the save
+succeeding at all is most of the evidence" -- which is a comment that was right
+about a case it had not been tested against.
+
+### Three secret providers nothing had ever read back
+
+Found by asking what the credential assertion was really guarding. A
+`SecretRef` is a provider and a name and **holds no value**, so no renderer can
+write a passphrase it does not have: the leak the test was written against is
+foreclosed by the model. What `secret_ref` can get wrong is the prefix, and
+there the gap was real -- of its four arms, only `keyring` had a case anywhere
+in the tree, the PPPoE password, whose own comment says why.
+
+`@secret:pass:home` and `@secret:home` name different stores. Collapsing `pass`
+onto the default spelling broke **nothing** before this, and a profile saved
+from such a build loads, looks right, finds no credential where it looked, and
+reports a wifi failure rather than a parse one. The new case round-trips all
+four and asserts the four rendered lines are **distinct**, because four cases
+each round-tripping prove nothing about a renderer that collapses two providers
+onto one spelling the parser then maps back to whichever it collapsed to. The
+sabotage confirms the aim: collapsing `pass` fails exactly one test, the new
+one.
+
+**The unrenderable list is now `match` blocks, ethtool settings, qdisc,
+`ingress_redirect`, hooks, dns options, dnssec, dns transport, a dns server with
+a port or sni, `dns_mode = "exec"`, some interface kinds, an address with
+lifetimes or a peer, and a route with a scope or a proto.** Every entry that was
+a whole block of its own is gone; what is left is keys inside blocks that do
+render, so none of them can refuse a save for a machine that merely *has* a
+radio, a rule or a hotspot.
 
 ## 10.168 A rule nobody could write, and rules no profile could hold
 
