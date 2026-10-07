@@ -9602,8 +9602,9 @@ already passing here** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first
 report that `ppp.sh` was newly passing was wrong, read off each script's *first*
 `skip()` call rather than off what happened: a skip site is not a skip event.
 
-**Four now run that never ran.** `sandbox_writes.sh` and `hwsim.sh` pass;
-`bluetooth.sh`, `pppoe-session.sh` and `nm.sh` fail, and those failures are
+**Four now run that never ran.** `sandbox_writes.sh`, `hwsim.sh` and
+`pppoe-session.sh` pass -- the last two after defects in the scripts
+themselves were fixed -- while `bluetooth.sh` and `nm.sh` fail, and those failures are
 recorded rather than diagnosed -- a failing check is not evidence either, and
 `bluetooth.sh`'s `hci0: Opcode 0x0c03 failed: -110` points at the virtual
 adapter before it points at netcfgd.
@@ -9626,9 +9627,21 @@ only pass where netcfgd happened to be installed. One variable later all 25 of
 its checks pass, including `took a DHCP lease over the radio (10.55.0.109)` and
 `wrote no lease into the host's /var/lib/dhcpcd`.
 
-**Three defects, one shape**: the empty radio baseline, the missing hook
-pointer, and `pppoe-session.sh`'s unhonoured contract were all correct-looking
-code that needed a new environment rather than a new test to become visible.
+**Five defects, one shape**: the empty radio baseline, the missing hook pointer,
+`pppoe-session.sh`'s unhonoured contract, and its two `grep -c` checks that
+compared an empty string against `"0"` -- all correct-looking code that needed a
+new environment rather than a new test to become visible.
+
+**The two `grep -c` ones are worth separating, because the fixes differ.** One
+check was **moved** to after the apply that creates the file it is about, rather
+than taught to tolerate the file's absence: its own comment says both files
+exist, so tolerating absence would have made it pass over nothing. It is proven
+non-vacuous by a control -- asked for a string the file does contain it reports
+`actual: 2`, where it used to report nothing. The other was **loosened**,
+because pppd *removes* the report rather than emptying it as the prose claimed,
+and no report names no resolver more firmly than an empty one does. That one is
+written with an explicit `if`, since `grep -c` exits 1 on a zero count and
+`|| echo 0` would print both.
 
 **And the tier found two defects in the suite on its first serious use.**
 

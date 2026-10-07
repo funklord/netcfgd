@@ -324,7 +324,7 @@ this machine** -- `ppp.sh`, `killmode.sh`, `select.sh` -- and a first report tha
     sandbox_writes.sh   PASSES    31 checks against 25 here, 3 of the 6 controls
     hwsim.sh            PASSES    25 checks: SAE, a real lease, roam detection
     bluetooth.sh        1 failed  "netcfgd reports the adapter it can see"
-    pppoe-session.sh    2 failed  resolv.conf handling
+    pppoe-session.sh    PASSES    13 checks, after two of its own were fixed
     nm.sh               4+ failed "the loopback is a loopback, not an ethernet"
 
 **`hwsim.sh` is the headline and it is worth reading what it got through.** With
@@ -385,6 +385,46 @@ netcfgd, and is a reason to suspect the environment first.
 **Two cannot run at all.** `delegation.sh` wants `odhcp6c`, which Debian does
 not package, and `association.sh` wants an *installed* netcfgd with a running
 daemon and an associated radio.
+
+### `pppoe-session.sh`: two test bugs, and the fixes are deliberately different
+
+Both failures printed `expected: 0` and an **empty** `actual:`, which is the
+whole diagnosis: `grep -c PATTERN FILE` prints `0` for a present file with no
+matches and **nothing at all** for a missing one, so each check compared an
+empty string against `"0"`. Instrumented to say `ABSENT` rather than nothing,
+the guest confirmed both files were missing.
+
+**The first check was moved, not loosened.** Its own comment states the premise
+-- *"both files exist, and only one of them is written by the thing that says it
+writes it"* -- and before the second `ncfg apply` netcfgd's `resolv.conf` does
+not exist at all, the very next check grepping the same file passing because
+that apply creates it. Teaching it to tolerate an absent file would have made it
+pass over nothing, which is the vacuous pass this tree keeps finding. Asked
+after the apply, it reads a real file.
+
+**Proven non-vacuous by a control**, which mattered more than usual here because
+the original bug was "reads a file that is not there": asked for `nameserver`, a
+string the file does contain, it reports
+
+```text
+FAIL and the one netcfgd manages was written by netcfgd
+       expected: 0
+       actual:   2
+```
+
+A number from a real file where it used to produce an empty string.
+
+**The second check was loosened, because absence is the stronger result.**
+pppd's ip-down **removes** the report; the script's prose said it *empties* it,
+and that was simply wrong about the mechanism. No report names no `dns=` more
+firmly than an empty one does, so the check accepts either -- written with an
+explicit `if` rather than `grep -c ... || echo 0`, because **`grep -c` exits 1
+when the count is zero** and the fallback would then print the count *and* the
+zero. That is the same trap from the other direction, and it would have put a
+new bug in beside the fix.
+
+Neither check had ever run anywhere: the script needs real root, so it always
+skipped.
 
 ### Two defects the tier found immediately, in the suite rather than in netcfgd
 
