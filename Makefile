@@ -1817,12 +1817,33 @@ vm: vm-image
 vm-cluster: vm-image
 	sh tool/vm/run.sh tool/vm/payload/cluster.sh $${VM_COUNT:-3}
 
+# The Debian guest, which is the one netcfgd's own tests can run in: it matches
+# this machine's libc, so `target/debug/netcfgd` runs straight off the
+# read-only share with nothing cross-built and no toolchain installed here.
+# Measured: `netcfgd 0.1.0` printed from inside a guest, 20 seconds to the
+# payload, under systemd -- which is also what sandbox_writes.sh refuses for.
+vm-debian: vm-image
+	VM_GUEST=debian sh tool/vm/run.sh tool/vm/payload/share.sh
+
+# `tests/live/sandbox_writes.sh` under a real systemd, which is the script this
+# whole tier was built for: on a sysvinit machine it ends `make live` with a
+# non-zero exit because its last block cannot run at all.
+#
+# Measured on 2026-10-07: 31 checks in the guest against 25 here, and three of
+# the six it adds are the script's own CONTROLS -- the two "cannot without this
+# line, so that line is load-bearing" sabotages and the probe's own positive
+# control. So the guest does not merely assert more, it supplies the checks
+# that make the others mean something.
+vm-sandbox: vm-image
+	VM_GUEST=debian sh tool/vm/run.sh tool/vm/payload/sandbox_writes.sh
+
 # Separate, because the fetch is the only part that needs the internet and it
-# is a no-op once the image is in place.
+# is a no-op once the images are in place. Both guests: Alpine for kernel and
+# module work, Debian for netcfgd's own suite and for systemd.
 vm-image:
 	sh tool/vm/fetch.sh
 
-.PHONY: vm vm-cluster vm-image
+.PHONY: vm vm-cluster vm-debian vm-image vm-sandbox
 
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:

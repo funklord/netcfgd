@@ -3,6 +3,19 @@
 #
 #     sh tool/vm/run.sh tool/vm/payload/capability.sh        # one guest
 #     sh tool/vm/run.sh tool/vm/payload/cluster.sh 3         # three, on a wire
+#     VM_GUEST=debian sh tool/vm/run.sh tool/vm/payload/share.sh
+#
+# TWO GUESTS. `VM_GUEST` is `alpine` (the default) or `debian`.
+#   Alpine boots in about ten seconds and is for kernel-and-module work. Debian
+#   matches this machine's libc, so `target/debug/netcfgd` runs in it straight
+#   off the share, and it brings systemd. See 0265.
+#
+#   They are driven differently and the difference is all in how a command
+#   reaches the guest. Alpine takes an apkovl over HTTP, because its initramfs
+#   will fetch one. Debian's genericcloud image carries cloud-init and already
+#   has a serial console in its own bootloader configuration, so the payload
+#   travels on a tiny FAT seed disk labelled CIDATA and nothing is served over
+#   the network at all.
 #
 # TERMINATION, because this starts a virtual machine and a web server.
 #   The guest runs under `timeout $VM_TIMEOUT` (default 180) and qemu is a
@@ -49,6 +62,7 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 store=${VM_DIR:-$HOME/vm}
 payload=${1:-}
 count=${2:-${VM_COUNT:-1}}
+guest=${VM_GUEST:-alpine}
 timeout_s=${VM_TIMEOUT:-180}
 repo_url=${VM_REPO:-http://dl-cdn.alpinelinux.org/alpine/v3.21/main}
 
@@ -63,10 +77,24 @@ case "$count" in
 *) die "count is 1 to 5, not \`$count'" ;;
 esac
 [ -f "$payload" ] || die "no such payload: $payload"
-for f in vmlinuz-lts initramfs-lts modloop-lts; do
-	[ -f "$store/alpine-3.21.0-x86_64/boot/$f" ] ||
-		die "no $f in $store; run tool/vm/fetch.sh first"
-done
+alpine_boot="$store/alpine-3.21.0-x86_64/boot"
+debian_image="$store/debian-13-generic-amd64-20261001-2618.qcow2"
+case "$guest" in
+alpine)
+	for f in vmlinuz-lts initramfs-lts modloop-lts; do
+		[ -f "$alpine_boot/$f" ] ||
+			die "no $f in $store; run \`tool/vm/fetch.sh alpine' first"
+	done
+	;;
+debian)
+	[ -f "$debian_image" ] ||
+		die "no Debian image in $store; run \`tool/vm/fetch.sh debian' first"
+	for tool in qemu-img mformat mcopy base64; do
+		command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
+	done
+	;;
+*) die "VM_GUEST is alpine or debian, not \`$guest'" ;;
+esac
 for tool in qemu-system-x86_64 python3 tar; do
 	command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
 done
@@ -83,37 +111,32 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-# The overlay: the payload, and the runlevel symlink that makes OpenRC run it.
-mkdir -p "$work/ovl/etc/local.d" "$work/ovl/etc/runlevels/default"
-# **Everything goes to /dev/console explicitly, because OpenRC swallows it.**
-# The first working boot ran the payload -- it powered the guest off, and
-# nothing else does -- and printed not one of its lines, because the `local`
-# service's output does not reach the serial port. So the wrapper redirects to
-# the console device rather than trusting the service's stdout.
-#
-# **And the modules are mounted here rather than asked for.** The initramfs's
-# own option list does not contain `modloop`, so `modloop=` on the command line
-# reaches nothing: the first boot fetched the overlay, built a root from the
-# mirror, and then said
-#
-#     Loading modules ...modprobe: can't change directory to '/lib/modules'
-#
-# which is this tier with its one reason removed. The squashfs is attached as a
-# read-only disk instead and mounted the way Alpine's own service would, which
-# needs no cooperation from the guest's init at all.
+# **One wrapper, two carriers.** The payload is the same text in both guests;
+# only the way it arrives differs, so the wrapper is built once here and each
+# guest's carrier picks it up. Alpine gets it in an apkovl over HTTP, Debian in
+# cloud-init's user-data on a FAT seed disk.
+wrapper="$work/payload.sh"
 {
 	echo '#!/bin/sh'
 	echo '# Written by tool/vm/run.sh.'
 	echo 'exec > /dev/console 2>&1'
-	echo '# Which guest this is, from the command line, so one payload can'
-	echo '# serve every member of the cluster.'
-	echo 'VM_INDEX=$(sed -n "s/.*vm_index=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
-	echo 'VM_COUNT=$(sed -n "s/.*vm_count=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
+	echo '# Which guest this is. Alpine reads it from the kernel command line,'
+	echo '# which it can be given; Debian has it written in by the seed, there'
+	echo '# being no command line to add to without rebuilding the image.'
+	echo 'if [ -z "${VM_INDEX:-}" ]; then'
+	echo '	VM_INDEX=$(sed -n "s/.*vm_index=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
+	echo '	VM_COUNT=$(sed -n "s/.*vm_count=\\([0-9]*\\).*/\\1/p" /proc/cmdline)'
+	echo 'fi'
 	echo 'export VM_INDEX VM_COUNT'
-	echo 'mkdir -p /.modloop /lib/modules'
-	echo 'if mount -t squashfs -o ro /dev/vda /.modloop 2>/dev/null; then'
-	echo '	mount --bind /.modloop/modules /lib/modules 2>/dev/null ||'
-	echo '		ln -sfn /.modloop/modules/* /lib/modules/ 2>/dev/null'
+	echo '# The modules, where a modloop disk was attached. Absent on Debian,'
+	echo '# whose image carries its own; the mount simply fails and nothing'
+	echo '# depends on it having worked.'
+	echo 'if [ -b /dev/vda ] && [ ! -d /lib/modules/"$(uname -r)" ]; then'
+	echo '	mkdir -p /.modloop /lib/modules'
+	echo '	if mount -t squashfs -o ro /dev/vda /.modloop 2>/dev/null; then'
+	echo '		mount --bind /.modloop/modules /lib/modules 2>/dev/null ||'
+	echo '			ln -sfn /.modloop/modules/* /lib/modules/ 2>/dev/null'
+	echo '	fi'
 	echo 'fi'
 	echo '# The repository, read-only, so a payload can reach the tree it is'
 	echo '# testing without an image being rebuilt. Read-only on both sides:'
@@ -130,17 +153,65 @@ mkdir -p "$work/ovl/etc/local.d" "$work/ovl/etc/runlevels/default"
 	echo 'status=$?'
 	echo 'echo "VM-PAYLOAD-END rc=$status"'
 	echo 'poweroff'
-} > "$work/ovl/etc/local.d/payload.start"
-chmod 0755 "$work/ovl/etc/local.d/payload.start"
-ln -s /etc/init.d/local "$work/ovl/etc/runlevels/default/local"
+} > "$wrapper"
+chmod 0755 "$wrapper"
 
-( cd "$work/ovl" && tar -czf "$work/test.apkovl.tar.gz" . )
+# A cloud-init seed for one Debian guest: the wrapper, base64'd so no amount of
+# indentation in the payload can break the YAML, and a runcmd to run it.
+#
+# **Built with mformat and mcopy, which need no root** -- there is no
+# genisoimage or xorriso on this machine, and cloud-init's NoCloud datasource
+# reads a filesystem labelled CIDATA as readily as an ISO. The long filenames
+# matter: cloud-init wants `user-data`, and mtools writes VFAT long names
+# alongside the 8.3 ones. Checked with `mtype ::/user-data` rather than with
+# `strings`, which cannot see them at all -- a long name is UTF-16.
+seed_for() {
+	_i=$1
+	_d="$work/seed.$_i"
+	mkdir -p "$_d"
+	printf 'instance-id: netcfgd-%s\nlocal-hostname: vm%s\n' "$_i" "$_i" > "$_d/meta-data"
+	{
+		echo '#cloud-config'
+		echo 'write_files:'
+		echo '  - path: /usr/local/bin/vm-payload'
+		echo "    permissions: '0755'"
+		echo '    encoding: b64'
+		printf '    content: %s\n' "$(base64 -w0 "$wrapper")"
+		echo 'runcmd:'
+		printf '  - [ env, VM_INDEX=%s, VM_COUNT=%s, /usr/local/bin/vm-payload ]\n' \
+			"$_i" "$count"
+	} > "$_d/user-data"
+	rm -f "$work/seed.$_i.img"
+	mformat -i "$work/seed.$_i.img" -v CIDATA -C -f 1440 :: ||
+		die "could not format a cloud-init seed"
+	mcopy -i "$work/seed.$_i.img" "$_d/user-data" "$_d/meta-data" :: ||
+		die "could not write the cloud-init seed"
+}
 
-# Bound to loopback: the guest reaches it through the user-net gateway, and
-# nothing else on the network can. Port 0 lets the kernel choose, so two runs
-# do not collide.
-python3 -c '
-import http.server, socketserver, sys, threading, os
+# Alpine's carrier: an apkovl, which is the overlay its initramfs fetches and
+# unpacks. The wrapper goes where OpenRC's `local` service will run it, and the
+# runlevel symlink is what enables that service.
+#
+# **Everything in the wrapper goes to /dev/console explicitly, because OpenRC
+# swallows it.** The first working boot ran the payload -- it powered the guest
+# off, and nothing else does -- and printed not one of its lines, because the
+# `local` service's output does not reach the serial port.
+port=
+if [ "$guest" = alpine ]; then
+	mkdir -p "$work/ovl/etc/local.d" "$work/ovl/etc/runlevels/default"
+	cp "$wrapper" "$work/ovl/etc/local.d/payload.start"
+	chmod 0755 "$work/ovl/etc/local.d/payload.start"
+	ln -s /etc/init.d/local "$work/ovl/etc/runlevels/default/local"
+	( cd "$work/ovl" && tar -czf "$work/test.apkovl.tar.gz" . )
+
+	# Bound to loopback: the guest reaches it through the user-net gateway and
+	# nothing else on the network can. Port 0 lets the kernel choose, so two
+	# runs on this machine do not collide.
+	#
+	# Debian needs none of this -- cloud-init reads the payload off a seed
+	# disk -- so no server is started and no port is waited for there.
+	python3 -c '
+import http.server, socketserver, sys, os
 os.chdir(sys.argv[1])
 class Quiet(http.server.SimpleHTTPRequestHandler):
 	def log_message(self, *a):
@@ -149,20 +220,21 @@ httpd = socketserver.TCPServer(("127.0.0.1", 0), Quiet)
 print(httpd.server_address[1], flush=True)
 httpd.serve_forever()
 ' "$work" > "$work/port" 2>"$work/server.log" &
-server=$!
+	server=$!
 
-# Wait for the port rather than sleeping a guess at it: the server prints it
-# once it is bound, so an empty file means not yet listening.
-waited=0
-while [ ! -s "$work/port" ]; do
-	waited=$((waited + 1))
-	[ "$waited" -gt 100 ] && die "the overlay server never bound a port"
-	sleep 0.1
-done
-port=$(cat "$work/port")
+	# Waited for rather than slept at: the server prints its port once bound,
+	# so an empty file means not yet listening.
+	waited=0
+	while [ ! -s "$work/port" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 100 ] && die "the overlay server never bound a port"
+		sleep 0.1
+	done
+	port=$(cat "$work/port")
+	echo "run: serving the overlay on 127.0.0.1:$port"
+fi
 
-echo "run: serving the overlay on 127.0.0.1:$port"
-echo "run: booting, up to ${timeout_s}s"
+echo "run: $guest, booting, up to ${timeout_s}s"
 
 # **Nothing is typed, and two attempts at typing are why.**
 # ISOLINUX reads the serial port by polling, and it loses characters at both
@@ -213,26 +285,51 @@ pids=
 rc=0
 i=1
 while [ "$i" -le "$count" ]; do
-	timeout "$timeout_s" qemu-system-x86_64 \
-		-enable-kvm -m 1024 -smp 2 -nographic -no-reboot \
-		-kernel "$store/alpine-3.21.0-x86_64/boot/vmlinuz-lts" \
-		-initrd "$store/alpine-3.21.0-x86_64/boot/initramfs-lts" \
-		-append "console=ttyS0,115200 ip=dhcp quiet \
+	# The wire is shared by both guests; everything else differs.
+	wire="-netdev socket,id=lan,mcast=230.0.0.42:$mcast_port,localaddr=127.0.0.1
+	      -device virtio-net-pci,netdev=lan,mac=52:54:00:12:34:0$i"
+
+	if [ "$guest" = alpine ]; then
+		# shellcheck disable=SC2086
+		timeout "$timeout_s" qemu-system-x86_64 \
+			-enable-kvm -m 1024 -smp 2 -nographic -no-reboot \
+			-kernel "$alpine_boot/vmlinuz-lts" \
+			-initrd "$alpine_boot/initramfs-lts" \
+			-append "console=ttyS0,115200 ip=dhcp quiet \
 modules=loop,squashfs,virtio_net,virtio_pci,virtio_blk \
 alpine_repo=$repo_url \
 vm_index=$i vm_count=$count \
 apkovl=http://10.0.2.2:$port/test.apkovl.tar.gz" \
-		-netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
-		-netdev socket,id=lan,mcast=230.0.0.42:$mcast_port,localaddr=127.0.0.1 \
-		-device virtio-net-pci,netdev=lan,mac=52:54:00:12:34:0$i \
-		-drive file="$store/alpine-3.21.0-x86_64/boot/modloop-lts",format=raw,if=virtio,readonly=on \
-		-virtfs local,path="$repo",mount_tag=repo,security_model=none,readonly=on \
-		< /dev/null > "$work/console.$i.log" 2>&1 &
+			-netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+			$wire \
+			-drive file="$alpine_boot/modloop-lts",format=raw,if=virtio,readonly=on \
+			-virtfs local,path="$repo",mount_tag=repo,security_model=none,readonly=on \
+			< /dev/null > "$work/console.$i.log" 2>&1 &
+	else
+		# **A copy-on-write overlay per guest, on local disk.** The base image
+		# is never written: it lives in a store that may be on a network
+		# filesystem, where a guest disk corrupts in ways that present as
+		# guest faults, and N guests sharing one writable image would corrupt
+		# it between them regardless of where it sat.
+		qemu-img create -f qcow2 -F qcow2 \
+			-b "$debian_image" "$work/disk.$i.qcow2" >/dev/null ||
+			die "could not make an overlay for guest $i"
+		seed_for "$i"
+		# shellcheck disable=SC2086
+		timeout "$timeout_s" qemu-system-x86_64 \
+			-enable-kvm -m 1024 -smp 2 -nographic -no-reboot \
+			-drive file="$work/disk.$i.qcow2",format=qcow2,if=virtio \
+			-drive file="$work/seed.$i.img",format=raw,if=virtio,readonly=on \
+			-netdev user,id=n0 -device virtio-net-pci,netdev=n0 \
+			$wire \
+			-virtfs local,path="$repo",mount_tag=repo,security_model=none,readonly=on \
+			< /dev/null > "$work/console.$i.log" 2>&1 &
+	fi
 	pids="$pids $!"
 	i=$((i + 1))
 done
 
-echo "run: $count guest(s) booting, up to ${timeout_s}s, wire on port $mcast_port"
+echo "run: $count guest(s) on the wire at port $mcast_port"
 
 # Every guest is waited for, and the first non-zero status is kept rather than
 # the last: `wait` without this reports whichever finished last, so a failing

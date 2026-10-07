@@ -1,8 +1,10 @@
 # 0265: A VM tier, for exactly what a namespace cannot do
 
-Status: accepted; built and measured -- `make vm` boots a guest and runs a
-payload in it, and `make vm-cluster` boots two to five on a shared wire. What
-is left is named under "What this leaves": the nspawn tier and procd.
+Status: accepted; built and measured. `make vm` boots an Alpine guest and runs
+a payload in it, `make vm-cluster` boots two to five on a shared wire, and
+`make vm-debian` boots a Debian guest which runs this machine's own netcfgd
+binary off the share. What is left under "What this leaves": procd, and the
+nspawn tier, which the holder's objection to host installs has now retired.
 Date: 2026-10-07
 Milestone: a second test tier, asked for by the copyright holder
 
@@ -228,7 +230,111 @@ rebuilt in the loop: `repo /mnt/repo 9p ro,relatime,access=client,trans=virtio`,
 so is the mount -- because a guest that could write there would be a test
 editing the source it is testing.
 
-### The one thing still blocking netcfgd's own tests, measured
+### The Debian guest, which is what netcfgd's own tests can run in
+
+**Settled by the copyright holder 2026-10-07, on the ground that the
+alternative pollutes the host.** A musl Rust target would have meant a second
+toolchain outside apt -- Debian packages no Rust std for musl -- installed on
+the machine to serve a guest, which is backwards from why this tier exists. The
+same objection retires the nspawn tier: `systemd-container` and `debootstrap`
+are host installs, and a Debian *guest* brings its own systemd as an image in
+`$VM_DIR`.
+
+**It works, and this is the measurement that matters:**
+
+```text
+mount:  repo /mnt/repo 9p ro,relatime,access=client,trans=virtio 0 0
+files:  28 entries at the root       marker: project.md present
+netcfgd: netcfgd 0.1.0
+         Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>
+```
+
+The host's own binary, run inside a guest, off a read-only share, with nothing
+cross-built and nothing installed here. Twenty seconds to the payload, under
+systemd -- which is also what `sandbox_writes.sh` refuses for, so the unit's
+real sandbox becomes checkable rather than inspected.
+
+**It is driven differently from Alpine, and the difference removes machinery
+rather than adding it.** The `generic` image carries cloud-init and already has
+a serial console in its own bootloader configuration, so nothing is typed and
+no HTTP server is needed: the payload rides on a 1.4 MB FAT seed labelled
+CIDATA, built with `mformat` and `mcopy`, which need no root. There is no
+`genisoimage` or `xorriso` on this machine and cloud-init's NoCloud datasource
+reads a labelled filesystem as readily as an ISO. The payload is base64'd into
+the user-data, so no indentation in a payload can break the YAML.
+
+**One verification worth copying.** cloud-init wants a file called exactly
+`user-data`, and `mdir` shows only the 8.3 name `USER-D~1`. The long name was
+confirmed with `mtype ::/user-data`, which prints the content -- *not* with
+`strings`, which reports zero occurrences, because a VFAT long name is UTF-16.
+That is the AXML trap in `evidence.md` wearing a filesystem's clothes: an
+unreadable encoding and an absent string are indistinguishable in the output.
+
+**A copy-on-write overlay per guest, on local disk.** The base image is never
+written: it lives in a store that is NFS here, where a guest disk corrupts in
+ways that present as guest faults -- and N guests sharing one writable image
+would corrupt it between themselves wherever it sat.
+
+### The tier pays off: six checks that had never run anywhere
+
+`make vm-sandbox` runs `tests/live/sandbox_writes.sh` under a real systemd 257,
+and it reports `all checks passed`. On the machine this was written on that
+script ends `make live` with a non-zero exit -- *"NCFG_LIVE is set but no
+systemd here, so the unit's real sandbox is unchecked"* -- because the machine
+runs sysvinit.
+
+**31 checks in the guest against 25 here**, and the six it adds are these:
+
+```text
+the unit's own ProtectSystem= and ReadWritePaths= leave /etc writable
+a script in netcfgd's runtime directory can be executed by a child
+and cannot without the unit's ExecPaths=, so that line is load-bearing
+the unit's capabilities let a child signal a process of another uid
+and cannot without the unit's CAP_KILL, so that line is load-bearing
+and the probe can see a sandbox that does not, so rw means something
+```
+
+**Three of the six are controls**, which is the part worth more than the count:
+the two sabotages that remove a unit line and require the capability to
+disappear with it, and the probe's own positive control. The guest does not
+merely assert more about the unit -- it supplies the checks that establish the
+other assertions mean anything, and those are exactly what a machine without
+systemd cannot have.
+
+That is also the gap 0176 is about, stated by the script itself: every other
+block makes its own mounts, so it checks what netcfgd does *given* a sandbox
+rather than what the unit's declaration produces, and the file passed green
+throughout the period when the shipped pairing granted nothing. Only this block
+asks systemd to impose the real thing, and until now it ran nowhere.
+
+**Run with `NCFG_LIVE=1` deliberately**, so the script's own skips become
+failures: a guest that cannot run it must say so rather than report a pass over
+nothing. The repository arrives on the read-only share and that is enough -- the
+script computes its own `$repo` from `$0` and writes only under `TMPDIR`.
+
+### `generic`, not `genericcloud`, and it is Alpine's lesson again
+
+The first Debian guest was the `genericcloud` flavour, and it booted, ran
+cloud-init, executed the payload and powered off in 20.6 seconds -- with:
+
+```text
+mount: /mnt/repo: unknown filesystem type '9p'
+```
+
+`genericcloud` ships `linux-image-cloud-amd64`, trimmed of what a cloud
+provider's guests never need, and 9p is in what it drops -- which is the share
+the guest exists to use. **That is structurally the same finding as `lts`
+against `virt` above**: the variant built for the smaller case lacks exactly
+what this tier is for, and the larger image buys the whole reason for it. Two
+distributions, two trimmed kernels, the same mistake available in both.
+
+**The diagnosis was one line long because the payload reports rather than
+asserts.** `share.sh` prints what it found, so the mount error appeared beside
+`files: 0 entries` and `marker: MISSING`. Had it only asserted, those two lines
+would have read as a wrong share path rather than as a kernel without the
+filesystem.
+
+### What was blocking netcfgd's own tests, and is not any more
 
 **The host's binary cannot run in the guest, and the symptom does not say so.**
 The host builds against glibc and the guest is musl:
@@ -242,19 +348,15 @@ missing is its interpreter -- `/lib64/ld-linux-x86-64.so.2`. Worth recording in
 those words, because "not found" on an executable that is present reads as a
 broken share rather than as a libc mismatch.
 
-Only `x86_64-unknown-linux-gnu` is installed here; there is no musl target, and
+Only `x86_64-unknown-linux-gnu` is installed here, and
 `packaging/alpine/APKBUILD.in` builds with Alpine's own cargo *inside* Alpine,
-so the existing Alpine packaging path offers no cross-build to borrow. Three
-ways, none of them chosen here because the choice is the holder's:
+so that path offers no cross-build to borrow. **The Debian guest above is the
+answer**, and the musl route was declined rather than merely unchosen: it would
+install a toolchain on the host for a guest's benefit.
 
-- **Alpine guest, built inside it.** Needs nothing installed; minutes per run
-  with no persistent cache, and the network for crates. It would exercise the
-  musl build the APKBUILD produces and nothing currently checks.
-- **Debian guest, host binary over the share.** Matches the development libc,
-  so the existing live scripts run unmodified. Costs a Debian image and its own
-  unattended-boot plumbing, which Alpine's apkovl gave cheaply.
-- **A musl target on this host**, if Debian packages one -- one root action,
-  then the Alpine guest runs the cross-built binary directly.
+What an Alpine guest would still be good for is the musl build itself, with
+`apk add cargo` inside it -- something the APKBUILD produces and nothing
+checks. That is a payload, not a tier, and it is not built here.
 
 **`capability.sh` asserts, and its first version did not.** It ended with an
 `echo`, so its status was that echo's and `make vm` would have reported a pass

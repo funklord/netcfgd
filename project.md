@@ -9595,6 +9595,62 @@ store), and the guest is diskless so nothing is ever written there -- which
 matters because a guest disk over NFS corrupts in ways that look like guest
 faults.
 
+### A Debian guest runs netcfgd's own binary, with nothing installed here
+
+**Settled by the copyright holder 2026-10-07 on the ground that the alternative
+pollutes the host.** Running netcfgd inside the Alpine guest needs a musl
+binary, and Debian packages no Rust std for musl -- so it would have meant a
+second toolchain outside apt, on the machine, to serve a guest. The same
+objection retires the nspawn tier, `systemd-container` and `debootstrap` being
+host installs where a Debian *guest* brings its own systemd as an image.
+
+`make vm-debian`, measured:
+
+    mount:  repo /mnt/repo 9p ro,relatime,access=client,trans=virtio 0 0
+    files:  28 entries at the root       marker: project.md present
+    netcfgd: netcfgd 0.1.0
+             Copyright (C) 2026 Nabeel Sowan <nabeel@vibes.se>
+
+The host's own binary, inside a guest, off a read-only share, nothing
+cross-built and nothing installed. Twenty seconds to the payload, **under
+systemd** -- which is what `sandbox_writes.sh` refuses for, the one live script
+that ends `make live` non-zero.
+
+It is driven differently from Alpine and the difference removes machinery: the
+image has cloud-init and a serial console already, so nothing is typed and no
+HTTP server runs. The payload rides a 1.4 MB FAT seed labelled CIDATA, built
+with `mformat` and `mcopy` because there is no `genisoimage` here and NoCloud
+reads a labelled filesystem as readily as an ISO, and it is base64'd in so no
+payload's indentation can break the YAML.
+
+**And the tier paid off the same afternoon.** `make vm-sandbox` runs
+`tests/live/sandbox_writes.sh` under systemd 257 and it reports `all checks
+passed`, where on this machine that script ends `make live` with a non-zero
+exit. **31 checks in the guest against 25 here**, and the six it adds are the
+unit's real `ProtectSystem=`/`ReadWritePaths=`, its `ExecPaths=`, its `CAP_KILL`
+-- and **three of the six are controls**: the two sabotages that remove a unit
+line and require the capability to vanish with it, and the probe's own positive
+control. The guest does not merely assert more, it supplies the checks that make
+the other assertions mean something, which is precisely what a machine without
+systemd cannot have. That is 0176's gap closed: every other block makes its own
+mounts and so checks what netcfgd does *given* a sandbox rather than what the
+unit declares, and the file passed green throughout the period the shipped
+pairing granted nothing.
+
+**`generic`, not `genericcloud`, and that is Alpine's lesson a second time.**
+The first Debian guest booted, ran cloud-init and powered off in 20.6 seconds
+saying `mount: /mnt/repo: unknown filesystem type '9p'`. genericcloud ships
+`linux-image-cloud-amd64`, trimmed of what cloud providers never need, and 9p is
+among what it drops -- the share the guest exists to use. Structurally the same
+finding as `lts` against `virt`: the variant built for the smaller case lacks
+exactly what this tier is for. Two distributions, two trimmed kernels, the same
+mistake available in both.
+
+The diagnosis took one line because `share.sh` **reports rather than asserts**,
+so the mount error printed beside `files: 0 entries`. Asserting alone would have
+left two lines that read as a wrong share path rather than as a kernel without
+the filesystem.
+
 ### The wire needed one flag, and the first passing run could not say so
 
 `localaddr=127.0.0.1` on the multicast socket is a requirement rather than a
