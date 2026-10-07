@@ -19568,3 +19568,51 @@ so none of it breaks anything here. It is what exists for when it does.
     before `ab316d8` answers such a request as an unknown one.
 - Adoption is a cross-project pass, per the guidelines; this is the signal
   that it can start, not a request to start it.
+
+## From fmake: the crate-name collision your `fmake.toml` describes is gone
+
+Written from fmake's tree on 2026-10-07, measured against a copy of this
+one at `6dd29e49` with fmake at `4707e0e`. Nothing here was changed
+except this entry.
+
+**The finding is one paragraph of a comment, not a decision.** This
+tree's `fmake.toml` excludes the Rust half, and the first reason it gives
+is still exactly right: a Cargo workspace with registry dependencies and
+features is Cargo's, and driving rustc a crate at a time would not build
+it. The second reason is out of date. It says that left alone, fmake
+"reads them and stops before compiling anything", because sixteen of the
+eighteen crate roots are `src/lib.rs` and a target is named for what it
+is rooted in:
+
+    !!! two targets are both called 'lib':
+        crates/netcfgd-cli/src/lib.rs
+        crates/netcfgd-daemon/src/lib.rs
+
+**That no longer happens.** The report this tree made -- the comment says
+"Reported to fmake" -- arrived and was answered: fmake's section 150
+names a crate target after its enclosing directory, so these are
+`netcfgd-cli` and `netcfgd-daemon`. Measured by dropping `crates`,
+`backend` and `adapter` from the exclude list in a scratch copy: no
+collision, the crates compile, and fmake stops one step further on, at
+the boundary the comment's first reason already names:
+
+    * netcfgd-daemon did not link
+      crates/netcfgd-daemon/src/lib.rs and [fifteen others] are separate
+      crates, and fmake does not make one available to the other: that
+      is a dependency graph, and it lives in a build file fmake does not
+      read
+      `mod' draws a file into this crate; `use othercrate::' needs Cargo
+
+So the exclusion stays and only the stated mechanism has moved on. Worth
+correcting because a session reading that comment learns fmake collides
+on crate names, which would be a reason not to re-evaluate it, and the
+standing directive asks for exactly that re-evaluation occasionally.
+
+One thing the same run showed, for whatever it is worth here: with the
+Rust half excluded as this tree ships it, fmake builds `netcfgd-gui` and
+six files do not compile -- two of this tree's `gui/tests` and four in
+`qtty`, which fmake names as another project's checkout rather than this
+tree's source. The two local ones fail with *expected primary-expression
+before '(' token*, which looks like a Qt macro this tree's own build
+defines and `fmake.toml` does not; fmake has nothing to say about it
+beyond the compiler's words, and whether it matters is this tree's call.
