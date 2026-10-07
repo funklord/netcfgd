@@ -9946,8 +9946,23 @@ Wrapping the inner tarball rather than repacking its contents is deliberate: the
 bytes that survive are the bytes that were captured, and the check is one hash
 rather than six modes and timestamps.
 
-**`netcfgd-salvage.tar.gz` is now disposable in full.** Everything it carried is
-either on the remote or in the archive beside it.
+**`netcfgd-salvage.tar.gz` is deleted, 2026-10-07**, on the holder's
+instruction. Everything it carried was either on the remote or in the archive
+beside it, and both were checked once more immediately before: the replacement's
+inner tarball hashed to `ebe14a759d35f0f2a9dc9b988e4902a4` and unpacked to all
+six files, and `origin/master`, `origin/c-port` and
+`origin/backup/pre-reformat-master` were all present. The replacement was
+verified first, so a corrupt copy could not have cost the original.
+
+What is gone with it, and deliberately: the bundle of 35 unreferenced commits,
+whose content the triage above found in the published history; `RESTORE.txt`,
+whose procedure applied only to that bundle; and `MANIFEST.txt`, a list of 35
+dangling shas that name nothing once the bundle is gone. `dl180g6-03` now holds
+`netcfgd-capture-xylem.tar.gz` and nothing else of netcfgd's.
+
+**This entry is therefore the only account of the salvage that still exists.**
+That is the reason it carries the method rather than just the verdict: there is
+no longer an archive to re-triage if somebody doubts it.
 
 ### The one thing that is not in git, and is not mine to put there
 
