@@ -9572,6 +9572,41 @@ marker for all three -- or omitted all three -- satisfies no two of the
 assertions at once. A label-equal SSID must stay omitted, since that is what
 omitting it means and the shorter form is the faithful one.
 
+### The corpus was already there and cost nothing to use
+
+The experiment that found it: round-trip every document `tests/compile.rs`
+compiles. **90 documents, hand-written over the life of the project to be
+various, each chosen by somebody to reach a particular corner of the language**
+-- and not one had any reason to ask about the renderer, while `profile save`'s
+whole safety rests on the renderer reproducing a document exactly. 88 came back
+identical, nothing failed to render, and the two that differed were both this
+one defect.
+
+`evidence.md` has the line and this is it working: *what a test does in passing
+is data you already own -- the cheapest data in any tree, because somebody has
+already made it run.* The whole measurement was a temporary instrumentation of
+one helper.
+
+**So the check is permanent now rather than an experiment**, in `build_ok`,
+where that corpus happens to pass. Every test in the file that expects a
+successful compile also proves the renderer can write the document back, and a
+test added next year gets that for free. Three things make it honest:
+
+  - **No waiver.** Nothing needed one when it went in, so a document that
+    cannot be rendered is either a new renderer gap or a feature this file
+    reached first, and both are worth stopping for.
+  - **The failure says whose it is.** A test about route destinations failing
+    with a complaint about the renderer is a confusing place to start, so the
+    message opens `THE RENDERER, not this test` and names the consequence an
+    operator would meet.
+  - **It was seen to fail**, by reverting the `@bssid` fix and watching exactly
+    the two tests go red through the new path.
+
+**A renderer regression will now fail many tests at once.** That is noise and it
+is the price of the coupling; it is worth paying because the alternative is what
+just happened -- a renderer defect sitting under 90 green tests that were all
+looking the other way.
+
 ## 10.185 A name the kernel allows and the renderer could not write
 
 **`ncfg profile save` refused on a machine with an interface named `4g0`.** Not

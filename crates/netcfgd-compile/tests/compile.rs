@@ -34,12 +34,67 @@ fn build(text: &str) -> Result<Document, Diagnostics> {
 	compile(&sources, &mut NoHooks)
 }
 
+/// Compile, and prove the renderer can reproduce what compiled.
+///
+/// **The second half is free coverage and it found a defect the day it went
+/// in.** Every test in this file that expects a successful compile hands a
+/// document through here -- 90 of them, hand-written to be various, each
+/// chosen by somebody to reach a particular corner of the language. None had
+/// any reason to ask about the renderer, and `profile save`'s whole safety
+/// rests on the renderer reproducing a document exactly.
+///
+/// Measured when this was added: 88 of the 90 round-tripped, nothing failed to
+/// render, and the two that came back different were the same defect -- a
+/// network pinned by access point losing `ssid = "@bssid"`, so that
+/// `ncfg profile save` refused on any machine that had one.
+///
+/// **A renderer regression will now fail many tests at once**, which is noisy
+/// and is the price of the coupling. The message says so, because a test about
+/// route destinations failing with a complaint about the renderer is otherwise
+/// a confusing place to start.
+///
+/// Documents this file expects to FAIL compiling do not come through here, and
+/// `build` is left alone for them.
 fn build_ok(text: &str) -> Document {
 	let mut sources = SourceMap::new();
 	sources.add("netcfgd.conf", text);
-	match compile(&sources, &mut NoHooks) {
+	let document = match compile(&sources, &mut NoHooks) {
 		Ok(document) => document,
 		Err(diagnostics) => panic!("expected success, got:\n{}", diagnostics.render(&sources)),
+	};
+
+	let overrides = netcfgd_compile::render::Overrides::new();
+	let rendered = match netcfgd_compile::render::render(&document, &overrides) {
+		Ok(rendered) => rendered,
+		Err(missing) => {
+			// Not waived. Nothing in this file needed a waiver when the check
+			// went in, so a document that cannot be rendered is either a new
+			// renderer gap or a feature this file reached first -- and both are
+			// worth stopping for rather than counting.
+			panic!(
+				"THE RENDERER, not this test: it cannot write back a document that \
+				 compiled, so `ncfg profile save` would refuse on a machine \
+				 configured this way.\nmissing: {}\nfrom:\n{text}",
+				missing.join(", ")
+			)
+		}
+	};
+
+	let mut back = SourceMap::new();
+	back.add("rendered.conf", &rendered);
+	match compile(&back, &mut NoHooks) {
+		Ok(again) if again == document => document,
+		Ok(_) => panic!(
+			"THE RENDERER, not this test: what it wrote compiles to a DIFFERENT \
+			 document, so `ncfg profile save` would refuse on a machine configured \
+			 this way.\nfrom:\n{text}\nrendered:\n{rendered}"
+		),
+		Err(diagnostics) => panic!(
+			"THE RENDERER, not this test: what it wrote does not compile, so \
+			 `ncfg profile save` would refuse on a machine configured this \
+			 way.\nfrom:\n{text}\nrendered:\n{rendered}\n{}",
+			diagnostics.render(&back)
+		),
 	}
 }
 
