@@ -3,14 +3,17 @@
  * and delivering a resolver configuration.
  *
  * WHAT THIS BUILD CARRIES, AND WHAT IT REFUSES
- *   Five of the nine backend kinds have a module under `src/backend/`:
- *   `ncfg_hostapd_start`, `ncfg_ra_start`/`_reload`/`_stop`,
- *   `ncfg_openvpn_start`/`_stop`, `ncfg_dhcp_start`/`_stop` and
- *   `ncfg_supplicant_start`/`_stop`. Those are the ones this executes. A
- *   PPPoE session is started by code that is not ported and is **refused by
- *   name** rather than reported as done -- an executor that answered success
- *   for a session it did not start would have the planner satisfied about a
- *   machine with no address.
+ *   Asked rather than listed: `netcfgd --supported` prints one line per
+ *   backend kind and verb, derived from `ncfg_service_backend_supported`, so
+ *   there is no count here to go stale. What it refuses it refuses **by
+ *   name**, with a sentence -- an executor that answered success for a daemon
+ *   it did not start would have the planner satisfied about a machine with no
+ *   address.
+ *
+ *   The two it refuses are refused by their nature rather than by omission:
+ *   WireGuard is a kernel device that `link.create` makes and
+ *   `wg.set_device` configures, and DNS is delivered by `dns.apply` because
+ *   the resolver is somebody else's. Neither is a process to start.
  *
  * STARTING A SUPPLICANT IS THE ONE START THAT IS NOT FINISHED WHEN IT RETURNS
  *   A supplicant that has just been launched knows nothing, by design (0015),

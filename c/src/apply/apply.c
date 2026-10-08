@@ -100,12 +100,14 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
 		return 1;
 	case NCFG_KIND_WIREGUARD:
 		/*
-		 * The link only. Everything that makes it a tunnel -- the key, the
-		 * peers, the allowed prefixes -- goes over generic netlink afterwards
-		 * and is `wg.set_device`/`wg.set_peers`, neither of which this build
-		 * executes. Said here rather than left implied, because a WireGuard
-		 * device that exists and carries nothing is up, addressed and silently
-		 * passing no traffic, which looks like a working interface.
+		 * The link only, and that is a sequencing fact rather than a gap.
+		 * Everything that makes it a tunnel -- the key, the peers, the allowed
+		 * prefixes -- goes over generic netlink afterwards as
+		 * `wg.set_device`/`wg.set_peers`, which `ncfg_kernel_wg_op` carries
+		 * out. Said here rather than left implied, because a WireGuard device
+		 * that exists and carries nothing is up, addressed and silently
+		 * passing no traffic, which looks like a working interface -- so a
+		 * creation that succeeded alone is not a configured tunnel.
 		 */
 		return 1;
 	case NCFG_KIND_VLAN:

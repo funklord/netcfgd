@@ -160,12 +160,19 @@ void ncfg_plan_link_creation(ncfg_builder_t *builder, const ncfg_device_t *devic
 	}
 	/*
 	 * **A kind the executor cannot create must not be planned**, which is the
-	 * rule the arm above states and did not cover. `ncfg_apply_supported`
-	 * refuses `link.create` for a bond, a macvlan, a tunnel and a vlan --
-	 * `ncfg_kernel_newlink_of` builds no nest for them -- so emitting one puts
-	 * an action in the plan that fails on every apply, for ever, while `ncfg
-	 * plan` goes on listing it as work to do. That is the non-convergence this
-	 * file's neighbours each carry an arm to prevent.
+	 * rule the arm above states and did not cover. Emitting one puts an action
+	 * in the plan that fails on every apply, for ever, while `ncfg plan` goes
+	 * on listing it as work to do. That is the non-convergence this file's
+	 * neighbours each carry an arm to prevent.
+	 *
+	 * **It is a backstop with nothing left to fire on, which is the right
+	 * state for it.** The bond, the macvlan, the tunnel and the vlan were the
+	 * kinds it held back; each has its nest in `ncfg_kernel_newlink_of` now,
+	 * and what `ncfg_apply_supported` still refuses -- a physical device, a
+	 * pppoe session, an openvpn tunnel -- reaches an earlier arm here or is
+	 * never planned as a creation at all. So this covers the *next* kind to be
+	 * held back rather than any kind today, and `netcfgd --supported` is where
+	 * the current answer is read, since it asks this same function.
 	 *
 	 * **Last of the arms, deliberately.** Every one above refuses a kind for a
 	 * reason of its own and says it in its own words -- a physical device that

@@ -12293,6 +12293,76 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.388 Nothing is unported, and the list still said five things were
+
+Asked what remains to port. **Three independent instruments agree that nothing
+of substance does**, and they are independent in the way `evidence.md` asks --
+different artifacts, not one query asked three ways:
+
+- **`netcfgd --supported`**: 115 rows, 100 supported, 15 refused. Every refusal
+  carries its own sentence and every sentence says the thing cannot exist rather
+  than that it is missing -- a physical device netcfgd configures and cannot
+  make, a pppoe interface its helper creates as it dials, a reload for a client
+  whose reload is its own business. The ledger is derived from
+  `ncfg_apply_supported` per op and per kind, so it cannot drift from the code.
+- **`ncfg --help`** is byte-identical between the two programs, which
+  `tool/agree_gate.py` compares as a read case.
+- **`warn_unported`** holds one entry, `link_local`, and its own comment cites
+  the Rust arm that carries the same warning. Checked by phrase rather than by
+  the line number it gives: `crates/netcfgd-plan/src/lib.rs` has
+  `AddressSource::LinkLocal` warning "accepted but not yet applied by this
+  build". So it is a feature neither language implements, not a port gap -- and
+  the C deliberately dropped the "not yet", which was a promise nobody made.
+
+### What the list actually still contained: five false claims
+
+Every one says a capability is missing that this build has. Each was checked by
+reading the function it describes.
+
+| site | said | is |
+|---|---|---|
+| `apply/apply.c` | `wg.set_device`/`wg.set_peers`, "neither of which this build executes" | `ncfg_kernel_wg_op` opens a genl socket and sends them |
+| `plan/link.c` | the executor "builds no nest" for bond, macvlan, tunnel, vlan | all four have nests; the probe is a backstop with nothing left to fire on |
+| `plan/build.c` | the same, with `k-bond` as the witness | a bond is creatable, so that document no longer reproduces it |
+| `apply/backend_ops.c` | "five of the nine backend kinds have a module", pppoe "not ported" | eight kinds, six start, seven modules, and `backend.start pppoe` is supported |
+| `cli/run.c` | an arm can be "a verb whose module is not ported" | no arm is, and `--help` matches the Rust byte for byte |
+
+**The WireGuard one nearly cost a day.** It was the most plausible next task on
+the list -- a kernel device created but not configured, which the comment itself
+says looks like a working interface -- and the work was already done. That is the
+cost `evidence.md` names for this class: a gap claim that outlives its gap sends
+the next reader at work already done, and its falsifier is a commit nobody
+connects to it.
+
+**The tests were right the whole time.** `plan_kind_test.c` says in as many
+words that the bond and the macvlan "have left this list" and that "with them
+went the last kind a *document* could express that `ncfg_apply_supported`
+refuses". `apply_kernel_test.c`'s `check_supported_matches_the_builders` asserts
+the agreement for all fifteen kinds through their real entry points, so the
+behaviour could not rot. Only the prose beside the code did -- which is why four
+of the five are in `src/` and none in `c/tests/`.
+
+### The remedy for a count is to stop quoting it
+
+`backend_ops.c`'s was the instructive one: "five of the nine" is a
+present-tense countable claim about the tree's own shape, which is the form
+`evidence.md` says rots, and it was wrong in both figures. It now names no
+number and points at `netcfgd --supported`, which recounts itself on every run.
+That is *move the count out of judgement and into the tool* where the tool
+already existed.
+
+### And the correction added a sixth, caught before it landed
+
+The replacement sentence in `build.c` said `declined` is filled by "a veth whose
+peer name is taken and a physical device that is not there". The second half was
+inferred, not read. `grep` for `&builder->declined` finds exactly two sites --
+the veth clash and the executor probe -- and absent hardware is held back by
+`link_is_plannable`, a different mechanism. **The first grep missed the probe
+site because the pattern spanned a line break**, which is the loose-pattern
+failure of *Four ways to manufacture an absence* met while fixing its sibling.
+Fixed before the commit; recorded because writing a correction is exactly when
+the next wrong claim gets written.
+
 ## 10.387 The empty-`device` skip is load-bearing, and `master` may have removed it
 
 Left open since the ethtool work: `render_device` skips a device whose body is
