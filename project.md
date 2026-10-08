@@ -9617,6 +9617,69 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.373 Two renderer defects found in Rust and live in the C
+
+Both were found on `master` against the Rust renderer and **both were present
+here, in C written independently of it.** That is the transferable part: a
+finding in the retired implementation is worth checking against `c/src/compile/`
+rather than filed as that language's problem, because the two were written from
+the same understanding and inherited the same gaps in it.
+
+Neither is a Rust defect, so neither falls under this branch's practice of
+writing those down rather than touching them. These are defects in the C.
+
+**A network pinned by access point lost its marker.** `render_network_keys` had
+
+	if (network->ssid.has) { if (differs) write the bytes }
+
+and nothing for the absent case -- while `document.h` says where the field is
+declared that absent means *"whatever the access points in `bssid` call
+themselves"*. Three states, and writing nothing for the third collapsed it into
+the first: `ssid = "@bssid"` vanished, the document came back as a network named
+after its own label, and `ncfg profile save` refused on any machine with a
+network pinned that way. The marker's spelling now comes from
+`ncfg_ssid_from_bssid`, which `lower_network.c` defines and `lower_internal.h`
+declares -- it was `static` to that file, and a second copy of the string in the
+renderer is how the two halves would come to disagree about what the language
+says.
+
+**A label the lexer cannot read bare.** Both `render_device.c` and
+`render_link.c` wrote `"%s {\n%s}\n"` with the name unquoted, so a name the
+compiler accepts -- `parse.c` has always taken `NCFG_TOKEN_STRING` as a label --
+rendered to text that does not parse. The names were checked against the kernel
+rather than argued about: `ip link add .th0 type dummy` succeeds and so does
+`2eth`, while `eth0:1` is refused by the kernel and is not at issue. **A leading
+digit is an ordinary way to name a mobile interface (`4g0`)**, which is the case
+worth caring about rather than the leading dot that found it.
+
+`ncfg_render_label` asks `lex.h`'s own `ncfg_is_ident_start` and
+`ncfg_is_ident_continue`, which were already public here -- so unlike the Rust
+side no visibility had to be widened. That is also why `eth0.42` stays bare: a
+dot is legal inside an identifier and not at its start, and that is the spelling
+Linux gives every VLAN interface.
+
+**`c/tests/render_test.c` had the machinery and neither fixture.** Its
+`round_trips` helper is exactly the right instrument and the file contained zero
+occurrences of `@bssid` or of a label that is not an identifier. The same shape
+the Rust side was in: the proof exists, nothing asks these two questions.
+
+Each is proven by sabotage, and the controls are the point rather than
+decoration. The label test fails when `ncfg_render_label` never quotes **and**
+when it always quotes -- six checks each way -- because quoting every label
+would rewrite every profile this tree writes. The marker test fails when the
+absent case writes nothing, while its control (a label-equal SSID staying
+omitted) keeps passing, so a renderer that wrote the marker unconditionally
+would be caught too.
+
+**And `make check` cannot complete on this machine, for a reason that is neither
+of these.** `packaging` runs `udevadm verify`, guarded by `command -v udevadm`.
+This machine has udevadm 251, which has no `verify` subcommand, so the guard
+passes and the command fails -- `evidence.md`'s *a name is not a capability*,
+where the guard tests for a binary and means a capability. Reproduced standalone
+rather than inferred from the gate. Not touched here, being nothing to do with
+the renderer; `style`, `shell`, `test`, `c-test`, `clippy` and `fmt` were run
+individually and all pass.
+
 ## 10.372 A probe test that races its own script, and 35 unreachable commits
 
 Two findings from this session that are nobody's slice, recorded because the

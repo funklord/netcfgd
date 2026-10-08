@@ -64,6 +64,10 @@ void ncfg_render_refuse(ncfg_unrenderable_t *missing, const char *scope, const c
  */
 void ncfg_render_quote(ncfg_buf_t *out, const char *value);
 
+/* A block's label, bare where the lexer would read it back as an identifier and
+ * quoted where it would not -- `eth0.42` bare, `4g0` and `.th0` quoted. */
+void ncfg_render_label(ncfg_buf_t *out, const char *name);
+
 /*
  * A credential as the document refers to it -- **never as its value.**
  *
