@@ -1285,20 +1285,36 @@ packaging:
 	@# *assigns* an attribute instead of matching one, which udev accepts as a
 	@# sentence and refuses as a rule -- and a rules file that does not load
 	@# fails silently, leaving the port with no stable name and no message
-	@# anywhere. The guard asks for the subcommand rather than the program:
-	@# `udevadm verify` arrived in systemd 254, so `command -v udevadm`
-	@# answers yes on a machine that cannot run it -- which failed this
-	@# whole target on udevadm 251 rather than skipping. Skipped loudly in
-	@# both directions, and they are different facts: not installed is every
-	@# machine this project targets that does not run systemd, while too old
-	@# to ask is one that does.
-	@if udevadm verify --help >/dev/null 2>&1; then \
-		udevadm verify packaging/udev/71-netcfgd-modem.rules; \
-	elif command -v udevadm >/dev/null 2>&1; then \
-		echo "udev-rules: udevadm $$(udevadm --version) has no \`verify\`,"\
-		     "skipping the syntax check (systemd 254 or later)"; \
-	else \
+	@# anywhere. Skipped loudly where udevadm cannot do it, which is every
+	@# machine this project targets that does not run systemd -- and also every
+	@# machine whose systemd is older than `udevadm verify`.
+	@#
+	@# **The guard asked for the BINARY and meant the SUBCOMMAND**, which is
+	@# `evidence.md`'s *a name is not a capability* exactly. Measured on a
+	@# machine with udevadm 251: `command -v udevadm` succeeds, `verify` is not
+	@# in its command list, and the gate died with `udevadm: missing or unknown
+	@# command` -- so `make check` could not complete at all there, for a reason
+	@# that had nothing to do with the tree. The lax direction, as that entry
+	@# warns: the guard skipped nothing and handed the failure to the gate.
+	@#
+	@# `<verb> --help` is the probe because it attempts the verb rather than
+	@# reading the help text, which is a format that can change. Its ability to
+	@# report *present* is controlled with a verb this udevadm does have:
+	@# `udevadm info --help` exits 0 where `udevadm verify --help` exits 2.
+	@# What is NOT verified here is the verify-present path end to end, which
+	@# needs a systemd new enough to carry the verb; the first machine that has
+	@# one exercises it.
+	@#
+	@# Three states and three messages, because "not installed" and "too old"
+	@# send a reader to different fixes.
+	@if ! command -v udevadm >/dev/null 2>&1; then \
 		echo "udev-rules: udevadm not installed, skipping the syntax check"; \
+	elif ! udevadm verify --help >/dev/null 2>&1; then \
+		echo "udev-rules: this udevadm has no \`verify\` subcommand, skipping"; \
+		echo "udev-rules:   the syntax check. It arrived in a later systemd;"; \
+		echo "udev-rules:   this machine has udevadm $$(udevadm --version 2>&1 | head -1)."; \
+	else \
+		udevadm verify packaging/udev/71-netcfgd-modem.rules; \
 	fi
 	@# Conflicts= stops a unit and does not order against it, so netcfgd could
 	@# read another daemon's claim while it was still shutting down and decline

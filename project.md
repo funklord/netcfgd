@@ -12293,6 +12293,47 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.374 `make check` could not finish, and the guard was the reason
+
+`packaging` runs `udevadm verify` on the modem rules, guarded by
+`command -v udevadm`. **That asks for the binary and means the subcommand**,
+which is `evidence.md`'s *a name is not a capability* with nothing added.
+
+Measured here: udevadm is installed at version 251, `verify` is not in its
+command list, so the guard passed and the gate died with `udevadm: missing or
+unknown command`. **`make check` could not complete on this machine at all**,
+for a reason that had nothing to do with the tree -- and it failed in the lax
+direction that entry warns about, the guard skipping nothing and handing the
+failure to the gate.
+
+Reproduced standalone before the gate was blamed: `udevadm verify
+packaging/udev/71-netcfgd-modem.rules` exits 2 with that message when run by
+hand.
+
+**The probe attempts the verb rather than reading the help text**, because a
+help format is a thing that changes and a verb either runs or does not. Its
+ability to report *present* is controlled with a verb this udevadm does have:
+`udevadm info --help` exits 0 where `udevadm verify --help` exits 2. So the
+mechanism is demonstrated in both directions on one machine, which is more than
+a probe usually gets.
+
+**What is not verified is the verify-present path end to end.** It needs a
+systemd new enough to carry the verb, and this machine has not got one -- so the
+branch that actually runs the check has never been taken here, and the first
+machine with a newer systemd is what exercises it. Said rather than left for
+somebody to assume a green gate meant the rules were parsed.
+
+**Three states and three messages**, because "udevadm is not installed" and
+"this udevadm is too old" send a reader to different fixes, and the second names
+the version it found. The old guard had two states and the world had three,
+which is the shape a proxy fails in: it had no way to say the thing it was
+actually looking at.
+
+Skipping rather than failing, for the reason `fmt` and `clippy` already skip:
+most machines this project targets do not run systemd at all, and a gate that
+fails for want of a tool nobody on the target platform has is one people learn
+to work around.
+
 ## 10.373 Two renderer defects found in Rust and live in the C
 
 Both were found on `master` against the Rust renderer and **both were present
