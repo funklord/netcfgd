@@ -574,6 +574,87 @@ static void render_network_keys(const ncfg_wifi_network_t *network, ncfg_buf_t *
 	}
 }
 
+/*
+ * One `access_point` block: a radio this machine runs as an AP.
+ *
+ * **Refused wholesale until now**, so a machine running a hotspot could not save
+ * a profile -- and the configuration is one somebody set up deliberately, which
+ * is the worst kind to lose.
+ *
+ * Here rather than in `render.c` because it reuses two statics this file already
+ * has: `render_security`, which a network's `wifi` block uses, and `quote_ssid`.
+ * A second copy of either would be a second place for the key-management
+ * spellings to drift, which is the argument that put networks and interfaces in
+ * one file to begin with.
+ *
+ * The label is the SSID unless the document said otherwise, exactly as a
+ * network's is -- and then it is hex, because an SSID is 0 to 32 arbitrary
+ * octets while a label is text.
+ *
+ * **One list, and which key it is under IS the policy.** The compiler refuses a
+ * block carrying both an `allow` and a `deny`, so there is no separate value to
+ * write; the key says it. The list is bracketed even for one station, because
+ * `access_control` is where a reader most needs to see that it is a list rather
+ * than a single permitted address.
+ */
+void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text)
+{
+	ncfg_buf_t body;
+	size_t     length;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_add_text(&body, "\tdevice = ");
+	ncfg_render_quote(&body, point->device);
+	ncfg_buf_add_char(&body, '\n');
+
+	length = strlen(point->id ? point->id : "");
+	if (length != point->ssid.length ||
+	    memcmp(point->id, point->ssid.bytes, length) != 0) {
+		ncfg_buf_add_text(&body, "\tssid = ");
+		quote_ssid(&body, &point->ssid);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (point->channel.has) {
+		ncfg_buf_addf(&body, "\tchannel = %lld\n", (long long)point->channel.value);
+	}
+	if (point->band) {
+		ncfg_buf_add_text(&body, "\tband = ");
+		ncfg_render_quote(&body, point->band);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (point->regdom) {
+		ncfg_buf_add_text(&body, "\tregdom = ");
+		ncfg_render_quote(&body, point->regdom);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (point->hidden) {
+		ncfg_buf_add_text(&body, "\thidden = true\n");
+	}
+	ncfg_buf_add_text(&body, "\twifi {\n");
+	render_security(&point->security, &body);
+	ncfg_buf_add_text(&body, "\t}\n");
+
+	if (point->access_control) {
+		size_t i;
+
+		ncfg_buf_addf(&body, "\taccess_control { %s = [",
+		    point->access_control->policy == NCFG_ACL_POLICY_ALLOW ? "allow" : "deny");
+		for (i = 0; i < point->access_control->station_count; i++) {
+			if (i) {
+				ncfg_buf_add_text(&body, ", ");
+			}
+			ncfg_render_quote(&body, point->access_control->stations[i]);
+		}
+		ncfg_buf_add_text(&body, "] }\n");
+	}
+
+	ncfg_render_opening(text, "access_point", point->id, overrides);
+	ncfg_render_quote(text, point->id);
+	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
+	ncfg_buf_free(&body);
+}
+
 void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {

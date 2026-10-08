@@ -784,4 +784,12 @@ netcfgd
 # bytes. Small enough to argue about and that is the argument for taking it: the
 # entry above this one exists because 5,056 bytes accumulated in exactly these
 # steps, each too small to bother with.
-total 1150552
+# routing rules and access points in the renderer, +4,224 bytes to 1,154,776.
+#
+# Two whole-block renderers where there were two refusals, plus the `invert` and
+# `l3mdev` keys the lowerer gained so that a rule carrying either could exist at
+# all. About a page per block, which is what a block costs when its words are
+# already in the binary -- both reuse spellings the lowerer owns.
+#
+# Recorded rather than left to ride the tolerance, as every entry above says.
+total 1154776
