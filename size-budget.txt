@@ -778,4 +778,22 @@ netcfgd
 # and it is not one it should take credit for** -- it is a different program --
 # which is exactly why the limit is re-seeded from a fresh measurement here
 # rather than left to pass by a wide margin.
-total 1145336
+# re-seeded at the measured figure, +5,144 bytes to 1,150,480.
+#
+# **The limit was being ridden rather than met, and almost none of it is this
+# session's.** Measured both sides: the commit before this session's C changes
+# builds at **1,150,392** -- already 5,056 bytes over the 1,145,336 above, and
+# passing only because the 3% carried it. This session's renderer work added
+# **88 bytes** on top: the `ncfg_render_label` helper, the `ssid = "@bssid"`
+# branch, and one string.
+#
+# So the 5,056 belongs to whatever landed between the re-seed above and now, and
+# this entry does not claim to know which feature it was -- what it fixes is the
+# consequence. The 3% is for compiler noise, and a feature sitting inside it
+# makes the NEXT feature fail for a reason that is not its own, which is this
+# file's own rule stated in every entry that precedes it.
+#
+# Measured with `make size` on the committed tree, and the attribution by
+# checking out the parent's `c/`, rebuilding, and measuring again rather than
+# reasoning about which change was likely to be large.
+total 1150480
