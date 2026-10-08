@@ -383,7 +383,8 @@ static void render_the_witness(int argc, char **argv)
 	 * send an operator to write a block the parser does not have. */
 	static const char *const expected[] = { "kind wireguard", "kind openvpn", "kind tunnel",
 		/* `routing rule(s)` was here and renders now. */
-		"kind tun", "kind ifb", "access_point block(s)",
+		/* `access_point block(s)` was here and renders now. */
+		"kind tun", "kind ifb",
 		/* `a wifi policy` was here and is rendered now, so it is no longer
 		 * refused. Removed rather than left: this list's job is to name what
 		 * has no rendering, and an entry for something that renders would make
@@ -607,6 +608,70 @@ static void the_unmanage_policy_defects(void)
  * non-default value for each is what catches a word written from the wrong
  * table.
  */
+/*
+ * An `access_point` block round-trips, including its station list.
+ *
+ * **Refused wholesale until now**, so a machine running a hotspot could not save
+ * a profile -- and that configuration is one somebody set up deliberately, which
+ * is the worst kind to lose.
+ *
+ * The `access_control` list is the case worth most: which key it sits under IS
+ * the policy, the compiler refusing a block that carries both an `allow` and a
+ * `deny`, so a renderer that wrote the wrong key inverts the meaning of the
+ * block rather than losing a line. Both policies are exercised for that reason.
+ *
+ * An SSID equal to the label stays unwritten, as a network's does, and one that
+ * differs comes back as hex -- an SSID being arbitrary octets while a label is
+ * text.
+ */
+static void an_access_point_round_trips(void)
+{
+	char *allowed;
+	char *denied;
+	char *plain;
+
+	/* No `device wlan0 { }` beside it, and deliberately so: an access point
+	 * needs none, and an empty device block is currently dropped by
+	 * `render_device` -- a separate open question (10.377) that would make this
+	 * case fail for a reason that has nothing to do with access points. */
+	round_trips("access_point \"guests\" {\n"
+	    "\tdevice = \"wlan0\"\n"
+	    "\tchannel = 6\n"
+	    "\tband = \"2.4\"\n"
+	    "\tregdom = \"SE\"\n"
+	    "\thidden = true\n"
+	    "\twifi { psk = \"@secret:ap\"; proto = \"wpa2+wpa3\" }\n"
+	    "\taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n"
+	    "}\n",
+	    "every field of an access point survives a round trip");
+
+	denied = rendering_of("access_point \"a\" {\n"
+	    "\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { deny = [\"aa:bb:cc:dd:ee:ff\"] }\n}\n");
+	check(denied && strstr(denied, "deny = [") != NULL,
+	    "a deny list comes back under `deny`");
+	free(denied);
+
+	/* The other policy, because writing the wrong key inverts the block rather
+	 * than losing a line. */
+	allowed = rendering_of("access_point \"a\" {\n"
+	    "\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { allow = [\"aa:bb:cc:dd:ee:ff\", \"11:22:33:44:55:66\"] }\n}\n");
+	check(allowed && strstr(allowed, "allow = [") != NULL &&
+	        strstr(allowed, "deny") == NULL,
+	    "and an allow list under `allow`, never the other way about");
+	check(allowed && strstr(allowed, "\"11:22:33:44:55:66\"") != NULL,
+	    "with every station in it, not just the first");
+	free(allowed);
+
+	/* The label-equal SSID stays unwritten, as a network's does. */
+	plain = rendering_of("access_point \"home\" {\n"
+	    "\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n}\n");
+	check(plain && strstr(plain, "ssid =") == NULL,
+	    "while an SSID equal to the label is left unsaid");
+	free(plain);
+}
+
 static void a_routing_rule_round_trips(void)
 {
 	char *full;
@@ -1544,6 +1609,7 @@ int main(int argc, char **argv)
 	the_hostname_policy_round_trips();
 	a_radios_own_policy_round_trips();
 	a_routing_rule_round_trips();
+	an_access_point_round_trips();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();

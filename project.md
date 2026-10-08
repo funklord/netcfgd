@@ -12293,6 +12293,45 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.380 Access points render, and the policy is the key
+
+`render.c` refused `%zu access_point block(s)` wholesale, so **a machine running
+a hotspot could not save a profile** -- a configuration somebody set up
+deliberately, which is the worst kind to lose.
+
+In `render_link.c` rather than `render.c`, because it reuses two statics that
+file already has: `render_security`, which a network's `wifi` block uses, and
+`quote_ssid`. A second copy of either would be a second place for the
+key-management spellings to drift, which is the argument that put networks and
+interfaces in one file to begin with.
+
+**Which key the station list sits under IS the policy**, and that is why the
+control matters more than usual. The compiler refuses a block carrying both an
+`allow` and a `deny`, so there is no separate value to write -- the key says it,
+and a renderer that wrote the wrong one turns a deny-list into an allow-list.
+That is a security inversion rather than a lost line, so both policies are
+exercised and swapping them in the source fails three checks.
+
+The list is bracketed even for one station, because `access_control` is where a
+reader most needs to see it is a list rather than a single permitted address. An
+SSID equal to the label stays unwritten as a network's does, and one that differs
+comes back as hex, an SSID being arbitrary octets while a label is text.
+
+### The empty-device question is now blocking fixtures, not just theory
+
+The first fixture put `device wlan0 { }` beside the access point and the round
+trip failed -- not for anything to do with access points, but because
+`render_device` skips a device whose body is empty and the device vanished. An
+access point needs no device block, so the fixture dropped it and says why.
+
+**That is the second place this has cost something today**, after
+`device eth0 { ethtool { } }` in 10.377, and it is no longer a matter of taste:
+two legitimate documents in this tree's own corpora do not survive a round trip
+because of it. The skip's comment still says it is right. `master` removed the
+same skip citing 10.21; here it is deliberate and documented, so it stays flagged
+rather than overruled -- but the evidence against it is now two measured cases
+rather than one.
+
 ## 10.379 Routing rules render, and two things had to be found first
 
 `render.c` refused `%zu routing rule(s)` wholesale, so **a machine with any

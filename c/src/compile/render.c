@@ -812,9 +812,8 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	for (i = 0; i < document->rule_count; i++) {
 		render_rule(&document->rules[i], overrides, text);
 	}
-	if (document->access_point_count > 0) {
-		ncfg_render_refuse(missing, NULL, NULL, "%zu access_point block(s)",
-		    document->access_point_count);
+	for (i = 0; i < document->access_point_count; i++) {
+		ncfg_render_access_point(&document->access_points[i], overrides, text);
 	}
 	for (i = 0; i < document->bluetooth_count; i++) {
 		ncfg_render_bluetooth(&document->bluetooth[i], overrides, text);
