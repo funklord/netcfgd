@@ -9546,6 +9546,37 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.185 A name the kernel allows and the renderer could not write
+
+**`ncfg profile save` refused on a machine with an interface named `4g0`.** Not
+hypothetically: `interface` and `device` labels were always written bare, the
+lexer reads a bare label as an identifier, and an identifier may not begin with
+a digit. So the snapshot rendered to text that does not compile, the round-trip
+proof caught it -- which is what that proof is for -- and the operator got no
+profile and a refusal about the renderer.
+
+The names are real and were checked against the kernel rather than reasoned
+about. `ip link add .th0 type dummy` succeeds and so does `2eth`; `eth0:1` is
+refused by the kernel and is therefore not at issue. A leading digit is an
+ordinary way to name a mobile interface, which is the case worth caring about
+rather than the leading dot that found it.
+
+**The language could already express it; the renderer was not using it.**
+`parse_block_after_head` accepts `Token::Str` as a label, so `device "4g0" { }`
+has always parsed. And `network`, `access_point` and `rule` labels were already
+quoted, because their ids are free-form. Only the two that carry kernel
+interface names were bare. `label()` now asks `lex`'s own `is_ident_start` and
+`is_ident_continue` -- made `pub(crate)` for it -- rather than restating the
+rule, because a second copy would drift silently in the one direction that
+matters: the renderer going on emitting bare labels the lexer had stopped
+accepting.
+
+Proven both ways, which the control is for: reverting the fix fails the new
+test, and making `label` quote *everything* fails it too, on `eth0` and on
+`eth0.42`. That second half is not decoration -- quoting every label would
+rewrite every profile this tree renders, and `eth0.42` is the case the lexer's
+own comment says the dot rule exists for.
+
 ## 10.184 Two messages nothing produced, out of 408
 
 The lens came from the day's finds, all of which were things that had never

@@ -350,11 +350,11 @@ impl<'a> Lexer<'a> {
 	}
 }
 
-fn is_ident_start(byte: u8) -> bool {
+pub(crate) fn is_ident_start(byte: u8) -> bool {
 	byte.is_ascii_alphabetic() || byte == b'_'
 }
 
-fn is_ident_continue(byte: u8) -> bool {
+pub(crate) fn is_ident_continue(byte: u8) -> bool {
 	// A dot is legal *inside* an identifier and not at the start, which is
 	// what keeps `eth0.42` an interface name while a bare `.42` stays an
 	// error. Linux names VLAN interfaces that way by universal convention and

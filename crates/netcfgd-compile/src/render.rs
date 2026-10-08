@@ -110,6 +110,47 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 /// A quote or a backslash left raw would end the string early and produce a
 /// file that does not compile -- which takes every other block with it, since
 /// the loader compiles the directory as one document.
+/// A block label: bare where the lexer would read it back as one, quoted where
+/// it would not.
+///
+/// **Found by mutation, and the names are not hypothetical.** An `interface` and
+/// a `device` label were always written bare, so a name the compiler accepts --
+/// through a quoted label, or as a string in a bond's `members` -- could render
+/// to text that does not parse. The mutation sweep over the example corpus hit
+/// it with a bond member called `.th0`, and `.th0` is a name the kernel creates
+/// happily: `ip link add .th0 type dummy` succeeds.
+///
+/// The lexer's rule is that a label starts with a letter or `_` and continues
+/// with letters, digits, `.`, `-` or `_` -- which is why `eth0.42`, the
+/// universal spelling of a VLAN interface, is deliberately bare. What it
+/// refuses is a leading dot, a leading digit and anything else: `.th0` and
+/// `2eth` are both legal kernel names, and a leading digit is an entirely
+/// ordinary way to name a mobile interface (`4g0`). On such a machine
+/// `ncfg profile save` refused, because the snapshot it rendered would not
+/// compile -- the round-trip proof catching the renderer, which is what that
+/// proof is for, but the operator got no profile.
+///
+/// Asked of `lex`'s own predicates rather than re-stating them here. A second
+/// copy of the identifier rule is a second thing to be wrong, and it would go
+/// wrong silently: the renderer would keep emitting bare labels the lexer had
+/// stopped accepting.
+fn label(name: &str) -> String {
+	let mut bytes = name.bytes();
+	let bare = match bytes.next() {
+		Some(first) => {
+			crate::lex::is_ident_start(first) && bytes.all(crate::lex::is_ident_continue)
+		}
+		// An empty label cannot be bare, and quoting says so where writing
+		// nothing would silently produce `device {`.
+		None => false,
+	};
+	if bare {
+		name.to_owned()
+	} else {
+		quote(name)
+	}
+}
+
 fn quote(value: &str) -> String {
 	format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
@@ -349,7 +390,7 @@ fn render_interface(
 	}
 
 	let head = opening("interface", name, overrides);
-	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
+	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", label(name));
 }
 
 /// What kind of link this is, as its own block.
@@ -1178,7 +1219,7 @@ fn render_device(
 		return;
 	}
 	let head = opening("device", name, overrides);
-	let _ = write!(text, "\n{head} {name} {{\n{body}}}\n");
+	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", label(name));
 }
 
 /// The `wifi` block of a device: what the radio itself is told to do.
@@ -3508,5 +3549,49 @@ mod tests {
 			rendered.contains("\noverride access_point \"Home\" {"),
 			"{rendered}"
 		);
+	}
+
+	/// A name the kernel allows and the lexer will not read bare.
+	///
+	/// **Found by the mutation sweep over the example corpus**, which hit a
+	/// bond whose `members` named `.th0` -- accepted, because a member is a
+	/// string -- and then rendered `device .th0 {`, which does not parse. The
+	/// round-trip proof refused the snapshot, which is what it is for; the
+	/// operator got no profile.
+	///
+	/// Deterministic here as well as probabilistic there. The mutation test
+	/// reaches this by chance, and only after its digit-aware arm was added --
+	/// before that the whole sweep found it once in a run or not at all.
+	///
+	/// Both names are real: `ip link add .th0 type dummy` succeeds, and so does
+	/// `2eth`. A leading digit is an ordinary way to name a mobile interface,
+	/// which is the case worth caring about rather than the leading dot.
+	#[test]
+	fn a_name_the_lexer_cannot_read_bare_is_quoted() {
+		for name in [".th0", "2eth", "4g0"] {
+			round_trips(&format!(
+				"device \"{name}\" {{\n\tmtu = 1400\n}}\n\
+				 interface \"{name}\" {{\n\tconfig = \"dhcp\"\n}}\n"
+			));
+		}
+		// The control: a name that IS a bare identifier must stay bare, so a
+		// `label` that quoted everything would be caught here rather than
+		// quietly rewriting every profile this tree renders. `eth0.42` is the
+		// case the lexer's own comment is about.
+		for name in ["eth0", "eth0.42", "br-lan", "_x"] {
+			let text = format!(
+				"device {name} {{\n\tmtu = 1400\n}}\n\
+				 interface {name} {{\n\tconfig = \"dhcp\"\n}}\n"
+			);
+			round_trips(&text);
+			let mut sources = crate::SourceMap::new();
+			sources.add("bare.conf", &text);
+			let document = crate::compile(&sources, &mut crate::NoHooks).expect("it compiles");
+			let rendered = render(&document, &Overrides::new()).expect("it renders");
+			assert!(
+				rendered.contains(&format!("device {name} {{")),
+				"`{name}` is a bare identifier and must not be quoted:\n{rendered}"
+			);
+		}
 	}
 }
