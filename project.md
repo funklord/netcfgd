@@ -9617,6 +9617,75 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.375 Ten assertions over a log, none of which would show it
+
+`daemon_wifi_test` has ten checks of the form
+
+	check(heard && strstr(heard, "ADD_NETWORK") != NULL &&
+	    strstr(heard, "SELECT_NETWORK 0") != NULL, "...");
+
+and **not one of them printed `heard`**. Two started failing, the output was
+`FAILED` and nothing else, and there was no way to tell a missing command from a
+command with different arguments, or which of a pair of `strstr` calls had come
+back empty. An afternoon went on reasoning about a log that was sitting in a
+variable, and the file already had a `detail()` helper every other diagnostic
+here uses.
+
+`check_heard` prints it. The two failures became this, immediately:
+
+	the fake heard: PING / LIST_NETWORKS / ADD_NETWORK
+	  SET_NETWORK 0 ssid 486f6d654669626572
+	  SET_NETWORK 0 mac_addr 0 / SET_NETWORK 0
+	  SET_NETWORK 0 key_mgmt WPA-PSK FT-PSK
+	  SET_NETWORK 0 proto RSN / SET_NETWORK 0 ieee80211w 1
+	  ENABLE_NETWORK 0 / ATTACH
+
+**There is no `SELECT_NETWORK` in it, and an `ENABLE_NETWORK 0` where one should
+be.** The second failing check asserts the same thing from the other side --
+`SELECT_NETWORK` present and `ENABLE_NETWORK` absent -- and its comment says
+why: selecting disables the others, which is what leaves the supplicant no
+choice, where enabling merely adds one more candidate.
+
+### What is observed, and what is only a candidate
+
+The observation is the trace above. Two mechanisms would produce it and
+**neither is established**, so they are written as candidates rather than as a
+cause:
+
+  - **A route rather than a race.** `SELECT_NETWORK` is sent from
+    `daemon/wifi.c:1180` and `ENABLE_NETWORK` from
+    `backend/supplicant/session.c:397`, which is the profile-installation path.
+    The trace reads as one coherent flow of that second path, not as two flows
+    interleaved -- so `ncfg_wifi_connect` may be reaching the backend's
+    installer where the test expects the daemon's own select.
+  - **A window rather than a message.** `log_mark()` records the fake's log
+    *size* and `log_since()` reads from that offset, so what a check examines is
+    everything appended between two points and not what this call sent. Any
+    second actor against the same fake lands in the same window. That makes
+    interleaving structurally possible, which is worth knowing whether or not it
+    happened here.
+
+**And the part I cannot explain.** These two checks passed four times at 14:24,
+14:28, 14:33 and 14:41 on this branch's tip, and have failed every run since
+15:05 -- 8 for 8. The only activity in the window was a GUI build that died at
+`gui/tests/reconnect`; `make check` never reached `c-test` in that run, and
+`c/.build-flags` has not changed since 14:23. **It is not the renderer commit**:
+the C was reverted to the parent commit in place, rebuilt, and failed
+identically three times. So something outside the C sources moved, and this
+entry does not say what.
+
+Recorded rather than guessed at, because a comfortable explanation would close
+an investigation that is still open -- and the diagnostic is in now, so the next
+run says what the fake heard rather than only that it was not what was wanted.
+
+**Two smaller things found on the way.** The conversion matched one `check()`
+whose *message* reads "a generation nobody has heard of" -- the word in prose,
+not the variable -- and the compiler caught it; a pattern over a call's whole
+text is not a pattern over its identifiers. And `c-test` leaks two `/tmp`
+directories per run, one `ncfg-apply-hook-*` and one `ncfg-apply-kernel-*`, one
+pair at each of 14:24, 14:27, 14:33, 14:38, 14:41 and 15:04. Left in place as
+evidence rather than swept.
+
 ## 10.374 `make check` could not finish, and the guard was the reason
 
 `packaging` runs `udevadm verify` on the modem rules, guarded by
