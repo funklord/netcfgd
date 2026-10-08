@@ -38,21 +38,29 @@ What the blanking actually prevents is a desynchronised scan, and the damage
 runs the other way -- towards false FAILURES, which is the direction a reader
 would act on. An apostrophe in prose (`renderer's`, `parser's`) pairs with the
 next real quote, so the literal after it is read inside-out and every literal
-following it shifts. Measured, three configurations of this one function:
+following it shifts. Measured against the 141-key denominator:
 
     comments and chars blanked    the gate as it stands
-    comments kept, chars blanked  50 written keys LOST, among them `command`,
-                                  `autoneg`, `interval` and `duplex`
-    nothing blanked               0 keys lost, and 6 word fragments gained --
-                                  `ists`, `ound`, `riting`, `sked`
+    comments kept, chars blanked  75 keys the renderer DOES write are lost,
+                                  `action`, `ageing_time`, `agent`, `allow`
+                                  and seventy-one more
+    nothing blanked               no key lost, five words gained
 
-**Read the third row before trusting a scan by sampling it.** Losing no keys
-looks like the healthy answer and is not: the fragments are `exists`, `found`,
-`writing` and `asked` with their beginnings eaten, so the scan is reading prose
-as a literal there, and it comes out even only because two desynchronisations
-happen to cancel. A character literal is the other half -- this renderer's job
-is quoting, so it holds ten `'\"'`, and one of them hid `"@secret:keyring:"` at
-`render.c:268` from a scan that had that literal directly in front of it.
+**The third row is why a scan cannot be trusted by sampling one
+configuration.** Losing no key looks like the healthy answer, and all it means
+is that this test's shape requirements happen to filter the wreckage out: under
+the looser word test the same configuration surfaced `ists`, `ound`, `riting`
+and `sked` -- `exists`, `found`, `writing` and `asked` with their beginnings
+eaten -- so the scan was reading prose as a literal there and came out even
+only because two desynchronisations cancelled.
+
+A character literal is the other half, and this renderer is the worst place for
+it: **its job is quoting, so it holds ten `'\"'`**, and one of them hid
+`"@secret:keyring:"` at `render.c:268` from a scan that had that literal
+directly in front of it. That changed no key verdict either, which is the
+pattern worth carrying -- **every fault in this scan has been invisible in its
+own output**, and each was found by asking it about something whose answer was
+known beforehand.
 
 WHAT THIS DOES NOT PROMISE. It asks whether the renderer MENTIONS a key, not
 whether it writes it correctly, under the right condition, with the right
