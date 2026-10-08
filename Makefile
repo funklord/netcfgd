@@ -17,6 +17,19 @@
 #                         wpa_supplicant and a privileged netns; not in check
 #   make live-container -- the live suite in a container, with the programs
 #                         and privileges this machine cannot give it
+#   make vm            -- a guest with its own kernel, for what a namespace
+#                         cannot do: module loading, /dev/vhci, real init.
+#                         `vm-image` fetches the images into ~/vm first and
+#                         is the only part that needs the internet
+#   make vm-cluster    -- several guests on one layer-2 wire
+#   make vm-skipped    -- the live scripts that skip on this machine, run in
+#                         a guest where a skip is a failure
+#   make vm-delegation -- prefix delegation end to end, with odhcp6c built
+#                         from a pinned source Debian does not package
+#   make vm-init       -- the LSB init script, started and stopped for real.
+#                         Under systemd's sysv-generator, not under sysvinit,
+#                         and the payload says what that does not prove
+#   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
 #   make fuzz          -- the fuzz targets
 #   make conformance   -- the two client implementations, asked the same
 #                         questions
