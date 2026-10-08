@@ -12293,6 +12293,39 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.385 Every address source renders now
+
+`@pd:` and `reported` were the last two the model has, both refused through the
+same `%s addressing` line, and closing them leaves the switch in
+`render_addressing` covering all seven kinds -- the `default:` arm is now
+defensive rather than load-bearing.
+
+`@pd:` is the other half of 10.383. `advertise` tells the hosts behind a machine
+what their prefix is; a delegated address is how the machine gives *itself* an
+address out of the same delegation. **A router has both**, so either one refused
+was enough to stop it saving a profile, and they were refused separately in two
+different functions.
+
+The spelling is `@pd:<interface>[/<subnet>][=<suffix>]` and the suffix defaults
+to `::1/64`, so the form that states the default and the form that omits it are
+one document. Only the shorter is written -- and **sabotaging that is the third
+round-trip-blind case in two days**: always writing the suffix compiles to the
+same document, so the round trip passes and one text assertion is the whole
+defence. The other two were the qdisc block form in 10.381 and `valid_lft
+forever` in 10.382.
+
+That is now a pattern rather than three incidents, and it has a shape: **the
+round trip cannot see a choice between two spellings of one fact.** It sees
+anything that changes the document, which is most defects; it is blind to exactly
+the class where the language is redundant. So the rule for this renderer is
+narrow and mechanical -- where the language accepts more than one way to say a
+thing, the test asserts the text as well, and where it does not, the round trip
+is enough.
+
+`reported` takes no modifiers, so the bare word is the whole source. Rendering it
+as anything else would turn an observation into an instruction: it says netcfgd
+must not manage this interface's addresses and must report what it finds.
+
 ## 10.384 `guard` renders, hooks cannot, and the survey was wrong a third time
 
 **`guard` was the most expensive refusal in the renderer and the cheapest to

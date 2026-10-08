@@ -400,8 +400,10 @@ static void render_the_witness(int argc, char **argv)
 		/* `an address with lifetimes or a peer` was here. All three of those
 		 * modifiers are in the language, so that refusal was reachable from an
 		 * ordinary config file and is closed. */
-		"delegated addressing",
-		"reported addressing", "a route with a scope", "a route with a proto",
+		/* `delegated addressing` and `reported addressing` were here and
+		 * render now, which leaves every address source the model has with
+		 * a rendering. */
+		"a route with a scope", "a route with a proto",
 		"a dhcp lease's client id", "a dhcp lease's requested options",
 		"network n-eap: dns options" };
 	const char         *path = witness_path(argc, argv);
@@ -1141,6 +1143,50 @@ static void a_guard_round_trips(void)
 }
 
 /*
+ * The two address sources that had no rendering, which completes the set.
+ *
+ * `@pd:` is how a machine gives itself an address out of a prefix its ISP
+ * delegated, and is the other half of `advertise`: that block tells the hosts
+ * behind the machine what their prefix is, and this gives the machine its own
+ * address in it. A router has both, so either one refused was enough to stop it
+ * saving a profile.
+ *
+ * The suffix defaults to `::1/64`, so the form that omits it and the form that
+ * states it are the same document and only one of them is written.
+ */
+static void the_remaining_address_sources_round_trip(void)
+{
+	const char *full = "interface lan0 {\n\tconfig = \"@pd:wan0/2=::5/64\"\n}\n";
+	const char *bare = "interface lan0 {\n\tconfig = \"@pd:wan0\"\n}\n";
+	char       *rendered;
+
+	round_trips(full, "a delegated address with a subnet and a suffix round trips");
+	rendered = rendering_of(full);
+	check(holds(rendered, "\"@pd:wan0/2=::5/64\""),
+	    "and keeps the spelling the parser reads back, selector and suffix both");
+	free(rendered);
+
+	round_trips(bare, "a delegated address with neither round trips too");
+	rendered = rendering_of(bare);
+	check(holds(rendered, "\"@pd:wan0\""),
+	    "with the default suffix left unwritten, as every other default here is");
+	free(rendered);
+
+	round_trips("interface eth0 {\n\tconfig = \"@pd:wan0=::1/64\"\n}\n",
+	    "and so does one that states the default suffix, which is the same document");
+
+	/* `reported` says netcfgd must not manage this interface's addresses and
+	 * must report what it finds. Rendering it as anything else would turn an
+	 * observation into an instruction. */
+	round_trips("interface eth0 {\n\tconfig = \"reported\"\n}\n",
+	    "a reported address source round trips");
+	rendered = rendering_of("interface eth0 {\n\tconfig = \"reported\"\n}\n");
+	check(holds(rendered, "config = \"reported\""),
+	    "and is the bare word, which is all the language has for it");
+	free(rendered);
+}
+
+/*
  * Per-port VLAN membership, which was being dropped in silence.
  *
  * It was neither rendered nor refused, so `ncfg profile save` wrote a switch
@@ -1826,6 +1872,7 @@ int main(int argc, char **argv)
 	an_address_modifiers_round_trip();
 	an_advertise_block_round_trips();
 	a_guard_round_trips();
+	the_remaining_address_sources_round_trip();
 	per_port_vlans_round_trip();
 	every_psk_generation_round_trips();
 	an_empty_dns_block_survives_where_it_means_something();
