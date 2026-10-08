@@ -224,14 +224,6 @@ static void render_tun(const ncfg_tun_config_t *tun, ncfg_buf_t *body)
 }
 
 /*
- * In the enum's order, and the parser's diagnostic lists them in the same one --
- * checked rather than assumed, because the advertise backends and the wifi
- * backends both had a human-facing list that disagreed with their enum.
- */
-static const char *const tunnel_mode_words[] = { "gre", "gretap", "ip6gre", "ipip", "sit",
-	"ip6tnl", "geneve" };
-
-/*
  * A tunnel of whichever encapsulation.
  *
  * One model type for seven kernel link kinds, which take the same parameters and
@@ -240,11 +232,41 @@ static const char *const tunnel_mode_words[] = { "gre", "gretap", "ip6gre", "ipi
  * not `kind`** for the serialisation reason `document.h` records, and the
  * language accepts either spelling; `mode` is written, being the model's.
  */
-static void render_tunnel(const ncfg_tunnel_config_t *tunnel, ncfg_buf_t *body)
+static void render_tunnel(const ncfg_tunnel_config_t *tunnel, const char *name,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
+	size_t end;
+
+	/*
+	 * **What `lower_tunnel` refuses, this refuses**, by asking the same
+	 * function rather than restating the rule. An endpoint has to agree with
+	 * the encapsulation -- a v6 `remote` on an `ipip` is a link the kernel
+	 * will not build -- so a document carrying the disagreement is one no
+	 * config file could have produced, and writing it back produces a profile
+	 * that does not compile.
+	 *
+	 * Found by round-tripping the plan suites' fixtures: the renderer wrote
+	 * `tunnel { mode = "geneve"; remote = "2001:db8::9" }` and the compiler
+	 * answered "a `geneve` tunnel carries an IPv4 outer header, and `remote`
+	 * is IPv6". Unreachable from a config file, and kept for the reason every
+	 * other such refusal is kept -- this takes a document rather than a file,
+	 * and a refusal that cannot fire costs nothing while writing something
+	 * uncompilable costs the save.
+	 */
+	for (end = 0; end < 2u; end++) {
+		const char *address = end ? tunnel->remote : tunnel->local;
+
+		if (address && (strchr(address, ':') != NULL) != (ncfg_tunnel_is_v6(tunnel->mode) != 0)) {
+			ncfg_render_refuse(missing, "device", name,
+			    "a %s tunnel whose %s is the other address family",
+			    ncfg_render_word_or_gap(ncfg_tunnel_mode_name(tunnel->mode)),
+			    end ? "remote" : "local");
+			return;
+		}
+	}
+
 	ncfg_buf_addf(body, "\ttunnel {\n\t\tmode = \"%s\"\n",
-	    ncfg_render_word_or_gap(ncfg_render_word(tunnel_mode_words,
-	        NCFG_COUNT_OF(tunnel_mode_words), tunnel->mode)));
+	    ncfg_render_word_or_gap(ncfg_tunnel_mode_name(tunnel->mode)));
 	if (tunnel->local) {
 		ncfg_buf_add_text(body, "\t\tlocal = ");
 		ncfg_render_quote(body, tunnel->local);
@@ -419,7 +441,7 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		render_tun(&kind->tun, body);
 		break;
 	case NCFG_KIND_TUNNEL:
-		render_tunnel(&kind->tunnel, body);
+		render_tunnel(&kind->tunnel, name, body, missing);
 		break;
 	case NCFG_KIND_WIREGUARD:
 		render_wireguard(&kind->wireguard, name, body, missing);

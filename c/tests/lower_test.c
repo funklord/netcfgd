@@ -37,6 +37,7 @@
 #include "ncfg/base.h"
 #include "ncfg/document.h"
 #include "ncfg/hostapd.h"
+#include "ncfg/config.h"
 #include "ncfg/lower.h"
 #include "ncfg/parse.h"
 #include "ncfg/state.h"
@@ -213,15 +214,115 @@ static ncfg_document_t *build_one(const char *text)
 }
 
 /* Compiles, and the caller goes on to look at the document. */
-static ncfg_document_t *compiles(const char *text, const char *what)
+/* Whether anything in this document holds a hook, which has no rendering by
+ * construction -- see `compiles` below. */
+static int carries_hooks(const ncfg_document_t *document)
+{
+	size_t i;
+
+	for (i = 0; i < document->interface_count; i++) {
+		if (document->interfaces[i].hook_count > 0) {
+			return 1;
+		}
+	}
+	for (i = 0; i < document->network_count; i++) {
+		if (document->networks[i].hook_count > 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Compiles, and **deliberately does not survive a round trip** -- the one
+ * recorded hole, pinned rather than skipped.
+ *
+ * A device the operator declared and left at every default is written nowhere:
+ * the renderer skips a device whose body comes out empty, and it must, because
+ * writing it emits `override device eth0 { }` for the synthesised
+ * per-interface device every document carries, which cannot compile. 10.418
+ * has the measurement and the two candidate fixes, both of which need the model
+ * to record which devices were DECLARED rather than synthesised.
+ *
+ * Asserted rather than waived, so closing the hole fails here and sends the
+ * next reader to 10.418 instead of leaving a silent exception behind. The
+ * reason is matched as well as the failure, so this cannot pass for some other
+ * reason.
+ */
+static ncfg_document_t *compiles_but_cannot_round_trip(const char *text, const char *what,
+    const char *because)
 {
 	ncfg_document_t *document = build_one(text);
+	char             why[NCFG_ERROR_MAX];
 
 	if (!document) {
 		printf("%-70s %s\n", what, "FAILED");
 		printf("    expected success, got:\n%s", said);
 		failures++;
 		return NULL;
+	}
+	why[0] = '\0';
+	if (ncfg_config_round_trips(document, why, sizeof(why))) {
+		printf("%-70s %s\n", what, "FAILED");
+		printf("    it round trips now, so 10.418's hole is closed and this case\n"
+		    "    should become an ordinary `compiles` -- read that entry first\n");
+		failures++;
+	} else if (!strstr(why, because)) {
+		printf("%-70s %s\n", what, "FAILED");
+		printf("    expected it to fail with `%s`, and it failed with:\n    %s\n",
+		    because, why);
+		failures++;
+	}
+	return document;
+}
+
+static ncfg_document_t *compiles(const char *text, const char *what)
+{
+	ncfg_document_t *document = build_one(text);
+	char             why[NCFG_ERROR_MAX];
+
+	if (!document) {
+		printf("%-70s %s\n", what, "FAILED");
+		printf("    expected success, got:\n%s", said);
+		failures++;
+		return NULL;
+	}
+	/*
+	 * **And prove the renderer can write it back.** Free here, and a corpus
+	 * the renderer's own suite does not overlap: every document in this file
+	 * was written to exercise lowering, with no reason to ask about rendering.
+	 * That non-overlap is the whole argument for asking more than one corpus,
+	 * and this file has already found one renderer defect by being asked --
+	 * `global { hostname = "dhcp" }` rendering as `from_dhcp`, which the
+	 * renderer's own cases had no case for. It was asked once, by hand; this
+	 * is the standing version.
+	 *
+	 * **These documents are the lowering's output, which is what makes the
+	 * question valid.** `c/tests/planfix.h` builds documents from JSON and the
+	 * same guard there reported 62 faults that were not: the lowering
+	 * synthesises a device per interface, so a document that never went
+	 * through it gains devices on recompile and can never round trip. The
+	 * property belongs to compiled documents.
+	 *
+	 * `profile save`'s safety is exactly this property, so a document the
+	 * renderer cannot reproduce is a machine whose profile cannot be saved.
+	 * The message says the renderer is at fault, because a test about lowering
+	 * failing with a complaint about rendering is otherwise a confusing place
+	 * to start.
+	 */
+	/*
+	 * **Hooks are skipped structurally, not tolerated.** A hook in the
+	 * language is a phase block of inline shell that the compiler materialises
+	 * into a file; the document carries a path and a hash and no shell, so
+	 * there is nothing to write the block back from and never will be. A
+	 * document carrying one has no round trip to assert, which is a different
+	 * statement from one that fails.
+	 */
+	why[0] = '\0';
+	if (!carries_hooks(document) && !ncfg_config_round_trips(document, why, sizeof(why))) {
+		printf("%-70s %s\n", what, "FAILED");
+		printf("    THE RENDERER, not this case: %s\n", why);
+		failures++;
 	}
 	return document;
 }
@@ -1293,8 +1394,8 @@ static void device_cases(void)
 		    device->link_settings->speed.value == 1000, "  even though nothing applies them");
 		ncfg_document_free(document);
 	}
-	document = compiles("device eth0 { ethtool { } }\n",
-	    "an empty ethtool block produces nothing");
+	document = compiles_but_cannot_round_trip("device eth0 { ethtool { } }\n",
+	    "an empty ethtool block produces nothing", "`device eth0` is what differs");
 	if (document) {
 		device = device_named(document, "eth0");
 		check(device && device->link_settings == NULL, "  rather than a structure of defaults");

@@ -1213,6 +1213,42 @@ static void a_redirect_this_build_did_not_make_is_refused(void)
 }
 
 /*
+ * A tunnel whose endpoint is the wrong address family, which the renderer used
+ * to write and the compiler then refused.
+ *
+ * `lower_tunnel` requires `local` and `remote` to agree with the encapsulation
+ * -- a v6 `remote` on an `ipip` is a link the kernel will not build -- so no
+ * config file produces this and only a document that arrived as JSON can carry
+ * it. The renderer wrote it anyway, and `ncfg profile save` then refused with
+ * "would not reproduce what this machine is running", which says nothing about
+ * the tunnel.
+ *
+ * **Found by round-tripping the plan suites' fixtures**, which is a corpus with
+ * no reason to ask about rendering. The refusal asks `ncfg_tunnel_is_v6` rather
+ * than restating the rule, so the two cannot drift.
+ */
+static void a_tunnel_of_the_wrong_family_is_refused(void)
+{
+	char *geneve = refusals_of_json(DOC(PLAIN_GLOBALS
+	    "\"devices\":[{\"name\":\"gnv0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"tunnel\",\"mode\":\"geneve\","
+	    "\"remote\":\"2001:db8::9\"}}],"
+	    NO_INTERFACES NO_NETWORKS));
+	char *ip6gre = refusals_of_json(DOC(PLAIN_GLOBALS
+	    "\"devices\":[{\"name\":\"gre6\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"tunnel\",\"mode\":\"ip6gre\","
+	    "\"local\":\"192.0.2.1\"}}],"
+	    NO_INTERFACES NO_NETWORKS));
+
+	check(holds(geneve, "a geneve tunnel whose remote is the other address family"),
+	    "a geneve tunnel with an IPv6 remote is refused rather than written");
+	check(holds(ip6gre, "a ip6gre tunnel whose local is the other address family"),
+	    "and an ip6gre with an IPv4 local, which is the same rule the other way");
+	free(geneve);
+	free(ip6gre);
+}
+
+/*
  * `guard`, whose loss is the most consequential in this file.
  *
  * The reason string is the whole value -- "eth0: nfs root" tells a reader what
@@ -2052,6 +2088,7 @@ int main(int argc, char **argv)
 	an_advertise_block_round_trips();
 	an_ingress_shaper_is_undone();
 	a_redirect_this_build_did_not_make_is_refused();
+	a_tunnel_of_the_wrong_family_is_refused();
 	a_guard_round_trips();
 	the_remaining_address_sources_round_trip();
 	the_remaining_kinds_round_trip();

@@ -260,6 +260,19 @@ extern const char *const ncfg_ssid_from_bssid;
  * range, which `ncfg_render_word_or_gap` turns into a visible gap. */
 const char *ncfg_qdisc_kind_name(int kind);
 
+/*
+ * A tunnel's mode word, and whether that mode's outer header is IPv6.
+ *
+ * Exposed for the renderer, which had grown a second copy of the word list --
+ * the fault 10.381 names, committed by the same hand that recorded it. The
+ * family rule travels with the words because the renderer has to refuse what
+ * `lower_tunnel` refuses: a `geneve` whose `remote` is IPv6 is a document the
+ * language cannot express, so writing it back produces a profile that does not
+ * compile.
+ */
+const char *ncfg_tunnel_mode_name(int kind);
+int         ncfg_tunnel_is_v6(int kind);
+
 /* The one place the "not an interface name" diagnostic is built. */
 int   ncfg_name_ok(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, const char *help);
 /* A string that has to be a name the kernel would take for a link. */

@@ -437,12 +437,12 @@ static int tunnel_kind(const char *text, int *out)
 	return 0;
 }
 
-static int tunnel_is_v6(int kind)
+int ncfg_tunnel_is_v6(int kind)
 {
 	return kind == NCFG_TUNNEL_KIND_IP6GRE || kind == NCFG_TUNNEL_KIND_IP6TNL;
 }
 
-static const char *tunnel_name(int kind)
+const char *ncfg_tunnel_mode_name(int kind)
 {
 	static const char *const names[] = { "gre", "gretap", "ip6gre", "ipip", "sit", "ip6tnl",
 		"geneve" };
@@ -528,10 +528,10 @@ static int lower_tunnel(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			continue;
 		}
 		is_v6 = strchr(address, ':') != NULL;
-		if (is_v6 != tunnel_is_v6(kind)) {
+		if (is_v6 != ncfg_tunnel_is_v6(kind)) {
 			ncfg_diag(ctx, block->span,
 			    "a `%s` tunnel carries an IPv%d outer header, and `%s` is IPv%d",
-			    tunnel_name(kind), tunnel_is_v6(kind) ? 6 : 4, label, is_v6 ? 6 : 4);
+			    ncfg_tunnel_mode_name(kind), ncfg_tunnel_is_v6(kind) ? 6 : 4, label, is_v6 ? 6 : 4);
 			goto drop;
 		}
 	}

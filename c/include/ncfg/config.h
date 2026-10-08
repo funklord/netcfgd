@@ -282,6 +282,22 @@ ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t
  *
  * A missing directory lists nothing and is not an error.
  */
+/*
+ * Whether this document survives being written out and read back.
+ *
+ * **The property `ncfg profile save` rests on**, asked of a document a caller
+ * already has: one the renderer cannot reproduce is a machine whose profile
+ * cannot be saved. Returns 0 with a sentence saying which of the three ways it
+ * failed -- it would not render, what it wrote would not compile, or what it
+ * wrote compiled to a different document.
+ *
+ * Strict: nothing is waived except what `ncfg_config_documents_agree` leaves
+ * out, which is provenance. So a device at every default -- written nowhere,
+ * see `render_device` -- does not survive, and a caller meeting that is meeting
+ * a real limit rather than a fault here.
+ */
+int ncfg_config_round_trips(const ncfg_document_t *document, char *err, size_t err_size);
+
 int ncfg_config_writable_files(const char *config_dir, char ***out, size_t *count_out, char *err,
     size_t err_size);
 

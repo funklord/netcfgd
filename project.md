@@ -12292,6 +12292,99 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.423 The renderer had no corpus guard, and adding one found two faults
+
+Asked to keep porting renderer gaps with the refusal lists agreeing, so the
+question became what instrument had not been used. **No C test round-tripped a
+corpus at all.** `lower_test.c` compiled 78 documents and never asked whether
+they rendered back; `render_test.c` had only the cases somebody thought to
+write. The Rust guards three corpora, and its own comment says why: five
+planner fixtures caught a renderer defect none of the compiler's ninety
+documents could see.
+
+`ncfg_config_round_trips` is that guard, and `lower_test.c`'s `compiles()` now
+asks it of every document it builds. Two faults, both real.
+
+### Where it lives, because the layer was the first thing I got wrong
+
+It was written in `compile/` beside the renderer, which is where the Rust keeps
+it. That cannot work here: the third step is a document comparison, and
+`host/document_compare.c` is where that lives -- including the one member it has
+to leave out. So it is in `host/round_trip.c`, and `profile_save.c` already
+performs the same sequence against the machine's observed state.
+
+### And the corpus, which I got wrong more expensively
+
+The guard went into `c/tests/planfix.h` first, where 140 plan fixtures would
+have been free. It reported **70 faults**. Sixty-two were not faults:
+`planfix.h` builds documents from JSON, and **the lowering synthesises a device
+per interface**, so a document that never went through the lowering gains
+devices on recompile and can never round trip. Measured directly --
+`before devices: []`, `after devices: ['eth0']` -- rather than argued.
+
+The Rust's equivalent guard works because `netcfgd-plan/tests/fixtures.rs`
+compiles fixture *text*. The property belongs to compiled documents, and
+`lower_test.c` is where the C has those.
+
+**A first diagnosis was wrong too, and plausibly.** The only difference in my
+reduced fixture was `generated_by`, which `document.h` excludes from equality
+and the canonical writer emits -- so a string comparison of canonical JSON
+reports it. That was a real fault in the instrument and fixing it changed
+nothing: the count stayed at 70, because the reduced fixture had no interfaces
+and so could not show the synthesis. **A reduction that fires reliably tells you
+where to look and nothing about why**, which is already in `evidence.md`; this
+is it costing a diagnosis.
+
+### What the valid corpus found
+
+Three faults of 79, and one of the three was worth the whole exercise.
+
+**Hooks: two, and skipped structurally rather than tolerated.** A hook is a
+phase block of inline shell the compiler materialises into a file; the document
+carries a path and a hash, so there is nothing to write the block back from. A
+document carrying one has no round trip to assert, which is a different
+statement from one that fails. Asked of the document rather than matched on a
+message.
+
+**The empty-device hole, reached from `device eth0 { ethtool { } }`.** 10.418
+recorded that hole as needing "an access point beside it to observe". It needs
+nothing of the sort: a declared device the operator left at every default is
+written nowhere, and the simplest possible config reaches it. **Pinned rather
+than skipped** -- `compiles_but_cannot_round_trip` asserts the failure *and its
+reason*, so closing the hole fails there and sends the next reader to 10.418
+instead of leaving a silent exception behind.
+
+### The one real renderer defect: a tunnel of the wrong address family
+
+Found in the planfix run before that corpus was ruled out, which is worth
+saying: **a wrong instrument still produced one true finding.** The renderer
+wrote `tunnel { mode = "geneve"; remote = "2001:db8::9" }` and the compiler
+answered *a `geneve` tunnel carries an IPv4 outer header, and `remote` is
+IPv6*. So the renderer produced a profile that does not compile, and
+`profile save` would have refused it with "would not reproduce what this machine
+is running" -- which says nothing about the tunnel.
+
+Refused by name now, **asking `ncfg_tunnel_is_v6` rather than restating the
+rule**, so the renderer and the lowering cannot drift. Unreachable from a config
+file, like the `dns` and `dhcp` refusals, and kept for the same reason.
+
+### And a duplicate word table of my own
+
+`lower_kind.c` has had `tunnel_name` all along; 10.417 added
+`tunnel_mode_words` to `render_device.c` -- a second copy of the same seven
+words, committed by the hand that recorded in 10.381 that "a kind rendered under
+the wrong name is a document that compiles and describes a different
+scheduler". Both are `ncfg_tunnel_mode_name` now. The rule is easy to state and
+easy to break while writing something else.
+
+### Three invocation errors, one class
+
+`client_test`, `render_test` and `lower_test` each resolve a fixture relative to
+their own directory, and each was run from the repository root and read as a
+failure -- a missing witness, a missing schema, a missing example file. Three
+times in one session. The suites are right to use relative paths; what was wrong
+is running them from anywhere else, and `make c-test` does not.
+
 ## 10.422 The ingress shaper is undone, and the refusal's reason was wrong
 
 **Three refusals for one setting, so no machine shaping arriving traffic could
