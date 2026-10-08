@@ -94,6 +94,27 @@ static void detail(const char *label, const char *body)
 	printf("    %s: %s\n", label, body ? body : "(nothing)");
 }
 
+/*
+ * A check on what the fake supplicant was told, which prints the log when it
+ * fails.
+ *
+ * **`strstr` returning NULL says nothing about what WAS there**, and this file
+ * had ten assertions over `heard` and no way to see past any of them. Two of
+ * them then started failing and the output was `FAILED` and nothing else: no
+ * way to tell a missing command from a command with different arguments, and
+ * no way to tell which of a pair of `strstr` calls had come back empty. An
+ * afternoon went on reasoning about a log that was sitting in a variable.
+ *
+ * The log goes through `detail`, which every other diagnostic here uses.
+ */
+static void check_heard(int condition, const char *what, const char *heard)
+{
+	check(condition, what);
+	if (!condition) {
+		detail("the fake heard", heard);
+	}
+}
+
 /* Every `err` buffer this file has filled, end to end, swept at the end. */
 static char   every_message[128u * 1024u];
 static size_t every_message_length;
@@ -1064,8 +1085,8 @@ static void the_scan_and_why_it_may_be_stale(void)
 		ncfg_proto_message_free(&message);
 	}
 	heard = log_since(mark);
-	check(heard && strstr(heard, "SCAN_RESULTS") != NULL && strstr(heard, "\nSCAN\n") == NULL,
-	    "  and no `SCAN` was ever sent, which is what stops the full patience being spent");
+	check_heard(heard && strstr(heard, "SCAN_RESULTS") != NULL && strstr(heard, "\nSCAN\n") == NULL,
+	    "  and no `SCAN` was ever sent, which is what stops the full patience being spent", heard);
 	free(heard);
 	ncfg_buf_free(&out);
 	ncfg_document_free(document);
@@ -1107,11 +1128,11 @@ static void joining_a_network_the_configuration_describes(void)
 	check(strcmp(ncfg_buf_text(&out), "{\"response\":\"ok\"}") == 0,
 	    "  and `ok` means it joined, not that the command was taken");
 	heard = log_since(mark);
-	check(heard && strstr(heard, "ADD_NETWORK") != NULL &&
+	check_heard(heard && strstr(heard, "ADD_NETWORK") != NULL &&
 	    strstr(heard, "SELECT_NETWORK 0") != NULL,
-	    "  the network was handed over and selected");
-	check(heard && strstr(heard, "\nSET_NETWORK 0\n") != NULL,
-	    "  and the credential crossed the socket, cut off at the keyword in the fake's log");
+	    "  the network was handed over and selected", heard);
+	check_heard(heard && strstr(heard, "\nSET_NETWORK 0\n") != NULL,
+	    "  and the credential crossed the socket, cut off at the keyword in the fake's log", heard);
 	free(heard);
 	ncfg_buf_free(&out);
 
@@ -1128,8 +1149,8 @@ static void joining_a_network_the_configuration_describes(void)
 	check(ncfg_wifi_connect(&where, document, secrets_dir, certs_dir, "wlan0", "office", &out,
 	        err, sizeof(err)), "a network the supplicant already holds is joined");
 	heard = log_since(mark);
-	check(heard && strstr(heard, "ADD_NETWORK") == NULL,
-	    "  without a second copy of it, which would make LIST_NETWORKS unreadable");
+	check_heard(heard && strstr(heard, "ADD_NETWORK") == NULL,
+	    "  without a second copy of it, which would make LIST_NETWORKS unreadable", heard);
 	/*
 	 * `SELECT_NETWORK` rather than `ENABLE_NETWORK`: it disables the others,
 	 * which is what "join this one" means. `ENABLE` would leave the supplicant
@@ -1138,9 +1159,9 @@ static void joining_a_network_the_configuration_describes(void)
 	 * on the path above, where `ncfg_supplicant_add_network` legitimately
 	 * enables the network it has just handed over.
 	 */
-	check(heard && strstr(heard, "SELECT_NETWORK") != NULL &&
+	check_heard(heard && strstr(heard, "SELECT_NETWORK") != NULL &&
 	    strstr(heard, "ENABLE_NETWORK") == NULL,
-	    "  and by selecting it, which is what leaves the supplicant no other choice");
+	    "  and by selecting it, which is what leaves the supplicant no other choice", heard);
 	free(heard);
 	ncfg_buf_free(&out);
 
@@ -1267,9 +1288,9 @@ static void leaving_without_forgetting(void)
 	check(ncfg_wifi_disconnect(&where, document, "wlan0", &out, err, sizeof(err)) &&
 	    strcmp(ncfg_buf_text(&out), "{\"response\":\"ok\"}") == 0, "the radio disconnects");
 	heard = log_since(mark);
-	check(heard && strstr(heard, "DISCONNECT") != NULL &&
+	check_heard(heard && strstr(heard, "DISCONNECT") != NULL &&
 	    strstr(heard, "REMOVE_NETWORK") == NULL,
-	    "  and the network stays configured, so reconnecting resolves nothing again");
+	    "  and the network stays configured, so reconnecting resolves nothing again", heard);
 	free(heard);
 	ncfg_buf_free(&out);
 	ncfg_buf_init(&out, 0);
@@ -1649,14 +1670,14 @@ static void no_credential_reaches_a_message(void)
 	/* Non-vacuity first: a join that succeeded is a credential that resolved
 	 * and reached the socket, and the cut `SET_NETWORK 0` line is what the
 	 * fake's redaction leaves where the value was. */
-	check(installed.calls > 0u || heard != NULL, "the fake kept a log to sweep");
+	check_heard(installed.calls > 0u || heard != NULL, "the fake kept a log to sweep", heard);
 	found = strstr(every_message, CANARY);
 	check(found == NULL, "no `err` buffer this file filled carries the passphrase");
 	if (found) {
 		detail("in", found - 200 > every_message ? found - 200 : every_message);
 	}
-	check(!heard || strstr(heard, CANARY) == NULL,
-	    "and neither does the fake supplicant's own log");
+	check_heard(!heard || strstr(heard, CANARY) == NULL,
+	    "and neither does the fake supplicant's own log", heard);
 	free(heard);
 }
 
