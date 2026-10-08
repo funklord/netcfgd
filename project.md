@@ -12292,7 +12292,7 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
-## 10.421 fmake reaches the link, and stops on two symbols that are ours
+## 10.421 fmake reaches the link, and the two symbols were six of twenty
 
 Reported through `.git/cc-inbox/` on 2026-10-08 by the session working in
 fmake, measured in a `git archive HEAD` copy of this tree with our own
@@ -12304,34 +12304,60 @@ objects of the C daemon compiled, then a stop -- not on Cargo, which our README
 named as the obstacle and which 0266 removed, but on two duplicate symbols
 between the daemon's copy and the client's.
 
-### Verified here, and one is worse than a duplicate name
+### Two was the sample, twenty was the population
 
-    c/include/ncfg/daemon.h:1093  void ncfg_probes_free(ncfg_probes_t *probes)
-    client/ncfg_client.h:873      void ncfg_probes_free(ncfg_probes_t *probes)
+**Asked to rename the two, measured first, and the instrument matters.** fmake
+reported the two its first error batch named; `nm` over the two archives
+reports the set:
 
-    c/include/ncfg/hooks.h:190    void ncfg_hook_scripts_free(
-                                      ncfg_hook_script_t *scripts, size_t count)
-    client/ncfg_client.h:1084     void ncfg_hook_scripts_free(
-                                      ncfg_hook_scripts_t *scripts)
+    nm --defined-only -g client/libncfg_client.a | awk '$2=="T"{print $3}'
+    nm --defined-only -g c/libncfg.a             | awk '$2=="T"{print $3}'
+    comm -12 ...                                  -> 20
 
-The first pair is a deliberate parallel copy with one signature. **The second is
-two different functions sharing a linker name**, with different parameter lists
-and different types -- so a translation unit including both `ncfg/hooks.h` and
-`client/ncfg_client.h` does not compile, and the two headers are mutually
-exclusive today without anything saying so.
+Twenty, in three groups that want three different answers -- which is why
+renaming the two as asked would have left eighteen and stopped fmake again on
+the next one.
 
-`code-style.md` decided the rule: a deliberate parallel copy in two libraries
-needs a **distinct** name, "not the same name in both on the assumption that
-nothing will ever link both sides; that assumption fails later, at a call site
-that changed nothing." fmake linking both halves is that call site arriving.
+**Fourteen `ncfg_json_*` are not a naming defect at all.** `c/Makefile` reads
+`SHARED_SRCS = ../client/ncfg_json.c`: it is **one source file** compiled into
+both archives, so the duplicate is in how the archives are composed and not in
+what anything is called. Renaming here would be wrong. Left alone and recorded.
 
-**`static` is not available and that is why this is a decision rather than a
-fix.** Both are public API in both headers, and `gui/src/ncfg_connection.cpp`
-calls the client's at two sites. So one side renames, and which one is the
-question: the client is consumed by the GUI and whatever else links
-`libncfgclient`, while `c/include/ncfg/*.h` is the daemon's own. Nothing is
-broken today, because nothing links both. Whose decision: the copyright
-holder's.
+**Six were real, and the five with matching signatures are the dangerous
+ones.** `ncfg_hook_scripts_free` differs in signature between the two headers,
+so a translation unit including both does not compile -- loud, and the one
+fmake named. The other five declare *identically* over same-named types that
+are not the same type:
+
+    ncfg_journal_t, daemon (apply.h)   records, record_count, record_capacity,
+                                       owned, owned_count, failed
+    ncfg_journal_t, client             items, count
+
+Same name, same `void ncfg_journal_free(ncfg_journal_t *)`, different struct.
+Nothing refuses that at compile time and nothing refuses it at link time
+either: whichever copy the linker keeps runs against the wrong layout. So the
+five that look benign are worse than the one that looks broken.
+
+### Renamed, on the copyright holder's instruction
+
+The client's six take its own prefix -- `ncfg_client_probes_free` and the rest.
+That is the client's established spelling rather than a new one: 53 of its 100
+exported symbols already carry `ncfg_client_`. The daemon keeps its names,
+which is the cheaper side to leave alone -- those six appear across 35 files in
+`c/`, against four files for the client's.
+
+    client/ncfg_client.h          6 occurrences
+    client/ncfg_client.c          8
+    client/tests/client_test.c   11
+    gui/src/ncfg_connection.cpp   6
+
+Proved rather than read: nothing under `c/` is in the diff, no old name remains
+in those four files, and the archive intersection went from 20 to 14 -- the 14
+being exactly the shared `ncfg_json_*`. `client_test` passes 248 checks and the
+GUI builds.
+
+`static` was not available: all six are public API in both headers and the GUI
+calls the client's.
 
 ### Two stale claims of ours, both fixed here
 

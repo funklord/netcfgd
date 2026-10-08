@@ -839,10 +839,10 @@ static void a_plan_becomes_a_model(void)
 		       "on_unmanage = \"clear\"");
 	}
 
-	ncfg_plan_free(&plan);
+	ncfg_client_plan_free(&plan);
 	/* Twice, because the error paths inside the conversion free a plan the
 	 * caller will free again, and "it depends" is not a rule anybody keeps. */
-	ncfg_plan_free(&plan);
+	ncfg_client_plan_free(&plan);
 	ok("and freeing a plan twice leaves it zeroed",
 	   plan.actions == NULL && plan.action_count == 0u && plan.refusals == NULL, NULL);
 	staged_close(&staged);
@@ -1424,7 +1424,7 @@ static void an_apply_becomes_a_journal(void)
 		       "the kernel refused: Operation not permitted");
 		equals("with the daemon's word for it", journal.items[1].outcome, "failed");
 	}
-	ncfg_journal_free(&journal);
+	ncfg_client_journal_free(&journal);
 
 	ok("a confirm is answered", ncfg_client_confirm(staged.client, err, sizeof(err)) == 1, err);
 	equals("and asks for exactly that", received(staged.server, sent, sizeof(sent)),
@@ -1436,7 +1436,7 @@ static void an_apply_becomes_a_journal(void)
 	if (ncfg_client_apply(staged.client, 0, NULL, &journal, err, sizeof(err))) {
 		equals("an apply with no window does not mention confirm at all",
 		       received(staged.server, sent, sizeof(sent)), "{\"request\":\"apply\"}\n");
-		ncfg_journal_free(&journal);
+		ncfg_client_journal_free(&journal);
 	} else {
 		ok("an apply with no window is still an apply", 0, err);
 	}
@@ -1680,7 +1680,7 @@ static void consent_goes_out_the_way_the_daemon_spells_it(void)
 		       "{\"request\":\"apply\",\"confirm\":90,"
 		       "\"allow_disruption\":[\"eth0\",\"wlan0\"],"
 		       "\"strand_credentials\":[\"wg0\"]}\n");
-		ncfg_journal_free(&journal);
+		ncfg_client_journal_free(&journal);
 	} else {
 		ok("both consent lists reach the daemon", 0, err);
 	}
@@ -1694,7 +1694,7 @@ static void consent_goes_out_the_way_the_daemon_spells_it(void)
 		equals("a list nobody filled in is not mentioned",
 		       received(staged.server, sent, sizeof(sent)),
 		       "{\"request\":\"apply\",\"strand_credentials\":[\"wg0\"]}\n");
-		ncfg_journal_free(&journal);
+		ncfg_client_journal_free(&journal);
 	} else {
 		ok("a list nobody filled in is not mentioned", 0, err);
 	}
@@ -1707,7 +1707,7 @@ static void consent_goes_out_the_way_the_daemon_spells_it(void)
 		equals("and a name with a quote in it is escaped rather than interpolated",
 		       received(staged.server, sent, sizeof(sent)),
 		       "{\"request\":\"apply\",\"allow_disruption\":[\"we\\\"ird\"]}\n");
-		ncfg_journal_free(&journal);
+		ncfg_client_journal_free(&journal);
 	} else {
 		ok("and a name with a quote in it is escaped rather than interpolated", 0, err);
 	}
@@ -1789,12 +1789,12 @@ static void freeing_what_was_never_filled_in_is_nothing(void)
 	 * stack, and the error paths inside the library free structs they only
 	 * half filled. Both end up here. */
 	ncfg_links_free(&links);
-	ncfg_plan_free(&plan);
-	ncfg_journal_free(&journal);
+	ncfg_client_plan_free(&plan);
+	ncfg_client_journal_free(&journal);
 	ncfg_event_free(&event);
 	ncfg_links_free(NULL);
-	ncfg_plan_free(NULL);
-	ncfg_journal_free(NULL);
+	ncfg_client_plan_free(NULL);
+	ncfg_client_journal_free(NULL);
 	ncfg_event_free(NULL);
 
 	ok("freeing a model that was never filled in is nothing",

@@ -503,7 +503,7 @@ bool ncfg_connection::plan(ncfg_plan_data *out, QString *error)
 	notes_into(plan.refusals, plan.refusal_count, &out->refusals);
 	notes_into(plan.stranded, plan.stranded_count, &out->stranded);
 
-	ncfg_plan_free(&plan);
+	ncfg_client_plan_free(&plan);
 	return true;
 }
 
@@ -574,7 +574,7 @@ bool ncfg_connection::apply(unsigned confirm_seconds, const ncfg_consent_rows &c
 		out->append(row);
 	}
 
-	ncfg_journal_free(&journal);
+	ncfg_client_journal_free(&journal);
 	return true;
 }
 
@@ -865,7 +865,7 @@ bool ncfg_connection::probes(QList<ncfg_probe_row> *out, QString *error)
 		row.editable = found.items[i].editable != 0;
 		out->append(row);
 	}
-	ncfg_probes_free(&found);
+	ncfg_client_probes_free(&found);
 	return true;
 }
 
@@ -1323,7 +1323,7 @@ bool ncfg_connection::hook_scripts(QList<ncfg_hook_script> *out, QString *error)
 		row.readable = found.items[i].readable != 0;
 		out->append(row);
 	}
-	ncfg_hook_scripts_free(&found);
+	ncfg_client_hook_scripts_free(&found);
 	return true;
 }
 
@@ -1357,7 +1357,7 @@ bool ncfg_connection::hooks(QList<ncfg_hook_row> *out, QString *error)
 		row.timeout = found.items[i].timeout;
 		out->append(row);
 	}
-	ncfg_hooks_free(&found);
+	ncfg_client_hooks_free(&found);
 	return true;
 }
 
@@ -1765,7 +1765,7 @@ bool ncfg_connection::explain(const QString &interface, QList<ncfg_explain_row> 
 		row.source = QString::fromUtf8(answer.items[i].source ? answer.items[i].source : "");
 		out->append(row);
 	}
-	ncfg_explanation_free(&answer);
+	ncfg_client_explanation_free(&answer);
 	return true;
 }
 

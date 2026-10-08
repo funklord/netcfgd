@@ -665,8 +665,8 @@ void ncfg_links_free(ncfg_links_t *links);
 void ncfg_inventory_free(ncfg_inventory_t *inventory);
 void ncfg_linksets_free(ncfg_linksets_t *linksets);
 void ncfg_connectivity_free(ncfg_connectivity_t *connectivity);
-void ncfg_plan_free(ncfg_plan_t *plan);
-void ncfg_journal_free(ncfg_journal_t *journal);
+void ncfg_client_plan_free(ncfg_plan_t *plan);
+void ncfg_client_journal_free(ncfg_journal_t *journal);
 void ncfg_event_free(ncfg_event_t *event);
 void ncfg_scan_free(ncfg_scan_t *scan);
 void ncfg_wifi_status_free(ncfg_wifi_status_t *status);
@@ -870,7 +870,7 @@ typedef struct {
 	size_t        count;
 } ncfg_probes_t;
 
-void ncfg_probes_free(ncfg_probes_t *probes);
+void ncfg_client_probes_free(ncfg_probes_t *probes);
 
 /*
  * One profile the machine could be switched to.
@@ -1051,7 +1051,7 @@ typedef struct {
 	size_t       count;
 } ncfg_hooks_t;
 
-void ncfg_hooks_free(ncfg_hooks_t *hooks);
+void ncfg_client_hooks_free(ncfg_hooks_t *hooks);
 
 /*
  * One hook script: the program itself, rather than the reference to it.
@@ -1081,7 +1081,7 @@ typedef struct {
 	size_t              count;
 } ncfg_hook_scripts_t;
 
-void ncfg_hook_scripts_free(ncfg_hook_scripts_t *scripts);
+void ncfg_client_hook_scripts_free(ncfg_hook_scripts_t *scripts);
 
 /*
  * The host-wide policy: the `global` block, minus the dns half the dns view
@@ -1501,7 +1501,7 @@ typedef struct {
 	size_t       count;
 } ncfg_explanation_t;
 
-void ncfg_explanation_free(ncfg_explanation_t *explanation);
+void ncfg_client_explanation_free(ncfg_explanation_t *explanation);
 
 /*
  * Why is this interface the way it is. Needs `observe`.

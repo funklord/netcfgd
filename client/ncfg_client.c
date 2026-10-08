@@ -570,7 +570,7 @@ static void notes_free(ncfg_note_t *notes, size_t count)
 	free(notes);
 }
 
-void ncfg_plan_free(ncfg_plan_t *plan)
+void ncfg_client_plan_free(ncfg_plan_t *plan)
 {
 	if (!plan) {
 		return;
@@ -589,7 +589,7 @@ void ncfg_plan_free(ncfg_plan_t *plan)
 	memset(plan, 0, sizeof(*plan));
 }
 
-void ncfg_journal_free(ncfg_journal_t *journal)
+void ncfg_client_journal_free(ncfg_journal_t *journal)
 {
 	if (!journal) {
 		return;
@@ -1013,7 +1013,7 @@ static int convert_plan(const ncfg_json_doc_t *doc, ncfg_plan_t *out, char *err,
 	           &out->refusals, &out->refusal_count, err, err_size) ||
 	    !convert_notes(doc, ncfg_json_member(doc, root, "stranded"), &stranded_names,
 	           &out->stranded, &out->stranded_count, err, err_size)) {
-		ncfg_plan_free(out);
+		ncfg_client_plan_free(out);
 		return 0;
 	}
 	return 1;
@@ -1050,7 +1050,7 @@ static int convert_journal(const ncfg_json_doc_t *doc, ncfg_journal_t *out, char
 		item->detail = member_text(doc, record, "error");
 		if (!item->op || !item->interface || !item->outcome || !item->detail) {
 			set_error(err, err_size, "out of memory");
-			ncfg_journal_free(out);
+			ncfg_client_journal_free(out);
 			return 0;
 		}
 	}
@@ -3340,7 +3340,7 @@ int ncfg_client_globals(ncfg_client_t *client, ncfg_globals_t *out, char *err, s
 	return 1;
 }
 
-void ncfg_hooks_free(ncfg_hooks_t *hooks)
+void ncfg_client_hooks_free(ncfg_hooks_t *hooks)
 {
 	if (!hooks) {
 		return;
@@ -3536,7 +3536,7 @@ int ncfg_client_modems(ncfg_client_t *client, ncfg_modems_t *out, char *err,
 	return 1;
 }
 
-void ncfg_probes_free(ncfg_probes_t *probes)
+void ncfg_client_probes_free(ncfg_probes_t *probes)
 {
 	if (!probes) {
 		return;
@@ -3551,7 +3551,7 @@ void ncfg_probes_free(ncfg_probes_t *probes)
 	probes->count = 0;
 }
 
-void ncfg_hook_scripts_free(ncfg_hook_scripts_t *scripts)
+void ncfg_client_hook_scripts_free(ncfg_hook_scripts_t *scripts)
 {
 	if (!scripts) {
 		return;
@@ -4147,7 +4147,7 @@ int ncfg_client_configs(ncfg_client_t *client, ncfg_configs_t *out, char *err, s
 	return 1;
 }
 
-void ncfg_explanation_free(ncfg_explanation_t *explanation)
+void ncfg_client_explanation_free(ncfg_explanation_t *explanation)
 {
 	if (!explanation) {
 		return;
