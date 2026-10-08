@@ -9546,6 +9546,58 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.184 Two messages nothing produced, out of 408
+
+The lens came from the day's finds, all of which were things that had never
+run: a stale pinned number in a test that skipped everywhere, a field with no
+reader, a heredoc comment executing. The next member of that family is a
+diagnostic no test produces -- which rots in a particular way, because if a
+check stops *firing* something downstream usually notices, while a message
+that fires with wording that has stopped describing its case is noticed by
+nobody.
+
+**Swept in two passes, because the first pass's own result showed what it could
+not see.** Pass one took the string literal at each `Diagnostic::new` site:
+249 sites, 242 produced by something, and **the one apparent miss was a
+detector artifact** -- at `lower.rs:2080` the message is a variable from
+`portal_url`, so the regex picked up the neighbouring `with_help` literal
+instead. That artifact was the useful part: it said the detector could not
+follow a message built in a helper, which is a whole family.
+
+Pass two took every `Err("...")` and `Err(format!("..."))` anywhere in the
+workspace: 159 more sites, 157 produced. Two misses, and **both were real**:
+
+  - `netcfgd-daemon`'s refusal of the `iwd` backend. 0014's whole point is that
+    asking for iwd is refused by name rather than `wpa_supplicant` quietly
+    standing in, because substituting a supplicant changes roaming behaviour
+    the config did not ask for. The text appeared only in the file that raises
+    it.
+  - `ncfg secret set` with no name at all -- the easiest way to type that
+    command wrong. Its two neighbours in the same file pin the *other* two ways
+    `set` refuses, and the first one an operator meets was covered by nobody.
+
+Both are closed, pinned on the **wording** rather than on the `Err`, and both
+were proven by sabotage. The iwd test fails when the refusal is deleted *and*
+when the message stops naming a backend the operator can use instead; its
+control is `auto` and `wpa_supplicant`, so a `check_backend` that learned to
+refuse everything fails rather than satisfying the assertion above. The secret
+test fails when the message keeps *"needs a name"* and loses the example --
+which still refuses, and stops answering the question the operator has.
+
+**Two instrument notes, both of which inflated the apparent gap.** Rust's
+`\`-newline continuation means a literal's source text carries a backslash and
+the next line's indentation, so a fragment taken straight from the source
+matches nothing: both pass-two hits first surfaced as mid-sentence fragments
+and had to be re-checked against the real string before they could be believed.
+And the sweep's own controls were run before its results were -- a fragment
+known to be asserted must be found, one that cannot exist must not be.
+
+**399 of 408 produced, every examined miss either closed or explained.** So
+this family is swept, and the record says with what lens: literal messages at
+`Diagnostic::new` and at `Err`. What it did not look at is a message assembled
+from pieces, or one whose only literal is shorter than twelve characters. The
+next fault needs a different one.
+
 ## 10.183 The LSB init script works; the openrc one cannot be tested here
 
 netcfgd ships four init integrations and `sandbox_writes.sh` covers one.

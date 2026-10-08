@@ -426,4 +426,34 @@ access_point guest {
 		assert!(refusal.contains("never an argument"), "{refusal}");
 		assert!(!secret_path(&dir, "vpn").exists(), "it wrote a file anyway");
 	}
+
+	/// No name at all, which is the easiest way to type this wrong.
+	///
+	/// **Measured as unproduced before this was written.** A sweep of the 408
+	/// message literals reaching a diagnostic or an `Err` in this workspace
+	/// found two asserted by nothing: this one and the `iwd` refusal in
+	/// `netcfgd-daemon`. Its text appeared only in the file that raises it --
+	/// so the two neighbours above pinned the *other* two ways `set` refuses,
+	/// and the first one an operator meets was covered by nobody.
+	///
+	/// Pinned on the wording, because that is the half that rots. This message
+	/// does the work of a usage line: it says a name is wanted, says which
+	/// name -- the one the configuration already refers to -- and shows the
+	/// pair. A refusal that kept the first clause and lost the example would
+	/// still refuse, and would stop answering the question the operator has.
+	/// Proven by deleting the command half and watching this go red.
+	#[test]
+	fn no_name_is_refused_with_the_example() {
+		let dir = netcfgd_testdir::TestDir::new("secret-noname");
+		let options = Options {
+			config_dir: Some(dir.display().to_string()),
+			..Options::default()
+		};
+		let refusal = set(&[], &options).expect_err("it refuses");
+		assert!(refusal.contains("needs a name"), "{refusal}");
+		// The example, which is what makes the message usable rather than
+		// merely correct: the config side and the command side together.
+		assert!(refusal.contains("@secret:vpn"), "{refusal}");
+		assert!(refusal.contains("ncfg secret set vpn"), "{refusal}");
+	}
 }

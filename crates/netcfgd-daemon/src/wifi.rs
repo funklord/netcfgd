@@ -1194,4 +1194,70 @@ mod tests {
 			plan.warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
 		);
 	}
+
+	/// Asking for `iwd` is refused, by name and with the reason.
+	///
+	/// **Measured as unproduced before this was written.** A sweep of every
+	/// message literal reaching a diagnostic or an `Err` in this workspace --
+	/// 408 sites -- found this one and one other asserted by nothing at all:
+	/// the text `asks for the iwd backend` appeared only in the file that
+	/// raises it. So the refusal fired for nobody, and 0014's whole point is
+	/// that it must fire rather than `wpa_supplicant` quietly standing in.
+	///
+	/// Pinned on the message and not only on the `Err`, because the half that
+	/// rots is the wording. A refusal that stops naming iwd, or stops naming a
+	/// backend the operator can use instead, has become a dead end for exactly
+	/// the person who wrote `backend = "iwd"` in good faith.
+	///
+	/// The control is the other two backends: `Auto` and `WpaSupplicant` must
+	/// be accepted, so a refusal that learned to refuse everything would fail
+	/// here rather than passing the assertion above it.
+	#[test]
+	fn asking_for_iwd_is_refused_by_name() {
+		let document = |backend: &str| {
+			let mut sources = netcfgd_compile::SourceMap::new();
+			sources.add(
+				"iwd.conf",
+				format!("device wlan0 {{\n\twifi {{ backend = \"{backend}\" }}\n}}\n"),
+			);
+			netcfgd_compile::compile(&sources, &mut netcfgd_compile::NoHooks).unwrap_or_else(
+				|diagnostics| {
+					panic!(
+						"the backend `{backend}` does not compile, so this test \
+						 cannot reach the refusal:\n{}",
+						diagnostics.render(&sources)
+					)
+				},
+			)
+		};
+
+		let iwd = document("iwd");
+		let refused = super::check_backend(Some(&iwd), "wlan0")
+			.expect_err("a document asking for iwd must be refused (0014)");
+		assert!(
+			refused.contains("iwd"),
+			"the refusal must name the backend that was asked for: {refused}"
+		);
+		assert!(
+			refused.contains("wpa_supplicant"),
+			"and name one the operator can use instead: {refused}"
+		);
+
+		// The control. Without these, a `check_backend` that refused every
+		// backend would satisfy the assertions above.
+		for allowed in ["auto", "wpa_supplicant"] {
+			let ok = document(allowed);
+			assert!(
+				super::check_backend(Some(&ok), "wlan0").is_ok(),
+				"`{allowed}` is served by this build and must not be refused"
+			);
+		}
+
+		// An interface the document says nothing about is not this check's to
+		// refuse, which is the early return above the match.
+		assert!(
+			super::check_backend(Some(&iwd), "wlan9").is_ok(),
+			"a device the document does not mention must not be refused"
+		);
+	}
 }
