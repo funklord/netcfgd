@@ -76,6 +76,7 @@ pub fn round_trip(document: &Document) -> Result<(), String> {
 	back.add("rendered.conf", &rendered);
 	match crate::compile(&back, &mut crate::NoHooks) {
 		Ok(again) if again == *document => Ok(()),
+		Ok(again) if silent_devices_aside(document, &again) => Ok(()),
 		Ok(_) => Err(format!(
 			"what it wrote compiles to a DIFFERENT document.\nrendered:\n{rendered}"
 		)),
@@ -84,6 +85,50 @@ pub fn round_trip(document: &Document) -> Result<(), String> {
 			diagnostics.render(&back)
 		)),
 	}
+}
+
+/// Whether the two documents differ ONLY by devices the renderer writes nothing
+/// for -- which is this predicate's one known limit, pinned rather than left for
+/// a reader to discover.
+///
+/// A device at every default renders to no block at all, so a document that
+/// declares one comes back without it. That is deliberate: writing it would
+/// emit `override device eth0 { }` for the synthesised per-interface device
+/// every document carries, and `override` on a block the base config never had
+/// cannot compile -- which broke `ncfg profile save` for any configuration
+/// declaring an interface and no device. 10.418 has the measurement and the two
+/// candidate fixes, both of which need the model to record which devices were
+/// DECLARED rather than synthesised; neither is this function's to make.
+///
+/// **It waives exactly that and nothing else.** Both sides are stripped of the
+/// devices the renderer is silent about, and the rest must still be equal, so
+/// any other difference fails as before. The silence is asked of
+/// `render_device` rather than recomputed from the fields.
+fn silent_devices_aside(before: &Document, after: &Document) -> bool {
+	fn speaking(document: &Document) -> Vec<Device> {
+		let overrides = Overrides::new();
+		let mut aside = Vec::new();
+		let ingress = IngressShaping::of(document, &mut aside);
+		document
+			.devices
+			.iter()
+			.filter(|device| {
+				let mut text = String::new();
+				let mut missing = Vec::new();
+				render_device(device, &overrides, &ingress, &mut text, &mut missing)
+			})
+			.cloned()
+			.collect()
+	}
+	// Only a dropped device can explain the difference; a gained one cannot.
+	if after.devices.len() >= before.devices.len() {
+		return false;
+	}
+	let mut a = before.clone();
+	let mut b = after.clone();
+	a.devices = speaking(before);
+	b.devices = speaking(after);
+	a == b
 }
 
 /// Render a whole document as configuration text.
@@ -118,7 +163,7 @@ pub fn render(document: &Document, overrides: &Overrides) -> Result<String, Unre
 		if ingress.derived.contains(&device.name) {
 			continue;
 		}
-		render_device(device, overrides, &ingress, &mut text, &mut missing);
+		let _ = render_device(device, overrides, &ingress, &mut text, &mut missing);
 	}
 
 	// Named rather than skipped, per the header: these have no rendering yet
@@ -1203,13 +1248,19 @@ fn render_eap(eap: &EapConfig, body: &mut String) {
 	}
 }
 
+/// Returns whether the block was written, which `round_trip` asks about.
+///
+/// **Asked of the renderer rather than recomputed.** The condition is "this
+/// device has nothing to say", and a predicate spelling that out elsewhere
+/// would enumerate `Device`'s fields and go stale the next time one is added --
+/// silently, and in the direction that makes the round trip look sound.
 fn render_device(
 	device: &Device,
 	overrides: &Overrides,
 	ingress: &IngressShaping,
 	text: &mut String,
 	missing: &mut Unrenderable,
-) {
+) -> bool {
 	let name = &device.name;
 	if device.r#match.is_some() {
 		missing.push(format!("device {name}: a match block"));
@@ -1225,6 +1276,24 @@ fn render_device(
 		let _ = writeln!(body, "\tmaster = {}", quote(master));
 	}
 	render_bridge_vlans(&device.bridge_vlans, &mut body);
+	// Settings of the adapter, which moved here from `interface` with 0155
+	// pass 1a. Rendered from the day they arrived rather than joining the list
+	// of things a profile silently loses.
+	if let Some(mtu) = device.mtu {
+		let _ = writeln!(body, "\tmtu = {mtu}");
+	}
+	if let Some(mac) = &device.mac {
+		let _ = writeln!(body, "\tmac = {}", quote(mac));
+	}
+	// **After the scalars, which is a byte-for-byte agreement rather than a
+	// preference.** Both programs gained qdisc and ethtool rendering
+	// independently -- this one on master, the C port on its own branch -- and
+	// put them on opposite sides of `mtu`. Neither was a porting error and
+	// neither output was wrong, but `agree` compares the two profiles byte for
+	// byte, so one had to move. This one did: `device eth0 { mtu = 1492;
+	// qdisc { ... } }` is the order the configuration is written in, a plain
+	// key before a nested block, and under 0266 the C is what ships -- so the
+	// shipped spelling is the one the oracle follows.
 	if let Some(qdisc) = &device.qdisc {
 		render_qdisc(
 			qdisc,
@@ -1236,15 +1305,6 @@ fn render_device(
 	}
 	if let Some(settings) = &device.link_settings {
 		render_ethtool(settings, &mut body);
-	}
-	// Settings of the adapter, which moved here from `interface` with 0155
-	// pass 1a. Rendered from the day they arrived rather than joining the list
-	// of things a profile silently loses.
-	if let Some(mtu) = device.mtu {
-		let _ = writeln!(body, "\tmtu = {mtu}");
-	}
-	if let Some(mac) = &device.mac {
-		let _ = writeln!(body, "\tmac = {}", quote(mac));
 	}
 	// Was dropped in silence, and this is the expensive one to lose. `Clear`
 	// exists because walking away from a device otherwise strands credentials
@@ -1271,18 +1331,37 @@ fn render_device(
 		}
 		body.push_str("\t}\n");
 	}
-	// **Present and empty is not absent**, which is the principle stated three
-	// lines below this for `device.wifi` and in 10.21 for `dns { }` -- and this
-	// block was the one place still breaking it. `device wlan0 { }` compiled to
-	// a `Device` entry and rendered to nothing, so the document came back
-	// without it and `profile save`'s proof refused.
+	// **A device with nothing to say is not written at all, and the skip is
+	// load-bearing.** It was removed here on the reading that 10.21's
+	// "present and empty is not absent" covered a `device` block as it covers
+	// `dns { }`, and that broke `ncfg profile save` for an ordinary
+	// configuration: the document holds a synthesised all-default device for
+	// every interface, `overrides` claims that synthesised device is declared
+	// in the base, so the renderer wrote `override device eth0 { }` for a
+	// block the base config never had -- and `override` on something with
+	// nothing to override cannot compile. Measured on
+	// `tests/footprint/etc`, which declares one interface and no device:
 	//
-	// Not skipped for being short. The derived `ifb` devices an ingress shaper
-	// synthesises are the ones that must not be written, and they are skipped
-	// by name at the call site rather than by being empty -- which is why
-	// removing this does not disturb them.
+	//     ncfg: that would stop the configuration compiling, so it was not
+	//     kept: .../00-saved.conf:13:10: `override device eth0` has nothing
+	//     to override
+	//
+	// 10.21's criterion is whether a block carries meaning of its own, which
+	// is why an empty `dns { }` on an interface must be written and the same
+	// block in `global` must not. A `device` block measures as the `global`
+	// case: it changes no plan, and netcfgd says so itself -- a device block
+	// alone is policy about hardware nobody asked it to configure.
+	//
+	// What that leaves open is narrow and is NOT fixed by writing the block:
+	// a declared empty device with nothing else to recreate its entry does
+	// not survive a round trip. 10.418 records the two candidate fixes and
+	// whose decision each is.
+	if body.is_empty() {
+		return false;
+	}
 	let head = opening("device", name, overrides);
 	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", label(name));
+	true
 }
 
 /// The `wifi` block of a device: what the radio itself is told to do.
@@ -3724,33 +3803,40 @@ mod tests {
 		round_trips(hex);
 	}
 
-	/// A `device` block with nothing in it is still a block.
+	/// A `device` block with nothing in it is NOT written, and this pins why.
 	///
-	/// **The third instance of 10.21's lesson, and the last place still
-	/// breaking it.** `render_device` returned early when its body came out
-	/// empty, so `device wlan0 { }` compiled to a `Device` entry and rendered
-	/// to nothing at all -- the document came back one device short and
-	/// `profile save`'s proof refused. The principle was already stated three
-	/// lines below the offending `return`, for `device.wifi`, and in 10.21 for
-	/// `dns { }`.
+	/// **This case asserted the opposite and the assertion was the defect.** It
+	/// read 10.21's "present and empty is not absent" as covering a `device`
+	/// block the way it covers `dns { }`, removed `render_device`'s early
+	/// return, and broke `ncfg profile save` for any configuration that
+	/// declares an interface and no device -- which is the ordinary one. The
+	/// document carries a synthesised all-default device per interface and
+	/// `overrides` claims it is declared in the base, so the renderer wrote
+	/// `override device eth0 { }` for a block the base config never had:
 	///
-	/// Found by round-tripping the 259 documents `netcfgd-plan`'s fixtures
-	/// compile -- a corpus `tests/compile.rs` does not overlap, which is the
-	/// argument for guarding more than one of them: five of those documents hit
-	/// this and none of compile.rs's ninety did.
+	///     `override device eth0` has nothing to override
 	///
-	/// The control is the derived `ifb` device an ingress shaper synthesises.
-	/// Those must NOT be written, and they are skipped by name at the call site
-	/// rather than for being empty -- so a renderer that started writing them
-	/// would fail `an_ingress_shaper_inverts`, not this.
+	/// Measured on `tests/footprint/etc`, and the agree gate caught it when
+	/// this branch was rebased, which is the first time the two programs were
+	/// compared with it present.
+	///
+	/// 10.21's criterion is whether the block carries meaning of its own, and a
+	/// `device` block measures as the `global` case rather than the interface
+	/// one: it changes no plan, and netcfgd says so itself.
+	///
+	/// **What is genuinely lost is asserted here rather than left implied**: a
+	/// declared empty device with nothing else to recreate its entry does not
+	/// survive a round trip. `round_trip` waives exactly that and nothing else.
+	/// Closing it needs the model to record which devices were DECLARED rather
+	/// than synthesised; 10.418 has the two candidate fixes and says whose
+	/// decision each is. If this test starts failing, one of them has landed
+	/// and this case should become the assertion it used to make.
 	#[test]
-	fn an_empty_device_block_is_still_rendered() {
+	fn an_empty_device_block_is_not_written_and_that_is_pinned() {
 		let text = "device wlan0 { }\naccess_point \"home\" {\n\
 			 \tdevice = \"wlan0\"\n\
 			 \twifi { psk = \"@secret:ap\"; proto = \"wpa2\" }\n\
 			 }\n";
-		round_trips(text);
-
 		let mut sources = crate::SourceMap::new();
 		sources.add("empty.conf", text);
 		let document = crate::compile(&sources, &mut crate::NoHooks).expect("it compiles");
@@ -3759,11 +3845,30 @@ mod tests {
 			1,
 			"the fixture must produce a device, or this tests nothing"
 		);
+
 		let rendered = render(&document, &Overrides::new()).expect("it renders");
 		assert!(
-			rendered.contains("device wlan0 {"),
-			"a device the document declares must be written even with nothing in \
-			 it:\n{rendered}"
+			!rendered.contains("device wlan0"),
+			"a device at every default is written nowhere, because writing it \
+			 emits an `override` for a block the base never had:\n{rendered}"
+		);
+
+		// And the round trip tolerates that one loss while still proving
+		// everything else came back: the access point, its secret and its
+		// protocol all survive, so this is a narrow waiver rather than a
+		// disabled check.
+		round_trip(&document).expect("the rest round trips");
+		let mut back = crate::SourceMap::new();
+		back.add("rendered.conf", &rendered);
+		let again = crate::compile(&back, &mut crate::NoHooks).expect("it recompiles");
+		assert!(
+			again.devices.is_empty(),
+			"the device is the only thing lost"
+		);
+		assert_eq!(
+			again.access_points.len(),
+			1,
+			"and the access point that named it is not"
 		);
 	}
 }

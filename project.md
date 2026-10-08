@@ -12292,6 +12292,67 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.420 The rebase onto master, and the three defects it surfaced
+
+295 commits replayed onto master, which had moved 58 commits since this branch
+left it on 2026-09-18. Eight conflicts. The measurement that chose the method is
+in the commit for the renumbering; what belongs here is what the rebase *found*,
+because that is the argument for doing it rather than merging.
+
+### Both branches had fixed the same three defects, and each had half
+
+- **`nm.sh`'s metric.** master pinned the literal `metric = 3922`; this branch
+  asserts that *a* metric is written and that the priority round trips. The
+  second is the better test and its own comment names the trap the first fell
+  into -- a hard-coded result goes stale in silence, which is the defect 0207
+  is about. Took this branch's.
+- **The GUI socket aliasing.** Each branch fixed **half**: master copied the
+  path before `close()` could clear it but discarded the error into a local;
+  this branch passed the error to the caller and did not copy. Neither alone
+  was the fix.
+- **The `udevadm` guard**, three-state on both sides. Here the tail below the
+  conflict marker belonged to this branch's `if/elif/else`, so taking master's
+  opening would have produced a construct that did not parse -- the one case
+  where reading only the hunk would have misled.
+
+### master carried the empty-`device` regression, which 10.418 predicted
+
+Three agree-gate cases failed with ``override device eth0`` *has nothing to
+override*. That is 10.418's reproduction, in the Rust, on master's code, which
+10.418 could not reach from this branch. The skip is restored and `round_trip`
+pins what that leaves open.
+
+**The gate could only see it after the rebase**, because this branch's Rust was
+three weeks stale: it still refused the renderer features master had closed, so
+the comparison was between a current C and an old oracle. That is what made
+`SAVE_AHEAD` necessary, and it is why the entry emptied itself.
+
+### `SAVE_AHEAD` went red and asked for its own deletion
+
+It recorded that the C rendered a qdisc the Rust refused. master's Rust renders
+it, so the pinned `rust` fragment stopped appearing and the gate failed naming
+the entry rather than passing over a closed divergence. That is the four-part
+pinning working: a record saying only "these differ" would have gone on passing.
+
+One divergence was left after it went: both programs render the qdisc and put
+`mtu` on opposite sides of it. Neither was a porting error -- the feature was
+implemented twice, independently -- and the gate compares bytes, so one had to
+move. The Rust's did, because a plain key before a nested block is the order the
+configuration itself is written in and under 0266 the C is what ships.
+
+The gate now reports **4 configurations written back as the same profile and 0
+divergences**, against 3 and 1 before.
+
+### And a reading error of mine, which is this file's own rule
+
+`make check` was reported as passing when it had exited 2. The harness's
+completion notice carries the **shell's** exit code, and the command ended with
+an `echo`, so it was always 0; make's status went to the output file that echo
+wrote, which went unread. *Ask the object you mean* -- the status of the thing,
+not of whatever followed it -- met in the one place the instrument is the
+harness rather than a pipe. The gate's own output is what caught it, because it
+was read whole.
+
 ## 10.419 Nothing is unported, and the list still said five things were
 
 Asked what remains to port. **Three independent instruments agree that nothing
@@ -12362,7 +12423,7 @@ failure of *Four ways to manufacture an absence* met while fixing its sibling.
 Fixed before the commit; recorded because writing a correction is exactly when
 the next wrong claim gets written.
 
-## 10.418 The empty-`device` skip is load-bearing, and `master` may have removed it
+## 10.418 The empty-`device` skip is load-bearing, and `master` had removed it
 
 Left open since the ethtool work: `render_device` skips a device whose body is
 empty, with a comment saying that is right, while **`master`'s Rust had the
@@ -12427,18 +12488,27 @@ save the rare one. Two candidates, and **the second is the deeper**:
 Whose decision: the copyright holder's. The second changes what `overrides`
 means, which reaches further than the renderer.
 
-### What is NOT established
+### Established, by the rebase, and 10.420 has the run
 
-**`master` has not been run.** This reproduction is the C on `c-port`, and
-`master`'s Rust is a different binary on a branch this work has not touched. The
-mechanism is shared architecture rather than measured there.
+This section said `master` had not been run and that one run would settle it.
+The rebase onto master was that run. `master`'s Rust carries it: on
+`tests/footprint/etc`, which declares one interface and no `device` block,
+`ncfg profile save` refuses with ``override device eth0`` *has nothing to
+override*, and three of the agree gate's cases failed on it.
 
-What makes it worth saying anyway: `master`'s own agree-gate corpus includes
-`tests/footprint/etc`, which declares interfaces and no `device` block -- exactly
-the shape that fails here. So **if `master` has this, `make check` on `master`
-should already fail at the agree gate**, and one run settles it. That is the
-command to use rather than reading the diff, and it is one branch switch away in
-a tree other sessions share.
+The skip is restored in the Rust, so the regression is closed. What remains open
+is the narrow case above -- a declared empty device with nothing else to recreate
+its entry -- and `render_trip` now **pins** that rather than leaving it implied:
+it waives a difference consisting only of devices the renderer writes nothing
+for, asks `render_device` which those are rather than recomputing "at every
+default", and still fails for any other loss. Proved by sabotaging a different
+one: dropping a device's `mtu` fails ten checks including three of the 237
+planner fixtures.
+
+The two candidate fixes stand, and both need the model to record which devices
+were DECLARED rather than synthesised, since a synthesised all-default device
+and a deliberately-declared empty one are indistinguishable without it. Whose
+decision: the copyright holder's.
 
 ## 10.417 Every device kind renders but the one netcfgd makes itself
 

@@ -548,23 +548,18 @@ def known_divergence(name, rust_mode, c_mode):
 #
 # Any one of them ceasing to hold is a red gate naming which entry can go --
 # which is what retiring the Rust will do to all of them.
-SAVE_AHEAD = {
-	# project.md 10.381. `tests/determinism/netcfgd.conf` shapes eth0 with
-	# cake at 100mbit; the Rust has no qdisc rendering and names it, the C
-	# writes it in the block form a rate needs.
-	"tests/determinism": {
-		"rust": ["device eth0: qdisc",
-			 "cannot be written out yet"],
-		"c": ["wrote <config>/profile/agree/00-saved.conf"],
-		"only_c": ["conf.d/90-profile.conf",
-			   "profile/agree/00-saved.conf"],
-		"profile": ["profile/agree/00-saved.conf", [
-			"qdisc {",
-			'kind = "cake"',
-			'bandwidth = "100mbit"',
-		]],
-	},
-}
+# Empty, and it emptied itself, which is the record worth keeping. It held one
+# entry for `tests/determinism`: the C rendered that fixture's cake qdisc and
+# this branch's Rust still refused it. Rebasing onto master brought a Rust that
+# renders it too, the entry's `rust` fragment stopped appearing, and the gate
+# went red naming the entry rather than passing over a closed divergence --
+# which is what the four pinned parts are for.
+#
+# The mechanism stays for the next one: a C that renders something the Rust
+# refuses is the expected direction of this port, and recording it beats
+# tolerating it, because a record that said only "these differ" would equally
+# tolerate the C rendering the thing WRONGLY.
+SAVE_AHEAD = {}
 
 
 def save_ahead(config_dir, rust_said, c_said, rust_tree, c_tree):
