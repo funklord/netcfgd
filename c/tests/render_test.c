@@ -2088,6 +2088,83 @@ static void a_caller_that_discards_the_refusals_is_refused(void)
 	ncfg_document_free(document);
 }
 
+
+/*
+ * The five spellings the language accepts and the renderer does not write.
+ *
+ * `tool/key_coverage_gate.py` proves every key the lowering accepts is one the
+ * renderer writes, and waives these five because each is an alias of a key it
+ * does write: a document setting the alias comes back spelled the other way
+ * and compiles to the same document. That was a sentence in a waiver file, and
+ * two measurements agreed it was the only thing holding them up -- the five
+ * keys set by no corpus in this tree are exactly the five waived.
+ *
+ * So nothing exercised the alias at all. If `dev` stopped reaching the same
+ * field as `parent`, every test here would still pass and the gate would still
+ * be green, because the gate reads source text and the corpora read documents
+ * that use the canonical name.
+ *
+ * `doc/interface-report.md` writes `global { dns { dns_mode = "dnsmasq" } }`
+ * as an example, so the untested spelling is one the documentation hands to a
+ * reader.
+ *
+ * Each case asserts both halves: the document survives the round trip, AND the
+ * rendering carries the canonical spelling rather than the alias. The second is
+ * what makes the waiver file's reason a check -- without it, a renderer that
+ * preserved the alias would pass the round trip and quietly make the waiver
+ * wrong.
+ */
+static void the_alias_spellings_round_trip(void)
+{
+	char *macvlan;
+	char *vxlan;
+	char *tunnel;
+	char *dns;
+
+	round_trips("device mv0 {\n\tmacvlan {\n\t\tdev = \"eth0\"\n"
+	    "\t\tmode = \"bridge\"\n\t}\n}\n",
+	    "a macvlan named by `dev` rather than `parent` round trips");
+	macvlan = rendering_of("device mv0 { macvlan { dev = \"eth0\" } }\n");
+	check(macvlan && holds(macvlan, "parent = \"eth0\"") &&
+	        lacks(macvlan, "dev ="),
+	    "and comes back as `parent`, which is the spelling the renderer writes");
+	free(macvlan);
+
+	round_trips("device vx0 {\n\tvxlan {\n\t\tvni = 100\n"
+	    "\t\tdev = \"eth0\"\n\t}\n}\n",
+	    "a vxlan named by `vni` and `dev` round trips");
+	vxlan = rendering_of("device vx0 { vxlan { vni = 100; dev = \"eth0\" } }\n");
+	check(vxlan && holds(vxlan, "id = 100") && holds(vxlan, "parent = \"eth0\"") &&
+	        lacks(vxlan, "vni"),
+	    "and comes back as `id` and `parent`, both canonical");
+	free(vxlan);
+
+	/* `vni` is an alias of `key` in a tunnel and of `id` in a vxlan -- one
+	 * word reaching two different canonical names, which is the case a single
+	 * waiver line could most easily be wrong about. */
+	round_trips("device gt0 {\n\ttunnel {\n\t\tmode = \"gretap\"\n"
+	    "\t\tlocal = \"192.0.2.10\"\n\t\tremote = \"198.51.100.10\"\n"
+	    "\t\tvni = 7\n\t}\n}\n",
+	    "and a tunnel's `vni` round trips, where it means `key` instead");
+	tunnel = rendering_of("device gt0 { tunnel { mode = \"gretap\"; "
+	    "local = \"192.0.2.10\"; remote = \"198.51.100.10\"; vni = 7 } }\n");
+	check(tunnel && holds(tunnel, "key = 7") && lacks(tunnel, "vni"),
+	    "as `key`, not as the `id` the same word means one block over");
+	free(tunnel);
+
+	round_trips("global {\n\tdns {\n\t\tdns_mode = \"dnsmasq\"\n"
+	    "\t\tdns_search = [\"example.com\"]\n"
+	    "\t\tdns_domains = [\"corp.example.com\"]\n\t}\n}\n",
+	    "the three flat `dns_` spellings round trip inside a dns block");
+	dns = rendering_of("global { dns { dns_mode = \"dnsmasq\"; "
+	    "dns_search = [\"example.com\"]; dns_domains = [\"corp.example.com\"] } }\n");
+	check(dns && holds(dns, "mode = \"dnsmasq\"") && holds(dns, "search") &&
+	        holds(dns, "domains") && lacks(dns, "dns_mode") &&
+	        lacks(dns, "dns_search") && lacks(dns, "dns_domains"),
+	    "and come back as `mode`, `search` and `domains`");
+	free(dns);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2102,6 +2179,7 @@ int main(int argc, char **argv)
 	an_access_point_round_trips();
 	ethtool_and_qdisc_round_trip();
 	a_default_roam_block_survives();
+	the_alias_spellings_round_trip();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

@@ -12385,6 +12385,70 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.428 The five aliases had no round-trip evidence, and the docs ship one
+
+10.427's gate waives five keys as aliases. Asked separately -- **which of the
+125 keys does no corpus in this tree set?** -- the answer is the same five:
+
+    125 keys; set by at least one corpus 120, by none 5
+    example 111   schema 110   lower 63   render 39
+    the five: dev, vni, dns_mode, dns_search, dns_domains
+
+**Two instruments, different methods, one answer.** The waiver list came from
+reading the renderer's string literals and the lowering's arms; this came from
+grepping four corpora for an assignment. Agreement across those is worth having
+-- and it is also the finding, because what both are saying is that **the alias
+spellings are exercised by nothing.** If `dev` stopped reaching the same field
+as `parent`, every test passed and the gate stayed green: the gate reads source
+text, and the corpora only ever use the canonical name.
+
+**And the untested spelling is one the documentation hands out.**
+`doc/interface-report.md` writes `global { dns { dns_mode = "dnsmasq" } }` as an
+example to copy. Three decision records use `dns_mode` in prose too. So the
+alias is not a legacy corner nobody reaches; it is what a reader following this
+project's own documents would type.
+
+### Each case asserts two halves, because the round trip cannot see one of them
+
+`the_alias_spellings_round_trip` in `render_test.c` covers all five, and every
+case asserts the document survives **and** that the rendering carries the
+canonical spelling. The second is not belt-and-braces. Two sabotages, each
+caught by a different half:
+
+    `dev` removed from `lower_macvlan`   round trip FAILS: unknown macvlan key
+    renderer writes `dev`, not `parent`  round trip PASSES, canonical FAILS
+
+**The second is the one worth keeping.** A renderer that preserved the alias
+renders `dev = "eth0"`, which the lowering accepts, which compiles to the same
+document -- so `round_trips` passes and reports nothing. The round-trip corpora
+are structurally unable to police normalisation, however many of them there
+are, because the property they check is blind to which of two accepted names
+came out. Only the text assertion can see it, which is what turns the waiver
+file's reason from a sentence into a check.
+
+**`vni` is the case a single waiver line could most easily have been wrong
+about**, so it gets two: one word reaching two different canonical names, `key`
+in a tunnel and `id` in a vxlan. Each is asserted by name rather than by the
+pair being mentioned.
+
+### A fixture is a claim too
+
+The first version of the dns case set `dns_mode = "none"` with domains, and the
+compiler refused it: *"dns scope globals uses routing domains, which mode none
+cannot express."* Correct, and a reminder that a test's own configuration is as
+much an assertion about the language as the check underneath it -- the fixture
+was wrong, not the compiler, and only running it says which.
+
+### And a sabotage that did not land reads exactly like a passing check
+
+The first attempt at the renderer sabotage was a `sed` whose escaping did not
+match, so the file was untouched and the suite reported `ok` for a check I
+believed I had broken. Caught by grepping the line afterwards. The second
+attempt hit the opposite guard and is the better outcome: an anchor matching
+two sites refused to apply at all, because `lower_kind.c` carries the same
+`parent`/`dev` arm four times, and an assertion on the match count is what
+stopped the edit landing in `lower_vxlan` while the report said macvlan.
+
 ## 10.427 Ask the language, not a document: a key-coverage gate
 
 10.425's defect was found because one example happened to set the field. That is
