@@ -1245,6 +1245,12 @@ packaging:
 	@# whose tests are to follow has not been ported; this is that sentence
 	@# with something behind it.
 	@python3 tool/c_tests_gate.py
+	@# Every key the configuration language accepts against what the renderer
+	@# writes. `require_lease` was accepted, defaulted on, and written nowhere,
+	@# so a saved profile came back requiring a lease its probe had been told
+	@# not to -- found by one example setting it, and invisible to every
+	@# instrument that starts from a document.
+	@python3 tool/key_coverage_gate.py
 	@# And every public header in one file. `tun.h` declared an enum `document.h`
 	@# already had, so any translation unit including both failed to compile --
 	@# and none did, so the module built and its tests passed.

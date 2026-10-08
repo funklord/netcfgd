@@ -425,9 +425,9 @@ static void render_eap(const ncfg_eap_config_t *eap, ncfg_buf_t *body)
  * one is not a probe: the parser refuses the block outright, so a rendered
  * profile that left it out would be one that no longer compiles.
  *
- * `require_lease` is deliberately not written. It defaults on, the
- * configuration language has no key for it, and there is therefore nothing an
- * operator could have chosen for a snapshot to preserve.
+ * `require_lease` is the exception and reads inverted: it is written only when
+ * it is OFF, because its default is on. The reasoning is at the write itself,
+ * along with how the omission was found.
  */
 static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
 {

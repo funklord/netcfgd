@@ -12385,6 +12385,109 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.427 Ask the language, not a document: a key-coverage gate
+
+10.425's defect was found because one example happened to set the field. That is
+the whole of why it took four instruments to reach it: **every corpus starts
+from a document, so a key no document sets is a key no corpus can ask about.**
+Four of them agreeing proves only that the union of their documents is covered.
+
+So this one starts from the other end. `tool/key_coverage_gate.py` reads the
+keys a config file can actually set -- the `strcmp(key, "...")` arms in
+`c/src/compile/lower_*.c` -- and the string literals the renderer emits, and
+fails on a key in the first that is absent from the second.
+
+    125 keys accepted by the lowering, 120 written by the renderer,
+    5 waived with a reason
+
+**The five are spellings, not fields**, and the waiver file says which: `dev`
+for `parent`, `vni` for `id` in a vxlan and `key` in a tunnel, and the flat
+`dns_mode`/`dns_search`/`dns_domains` for the keys inside a `dns` block. A
+document setting an alias comes back spelled the other way and compiles to the
+same document, so the round trip holds -- `profile save` does not promise to
+preserve which of two names an operator typed. The file says in as many words
+that a non-alias does not belong there, because waiving `require_lease` would
+have been the gate agreeing with the defect.
+
+**The waiver list is held to the tree in both directions**, which is what stops
+it becoming a list nobody has re-read: a waived key that has left the language
+fails, and so does a waived key the renderer has started writing. All three
+arms were made to fire, each with its own message, before the gate was wired in.
+
+### The denominator that did not work, and why that is worth a paragraph
+
+`c/src/compile/scope.c` looked like the natural source -- 138 rows of
+`{ NCFG_BLOCK..., key, number }`, 63 of them under `interface`. It is the wrong
+list, and its own header says so: it registers keys that **travel**, and
+`device` and `bluetooth` "have no range because they are host-private entire:
+nothing in them travels, so nothing in them has a number."
+
+So a coverage proof built on it would have had no opinion about any device key
+-- which is where 10.423's tunnel-family bug and 10.381's ethtool toggles both
+were. **A denominator that excludes the region the defects came from is worse
+than none, because it reports a percentage.** The lowering's arms are the
+language; the registry is a subset of it with a different job.
+
+### Three instrument faults on the way to it, all mine
+
+**The first asked prose.** Reaching for enumerating diagnostics -- "an advertise
+block takes backend, prefixes, managed..." -- the pattern matched any string
+containing `takes` or `one of`, swept 697 words out of comments, and reported
+180 missing including `asymmetry`, `business` and `ncfg_diag_t`. Most unknown-key
+diagnostics do not enumerate at all; only about a dozen do.
+
+**The second could not see a tab.** Extracting words from string literals,
+`"\t\teap = "` yields `teap` and never `eap`, because the escape fuses with
+the name after it. 60 keys were reported unwritten, every one of them written,
+and the list was plausible enough -- `command`, `guard`, `identity` -- to read
+as a finding. `evidence.md` names this exact shape: a pattern that cannot match
+a tab-indented name, in a workspace where everything is tab-indented.
+
+**The third was a false claim about my own evidence, and it is the one worth
+keeping.** The docstring said comment-stripping was load-bearing: that the
+paragraph discussing `require_lease` would otherwise cover the key and the
+sabotage would pass. **It would not.** Only string literals are read, so comment
+prose was never going to match, and with the stripping disabled the sabotage
+still fires -- which I only found because I went to demonstrate the claim
+instead of asserting it.
+
+What stripping does buy is a literal scan that stays synchronised. Measured with
+it off: 173 extra words, among them `ists`, `ound`, `riting` and `sked` --
+`exists`, `found`, `writing` and `asked` with their beginnings eaten, which is
+what a scan reading prose as a literal looks like after a quote in a comment
+paired with the wrong one. None of the 173 is a key today, so the guard is real
+and undemonstrated rather than proven. The docstring says that now.
+
+### What it found: a comment that outlived the fix below it
+
+`render_probe`'s header said `require_lease` "is deliberately not written. It
+defaults on, the configuration language has no key for it, and there is
+therefore nothing an operator could have chosen for a snapshot to preserve."
+
+Every clause of that is what I believed before 10.425, and the sentence survived
+10.425's own commit -- sitting 54 lines above the write that disproves it. **A
+stale comment is worse here than a stale document claim**, because it does not
+merely describe the renderer, it tells the next reader the renderer is right to
+write nothing. The gate did not detect it; looking for `require_lease` in order
+to build the control did.
+
+### What it does not promise
+
+It asks whether the renderer **mentions** a key, not whether it writes it
+correctly, under the right condition, with the right value, or in the right
+block. A key emitted into the wrong block passes. It cannot see a key accepted
+somewhere other than a `strcmp(key, ...)` arm -- a modifier parsed positionally,
+a word inside a phrase. The word test is deliberately loose, because the three
+routes a key reaches the output by (inline in a format string, as
+`ncfg_render_list_emit`'s key argument, as a bare literal in a table or a
+`render_toggle` call) share only that the key is spelled somewhere; enumerating
+the helpers is a list that rots.
+
+So it is a tripwire on the one failure that has now happened twice -- an arm
+added with nobody having thought about rendering it -- and not a proof of
+coverage. The round-trip corpora remain what establishes that a document comes
+back.
+
 ## 10.426 The mutation sweep finds nothing, and the method is the result
 
 The fourth instrument, and the last one the Rust had that the C did not: mutate
@@ -12445,10 +12548,16 @@ Four instruments, and the order they were applied in is the finding:
 Each of the first three found what the others could not, and the fourth found
 nothing on top of them. **That is the honest reading of "the renderer is
 complete": not that nobody can think of a gap, but that four instruments
-disagreeing about where to look now agree there is nothing there.** The next
-gap, if there is one, needs a corpus none of these four reaches -- the
-observer's documents, or a machine's real state -- rather than a fifth way of
-asking the same four.
+disagreeing about where to look now agree there is nothing there.**
+
+~~The next gap, if there is one, needs a corpus none of these four reaches --
+the observer's documents, or a machine's real state.~~ **Measured, and there is
+no such corpus: the renderer never sees an observed document.** Both callers of
+`ncfg_profile_save` hand it a compiled one -- `ncfg_cli_compile_to_read` in
+`c/src/cli/profile.c`, and `desk->state->desired` in
+`c/src/main/daemon_answer.c` -- so a document the compiler cannot produce is
+one the renderer is never asked to write. What was left was not a fifth corpus
+but a different question, which 10.427 asks.
 
 ## 10.425 A probe's `require_lease` was dropped, found by asking the example file
 

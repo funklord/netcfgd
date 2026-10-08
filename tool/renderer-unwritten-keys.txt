@@ -1,0 +1,18 @@
+# Keys the configuration language accepts that the renderer deliberately never
+# writes, read by tool/key_coverage_gate.py. One key, then the reason.
+#
+# Every entry here is a SPELLING, not a field: the lowering accepts two names
+# for one thing, and the renderer picks one. A document setting the alias comes
+# back spelled the other way and compiles to the same document, so the round
+# trip holds -- `ncfg profile save` is not promised to preserve which of two
+# names an operator typed, only what the machine is configured to do.
+#
+# A key that is NOT an alias does not belong here. The one this gate was
+# written for, `require_lease`, was a field with nowhere else to go, and
+# waiving it would have been the gate agreeing with the defect.
+
+dev          alias of `parent`, taken by macvlan, pppoe, tunnel and vxlan; the renderer writes `parent`
+vni          alias of `id` in a vxlan and of `key` in a tunnel; the renderer writes those
+dns_mode     flat spelling of `mode` inside `dns`; the renderer writes the block form
+dns_search   flat spelling of `search` inside `dns`; the renderer writes the block form
+dns_domains  flat spelling of `domains` inside `dns`; the renderer writes the block form
