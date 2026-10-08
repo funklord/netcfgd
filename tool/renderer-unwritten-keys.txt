@@ -16,3 +16,7 @@ vni          alias of `id` in a vxlan and of `key` in a tunnel; the renderer wri
 dns_mode     flat spelling of `mode` inside `dns`; the renderer writes the block form
 dns_search   flat spelling of `search` inside `dns`; the renderer writes the block form
 dns_domains  flat spelling of `domains` inside `dns`; the renderer writes the block form
+other        alias of `other_config` in an advertise block; the renderer writes the long name
+prefix       singular alias of `prefixes` in an advertise block, which the renderer writes as a list
+user         alias of `username`, taken by pppoe and openvpn; the renderer writes `username`
+file         alias of `config` in an openvpn tunnel; the renderer writes `config`

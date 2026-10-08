@@ -12385,20 +12385,23 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
-## 10.428 The five aliases had no round-trip evidence, and the docs ship one
+## 10.428 The nine aliases had no round-trip evidence, and the docs ship one
 
-10.427's gate waives five keys as aliases. Asked separately -- **which of the
-125 keys does no corpus in this tree set?** -- the answer is the same five:
+10.427's gate waived five keys as aliases. Asked separately -- **which of the
+125 keys does no corpus in this tree set?** -- the answer was the same five:
 
     125 keys; set by at least one corpus 120, by none 5
     example 111   schema 110   lower 63   render 39
     the five: dev, vni, dns_mode, dns_search, dns_domains
 
-**Two instruments, different methods, one answer.** The waiver list came from
-reading the renderer's string literals and the lowering's arms; this came from
-grepping four corpora for an assignment. Agreement across those is worth having
--- and it is also the finding, because what both are saying is that **the alias
-spellings are exercised by nothing.** If `dev` stopped reaching the same field
+**Two instruments, different methods, one answer** -- the waiver list from
+reading the renderer's literals and the lowering's arms, this from grepping
+four corpora for an assignment. And the agreement was not the end of it: asking
+the second question a third way, **which keys does only ONE corpus set**, is
+what exposed two false passes in the gate and took the alias count from five to
+nine. That is the next section.
+
+What all of it says is that **the alias spellings were exercised by nothing.** If `dev` stopped reaching the same field
 as `parent`, every test passed and the gate stayed green: the gate reads source
 text, and the corpora only ever use the canonical name.
 
@@ -12407,6 +12410,52 @@ text, and the corpora only ever use the canonical name.
 example to copy. Three decision records use `dns_mode` in prose too. So the
 alias is not a legacy corner nobody reaches; it is what a reader following this
 project's own documents would type.
+
+### The gate had two false passes, and the third question found them
+
+Which keys does only one corpus set? Five -- `group`, `other_config`, `prefix`,
+`protocol`, `user` -- and two of those should not have been passing the gate at
+all. Asking *which literal covers each* is what showed it:
+
+    prefix    "an advertise block with no prefix"       a REFUSAL sentence
+    user      "user:%s"                                 a principal's spelling
+    group     "\t\tgroup = "                               a real write
+    protocol  "\t\tprotocol = \"%s\"\n"                      a real write
+
+**So the gate was passing two keys on the strength of a sentence.** Both
+verdicts happened to be right -- each is an alias the renderer legitimately
+does not write -- which is the uncomfortable part: **correct by luck, and a
+genuine gap with either spelling would have gone straight through.** The
+docstring had named this weakness ("the word test is deliberately loose") and
+naming it is not the same as knowing it had fired.
+
+**Tightened to the two shapes an emission actually takes**: an assignment
+inside a format string, or a literal that is nothing but the key -- which
+covers `render_toggle(body, "autoneg", ...)`, `ncfg_render_list_emit`'s key
+argument and the `{ "interval", 30 }` rows a `"%s = %lld"` format reads its
+name from. A refusal sentence satisfies neither, and nor does `"user:%s"`.
+
+**The tightening has a discriminating control rather than a reshuffle's.**
+Replace `mtu`'s write with the sentence *"a device whose mtu cannot be
+written"* and the two tests disagree:
+
+    loose test   mtu written: yes      <- the false pass, demonstrated
+    tight test   mtu written: no       <- fails, naming mtu
+
+That is the pair `evidence.md` asks for: not that the new check passes, but a
+case where old and new give opposite answers.
+
+**It cost four more waivers and found four more untested aliases** -- `prefix`
+for `prefixes` and `other` for `other_config` in an advertise block, `user` for
+`username` in pppoe and openvpn, and `file` for `config` in an openvpn tunnel.
+Nine waived now, 116 written, and every one of the nine has a case.
+
+**Two of the nine were found by the corpus question and four by the tightening,
+and neither question could have found the other's.** The corpus count sees a
+key no document sets; the shape test sees a key whose coverage is a sentence.
+`prefix` and `user` happen to be in both sets, which is why the cross-check
+worked at all -- they were the handhold that showed the gate's own stated
+weakness was live.
 
 ### Each case asserts two halves, because the round trip cannot see one of them
 

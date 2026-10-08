@@ -2120,6 +2120,9 @@ static void the_alias_spellings_round_trip(void)
 	char *vxlan;
 	char *tunnel;
 	char *dns;
+	char *advertise;
+	char *pppoe;
+	char *openvpn;
 
 	round_trips("device mv0 {\n\tmacvlan {\n\t\tdev = \"eth0\"\n"
 	    "\t\tmode = \"bridge\"\n\t}\n}\n",
@@ -2163,6 +2166,46 @@ static void the_alias_spellings_round_trip(void)
 	        lacks(dns, "dns_search") && lacks(dns, "dns_domains"),
 	    "and come back as `mode`, `search` and `domains`");
 	free(dns);
+
+	/*
+	 * The four found by tightening the gate rather than by the corpus count.
+	 * Each was passing the loose word test for the wrong reason -- `prefix`
+	 * because two refusal sentences mention a prefix, `user` because
+	 * `render.c` spells a principal `"user:%s"` -- so each is both an alias
+	 * worth exercising and a verdict the gate used to reach by luck.
+	 */
+	round_trips("interface wan0 {\n\tconfig = \"dhcp6 pd\"\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.0.2.1/24\"\n"
+	    "\tadvertise {\n\t\tprefix = [\"@pd:wan0\"]\n"
+	    "\t\tother = true\n\t}\n}\n",
+	    "an advertise block using `prefix` and `other` round trips");
+	advertise = rendering_of("interface wan0 { config = \"dhcp6 pd\" }\n"
+	    "interface lan0 { config = \"192.0.2.1/24\"\n"
+	    "\tadvertise { prefix = [\"@pd:wan0\"]; other = true } }\n");
+	check(advertise && holds(advertise, "prefixes") &&
+	        holds(advertise, "other_config = true") && lacks(advertise, "prefix ="),
+	    "and comes back as `prefixes` and `other_config`");
+	free(advertise);
+
+	round_trips("device ppp0 {\n\tpppoe {\n\t\tparent = \"e0\"\n"
+	    "\t\tuser = \"u\"\n\t\tpassword = \"@secret:p\"\n\t}\n}\n",
+	    "a pppoe session naming `user` rather than `username` round trips");
+	pppoe = rendering_of("device ppp0 { pppoe { parent = \"e0\"; user = \"u\"; "
+	    "password = \"@secret:p\" } }\n");
+	check(pppoe && holds(pppoe, "username = \"u\"") && lacks(pppoe, "user ="),
+	    "and comes back as `username`");
+	free(pppoe);
+
+	round_trips("device vpn0 {\n\topenvpn {\n"
+	    "\t\tfile = \"/etc/openvpn/work.ovpn\"\n\t\tuser = \"u\"\n"
+	    "\t\tpassword = \"@secret:vpn\"\n\t}\n}\n",
+	    "an openvpn tunnel naming `file` and `user` round trips");
+	openvpn = rendering_of("device vpn0 { openvpn { file = \"/etc/openvpn/work.ovpn\"; "
+	    "user = \"u\"; password = \"@secret:vpn\" } }\n");
+	check(openvpn && holds(openvpn, "config = \"/etc/openvpn/work.ovpn\"") &&
+	        holds(openvpn, "username = \"u\"") && lacks(openvpn, "file ="),
+	    "and comes back as `config` and `username`");
+	free(openvpn);
 }
 
 int main(int argc, char **argv)

@@ -136,25 +136,42 @@ def language_keys():
 	return keys
 
 
-def rendered_words():
-	"""Every word appearing in a string literal in the renderer.
+def written_keys():
+	"""Every key the renderer is seen to write, in the shapes it writes them.
 
-	Deliberately loose. A key reaches the output three ways -- inline in a
-	format string, as the key argument of `ncfg_render_list_emit`, or as a
-	bare literal passed to a helper or sat in a table -- and enumerating the
-	helpers is a list that rots. What they share is that the key is spelled
-	somewhere as a literal.
+	The first version of this asked only whether a key's name appeared in any
+	string literal, which is too loose in the one direction that matters: it
+	passes a key on the strength of a sentence. Two did. `prefix` was counted as
+	written because two REFUSAL messages mention a prefix, and `user` because
+	`render.c` spells a principal `"user:%s"`. Both verdicts happened to be
+	right -- each is an alias the renderer legitimately does not write -- so the
+	gate was correct by luck, and a real gap with either spelling would have
+	gone straight through.
+
+	So match the two shapes an emission actually takes, and nothing else:
+
+	  (a) an assignment inside a format string, `"\\tmtu = %lld\\n"`, which is
+	      how most keys go out;
+	  (b) a literal that is nothing but the key, which covers the bare-argument
+	      and table forms -- `render_toggle(body, "autoneg", ...)`,
+	      `ncfg_render_list_emit(body, "\\t", "routes", ...)`, and the
+	      `{ "interval", 30 }` rows a `"%s = %lld"` format reads its name from.
+
+	A refusal sentence satisfies neither, and neither does `"user:%s"`.
 	"""
-	words = set()
+	written = set()
 	for path in RENDER:
 		text = strip_comments(path.read_text(encoding="utf-8"))
 		for literal in re.findall(r'"((?:[^"\\]|\\.)*)"', text):
-			# Replace each escape with a space before splitting into words. A
-			# `\t` otherwise fuses with the name after it, so `"\t\teap = "`
-			# yields `teap` and never `eap` -- which made the first run of this
-			# gate report 60 keys unwritten, every one of them written.
-			words.update(re.findall(r"[a-z][a-z0-9_]*", re.sub(r"\\.", " ", literal)))
-	return words
+			# An escape becomes a break rather than vanishing, so that `\\t\\teap`
+			# yields `eap` and not `teap` -- the fault that made the first run of
+			# this gate report 60 written keys as missing.
+			plain = re.sub(r"\\[tn]", "\n", literal)
+			written.update(re.findall(r"(?:^|\n|\s)([a-z][a-z0-9_]*) =", plain))
+			bare = plain.strip("\n ")
+			if re.fullmatch(r"[a-z][a-z0-9_]*", bare):
+				written.add(bare)
+	return written
 
 
 def waivers():
@@ -175,7 +192,7 @@ def waivers():
 
 def main():
 	keys = language_keys()
-	written = rendered_words()
+	written = written_keys()
 	waived = waivers()
 	if not keys or not written:
 		sys.exit("key_coverage_gate: read no keys or no renderer, so checked nothing")
