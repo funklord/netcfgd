@@ -113,10 +113,13 @@ export DEBIAN_FRONTEND=noninteractive
 timeout 300 apt-get -qq update 2>&1 | tail -2
 for pkg in kea-dhcp6-server radvd git cmake build-essential pkg-config \
 	libjson-c-dev; do
-	if timeout 600 apt-get -qq -y install "$pkg" >/dev/null 2>&1; then
+	# Why it failed, not just that it did -- see the note in `init.sh`, where
+	# a bare `NOT AVAILABLE` cost a guest run.
+	if timeout 600 apt-get -qq -y install "$pkg" > "/tmp/apt.$pkg" 2>&1; then
 		echo "    $pkg: installed"
 	else
-		echo "    $pkg: NOT AVAILABLE"
+		echo "    $pkg: NOT AVAILABLE, and apt said:"
+		sed 's/^/      /' "/tmp/apt.$pkg" | tail -8
 	fi
 done
 

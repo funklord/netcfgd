@@ -1864,6 +1864,12 @@ vm-delegation: vm-image
 	VM_GUEST=debian VM_TIMEOUT=1800 sh tool/vm/run.sh \
 		tool/vm/payload/delegation.sh
 
+# The two init integrations nothing has ever executed: the LSB script and the
+# `openrc-run` one. Debian packages `openrc`, so one guest runs both against
+# the ordinary glibc binary -- which Alpine cannot, being musl.
+vm-init: vm-image
+	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/init.sh
+
 # Separate, because the fetch is the only part that needs the internet and it
 # is a no-op once the images are in place. Both guests: Alpine for kernel and
 # module work, Debian for netcfgd's own suite and for systemd.

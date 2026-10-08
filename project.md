@@ -9546,6 +9546,65 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.183 The LSB init script works; the openrc one cannot be tested here
+
+netcfgd ships four init integrations and `sandbox_writes.sh` covers one.
+`packaging/sysvinit/netcfgd` -- 124 lines, which also serves OpenRC on Debian
+-- and `packaging/openrc/netcfgd` -- 28 lines of `openrc-run` -- **had never
+been executed anywhere**, and procd needs OpenWrt and stays out of reach.
+
+`tool/vm/payload/init.sh` and `make vm-init` run them in a Debian guest, which
+needs no new image and no host installs: the daemon is the ordinary glibc
+binary, copied in from the read-only mount rather than symlinked, because
+`start-stop-daemon --exec` resolves the path and compares it against
+`/proc/<pid>/exe`.
+
+**The LSB script passes seven checks, including the two its own comments
+promise:** that the runtime directory is made, and that stop *leaves* it --
+0135's choice, because the record of what netcfgd installed has nowhere else to
+live and a restart that threw it away could not put those things back.
+
+**And it proves less than it looks, which the run itself revealed.** The guest
+runs systemd, whose `systemd-sysv-generator` turns a script in `/etc/init.d`
+into a unit -- so `start` printed *Starting netcfgd (via systemctl)* and
+`status` answered `Loaded: loaded (/etc/init.d/netcfgd; generated)`. What that
+does prove is worth having: the generator parses the LSB header, which is the
+part most likely to be malformed, and the script's own `start`, `stop` and
+`status` shell ran. What it does not prove is the script under *sysvinit*,
+where nothing generates a unit and `start-stop-daemon --background` is
+unsupervised.
+
+**The openrc half was claimed before it was measured, and the claim was
+wrong.** This payload first said a Debian guest could run both, on the grounds
+that Debian packages `openrc`. It does -- 0.56-1 in trixie, candidate confirmed
+in the guest -- and it still cannot be installed:
+
+	systemd-sysv : Conflicts: insserv but 1.26.0-1 is to be installed
+	openrc:amd64 Depends insserv
+
+Installing openrc on a systemd Debian means removing systemd as init, which apt
+will not do on the way to a dependency. That is structural. Alpine is the tier's
+other OpenRC guest and is musl while the binary is glibc, and the musl target
+was retired deliberately rather than pollute the host to serve a guest. **A
+`sysvinit-core` guest would close both halves at once** -- openrc installs
+there, and the LSB script would run under the init it is written for -- and
+that is a second image, so it is named rather than assumed.
+
+The payload reports that limit and counts it **neither as a pass nor as a
+failure**: a target that always goes red is one people learn to ignore, and a
+green `vm-init` that silently covered one of two integrations is the vacuous
+pass this tree keeps finding. It also fires a note if `openrc-run` ever turns
+up, because at that point this measurement has gone stale and the section should
+become real checks again.
+
+**Two of my own mistakes are in the history rather than hidden.** The install
+loop printed `NOT AVAILABLE` for every failure with apt's output sent to
+`/dev/null`, so the first run said the one wrong thing about the one question
+asked and a whole guest run bought nothing; all three payloads keep apt's output
+now. And the rewrite of the openrc section used `str.index` on an anchor that
+occurred twice, cutting the file at the wrong one -- the uniqueness assertion
+this tree's own rule asks for, left off the one edit that needed it.
+
 ## 10.182 Prefix delegation, proven end to end, by a profile nobody was testing
 
 `delegation.sh` had never run anywhere. It needs real root and `odhcp6c`, which

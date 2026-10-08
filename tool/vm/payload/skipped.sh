@@ -39,10 +39,13 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update 2>&1 | tail -2
 for pkg in wpasupplicant iw ppp pppoe odhcp6c kea-dhcp6-server radvd \
 	network-manager bluez python3-gi; do
-	if apt-get -qq -y install "$pkg" >/dev/null 2>&1; then
+	# Why it failed, not just that it did -- see the note in `init.sh`, where
+	# a bare `NOT AVAILABLE` cost a guest run.
+	if apt-get -qq -y install "$pkg" > "/tmp/apt.$pkg" 2>&1; then
 		echo "    $pkg: installed"
 	else
-		echo "    $pkg: NOT AVAILABLE"
+		echo "    $pkg: NOT AVAILABLE, and apt said:"
+		sed 's/^/      /' "/tmp/apt.$pkg" | tail -8
 	fi
 done
 echo
