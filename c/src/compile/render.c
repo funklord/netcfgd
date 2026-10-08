@@ -31,6 +31,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/lex.h"
 #include "ncfg/value.h"
 
 #include <stdarg.h>
@@ -311,6 +312,48 @@ void ncfg_render_list_emit(ncfg_buf_t *body, const char *indent, const char *key
 		ncfg_buf_addf(body, "[%s]\n", ncfg_buf_text(&list->joined));
 	} else {
 		ncfg_buf_addf(body, "%s\n", ncfg_buf_text(&list->joined));
+	}
+}
+
+/*
+ * A block label: bare where the lexer would read it back as one, quoted where
+ * it would not.
+ *
+ * **The names are not hypothetical.** An `interface` and a `device` label were
+ * always written bare, so a name the compiler accepts -- through a quoted
+ * label, which `parse.c` has always taken, or as a string in a bond's
+ * `members` -- could render to text that does not parse. `.th0` and `2eth` are
+ * both names the kernel creates happily, and a leading digit is an ordinary way
+ * to name a mobile interface (`4g0`). On such a machine `ncfg profile save`
+ * refused, because the snapshot it rendered would not compile.
+ *
+ * Asked of the lexer's own predicates rather than restating the rule, which is
+ * why `eth0.42` -- the universal spelling of a VLAN interface -- stays bare: a
+ * dot is legal inside an identifier and not at its start. A second copy of that
+ * rule would go wrong silently, the renderer emitting bare labels the lexer had
+ * stopped accepting.
+ *
+ * Found on the Rust side and fixed in both; the two renderers were written
+ * independently and had the same hole.
+ */
+void ncfg_render_label(ncfg_buf_t *text, const char *name)
+{
+	const unsigned char *bytes = (const unsigned char *)(name ? name : "");
+	size_t               i;
+	int                  bare;
+
+	/* An empty label cannot be bare: quoting says so, where writing nothing
+	 * would silently produce `device {`. */
+	bare = bytes[0] != '\0' && ncfg_is_ident_start(bytes[0]);
+	for (i = 1u; bare && bytes[i] != '\0'; i++) {
+		if (!ncfg_is_ident_continue(bytes[i])) {
+			bare = 0;
+		}
+	}
+	if (bare) {
+		ncfg_buf_add_text(text, (const char *)bytes);
+	} else {
+		ncfg_render_quote(text, (const char *)bytes);
 	}
 }
 

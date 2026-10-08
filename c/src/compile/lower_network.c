@@ -25,7 +25,7 @@
  * `@` is the DSL's existing mark for a value resolved elsewhere, as in
  * `@secret:NAME`.
  */
-static const char *const ssid_from_bssid = "@bssid";
+const char *const ncfg_ssid_from_bssid = "@bssid";
 
 /* ------------------------------------------------------------------------ *
  * The wifi keys
@@ -508,7 +508,7 @@ static void lower_network_key(ncfg_lower_ctx_t *ctx, ncfg_wifi_network_t *networ
 		if (!text) {
 			return;
 		}
-		if (strcmp(text, ssid_from_bssid) == 0) {
+		if (strcmp(text, ncfg_ssid_from_bssid) == 0) {
 			/* "I do not know what it is called; ask the access points."
 			 * Required rather than inferred from `bssid` alone -- a network's
 			 * label is its SSID by default, and quietly changing what that

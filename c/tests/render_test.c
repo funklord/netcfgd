@@ -504,6 +504,109 @@ static void the_unmanage_policy_defects(void)
  * list widens the network to any radio broadcasting the same name, which is
  * exactly what the key exists to prevent.
  */
+/*
+ * A network named by its access points says which state that is.
+ *
+ * **Absent is a statement, not an absence**, and `document.h` says so where the
+ * field is declared: absent means "whatever the access points in `bssid` call
+ * themselves", while omitting the key makes the SSID the block's label. Three
+ * states, and `render_network_keys` wrote nothing for the third -- so
+ * `ssid = "@bssid"` vanished, the document came back as a network named after
+ * its own label, and `ncfg profile save` refused on any machine with a network
+ * pinned by access point.
+ *
+ * Found on the Rust side and fixed in both: the two renderers were written
+ * independently and carried the same hole, which is the reason a finding over
+ * there is worth checking here rather than assumed to be that language's.
+ *
+ * The three states are kept apart deliberately. A renderer that wrote the
+ * marker for all three, or omitted all three, satisfies no two of these at
+ * once -- and a label-equal SSID must stay omitted, because that is what
+ * omitting it means and the shorter form is the faithful one.
+ */
+/*
+ * A name the kernel allows and the lexer will not read bare.
+ *
+ * **`ncfg profile save` refused on a machine with an interface named `4g0`.**
+ * `interface` and `device` labels were always written bare, the lexer reads a
+ * bare label as an identifier, and an identifier may not begin with a digit --
+ * so the snapshot rendered to text that does not compile, and the operator got
+ * no profile and a complaint about the renderer.
+ *
+ * The names were checked against the kernel rather than reasoned about:
+ * `ip link add .th0 type dummy` succeeds and so does `2eth`, while `eth0:1` is
+ * refused by the kernel and is not at issue. A leading digit is an ordinary way
+ * to name a mobile interface, which is the case worth caring about rather than
+ * the leading dot that found it.
+ *
+ * The control is `eth0.42`, which must stay bare: a dot is legal inside an
+ * identifier and not at its start, and that is the spelling Linux gives every
+ * VLAN interface. A renderer that quoted everything would rewrite every profile
+ * this tree writes, so both directions are asserted.
+ */
+static void a_label_the_lexer_cannot_read_bare(void)
+{
+	static const char *const quoted[] = { ".th0", "2eth", "4g0" };
+	static const char *const bare[] = { "eth0", "eth0.42", "br-lan" };
+	size_t                   i;
+
+	for (i = 0u; i < sizeof(quoted) / sizeof(quoted[0]); i++) {
+		char  config[128];
+		char  wanted[64];
+		char *out;
+
+		snprintf(config, sizeof(config), "device \"%s\" {\n\tmtu = 1400\n}\n", quoted[i]);
+		round_trips(config, "a label the lexer cannot read bare survives a round trip");
+		snprintf(wanted, sizeof(wanted), "device \"%s\" {", quoted[i]);
+		out = rendering_of(config);
+		check(out && strstr(out, wanted) != NULL,
+		    "and is written quoted rather than bare");
+		free(out);
+	}
+
+	for (i = 0u; i < sizeof(bare) / sizeof(bare[0]); i++) {
+		char  config[128];
+		char  wanted[64];
+		char *out;
+
+		snprintf(config, sizeof(config), "device %s {\n\tmtu = 1400\n}\n", bare[i]);
+		round_trips(config, "a label that is an identifier survives a round trip");
+		snprintf(wanted, sizeof(wanted), "device %s {", bare[i]);
+		out = rendering_of(config);
+		check(out && strstr(out, wanted) != NULL,
+		    "and stays bare, because quoting every label would rewrite every profile");
+		free(out);
+	}
+}
+
+static void a_network_named_by_its_access_points(void)
+{
+	char *pinned;
+	char *plain;
+
+	round_trips("network \"Lobby\" {\n"
+	    "\tbssid = \"aa:bb:cc:dd:ee:ff\"\n"
+	    "\tssid = \"@bssid\"\n"
+	    "\twifi { psk = \"@secret:lobby\" }\n}\n",
+	    "a network whose name is the access points' survives a round trip");
+
+	pinned = rendering_of("network \"Lobby\" {\n"
+	    "\tbssid = \"aa:bb:cc:dd:ee:ff\"\n"
+	    "\tssid = \"@bssid\"\n"
+	    "\twifi { psk = \"@secret:lobby\" }\n}\n");
+	check(pinned && strstr(pinned, "ssid = \"@bssid\"") != NULL,
+	    "and the marker is written rather than left to be guessed");
+	free(pinned);
+
+	/* The control. An SSID equal to the label is what omitting the key means,
+	 * so stating it would be noise -- and a renderer that wrote the marker
+	 * unconditionally would fail here. */
+	plain = rendering_of("network \"Cafe\" {\n\twifi { psk = \"@secret:cafe\" }\n}\n");
+	check(plain && strstr(plain, "ssid =") == NULL,
+	    "while a network named by its own label states no ssid at all");
+	free(plain);
+}
+
 static void the_wireless_network_drops(void)
 {
 	char *pinned;
@@ -1266,6 +1369,8 @@ int main(int argc, char **argv)
 
 	the_unmanage_policy_defects();
 	the_wireless_network_drops();
+	a_network_named_by_its_access_points();
+	a_label_the_lexer_cannot_read_bare();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();

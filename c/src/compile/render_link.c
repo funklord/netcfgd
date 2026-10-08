@@ -15,6 +15,7 @@
  * internal fails to resolve. Writing a second copy is how the two would come
  * to disagree about what `slaac` spells.
  */
+#include "lower_internal.h"
 #include "render_private.h"
 
 #include "ncfg/buf.h"
@@ -455,7 +456,8 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	}
 
 	ncfg_render_opening(text, "interface", name, overrides);
-	ncfg_buf_addf(text, "%s {\n%s}\n", name ? name : "", ncfg_buf_text(&body));
+	ncfg_render_label(text, name);
+	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
 	ncfg_buf_free(&body);
 }
 
@@ -513,6 +515,18 @@ static void render_network_keys(const ncfg_wifi_network_t *network, ncfg_buf_t *
 {
 	size_t i;
 
+	/* **Absent is a statement, not an absence**, which is what the first
+	 * version of this read it as. `document.h` says so where the field is
+	 * declared: absent means "whatever the access points in `bssid` call
+	 * themselves", while omitting the key makes the SSID the block's label.
+	 * Three states, and writing nothing for the third collapsed it into the
+	 * first -- `ssid = "@bssid"` vanished and the document came back as a
+	 * network named after its own label, so `ncfg profile save` refused on any
+	 * machine with a network pinned by access point.
+	 *
+	 * Found on the Rust side first and fixed there as well; the two renderers
+	 * were written independently and had the same hole. The marker's spelling
+	 * comes from the lowerer that defines it rather than being retyped here. */
 	if (network->ssid.has) {
 		size_t length = strlen(network->id ? network->id : "");
 
@@ -524,6 +538,10 @@ static void render_network_keys(const ncfg_wifi_network_t *network, ncfg_buf_t *
 			quote_ssid(body, &network->ssid);
 			ncfg_buf_add_char(body, '\n');
 		}
+	} else {
+		ncfg_buf_add_text(body, "\tssid = ");
+		ncfg_render_quote(body, ncfg_ssid_from_bssid);
+		ncfg_buf_add_char(body, '\n');
 	}
 	if (network->hidden) {
 		ncfg_buf_add_text(body, "\thidden = true\n");

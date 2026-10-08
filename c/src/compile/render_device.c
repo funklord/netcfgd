@@ -366,7 +366,8 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 	 * and see the paragraph above for what has to be written before this runs. */
 	if (ncfg_buf_text(&body)[0] != '\0') {
 		ncfg_render_opening(text, "device", name, overrides);
-		ncfg_buf_addf(text, "%s {\n%s}\n", name ? name : "", ncfg_buf_text(&body));
+		ncfg_render_label(text, name);
+		ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
 	}
 	ncfg_buf_free(&body);
 }

@@ -247,6 +247,14 @@ extern const char *const ncfg_link_name_help;
 /* The same, where a block is named for the link it declares. */
 extern const char *const ncfg_link_label_help;
 
+/* What an operator writes when the network's name is not theirs to state:
+ * `ssid = "@bssid"`, the SSID being whatever the access points in `bssid` are
+ * advertising. Declared here rather than left static to `lower_network.c`
+ * because the RENDERER needs the same spelling -- a network with no stated SSID
+ * has to be written back with this marker, and a second copy of the string is
+ * how the two halves would come to disagree about what the language says. */
+extern const char *const ncfg_ssid_from_bssid;
+
 /* The one place the "not an interface name" diagnostic is built. */
 int   ncfg_name_ok(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, const char *help);
 /* A string that has to be a name the kernel would take for a link. */
