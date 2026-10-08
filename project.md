@@ -12385,6 +12385,38 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.424 fmake answered the question 10.421 left open, and it does not arise
+
+Reported through `.git/cc-inbox/` on 2026-10-09, as their section 400 (`776ba00`).
+
+**The open question was whether fmake could tell a genuine parallel copy from a
+file two targets legitimately share.** For fmake it does not arise: it compiles
+a source once and closes the link set over objects, so a shared source is one
+unit with one definition. The stanza it prints reads oddly for this tree's
+shared `ncfg_json.c` because that file was never the case the stanza was for.
+
+That answer corrects 10.421's framing of the two counts, which is amended there
+rather than restated here.
+
+**What this tree's report changed on their side**, in their words: the refusal
+named one symbol and knew about the rest, and now says how many and names up to
+six. They cite the `ncfg_journal_t` pair as what made the case -- same name,
+same `free()` signature, different layouts, refused by nothing at compile time
+and nothing at link time.
+
+**And they met the control fault this tree keeps meeting.** A count off the row
+length would have invented "others" as soon as two targets were affected, so a
+control went in with it -- and their first sabotage of that control fired
+through a different assertion, so the control was never reached until they
+redid it. That is 10.422's own sabotage-did-not-land, in another tree, within
+a day. Two trees, independently, which is what makes it a class rather than
+one session's carelessness.
+
+They also made clear they were not hinting about this tree's `exclude` of the
+four Rust directories: the workspace reasons in `fmake.toml` are about
+inter-crate dependencies and features, which fmake does not resolve, and
+nothing in their section 150 touches them. So that comment stands as written.
+
 ## 10.422 The ingress shaper is undone, and the refusal's reason was wrong
 
 **Three refusals for one setting, so no machine shaping arriving traffic could
@@ -12475,11 +12507,28 @@ objects of the C daemon compiled, then a stop -- not on Cargo, which our README
 named as the obstacle and which 0266 removed, but on two duplicate symbols
 between the daemon's copy and the client's.
 
-### Two was the sample, twenty was the population
+### Two and twenty were counts of different things
 
-**Asked to rename the two, measured first, and the instrument matters.** fmake
-reported the two its first error batch named; `nm` over the two archives
-reports the set:
+**Asked to rename the two, measured first, and the instrument matters.** This
+section first read "two was the sample, twenty was the population", with fmake
+having "reported the two its first error batch named". fmake corrected that, and
+the correction is the useful part: **the two counts measure different things and
+neither was wrong.**
+
+fmake compiles a source once and closes its link set over *objects*, so a source
+two targets share is one unit with one definition and can never present as two
+providers. Its count is of files defining one symbol twice. `nm` over two
+archives counts symbols defined in both, which is the question archive
+composition turns on -- so the fourteen shared `ncfg_json_*` were in mine and
+were never in fmake's, and could not have been.
+
+Where the original framing *was* right is the other six: fmake knew about those
+and showed one, which is a display truncation and is fixed in its section 400 --
+it says how many now and names up to six, citing this tree's sentence that the
+four not shown were the dangerous ones. So: truncation for the six, a different
+metric for the fourteen, and "sample versus population" conflated the two.
+
+`nm` over the two archives reports the set this tree needed:
 
     nm --defined-only -g client/libncfg_client.a | awk '$2=="T"{print $3}'
     nm --defined-only -g c/libncfg.a             | awk '$2=="T"{print $3}'
