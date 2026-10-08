@@ -773,7 +773,7 @@ public:
 	 * and started the program again. A connection that is fine, or one that
 	 * was never opened, is left exactly as it is.
 	 */
-	bool reopen_if_broken();
+	bool reopen_if_broken(QString *error = nullptr);
 
 	/* Which machine this is. A client that can configure a router across the
 	 * room must never leave the operator unsure whose network it is about to

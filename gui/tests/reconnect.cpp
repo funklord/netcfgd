@@ -134,7 +134,8 @@ int main(int argc, char **argv)
 	}
 	check(true, "the daemon comes back");
 
-	check(connection.reopen_if_broken(), "and the connection reopens itself");
+	QString why;
+	check(connection.reopen_if_broken(&why), "and the connection reopens itself", why);
 	check(connection.is_open(), "which leaves it open again");
 	check(connection.links(&links, &error), "and answering questions", error);
 	/* Only where it died: a second call has nothing to do, and a client that

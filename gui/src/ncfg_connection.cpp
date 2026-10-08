@@ -98,9 +98,25 @@ bool ncfg_connection::is_open() const
 	return client != nullptr && !ncfg_client_broken(client);
 }
 
-bool ncfg_connection::reopen_if_broken()
+bool ncfg_connection::reopen_if_broken(QString *error)
 {
-	if (client == nullptr || !ncfg_client_broken(client)) {
+	/* **Three ways to return false and they are not the same answer**, which
+	 * is why each says which it was. This threw the reason away -- `QString
+	 * ignored` -- and `reconnect` then failed three checks with nothing to go
+	 * on but `not connected` from a later call, which is the message for a
+	 * null client and says nothing about why reopening did not work. The
+	 * caller in the window ignores all of this and is unaffected; the test is
+	 * the reader that needed it. */
+	if (client == nullptr) {
+		if (error) {
+			*error = QStringLiteral("there is no connection to reopen");
+		}
+		return false;
+	}
+	if (!ncfg_client_broken(client)) {
+		if (error) {
+			*error = QStringLiteral("the connection is not broken, so it is left alone");
+		}
 		return false;
 	}
 	/* The same path as it was opened on -- **copied**, not passed by
@@ -111,17 +127,43 @@ bool ncfg_connection::reopen_if_broken()
 	 * connection was living on. On a machine with no daemon at the default
 	 * path that fails, which is how the test caught it; on a machine running
 	 * netcfgd it SUCCEEDS, against the system daemon rather than the one the
-	 * caller named, and the test passes. */
+	 * caller named, and the test passes.
+	 *
+	 * The error goes to the caller rather than into a local nobody reads: a
+	 * failure here leaves no client at all, so a later `links()` says `not
+	 * connected` and says nothing about the reopen -- which is the whole
+	 * reason this function has an error out-parameter.
+	 *
+	 * Both halves of this were found separately, one on each branch, and each
+	 * fixed only its own: the copy without passing the error on, and the error
+	 * passed on without the copy. */
 	const QString where = path;
-	QString ignored;
-	return open(where, &ignored);
+	return open(where, error);
 }
 
 bool ncfg_connection::open(const QString &socket_path, QString *error)
 {
+	/*
+	 * **Copied before `close()`, because the caller may have handed us our own
+	 * member.** `close()` clears `path`, so a `socket_path` that aliased it was
+	 * emptied underneath this function, the empty string made `ncfg_client_open`
+	 * fall back to the default socket, and a client opened on any other path
+	 * reconnected to `/run/netcfgd/netcfgd.sock` instead of where it had been.
+	 *
+	 * `reopen_if_broken` copies into a local now as well, so no caller in this
+	 * file still passes the member by reference. This copy stays because it is
+	 * the one that holds for a caller who does: the hazard belongs to taking a
+	 * reference and then calling `close()`, which is this function's doing
+	 * rather than any caller's.
+	 *
+	 * It presented as a reconnect that did not happen: `reconnect` failed three
+	 * checks and the only message available was `not connected`, from a later
+	 * call, because a failed `open` has already closed the old client.
+	 */
+	const QByteArray requested = socket_path.toUtf8();
+
 	close();
 
-	const QByteArray requested = socket_path.toUtf8();
 	char message[NCFG_ERROR_MAX];
 
 	client = ncfg_client_open(requested.isEmpty() ? nullptr : requested.constData(), message,
