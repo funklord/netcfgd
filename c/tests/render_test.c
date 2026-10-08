@@ -394,8 +394,13 @@ static void render_the_witness(int argc, char **argv)
 		"a match block", "a qdisc metering arriving traffic",
 		"ingress_redirect", "global: dns options", "global: dnssec",
 		"global: dns transport", "global: a dns server with a port or sni",
-		"interface d-0: hooks", "interface d-0: advertise", "interface d-0: guard",
-		"an address with lifetimes or a peer", "delegated addressing",
+		/* `interface d-0: advertise` was here and renders now. */
+		/* `interface d-0: guard` was here and renders now. */
+		"interface d-0: hooks",
+		/* `an address with lifetimes or a peer` was here. All three of those
+		 * modifiers are in the language, so that refusal was reachable from an
+		 * ordinary config file and is closed. */
+		"delegated addressing",
 		"reported addressing", "a route with a scope", "a route with a proto",
 		"a dhcp lease's client id", "a dhcp lease's requested options",
 		"network n-eap: dns options" };
@@ -1008,6 +1013,131 @@ static void a_routes_source_and_onlink_round_trip(void)
 	check(holds(rendered, "\"198.51.100.0/24 via 192.0.2.99 onlink\""),
 	    "with `onlink` as a bare keyword at the end");
 	free(rendered);
+}
+
+/*
+ * A static address's three modifiers, which were refused as one.
+ *
+ * The refusal read "an address with lifetimes or a peer" and covered a case
+ * that can arrive from a config file and a case that cannot -- the lifetimes
+ * and the peer are all three in the language, so **a point-to-point link could
+ * not save a profile**, and the wording did not say which half was which.
+ *
+ * `peer` and `pointopoint` are two spellings the parser takes for one field, so
+ * the second of these round trips while its text comes back as the first. That
+ * is the round trip doing its job rather than a loss: what must survive is the
+ * document, and the document has one field.
+ */
+static void an_address_modifiers_round_trip(void)
+{
+	const char *text = "interface eth0 {\n\tconfig = \"192.0.2.1/32 peer 192.0.2.2\"\n}\n";
+	const char *both = "interface eth0 {\n"
+	    "\tconfig = \"2001:db8::1/64 preferred_lft 1800 valid_lft 3600\"\n}\n";
+	char       *rendered;
+
+	round_trips(text, "an address with a point-to-point peer round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "\"192.0.2.1/32 peer 192.0.2.2\""),
+	    "and the peer is beside the address, in the value the parser reads back");
+	free(rendered);
+
+	round_trips(both, "an address with both lifetimes round trips");
+	rendered = rendering_of(both);
+	check(holds(rendered, "preferred_lft 1800"), "with the preferred lifetime in seconds");
+	check(holds(rendered, "valid_lft 3600"), "and the valid one after it");
+	free(rendered);
+
+	round_trips("interface eth0 {\n"
+	    "\tconfig = \"192.0.2.1/32 pointopoint 192.0.2.2\"\n}\n",
+	    "and so does the other spelling of a peer");
+
+	/* `forever` is how the language says "no lifetime", and `set_lifetime`
+	 * stores it as absent -- so it must come back as nothing at all rather
+	 * than as a number. A renderer writing a sentinel here would produce a
+	 * document that compiles to something else. */
+	round_trips("interface eth0 {\n\tconfig = \"2001:db8::1/64 valid_lft forever\"\n}\n",
+	    "an address whose lifetime is `forever` round trips");
+	rendered = rendering_of("interface eth0 {\n"
+	    "\tconfig = \"2001:db8::1/64 valid_lft forever\"\n}\n");
+	check(!holds(rendered, "valid_lft"),
+	    "and says nothing, because absent is what `forever` compiles to");
+	free(rendered);
+}
+
+/*
+ * `advertise { }`, which decides whether anything behind this machine can
+ * configure itself at all.
+ *
+ * Losing it leaves a router that no longer tells the hosts on its LAN what their
+ * prefix is, so every one of them falls back to link-local and the network looks
+ * broken from the inside while the router itself is fine.
+ *
+ * **`dns` defaults to true and the other two flags to false**, so the three are
+ * not written the same way: `dns` appears only when it is off, `managed` and
+ * `other_config` only when they are on. A renderer treating all three alike
+ * produces a document that compiles and says something else.
+ */
+static void an_advertise_block_round_trips(void)
+{
+	const char *text = "interface wan0 {\n\tconfig = \"dhcp6 pd\"\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.0.2.1/24\"\n"
+	    "\tadvertise {\n\t\tbackend = \"radvd\"\n"
+	    "\t\tprefixes = [\"@pd:wan0\", \"@pd:wan0/3\"]\n"
+	    "\t\tmanaged = true\n\t\tother_config = true\n"
+	    "\t\tdns = false\n\t\tlifetime = 1800\n\t}\n}\n";
+	const char *plain = "interface wan0 {\n\tconfig = \"dhcp6 pd\"\n}\n"
+	    "interface lan0 {\n\tconfig = \"192.0.2.1/24\"\n"
+	    "\tadvertise { prefixes = [\"@pd:wan0\"] }\n}\n";
+	char       *rendered;
+
+	round_trips(text, "every field of an advertise block survives a round trip");
+	rendered = rendering_of(text);
+	check(holds(rendered, "backend = \"radvd\""),
+	    "and the backend is the daemon the policy named, not the one beside it in the enum");
+	check(holds(rendered, "prefixes = [\"@pd:wan0\", \"@pd:wan0/3\"]"),
+	    "with both prefix references, the subnet selector kept on the one that has it");
+	check(holds(rendered, "dns = false"),
+	    "and `dns` is stated, because true is its default and absence would mean that");
+	check(holds(rendered, "lifetime = 1800"), "and the lifetime it was given");
+	free(rendered);
+
+	/* The other direction: a policy at every default must write none of the
+	 * three flags, or a profile acquires lines that say what it already said. */
+	round_trips(plain, "a policy with nothing but a prefix survives one too");
+	rendered = rendering_of(plain);
+	check(!holds(rendered, "dns ="), "while `dns` at its default is left unsaid");
+	check(!holds(rendered, "managed"), "and so is `managed`");
+	check(!holds(rendered, "backend"), "and the backend, which is `auto`");
+	check(holds(rendered, "advertise {"), "though the block itself is still written");
+	free(rendered);
+}
+
+/*
+ * `guard`, whose loss is the most consequential in this file.
+ *
+ * The reason string is the whole value -- "eth0: nfs root" tells a reader what
+ * to go and stop, where a bare flag would not -- and an interface saved without
+ * its guard comes back as one netcfgd may take down. It was refused rather than
+ * dropped, so no machine with a guard could save a profile; this is the same
+ * fact with the refusal closed.
+ */
+static void a_guard_round_trips(void)
+{
+	const char *text = "interface eth0 {\n\tconfig = \"dhcp\"\n"
+	    "\tguard = \"eth0: nfs root\"\n}\n";
+	char       *rendered;
+
+	round_trips(text, "an interface's guard round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "guard = \"eth0: nfs root\""),
+	    "and the reason is kept whole, because the reason is the whole value");
+	free(rendered);
+
+	/* A reason carrying the character the text ends with. Nothing validates a
+	 * reason, so it is the renderer's to escape. */
+	round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n"
+	    "\tguard = \"the \\\"lab\\\" uplink\"\n}\n",
+	    "and so does one whose reason carries a quote");
 }
 
 /*
@@ -1693,6 +1823,9 @@ int main(int argc, char **argv)
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
+	an_address_modifiers_round_trip();
+	an_advertise_block_round_trips();
+	a_guard_round_trips();
 	per_port_vlans_round_trip();
 	every_psk_generation_round_trips();
 	an_empty_dns_block_survives_where_it_means_something();
