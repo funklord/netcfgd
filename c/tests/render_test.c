@@ -544,6 +544,45 @@ static void the_unmanage_policy_defects(void)
  * VLAN interface. A renderer that quoted everything would rewrite every profile
  * this tree writes, so both directions are asserted.
  */
+/*
+ * The hostname policy renders the spelling the language takes.
+ *
+ * **It wrote `from_dhcp` and the language only accepts `dhcp`.**
+ * `lower_global` compares against `"dhcp"`; anything else falls through to the
+ * hostname check, where `from_dhcp` is refused outright because an underscore
+ * is not legal in a hostname. So the renderer produced a document that does not
+ * compile, and `ncfg profile save` refused on any machine with
+ * `global { hostname = "dhcp" }` -- which is an ordinary thing to have.
+ *
+ * Found by round-tripping the 78 documents `lower_test.c` already compiles: a
+ * corpus written to exercise lowering, with no reason to ask about rendering,
+ * and the renderer's own suite had no case for this policy at all. The same
+ * defect was found in the Rust renderer earlier the same day; the two were
+ * written from one understanding and inherited the same mistake.
+ *
+ * The control is the static form beside it. A renderer that wrote `dhcp` for
+ * every hostname would pass the first check and fail the second.
+ */
+static void the_hostname_policy_round_trips(void)
+{
+	char *from_dhcp;
+	char *stated;
+
+	round_trips("global { hostname = \"dhcp\" }\n",
+	    "a hostname taken from DHCP survives a round trip");
+	from_dhcp = rendering_of("global { hostname = \"dhcp\" }\n");
+	check(from_dhcp && strstr(from_dhcp, "hostname = \"dhcp\"") != NULL,
+	    "and is written as the one spelling the language takes");
+	free(from_dhcp);
+
+	round_trips("global { hostname = \"router\" }\n",
+	    "and a stated hostname survives one too");
+	stated = rendering_of("global { hostname = \"router\" }\n");
+	check(stated && strstr(stated, "hostname = \"router\"") != NULL,
+	    "written as itself, not as the policy");
+	free(stated);
+}
+
 static void a_label_the_lexer_cannot_read_bare(void)
 {
 	static const char *const quoted[] = { ".th0", "2eth", "4g0" };
@@ -1371,6 +1410,7 @@ int main(int argc, char **argv)
 	the_wireless_network_drops();
 	a_network_named_by_its_access_points();
 	a_label_the_lexer_cannot_read_bare();
+	the_hostname_policy_round_trips();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();
