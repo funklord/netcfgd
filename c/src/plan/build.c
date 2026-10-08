@@ -265,16 +265,19 @@ uint32_t ncfg_builder_push(ncfg_builder_t *builder, const ncfg_op_t *op,
 	/*
 	 * **And the same for a device this plan declined to create**, for the
 	 * reason the paragraph above gives: a pass added later would not know to
-	 * ask. `link.create` for a bond, a macvlan or a tunnel is refused by this
-	 * build's executor -- `ncfg_kernel_newlink_of` builds no nest for them --
-	 * so the creation pass says so and notes the name, and every action
-	 * against that name afterwards is one that must fail.
+	 * ask. Where the creation pass declines a device it notes the name, and
+	 * every action against that name afterwards is one that must fail.
 	 *
-	 * Found by the frozen witness: `k-bond` is a bond, is not observed, and
-	 * collected a `bridge.vlan.add`, two sysctls, a `qdisc.set`, an
-	 * `ingress.redirect` and a `dns.apply` -- eighteen actions against a
-	 * device nothing would bring into existence, planned again on every
-	 * reconcile. The passes that emitted them are driven from the document
+	 * Found by the frozen witness, when a bond was still a kind the executor
+	 * could not create: `k-bond` was not observed and collected a
+	 * `bridge.vlan.add`, two sysctls, a `qdisc.set`, an `ingress.redirect` and
+	 * a `dns.apply` -- eighteen actions against a device nothing would bring
+	 * into existence, planned again on every reconcile. A bond is creatable
+	 * now, so that document no longer reproduces it. Two arms in `plan/link.c`
+	 * fill `declined` and only one of them can fire: a veth whose peer name is
+	 * taken, and the executor probe, which has no kind left to refuse. Absent
+	 * hardware and a `pppoe` are held back by `link_is_plannable` instead,
+	 * which is a different mechanism reaching the same answer. The passes that emitted them are driven from the document
 	 * rather than through `ncfg_plan_interface_contents`, which does ask, so
 	 * each of them would have had to ask separately and one of them always
 	 * forgets.

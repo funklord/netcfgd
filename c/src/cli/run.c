@@ -9,12 +9,17 @@
  *   test walks the usage looking for one that does not.
  *
  * WHAT AN ARM CAN BE
- *   Three things. A verb this wave carries, which runs. A verb whose module is
- *   not ported, which says so and names the module -- `ncfg_cli_print_status`
- *   is finished and tested, and what is missing is the observer that would
- *   feed it, so the refusal says that rather than pretending the command does
- *   not exist. And a verb that is a refusal in the Rust too, like `ncfg secret
- *   get`, which keeps the Rust's sentence because the sentence is the point.
+ *   Two things now. A verb this build carries, which runs. And a verb that is
+ *   a refusal in the Rust too, like `ncfg secret get`, which keeps the Rust's
+ *   sentence because the sentence is the point.
+ *
+ *   There was a third -- a verb whose module was not ported, which said so and
+ *   named the module, `ncfg_cli_print_status` waiting on an observer that had
+ *   not landed. No arm is that any more, and `ncfg --help` is byte-identical
+ *   between the two programs, which the agree gate compares. The shape is
+ *   recorded because it is the honest answer if a verb ever gets ahead of what
+ *   feeds it again: refuse naming the module, rather than pretend the command
+ *   does not exist.
  *
  * WHY ERRORS GO TO stderr WITHOUT GOING THROUGH out.c
  *   0261 changed `println!` and left `eprintln!` alone deliberately: stderr is
