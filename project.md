@@ -12429,6 +12429,28 @@ runs `DOT1Q`, `DOT1AD`. Reversed, a dot1ad vlan renders `dot1q`, which still
 compiles and silently changes the device. Reversing it fails four checks -- both
 round trips and both word assertions. Before the case existed it failed nothing.
 
+### Corroborating the new denominator against prose the author wrote
+
+Having just said a count inherits its detector, the new detector needed asking
+too. Three spellings of a key arm exist in the lowering -- `key`,
+`assignment->key` and `keyword` -- and the third is the positional class, which
+belongs to the 80 and not the 141. No `ncfg_str_eq`, no `strncmp`, no table
+lookup.
+
+That is still one reading. The independent one is the parser's **enumerating**
+diagnostics, eight of them, which name a block's keys in prose because somebody
+wrote the list out by hand:
+
+    8 diagnostics, 48 words, 28 not in the denominator -- and every one of the
+    28 is prose (`and`, `takes`, `only`, `that`), a block's name
+    (`advertise`, `bluetooth`, `openvpn`), or a positional keyword
+    (`via`, `src`, `onlink`) that is correctly in the other class
+
+So nothing a human wrote down as a key is outside the 141. It is a weak
+instrument -- eight messages out of some forty unknown-key diagnostics, most of
+which do not enumerate -- but it is not another grep over the same arms, which
+is the property that made it worth running.
+
 ### The same instrument fault, a third time, because the fix lived in the tool
 
 The corpus measurement first reported `agent` and `group` as set by no corpus.
