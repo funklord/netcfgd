@@ -78,7 +78,24 @@ static int rule_is_complete(ncfg_lower_ctx_t *ctx, const ncfg_routing_rule_t *ru
 	/* A rule that looks nothing up and does nothing else is a rule that has no
 	 * effect, and the most likely cause is a `lookup` somebody meant to
 	 * write. */
-	if (rule->action == NCFG_RULE_ACTION_LOOKUP && !rule->table.has) {
+	/* **`l3mdev` names no table because the VRF supplies one, and naming both
+	 * is a contradiction.** The kernel's `l3mdev` rule looks up whichever table
+	 * the enslaving VRF owns, which is not knowable here -- so a rule carrying
+	 * a `lookup` as well is asking for two different tables and the more
+	 * specific answer is to refuse it rather than pick one.
+	 *
+	 * Checked before the completeness rule below, which would otherwise refuse
+	 * the valid form: an `l3mdev` rule has no `lookup` and no `action` by
+	 * construction, which is exactly the shape that rule exists to catch.
+	 * Without this exception `l3mdev` was a key the parser accepted and no
+	 * document could carry, so a VRF rule could not be written at all. */
+	if (rule->l3mdev && rule->table.has) {
+		ncfg_diag(ctx, block->span,
+		    "rule `%s` is `l3mdev` and also names a table: the VRF the interface is "
+		    "enslaved to supplies the table, so drop the `lookup`", label);
+		return 0;
+	}
+	if (rule->action == NCFG_RULE_ACTION_LOOKUP && !rule->table.has && !rule->l3mdev) {
 		ncfg_diag(ctx, block->span, "rule `%s` looks up no table and names no action: %s",
 		    label, action_named
 		        ? "`action = \"lookup\"` needs a `lookup = N`"
@@ -169,6 +186,21 @@ int ncfg_lower_rule(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
 			ncfg_as_u32_opt(ctx, assignment->value, &rule.table);
 		} else if (strcmp(key, "suppress_prefixlength") == 0) {
 			ncfg_as_u32_opt(ctx, assignment->value, &rule.suppress_prefixlength);
+		} else if (strcmp(key, "invert") == 0) {
+			/* **Applied, observed and serialised, and until now unwritable.**
+			 * `ops_route.c` sets `FIB_RULE_INVERT` from this field,
+			 * `sys/rule.c` reads it back off a netlink dump and
+			 * `plan/model_json.c` writes it out -- every end was plumbed
+			 * except the one an operator writes, so a rule the kernel can
+			 * hold and netcfgd can see was one the language could not say.
+			 *
+			 * It inverts the SELECTORS rather than the action: a rule matching
+			 * everything except a prefix is how a policy carves one subnet out
+			 * of a table, and writing it the other way round means enumerating
+			 * the complement. */
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				rule.invert = flag;
+			}
 		} else if (strcmp(key, "l3mdev") == 0) {
 			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 				rule.l3mdev = flag;

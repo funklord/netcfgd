@@ -683,6 +683,95 @@ static const char header[] = "# Written by netcfgd from what this machine was ru
     "# everything explicitly -- including things a person would have left to\n"
     "# a default.\n";
 
+/*
+ * One `rule` block: a routing rule, as configuration text.
+ *
+ * **Refused wholesale until now**, so a machine with any policy routing could
+ * not save a profile -- and a rule is not a thing an operator writes by
+ * accident, so refusing it fell on exactly the configurations somebody had
+ * thought hardest about.
+ *
+ * `priority` is written unconditionally because it is what a rule is ordered by
+ * and the compiler requires one. Everything else is written only when it is
+ * there, which for the optional integers means asking `has` rather than
+ * comparing against a value a rule may legitimately hold.
+ *
+ * **`lookup`, not `table`.** The compiler reads both and the model calls it
+ * `table`; a profile is read by people, so it gets the spelling the example
+ * file teaches.
+ *
+ * **`l3mdev` and `lookup` are mutually exclusive and that is why this is
+ * careful.** A VRF supplies the table, so the compiler refuses a rule carrying
+ * both -- and it also refuses one with no lookup, no action and no `l3mdev` at
+ * all. A renderer that dropped `l3mdev` would turn a valid VRF rule into a
+ * document that does not compile, which is what happened in the Rust renderer
+ * and was caught by the same round trip that found the rest of this.
+ *
+ * The spellings come from `ncfg_rule_action_name` and `ncfg_rule_family_name`,
+ * which the lowerer's own `..._from_name` pair invert -- so there is no table
+ * here to put in the wrong order, which is the mistake the wifi backend table
+ * made when it was carried over from the other language.
+ */
+static void render_rule(const ncfg_routing_rule_t *rule, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text)
+{
+	ncfg_buf_t body;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_addf(&body, "\tpriority = %lld\n", (long long)rule->priority);
+	if (rule->family != NCFG_RULE_FAMILY_INET) {
+		ncfg_buf_addf(&body, "\tfamily = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_rule_family_name((ncfg_rule_family_t)rule->family)));
+	}
+	if (rule->from) {
+		ncfg_buf_add_text(&body, "\tfrom = ");
+		ncfg_render_quote(&body, rule->from);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (rule->to) {
+		ncfg_buf_add_text(&body, "\tto = ");
+		ncfg_render_quote(&body, rule->to);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (rule->iif) {
+		ncfg_buf_add_text(&body, "\tiif = ");
+		ncfg_render_quote(&body, rule->iif);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (rule->oif) {
+		ncfg_buf_add_text(&body, "\toif = ");
+		ncfg_render_quote(&body, rule->oif);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	if (rule->fwmark.has) {
+		ncfg_buf_addf(&body, "\tfwmark = %lld\n", (long long)rule->fwmark.value);
+	}
+	if (rule->fwmask.has) {
+		ncfg_buf_addf(&body, "\tfwmask = %lld\n", (long long)rule->fwmask.value);
+	}
+	if (rule->table.has) {
+		ncfg_buf_addf(&body, "\tlookup = %lld\n", (long long)rule->table.value);
+	}
+	if (rule->suppress_prefixlength.has) {
+		ncfg_buf_addf(&body, "\tsuppress_prefixlength = %lld\n",
+		    (long long)rule->suppress_prefixlength.value);
+	}
+	if (rule->invert) {
+		ncfg_buf_add_text(&body, "\tinvert = true\n");
+	}
+	if (rule->l3mdev) {
+		ncfg_buf_add_text(&body, "\tl3mdev = true\n");
+	}
+	if (rule->action != NCFG_RULE_ACTION_LOOKUP) {
+		ncfg_buf_addf(&body, "\taction = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_rule_action_name((ncfg_rule_action_t)rule->action)));
+	}
+	ncfg_render_opening(text, "rule", rule->id, overrides);
+	ncfg_render_quote(text, rule->id);
+	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
+	ncfg_buf_free(&body);
+}
+
 int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing, char *err, size_t err_size)
 {
@@ -720,9 +809,8 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	/* Named rather than skipped: these have no rendering yet, and a profile
 	 * that quietly lacked them would be wrong in a way nobody would see until
 	 * the rule or the access point was needed. */
-	if (document->rule_count > 0) {
-		ncfg_render_refuse(missing, NULL, NULL, "%zu routing rule(s)",
-		    document->rule_count);
+	for (i = 0; i < document->rule_count; i++) {
+		render_rule(&document->rules[i], overrides, text);
 	}
 	if (document->access_point_count > 0) {
 		ncfg_render_refuse(missing, NULL, NULL, "%zu access_point block(s)",
