@@ -9617,6 +9617,84 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.387 The empty-`device` skip is load-bearing, and `master` may have removed it
+
+Left open since the ethtool work: `render_device` skips a device whose body is
+empty, with a comment saying that is right, while **`master`'s Rust had the
+equivalent skip removed** citing 10.21. Both positions were in the tree and
+neither cited a measurement. Here is the measurement.
+
+### What the skip prevents, measured
+
+Remove it from the C and `ncfg profile save` **fails outright** on an ordinary
+config:
+
+    interface eth0 { config = "dhcp" }
+
+    ncfg: that would stop the configuration compiling, so it was not kept:
+    .../00-saved.conf:16:10: `override device eth0` has nothing to override:
+    remove `override`, or check the name
+
+Two facts behind that, both of which the skip was hiding. **The document holds a
+synthesised all-default device for each interface** -- the config above declares
+no `device` block and the document has one. And **`overrides` claims that
+synthesised device is declared in the base**, so the renderer writes `override
+device eth0 { }` for a block the base config never had, which cannot compile.
+
+So the skip is not tidiness. It is what stops the renderer inventing override
+blocks for devices nobody wrote. With it, both programs save this config
+cleanly; without it in the C, neither the save nor anything downstream survives.
+
+### 10.21 is the wrong lens here, and that is the correction
+
+10.21's criterion is whether a block **carries meaning of its own** -- that is
+why an empty `dns { }` on an interface must be written and the same block in
+`global` must not. Applying it to `device` reads as the interface case and is
+the `global` case: measured, an empty `device wlan0 { }` changes no plan, and
+netcfgd says so itself -- *"a `device` block on its own is policy about hardware
+nobody has asked it to configure"*. It is also not the operator's block at all
+most of the time, being synthesised.
+
+### The real hole is narrower, and the fix is not "always write it"
+
+There *is* a round-trip failure, and it is specific: a declared empty device with
+nothing else to recreate its entry.
+
+    device wlan0 { }
+    access_point "ap" { device = "wlan0"; ssid = "686f6d65"; wifi { psk = "@secret:ap" } }
+
+    devices before: [{"name": "wlan0", "managed": true, ...}]
+    devices after:  []
+
+**The same case with an `interface wlan0` beside it passes, and passes for the
+wrong reason**: rendering the interface makes the recompile synthesise the device
+entry again, so the documents match by coincidence. A probe written to test this
+would have been read as a pass.
+
+The fix cannot be the one `master` took, because that breaks the common case to
+save the rare one. Two candidates, and **the second is the deeper**:
+
+- the renderer learns which devices the base declared, and writes an empty block
+  only for those;
+- `overrides` stops claiming a synthesised device is declared in the base, after
+  which an empty `device wlan0 { }` renders with no `override` and compiles.
+
+Whose decision: the copyright holder's. The second changes what `overrides`
+means, which reaches further than the renderer.
+
+### What is NOT established
+
+**`master` has not been run.** This reproduction is the C on `c-port`, and
+`master`'s Rust is a different binary on a branch this work has not touched. The
+mechanism is shared architecture rather than measured there.
+
+What makes it worth saying anyway: `master`'s own agree-gate corpus includes
+`tests/footprint/etc`, which declares interfaces and no `device` block -- exactly
+the shape that fails here. So **if `master` has this, `make check` on `master`
+should already fail at the agree gate**, and one run settles it. That is the
+command to use rather than reading the diff, and it is one branch switch away in
+a tree other sessions share.
+
 ## 10.386 Every device kind renders but the one netcfgd makes itself
 
 `wireguard`, `openvpn`, `tunnel` and `tun`/`tap` were the four the switch in
