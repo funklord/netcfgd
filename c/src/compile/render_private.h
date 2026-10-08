@@ -119,8 +119,10 @@ void ncfg_render_access_point(const ncfg_access_point_t *point,
 
 void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);
+/* Takes the document, because undoing the ingress shaper is a question about
+ * two devices: the one that asked for it and the `ifb` it was expanded into. */
 void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *overrides,
-    ncfg_buf_t *text, ncfg_unrenderable_t *missing);
+    const ncfg_document_t *document, ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 void ncfg_render_bluetooth(const ncfg_bluetooth_device_t *device,
     const ncfg_overrides_t *overrides, ncfg_buf_t *text);
 void ncfg_render_linkset(const ncfg_linkset_t *set, const ncfg_overrides_t *overrides,

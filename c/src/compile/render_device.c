@@ -15,6 +15,7 @@
 #include "ncfg/value.h"
 
 #include <stdio.h>
+#include <string.h>
 
 
 /* `iproute2`'s spellings, the same on both sides, from
@@ -593,6 +594,123 @@ static void render_rate(ncfg_buf_t *body, int64_t bits)
 	ncfg_buf_addf(body, "\"%lldbit\"", (long long)bits);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Undoing the ingress shaper
+ * ------------------------------------------------------------------------ */
+
+/*
+ * `lower.c` turns `qdisc { ingress_bandwidth = ... }` on a device into two
+ * things: an `ingress_redirect` naming `ifb-<device>`, and a synthesised `ifb`
+ * device whose own cake qdisc carries the rate and meters arriving traffic.
+ *
+ * Both halves were refused, so **a machine with ingress shaping could not save
+ * a profile** -- three refusals for one setting, which is how it was found. The
+ * comment at the refusal said what a snapshot would have to write back "is the
+ * `ingress_bandwidth` it came from, which the document no longer holds by the
+ * time this sees it". That was wrong: the document holds it, on the `ifb`.
+ *
+ * Computed from the document on demand rather than collected into a side
+ * table. There are a handful of devices, the walk is cheap, and a parallel
+ * structure would be a second thing to keep in step with the document -- which
+ * is the fault this file has already paid for twice in word tables.
+ */
+
+/* The name this build would give the `ifb` for `shaped`, without building it:
+ * a buffer here would need `lower.c`'s private `IFNAMSIZ_MAX`, and a second
+ * copy of a constant is a second thing to be wrong. */
+static int our_ifb_name(const char *name, const char *shaped)
+{
+	return name && shaped && strncmp(name, "ifb-", 4u) == 0 &&
+	    strcmp(name + 4, shaped) == 0;
+}
+
+/*
+ * Whether this `ifb` is one `lower.c` would have made, and nothing more.
+ *
+ * `expand_ingress_shapers` sets four things -- the kind, and a cake qdisc with
+ * the rate and `ingress` -- and leaves the rest at `push_device`'s defaults.
+ * Anything else being set is an operator's own `device ifb-eth0 { }`, and
+ * inverting past it would discard their field in silence, which is what the
+ * unrenderable list exists to prevent.
+ *
+ * **The enumeration is what rots, so the rot is made loud.** A field added to
+ * `ncfg_device_t` is one this stops looking at, and the symptom would be a
+ * profile that quietly dropped it. The assertion below fires when the struct
+ * grows and sends whoever grew it here.
+ */
+#define NCFG_RENDER_DEVICE_SIZE 584u /* measured, x86-64, 2026-10-08 */
+_Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
+    "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
+
+static int bare_ifb(const ncfg_device_t *device, int64_t *rate)
+{
+	if (device->kind.kind != NCFG_KIND_IFB || !device->qdisc) {
+		return 0;
+	}
+	/* The qdisc the expansion makes. A different one is the operator's, even
+	 * on a device of the right name. */
+	if (device->qdisc->kind != NCFG_QDISC_CAKE || !device->qdisc->ingress ||
+	    !device->qdisc->bandwidth_bits.has || device->qdisc->ingress_bandwidth_bits.has) {
+		return 0;
+	}
+	/* What it leaves alone, and what must still be alone. */
+	if (!device->managed || device->on_unmanage != NCFG_ON_UNMANAGE_LEAVE ||
+	    device->match || device->wifi || device->modem || device->mtu.has ||
+	    device->mac || device->link_settings || device->master ||
+	    device->ingress_redirect || device->bridge_vlan_count > 0) {
+		return 0;
+	}
+	*rate = device->qdisc->bandwidth_bits.value;
+	return 1;
+}
+
+/* The rate `shaped`'s redirect can be undone to, or 0 where it cannot. */
+static int64_t shaper_rate(const ncfg_document_t *document, const ncfg_device_t *shaped)
+{
+	size_t i;
+
+	if (!document || !shaped->ingress_redirect || !shaped->qdisc) {
+		return 0;
+	}
+	for (i = 0; i < document->device_count; i++) {
+		const ncfg_device_t *candidate = &document->devices[i];
+		int64_t              rate = 0;
+
+		if (!candidate->name || strcmp(candidate->name, shaped->ingress_redirect) != 0) {
+			continue;
+		}
+		/* The name as well as the shape: a redirect onto somebody else's
+		 * `ifb` is theirs, whatever that device looks like. */
+		if (our_ifb_name(candidate->name, shaped->name) && bare_ifb(candidate, &rate)) {
+			return rate;
+		}
+		return 0;
+	}
+	return 0;
+}
+
+/* Whether this device is one some other device's shaping synthesised, and so
+ * is not written at all -- the half that keeps a derived device out of a
+ * profile. */
+static int derived_ifb(const ncfg_document_t *document, const ncfg_device_t *device)
+{
+	size_t i;
+
+	if (!document || device->kind.kind != NCFG_KIND_IFB) {
+		return 0;
+	}
+	for (i = 0; i < document->device_count; i++) {
+		const ncfg_device_t *shaped = &document->devices[i];
+
+		if (shaped->ingress_redirect && device->name &&
+		    strcmp(shaped->ingress_redirect, device->name) == 0 &&
+		    shaper_rate(document, shaped) != 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /*
  * A device's root qdisc, in whichever of its two forms the document needs.
  *
@@ -612,13 +730,16 @@ static void render_rate(ncfg_buf_t *body, int64_t bits)
  * recovering an `ingress_bandwidth` the document no longer holds, which is the
  * same reason `ingress_redirect` is refused a few lines below.
  */
-static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, ncfg_buf_t *body,
-    ncfg_unrenderable_t *missing)
+static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, int64_t ingress,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
 	if (qdisc->ingress) {
 		ncfg_render_refuse(missing, "device", name, "a qdisc metering arriving traffic");
 	}
-	if (!qdisc->bandwidth_bits.has && !qdisc->ingress_bandwidth_bits.has) {
+	/* `ingress` is the rate recovered from this device's `ifb`, which
+	 * `expand_ingress_shapers` moved off the field below. Nonzero means the
+	 * block form is needed whatever the rest of the policy says. */
+	if (!qdisc->bandwidth_bits.has && !qdisc->ingress_bandwidth_bits.has && ingress == 0) {
 		ncfg_buf_addf(body, "\tqdisc = \"%s\"\n",
 		    ncfg_render_word_or_gap(ncfg_qdisc_kind_name(qdisc->kind)));
 		return;
@@ -631,9 +752,13 @@ static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, ncf
 		render_rate(body, qdisc->bandwidth_bits.value);
 		ncfg_buf_add_char(body, '\n');
 	}
-	if (qdisc->ingress_bandwidth_bits.has) {
+	/* The field, or the rate recovered from the `ifb` the expansion moved it
+	 * to. Never both: the expansion clears the field as it moves it, and
+	 * `bare_ifb` refuses an `ifb` whose own field is set. */
+	if (qdisc->ingress_bandwidth_bits.has || ingress != 0) {
 		ncfg_buf_add_text(body, "\t\tingress_bandwidth = ");
-		render_rate(body, qdisc->ingress_bandwidth_bits.value);
+		render_rate(body, qdisc->ingress_bandwidth_bits.has
+		    ? qdisc->ingress_bandwidth_bits.value : ingress);
 		ncfg_buf_add_char(body, '\n');
 	}
 	ncfg_buf_add_text(body, "\t}\n");
@@ -706,10 +831,20 @@ static void render_modem(const ncfg_modem_policy_t *modem, ncfg_buf_t *body)
 }
 
 void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *overrides,
-    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+    const ncfg_document_t *document, ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
 	const char *name = device->name;
 	ncfg_buf_t  body;
+	int64_t     ingress;
+
+	/* **A device this build synthesised is written nowhere.** It exists so an
+	 * egress qdisc can shape what arrived; putting it in a profile would make
+	 * the next compile create a second one beside it, and the setting it was
+	 * made from goes out on the device that asked for it instead. */
+	if (derived_ifb(document, device)) {
+		return;
+	}
+	ingress = shaper_rate(document, device);
 
 	/* `match` is one of the six the model has and the configuration language
 	 * cannot reach -- `lower_device` never assigns it -- so this refusal
@@ -730,16 +865,24 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		ncfg_buf_add_char(&body, '\n');
 	}
 	render_bridge_vlans(device->bridge_vlans, device->bridge_vlan_count, &body);
-	if (device->ingress_redirect) {
-		/* **Refused, and it must stay refused**, which is different from the
-		 * rest of the list. It is not a config key: the compiler synthesises
-		 * it and the `ifb` it points at from `ingress_bandwidth`, so rendering
-		 * it would make the next compile synthesise a second one on top of the
-		 * first. What a snapshot would have to write back is the
-		 * `ingress_bandwidth` it came from, which the document no longer holds
-		 * by the time this sees it. A derived field is not a missing feature,
-		 * and treating it as one would be the bug. */
-		ncfg_render_refuse(missing, "device", name, "ingress_redirect");
+	/*
+	 * **It is still not a config key, and it is no longer refused.** The
+	 * comment here used to say the `ingress_bandwidth` it came from "is not
+	 * held by the document by the time this sees it", and that was wrong: it
+	 * is on the `ifb`, which is what `shaper_rate` reads. Writing the redirect
+	 * itself would still be the bug it described -- the next compile would
+	 * synthesise a second `ifb` on top of the first -- so what goes out is the
+	 * setting, not the derivation.
+	 *
+	 * Refused only where the pair is not the shape this build makes, and then
+	 * by name: a redirect onto somebody else's device, or onto an `ifb`
+	 * carrying a field of their own, is theirs to keep rather than this
+	 * function's to unpick.
+	 */
+	if (device->ingress_redirect && shaper_rate(document, device) == 0) {
+		ncfg_render_refuse(missing, "device", name,
+		    "an ingress redirect to `%s`, which is not a device this build would have "
+		    "made for it", device->ingress_redirect);
 	}
 	/* Settings of the adapter, which moved here from `interface` with 0155
 	 * pass 1a. Rendered from the day they arrived rather than joining the list
@@ -776,7 +919,7 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		render_ethtool(device->link_settings, &body);
 	}
 	if (device->qdisc) {
-		render_qdisc(device->qdisc, name, &body, missing);
+		render_qdisc(device->qdisc, name, ingress, &body, missing);
 	}
 	if (device->modem) {
 		render_modem(device->modem, &body);

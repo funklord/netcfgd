@@ -280,7 +280,7 @@ static char *refusals_for(ncfg_document_t *document)
  * `wireguard` and `openvpn` were refused. **Hooks are now the only refusal a
  * config file can reach**: every other one names something the language has no
  * words for, or something netcfgd synthesises, so the way to reach them is a
- * document that arrived as JSON -- which is what `refusals_of_document` below is
+ * document that arrived as JSON -- which is what `refusals_of_json` below is
  * for. Anything new that is refused and reachable wants this helper back.
  */
 
@@ -395,7 +395,14 @@ static void render_the_witness(int argc, char **argv)
 		/* `ethtool settings` and the blanket `qdisc` were here and render now; the
 		 * ingress-metering half of a qdisc is still refused and is below. */
 		"a match block", "a qdisc metering arriving traffic",
-		"ingress_redirect", "global: dns options", "global: dnssec",
+		/* `ingress_redirect` was a blanket refusal and is now a specific
+		 * one: the shaper is undone where the pair is the shape this build
+		 * makes, and named where it is not. Every device in the witness
+		 * redirects to `ifb-eth0` and the witness has no such device, so each
+		 * is refused -- correctly, and saying why. */
+		"an ingress redirect to `ifb-eth0`, which is not a device this build "
+		"would have made for it",
+		"global: dns options", "global: dnssec",
 		"global: dns transport", "global: a dns server with a port or sni",
 		/* `interface d-0: advertise` was here and renders now. */
 		/* `interface d-0: guard` was here and renders now. */
@@ -1115,6 +1122,94 @@ static void an_advertise_block_round_trips(void)
 	check(!holds(rendered, "backend"), "and the backend, which is `auto`");
 	check(holds(rendered, "advertise {"), "though the block itself is still written");
 	free(rendered);
+}
+
+/*
+ * The ingress shaper, undone -- which was three refusals for one setting.
+ *
+ * `lower.c` turns `qdisc { ingress_bandwidth = ... }` into an
+ * `ingress_redirect` plus a synthesised `ifb` carrying the rate, and all three
+ * of those were refused: the redirect, the `ifb`'s kind, and the `ifb`'s
+ * ingress-metering qdisc. **So no machine shaping arriving traffic could save a
+ * profile**, and the refusal's own comment said the rate was gone -- it is on
+ * the `ifb`.
+ *
+ * The round trip is the whole assertion here: the rendering has to compile back
+ * to the same document, which means the expansion must run again and produce
+ * the same pair. A rendering that wrote the redirect would make a second `ifb`
+ * and fail it.
+ */
+static void an_ingress_shaper_is_undone(void)
+{
+	const char *text = "device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tingress_bandwidth = \"50mbit\"\n\t}\n}\n";
+	char       *rendered;
+
+	round_trips(text, "a device shaping arriving traffic round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "ingress_bandwidth = \"50mbit\""),
+	    "and the rate comes back, read off the `ifb` the expansion put it on");
+	check(lacks(rendered, "ifb-eth0"),
+	    "while the device that expansion made is written nowhere at all");
+	check(lacks(rendered, "ingress_redirect"),
+	    "and the redirect is not written, which would synthesise a second one");
+	free(rendered);
+
+	/* Both rates at once, because they go to different places: the egress one
+	 * stays on the device's own qdisc and the ingress one travels to the
+	 * `ifb`. A renderer reading the wrong one would pass the case above. */
+	round_trips("device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"100mbit\"\n\t\tingress_bandwidth = \"50mbit\"\n\t}\n}\n",
+	    "a device shaping both directions round trips");
+	rendered = rendering_of("device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"100mbit\"\n\t\tingress_bandwidth = \"50mbit\"\n\t}\n}\n");
+	check(holds(rendered, "bandwidth = \"100mbit\"") &&
+	    holds(rendered, "ingress_bandwidth = \"50mbit\""),
+	    "with each rate on the key it came from, which are not interchangeable");
+	free(rendered);
+}
+
+/*
+ * And what the inversion must NOT do, which is the half that makes it safe.
+ *
+ * A redirect this build did not make is the operator's, and undoing it would
+ * throw their `ifb` away. These arrive as documents rather than config files,
+ * because the language has no `ingress_redirect` key -- which is exactly why
+ * the refusals are kept for a document that came some other way.
+ */
+static void a_redirect_this_build_did_not_make_is_refused(void)
+{
+	char *missing_target = refusals_of_json(DOC(PLAIN_GLOBALS
+	    "\"devices\":[{\"name\":\"eth0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"physical\"},\"qdisc\":{\"kind\":\"cake\"},"
+	    "\"ingress_redirect\":\"ifb-eth0\"}],"
+	    NO_INTERFACES NO_NETWORKS));
+	char *wrong_name = refusals_of_json(DOC(PLAIN_GLOBALS
+	    "\"devices\":[{\"name\":\"eth0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"physical\"},\"qdisc\":{\"kind\":\"cake\"},"
+	    "\"ingress_redirect\":\"shaper0\"},"
+	    "{\"name\":\"shaper0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"ifb\"},\"qdisc\":{\"kind\":\"cake\","
+	    "\"bandwidth_bits\":50000000,\"ingress\":true}}],"
+	    NO_INTERFACES NO_NETWORKS));
+	char *not_bare = refusals_of_json(DOC(PLAIN_GLOBALS
+	    "\"devices\":[{\"name\":\"eth0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"kind\":{\"kind\":\"physical\"},\"qdisc\":{\"kind\":\"cake\"},"
+	    "\"ingress_redirect\":\"ifb-eth0\"},"
+	    "{\"name\":\"ifb-eth0\",\"managed\":true,\"on_unmanage\":\"leave\","
+	    "\"mtu\":9000,\"kind\":{\"kind\":\"ifb\"},\"qdisc\":{\"kind\":\"cake\","
+	    "\"bandwidth_bits\":50000000,\"ingress\":true}}],"
+	    NO_INTERFACES NO_NETWORKS));
+
+	check(holds(missing_target, "an ingress redirect to `ifb-eth0`"),
+	    "a redirect onto a device that is not there is refused, and named");
+	check(holds(wrong_name, "an ingress redirect to `shaper0`"),
+	    "and so is one onto an ifb this build would not have named that");
+	check(holds(not_bare, "an ingress redirect to `ifb-eth0`"),
+	    "and one whose ifb carries a field of the operator's, which undoing would lose");
+	free(missing_target);
+	free(wrong_name);
+	free(not_bare);
 }
 
 /*
@@ -1843,13 +1938,17 @@ static void the_refusals_no_config_file_can_reach(void)
 	    "a DNS scope's four unwritable facts are each named");
 	/* The qdisc was named here too. It renders now -- this fixture's `cake`
 	 * carries no rate and no ingress flag, so it comes back as the short form
-	 * -- and only the two that are still unrenderable are asserted. The
-	 * ingress-metering half of a qdisc is refused and is covered where that
-	 * renderer is tested. */
+	 * -- and only what is still unrenderable is asserted.
+	 *
+	 * The redirect's refusal is specific now rather than blanket: this fixture
+	 * points at `ifb-eth0` and declares no such device, so the shaper cannot
+	 * be undone and the message says which device is missing. A pair this
+	 * build would have made is undone instead, which
+	 * `an_ingress_shaper_is_undone` covers. */
 	check(holds(device, "device eth0: a match block") &&
-	    holds(device, "device eth0: ingress_redirect") &&
+	    holds(device, "device eth0: an ingress redirect to `ifb-eth0`") &&
 	    lacks(device, "device eth0: qdisc"),
-	    "and a device's match and its synthesised redirect, the qdisc rendering now");
+	    "and a device's match, and a redirect onto a device that is not there");
 	check(holds(lease, "interface eth0: a dhcp lease's client id") &&
 	    holds(lease, "interface eth0: a dhcp lease's backend") &&
 	    holds(lease, "interface eth0: a dhcp lease's metric"),
@@ -1951,6 +2050,8 @@ int main(int argc, char **argv)
 	a_routes_source_and_onlink_round_trip();
 	an_address_modifiers_round_trip();
 	an_advertise_block_round_trips();
+	an_ingress_shaper_is_undone();
+	a_redirect_this_build_did_not_make_is_refused();
 	a_guard_round_trips();
 	the_remaining_address_sources_round_trip();
 	the_remaining_kinds_round_trip();

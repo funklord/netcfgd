@@ -12292,6 +12292,84 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.422 The ingress shaper is undone, and the refusal's reason was wrong
+
+**Three refusals for one setting, so no machine shaping arriving traffic could
+save a profile.** `qdisc { ingress_bandwidth = "50mbit" }` on a device compiles
+to two things -- an `ingress_redirect` naming `ifb-<device>`, and a synthesised
+`ifb` whose own cake qdisc carries the rate and meters arriving traffic -- and
+the C refused all three parts:
+
+    device eth0: ingress_redirect
+    device ifb-eth0: kind ifb
+    device ifb-eth0: a qdisc metering arriving traffic
+
+**The refusal said the information was gone, and it is not.** Its comment read
+that what a snapshot would have to write back "is the `ingress_bandwidth` it
+came from, which the document no longer holds by the time this sees it. A
+derived field is not a missing feature, and treating it as one would be the
+bug." The first half of that is false: the rate is on the `ifb`. The second half
+is still right, which is why what goes out is the *setting* and never the
+redirect -- writing the redirect would make the next compile synthesise a second
+`ifb` beside the first.
+
+### Found by re-measuring after the rebase, not by the gate
+
+The renderer was complete when 10.419 measured it. The rebase then brought
+master's Rust forward, and master's `fc191b8c` had taught it to undo the shaper
+-- so the C was behind by one refusal and the earlier measurement had outlived
+its subject.
+
+**The agree gate could not see it**, and that is the finding about the gate: no
+configuration in its corpus shapes arriving traffic, so both programs were
+compared on inputs where the difference does not arise. What found it was
+diffing the two renderers' refusal lists, which is a different instrument from
+running them on a corpus.
+
+### Computed from the document, not collected into a side table
+
+The Rust builds an `IngressShaping` map up front. This asks the document on
+demand instead: there are a handful of devices, the walk is cheap, and a
+parallel structure is a second thing to keep in step -- which is the fault this
+file has already paid for twice in word tables. It also removed the allocation,
+the ownership and the free.
+
+Two halves, and the second is what makes it safe:
+
+- a device whose redirect names the `ifb` this build would have made, where that
+  `ifb` is bare, gets `ingress_bandwidth` written back and the `ifb` is written
+  nowhere;
+- anything else is **refused by name**: a redirect onto a device that is not
+  there, onto an `ifb` this build would not have called that, or onto one
+  carrying a field of the operator's. Undoing past their field would discard it
+  in silence, which is what the unrenderable list exists to prevent.
+
+`bare_ifb` enumerates `ncfg_device_t`'s fields, which is the part that rots: a
+field added later is one it silently stops checking, and the symptom would be a
+profile that quietly dropped it. **The rot is made loud** with a
+`_Static_assert` on the struct's measured size -- 584 bytes, x86-64 -- which
+sends whoever grows it to this function. Shown firing by changing the constant
+to 592.
+
+### A sabotage that did not land, and read as a dead check
+
+Four sabotages, and the first reported **zero** failures: the bareness check
+looked incapable of failing. It was not -- the edit had replaced only the
+`managed`/`on_unmanage` clause and left the `mtu.has` test that the case
+actually trips. Removing the whole block fails exactly the case written for it.
+
+*Confirm the sabotage landed* is already the rule, and this is the shape it
+takes when a check is a single long condition: a textual edit applies cleanly,
+disables a third of what it names, and the green run reads as "this check is
+dead" rather than "that edit missed".
+
+### And `refusals_of_document` is a function nobody has
+
+The comment above the helper named it that; it is `refusals_of_json`. Written
+while the two cases below were being added, which is how it was noticed -- the
+compiler refused the name. Fixed, and worth one line because 10.419 swept this
+class in `src/` and a test file's comments were not in that sweep.
+
 ## 10.421 fmake reaches the link, and the two symbols were six of twenty
 
 Reported through `.git/cc-inbox/` on 2026-10-08 by the session working in

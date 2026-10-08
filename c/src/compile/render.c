@@ -803,7 +803,7 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 		ncfg_render_network(&document->networks[i], overrides, text, missing);
 	}
 	for (i = 0; i < document->device_count; i++) {
-		ncfg_render_device(&document->devices[i], overrides, text, missing);
+		ncfg_render_device(&document->devices[i], overrides, document, text, missing);
 	}
 
 	/* Named rather than skipped: these have no rendering yet, and a profile
