@@ -796,4 +796,15 @@ netcfgd
 # Measured with `make size` on the committed tree, and the attribution by
 # checking out the parent's `c/`, rebuilding, and measuring again rather than
 # reasoning about which change was likely to be large.
-total 1150480
+# the radio's own policy in the renderer, +72 bytes to 1,150,552.
+#
+# Seventy-two bytes for seven fields, three word tables and a block, which is
+# what a renderer costs when the strings it writes are already in the binary --
+# `lower_device` parses the same words, so the only new bytes are the tables'
+# pointers and the branches.
+#
+# Recorded rather than left to ride the tolerance, which it was doing by 72
+# bytes. Small enough to argue about and that is the argument for taking it: the
+# entry above this one exists because 5,056 bytes accumulated in exactly these
+# steps, each too small to bother with.
+total 1150552

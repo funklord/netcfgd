@@ -383,7 +383,11 @@ static void render_the_witness(int argc, char **argv)
 	 * send an operator to write a block the parser does not have. */
 	static const char *const expected[] = { "kind wireguard", "kind openvpn", "kind tunnel",
 		"kind tun", "kind ifb", "routing rule(s)", "access_point block(s)",
-		"a match block", "a wifi policy", "ethtool settings", "qdisc",
+		/* `a wifi policy` was here and is rendered now, so it is no longer
+		 * refused. Removed rather than left: this list's job is to name what
+		 * has no rendering, and an entry for something that renders would make
+		 * the next reader think the gap is still open. */
+		"a match block", "ethtool settings", "qdisc",
 		"ingress_redirect", "global: dns options", "global: dnssec",
 		"global: dns transport", "global: a dns server with a port or sni",
 		"interface d-0: hooks", "interface d-0: advertise", "interface d-0: guard",
@@ -563,6 +567,70 @@ static void the_unmanage_policy_defects(void)
  * The control is the static form beside it. A renderer that wrote `dhcp` for
  * every hostname would pass the first check and fail the second.
  */
+/*
+ * A radio's own policy round-trips, every field of it.
+ *
+ * **Refused wholesale until now, which meant no machine with a radio could
+ * save a profile.** `ncfg wifi activate` writes `device wlan0 { wifi {
+ * autoconnect = true } }`, so a laptop that has ever joined a network from the
+ * client has one, and `ncfg profile save` answered that it could not render a
+ * wifi policy. That is the same shape as the `bluetooth` block being refused
+ * wholesale: a refusal costing more than the rendering does.
+ *
+ * Every field in one document rather than one case each, because the seven are
+ * written by one function and a case covering two would leave the other five
+ * free to go quiet. The non-default value is chosen for each, since a renderer
+ * that wrote nothing would round-trip a document whose defaults happened to
+ * match.
+ *
+ * **And `wifi { }` present and empty is its own case.** `device->wifi` being
+ * non-NULL is what makes a device a radio netcfgd manages, so an empty block
+ * has to come back as an empty block rather than as nothing -- 10.21's lesson,
+ * which this renderer has now met three times.
+ */
+static void a_radios_own_policy_round_trips(void)
+{
+	char *full;
+	char *empty;
+
+	round_trips("device wlan0 {\n\twifi {\n"
+	    "\t\tbackend = \"wpa_supplicant\"\n"
+	    "\t\tautoconnect = false\n"
+	    "\t\tportal_check = \"http://example.com/generate_204\"\n"
+	    "\t\tregdom = \"SE\"\n"
+	    "\t\tpowersave = \"off\"\n"
+	    "\t\tmac_policy = \"per_network\"\n"
+	    "\t\tscan_randomization = true\n"
+	    "\t}\n}\n",
+	    "every field of a radio's policy survives a round trip");
+
+	full = rendering_of("device wlan0 {\n\twifi {\n"
+	    "\t\tbackend = \"iwd\"\n"
+	    "\t\tpowersave = \"on\"\n"
+	    "\t\tmac_policy = \"per_connection\"\n"
+	    "\t}\n}\n");
+	/* `iwd` is written like any other backend. The compiler accepts it and
+	 * netcfgd refuses it at use (0014), so dropping it would turn a
+	 * configuration netcfgd explains itself about into one it approves. */
+	check(full && strstr(full, "backend = \"iwd\"") != NULL,
+	    "including a backend this build refuses at use, rather than dropping it");
+	check(full && strstr(full, "powersave = \"on\"") != NULL &&
+	        strstr(full, "mac_policy = \"per_connection\"") != NULL,
+	    "and the two words that are not the first in their table");
+	free(full);
+
+	/* The default side: a policy at every default writes an empty block, not a
+	 * block restating defaults, and not nothing at all. */
+	round_trips("device wlan0 { wifi { } }\n",
+	    "a radio declared with no policy at all survives one too");
+	empty = rendering_of("device wlan0 { wifi { } }\n");
+	check(empty && strstr(empty, "wifi {") != NULL,
+	    "and the block is still written, because present and empty is not absent");
+	check(empty && strstr(empty, "autoconnect") == NULL,
+	    "while a default is left unsaid rather than restated");
+	free(empty);
+}
+
 static void the_hostname_policy_round_trips(void)
 {
 	char *from_dhcp;
@@ -1411,6 +1479,7 @@ int main(int argc, char **argv)
 	a_network_named_by_its_access_points();
 	a_label_the_lexer_cannot_read_bare();
 	the_hostname_policy_round_trips();
+	a_radios_own_policy_round_trips();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();

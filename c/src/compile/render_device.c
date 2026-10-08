@@ -25,6 +25,19 @@ static const char *const bond_mode_words[] = { "balance-rr", "active-backup", "b
 static const char *const vlan_protocol_words[] = { "dot1q", "dot1ad" };
 static const char *const macvlan_mode_words[] = { "private", "vepa", "bridge", "passthru" };
 
+/* A radio's own policy, spelled as `lower_device` reads each back. `iwd` is
+ * rendered like any other: the compiler accepts it and netcfgd refuses it at
+ * use (0014), so a profile that dropped it would turn a configuration netcfgd
+ * explains itself about into one it silently approves. */
+/* **In the enum's order, which is not the Rust enum's.** `ncfg_wifi_backend_t`
+ * is AUTO, IWD, WPA_SUPPLICANT; the Rust one is Auto, WpaSupplicant, Iwd. A
+ * table written from the other language's order renders `wpa_supplicant` as
+ * `iwd` and vice versa, which is a configuration this build refuses at use
+ * reported as one it serves. Read from `document.h` rather than carried over. */
+static const char *const wifi_backend_words[] = { "auto", "iwd", "wpa_supplicant" };
+static const char *const powersave_words[] = { "default", "on", "off" };
+static const char *const mac_policy_words[] = { "permanent", "per_network", "per_connection" };
+
 /* ------------------------------------------------------------------------ *
  * What kind of thing a device is
  * ------------------------------------------------------------------------ */
@@ -220,6 +233,67 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 	}
 }
 
+/*
+ * A radio's own policy: what the device is told to do, not what it may join.
+ *
+ * **Refused wholesale until now, which meant no machine with a radio could save
+ * a profile.** `ncfg wifi activate` writes `device wlan0 { wifi { autoconnect =
+ * true } }`, so a laptop that has ever joined a network from the client has one
+ * -- and `ncfg profile save` answered that it could not render a wifi policy.
+ * The seven fields are the whole of `ncfg_wifi_device_policy_t`.
+ *
+ * **Present and empty is not absent**, as it is for `dns` (10.21) and the
+ * device block itself: `device->wifi` being non-NULL is what makes a device a
+ * radio netcfgd manages, so the block is opened even when every field sits at
+ * its default and `wifi { }` comes back as `wifi { }` rather than as nothing.
+ *
+ * Only what differs from a default is written, which is this renderer's rule
+ * everywhere: a block restating every default is one nobody can read for what
+ * is unusual. `regdom` is already uppercase, `lower_device` having upcased it on
+ * the way in, so it reads back as the same value rather than one the parser
+ * would normalise again.
+ */
+static void render_wifi_device(const ncfg_wifi_device_policy_t *wifi, ncfg_buf_t *body)
+{
+	if (!wifi) {
+		return;
+	}
+	ncfg_buf_add_text(body, "\twifi {\n");
+	if (wifi->backend != NCFG_WIFI_BACKEND_AUTO) {
+		ncfg_buf_addf(body, "\t\tbackend = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_render_word(wifi_backend_words,
+		        NCFG_COUNT_OF(wifi_backend_words), wifi->backend)));
+	}
+	/* `autoconnect` defaults to true, so only `false` is worth a line. */
+	if (!wifi->autoconnect) {
+		ncfg_buf_add_text(body, "\t\tautoconnect = false\n");
+	}
+	if (wifi->portal_check) {
+		ncfg_buf_add_text(body, "\t\tportal_check = ");
+		ncfg_render_quote(body, wifi->portal_check);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (wifi->regdom) {
+		ncfg_buf_add_text(body, "\t\tregdom = ");
+		ncfg_render_quote(body, wifi->regdom);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (wifi->powersave != NCFG_POWERSAVE_DEFAULT) {
+		ncfg_buf_addf(body, "\t\tpowersave = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_render_word(powersave_words,
+		        NCFG_COUNT_OF(powersave_words), wifi->powersave)));
+	}
+	if (wifi->mac_policy != NCFG_MAC_POLICY_PERMANENT) {
+		ncfg_buf_addf(body, "\t\tmac_policy = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_render_word(mac_policy_words,
+		        NCFG_COUNT_OF(mac_policy_words), wifi->mac_policy)));
+	}
+	if (wifi->scan_randomization) {
+		ncfg_buf_add_text(body, "\t\tscan_randomization = true\n");
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
 /* ------------------------------------------------------------------------ *
  * The device block
  * ------------------------------------------------------------------------ */
@@ -299,9 +373,6 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 	if (device->match) {
 		ncfg_render_refuse(missing, "device", name, "a match block");
 	}
-	if (device->wifi) {
-		ncfg_render_refuse(missing, "device", name, "a wifi policy");
-	}
 	if (device->link_settings) {
 		ncfg_render_refuse(missing, "device", name, "ethtool settings");
 	}
@@ -358,6 +429,10 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 	if (device->on_unmanage != NCFG_ON_UNMANAGE_LEAVE) {
 		ncfg_buf_add_text(&body, "\ton_unmanage = \"clear\"\n");
 	}
+	/* Before `modem` for no reason beyond reading order: a radio's policy and a
+	 * modem's are the two device-level backends, and a device has one or the
+	 * other. */
+	render_wifi_device(device->wifi, &body);
 	if (device->modem) {
 		render_modem(device->modem, &body);
 	}

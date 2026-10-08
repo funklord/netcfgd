@@ -12293,6 +12293,61 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.378 A radio's own policy, which no machine with a radio could save
+
+`render_device` refused `a wifi policy` wholesale. `ncfg wifi activate` writes
+`device wlan0 { wifi { autoconnect = true } }`, so **a laptop that has ever
+joined a network from the client has one, and `ncfg profile save` told it the
+renderer could not write a wifi policy.** Same shape as the `bluetooth` block
+being refused wholesale, and the same answer: a refusal costing more than the
+rendering does.
+
+Seven fields, which is the whole of `ncfg_wifi_device_policy_t` -- backend,
+autoconnect, portal_check, regdom, powersave, mac_policy, scan_randomization --
+and only what differs from a default is written, which is this renderer's rule
+everywhere.
+
+**Present and empty is not absent, for the third time in this renderer.**
+`device->wifi` being non-NULL is what makes a device a radio netcfgd manages, so
+`wifi { }` comes back as `wifi { }` rather than as nothing. Proven by sabotage:
+skipping an all-default policy fails two checks, which is the same control the
+`dns` and `device` cases needed.
+
+### The enum order is the C's, not the other language's
+
+**Written from master's Rust renderer and wrong on the first run, in the way a
+port is most likely to be wrong.** `ncfg_wifi_backend_t` is `AUTO, IWD,
+WPA_SUPPLICANT`; Rust's is `Auto, WpaSupplicant, Iwd`. A word table carried over
+in the Rust order renders `wpa_supplicant` as `iwd` and `iwd` as
+`wpa_supplicant` -- which is **a configuration this build refuses at use (0014)
+reported as one it serves**, the worst direction for that particular pair to be
+wrong in.
+
+The test caught it immediately, and only because the fixture names a
+non-default value for each field rather than sampling one: a case that used the
+first word in each table would have passed against a table in any order. The
+comment on the table now says where the order comes from, because the next
+person porting a field has exactly this to get wrong.
+
+**That is the general caution for the whole port and it is cheap to state:** two
+enums with the same members need not have the same order, and nothing in either
+language complains. Read the C header, do not carry the Rust order over.
+
+### What the refusal list now says
+
+`a wifi policy` is out of `render_test.c`'s expected-refusals array. Removed
+rather than left: that list's job is to name what has no rendering, and an entry
+for something that renders would tell the next reader a gap is still open. Its
+neighbour check -- that the list did not quietly lose an entry -- went on
+passing, which is what makes removing one safe to do deliberately.
+
+Still refused, and each one still a machine that cannot save a profile: routing
+rules, access points, `ethtool`, `qdisc`, `ingress_redirect`, a device match
+block, several `dns` options, hooks, advertise, guard, delegated and reported
+addressing, address lifetimes, route scope and proto, and four `dhcp` lease
+fields. The Rust renderer writes most of those today, so each is a port with a
+known shape rather than a design question.
+
 ## 10.377 `hostname = "dhcp"` rendered as a word the language refuses
 
 `render_globals` wrote `hostname = "from_dhcp"`. `lower_global` compares against
