@@ -7,16 +7,23 @@
 # So that half is excluded rather than half-attempted, and `make build` is
 # how the daemon is built. These four directories are where every .rs lives.
 #
-# Left alone, fmake reads them and stops before compiling anything, because
-# sixteen of the eighteen crate roots are `src/lib.rs` and a target is named
-# for what it is rooted in:
+# **The second half of this comment quoted a refusal fmake no longer makes,
+# and the report that produced it was answered.** It said fmake stopped with
+# `two targets are both called 'lib'` because a target is named for the file
+# it is rooted in, and that the name Cargo would use was in a Cargo.toml
+# fmake does not read.
 #
-#     !!! two targets are both called 'lib':
-#         crates/netcfgd-cli/src/lib.rs
-#         crates/netcfgd-daemon/src/lib.rs
+# fmake's section 150 fixed that: a crate root is named after its ENCLOSING
+# DIRECTORY. The measurement behind it is this tree's -- across nineteen
+# crate roots the enclosing directory IS the `[package] name`, every one --
+# so the authoritative name was reachable without reading a file fmake does
+# not own. The same entry corrected the scope: of seventeen `lib.rs` files
+# two collide rather than sixteen, because a crate root becomes a target only
+# if it defines a `main`.
 #
-# which is correct and unhelpful -- the name Cargo would use is in the
-# Cargo.toml beside it, and fmake does not read those. Reported to fmake.
+# So the naming refusal is not a reason for the exclusion any more. The
+# workspace reasons above are, and they stand on their own. Whether the
+# exclusion is still needed at all has not been measured here (10.421).
 [project]
 exclude = ["crates", "backend", "adapter", "fuzz"]
 

@@ -12292,6 +12292,78 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.421 fmake reaches the link, and stops on two symbols that are ours
+
+Reported through `.git/cc-inbox/` on 2026-10-08 by the session working in
+fmake, measured in a `git archive HEAD` copy of this tree with our own
+`fmake.toml` and no flags. **Their finding, relayed; the verification below is
+this tree's.**
+
+They got as far as the link: moc over the Qt client's headers, twenty-two
+objects of the C daemon compiled, then a stop -- not on Cargo, which our README
+named as the obstacle and which 0266 removed, but on two duplicate symbols
+between the daemon's copy and the client's.
+
+### Verified here, and one is worse than a duplicate name
+
+    c/include/ncfg/daemon.h:1093  void ncfg_probes_free(ncfg_probes_t *probes)
+    client/ncfg_client.h:873      void ncfg_probes_free(ncfg_probes_t *probes)
+
+    c/include/ncfg/hooks.h:190    void ncfg_hook_scripts_free(
+                                      ncfg_hook_script_t *scripts, size_t count)
+    client/ncfg_client.h:1084     void ncfg_hook_scripts_free(
+                                      ncfg_hook_scripts_t *scripts)
+
+The first pair is a deliberate parallel copy with one signature. **The second is
+two different functions sharing a linker name**, with different parameter lists
+and different types -- so a translation unit including both `ncfg/hooks.h` and
+`client/ncfg_client.h` does not compile, and the two headers are mutually
+exclusive today without anything saying so.
+
+`code-style.md` decided the rule: a deliberate parallel copy in two libraries
+needs a **distinct** name, "not the same name in both on the assumption that
+nothing will ever link both sides; that assumption fails later, at a call site
+that changed nothing." fmake linking both halves is that call site arriving.
+
+**`static` is not available and that is why this is a decision rather than a
+fix.** Both are public API in both headers, and `gui/src/ncfg_connection.cpp`
+calls the client's at two sites. So one side renames, and which one is the
+question: the client is consumed by the GUI and whatever else links
+`libncfgclient`, while `c/include/ncfg/*.h` is the daemon's own. Nothing is
+broken today, because nothing links both. Whose decision: the copyright
+holder's.
+
+### Two stale claims of ours, both fixed here
+
+- **The README invited somebody to run it**, saying whether fmake can build the
+  daemon "has not been tried since the daemon became C (0266)" and "until
+  somebody runs it and sees". Somebody has. It carries the measurement now and
+  points here.
+- **`fmake.toml`'s comment quoted a refusal fmake no longer makes** -- the
+  `two targets are both called 'lib'` stop, and the claim that the name Cargo
+  would use "is in the Cargo.toml beside it, and fmake does not read those".
+  fmake answered that report: a crate root is named after its enclosing
+  directory, and the measurement behind it is **ours** -- across nineteen crate
+  roots the enclosing directory is the `[package] name` every time. The scope
+  was wrong too: two `lib.rs` files collide rather than sixteen, because a crate
+  root becomes a target only if it defines a `main`.
+
+  So the naming refusal is no longer a reason for the `exclude`. The workspace
+  reasons stand on their own, and whether the exclusion is still needed is
+  **unmeasured here** rather than settled.
+
+This is the third stale-claim finding in two days -- after 10.419's five and
+10.418's own correction -- and the only one that arrived from outside. Worth
+noting which instrument found it: not a sweep of our own comments, but somebody
+running the thing the comment was about.
+
+### And our tree was the reproduction for a fault in fmake
+
+Their advice block iterated every ambiguity while its header showed one symbol's
+providers, so it printed `c/src/host/hooks.c` beneath `ncfg_probes_free` -- a
+file that does not define it. Fixed as their section 398, with this tree named
+as the reproduction. Nothing asked of us.
+
 ## 10.420 The rebase onto master, and the three defects it surfaced
 
 295 commits replayed onto master, which had moved 58 commits since this branch
