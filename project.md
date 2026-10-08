@@ -9617,6 +9617,81 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.376 A reconnect that went to the default socket, by aliasing
+
+`reconnect` failed three checks, and the only message available was
+`not connected` -- which comes from a *later* call and says nothing about why
+reopening had not worked. `reopen_if_broken` threw the reason away:
+
+	QString ignored;
+	return open(path, &ignored);
+
+Given somewhere to report, it said this at once:
+
+	cannot reach netcfgd at /run/netcfgd/netcfgd.sock: No such file or
+	directory -- netcfgd is not running.
+
+**The default socket.** The connection had been opened on a temporary one.
+
+### The mechanism
+
+`reopen_if_broken` passes the member `path` **by const reference**, and
+`open()`'s first act is `close()`, which does `path.clear()`:
+
+	bool ncfg_connection::open(const QString &socket_path, ...)
+	{
+		close();                                      // clears `path`
+		const QByteArray requested = socket_path.toUtf8();   // aliases it
+
+So `socket_path` referred to an object that had been emptied underneath it, and
+an empty path is exactly what makes `ncfg_client_open` fall back to
+`ncfg_client_default_socket()`. The client library was blameless: it stores the
+path it was given, and it was given none.
+
+The fix is to copy before closing, one line moved. Controlled by putting the
+original order back and watching the same three checks fail again.
+
+**And on a default install it works by coincidence**, which is why it survived.
+When the connection was opened on `/run/netcfgd/netcfgd.sock`, the fallback
+*is* the right path, so the reconnect succeeded for a reason unrelated to the
+code being correct -- `evidence.md`'s *a consumer that is right by coincidence
+looks exactly like a wired one*. What it broke is every client pointed anywhere
+else: a second instance, a guest, a test, a machine with the socket moved. A
+package upgrade restarts netcfgd, which is the case this whole test exists for.
+
+### Why the failure said so little
+
+Two layers of discarded information, and they compounded. `reopen_if_broken`
+dropped the reason, and it has **three** ways to return false -- no client at
+all, a client that is not broken, and a reopen that failed -- which the single
+`return false` made indistinguishable. Then a failed `open` leaves no client,
+because `close()` has already run, so the *next* call reports `not connected`
+and the reader is told about a symptom two steps downstream of the cause.
+
+Each false says which it was now, and the window's caller is unaffected: the
+reporting is an optional out-parameter, defaulted, and `main_window.cpp` ignores
+the result as it always has.
+
+**Swept for siblings, and there are none.** Of 76 `const QString &` parameters
+across `gui/src`, exactly one function clears or closes state in its opening
+lines, and it is this one. The lens is coarse -- "takes a reference and resets
+something early" is a heuristic, not a proof, and it would not catch an alias
+reached through a helper -- but the population is small enough that the answer is
+worth having: this shape occurs once in that directory.
+
+**Noticed and not changed.** The window draws
+`"netcfgd at %1".arg(connection->where())` right after calling this, and
+`where()` returns `path` -- which `close()` has cleared by the time a reopen has
+failed. So a genuine failure leaves the label reading *netcfgd at* and nothing,
+where the path it could not reach is the one thing worth saying. That is a
+separate decision about what the label is for, and it is not this fix's.
+
+**The same shape as 10.375, one layer up.** There a fake replied before writing
+its log and the test read the log too early; here a function cleared the thing
+it was about to read. Both were invisible because the code that would have said
+so was throwing the answer away, and in both cases making the failure legible
+cost less than the reasoning that preceded it.
+
 ## 10.375 The fake answered before it wrote down what it had been asked
 
 `daemon_wifi_test` lost two checks and the output was `FAILED` and nothing else.

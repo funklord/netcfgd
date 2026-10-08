@@ -98,22 +98,52 @@ bool ncfg_connection::is_open() const
 	return client != nullptr && !ncfg_client_broken(client);
 }
 
-bool ncfg_connection::reopen_if_broken()
+bool ncfg_connection::reopen_if_broken(QString *error)
 {
-	if (client == nullptr || !ncfg_client_broken(client)) {
+	/* **Three ways to return false and they are not the same answer**, which
+	 * is why each says which it was. This threw the reason away -- `QString
+	 * ignored` -- and `reconnect` then failed three checks with nothing to go
+	 * on but `not connected` from a later call, which is the message for a
+	 * null client and says nothing about why reopening did not work. The
+	 * caller in the window ignores all of this and is unaffected; the test is
+	 * the reader that needed it. */
+	if (client == nullptr) {
+		if (error) {
+			*error = QStringLiteral("there is no connection to reopen");
+		}
+		return false;
+	}
+	if (!ncfg_client_broken(client)) {
+		if (error) {
+			*error = QStringLiteral("the connection is not broken, so it is left alone");
+		}
 		return false;
 	}
 	/* The same path as it was opened on. `open` closes first, so the dead
-	 * client goes with it. */
-	QString ignored;
-	return open(path, &ignored);
+	 * client goes with it -- and a failure here therefore leaves no client at
+	 * all, which is what makes a later `links()` say `not connected` rather
+	 * than anything about the reopen. */
+	return open(path, error);
 }
 
 bool ncfg_connection::open(const QString &socket_path, QString *error)
 {
+	/*
+	 * **Copied before `close()`, because the caller may have handed us our own
+	 * member.** `reopen_if_broken` passes `path` by const reference and
+	 * `close()` clears `path` -- so `socket_path` aliased an object that was
+	 * emptied underneath it, the empty string made `ncfg_client_open` fall back
+	 * to the default socket, and a client opened on any other path reconnected
+	 * to `/run/netcfgd/netcfgd.sock` instead of where it had been.
+	 *
+	 * It presented as a reconnect that did not happen: `reconnect` failed three
+	 * checks and the only message available was `not connected`, from a later
+	 * call, because a failed `open` has already closed the old client.
+	 */
+	const QByteArray requested = socket_path.toUtf8();
+
 	close();
 
-	const QByteArray requested = socket_path.toUtf8();
 	char message[NCFG_ERROR_MAX];
 
 	client = ncfg_client_open(requested.isEmpty() ? nullptr : requested.constData(), message,
