@@ -12293,6 +12293,51 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.377 `hostname = "dhcp"` rendered as a word the language refuses
+
+`render_globals` wrote `hostname = "from_dhcp"`. `lower_global` compares against
+`"dhcp"` and nothing else; everything else falls through to the hostname check,
+where `from_dhcp` is refused outright because an underscore is not legal in a
+hostname. **So the renderer produced a document that does not compile, and
+`ncfg profile save` refused on any machine with `global { hostname = "dhcp" }`
+in it** -- which is an ordinary thing to have.
+
+The same defect was found in the Rust renderer earlier the same day. Two
+renderers written from one understanding inherit the same mistakes, which is now
+three for three: the `@bssid` marker, the bare block label, and this.
+
+### A third corpus, and the method that keeps paying
+
+Found by round-tripping the **78** documents `lower_test.c` already compiles --
+a corpus written to exercise lowering, with no reason to ask about rendering --
+and the renderer's own suite had no case for this policy at all. The experiment
+was a temporary instrumentation of one helper, `compiles()`, which 79 call sites
+go through. Measured:
+
+	53 OK   23 MISSING   1 NOCOMPILE   1 DIFFERENT
+
+**The 23 refusals are honest and were read rather than counted**: routing rules,
+access points, qdiscs, hooks, a wifi policy, delegated addressing, advertise and
+guard -- the C renderer's known gaps, each reported by `ncfg_render_refuse`
+rather than written wrongly. A sweep that treated them as failures would have
+buried the two that matter in twenty-three that do not.
+
+### The one left open, with the evidence it now has
+
+The `DIFFERENT` is `device eth0 { ethtool { } }`. An empty `ethtool` block
+contributes nothing, so the device compiles to an entry with no settings, and
+`render_device` skips a device whose body comes out empty -- taking the device
+itself with it. Its comment says that skip "is right".
+
+**It is not mine to overrule, and it is no longer only a matter of taste.** The
+same skip was removed on `master` for the same reason 10.21 gives, and here is a
+document in this branch's own corpus that it loses: the round trip fails, so
+`profile save` refuses on a machine configured that way. What the comment and the
+corpus now say are different things, and `working-practice.md` asks that this be
+flagged rather than resolved in either direction. It also blocks making the
+round-trip check permanent over this corpus, which is the obvious next step once
+it is settled.
+
 ## 10.376 A reconnect that went to the default socket, by aliasing
 
 `reconnect` failed three checks, and the only message available was

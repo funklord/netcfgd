@@ -627,7 +627,15 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	}
 	switch (globals->hostname_policy.kind) {
 	case NCFG_HOSTNAME_POLICY_FROM_DHCP:
-		ncfg_buf_add_text(&body, "\thostname = \"from_dhcp\"\n");
+		/* **`dhcp`, which is the only spelling the language takes.**
+		 * `lower_global` compares against `"dhcp"` and everything else falls
+		 * through to the hostname check -- where `from_dhcp` is refused outright,
+		 * an underscore not being legal in a hostname. So this wrote a document
+		 * that does not compile, and `ncfg profile save` refused on any machine
+		 * with `hostname = "dhcp"` in it. The same defect was found and fixed in
+		 * the Rust renderer; the two were written from one understanding and
+		 * inherited the same mistake. */
+		ncfg_buf_add_text(&body, "\thostname = \"dhcp\"\n");
 		break;
 	case NCFG_HOSTNAME_POLICY_STATIC:
 		ncfg_buf_add_text(&body, "\thostname = ");
