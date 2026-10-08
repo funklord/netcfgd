@@ -47,6 +47,45 @@ pub type Overrides = BTreeSet<String>;
 /// What could not be rendered, so the caller can say so precisely.
 pub type Unrenderable = Vec<String>;
 
+/// Whether rendering this document and compiling the result gives it back.
+///
+/// **The property `ncfg profile save` rests on, available to any test that
+/// happens to hold a document.** The daemon proves it before keeping a
+/// snapshot, so a renderer that writes something subtly different refuses the
+/// save rather than producing a wrong file -- which means every such refusal is
+/// a defect here, and the operator sees it rather than a test does.
+///
+/// Public and here rather than copied into each test file, because it is now
+/// called from three corpora -- the example manual, `netcfgd-compile`'s own
+/// suite and `netcfgd-plan`'s fixtures -- and three copies of this would drift.
+/// Two of the three defects it has found were visible to only one of those
+/// corpora, which is the argument for pointing it at all of them.
+///
+/// Returns the complaint rather than panicking, so a caller can say whose test
+/// it is and what an operator would have met.
+///
+/// # Errors
+///
+/// If the document cannot be rendered, if what was rendered does not compile,
+/// or if it compiles to a different document.
+pub fn round_trip(document: &Document) -> Result<(), String> {
+	let overrides = Overrides::new();
+	let rendered = render(document, &overrides)
+		.map_err(|missing| format!("it cannot be rendered at all: {}", missing.join(", ")))?;
+	let mut back = crate::SourceMap::new();
+	back.add("rendered.conf", &rendered);
+	match crate::compile(&back, &mut crate::NoHooks) {
+		Ok(again) if again == *document => Ok(()),
+		Ok(_) => Err(format!(
+			"what it wrote compiles to a DIFFERENT document.\nrendered:\n{rendered}"
+		)),
+		Err(diagnostics) => Err(format!(
+			"what it wrote does not compile.\nrendered:\n{rendered}\n{}",
+			diagnostics.render(&back)
+		)),
+	}
+}
+
 /// Render a whole document as configuration text.
 ///
 /// # Errors
@@ -1232,9 +1271,16 @@ fn render_device(
 		}
 		body.push_str("\t}\n");
 	}
-	if body.is_empty() {
-		return;
-	}
+	// **Present and empty is not absent**, which is the principle stated three
+	// lines below this for `device.wifi` and in 10.21 for `dns { }` -- and this
+	// block was the one place still breaking it. `device wlan0 { }` compiled to
+	// a `Device` entry and rendered to nothing, so the document came back
+	// without it and `profile save`'s proof refused.
+	//
+	// Not skipped for being short. The derived `ifb` devices an ingress shaper
+	// synthesises are the ones that must not be written, and they are skipped
+	// by name at the call site rather than by being empty -- which is why
+	// removing this does not disturb them.
 	let head = opening("device", name, overrides);
 	let _ = write!(text, "\n{head} {} {{\n{body}}}\n", label(name));
 }
@@ -3676,5 +3722,48 @@ mod tests {
 			 \twifi { psk = \"@secret:o\" }\n\
 			 }\n";
 		round_trips(hex);
+	}
+
+	/// A `device` block with nothing in it is still a block.
+	///
+	/// **The third instance of 10.21's lesson, and the last place still
+	/// breaking it.** `render_device` returned early when its body came out
+	/// empty, so `device wlan0 { }` compiled to a `Device` entry and rendered
+	/// to nothing at all -- the document came back one device short and
+	/// `profile save`'s proof refused. The principle was already stated three
+	/// lines below the offending `return`, for `device.wifi`, and in 10.21 for
+	/// `dns { }`.
+	///
+	/// Found by round-tripping the 259 documents `netcfgd-plan`'s fixtures
+	/// compile -- a corpus `tests/compile.rs` does not overlap, which is the
+	/// argument for guarding more than one of them: five of those documents hit
+	/// this and none of compile.rs's ninety did.
+	///
+	/// The control is the derived `ifb` device an ingress shaper synthesises.
+	/// Those must NOT be written, and they are skipped by name at the call site
+	/// rather than for being empty -- so a renderer that started writing them
+	/// would fail `an_ingress_shaper_inverts`, not this.
+	#[test]
+	fn an_empty_device_block_is_still_rendered() {
+		let text = "device wlan0 { }\naccess_point \"home\" {\n\
+			 \tdevice = \"wlan0\"\n\
+			 \twifi { psk = \"@secret:ap\"; proto = \"wpa2\" }\n\
+			 }\n";
+		round_trips(text);
+
+		let mut sources = crate::SourceMap::new();
+		sources.add("empty.conf", text);
+		let document = crate::compile(&sources, &mut crate::NoHooks).expect("it compiles");
+		assert_eq!(
+			document.devices.len(),
+			1,
+			"the fixture must produce a device, or this tests nothing"
+		);
+		let rendered = render(&document, &Overrides::new()).expect("it renders");
+		assert!(
+			rendered.contains("device wlan0 {"),
+			"a device the document declares must be written even with nothing in \
+			 it:\n{rendered}"
+		);
 	}
 }

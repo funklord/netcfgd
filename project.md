@@ -9546,6 +9546,26 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.187 An empty `device { }` rendered as nothing, and one corpus could not see it
+
+**The third instance of 10.21's lesson, and the last place still breaking it.**
+`render_device` returned early when its body came out empty, so
+`device wlan0 { }` compiled to a `Device` entry and rendered to nothing at all.
+The document came back one device short and `profile save`'s proof refused.
+
+The thing worth noticing is where the rule was written down. The bare
+`if body.is_empty() { return; }` had no comment, and **three lines below it** sat
+the doc comment for `render_wifi_device` saying *"**Present and empty is not
+absent**, which is 10.21's lesson for `dns { }` arriving in a second block."*
+The principle was stated, in the same function's neighbourhood, by whoever fixed
+it for `dns` and then for `device.wifi`. The device block itself was never
+revisited.
+
+Not skipped for being short: the derived `ifb` devices an ingress shaper
+synthesises are the ones that must not be written, and they are skipped **by
+name at the call site** rather than for being empty -- which is why removing
+this did not disturb them, and is the control the new test names.
+
 ## 10.186 A network pinned by access point could not be saved
 
 **`ncfg profile save` refused on any machine with a network named by its access
