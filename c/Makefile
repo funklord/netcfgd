@@ -82,7 +82,25 @@ SRCS = $(filter-out src/main/%,$(wildcard src/*/*.c)) $(wildcard src/*/*/*.c)
 # output is ours.
 SHARED_SRCS = ../client/ncfg_json.c
 SHARED_OBJS = $(notdir $(SHARED_SRCS:.c=.o))
-OBJS = $(patsubst %.c,%.o,$(SRCS)) $(SHARED_OBJS)
+
+# **And kept OUT of the archive**, which is the other half of sharing it.
+#
+# `client/libncfg_client.a` necessarily carries the same reader -- its own
+# `ncfg_client.o` calls it and an archive has to be self-sufficient for the
+# GUI, its tests and the CMake project that link it. So with this object
+# archived too, both libraries exported the same fourteen `ncfg_json_*`
+# symbols, and anything linking the pair got a duplicate-symbol error rather
+# than one copy. `code-style.md` calls that a landmine that only detonates
+# when one link pulls both sides, and fmake building the whole tree as one
+# target set is that link arriving (project.md 10.421).
+#
+# Nothing outside this directory links `libncfg.a`, so the fix is here and is
+# cheap: the archive holds what this directory compiled, and the shared object
+# goes on the link line beside it. Named explicitly at each site rather than
+# reached through `$^`, which would put a header on a compile line -- the rule
+# `build-and-commit.md` states.
+LIB_OBJS = $(patsubst %.c,%.o,$(SRCS))
+OBJS = $(LIB_OBJS) $(SHARED_OBJS)
 
 # The program, its second name, and the entry points that make it one.
 PROGRAM       = netcfgd
@@ -153,16 +171,16 @@ EXAMPLES = examples/live_association
 
 examples: $(EXAMPLES)
 
-examples/%: examples/%.c $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+examples/%: examples/%.c $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
-$(LIB): $(OBJS)
-	$(AR) rcs $@ $(OBJS)
+$(LIB): $(LIB_OBJS)
+	$(AR) rcs $@ $(LIB_OBJS)
 
 # The library last on the line, because it is an archive: the objects that need
 # it are listed before it or the linker has already walked past what it wanted.
-$(PROGRAM): $(PROGRAM_OBJS) $(LIB)
-	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(LIB) $(LDFLAGS) -o $@
+$(PROGRAM): $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB)
+	$(CC) $(CFLAGS) $(PROGRAM_OBJS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
 # The second name, made rather than installed -- see the header.
 $(PROGRAM_LINK): $(PROGRAM)
@@ -208,8 +226,8 @@ test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK)
 	[ $$fail -eq 0 ] || { echo "c: some checks failed"; exit 1; }
 	@echo "c: every check passed"
 
-tests/%_test: tests/%_test.c $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
+tests/%_test: tests/%_test.c $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
 # The two tests that link more than the library, because what they check is not
 # in the library: the entry points and the descriptor loop are under
@@ -221,21 +239,21 @@ tests/%_test: tests/%_test.c $(LIB) .build-flags
 # for the reason 0263 gives -- a library never exits and never owns a `poll`
 # that decides when a process stops. `world_test` and `answer_test` are the
 # other two halves of the same sentence.
-tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+tests/main_test: tests/main_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
-tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+tests/loop_test: tests/loop_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
 # The same two, for the same reason: the four seams a reconcile pass reaches
 # the machine through and the request dispatcher are `src/main/`'s work --
 # owning the apply lock, the netlink socket and the connections an event is
 # written to is what that directory is for.
-tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
-tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(LIB) .build-flags
-	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(LIB) $(LDFLAGS) -o $@
+tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
 # What this build made, by the same wildcard that made it -- and nothing by
 # pattern that this directory does not own. The program and its second name are

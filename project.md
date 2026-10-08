@@ -12318,10 +12318,35 @@ Twenty, in three groups that want three different answers -- which is why
 renaming the two as asked would have left eighteen and stopped fmake again on
 the next one.
 
-**Fourteen `ncfg_json_*` are not a naming defect at all.** `c/Makefile` reads
-`SHARED_SRCS = ../client/ncfg_json.c`: it is **one source file** compiled into
-both archives, so the duplicate is in how the archives are composed and not in
-what anything is called. Renaming here would be wrong. Left alone and recorded.
+**Fourteen `ncfg_json_*` are not a naming defect at all**, and were fixed as
+what they are. `c/Makefile` reads `SHARED_SRCS = ../client/ncfg_json.c`: it is
+**one source file** compiled into both archives, so the duplicate was in how
+the archives are composed and not in what anything is called -- renaming would
+have been wrong.
+
+The fix is that `libncfg.a` no longer carries it. The archive is built from
+`LIB_OBJS`, this directory's own objects, and the shared object goes on the
+seven link lines that name the archive. The client's archive keeps its copy
+because it has to: `ncfg_client.o` calls the reader, and the GUI, the GUI's
+tests and the CMake project all link that archive and must find it there. The
+daemon's archive has no outside consumer at all -- `bridge/` names the objects
+it wants individually -- so this was the cheap side.
+
+**What was deliberately NOT changed is the two-objects arrangement**, which the
+comment above `SHARED_SRCS` records with its own incident: compiling at
+`../client/ncfg_json.o` put this directory's object where `client/Makefile`
+builds and archives one, with different flags and outside the `.build-flags`
+stamp, so `make SANITIZE=1` here left a sanitized object the client's archive
+picked up -- and this directory's `clean` then deleted another component's
+object. One source, two objects, still. Only the archiving changed.
+
+Measured: `nm` over the two archives intersects to **0**, where it was 14. The
+19 `ncfg_json_*` left in `libncfg.a` are the daemon's own writer from
+`c/src/json/write.c` -- `ncfg_json_write_*` and `ncfg_json_pretty` -- which the
+client does not have, so they cannot collide. **Checked after a `clean`,
+because `ar rcs` adds to an existing archive rather than replacing it**: a
+stale `libncfg.a` would have kept the member and the measurement would have
+been of the wrong file.
 
 **Six were real, and the five with matching signatures are the dangerous
 ones.** `ncfg_hook_scripts_free` differs in signature between the two headers,
