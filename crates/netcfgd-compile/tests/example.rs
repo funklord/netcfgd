@@ -242,6 +242,203 @@ fn every_example_renders_and_round_trips() {
 	);
 }
 
+/// xorshift, seeded fixed by the caller, because a randomised failure nobody
+/// can reproduce is a sighting rather than a finding. The same generator as
+/// `tests/random.rs`, deliberately: a second one would be a second thing to be
+/// wrong about.
+struct Rng(u64);
+
+impl Rng {
+	fn next(&mut self) -> u64 {
+		self.0 ^= self.0 << 13;
+		self.0 ^= self.0 >> 7;
+		self.0 ^= self.0 << 17;
+		self.0
+	}
+
+	fn below(&mut self, bound: usize) -> usize {
+		if bound == 0 {
+			0
+		} else {
+			usize::try_from(self.next() % bound as u64).unwrap_or(0)
+		}
+	}
+}
+
+/// One to four byte edits of `text`.
+///
+/// **The digit arm is the one that reaches a VALUE rather than the grammar**,
+/// and it was added because a sabotage proved the sweep could not find one:
+/// dropping `mtu` unless it was exactly 1492 -- the only value the corpus
+/// contains -- left every assertion green. A random printable byte lands on a
+/// digit position about 14% of the time and is itself a digit 10 times in 95,
+/// so reaching a specific number's digits was a once-or-twice-per-run accident.
+/// This makes it ordinary, and it keeps the document valid while doing it,
+/// which is what gets a mutation past the parser and into the renderer.
+fn mutate(rng: &mut Rng, text: &str) -> Vec<u8> {
+	let mut bytes = text.as_bytes().to_vec();
+	for _ in 0..=rng.below(4) {
+		if bytes.is_empty() {
+			break;
+		}
+		let index = rng.below(bytes.len());
+		match rng.below(4) {
+			0 => bytes[index] = u8::try_from(0x20 + rng.below(0x5f)).unwrap_or(b' '),
+			1 => {
+				bytes.remove(index);
+			}
+			2 if bytes[index].is_ascii_digit() => {
+				bytes[index] = b'0' + u8::try_from(rng.below(10)).unwrap_or(0);
+			}
+			// Duplicating a byte is how unbalanced braces and quotes arrive,
+			// which is the mutation that reaches the parser's recovery rather
+			// than its happy path.
+			_ => bytes.insert(index, bytes[index]),
+		}
+	}
+	bytes
+}
+
+/// How many mutations each example gets.
+///
+/// Per snippet rather than a flat budget, so a block type cannot be starved by
+/// the file happening to carry more examples of another. Raised from 120 when
+/// the digit arm went into `mutate`: the point of both changes is to reach
+/// values, and 120 was chosen before there was any evidence about what reaching
+/// them costs. Measured at about 4 seconds for the whole test, which is
+/// affordable in `make check` and is the reason it is not higher.
+const PER_SNIPPET: usize = 600;
+
+/// Mutations of every example, not of one hand-written block.
+///
+/// **`tests/random.rs` mutates a single `interface` template.** It is a good
+/// test and it reaches lowering for exactly one block shape: `config`,
+/// `routes`, `dns`, `mtu`, `guard` and a `vlan`. The language has `network`,
+/// `device`, `bluetooth`, `access_point`, `rule`, `linkset`, `tunnel`,
+/// `wireguard`, `openvpn`, `pppoe`, `advertise`, `ethtool` and `qdisc` besides,
+/// and mutation reached none of their lowering paths -- so the shapes most
+/// recently taught to the compiler were the ones a mutating test never saw.
+///
+/// The corpus is already here, already complete enough to be a gate, and
+/// already extracted by `snippets`, so this lives beside it rather than
+/// carrying a second copy of that extraction.
+///
+/// **Two properties, and the second is the stronger one.** No mutation may
+/// panic, which is what a fuzz target asserts. And any mutation that still
+/// *compiles* must round-trip through the renderer, which is the invariant
+/// `every_example_renders_and_round_trips` checks on unmutated text -- it has
+/// nothing to do with the input being an example, so it must hold for every
+/// document the compiler accepts. A mutated-but-valid document is a document.
+///
+/// The hooks waiver is carried for the same reason as above, and so is the
+/// requirement that it fire: a mutation that produces a hook must not be read
+/// as a renderer failure.
+#[test]
+fn mutating_every_example_round_trips_or_is_refused() {
+	let source = std::fs::read_to_string(EXAMPLE)
+		.unwrap_or_else(|error| panic!("cannot read {EXAMPLE}: {error}"));
+	let found = snippets(&source);
+	assert!(found.len() >= 20, "only {} examples found", found.len());
+
+	let mut rng = Rng(0x2026_1008_0000_0001);
+	let mut failures = String::new();
+	let mut compiled = 0usize;
+	let mut round_tripped = 0usize;
+	let mut waived = 0usize;
+
+	for snippet in &found {
+		for _ in 0..PER_SNIPPET {
+			let bytes = mutate(&mut rng, &snippet.text);
+			let Ok(text) = std::str::from_utf8(&bytes) else {
+				continue;
+			};
+
+			let mut sources = SourceMap::new();
+			sources.add("mutated.conf", text);
+			// Any refusal is a correct outcome: this asserts about what the
+			// compiler ACCEPTS, and a mutation is far likelier to be invalid.
+			let Ok(document) = compile(&sources, &mut FakeHooks) else {
+				continue;
+			};
+			compiled += 1;
+
+			// Canonicalisation is reachable only through a successful compile,
+			// so it is driven here as `random.rs` drives it.
+			let _ = document.to_json_canonical();
+
+			let overrides = netcfgd_compile::render::Overrides::new();
+			let rendered = match netcfgd_compile::render::render(&document, &overrides) {
+				Ok(rendered) => rendered,
+				Err(missing) => {
+					if missing.iter().all(|what| what.contains("hooks")) {
+						waived += 1;
+					} else {
+						failures.push_str(&format!(
+							"\na mutation of {EXAMPLE}:{} compiles but renders only \
+							 partly, and not because of hooks: {}\n{text}\n",
+							snippet.line,
+							missing.join(", ")
+						));
+					}
+					continue;
+				}
+			};
+
+			let mut back = SourceMap::new();
+			back.add("rendered.conf", &rendered);
+			match compile(&back, &mut FakeHooks) {
+				Ok(again) if again == document => round_tripped += 1,
+				Ok(_) => failures.push_str(&format!(
+					"\na mutation of {EXAMPLE}:{} renders to a different \
+					 document.\nmutated:\n{text}\nrendered:\n{rendered}\n",
+					snippet.line
+				)),
+				Err(diagnostics) => failures.push_str(&format!(
+					"\na mutation of {EXAMPLE}:{} renders to something that does \
+					 not compile.\nmutated:\n{text}\nrendered:\n{rendered}\n{}\n",
+					snippet.line,
+					diagnostics.render(&back)
+				)),
+			}
+
+			// One finding is enough to act on, and a mutation storm would
+			// bury it.
+			if failures.len() > 4_000 {
+				break;
+			}
+		}
+	}
+
+	assert!(failures.is_empty(), "{failures}");
+	// **The controls, because a mutation sweep that reached nothing would be
+	// silent in exactly the same way as one that found nothing.** Mutations
+	// are far likelier to be invalid than valid, so the number that compile is
+	// the measure of whether this test examined the renderer at all.
+	// Measured when this was written: 3182 compiled, 3065 round-tripped, and
+	// the 117 between them are the hooks waiver firing. The floors are set at
+	// roughly half, so a collapse fails while ordinary movement in the corpus
+	// does not -- `found.len() >= 20` above already guards the corpus itself.
+	assert!(
+		compiled >= 1_500,
+		"only {compiled} mutations compiled, against 3182 when this was written -- \
+		 too few for the round-trip assertions to be a measurement, so either the \
+		 mutation has become too destructive or the language stopped accepting \
+		 something it did"
+	);
+	assert!(
+		round_tripped >= 1_200,
+		"only {round_tripped} mutations reached the renderer and came back, against \
+		 3065 when this was written, so this test is asserting much less about it \
+		 than it did"
+	);
+	// The hooks waiver has to fire, for the reason the test above it says: a
+	// waiver that never fires is either dead or hiding something.
+	assert!(
+		waived > 0,
+		"no mutation was refused for hooks, so the waiver is checking nothing"
+	);
+}
+
 /// The installed example must not be a file the loader reads.
 ///
 /// The whole safety of shipping a configuration file full of examples is that

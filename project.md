@@ -9577,6 +9577,46 @@ test, and making `label` quote *everything* fails it too, on `eth0` and on
 rewrite every profile this tree renders, and `eth0.42` is the case the lexer's
 own comment says the dot rule exists for.
 
+### What found it, and the sabotage that made it able to
+
+`tests/random.rs` mutates **one** hand-written `interface` template --
+`config`, `routes`, `dns`, `mtu`, `guard`, a `vlan`. It is a good test and it
+reaches lowering for exactly that shape, while the language has `network`,
+`device`, `bluetooth`, `access_point`, `rule`, `linkset`, `tunnel`,
+`wireguard`, `openvpn`, `pppoe`, `advertise`, `ethtool` and `qdisc` besides. The
+shapes most recently taught to the compiler were the ones a mutating test never
+saw.
+
+`mutating_every_example_round_trips_or_is_refused` mutates the example corpus
+instead -- every block type the manual documents -- and lives in `example.rs`
+beside the `snippets` extractor rather than carrying a second copy of it. It
+asserts two things, and the second is the stronger: no mutation may panic, and
+any mutation that still *compiles* must round-trip through the renderer. That
+invariant has nothing to do with the input being an example, so it must hold for
+every document the compiler accepts. A mutated-but-valid document is a document.
+
+**The first version could not have found this, and a sabotage is what said
+so.** Dropping `mtu` from the renderer unless it was exactly 1492 -- the only
+mtu the corpus contains -- left every assertion green. The arithmetic says why:
+a random printable byte lands on one of four digit positions about 14% of the
+time and is itself a digit 10 times in 95, so reaching a specific number's
+digits was a once-or-twice-per-run accident. An arm that turns a digit into
+another digit made it ordinary, and **with that arm the same sabotage is caught
+immediately and the real defect fell out of the next run.**
+
+So the order matters and is worth keeping: the test passed, a sabotage showed it
+was passing for want of power rather than for want of a defect, the generator
+was strengthened, and the strengthened version found something nobody was
+looking for. A mutation sweep that has not been sabotaged is a green light with
+no demonstrated ability to be anything else.
+
+**Its controls are counts, because a sweep that reached nothing is silent in the
+same way as one that found nothing.** Mutations are far likelier to be invalid
+than valid, so the number that compile measures whether the renderer was
+examined at all: 3182 compiled and 3065 round-tripped when this was written, and
+the 117 between them are the hooks waiver firing. The floors are set near half,
+so a collapse fails while ordinary movement in the corpus does not.
+
 ## 10.184 Two messages nothing produced, out of 408
 
 The lens came from the day's finds, all of which were things that had never
