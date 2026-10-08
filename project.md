@@ -12293,6 +12293,63 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.386 Every device kind renders but the one netcfgd makes itself
+
+`wireguard`, `openvpn`, `tunnel` and `tun`/`tap` were the four the switch in
+`render_kind` refused, and closing them leaves **`ifb` alone** -- refused because
+netcfgd synthesises one per interface asking for `ingress_bandwidth`, so
+rendering it would put a derived device into a profile as though somebody had
+asked for it. That is a property of the thing, like hooks in 10.384, rather than
+work left undone.
+
+A WireGuard machine could not save a profile at all, which is the largest of
+these: the keys stay references -- `ncfg_secret_ref_t` is incapable of carrying
+material -- so saving a profile copies no key anywhere, and a peer's public key
+goes out through `ncfg_key_render` rather than any spelling of this file's own.
+Base64 has more than one spelling of one 32-octet key, the final character
+carrying four significant bits, and the model keeps octets precisely so two
+spellings compare equal; rendering them by hand would reintroduce the second
+spelling at the one place the whole arrangement exists to prevent it.
+
+**The mode of a tun device is the block's name, not a key in it.** `lower_tun` is
+reached from `tun { }` and from `tap { }` and takes the mode from which head it
+saw, so `tun { mode = "tap" }` is an unknown key rather than a tap device. One
+model type, two spellings, and the spelling is the whole difference -- sabotaged
+by inverting them, and it fails four checks.
+
+### The redundancy rule from 10.385 paid for itself the same day
+
+10.385 ended with a rule: where the language accepts more than one way to say a
+thing, assert the text as well, because the round trip is blind to a choice
+between two spellings of one fact. These four kinds have five such pairs --
+`config`/`file`, `username`/`user`, `mode`/`kind`, `parent`/`dev`, `key`/`vni` --
+and the first draft of the test asserted only `mode`.
+
+Adding the other four was mechanical, not inspired, and then **writing `user`
+where `openvpn` should write `username` failed exactly one check: the assertion
+added for that reason.** The round trip passed, because the parser takes both.
+Without the rule the test would have been written, the sabotage would have come
+back green, and nothing would have said why.
+
+So the rule is not a heuristic any more. It has a procedure: read the lowering
+for `||` chains on key names, and assert the canonical spelling of each pair it
+finds.
+
+### What the refusal list is now, and a helper whose death is the finding
+
+Twenty-odd refusals remain and **hooks is the only one a config file can
+reach**. Every other names something the language has no words for -- the five
+`dns` facts, the seven `dhcp` lease fields, `match`, `ingress_redirect`, a
+route's `scope` and `proto` -- or something netcfgd synthesises, or a shape the
+lowering already rejects before the renderer sees it.
+
+The evidence is a compiler warning rather than a survey: `refusals_of_config` in
+`render_test.c`, which compiled a config file and collected its refusals, has no
+callers left. It had them while `wireguard` and `openvpn` were refused. Its
+absence is noted in the file rather than quietly tidied, because anything new
+that is both refused and reachable wants it back -- and because an unused test
+helper is the cheapest census of reachability this tree is going to get.
+
 ## 10.385 Every address source renders now
 
 `@pd:` and `reported` were the last two the model has, both refused through the
