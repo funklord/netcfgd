@@ -12385,6 +12385,55 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.425 A probe's `require_lease` was dropped, found by asking the example file
+
+10.423 added the round-trip guard to `lower_test.c`'s own documents. The example
+file was still unasked, and it is the corpus a reader meets first and the one
+`ncfg profile save` is most likely to be pointed at. `example_cases()` already
+compiles all 101 blocks; asking each whether it renders back is three lines and
+found a real defect in one.
+
+**`render_probe` wrote nothing for `require_lease`, one field of nine.** The
+example's `wwan0` probe sets `require_lease = false` and the file's own prose
+says why: a cellular link gets no DHCP lease, so requiring one *"would hold a
+working link down for ever"*. A profile saved from such a machine came back
+requiring a lease -- the probe's precondition inverted, with nothing downstream
+to report it.
+
+**Why that field and not another is the transferable part.** Every other probe
+key is written when it differs from a fallback of zero or a number.
+`require_lease` is the only one whose default is `true`, so it needed the
+opposite test -- `if (!probe->require_lease)` -- and a renderer written by
+sweeping the struct with one shape of comparison skips exactly the field whose
+polarity differs. The same shape caught the ethtool toggles in 10.381, where
+`off` is not the absence of a value; this is it again with a boolean.
+
+It is written only when off, which is 0191's reasoning: `require_lease = false`
+reads as a decision where `skip_lease_check = true` would read as a workaround.
+
+### Two corpora, and each catches it alone
+
+Pinned in `render_test.c` as well as found in the example, so the fix does not
+depend on that file keeping the `wwan0` block. Sabotaged by dropping the write
+again: `render_test` fails two checks and `lower_test` reports one example
+block. Either alone would have caught it, which is the argument for having both
+rather than a reason to drop one.
+
+### The instrument's third corpus, and the pattern in what each found
+
+Three corpora now ask the renderer whether it can write a document back, and
+each has found something the others could not:
+
+    render_test.c's own cases     the hand-written ones, 188 checks
+    lower_test.c's compiles()     a geneve tunnel of the wrong address family
+    doc/netcfgd.conf.example      a probe's require_lease
+
+None of the three found the other two's defect. That is the non-overlap argument
+stated as a measurement rather than a principle, and it is why the next corpus
+is worth asking rather than the next feature: **the renderer's remaining gaps
+are not in what it refuses -- both implementations agree there -- but in fields
+it writes nothing for and nobody has asked about.**
+
 ## 10.424 fmake answered the question 10.421 left open, and it does not arise
 
 Reported through `.git/cc-inbox/` on 2026-10-09, as their section 400 (`776ba00`).

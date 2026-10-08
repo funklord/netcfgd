@@ -462,6 +462,26 @@ static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
 			    (long long)values[i]);
 		}
 	}
+	/*
+	 * **The one field of nine this wrote nothing for**, and the only one whose
+	 * default is `true`, which is why it was the one missed: every other key
+	 * here is written when it differs from a fallback of zero or a number, and
+	 * a boolean that is on by default needs the opposite test.
+	 *
+	 * `doc/netcfgd.conf.example` is where it surfaced -- its `wwan0` probe sets
+	 * `require_lease = false`, and the example's own prose says why: a cellular
+	 * link gets no DHCP lease, so requiring one "would hold a working link down
+	 * for ever". A profile saved from such a machine came back requiring a
+	 * lease, which is the probe's precondition inverted and nothing downstream
+	 * would report it.
+	 *
+	 * Written only when off, because absence means on -- 0191's reasoning, that
+	 * `require_lease = false` reads as a decision where `skip_lease_check =
+	 * true` reads as a workaround.
+	 */
+	if (!probe->require_lease) {
+		ncfg_buf_add_text(body, "\t\trequire_lease = false\n");
+	}
 	ncfg_buf_add_text(body, "\t}\n");
 }
 

@@ -2144,6 +2144,7 @@ static void example_cases(void)
 	size_t found = 0;
 	size_t allowed = 0;
 	size_t bad = 0;
+	size_t unrenderable = 0;
 	size_t head;
 
 	if (!text) {
@@ -2215,6 +2216,29 @@ static void example_cases(void)
 			} else if (!document) {
 				allowed++;
 			}
+			/*
+			 * **And whether the renderer can write each one back.** The
+			 * example file is the corpus a reader meets first and the one
+			 * `profile save` is most likely to be pointed at, and nothing had
+			 * ever asked it this. A block the renderer cannot reproduce is a
+			 * machine whose profile cannot be saved, and this is the third
+			 * corpus to be asked -- the first two being `compiles()` above and
+			 * the renderer's own cases.
+			 *
+			 * Hooks are skipped for the reason `compiles` gives: the document
+			 * holds a path and a hash and never the shell, so there is nothing
+			 * to write the block back from.
+			 */
+			if (document && !carries_hooks(document)) {
+				char why[NCFG_ERROR_MAX];
+
+				why[0] = '\0';
+				if (!ncfg_config_round_trips(document, why, sizeof(why))) {
+					printf("%s:%zu: THE RENDERER, not the example: %s\n",
+					    EXAMPLE_PATH, start, why);
+					unrenderable++;
+				}
+			}
 			ncfg_document_free(document);
 		}
 
@@ -2231,6 +2255,7 @@ static void example_cases(void)
 	 * currently carries ninety-three.
 	 */
 	check(found >= 50u, "the example extractor finds the blocks it should");
+	check(unrenderable == 0u, "  and every block that compiles can be written back");
 	if (found < 50u) {
 		printf("    only %zu blocks found in %s; the extractor is broken, not the file\n",
 		    found, EXAMPLE_PATH);

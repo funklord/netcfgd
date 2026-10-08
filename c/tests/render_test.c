@@ -1529,6 +1529,27 @@ static void a_bare_probe_round_trips(void)
 	check(holds(rendered, "\tprobe {\n\t\tcommand = \"/usr/bin/true\"\n\t}\n"),
 	    "and writes its command and nothing else");
 	free(rendered);
+
+	/*
+	 * **The one field of nine this renderer wrote nothing for.** Every other
+	 * probe key is written when it differs from a fallback of zero or a
+	 * number; `require_lease` is the only one whose default is `true`, so it
+	 * needed the opposite test and did not have it. A profile saved from a
+	 * cellular machine came back requiring a lease the link never gets, which
+	 * the example file's own prose says "would hold a working link down for
+	 * ever".
+	 *
+	 * Found by round-tripping `doc/netcfgd.conf.example`, which nothing had
+	 * asked about rendering before. Asserted here as well, so the fix does not
+	 * depend on that file keeping the `wwan0` block.
+	 */
+	text = "interface wwan0 {\n\tconfig = \"dhcp\"\n"
+	    "\tprobe { command = \"/usr/bin/true\"; require_lease = false }\n}\n";
+	round_trips(text, "a probe that does not require a lease round trips");
+	rendered = rendering_of(text);
+	check(holds(rendered, "require_lease = false"),
+	    "and says so, because absence means it does require one");
+	free(rendered);
 }
 
 /*
