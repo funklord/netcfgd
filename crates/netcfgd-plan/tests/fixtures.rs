@@ -14,13 +14,32 @@ use netcfgd_model::{
 use netcfgd_plan::{plan as plan_unchecked, Op, Plan, PlanOptions};
 
 /// Compile fixture text into a document.
+/// Compile a fixture, and prove the renderer can write it back.
+///
+/// **259 documents, free, and a different corpus from the compiler's own.**
+/// Every fixture here was written to exercise planning, not rendering, and five
+/// of them caught a renderer defect that none of `netcfgd-compile`'s ninety
+/// documents could see -- an empty `device { }` block rendering to nothing. That
+/// non-overlap is the whole argument for asking more than one corpus.
+///
+/// `profile save`'s safety is exactly this property, so a fixture the renderer
+/// cannot reproduce is a machine whose profile cannot be saved. The message says
+/// the renderer is at fault, because a test about plan ordering failing with a
+/// complaint about rendering is otherwise a confusing place to start.
 fn document(text: &str) -> Document {
 	let mut sources = SourceMap::new();
 	sources.add("netcfgd.conf", text);
-	match compile(&sources, &mut NoHooks) {
+	let document = match compile(&sources, &mut NoHooks) {
 		Ok(document) => document,
 		Err(diagnostics) => panic!("fixture did not compile:\n{}", diagnostics.render(&sources)),
+	};
+	if let Err(why) = netcfgd_compile::render::round_trip(&document) {
+		panic!(
+			"THE RENDERER, not this test: {why}\nso `ncfg profile save` would refuse \
+			 on a machine configured this way.\nfrom:\n{text}"
+		);
 	}
+	document
 }
 
 /// A link that exists and is down, which is what a fresh boot looks like.

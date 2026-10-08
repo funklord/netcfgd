@@ -9566,6 +9566,28 @@ synthesises are the ones that must not be written, and they are skipped **by
 name at the call site** rather than for being empty -- which is why removing
 this did not disturb them, and is the control the new test names.
 
+### A second corpus saw what the first could not
+
+This was found by round-tripping the **259** documents `netcfgd-plan`'s fixtures
+compile -- and **five of them hit it while none of `tests/compile.rs`'s ninety
+did.** That non-overlap is the argument, and it is stronger than "more coverage
+is better": the two corpora were written by different people for different
+reasons, so they reach different corners, and a renderer defect lives in
+whichever corner nobody's tests happen to visit.
+
+So `round_trip` is a `pub fn` in `render` now rather than a copy in each test
+file. Three callers -- the example manual, the compiler's own suite, the
+planner's fixtures -- and three copies of twenty lines would drift. It returns
+the complaint rather than panicking, so each caller can say whose test it is.
+It costs nothing in the shipped binary: `make size` reports the same 2,992,672,
+because nothing in the binary calls it and the linker drops it.
+
+**And the instrument needed fixing before its numbers were worth anything.** The
+first measurement logged one line per document to a shared file from 234 tests
+running in parallel; the appends interleaved and the output carried fragments
+like `nmdee\"i` beside the counts. Read as data that would have been a
+measurement of nothing. `--test-threads=1` is what made it a count.
+
 ## 10.186 A network pinned by access point could not be saved
 
 **`ncfg profile save` refused on any machine with a network named by its access

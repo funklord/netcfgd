@@ -63,39 +63,13 @@ fn build_ok(text: &str) -> Document {
 		Err(diagnostics) => panic!("expected success, got:\n{}", diagnostics.render(&sources)),
 	};
 
-	let overrides = netcfgd_compile::render::Overrides::new();
-	let rendered = match netcfgd_compile::render::render(&document, &overrides) {
-		Ok(rendered) => rendered,
-		Err(missing) => {
-			// Not waived. Nothing in this file needed a waiver when the check
-			// went in, so a document that cannot be rendered is either a new
-			// renderer gap or a feature this file reached first -- and both are
-			// worth stopping for rather than counting.
-			panic!(
-				"THE RENDERER, not this test: it cannot write back a document that \
-				 compiled, so `ncfg profile save` would refuse on a machine \
-				 configured this way.\nmissing: {}\nfrom:\n{text}",
-				missing.join(", ")
-			)
-		}
-	};
-
-	let mut back = SourceMap::new();
-	back.add("rendered.conf", &rendered);
-	match compile(&back, &mut NoHooks) {
-		Ok(again) if again == document => document,
-		Ok(_) => panic!(
-			"THE RENDERER, not this test: what it wrote compiles to a DIFFERENT \
-			 document, so `ncfg profile save` would refuse on a machine configured \
-			 this way.\nfrom:\n{text}\nrendered:\n{rendered}"
-		),
-		Err(diagnostics) => panic!(
-			"THE RENDERER, not this test: what it wrote does not compile, so \
-			 `ncfg profile save` would refuse on a machine configured this \
-			 way.\nfrom:\n{text}\nrendered:\n{rendered}\n{}",
-			diagnostics.render(&back)
-		),
+	if let Err(why) = netcfgd_compile::render::round_trip(&document) {
+		panic!(
+			"THE RENDERER, not this test: {why}\nso `ncfg profile save` would refuse \
+			 on a machine configured this way.\nfrom:\n{text}"
+		);
 	}
+	document
 }
 
 fn errors(text: &str) -> String {
