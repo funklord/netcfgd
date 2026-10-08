@@ -2228,7 +2228,7 @@ fn lower_network_key(network: &mut WifiNetwork, assignment: &Assignment, diags: 
 /// are advertising, read off a scan before the supplicant is configured. The
 /// `@` is the DSL's existing mark for a value resolved elsewhere, as in
 /// `@secret:NAME`.
-const SSID_FROM_BSSID: &str = "@bssid";
+pub(crate) const SSID_FROM_BSSID: &str = "@bssid";
 
 /// Whether a URL is one netcfgd can probe with.
 ///

@@ -991,9 +991,26 @@ fn render_network(
 	let id = &network.id;
 	let mut body = String::new();
 
-	if let Some(ssid) = &network.ssid {
-		if ssid.as_bytes() != id.as_bytes() {
+	// **`None` is a statement and not an absence**, which is what the first
+	// version of this read it as. The model says so: `None` means "whatever the
+	// access points in `bssid` call themselves" (0090), while omitting the key
+	// makes the SSID the label -- so a network written `ssid = "@bssid"`
+	// rendered with no `ssid` line at all and came back as a network named
+	// after its own label. `ncfg profile save` refused on any machine with a
+	// network pinned by access point, with its own honest message: *"That is a
+	// fault in the snapshot rather than in your configuration."* It was.
+	//
+	// The spelling comes from the lowerer that defines it rather than being
+	// retyped, so the two cannot disagree about what the marker is.
+	match &network.ssid {
+		// Equal to the label is what omitting the key means, so omitting it is
+		// the faithful rendering and the shorter one.
+		Some(ssid) if ssid.as_bytes() == id.as_bytes() => {}
+		Some(ssid) => {
 			let _ = writeln!(body, "\tssid = {}", quote(&ssid.to_hex()));
+		}
+		None => {
+			let _ = writeln!(body, "\tssid = {}", quote(crate::lower::SSID_FROM_BSSID));
 		}
 	}
 	if network.hidden {
@@ -3593,5 +3610,71 @@ mod tests {
 				"`{name}` is a bare identifier and must not be quoted:\n{rendered}"
 			);
 		}
+	}
+
+	/// A network named by its access points says so.
+	///
+	/// **`None` is a statement, not an absence.** The model is explicit: `None`
+	/// means "whatever the access points in `bssid` call themselves" (0090),
+	/// while omitting the key makes the SSID the block's label. The renderer
+	/// read `None` as nothing to write, so `ssid = "@bssid"` vanished and the
+	/// document came back as a network named after its own label --
+	/// `ncfg profile save` refused on any machine with a network pinned by
+	/// access point, naming the renderer as the fault, which it was.
+	///
+	/// Found by round-tripping the documents this suite's own tests compile,
+	/// which cost nothing to collect: 88 of 90 came back identical and the two
+	/// that did not were both this, in
+	/// `a_network_can_be_named_by_its_access_points` and
+	/// `a_network_can_list_several_access_points`. Neither was wrong; neither
+	/// had any reason to ask about the renderer.
+	///
+	/// The control is the three states kept apart. A label-equal SSID must stay
+	/// omitted, because that is what omitting it means and the shorter form is
+	/// the faithful one; a different SSID must be stated as hex; and `None`
+	/// must be stated as the marker. A renderer that wrote `@bssid` for all
+	/// three, or omitted all three, satisfies no two of these at once.
+	#[test]
+	fn a_network_named_by_its_access_points_says_so() {
+		// `None`: the marker has to come back.
+		let text = "network \"Lobby\" {\n\
+			 \tssid = \"@bssid\"\n\
+			 \tbssid = \"aa:bb:cc:dd:ee:ff\"\n\
+			 \twifi { psk = \"@secret:l\" }\n\
+			 }\n";
+		round_trips(text);
+		let mut sources = crate::SourceMap::new();
+		sources.add("bssid.conf", text);
+		let document = crate::compile(&sources, &mut crate::NoHooks).expect("it compiles");
+		assert!(
+			document.networks[0].ssid.is_none(),
+			"the fixture must reach the `None` state, or this tests nothing"
+		);
+		let rendered = render(&document, &Overrides::new()).expect("it renders");
+		assert!(
+			rendered.contains("ssid = \"@bssid\""),
+			"a network with no stated SSID must say which state that is:\n{rendered}"
+		);
+
+		// Label-equal: omitted, because that is what omitting it means.
+		let plain = "network \"Cafe\" {\n\twifi { psk = \"@secret:c\" }\n}\n";
+		round_trips(plain);
+		let mut sources = crate::SourceMap::new();
+		sources.add("plain.conf", plain);
+		let document = crate::compile(&sources, &mut crate::NoHooks).expect("it compiles");
+		let rendered = render(&document, &Overrides::new()).expect("it renders");
+		assert!(
+			!rendered.contains("ssid ="),
+			"an SSID equal to the label is what omitting the key means, so stating \
+			 it is noise:\n{rendered}"
+		);
+
+		// Stated and different: hex, which is how a name that is not text is
+		// written down at all.
+		let hex = "network \"Odd\" {\n\
+			 \tssid = \"4f6464\"\n\
+			 \twifi { psk = \"@secret:o\" }\n\
+			 }\n";
+		round_trips(hex);
 	}
 }

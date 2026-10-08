@@ -9546,6 +9546,32 @@ failing opener, so it works today; changing correct code in a passing test to
 match a fix elsewhere is how a fix becomes a sweep. Recorded rather than
 edited, because the hazard is real and one added line away.
 
+## 10.186 A network pinned by access point could not be saved
+
+**`ncfg profile save` refused on any machine with a network named by its access
+points**, and said so in its own words: *"saving `probe` would not reproduce
+what this machine is running... That is a fault in the snapshot rather than in
+your configuration; write the profile by hand and please report it. `network
+"Lobby"` is what differs."* It was exactly that fault, and this is the report.
+
+**`None` is a statement, not an absence.** The model says so where it is
+declared: `ssid: Option<Ssid>` with `None` meaning *"whatever the access points
+in `bssid` call themselves"* (0090), while omitting the key makes the SSID the
+block's label. Three states, and the renderer collapsed two of them --
+`if let Some(ssid)` wrote a line for a stated name and nothing at all for
+`None`, so `ssid = "@bssid"` vanished and the document came back as a network
+named after its own label. The `match` now covers all three, and the marker's
+spelling comes from `lower`'s own `SSID_FROM_BSSID` rather than being retyped.
+
+Verified by running the command rather than only the test: the same
+configuration that was refused now writes `00-saved.conf` with
+`ssid = "@bssid"` in it.
+
+Its control is the three states kept apart, because a renderer that wrote the
+marker for all three -- or omitted all three -- satisfies no two of the
+assertions at once. A label-equal SSID must stay omitted, since that is what
+omitting it means and the shorter form is the faithful one.
+
 ## 10.185 A name the kernel allows and the renderer could not write
 
 **`ncfg profile save` refused on a machine with an interface named `4g0`.** Not
