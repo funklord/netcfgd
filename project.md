@@ -12293,6 +12293,145 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.384 `guard` renders, hooks cannot, and the survey was wrong a third time
+
+**`guard` was the most expensive refusal in the renderer and the cheapest to
+close** -- one field, three lines. A guard says why an interface must not be
+disrupted, and the reason string is the whole value: "eth0: nfs root" tells a
+reader what to go and stop. An interface saved without it comes back as one
+netcfgd may take down, and the thing it was guarding goes with it. Until now
+every machine with a guard could not save a profile at all.
+
+Written through `ncfg_render_quote` rather than a format string, because nothing
+validates a reason -- sabotaged by writing it unescaped, and **only** the case
+whose reason carries a quote catches that. One check, which is the argument for
+writing it.
+
+### Hooks cannot be rendered, and that is not a gap
+
+The language takes a phase block of **inline shell**; `ncfg_lower_hook` hands it
+to a sink that materialises it into a file, and the document carries a path, a
+hash, a user and a timeout -- and no shell, deliberately, because a document that
+could carry shell would be remote code execution with extra steps. So there is
+nothing in the document to write the block back from.
+
+Recovering it would mean reading the file off disk, which would make a saved
+profile depend on something outside the config files and break 0009's purity
+property. **So the refusal is permanent rather than pending**, and the comment at
+the site now says so: whether that trade is worth revisiting is a design question
+and not the renderer's to settle. Both programs refuse it, so nothing diverges.
+
+### The third wrong instrument, and why the third one is the interesting one
+
+10.382 recorded two: a name-keyed grep, and a probe whose detector could only see
+one vocabulary of refusal. The conclusion drawn from fixing them -- that the
+reachable refusals were advertise and hooks alone -- **was itself wrong, because
+`guard` is a key and the probe wrote it as a block.** The error was in the probe
+again, one layer along.
+
+The first two were instrument errors. The third was a *frame* error: having just
+been burned twice on probe syntax, the survey still accepted a syntax error as
+evidence of absence, because by then the answer felt settled. `evidence.md` names
+this -- a frame that has just been right is the hardest one to drop -- and the
+tell was there, since ``guard is not valid inside `interface` `` is a complaint
+about *where*, which a key-versus-block confusion produces and a missing feature
+does not.
+
+**What actually settles reachability is reading the lowering, not probing it.**
+`lower_interface.c` is a chain of `strcmp(key, ...)` for keys and a separate arm
+for blocks; which arm a thing is in is the answer, and it cannot be mistyped. The
+refusal sites bear this out: eleven of twenty-five carry a comment saying they
+cannot fire, and the other fourteen say nothing either way -- so the comments are
+not a census either.
+
+## 10.383 `advertise` renders, and three defaults that are not alike
+
+Refused whole, so **a router could not save a profile.** Losing the block leaves
+a machine that no longer tells the hosts on its LAN what their prefix is: every
+one of them falls back to link-local and the network looks broken from the inside
+while the router itself is fine, which is the hardest shape of fault to place.
+
+**The three flags have two defaults between them and are written three different
+ways.** `dns` defaults to *true*, so it appears only when it is off; `managed` and
+`other_config` default to false and appear only when on. A renderer treating them
+alike compiles and says something else -- sabotaged by writing `dns` the way the
+other two are written, and that fails three checks including the round trip.
+
+**The backend table is in the enum's order, which is not the order the parser's
+own diagnostic lists.** The enum is auto, odhcpd, radvd, exec; the message says
+"auto, radvd, odhcpd". A table copied from the message names the wrong daemon for
+every policy that sets one. That is the third time in two days this shape has come
+up -- the wifi backend table in 10.379, the toggle words in 10.381 -- and the
+second time a human-facing list of words sat next to an enum in a different order.
+**A word list written for a reader is not a word list indexed by a value**, and
+nothing in either one says which it is.
+
+Two of the policy's fields are named rather than written, each because the
+language cannot say it: `exec` is in the backend enum and `lower_advertise`
+accepts only auto, radvd and odhcpd, so its command has nowhere to go; and a
+prefix's `index` is hardcoded to 0 on the way in, the reference syntax being
+`@pd:<interface>` with an optional `/<subnet>` and no third part. An empty prefix
+list is refused too -- `lower_advertise` rejects a block without one, so writing
+`advertise { }` would produce a profile that does not compile, and a refusal says
+so where a written block would leave the operator to discover it.
+
+## 10.382 An address's peer and lifetimes render, and a survey that was wrong twice
+
+`render_link.c` refused `an address with lifetimes or a peer`, so **a
+point-to-point link could not save a profile.** All three modifiers -- `peer`,
+`preferred_lft`, `valid_lft` -- are in the language, and the code's own comment
+said closing it was separate work with its own round trip. This is that work.
+
+`ncfg_static_t` holds four fields and all four are written now, which is what
+makes it complete rather than a sample: the compiler *refuses* every modifier it
+cannot keep rather than dropping it -- `netmask` folds into the prefix, and
+`scope`, `label`, `nodad`, `brd` and the rest are named as unsupported -- so a
+compiled static address can carry an address, a peer and two lifetimes and
+nothing else. That refusal upstream is what bounds this.
+
+**`forever` is the absence of a lifetime**, not a value: `set_lifetime` stores it
+as unset, so writing nothing where `has` is clear is the same statement in fewer
+words. Sabotaged by saying it out loud -- `valid_lft forever` on every address --
+and that **round-trips**, because it compiles back to the same unset field. Only
+the text assertions caught it, three of them. The second case in two days where
+the round trip alone would have been silent, so it is no longer a curiosity: a
+renderer needs its text asserted wherever the language has two ways to say one
+thing.
+
+`peer` and `pointopoint` are two spellings of one field, so a document using the
+second comes back using the first. That is the round trip working -- what has to
+survive is the document, and the document has one field -- and it is asserted
+rather than assumed.
+
+### The survey that found this was wrong twice, in the reassuring direction
+
+The question was which renderer refusals are worth closing, and the answer turns
+on whether the *language* can express the thing at all: a refusal for something
+no config file can write is unreachable and costs nothing, and the code says so
+at four of them.
+
+**First instrument: grep the parser for each key.** It reported `match` and
+`client_id` as absent from the language and `hooks` as absent too. All three are
+in it -- `match` and `dhcp` are blocks the grep did not look for, and `hooks` is
+there under a syntax the probe got wrong. A name-keyed grep answers about the
+spelling it was given, which is the lens that already failed once on the
+`Observed` field sweep.
+
+**Second instrument: compile a probe for each and look for a complaint.** The
+detector was `grep 'unknown|expected|unexpected'`, and it reported nine
+constructs "accepted" that the compiler had rejected -- because it rejects a
+block it does not have with ``is not valid inside `interface` ``, which contains
+none of those three words. **A probe that can only see one vocabulary of refusal
+reports every other kind as a pass.** Both errors inflated the work: nine gaps
+that were not there.
+
+What answered it was reading the compiler's actual first line for each probe.
+The reachable refusals are three, not fourteen: this one, `interface: advertise`,
+and `hooks` on an interface and a network. Everything else -- the five `dns`
+facts, seven `dhcp` lease fields, `match`, `ingress_redirect`, route `scope` and
+`proto` -- names something the language has no syntax for, which is why each one
+carries a comment saying it cannot fire from a compiled document.
+
 ## 10.381 `ethtool` and `qdisc` render, and one sabotage round-trips
 
 Both were refused wholesale, so **a machine with any link setting or any shaped

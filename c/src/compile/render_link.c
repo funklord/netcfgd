@@ -125,6 +125,50 @@ static void render_lease_modifiers(const ncfg_address_source_t *source, ncfg_buf
 	}
 }
 
+/*
+ * One statically configured address, with whatever modifiers it carries.
+ *
+ * `ncfg_static_t` holds four things and all four are written here, which is
+ * what makes this complete rather than a sample: the compiler refuses every
+ * modifier it cannot keep -- `netmask` is folded into the prefix, and `scope`,
+ * `label`, `nodad` and the rest are named as unsupported rather than dropped --
+ * so a compiled address can carry an address, a peer and the two lifetimes and
+ * nothing else.
+ *
+ * **A lifetime of `forever` is the absence of one**, because `set_lifetime`
+ * stores it as unset. So writing nothing where `has` is clear is not a gap: it
+ * is the same statement in fewer words, and the round trip holds because the
+ * document being compared against holds an unset field too.
+ *
+ * The whole value is built and then quoted once rather than written between two
+ * literal quote characters. A peer is not checked as an address -- it is kept as
+ * the token the author wrote -- so it is the one part here that could carry a
+ * character the text has to escape, and escaping is what `ncfg_render_quote`
+ * is for.
+ */
+static void render_static_address(const ncfg_static_t *address, ncfg_buf_t *slot)
+{
+	ncfg_buf_t value;
+
+	ncfg_buf_init(&value, 0);
+	ncfg_buf_add_text(&value, address->address ? address->address : "");
+	if (address->peer) {
+		ncfg_buf_addf(&value, " peer %s", address->peer);
+	}
+	/* The parser reads these in any order; this is the table's own, which is
+	 * also the order `ip addr` documents them in. */
+	if (address->preferred_lifetime.has) {
+		ncfg_buf_addf(&value, " preferred_lft %lld",
+		    (long long)address->preferred_lifetime.value);
+	}
+	if (address->valid_lifetime.has) {
+		ncfg_buf_addf(&value, " valid_lft %lld",
+		    (long long)address->valid_lifetime.value);
+	}
+	ncfg_render_quote(slot, ncfg_buf_text(&value));
+	ncfg_buf_free(&value);
+}
+
 static void render_addressing(const ncfg_address_source_t *sources, size_t count,
     const char *scope, const char *name, ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
@@ -139,18 +183,8 @@ static void render_addressing(const ncfg_address_source_t *sources, size_t count
 
 		switch (source->kind) {
 		case NCFG_ADDRESS_SOURCE_STATIC:
-			/* The language has `peer`, `preferred_lft` and `valid_lft` as
-			 * modifiers and this does not write them, so they are named.
-			 * A refusal is not a drop; closing it is a separate piece of
-			 * work with its own round trip. */
-			if (source->static_address.peer ||
-			    source->static_address.preferred_lifetime.has ||
-			    source->static_address.valid_lifetime.has) {
-				ncfg_render_refuse(missing, scope, name,
-				    "an address with lifetimes or a peer");
-			}
-			ncfg_render_quote(ncfg_render_list_next(&config),
-			    source->static_address.address);
+			render_static_address(&source->static_address,
+			    ncfg_render_list_next(&config));
 			continue;
 		case NCFG_ADDRESS_SOURCE_DHCP4:
 			word = "dhcp";
@@ -413,22 +447,118 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
 	}
 }
 
+/*
+ * What an interface tells the hosts behind it.
+ *
+ * **In the enum's order, which is not the order the parser's own diagnostic
+ * lists**: the enum is auto, odhcpd, radvd, exec and the message says "auto,
+ * radvd, odhcpd". A table written from the message would name the wrong daemon
+ * for every policy that sets one, and a document naming the wrong daemon
+ * compiles -- so nothing downstream would report it.
+ */
+static const char *const ra_backend_words[] = { "auto", "odhcpd", "radvd", "exec" };
+
+/*
+ * `advertise { }`, which was refused whole.
+ *
+ * Two of this policy's fields cannot come from a config file and are named
+ * rather than written. `exec` is in the backend enum and `lower_advertise`
+ * accepts only auto, radvd and odhcpd, so a policy carrying it arrived some
+ * other way and its command has nowhere to go. A prefix's `index` is likewise
+ * hardcoded to 0 on the way in -- the reference syntax is `@pd:<interface>` with
+ * an optional `/<subnet>` and has no third part -- so a non-zero one would be
+ * dropped in silence, which is what this refuses to do.
+ *
+ * **An empty prefix list is refused rather than written**, because a document
+ * needs one: `lower_advertise` rejects a block without `prefixes`, so writing
+ * `advertise { }` would produce a profile that does not compile. A refusal says
+ * that; a written block would make it the operator's problem to discover.
+ *
+ * `dns` defaults to **true**, so it is written only when it is off. The other
+ * two flags default to false and are written only when on. Getting that
+ * backwards is a silent change of meaning rather than a parse error.
+ */
+static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing)
+{
+	ncfg_render_list_t prefixes;
+	size_t             i;
+
+	if (policy->backend.kind == NCFG_RA_BACKEND_EXEC) {
+		ncfg_render_refuse(missing, "interface", name, "an advertise backend of exec");
+		return;
+	}
+	if (policy->prefix_count == 0) {
+		ncfg_render_refuse(missing, "interface", name, "an advertise block with no prefix");
+		return;
+	}
+
+	ncfg_render_list_init(&prefixes);
+	for (i = 0; i < policy->prefix_count; i++) {
+		const ncfg_prefix_ref_t *prefix = &policy->prefixes[i];
+		ncfg_buf_t               reference;
+
+		if (prefix->index != 0) {
+			ncfg_render_refuse(missing, "interface", name,
+			    "an advertised prefix naming which delegation it is");
+			continue;
+		}
+		ncfg_buf_init(&reference, 0);
+		ncfg_buf_addf(&reference, "@pd:%s", prefix->source ? prefix->source : "");
+		if (prefix->subnet != 0) {
+			ncfg_buf_addf(&reference, "/%lld", (long long)prefix->subnet);
+		}
+		ncfg_render_quote(ncfg_render_list_next(&prefixes), ncfg_buf_text(&reference));
+		ncfg_buf_free(&reference);
+	}
+	if (prefixes.count == 0) {
+		ncfg_render_list_free(&prefixes);
+		return;
+	}
+
+	ncfg_buf_add_text(body, "\tadvertise {\n");
+	if (policy->backend.kind != NCFG_RA_BACKEND_AUTO) {
+		ncfg_buf_addf(body, "\t\tbackend = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_render_word(ra_backend_words,
+		        NCFG_COUNT_OF(ra_backend_words), policy->backend.kind)));
+	}
+	ncfg_render_list_emit(body, "\t", "\tprefixes", &prefixes, 1);
+	if (policy->managed) {
+		ncfg_buf_add_text(body, "\t\tmanaged = true\n");
+	}
+	if (policy->other_config) {
+		ncfg_buf_add_text(body, "\t\tother_config = true\n");
+	}
+	if (!policy->dns) {
+		ncfg_buf_add_text(body, "\t\tdns = false\n");
+	}
+	if (policy->lifetime.has) {
+		ncfg_buf_addf(body, "\t\tlifetime = %lld\n", (long long)policy->lifetime.value);
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+	ncfg_render_list_free(&prefixes);
+}
+
 void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
 	const char *name = interface->name;
 	ncfg_buf_t  body;
-
-	/* Each of these has a block or a key of its own that this does not write
-	 * yet. Named so the operator knows what to keep by hand. */
+	/*
+	 * A hook is the one thing here that cannot be rendered in principle
+	 * rather than not yet. The language takes a phase block of **inline
+	 * shell**, which the compiler materialises into a file; the document
+	 * carries a path and a hash and no shell at all, deliberately, because a
+	 * document that could carry shell would be remote code execution with
+	 * extra steps. So there is nothing in the document to write the block
+	 * back from, and recovering it would mean reading the file off disk --
+	 * which would make a profile depend on something outside the config
+	 * files, against 0009. Named rather than attempted, and whether that
+	 * trade is worth revisiting is a design question rather than this
+	 * function's.
+	 */
 	if (interface->hook_count > 0) {
 		ncfg_render_refuse(missing, "interface", name, "hooks");
-	}
-	if (interface->advertise) {
-		ncfg_render_refuse(missing, "interface", name, "advertise");
-	}
-	if (interface->guard) {
-		ncfg_render_refuse(missing, "interface", name, "guard");
 	}
 
 	ncfg_buf_init(&body, 0);
@@ -444,6 +574,20 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 		ncfg_buf_addf(&body, "\ton_drift = \"%s\"\n", ncfg_render_word_or_gap(
 		    ncfg_drift_policy_name((ncfg_drift_policy_t)interface->on_drift.value)));
 	}
+	/*
+	 * **The most expensive line in this file to lose.** A guard is why an
+	 * interface must not be disrupted, and the reason string is the whole
+	 * value: a profile saved without it comes back as an interface netcfgd
+	 * may take down, and the thing it was guarding -- an NFS root, a lab
+	 * uplink -- goes with it. It was refused, so every machine with one
+	 * could not save a profile at all; the only consolation is that a
+	 * refusal is not a drop.
+	 */
+	if (interface->guard) {
+		ncfg_buf_add_text(&body, "\tguard = ");
+		ncfg_render_quote(&body, interface->guard->reason);
+		ncfg_buf_add_char(&body, '\n');
+	}
 	render_addressing(interface->addressing, interface->addressing_count, "interface", name,
 	    &body, missing);
 	render_routes(interface->routes, interface->route_count, "interface", name, &body, missing);
@@ -453,6 +597,9 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 		 * absent, and the difference is whether a lease's resolvers are taken
 		 * or ignored. */
 		ncfg_buf_add_text(&body, "\tdns { }\n");
+	}
+	if (interface->advertise) {
+		render_advertise(interface->advertise, name, &body, missing);
 	}
 
 	ncfg_render_opening(text, "interface", name, overrides);
