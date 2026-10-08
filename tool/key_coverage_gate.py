@@ -131,7 +131,13 @@ def language_keys():
 			match = re.match(r"(?:static\s+)?\w[\w \t*]*\b(\w+)\s*\(", line)
 			if match and not line[:1].isspace():
 				function = match.group(1)
-			for key in re.findall(r'strcmp\(key, "([^"]+)"\)', line):
+			# Both spellings. Several lowerings hold the assignment rather than
+			# having pulled its key into a local, and the first version of this
+			# read only the local form -- so `owner`, `apn`, `agent`, `allow`,
+			# `deny`, `requires` and fourteen others were outside the
+			# denominator entirely, and `tun`'s `group` was being credited to a
+			# vxlan's alias of `remote`. A count inherits its detector.
+			for key in re.findall(r'strcmp\((?:[a-z_]+(?:->|\.))?key, "([^"]+)"\)', line):
 				keys.setdefault(key, set()).add(f"{path.name}:{function}")
 	return keys
 

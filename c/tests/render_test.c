@@ -2208,6 +2208,63 @@ static void the_alias_spellings_round_trip(void)
 	free(openvpn);
 }
 
+
+/*
+ * A vlan's `protocol`, which was the one key no round trip reached.
+ *
+ * Found by counting rather than by suspicion. Of the 141 keys the lowering
+ * accepts, every one is set by some corpus in this tree -- and `protocol` was
+ * set by exactly one, `doc/schema/document.json`, which `render_the_witness`
+ * asserts a refusal list against rather than round tripping. So the only
+ * document naming this key was the one document never asked whether it comes
+ * back.
+ *
+ * It is also the `require_lease` shape: written only when it differs from the
+ * default, so the interesting case is the one a sweep over the struct with a
+ * single comparison would skip. Both directions are asserted here -- `dot1ad`
+ * written out, and `dot1q` deliberately absent -- because an omission is a
+ * claim about the parser's default and is wrong if that default moves.
+ *
+ * `vlan_protocol_words` is in enum order, which is checked here by rendering
+ * the non-default value and reading the word: `NCFG_VLAN_PROTOCOL_DOT1Q` then
+ * `DOT1AD` against `{ "dot1q", "dot1ad" }`. A table written the other way round
+ * renders `dot1q` for a dot1ad vlan, which still compiles and silently changes
+ * the device.
+ */
+static void a_vlans_protocol_round_trips(void)
+{
+	char *tagged;
+	char *plain;
+	char *alias;
+
+	round_trips("device v0 {\n\tvlan {\n\t\tparent = \"eth0\"\n"
+	    "\t\tid = 10\n\t\tprotocol = \"dot1ad\"\n\t}\n}\n",
+	    "a vlan carrying the non-default protocol round trips");
+	tagged = rendering_of("device v0 { vlan { parent = \"eth0\"; id = 10; "
+	    "protocol = \"dot1ad\" } }\n");
+	check(tagged && holds(tagged, "protocol = \"dot1ad\""),
+	    "and names `dot1ad`, not the word one place along in the table");
+	free(tagged);
+
+	round_trips("device v1 {\n\tvlan {\n\t\tparent = \"eth0\"\n\t\tid = 11\n\t}\n}\n",
+	    "and one at the default protocol round trips without the key");
+	plain = rendering_of("device v1 { vlan { parent = \"eth0\"; id = 11 } }\n");
+	check(plain && lacks(plain, "protocol"),
+	    "which is left unwritten, because absent means dot1q");
+	free(plain);
+
+	/* The wire spellings the lowering also takes, which no corpus used either. */
+	round_trips("device v2 {\n\tvlan {\n\t\tparent = \"eth0\"\n"
+	    "\t\tid = 12\n\t\tprotocol = \"802.1ad\"\n\t}\n}\n",
+	    "and the `802.1ad` spelling round trips");
+	alias = rendering_of("device v2 { vlan { parent = \"eth0\"; id = 12; "
+	    "protocol = \"802.1ad\" } }\n");
+	check(alias && holds(alias, "protocol = \"dot1ad\"") &&
+	        lacks(alias, "802.1ad"),
+	    "coming back as `dot1ad`, which is the word the renderer writes");
+	free(alias);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2223,6 +2280,7 @@ int main(int argc, char **argv)
 	ethtool_and_qdisc_round_trip();
 	a_default_roam_block_survives();
 	the_alias_spellings_round_trip();
+	a_vlans_protocol_round_trips();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

@@ -12385,6 +12385,68 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.429 The denominator was sixteen keys short, and one key no round trip reached
+
+**Chasing `group` is what found it.** The renderer writes `"\t\tgroup = "` for a
+tun device's group, and the only `strcmp(key, "group")` in the lowering is a
+vxlan's alias of `remote` -- so the gate was crediting a tun key to a vxlan
+alias and calling the matter closed. `lower_tun` spells its arms
+`strcmp(assignment->key, "...")`, having never pulled the key into a local.
+
+    125 keys    the first denominator: `strcmp(key, ...)` only
+    141 keys    both spellings, 24 sites across five lowerings
+
+Sixteen keys were outside the question entirely -- `owner`, `apn`, `agent`,
+`allow`, `deny`, `requires`, `sim`, `ingress_bandwidth`, `signal`,
+`slow_interval` and six more. **The verdict held: all sixteen are written, so
+no gap was hiding there.** What was wrong was the number, which had been
+reported as a property of the language and was a property of one spelling.
+`evidence.md`'s rule, met in the gate's own extraction: a count inherits its
+detector.
+
+### Then the corpus question, re-asked over the full set
+
+    141 keys: set by no corpus 0, set only by the witness 1
+
+**The one is `protocol`, a vlan's.** And the witness is the single corpus that
+is never round-tripped -- `render_the_witness` asserts a *refusal list* against
+`doc/schema/document.json`, because the witness deliberately carries things the
+renderer cannot write. So the only document in this tree naming that key was
+the one document never asked whether it comes back.
+
+It is also the `require_lease` shape a third time: **written only when it
+differs from the default**, so the case that exercises it is the one a sweep
+over the struct with a single comparison skips.
+
+`a_vlans_protocol_round_trips` covers it in both directions -- `dot1ad` written
+out, and `dot1q` deliberately absent, since an omission is a claim about the
+parser's default and is wrong the moment that default moves -- plus the
+`802.1ad` spelling, which no corpus used either.
+
+**The control is the word table's order**, which is the fault this would hide:
+`vlan_protocol_words` is `{ "dot1q", "dot1ad" }` and is indexed by an enum that
+runs `DOT1Q`, `DOT1AD`. Reversed, a dot1ad vlan renders `dot1q`, which still
+compiles and silently changes the device. Reversing it fails four checks -- both
+round trips and both word assertions. Before the case existed it failed nothing.
+
+### The same instrument fault, a third time, because the fix lived in the tool
+
+The corpus measurement first reported `agent` and `group` as set by no corpus.
+Both are set by `render_test.c`, and the cause was the fault 10.427 already
+records: in `"\t\tagent = "` the character before the name is `t`, so a
+lookbehind guarding against `foo.agent` rejects it.
+
+**The gate was fixed for this in 10.427 and the probe repeated it**, because the
+probe is a throwaway script and the fix lived in the tool. There is no clever
+remedy -- the point is that a measurement taken beside a hardened tool does not
+inherit its hardening, and the ad-hoc one is the one nobody reviews.
+
+**What caught it was the suite disagreeing with the probe.** `render_test`
+prints *"and who may act as the agent is in the text"* and passes, which cannot
+be true of a key no corpus sets. Two readings contradicted and the probe was
+wrong, which is `evidence.md`'s witness working -- and the thing that made it
+audible was that one of the two was a passing test rather than another grep.
+
 ## 10.428 The nine aliases had no round-trip evidence, and the docs ship one
 
 10.427's gate waived five keys as aliases. Asked separately -- **which of the
