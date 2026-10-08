@@ -169,6 +169,50 @@ static void render_static_address(const ncfg_static_t *address, ncfg_buf_t *slot
 	ncfg_buf_free(&value);
 }
 
+/*
+ * `@pd:wan0`, `@pd:wan0/2` and `@pd:wan0=::5/64` -- an address built from a
+ * prefix the ISP delegates.
+ *
+ * The counterpart of `advertise`: that block tells the hosts behind this machine
+ * what their prefix is, and this is how the machine gives itself an address out
+ * of the same delegation. A router has both, so refusing either one was enough
+ * to stop it saving a profile.
+ *
+ * **The suffix defaults to `::1/64` and is left unwritten when it is that**,
+ * which is this file's rule for every default -- and it is safe here only
+ * because the default is a constant in `delegated_source` rather than something
+ * derived from the prefix.
+ *
+ * A prefix's `index` is hardcoded to 0 on the way in, the spelling having no
+ * third part, so a non-zero one is named rather than dropped. Same reasoning as
+ * `render_advertise`, and the same refusal would be wrong to share: these are
+ * two different things a document can carry and an operator fixes them in two
+ * different places.
+ */
+static void render_delegated(const ncfg_delegated_t *delegated, const char *scope,
+    const char *name, ncfg_buf_t *slot, ncfg_unrenderable_t *missing)
+{
+	static const char *const default_suffix = "::1/64";
+	ncfg_buf_t               value;
+
+	if (delegated->prefix.index != 0) {
+		ncfg_render_refuse(missing, scope, name,
+		    "a delegated address naming which delegation it is");
+		return;
+	}
+	ncfg_buf_init(&value, 0);
+	ncfg_buf_addf(&value, "@pd:%s",
+	    delegated->prefix.source ? delegated->prefix.source : "");
+	if (delegated->prefix.subnet != 0) {
+		ncfg_buf_addf(&value, "/%lld", (long long)delegated->prefix.subnet);
+	}
+	if (delegated->suffix && strcmp(delegated->suffix, default_suffix) != 0) {
+		ncfg_buf_addf(&value, "=%s", delegated->suffix);
+	}
+	ncfg_render_quote(slot, ncfg_buf_text(&value));
+	ncfg_buf_free(&value);
+}
+
 static void render_addressing(const ncfg_address_source_t *sources, size_t count,
     const char *scope, const char *name, ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
@@ -198,6 +242,15 @@ static void render_addressing(const ncfg_address_source_t *sources, size_t count
 		case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
 			word = "link_local";
 			break;
+		case NCFG_ADDRESS_SOURCE_REPORTED:
+			/* `reported` takes no modifiers -- `no_modifiers` refuses every
+			 * one -- so the word is the whole source. */
+			word = "reported";
+			break;
+		case NCFG_ADDRESS_SOURCE_DELEGATED:
+			render_delegated(&source->delegated, scope, name,
+			    ncfg_render_list_next(&config), missing);
+			continue;
 		default:
 			ncfg_render_refuse(missing, scope, name, "%s addressing",
 			    ncfg_render_word_or_gap(
@@ -841,8 +894,10 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 		/* Present and empty says the same thing here as on an interface. */
 		ncfg_buf_add_text(&body, "\tdns { }\n");
 	}
-	/* Refused rather than rendered, matching an interface's hooks: the phase
-	 * blocks have a shape of their own and neither side writes them yet. */
+	/* Refused for the reason `ncfg_render_interface` gives at the same
+	 * refusal, and it is the same reason rather than a matching one: the
+	 * document holds a hook's path and hash and never its shell, so there is
+	 * nothing here to write a phase block back from. Not "yet". */
 	if (network->hook_count > 0) {
 		ncfg_render_refuse(missing, "network", id, "hooks");
 	}
