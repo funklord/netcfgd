@@ -443,15 +443,15 @@ def serve(ctrl_dir, interface, pidfile):
 				if command.endswith("lower-layer"):
 					lines[-1] = EAP_SUCCESS_LOWER
 				announce(server, attached, [f"<3>{line}" for line in lines])
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			elif command.startswith("JOIN "):
 				wanted = command.split(None, 1)[1]
 				match = [n for n in NETWORKS if n[4] == wanted]
 				if not match:
-					reply(server, sender, b"FAIL\n")
 					print(f"{command} (no such network)", flush=True)
+					reply(server, sender, b"FAIL\n")
 					continue
 				ASSOCIATED[0] = match[0]
 				# **An enterprise network authenticates before it connects**,
@@ -467,8 +467,8 @@ def serve(ctrl_dir, interface, pidfile):
 				    f"{match[0][0]} completed [id={network_id(match[0])} id_str=]"
 				)
 				announce(server, attached, [event])
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			# `DISABLE <ssid> <flags>` and `TROUBLE <event text>` are not
 			# wpa_supplicant commands either, and are here for the same reason
@@ -504,8 +504,8 @@ def serve(ctrl_dir, interface, pidfile):
 			# the reason FAIL_NEXT_SCAN is one.
 			elif command.startswith("FAIL_NEXT_JOIN "):
 				FAIL_JOIN.append(command.split(None, 1)[1])
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			elif command.startswith("SELECT_NETWORK "):
 				if FAIL_JOIN:
@@ -517,18 +517,18 @@ def serve(ctrl_dir, interface, pidfile):
 					event = ("<3>CTRL-EVENT-CONNECTED - Connection to "
 					         + ASSOCIATED[0][0]
 					         + f" completed [id={network_id(ASSOCIATED[0])} id_str=]")
+				print(command, flush=True)
 				reply(server, sender, b"OK\n")
 				for listener in attached:
 					try:
 						server.sendto(event.encode(), listener)
 					except OSError:
 						pass
-				print(command, flush=True)
 				continue
 			elif command.startswith("FAIL_NEXT_SCAN "):
 				FAIL_SCAN.append(command.split(None, 1)[1])
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			# `SILENT_NEXT_SCAN` answers the next `SCAN` with OK and then says
 			# nothing at all, which is a radio that took the request and never
@@ -536,26 +536,26 @@ def serve(ctrl_dir, interface, pidfile):
 			# patience without waiting on real hardware.
 			elif command == "SILENT_NEXT_SCAN":
 				SILENT_SCAN.append(True)
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			elif command == "SCAN":
 				if SILENT_SCAN:
 					SILENT_SCAN.pop(0)
-					reply(server, sender, b"OK\n")
 					print("SCAN", flush=True)
+					reply(server, sender, b"OK\n")
 					continue
 				if FAIL_SCAN:
 					event = f"<3>CTRL-EVENT-SCAN-FAILED ret={FAIL_SCAN.pop(0)}"
 				else:
 					event = "<3>CTRL-EVENT-SCAN-RESULTS "
+				print("SCAN", flush=True)
 				reply(server, sender, b"OK\n")
 				for listener in attached:
 					try:
 						server.sendto(event.encode(), listener)
 					except OSError:
 						pass
-				print("SCAN", flush=True)
 				continue
 			elif command.startswith("DISABLE "):
 				# Flags first, name last, because the name is the one that can
@@ -563,12 +563,12 @@ def serve(ctrl_dir, interface, pidfile):
 				# what these tests are here to carry through.
 				parts = command.split(None, 2)
 				if len(parts) != 3:
-					reply(server, sender, b"FAIL\n")
 					print(f"{command} (needs flags and an ssid)", flush=True)
+					reply(server, sender, b"FAIL\n")
 					continue
 				KNOWN.append((len(KNOWN), parts[2], parts[1]))
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			elif command.startswith("TROUBLE "):
 				event = "<3>" + command.split(None, 1)[1]
@@ -577,8 +577,8 @@ def serve(ctrl_dir, interface, pidfile):
 						server.sendto(event.encode(), listener)
 					except OSError:
 						pass
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			elif command.startswith("ROAM "):
 				bssid = command.split(None, 1)[1]
@@ -594,8 +594,8 @@ def serve(ctrl_dir, interface, pidfile):
 						server.sendto(event.encode(), listener)
 					except OSError:
 						pass
-				reply(server, sender, b"OK\n")
 				print(command, flush=True)
+				reply(server, sender, b"OK\n")
 				continue
 			# Logged so a test can assert which commands a D-Bus call produced.
 			# Secrets are redacted: `SET_NETWORK 0 psk "..."` carries the
