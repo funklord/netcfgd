@@ -12293,6 +12293,68 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.379 Routing rules render, and two things had to be found first
+
+`render.c` refused `%zu routing rule(s)` wholesale, so **a machine with any
+policy routing could not save a profile** -- and a rule is not written by
+accident, so the refusal fell on exactly the configurations somebody had thought
+hardest about. Fifteen fields, with the spellings coming from
+`ncfg_rule_action_name` and `ncfg_rule_family_name`, which the lowerer's own
+`..._from_name` pair invert. **No table here to put in the wrong order**, which
+is the mistake the wifi backend made an hour earlier.
+
+`lookup` is written as `lookup` rather than `table`: the compiler reads both, the
+model calls it `table`, and a profile is read by people, so it gets the spelling
+the manual teaches.
+
+### `l3mdev` was a key no document could carry
+
+The C accepted `l3mdev` as a key and then refused every rule that used it. The
+completeness check asked "action is lookup and no table" and said so -- and an
+`l3mdev` rule has no table **by construction**, the VRF the interface is
+enslaved to supplying one. So a VRF rule could not be written at all, and the
+renderer's `l3mdev` line was unreachable.
+
+Both halves are here now, as they are in the Rust: the "no table" rule exempts
+`l3mdev`, and a rule naming **both** is refused, because that is asking for two
+different tables and picking one would be inventing an answer.
+
+Proven by sabotage in the direction that matters: dropping `l3mdev` from the
+renderer makes a valid VRF rule render to text the compiler refuses -- *rule
+`vrf-local` looks up no table and names no action* -- which is exactly what the
+Rust renderer did until a round trip caught it.
+
+### `invert` was applied, observed, serialised, and unwritable
+
+The sharper find, and the fixture is what turned it up: `every field of a routing
+rule` would not compile, on **`unknown rule key \`invert\``**.
+
+`ncfg_routing_rule_t` carries `invert`, and the C uses it at every end but one.
+`ops_route.c` sets `FIB_RULE_INVERT` from it, so the executor can apply an
+inverted rule; `sys/rule.c` reads it back off a netlink dump, so the observer can
+see one; `plan/model_json.c` writes it out, so a plan carries it. **Only the
+configuration language could not say it.** A rule the kernel can hold and
+netcfgd can report was one no operator could ask for.
+
+That is `evidence.md`'s *an interface is only as wired as its least-used method*
+with the unwired end being the one a person types. It survived because every
+instrument that would notice looks at the other four ends, and because the
+renderer could not write rules at all -- so nothing ever tried to round-trip one.
+
+**The fixture found it by naming a non-default value for every field**, which is
+the same property that caught the wifi backend table. A case that sampled two
+fields would have passed.
+
+### And two existing tests were pinning the refusals
+
+`render_test.c` asserted `1 routing rule(s)` in its refusal list and, in another
+function, that a rule is *refused and counted*. Both are gone: the first removed
+from the expected array, the second replaced by a note saying where the case
+moved. A refusal assertion for something that renders would send the next reader
+looking for a gap that is closed -- and the neighbouring check that the list has
+lost no entry went on passing, which is what makes removing one safe to do
+deliberately.
+
 ## 10.378 A radio's own policy, which no machine with a radio could save
 
 `render_device` refused `a wifi policy` wholesale. `ncfg wifi activate` writes

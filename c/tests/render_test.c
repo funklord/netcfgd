@@ -382,7 +382,8 @@ static void render_the_witness(int argc, char **argv)
 	 * `open_vpn` are the document's words, and a refusal that used them would
 	 * send an operator to write a block the parser does not have. */
 	static const char *const expected[] = { "kind wireguard", "kind openvpn", "kind tunnel",
-		"kind tun", "kind ifb", "routing rule(s)", "access_point block(s)",
+		/* `routing rule(s)` was here and renders now. */
+		"kind tun", "kind ifb", "access_point block(s)",
 		/* `a wifi policy` was here and is rendered now, so it is no longer
 		 * refused. Removed rather than left: this list's job is to name what
 		 * has no rendering, and an entry for something that renders would make
@@ -588,6 +589,67 @@ static void the_unmanage_policy_defects(void)
  * has to come back as an empty block rather than as nothing -- 10.21's lesson,
  * which this renderer has now met three times.
  */
+/*
+ * A routing rule round-trips, including the two that exclude each other.
+ *
+ * **Refused wholesale until now**, so a machine with any policy routing could
+ * not save a profile -- and a rule is not written by accident, so the refusal
+ * fell on exactly the configurations somebody had thought hardest about.
+ *
+ * `lookup` and `l3mdev` are the pair worth a case each. A VRF supplies the
+ * table, so the compiler refuses a rule carrying both -- and refuses one with
+ * no lookup, no action and no `l3mdev` at all. A renderer that dropped `l3mdev`
+ * would turn a valid VRF rule into a document that does not compile, which is
+ * exactly what the Rust renderer did until a round trip caught it.
+ *
+ * Every field in one rule for the reason the wifi policy's case gives: a
+ * fixture that sampled one would leave the rest free to go quiet, and a
+ * non-default value for each is what catches a word written from the wrong
+ * table.
+ */
+static void a_routing_rule_round_trips(void)
+{
+	char *full;
+
+	round_trips("rule \"from-lan\" {\n"
+	    "\tpriority = 100\n"
+	    "\tfamily = \"inet6\"\n"
+	    "\tfrom = \"2001:db8::/64\"\n"
+	    "\tto = \"2001:db8:1::/64\"\n"
+	    "\tiif = \"lan0\"\n"
+	    "\toif = \"wan0\"\n"
+	    "\tfwmark = 42\n"
+	    "\tfwmask = 255\n"
+	    "\tlookup = 200\n"
+	    "\tsuppress_prefixlength = 0\n"
+	    "\tinvert = true\n"
+	    "}\n",
+	    "every field of a routing rule survives a round trip");
+
+	full = rendering_of("rule \"blocked\" {\n\tpriority = 50\n\taction = \"blackhole\"\n}\n");
+	/* The spelling comes from `ncfg_rule_action_name`, which the lowerer's
+	 * `..._from_name` inverts, so there is no table here to misorder. */
+	check(full && strstr(full, "action = \"blackhole\"") != NULL,
+	    "and an action that is not the default is named");
+	free(full);
+
+	/* `lookup` is written as `lookup` though the model calls it `table`: the
+	 * compiler reads both and a profile is read by people. */
+	full = rendering_of("rule \"t\" {\n\tpriority = 7\n\ttable = 9\n}\n");
+	check(full && strstr(full, "lookup = 9") != NULL,
+	    "and the table is written as `lookup`, the spelling the manual teaches");
+	free(full);
+
+	/* The VRF rule, which has no lookup because the VRF supplies the table --
+	 * and which therefore does not compile at all if `l3mdev` is dropped. */
+	round_trips("rule \"vrf-local\" {\n\tpriority = 1000\n\tl3mdev = true\n}\n",
+	    "a rule whose table comes from a VRF survives one too");
+	full = rendering_of("rule \"vrf-local\" {\n\tpriority = 1000\n\tl3mdev = true\n}\n");
+	check(full && strstr(full, "l3mdev = true") != NULL,
+	    "because `l3mdev` is written, without which it would not compile");
+	free(full);
+}
+
 static void a_radios_own_policy_round_trips(void)
 {
 	char *full;
@@ -1339,8 +1401,6 @@ static void what_cannot_be_rendered_is_named(void)
 	    "\t\tconfig = \"/etc/openvpn/work.ovpn\"\n\t}\n}\n");
 	char *hooks = refusals_with_hooks("interface eth0 {\n\tconfig = \"dhcp\"\n"
 	    "\tpost_up {\n\t\techo hello\n\t}\n}\n");
-	char *rules = refusals_of_config("interface eth0 {\n\tconfig = \"dhcp\"\n}\n"
-	    "rule r {\n\tpriority = 100\n\tfrom = \"192.0.2.0/24\"\n\tlookup = 42\n}\n");
 
 	check(holds(wireguard, "device wg0: kind wireguard"),
 	    "a wireguard device is refused by name, with the language's spelling");
@@ -1350,11 +1410,14 @@ static void what_cannot_be_rendered_is_named(void)
 	    "and the same for openvpn, the other word this project has shipped wrong");
 	check(holds(hooks, "interface eth0: hooks"),
 	    "an interface's hooks are refused rather than dropped");
-	check(holds(rules, "1 routing rule(s)"), "and a routing rule is refused, and counted");
+	/* A routing rule was asserted here as refused and counted. It renders now,
+	 * so the case moved to `a_routing_rule_round_trips` -- which asserts the
+	 * stronger thing, that the rule comes back as the same rule. A refusal
+	 * assertion for something that renders would send the next reader looking
+	 * for a gap that is closed. */
 	free(wireguard);
 	free(openvpn);
 	free(hooks);
-	free(rules);
 }
 
 /*
@@ -1480,6 +1543,7 @@ int main(int argc, char **argv)
 	a_label_the_lexer_cannot_read_bare();
 	the_hostname_policy_round_trips();
 	a_radios_own_policy_round_trips();
+	a_routing_rule_round_trips();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();
