@@ -39,10 +39,12 @@
 #include "ncfg/hostapd.h"
 #include "ncfg/config.h"
 #include "ncfg/lower.h"
+#include "ncfg/render.h"
 #include "ncfg/parse.h"
 #include "ncfg/state.h"
 #include "ncfg/value.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -214,6 +216,32 @@ static ncfg_document_t *build_one(const char *text)
 }
 
 /* Compiles, and the caller goes on to look at the document. */
+/*
+ * Whether this document declares a device the renderer writes nothing for,
+ * which is the one recorded hole and so has no round trip to assert.
+ *
+ * Structural and asked of the renderer, exactly as `carries_hooks` is
+ * structural: the alternative is reading the failure's message for a device
+ * name, and a check keyed on a sentence breaks when the sentence improves.
+ *
+ * `compiles_but_cannot_round_trip` pins the hole with a named case, so skipping
+ * it here does not hide it -- the mutation sweep reaches it constantly, because
+ * deleting the one line in `device eth1 { qdisc = "fq_codel" }` leaves exactly
+ * that shape, and a sweep that failed on it would report the known hole
+ * hundreds of times instead of a new fault once.
+ */
+static int carries_silent_device(const ncfg_document_t *document)
+{
+	size_t i;
+
+	for (i = 0; i < document->device_count; i++) {
+		if (ncfg_render_device_writes_nothing(&document->devices[i], document)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* Whether anything in this document holds a hook, which has no rendering by
  * construction -- see `compiles` below. */
 static int carries_hooks(const ncfg_document_t *document)
@@ -2131,6 +2159,103 @@ static int brace_delta(const char *body, size_t length)
 	return delta;
 }
 
+/*
+ * A mutated copy of one example block, and the counters a run reports.
+ *
+ * **What a mutation is for.** The example blocks are each correct, so asking
+ * them to round trip exercises the renderer over the fields their authors
+ * wrote. A mutation reaches the combinations nobody wrote: a number changed, a
+ * boolean flipped, a line removed. Most mutations produce something that does
+ * not compile, which is fine -- the property asserted is "compiles and round
+ * trips, or does not compile", and the only failure is a document that
+ * compiles and cannot be written back.
+ *
+ * **Deterministic, so a failure reproduces.** One xorshift seeded from a
+ * constant, not from the clock. A case that fails here fails again on the next
+ * run with the same mutation, which a random seed would not give.
+ *
+ * **Bounded by construction.** `MUTATIONS_PER_BLOCK` applications per block and
+ * nothing recursive, so the worst case is that constant times the block count.
+ * Measured at 73 microseconds per round trip, so the whole sweep is under a
+ * second -- `running-code.md` asks what makes it stop, and it is a `for`.
+ */
+#define MUTATIONS_PER_BLOCK 120u
+
+static uint32_t mutate_state = 0x9e3779b9u;
+
+static uint32_t mutate_next(void)
+{
+	mutate_state ^= mutate_state << 13;
+	mutate_state ^= mutate_state >> 17;
+	mutate_state ^= mutate_state << 5;
+	return mutate_state;
+}
+
+/* One mutation of `source` into `out`. Returns 0 where it would not fit, which
+ * is a skip rather than a failure. */
+static int mutate_block(const char *source, char *out, size_t out_size)
+{
+	size_t length = strlen(source);
+	size_t at;
+
+	if (length == 0u || length + 2u >= out_size) {
+		return 0;
+	}
+	memcpy(out, source, length + 1u);
+	at = mutate_next() % length;
+	switch (mutate_next() % 5u) {
+	case 0:
+		/* A digit becomes another digit, which is how a value lands outside
+		 * what its key accepts without changing the shape of the text. */
+		if (out[at] >= '0' && out[at] <= '9') {
+			out[at] = (char)('0' + (int)(mutate_next() % 10u));
+		}
+		break;
+	case 1:
+		/* A boolean flips, which is the case `require_lease` was. */
+		if (strstr(out, "true")) {
+			char *found = strstr(out, "true");
+
+			memcpy(found, "fals", 4u);
+			memmove(found + 4, found + 4, strlen(found + 4) + 1u);
+			found[4] = 'e';
+		} else if (strstr(out, "false")) {
+			char *found = strstr(out, "false");
+
+			memcpy(found, "true", 4u);
+			memmove(found + 4, found + 5, strlen(found + 5) + 1u);
+		}
+		break;
+	case 2: {
+		/* A line goes, which is how a required key goes missing and how an
+		 * optional one stops being set. */
+		char *line = out + at;
+		char *start = line;
+		char *end = strchr(line, '\n');
+
+		while (start > out && start[-1] != '\n') {
+			start--;
+		}
+		if (end) {
+			memmove(start, end + 1, strlen(end + 1) + 1u);
+		} else {
+			*start = '\0';
+		}
+		break;
+	}
+	case 3:
+		/* Truncated, which leaves an unclosed block most of the time and
+		 * occasionally a shorter valid one. */
+		out[at] = '\0';
+		break;
+	default:
+		/* A character goes, which reaches the lexer rather than the keys. */
+		memmove(out + at, out + at + 1, strlen(out + at + 1) + 1u);
+		break;
+	}
+	return out[0] != '\0';
+}
+
 static void example_cases(void)
 {
 	size_t length = 0;
@@ -2145,6 +2270,11 @@ static void example_cases(void)
 	size_t allowed = 0;
 	size_t bad = 0;
 	size_t unrenderable = 0;
+	size_t compiled_mutations = 0;
+	size_t refused_mutations = 0;
+	size_t round_tripped_mutations = 0;
+	size_t waived_mutations = 0;
+	size_t unrenderable_mutations = 0;
 	size_t head;
 
 	if (!text) {
@@ -2240,6 +2370,45 @@ static void example_cases(void)
 				}
 			}
 			ncfg_document_free(document);
+			/*
+			 * And the same question of mutations of this block, which reach
+			 * the field combinations nobody wrote. See `mutate_block`: the
+			 * property is "compiles and round trips, or does not compile",
+			 * and a document that compiles and cannot be written back is the
+			 * only failure.
+			 */
+			for (i = 0; i < MUTATIONS_PER_BLOCK; i++) {
+				char             mutated[sizeof(block)];
+				ncfg_document_t *copy;
+
+				if (!mutate_block(block, mutated, sizeof(mutated))) {
+					continue;
+				}
+				copy = build_one(mutated);
+				if (!copy) {
+					refused_mutations++;
+					continue;
+				}
+				compiled_mutations++;
+				if (!carries_hooks(copy) && !carries_silent_device(copy)) {
+					char why[NCFG_ERROR_MAX];
+
+					why[0] = '\0';
+					if (ncfg_config_round_trips(copy, why, sizeof(why))) {
+						round_tripped_mutations++;
+					} else {
+						if (unrenderable_mutations < 4u) {
+							printf("%s:%zu: THE RENDERER, on a mutation: %s\n"
+							    "  the mutation was:\n%s\n",
+							    EXAMPLE_PATH, start, why, mutated);
+						}
+						unrenderable_mutations++;
+					}
+				} else {
+					waived_mutations++;
+				}
+				ncfg_document_free(copy);
+			}
 		}
 
 	next:
@@ -2256,6 +2425,24 @@ static void example_cases(void)
 	 */
 	check(found >= 50u, "the example extractor finds the blocks it should");
 	check(unrenderable == 0u, "  and every block that compiles can be written back");
+	check(unrenderable_mutations == 0u,
+	    "  and so can every mutation of one that still compiles");
+	/*
+	 * **The floors, which are the control.** A `mutate_block` that produced
+	 * garbage would make every mutation refuse, and a sweep where nothing
+	 * compiles reports success exactly as loudly as a real one -- so the
+	 * counts are asserted, not just printed. Measured on the run that added
+	 * this -- 6656 compiled and 3650 round tripped -- and the floors are set
+	 * near half of each: loose enough that the example file gaining blocks
+	 * does not fail them, tight enough that a mutator which stopped producing
+	 * compilable output does. The seed is fixed, so these move only when the
+	 * corpus or the mutator moves.
+	 */
+	check(compiled_mutations >= 3000u,
+	    "  and the mutations reach the compiler rather than all being refused");
+	check(round_tripped_mutations >= 1500u, "  and enough of them to be worth asking");
+	printf("    %zu mutations compiled, %zu round tripped, %zu refused, %zu waived\n",
+	    compiled_mutations, round_tripped_mutations, refused_mutations, waived_mutations);
 	if (found < 50u) {
 		printf("    only %zu blocks found in %s; the extractor is broken, not the file\n",
 		    found, EXAMPLE_PATH);

@@ -12385,6 +12385,71 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.426 The mutation sweep finds nothing, and the method is the result
+
+The fourth instrument, and the last one the Rust had that the C did not: mutate
+every example block and ask each mutation the same question. **It found no new
+renderer defect**, which is worth recording with its method rather than
+reporting as silence -- an empty sweep that names what it looked for says
+something a sweep nobody describes does not.
+
+    6656 mutations compiled, 3650 round tripped, 5423 refused, 3006 waived
+    0 faults, 1.43 s for the whole suite
+
+**The property is "compiles and round trips, or does not compile."** Most
+mutations produce something the compiler refuses, and that is fine; the only
+failure is a document that compiles and cannot be written back. So a mutator
+that produced garbage would pass by refusing everything, which is why the
+counts are asserted and not merely printed.
+
+**Deterministic and bounded, which `running-code.md` asks for before anything
+loops.** One xorshift from a constant seed, `MUTATIONS_PER_BLOCK` applications
+per block, nothing recursive -- so the worst case is that constant times the
+block count and a failure reproduces on the next run. A clock-seeded mutator
+would have given a sweep nobody could re-run.
+
+**The floors are the control and they were proved.** Set near half of what the
+run found -- 3000 compiled, 1500 round tripped -- loose enough that the example
+file gaining blocks does not fail them, tight enough that a mutator which
+stopped working does. Sabotaged by making every mutation start with a byte the
+lexer refuses: both floors go red. Before tightening they were 400 and 300,
+which would have passed a 90% collapse.
+
+### What it reached constantly, and why that is a skip rather than a failure
+
+Deleting the one line in `device eth1 { qdisc = "fq_codel" }` leaves
+`device eth1 { }` -- 10.418's hole, which the sweep hits hundreds of times. A
+sweep failing on it would report a known hole repeatedly instead of a new fault
+once, so those mutations are skipped structurally, exactly as hook-carrying
+documents are.
+
+**Asked of the renderer rather than recomputed.**
+`ncfg_render_device_writes_nothing` renders the device and reports whether
+anything came out, so the test cannot disagree with the renderer about what it
+writes -- and no second enumeration of `ncfg_device_t` exists to go stale. The
+alternative considered and rejected was reading the failure's message for a
+device name, which breaks when the sentence improves.
+
+The hole stays pinned by its own named case in `compiles_but_cannot_round_trip`,
+so skipping it in the sweep hides nothing.
+
+### Where that leaves the renderer
+
+Four instruments, and the order they were applied in is the finding:
+
+    refusal-list diff vs the Rust    found the ingress shaper (10.422)
+    lower_test's own documents       found a tunnel of the wrong family (10.423)
+    doc/netcfgd.conf.example         found a probe's require_lease (10.425)
+    mutations of the example         found nothing
+
+Each of the first three found what the others could not, and the fourth found
+nothing on top of them. **That is the honest reading of "the renderer is
+complete": not that nobody can think of a gap, but that four instruments
+disagreeing about where to look now agree there is nothing there.** The next
+gap, if there is one, needs a corpus none of these four reaches -- the
+observer's documents, or a machine's real state -- rather than a fifth way of
+asking the same four.
+
 ## 10.425 A probe's `require_lease` was dropped, found by asking the example file
 
 10.423 added the round-trip guard to `lower_test.c`'s own documents. The example

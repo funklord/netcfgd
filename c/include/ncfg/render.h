@@ -142,6 +142,20 @@ void ncfg_unrenderable_free(ncfg_unrenderable_t *missing);
  * `overrides` may be NULL, which means the base defines nothing. `missing` may
  * not: see the header comment.
  */
+/*
+ * Whether the renderer would write nothing at all for this device.
+ *
+ * For a caller asking whether a document can survive a round trip: a device
+ * the operator declared and left at every default is written nowhere, so a
+ * document holding one does not come back. 10.418 has the measurement and why
+ * writing it instead broke `ncfg profile save`.
+ *
+ * Asked of the renderer rather than recomputed, so no caller has to enumerate
+ * `ncfg_device_t` and keep that enumeration current.
+ */
+int ncfg_render_device_writes_nothing(const ncfg_device_t *device,
+    const ncfg_document_t *document);
+
 int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing, char *err, size_t err_size);
 
