@@ -12443,20 +12443,47 @@ and the list was plausible enough -- `command`, `guard`, `identity` -- to read
 as a finding. `evidence.md` names this exact shape: a pattern that cannot match
 a tab-indented name, in a workspace where everything is tab-indented.
 
-**The third was a false claim about my own evidence, and it is the one worth
-keeping.** The docstring said comment-stripping was load-bearing: that the
-paragraph discussing `require_lease` would otherwise cover the key and the
-sabotage would pass. **It would not.** Only string literals are read, so comment
-prose was never going to match, and with the stripping disabled the sabotage
-still fires -- which I only found because I went to demonstrate the claim
-instead of asserting it.
+**The third was a false claim about my own evidence, corrected twice, and the
+second correction is the one worth keeping.** The docstring first said
+comment-stripping was load-bearing because the paragraph discussing
+`require_lease` would otherwise cover the key and the sabotage would pass. **It
+would not** -- only string literals are read, so comment prose never matches,
+and with the stripping disabled the sabotage still fires. I found that only
+because I went to demonstrate the claim instead of asserting it.
 
-What stripping does buy is a literal scan that stays synchronised. Measured with
-it off: 173 extra words, among them `ists`, `ound`, `riting` and `sked` --
-`exists`, `found`, `writing` and `asked` with their beginnings eaten, which is
-what a scan reading prose as a literal looks like after a quote in a comment
-paired with the wrong one. None of the 173 is a key today, so the guard is real
-and undemonstrated rather than proven. The docstring says that now.
+The replacement said stripping merely keeps the literal scan synchronised, a
+guard against a coincidence that has not happened. **That was also wrong, and
+wrong in the direction a reader would act on.** Measured properly, over three
+configurations of the one function:
+
+    comments and chars blanked      the gate as it stands
+    comments kept, chars blanked    50 written keys LOST -- `command`,
+                                    `autoneg`, `interval`, `duplex` among them
+    nothing blanked                 0 keys lost, 6 word fragments gained
+
+So the damage is **false failures, not false passes**: an apostrophe in prose
+(`renderer's`, `parser's`) pairs with the next real quote, the literal after it
+is read inside-out, and every literal following it shifts. Fifty keys the
+renderer does write would have been reported as unwritten.
+
+**And the third row is why sampling one configuration cannot tell you a scan is
+sound.** Losing no keys looks like the healthy answer. The six fragments are
+`ists`, `ound`, `riting` and `sked` -- `exists`, `found`, `writing` and `asked`
+with their beginnings eaten -- so the scan *is* reading prose as a literal
+there; it comes out even because two desynchronisations happen to cancel.
+
+### The fourth, found by the phrase sweep below: a renderer full of quotes
+
+A character literal is the other half of the same fault, and this renderer is
+the worst possible place for it: **its job is quoting, so it holds ten `'"'`**,
+and the scan treated each as opening a string. `render.c:252` onward was
+scrambled, which hid `"@secret:keyring:"` at line 268 from a scan that had that
+literal directly in front of it.
+
+It changed no key verdict -- 120 of 125 before and after -- so the gate was
+**coincidentally right rather than sound**, which is only distinguishable by
+asking it about something whose answer you already know. The phrase sweep was
+that question, and `keyring` was the answer it got wrong.
 
 ### What it found: a comment that outlived the fix below it
 
@@ -12470,6 +12497,39 @@ stale comment is worse here than a stale document claim**, because it does not
 merely describe the renderer, it tells the next reader the renderer is right to
 write nothing. The gate did not detect it; looking for `require_lease` in order
 to build the control did.
+
+### The phrase keywords, swept and deliberately not gated
+
+The gate's own limits name the class it cannot see: a key accepted somewhere
+other than a `strcmp(key, ...)` arm. So the same question was put to those --
+`strcmp(word, ...)`, `strcmp(keyword, ...)` and the `keywords[]` tables, which
+is where route phrases, address modifiers, bridge VLAN words and secret-source
+prefixes are accepted.
+
+    80 phrase keywords accepted positionally
+    21 the renderer never spells, every one of them accounted for
+
+Three kinds, and reading them is what rules the class out rather than the count:
+
+  * **aliases** -- `dhcp4` and `dhcpv6` for `dhcp` and `dhcp6`, `802.1q` for
+    `dot1q`, `link-local` for `link_local`, `wpa2wpa3` for `wpa2+wpa3`,
+    `pointopoint` and `netmask` for `peer`, `inet`/`inet6` for `ipv4`/`ipv6`;
+  * **defaults the renderer is right to omit** -- `forever` sets a lifetime's
+    `has` to 0, which is the absent state, so a `forever` lifetime is written
+    as nothing and recompiles to the same thing; `tagged` is the absence of
+    `untagged` and the parser's default, and the renderer says so in a comment;
+  * **words stored verbatim** -- `full` and `half` live in `duplex` as a
+    `char *`, `2.4`/`5`/`6` in a band the same way, so the renderer quotes the
+    stored text back and the word never appears as a literal in it.
+
+**No gate was built for this, and the third kind is why.** A gate would need
+twenty-one waivers, most of them saying "stored verbatim, so the renderer never
+spells it" -- a reason that applies to every value word anyone adds later, so
+the list would grow with the language while telling nobody anything. That is
+`evidence.md`'s gate carrying a long ignore list, switched off by instalments.
+The sweep is recorded with its method instead, which is what an empty result is
+worth: **this class has been asked, these are the three shapes it answers in,
+and the next renderer gap is not here.**
 
 ### What it does not promise
 

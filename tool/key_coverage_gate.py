@@ -27,19 +27,32 @@ So this starts from the LANGUAGE instead:
 A key in the first and not the second fails the build, unless it is named in
 `tool/renderer-unwritten-keys.txt` with a reason.
 
-**Comments are stripped before the renderer is read, and the reason is not the
-obvious one.** Only string literals are read, so a comment that merely
-discusses a key was never going to cover it -- with the stripping disabled and
-the `require_lease` write deleted, the gate still fires, and the paragraph
-above `render_probe` discusses that key at length. What stripping actually
-buys is a literal scan that stays synchronised: an apostrophe or a quote in
-prose pairs with the next one and everything after it is read inside-out.
-Measured, with stripping off: 173 extra words, among them `ists`, `ound`,
-`riting` and `sked` -- `exists`, `found`, `writing` and `asked` with their
-beginnings eaten, which is what a scan reading prose as a literal looks like.
-None of the 173 is a key today, so this guards a coincidence that has not
-happened rather than one that has; it is cheap and the alternative is a scan
-whose correctness depends on how many quotes the comments happen to contain.
+**Comments and character literals are both blanked before the renderer is
+read, and what that buys is the opposite of the obvious guess.** The guess is
+that a comment discussing a key would cover it and cause a false pass. It would
+not -- only string literals are read, and with the blanking disabled and the
+`require_lease` write deleted this gate still fires, although the paragraph
+above `render_probe` discusses that key at length.
+
+What the blanking actually prevents is a desynchronised scan, and the damage
+runs the other way -- towards false FAILURES, which is the direction a reader
+would act on. An apostrophe in prose (`renderer's`, `parser's`) pairs with the
+next real quote, so the literal after it is read inside-out and every literal
+following it shifts. Measured, three configurations of this one function:
+
+    comments and chars blanked    the gate as it stands
+    comments kept, chars blanked  50 written keys LOST, among them `command`,
+                                  `autoneg`, `interval` and `duplex`
+    nothing blanked               0 keys lost, and 6 word fragments gained --
+                                  `ists`, `ound`, `riting`, `sked`
+
+**Read the third row before trusting a scan by sampling it.** Losing no keys
+looks like the healthy answer and is not: the fragments are `exists`, `found`,
+`writing` and `asked` with their beginnings eaten, so the scan is reading prose
+as a literal there, and it comes out even only because two desynchronisations
+happen to cancel. A character literal is the other half -- this renderer's job
+is quoting, so it holds ten `'\"'`, and one of them hid `"@secret:keyring:"` at
+`render.c:268` from a scan that had that literal directly in front of it.
 
 WHAT THIS DOES NOT PROMISE. It asks whether the renderer MENTIONS a key, not
 whether it writes it correctly, under the right condition, with the right
@@ -85,18 +98,16 @@ def strip_comments(text):
 				out.append('"')
 				i += 1
 		elif c == "'" and i + 1 < n:
-			out.append(c)
+			# Blanked, not kept. A character literal never holds a key, and this
+			# renderer's job is quoting, so it contains ten `'\"'` -- each of
+			# which pairs with the next real quote and reads everything after it
+			# inside-out. That is what hid `@secret:keyring:` at render.c:268
+			# from a scan that had the literal in front of it.
 			i += 1
 			while i < n and text[i] != "'":
-				if text[i] == "\\":
-					out.append(text[i])
-					i += 1
-				if i < n:
-					out.append(text[i])
-					i += 1
-			if i < n:
-				out.append("'")
-				i += 1
+				i += 2 if text[i] == "\\" else 1
+			i += 1
+			out.append(" ")
 		elif text.startswith("/*", i):
 			i = text.find("*/", i + 2)
 			i = n if i < 0 else i + 2
