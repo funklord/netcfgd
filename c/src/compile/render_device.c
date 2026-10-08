@@ -160,13 +160,205 @@ static void render_pppoe(const ncfg_pppoe_config_t *pppoe, ncfg_buf_t *body)
 }
 
 /*
+ * An OpenVPN tunnel: a path, and optionally a login for it.
+ *
+ * 0046 is why there is so little here -- `openvpn --help` lists 253 top-level
+ * options, so netcfgd names the operator's `.ovpn` and does not express its
+ * surface. That makes this the smallest of the kinds and the one whose absence
+ * was least excusable.
+ *
+ * **Username and password are both or neither**, which `lower_openvpn` enforces,
+ * so a document holding one of them arrived some other way and is named rather
+ * than written: rendering half of a login produces a profile that does not
+ * compile, and the operator would meet that instead of this.
+ */
+static void render_openvpn(const ncfg_openvpn_config_t *openvpn, const char *name,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
+{
+	if (!openvpn->config) {
+		ncfg_render_refuse(missing, "device", name, "an openvpn tunnel with no config file");
+		return;
+	}
+	if ((openvpn->username != NULL) != (openvpn->password != NULL)) {
+		ncfg_render_refuse(missing, "device", name,
+		    "an openvpn tunnel with only half of a login");
+		return;
+	}
+	ncfg_buf_add_text(body, "\topenvpn {\n\t\tconfig = ");
+	ncfg_render_quote(body, openvpn->config);
+	ncfg_buf_add_char(body, '\n');
+	if (openvpn->username) {
+		ncfg_buf_add_text(body, "\t\tusername = ");
+		ncfg_render_quote(body, openvpn->username);
+		ncfg_buf_add_text(body, "\n\t\tpassword = ");
+		ncfg_render_quote_secret(body, openvpn->password);
+		ncfg_buf_add_char(body, '\n');
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
+ * A tun or tap device.
+ *
+ * **The mode is the block's name, not a key inside it.** `lower_tun` is reached
+ * from `tun { }` and from `tap { }` and sets the mode from which head it saw, so
+ * writing `tun { mode = "tap" }` would be an unknown key rather than a tap
+ * device. One model type, two spellings, and the spelling is the whole
+ * difference.
+ */
+static void render_tun(const ncfg_tun_config_t *tun, ncfg_buf_t *body)
+{
+	ncfg_buf_addf(body, "\t%s {\n", tun->mode == NCFG_TUN_MODE_TAP ? "tap" : "tun");
+	if (tun->owner) {
+		ncfg_buf_add_text(body, "\t\towner = ");
+		ncfg_render_quote(body, tun->owner);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (tun->group) {
+		ncfg_buf_add_text(body, "\t\tgroup = ");
+		ncfg_render_quote(body, tun->group);
+		ncfg_buf_add_char(body, '\n');
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
+ * In the enum's order, and the parser's diagnostic lists them in the same one --
+ * checked rather than assumed, because the advertise backends and the wifi
+ * backends both had a human-facing list that disagreed with their enum.
+ */
+static const char *const tunnel_mode_words[] = { "gre", "gretap", "ip6gre", "ipip", "sit",
+	"ip6tnl", "geneve" };
+
+/*
+ * A tunnel of whichever encapsulation.
+ *
+ * One model type for seven kernel link kinds, which take the same parameters and
+ * differ only in the name sent to the kernel -- so this is one block with a
+ * `mode`, which is what the language has too. **The field is called `mode` and
+ * not `kind`** for the serialisation reason `document.h` records, and the
+ * language accepts either spelling; `mode` is written, being the model's.
+ */
+static void render_tunnel(const ncfg_tunnel_config_t *tunnel, ncfg_buf_t *body)
+{
+	ncfg_buf_addf(body, "\ttunnel {\n\t\tmode = \"%s\"\n",
+	    ncfg_render_word_or_gap(ncfg_render_word(tunnel_mode_words,
+	        NCFG_COUNT_OF(tunnel_mode_words), tunnel->mode)));
+	if (tunnel->local) {
+		ncfg_buf_add_text(body, "\t\tlocal = ");
+		ncfg_render_quote(body, tunnel->local);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (tunnel->remote) {
+		ncfg_buf_add_text(body, "\t\tremote = ");
+		ncfg_render_quote(body, tunnel->remote);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (tunnel->parent) {
+		ncfg_buf_add_text(body, "\t\tparent = ");
+		ncfg_render_quote(body, tunnel->parent);
+		ncfg_buf_add_char(body, '\n');
+	}
+	/* `ttl` of zero means inherit from the inner packet, which is a value and
+	 * not an absence -- so it is written whenever the field is set. */
+	if (tunnel->ttl.has) {
+		ncfg_buf_addf(body, "\t\tttl = %lld\n", (long long)tunnel->ttl.value);
+	}
+	if (tunnel->key.has) {
+		ncfg_buf_addf(body, "\t\tkey = %lld\n", (long long)tunnel->key.value);
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
+ * A WireGuard device and its peers.
+ *
+ * The private key and each preshared key are written as **references**, never as
+ * material: that is what `ncfg_secret_ref_t` is for, and the document is
+ * incapable of carrying the key itself. So saving a profile from a WireGuard
+ * machine does not copy its keys anywhere, and the rendering could not leak one
+ * if it tried.
+ *
+ * **A peer's public key goes out through `ncfg_key_render` rather than any
+ * spelling of this function's own.** Base64 has more than one spelling of one
+ * 32-octet key -- the final character carries four significant bits -- and the
+ * model keeps octets precisely so that two spellings compare equal. Rendering
+ * them by hand would reintroduce the second spelling at the one point where the
+ * whole arrangement is meant to produce the first.
+ *
+ * Its status is read, and a key that will not render is named rather than
+ * written as the empty string it leaves behind: an `ncfg_key_render` that
+ * refused and a peer with no key look identical in the output otherwise.
+ */
+static void render_wireguard(const ncfg_wireguard_config_t *wireguard, const char *name,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
+{
+	size_t i;
+
+	ncfg_buf_add_text(body, "\twireguard {\n\t\tprivate_key = ");
+	ncfg_render_quote_secret(body, &wireguard->private_key);
+	ncfg_buf_add_char(body, '\n');
+	if (wireguard->listen_port.has) {
+		ncfg_buf_addf(body, "\t\tlisten_port = %lld\n",
+		    (long long)wireguard->listen_port.value);
+	}
+	if (wireguard->fwmark.has) {
+		ncfg_buf_addf(body, "\t\tfwmark = %lld\n", (long long)wireguard->fwmark.value);
+	}
+	for (i = 0; i < wireguard->peer_count; i++) {
+		const ncfg_wg_peer_t *peer = &wireguard->peers[i];
+		char                  text[NCFG_KEY_TEXT_SIZE];
+		ncfg_render_list_t    allowed;
+		size_t                at;
+
+		/* No error buffer: the only way `ncfg_key_render` refuses is a buffer
+		 * too small for the text, which `NCFG_KEY_TEXT_SIZE` is not, so there
+		 * is no sentence to relay that this refusal does not already say. The
+		 * status is still read -- it empties `out` on a refusal, and an empty
+		 * key written into a peer block is indistinguishable from a peer that
+		 * has none. */
+		if (!ncfg_key_render(peer->public_key, text, sizeof(text), NULL, 0)) {
+			ncfg_render_refuse(missing, "device", name,
+			    "a wireguard peer whose public key will not render");
+			continue;
+		}
+		ncfg_buf_add_text(body, "\t\tpeer ");
+		ncfg_render_label(body, peer->name);
+		ncfg_buf_addf(body, " {\n\t\t\tpublic_key = \"%s\"\n", text);
+		if (peer->preshared_key) {
+			ncfg_buf_add_text(body, "\t\t\tpreshared_key = ");
+			ncfg_render_quote_secret(body, peer->preshared_key);
+			ncfg_buf_add_char(body, '\n');
+		}
+		if (peer->endpoint) {
+			ncfg_buf_add_text(body, "\t\t\tendpoint = ");
+			ncfg_render_quote(body, peer->endpoint);
+			ncfg_buf_add_char(body, '\n');
+		}
+		ncfg_render_list_init(&allowed);
+		for (at = 0; at < peer->allowed_ip_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&allowed), peer->allowed_ips[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t", "\tallowed_ips", &allowed, 1);
+		ncfg_render_list_free(&allowed);
+		if (peer->keepalive.has) {
+			ncfg_buf_addf(body, "\t\t\tkeepalive = %lld\n",
+			    (long long)peer->keepalive.value);
+		}
+		ncfg_buf_add_text(body, "\t\t}\n");
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
  * What kind of link this is, as its own block.
  *
- * The topology kinds are here and `pppoe` with them. What is refused is
- * `wireguard`, whose peer list and private key are a bigger question than more
- * keys; `openvpn`, which names an operator's file; and `tunnel`, `tun` and
- * `ifb`. The split is by what a block *carries* rather than by effort -- the
- * kinds that render say who they are made of and nothing secret.
+ * Every kind the model has renders except `ifb`, which is synthesised: netcfgd
+ * creates one per interface asking for `ingress_bandwidth`, so it is never
+ * written by hand and rendering it back would put a derived device into a
+ * profile as though somebody had asked for it. That is the same reason the
+ * metering half of a qdisc and `ingress_redirect` are refused, and it is a
+ * property of the thing rather than work left undone.
  */
 static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncfg_buf_t *body,
     ncfg_unrenderable_t *missing)
@@ -218,6 +410,18 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		break;
 	case NCFG_KIND_PPPOE:
 		render_pppoe(&kind->pppoe, body);
+		break;
+	case NCFG_KIND_OPENVPN:
+		render_openvpn(&kind->openvpn, name, body, missing);
+		break;
+	case NCFG_KIND_TUN:
+		render_tun(&kind->tun, body);
+		break;
+	case NCFG_KIND_TUNNEL:
+		render_tunnel(&kind->tunnel, body);
+		break;
+	case NCFG_KIND_WIREGUARD:
+		render_wireguard(&kind->wireguard, name, body, missing);
 		break;
 	default:
 		/* The scope is `device` and not `interface`, which is where 0155 pass

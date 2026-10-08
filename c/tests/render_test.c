@@ -272,21 +272,20 @@ static char *refusals_for(ncfg_document_t *document)
 	return out;
 }
 
-static char *refusals_of_config(const char *text)
-{
-	ncfg_document_t *document = compiled(text, "a case's own configuration");
-	char            *out;
+/*
+ * There is no `refusals_of_config` any more, and its absence is a fact worth
+ * leaving a note for rather than a tidy-up.
+ *
+ * It compiled a config file and collected the refusals, and it had users while
+ * `wireguard` and `openvpn` were refused. **Hooks are now the only refusal a
+ * config file can reach**: every other one names something the language has no
+ * words for, or something netcfgd synthesises, so the way to reach them is a
+ * document that arrived as JSON -- which is what `refusals_of_document` below is
+ * for. Anything new that is refused and reachable wants this helper back.
+ */
 
-	if (!document) {
-		return NULL;
-	}
-	out = refusals_for(document);
-	ncfg_document_free(document);
-	return out;
-}
-
-/* The same, for a file carrying hooks, which need a sink that accepts them
- * before the renderer ever sees one. `record_hook` is below. */
+/* For a file carrying hooks, which need a sink that accepts them before the
+ * renderer ever sees one. `record_hook` is below. */
 static char *refusals_with_hooks(const char *text);
 
 /*
@@ -381,10 +380,14 @@ static void render_the_witness(int argc, char **argv)
 	 * kinds are spelled the *language's* way on purpose: `wire_guard` and
 	 * `open_vpn` are the document's words, and a refusal that used them would
 	 * send an operator to write a block the parser does not have. */
-	static const char *const expected[] = { "kind wireguard", "kind openvpn", "kind tunnel",
+	static const char *const expected[] = {
+		/* `kind wireguard`, `kind openvpn`, `kind tunnel` and `kind tun` were
+		 * here and render now. `ifb` is the only kind left, and it is refused
+		 * because netcfgd synthesises it rather than because nothing writes
+		 * it. */
 		/* `routing rule(s)` was here and renders now. */
 		/* `access_point block(s)` was here and renders now. */
-		"kind tun", "kind ifb",
+		"kind ifb",
 		/* `a wifi policy` was here and is rendered now, so it is no longer
 		 * refused. Removed rather than left: this list's job is to name what
 		 * has no rendering, and an entry for something that renders would make
@@ -1187,6 +1190,94 @@ static void the_remaining_address_sources_round_trip(void)
 }
 
 /*
+ * The four device kinds that had no rendering, which leaves only `ifb`.
+ *
+ * `ifb` stays refused because it is synthesised -- netcfgd makes one per
+ * interface asking for `ingress_bandwidth` -- so rendering it would put a
+ * derived device into a profile as though somebody had asked for it. That is a
+ * property of the thing and not work left undone.
+ *
+ * **The spelling assertions are the ones that were paid for twice.** The
+ * document says `wire_guard` and `open_vpn`; the language says `wireguard` and
+ * `openvpn`, and a block written with the document's word cannot compile. This
+ * used to be asserted of the refusal text and is now asserted of the rendering,
+ * which is where it does more good.
+ */
+static void the_remaining_kinds_round_trip(void)
+{
+	const char *wireguard = "device wg0 {\n\twireguard {\n"
+	    "\t\tprivate_key = \"@secret:wg\"\n\t\tlisten_port = 51820\n"
+	    "\t\tfwmark = 42\n\t\tpeer \"office\" {\n"
+	    "\t\t\tpublic_key = \"0000000000000000000000000000000000000000000=\"\n"
+	    "\t\t\tpreshared_key = \"@secret:psk\"\n"
+	    "\t\t\tendpoint = \"vpn.example:51820\"\n"
+	    "\t\t\tallowed_ips = [\"0.0.0.0/0\", \"::/0\"]\n"
+	    "\t\t\tkeepalive = 25\n\t\t}\n\t}\n}\n";
+	const char *openvpn = "device vpn0 {\n\topenvpn {\n"
+	    "\t\tconfig = \"/etc/openvpn/work.ovpn\"\n\t\tusername = \"u\"\n"
+	    "\t\tpassword = \"@secret:vpn\"\n\t}\n}\n";
+	const char *tunnel = "device gre0 {\n\ttunnel {\n\t\tmode = \"gretap\"\n"
+	    "\t\tlocal = \"192.0.2.1\"\n\t\tremote = \"198.51.100.1\"\n"
+	    "\t\tparent = \"eth0\"\n\t\tttl = 64\n\t\tkey = 42\n\t}\n}\n";
+	char       *rendered;
+
+	round_trips(wireguard, "a wireguard device and its peer round trip");
+	rendered = rendering_of(wireguard);
+	check(holds(rendered, "wireguard {") && lacks(rendered, "wire_guard"),
+	    "and the block is the language's word, never the document's `wire_guard`");
+	check(holds(rendered, "private_key = \"@secret:wg\""),
+	    "with the private key written as a reference, which is all the model has");
+	check(holds(rendered, "public_key = \"0000000000000000000000000000000000000000000=\""),
+	    "and the peer's public key in the one spelling the model keeps octets for");
+	check(holds(rendered, "allowed_ips = [\"0.0.0.0/0\", \"::/0\"]"),
+	    "and every allowed prefix, not just the first");
+	free(rendered);
+
+	round_trips(openvpn, "an openvpn tunnel round trips");
+	rendered = rendering_of(openvpn);
+	check(holds(rendered, "openvpn {") && lacks(rendered, "open_vpn"),
+	    "and is spelled the language's way too, which is the same pair of words");
+	check(holds(rendered, "password = \"@secret:vpn\""),
+	    "with the password as a reference and never as a value");
+	/* `config`/`file` and `username`/`user` are both accepted, so the round
+	 * trip cannot tell the two spellings apart. Assert the canonical one. */
+	check(holds(rendered, "config = \"/etc/openvpn/work.ovpn\""),
+	    "and `config` rather than `file`, which the parser also takes");
+	check(holds(rendered, "username = \"u\""),
+	    "and `username` rather than `user`, for the same reason");
+	free(rendered);
+	round_trips("device vpn0 {\n\topenvpn {\n"
+	    "\t\tconfig = \"/etc/openvpn/work.ovpn\"\n\t}\n}\n",
+	    "and so does one with no login, which is the commoner shape");
+
+	round_trips(tunnel, "a tunnel round trips with every key it has");
+	rendered = rendering_of(tunnel);
+	check(holds(rendered, "mode = \"gretap\""),
+	    "and the encapsulation is the one named, not its neighbour in the table");
+	check(holds(rendered, "ttl = 64"), "with the ttl it was given");
+	/* Three more pairs the parser accepts either of: `mode`/`kind` above,
+	 * `parent`/`dev`, and `key`/`vni`. */
+	check(holds(rendered, "parent = \"eth0\""),
+	    "and `parent` rather than `dev`, which would round trip just as well");
+	check(holds(rendered, "key = 42"), "and `key` rather than `vni`");
+	free(rendered);
+
+	/* The mode is the block's name rather than a key, so a tap device written
+	 * as `tun { mode = "tap" }` would not compile at all. */
+	round_trips("device tap0 {\n\ttap {\n\t\towner = \"bob\"\n"
+	    "\t\tgroup = \"vpn\"\n\t}\n}\n", "a tap device round trips");
+	rendered = rendering_of("device tap0 {\n\ttap {\n\t\towner = \"bob\"\n\t}\n}\n");
+	check(holds(rendered, "tap {"), "and is written as `tap`, which is where its mode lives");
+	free(rendered);
+	round_trips("device tun0 {\n\ttun {\n\t\towner = \"bob\"\n\t}\n}\n",
+	    "and a tun device round trips as `tun`");
+	rendered = rendering_of("device tun0 {\n\ttun {\n\t\towner = \"bob\"\n\t}\n}\n");
+	check(holds(rendered, "tun {") && lacks(rendered, "tap"),
+	    "which is a different block from the one above, not a key apart");
+	free(rendered);
+}
+
+/*
  * Per-port VLAN membership, which was being dropped in silence.
  *
  * It was neither rendered nor refused, so `ncfg profile save` wrote a switch
@@ -1702,35 +1793,24 @@ static char *refusals_with_hooks(const char *text)
 }
 
 /*
- * A wireguard device has no rendering here, and saying so by name is the whole
- * difference between a partial renderer and a lossy one -- **and the name is
- * the language's**, not the document's `wire_guard`.
+ * What is still refused and reachable from a config file, which is hooks alone.
+ *
+ * `wireguard` and `openvpn` were asserted here as refused by name. Both render
+ * now, and the property that mattered about those refusals -- that the word is
+ * the language's `wireguard` and never the document's `wire_guard`, the pair
+ * this project has shipped wrong twice -- moved to
+ * `the_remaining_kinds_round_trip`, where it is asserted of the rendered block
+ * instead. That is the stronger place for it: a refusal naming the right word
+ * helps an operator write the block by hand, and a rendering spelled the right
+ * way means they do not have to.
  */
 static void what_cannot_be_rendered_is_named(void)
 {
-	char *wireguard = refusals_of_config("device wg0 {\n\twireguard {\n"
-	    "\t\tprivate_key = \"@secret:wg\"\n\t}\n}\ninterface wg0 {\n"
-	    "\tconfig = \"10.0.0.2/32\"\n}\n");
-	char *openvpn = refusals_of_config("device tun0 {\n\topenvpn {\n"
-	    "\t\tconfig = \"/etc/openvpn/work.ovpn\"\n\t}\n}\n");
 	char *hooks = refusals_with_hooks("interface eth0 {\n\tconfig = \"dhcp\"\n"
 	    "\tpost_up {\n\t\techo hello\n\t}\n}\n");
 
-	check(holds(wireguard, "device wg0: kind wireguard"),
-	    "a wireguard device is refused by name, with the language's spelling");
-	check(lacks(wireguard, "wire_guard"),
-	    "and never with the document's, which is not a word an operator can write");
-	check(holds(openvpn, "device tun0: kind openvpn") && lacks(openvpn, "open_vpn"),
-	    "and the same for openvpn, the other word this project has shipped wrong");
 	check(holds(hooks, "interface eth0: hooks"),
 	    "an interface's hooks are refused rather than dropped");
-	/* A routing rule was asserted here as refused and counted. It renders now,
-	 * so the case moved to `a_routing_rule_round_trips` -- which asserts the
-	 * stronger thing, that the rule comes back as the same rule. A refusal
-	 * assertion for something that renders would send the next reader looking
-	 * for a gap that is closed. */
-	free(wireguard);
-	free(openvpn);
 	free(hooks);
 }
 
@@ -1873,6 +1953,7 @@ int main(int argc, char **argv)
 	an_advertise_block_round_trips();
 	a_guard_round_trips();
 	the_remaining_address_sources_round_trip();
+	the_remaining_kinds_round_trip();
 	per_port_vlans_round_trip();
 	every_psk_generation_round_trips();
 	an_empty_dns_block_survives_where_it_means_something();
