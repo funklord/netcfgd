@@ -214,7 +214,7 @@ int ncfg_backend_run(const char *program, const char *const *argv, const char *l
 	 * a file with no executable bit and a file on a filesystem mounted
 	 * `noexec`, and `ncfg_process_exec_refusal` tells them apart. That
 	 * function existed, was tested, and had no caller anywhere
-	 * (project.md 10.258, 10.267).
+	 * (project.md 10.289, 10.298).
 	 *
 	 * Close-on-exec, so a successful exec closes the write end and the
 	 * parent's read gets zero bytes. That is also what separates "could not
@@ -543,7 +543,7 @@ char *ncfg_backend_strdup(const char *text)
  * 20 of its 45 checks were silently exercising the machine's openvpn (0101).
  * This function reproduced that exactly -- four system directories, then
  * `PATH` -- so every live script that puts a stand-in on `PATH` was answered
- * with the machine's own program instead (project.md 10.267).
+ * with the machine's own program instead (project.md 10.298).
  *
  * **And the fallback now applies only where `PATH` cannot answer at all.**
  * The Rust's `which` is `PATH` and nothing else. This port added four system

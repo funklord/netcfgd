@@ -310,7 +310,7 @@ static int say_zero(DBusMessageIter *into, void *object, char *err, size_t err_s
  * **A lookup and never arithmetic.** The settings objects are numbered by the
  * CONNECTION store and this one by the DEVICE store, so `/Devices/3` and
  * `/Settings/3` are unrelated -- computing one from the other would hand a
- * client the settings of whatever connection happened to share a number. 10.362
+ * client the settings of whatever connection happened to share a number. 10.393
  * answered `/` rather than guess; this asks the connection store for the id the
  * device's link reports.
  *

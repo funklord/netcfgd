@@ -5,17 +5,17 @@
 #
 # ## Why this exists
 #
-# project.md 10.307 is fifty-two minutes in which a machine did not match its
+# project.md 10.338 is fifty-two minutes in which a machine did not match its
 # own configuration and netcfgd said nothing. The configuration was correct by
 # 12:55:17; what applied it was a daemon restart at 13:47 for an unrelated
-# reason. 10.330 closed the "nothing said so" half for the policies that do not
+# reason. 10.361 closed the "nothing said so" half for the policies that do not
 # act, and explicitly did not close this one: that machine's radio was under the
 # default policy, which is `reconcile`, so the daemon should have applied it.
 #
 # **No live test covered the path at all.** Thirty scripts write configuration
 # while a daemon runs, and every one of them either calls `ncfg apply`
 # afterwards or starts the daemon with `--no-apply-on-start` and drives it by
-# hand. The one question 10.307 asks -- write a file, touch nothing else, does
+# hand. The one question 10.338 asks -- write a file, touch nothing else, does
 # the machine change -- had no witness.
 #
 # So this script calls `apply` nowhere. That is the point of it, and a future
@@ -24,16 +24,16 @@
 # ## What it drives
 #
 # Dummy interfaces in a network namespace, and netcfgd's own reload path. No
-# radio, because the question is not about radios: 10.307's write was a
+# radio, because the question is not about radios: 10.338's write was a
 # `network` block, but what it turns on is whether a *written file* is noticed
 # and acted on, and an address on a dummy link asks that with nothing faked.
 #
-# ## The three writes, and why the second is the one 10.307 made
+# ## The three writes, and why the second is the one 10.338 made
 #
 #   1. a key changed in `netcfgd.conf` itself;
 #   2. the same change arriving as a **drop-in** under `conf.d/`, which is what
 #      every `ncfg wifi` and every GUI dialog writes, and what the machine in
-#      10.307 was handed. It says `override`, because a drop-in redefining a
+#      10.338 was handed. It says `override`, because a drop-in redefining a
 #      block without it is refused -- which this script got wrong first, and
 #      the compiler said so in one sentence naming both files and the line;
 #   3. a whole new interface arriving in a drop-in, which is the case where
@@ -41,7 +41,7 @@
 #      that moved.
 #
 # Each is given ten seconds. A reload that takes longer than that on an
-# otherwise idle namespace is a failure whatever the eventual outcome: 10.307's
+# otherwise idle namespace is a failure whatever the eventual outcome: 10.338's
 # operator waited fifty-two minutes.
 set -eu
 
@@ -175,7 +175,7 @@ check "a value changed in netcfgd.conf reaches the machine, with no apply" \
 
 # ------------------------------------------------- 2: a drop-in under conf.d
 #
-# **The shape 10.307 was handed.** Every `ncfg wifi add` and every GUI dialog
+# **The shape 10.338 was handed.** Every `ncfg wifi add` and every GUI dialog
 # writes here rather than into netcfgd.conf, so a reload that covered the one
 # file and not this directory would present exactly as that afternoon did.
 
@@ -211,7 +211,7 @@ check "an interface that did not exist when the daemon started is created" \
 
 # ------------------------------------- 4: a drop-in that does not compile
 #
-# **The remaining candidate for 10.307, and the reason this section exists.**
+# **The remaining candidate for 10.338, and the reason this section exists.**
 # Everything above passes, so "a written file is never noticed" is refuted for
 # the ordinary case. What is left is a file that IS noticed and cannot be used:
 # one bad drop-in fails the whole load, netcfgd keeps the configuration it has,
@@ -261,7 +261,7 @@ check "and the configuration that was waiting is applied" \
 # ----------------------------------------------------------------- and quiet
 #
 # Whatever the three above did, a daemon that applied them should not also be
-# complaining that the machine does not match -- 10.330's warning firing here
+# complaining that the machine does not match -- 10.361's warning firing here
 # would mean netcfgd could see the work and declined it, which is the other way
 # this could fail.
 

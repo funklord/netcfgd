@@ -640,7 +640,7 @@ typedef struct {
 	 * `link.set_offloads` on every pass for ever, and one naming an
 	 * unsupported feature `on` did the same -- measured on this workstation,
 	 * where `rx-checksum` is active and unwanted on the loopback, on
-	 * `docker0` and on both WireGuard devices (project.md 10.185, 10.198).
+	 * `docker0` and on both WireGuard devices (project.md 10.216, 10.229).
 	 *
 	 * A subset of `offloads` only for the first direction; the second names
 	 * features that are *not* in it. Empty where every request took, which is
@@ -1261,7 +1261,7 @@ typedef struct {
  * it in the DNS backend, so `src/plan/host_wide.c` included a backend header
  * to reach it and got the renderers and the deliverer with it. That is the
  * arrangement `src/model/device.c` records the cost of, met a second time
- * (project.md 10.255, 10.256).
+ * (project.md 10.286, 10.287).
  */
 
 /* The scope that is not an interface. `resolvconf` keys on an interface name

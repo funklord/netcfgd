@@ -52,7 +52,7 @@ void nmc_state_free(nmc_state_t *state);
  *
  * Every getter asked netcfgd directly, which made a `GetAll` on one device
  * sixty-two socket round trips -- thirty-one properties times a device list and
- * a link list each. That is what starved the loop (project.md 10.364): a sweep
+ * a link list each. That is what starved the loop (project.md 10.395): a sweep
  * took longer than the tick, so `read_write_dispatch` never ran and the shim
  * answered nothing while looking alive.
  *
@@ -141,7 +141,7 @@ const ncfg_scan_t *nmc_state_scan(nmc_state_t *state, const char *interface);
  * In the window for the reason the scan is, and the reason is measured rather
  * than guessed: the change detector reads every property twice -- once to compare
  * and once to send -- so an unwindowed call is two requests per tick on the one
- * device that can least afford them. 10.365 is this adapter's tick taking a
+ * device that can least afford them. 10.396 is this adapter's tick taking a
  * second because of a wifi fetch, and starving the dispatch loop.
  *
  * Like the scan, a second radio in one window replaces the first one's answer

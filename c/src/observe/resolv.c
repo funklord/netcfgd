@@ -7,7 +7,7 @@
  *   so. While the record had no writer at all the question did not arise --
  *   the list was empty on every machine and every pass re-delivered, which
  *   corrected an overwritten `resolv.conf` by accident and cost a `dns.apply`
- *   for ever. The record has a writer now (project.md 10.205), so the accident
+ *   for ever. The record has a writer now (project.md 10.236), so the accident
  *   is gone and this is what notices in its place.
  *
  * WHY IT CLEARS EVERYTHING RATHER THAN ONE SCOPE

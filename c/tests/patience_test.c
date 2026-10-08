@@ -7,7 +7,7 @@
  *     * **hooks SUM rather than MAX**, because the phases run in sequence --
  *       a four-phase interface waits for four timeouts, and a function that
  *       maximised would return 60 where the truth is 240. That is the number
- *       10.321 measured the whole design against;
+ *       10.352 measured the whole design against;
  *     * **a stated zero is honoured**, because `ncfg_optint_t` distinguishes
  *       absent from present and substituting the default for a zero somebody
  *       wrote would be this file overruling the document;
@@ -139,7 +139,7 @@ static void networks_cost_one_association_between_them(void)
 
 /*
  * The machine this was measured on, end to end: one radio, two networks, no
- * hooks. 10.321 put its worst stated apply at the association alone.
+ * hooks. 10.352 put its worst stated apply at the association alone.
  */
 static void the_reporting_machine_adds_up(void)
 {

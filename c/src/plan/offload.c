@@ -51,7 +51,7 @@
  * Planning one of those is an action that must fail, on every pass, for ever:
  * the executor writes the request, the kernel keeps what it had, the next
  * observation reports the same thing and the planner asks again. That is the
- * convergence failure 10.194 records and this is the guard that closes it.
+ * convergence failure 10.225 records and this is the guard that closes it.
  */
 static int is_fixed(const ncfg_observed_link_t *link, const char *name)
 {
@@ -122,7 +122,7 @@ static const char *describe(ncfg_plan_t *plan, const ncfg_offload_t *features, s
  * operator who wrote `gro = true` that their block is ignored would be false.
  *
  * **It used to end "not applied by this build", which is a promise nobody
- * checked.** Settled against `crates/` the way 10.180 settled the last three:
+ * checked.** Settled against `crates/` the way 10.211 settled the last three:
  * `crates/netcfgd-plan/src/lib.rs:714` is this same warning, field for field
  * and almost word for word, and the encoder it is waiting on does not exist on
  * either side -- `crates/netcfgd-sys/src/ethtool.rs` defines

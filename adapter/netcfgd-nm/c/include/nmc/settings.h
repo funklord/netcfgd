@@ -62,7 +62,7 @@ int  nmc_connections_refresh(nmc_connections_t *store);
  * The device-to-connection join: a network's id as its object path, or NULL.
  *
  * A lookup and never arithmetic -- the two stores number independently, so
- * `/Devices/3` and `/Settings/3` are unrelated (project.md 10.362, 10.366).
+ * `/Devices/3` and `/Settings/3` are unrelated (project.md 10.393, 10.397).
  */
 const char *nmc_connections_path_of(nmc_connections_t *store, nmc_profile_kind_t kind,
     const char *id);

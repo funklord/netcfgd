@@ -469,7 +469,7 @@ static int eap_survived(const ncfg_wifi_profile_t *profile, const ncfg_eap_confi
  *
  * **Every field is compared, not the enterprise five.** The Rust's own comment
  * says the check covers "an SSID whose hex form did not round-trip" and
- * nothing in it looks at the SSID; section 10.160 is the same shape one layer up,
+ * nothing in it looks at the SSID; section 10.191 is the same shape one layer up,
  * where five fields are dropped by a renderer with nothing comparing what went
  * in against what came out. A check that names the fields it does not check is
  * worse than one that checks them.

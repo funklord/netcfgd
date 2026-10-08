@@ -36,7 +36,7 @@
  *       the observation, which is what `ncfg status` shows.
  *     * **`allowed_ips` are canonicalised and sorted.** The kernel prints its
  *       own spelling and the operator writes theirs; comparing the two as
- *       written is 10.169's defect in a second place, and the order is the
+ *       written is 10.200's defect in a second place, and the order is the
  *       kernel's arbitrary one on one side and the operator's on the other.
  *     * **A zero keepalive is absent.** A peer with none reports 0, and a
  *       document saying 0 means the same thing.

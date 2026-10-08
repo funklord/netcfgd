@@ -1481,7 +1481,7 @@ static void write_config(const char *config_dir, const char *text)
  * driving a select line is board enablement. `ncfg_sims_sync` publishes it and
  * nothing called it, so a modem that had never advanced had no file at all --
  * and the hook, whose only job is to read one, had nothing (project.md
- * 10.207).
+ * 10.238).
  *
  * Both halves here, because the second is what a removal costs: a device that
  * leaves the document keeps its file otherwise, and a hook with no other way

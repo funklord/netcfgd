@@ -9,7 +9,7 @@
  *   that crashed an hour ago stayed `running` for ever, and 0079's restart
  *   could not fire for it -- the cap counts starts of something the record
  *   already says is up, so "never started again" became "started for ever" the
- *   moment anyone tried to clear it on `running` instead (project.md 10.183).
+ *   moment anyone tried to clear it on `running` instead (project.md 10.214).
  *
  * WHY IT ONLY EVER CLEARS
  *   The record is netcfgd's account of what *it* started. A process netcfgd did
@@ -37,7 +37,7 @@
  *   answers before any route exists; the installed route answers the second
  *   half and cannot, because a client that has not finished its first exchange
  *   has installed nothing. Until this pass wrote it the field had no producer
- *   at all, so that first half never fired on any machine (project.md 10.206).
+ *   at all, so that first half never fired on any machine (project.md 10.237).
  *
  *   **Read for a client this pass could not ask about, as well as one it
  *   found.** That is not sloppiness and it is where this differs from the
@@ -102,7 +102,7 @@ static int dhcp_pid_file(const char *run_dir, const char *program, const char *i
  * away, or one an operator started themselves. Only a file that *is* there
  * and names something which is not this daemon says it has gone.
  *
- * The DHCP arm has said so since 10.206 and the other four did not, so a
+ * The DHCP arm has said so since 10.237 and the other four did not, so a
  * record naming a running supplicant with no pid file beside it was read as
  * "not running" -- which took `answering` off the supplicant round entirely,
  * because that pass only asks about backends the record still calls up. A
@@ -201,7 +201,7 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 			 * client that has gone, and while this arm answered "cannot tell"
 			 * to both, a udhcpc client that died stayed `running` for ever --
 			 * so the planner never restarted it and the interface kept no
-			 * lease at all (project.md 10.206). The Rust asks `path.exists()`
+			 * lease at all (project.md 10.237). The Rust asks `path.exists()`
 			 * first for the same reason.
 			 */
 			*answerable = 0;

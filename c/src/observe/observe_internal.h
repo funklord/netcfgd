@@ -78,7 +78,7 @@ int observe_widen(uint64_t value, const char *what, int64_t *out, char *err, siz
  * one public argument: `ncfg_observe_current` opens one beside the route
  * socket for a whole observation. There was a second caller --
  * `ncfg_observe_netfilter`, which opened one for a single read -- and nothing
- * ever asked for a single read, so it is gone (project.md 10.258). 0 is a
+ * ever asked for a single read, so it is gone (project.md 10.289). 0 is a
  * machine with no nftables, which is a note rather than a
  * failure and is said there -- the socket is left closed and the caller asks
  * nothing.

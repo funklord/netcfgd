@@ -190,7 +190,7 @@ void ncfg_log_emitf(const char *subsystem, ncfg_severity_t severity, const char 
  * **Why it is worth having at all.** An afternoon's troubleshooting needed a
  * link's supplicant, its DHCP client and the daemon's own passes laid on one
  * timeline, and the events that anchored it came from the backends rather than
- * from netcfgd (project.md 10.307). A flat subsystem makes
+ * from netcfgd (project.md 10.338). A flat subsystem makes
  * `journalctl | grep '\[dhcp\]'` possible and `... one link` impossible;
  * a path makes both, with no index and no second copy of anything.
  */

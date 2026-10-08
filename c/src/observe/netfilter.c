@@ -99,7 +99,7 @@ static int dump(const ncfg_observe_kernel_t *kernel,
 		 * claiming both outcomes. Two failures are two facts; a line
 		 * that cannot be told from the one above it reads as a log
 		 * repeating itself rather than as a second request refused.
-		 * project.md 10.355, and the same shape as the resolv.conf
+		 * project.md 10.386, and the same shape as the resolv.conf
 		 * episode count in 10.348.
 		 */
 		ncfg_log_emitf("observe", NCFG_LOG_NOTE,

@@ -7,7 +7,7 @@
  *   needed one -- to check that a supplicant event reaches the log -- there
  *   was nowhere to take it from. The answer for a whole wave was a `grep` of
  *   the watcher's source asserting the call was still written, which is a
- *   check of the text rather than of the behaviour (project.md 10.238).
+ *   check of the text rather than of the behaviour (project.md 10.269).
  *
  *   Two stand-ins for one daemon is two beliefs about its protocol -- the
  *   reply shape, what `ATTACH` answers, how an event is framed -- and what

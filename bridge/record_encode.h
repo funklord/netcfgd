@@ -23,7 +23,7 @@
  *   source file out of `c/` for the registry.
  *
  * THE BODY IS THE VALUE AS THE LANGUAGE SPELLS IT
- *   Not a second encoding. project.md 10.324 settles the mirror: netcfgd's
+ *   Not a second encoding. project.md 10.355 settles the mirror: netcfgd's
  *   format is what records are rendered into and read back from, so a record
  *   whose body is the language's own text round-trips through `render.c` and
  *   `parse.c`, which are already disciplined against each other. A second
@@ -45,7 +45,7 @@
  *   scope rather than passed in, so a caller cannot put an estate-wide value
  *   in the host stream even deliberately.
  *
- * WHAT IT CANNOT REFUSE, WHICH CORRECTS 10.325
+ * WHAT IT CANNOT REFUSE, WHICH CORRECTS 10.356
  *   That entry said a record encoder refusing `NCFG_CERT_SOURCE_PATH` is what
  *   would let `dot1x.ca_cert` and its two siblings be numbered. The refusal
  *   cannot live here: a cert source is a document type, this takes bytes, and
@@ -99,7 +99,7 @@
  * A SUBJECT IS A CONFIGURED OBJECT, NOT A MACHINE
  *
  * **Settled by the copyright holder 2026-09-29: fold the instance into the
- * subject.** project.md 10.328 measured what the first version cost -- fuzznet
+ * subject.** project.md 10.359 measured what the first version cost -- fuzznet
  * addresses a cell by `(issuer, subject, kind)`, a kind names the KEY, and
  * with a host for a subject `wlan0`'s MTU and `eth0`'s MTU were one cell. The
  * second write won and every host in the estate agreed about the wrong answer.
@@ -215,7 +215,7 @@ typedef struct {
  * measured by sabotage, a trailing-NUL scheme passes every test in this
  * module, because only the label is length-taken and it is last. The prefix
  * stays correct if a root ever becomes length-taken or a component is added
- * after the label -- project.md 10.329 records that the tests cannot tell the
+ * after the label -- project.md 10.360 records that the tests cannot tell the
  * two schemes apart, so the claim is not stronger than that.
  *
  * `hash` is the caller's binding, as every other fuzznet seam takes it.

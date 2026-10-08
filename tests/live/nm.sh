@@ -565,7 +565,7 @@ else
 	wifi() { nmcli --terse --fields "$1" device wifi list --rescan no 2>/dev/null; }
 
 	# Four since `fake_supplicant.py` learned an enterprise network (project.md
-	# 10.335). The count is the assertion and the names are what make a wrong
+	# 10.366). The count is the assertion and the names are what make a wrong
 	# count readable, so both move together.
 	check "every access point the scan found is listed" \
 		"$(wifi SSID | grep -c .)" "4"

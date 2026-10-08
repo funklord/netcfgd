@@ -12,7 +12,7 @@
  * THE PROPERTY BOTH PASSES HAVE TO KEEP
  *   **Applying a plan twice produces an empty second plan.** For the token
  *   that means comparing `::5` against the `0:0:0:0:0:0:0:5` the kernel may
- *   report as the same token rather than as two, which is 10.169's shape
+ *   report as the same token rather than as two, which is 10.200's shape
  *   applied to something that is not an address the document installs. For NAT
  *   it means comparing two lists in one order, which is why the wanted list is
  *   sorted before it is compared and before it is sent.
@@ -298,7 +298,7 @@ static void a_token_is_set_where_the_document_names_one(void)
 }
 
 /*
- * 10.169's shape, applied to a value that is not an address the document
+ * 10.200's shape, applied to a value that is not an address the document
  * installs.
  *
  * `::5` and `0:0:0:0:0:0:0:5` are one token, and the kernel reports its own

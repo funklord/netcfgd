@@ -38,7 +38,7 @@
  *   * **The round trip compares every field the block can carry**, where the
  *     Rust compares the enterprise five and nothing else -- although its own
  *     comment says the check covers "an SSID whose hex form did not round-trip",
- *     which nothing in it looks at. section 10.160 is the same shape one layer up.
+ *     which nothing in it looks at. section 10.191 is the same shape one layer up.
  *   * **A credential carrying a NUL is refused**, because nothing downstream
  *     can carry one: the supplicant's control socket is lines, and anything
  *     treating the value as a C string silently stores the part before it.

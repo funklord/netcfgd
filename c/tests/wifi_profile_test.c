@@ -8,7 +8,7 @@
  *   catches a field which did not survive, a credential that must not be
  *   clobbered. Three groups beyond those:
  *
- *   * **Every field the block can carry is written and read back.** section 10.160
+ *   * **Every field the block can carry is written and read back.** section 10.191
  *     records five fields `ncfg profile save` drops with nothing comparing
  *     what went in against what came out; the answer here is that the install
  *     *is* that comparison, so a renderer that stops writing a key makes the
@@ -464,7 +464,7 @@ static void an_id_that_escapes_the_directory(void)
 /*
  * Every field the block can carry, written and read back.
  *
- * **This is the answer to section 10.160 for this writer.** There, five fields are
+ * **This is the answer to section 10.191 for this writer.** There, five fields are
  * dropped by a renderer with nothing comparing what went in against what came
  * out. Here the install *is* that comparison: the round trip inside it
  * compares the ssid, the hidden flag, the metric, the security kind, the

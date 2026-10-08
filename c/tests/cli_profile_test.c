@@ -985,7 +985,7 @@ static void json_list_is_the_socket_payload_with_the_tag_off(void)
  * `config put` and `config rm`, and the member the daemon route must not have.
  *
  * A `removed` of `false` on a route that cannot tell would be project.md
- * section 10.175's shape in a document: an absent file is success over the
+ * section 10.206's shape in a document: an absent file is success over the
  * socket, and the text says so plainly for that reason.
  */
 static void json_says_what_a_drop_in_write_did(void)

@@ -268,7 +268,7 @@ nmc_connection_slot_t *nmc_connections_by_uuid(nmc_connections_t *store, const c
  * order networks were first seen and the device store by the order devices
  * were, so `/Devices/3` and `/Settings/3` are unrelated. Computing one path
  * from the other's number would hand a client the settings of whatever
- * connection happened to share a number -- which is what 10.362 refused to do
+ * connection happened to share a number -- which is what 10.393 refused to do
  * and left as `/`.
  */
 const char *nmc_connections_path_of(nmc_connections_t *store, nmc_profile_kind_t kind,

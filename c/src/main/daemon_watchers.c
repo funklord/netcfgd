@@ -296,7 +296,7 @@ static int drain_radio(void *context, ncfg_main_harvest_t *harvest, char *err, s
 		 * all: a station refused, a network given up on, a scan the radio
 		 * could not run, and the association itself. The first tryout of this
 		 * daemon on a live machine produced a log of three startup lines while
-		 * the Rust beside it narrated every one of these (project.md 10.237).
+		 * the Rust beside it narrated every one of these (project.md 10.268).
 		 *
 		 * The decision is `ncfg_main_supplicant_event_line`'s, which is where
 		 * it can be tested; this is the part that writes and cannot be.
@@ -638,7 +638,7 @@ int ncfg_main_watchers_open(ncfg_main_watchers_t *watchers, const ncfg_main_watc
 		 * **Here rather than where the directory is resolved.** It was in
 		 * `daemon_main.c`, one call in the one function a test may not run,
 		 * so the only thing holding it was a `grep` of the source
-		 * (project.md 10.239). The sweep belongs with the code that lists the
+		 * (project.md 10.270). The sweep belongs with the code that lists the
 		 * directory in any case: this is the first thing in this program that
 		 * reads it, and the reason the sweep is once rather than per connect
 		 * is that the set can only grow when a process dies.

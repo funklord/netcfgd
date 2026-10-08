@@ -286,7 +286,7 @@ int ncfg_dhcp_report_path(const char *run, const char *iface, char *out, size_t 
  * **The reader end of this file already existed and the writer did not.**
  * `ncfg_state_read_reports` walks `<run>/prefixes/` and has since the host
  * module landed; nothing wrote into it, because the C refused to start a
- * DHCPv6 client at all (project.md 10.259).
+ * DHCPv6 client at all (project.md 10.290).
  *
  * Allocated; free it. NULL with a sentence.
  */
@@ -624,7 +624,7 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
  *     to odhcp6c with `-s`, rather than the shipped dhcpcd hook. It is the
  *     writer of `<run>/prefixes/<iface>`, whose reader
  *     (`ncfg_state_read_reports`) existed for several waves with nothing
- *     writing into it because this function did not exist (project.md 10.259).
+ *     writing into it because this function did not exist (project.md 10.290).
  *
  * `request` is the `-P` argument `ncfg_dhcp_prefix_request` built, or NULL
  * where the document asked for no prefix -- and an absent one means no `-P` at

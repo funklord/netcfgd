@@ -781,7 +781,7 @@ static void fake_daemon_stop(void)
  *
  * netcfgd says nothing about which credentials it removed, so an empty
  * `removed` here would be this command reporting that none went when it has no
- * idea -- project.md section 10.175's shape in a document rather than in a
+ * idea -- project.md section 10.206's shape in a document rather than in a
  * sentence.
  */
 static void json_over_the_socket_omits_what_ok_does_not_say(void)

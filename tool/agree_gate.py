@@ -401,7 +401,7 @@ def daemon_without_exceptions(verb, rust_text, c_text):
 		if line not in said.splitlines():
 			return (None, None,
 				f"`netcfgd {verb}`: the {which} program no longer has the line "
-				f"{line!r}. project.md 10.232 records that divergence; if it has "
+				f"{line!r}. project.md 10.263 records that divergence; if it has "
 				"been closed, the exception in this gate can go")
 	# Each recorded line is dropped once, from the side that owns it, so a
 	# second copy of one -- or any line nobody recorded -- still has to match.
@@ -511,7 +511,7 @@ WRITE_CASES += [
 # temporary-and-rename every other file in that module gets. The C writes 0644
 # atomically like everything else. Recorded rather than fixed: the Rust is what
 # this port is being compared against, and a defect in it is a finding rather
-# than an edit (project.md 10.221).
+# than an edit (project.md 10.252).
 #
 # Written as an exact pair so that it stops being an exception the moment
 # either side changes: a Rust that starts writing 0644 makes the two equal and

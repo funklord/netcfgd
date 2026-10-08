@@ -1251,7 +1251,7 @@ static void saving(const char *root)
  * `ncfg_config_compile` and handed `ncfg_explain` nothing. Every line of its
  * output then declined to name a file, and the notice at the top said the
  * compiler recorded no positions -- which had stopped being true several waves
- * earlier (project.md 10.208).
+ * earlier (project.md 10.239).
  *
  * Two files, because the name in an entry is the thing a single-file fixture
  * cannot get wrong: a table that recorded the position but lost which file it

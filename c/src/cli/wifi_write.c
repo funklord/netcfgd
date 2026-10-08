@@ -1050,7 +1050,7 @@ done:
  * **Both are absent on the daemon route, never empty.** The daemon answers
  * `ok` and says nothing about credentials, so an empty list there would be
  * this command reporting that none went when it has no idea -- which is
- * project.md section 10.175's shape in a document rather than in a sentence. An
+ * project.md section 10.206's shape in a document rather than in a sentence. An
  * empty list on the local route means the loop ran and found none.
  */
 static int say_forgotten(const char *id, const ncfg_wifi_forgotten_t *forgotten, char *err,

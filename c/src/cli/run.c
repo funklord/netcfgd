@@ -991,7 +991,7 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
  *
  * SILENT WHERE IT CANNOT ASK, WHICH IS THE ORDINARY CASE FOR A PERSON
  *   The control socket is root-owned and 0770, so an unprivileged `ncfg
- *   status` cannot open it -- and 10.333 is what happens when that is reported
+ *   status` cannot open it -- and 10.364 is what happens when that is reported
  *   as a fact about the machine instead of about the caller. No connection is
  *   no sentence.
  */
@@ -1716,7 +1716,7 @@ static void release_serialisation(void)
  * instruction in it that outlived it -- **do not write a count of what this
  * build cannot do into a comment**, because a number has to be swept whenever
  * a pass lands and the ones written here went stale inside a wave
- * (project.md 10.260).
+ * (project.md 10.291).
  */
 static int command_apply(const ncfg_cli_options_t *options)
 {

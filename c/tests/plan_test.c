@@ -1958,7 +1958,7 @@ static void a_link_that_is_already_down_is_not_cycled(void)
  * before anything has read the machine. Every daemon-driven live script that
  * did not pass `--no-apply-on-start` died on its first converge, which is what
  * `tests/live/roam.sh` was really reporting when it said netcfgd never
- * attached to the supplicant (project.md 10.265).
+ * attached to the supplicant (project.md 10.296).
  *
  * Refused rather than treated as an empty observation: an empty observation
  * and a machine nobody has read are different facts, and planning against the

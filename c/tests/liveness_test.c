@@ -351,7 +351,7 @@ static void a_client_netcfgd_gave_no_pid_file_is_left_alone(void)
  * was *told* -- which is there before the first exchange has installed
  * anything. The second had no producer at all until this pass read it, so a
  * client started with the wrong metric was left alone until it managed to
- * install a route with the wrong metric (project.md 10.206).
+ * install a route with the wrong metric (project.md 10.237).
  *
  * The client here is a dhcpcd one, which is deliberate twice over: it is the
  * only client netcfgd gives a metric to, and it is the one this pass cannot
@@ -520,7 +520,7 @@ static void an_access_point_can_be_asked_at_last(void)
  * A daemon with no pid file of netcfgd's is unanswerable, for all five kinds.
  *
  * **The rule was applied to one of them.** `a_client_netcfgd_gave_no_pid_file_
- * is_left_alone` covers the DHCP arm, which got it in 10.206 because a udhcpc
+ * is_left_alone` covers the DHCP arm, which got it in 10.237 because a udhcpc
  * client that died stayed `running` for ever. The other four asked
  * `*_running_pid` directly, and that answers 0 for a missing file exactly as
  * it does for a dead process -- so a record naming a running supplicant with

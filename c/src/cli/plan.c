@@ -215,7 +215,7 @@ int ncfg_cli_print_document(ncfg_document_t *document, char *err, size_t err_siz
 		 *
 		 * Laying it out would make five documents disagree and is not a
 		 * decision to take while fixing a live script that does not read this
-		 * verb. It is in `project.md` 10.275 for the copyright holder. */
+		 * verb. It is in `project.md` 10.306 for the copyright holder. */
 		ncfg_out_line(ncfg_buf_text(&buf));
 	}
 	ncfg_buf_free(&buf);

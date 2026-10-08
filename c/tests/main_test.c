@@ -1024,7 +1024,7 @@ static void this_build_does_not_reconcile(void)
 		char *record = read_source("src/daemon/record.c");
 
 		/*
-		 * The two files that would have to change, which is 10.177's rule
+		 * The two files that would have to change, which is 10.208's rule
 		 * about asserting a negative over a location. Both halves, because
 		 * either alone is a machine that records nothing: the pass has to
 		 * reach the fold, and the fold is what writes the journal. They were
@@ -1094,7 +1094,7 @@ static void this_build_does_not_reconcile(void)
 		 * body** rather than anywhere in the file -- `mark_as_ours` is called
 		 * by the netlink path too, so a search of the whole file finds it
 		 * whether or not the tun arm reaches it. That is the Rust's defect
-		 * exactly (project.md 10.173): its tun arm returns twenty lines above
+		 * exactly (project.md 10.204): its tun arm returns twenty lines above
 		 * the block that marks a created link, so the one kind whose
 		 * ownership has nowhere else to live is the one kind without a mark.
 		 * A sabotage that deleted the call from `create_tun` alone went
@@ -1116,7 +1116,7 @@ static void this_build_does_not_reconcile(void)
 		 * called from the netlink path too -- and then nobody asserted the
 		 * netlink path. A sabotage that deleted the call from `create_link`
 		 * and left `create_tun` alone went green across the whole suite,
-		 * which is the same gap 10.177 records one arm to the left: a check
+		 * which is the same gap 10.208 records one arm to the left: a check
 		 * that narrows to avoid a false pass has to leave something covering
 		 * what it narrowed away from.
 		 *

@@ -148,7 +148,7 @@ static int read_record(const char *run_dir, record_t *record, ncfg_observe_prior
 	 * not carry, so this hand-over was two lists short and `observed.backends`
 	 * and `observed.dns` were empty on every machine -- which is what left six
 	 * observation passes with nothing to walk and made the planner ask for a
-	 * DNS delivery it had already made, for ever (project.md 10.183).
+	 * DNS delivery it had already made, for ever (project.md 10.214).
 	 */
 	prior->backends = record->owned.backends;
 	prior->backend_count = record->owned.backend_count;

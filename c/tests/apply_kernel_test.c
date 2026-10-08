@@ -829,7 +829,7 @@ static void check_creations(const fixture_t *fixture)
 /*
  * What this build says it can create, and what it can actually build.
  *
- * **This is 10.177's defect asked of every kind rather than of one.** A `tun`
+ * **This is 10.208's defect asked of every kind rather than of one.** A `tun`
  * was reported creatable by `ncfg_apply_supported` while
  * `ncfg_kernel_newlink_of` refused one, and the cost is specific: that
  * function is *the* list, asked once by `execute` before anything is done, so

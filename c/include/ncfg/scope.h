@@ -94,7 +94,7 @@ const char *ncfg_block_name(ncfg_block_t block);
  * supplicant inside a radio's `wifi`; `dns` is a key, a sub-block, and a key
  * inside that sub-block. A flat name collapses those, which is how the first
  * version of this table came to carry six entries that were not keys at all
- * and to give one number to two meanings (project.md 10.326).
+ * and to give one number to two meanings (project.md 10.357).
  *
  * So `key` is `"mtu"`, `"advertise.prefix"`, `"wifi.roam.signal"`. NULL asks
  * for the block's default.
@@ -171,7 +171,7 @@ ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block);
  * is not among them, which is what would have caught the first version of this
  * table registering `address`, `radvd` and `auto` -- one a key that does not
  * exist and two that are values. What it cannot check is the NESTING: it sees
- * the leaf, not which sub-block the leaf belongs to. project.md 10.325 and
+ * the leaf, not which sub-block the leaf belongs to. project.md 10.356 and
  * 10.326.
  */
 #define NCFG_KIND_NONE 0u

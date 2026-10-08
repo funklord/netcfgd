@@ -49,7 +49,7 @@
  *   where the document states them: a radio at its defaults is not asking for
  *   anything.
  *
- *   **This heading said THREE and named two**, which is 10.182's failure --
+ *   **This heading said THREE and named two**, which is 10.213's failure --
  *   a count that never matched the list beneath it. The third was
  *   `scan_randomization`, and it is the Rust's sentence rather than this
  *   port's: this build writes it as the supplicant's `preassoc_mac_addr`
@@ -91,7 +91,7 @@
  * says it about the settings that were actually written.
  *
  * **What was still wrong is the frame the reasons sit in.** "Not acted on by
- * this build ... when the code arrives" is 10.180's promise, and a radio's
+ * this build ... when the code arrives" is 10.211's promise, and a radio's
  * `regdom` and a `powersave` are the case that helper was published for:
  * neither is read by any pass in either language. Settled against `crates/`
  * field by field rather than assumed --
@@ -385,7 +385,7 @@ static void warn_regdom(ncfg_builder_t *builder)
  *     `build.c`'s rule rather than an omission.
  *
  * So the first four get `ncfg_plan_warn_unbuilt`'s sentence and the fifth does
- * not, which is what 10.180 published that helper for: "this port has not got
+ * not, which is what 10.211 published that helper for: "this port has not got
  * there yet" and "there is nothing to wait for" are the same sentence to a
  * reader and different facts, and only one of them is worth waiting on.
  *

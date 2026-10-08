@@ -197,7 +197,7 @@ static void walk_assignment(walk_t *walk, const ncfg_ast_assignment_t *assignmen
 		 * **The refusal `bridge/record_encode.c` could not own.** It
 		 * takes bytes and has no document model, so it cannot tell a
 		 * stored reference from a path; here the written value is in
-		 * hand. project.md 10.327 named this as the layer it belongs
+		 * hand. project.md 10.358 named this as the layer it belongs
 		 * in, and this is that layer.
 		 */
 		item.what = NCFG_WALK_WITHHELD;

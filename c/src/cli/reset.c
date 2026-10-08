@@ -44,7 +44,7 @@
  *   for**, and `would_remove` -- the prediction -- is written only on a run
  *   that attempted nothing. The two never appear together, because one is a
  *   record and the other is a guess, and a document that carried both would be
- *   asking a reader to tell them apart by name. project.md section 10.175 is the
+ *   asking a reader to tell them apart by name. project.md section 10.206 is the
  *   whole reason: the Rust prints the word `removed` over the list before the
  *   loop, and a script believes a document in a way nobody believes a sentence.
  *
@@ -169,7 +169,7 @@ static void say_what_is_left(const char *config_dir, const char *factory_dir, si
  * ran and `done` of them came back from `unlink` successfully, so exactly those
  * go under `removed`. **There is no call shape that writes a path under
  * `removed` without a successful `unlink` behind it**, which is the property
- * project.md section 10.175 costs a machine's configuration when it is missing.
+ * project.md section 10.206 costs a machine's configuration when it is missing.
  *
  * `credentials_remaining` is absent where the store could not be listed, not
  * zero: the text prints nothing in that case for the same reason, and a `0`

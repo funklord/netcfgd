@@ -132,7 +132,7 @@
  * hold smaller than the drain overflows on every burst the drain exists to
  * handle. It was 16 against a drain of 64, so a supplicant losing an access
  * point (0240, which is why the drain is a drain) reliably lost the tail:
- * `tests/live/roam.sh` asks for thirty and counted twenty (project.md 10.265).
+ * `tests/live/roam.sh` asks for thirty and counted twenty (project.md 10.296).
  * Naming the relationship is what stops the two drifting apart again.
  */
 #define NCFG_MAIN_ROAMS_MAX NCFG_MAIN_EVENT_BURST
@@ -1385,7 +1385,7 @@ void ncfg_main_world_expiry(void *context, uint32_t seconds);
  * `ncfg_reconcile_world_t::release_contended`.
  *
  * **It asks who is contending before it opens an executor**, which is 0263's
- * divergence and 10.169's defect: the Rust opens one as soon as netcfgd runs
+ * divergence and 10.200's defect: the Rust opens one as soon as netcfgd runs
  * any backend at all, so every laptop with wifi takes the global apply lock
  * and a netlink socket every five seconds to find out there is nothing to give
  * back. It also asks whether this build's executor can carry out the stop

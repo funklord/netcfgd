@@ -19,7 +19,7 @@ would want in their own config file.
 ## Why it needed deciding at all
 
 The holder has set local and network-wide configuration as two first-class use
-cases, both to be met in full (project.md 10.315). A site-scoped concept fails
+cases, both to be met in full (project.md 10.346). A site-scoped concept fails
 constraint 6's test by construction: *"this WLAN spans forty access points"* is
 not something a single-machine operator wants in their file, and no amount of
 design will make it so.
@@ -56,7 +56,7 @@ job and the reason the wording above is narrow.
 
 **It does not settle where the local/network boundary runs.** Which options are
 local-only, which network-wide and which meaningful in both is a per-key
-judgement across the language, and 10.315 names it as the bulk of the design.
+judgement across the language, and 10.346 names it as the bulk of the design.
 This decision makes that work permissible; it does not do any of it.
 
 **It does not touch constraint 2.** A machine that never joins a network-wide
@@ -67,6 +67,6 @@ use, not capability, and that is what keeps the single-machine case whole.
 
 Constraint 6 in `project.md` section 1 carries the ruling inline, because that
 is where a reader meets the rule and forms the wrong reading. This record
-carries the reasoning. 10.315 previously said the question was the holder's to
+carries the reasoning. 10.346 previously said the question was the holder's to
 answer and now says it was answered, rather than leaving a reader to find the
 open version and believe it.

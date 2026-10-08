@@ -49,7 +49,7 @@
  *   `ncfg_dhcp_pd_script` -- and the refusal stands until there is a start to
  *   replace it with, because a `supported` that said yes to a start that
  *   cannot happen is worse than one that says no with a reason (project.md
- *   10.259). Stopping is a
+ *   10.290). Stopping is a
  *   different question and is answerable: `dhcpcd -6 -k` and an odhcp6c's
  *   recorded pid are both this module's, so a v6 client that is running can be
  *   stopped whoever started it.
@@ -136,7 +136,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	 * the sentence for all three verbs. The refusal an operator reads has to
 	 * name the thing that is actually wrong (0010), and until this the two
 	 * kinds got the sharper sentence for `start` and `stop` and the generic
-	 * one for `reload` (project.md 10.261).
+	 * one for `reload` (project.md 10.292).
 	 */
 	if (kind == NCFG_BACKEND_WIREGUARD) {
 		ncfg_error_set(err, err_size,
@@ -187,7 +187,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	 * machine rather than about this build -- a document asking for a prefix
 	 * where only dhcpcd is installed -- and that belongs to the start, which
 	 * can see what is installed, rather than to this predicate, which is pure
-	 * (project.md 10.259, 0050).
+	 * (project.md 10.290, 0050).
 	 */
 	case NCFG_BACKEND_DHCP6:
 		return 1;
@@ -427,7 +427,7 @@ static void prefix_request_on(const ncfg_service_t *service, const char *iface, 
  *
  * `start_dhcp`'s arrangement -- the running question is `ncfg_dhcp6_start`'s
  * first two steps -- with the document's prefix request carried in, which is
- * the whole of what this build could not do until now (project.md 10.259).
+ * the whole of what this build could not do until now (project.md 10.290).
  */
 static int start_dhcp6(const ncfg_service_t *service, const char *run_dir, const char *iface,
     char *err, size_t err_size)

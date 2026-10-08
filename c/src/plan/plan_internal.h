@@ -603,7 +603,7 @@ void ncfg_plan_reported(ncfg_builder_t *builder, const ncfg_interface_t *interfa
  *
  * The teardown's half of the pass above, and **compared canonically**: a
  * report's text is whatever its writer printed and never went through the
- * compiler, while the kernel reports its own spelling. project.md 10.169 is
+ * compiler, while the kernel reports its own spelling. project.md 10.200 is
  * what comparing the two as text costs.
  */
 int ncfg_plan_reported_holds(const ncfg_observed_t *observed, const char *interface,
@@ -657,7 +657,7 @@ int ncfg_plan_subnet_contains(const char *network_cidr, const char *candidate);
  * The document's addresses come through the compiler's `canonical_address`
  * already; an address this planner *derives* is rendered by `value.h` and so
  * does too -- but the question is asked against the kernel's own spelling, and
- * a comparison that happened to work for one pair is the defect 10.169
+ * a comparison that happened to work for one pair is the defect 10.200
  * records: one address written twice reads as two, and the plan installs it
  * again for ever. Text equality is the answer only where neither side parses,
  * which is where there is nothing better to say.

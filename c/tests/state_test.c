@@ -271,7 +271,7 @@ static void a_record_that_will_not_parse_is_discarded_rather_than_fatal(const ch
  * wrote the record back without them -- so a C netcfgd taking over from a Rust
  * one forgot which daemons were up and which resolver policy had been
  * delivered, and the planner re-delivered every scope on every pass for ever
- * (project.md 10.183).
+ * (project.md 10.214).
  */
 static const char THE_RECORD_A_RUST_NETCFGD_WROTE[] =
     "{\n"

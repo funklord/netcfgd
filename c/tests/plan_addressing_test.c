@@ -17,7 +17,7 @@
  *   action, and a case that plans *nothing* against an observation carrying
  *   the result -- and for the delegated address there is a third, where the
  *   observation carries the same address in a spelling nobody would have
- *   typed. 10.169 is what that third one is for: an address compared as text
+ *   typed. 10.200 is what that third one is for: an address compared as text
  *   rather than as an address is how `ncfg explain` came to say netcfgd did
  *   not ask for an address netcfgd had installed itself.
  *
@@ -685,7 +685,7 @@ static void a_delegated_address_already_installed_plans_nothing(void)
 	planfix_release(plan, document, observed);
 
 	/*
-	 * **And the same address in a spelling nobody would have typed.** 10.169:
+	 * **And the same address in a spelling nobody would have typed.** 10.200:
 	 * a report's address compared as text broke exactly this -- one address
 	 * written twice reads as two, and netcfgd plans it again on every run.
 	 * The kernel's own rendering is what the observation carries, so this is
@@ -1018,7 +1018,7 @@ static void a_leases_nameservers_are_taken_only_where_the_interface_asked(void)
 	 * delivery records what it wrote and the observer reads that record back,
 	 * so a server carried through in the author's spelling compares unequal
 	 * against netcfgd's own record of having delivered it -- and `dns.apply`
-	 * is planned on every single run. Same defect as 10.169, one field over.
+	 * is planned on every single run. Same defect as 10.200, one field over.
 	 */
 	plan = plan_of(RESOLV_GLOBALS, asked,
 	    "\"links\":[" LINK_UP("eth0") "],"

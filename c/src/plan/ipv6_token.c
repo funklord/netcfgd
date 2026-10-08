@@ -17,7 +17,7 @@
  *   `::5` and `0:0:0:0:0:0:0:5` are the same token and the kernel reports its
  *   own spelling. A text comparison would write the token on every reconcile
  *   for ever against a kernel that already holds it, which is the shape
- *   project.md 10.169 measured elsewhere in this planner.
+ *   project.md 10.200 measured elsewhere in this planner.
  */
 #include "plan_internal.h"
 

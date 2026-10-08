@@ -5,9 +5,9 @@
 #
 # ## Why this exists
 #
-# This is project.md 10.307's own shape, which `config_arrives.sh` deliberately
+# This is project.md 10.338's own shape, which `config_arrives.sh` deliberately
 # does not have. That script proves a written file reaches the machine, on
-# dummy links and ordinary keys. What 10.307 actually held was a `network`
+# dummy links and ordinary keys. What 10.338 actually held was a `network`
 # block written into `conf.d/` while the daemon ran, where the work lands on a
 # radio and on a supplicant netcfgd started -- two more layers, either of which
 # could swallow it, and neither of which any test drove.
@@ -35,7 +35,7 @@
 # A daemon that reloads the document, plans correctly, and never reaches the
 # supplicant would pass every check in `config_arrives.sh` and leave a machine
 # that does not join the network somebody just added. That is the failure
-# 10.307 looked like from the operator's chair, and **one check here sees it**
+# 10.338 looked like from the operator's chair, and **one check here sees it**
 # -- which one is measured below rather than claimed, because the obvious
 # candidate turned out not to.
 set -eu
@@ -258,7 +258,7 @@ check "and knows nothing of a network nobody has configured" \
 
 # ------------------------------------- a network arrives while it is running
 #
-# **The write 10.307 made.** A drop-in under `conf.d/`, which is what
+# **The write 10.338 made.** A drop-in under `conf.d/`, which is what
 # `ncfg wifi add` and every GUI dialog produce, naming a network the radio has
 # never been given.
 
@@ -307,7 +307,7 @@ check "and netcfgd sees the station on the network it moved to" \
 # network carries `EAP` flags -- STARTED, a proposed method refused, the one
 # selected, three certificates, the subject-alt names, SUCCESS -- and netcfgd
 # reads none of them: its reader knows six event kinds and no EAP one
-# (project.md 10.335). So what this asserts is that it survives them, which is
+# (project.md 10.366). So what this asserts is that it survives them, which is
 # the risk a reader of unknown lines carries and which no test drove before the
 # fake could produce any.
 

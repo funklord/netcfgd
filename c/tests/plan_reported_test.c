@@ -18,7 +18,7 @@
  *   the kernel prints it. A report went through nothing: it is the text
  *   somebody's shell script produced.
  *
- *   project.md 10.169 is what that costs when the comparison is `strcmp`,
+ *   project.md 10.200 is what that costs when the comparison is `strcmp`,
  *   measured against the shipped Rust -- `0000:0000:...:0001/128` and
  *   `::1/128` read as two addresses, so an `addr.add` is planned for one the
  *   kernel is already holding, and where netcfgd owns it the teardown plans an
@@ -211,7 +211,7 @@ static void a_report_is_where_the_addresses_come_from(void)
 }
 
 /*
- * 10.169, in both directions, and the whole reason this file exists.
+ * 10.200, in both directions, and the whole reason this file exists.
  *
  * The report's spelling is whoever wrote it and the kernel's is its own, so
  * either side may be the long one. A `strcmp` gets both of these wrong the
@@ -282,7 +282,7 @@ static void nothing_reported_is_a_sentence_rather_than_a_silence(void)
 }
 
 /*
- * The teardown's half, which is the half 10.169 says fires only where netcfgd
+ * The teardown's half, which is the half 10.200 says fires only where netcfgd
  * owns the address -- and which is rule 7 pointed the other way.
  *
  * A bearer that goes down empties the report, the address stops being wanted,

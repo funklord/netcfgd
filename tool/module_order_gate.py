@@ -16,7 +16,7 @@ WHAT THIS ENFORCES
 WHY THE SIXTH GROUP IS NOT ORDERED HERE
   Because 0263 does not order it. Writing an order for those six would be
   inventing a decision inside a gate, which is the worst place to keep one --
-  quiet, and enforced. project.md 10.256 has the case for deciding one and
+  quiet, and enforced. project.md 10.287 has the case for deciding one and
   says whose decision it is.
 
 WHAT THIS CATCHES AND WHAT IT DOES NOT

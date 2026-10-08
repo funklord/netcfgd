@@ -39,7 +39,7 @@
  *
  *   **And an endpoint is compared the way the model compares**, never as text.
  *   `plan.h`'s second load-bearing property is that applying a plan twice
- *   produces an empty second plan, and 10.169 is what a text comparison costs:
+ *   produces an empty second plan, and 10.200 is what a text comparison costs:
  *   one address written twice reads as two, and the same action is planned for
  *   ever. `ncfg_plan_address_equal` is the one place that is decided.
  */

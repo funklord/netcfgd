@@ -385,7 +385,7 @@ static void a_rule_that_agrees_is_left_alone_and_a_changed_selector_is_not(void)
  * A selector written in another spelling of the same prefix.
  *
  * The compiler canonicalises what a document says, so this is the case of a
- * rule reaching the planner some other way -- and 10.169 is what comparing the
+ * rule reaching the planner some other way -- and 10.200 is what comparing the
  * two as text costs: the rule is torn down and reinstalled on every apply.
  */
 static void a_selector_is_compared_as_an_address_and_not_as_text(void)

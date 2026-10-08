@@ -715,7 +715,7 @@ static void an_access_point_round_trips(void)
 
 	/* No `device wlan0 { }` beside it, and deliberately so: an access point
 	 * needs none, and an empty device block is currently dropped by
-	 * `render_device` -- a separate open question (10.377) that would make this
+	 * `render_device` -- a separate open question (10.408) that would make this
 	 * case fail for a reason that has nothing to do with access points. */
 	round_trips("access_point \"guests\" {\n"
 	    "\tdevice = \"wlan0\"\n"

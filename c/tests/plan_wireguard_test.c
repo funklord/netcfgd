@@ -213,7 +213,7 @@ static void a_peer_that_has_roamed_is_still_the_same_peer(void)
  * The prefixes are canonicalised and sorted on both sides.
  *
  * The kernel prints its own spelling and in its own order; the operator writes
- * theirs. Comparing the two as written is 10.169's defect in a second place,
+ * theirs. Comparing the two as written is 10.200's defect in a second place,
  * and it would replace the peer list of a working tunnel for ever.
  */
 static void allowed_prefixes_are_compared_as_addresses_and_in_one_order(void)

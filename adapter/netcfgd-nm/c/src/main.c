@@ -63,7 +63,7 @@ typedef struct {
  *
  * It was latent from the day the poll was added and became visible only when
  * enough interfaces existed to cross one second. It also means the measurement
- * that said "no signals in eight seconds on a converged machine" (10.359) was
+ * that said "no signals in eight seconds on a converged machine" (10.390) was
  * taken on a loop that may already have been starving, which is why the
  * detector has a direct test and not only that observation.
  *
@@ -80,7 +80,7 @@ typedef struct {
  *
  * `nmc_bus_announce` is what libnm reads to learn the object exists at all;
  * `nmc_emit_path` is NM's own signal on the owning object, which a client that
- * already has a cache watches. **Every membership change needs both** -- 10.367
+ * already has a cache watches. **Every membership change needs both** -- 10.398
  * emitted only the second, and a device that went stayed in `nmcli device` for
  * ever.
  *

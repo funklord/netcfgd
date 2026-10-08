@@ -693,7 +693,7 @@ static int run_client(const char *program, const ncfg_dhcp_args_t *args, const c
 		 * ran and failed was reported without the one fact a script can
 		 * branch on, which is what `tests/live/exec_refused.sh` asks for. The
 		 * Rust carries the status and not the words; carrying both loses
-		 * nothing (project.md 10.267).
+		 * nothing (project.md 10.298).
 		 */
 		ncfg_error_set(err, err_size,
 		    "%s on %s exited with status %d: %s. Its output is in %s", program, iface,

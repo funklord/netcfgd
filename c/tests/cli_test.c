@@ -1748,7 +1748,7 @@ static void the_sentence_that_stopped_being_true_is_gone(void)
 	 * the compiler had been recording positions for waves. The sentence and
 	 * the argument are asserted together on purpose: deleting the comment
 	 * without passing the table would leave the command exactly as wrong and
-	 * this check green (project.md 10.208).
+	 * this check green (project.md 10.239).
 	 */
 	check(strstr(source, "does not port `compile_with_provenance`") == NULL,
 	    "no arm still says the compiler records no positions, which it does");

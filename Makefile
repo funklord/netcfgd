@@ -2018,7 +2018,7 @@ vm-image:
 #   them across 24 files, and only 2 of those files drive a binary at all; the
 #   rest call Rust functions directly. These 79 scripts drive a binary, and
 #   they are therefore the whole of the Rust's suite that the C can be put
-#   under (project.md 10.262).
+#   under (project.md 10.293).
 #
 #       make live                                    the Rust, as before
 #       NCFG_LIVE_BUILD=$$PWD/c make live            the C
@@ -2071,7 +2071,7 @@ live:
 	@# bind-mounts a sentinel over `/etc/resolv.conf` before it runs anything
 	@# and checks the sentinel afterwards. A test for the defect that sends a
 	@# delivery to the wrong place must not be able to cause it -- which is not
-	@# hypothetical here (project.md 10.246).
+	@# hypothetical here (project.md 10.277).
 	@unshare -rmn sh -c "NCFG_LIVE=1 sh tests/live/c_dns_delivery.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
@@ -2124,11 +2124,11 @@ live:
 	@# Write a file, touch nothing else, does the machine change. Thirty
 	@# scripts here write configuration while a daemon runs and every one of
 	@# them then calls `ncfg apply` or drives the daemon by hand, so the one
-	@# question project.md 10.307 asks had no witness at all. It calls `apply`
+	@# question project.md 10.338 asks had no witness at all. It calls `apply`
 	@# nowhere, which is the point of it.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
 	@# The same question one layer up, on a radio and a supplicant netcfgd
-	@# started, which is the shape 10.307 actually had. `switch_network.sh`
+	@# started, which is the shape 10.338 actually had. `switch_network.sh`
 	@# shares this fixture and drives it with `ncfg apply` at every step; this
 	@# one asks whether the daemon does it unasked.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/network_arrives.sh"

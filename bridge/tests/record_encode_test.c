@@ -95,8 +95,8 @@ static ncfg_record_rootref_t named_root(ncfg_record_root_t kind, const char *nam
 /*
  * **THE CASE THE DECISION WAS TAKEN FOR.** With a host for a subject, these
  * two were one cell: same kind, same subject, second write wins, every host in
- * the estate agreeing about the wrong answer. project.md 10.328 measured it
- * and 10.329 is the fix.
+ * the estate agreeing about the wrong answer. project.md 10.359 measured it
+ * and 10.360 is the fix.
  */
 static void two_interfaces_no_longer_share_a_cell(void)
 {
@@ -261,7 +261,7 @@ static void a_host_private_key_is_refused_as_such(void)
 	    "nor anything in a host-private block");
 	/* The three cert keys, which are estate-wide and unregistered on
 	 * purpose: they must read as unregistered rather than as private, or
-	 * the reason in 10.327 is lost. */
+	 * the reason in 10.358 is lost. */
 	check(ncfg_record_encode(&hash, block_named("interface"), &root, "wlan0", 5u,
 	          "dot1x.ca_cert", "\"@secret:ca\"", 12u, &fields) ==
 	        NCFG_RECORD_ERR_UNREGISTERED,

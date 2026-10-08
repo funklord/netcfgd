@@ -205,7 +205,7 @@ static const struct {
 	/*
 	 * And its network-describing keys go up.
 	 *
-	 * **`advertise.prefix` and `config` are the pair 10.322 turned on**, once
+	 * **`advertise.prefix` and `config` are the pair 10.353 turned on**, once
 	 * the keys were read rather than remembered -- 10.326. A prefix this link
 	 * ANNOUNCES is a fact about the segment that every router on it must
 	 * agree about, while `config` is which address this machine takes within
@@ -438,7 +438,7 @@ static const struct {
  *
  * **The numbering was rewritten once, on 2026-09-29, and nothing is retired
  * from it.** The first table was keyed on a bare name rather than a path and
- * carried six entries that were not keys at all (10.326). Nothing had written
+ * carried six entries that were not keys at all (10.357). Nothing had written
  * a record under any of those numbers, on this machine or anywhere else, so
  * they were corrected rather than retired -- which was the last moment that
  * was free, and is why the rule binds from here.

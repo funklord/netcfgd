@@ -131,7 +131,7 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 	/*
 	 * The kernel's link kind, which is what NM's `DeviceType` is about --
 	 * netcfgd's device kind is `"physical"` for a wifi card and an ethernet
-	 * port alike (project.md 10.357). A failure here leaves the kind empty,
+	 * port alike (project.md 10.388). A failure here leaves the kind empty,
 	 * which reads as a real NIC and is the same answer as before.
 	 */
 	if (links) {

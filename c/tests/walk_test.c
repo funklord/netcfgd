@@ -220,7 +220,7 @@ static void the_label_tells_two_instances_apart(void)
  * and an SSID is 32 arbitrary bytes. `bridge/record_encode.h` hashes it into a
  * subject and takes it the same way; handing over the pointer alone would
  * shorten a network whose name holds a NUL, and two of those would share a
- * cell -- the fault 10.329 exists to close, arriving by a second route.
+ * cell -- the fault 10.360 exists to close, arriving by a second route.
  */
 static void a_label_arrives_with_its_length(void)
 {
@@ -281,7 +281,7 @@ static void a_credential_written_as_a_path_is_withheld(void)
 	check(stored_form && stored_form->withheld != NCFG_WITHHELD_PRIVILEGED,
 	    "while `@secret:` under the same key is not");
 	/* The stored form is still unregistered, and must say so rather than
-	 * inheriting the other's reason -- 10.327 turns on the difference. */
+	 * inheriting the other's reason -- 10.358 turns on the difference. */
 	check(stored_form && stored_form->withheld == NCFG_WITHHELD_UNREGISTERED,
 	    "it is withheld for the other reason, which is the one that will change");
 }

@@ -322,7 +322,7 @@ int nmc_aps_refresh(nmc_aps_t *store)
  *
  * Through the window, which it earns with one caller rather than two: the change
  * detector reads every property twice per tick -- once to compare, once to send
- * -- so an unwindowed call is two requests per tick on a radio, and 10.365 is
+ * -- so an unwindowed call is two requests per tick on a radio, and 10.396 is
  * this adapter's tick taking a second over a wifi fetch and starving the loop.
  */
 const char *nmc_aps_active_path(nmc_aps_t *store, const char *interface)

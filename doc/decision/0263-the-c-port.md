@@ -136,11 +136,11 @@ taken.
   is an `ifinfomsg` with a list after it rather than an attribute list.
 * **Narrowing is checked rather than cast**, everywhere the model's `int64_t`
   meets a kernel field, with the field named in the refusal.
-* **The renderer writes five fields the Rust silently drops** (10.160) and
+* **The renderer writes five fields the Rust silently drops** (10.191) and
   refuses `dhcp`'s modifiers by name, since the language takes none.
 * **A WireGuard peer set too large for one attribute is split**, which is what
   `linux/wireguard.h` says to do and what `wg(8)` does; the Rust truncates the
-  length instead (10.157). One peer too large for one attribute is refused.
+  length instead (10.188). One peer too large for one attribute is refused.
 * **Lowering diagnostics carry the file name.** A span still carries no source
   id, because a parse is one file -- but merge sees several at once, and
   "already defined; first defined at conf.d/10-office.conf:3" is the whole
@@ -1263,7 +1263,7 @@ taken.
   wrote and the observer reads that record back: a server carried through in
   the author's spelling compares unequal against netcfgd's own record of having
   delivered it, and `dns.apply` is then planned on every single run. That is
-  10.169's defect one field over, and it is checked with a report naming
+  10.200's defect one field over, and it is checked with a report naming
   `2001:0DB8:0000::0053`.
 * **A DNS policy is compared by rendering it, not by walking it.** The
   planner's own writer is what a plan and the record under `<run>/dns/` are
@@ -1433,7 +1433,7 @@ taken.
   radio back opens an executor through the very calls the pass uses.
 * **Giving a contended radio back asks two questions before it takes the apply
   lock**, where the Rust asks neither. The first is the Rust's own defect
-  (10.169): it opens an executor as soon as netcfgd runs any backend at all, so
+  (10.200): it opens an executor as soon as netcfgd runs any backend at all, so
   every machine it manages takes the global apply lock and a netlink socket
   every five seconds to discover there is nothing to give back, against the
   lock `ncfg apply` waits on (0184). Here `ncfg_contenders_find` answers first.
@@ -1458,7 +1458,7 @@ taken.
   loud rather than dropped.
 * **The subscriber list is bounded, its descriptors are non-blocking, and a
   short write drops the subscriber.** The Rust's is a `Vec` pruned only inside
-  a broadcast, and a converged machine broadcasts nothing -- which 10.169
+  a broadcast, and a converged machine broadcasts nothing -- which 10.200
   already records. Bounding it matters for the same reason the refusal is an
   answer: `monitor` needs only the `observe` tier, which
   `control { observe = "any" }` opens to every local user. Non-blocking matters
@@ -1488,7 +1488,7 @@ taken.
   so pointing the socket at the document's own block would read freed memory
   the first time somebody wrote in the configuration directory. The Rust clones
   it for the same reason. **What the copy costs is a defect in both** and is
-  written up in project.md 10.171: the socket's mode and group are decided once
+  written up in project.md 10.202: the socket's mode and group are decided once
   and authorization follows the reload, so a widened policy is in force in the
   daemon and unreachable through the file.
 * **A remote socket is bound beside the control socket, not under the run
@@ -1867,7 +1867,7 @@ taken.
   SSID whose hex form did not round-trip", which nothing in it reads. The
   hidden flag, the metric, the WPA generation and which credential the block
   refers to are compared by nothing. Here all of them are, so the install *is*
-  the comparison 10.160 found missing one layer up, and sabotaging any one
+  the comparison 10.191 found missing one layer up, and sabotaging any one
   rendered key turns a success into a refusal naming that field.
 * **The install verifies through the loader that reads the selected profile.**
   `install_drop_in` was fixed to do that and this second writer of the same
@@ -1978,7 +1978,7 @@ taken.
   halves are checked, including that a refused `monitor` leaks no descriptor.
 * **The Rust's monitor thread holds a connection slot until something is
   announced, and this one does not.** The defect is reported in project.md
-  10.176 and the divergence is the shape that avoids it: `handle` blocks in
+  10.207 and the divergence is the shape that avoids it: `handle` blocks in
   `for event in incoming` for the life of the stream, so a client that
   subscribes and hangs up holds one of sixty-four slots until the next
   broadcast -- which on a converged machine never comes. Here the slot goes back
@@ -2032,7 +2032,7 @@ taken.
   place this deliberately does not copy the Rust: its `Op::LinkCreate` returns
   from the tun arm twenty lines above the block that marks a created link, so
   the one kind whose ownership most needs the kernel's mark is the one kind
-  without it (project.md 10.173). `create_tun` calls `mark_as_ours` exactly as
+  without it (project.md 10.204). `create_tun` calls `mark_as_ours` exactly as
   the netlink path does, after the device exists and never before.
 
   **What is not tested, and cannot be here:** that a device actually appears.
@@ -2117,7 +2117,7 @@ taken.
   the next hop.** `reported` is the one addressing source whose value went
   through no compiler: every other address netcfgd installs came through
   `canonical_address` and already reads the way the kernel prints it, while a
-  report is the text somebody's shell script produced. project.md 10.169
+  report is the text somebody's shell script produced. project.md 10.200
   measures what `strcmp` costs there against the shipped Rust -- an `addr.add`
   planned for an address the kernel is already holding, and, because the
   address is netcfgd's, an `addr.del` for it in the same plan, on every
@@ -2224,7 +2224,7 @@ taken.
   refusing**: an empty list written by a command that never looked is a finding
   nobody made, and a script cannot tell it from one that did.
 * **`ncfg reset --json` writes `removed` from what `unlink` answered, and never
-  beside `would_remove`.** project.md 10.175 is the reason and it is the worst
+  beside `would_remove`.** project.md 10.206 is the reason and it is the worst
   case this flag has: the Rust prints the word `removed` over the whole list
   *before* the loop that removes anything, so a reset that stops on its second
   file has already reported that all of them are gone. A document claiming a
@@ -2475,7 +2475,7 @@ taken.
   the blame wrong for four of them.** `c/src/plan/wifi.c` said a network's
   addressing, routes, `dns` policy, hooks and metric were "carried in the
   document and this build of the planner does not act on them", which is the
-  promise 10.180 took apart. Asked of `crates/` field by field, it split four to
+  promise 10.211 took apart. Asked of `crates/` field by field, it split four to
   one.
 
   **Addressing, `routes` and a `dns` policy are acted on by nothing in either
@@ -2544,7 +2544,7 @@ taken.
 
 * **`ncfg_plan_warn_unbuilt` is published in `plan_internal.h`** rather than
   static in `build.c`, because the wifi passes have the same distinction to draw
-  and 10.180's whole point is that "this port has not got there yet" and "there
+  and 10.211's whole point is that "this port has not got there yet" and "there
   is nothing to wait for" must not become two sentences that can drift.
 
 * **`effective_metric` and the absent `cycle` option were re-asked, and both are
@@ -2608,13 +2608,13 @@ taken.
   frozen witness's bond is planned once more.
 
 * **The two halves are compared by kind, in the module that owns both.**
-  10.177's defect was `ncfg_apply_supported` answering yes for a `tun` while
+  10.208's defect was `ncfg_apply_supported` answering yes for a `tun` while
   `ncfg_kernel_newlink_of` refused one, and it was found by hand. It is a check
   now: `apply_kernel_test.c` walks every kind tag, asks the list and asks the
   two builders `create_link` chooses between, and requires them to agree. Both
   directions were sabotaged and both go red.
 
-* **The mark a created link wears was guarded on one arm only.** 10.173 records
+* **The mark a created link wears was guarded on one arm only.** 10.204 records
   the Rust's tun arm returning above the block that marks a created link, and
   `main_test.c` narrowed its check to `create_tun`'s body so that a search of
   the whole file could not give a false pass. Nothing then covered the arm it
@@ -2641,7 +2641,7 @@ taken.
   So an operator who deletes `band = "5"` gets `access_point.band:  (was 5)`,
   with an empty field where the value that caused the restart should be. This
   prints `2.4`, which is the value compared and the band the radio is about to
-  come up in. project.md 10.181 has the measurement.
+  come up in. project.md 10.212 has the measurement.
 * **`ncfg_hostapd_key_mgmt_of` is published by the hostapd backend, not by the
   model.** The Rust keeps `key_mgmt_of` in `netcfgd-model` and says why: the
   planner compares the document's generation against the record of what hostapd
@@ -2731,7 +2731,7 @@ taken.
   `observe.h` entry that named the deferred passes had been wrong for several
   waves in two directions at once -- it said six of eleven and listed nine,
   while all eleven were deferred -- and the blockers it named had been
-  overtaken by the backend modules landing. project.md 10.182 has the count
+  overtaken by the backend modules landing. project.md 10.213 has the count
   and the real blocker, which is that `ncfg_owned_state_t` carries no backends
   and so `observed.backends` is empty on every machine: six of the ten
   remaining passes walk that list, a seventh walks `observed.dns` beside it,
@@ -2846,7 +2846,7 @@ taken.
   stopped at the record.
 
 * **Three more warnings settled against `crates/`, and all three were the same
-  answer.** 10.180 published `ncfg_plan_warn_unbuilt` for the case where a
+  answer.** 10.211 published `ncfg_plan_warn_unbuilt` for the case where a
   block reads as this port's gap and is nobody's; these are the three that were
   left. Each was checked field by field rather than inherited, and each turned
   out to be acted on by nothing in either language, so all three now carry that
@@ -2925,7 +2925,7 @@ taken.
   `c/src/model/linkset.c:151` and `c/src/model/inventory.c:112` and `:270`, and
   the only writer in either language is `ask_supplicants`
   (`crates/netcfgd-observe/src/host.rs:604`), which walks `observed.backends`
-  (`:522`) -- the list 10.182 records as empty on every machine because
+  (`:522`) -- the list 10.213 records as empty on every machine because
   `ncfg_owned_state_t` carries no backends. So a producer written today would
   return `interface->preference` for every interface on every machine, which is
   precisely the defect `effective_metric`'s own doc comment records being
@@ -3009,7 +3009,7 @@ taken.
   ever. Measured read-only on this workstation: `rx-checksum` is in `ACTIVE`
   and not in `WANTED` on `lo`, `docker0` and both WireGuard devices, which is
   the post-refusal state sitting there before anything was applied. project.md
-  10.185 has the measurement. Reading the third state needs somewhere to put
+  10.216 has the measurement. Reading the third state needs somewhere to put
   it, and `ncfg_observed_link_t.offloads` is a list of names in both languages;
   the entry above is the same gap from the other side. Named here rather than
   closed in an observation pass, because closing it is a model change and a
@@ -3203,24 +3203,24 @@ each, in the order they appear.
   rule and is the bug the rule exists to prevent". A later wave rediscovered
   that second blocker independently, by re-deriving what `ask_supplicants`
   does, and only then found this paragraph had said it first (project.md
-  10.202). The first blocker went when `ncfg_main_service_of` began composing
-  an `ncfg_service_t` (10.189) and the four lists were filled over the waves
-  that followed (10.189, 10.190, 10.192); the second went when
-  `ncfg_observe_supplicants` landed (10.202). Both halves of the rule are
+  10.233). The first blocker went when `ncfg_main_service_of` began composing
+  an `ncfg_service_t` (10.220) and the four lists were filled over the waves
+  that followed (10.220, 10.221, 10.223); the second went when
+  `ncfg_observe_supplicants` landed (10.233). Both halves of the rule are
   applied now -- `with_metric` through `ncfg_observed_effective_metric`, and
   `ncfg_plan_metric_restart` for a client already running with the old one --
   and the warning that named the gap came out in the same commit that closed
   it, which is `build.c`'s rule.
 
 * ***The service-side executor has no caller in `src/main/`***. Closed:
-  `ncfg_main_world_executor_open` installs one (10.189). The entry's warning --
+  `ncfg_main_world_executor_open` installs one (10.220). The entry's warning --
   "so that nobody reads *the launcher landed* as *a WPA laptop comes up*" -- is
   the reason it was worth writing, and the same shape recurred twice more
   afterwards: `ncfg_wifi_configure_network` had an implementation and no caller
-  (10.203), and `ncfg_kernel_set_document` had none either, which left six
-  netlink ops refusing by name (10.204). Both were found by **measuring** for
+  (10.234), and `ncfg_kernel_set_document` had none either, which left six
+  netlink ops refusing by name (10.235). Both were found by **measuring** for
   a published function with no caller rather than by reasoning about what was
-  left, which is the method 10.204 records and recommends repeating.
+  left, which is the method 10.235 records and recommends repeating.
 
 * ***`netcfgd_host::wifi_profile` was not ported***, and the arms that cited
   it. The module landed; what outlived it was the daemon's refusal, which went
@@ -3229,7 +3229,7 @@ each, in the order they appear.
 
 * ***The `observe.h` entry that named the deferred passes had been wrong for
   several waves***. It was wrong again afterwards, twice, and is now right:
-  every observation pass that header names is written (10.199 through 10.202).
+  every observation pass that header names is written (10.230 through 10.233).
 
 * ***The journal writer is still deferred and is now the whole of it***, which
   was the closing clause of the entry above it. Closed too:
@@ -3243,7 +3243,7 @@ each, in the order they appear.
   having a writer for one, and this one had none -- so `observed.dns`, which is
   filled from that record and from nowhere else, was empty on every machine and
   the planner asked for a delivery it had already made, on every pass, for ever
-  (project.md 10.205). It is folded now: `ncfg_apply_record` takes the scope
+  (project.md 10.236). It is folded now: `ncfg_apply_record` takes the scope
   list an apply delivered, because `dns.apply` is the one op that is not its
   own effect. The entry's own argument for deferring it -- that a deep copy of
   an `ncfg_dns_policy_t` "exists nowhere in this port" -- was sound and is

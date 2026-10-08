@@ -41,7 +41,7 @@
  *   the part that had gone stale. It is kept as history rather than deleted
  *   because what each pass waited on is the useful part, and because a list
  *   nobody re-checks is worse than none -- it is addressed to somebody who
- *   cannot check it (project.md 10.180, 10.182, 10.183, 10.205, 10.216).
+ *   cannot check it (project.md 10.211, 10.213, 10.214, 10.236, 10.247).
  *
  *     * **Six walk `observed.backends`, and that list is no longer always
  *       empty.** `ask_supplicants`, `read_access_control`, `read_advertised`,
@@ -61,7 +61,7 @@
  *       netcfgd's memory of having started one -- and 0079's third clear is
  *       written on top of it: `ncfg_apply_record` takes the observation and
  *       clears the restart count of every backend this pass found running
- *       (`apply.h`, project.md 10.183, 10.191, 10.254).
+ *       (`apply.h`, project.md 10.214, 10.222, 10.285).
  *
  *       **The `/proc` it reads under is still not a parameter**, which is this
  *       module's rule broken and is recorded rather than worked around: the
@@ -885,7 +885,7 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
  * **What `ACTIVE` does not say.** The reply also carries `WANTED` and
  * `NOCHANGE`, and this reads neither -- so a feature the device forces on is
  * reported on although a `link.set_offloads` cannot move it, and the planner
- * asks again on every pass. Measured on a live machine; project.md 10.185 has
+ * asks again on every pass. Measured on a live machine; project.md 10.216 has
  * it, and closing it needs a third state on this field rather than a change
  * here.
  *
@@ -1333,7 +1333,7 @@ int ncfg_observe_currency(ncfg_observed_t *observed, const char *run_dir,
  * nothing wrote `owned.json`'s `dns`, the list was empty on every machine and
  * the planner re-delivered on every pass -- which corrected a resolver
  * somebody else had overwritten, by accident and at the cost of a `dns.apply`
- * for ever (project.md 10.205). Now that the record is written, that accident
+ * for ever (project.md 10.236). Now that the record is written, that accident
  * is gone and this is what notices.
  *
  * Only where a delivered scope asks for `write_resolv_conf`: netcfgd owns that

@@ -25,7 +25,7 @@
  *     one line, at the end -- and the list of removals is written from what
  *     `unlink` actually returned. A dry run's document has `would_remove` and
  *     no `removed` member at all; a run that removed has `removed` and no
- *     `would_remove`. project.md section 10.175 is why that is asserted as an
+ *     `would_remove`. project.md section 10.206 is why that is asserted as an
  *     absence rather than only as a presence: the Rust prints `removed` over the
  *     whole list before the loop that removes anything, and a document
  *     claiming a removal is worse than a sentence doing it because a script
@@ -493,7 +493,7 @@ static void a_removal_that_could_not_happen(void)
  * A dry run's document predicts and never reports.
  *
  * The `removed` member is asserted **absent**, not empty: this is project.md
- * section 10.175 in a document, and the Rust's own failure was that the word
+ * section 10.206 in a document, and the Rust's own failure was that the word
  * appeared over a list of files that were still on disk.
  */
 static void a_dry_run_says_would_remove_and_never_removed(void)

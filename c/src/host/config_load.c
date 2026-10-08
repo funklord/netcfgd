@@ -684,7 +684,7 @@ ncfg_document_t *ncfg_config_compile_with_provenance(const ncfg_config_sources_t
 	 * refusal saying "nothing to compile", and a caller that passed a perfectly
 	 * good set of sources and no sink was told its *sources* were the problem
 	 * -- which cost two rounds of looking in the wrong place while a probe was
-	 * being written against this call (project.md 10.236).
+	 * being written against this call (project.md 10.267).
 	 *
 	 * And it stays a refusal rather than becoming a default. A sink is what
 	 * turns a hook's body into `{phase, path, sha256}`; without one, a

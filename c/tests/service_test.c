@@ -290,7 +290,7 @@ static void the_fourteen_are_supported(void)
 	 * true of this build and was written down as the decision rather than as
 	 * the gap it was -- the Rust starts that kind from its own
 	 * `Op::BackendStart`, one match arm before the refusal this port had
-	 * copied (project.md 10.259).
+	 * copied (project.md 10.290).
 	 *
 	 * Both verbs are carried out now. The refusal that survives is a fact
 	 * about the **machine** rather than about this build -- a document that
@@ -318,7 +318,7 @@ static void the_fourteen_are_supported(void)
 	 * advertisement daemon re-reads its configuration" -- which is what a
 	 * `backend.reload` for either of them used to answer -- explains reload
 	 * semantics to somebody who was not asking about them. What is wrong is
-	 * that there is nothing there (project.md 10.261).
+	 * that there is nothing there (project.md 10.292).
 	 */
 	for (i = 0; i < sizeof(refused_kinds) / sizeof(refused_kinds[0]); i++) {
 		static const int verbs[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,

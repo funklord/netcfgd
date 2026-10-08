@@ -280,7 +280,7 @@ static void stop_interrupting(void)
  * `ncfg wifi connect` mid-join came back with *the supplicant on wlp0s20f3
  * stopped answering: Interrupted system call*, which is this exact read
  * reporting `EINTR` as a failure. The association was left down and the
- * fallback put the Rust daemon back (project.md 10.234).
+ * fallback put the Rust daemon back (project.md 10.265).
  *
  * Both halves are driven here because the two reads answer differently: an
  * event read has "nothing yet" available to it and a command does not, so one

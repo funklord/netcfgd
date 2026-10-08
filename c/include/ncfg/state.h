@@ -50,7 +50,7 @@
  *   filled **from this file and from nowhere else**, so both were empty on
  *   every machine: six observation passes had nothing to walk, and the
  *   planner's DNS comparison ran against an empty list and emitted a
- *   `dns.apply` on every pass for ever (project.md 10.182, 10.183).
+ *   `dns.apply` on every pass for ever (project.md 10.213, 10.214).
  *
  *   They are here now, read and written through
  *   `ncfg_observed_backends_read` and `ncfg_applied_dns_read` -- the model's
@@ -484,7 +484,7 @@ int ncfg_state_write_desired(const char *run_dir, ncfg_document_t *document, cha
  * waited on: `observed.h` has `ncfg_observed_link_write` and the address and
  * route pair beside it. They were private while nothing called them, on the
  * argument that a table nothing calls is a table nothing checks, and this is
- * the caller (project.md 10.217).
+ * the caller (project.md 10.248).
  *
  * The whole file is written first. A run directory that can hold only one of
  * the two holds the record, and a per-link view that could not be written

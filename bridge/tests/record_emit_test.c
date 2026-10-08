@@ -53,7 +53,7 @@ static const char SOURCE[] =
     "\tmtu = 1500\n"
     "\tmac = \"aa:bb:cc:dd:ee:ff\"\n"
     /* Estate-scoped and deliberately unregistered -- the three cert keys that
-     * accept either a stored secret or a root-readable path, which 10.327
+     * accept either a stored secret or a root-readable path, which 10.358
      * leaves without a number until an encoder can refuse the path form. The
      * one key in the language that is neither host-private nor numbered, and
      * so the only way this fixture can tell those two columns apart. */

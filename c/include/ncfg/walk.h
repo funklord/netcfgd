@@ -6,7 +6,7 @@
  *   `compile/scope.c` answers about one key at a time. This finds the keys.
  *   It is the producer for `bridge/record_encode.h`, which turns one key and
  *   its value into a statement fuzznet can carry, and it is the reader half of
- *   the mirror in project.md 10.324: an operator's edit of a rendered file
+ *   the mirror in project.md 10.355: an operator's edit of a rendered file
  *   comes back through here as a sequence of keys and values.
  *
  * IT WALKS TEXT, AND A DOCUMENT IS TEXT ONCE RENDERED

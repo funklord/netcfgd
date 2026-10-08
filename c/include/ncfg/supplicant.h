@@ -328,7 +328,7 @@ int ncfg_supplicant_entry_is_current(const ncfg_supplicant_entry_t *entry);
  * which is what "join this one" means -- while the second is the supplicant
  * blacklisting a network it could not get onto, and it clears that itself.
  *
- * project.md 10.337: a network left disabled by an earlier join is a machine
+ * project.md 10.368: a network left disabled by an earlier join is a machine
  * that has stopped matching its own configuration, and nothing in this tree
  * read this flag until that was traced.
  */

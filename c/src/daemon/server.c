@@ -470,7 +470,7 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 		 * at all -- so a `wifi connect` that failed mid-join on the machine
 		 * this was written on showed the operator a sentence and the daemon's
 		 * own log three startup lines, with nothing to say a request had ever
-		 * arrived (project.md 10.234). A daemon whose log cannot be read
+		 * arrived (project.md 10.265). A daemon whose log cannot be read
 		 * afterwards to find out what it was asked is one nobody can debug
 		 * from the evidence.
 		 *

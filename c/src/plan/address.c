@@ -95,7 +95,7 @@ static int text_equal(const char *left, const char *right)
  * **The way the model compares, never the way the text reads.** An address
  * this planner derives is rendered by `value.h` and the kernel prints its own
  * spelling of whatever was installed, and the two agree -- but agreeing by
- * construction is not the same as being compared, and 10.169 is what that
+ * construction is not the same as being compared, and 10.200 is what that
  * costs: one address written twice reads as two, and the plan installs it
  * again on every run. Text equality is the answer only where neither side
  * parses, which is where there is nothing better to say.

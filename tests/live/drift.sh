@@ -205,9 +205,9 @@ daemon=
 #
 # **The case the hook cannot cover, and the one that cost fifty-two minutes.**
 # The comment above `drift_hooks` used to say "the hook IS the telling", which
-# is true only for an operator who has written one. project.md 10.307 is a
+# is true only for an operator who has written one. project.md 10.338 is a
 # machine that did not match its configuration for most of an hour with the
-# journal empty throughout, and 10.330 is this.
+# journal empty throughout, and 10.361 is this.
 #
 # Nothing here declares a hook, so every assertion below is about the daemon's
 # own log.

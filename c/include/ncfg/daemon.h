@@ -276,7 +276,7 @@ ncfg_order_class_t ncfg_order_class_of(ncfg_proto_request_kind_t kind);
 /*
  * HOW LONG AN APPLY AGAINST THIS DOCUMENT MAY LEGITIMATELY TAKE, IN SECONDS
  *
- * A leased order needs a term, and 10.321 measured that there is no constant
+ * A leased order needs a term, and 10.352 measured that there is no constant
  * to use: the legitimate duration is a function of the configuration. One
  * hooked interface adds four phases at `NCFG_HOOK_DEFAULT_TIMEOUT_SECONDS`
  * each, so 240 seconds before anything else happens, while this machine --
@@ -294,7 +294,7 @@ ncfg_order_class_t ncfg_order_class_of(ncfg_proto_request_kind_t kind);
  * bounded anywhere in this tree** -- dhcpcd answers when it answers, and the
  * two acquisitions measured on the reporting machine took 4.571 and 6.895
  * seconds. Nothing here invents a term for it, because a number nobody
- * measured is what 10.321 refused to produce.
+ * measured is what 10.352 refused to produce.
  *
  * The consequence is that this is a **floor on the legitimate duration rather
  * than a ceiling on it**, and a caller using it as a lease adds its own
@@ -1904,7 +1904,7 @@ int ncfg_wifi_check_backend(const ncfg_document_t *document, const char *interfa
  * the BSSID rule and the first-match fallback and stops there, so the two
  * implementations answer differently for exactly the configuration this was
  * added for. Recorded rather than changed there, which is this branch's rule
- * for the Rust (project.md 10.235).
+ * for the Rust (project.md 10.266).
  *
  * **This is `netcfgd_model::wifi::network_for` and it belongs in the model**,
  * which is where the Rust keeps it and says why: the socket answers "which
@@ -2948,7 +2948,7 @@ typedef struct {
 	 *
 	 * A reload that cannot compile leaves the previous document standing and
 	 * the machine exactly as it was, which from outside is indistinguishable
-	 * from a write nobody noticed -- project.md 10.307 and 10.331. So it is
+	 * from a write nobody noticed -- project.md 10.338 and 10.331. So it is
 	 * said in the log, and this is what stops it being said again on every
 	 * pass for as long as the file stays broken: the watch fires per event
 	 * and a broken file does not fix itself.

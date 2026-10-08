@@ -18,7 +18,7 @@
  *     * that giving a contended radio back **asks who is contending before it
  *       opens an executor** -- the Rust does it the other way round, so every
  *       laptop with wifi takes the global apply lock every five seconds to
- *       find out there is nothing to do (project.md 10.169). The proof is a
+ *       find out there is nothing to do (project.md 10.200). The proof is a
  *       measurement rather than a reading: this test holds the apply lock, and
  *       a pass that tried to open an executor could not get it;
  *     * that an event is written the way `proto.h` reads one, decoded back by
@@ -812,7 +812,7 @@ static void a_monitor_becomes_a_subscriber_and_is_told(void)
 
 	/*
 	 * And a client that goes away is dropped on the next announcement rather
-	 * than written to for ever. This is the C half of the Rust's 10.169: there
+	 * than written to for ever. This is the C half of the Rust's 10.200: there
 	 * the list is a `Vec` with no bound, pruned only inside a broadcast, so a
 	 * quiet machine accumulates them without limit. Here the pruning is the
 	 * same and the list cannot grow past `NCFG_MAIN_SUBSCRIBERS_MAX`.
@@ -1770,7 +1770,7 @@ static void an_unmanaged_tunnel_is_not_netcfgds_to_start(void)
  * socket -- as soon as netcfgd is running any backend at all, and only then
  * asks who is contending; on a laptop with wifi the answer is "nobody", five
  * seconds later it is "nobody" again, and in between an operator's `ncfg
- * apply` is waiting on that lock (0184, project.md 10.169).
+ * apply` is waiting on that lock (0184, project.md 10.200).
  *
  * So the check is not that the code reads a certain way. This test **holds the
  * apply lock itself** and gives the world a patience of 50ms: a pass that

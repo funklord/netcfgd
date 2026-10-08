@@ -364,10 +364,10 @@ int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const cha
 	 * construction, and logging `command` here would put a PSK in the journal.
 	 *
 	 * This module had no logging at all, which is why the investigation in
-	 * project.md 10.337 needed `tool/capture-supplicant.sh`: netcfgd sends
+	 * project.md 10.368 needed `tool/capture-supplicant.sh`: netcfgd sends
 	 * `SELECT_NETWORK`, that disables every other network, and nothing
 	 * anywhere recorded that it had been sent. `ncfg_log_aboutf`'s own
-	 * comment cites 10.307 as the afternoon that wanted one timeline -- the
+	 * comment cites 10.338 as the afternoon that wanted one timeline -- the
 	 * facility was built for this and the wire was the one thing not on it.
 	 */
 	ncfg_log_aboutf("supplicant", client->interface, NCFG_LOG_VERBOSE, "-> %s", label);
@@ -392,7 +392,7 @@ int ncfg_supplicant_request_labelled(ncfg_supplicant_client_t *client, const cha
 			 * Found live rather than by reading: `ncfg wifi connect` on the
 			 * machine this was written on failed with *the supplicant on
 			 * wlp0s20f3 stopped answering: Interrupted system call*, which is
-			 * the event read below saying the same thing (project.md 10.234).
+			 * the event read below saying the same thing (project.md 10.265).
 			 *
 			 * It cannot spin. Every one of these is a signal that really
 			 * arrived, and what is left of the **same** deadline is what
@@ -609,7 +609,7 @@ int ncfg_supplicant_next_event(ncfg_supplicant_client_t *client, int timeout_ms,
 			 * two spellings of a timeout and left the interruption out, which
 			 * is how a signal came to be reported as a supplicant that had
 			 * died -- measured on this machine, aborting an `ncfg wifi
-			 * connect` mid-join (project.md 10.234).
+			 * connect` mid-join (project.md 10.265).
 			 */
 			return 1;
 		}

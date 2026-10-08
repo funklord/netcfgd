@@ -14,7 +14,7 @@
  *   `plan.h` calls load-bearing: a converged device plans nothing. A
  *   comparison that is wrong in that direction is not a missing feature, it is
  *   a plan that does the same work for ever on every reconcile -- and it is
- *   exactly what 10.169 records a text comparison of addresses costing. The
+ *   exactly what 10.200 records a text comparison of addresses costing. The
  *   tunnel and VXLAN cases put the kernel's spelling of an address against the
  *   operator's on purpose.
  */
@@ -398,7 +398,7 @@ static void a_tunnel_endpoint_is_corrected(void)
  *
  * The document writes an IPv6 endpoint one way and the kernel reports its own
  * spelling of the same address. Compared as text they never agree, so the same
- * `link.set_tunnel` is planned on every reconcile for ever -- 10.169's defect,
+ * `link.set_tunnel` is planned on every reconcile for ever -- 10.200's defect,
  * in a second place. `ncfg_plan_address_equal` is what makes this quiet.
  */
 static void an_endpoint_is_compared_as_an_address_and_not_as_text(void)

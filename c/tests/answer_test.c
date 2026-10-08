@@ -1402,7 +1402,7 @@ static void the_probe_and_modem_listings_leave_out_what_is_not_there(void)
  * The refusal that used to stand here said the writer that renders a `probe`
  * block was not ported. Two things were wrong with it: this request writes a
  * *script* and no block at all, and `render_link.c` renders one anyway
- * (project.md 10.215).
+ * (project.md 10.246).
  */
 static void a_probe_script_is_written_and_guarded(void)
 {

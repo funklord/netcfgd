@@ -21,7 +21,7 @@
  *   every laptop with wifi -- it takes the global apply lock and a netlink
  *   socket every five seconds to discover there is nothing to give back,
  *   against the same lock `ncfg apply` waits on (0184, and project.md
- *   10.169). The same instinct is carried one step further here: asking
+ *   10.200). The same instinct is carried one step further here: asking
  *   `ncfg_apply_supported` costs nothing, so the lock is not taken to be
  *   refused either -- and it is asked of the kinds that are actually running.
  *   Asking it of a representative op is what made that guard unreachable for
@@ -271,7 +271,7 @@ int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, cha
  * a wrong answer in production, where the machine's own `/run` is the right
  * one: it is that `tests/live/displace.sh` could never make the case fire, and
  * five of its checks reported netcfgd starting a supplicant on a radio
- * `NetworkManager` had claimed (project.md 10.266).
+ * `NetworkManager` had claimed (project.md 10.297).
  *
  * **A named run root clears `run_root_is_the_machines`**, which is the Rust's
  * rule and the one that field exists for: the namespace check is about a
@@ -909,7 +909,7 @@ int ncfg_main_world_release_contended(void *context, ncfg_daemon_state_t *state,
 		 * ordinary machine, and reaching it without having taken the apply
 		 * lock or opened a netlink socket is the difference between this and
 		 * the Rust, which does both every five seconds for the life of the
-		 * daemon to arrive here (0184, project.md 10.169).
+		 * daemon to arrive here (0184, project.md 10.200).
 		 */
 		ncfg_contenders_free(&found);
 		return 1;

@@ -150,10 +150,10 @@ static ncfg_optbool_t record_says(const char *run_dir, const char *interface,
  *   becomes `NCFG_OP_WIFI_SET_PROFILES`, which re-adds every network and
  *   enables each one. So this is an ordinary plan action -- `on_drift` governs
  *   it, a `report` interface says so and changes nothing, the drift hook and
- *   10.330's log line cover it, and a confirm window can revert it. Nothing
+ *   10.361's log line cover it, and a confirm window can revert it. Nothing
  *   new was needed but the question.
  *
- * THE ANSWER THIS TAKES, OF THE FOUR 10.337 NAMES
+ * THE ANSWER THIS TAKES, OF THE FOUR 10.368 NAMES
  *   *Re-enable what `autoconnect` names, and leave the current association
  *   alone.* `set_profiles` sends no `SELECT_NETWORK`, and `ENABLE_NETWORK`
  *   does not deselect, so the station stays where it is.

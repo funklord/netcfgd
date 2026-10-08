@@ -22,7 +22,7 @@
  *   spelling of whatever was installed. So `0000:0000:...:0001/128` and
  *   `::1/128` are one address here and two to `strcmp`, and comparing them as
  *   text plans an `addr.add` for something the kernel already holds, on every
- *   single run. project.md 10.169 is that defect measured against the shipped
+ *   single run. project.md 10.200 is that defect measured against the shipped
  *   Rust, which compares both halves -- the forward pass and the teardown --
  *   as strings.
  *
@@ -119,7 +119,7 @@ int ncfg_plan_reported_holds(const ncfg_observed_t *observed, const char *interf
 		return 0;
 	}
 	for (i = 0; i < report->address_count; i++) {
-		/* Canonically, which is the whole of 10.169: the report's spelling is
+		/* Canonically, which is the whole of 10.200: the report's spelling is
 		 * whoever wrote it, and `seen->address` is the kernel's. */
 		if (ncfg_plan_address_equal(report->addresses[i], address)) {
 			return 1;

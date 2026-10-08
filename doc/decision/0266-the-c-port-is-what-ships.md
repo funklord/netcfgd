@@ -92,7 +92,7 @@ would pass for a reason that has nothing to do with the budget holding. Moving a
 budget in the same change that moves what it measures is how a ratchet stops
 ratcheting. It is a pass of its own, with its own re-calibration, and the
 `footprint` half is the easy one: the two programs now write byte-identical
-files under `/run`, which 10.287 measured.
+files under `/run`, which 10.318 measured.
 
 **`make live` and `make cross` still drive the Rust.** `live` builds the
 workspace and runs Rust-only unit tests that have no C equivalent (`wg-*`,

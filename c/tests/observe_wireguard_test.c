@@ -23,7 +23,7 @@
  *
  * WHY THE CANARY, AND WHY IT IS ASSERTED TO BE REACHABLE FIRST
  *   The currency question is the one pass in this module that touches the
- *   secret store, and 10.163 records a passphrase reaching a diagnostic in the
+ *   secret store, and 10.194 records a passphrase reaching a diagnostic in the
  *   Rust. A private key is worse. So a secret whose value nothing may repeat is
  *   put in the store, driven through every failure this pass has, and looked
  *   for afterwards in every `err` buffer, in everything the process said on

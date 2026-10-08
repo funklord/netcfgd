@@ -4,7 +4,7 @@
 # PURPOSE
 #   The C port of the NetworkManager shim, over `libdbus-1` -- decision 0264's
 #   answer, written once the dependency order it named was satisfied (project.md
-#   10.353).
+#   10.384).
 #
 #   Beside the Rust rather than replacing it, which mirrors the daemon's own
 #   arrangement: `crates/` and `c/` at the top level, `netcfgd-nm/` and

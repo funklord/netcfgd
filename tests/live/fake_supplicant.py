@@ -93,7 +93,7 @@ def network_id(entry):
 #
 # Captured from wpa_supplicant 2.10 against a real enterprise network, eleven
 # authentications over thirteen days, all identical in shape (project.md
-# 10.334). The order below is chronological from that log, not a guess at a
+# 10.365). The order below is chronological from that log, not a guess at a
 # plausible one.
 #
 # Two details that look like defects in a fixture and are not:

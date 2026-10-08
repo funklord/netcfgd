@@ -185,7 +185,7 @@ static const char *dns_difference(ncfg_plan_t *plan, const ncfg_dns_policy_t *wa
 	 * this function was written to stop: a `dns.apply` whose reason read
 	 * `dns: write_resolv_conf (was write_resolv_conf)` was watched running on
 	 * a real machine, and the search domain that had actually changed was
-	 * named nowhere (project.md 10.350).
+	 * named nowhere (project.md 10.381).
 	 */
 	*desired = "differs";
 	*observed = "differs";

@@ -40,7 +40,7 @@
  * The addresses go through `ncfg_plan_address_equal` rather than `strcmp`,
  * which the Rust does not do: the compiler canonicalises what the document
  * says, so the two spellings agree for a document that came through it -- and
- * a rule reaching the planner some other way is exactly the case 10.169
+ * a rule reaching the planner some other way is exactly the case 10.200
  * records, where one value written twice reads as two and the rule is torn
  * down and reinstalled on every apply.
  */

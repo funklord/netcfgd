@@ -607,7 +607,7 @@ static void the_address_answers_before_the_name(void)
  *
  * The supplicant says which it is, in `key_mgmt`. The Rust has no such arm, so
  * this is where the two implementations answer differently (project.md
- * 10.235).
+ * 10.266).
  */
 static void the_security_separates_two_blocks_of_one_name(void)
 {
@@ -1021,7 +1021,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 		check(message.u.response.kind == NCFG_PROTO_RESP_WIFI_SCAN &&
 		    says(scan->interface, "wlan0") && scan->access_point_count == 4u,
 		    "  with every access point the radio saw");
-		/* **Four since the fake learned an enterprise network** (10.335), and
+		/* **Four since the fake learned an enterprise network** (10.366), and
 		 * the ordering is what this asserts rather than the membership: -60
 		 * arrived in the middle, so a sort that had quietly stopped sorting
 		 * would now put it at the end where it used to be able to hide. */

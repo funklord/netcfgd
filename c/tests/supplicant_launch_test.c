@@ -67,7 +67,7 @@
  *   `secrets_test.c`'s proof, carried through a launch. One value is the
  *   passphrase of the radio's network **and** the 802.1X password of the
  *   wired port -- `configure_wired` has the identical shape and is the second
- *   half of what 10.163 records -- and every failure this module has is driven
+ *   half of what 10.194 records -- and every failure this module has is driven
  *   with it in place. Five channels are read back: every `err` buffer this
  *   file filled, this process' whole standard error, the launch log netcfgd
  *   writes, the fake's own output, and the argv netcfgd built.
@@ -508,7 +508,7 @@ static ncfg_secret_ref_t         fixture_password;
  * One radio with one WPA2 network, and one wired port with 802.1X.
  *
  * Both credentials are the canary, because both reach a control socket through
- * different code -- `add_network` and `configure_wired` -- and 10.163 records
+ * different code -- `add_network` and `configure_wired` -- and 10.194 records
  * the Rust leaking through each of them in the same sentence.
  */
 static void a_document(void)
@@ -1202,7 +1202,7 @@ static void this_build_says_it_can_do_it(void)
  * line that carries the passphrase, and the canary is asserted to be *in* it.
  * Without this the silences below would pass just as loudly on a fixture whose
  * network had stopped carrying a credential at all -- which is the shape
- * 10.163 records: a redaction with a test, and a composed sentence without
+ * 10.194 records: a redaction with a test, and a composed sentence without
  * one.
  */
 static size_t the_credential_really_is_in_what_is_sent(void)

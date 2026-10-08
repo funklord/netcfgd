@@ -158,7 +158,7 @@ def bad_components(block, path, keys, heads):
 CONTROL = (
 	("NCFG_BLOCK_INTERFACE", "advertise.prefix", True, "a real path"),
 	# A VALUE of `advertise.backend`, which is how three of the six rows in
-	# 10.326 got written.
+	# 10.357 got written.
 	("NCFG_BLOCK_INTERFACE", "advertise.radvd", False, "a value, not a key"),
 	# A real key OF ANOTHER BLOCK -- bluetooth's. This is the row that
 	# prompted the gate, and a pooled key list accepts it.

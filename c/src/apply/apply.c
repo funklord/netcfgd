@@ -51,7 +51,7 @@
  * protecting is intact.
  *
  * **This function and `ncfg_kernel_newlink_of` have to agree by kind**, which
- * is what 10.177 is about and is why the arms below are a switch over the same
+ * is what 10.208 is about and is why the arms below are a switch over the same
  * tag that one is. What either may still refuse is a *device*: a vlan with no
  * parent, a veth whose peer is unnamed, a tun whose owner is nobody on this
  * machine. Those are refusals about a document rather than about this build,

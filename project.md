@@ -12246,8 +12246,7 @@ in the file. 0259's own work was not wrong: `is_open()` tests
 `ncfg_client_broken` as that decision says, and the pointer test it replaced is
 gone. The reopen beside it was passing a reference into a function that empties
 it, which no amount of reading `is_open` would reveal.
-## 10.325 The kind registry, and the gate it cannot have
-## 10.348 Three reported faults, none of which was one
+## 10.379 Three reported faults, none of which was one
 
 Asked to fix the roam severity and the duplicated warning reported at the end
 of 10.347. Measured, **all three things named there are correct code**, and
@@ -12293,7 +12292,7 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
-## 10.388 Nothing is unported, and the list still said five things were
+## 10.419 Nothing is unported, and the list still said five things were
 
 Asked what remains to port. **Three independent instruments agree that nothing
 of substance does**, and they are independent in the way `evidence.md` asks --
@@ -12363,7 +12362,7 @@ failure of *Four ways to manufacture an absence* met while fixing its sibling.
 Fixed before the commit; recorded because writing a correction is exactly when
 the next wrong claim gets written.
 
-## 10.387 The empty-`device` skip is load-bearing, and `master` may have removed it
+## 10.418 The empty-`device` skip is load-bearing, and `master` may have removed it
 
 Left open since the ethtool work: `render_device` skips a device whose body is
 empty, with a comment saying that is right, while **`master`'s Rust had the
@@ -12441,13 +12440,13 @@ should already fail at the agree gate**, and one run settles it. That is the
 command to use rather than reading the diff, and it is one branch switch away in
 a tree other sessions share.
 
-## 10.386 Every device kind renders but the one netcfgd makes itself
+## 10.417 Every device kind renders but the one netcfgd makes itself
 
 `wireguard`, `openvpn`, `tunnel` and `tun`/`tap` were the four the switch in
 `render_kind` refused, and closing them leaves **`ifb` alone** -- refused because
 netcfgd synthesises one per interface asking for `ingress_bandwidth`, so
 rendering it would put a derived device into a profile as though somebody had
-asked for it. That is a property of the thing, like hooks in 10.384, rather than
+asked for it. That is a property of the thing, like hooks in 10.415, rather than
 work left undone.
 
 A WireGuard machine could not save a profile at all, which is the largest of
@@ -12465,9 +12464,9 @@ saw, so `tun { mode = "tap" }` is an unknown key rather than a tap device. One
 model type, two spellings, and the spelling is the whole difference -- sabotaged
 by inverting them, and it fails four checks.
 
-### The redundancy rule from 10.385 paid for itself the same day
+### The redundancy rule from 10.416 paid for itself the same day
 
-10.385 ended with a rule: where the language accepts more than one way to say a
+10.416 ended with a rule: where the language accepts more than one way to say a
 thing, assert the text as well, because the round trip is blind to a choice
 between two spellings of one fact. These four kinds have five such pairs --
 `config`/`file`, `username`/`user`, `mode`/`kind`, `parent`/`dev`, `key`/`vni` --
@@ -12498,7 +12497,7 @@ absence is noted in the file rather than quietly tidied, because anything new
 that is both refused and reachable wants it back -- and because an unused test
 helper is the cheapest census of reachability this tree is going to get.
 
-## 10.385 Every address source renders now
+## 10.416 Every address source renders now
 
 `@pd:` and `reported` were the last two the model has, both refused through the
 same `%s addressing` line, and closing them leaves the switch in
@@ -12516,7 +12515,7 @@ to `::1/64`, so the form that states the default and the form that omits it are
 one document. Only the shorter is written -- and **sabotaging that is the third
 round-trip-blind case in two days**: always writing the suffix compiles to the
 same document, so the round trip passes and one text assertion is the whole
-defence. The other two were the qdisc block form in 10.381 and `valid_lft
+defence. The other two were the qdisc block form in 10.412 and `valid_lft
 forever` in 10.382.
 
 That is now a pattern rather than three incidents, and it has a shape: **the
@@ -12531,7 +12530,7 @@ is enough.
 as anything else would turn an observation into an instruction: it says netcfgd
 must not manage this interface's addresses and must report what it finds.
 
-## 10.384 `guard` renders, hooks cannot, and the survey was wrong a third time
+## 10.415 `guard` renders, hooks cannot, and the survey was wrong a third time
 
 **`guard` was the most expensive refusal in the renderer and the cheapest to
 close** -- one field, three lines. A guard says why an interface must not be
@@ -12561,7 +12560,7 @@ and not the renderer's to settle. Both programs refuse it, so nothing diverges.
 
 ### The third wrong instrument, and why the third one is the interesting one
 
-10.382 recorded two: a name-keyed grep, and a probe whose detector could only see
+10.413 recorded two: a name-keyed grep, and a probe whose detector could only see
 one vocabulary of refusal. The conclusion drawn from fixing them -- that the
 reachable refusals were advertise and hooks alone -- **was itself wrong, because
 `guard` is a key and the probe wrote it as a block.** The error was in the probe
@@ -12582,7 +12581,7 @@ refusal sites bear this out: eleven of twenty-five carry a comment saying they
 cannot fire, and the other fourteen say nothing either way -- so the comments are
 not a census either.
 
-## 10.383 `advertise` renders, and three defaults that are not alike
+## 10.414 `advertise` renders, and three defaults that are not alike
 
 Refused whole, so **a router could not save a profile.** Losing the block leaves
 a machine that no longer tells the hosts on its LAN what their prefix is: every
@@ -12599,7 +12598,7 @@ other two are written, and that fails three checks including the round trip.
 own diagnostic lists.** The enum is auto, odhcpd, radvd, exec; the message says
 "auto, radvd, odhcpd". A table copied from the message names the wrong daemon for
 every policy that sets one. That is the third time in two days this shape has come
-up -- the wifi backend table in 10.379, the toggle words in 10.381 -- and the
+up -- the wifi backend table in 10.410, the toggle words in 10.412 -- and the
 second time a human-facing list of words sat next to an enum in a different order.
 **A word list written for a reader is not a word list indexed by a value**, and
 nothing in either one says which it is.
@@ -12613,7 +12612,7 @@ list is refused too -- `lower_advertise` rejects a block without one, so writing
 `advertise { }` would produce a profile that does not compile, and a refusal says
 so where a written block would leave the operator to discover it.
 
-## 10.382 An address's peer and lifetimes render, and a survey that was wrong twice
+## 10.413 An address's peer and lifetimes render, and a survey that was wrong twice
 
 `render_link.c` refused `an address with lifetimes or a peer`, so **a
 point-to-point link could not save a profile.** All three modifiers -- `peer`,
@@ -12670,7 +12669,7 @@ facts, seven `dhcp` lease fields, `match`, `ingress_redirect`, route `scope` and
 `proto` -- names something the language has no syntax for, which is why each one
 carries a comment saying it cannot fire from a compiled document.
 
-## 10.381 `ethtool` and `qdisc` render, and one sabotage round-trips
+## 10.412 `ethtool` and `qdisc` render, and one sabotage round-trips
 
 Both were refused wholesale, so **a machine with any link setting or any shaped
 queue could not save a profile** -- and these are settings somebody chose against
@@ -12763,7 +12762,7 @@ says. That fired through its own route and named the fragment. The other two
 pieces were sabotaged in the record -- a refusal wording the Rust does not use,
 and a file the C does not write -- and each named itself.
 
-## 10.380 Access points render, and the policy is the key
+## 10.411 Access points render, and the policy is the key
 
 `render.c` refused `%zu access_point block(s)` wholesale, so **a machine running
 a hotspot could not save a profile** -- a configuration somebody set up
@@ -12795,14 +12794,14 @@ trip failed -- not for anything to do with access points, but because
 access point needs no device block, so the fixture dropped it and says why.
 
 **That is the second place this has cost something today**, after
-`device eth0 { ethtool { } }` in 10.377, and it is no longer a matter of taste:
+`device eth0 { ethtool { } }` in 10.408, and it is no longer a matter of taste:
 two legitimate documents in this tree's own corpora do not survive a round trip
 because of it. The skip's comment still says it is right. `master` removed the
 same skip citing 10.21; here it is deliberate and documented, so it stays flagged
 rather than overruled -- but the evidence against it is now two measured cases
 rather than one.
 
-## 10.379 Routing rules render, and two things had to be found first
+## 10.410 Routing rules render, and two things had to be found first
 
 `render.c` refused `%zu routing rule(s)` wholesale, so **a machine with any
 policy routing could not save a profile** -- and a rule is not written by
@@ -12864,7 +12863,7 @@ looking for a gap that is closed -- and the neighbouring check that the list has
 lost no entry went on passing, which is what makes removing one safe to do
 deliberately.
 
-## 10.378 A radio's own policy, which no machine with a radio could save
+## 10.409 A radio's own policy, which no machine with a radio could save
 
 `render_device` refused `a wifi policy` wholesale. `ncfg wifi activate` writes
 `device wlan0 { wifi { autoconnect = true } }`, so **a laptop that has ever
@@ -12919,7 +12918,7 @@ addressing, address lifetimes, route scope and proto, and four `dhcp` lease
 fields. The Rust renderer writes most of those today, so each is a port with a
 known shape rather than a design question.
 
-## 10.377 `hostname = "dhcp"` rendered as a word the language refuses
+## 10.408 `hostname = "dhcp"` rendered as a word the language refuses
 
 `render_globals` wrote `hostname = "from_dhcp"`. `lower_global` compares against
 `"dhcp"` and nothing else; everything else falls through to the hostname check,
@@ -12964,7 +12963,7 @@ flagged rather than resolved in either direction. It also blocks making the
 round-trip check permanent over this corpus, which is the obvious next step once
 it is settled.
 
-## 10.376 A reconnect that went to the default socket, by aliasing
+## 10.407 A reconnect that went to the default socket, by aliasing
 
 `reconnect` failed three checks, and the only message available was
 `not connected` -- which comes from a *later* call and says nothing about why
@@ -13033,13 +13032,13 @@ failed. So a genuine failure leaves the label reading *netcfgd at* and nothing,
 where the path it could not reach is the one thing worth saying. That is a
 separate decision about what the label is for, and it is not this fix's.
 
-**The same shape as 10.375, one layer up.** There a fake replied before writing
+**The same shape as 10.406, one layer up.** There a fake replied before writing
 its log and the test read the log too early; here a function cleared the thing
 it was about to read. Both were invisible because the code that would have said
 so was throwing the answer away, and in both cases making the failure legible
 cost less than the reasoning that preceded it.
 
-## 10.375 The fake answered before it wrote down what it had been asked
+## 10.406 The fake answered before it wrote down what it had been asked
 
 `daemon_wifi_test` lost two checks and the output was `FAILED` and nothing else.
 It has ten assertions of the form
@@ -13106,7 +13105,7 @@ not a pattern over its identifiers. And `c-test` leaks two `/tmp` directories pe
 run, one `ncfg-apply-hook-*` and one `ncfg-apply-kernel-*`, one pair at each of
 14:24, 14:27, 14:33, 14:38, 14:41 and 15:04.
 
-## 10.374 `make check` could not finish, and the guard was the reason
+## 10.405 `make check` could not finish, and the guard was the reason
 
 `packaging` runs `udevadm verify` on the modem rules, guarded by
 `command -v udevadm`. **That asks for the binary and means the subcommand**,
@@ -13147,7 +13146,7 @@ most machines this project targets do not run systemd at all, and a gate that
 fails for want of a tool nobody on the target platform has is one people learn
 to work around.
 
-## 10.373 Two renderer defects found in Rust and live in the C
+## 10.404 Two renderer defects found in Rust and live in the C
 
 Both were found on `master` against the Rust renderer and **both were present
 here, in C written independently of it.** That is the transferable part: a
@@ -13210,7 +13209,7 @@ rather than inferred from the gate. Not touched here, being nothing to do with
 the renderer; `style`, `shell`, `test`, `c-test`, `clippy` and `fmt` were run
 individually and all pass.
 
-## 10.372 A probe test that races its own script, and 35 unreachable commits
+## 10.403 A probe test that races its own script, and 35 unreachable commits
 
 Two findings from this session that are nobody's slice, recorded because the
 machine they were found on is going away.
@@ -13255,7 +13254,7 @@ permission check, so **this is the holder's to do** before the machine is gone:
 
 The three stashes are the ones with a name on them and are where to start.
 
-## 10.371 One question, one answer: the activation, and the instrument that found it
+## 10.402 One question, one answer: the activation, and the instrument that found it
 
 The oracle is at **66 of 117**, from 56. Everything here was found by
 `tool/nm-compare.sh` rather than by reading either implementation.
@@ -13301,7 +13300,7 @@ Open: `RequestScan`, the activation pair, the IP configuration's gateway and
 nameservers -- the only difference the differ still shows on its default
 questions -- and the writes.
 
-## 10.370 The profile model, derived uuids, and an outage I cannot pin on anything
+## 10.401 The profile model, derived uuids, and an outage I cannot pin on anything
 
 **Incomplete and pushed deliberately**, because access to the machine it was
 written on is ending. What is here builds, passes 134 unit checks and moves the
@@ -13388,9 +13387,9 @@ outage on a machine I was running network tooling on is not a coincidence
 anybody gets to keep**, and the honest record is that the state is gone and the
 cause is open.
 
-## 10.369 Six properties, one window, and a count over work that never ran
+## 10.400 Six properties, one window, and a count over work that never ran
 
-The eight failures 10.368 left were two pieces of work, and finishing them
+The eight failures 10.399 left were two pieces of work, and finishing them
 turned up a third nobody had named -- plus a reading of the result that was
 wrong in the way `evidence.md` has a section for.
 
@@ -13432,7 +13431,7 @@ came up; it is not an NM device.
 
 **`InterfacesAdded` and `InterfacesRemoved`, which is how libnm learns an object
 exists at all.** `DeviceAdded` is read as a hint about an object a client already
-knows, so 10.367's signals left a new device unreadable and a departed one in the
+knows, so 10.398's signals left a new device unreadable and a departed one in the
 cache for ever. Every membership change is announced twice now, to the object
 manager and to the owning object. A removal cannot ask the object what interfaces
 it had -- the slot resolves to nothing by then -- so the caller supplies them.
@@ -13447,7 +13446,7 @@ associated to a network the document does not describe, and two radios of one
 network share an SSID. **The wifi status joins the window with one caller rather
 than two**, which is the rule the window usually waits for -- the change detector
 reads every property twice per tick, so unwindowed it is two requests per tick on
-the one device least able to afford them, and 10.365 is this adapter's tick taking
+the one device least able to afford them, and 10.396 is this adapter's tick taking
 a second over a wifi fetch and starving the dispatch loop.
 
 **And the reading. "37 passed, 0 failed" was a count over work that did not
@@ -13477,9 +13476,9 @@ the preceding check requires the same property to succeed on a real bridge. The
 Rust shim passes all 116 with both script changes in, which is what says they are
 amendments and not accommodations.
 
-Open: the writes, behind 10.361's gate. Nothing else in the oracle is a read.
+Open: the writes, behind 10.392's gate. Nothing else in the oracle is a read.
 
-## 10.368 The oracle pointed at the port, and what it found in one run
+## 10.399 The oracle pointed at the port, and what it found in one run
 
 0264 names `tests/live/nm.sh` as the acceptance test for the C shim, and it was
 still starting the Rust binary. **An oracle aimed at the implementation being
@@ -13573,7 +13572,7 @@ Open, and the eight failures are exactly these two:
   `Parent` and `VlanId`, a wireguard device's `PublicKey`, `ListenPort` and
   `FwMark` answer placeholders. netcfgd observes all six.
 - **`InterfacesRemoved` is not emitted**, so a device that goes stays in a
-  libnm client's cache: 10.367 emits `DeviceRemoved`, which libnm reads as a
+  libnm client's cache: 10.398 emits `DeviceRemoved`, which libnm reads as a
   hint about an object it expects to know already. The membership diff that
   drives it is in place and the signals are declared.
 
@@ -13581,7 +13580,7 @@ Open, and the eight failures are exactly these two:
 the oracle pointed at the Rust shim would have kept a passing run that tested
 nothing about the port.
 
-## 10.367 The signals, and a removal check that was the thing at fault
+## 10.398 The signals, and a removal check that was the thing at fault
 
 The thirteenth slice of 0264's port emits what NM emits rather than leaving a
 client to diff a list. `DeviceAdded`, `DeviceRemoved`, `NewConnection`,
@@ -13619,7 +13618,7 @@ per-key now, and the test drives two keys alternately for exactly that reason.
 **The live probe, and the control that is the point of it.** `bus_test` drives
 both detectors and sabotages each, which answers "did it notice". It cannot
 answer whether the answer reaches a client, and this adapter has twice been
-quiet for the wrong reason (10.364). So `tests/live/c_nm_signals.sh` attaches
+quiet for the wrong reason (10.395). So `tests/live/c_nm_signals.sh` attaches
 `dbus-monitor` **before** the shim starts -- so the startup silence is observed
 rather than assumed -- then forces a dummy link in and out of the namespace and
 requires the bus to say so.
@@ -13652,19 +13651,19 @@ drives `cargo test` in each Rust adapter workspace and the C port is not one, so
 gates, for the reason `bridge-test` did, and was sabotaged once to watch it exit
 2 rather than trusted.
 
-Open: the writes themselves, behind 10.361's gate, and `tests/live/nm.sh` still
+Open: the writes themselves, behind 10.392's gate, and `tests/live/nm.sh` still
 points at the Rust shim's binary -- 0264's acceptance oracle is not pointed at
 the thing being accepted yet.
 
-## 10.366 The device-to-connection join, and the machine disproving arithmetic
+## 10.397 The device-to-connection join, and the machine disproving arithmetic
 
-The twelfth slice of 0264's port closes the one join 10.362 refused to guess at.
+The twelfth slice of 0264's port closes the one join 10.393 refused to guess at.
 `Connection.Active.Connection` and `Device.AvailableConnections` answer real
 paths now.
 
 ### The machine itself shows why it had to be a lookup
 
-10.362 left `Connection` as `/` because the settings objects are numbered by the
+10.393 left `Connection` as `/` because the settings objects are numbered by the
 CONNECTION store and the active connection by the DEVICE store, so the path
 cannot be computed from the device's number. That was a refusal on principle.
 **This machine turns it into a measurement:**
@@ -13724,7 +13723,7 @@ implicit declaration, so the cost was a minute; the rule `evidence.md` states fo
 mechanical edits applies to a single one, and this is the second time this port
 has paid for skipping it.
 
-## 10.365 The per-dispatch window, and the latency that was never the fetching
+## 10.396 The per-dispatch window, and the latency that was never the fetching
 
 The eleventh slice of 0264's port. A `GetAll` on one device went from **3150 ms
 to 2 ms**. Most of that was not the thing the previous entry blamed.
@@ -13797,14 +13796,14 @@ evidence, from an instrument that could not have produced the answer it claims.
 
 A tick still does real work, so a call that coincides with one waits for it --
 which is why the figures above vary between 2 ms and 108 ms depending on where a
-tick lands. Bounding the tick to one object (10.364) and widening the interval to
+tick lands. Bounding the tick to one object (10.395) and widening the interval to
 five seconds makes that rare rather than absent. Removing it entirely needs
 netcfgd to tell the adapter when something changed, which it does not.
 
-## 10.364 The secret agent registry, and the poll that was starving the loop
+## 10.395 The secret agent registry, and the poll that was starving the loop
 
 The tenth slice of 0264's port serves `AgentManager`. **It also found a defect
-that had made every live measurement since 10.359 suspect**, which is worth more
+that had made every live measurement since 10.390 suspect**, which is worth more
 than the slice.
 
 ### The shim answered nothing, and the cause was its own heartbeat
@@ -13823,7 +13822,7 @@ while looking perfectly alive.
 
 **It was latent from the day the poll was added** and became visible only when
 enough interfaces existed to cross a second. Which means the measurement in
-10.359 -- "no `PropertiesChanged` in eight seconds on a converged machine" --
+10.390 -- "no `PropertiesChanged` in eight seconds on a converged machine" --
 was taken on a loop that may already have been starving, and so was evidence of
 less than it appeared. The detector's own test is what carries that claim now,
 and this is the second time in this port that **a quiet bus turned out to be
@@ -13871,7 +13870,7 @@ The capability mask is remembered and not acted on. Its one flag is "this agent
 can show a VPN hint" and netcfgd has no VPN secrets to ask for, so storing it
 keeps the agent's statement without pretending to honour it.
 
-## 10.363 Access points, keyed on the only identity that holds still
+## 10.394 Access points, keyed on the only identity that holds still
 
 The ninth slice of 0264's port. The radio's `AccessPoints` lists real scan
 results and each is an object a client can read.
@@ -13946,7 +13945,7 @@ which is a change to `nmc_aps_t` and not to the property that reads it -- said
 here so the next person does not take the single store for a decision about
 multi-radio machines.
 
-## 10.362 Active connections and IP configs, numbered by their device
+## 10.393 Active connections and IP configs, numbered by their device
 
 The eighth slice of 0264's port. Three more object families -- `IP4Config`,
 `IP6Config` and `Connection.Active` -- and the device and manager now point at
@@ -14022,7 +14021,7 @@ settings of whatever connection happened to share the number. Joining them means
 one store asking the other, which is a slice rather than an arithmetic
 coincidence.
 
-## 10.361 The write authorization, and the deputy it refuses to be
+## 10.392 The write authorization, and the deputy it refuses to be
 
 The seventh slice of 0264's port, and the one the previous slice held writes
 back for. **The gate is live, tested and already deciding, with nothing behind
@@ -14107,7 +14106,7 @@ reach the bus cannot ask who is calling.** Three existing handlers gained an
 unused parameter, which is the cheapest possible price for making the question
 askable at all.
 
-## 10.360 The settings interfaces, with every write refused on purpose
+## 10.391 The settings interfaces, with every write refused on purpose
 
 The sixth slice of 0264's port. `...Settings` serves at the settings path and a
 `...Settings.Connection` per saved network beneath it -- the holder's two
@@ -14182,9 +14181,9 @@ reference and the value lives at 0600 outside the document on purpose, so
 answering it over this bus would undo the whole arrangement. That is the
 holder's decision rather than a slice of a port.
 
-## 10.359 The signal mechanism, and why a quiet bus proved nothing
+## 10.390 The signal mechanism, and why a quiet bus proved nothing
 
-The fifth slice of 0264's port, and the one 10.356 said would have to carry the
+The fifth slice of 0264's port, and the one 10.387 said would have to carry the
 cache: `PropertiesChanged` is emitted when a property moves, NM's own signals
 are declared, and the interface model gained a signal member.
 
@@ -14256,7 +14255,7 @@ each a socket round trip, which is the figure `state.h` records as wrong for a
 tray and right for being correct first. A notification path from netcfgd is the
 thing that would retire it.
 
-## 10.358 One subtype per device, because libnm reads the document to classify
+## 10.389 One subtype per device, because libnm reads the document to classify
 
 The fourth slice of 0264's port. All eight device subtype interfaces are
 served, and **each device gets exactly one**:
@@ -14321,7 +14320,7 @@ with no client the facts come back empty, so an empty kind with no radio is
 `AccessPoints`, `Slaves`, `Parent` and `PublicKey` answer empty or `/` -- each
 is a family of objects or a kernel relationship the client does not carry yet.
 
-## 10.357 Devices on the bus, and a wifi card reported as ethernet
+## 10.388 Devices on the bus, and a wifi card reported as ethernet
 
 The third slice of 0264's port. **Ten devices from the running daemon appear as
 NetworkManager objects**, `busctl tree` walks to each, and a path for a device
@@ -14407,7 +14406,7 @@ interfaces -- `.Wireless` with its two signals, `.Wired`, `.Bridge` -- are not
 served yet, so a client sees a device of the right type with none of its
 type-specific properties.
 
-## 10.356 The adapter's client was already written, and the manager is on the bus
+## 10.387 The adapter's client was already written, and the manager is on the bus
 
 The second slice of 0264's port. **`client.rs` has no counterpart to write**:
 `client/libncfg_client.a` and `client/ncfg_client.h` are the daemon's own
@@ -14468,7 +14467,7 @@ Devices, active connections and the primary connection answer empty. They need
 the object tree, which is `device.rs` and `active.rs`, and an empty list is
 what "none" looks like to libnm rather than a refusal.
 
-## 10.355 One sentence twice, from two different refusals
+## 10.386 One sentence twice, from two different refusals
 
 Measured at the start of 2026-10-02 and nearly lost with the session that found
 it: `NCFG_LOG=note ncfg status` emits "the nftables dump was not answered"
@@ -14479,22 +14478,22 @@ claimed both outcomes: "reports no NAT installed and no conflicting table".
 
 Each now names which dump it was. Two failures are two facts, and a line that
 cannot be told from the one above it reads as a log repeating itself rather
-than a second request refused -- the resolv.conf shape from 10.348, a second
+than a second request refused -- the resolv.conf shape from 10.379, a second
 time in a day, which is what makes it worth a rule rather than a fix: **when a
 helper logs, the message belongs to the CALLER's question, not the helper's
 mechanism.** The helper knew it had failed; only the caller knew what had been
 asked.
 
 **And the noise this was found inside has already gone**, by a change made for
-another reason. These are `NOTE`, and 10.347 set the client's floor to
+another reason. These are `NOTE`, and 10.378 set the client's floor to
 `WARNING` -- so an unprivileged `ncfg status`, which led with four alarming
 `!` lines about `EPERM`, now leads with its output. That was the intended
 effect of the floor and this is the first evidence of it on a real invocation.
 
-## 10.354 The NM adapter's C port: the dispatcher, and one interface on it
+## 10.385 The NM adapter's C port: the dispatcher, and one interface on it
 
 Instructed by the copyright holder, 2026-10-02: port the adapter to C over
-`libdbus-1`, which is the answer 0264 had already chosen and 10.353 found
+`libdbus-1`, which is the answer 0264 had already chosen and 10.384 found
 unblocked. **What exists is the foundation and one interface, proven on a
 bus.** The Rust goes on shipping; nothing is switched over.
 
@@ -14580,13 +14579,13 @@ on its interface with no authorization: any local process can call
 function here. `save`'s `# Errors` section contradicts its body. The policy
 gate's blind spot was already corrected.
 
-## 10.353 Nothing has to stay Rust, and the condition for that was met
+## 10.384 Nothing has to stay Rust, and the condition for that was met
 
 The copyright holder, 2026-10-02: nothing needs to stay Rust, they never said
 it did, and carrying a Rust dependency for a project that benefits from C and
 the system libraries looks counterproductive.
 
-**They are right and this document was wrong.** 10.294 said
+**They are right and this document was wrong.** 10.325 said
 "`adapter/netcfgd-nm` is Rust and stays Rust" and cited 0264 for it. 0264 says
 the opposite of "stays": the answer is **link `libdbus-1`**, and "not yet" --
 with "Nothing in this record is authority to write the module" in as many
@@ -14625,7 +14624,7 @@ explicit that it is not authority to write it. What this entry does is remove
 the two reasons it was not being asked about: a record that said "stays" when
 it meant "not yet", and a schedule whose condition had quietly been satisfied.
 
-## 10.352 Extracting `netcfgd-modem-at-proposal` so it can be deleted
+## 10.383 Extracting `netcfgd-modem-at-proposal` so it can be deleted
 
 The proposal tree is **not a git repository** -- no `.git`, not a submodule,
 referenced from nothing -- so deleting it is unrecoverable and the bar for this
@@ -14677,7 +14676,7 @@ numbers sitting in one tree invite the wrong one to be copied.
                                               termios; 0208 paid for the better
                                               one
     `config = "reported"`                     the shipped design takes a lease
-    connect/disconnect/stop, `-d`             deliberately diverged, 10.351
+    connect/disconnect/stop, `-d`             deliberately diverged, 10.382
 
 **What dies with it.** The decision record's 149 lines of text. Its substance
 is distributed now -- the `usbnet` finding and the no-retry argument in this
@@ -14696,7 +14695,7 @@ would have been wrong four times over, and it would have been given
 confidently**, because each pass had genuinely audited everything it had
 looked at.
 
-## 10.351 The modem proposal landed as code and never as a document
+## 10.382 The modem proposal landed as code and never as a document
 
 Asked whether everything from `netcfgd-modem-at-proposal` had been folded in.
 It had not, and the split is clean: **the code and the measurements are here,
@@ -14753,9 +14752,9 @@ finding under a new number, since records are not edited once accepted and 0123
 is gone; and whether "met hardware" is the right phrase at all for a helper
 that has exchanged AT commands with a real modem and never carried a packet.
 
-## 10.350 A reason that asserted nothing had changed
+## 10.381 A reason that asserted nothing had changed
 
-Found by watching the applied-action logging of 10.347 on the real daemon, which
+Found by watching the applied-action logging of 10.378 on the real daemon, which
 is what that logging is for. One search domain added to
 `/etc/netcfgd/conf.d/50-dns.conf` produced:
 
@@ -14805,11 +14804,11 @@ manual reproduction that nothing re-runs. Understanding
 small piece of work, and it is the thing still owed here.
 
 **The demonstration was worth more than the thing it demonstrated.** It was run
-to witness the 10.347 logging on real hardware, since a converged machine logs
+to witness the 10.378 logging on real hardware, since a converged machine logs
 nothing and absence looks identical to a broken build. It witnessed that, and
 the first line it produced was a defect nobody was looking for.
 
-## 10.349 fuzznet is overhauling logging, and this work is provisional
+## 10.380 fuzznet is overhauling logging, and this work is provisional
 
 Reported by the copyright holder, 2026-10-01: **fuzznet is now overhauling a
 harmonized log system to cover all of these cases directly.**
@@ -14818,13 +14817,13 @@ Their statement, not a measurement taken here, and recorded in their voice
 because netcfgd cannot see that tree's plans. What follows is this project's
 reading of it and is marked as such.
 
-It bears on everything in 10.345 through 10.348, which is why it is written
+It bears on everything in 10.376 through 10.379, which is why it is written
 down beside them rather than left in conversation. Those entries settled, for
 netcfgd alone: where subtool output goes, which severity a roam is, how a
 subtool's verbosity is reached, what an applied action looks like on the log,
 and how a recurrence is told from a repeat. Every one of those is a question a
 harmonized system would answer once for every project that adopts it -- and
-10.348 has already found this tree deferring to a sibling on exactly this axis,
+10.379 has already found this tree deferring to a sibling on exactly this axis,
 since the severity labels are flog's by assertion.
 
 **So the netcfgd-local decisions above are provisional**, and the cost of
@@ -14839,13 +14838,13 @@ the code: a declarative reconciler needs its decisions and its actions on the
 same timeline as the tools it drives, the interface belongs in the subsystem
 path so one link can be selected, and a converged pass must say nothing at all.
 
-## 10.347 The daemon was the quietest thing in its own log
+## 10.378 The daemon was the quietest thing in its own log
 
 The holder, 2026-10-01: the logging is the blocking feature, and it is poorly
 designed -- or incomplete. Measured, it is incomplete, and the earlier half of
-that diagnosis in 10.345 was wrong in a way worth keeping.
+that diagnosis in 10.376 was wrong in a way worth keeping.
 
-**`journalctl -u netcfgd` already carries everything.** 10.345's table said
+**`journalctl -u netcfgd` already carries everything.** 10.376's table said
 wpa_supplicant was on a separate timeline under its own tag; it is under its
 own tag and under the unit, because it runs in netcfgd's control group. One
 query gets the lot. There is no fragmentation to fix and the claim should not
@@ -14910,7 +14909,7 @@ operation flagged as a problem. And the resolv.conf warning repeats identically
 with no new information. Both are severity and de-duplication decisions rather
 than missing records, which is a different piece of work from this one.
 
-## 10.345 The control exchange was on no log at all
+## 10.376 The control exchange was on no log at all
 
 The holder's question, 2026-10-01: can netcfgd log everything, including a
 subtool's output when configured to, rather than needing a logging script
@@ -14929,12 +14928,12 @@ narrower and worse: **`backend/supplicant/client.c` held no logging
 whatsoever** -- zero `ncfg_log` calls in the module that owns every control
 exchange. netcfgd sends `SELECT_NETWORK`, which disables every other network
 on the radio, and nothing anywhere recorded that it had been sent. That is
-the whole of why 10.337 needed `tool/capture-supplicant.sh`: the request that
+the whole of why 10.368 needed `tool/capture-supplicant.sh`: the request that
 caused the fault was the one thing not written down.
 
 **The facility was already there and already cites the symptom.**
 `ncfg_log_aboutf` exists to put a link's supplicant, its DHCP client and the
-daemon's passes on one timeline, and its own comment names 10.307 as the
+daemon's passes on one timeline, and its own comment names 10.338 as the
 afternoon that wanted one. Twelve subsystems use it. The wire was the one
 thing not on it.
 
@@ -14974,7 +14973,7 @@ supplicant should write a file at all is a design question about where subtool
 output belongs, and it is the holder's; the measurement is here so it can be
 answered once.
 
-## 10.346 Two more measurements that could not discriminate
+## 10.377 Two more measurements that could not discriminate
 
 **`supplicant_client_test`'s stderr sweep was asserting about an empty file.**
 It checks that nothing this module writes to stderr carries the canary secret,
@@ -14998,7 +14997,7 @@ at all -- so a red `make check` here had verified nothing about the change in
 front of it, and the C suites had to be run directly. A gate that stops early
 has not checked what comes after it.
 
-## 10.342 What this machine would actually replicate
+## 10.373 What this machine would actually replicate
 
 The walker and the encoder both existed and nothing joined them, so the
 question the whole chain was built to answer had never been asked of a
@@ -15023,7 +15022,7 @@ is not is not an accident.
 records and withholding four is a different thing from one producing nine and
 withholding forty, and a single number cannot tell them apart.
 
-## 10.343 A written passphrase travelled, because the refusal lived in the compiler
+## 10.374 A written passphrase travelled, because the refusal lived in the compiler
 
 `scope.c` gives `wifi.psk` a wire number and states the ground in bold: "a
 credential travels as a reference and never as a value", because
@@ -15064,10 +15063,10 @@ and broken the machine.
 `record_emit.c` guards the index with `<`, so adding a reason would have kept
 compiling, kept passing, and silently counted the new one as nothing.
 
-## 10.344 A proof that could not have failed, offered for the wrong tree
+## 10.375 A proof that could not have failed, offered for the wrong tree
 
 **`bridge/` was diagnosed as missing header dependency tracking, and it is
-not missing it -- it does not need it.** `c/` had the gap (10.328) and the
+not missing it -- it does not need it.** `c/` had the gap (10.359) and the
 inference from one Makefile to its sibling was wrong. Every target in
 `bridge/Makefile` lists `fuzznet` as a prerequisite, `fuzznet` is `.PHONY`, so
 every target relinks from source on every invocation and a stale header cannot
@@ -15079,7 +15078,7 @@ seven -- `gcc` overwrites a single `-MF` file per translation unit, so it
 recorded whichever compiled last. Reverted; only the `clean` message, which
 was short by one test independently, was kept.
 
-## 10.341 The field test: it joined on its own, and the fixture held
+## 10.372 The field test: it joined on its own, and the fixture held
 
 The holder took the machine to the site with the enterprise network, 2026-10-01,
 and ran the capture after the radio had already joined. Both halves of that are
@@ -15093,7 +15092,7 @@ results.
 
 **Neither is `[DISABLED]`.** OpenPC.se carries empty flags -- enabled, not
 current. Five days earlier the same list read `EMP-XYLEM [DISABLED]` and
-`OpenPC.se [CURRENT]`, which is 10.337's whole subject.
+`OpenPC.se [CURRENT]`, which is 10.368's whole subject.
 
 So: the pass re-enabled EMP-XYLEM, and with it enabled **the radio joined it
 with nobody asking**, at a site where the other network is out of range. That
@@ -15108,7 +15107,7 @@ own.
 
 ### The EAP sequence, checked against an authentication it was not derived from
 
-10.335 took the exchange from eleven authentications over thirteen days, all at
+10.366 took the exchange from eleven authentications over thirteen days, all at
 one place against one access point. The journal from the site carries a
 twelfth, on a different access point at 5660 MHz and Wi-Fi 6 rather than 5
 GHz Wi-Fi 5, and it matches line for line:
@@ -15139,7 +15138,7 @@ take as a defect.
 ### What was not captured, and will not be now
 
 The listener started after the join, so the capture's `events` file is empty
-again -- the same lesson as 10.334, which the journal covers for a join that
+again -- the same lesson as 10.365, which the journal covers for a join that
 has already happened and cannot cover for one that has not. **A failed
 enterprise authentication is still uncaptured**, and this was the last site
 visit before the machine moves to one with no radio.
@@ -15149,7 +15148,7 @@ So netcfgd will go on being unable to say why an enterprise join failed, and
 access point are in the same room again. Recorded as the gap it is rather than
 closed with invented events.
 
-## 10.340 Six dhcpcd processes that are one, and the verdict that said otherwise
+## 10.371 Six dhcpcd processes that are one, and the verdict that said otherwise
 
 **There is no leak.** Reading the journal after an install, a session flagged
 six dhcpcd processes in netcfgd's control group as accumulation across
@@ -15231,13 +15230,13 @@ what should have happened.
 
 `build-and-commit.md` names this and today has supplied three instances: a
 Rust adapter answered from `target/debug` while `nm.sh` tested a stale one
-(10.336), and this twice. The rule is not subtle and the trap is not either;
+(10.367), and this twice. The rule is not subtle and the trap is not either;
 what makes it recur is that the stale run usually looks like the answer you
 expected.
 
-## 10.339 The reconcile half, the answer taken, and what it costs `wifi connect`
+## 10.370 The reconcile half, the answer taken, and what it costs `wifi connect`
 
-10.337 named four answers and said the choice was the holder's. **The holder,
+10.368 named four answers and said the choice was the holder's. **The holder,
 2026-10-01: do the reconcile half.** This is answer (c) -- *re-enable what
 `autoconnect` names, leave the current association alone* -- with the reasoning
 for taking it and the one thing it costs.
@@ -15262,7 +15261,7 @@ for taking it and the one thing it costs.
 empty list; it now also refutes when a network the document wants joined
 carries `[DISABLED]`. Refuting the record is what `plan/wifi.c` acts on, so
 this is an ordinary `wifi.set_profiles` action: `on_drift` governs it, a
-`report` interface says so and changes nothing, 10.330's log line and the drift
+`report` interface says so and changes nothing, 10.361's log line and the drift
 hook cover it, and a confirm window can revert it.
 
 **And it converges, which was the question to settle before building it.**
@@ -15340,9 +15339,9 @@ because the shell ate the `&&` in the anchor I was substituting on. The
 a check that cannot fail are indistinguishable from the output, which is why
 the assert is not optional.
 
-## 10.338 Seeing a network left disabled, and three ways a test hid a crash
+## 10.369 Seeing a network left disabled, and three ways a test hid a crash
 
-10.337 traced why EMP-XYLEM is `[DISABLED]`: `SELECT_NETWORK` disables every
+10.368 traced why EMP-XYLEM is `[DISABLED]`: `SELECT_NETWORK` disables every
 other network, nothing re-enables them, and nothing looked. This is the looking
 half. Whether a reconcile should undo it is still the holder's, and nothing
 here changes behaviour.
@@ -15367,14 +15366,14 @@ is the comparison instrument rather than something to edit. So the check asks
 the supplicant where it already has the document and the observation to hand.
 
 **Silent where it cannot ask**, which is the ordinary case for a person: the
-control socket is root-owned and 0770, and 10.333 is what happens when that is
+control socket is root-owned and 0770, and 10.364 is what happens when that is
 reported as a fact about the machine. No connection is no sentence. Confirmed
 on the reporting machine -- an unprivileged `ncfg status` says nothing.
 
 **And confirmed in the other direction, on the machine that reported the
 symptom.** The holder, 2026-10-01, running it as root: *"ran it, EMP-XYLEM
 shows up."* So the note fires against a real wpa_supplicant, on the real
-network list, naming the real network -- the whole of 10.337's trace closed
+network list, naming the real network -- the whole of 10.368's trace closed
 end to end on hardware, hours before that hardware goes.
 
 That is worth distinguishing from the live checks above, which drive
@@ -15432,7 +15431,7 @@ The four checks now: the network is named, what joins it is named, exactly one
 is named, and **status itself exited 0**. The last is the one that found the
 other three.
 
-## 10.337 Why EMP-XYLEM is disabled: `SELECT_NETWORK`, and nothing that looks
+## 10.368 Why EMP-XYLEM is disabled: `SELECT_NETWORK`, and nothing that looks
 
 Answered, and it is not the access point's doing. **One deliberate join takes
 every other network out of autoconnect for good**, and nothing anywhere
@@ -15474,7 +15473,7 @@ network this machine should join when it is in range. The supplicant says
 `[DISABLED]`. Both have said so since some join of OpenPC.se, and no pass
 between them compares the two.
 
-**5. And 10.330's warning cannot fire**, which is the part worth noticing. That
+**5. And 10.361's warning cannot fire**, which is the part worth noticing. That
 entry made a drift netcfgd will not act on say so out loud -- and this is a
 drift netcfgd never *sees*. A reconciler's blind spot is upstream of its
 reporting, and nothing about the reporting fix reaches this.
@@ -15498,7 +15497,7 @@ The data is already parsed. `emptied()` frees flags it has in hand, so reading
 them costs nothing new:
 
 - **Observe it.** An entry whose flags carry `[DISABLED]` where the document
-  says `autoconnect`, reported as drift. That alone makes 10.330's warning
+  says `autoconnect`, reported as drift. That alone makes 10.361's warning
   speak, which turns a silent divergence into a sentence.
 - **Reconcile it.** Send `ENABLE_NETWORK` for those, which is the same shape as
   every other reconcile in this tree: observed does not match desired, so put
@@ -15523,7 +15522,7 @@ a real supplicant would give it, *"the state no test could produce before"*.
 Whatever is decided, it is testable without a radio -- which matters, because
 the radio goes tomorrow.
 
-## 10.336 A hard-coded metric that went stale, and the decision it was about
+## 10.367 A hard-coded metric that went stale, and the decision it was about
 
 `nm.sh` asserted `metric = 3924` from `autoconnect-priority 42` and had been
 failing since decision 0207. **The test was wrong and the code was right.**
@@ -15566,10 +15565,10 @@ failed, and the run printed no summary at all. `build-and-commit.md` names that
 one: never conclude a test passes or fails from a binary the build step did not
 rebuild.
 
-## 10.335 The EAP exchange, from the capture -- and a fixture that emitted into the void
+## 10.366 The EAP exchange, from the capture -- and a fixture that emitted into the void
 
 `fake_supplicant.py` speaks one 802.1X authentication now, taken from the
-journal in 10.334 rather than from memory. netcfgd has a `dot1x` path, and
+journal in 10.365 rather than from memory. netcfgd has a `dot1x` path, and
 until this every test of it drove a station that authenticated by never
 trying.
 
@@ -15652,7 +15651,7 @@ NetworkManager. It is the only one.
 **And `nm.sh` failed a check that was not this.** *"NM's autoconnect-priority
 becomes a network metric"*, expected 1, got 0 -- verified pre-existing by
 stashing all three changed files and running it at HEAD, where it failed
-identically. Fixed in 10.336, where it turns out to have been the test.
+identically. Fixed in 10.367, where it turns out to have been the test.
 
 ### What netcfgd does with these events: nothing, and what that costs
 
@@ -15668,13 +15667,13 @@ can say a join failed and cannot say it failed to AUTHENTICATE -- a wrong
 password, an expired certificate, a rejected identity. On an enterprise network
 that is the most common failure and the one where the sentence matters most.
 
-**Not fixed here, and the reason is 10.334's.** The failure events have never
+**Not fixed here, and the reason is 10.365's.** The failure events have never
 been captured, so a reader written for them would be written against invented
 text. What the capture holds is the success path; the failure path needs a real
 authentication to fail, which needs the radio and the access point -- and there
 are hours of that left rather than days.
 
-## 10.334 Status 53 on real hardware, from the journal rather than a window
+## 10.365 Status 53 on real hardware, from the journal rather than a window
 
 The live capture attached for three minutes and recorded **nothing**: a station
 that is associated and idle emits no control events, so a capture window only
@@ -15737,7 +15736,7 @@ discovers a monitor whose socket is gone.
 `client.c` already sends `DETACH` on free and its comment names that exact
 journal line. What leaves one behind is a netcfgd that exits without running
 the free -- which a restart does. **Not a defect**, and said so rather than
-counted as one: a proxy was reported as a defect once already today (10.333)
+counted as one: a proxy was reported as a defect once already today (10.364)
 and once is the budget.
 
 ### The event vocabulary a real supplicant used, which the fake should answer to
@@ -15775,7 +15774,7 @@ It lives in a session scratch directory and dies with it, which for that
 content is the right end. What is above is the shape, which is what the fake
 needs.
 
-## 10.333 A retraction, and the one thing it left standing
+## 10.364 A retraction, and the one thing it left standing
 
 **There was no read-path defect.** It was reported here as one, on a machine
 the holder was using, and it was wrong.
@@ -15876,11 +15875,11 @@ try it again until something re-enables it, which is the likeliest reading of
 the holder's "I had to fiddle around for it to switch networks". It is a real
 lead, it is radio-dependent, and this machine has two days of radio left.
 
-## 10.332 10.307's own shape, driven -- and what two days of radio are worth
+## 10.363 10.338's own shape, driven -- and what two days of radio are worth
 
 `tests/live/network_arrives.sh`. A `network` block written into `conf.d/`
 while the daemon runs, on a radio, through a supplicant netcfgd started. That
-is what 10.307 actually held, and what `config_arrives.sh` deliberately does
+is what 10.338 actually held, and what `config_arrives.sh` deliberately does
 not: dummy links and ordinary keys leave two layers untested, either of which
 could swallow the work.
 
@@ -15892,7 +15891,7 @@ wrong for this one.
 
 A network added to a running daemon reaches the supplicant, the station stays
 on the network it was on while that happens, and netcfgd follows it when it
-moves. 10.307 remains unexplained -- and the path now has a witness that will
+moves. 10.338 remains unexplained -- and the path now has a witness that will
 catch a regression, which it did not have when that entry was written.
 
 ### Which check gates the arrival, measured because the obvious answer was wrong
@@ -15959,7 +15958,7 @@ here, in that order.
     and it never warned that the machine does not match
     nor that the configuration stopped compiling
 
-## 10.331 The 10.307 reproduction, what it refuted, and what it found
+## 10.362 The 10.338 reproduction, what it refuted, and what it found
 
 `tests/live/config_arrives.sh`. Write a file, touch nothing else, does the
 machine change. It calls `apply` nowhere, and a future edit adding one to make
@@ -15967,7 +15966,7 @@ it pass has removed the test rather than fixed it.
 
 **No live test covered the path.** Thirty scripts write configuration while a
 daemon runs; every one of them then calls `ncfg apply` or starts the daemon
-with `--no-apply-on-start` and drives it by hand. The one question 10.307 asks
+with `--no-apply-on-start` and drives it by hand. The one question 10.338 asks
 had no witness at all, which is why the theories about it could not be settled
 by reading.
 
@@ -15995,7 +15994,7 @@ never arrived either. Two failing checks, one cause, and the cause was the test.
 `ncfg show` said so immediately; running the compiler by hand on the fixture
 was faster than reading anything.
 
-### What it found, which is a real defect and not 10.307
+### What it found, which is a real defect and not 10.338
 
 **A configuration the daemon cannot compile is silent.** `reload()` announces
 `NCFG_PROTO_EVENT_RELOADED` with `ok = 0` and the diagnostics -- to whoever is
@@ -16006,7 +16005,7 @@ indistinguishable from a write nobody noticed.
 Measured: a deliberately broken drop-in, a machine that stayed exactly as it
 was, and a journal holding two lines, neither about it.
 
-**The same defect as 10.330's drift, one layer up, found the same way.** An
+**The same defect as 10.361's drift, one layer up, found the same way.** An
 event to a listener is not a record, and the listener is usually nobody. That
 is twice in one day from one root, which makes it a shape worth carrying rather
 than two fixes: **netcfgd announces to clients and forgets to write it down.**
@@ -16022,7 +16021,7 @@ agreeing for `NCFG_LOG_MAX` bytes are said once. That is the trade a fixed
 buffer buys and it fails in the safe direction: the first is always said, and a
 second costs a line rather than the fact.
 
-### 10.307 is still not explained
+### 10.338 is still not explained
 
 None of this is that afternoon. Its drop-in compiled -- `config_put` answered
 successfully at 12:55:17.853, which is how the file came to exist at all -- so
@@ -16030,7 +16029,7 @@ the silent-compile-failure path was not the one it took. What this closes is
 another way to arrive at the same fifty-two minutes, and it closes the path
 that had no witness.
 
-What remains untested is the shape 10.307 actually had: a `network` block added
+What remains untested is the shape 10.338 actually had: a `network` block added
 to a running daemon, where the action lands on a radio. That needs
 `fake_supplicant.py`, which `switch_network.sh` already drives, and is the next
 thing to write.
@@ -16039,7 +16038,7 @@ thing to write.
 
     the daemon converged on what it was started with
     a value changed in netcfgd.conf reaches the machine, with no apply
-    a drop-in under conf.d reaches it too                  the 10.307 shape
+    a drop-in under conf.d reaches it too                  the 10.338 shape
     an interface that did not exist is created
     a configuration that will not compile is said out loud the finding
     naming the file and the line
@@ -16053,7 +16052,7 @@ Sabotaged three ways, each caught by the checks meant for it: the announcement
 removed (four red), the de-duplication removed (one), and the recovery line
 removed (one).
 
-## 10.330 "The hook is the telling", and the operators who had not written one
+## 10.361 "The hook is the telling", and the operators who had not written one
 
 A drift netcfgd can see and will not act on is now a line in its own log,
 once, when it appears. Before this it was a `/run` marker, an event to whoever
@@ -16110,12 +16109,12 @@ the drift text in `/run`, which is why the sentence belongs there and not in
 the filter. Both files now say so, so the next reader does not "fix" the quiet
 one.
 
-### It does not close 10.307, and saying so is the point
+### It does not close 10.338, and saying so is the point
 
 That machine's radio is under the default policy, which is `reconcile`, so
 none of the above would have fired for it. **The fifty-two minutes remain
 unexplained**, and this entry is not the explanation -- it closes the class
-that 10.307 is an instance of the shape of, not 10.307's own case.
+that 10.338 is an instance of the shape of, not 10.338's own case.
 
 Keeping the two apart is the rule that entry already paid for twice: a cause
 that explains the symptom is not thereby the cause, and a comfortable
@@ -16125,7 +16124,7 @@ no explanation keeps somebody looking.
 What is now true is narrower and checkable: **a machine that does not match its
 configuration and is not going to be corrected says so in the journal, whether
 or not anybody wrote a hook.** What netcfgd should do about newly-written
-configuration remains the holder's, as 10.307 records.
+configuration remains the holder's, as 10.338 records.
 
 ### What the drift checks say
 
@@ -16141,10 +16140,10 @@ not notice that nothing read it. Sabotaged both ways -- the flag inverted for a
 refusal and for `report`, each caught by its own assertion; and the
 announcement removed, which fails four live checks and no unit ones.
 
-## 10.329 The instance folded into the subject, and a sabotage that refused to fail
+## 10.360 The instance folded into the subject, and a sabotage that refused to fail
 
 **The copyright holder, 2026-09-29: fold the instance into the subject.**
-10.328 measured what the first version cost -- `wlan0`'s MTU and `eth0`'s MTU
+10.359 measured what the first version cost -- `wlan0`'s MTU and `eth0`'s MTU
 were one cell, the second write won, and every host in the estate agreed about
 the wrong answer. This is that decision implemented.
 
@@ -16154,7 +16153,7 @@ those three, and the label is what separates two interfaces.
 
 ### The root is the block's and the stream is the key's
 
-That is the conflation 10.328 named, and it is gone. The first version mapped a
+That is the conflation 10.359 named, and it is gone. The first version mapped a
 key's SCOPE onto a subject one-to-one, which asked "how far does this travel"
 and "what is this about" as one question.
 
@@ -16216,7 +16215,7 @@ gates.
 A network's label is an SSID, and an SSID is 32 arbitrary bytes rather than a C
 string. `ncfg_walk_item_t` gained `label_len`, because handing the encoder a
 pointer alone would shorten a network whose name holds a NUL -- and two of
-those would share a cell, which is 10.328's fault arriving by a second route.
+those would share a cell, which is 10.359's fault arriving by a second route.
 
 ### What the subject checks say
 
@@ -16239,11 +16238,11 @@ Sabotaged four ways. Three were caught by the check meant for them: the label
 dropped from the transcript, the block's name dropped, and the root-against-
 block check removed. The fourth is the section above.
 
-## 10.328 The document walker, and the cell two interfaces share
+## 10.359 The document walker, and the cell two interfaces share
 
 `compile/walk.c`. Every key in a document, its value as written, and the
 verdict on whether it may travel -- the producer for
-`bridge/record_encode.h`, and the reader half of 10.324's mirror.
+`bridge/record_encode.h`, and the reader half of 10.355's mirror.
 
 ### It walks text, and slices rather than re-spells
 
@@ -16276,12 +16275,12 @@ operator why a value did not replicate wants the answer still true tomorrow:
 second would invite somebody to close a registry gap that changes nothing for
 the value in front of them.
 
-### The refusal 10.327 could not place
+### The refusal 10.358 could not place
 
 `dot1x.ca_cert = "/etc/ssl/certs/ca.pem"` is withheld as PRIVILEGED;
 `dot1x.client_cert = "@secret:client"` is not. That is the distinction
 `record_encode.c` cannot make -- it takes bytes and has no document model --
-and here the written value is in hand. The condition named in 10.327 is met,
+and here the written value is in hand. The condition named in 10.358 is met,
 so the three cert keys can be numbered when somebody wants them.
 
 The match is on the leaf name and is deliberately wider than the three sites
@@ -16360,7 +16359,7 @@ cannot express that at all, and neither can this entry without deciding what
 the scopes mean.
 
 **Settled the same day: fold the instance into the subject** -- the first
-option, taken by the copyright holder. 10.329 is the implementation, including
+option, taken by the copyright holder. 10.360 is the implementation, including
 what the cost above turned out to be in practice and the separation of root
 from scope that came with it.
 
@@ -16371,7 +16370,7 @@ from scope that came with it.
     the label separates two interfaces under one number     the finding, pinned
     a hook is reported rather than passed over
     a host-private key is withheld as one
-    a path credential is withheld, `@secret:` is not        the 10.327 refusal
+    a path credential is withheld, `@secret:` is not        the 10.358 refusal
     an unknown block is one report, not its keys
     a visit that stops stops the walk
     a document that does not parse visits nothing
@@ -16383,7 +16382,7 @@ refusal removed, hooks skipped, the list-span fix reverted, and every slice
 shortened by one byte -- which the round trip catches and mere re-parsing
 would not, a truncated value being a shorter value that still parses.
 
-## 10.327 The record encoder, and the one refusal it turned out not to own
+## 10.358 The record encoder, and the one refusal it turned out not to own
 
 `bridge/record_encode.c`. Given a key, its value and who the statement is
 about, it fills in what `fzn_record_sign` needs -- and refuses the cases that
@@ -16400,7 +16399,7 @@ program section 3 keeps small stays small.
 
 ### The body is the value as the language spells it
 
-Not a second encoding. 10.324 settled the mirror: netcfgd's format is what
+Not a second encoding. 10.355 settled the mirror: netcfgd's format is what
 records are rendered into and read back from, so a body carrying the
 language's own text round-trips through `render.c` and `parse.c`, which are
 already disciplined against each other.
@@ -16456,7 +16455,7 @@ it is worth one: reading success as failure refuses a good hash, which is loud,
 while reading failure as success hands the caller whatever was on the stack.
 It failed in the loud direction and five checks went red at once.
 
-### The refusal it does not own, correcting 10.325
+### The refusal it does not own, correcting 10.356
 
 That entry said a record encoder refusing `NCFG_CERT_SOURCE_PATH` is what would
 let `dot1x.ca_cert`, `dot1x.client_cert` and `dot1x.private_key` be numbered.
@@ -16511,9 +16510,9 @@ afford that, deciding what leaves the machine, so `bridge-test` is in
 `PORTABLE_GATES` -- about eight seconds incrementally, and one fuzznet build
 the first time on a clean tree.
 
-## 10.326 A key is a path, and the first registry named six things that were not keys
+## 10.357 A key is a path, and the first registry named six things that were not keys
 
-**Written 2026-09-29, correcting 10.325 and the headline pair in 10.322.**
+**Written 2026-09-29, correcting 10.356 and the headline pair in 10.322.**
 
 Asked for the remaining kind ranges, the four unwritten blocks were enumerated
 from `compile/lower_*.c` rather than from memory. That enumeration condemned
@@ -16541,7 +16540,7 @@ addressing is written as `config`, and `address` is a key only of `bluetooth`.
 and `probe` are sub-block heads. Twelve more were real keys registered a level
 too shallow, and two real keys -- `config` and `ipv6_token` -- were missing.
 
-**And 10.322's headline pair was wrong in both halves.** It turned on `prefix`
+**And 10.353's headline pair was wrong in both halves.** It turned on `prefix`
 against `address`; `prefix` is an `advertise` key and `address` is not a key.
 The pair it was reaching for is real and now reads **`interface.advertise.prefix`
 against `interface.config`**: what this link announces to the segment, against
@@ -16595,7 +16594,7 @@ the last moment it was free. The never-reuse rule binds from this commit,
 which is why the correction went in before the four remaining ranges rather
 than after them.
 
-## 10.325 The kind registry, and the gate it half has
+## 10.356 The kind registry, and the gate it half has
 
 `ncfg_kind_of(block, path)` in `compile/scope.c`, kept as a protocol registry
 rather than an enum: explicit numbers, assigned once, never reused, and
@@ -16603,7 +16602,7 @@ rather than an enum: explicit numbers, assigned once, never reused, and
 so it needs no wire number and must not have one.
 
 **A key is identified by its path within the block**, not by its name --
-`mtu`, `advertise.prefix`, `wifi.roam.signal`. 10.326 has why, and what the
+`mtu`, `advertise.prefix`, `wifi.roam.signal`. 10.357 has why, and what the
 flat version cost.
 
 Eighty-nine numbers, grouped by block for a reader and **not computed
@@ -16690,7 +16689,7 @@ registry rather than the registry chase the lowering, so a key that cannot be
 scoped and numbered cannot be lowered at all. That is a real change to
 `compile/` and is not started.
 
-## 10.324 `kind` is a wire number, and a pluggable store is byte-exact
+## 10.355 `kind` is a wire number, and a pluggable store is byte-exact
 
 **The holder, 2026-09-29: fuzznet deals with all replication, get and set, and
 carries a default storage; netcfgd wants a pluggable backend as well, for its
@@ -16743,7 +16742,7 @@ belongs to; the number is the second half and has not been started.
 
 ### A pluggable store must round-trip bytes, which decides the format question
 
-10.314 recorded two readings of "the netifrc-like config files as storage
+10.345 recorded two readings of "the netifrc-like config files as storage
 backend" and declined to pick one. The measurement picks one.
 
     int (*put)(void *ctx, const uint8_t issuer[32], uint32_t stream,
@@ -16802,7 +16801,7 @@ key added to one is under the nose of whoever adds it to the other".
 
 Two hazards it does not remove, both named rather than solved:
 
-**Whose write wins, continuously.** 10.315 asked what happens when local and
+**Whose write wins, continuously.** 10.346 asked what happens when local and
 estate both set a value, as a one-off. A mirror makes it perpetual: an estate
 change and an operator edit can cross. That is the same precedence question and
 it now has a clock in it.
@@ -16829,12 +16828,12 @@ authoritative in the sense the constraint means and not merely in the
 mechanical one. What remains is that an edit may *lose*, to an estate change
 that crosses it -- which is a precedence answer rather than a broken promise.
 
-## 10.323 The scopes are fuzznet's, and netcfgd wrote them anyway
+## 10.354 The scopes are fuzznet's, and netcfgd wrote them anyway
 
 **The holder, 2026-09-29: the scopes are part of fuzznet and general features
 of it.** They are not netcfgd's to define.
 
-**And 10.322 had already argued that, in netcfgd's own words** -- "a scope is a
+**And 10.353 had already argued that, in netcfgd's own words** -- "a scope is a
 cell's subject", "adding a scope is adding a kind of subject, not a mechanism",
 "this should be expressed in fuzznet's terms rather than in a netcfgd enum that
 would need widening every time" -- and then `ncfg_scope_t` was written into
@@ -16878,9 +16877,9 @@ before designing. The remedy for this one is different: re-read what you just
 concluded before implementing against it**, because the conclusion and the
 implementation were minutes apart and still disagreed.
 
-## 10.322 The local/network boundary runs at block level, and four keys cross it
+## 10.353 The local/network boundary runs at block level, and four keys cross it
 
-10.315 called this the bulk of the design. Measured against the language as it
+10.346 called this the bulk of the design. Measured against the language as it
 is, it is smaller than that -- **the boundary follows the block structure the
 document already has**, and the interesting part is a set of four keys that do
 not classify at all.
@@ -16941,7 +16940,7 @@ different on every one. Classifying them either way is wrong: network-wide
 gives every node the same address, local gives the site no way to say what the
 subnet is.
 
-**They are not a boundary question at all. They are 10.316's missing layer
+**They are not a boundary question at all. They are 10.347's missing layer
 arriving in a concrete place.** A site says "this VLAN is 10.78.60.0/22" and a
 host's address is *derived* from that -- statically assigned, drawn from a
 pool, or left to DHCP, which is what this machine already does. netcfgd has no
@@ -16958,7 +16957,7 @@ these** -- host-scoped in two flavours, **replicated and not**, estate-wide,
 and less-than-estate-wide.
 
 Everything above was written against a binary local/network split, which is
-the same error as 10.314: measuring carefully against a model nobody had
+the same error as 10.345: measuring carefully against a model nobody had
 stated. The block-level sort survives, because the rule it uses is about what
 a value describes rather than about how many scopes exist. **The four crossing
 keys do not survive -- they dissolve**, which is the good news.
@@ -17074,9 +17073,9 @@ like the rest: `preference` and `guard` came back from group to the block's
 host default, being this machine's ranking of its own links and its own
 reason for leaving one alone.
 
-## 10.321 The lease term measured, and why it is not one number
+## 10.352 The lease term measured, and why it is not one number
 
-10.319 left the lease term as "a number nobody has measured". Measured, it is
+10.350 left the lease term as "a number nobody has measured". Measured, it is
 not a number at all, and that is the finding rather than a failure to produce
 one.
 
@@ -17178,9 +17177,9 @@ in a number that looks complete.
 The ceiling's value, which is a policy judgement rather than a measurement --
 what this entry supplies is the term it has to dominate.
 
-## 10.320 An order's idempotence is a property of its verb
+## 10.351 An order's idempotence is a property of its verb
 
-**Settled by the copyright holder 2026-09-29**, closing the question 10.319
+**Settled by the copyright holder 2026-09-29**, closing the question 10.350
 left open. An order's idempotence class -- whether it may be leased and retried
 or must stall rather than risk running twice -- is derived from its verb and is
 never a field a caller sets.
@@ -17272,7 +17271,7 @@ table compared against itself is one witness twice.
 The lease term for the idempotent class, still a number nobody has measured --
 it trades a dead taker's stall against a slow taker's double execution.
 
-## 10.319 A data-driven order queue, and where the choice actually lies
+## 10.350 A data-driven order queue, and where the choice actually lies
 
 **The holder, 2026-09-29: plan the order queue so that two readers of one queue
 follow a procedure eliminating multiple takers, with failure mitigation.** A
@@ -17338,7 +17337,7 @@ order rather than from a queue-wide setting somebody picks once.
 
 **And a stall must be loud.** An at-most-once item whose taker is presumed dead
 but unproven is the failure this design accepts; accepting it silently would be
-the same fault as the `[adopt]` all-clear printing as a warning (10.306) with
+the same fault as the `[adopt]` all-clear printing as a warning (10.337) with
 the polarity reversed -- a real condition rendered as nothing.
 
 ### Which is where the relay earns its place
@@ -17358,13 +17357,13 @@ settled. And the term length for a leased take is a number nobody has measured
 -- it trades a dead taker's stall against a slow taker's double execution, and
 it should be chosen against a measurement rather than by taste.
 
-## 10.318 fuzznet names the same gap, and declines it twice
+## 10.349 fuzznet names the same gap, and declines it twice
 
 **The holder, 2026-09-29: fuzznet already has a need for distributed
 consensus-queuing, so it may want generalising until everything can use it --
 and the signed order relay beside it, for when the queuing breaks down.**
 
-That is right, and fuzznet says so in its own words. 10.317 concluded the
+That is right, and fuzznet says so in its own words. 10.348 concluded the
 primitive was absent from netcfgd's side of the fence; it is absent from
 fuzznet's own too, **and fuzznet has already written down where.**
 
@@ -17395,7 +17394,7 @@ every peer independently computes the same answer about who fetches it.
 **Those are the same function with different nouns** -- members and a key, in,
 an agreed ordering of responsibility, out. Placement, relay routing, fetch
 assignment and job queuing are then four consumers of one thing rather than
-four hand-rolled answers, which is the whole of 10.313's instruction not to
+four hand-rolled answers, which is the whole of 10.344's instruction not to
 implement haphazardly.
 
 It also explains why `claim/` does not stretch to it and should not be made
@@ -17485,20 +17484,20 @@ build for whoever fetches next.
 
 Whether the ordering function is rendezvous hashing, a keyed permutation, or
 something fuzznet prefers, is fuzznet's -- netcfgd's part is the requirement
-and the two call sites, not the algorithm. 10.313 is explicit that what gets
+and the two call sites, not the algorithm. 10.344 is explicit that what gets
 signalled is framed as a primitive fuzznet is missing rather than a design
 netcfgd has chosen for it.
 
-## 10.317 No controller, and the one primitive fuzznet does not have
+## 10.348 No controller, and the one primitive fuzznet does not have
 
-**The holder, 2026-09-29, correcting 10.316's suggested resolution:** netcfgd
+**The holder, 2026-09-29, correcting 10.347's suggested resolution:** netcfgd
 is not going to be a single point of failure like UniFi. **Each node marshals
 its own config and is part of site replication and control.** Nodes relay
 orders via each other. Not every command will be known purely via shared data,
 though consensus-queuing should be built from **data plus pseudorandom** as far
 as it will go.
 
-10.316 offered a controller holding the site with leaves holding less. That is
+10.347 offered a controller holding the site with leaves holding less. That is
 withdrawn, and it was the wrong shape for a reason worth keeping: it answered a
 capacity question by centralising, which is the one move this design exists to
 refuse.
@@ -17512,7 +17511,7 @@ refuse.
 >  demand**.
 
 So every node holds the index and participates in replication, and no node
-holds the whole site. That is the objection in 10.316 answered without a
+holds the whole site. That is the objection in 10.347 answered without a
 controller and without netcfgd asking for anything. The shard size is
 deliberately the **privacy control** rather than a performance knob -- a fetch
 reveals interest in a key *range*, so the estate is the anonymity set -- which
@@ -17553,7 +17552,7 @@ library as the first rather than in netcfgd.
 
 ### So this is the signal, and it is netcfgd's to send
 
-Per 10.313 the steering pattern is: meet the limit, measure it, and report it
+Per 10.344 the steering pattern is: meet the limit, measure it, and report it
 as fuzznet's to answer, framed as a primitive rather than a feature request.
 raidcfgd's reply-cap report is the worked example -- they stopped rather than
 write a bridge that could not carry one.
@@ -17565,10 +17564,10 @@ shared data with no round trip and no coordinator. Nodes are not
 interchangeable here, which is exactly why `claim/`'s answer does not extend.
 
 **Not written into fuzznet's tree yet.** That is an edit to another project and
-the local checkout is 145 commits behind its own remote (10.310), so where and
+the local checkout is 145 commits behind its own remote (10.341), so where and
 against what it is written is worth getting right rather than guessing.
 
-## 10.316 Trying the site model for fit, and the one place it does not
+## 10.347 Trying the site model for fit, and the one place it does not
 
 **The holder's experiment, 2026-09-29**: blend the network-wide machinery into
 the local without many special cases. Add site configuration -- not hidden,
@@ -17648,7 +17647,7 @@ netcfgd intends to support -- is a legitimate answer that simply costs
 memory on the smallest device. Which of the two is a question for the holder,
 and the numbers above are what it should be decided on.
 
-## 10.315 Two scopes, both first class, and where that meets the constraints
+## 10.346 Two scopes, both first class, and where that meets the constraints
 
 **Set by the copyright holder 2026-09-29.** Local and network-wide
 configuration are separate use cases and both are valid. Some machines will
@@ -17668,7 +17667,7 @@ is not a feature.
 mechanism is already named.** Anything netcfgd does must trace to a file under
 `/etc/netcfgd/`. Network-wide configuration arriving over the wire does not,
 *unless it is derived into one first*. That is exactly the "custom output
-module" reading of 10.314: the site model is resolved, rendered into
+module" reading of 10.345: the site model is resolved, rendered into
 netcfgd's own configuration language, and from there everything downstream --
 the compiler, the planner, `ncfg plan`, commit-confirm -- is unchanged and
 still reading a file. **Preserving constraint 1 is not a cost of that design,
@@ -17733,7 +17732,7 @@ already knows what two vocabularies for one concept cost.
 scripting" is falsified the moment the answer to "how does a site setting reach
 a host" is a hook the operator writes.
 
-## 10.314 The shared database measured, and the one thing it cannot be
+## 10.345 The shared database measured, and the one thing it cannot be
 
 **Result: fuzznet's database needs nothing new for netcfgd, and the 512-byte
 record body is not the gap it looks like.**
@@ -17846,7 +17845,7 @@ thing -- because the requirement had not been stated yet and I supplied one
 from what netcfgd happens to hold today. **A careful measurement of an assumed
 requirement is not cheaper than a guess, it is a guess with numbers on it.**
 
-## 10.313 netcfgd steers fuzznet, and steering has a shape already
+## 10.344 netcfgd steers fuzznet, and steering has a shape already
 
 **Set by the copyright holder 2026-09-29.** netcfgd's job is to steer fuzznet
 into being three things:
@@ -17924,7 +17923,7 @@ does not exist by design). The correction rate is the finding: **the default
 assumption should be that fuzznet or netcfgd's own records have already
 answered it**, and the first action is the grep rather than the design.
 
-## 10.312 There was no mapping to build, and the half nobody had asked
+## 10.343 There was no mapping to build, and the half nobody had asked
 
 **0128 decided this in August and the daemon has implemented it since.** The
 capability-to-tier mapping I had named as the next design decision does not
@@ -17989,7 +17988,7 @@ program.
 
     make check   green; remote_tiers 5 checks; peek_test 11
 
-## 10.311 The crypto backend was already chosen, one level down
+## 10.342 The crypto backend was already chosen, one level down
 
 0270 has the decision. The measuring is here, and most of it is about a wrong
 inference drawn from correct evidence.
@@ -18064,7 +18063,7 @@ not own; the objects know which of them has an entry point.**
     bridge/netcfgd-remote   969,512 -> 1,236,488 bytes with the crypto linked
     make check              green; peek_test 11 checks
 
-## 10.310 fuzznet is in the tree, linked by a program that admits what it is not
+## 10.341 fuzznet is in the tree, linked by a program that admits what it is not
 
 0269 has the decision. What belongs here is the measuring.
 
@@ -18131,7 +18130,7 @@ to exploit. A tree that gates on size elsewhere should know this program is a
 megabyte before it has opened a socket. Whether that matters is a question for
 when it does something.
 
-## 10.309 The join that was refused and connected anyway
+## 10.340 The join that was refused and connected anyway
 
 `wifi_connect` reported a refusal for a network that was already coming up.
 Reported as *"again I had to fiddle around for it to switch networks"*, three
@@ -18185,9 +18184,9 @@ exactly the same reason one layer along.
 
     make check   green; the sabotage fails one check, the right one
 
-## 10.308 The subsystem is a path
+## 10.339 The subsystem is a path
 
-`[dhcp]` is `[dhcp.wlp0s20f3]` where an interface is in scope. 10.307 asked for
+`[dhcp]` is `[dhcp.wlp0s20f3]` where an interface is in scope. 10.338 asked for
 it: one machine's log has to read as one timeline and still filter down to a
 link, and a flat subsystem makes `grep '\[dhcp\]'` possible and "one link"
 impossible.
@@ -18276,7 +18275,7 @@ daemon's own path.
                  3 of them including the end-to-end one
     binary       1145960 -> 1146176 (+216), inside the size gate's 3% tolerance
 
-## 10.307 Fifty-two minutes of nothing, and what a timeline has to carry
+## 10.338 Fifty-two minutes of nothing, and what a timeline has to carry
 
 An afternoon's troubleshooting, kept because the holder's direction for fuzznet
 and a distributed log arrived in the middle of it and this is the worked
@@ -18370,7 +18369,7 @@ Nothing is built and nothing is proposed. Recorded so the requirement has its
 evidence attached, per *Describing a thing thoroughly is a way of proposing
 it*: the cost and the ownership are the holder's, and this is the cost.
 
-## 10.306 The warning that is also what a real fault looks like
+## 10.337 The warning that is also what a real fault looks like
 
 netcfgd reads its own control group at startup now and says what it inherited.
 0267 has the decision; this is what the measuring turned up.
@@ -18530,7 +18529,7 @@ are the runs least likely to prompt one.
              failing with `is_claimed` stubbed out
     check    all gates green; module-order 50 attributed headers
 
-## 10.305 The GUI's live probes, and the banner the daemon could not raise
+## 10.336 The GUI's live probes, and the banner the daemon could not raise
 
 `tests/live/gui_wifi.sh` runs. It had not, and the reason was four characters
 of shell rather than anything about the port:
@@ -18573,7 +18572,7 @@ not missing from the banner. It was missing from the plan.
 **Two readings of `/run` and `/proc`, and the code said they were one.**
 `daemon_world.c` layers `NCFG_RUN_ROOT` and `NCFG_PROC` over the machine's
 defaults, for the reason `contention_roots_from_environment` records -- without
-it `displace.sh` could never make the case fire (10.266). The desk that answers
+it `displace.sh` could never make the case fire (10.297). The desk that answers
 requests called `ncfg_contention_machine` itself:
 
     /* The machine's, and the same answer the reconcile pass gives a radio
@@ -18591,21 +18590,21 @@ recomputed; `world` is opened further up the same function and outlives it.
 On a real machine the two were always the same, because there the machine's
 `/run` *is* the right one. So this cost nothing in production and cost the only
 test that could have seen it -- which is the same shape as the environment seam
-in 10.266, met one layer further in.
+in 10.297, met one layer further in.
 
 ### What it did not need
 
 No re-bless and no agree-gate exception. `plan` is one of the three verbs
 `tool/agree_gate.py` excludes by name, so the gate had nothing to say either
-way, and 10.303's lesson applies again: the cost was predicted and the
+way, and 10.334's lesson applies again: the cost was predicted and the
 prediction was worth checking rather than believing.
 
     gui_wifi.sh   14 probes, 334 checks, exit 0
     displace.sh   16 checks, exit 0, no skips
 
-## 10.304 The adapter the observation always carried and nothing showed
+## 10.335 The adapter the observation always carried and nothing showed
 
-`ncfg status` reports Bluetooth adapters now. 10.301 recorded the gap and left
+`ncfg status` reports Bluetooth adapters now. 10.332 recorded the gap and left
 it for the holder to place; the instruction was to close it, and `ncfg status`
 is where `tests/live/bluetooth.sh` already asserts it belongs.
 
@@ -18622,7 +18621,7 @@ place in netlink, which is why it has a list of its own. So the renderer had
 nothing to walk and said nothing, and **a reader could not tell an absent
 adapter from an unreported one.**
 
-**This was a gap in both implementations**, which is why 10.301 raised it rather
+**This was a gap in both implementations**, which is why 10.332 raised it rather
 than fixing it: patching one would have been a divergence. It is the C's alone
 to close now, 0266 having made the C what ships, and the agree gate does not
 mind -- `status` is one of the three verbs it excludes by name, beside `plan`
@@ -18648,11 +18647,11 @@ with the call removed.
 Confirmed on the machine as well: it has a real `hci0`, and `ncfg status` prints
 it.
 
-## 10.303 The ordering moved, and the re-bless it was supposed to need was empty
+## 10.334 The ordering moved, and the re-bless it was supposed to need was empty
 
 `ncfg_plan_wifi` runs between the device loop and the interface-contents loop
 now, rather than after `nat`. So the supplicant gets its networks before
-anything is addressed over them, which is what 10.302 measured the Rust doing.
+anything is addressed over them, which is what 10.333 measured the Rust doing.
 
 **The position is forced from both sides**, which is why there was only one
 place to put it. The op is gated through `ncfg_builder_gate`, and that collects
@@ -18661,7 +18660,7 @@ creation and `device_up`, or the profiles are handed over before the link is up.
 And it has to run before `ncfg_plan_interface_contents`, which is what plans
 addressing. Between the two loops satisfies both and nothing else does.
 
-### No witness needed re-blessing, and 10.302 said it would
+### No witness needed re-blessing, and 10.333 said it would
 
 The prediction was that plan ordering is asserted by action id across the suite
 and the frozen witnesses, so moving a pass would renumber expectations and cost
@@ -18681,7 +18680,7 @@ witness that was already right.
 **The general form, which this session has now paid for twice in a day:**
 guessing what a gate pins gives a change an imaginary price. The other instance
 was the opposite sign -- a budget gate assumed harmless turned out to be
-measuring a binary nobody shipped (10.295). Open the file.
+measuring a binary nobody shipped (10.326). Open the file.
 
 ### What the change cost, measured
 
@@ -18702,7 +18701,7 @@ wifi profiles. An unexplained improvement is not evidence for the change that
 happened to be in flight, which is the same discipline that kept the earlier
 anomalous pass from being read as a regression.
 
-## 10.302 The C gives a radio its networks after starting DHCP, and the Rust before
+## 10.333 The C gives a radio its networks after starting DHCP, and the Rust before
 
 The corrected harness ran 1400 checks against each build -- up from 1269 -- and
 found **one** check failing for the C and not the Rust:
@@ -18772,7 +18771,7 @@ are here rather than glossed:
   whether either caused it -- they did not, and that is the only reason the
   attribution above is "not a regression" rather than a guess.
 
-## 10.301 Four scripts were never unrunnable, and two were never tests
+## 10.332 Four scripts were never unrunnable, and two were never tests
 
 Asked to make `dhcpcd`, `dhcpcd_orphan` and `slaac` run. They run. So does
 `c_dns_delivery`. **None of them was ever blocked by this machine** -- all four
@@ -18833,16 +18832,16 @@ cannot see somewhere reports absence rather than uncertainty. This is that,
 scaled to a whole suite, and it survived four full sweeps because the number it
 produced -- zero C-only failures -- was the number I wanted.
 
-## 10.300 Five of the fourteen unmeasured scripts, measured
+## 10.331 Five of the fourteen unmeasured scripts, measured
 
-10.298 said the parity number had been taken over 65 of 79 scripts and that the
+10.329 said the parity number had been taken over 65 of 79 scripts and that the
 other fourteen were unmeasured rather than passing. Five of them have answers
-now, and the count is worth keeping because the point of 10.298 was that
+now, and the count is worth keeping because the point of 10.329 was that
 "unmeasured" and "passing" are different claims.
 
     wireguard    wireguard-tools installed   29 checks each side, parity
     tunnel       openvpn installed           22 each side; found a C-only
-                                             defect, fixed in 10.298, now parity
+                                             defect, fixed in 10.329, now parity
     hwsim        run as root                 every check passes, both builds
     association  probe built, run as root    passes against the C
     bluetooth    /dev/vhci already there     one check fails, IDENTICALLY for
@@ -18870,7 +18869,7 @@ would run from a sweep that did not wrap each script in `unshare` itself. That
 is the cheapest remaining group and it is a change to the harness rather than to
 either program.
 
-## 10.299 Association, roaming, and a C probe so the comparison stays honest
+## 10.330 Association, roaming, and a C probe so the comparison stays honest
 
 The copyright holder ran the root-only scripts. `hwsim.sh` is the one
 `wifi.sh` structurally cannot cover -- it drives a real supplicant with no
@@ -18975,7 +18974,7 @@ So the C's socket path and the C's own observation path agree about a live
 association on a real radio -- which is what the script exists to ask, and the
 first time it has been able to ask it of this build.
 
-## 10.298 Installing two packages bought two scripts and one real defect
+## 10.329 Installing two packages bought two scripts and one real defect
 
 `wireguard.sh` and `tunnel.sh` had never run on this machine -- the first wanted
 `wireguard-tools`, the second `openvpn`. The copyright holder installed both.
@@ -19023,7 +19022,7 @@ and the check is aimed at it.
 
 ### What this says about the parity number
 
-10.291 and the sweeps after it reported zero C-only failing checks, and that was
+10.322 and the sweeps after it reported zero C-only failing checks, and that was
 true of what could be measured. **It was measured over 65 scripts, and this
 defect was sitting in the 66th.** Two packages moved a script out of "cannot
 run" and it immediately found something -- which is the honest reading of the
@@ -19034,7 +19033,7 @@ The cheapest remaining ones are the same shape: `hwsim` wants
 `mac80211_hwsim`, which needs a run as root; `bluetooth` wants `/dev/vhci`;
 `association` wants a probe built with `cargo build -p netcfgd-host --example`.
 
-## 10.297 The machine is on the C, and the way back was a copy of the C
+## 10.328 The machine is on the C, and the way back was a copy of the C
 
 `debian-nabbe` runs the C daemon as of 2026-09-26 14:26. Verified rather than
 taken from the report:
@@ -19104,7 +19103,7 @@ instrument.
 as much as the last time somebody checked what is in it.** An install is the one
 moment that invalidates it, and it is also the moment nobody looks.
 
-## 10.296 A netcfgd written in C has now run this machine
+## 10.327 A netcfgd written in C has now run this machine
 
 The sentence the gate stood on -- "no netcfgd written in C has run a machine
 for any length of time" -- is false as of 2026-09-26. The copyright holder ran
@@ -19151,9 +19150,9 @@ This does not settle installation. The tryout runs `c/netcfgd` directly and
 restores the Rust daemon on its way out, which it did -- `systemctl is-active
 netcfgd` is active on the Aug 5 Rust binary again.
 
-## 10.295 Pointing the budget gates at the C found a gap in the C
+## 10.326 Pointing the budget gates at the C found a gap in the C
 
-10.294 left the three budget gates measuring a binary nobody ships and said it
+10.325 left the three budget gates measuring a binary nobody ships and said it
 wanted a pass of its own. This is that pass, and the first thing it did was
 fail.
 
@@ -19228,7 +19227,7 @@ The `size` sabotage is the one worth keeping in mind: padding a source file
 proves the gate reads the binary the build produced, where lowering the number
 in the budget file would only have proved the comparison works.
 
-## 10.294 The C is what ships, and the Rust stays as the instrument
+## 10.325 The C is what ships, and the Rust stays as the instrument
 
 Instructed by the copyright holder; `doc/decision/0266` is the record. `make
 build` builds the C, `make install` installs it, and every package from this
@@ -19313,7 +19312,7 @@ Deliberately not re-pointed. `size-budget.txt` is calibrated, and the C is a
 third the size -- so the gate would pass for a reason that has nothing to do
 with the budget holding. **Moving a budget in the same change that moves what it
 measures is how a ratchet stops ratcheting.** It wants a pass of its own, and
-the `footprint` half is the easy one: 10.287 measured the two programs writing
+the `footprint` half is the easy one: 10.318 measured the two programs writing
 byte-identical files under `/run`.
 
 `make live` and `make cross` still drive the Rust. Neither is a shipping
@@ -19321,7 +19320,7 @@ question. And one stale sentence is left in Rust source -- the test above
 advises `make build`, which no longer builds it -- recorded rather than edited,
 because the standing rule here is that the Rust is recorded and not fixed.
 
-## 10.293 The gate came off, and what it was holding up was a decision
+## 10.324 The gate came off, and what it was holding up was a decision
 
 The copyright holder instructed it: the C port's reconcile loop runs by
 default. `doc/decision/0265` is the record, and it supersedes 0263's status
@@ -19369,7 +19368,7 @@ promise and the half a tidying pass would take away without noticing.
 
 ### And a change from earlier the same day, reverted rather than defended
 
-10.292 rewrote `log_shape.sh`'s level check to count `[subsystem]` lines
+10.323 rewrote `log_shape.sh`'s level check to count `[subsystem]` lines
 instead of raw lines, because the C printed an unfilterable safety notice that
 the raw count caught. **That notice is gone with the gate**, so the reason for
 the rewrite is gone -- and the raw count is the stronger check, since it also
@@ -19379,7 +19378,7 @@ So it is reverted. Measured first: the C now emits **zero lines** at
 `NCFG_LOG=warning`, so the original passes for both programs, and both were run
 to confirm it.
 
-The reason to write this down is the shape of the temptation. 10.292 found a
+The reason to write this down is the shape of the temptation. 10.323 found a
 structural argument for the narrower check -- it was the only one in that file
 counting raw lines, its four neighbours all key on the tag -- and that argument
 is still true. It was also **found after the fact, to justify a change the
@@ -19398,9 +19397,9 @@ Swept all 79 scripts again with the default on and nothing passing
     scripts failing for the C and not the Rust                        0
     and the reverse                                                  0
 
-The difference set is empty **in both directions**, which is more than 10.291
+The difference set is empty **in both directions**, which is more than 10.322
 could say: it had the C one script behind on `log_shape`. Equal check counts are
-the guard, for the reason 10.291 gives -- a script that dies early produces
+the guard, for the reason 10.322 gives -- a script that dies early produces
 fewer checks rather than failing ones, so a suite that had quietly stopped
 running would score zero C-only failures and read as perfect.
 
@@ -19421,9 +19420,9 @@ off the Rust daemon running it. **Recorded and not fixed**, because a guard the
 Rust has not got is a divergence, and adding one in passing is what
 `harmonization.md` forbids.
 
-## 10.292 The third way out of a choice that had been written as two
+## 10.323 The third way out of a choice that had been written as two
 
-10.282 recorded `log_shape`'s one failure as undecidable, naming two ways to
+10.313 recorded `log_shape`'s one failure as undecidable, naming two ways to
 close it and rejecting both: weaken the safety notice so a log level can hide
 it, or let the C daemon bind without reconciling and take this workstation's
 socket from the Rust one running the network. Both rejections were right. The
@@ -19455,7 +19454,7 @@ the only one of the nine that fails**, which is the sabotage arriving through
 the check under test rather than being intercepted by a neighbour.
 
 With this, **no check in the live suite fails for the C port and passes for
-the Rust.** 10.291's sweep found exactly one and this was it.
+the Rust.** 10.322's sweep found exactly one and this was it.
 
 **The shape is worth more than the fix, because it is the third instance in
 one session.** A live check that encodes one implementation's output inventory
@@ -19466,7 +19465,7 @@ setting*, *silences it* -- described a behaviour while its body measured a
 tally. **When a live check wants an exact count, the question to ask is what
 it would say about a second correct implementation.**
 
-## 10.291 The whole live suite, measured against the Rust: one check apart
+## 10.322 The whole live suite, measured against the Rust: one check apart
 
 Swept all 79 scripts under `tests/live/` against both builds, sequentially,
 each in its own network namespace under `timeout 200`:
@@ -19475,7 +19474,7 @@ each in its own network namespace under `timeout 200`:
     scripts passing        C 58/79     Rust 59/79
     checks failing for the C and not the Rust                        1
 
-**That one has since been closed by 10.292, and the entry is left with its
+**That one has since been closed by 10.323, and the entry is left with its
 measurement rather than rewritten**: the sweep found what it found on the day,
 and nothing else in it moved, because nothing else was touched. `log_shape`
 now passes for both builds, nine checks each.
@@ -19483,7 +19482,7 @@ now passes for both builds, nine checks each.
 The one was `log_shape`'s "a level below what is emitted silences it
 completely". At `NCFG_LOG=warning` the C correctly silences both of its
 startup log lines; what remains is the `--try-the-c-daemon` notice, which
-10.282 put outside the log system on purpose so that no level can hide it.
+10.313 put outside the log system on purpose so that no level can hide it.
 That check and that notice are in genuine conflict, and the conflict ends when
 the gate does. **It is the only one.** Every other failing script fails for
 the Rust too -- no `mac80211_hwsim`, no bluetooth, no `dhcpcd`, no `mbimcli`,
@@ -19510,7 +19509,7 @@ So: **a sweep is an artifact with a build in it, and the build has to hold
 still.** The same rule as not running the control beside the subject, applied
 to the subject instead.
 
-## 10.290 Two serialisers, and removing either one changed nothing a clock could see
+## 10.321 Two serialisers, and removing either one changed nothing a clock could see
 
 A wifi scan waits up to ten seconds for the supplicant to announce results.
 `tests/live/wifi_trouble.sh` asks for `wifi status` on an unrelated interface
@@ -19597,7 +19596,7 @@ run and wrong to stop at. **An orphan found is not an explanation earned**:
 the comfortable answer was there and the controlled comparison is what
 actually settled it.
 
-## 10.289 The revert that announced itself and did not run
+## 10.320 The revert that announced itself and did not run
 
 `confirm.sh` passes end to end against the C port now. Three of its checks
 were failing and all three were one gap.
@@ -19641,7 +19640,7 @@ same script, the same build but for this, run twice: three checks red, then
 forty-nine green. A synthetic sabotage would have told me less, because the
 run without the fix IS the sabotage and it was the one I started from.
 
-## 10.288 Three gaps behind one sandbox, and a control that poisoned its own measurement
+## 10.319 Three gaps behind one sandbox, and a control that poisoned its own measurement
 
 `sandbox_writes.sh` is at parity with the Rust now -- zero C-only failing
 checks -- and getting there turned up three real gaps and one bad measurement
@@ -19690,10 +19689,10 @@ to write `thing` read a sentence about `conf.d` with nothing saying which file
 was refused. The Rust wraps it `could not write <path>: <why>`, and so does
 this now.
 
-**And one check loosened, for the reason 10.287's sibling was.** "and names
+**And one check loosened, for the reason 10.318's sibling was.** "and names
 the setting that grants it" counted `ReadWritePaths=` in the daemon log and
 wanted exactly 1. The C logs the refused `config_put` as well -- deliberately,
-10.234, because a daemon whose log says nothing about a request it refused
+10.265, because a daemon whose log says nothing about a request it refused
 cannot be debugged from the evidence -- and that line quotes the client's
 message, `ReadWritePaths=` included. The count made a second and better-
 informed log a failure; the check asks whether the setting is named, so it
@@ -19707,7 +19706,7 @@ that says more because it knows more -- fails a check whose own name asks only
 whether it said anything. Worth looking for the next time a live check wants an
 exact 1.
 
-## 10.287 The two programs computed different identities for the same configuration
+## 10.318 The two programs computed different identities for the same configuration
 
 `ncfg_daemon_document_hash` is a sha256 over the bytes
 `ncfg_document_write_canonical` produces, and that hash is what tells "the
@@ -19736,7 +19735,7 @@ covers and nobody was comparing.
 
 **It is not a presentation choice, which is why the layout lives inside the
 canonical writer rather than at the terminal.** `ncfg show` prints canonical
-text, so it changed with it, and that settles 10.275 the same way: the Rust's
+text, so it changed with it, and that settles 10.306 the same way: the Rust's
 `ncfg show` is indented, so the question of compact-versus-indented was never
 open, only unmeasured. The `cli_test` check asserting **one line** was
 asserting the opposite of the reference implementation.
@@ -19774,7 +19773,7 @@ reported `ok` -- the stale-binary trap of 10.2xx met for the fourth time this
 port. A sabotage that does not build is not a sabotage; the binary's mtime is
 the cheapest thing to look at before believing either colour.
 
-## 10.286 A counter that was not atomic, in a daemon that is threaded
+## 10.317 A counter that was not atomic, in a daemon that is threaded
 
 Comparing the two programs **by script** hid this, and comparing them by
 *check* is what found it. A script neither passes can fail for different
@@ -19840,9 +19839,9 @@ error for a question the configuration answers.
 `wpa_supplicant -Dwired -i lo` does not complete a join. That script is
 environmental for both.
 
-## 10.285 The supplicant's streams, settled by the fake's own comment
+## 10.316 The supplicant's streams, settled by the fake's own comment
 
-10.284 left this open and the answer was already written down, in
+10.315 left this open and the answer was already written down, in
 `tests/live/fake_supplicant.py`, beside the flag netcfgd passes:
 
 > `-s` -- Log to syslog. netcfgd passes it so a real supplicant's faults are
@@ -19876,7 +19875,7 @@ message names the driver and the status, that it names no file, and that
 of inheriting and is what a reader needs to see asserted. Sabotaged by putting
 the redirect back: one unit check and thirteen live checks go red.
 
-## 10.284 A refusal justified by a sentence that had stopped being true
+## 10.315 A refusal justified by a sentence that had stopped being true
 
 `enterprise.sh` failed at its first hard step: `ncfg wifi activate radio0`
 refused, on every build, with
@@ -19949,7 +19948,7 @@ quoting stands, at the price of thirteen checks in the Rust's own suite, which
 There is no arrangement that does both without teeing a pipe into the daemon's
 poll loop, which is machinery neither program has.
 
-## 10.283 The lock covered the acting and the race was in the observing
+## 10.314 The lock covered the acting and the race was in the observing
 
 `apply_race.sh` had one failure and it is the one the script exists for: five
 rounds of two simultaneous applies, **five failed actions, one per round**,
@@ -20009,7 +20008,7 @@ or fails from a binary the build step did not rebuild.* The rule is easy to
 hold and easy to drop, and it drops at exactly the moment a sabotage is
 producing the answer that would end the investigation.
 
-## 10.282 A safety notice a log level could switch off, and the one check the flag cannot pass
+## 10.313 A safety notice a log level could switch off, and the one check the flag cannot pass
 
 `log_shape.sh` has one failure and it is not fixable from here. What the
 investigation found instead is a defect in the thing the failure is about.
@@ -20066,7 +20065,7 @@ counted lines and wanted none. In all three the port said something correct
 and extra, and in all three the check's own name -- *says so*, *names the
 setting*, *silences it* -- described the behaviour rather than the tally.
 
-## 10.281 The record was published before the observation was finished
+## 10.312 The record was published before the observation was finished
 
 `linkset.sh` had two failures, and the machine was already right. One default
 route, on the member that answers -- that check passed. What failed is the
@@ -20095,7 +20094,7 @@ for having lost. **Everything computed from a verdict is in that position**,
 the connectivity rung included, which is precisely why `derive` is idempotent
 by design.
 
-### And 10.277's publish was in the wrong place
+### And 10.308's publish was in the wrong place
 
 I put the write inside `ncfg_daemon_state_reobserve` -- which is *before* the
 stamp and before the second derive. That made the publish itself part of the
@@ -20110,7 +20109,7 @@ what the wrong order cost it -- "the published record said the machine was on
 a link whose routes the planner had just taken away".
 
 **The test moved with it, and that is worth saying rather than hiding.**
-10.277's check asserted that re-observing publishes; it asserts now that
+10.308's check asserted that re-observing publishes; it asserts now that
 re-observing publishes *nothing*, and that publishing does. The property being
 tested changed because the earlier one was wrong -- an assertion about where
 the write happened, when what matters is that it happens after the record is
@@ -20122,7 +20121,7 @@ the assertion the live script cannot make and the one that says the second
 call is not a no-op. Sabotaged, `linkset.sh` goes red and the unit suite does
 not -- which is honest and is why both exist.
 
-## 10.280 Two event hooks nobody planned, and a journal nobody printed
+## 10.311 Two event hooks nobody planned, and a journal nobody printed
 
 `hooks.sh` had seventeen failures across three defects.
 
@@ -20193,7 +20192,7 @@ what happens here, because `--confirm-within` never reaches the compile. **A
 plausible explanation of a symptom, arrived at from a change I had just made
 and refuted only by running the other program.**
 
-## 10.279 An assertion reversed, because tidying up removed somebody else's socket
+## 10.310 An assertion reversed, because tidying up removed somebody else's socket
 
 `restart.sh` had one failure: *the socket file is left behind, as it is on a
 real stop* -- expected present, and the C had removed it.
@@ -20241,7 +20240,7 @@ neither side named. This is that: the Rust's behaviour is right, and the
 argument for it is not "the Rust does it" but a running daemon that cannot be
 reached.
 
-## 10.278 The hooks nobody wrote, the staging file nobody removed, and errno through a formatter
+## 10.309 The hooks nobody wrote, the staging file nobody removed, and errno through a formatter
 
 `write_full.sh` had eight failures across three defects, and only one of them
 is about a full disk.
@@ -20311,10 +20310,10 @@ uncomfortable part: the branch it protects is the difference between an
 unchanged resolver and an empty one, and it was resting on a library call not
 happening to disturb a global.
 
-## 10.277 Two rfkill scripts, two seams nobody supplied, and the daemon that published nothing
+## 10.308 Two rfkill scripts, two seams nobody supplied, and the daemon that published nothing
 
 `rfkill.sh` and `rfkill_stream.sh` both pass. Three separate gaps, and two of
-them are the same shape as 10.271's.
+them are the same shape as 10.302's.
 
 ### The plan said nothing about a radio that is switched off
 
@@ -20384,7 +20383,7 @@ and what is being tested is that the record follows the observation.
 Sabotaged separately and with a full rebuild, each change takes both its unit
 checks and its live script red.
 
-## 10.276 Sorted by the writer that could not sort, and a test that re-aimed itself
+## 10.307 Sorted by the writer that could not sort, and a test that re-aimed itself
 
 `stations.sh` had one failure:
 
@@ -20439,7 +20438,7 @@ or fails from a binary the build step did not rebuild*. Re-run with a full
 round a minute earlier, when a restored source with `make` reporting nothing
 to do left a test failing against an object nobody had relinked.
 
-## 10.275 The compact convention met the terminal, and a proof that compared two empty files
+## 10.306 The compact convention met the terminal, and a proof that compared two empty files
 
 `nat.sh` had four failures. Every value in the C's answer was correct and the
 whitespace around it was not.
@@ -20517,7 +20516,7 @@ string is a value that consumes the opener's pending break. The first
 implementation got both wrong and put every object's first key on the brace's
 line. Sabotaged, six of the seven go red.
 
-## 10.274 One rule written in one of five places, and the round it silently cancelled
+## 10.305 One rule written in one of five places, and the round it silently cancelled
 
 `wedged.sh` had six failures and passes on one change.
 
@@ -20529,7 +20528,7 @@ liveness pass is what re-asks, and the rule it turns on is the Rust's:
 > netcfgd cannot tell, which is not the same as "it is not running".
 
 **The C applied that to the DHCP clients and to nothing else.** That arm has
-carried it since 10.206, with the incident written out beside it -- a udhcpc
+carried it since 10.237, with the incident written out beside it -- a udhcpc
 client that died stayed `running` for ever. The other four kinds called
 `ncfg_supplicant_running_pid` and its siblings directly, and those answer 0 for
 a missing file exactly as they do for a dead process. So a record naming a
@@ -20567,14 +20566,14 @@ in one loop, so a sixth added later is one row rather than a decision somebody
 has to remember; sabotaged, it takes exactly the four new rows red and leaves
 the DHCP one green.
 
-## 10.273 A search order inverted on a false premise, and three warnings nobody wrote
+## 10.304 A search order inverted on a false premise, and three warnings nobody wrote
 
 `ap.sh` had seven failures and passes. Two of them were mine, from four days
 earlier in this same port.
 
 ### The `/usr/sbin`-first search was not a mistake to fix
 
-10.267 changed `ncfg_backend_find_program` to search `PATH` first and fall
+10.298 changed `ncfg_backend_find_program` to search `PATH` first and fall
 back to `/usr/sbin`, `/sbin`, `/usr/local/sbin` and `/usr/bin` only where
 `PATH` is unset, and the commit message said this was "the shape its own
 header already described". **The header says the opposite**, in as many words:
@@ -20592,7 +20591,7 @@ tells the operator to read was never written, because nothing ran.
 test that puts a stand-in on `PATH` should reach the stand-in; that is what
 `exec_refused.sh` does. But the answer to that is the program parameter every
 one of these callers already takes, which `backend_internal.h` argues at
-length -- and which 10.271 finally supplied. Inverting a search to get a seam
+length -- and which 10.302 finally supplied. Inverting a search to get a seam
 that already existed is the shape worth remembering.
 
 **The two searches are now two functions, because the Rust has two.**
@@ -20640,7 +20639,7 @@ populated `allow` and an empty `deny` for the second, and the serving end of
 the same bridge for the third. Sabotaged one at a time, each pass takes
 exactly its own two checks red and nothing else.
 
-## 10.272 The guard was on the wrong side of the harm, and the buffer was too small to say so
+## 10.303 The guard was on the wrong side of the harm, and the buffer was too small to say so
 
 `displace.sh` had one failure left: netcfgd was expected to say *NetworkManager
 is already managing `radio0`* and said nothing of the kind. It passes, and
@@ -20694,7 +20693,7 @@ the guard saw rather than any amount of reading:
 Both buffers are `NCFG_RADIO_ROOT_MAX` now, and a failure to resolve the root
 is logged -- because an empty answer switches the guard off and nothing
 downstream can tell that from a machine with no other manager on it. That is
-the same shape as 10.271's seam nobody supplied: **every layer present, and
+the same shape as 10.302's seam nobody supplied: **every layer present, and
 the one value that makes it live absent.** Third instance in two days.
 
 ### The test's return value proves nothing; its sentences do
@@ -20724,7 +20723,7 @@ text is a subsequence of the result, refusing to write otherwise. Second time
 this exact anchor-searching mistake has been made in this port; the first cut
 comments out of three observe sources.
 
-## 10.271 The seam the headers asked for and nobody supplied
+## 10.302 The seam the headers asked for and nobody supplied
 
 `orphan`, `revive` and `switch_network` failed with *no wpa_supplicant found
 for radio0*, in a namespace where the script had written a fake supplicant and
@@ -20768,7 +20767,7 @@ assignment that would make it live was never written. Nothing fails; the
 default is simply always taken. What found it was not reading the code -- it
 was a test that had set the variable and was refused anyway.
 
-## 10.270 A `(null)` directory in the repository root, holding a real lock
+## 10.301 A `(null)` directory in the repository root, holding a real lock
 
 Found as untracked litter, not by a test: a directory named `(null)` beside
 `Makefile`, containing an empty `apply.lock`.
@@ -20801,14 +20800,14 @@ a null pointer -- it renders it. So the family to sweep is not "missing NULL
 checks" but **`%s` over a pointer whose provenance is a caller's struct**,
 where the failure is not a crash but a plausible-looking path.
 
-## 10.269 A mechanical rewrite that redirected the control, and the flag thirty scripts needed
+## 10.300 A mechanical rewrite that redirected the control, and the flag thirty scripts needed
 
 Two findings from the first sweep that was honestly all-C, and the second is
 only visible because the first was fixed.
 
 ### The seam pointed the comparison at itself
 
-10.262's rewrite gave seventy live scripts `build="${NCFG_LIVE_BUILD:-...}"`
+10.293's rewrite gave seventy live scripts `build="${NCFG_LIVE_BUILD:-...}"`
 and replaced every `$repo/target/debug` with `$build`. Five of those scripts
 are the **comparisons**: `c_daemon_answers`, `c_dns_delivery`,
 `c_link_settings`, `c_warnings` and `c_wireguard` each name the C tree by path
@@ -20820,7 +20819,7 @@ Rust is the control. The rewrite pointed that side at the C too, so with
 bound its socket*, above the C port's refusal to start a loop -- and the line
 was read for four hours as a C defect.
 
-**The proof 10.262 carried could not have caught it.** It checked that the
+**The proof 10.293 carried could not have caught it.** It checked that the
 default expands to the string it replaced, which is true of all seventy and is
 a claim about the *substitution*. What was wrong is the **population**: the
 rewrite's set should have been "scripts that drive one implementation", and
@@ -20834,7 +20833,7 @@ The five are restored to their committed form.
 
 With the control honest, the all-C sweep is **23 of 79** and thirty of the
 failures are one sentence: *this build of the C port does not start its
-reconcile loop by default*. That is 10.240's gate working exactly as written --
+reconcile loop by default*. That is 10.271's gate working exactly as written --
 no netcfgd in C has run a machine, so the loop asks to be told somebody is
 watching -- and `--try-the-c-daemon` is the flag that tells it. `unshare -rn`
 is a private network namespace, so a live script is the one place where being
@@ -20861,7 +20860,7 @@ The first run stopped on 34 unclassified existence probes -- a third class
 nobody had named -- and wrote nothing. 42 starts, 43 non-starts, 85 sites, 36
 files.
 
-## 10.268 The openvpn tunnel restart, and two ways a message was wrong
+## 10.299 The openvpn tunnel restart, and two ways a message was wrong
 
 `openvpn.sh` had seven failures and passes. Four faults, and only the first is
 about openvpn.
@@ -20924,7 +20923,7 @@ operator with two tunnels reads a complaint about neither. Both halves of the
 stop carry the tunnel now, matching the Rust's wording, which is what the live
 check was asking for: *reported, not recorded as stopped*.
 
-## 10.267 A program search that reproduced the defect its own header describes
+## 10.298 A program search that reproduced the defect its own header describes
 
 `exec_refused.sh` had nine failures and passes. Three faults, and the first is
 the one worth carrying.
@@ -20984,7 +20983,7 @@ and not executable was reported as missing.
 
 `ncfg_process_exec_refusal` -- which tells "no executable bit" from "mounted
 `noexec`", and is 0182 -- existed, was tested, and **had no caller anywhere**.
-10.258 listed it among the twenty-five functions used only inside their own
+10.289 listed it among the twenty-five functions used only inside their own
 file; this is what that cost, named by a script rather than by a sweep.
 
 The child writes its `errno` down a close-on-exec pipe now. A successful exec
@@ -21014,8 +21013,8 @@ status, which is the half a script can branch on. It carries both.
     both pass                   22 -> 34
     rust passes, C does not     33 -> 21
 
-Across four waves: the link remake (10.264), the startup segfault and the roam
-burst (10.265), the contention roots (10.266) and this. Twenty-one scripts
+Across four waves: the link remake (10.295), the startup segfault and the roam
+burst (10.296), the contention roots (10.297) and this. Twenty-one scripts
 still fail and are now the list: `ap`, `apply_race`, `confirm`, `c_warnings`,
 `displace`, `dot1x`, `enterprise`, `hooks`, `linkset`, `log_shape`, `nat`,
 `openvpn`, `orphan`, `restart`, `revive`, `rfkill`, `rfkill_stream`,
@@ -21023,7 +21022,7 @@ still fail and are now the list: `ap`, `apply_race`, `confirm`, `c_warnings`,
 
 `openvpn` is worth looking at first, for the reason this section is about: it
 is the script whose fault the header describes, and its stand-in is on `PATH`.
-## 10.266 The contention check was pointed at the machine, whatever it was told
+## 10.297 The contention check was pointed at the machine, whatever it was told
 
 `displace.sh` is about netcfgd and another manager sharing a radio: declining
 one that NetworkManager holds, taking it when NM lets go, and giving it back
@@ -21076,8 +21075,8 @@ it from eleven to three.
 
 **Reproducible is not correct when the artifact is inconsistent**, and three
 identical runs are three readings of one bad binary. This has now cost this
-session three times -- 10.252 records the first, and the `ncfg_dhcp_machine_t`
-field in 10.259 the second -- and the pattern is the same each time: a header
+session three times -- 10.283 records the first, and the `ncfg_dhcp_machine_t`
+field in 10.290 the second -- and the pattern is the same each time: a header
 that grows a field, a build that says nothing, and a failure a long way from
 its cause. The rule that survives it is mechanical rather than attentive:
 **after touching a header in `c/`, the next build is `make clean`**, and a
@@ -21103,7 +21102,7 @@ result from any other build is not evidence.
 Every one of the twelve scripts that set `NCFG_RUN_ROOT` was re-run against
 the new build. `roam` and `orphan` pass, `displace` improved, and `revive`,
 `wedged`, `wifi` and `wifi_trouble` are unchanged. Nothing regressed.
-## 10.265 A segfault on the daemon's first converge, found by asking why a hook never ran
+## 10.296 A segfault on the daemon's first converge, found by asking why a hook never ran
 
 `roam.sh` reported 13 failures, the first being *netcfgd attaches to the
 supplicant's event socket, once*. The watcher that does the attaching is
@@ -21182,7 +21181,7 @@ so the next person to change either finds the other.
     both pass                   22 -> 30
     rust passes, C does not     33 -> 25
 
-Newly passing: `links` (10.264), `orphan`, `portal`, `resolv_defended`,
+Newly passing: `links` (10.295), `orphan`, `portal`, `resolv_defended`,
 `resolv_owned`, `roam`, `steady_state`, `switch`. None regressed.
 
 **Four scripts read as regressions and were not**, which is worth recording
@@ -21197,12 +21196,12 @@ and the four that caught it were the four whose skip message names the binary.
 Three checks in `plan_test.c`: no observation, no configuration, and neither --
 the last because a sentence that names one when both are missing is a sentence
 that sends the reader to the wrong argument. The crash itself is proved by the
-control that found it: with the recreation pass of 10.264 disabled the
+control that found it: with the recreation pass of 10.295 disabled the
 segfault is unchanged, which is how it was established as older than that wave
 rather than caused by it.
-## 10.264 The link remake rule, which the live suite found by being run
+## 10.295 The link remake rule, which the live suite found by being run
 
-10.263's sharpest finding, fixed: an edited vlan id planned **nothing to do**
+10.294's sharpest finding, fixed: an edited vlan id planned **nothing to do**
 where the Rust plans a delete and a create, and `links.sh` went from 11
 failures to none.
 
@@ -21297,9 +21296,9 @@ back. One check, and it is the difference between a remake and a removal.
 One script moved, which is the honest number: `links.sh` is the only one of the
 75 that exercises this. The other 32 are still there and are still the next
 thing.
-## 10.263 The Rust's live suite, run against the C, with the Rust as its control
+## 10.294 The Rust's live suite, run against the C, with the Rust as its control
 
-10.262 built the seam. This is the first run, and the first answer this tree
+10.293 built the seam. This is the first run, and the first answer this tree
 has ever had to *does the C behave like the Rust* on anything that touches a
 kernel.
 
@@ -21383,7 +21382,7 @@ replaced a literal path with a shell variable, and three scripts use that path
 inside a **nested** shell -- `unshare -r sh -c '...'` -- where a plain variable
 does not exist. The literal always had.
 
-10.262's proof checked that the default expands to the string it replaced, in
+10.293's proof checked that the default expands to the string it replaced, in
 70 scripts, both ways. It was a true proof of the wrong property: textual
 expansion in the shell that declares it, where what mattered was scope. `export
 build` fixes all 70 at once.
@@ -21401,7 +21400,7 @@ script had a private network namespace and its own `mktemp -d`, with
 `NCFG_CONFIG_DIR` and `NCFG_RUN_DIR` pointed into it; the C honours both, which
 was checked before the first run rather than assumed. `/tmp` gained 13
 directories and 820 KB, on a 16 GB tmpfs at 10%.
-## 10.262 What is still missing, asked of the Rust rather than of the port
+## 10.293 What is still missing, asked of the Rust rather than of the port
 
 Two questions, and the first one's answer is why the second matters.
 
@@ -21420,13 +21419,13 @@ against the file each belongs to: `wireless_links` is `ncfg_radio_links`,
 `active_features` are the `ncfg_ethtool_*` pair, `redirect_ingress` is the two
 messages `kernel_internal.h` describes and `observed.h` carries
 `ingress_redirect` for, `key_mgmt_of` is `ncfg_security_key_mgmt` -- which
-10.257 moved into the model this week. A name-based comparison across two
+10.288 moved into the model this week. A name-based comparison across two
 naming conventions reports the conventions.
 
 So the honest answer to *what is missing* is: **nothing that any instrument in
 this tree can name.** The ledger carries every request and op in the frozen
 witnesses and its 15 remaining refusals are all permanent facts about a kind
-(10.261). Every observation pass is ported. Every CLI verb is wired. The
+(10.292). Every observation pass is ported. Every CLI verb is wired. The
 planner holds back one addressing source and says so per plan. What is left is
 not a list of functions -- it is whether the two programs *behave* alike, which
 no list can answer.
@@ -21487,7 +21486,7 @@ tree that can answer *behaves alike* rather than *carries out the same ops* --
 and the expectation should be that it goes red, in places, on the first run.
 That is the point of it.
 
-## 10.261 Nothing is refused for want of porting, and one refusal answered the wrong question
+## 10.292 Nothing is refused for want of porting, and one refusal answered the wrong question
 
 The ledger counts what this build declines. It said 16 before the DHCPv6 start
 landed and 15 after, so the obvious next question is what the 15 are -- read one
@@ -21509,7 +21508,7 @@ the hardware's, a `PPPoE` session's interface is `pppd`'s, an `OpenVPN`
 tunnel's is `openvpn`'s"*, and netcfgd cannot remake any of them.
 
 So **nothing this build refuses is refused for want of porting.** The DHCPv6
-start was the last of that kind and 10.259 closed it. That is a different
+start was the last of that kind and 10.290 closed it. That is a different
 statement from the ledger's completeness, which has held for several waves: the
 witnesses were all carried out *and* one of the refusals beside them was a gap
 wearing a reason.
@@ -21567,9 +21566,9 @@ design document holds the rationale rather than the layout. The sketch predates
 both. It is worth knowing only because somebody reading that document for the
 file to `cat` will not find it.
 
-## 10.260 Three sentences that closed a question, and the two sweeps that found none
+## 10.291 Three sentences that closed a question, and the two sweeps that found none
 
-10.259's finding was a gap written down three times as a decision. The lens from
+10.290's finding was a gap written down three times as a decision. The lens from
 that shape is **a claim in a comment that closes a question**, and this wave
 asked it two mechanical ways and one by reading.
 
@@ -21608,7 +21607,7 @@ Every one of the four had closed:
   * *the planner does not read every block* -- `warn_unported` holds back one
     addressing source now, and says so per plan;
   * *the executor refuses `backend.start` for four of the nine backend kinds*
-    -- three, since 10.259, and `make ledger` counts them;
+    -- three, since 10.290, and `make ledger` counts them;
   * *nothing under `ncfg` folds what an apply did into `owned.json`* -- the
     fold is `ncfg_apply_record`, called from the apply four lines from where
     the comment sat;
@@ -21677,9 +21676,9 @@ of the two is wrong is a real question, and the answer is the copyright
 holder's. `NCFG_SSID` is in the same paragraph of that document and is missing
 from both in the same way.
 
-## 10.259 The DHCPv6 client, and a deferral justified by a claim about the Rust
+## 10.290 The DHCPv6 client, and a deferral justified by a claim about the Rust
 
-10.258's lens was a function nothing reaches. The next one down is a **field**
+10.289's lens was a function nothing reaches. The next one down is a **field**
 nothing reaches -- which is this project's own recurring defect rather than a
 borrowed idea: `started_metric` had no producer at all, so the first half of
 the metric-restart rule never fired on any machine, and `observed.dns` had no
@@ -21692,7 +21691,7 @@ re-delivered for ever. Both were found by accident.
 JSON codec and a reader other than its own JSON writer. **Every one has both.**
 
 The detector needed three corrections before that zero meant anything, and all
-three under-reported -- which is 10.258's asymmetry again, met on a different
+three under-reported -- which is 10.289's asymmetry again, met on a different
 instrument. A write is not only `->x =`: it is `->x.y =`, which is how
 `liveness.c` sets `answering`; it is `->x[i] =`; and it is **having its address
 taken**, `&out->nameservers`, which is how every list in this tree is filled and
@@ -21828,7 +21827,7 @@ that file green, which is what a value with two consumers and one wired looks
 like. `service_test.c` asserts it now, against a document built in the test for
 the purpose, and the sabotage reddens exactly that check.
 
-## 10.258 Four dead functions, and a detector that was wrong four times finding them
+## 10.289 Four dead functions, and a detector that was wrong four times finding them
 
 The last three waves all turned on a rule with two consumers. The next lens
 from that shape is the same question one step further: **a function with no
@@ -21939,9 +21938,9 @@ a checker -- the thing `evidence.md` warns costs more than it saves.
 **Whose decision it is: the copyright holder's.** Recorded here with the
 number, so that whoever settles it settles it once.
 
-## 10.257 Finishing the lens: every rule the model owns, asked of the whole tree
+## 10.288 Finishing the lens: every rule the model owns, asked of the whole tree
 
-10.255 and 10.256 each found one rule in the wrong layer by following the one
+10.286 and 10.287 each found one rule in the wrong layer by following the one
 before it. That is how a lens is derived and it is not how one is finished, so
 this wave asked the question mechanically instead, two ways.
 
@@ -22002,7 +22001,7 @@ tree, above one of the copies.
 `ncfg_normalize_station` were both declared in `src/compile/lower_internal.h`
 -- a header private to the compiler. A backend needing the rule cannot reach a
 private header, and reaching into another module's internals would be worse
-than a copy, so it wrote one. That is 10.255's finding stated generally: **a
+than a copy, so it wrote one. That is 10.286's finding stated generally: **a
 rule reachable by only one of its consumers grows a copy in the other**, and
 where the rule sits privately inside a module the copy is the only thing left
 to do.
@@ -22057,11 +22056,11 @@ grouped by the module directory under `c/src/` that holds them, reported where
 a group spans more than one. It is thirty-one now, and a rule copied between
 modules will make it thirty-two.
 
-## 10.256 The same rule in the wrong layer, a second time, and what a gate can and cannot say
+## 10.287 The same rule in the wrong layer, a second time, and what a gate can and cannot say
 
-10.255's lens, pointed at the rest of the tree: **which rules does the Rust keep
+10.286's lens, pointed at the rest of the tree: **which rules does the Rust keep
 in `netcfgd-model` that this port put somewhere later, and who reaches across a
-layer to get them?** The answer was one more, and it is the one 10.254's
+layer to get them?** The answer was one more, and it is the one 10.285's
 argument rests on.
 
 `netcfgd-plan`'s manifest depends on `netcfgd-model` and on nothing else. In
@@ -22101,7 +22100,7 @@ callers.
 
 **Two includes went with it.** `src/plan/host_wide.c` no longer includes
 `ncfg/dns.h`, and `src/plan/access_point.c` no longer includes
-`ncfg/hostapd.h` -- the second a leftover from 10.255, which took every symbol
+`ncfg/hostapd.h` -- the second a leftover from 10.286, which took every symbol
 out of that file and left the line. The planner's headers are now `apply`,
 `base`, `buf`, `json_write`, `linkset`, `observed`, `plan` and `value`: model,
 base, and one deliberate forward reference.
@@ -22156,7 +22155,7 @@ holder's.** Writing an order into a gate would be inventing a decision in the
 quietest possible place, and `module_order_gate.py` says in its own header that
 it declines to.
 
-## 10.255 The guard was watching the model, and the copy came from the compiler
+## 10.286 The guard was watching the model, and the copy came from the compiler
 
 `c/include/ncfg/hostapd.h` carried four rules the Rust keeps in
 `netcfgd-model`: which band an access point comes up in, whether a channel
@@ -22256,7 +22255,7 @@ first reason given, that both halves are pure functions of a plan, a journal
 and an executor, is the one that decided it -- so what was wrong was a sentence
 still offering a blocker that had gone.
 
-## 10.254 0079's third clear, which waited two waves for a fact about a process
+## 10.285 0079's third clear, which waited two waves for a fact about a process
 
 Decision 0079 caps a backend at five consecutive starts that did not lead to a
 live process, and clears the count on three things: a deliberate stop, the plan
@@ -22354,7 +22353,7 @@ A sabotage caught by the wrong check is a sabotage that passed, for the purpose
 it was run: what it demonstrates is that something in the binary noticed, not
 that the assertion under test can fail.
 
-## 10.253 The suite had only ever been green for root
+## 10.284 The suite had only ever been green for root
 
 `make -C c test` fails for an ordinary user at `e4761ac`, on a clean tree and
 after `make -C c clean`, in two checks out of ninety test binaries. Neither is
@@ -22454,7 +22453,7 @@ it was never taken in. Recorded rather than solved: a banner line would be one
 more thing to keep true, and the honest fix is that a check should not depend
 on it.
 
-## 10.252 0644 stated, rather than a umask hoped for
+## 10.283 0644 stated, rather than a umask hoped for
 
 The last round's fix made the C's records match the Rust's. Sweeping *modes*
 across everything both write -- which the earlier run-directory comparison did
@@ -22502,7 +22501,7 @@ test, and it is worth knowing when a header is what a sabotage changes: the
 round that found it worked around it with `make clean`, and this one did the
 same.
 
-## 10.251 Every record netcfgd wrote under /run was world-writable
+## 10.282 Every record netcfgd wrote under /run was world-writable
 
 The DNS renderers were compared for the first time last round. The other
 backends render files too, so the next question was which of them can be
@@ -22565,9 +22564,9 @@ defect:
   literal in the Rust, `dirname`/`basename` at run time in the C. Both correct,
   and the scripts are not byte-identical.
 
-## 10.250 A test for this defect must not be able to cause it
+## 10.281 A test for this defect must not be able to cause it
 
-10.249 said the live script for the delivery modes was the obvious next thing
+10.280 said the live script for the delivery modes was the obvious next thing
 and was not there, because it would have to protect the machine from the very
 failure it tests for. `tests/live/c_dns_delivery.sh` is that script.
 
@@ -22621,9 +22620,9 @@ program found a machine the first had already configured and planned nothing to
 create. Cleaning before each run rather than after the pair is a one-line fix
 and was three checks' worth of confusion.
 
-## 10.249 The other two files, and the grep that missed them
+## 10.280 The other two files, and the grep that missed them
 
-10.246 fixed `NCFG_RESOLV_CONF` and left its two siblings alone on a wrong
+10.277 fixed `NCFG_RESOLV_CONF` and left its two siblings alone on a wrong
 premise. `dns.h` says the Rust reads all three; a grep over `crates/` found
 only the first, so the other two looked like variables this port had invented
 and nothing honoured.
@@ -22663,11 +22662,11 @@ has been compared against its counterpart, and it was only possible because
 the variable that points them at a temp file now works in both.
 
 A live script for the delivery modes is the obvious next thing and is not here.
-It would have to bind-mount over `/etc/dnsmasq.d` the way 10.246's negative
+It would have to bind-mount over `/etc/dnsmasq.d` the way 10.277's negative
 control does, because a script testing for this defect must not be able to
 cause it -- and that is a piece of work rather than a line.
 
-## 10.248 Both daemons, one client, the same questions
+## 10.279 Both daemons, one client, the same questions
 
 The ledger says the two request taxonomies are whole -- thirty-two names, none
 either way. It says nothing about the **answers**, and the daemon is the last
@@ -22720,7 +22719,7 @@ index, the MAC and the drift record all stop being things two daemons can
 sample differently. A comparison that needs a field excluded is usually a
 comparison asking about two moments.
 
-## 10.247 The completeness ledger, asked of the code rather than written down
+## 10.278 The completeness ledger, asked of the code rather than written down
 
 The question this campaign keeps being asked -- what does the C side not do
 yet -- has been answered by hand each time. `doc/c-transition.md` section 5
@@ -22805,7 +22804,7 @@ speaks that protocol in C. An adapter staying Rust is the arrangement, not a
 gap -- which is worth writing down because "is everything duplicated as C?" has
 been asked and the honest answer has two parts.
 
-## 10.246 The variable that exists so a test does not rewrite this machine
+## 10.277 The variable that exists so a test does not rewrite this machine
 
 Looking for the next surface to compare, two came out clean and are now
 measured rather than assumed: **converging away** -- apply a document, apply a
@@ -22889,9 +22888,9 @@ obvious the Rust has it the right way round, since a CLI compile of an edited
 file makes the daemon describe a configuration it has not loaded. Recorded
 rather than decided.
 
-## 10.245 The comparison that found those four, made into a gate
+## 10.276 The comparison that found those four, made into a gate
 
-10.244 found four missing warnings by hand: write a document, run both
+10.275 found four missing warnings by hand: write a document, run both
 programs, diff what they say. The obvious next move was to keep doing that,
 and the better one was to stop doing it by hand.
 
@@ -22959,7 +22958,7 @@ was declared at two warnings because that is what it produced on this machine,
 and in the namespace it produces one. The number belongs to the environment
 the script runs in, which is the namespace, and nowhere else.
 
-## 10.244 Four sentences this port did not say
+## 10.275 Four sentences this port did not say
 
 The two rounds before this compared what the two programs *do* to a kernel.
 This compares what they *say* about a document, which is the other half of the
@@ -23065,9 +23064,9 @@ sentence is added, and nothing tells you. Both now name this radio's own
 words, and taking the radio warning back out still fails them -- which is the
 half that had to be re-established after loosening the match.
 
-## 10.243 Every bridge this port made came up on the kernel's defaults
+## 10.274 Every bridge this port made came up on the kernel's defaults
 
-10.242 fixed one half of a create arm and did not look at the other. The Rust's
+10.273 fixed one half of a create arm and did not look at the other. The Rust's
 has two `if let`s in it -- WireGuard, then bridge -- and only the first was
 missing here. The second was missing too.
 
@@ -23152,9 +23151,9 @@ Two misreadings, both from truncating output before reading it. The rule that
 would have caught both is the one already in `evidence.md` -- check the
 artifact, not a convenient summary of it.
 
-## 10.242 The tunnel that was up, addressed and carrying nothing
+## 10.273 The tunnel that was up, addressed and carrying nothing
 
-The last of 10.240's three silent subsystems, and it was not a missing message
+The last of 10.271's three silent subsystems, and it was not a missing message
 either. Pulling on it found four defects, one of them the worst this port has
 had.
 
@@ -23263,9 +23262,9 @@ being weaker than it reads, found by the sabotage it was written for. The
 script now forces both end octets low -- thirty octets of entropy is still a
 key, and the two ends are the question -- and it fails every run.
 
-## 10.241 The profile the daemon kept while editing around it
+## 10.272 The profile the daemon kept while editing around it
 
-The second of 10.240's three silent subsystems. `profile` was not a missing
+The second of 10.271's three silent subsystems. `profile` was not a missing
 message either: it was the daemon not doing the thing the message reports.
 
 **0151 is a rule about writes, and only half the writes obeyed it.** A machine
@@ -23350,7 +23349,7 @@ paths that write what it guards, and a second writer that never touches the
 stamp is invisible to it -- the same thing the sabotage above found, in a
 Makefile instead of a function.
 
-## 10.240 The four backends that could not be taken back
+## 10.271 The four backends that could not be taken back
 
 A sweep of what each implementation *says* -- every log line, by subsystem --
 found three the Rust has and this port has none of: `backend`, `wireguard` and
@@ -23417,9 +23416,9 @@ shape as this one rather than missing messages: the Rust warns there from code
 paths this port reaches differently. Not investigated yet, which is worth
 saying rather than leaving as an even sweep.
 
-## 10.239 The last grep, and the fixture that was weaker than it read
+## 10.270 The last grep, and the fixture that was weaker than it read
 
-10.238 left one source check standing: the reply-socket sweep was a single
+10.269 left one source check standing: the reply-socket sweep was a single
 call in `daemon_main.c`, in the one function a test may not run, so a `grep`
 of the source was the only thing holding it.
 
@@ -23461,9 +23460,9 @@ asked about a call that succeeded. A sabotage that produces the wrong failure
 is still a sabotage caught, and this one says something about the code that
 reading the guards in isolation does not.
 
-## 10.238 The fake that was locked in one file
+## 10.269 The fake that was locked in one file
 
-10.237 closed with a check it called the weakest thing in that round: the
+10.268 closed with a check it called the weakest thing in that round: the
 watcher's narration was asserted by grepping `daemon_watchers.c` for the call
 and the emit beside it. A grep is a check of the text, and what it could not
 say is whether a supplicant event reaches the log at all.
@@ -23513,7 +23512,7 @@ Two sabotages, both caught by the new case where the grep caught one: the emit
 deleted, and the narration narrowed to the event the watcher was already
 looking at.
 
-## 10.237 What the daemon was not saying
+## 10.268 What the daemon was not saying
 
 A sweep for functions nothing calls -- every `ncfg_*` declared in a public
 header, counted by *mentions* rather than by call sites, so a seam installed as
@@ -23579,14 +23578,14 @@ somebody does, `main_test.c` greps the watcher for the call and for the emit
 beside it, which is what catches a sabotage that deletes either. The same
 pattern covers the reaper's one call site.
 
-## 10.236 Two gaps this session named, closed
+## 10.267 Two gaps this session named, closed
 
 Both were written down by the sessions that hit them, which is the point of
 writing them down.
 
 ### What a scan row is secured with
 
-10.235 left the listing asking `ncfg_wifi_network_for` with
+10.266 left the listing asking `ncfg_wifi_network_for` with
 `NCFG_WIFI_SECURITY_UNSTATED` and said so in a comment: a row's `flags` carry
 the answer -- `[WPA2-PSK-CCMP]` against `[ESS]` -- and nothing parsed them into
 a kind. So an association was credited to the right one of two same-named
@@ -23627,9 +23626,9 @@ hazard exactly. A caller that wants no hooks recorded passes a sink whose
 `record` is NULL, which is a statement rather than an omission -- and that is
 now what the header says.
 
-## 10.235 One SSID, two blocks, and what tells them apart
+## 10.266 One SSID, two blocks, and what tells them apart
 
-10.234 recorded the limitation this closes: `ncfg_wifi_network_for` answers
+10.265 recorded the limitation this closes: `ncfg_wifi_network_for` answers
 "which of my `network` blocks is this radio on?" by BSSID first and then by the
 first block with that SSID, so two blocks sharing an SSID and pinned to no
 address -- an open network beside a WPA2 one of the same name, which is the
@@ -23713,7 +23712,7 @@ Twenty-six checks in that file now. The sabotage for the new pair: a miss that
 does not accumulate, so nothing is ever counted and nothing is ever said about
 the network coming back.
 
-## 10.234 The second run, which broke the network on purpose
+## 10.265 The second run, which broke the network on purpose
 
 The tryout was run again and this time the fallback fired for real: three
 missed checks, the C daemon stopped, the Rust daemon started, the network back
@@ -23825,7 +23824,7 @@ its log under `$TMPDIR` -- which the self-test did not set, so its stub output
 landed in `/tmp` beside the real runs' and stayed there. Nine files after one
 afternoon. The self-test points `TMPDIR` at its own directory now.
 
-## 10.233 The first run, and the eight seconds it took to hand back
+## 10.264 The first run, and the eight seconds it took to hand back
 
 The tryout was run on the machine: `systemctl stop netcfgd`, the C daemon
 holding the radio for eighty-nine seconds, Ctrl-C, handed back. It reported
@@ -23901,7 +23900,7 @@ is that it starts, adopts, watches and hands back without disturbing a live
 association -- which is the floor the switch has to be tried from, not the
 switch.
 
-## 10.232 What it would take to run this on the machine, and what watches
+## 10.263 What it would take to run this on the machine, and what watches
 
 The question was whether the C daemon could be tried on this workstation
 without the workstation being what pays for it. Everything below was settled
@@ -23960,7 +23959,7 @@ between this entry and a wrong one.
 ### The gate, and why it stopped being a list
 
 `netcfgd` refused to start, and the refusal named two things: ops the executor
-would not carry out, and blocks the planner held. 10.229 closed the first and
+would not carry out, and blocks the planner held. 10.260 closed the first and
 this session's sweep closed the second -- every block this planner holds is one
 the Rust holds too, each carrying `warn_unbuilt`'s *nothing acts on it in the
 Rust either*, and the two that are read elsewhere say where.
@@ -24016,7 +24015,7 @@ removed.
 
 `netcfgd --help` is one of the five daemon invocations the agreement gate
 compares byte for byte, so adding a flag to one program broke it -- which is
-the gate doing its job. The divergence is recorded the way 10.224 records the
+the gate doing its job. The divergence is recorded the way 10.255 records the
 `reset` ones: as the exact lines the C produces, so that a Rust which grew the
 flag and a C which lost it both go red.
 
@@ -24030,12 +24029,12 @@ and an unrelated line added to the C's help fails as an ordinary difference.
 ### What is not done
 
 **The tryout has not been run** -- at the time this entry was written. It was
-run the same day, and what it found is 10.233, including a defect in the
+run the same day, and what it found is 10.264, including a defect in the
 handback check recorded here as working.
 
-## 10.231 The two consents that were parsed and dropped
+## 10.262 The two consents that were parsed and dropped
 
-10.228 recorded a gap and this closes it: `--strand-credentials` and
+10.259 recorded a gap and this closes it: `--strand-credentials` and
 `--restart-wedged` reached `ncfg_cli_options_t` and `ncfg_daemon_apply_ask_t`
 and stopped there, because `ncfg_plan_options_t` had no member for either. A
 client asking for consent got a plan that had not heard it -- a stranding still
@@ -24123,9 +24122,9 @@ backend is wedged and no key is stranded, so neither pass has anything to
 report. The daemon's path is checked end to end and the CLI's is checked by
 reading, which is worth writing down rather than leaving as an assumption.
 
-## 10.230 The dial, which is the one action that makes a link
+## 10.261 The dial, which is the one action that makes a link
 
-10.229 left the PPPoE backend with no emitter: nothing in `src/plan/` started
+10.260 left the PPPoE backend with no emitter: nothing in `src/plan/` started
 a `pppoe` or an `openvpn` backend, so the module could be called and never
 planned. `src/plan/session.c` is that pass, and it closes the gap for both
 daemons -- the openvpn one had been unemitted since it landed.
@@ -24195,7 +24194,7 @@ the same for an OpenVPN tunnel, whose executor had been waiting for a planner
 since it was written. `ncfg_apply_supported` refuses nothing that is a port gap
 and `src/plan/` emits every op that executor carries out.
 
-## 10.229 The session nobody could hang up
+## 10.260 The session nobody could hang up
 
 A PPPoE session is a `pppd`, and until this round the C port could neither
 start one nor stop one: `ncfg_apply_supported` refused `backend.start` on a
@@ -24307,7 +24306,7 @@ answers no for an interface whose link is absent because its daemon has not
 created it, which is right for addresses and routes and wrong for the one op
 that would bring the link into existence.
 
-## 10.228 The daemon's three verbs that change the machine
+## 10.259 The daemon's three verbs that change the machine
 
 `apply`, `confirm` and `revert` are answered over the socket. Thirty of the
 thirty-two request kinds are answered now; the two that are not are `hello` and
@@ -24394,7 +24393,7 @@ the first line names the file, the line and the column.
 ### The sentence that had stopped being true
 
 `will_not_reconcile` told an operator that "`ncfg apply` is refused for the
-same reason". It is not, since 10.227: somebody typed it, against the machine
+same reason". It is not, since 10.258: somebody typed it, against the machine
 in front of them, having read what `ncfg plan` said. The daemon still refuses
 to start, and the reason is now stated as what it actually is -- a reconcile on
 a timer is an apply nobody typed, repeatedly, against a live network. Two
@@ -24414,7 +24413,7 @@ than the check's**: setting `seconds` from `ask->confirm.value` without the
 defect 0094 describes. The defect is the document's window winning over an
 explicit zero, and written that way it goes red twice.
 
-## 10.227 `ncfg apply` arrives, and the seam that keeps it off this machine
+## 10.258 `ncfg apply` arrives, and the seam that keeps it off this machine
 
 The verb that changes things is ported. It compiles, observes, plans, acts,
 records what it did and says so -- and in this build of the library it cannot
@@ -24490,7 +24489,7 @@ output through `head` is how a clean fixture looks like a leaking one.
 `apply`, `confirm` and `revert` arms are the next thing rather than a part of
 this.
 
-## 10.226 Where each program is told to look, and a case that proved nothing
+## 10.257 Where each program is told to look, and a case that proved nothing
 
 `--help` promises that every directory is the flag, or the variable, or the
 default, in that order. A precedence that differed between the two programs
@@ -24517,7 +24516,7 @@ beat the flag.
 one corpus, for exactly that reason -- *which* directory a case is pointed at
 is the thing it is about.
 
-## 10.225 The other binary, and the rule that keeps this gate off the machine
+## 10.256 The other binary, and the rule that keeps this gate off the machine
 
 The agreement gate had only ever run `ncfg`. It runs `netcfgd` now, for the
 five invocations that binary answers without starting: `--help`, `--version`,
@@ -24544,7 +24543,7 @@ there.
 
 One sabotage, caught: rewording the C daemon's "unknown option".
 
-## 10.224 Argument handling, and pinning a divergence by its words
+## 10.255 Argument handling, and pinning a divergence by its words
 
 Twenty-seven invocations now, and most of them are argument handling: a verb
 with no subcommand, a flag nobody defined, a name that cannot be one, a count
@@ -24581,7 +24580,7 @@ fixtures in the tree. It nearly mattered already -- `ncfg reset extra` is a
 *dry run* in the Rust, and it listed this repository's own fixture files while I
 was probing by hand.
 
-## 10.223 The verbs that only read, and two texts required to differ
+## 10.254 The verbs that only read, and two texts required to differ
 
 Five more comparisons, all of them text: `--help`, `--version`, `control show`,
 `profile get` and `profile list`. They agree byte for byte, which is the answer
@@ -24619,7 +24618,7 @@ Three sabotages caught: an extra line in the C's `--help`, and -- for the two
 marked cases -- converging the note's wording, which makes the dry run identical
 and the gate say the exception can go.
 
-## 10.222 Eight sequences, and the line `profile set` was not printing
+## 10.253 Eight sequences, and the line `profile set` was not printing
 
 The writing half of the agreement gate is eight sequences now rather than four
 single verbs, and several are pairs on purpose: **undoing is the half that goes
@@ -24654,7 +24653,7 @@ Two other divergences met on the way and neither is a defect. The Rust ignores
 this port's own decision. And `ncfg wifi forget` agrees exactly, which is worth
 knowing because it is the verb that removes a credential as well as a block.
 
-## 10.221 Comparing permissions found a Rust defect on the first run
+## 10.252 Comparing permissions found a Rust defect on the first run
 
 The agreement gate now also runs the three verbs that write -- `config put`,
 `secret set` and `control set` -- and compares what each left behind. Adding
@@ -24693,7 +24692,7 @@ running the check has. Both programs agreed when it was tried by hand here, and
 a check whose fixture is the developer's laptop is one that fails for a reason
 nobody can reproduce.
 
-## 10.220 The renderer's differential, which is `profile save`
+## 10.251 The renderer's differential, which is `profile save`
 
 The agreement gate compared what a configuration compiles *to*. It now also
 compares what the two programs write *back*: `ncfg profile save` over a copy of
@@ -24723,7 +24722,7 @@ that. Changing the indentation of one rendered key produced a profile that
 compiles perfectly well and is not the Rust's, so the two programs *wrote*
 different things, and the gate reported that instead.
 
-## 10.219 Seven refusals, compared word for word
+## 10.250 Seven refusals, compared word for word
 
 The agreement gate compared one bad configuration. It compares seven now, and
 the comparison is stricter than "the same position": the C's first diagnostic
@@ -24768,7 +24767,7 @@ Three sabotages caught: rewording the C's diagnostic, moving its line by one,
 and renaming a field in the document model (which is the comparison the
 *compiling* half of the corpus makes).
 
-## 10.218 The first comparison of the two programs
+## 10.249 The first comparison of the two programs
 
 0263 says a module of the port is a candidate to replace its Rust half "only
 once it passes the Rust's own tests for the same behaviour", and that the
@@ -24822,7 +24821,7 @@ disagree: renaming one field in the C document model's table turns
 it green. A fixture that compiles when it should not, and a corpus entry that
 does not exist, were each driven the same way.
 
-## 10.217 The per-link views, and a guard that turned out to be reachable
+## 10.248 The per-link views, and a guard that turned out to be reachable
 
 `state.h` said the per-link projections were deferred because assembling one
 needs three of the observed model's writers and they were private -- "publishing
@@ -24862,7 +24861,7 @@ Three other sabotages caught: writing every address into every link's file, not
 removing the stale views, and creating the directory for a machine with no
 links.
 
-## 10.216 The accident that 10.205 removed, and the pass that replaces it
+## 10.247 The accident that 10.236 removed, and the pass that replaces it
 
 `observe.h` still said `read_resolv_currency` was waiting on a record nothing
 wrote. That had stopped being true four rounds earlier -- and the sentence was
@@ -24870,7 +24869,7 @@ hiding something sharper than a stale claim.
 
 **Closing one gap opened another.** While `owned.json`'s `dns` had no writer,
 `observed.dns` was empty on every machine, so the planner emitted a `dns.apply`
-on every pass. That was the defect 10.205 fixed -- and it was *also*, by
+on every pass. That was the defect 10.236 fixed -- and it was *also*, by
 accident, the only thing that corrected a `/etc/resolv.conf` some other program
 had overwritten. Writing the record took the accident away with the defect: a
 machine whose resolver was replaced would now have netcfgd reporting nothing to
@@ -24912,7 +24911,7 @@ Four sabotages, each caught: judging a mode netcfgd does not own the file in,
 never clearing, rendering with a different generator, and reading a path
 nobody gave.
 
-## 10.215 The refusal that was wrong twice, and the last verb before the apply
+## 10.246 The refusal that was wrong twice, and the last verb before the apply
 
 `probe put` was refused with: "this build of netcfgd cannot write a probe
 drop-in: the writer that renders a `probe` block is not ported". Both halves
@@ -24949,11 +24948,11 @@ link reported down for no reason.
 Four sabotages, each caught: dropping the name check, accepting whitespace,
 writing the file unexecutable, and replacing without being asked.
 
-## 10.214 The probes and the modems, and four members that are absences
+## 10.245 The probes and the modems, and four members that are absences
 
 Twenty-four of the thirty-two request kinds are answered; `journal` is the only
 response left unencoded. `ncfg_probe_list` is new and `ncfg_sims_status` was
-already here -- it was on 10.207's list of published calls with no caller, kept
+already here -- it was on 10.238's list of published calls with no caller, kept
 there with a reason ("waits on `modems`"), and this is that.
 
 **The probe listing's rule is the runner's.** A name in the operator's
@@ -24982,11 +24981,11 @@ whatever had happened since.
 Three sabotages caught: listing both copies of a probe name, writing
 `cycle_pending` always, and answering a modem list with no selection behind it.
 
-## 10.213 The explanation over the socket, and the file positions it reads
+## 10.244 The explanation over the socket, and the file positions it reads
 
 Twenty-two of the thirty-two request kinds are answered. This one needed a
 producer the last round had deliberately left without callers:
-`ncfg_state_write_provenance` and `ncfg_state_read_provenance`, which 10.208
+`ncfg_state_write_provenance` and `ncfg_state_read_provenance`, which 10.239
 recorded as "right to have no caller, because the file exists so a daemon's
 `explain` can answer without recompiling, and that response is unported". It is
 ported now, so both have one, and the note was right about why rather than
@@ -25026,7 +25025,7 @@ Five sabotages caught in the end: not writing the positions on reload, not
 reading them in the arm, writing an empty `source`, dropping the truncation
 fact, and adding one where nothing was truncated.
 
-## 10.212 Two listings whose rules are opposite
+## 10.243 Two listings whose rules are opposite
 
 `configs` and `hooks`, which brings the answered request kinds to twenty-one of
 thirty-two. Neither had a producer, so both gained one where it belongs:
@@ -25069,7 +25068,7 @@ Four sabotages caught: calling every file removable, dropping an unreadable
 hook, writing `name` for the base file, and the earlier pair on the two lists
 before them.
 
-## 10.211 Two lists whose producers were already here
+## 10.242 Two lists whose producers were already here
 
 `secrets` and `profiles`, which are the cheapest two of the responses left:
 `ncfg_secret_list` and `ncfg_profile_list` already existed, tested where they
@@ -25108,7 +25107,7 @@ byte for byte, which is the part a client built against the Rust depends on.
 Four sabotages, each caught: writing `used_by` always, writing `chosen`
 always, taking `chosen` from nowhere, and listing secrets with no document.
 
-## 10.210 The plan a client is served, and the warnings only it carries
+## 10.241 The plan a client is served, and the warnings only it carries
 
 The third response of the same shape, and the first with a rule in it rather
 than only an envelope. `{"response":"plan",<the four members>}` is
@@ -25161,7 +25160,7 @@ before the fourth found the gap above: dropping the contention pass, replacing
 one warning per interface with one naming all of them, and wrapping the
 members instead of flattening them.
 
-## 10.209 Two responses that were a model and an envelope
+## 10.240 Two responses that were a model and an envelope
 
 Four sweeps came back clean this round before one came back useful. A seam
 member nothing installs: two, both documented defaults (`now` is
@@ -25192,7 +25191,7 @@ asserted is that a Rust-built client reads this.
 members in the daemon instead would be a second list of a model's members in a
 module that does not own one -- and a member added to the model and forgotten
 there is a client reading a field the daemon has stopped sending, with nothing
-failing to compile. That is 10.205's defect in a new place, prevented rather
+failing to compile. That is 10.236's defect in a new place, prevented rather
 than found. The sabotage for it drops a member from the shared writer, and the
 witness check goes red.
 
@@ -25222,9 +25221,9 @@ and mine. The discipline the other sabotages in this session used is the one
 that works: copy the file aside first, `cp` it back afterwards, and never ask
 git to undo something in a tree where another session may be writing.
 
-## 10.208 The answer that had the facts and would not print them
+## 10.239 The answer that had the facts and would not print them
 
-10.207 found this while triaging its own sweep and left it: `ncfg explain`
+10.238 found this while triaging its own sweep and left it: `ncfg explain`
 handed `ncfg_explain` no positions table and printed a notice saying the
 compiler records none. The compiler had been recording them for waves --
 0263's own entry says so, naming the eleven kinds of entry the lowering
@@ -25283,9 +25282,9 @@ structure that has to go on agreeing with the document, which is what the
 argument against a side table was in the first place. Recorded so the next
 sweep does not triage it again.
 
-## 10.207 A published call with no caller, and the SIM nobody selected
+## 10.238 A published call with no caller, and the SIM nobody selected
 
-The third run of the same sweep, with the correction 10.206 forced into it: a
+The third run of the same sweep, with the correction 10.237 forced into it: a
 function is unwired when nothing in `c/src/` **mentions** it -- not when
 nothing calls it -- because a seam installed as a function pointer is wired
 and a function six tests call is not. Counting mentions rather than calls, and
@@ -25345,9 +25344,9 @@ and a line and none of them does. That is the next round's work rather than
 this one's: it needs a compile entry point that carries the table, which
 `config.h` does not have yet.
 
-## 10.206 The same sweep one level down: a field with no producer
+## 10.237 The same sweep one level down: a field with no producer
 
-10.204 swept for a published function with no caller. 10.205 was a
+10.235 swept for a published function with no caller. 10.236 was a
 different shape of the same thing -- a *record member* nothing ever wrote --
 and it was found by reading a stale sentence rather than by measuring. So I
 measured this one: every field the observed model's codec names, 198 of them
@@ -25369,7 +25368,7 @@ So the first question was never asked on any machine, and a client started
 with the wrong metric was left alone until it managed to install a route with
 the wrong metric.
 
-**A test using a function is not a caller**, and that is the lesson 10.204's
+**A test using a function is not a caller**, and that is the lesson 10.235's
 sweep needed. `ncfg_dhcp_started_metric` was in that sweep's output and I
 classified it as legitimate, because `dhcp_test.c` calls it six times. Six
 calls from a test file are exactly what an unwired producer looks like.
@@ -25408,9 +25407,9 @@ the seventh time this session. A v6 client on the same interface is the right
 fixture -- it shares the whole DHCP arm and only the kind separates them --
 and with it the sabotage goes red.
 
-## 10.205 The record with a reader, a format and no writer
+## 10.236 The record with a reader, a format and no writer
 
-The same sweep as 10.203 and 10.204, run a third time and this time over
+The same sweep as 10.234 and 10.235, run a third time and this time over
 `doc/decision/0263`, whose entries are cited from source. One of them said
 `applied_dns` "has nowhere to go for the reason `state.h` already gives".
 `state.h` had stopped giving that reason several waves ago: it carries `dns`,
@@ -25422,7 +25421,7 @@ empty record is an empty observation, and `plan/host_wide.c` compares every
 scope the document wants against nothing and emits `dns.apply` for each of
 them. On every pass. For ever. That is the plan-idempotence property `plan.h`
 names load-bearing, failing on any machine that configures DNS at all -- the
-same failure 10.182 and 10.183 found from the reading side, with the writing
+same failure 10.213 and 10.214 found from the reading side, with the writing
 side never there.
 
 **Four documents said a reader existed, in one hand.** `dns.h`: "the observer
@@ -25493,9 +25492,9 @@ journal writer moved with the code and now asserts both halves -- that the pass
 reaches the fold, and that the fold writes the journal -- because either alone
 is a machine that records nothing.
 
-## 10.204 Six more ops, found by sweeping for the same shape again
+## 10.235 Six more ops, found by sweeping for the same shape again
 
-10.203's sweep was for *sentences* that had outlived their truth. This one is
+10.234's sweep was for *sentences* that had outlived their truth. This one is
 for the shape underneath them: **a published function with no caller.** That is
 what hid `ncfg_kernel_set_service`, and then `ncfg_wifi_configure_network`, so
 rather than look for a third by reasoning I measured it -- 936 declarations in
@@ -25511,14 +25510,14 @@ device's *name* and nothing else -- `link.set_bridge`, `link.set_bond`,
 refused by name on every apply the daemon would have made. `apply.h` says what
 that refusal is protecting against: "a bridge with every setting at the
 kernel's default, reported as a successful apply". **I wired the service half
-in 10.189 and did not notice the setter beside it**, which is the same kind of
+in 10.220 and did not notice the setter beside it**, which is the same kind of
 miss the sweep exists to catch.
 
 `ncfg_kernel_set_secrets` had none either, and it matters for a different
 reason: NULL means the machine's **own** secrets directory, so a daemon pointed
 at a scratch tree would load the machine's real key material to configure it
 with. That is exactly the hazard `ncfg_main_world_where_t` was built to prevent
-in 10.189, one field along and missed the same way.
+in 10.220, one field along and missed the same way.
 
 **A check that passed before its subject, for the fifth time this session.** The
 WireGuard fixture omitted `peers`, which the reader requires, so the document
@@ -25535,7 +25534,7 @@ is maintenance that rots exactly the way the sentences did. Running it by hand
 at the end of a wave costs a minute and has now found three gaps that three
 separate "what is left?" readings did not.
 
-## 10.203 A seam with an implementation and no caller, found by sweeping
+## 10.234 A seam with an implementation and no caller, found by sweeping
 
 I had said the port had no gaps left twice and been wrong twice, so this time I
 swept the headers instead of asserting it -- `grep` for "not ported", "no
@@ -25569,7 +25568,7 @@ what was wrong, which is what those sentences are for.
 **And the stale claims, corrected rather than left.** `observe.h` still said
 four passes were unwritten -- and that each was "a round trip to the daemon it
 asks", which was true of two; `service.h` still said the observer had no reader
-for the supplicant's record, which 10.202 wrote; `explain.h` still said
+for the supplicant's record, which 10.233 wrote; `explain.h` still said
 `ncfg explain` was unwired because the observer was not ported, which it has
 not been for many waves.
 
@@ -25578,7 +25577,7 @@ also tripped the existing "a kind the table answers has an arm" check -- which
 is the check that would have caught this gap if the arm had ever claimed to
 answer.
 
-## 10.202 The last observation pass, and a rule whose input nobody wrote
+## 10.233 The last observation pass, and a rule whose input nobody wrote
 
 `ask_supplicants` is `ncfg_observe_supplicants`. With it the observer has no
 port gaps left: every pass `observe.h` names is written.
@@ -25587,11 +25586,11 @@ Three answers out of one connection, and **the third is the one other rules
 were already written against**. `ncfg_observed_link_t::network` -- which
 network a radio is associated to -- is read by
 `ncfg_observed_effective_metric`, by `inventory.c` and by `derive.c`, and
-**nothing in this port wrote it**. So the metric rule closed in 10.195 and
-10.196 always fell through to the interface's `preference` on a real machine:
+**nothing in this port wrote it**. So the metric rule closed in 10.226 and
+10.227 always fell through to the interface's `preference` on a real machine:
 the rule was right, the input was absent, and every test of it supplied the
 field by hand. Found by re-deriving what this pass does rather than by any
-check going red, which is the same way 10.199's gap was found.
+check going red, which is the same way 10.230's gap was found.
 
 `answering` is written onto the backend matched **by kind as well as by
 interface**. One interface carries several backends -- a supplicant and a DHCP
@@ -25630,7 +25629,7 @@ guard.
 NetworkManager adapter waits on 0264's libdbus decision, and whether the daemon
 may manage a machine is the holder's to decide.
 
-## 10.201 `answering` gets its answer, and the fake hostapd is shared
+## 10.232 `answering` gets its answer, and the fake hostapd is shared
 
 `read_access_control` is `ncfg_observe_access_control`, the one observation
 pass that talks to a daemon rather than reading a file. The connection answers
@@ -25689,12 +25688,12 @@ pass that replaces one of those fields releases what was there without reaching
 into the model's statics.
 
 6,398 checks across 99 binaries. Five sabotages caught. Also swept: three
-`world_test` directories left by the segfault in 10.192, and fourteen
+`world_test` directories left by the segfault in 10.223, and fourteen
 `/tmp/netcfgd-owner-*` from the Rust test leak recorded in 10.189.
 
 **One pass remains: `ask_supplicants`.**
 
-## 10.200 Two currency questions, and a check that passed for the wrong reason
+## 10.231 Two currency questions, and a check that passed for the wrong reason
 
 `read_secret_currency` and `read_tunnel_currency` are `ncfg_observe_currency`
 now, one round because they are one shape: a passphrase and a `.ovpn` are both
@@ -25723,8 +25722,8 @@ says nothing" put the daemon on `wlan-gone` and the access point block on
 the sabotage that answers "differs" from a missing file turned nothing red. The
 fixture names the block on the same device now. That is the third time this
 session a case has been found passing before its subject: the first was a
-borrow asserted of a scope that never reaches the merging branch (10.195), the
-second an addressing guard whose fixture had no client running (10.196).
+borrow asserted of a scope that never reaches the merging branch (10.226), the
+second an addressing guard whose fixture had no client running (10.227).
 
 **`NCFG_HOSTAPD_PASSPHRASE_MAX` is published**, because the renderer is no
 longer the only one that needs it. A reader with a bound of its own would
@@ -25746,7 +25745,7 @@ observation, and the `wpa_passphrase` line matched on the wrong key.
 **Two passes remain** -- `ask_supplicants` and `read_access_control` -- and
 those two really are control-socket round trips.
 
-## 10.199 What radvd is announcing, and four passes still to write
+## 10.230 What radvd is announcing, and four passes still to write
 
 I had been saying the port had no gaps left. That was wrong, and re-deriving
 rather than repeating it is what found them: `observe.h` names **five**
@@ -25787,7 +25786,7 @@ plan reloads against a guess. Two sabotages bite there now where none did.
 
 **And `observe.h` had a stale paragraph of mine.** It still said
 `apply/kernel_genl.c` does not write the WireGuard key record; I wrote that
-writer in 10.193 and corrected the liveness paragraph beside it without
+writer in 10.224 and corrected the liveness paragraph beside it without
 correcting this one. Fixed.
 
 6,354 checks across 97 binaries. Five sabotages caught: the prefixes sorted, a
@@ -25798,9 +25797,9 @@ missing file clearing the record, and a prefixless file clearing it.
 it asks" is only true of some: `read_secret_currency` and
 `read_tunnel_currency` are digests of files, like this one was.
 
-## 10.198 The offload disagreement is closed, in both languages
+## 10.229 The offload disagreement is closed, in both languages
 
-10.194 left this open because closing it needed a decision above the work: a
+10.225 left this open because closing it needed a decision above the work: a
 new field on `ObservedLink` changes `doc/schema/observed.json`, which both
 languages read and the Rust reads with `deny_unknown_fields`. The holder said
 to fix it in both.
@@ -25827,7 +25826,7 @@ decide one.
 own reader rather than by reasoning: `lo` holds `rx-checksum` and
 `tx-checksum-ip-generic`; `wlp0s20f3` holds `rx-checksum`; `docker0`,
 `enp0s31f6` and both WireGuard devices hold nothing. That last part corrects
-10.185, which named `docker0` and the WireGuard devices -- today `rx-checksum`
+10.216, which named `docker0` and the WireGuard devices -- today `rx-checksum`
 is not even active on them.
 
 **Both bitsets come out of one reply, not two round trips.** The kernel carries
@@ -25861,7 +25860,7 @@ the `WANTED` merge removed (C), and the managed filter removed (Rust).
 C: 6,342 checks across 96 binaries. Rust: every suite green, `clippy`, `fmt`
 and the adapters with it.
 
-## 10.197 The cycle option lands, and the last planner gap closes
+## 10.228 The cycle option lands, and the last planner gap closes
 
 `ncfg_plan_options_t::cycle` is 0152's option half, and it was the last thing
 in the planner that was this port's to finish. The daemon side was already
@@ -25912,11 +25911,11 @@ names is `warn_unbuilt`'s: link-local addressing, a `bluetooth` block, and a
 network block's own addressing, routes, `dns` and hooks are read by nobody in
 either language, so they are new work rather than porting.
 
-## 10.196 The other half of the metric, and two sabotages that caught nothing
+## 10.227 The other half of the metric, and two sabotages that caught nothing
 
 `ncfg_plan_metric_restart` closes the second half of what a network's `metric`
 means. The first half -- a route the interface declares taking the effective
-metric -- landed in 10.195; this is the **lease's own route**, which netcfgd
+metric -- landed in 10.226; this is the **lease's own route**, which netcfgd
 does not install and cannot edit, because the client installs it from what it
 was started with. The only way to move it is to start the client again.
 
@@ -25963,7 +25962,7 @@ asserts on the restart's own half instead.
 ignored, the start not waiting on the stop, a converged client restarted
 anyway, the addressing guard removed, and the `argv` half dropped.
 
-## 10.195 Half a wifi metric, and the count that came out of `build.c`
+## 10.226 Half a wifi metric, and the count that came out of `build.c`
 
 `address.c`'s `with_metric` filled a route's metric from
 `interface->preference` alone, and said so: *"This build has one answer,
@@ -26013,7 +26012,7 @@ prints off the operator's own machine.
 replacing rather than falling back, the planner going back to `preference`
 alone, and a route's own metric being overridden.
 
-## 10.194 One request parser where there were five, and a question I did not answer
+## 10.225 One request parser where there were five, and a question I did not answer
 
 `request_parts` was written five times -- `kernel_genl.c`, `offloads.c`,
 `netfilter.c`, `wireguard.c` and `collect.c` -- identical but for the noun in
@@ -26074,7 +26073,7 @@ threads the close and the exec race. Recorded rather than fixed, which is this
 branch's rule for the Rust: it is a defect in a test of code being deprecated,
 and the cause is here for whoever schedules it.
 
-## 10.193 The WireGuard record gets its writer, and a third base64 encoder
+## 10.224 The WireGuard record gets its writer, and a third base64 encoder
 
 `observe.h` declared `ncfg_observe_wg_key_record_path` and
 `ncfg_observe_wg_preset_record_path` "so that the writer, when it lands, names
@@ -26141,7 +26140,7 @@ emptying the file rather than removing it, a failed buffer written anyway, and
 -- the one that caught nothing first time -- the record written for a request
 the kernel refused.
 
-## 10.192 The service context is complete, and the refusal is about the planner now
+## 10.223 The service context is complete, and the refusal is about the planner now
 
 The last unresolved member of `ncfg_service_t` was `tunnels`:
 `ncfg_main_tunnels_of` fills it from the document's openvpn devices -- the
@@ -26178,7 +26177,7 @@ unchanged, so a reader was being told a pass was missing that had been there
 for waves. Rather than write today's list and wait for it to rot the same way,
 it now points at `warn_unported` and the per-pass held-block warnings -- which
 stay current by a rule that cannot rot, because a pass landing takes its
-warning out in the same commit. That is 10.177's lesson about counts applied to
+warning out in the same commit. That is 10.208's lesson about counts applied to
 a list.
 
 **Two things caught by the work rather than by a check.**
@@ -26202,7 +26201,7 @@ a header, `make clean`.**
 whose password failed, the report path losing its `reported/` component, the
 passwords not wiped on release, and the unmanaged-device skip.
 
-## 10.191 `running` stops being a memory and becomes a fact
+## 10.222 `running` stops being a memory and becomes a fact
 
 `ncfg_observed_backend_t::running` has always said of itself that it is *a fact
 about a process: something is there under that pid*. It was not. The backend
@@ -26266,9 +26265,9 @@ DHCP client with no pid file called dead, hostapd losing its answer again, and
 and what is left of the executor's is one argument: an openvpn tunnel's
 configuration file.
 
-## 10.190 A blocker that was not one, repeated because nobody read it
+## 10.221 A blocker that was not one, repeated because nobody read it
 
-`advertising` was left NULL in 10.189 on the strength of a comment in
+`advertising` was left NULL in 10.220 on the strength of a comment in
 `service.h`: that resolving `@pd:wan0` needs `derive_from_delegation` and
 *"`value.h` has no port of it"*, so a copy here would be the third reading of
 one rule. I repeated that sentence into `daemon_service.c` and into the commit
@@ -26325,10 +26324,10 @@ not a worker's; it was in the tree, it was specific, and it named a function.
 That is exactly the shape of claim that gets repeated. `value.h` was one grep
 away.
 
-## 10.189 The executor gets its other half, and four sentences that had to move
+## 10.220 The executor gets its other half, and four sentences that had to move
 
 `ncfg_kernel_set_service` had no caller outside the tests, which is the one
-wiring job on 10.187's list that was blocking a machine rather than a feature.
+wiring job on 10.218's list that was blocking a machine rather than a feature.
 `src/main/daemon_service.c` is that caller: `ncfg_main_world_executor_open`
 builds an `ncfg_service_t` beside the hooks it already built, and closes it with
 them. Fourteen of the forty-eight ops stop refusing -- `dns.apply`, the four
@@ -26403,7 +26402,7 @@ not help anyone reason about the C port, which is this branch's rule for Rust.
 the service not installed at all, the scopes not handed over, the metric rule's
 fall-through, and the service not released on close.
 
-## 10.188 The DNS scope rule leaves the planner, on its own terms
+## 10.219 The DNS scope rule leaves the planner, on its own terms
 
 `plan/host_wide.c` carried the rule that says which scopes a machine has, and
 its header carried the condition for moving it: *"This port has one caller for
@@ -26462,7 +26461,7 @@ failed once inside a full `make check` and passed alone and on the next full
 run, against a tree with no Rust change in it. Order- or parallelism-dependent,
 in code being deprecated.
 
-## 10.187 What the port is waiting for, in one place
+## 10.218 What the port is waiting for, in one place
 
 Written because this document has had six sentences corrected this week for
 saying something nobody re-checked, and the list of what is left had become
@@ -26487,7 +26486,7 @@ start. Nothing else on this list blocks a machine.
 
 Two, and both are the product's rather than this port's: **link-local
 addressing**, whose arm in the Rust is the same warning, and a **`network`
-block's** addressing, routes, `dns` and hooks, which §10.180 settled. The
+block's** addressing, routes, `dns` and hooks, which §10.211 settled. The
 third, `metric`, is a real port gap and is deferred for a reason worth keeping
 -- `effective_metric`'s observation half reads a field nothing fills, so a
 producer written today would return `interface->preference` for every
@@ -26500,7 +26499,7 @@ carries but which nothing fills until `read_backend_liveness` lands -- and
 that one is held by `process.h` reaching `/proc` at a fixed path, which
 `observe.h`'s own rule forbids an observation pass. The seventh,
 `read_resolv_currency`, reads `observed.dns`, which is carried and not folded
-for the reason §10.183 gives.
+for the reason §10.214 gives.
 
 ### What is written and cannot be reached
 
@@ -26513,8 +26512,8 @@ answered wrongly, which is the one shape the planner does nothing about.
 The NetworkManager adapter, which
 [0264](doc/decision/0264-the-library-the-bus-already-brought.md) settles and
 defers. `ncfg reset`'s partial-failure path, which cannot be driven as root.
-0079's third restart-count clear, which §10.183 shows is unsafe with the input
-available. And the `WANTED`/`ACTIVE` offload disagreement of §10.185, which
+0079's third restart-count clear, which §10.214 shows is unsafe with the input
+available. And the `WANTED`/`ACTIVE` offload disagreement of §10.216, which
 needs a third state neither language's model has anywhere to put.
 
 ### The residue nobody owns
@@ -26526,12 +26525,12 @@ shared pair belongs in `observe_internal.h`. A harmonizing pass over files
 that three waves were writing in at once is not a thing to do mid-wave, which
 is why it is here instead of done.
 
-## 10.186 The launcher, and the driver two halves of the Rust disagree about
+## 10.217 The launcher, and the driver two halves of the Rust disagree about
 
 `ncfg_supplicant_start` and `ncfg_supplicant_stop` land as
 `c/src/backend/supplicant/launch.c`, and `ncfg_service_backend_supported` stops
 refusing a supplicant. That refusal was the last executor gap between a WPA
-laptop and a plan that is already right about it -- §10.183's wave made the
+laptop and a plan that is already right about it -- §10.214's wave made the
 planner emit `backend.start` for a radio's supplicant and for a `dot1x` port,
 and the executor declined it with "needs a `wpa_supplicant` to be launched and
 adopted".
@@ -26636,13 +26635,13 @@ else, so every op in `service.h` -- `dns.apply`, the four sysctls, the six wifi
 ops and all three backend verbs -- is refused by name at run time for want of a
 context. Removing the supplicant's refusal from `ncfg_apply_supported`
 therefore makes `ncfg diff` and a dry run right about a WPA laptop and does not
-on its own bring one up. Named here for §10.183's reason: so that nobody reads
+on its own bring one up. Named here for §10.214's reason: so that nobody reads
 "the launcher landed" as "a WPA laptop comes up". Wiring the context is a
 `src/main/` wave and is the next one worth taking.
 
-## 10.185 The offloads nobody had ever read back, and what the kernel says besides
+## 10.216 The offloads nobody had ever read back, and what the kernel says besides
 
-`read_offloads` is ported, `c/src/observe/offloads.c`. §10.182 judged it the
+`read_offloads` is ported, `c/src/observe/offloads.c`. §10.213 judged it the
 cheapest of the ten deferred passes and named the one thing in its way: the
 kernel's feature names per model field existed once in this port, privately in
 `c/src/plan/offload.c`, above a comment saying the second caller takes that
@@ -26671,7 +26670,7 @@ first and says why: `netcfgd_model::interface::offload_names` is in the model
 `plan_tc_test.c` red and leaves `observe_offloads_test.c` green, because the
 latter derives every expectation from the table under test.
 
-### The convergence, which is §10.182's NAT sentence one field along
+### The convergence, which is §10.213's NAT sentence one field along
 
 `c/src/plan/offload.c` compares the document's `ethtool` block against
 `ncfg_observed_link_t.offloads`, and nothing filled it. So a machine whose
@@ -26688,7 +26687,7 @@ planning anything.
 The seam is a third `ncfg_observe_kernel_t` on `ncfg_observe_current_from`,
 named `genl` for the protocol rather than `ethtool` for the family -- one
 generic netlink socket carries every family, and the two WireGuard passes took
-this one in the same wave rather than opening a fourth (§10.184). 0263 carries
+this one in the same wave rather than opening a fourth (§10.215). 0263 carries
 the divergences.
 
 ### One defect in the Rust, and this port inherits it
@@ -26735,12 +26734,12 @@ names in both languages and has nowhere to put the third state. That is a change
 to the model and to both planners, so it is recorded here and in 0263 rather
 than made in an observation pass.
 
-## 10.184 The store the daemon was pointed at, and the one it reads
+## 10.215 The store the daemon was pointed at, and the one it reads
 
-The two WireGuard observation passes are ported, which §10.182 judged a wave of
+The two WireGuard observation passes are ported, which §10.213 judged a wave of
 their own because they need a generic netlink socket and, for the second of
 them, the secret store. The socket half stopped being a blocker when the
-offloads round opened one (§10.185); the store half is what this section is
+offloads round opened one (§10.216); the store half is what this section is
 about, because reading it turned up the one defect in the Rust that this port
 does not inherit.
 
@@ -26793,7 +26792,7 @@ the one directory where getting it wrong reads somebody's credentials.
 
 ### What the observation is for, which is not the convergence NAT had
 
-§10.182 and §10.183 both end in the same sentence: a list nothing filled made
+§10.213 and §10.214 both end in the same sentence: a list nothing filled made
 the planner compare against an empty one, so a machine that was already right
 was planned the same op on every pass and never converged. **The WireGuard
 passes are the other failure.** `ncfg_plan_wireguard` returns without planning
@@ -26853,9 +26852,9 @@ string, so the half of the sweep that looks for a digest could not have found
 one. It was caught by sabotage -- emitting the digest to a log deliberately and
 watching nothing go red -- and not by reading the test.
 
-## 10.183 The record was the keystone, and two things downstream of it had never converged
+## 10.214 The record was the keystone, and two things downstream of it had never converged
 
-§10.182 counted the observer's passes and found that what blocks six of them is
+§10.213 counted the observer's passes and found that what blocks six of them is
 not a backend module but `owned.json`: `observed.backends` is filled from the
 ownership record and from nowhere else, and `ncfg_owned_state_t` had no member
 for it. This wave is that member, and the one beside it.
@@ -26906,7 +26905,7 @@ record and a C one.
 
 ### Two things downstream had never converged, and one of them is the NAT defect again
 
-§10.182's `read_netfilter` entry found that a machine whose NAT was already
+§10.213's `read_netfilter` entry found that a machine whose NAT was already
 right was planned a `nat.replace` on every pass, because the list the planner
 compared against was empty and nothing filled it. **`observed.dns` is the same
 shape, and `dns.h` says so above the function that exists to prevent it**: "a
@@ -26941,7 +26940,7 @@ named; a caller with no list passes NULL and costs one re-delivery. `apply.h`
 carries the argument and `ncfg_observe_resolv_currency` is the reader that
 closed the other half.
 
-**0079's third clear was not written**, and §10.182 said it had neither an
+**0079's third clear was not written**, and §10.213 said it had neither an
 output nor an input. The output half closed with the record carrying backends.
 The input half did not, and the reason was sharper than "not done yet": the
 clear fires for a backend *seen running*, and `running` in the record was
@@ -26958,7 +26957,7 @@ an `argv` marker. The Rust has one function for it,
 the other way round** -- the six modules that start these daemons already know
 how to find one, so `ncfg_service_backend_handle` is a switch over the taxonomy
 with no `default:` that calls them, rather than a seventh spelling of six
-rules. `ncfg_observe_backend_liveness` is the pass, and §10.254 is the clear
+rules. `ncfg_observe_backend_liveness` is the pass, and §10.285 is the clear
 itself.
 
 **What did not close is the `/proc` root**, and `observe.h` records it in the
@@ -26994,9 +26993,9 @@ the half that is wrong. The C inherits none of it, because the C does not fold
 `dns` at all; when it does, the rule has to be "what was delivered" rather than
 "what this op named", and that is the same distinction.
 
-## 10.182 The observer's deferred passes, counted instead of remembered
+## 10.213 The observer's deferred passes, counted instead of remembered
 
-§10.170 gave, among the reasons the size comparison is not like-for-like, that
+§10.201 gave, among the reasons the size comparison is not like-for-like, that
 "six of eleven observation passes are deferred". Nobody had checked that
 sentence against `c/src/observe/` for several waves — the observer gained
 `collect.c` and `current.c` in the meantime — and `observe.h` carried the same
@@ -27019,7 +27018,7 @@ eleven deferred*, and after this wave it is *ten of eleven*. Corrected in
 place, above.
 
 **Two waves later it is seven of eleven**, and this is the last time the number
-is written here. `read_offloads` landed as `c/src/observe/offloads.c` (§10.185)
+is written here. `read_offloads` landed as `c/src/observe/offloads.c` (§10.216)
 and `read_wireguard_keys` and `read_wireguard_currency` landed together as
 `c/src/observe/wireguard.c`, which is the wave this section predicted: a
 generic netlink socket, and the secret store for the second of them. What is
@@ -27140,9 +27139,9 @@ most likely rather than least. The port inherits it because
 non-divergence rather than a quiet copy, since closing it is an `nft.h` change
 and not the observer's to make.
 
-### The shape, which is §10.180's from the other side
+### The shape, which is §10.211's from the other side
 
-§10.180 was three warnings that told an operator to wait for something that had
+§10.211 was three warnings that told an operator to wait for something that had
 already arrived or was never coming. This is the same failure in a header
 comment and in this document, with one part worse: the count was not merely
 overtaken, it never matched the list underneath it, and it was copied into a
@@ -27152,7 +27151,7 @@ this sentence. Nothing in the code was wrong either time. What had rotted was
 the sentence — and a wrong count in a record about what is missing is worse
 than no count, because it is the number the next person plans a wave from.
 
-## 10.181 A restart that names an empty field, and a copy that turned out not to be one
+## 10.212 A restart that names an empty field, and a copy that turned out not to be one
 
 Found porting the access point's half of the planner: `backend.start` for
 hostapd as a radio's prerequisite, the restart an edited identity costs, and
@@ -27214,7 +27213,7 @@ the renderer's agreement with it is checked, but not by calling it. The C does
 call it from both sides, which is the arrangement the comment describes.
 
 
-## 10.180 Three warnings that told an operator to wait for nothing
+## 10.211 Three warnings that told an operator to wait for nothing
 
 Found by asking, before writing anything, which of the blocks this port still
 held were the *port's* gap and which were the *product's*. A grep finds no
@@ -27262,10 +27261,10 @@ because the port caught up, one because the thing was never coming. The code
 each describes was correct throughout; what rotted was the sentence.
 
 That is the same failure as a stale comment, a stale count in a refusal
-(§10.177) and a gate over the wrong file (§10.177 again) -- and it is worse
+(§10.208) and a gate over the wrong file (§10.208 again) -- and it is worse
 than all three, because this one is addressed to somebody who cannot check it.
 
-## 10.179 Five in the DHCP client, four of which decide whose process gets signalled
+## 10.210 Five in the DHCP client, four of which decide whose process gets signalled
 
 The wave that ported `src/backend/dhcp/` -- the last backend `src/backend/`
 was missing, and the one `ncfg_apply_supported` refused by name with the
@@ -27447,7 +27446,7 @@ a suite that waits out three seconds twice -- but the default itself is
 exercised by nothing, and a check that spelled the number would be asserting
 the constant against itself.
 
-## 10.178 Three gaps closed, a journal nobody was told about, and an enum that could not be included twice
+## 10.209 Three gaps closed, a journal nobody was told about, and an enum that could not be included twice
 
 The wave that wired `ncfg_tun_create` into the executor, wrote
 `plan.last.json`, and gave the loop a way to notice a monitor stream whose
@@ -27474,7 +27473,7 @@ to somebody at a terminal and never to anybody watching a daemon.
 
 **The cost is the file being trusted, not the file being missing.**
 `plan.last.json` is the answer to *where did an apply stop*, and a reconcile
-has no terminal to print it to; §10.168 records a case where it "named the
+has no terminal to print it to; §10.199 records a case where it "named the
 cause exactly" while the daemon log held two startup lines and nothing else.
 A write that fails leaves whatever was there before, so the next reader is not
 told that nothing was written -- they are shown an *older* apply's journal and
@@ -27521,7 +27520,7 @@ The shape is worth more than the fix. **A module whose tests pass in isolation
 is not a module that has been integrated**, and the port's gate --
 `tool/c_tests_gate.py`, which requires a test to include each header -- cannot
 see it, because the test that includes `tun.h` alone satisfies the gate exactly
-as a real caller would. That is the same family as §10.177's guard over the
+as a real caller would. That is the same family as §10.208's guard over the
 wrong file: a check that passes for a reason unrelated to the thing it names.
 The model keeps the numbering, as it does for a bond's mode and a tunnel's kind
 word, and `tun.h` includes `document.h` for it.
@@ -27554,7 +27553,7 @@ once. The three that did not are worth more than the ten.
 **A tun created wore no alternative name and nothing noticed.** `main_test.c`
 read `kernel.c` for `mark_as_ours(kernel,` -- which the *netlink* path also
 calls, so deleting the call from `create_tun` alone left the search satisfied.
-That is §10.177's shape one turn further on: the file was right this time, and
+That is §10.208's shape one turn further on: the file was right this time, and
 the *granularity* was wrong. The check now reads the span between
 `static int create_tun` and the next function and requires the call inside it.
 
@@ -27574,7 +27573,7 @@ properly means executing `link.create` for a tun, which needs `CAP_NET_ADMIN`
 and leaves a device on the machine the suite runs on, so it is named here
 instead of asserted.
 
-## 10.177 A check that could not fail, and a claim four waves outlived
+## 10.208 A check that could not fail, and a claim four waves outlived
 
 Two faults in this port's own record-keeping, both found by the wave that
 closed the daemon's gaps, and both the same shape as the defects this
@@ -27629,12 +27628,12 @@ That function's contract is to be **the** list of what this build can carry
 out, asked once by `execute` before anything is done, so that a plan carrying
 something impossible is refused before the machine is touched rather than
 halfway through changing it. The planner declines a device by asking exactly
-that question (10.172). A yes here that becomes a no at execution puts the
+that question (10.203). A yes here that becomes a no at execution puts the
 refusal back in the middle of the plan, which is the failure the ordering
 exists to prevent. It refuses a tun by name now; `tun.h` carries
 `ncfg_tun_create` and nothing calls it, so closing it is wiring.
 
-## 10.176 A monitor stream that has gone still holds a connection slot
+## 10.207 A monitor stream that has gone still holds a connection slot
 
 Found by wiring `monitor` in the C port -- the one step `server.c` owed -- which
 meant reading the Rust's arrangement line by line rather than around it.
@@ -27656,7 +27655,7 @@ something is announced. The channel is between two threads inside the daemon
 and takes the event happily; the socket error only appears in `write_message`,
 which is reached only when an event arrives.
 
-**§10.169 records the subscriber vector filling this way. The connection slot
+**§10.200 records the subscriber vector filling this way. The connection slot
 is the sharper half and is not recorded**: what a held slot costs is not one
 client's event list but everybody's control socket. `MAX_CONNECTIONS` is 64.
 
@@ -27685,7 +27684,7 @@ stream is still live and carrying events. What a dead subscriber costs there is
 one entry in a list bounded at `NCFG_MAIN_SUBSCRIBERS_MAX`, with the
 seventeenth `monitor` refused by a sentence rather than by silence.
 
-## 10.175 The three verbs that removed nothing, and what writing them found
+## 10.206 The three verbs that removed nothing, and what writing them found
 
 The wave that gave `ncfg wifi add`, `ncfg wifi forget` and `ncfg reset` a
 writer. Two of them needed `netcfgd_host::wifi_profile` -- 810 lines that 0263
@@ -27776,9 +27775,9 @@ nothing at all.
 
 `render` writes `ssid = "<hex>"` only when the SSID is not exactly the label,
 which is the separate-`--id` case, so the claim is about the one path that is
-not covered by the label check either. This is 10.160's shape one layer down --
+not covered by the label check either. This is 10.191's shape one layer down --
 a renderer with nothing comparing what went in against what came out -- and
-10.162's shape exactly: a comment that describes what the code does not do.
+10.193's shape exactly: a comment that describes what the code does not do.
 
 The C's round trip compares every field the block can carry, and the install is
 therefore the comparison. Measured by sabotage: removing any one rendered key
@@ -27803,7 +27802,7 @@ yet does not compile before `wifi add` runs at all. What is left is a check
 that verifies a configuration the machine does not load, which is the thing the
 other site was fixed for. The C uses the profiled loader at both.
 
-## 10.174 The flag that was refused, and what answering it found
+## 10.205 The flag that was refused, and what answering it found
 
 The wave that made `--json` work at the six verbs `run.c` refused it at. The
 refusal's own words were the specification -- *a flag silently ignored is worse
@@ -27935,7 +27934,7 @@ way the daemon's is, which is `run.c` deliberately not having one: it calls
 `ncfg_observe_current` so that the CLI and the daemon cannot assemble one
 sequence two ways.
 
-## 10.173 The link that is not a netlink message is not marked either
+## 10.204 The link that is not a netlink message is not marked either
 
 The wave that closed the two facts keeping the C daemon's guard shut: a created
 link now carries netcfgd's alternative name, and what an apply did is folded
@@ -28014,12 +28013,12 @@ behaviour where it can (`ncfg_owned_absorb` claims a created link) and by
 reading `kernel.c` for the definition **and the call** where it cannot, plus
 the reason that still stands, and it was proved by sabotage both ways.
 
-**The shape is §10.166's and worth the lines for the same reason.** A guard
+**The shape is §10.197's and worth the lines for the same reason.** A guard
 aimed at the wrong file is not a weak guard, it is an absent one wearing a
 guard's name -- and this one was load-bearing: it was the single check standing
 between the port's daemon and a machine somebody works over.
 
-## 10.172 Four more, and what the halves found when they met
+## 10.203 Four more, and what the halves found when they met
 
 The wave that closed the planner's gaps and the executor's. Four defects in
 the Rust, and two in the port that only appeared where two workers' work
@@ -28123,7 +28122,7 @@ twice.
 **And four checks that were vacuous for one reason worth keeping.** A tunnel
 endpoint compared as text could not be caught. The test now edits the
 observation after reading it, which is the shape a report keeping a shell
-script's text actually hands over. That is §10.169's defect, and the fixture
+script's text actually hands over. That is §10.200's defect, and the fixture
 that would have found it was said not to be expressible.
 
 > **Corrected, and the correction is the more useful entry.** The reason given
@@ -28148,11 +28147,11 @@ that would have found it was said not to be expressible.
 > cause was never found because the wrong one sounded sufficient. Where
 > canonicalisation genuinely happens is the *compiler* -- `lower.c` turns
 > configuration text into a document -- and a report never goes through it,
-> which is the whole of why §10.169 and 10.172's route-destination defect
+> which is the whole of why §10.200 and 10.203's route-destination defect
 > exist.
 
 
-## 10.171 A control policy the daemon obeys and the socket does not
+## 10.202 A control policy the daemon obeys and the socket does not
 
 Found by porting the daemon's assembly — the part of `netcfgd-daemon::run`
 that binds the sockets — which is where the choice the Rust makes implicitly
@@ -28225,7 +28224,7 @@ directory, which is worse than the gap. `ncfg_main_policy_copy` is that copy,
 it is checked against a document that is freed before the copy is read, and
 0263 records the divergence and points here.
 
-## 10.170 The port links, and what linking it measured
+## 10.201 The port links, and what linking it measured
 
 `c/` had no `main` until today. The library built and the suite passed, so
 nothing had ever been linked as the thing this is meant to become -- and a
@@ -28241,7 +28240,7 @@ forty-eight and refuses the other thirty-five by name; the daemon runtime is
 unreachable code; `--json`, the `network`-block writer, `ncfg reset` and
 provenance recording are absent; seven of eleven observation passes are
 deferred (this said "six", and every one of the eleven was deferred on the day
-it was written; §10.182 counts them, and says where the figure has moved
+it was written; §10.213 counts them, and says where the figure has moved
 since). Three of the Rust's four libraries are ncurses and the unwinder,
 which the port gives up deliberately rather than beats. The figure is worth
 recording because a port with no linked artefact has no size at all, not
@@ -28344,7 +28343,7 @@ The check pins the surviving file and line, and **passes against the old
 code**: glibc's `qsort` is a merge sort and kept these two in order, so it was
 right by luck and would have been wrong elsewhere.
 
-### Two more defects, one of which sharpens 10.169's
+### Two more defects, one of which sharpens 10.200's
 
 **`Kernel::new()` takes a seven-dump snapshot of the machine to build a
 name-to-index map.** `kernel.rs` calls `snapshot_with` and uses exactly
@@ -28359,7 +28358,7 @@ round trips and a second machine-wide walk of the routing table per executor
 open. On a router with a real routing table the route dump dominates by orders
 of magnitude.
 
-That is what makes it worth more than its own size. §10.169 records that
+That is what makes it worth more than its own size. §10.200 records that
 `release_contended` opens an executor every five seconds on any machine
 running a backend. **It is not a lock and a socket every five seconds. It is
 six unnecessary machine-wide netlink dumps every five seconds, holding the
@@ -28485,7 +28484,7 @@ rather than a second opinion. Deleting the socket timeout in
 failure mode is a privileged daemon wedged for ever. Saying that is better
 than a check that does not exist.
 
-## 10.169 Five more, from the reconcile loop, `explain` and the portal check
+## 10.200 Five more, from the reconcile loop, `explain` and the portal check
 
 The wave that ported `netcfgd-daemon/src/lib.rs`, `ncfg explain`, the portal
 check and the contention detector. Four of the five were reproduced.
@@ -28600,7 +28599,7 @@ existed -- including by the sweeps in this document. **Rewriting a line is a
 harder read than reviewing it**, which is the argument for this port that was
 not in 0263 when it was written.
 
-## 10.168 What porting the daemon's second half and the command line found
+## 10.199 What porting the daemon's second half and the command line found
 
 Six workers, five modules, 12,420 lines of C and 867 checks. The suite is 56
 binaries and 3,842 checks, clean under ASan and UBSan with no findings. What
@@ -28667,7 +28666,7 @@ status 0.
 
 ### A removal, and a control policy, each checked against the wrong document
 
-`remove_drop_in` is §10.165 and is reproduced there. Beside it,
+`remove_drop_in` is §10.196 and is reproduced there. Beside it,
 `ncfg control set` writes the machine's control policy **into the factory
 image**: `defines_global` searches the layered set factory-first and splices
 into the first file carrying a `global` block. Reproduced -- the block landed
@@ -28759,7 +28758,7 @@ reported link failures from a half-sanitized archive, and two declined to run
 instinct and cost them a full rebuild each. Fixed, and the pattern now mirrors
 the Makefile's and says why.
 
-## 10.167 Two half-claims, one in a test and one in a document
+## 10.198 Two half-claims, one in a test and one in a document
 
 The round that ported configuration loading and the daemon's front half. Both
 of the round's own faults are the same shape, and neither is a coding mistake:
@@ -28809,7 +28808,7 @@ fold (137 checks), and the daemon's authorization, peers, privilege and server
 windows, probes, sims, the resolv guard, wifi -- is named in 0263 rather than
 stubbed, because a stub that answers is worse than a symbol that is missing.
 
-## 10.165 A removal verified against a configuration the machine does not have
+## 10.196 A removal verified against a configuration the machine does not have
 
 Found while porting `config.rs`, and reproduced rather than read.
 
@@ -28846,7 +28845,7 @@ see it: the two functions are checked by different tests, neither compares them,
 and the comment explaining the hazard sits in the function that no longer has
 it. The C port has both paths loading with the profile, and a case naming this.
 
-## 10.166 Two findings that were not, and why saying so is worth the lines
+## 10.197 Two findings that were not, and why saying so is worth the lines
 
 Both were queued as defects from the port's notes. Neither survived being
 checked, and the checking is the point: a report that is not verified before it
@@ -28895,7 +28894,7 @@ the group file is an argument and a test can produce each case on purpose --
 which the Rust cannot, since it reads `/etc/group` from a constant and its own
 tests say so twice.
 
-## 10.164 Three DNS renderers with no test, two of them the disclosing kind
+## 10.195 Three DNS renderers with no test, two of them the disclosing kind
 
 `netcfgd-dns`'s `render.rs` publishes five renderers. Its test module exercises
 two: `resolv_conf` and `resolvconf_blob`. `dnsmasq_conf`, `unbound_conf` and
@@ -28917,14 +28916,14 @@ Found by porting them, which is the only reading anybody had given that file in
 a while. The C has whole-text assertions for all three, the exclusive and
 non-exclusive forms among them, so the shapes are pinned on one side at least.
 
-**The pattern across 10.159 to here is worth naming.** A port does not find
+**The pattern across 10.190 to here is worth naming.** A port does not find
 defects because the porter is clever; it finds them because porting is the only
 activity that reads every line with a reason to disagree. Six of the findings so
 far are in code with no test at all, four are comments the code stopped
 obeying, and one -- the passphrase in a diagnostic -- is a rule kept in three
 places and forgotten in the fourth.
 
-## 10.163 A passphrase in a diagnostic, and the redaction that hid it
+## 10.194 A passphrase in a diagnostic, and the redaction that hid it
 
 **The one thing the design exists to prevent.** A credential is a reference
 everywhere it can be -- `@secret:name` in the document, in the rendered
@@ -28972,7 +28971,7 @@ sent under one string and reported under another, so the reported form is the
 only one a diagnostic can reach. A rule that every call site has to remember is
 a rule that one call site will forget, and this is what that looks like.
 
-## 10.162 A comment that forbids what the code does
+## 10.193 A comment that forbids what the code does
 
 `with_metric` fills a route's absent metric from an interface's preference.
 Its own doc comment says why that must happen once:
@@ -29011,7 +29010,7 @@ defect cannot appear.
 Both found by porting the planner, which is the third module in a row where
 the finding was in a comment the code had stopped obeying.
 
-## 10.161 What porting the compiler found in it
+## 10.192 What porting the compiler found in it
 
 `lower.rs` is 5,166 lines and the largest file in the project. Porting it meant
 reading every one with a reason to disagree, and seven things came back. Four
@@ -29056,10 +29055,10 @@ was right, the prose was stale, and I read past it twice while editing that
 file.
 
 **The port is now a review of the Rust that nobody budgeted for.** Twenty-odd
-findings across `10.157` to here, none from a reviewer, all from somebody
+findings across `10.188` to here, none from a reviewer, all from somebody
 trying to make the same thing work twice.
 
-## 10.160 Five fields `ncfg profile save` drops without saying so
+## 10.191 Five fields `ncfg profile save` drops without saying so
 
 The renderer's own discipline is in its header: **what cannot be written is
 refused by name, never dropped**, because a profile that comes back missing a
@@ -29093,14 +29092,14 @@ modifiers by name because the language takes none. Not fixed on `master`: the
 repair is five small additions plus the test that walks every field, and it
 belongs with whoever settles the other findings in 10.159.
 
-## 10.159 What the port has found in the Rust so far
+## 10.190 What the port has found in the Rust so far
 
 Porting a module means reading every line of it with a reason to disagree,
 which is a review nobody has budget for on its own. Eleven findings so far,
 none of them from a reviewer and all of them from somebody trying to make the
 same thing work twice. Two already have sections of their own -- the attribute
-length that truncates (10.157) and the request payload that is not strict
-(10.158). The rest are here, with what was actually checked rather than
+length that truncates (10.188) and the request payload that is not strict
+(10.189). The rest are here, with what was actually checked rather than
 reported.
 
 **Verified by reading the source, or by measurement:**
@@ -29161,7 +29160,7 @@ its own branch, the fixes want tests written against the Rust, and two of them
 repairs. What this section is for is that they do not evaporate when the branch
 is merged or abandoned.
 
-## 10.158 A payload that is not strict, and a document that says it is
+## 10.189 A payload that is not strict, and a document that says it is
 
 `doc/socket-protocol.md` section 7 states the rule plainly: *"Unknown members
 are refused on a request, in the envelope as well as the payload."* The
@@ -29196,7 +29195,7 @@ and leaves a client able to send a member the daemon ignores. The first is what
 the rule was for. Not decided here, and not on this branch -- it is `master`'s
 code and `master`'s document.
 
-## 10.157 An attribute length that truncates, found by porting it
+## 10.188 An attribute length that truncates, found by porting it
 
 `AttrBuf::push` in `crates/netcfgd-sys/src/wire.rs` computes the attribute
 length as a `usize` and casts it to `u16` under

@@ -15,7 +15,7 @@
 # `NCFG_DNSMASQ_CONF` or `NCFG_UNBOUND_CONF` -- the three variables whose whole
 # purpose is keeping a test off those files -- and writing the probe that found
 # it came within one working directory of rewriting this machine's
-# (project.md 10.246, 10.249).
+# (project.md 10.277, 10.280).
 #
 # THE TWO FORWARDERS ARE HANDLED DIFFERENTLY, AND THE REASON IS HONEST
 #   `/etc/dnsmasq.d` and `/etc/unbound/unbound.conf.d` cannot be bind-mounted
