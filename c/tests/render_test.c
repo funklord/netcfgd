@@ -389,7 +389,9 @@ static void render_the_witness(int argc, char **argv)
 		 * refused. Removed rather than left: this list's job is to name what
 		 * has no rendering, and an entry for something that renders would make
 		 * the next reader think the gap is still open. */
-		"a match block", "ethtool settings", "qdisc",
+		/* `ethtool settings` and the blanket `qdisc` were here and render now; the
+		 * ingress-metering half of a qdisc is still refused and is below. */
+		"a match block", "a qdisc metering arriving traffic",
 		"ingress_redirect", "global: dns options", "global: dnssec",
 		"global: dns transport", "global: a dns server with a port or sni",
 		"interface d-0: hooks", "interface d-0: advertise", "interface d-0: guard",
@@ -624,6 +626,77 @@ static void the_unmanage_policy_defects(void)
  * differs comes back as hex -- an SSID being arbitrary octets while a label is
  * text.
  */
+/*
+ * `ethtool` and `qdisc` round-trip, in both of the qdisc's two forms.
+ *
+ * **Both refused wholesale until now**, so a machine with any link setting or
+ * any shaped queue could not save a profile -- and these are settings somebody
+ * chose against a specific NIC or a specific uplink, which makes them the least
+ * guessable things in a document.
+ *
+ * **A toggle has three values and `off` is not the absence of one.** `unmanaged`
+ * is the default and means netcfgd leaves the driver's own answer alone, so it
+ * is omitted; `on` and `off` are both written. A renderer that treated `off` as
+ * nothing would turn "switch this offload off" into "do not touch it", which is
+ * the opposite instruction.
+ *
+ * The qdisc has two shapes and which one it takes is a property of the policy,
+ * not a style: a kind with no rate is the bare `qdisc = "fq_codel"` a person
+ * would have written, and one with a rate needs the block. Both are asserted,
+ * because a renderer that always wrote the block would round-trip and still be
+ * wrong about what a profile looks like.
+ *
+ * `render_rate` picks the largest suffix that divides exactly, so a rate comes
+ * back as `100mbit` rather than `100000kbit`.
+ */
+static void ethtool_and_qdisc_round_trip(void)
+{
+	char *toggles;
+	char *bare;
+	char *shaped;
+
+	round_trips("device eth0 {\n\tethtool {\n"
+	    "\t\tautoneg = \"off\"\n"
+	    "\t\tgro = \"on\"\n"
+	    "\t\tgso = \"off\"\n"
+	    "\t\ttso = \"on\"\n"
+	    "\t\trx_checksum = \"off\"\n"
+	    "\t\ttx_checksum = \"on\"\n"
+	    "\t\tspeed = 1000\n"
+	    "\t\tduplex = \"full\"\n"
+	    "\t\twol = \"g\"\n"
+	    "\t\trx_ring = 4096\n"
+	    "\t\ttx_ring = 2048\n"
+	    "\t}\n}\n",
+	    "every field of an ethtool block survives a round trip");
+
+	/* Both halves of the toggle, because `off` and unmentioned are different
+	 * instructions to the driver. */
+	toggles = rendering_of("device eth0 { ethtool { gro = \"off\"; tso = \"on\" } }\n");
+	check(toggles && strstr(toggles, "gro = \"off\"") != NULL,
+	    "an offload switched off says so, rather than reading as untouched");
+	check(toggles && strstr(toggles, "tso = \"on\"") != NULL &&
+	        strstr(toggles, "unmanaged") == NULL,
+	    "and one switched on says that, while the default is left unwritten");
+	free(toggles);
+
+	round_trips("device eth0 {\n\tqdisc = \"fq_codel\"\n}\n",
+	    "a qdisc with no rate survives a round trip");
+	bare = rendering_of("device eth0 {\n\tqdisc = \"fq_codel\"\n}\n");
+	check(bare && strstr(bare, "qdisc = \"fq_codel\"") != NULL,
+	    "and comes back in the short form a person would have written");
+	free(bare);
+
+	round_trips("device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"100mbit\"\n\t}\n}\n",
+	    "and a shaped one survives in the block form it needs");
+	shaped = rendering_of("device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"100mbit\"\n\t}\n}\n");
+	check(shaped && strstr(shaped, "bandwidth = \"100mbit\"") != NULL,
+	    "with the rate under the largest suffix that divides it exactly");
+	free(shaped);
+}
+
 static void an_access_point_round_trips(void)
 {
 	char *allowed;
@@ -1512,10 +1585,15 @@ static void the_refusals_no_config_file_can_reach(void)
 	    holds(dns, "global: dns transport") &&
 	    holds(dns, "global: a dns server with a port or sni"),
 	    "a DNS scope's four unwritable facts are each named");
+	/* The qdisc was named here too. It renders now -- this fixture's `cake`
+	 * carries no rate and no ingress flag, so it comes back as the short form
+	 * -- and only the two that are still unrenderable are asserted. The
+	 * ingress-metering half of a qdisc is refused and is covered where that
+	 * renderer is tested. */
 	check(holds(device, "device eth0: a match block") &&
-	    holds(device, "device eth0: qdisc") &&
-	    holds(device, "device eth0: ingress_redirect"),
-	    "and a device's match, qdisc and synthesised redirect");
+	    holds(device, "device eth0: ingress_redirect") &&
+	    lacks(device, "device eth0: qdisc"),
+	    "and a device's match and its synthesised redirect, the qdisc rendering now");
 	check(holds(lease, "interface eth0: a dhcp lease's client id") &&
 	    holds(lease, "interface eth0: a dhcp lease's backend") &&
 	    holds(lease, "interface eth0: a dhcp lease's metric"),
@@ -1610,6 +1688,7 @@ int main(int argc, char **argv)
 	a_radios_own_policy_round_trips();
 	a_routing_rule_round_trips();
 	an_access_point_round_trips();
+	ethtool_and_qdisc_round_trip();
 	a_default_roam_block_survives();
 
 	the_ordinary_interfaces();

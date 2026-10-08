@@ -34,13 +34,24 @@
  * told that classful schedulers are out, not that they typed something
  * unrecognised.
  */
+/*
+ * The closed set, once, at file scope.
+ *
+ * It was written twice here -- in the parser below and in `qdisc_name` under it
+ * -- and the renderer is now a third consumer. Two copies of a closed set are
+ * two places for it to be ordered differently from `ncfg_qdisc_kind_t`, and the
+ * renderer is where that costs most: a kind rendered under the wrong name is a
+ * document that compiles and describes a different scheduler.
+ */
+static const char *const qdisc_kind_words[] = { "fq_codel", "cake", "fq", "pfifo_fast",
+	"noqueue" };
+
 int ncfg_qdisc_kind(ncfg_lower_ctx_t *ctx, const char *name, ncfg_span_t span, int *out)
 {
-	static const char *const names[] = { "fq_codel", "cake", "fq", "pfifo_fast", "noqueue" };
 	size_t i;
 
-	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
-		if (strcmp(names[i], name) == 0) {
+	for (i = 0; i < sizeof(qdisc_kind_words) / sizeof(qdisc_kind_words[0]); i++) {
+		if (strcmp(qdisc_kind_words[i], name) == 0) {
 			*out = (int)i;
 			return 1;
 		}
@@ -59,11 +70,14 @@ static int qdisc_shapes(int kind)
 	return kind == NCFG_QDISC_CAKE;
 }
 
-static const char *qdisc_name(int kind)
+/* Exposed, because the renderer needs the same spelling and a table of its own
+ * would be a third copy of a closed set. */
+const char *ncfg_qdisc_kind_name(int kind)
 {
-	static const char *const names[] = { "fq_codel", "cake", "fq", "pfifo_fast", "noqueue" };
-
-	return names[kind];
+	if (kind < 0 || (size_t)kind >= sizeof(qdisc_kind_words) / sizeof(qdisc_kind_words[0])) {
+		return NULL;
+	}
+	return qdisc_kind_words[kind];
 }
 
 /*
@@ -204,13 +218,13 @@ int ncfg_lower_qdisc(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	if (policy.ingress_bandwidth_bits.has && !qdisc_shapes(policy.kind)) {
 		ncfg_diag(ctx, ingress_span,
 		    "`%s` cannot shape arriving traffic: ingress shaping puts `cake` on an `ifb` "
-		    "device, so the scheduler has to be `cake`", qdisc_name(policy.kind));
+		    "device, so the scheduler has to be `cake`", ncfg_qdisc_kind_name(policy.kind));
 		return 0;
 	}
 	if (policy.bandwidth_bits.has && !qdisc_shapes(policy.kind)) {
 		ncfg_diag(ctx, bandwidth_span,
 		    "`%s` cannot shape to a rate: `cake` is the scheduler that shapes without a class "
-		    "tree; the others queue but do not limit", qdisc_name(policy.kind));
+		    "tree; the others queue but do not limit", ncfg_qdisc_kind_name(policy.kind));
 		return 0;
 	}
 	*out = policy;
