@@ -7,6 +7,7 @@
  * is silently dropped from every saved profile -- which is the failure that
  * move most easily creates, and which it did create twice.
  */
+#include "lower_internal.h"
 #include "render_private.h"
 
 #include "ncfg/buf.h"
@@ -294,6 +295,146 @@ static void render_wifi_device(const ncfg_wifi_device_policy_t *wifi, ncfg_buf_t
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
+/* A toggle's three spellings, in `ncfg_toggle_t`'s order: UNMANAGED, ON, OFF.
+ * Read from `document.h`, not carried over -- the lesson the wifi backend table
+ * paid for. */
+static const char *const toggle_words[] = { "unmanaged", "on", "off" };
+
+/* One toggle, written only where it is not `unmanaged` -- which is the default
+ * and means netcfgd leaves the driver's own answer alone. `on` and `off` are
+ * both written, because the difference between `off` and not-mentioned is the
+ * whole point of a three-valued toggle. */
+static void render_toggle(ncfg_buf_t *body, const char *key, int value)
+{
+	if (value == NCFG_TOGGLE_UNMANAGED) {
+		return;
+	}
+	ncfg_buf_addf(body, "\t\t%s = \"%s\"\n", key,
+	    ncfg_render_word_or_gap(ncfg_render_word(toggle_words,
+	        NCFG_COUNT_OF(toggle_words), value)));
+}
+
+/*
+ * The `ethtool` block: what the driver is told about the link itself.
+ *
+ * **Refused wholesale until now**, so a machine with any link setting could not
+ * save a profile -- and these are settings somebody chose against a specific
+ * NIC, which makes them the least guessable thing in a document.
+ *
+ * `unmanaged` is a toggle's default and means netcfgd leaves the driver's own
+ * answer alone, so it is omitted; `on` and `off` are both written, because the
+ * difference between "off" and "not mentioned" is the whole point of a three-
+ * valued toggle (0023's shape, and the same argument `dns { }` turns on).
+ */
+static void render_ethtool(const ncfg_link_settings_t *settings, ncfg_buf_t *body)
+{
+	ncfg_buf_add_text(body, "\tethtool {\n");
+	/* Named one at a time rather than walked by offset: the pointer arithmetic
+	 * a table would need is the kind of thing that goes wrong silently in a
+	 * renderer, and six lines are cheaper than being clever here. */
+	render_toggle(body, "autoneg", settings->autoneg);
+	render_toggle(body, "gro", settings->gro);
+	render_toggle(body, "gso", settings->gso);
+	render_toggle(body, "tso", settings->tso);
+	render_toggle(body, "rx_checksum", settings->rx_checksum);
+	render_toggle(body, "tx_checksum", settings->tx_checksum);
+	if (settings->speed.has) {
+		ncfg_buf_addf(body, "\t\tspeed = %lld\n", (long long)settings->speed.value);
+	}
+	if (settings->duplex) {
+		ncfg_buf_add_text(body, "\t\tduplex = ");
+		ncfg_render_quote(body, settings->duplex);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (settings->wol) {
+		ncfg_buf_add_text(body, "\t\twol = ");
+		ncfg_render_quote(body, settings->wol);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (settings->rx_ring.has) {
+		ncfg_buf_addf(body, "\t\trx_ring = %lld\n", (long long)settings->rx_ring.value);
+	}
+	if (settings->tx_ring.has) {
+		ncfg_buf_addf(body, "\t\ttx_ring = %lld\n", (long long)settings->tx_ring.value);
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+/*
+ * A rate, in the suffixed form the parser reads back.
+ *
+ * The largest suffix that divides exactly, so `100000000` comes back as
+ * `100mbit` rather than `100000kbit`. A rate that divides by none is written in
+ * bits, which the parser also takes.
+ */
+static void render_rate(ncfg_buf_t *body, int64_t bits)
+{
+	static const struct {
+		const char *suffix;
+		int64_t     multiplier;
+	} units[] = {
+		{ "gbit", 1000000000 },
+		{ "mbit", 1000000 },
+		{ "kbit", 1000 },
+	};
+	size_t i;
+
+	for (i = 0; i < NCFG_COUNT_OF(units); i++) {
+		if (bits % units[i].multiplier == 0) {
+			ncfg_buf_addf(body, "\"%lld%s\"", (long long)(bits / units[i].multiplier),
+			    units[i].suffix);
+			return;
+		}
+	}
+	ncfg_buf_addf(body, "\"%lldbit\"", (long long)bits);
+}
+
+/*
+ * A device's root qdisc, in whichever of its two forms the document needs.
+ *
+ * **Refused wholesale until now.** `qdisc = "fq_codel"` is the shorthand for a
+ * scheduler carrying no rate, and the block form is for one that does -- so a
+ * policy with no bandwidth at all comes back as the short form, which is what
+ * a person would have written.
+ *
+ * The kind's spelling comes from `ncfg_qdisc_kind_name`, which the lowerer owns
+ * and `ncfg_qdisc_kind` inverts: a kind rendered under the wrong name is a
+ * document that compiles and describes a different scheduler, so the closed set
+ * has one home rather than a copy here.
+ *
+ * **The ingress half stays refused**, as it is in the Rust. A policy metering
+ * arriving traffic is served by building an `ifb` and redirecting to it, and
+ * the `ifb` is derived rather than written -- so rendering it back would mean
+ * recovering an `ingress_bandwidth` the document no longer holds, which is the
+ * same reason `ingress_redirect` is refused a few lines below.
+ */
+static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing)
+{
+	if (qdisc->ingress) {
+		ncfg_render_refuse(missing, "device", name, "a qdisc metering arriving traffic");
+	}
+	if (!qdisc->bandwidth_bits.has && !qdisc->ingress_bandwidth_bits.has) {
+		ncfg_buf_addf(body, "\tqdisc = \"%s\"\n",
+		    ncfg_render_word_or_gap(ncfg_qdisc_kind_name(qdisc->kind)));
+		return;
+	}
+	ncfg_buf_add_text(body, "\tqdisc {\n");
+	ncfg_buf_addf(body, "\t\tkind = \"%s\"\n",
+	    ncfg_render_word_or_gap(ncfg_qdisc_kind_name(qdisc->kind)));
+	if (qdisc->bandwidth_bits.has) {
+		ncfg_buf_add_text(body, "\t\tbandwidth = ");
+		render_rate(body, qdisc->bandwidth_bits.value);
+		ncfg_buf_add_char(body, '\n');
+	}
+	if (qdisc->ingress_bandwidth_bits.has) {
+		ncfg_buf_add_text(body, "\t\tingress_bandwidth = ");
+		render_rate(body, qdisc->ingress_bandwidth_bits.value);
+		ncfg_buf_add_char(body, '\n');
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
 /* ------------------------------------------------------------------------ *
  * The device block
  * ------------------------------------------------------------------------ */
@@ -373,9 +514,6 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 	if (device->match) {
 		ncfg_render_refuse(missing, "device", name, "a match block");
 	}
-	if (device->link_settings) {
-		ncfg_render_refuse(missing, "device", name, "ethtool settings");
-	}
 
 	ncfg_buf_init(&body, 0);
 	if (!device->managed) {
@@ -388,9 +526,6 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		ncfg_buf_add_char(&body, '\n');
 	}
 	render_bridge_vlans(device->bridge_vlans, device->bridge_vlan_count, &body);
-	if (device->qdisc) {
-		ncfg_render_refuse(missing, "device", name, "qdisc");
-	}
 	if (device->ingress_redirect) {
 		/* **Refused, and it must stay refused**, which is different from the
 		 * rest of the list. It is not a config key: the compiler synthesises
@@ -433,6 +568,12 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 	 * modem's are the two device-level backends, and a device has one or the
 	 * other. */
 	render_wifi_device(device->wifi, &body);
+	if (device->link_settings) {
+		render_ethtool(device->link_settings, &body);
+	}
+	if (device->qdisc) {
+		render_qdisc(device->qdisc, name, &body, missing);
+	}
 	if (device->modem) {
 		render_modem(device->modem, &body);
 	}

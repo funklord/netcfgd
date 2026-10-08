@@ -12293,6 +12293,99 @@ whose severity label is more alarming than its severity, and whose recurrences
 are indistinguishable from repeats, produces exactly this: confident reports of
 faults that are not there, costing the time of whoever checks them.
 
+## 10.381 `ethtool` and `qdisc` render, and one sabotage round-trips
+
+Both were refused wholesale, so **a machine with any link setting or any shaped
+queue could not save a profile** -- and these are settings somebody chose against
+a specific NIC or a specific uplink, which makes them the least guessable things
+in a document.
+
+**A toggle has three values and `off` is not the absence of one.** `unmanaged` is
+the default and means netcfgd leaves the driver's own answer alone, so it is
+omitted; `on` and `off` are both written. A renderer treating `off` as nothing
+turns *switch this offload off* into *do not touch it*, which is the opposite
+instruction -- sabotaged, and it fails two checks.
+
+### The sabotage that round-trips, which is why the text is asserted too
+
+The qdisc has two forms: `qdisc = "fq_codel"` for a kind carrying no rate, and a
+block for one that does. Making the renderer **always** write the block form
+changes nothing about the document -- it compiles to the same policy, so the
+round trip passes -- and it is still wrong, because a profile is read by people
+and that is not what a person writes.
+
+It fails three checks only because the case asserts the *text* beside the round
+trip. `render_test.c`'s own header says to do that where a spelling has more
+than one accepted form, and this is the first time in today's work that the
+round trip alone would have been silent. Worth keeping as the example: a
+symmetric check cannot see a difference that both sides agree about.
+
+### One table fewer rather than one more
+
+`qdisc_name` and `ncfg_qdisc_kind`'s parser each carried their own copy of the
+closed set, and the renderer would have been a third. The array is at file scope
+now with both functions using it, and `ncfg_qdisc_kind_name` is exposed through
+`lower_internal.h` -- so the spelling has one home. **A kind rendered under the
+wrong name is a document that compiles and describes a different scheduler**,
+which is the shape the wifi backend table paid for earlier today, so the fix was
+to remove the opportunity rather than to be careful.
+
+### Two self-inflicted faults, both caught in the first run
+
+An `offsetof` table walking the six toggles by offset was written and then
+replaced by six named calls: the pointer arithmetic is the kind of thing that
+goes wrong silently in a renderer, and six lines are cheaper than being clever.
+In making that swap the `ethtool {` opening line went with the text being
+replaced, so the block rendered as bare assignments and *did not parse* -- which
+the round trip said immediately.
+
+**The ingress half stays refused**, as it is in the Rust: a policy metering
+arriving traffic is served by building an `ifb` and redirecting to it, the `ifb`
+is derived rather than written, and rendering it back would mean recovering an
+`ingress_bandwidth` the document no longer holds. That is the same reason
+`ingress_redirect` is refused, and the C has no inversion machinery for it.
+Four device refusals remain, each deliberate: a kind, a match block, that
+metering case, and the redirect.
+
+### The `agree` gate needed a third kind of recorded divergence
+
+`tests/determinism/netcfgd.conf` shapes eth0 with cake at 100mbit, so this made
+the two programs disagree on `profile save` for the first time: the Rust names
+`device eth0: qdisc` and writes nothing, the C writes the profile. That is 0266's
+expected direction -- the C is what `make` installs -- and it is not something to
+let the gate absorb, because **a record saying "these differ" would also cover
+the C rendering the qdisc wrongly**, which is the only failure here worth
+catching.
+
+So `SAVE_AHEAD` pins four things separately, the way `reset`'s three divergences
+are pinned: the Rust's refusal wording, what the C said instead, the files the C
+leaves behind and the Rust does not, and **what the C's written-back snapshot has
+to contain, read off the fixture rather than off the renderer.** The last is the
+one that makes it a second witness rather than the renderer agreeing with itself.
+When the Rust goes, every part of the entry stops holding and the gate goes red
+naming it.
+
+Its summary line was over-claiming and now does not: it counted all four
+compiled corpora as "written back as the same profile" when one of them was not,
+and the heading above the recorded divergences said `TWO CASES` when there were
+four. The count is gone rather than corrected -- a count in a docstring is a
+claim about the file that nothing recounts.
+
+### A sabotage the check under test never saw
+
+Deleting the `bandwidth` line from the renderer turned the gate red through the
+wrong check: it reported the C no longer saying `wrote ...`. The C's own
+`profile save` verifies its round trip before keeping anything, so it refused the
+save itself -- the program defended the gate's fixture, and the content check
+never ran. **A control has to be reached, not only able to fire.**
+
+What only the content check can answer is a rendering that still round-trips, so
+the second attempt collapsed `render_rate`'s three suffixes to `kbit` alone:
+`100000kbit` is the same rate, compiles identically, and is not what the fixture
+says. That fired through its own route and named the fragment. The other two
+pieces were sabotaged in the record -- a refusal wording the Rust does not use,
+and a file the C does not write -- and each named itself.
+
 ## 10.380 Access points render, and the policy is the key
 
 `render.c` refused `%zu access_point block(s)` wholesale, so **a machine running

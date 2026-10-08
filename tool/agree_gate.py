@@ -103,7 +103,7 @@ needs a machine. Each runs against a copy of a configuration directory, because
 a mistake here -- a verb that writes where this expected it to print -- must not
 reach the tree.
 
-TWO CASES WHERE THE TEXT IS *REQUIRED* TO DIFFER
+WHERE THE TEXT IS *REQUIRED* TO DIFFER
 
 `ncfg reset` diverges in three ways that 0263 records with its reasons -- the C
 says `would remove` before and `removed` after where the Rust prints the whole
@@ -113,7 +113,21 @@ refuses a positional argument where the Rust's dispatch drops one -- so
 `ncfg reset office --yes` empties the whole configuration there. Those cases
 are marked, and the gate then insists the two **do** differ. So a divergence
 that gets closed is a gate that goes red asking for its own exception to be
-deleted, which is the opposite of what an allow-list does.
+deleted, which is the opposite of what an allow-list does. `--help` and the mode
+of the saved profile are recorded the same way, each beside the thing it is
+about. There is no count of them here, because a count in a docstring is a claim
+about this file that nothing recounts.
+
+AND WHERE THE C IS SIMPLY AHEAD
+
+`SAVE_AHEAD` is the third kind, and it is the one this port creates as it goes:
+the C renders something the Rust refuses, so `profile save` over a corpus
+directory holding that thing says different words and leaves a different
+directory behind. 0266 has the C as what `make` builds and installs, so this is
+the expected direction -- but an entry says what the C *wrote*, read off the
+fixture, and not merely that the two differ. A record that tolerated a
+difference would tolerate the C rendering the thing wrongly, which is the only
+failure here worth catching.
 
 WHY IT FAILS RATHER THAN SKIPS
 
@@ -512,6 +526,84 @@ def known_divergence(name, rust_mode, c_mode):
 	return (name, rust_mode, c_mode) in KNOWN_MODE_DIVERGENCE
 
 
+# Where the C renders something the Rust still refuses, which is this port
+# overtaking the thing it is compared against rather than disagreeing with it.
+#
+# `profile save` is the one case that can see it: the Rust compiles the document
+# and then declines to write it back, so the two programs say different things
+# and leave different directories behind. Decision 0266 has the C as what `make`
+# builds and installs, so the C being ahead is the expected direction -- but a
+# gate that merely tolerated "these differ" would also tolerate the C rendering
+# the thing WRONGLY, which is the failure actually worth catching here.
+#
+# So each entry pins four things separately, and the C's half is about the
+# rendering rather than about a difference existing:
+#
+#   rust    the refusal, in the words the Rust still has to use
+#   c       what the C said instead
+#   only_c  the files the C leaves behind and the Rust does not
+#   profile what the C's written-back snapshot has to contain -- read off the
+#           fixture rather than off the renderer, so this is a second witness
+#           to the rendering and not the renderer agreeing with itself
+#
+# Any one of them ceasing to hold is a red gate naming which entry can go --
+# which is what retiring the Rust will do to all of them.
+SAVE_AHEAD = {
+	# project.md 10.381. `tests/determinism/netcfgd.conf` shapes eth0 with
+	# cake at 100mbit; the Rust has no qdisc rendering and names it, the C
+	# writes it in the block form a rate needs.
+	"tests/determinism": {
+		"rust": ["device eth0: qdisc",
+			 "cannot be written out yet"],
+		"c": ["wrote <config>/profile/agree/00-saved.conf"],
+		"only_c": ["conf.d/90-profile.conf",
+			   "profile/agree/00-saved.conf"],
+		"profile": ["profile/agree/00-saved.conf", [
+			"qdisc {",
+			'kind = "cake"',
+			'bandwidth = "100mbit"',
+		]],
+	},
+}
+
+
+def save_ahead(config_dir, rust_said, c_said, rust_tree, c_tree):
+	"""(True, None) when this directory's recorded divergence is intact.
+
+	(False, None) when none is recorded, so the two must agree exactly.
+	(True, why) when one is recorded and a part of it has stopped holding.
+	"""
+	recorded = SAVE_AHEAD.get(config_dir)
+	if recorded is None:
+		return (False, None)
+	lead = f"{config_dir}: `profile save`"
+	for which, said in (("rust", rust_said), ("c", c_said)):
+		for fragment in recorded[which]:
+			if fragment not in said:
+				return (True, f"{lead}: the {which} program no longer says "
+					f"{fragment!r}. This gate records that the C renders "
+					"something the Rust refuses; if that has changed, the "
+					"entry in SAVE_AHEAD can go")
+	only_c = sorted(set(c_tree) - set(rust_tree))
+	if only_c != sorted(recorded["only_c"]):
+		return (True, f"{lead}: the C now leaves {only_c} behind rather than "
+			f"{sorted(recorded['only_c'])}. SAVE_AHEAD records what it "
+			"writes that the Rust does not")
+	if sorted(set(rust_tree) - set(c_tree)):
+		return (True, f"{lead}: the Rust left "
+			f"{sorted(set(rust_tree) - set(c_tree))} behind, which the C "
+			"did not. SAVE_AHEAD is for the C being ahead, not for this")
+	name, fragments = recorded["profile"]
+	if name not in c_tree:
+		return (True, f"{lead}: the C wrote no {name} to check")
+	written = c_tree[name][1].decode("utf-8", "replace")
+	for fragment in fragments:
+		if fragment not in written:
+			return (True, f"{lead}: the C wrote {name} without {fragment!r}, "
+				"which the fixture says it should carry")
+	return (True, None)
+
+
 def words(text):
 	"""The text with its whitespace collapsed, for `WRITE_CASES`' reason."""
 	return " ".join(text.split())
@@ -721,6 +813,12 @@ def compare_save(rust, c, config_dir):
 	with tempfile.TemporaryDirectory() as work:
 		rust_said, rust_tree = saved(rust, config_dir, os.path.join(work, "rust"))
 		c_said, c_tree = saved(c, config_dir, os.path.join(work, "c"))
+	ahead, why = save_ahead(config_dir, rust_said, c_said, rust_tree, c_tree)
+	if ahead:
+		# The divergence is recorded, so the comparisons below would all fail
+		# for the reason the record states. `why` is a part of the record that
+		# has stopped holding, which is the thing worth reporting.
+		return why
 	if rust_said != c_said:
 		return (f"{config_dir}: `profile save` said different things\n"
 			f"    rust: {rust_said.strip()[:160]}\n"
@@ -784,8 +882,13 @@ def main():
 			print(f"agree-gate: {problem}", file=sys.stderr)
 		return 1
 	compiling = sum(1 for _, ok in present if ok)
-	print(f"agree-gate: {len(present)} configuration(s), {compiling} compiled by both "
+	# The ahead ones compiled to the same document and were NOT written back as
+	# the same profile, so they do not belong in that count: a summary that
+	# claimed them would be this gate over-stating what it had checked.
+	ahead = sum(1 for d, ok in present if ok and d in SAVE_AHEAD)
+	print(f"agree-gate: {len(present)} configuration(s), {compiling - ahead} compiled by both "
 	      f"programs to the same document and written back as the same profile, "
+	      f"{ahead} where the C renders back what the Rust still refuses, "
 	      f"{len(present) - compiling} refused by both in the same words, and "
 	      f"{len(WRITE_CASES)} sequence(s) of writing verbs that left the same "
 	      f"directory behind, {len(READ_CASES)} invocation(s) that only read, "

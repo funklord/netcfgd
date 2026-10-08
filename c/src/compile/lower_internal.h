@@ -255,6 +255,11 @@ extern const char *const ncfg_link_label_help;
  * how the two halves would come to disagree about what the language says. */
 extern const char *const ncfg_ssid_from_bssid;
 
+/* A queueing discipline's spelling, as `ncfg_qdisc_kind` reads it back. Shared
+ * with the renderer so the closed set has one home. NULL for a kind out of
+ * range, which `ncfg_render_word_or_gap` turns into a visible gap. */
+const char *ncfg_qdisc_kind_name(int kind);
+
 /* The one place the "not an interface name" diagnostic is built. */
 int   ncfg_name_ok(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span, const char *help);
 /* A string that has to be a name the kernel would take for a link. */
