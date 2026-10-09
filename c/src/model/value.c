@@ -370,6 +370,16 @@ int ncfg_address_render(const ncfg_address_t *address, char *out, size_t out_siz
 	return 1;
 }
 
+int ncfg_roam_signal_in_range(int64_t signal)
+{
+	return signal >= NCFG_ROAM_SIGNAL_MIN && signal <= NCFG_ROAM_SIGNAL_MAX;
+}
+
+int ncfg_roam_intervals_ordered(int64_t interval, int64_t slow_interval)
+{
+	return interval <= slow_interval;
+}
+
 int ncfg_addresses_same_family(const char *one, const char *other)
 {
 	if (!one || !other) {

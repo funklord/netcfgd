@@ -136,6 +136,28 @@ int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *e
 int ncfg_addresses_same_family(const char *one, const char *other);
 
 /*
+ * What a `roam` policy has to be for the configuration language to read it
+ * back, which is more than its members' ranges say.
+ *
+ * `signal` is dBm, so negative: the document's range for it is `R_I32` and the
+ * language takes -100 to -1. `interval` is how often to look while the signal
+ * is weak, so looking LESS often then than when it is good is the policy
+ * inverted -- and it reads as a plausible pair of numbers, which is why the
+ * compiler refuses it rather than trusting it.
+ *
+ * **Both are here because both are needed twice.** The compiler refuses a
+ * configuration that breaks either, each with its own sentence; the renderer
+ * needs the same two answers to know it cannot write such a policy back. A
+ * document read from JSON can hold one, and before these existed it was
+ * written out and then rejected by the program that wrote it.
+ */
+#define NCFG_ROAM_SIGNAL_MIN (-100)
+#define NCFG_ROAM_SIGNAL_MAX (-1)
+
+int ncfg_roam_signal_in_range(int64_t signal);
+int ncfg_roam_intervals_ordered(int64_t interval, int64_t slow_interval);
+
+/*
  * The address a delegated prefix, a subnet selector and a suffix produce.
  *
  * **This is `netcfgd_model::derive_from_delegation`**, and it is here rather

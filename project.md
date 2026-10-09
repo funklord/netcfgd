@@ -12385,7 +12385,76 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
-## 10.452 The class closed from the language's side, and a sweep abandoned on the way
+## 10.453 The sweep got built after all, and found what reading had missed
+
+10.452 said the document-side sweep was blocked on two things: the field tables
+are `static`, and the witness is deliberately unrenderable so it cannot be the
+base. Both are true and **neither matters**, because there is a third route:
+
+  * **the base** is each example block compiled on its own -- renderable by
+    construction, since it compiled -- rather than the witness;
+  * **the enumeration** is the numeric leaves of that document's canonical
+    JSON, found by scanning the text for `": "` and a digit. No reflection, so
+    nothing needs exporting.
+
+Prototyped in the scratchpad as a Python driver over two small C harnesses, and
+it found four faults on its first run. The durable form is a C helper beside the
+mutation sweep that was already there, in process, because `example_cases`
+already reads the example file and splits its blocks -- the part that had
+looked expensive was already written.
+
+### What it found, and why reading had not
+
+    "signal" = 0            renders and will not recompile
+    "signal" = 99999        renders and will not recompile
+    "interval" = 99999      renders and will not recompile
+    "slow_interval" = 0     renders and will not recompile
+
+Two constraints on a `roam` policy. `signal` is dBm so negative, between -100
+and -1, while the member's range is `R_I32`. And `interval` is how often to
+look while the signal is weak, so it may not exceed `slow_interval` -- an
+ORDER between two `R_U32` members, which no range can express and which reads
+as a plausible pair of numbers, as its own comment says.
+
+**They were missed because the enumeration was a grep.** 10.452 listed the
+lowering's semantic checks by searching its diagnostics for `at least`,
+`must be`, `too large`, `of zero` and the rest. These two say "is not a signal
+strength" and "cannot be longer than". The set was declared complete on the
+strength of a pattern that could not see them -- a count inheriting its
+detector, which that same entry had quoted at something else.
+
+So the lesson is not "grep harder". It is that **an enumeration of a behaviour
+should come from exercising it, not from reading what it says about itself.**
+The sweep asks the program; the grep asked the program's error messages.
+
+### Why the text-side sweep could never have found them
+
+`mutate_block` has been mutating the example blocks for a long time, 120 per
+block, and the property it asserts is the right one. It mutates CONFIGURATION
+TEXT, so every document it builds came from compiling -- and a document that
+came from compiling cannot hold a value the compiler refuses. The documents
+`profile save` renders did not all come from compiling: a profile or a state
+file arrives through `ncfg_document_read`, whose ranges are the field tables'.
+
+The two sweeps are therefore not redundant and the new one is not a better
+version of the old. One reaches field combinations nobody wrote; the other
+reaches values the language cannot say.
+
+### Its floors are its control
+
+A scan that found no numeric leaf, or a reader that refused every variant,
+would report no faults exactly as loudly as a clean run. So the counts are
+asserted: 118 variants the reader accepts, of which 17 the renderer refuses by
+name, with floors at 60 and 8. Both guards and both predicates are the model's
+-- `ncfg_roam_signal_in_range` and `ncfg_roam_intervals_ordered`, used by the
+compiler for its two sentences and by the renderer for its two refusals, with
+`NCFG_ROAM_SIGNAL_MIN` and `NCFG_ROAM_SIGNAL_MAX` building the compiler's
+message so it cannot drift from the bound.
+
+Verified against the tree without the guards: the sweep names all four and the
+check fails.
+
+## 10.452 Six of the eight, enumerated from the language's side
 
 Four instances of "a document holds what the language refuses" had been fixed
 one at a time. The fifth was not going to arrive by luck, so this closes the
@@ -12468,12 +12537,19 @@ harmonising them has the reason in front of them. `lower_device.c` builds its
 diagnostic from both constants now, so the message cannot drift from the bound
 the way the vlan device's did.
 
-**The class is closed on this axis**: every semantic rejection the lowering has
-is either mirrored in the renderer or measured unreachable. What remains
-unguarded is a NEW one -- a check added to the lowering without a matching
-refusal in the renderer -- and nothing holds those together yet. The
-document-side sweep above is what would, which is why its two obstacles are
-written down rather than left as a shrug.
+**The class was declared closed on this axis here, and it was not.** The claim
+was that every semantic rejection the lowering has is either mirrored in the
+renderer or measured unreachable. It rested on a grep over the lowering's
+diagnostics, and a grep sees only the wordings it was given: `roam`'s two
+checks say "is not a signal strength" and "cannot be longer than", neither of
+which matches `at least`, `must be`, `too large` or any of the other words that
+pattern carried. Two constraints were open while the enumeration called itself
+complete -- **a count inheriting its detector**, in a sentence written three
+entries after quoting that rule at something else.
+
+10.453 has them, and has the sweep that found them: the document-side
+instrument described above as blocked turned out to be buildable by a third
+route that neither obstacle touches.
 
 ## 10.451 A channel outside its band, and the sweep that should have been finished first
 

@@ -2191,6 +2191,116 @@ static int mutate_block(const char *source, char *out, size_t out_size)
 	return out[0] != '\0';
 }
 
+/*
+ * Every numeric leaf of a document, taken to an extreme.
+ *
+ * **What this asks that nothing else did.** `mutate_block` mutates the
+ * configuration TEXT, so every document it produces came from compiling -- and
+ * a document that came from compiling cannot hold a value the compiler
+ * refuses. The documents `ncfg profile save` renders did not all come from
+ * compiling: a profile or a state file is read back through
+ * `ncfg_document_read`, whose ranges are the field tables' and are wider than
+ * the language in several places. So the property here is the one the text-side
+ * sweep structurally cannot reach:
+ *
+ *   a document the reader accepts is REFUSED BY NAME or ROUND TRIPS.
+ *
+ * "Renders, and then does not recompile" is the fault -- a profile written and
+ * then rejected by the program that wrote it, which `profile_save` turns into
+ * "a fault in the snapshot... please report it" after rolling the write back.
+ *
+ * **It found two constraints that reading the lowering had missed.** Six had
+ * been enumerated by grepping its diagnostics for wordings like "at least" and
+ * "must be"; `roam`'s two say "is not a signal strength" and "cannot be longer
+ * than", so the grep could not see them and the enumeration was declared
+ * complete while they were open. A count inherits its detector.
+ *
+ * Bounded: the leaves of one document, twice each, no recursion. The scan is
+ * one pass over the canonical form, which is pretty-printed, so a leaf is
+ * `": "` and then a digit or a minus.
+ */
+static void numeric_extremes(const ncfg_document_t *document, size_t line, size_t *checked,
+    size_t *refused, size_t *faults)
+{
+	static const char *const extremes[] = { "0", "99999" };
+	ncfg_buf_t  canonical;
+	const char *text;
+	size_t      at;
+	char        message[NCFG_ERROR_MAX];
+
+	ncfg_buf_init(&canonical, 0);
+	message[0] = '\0';
+	if (!ncfg_document_write_canonical((ncfg_document_t *)document, &canonical, message,
+	    sizeof(message))) {
+		ncfg_buf_free(&canonical);
+		return;
+	}
+	text = ncfg_buf_text(&canonical);
+	for (at = 0; text[at] != '\0'; at++) {
+		size_t start;
+		size_t end;
+		size_t which;
+
+		if (text[at] != '"' || text[at + 1u] != ':' || text[at + 2u] != ' ') {
+			continue;
+		}
+		start = at + 3u;
+		if (text[start] != '-' && (text[start] < '0' || text[start] > '9')) {
+			continue;
+		}
+		/* The document's own format, which the renderer never writes: mutating it
+		 * tests the schema check rather than this property. */
+		if (at >= 7u && (strncmp(text + at - 5u, "major", 5u) == 0
+		    || strncmp(text + at - 5u, "minor", 5u) == 0)) {
+			continue;
+		}
+		end = start + (text[start] == '-' ? 1u : 0u);
+		while (text[end] >= '0' && text[end] <= '9') {
+			end++;
+		}
+		for (which = 0; which < sizeof(extremes) / sizeof(extremes[0]); which++) {
+			ncfg_buf_t       variant;
+			ncfg_document_t *other;
+			char             why[NCFG_ERROR_MAX];
+
+			if ((size_t)(end - start) == strlen(extremes[which])
+			    && strncmp(text + start, extremes[which], end - start) == 0) {
+				continue;
+			}
+			ncfg_buf_init(&variant, 0);
+			ncfg_buf_add(&variant, text, start);
+			ncfg_buf_add_text(&variant, extremes[which]);
+			ncfg_buf_add_text(&variant, text + end);
+			message[0] = '\0';
+			other = ncfg_document_read(ncfg_buf_text(&variant), variant.length, message,
+			    sizeof(message));
+			ncfg_buf_free(&variant);
+			if (!other) {
+				/* Outside the field's own range, so not a document at all. */
+				continue;
+			}
+			(*checked)++;
+			why[0] = '\0';
+			if (ncfg_config_round_trips(other, why, sizeof(why))) {
+				ncfg_document_free(other);
+				continue;
+			}
+			if (strncmp(why, "it cannot be rendered at all", 28u) == 0) {
+				(*refused)++;
+				ncfg_document_free(other);
+				continue;
+			}
+			printf("%s:%zu: a document with %.*s = %s renders and will not recompile\n",
+			    EXAMPLE_PATH, line, (int)(at + 1u - (at >= 24u ? at - 24u : 0u)),
+			    text + (at >= 24u ? at - 24u : 0u), extremes[which]);
+			printf("    %s\n", why);
+			(*faults)++;
+			ncfg_document_free(other);
+		}
+	}
+	ncfg_buf_free(&canonical);
+}
+
 static void example_cases(void)
 {
 	size_t length = 0;
@@ -2210,6 +2320,9 @@ static void example_cases(void)
 	size_t round_tripped_mutations = 0;
 	size_t waived_mutations = 0;
 	size_t unrenderable_mutations = 0;
+	size_t numeric_checked = 0;
+	size_t numeric_refused = 0;
+	size_t numeric_faults = 0;
 	size_t head;
 
 	if (!text) {
@@ -2303,6 +2416,10 @@ static void example_cases(void)
 					    EXAMPLE_PATH, start, why);
 					unrenderable++;
 				}
+				/* And the same block's document taken to its numeric extremes, which is
+				 * the half the text-side mutations cannot reach. */
+				numeric_extremes(document, start, &numeric_checked, &numeric_refused,
+				    &numeric_faults);
 			}
 			ncfg_document_free(document);
 			/*
@@ -2362,6 +2479,15 @@ static void example_cases(void)
 	check(unrenderable == 0u, "  and every block that compiles can be written back");
 	check(unrenderable_mutations == 0u,
 	    "  and so can every mutation of one that still compiles");
+	check(numeric_faults == 0u,
+	    "  and so can every document whose numbers were taken to an extreme");
+	/* The floors are this sweep's own control: a scan that found no numeric leaf,
+	 * or a reader that refused every variant, would report no faults exactly as
+	 * loudly as a clean run. Measured on the run that added it. */
+	check(numeric_checked >= 60u,
+	    "  and the numeric sweep reached documents rather than nothing");
+	check(numeric_refused >= 8u,
+	    "  with some refused, which is what says the guards are reached");
 	/*
 	 * **The floors, which are the control.** A `mutate_block` that produced
 	 * garbage would make every mutation refuse, and a sweep where nothing

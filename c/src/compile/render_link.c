@@ -965,11 +965,37 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 	 * that rendered only its non-defaults could come back empty, and an empty
 	 * block is not the same document as no block at all. */
 	if (network->roam) {
-		ncfg_buf_addf(&body,
-		    "\t\troam {\n\t\t\tsignal = %lld\n\t\t\tinterval = %lld\n"
-		    "\t\t\tslow_interval = %lld\n\t\t}\n",
-		    (long long)network->roam->signal, (long long)network->roam->interval,
-		    (long long)network->roam->slow_interval);
+		/*
+		 * **Both of the compiler's own tests, from the model**, because the
+		 * members' ranges are wider than the language: `signal` is `R_I32` and
+		 * dBm is negative, and the two intervals are each `R_U32` with an order
+		 * between them that neither range can express. A document read from JSON
+		 * holds such a policy, and before this it was written out and then
+		 * rejected by the program that wrote it.
+		 *
+		 * Found by a sweep over every numeric leaf of a renderable document
+		 * rather than by reading the lowering: these two messages say "is not a
+		 * signal strength" and "cannot be longer than", so the grep that
+		 * enumerated the other six constraints by their wording missed both.
+		 */
+		if (!ncfg_roam_signal_in_range(network->roam->signal)) {
+			ncfg_render_refuse(missing, "network", id,
+			    "a roam signal of %lld, which is not dBm (%d to %d)",
+			    (long long)network->roam->signal, NCFG_ROAM_SIGNAL_MIN,
+			    NCFG_ROAM_SIGNAL_MAX);
+		} else if (!ncfg_roam_intervals_ordered(network->roam->interval,
+		    network->roam->slow_interval)) {
+			ncfg_render_refuse(missing, "network", id,
+			    "a roam `interval` of %lld longer than its `slow_interval` of %lld",
+			    (long long)network->roam->interval,
+			    (long long)network->roam->slow_interval);
+		} else {
+			ncfg_buf_addf(&body,
+			    "\t\troam {\n\t\t\tsignal = %lld\n\t\t\tinterval = %lld\n"
+			    "\t\t\tslow_interval = %lld\n\t\t}\n",
+			    (long long)network->roam->signal, (long long)network->roam->interval,
+			    (long long)network->roam->slow_interval);
+		}
 	}
 	ncfg_buf_add_text(&body, "\t}\n");
 

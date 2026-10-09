@@ -316,12 +316,13 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			}
 			/* A positive dBm would be a signal stronger than the transmitter,
 			 * and wpa_supplicant would scan for ever. */
-			if (value >= -100 && value < 0) {
+			if (ncfg_roam_signal_in_range(value)) {
 				roam->signal = value;
 			} else {
 				ncfg_diag(ctx, assignment->span,
-				    "`%lld` is not a signal strength: dBm, negative, and between -100 and "
-				    "-1; -70 is a weak link", (long long)value);
+				    "`%lld` is not a signal strength: dBm, negative, and between %d and "
+				    "%d; -70 is a weak link", (long long)value, NCFG_ROAM_SIGNAL_MIN,
+				    NCFG_ROAM_SIGNAL_MAX);
 			}
 		} else if (strcmp(assignment->key, "interval") == 0) {
 			if (ncfg_as_u32(ctx, assignment->value, &value)) {
@@ -340,7 +341,7 @@ static void lower_roam(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 
 	/* Looking *less* often when the signal is bad than when it is good is the
 	 * policy inverted, and it reads as a plausible pair of numbers. */
-	if (roam->interval > roam->slow_interval) {
+	if (!ncfg_roam_intervals_ordered(roam->interval, roam->slow_interval)) {
 		ncfg_diag(ctx, block->span,
 		    "`interval` is how often to look while the signal is weak, so it cannot be longer "
 		    "than `slow_interval`: the usual pair is a short interval and a long one: 30 and "
