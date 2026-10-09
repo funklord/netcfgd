@@ -2669,7 +2669,13 @@ fn write_profile_snapshot(
 		for network in &base.networks {
 			overrides.insert(format!("network {}", network.id));
 		}
-		for device in &base.devices {
+		// Only the ones the base WROTE. The lowering invents a device for
+		// every interface, and this list's job is to say which blocks the
+		// base *defines* -- so counting an invented one tells the renderer to
+		// write `override device eth0 { }` for a block that was never there,
+		// which is a compile error in the profile. 10.418, and `declared` is
+		// what makes the two tellable apart.
+		for device in base.devices.iter().filter(|device| device.declared.0) {
 			overrides.insert(format!("device {}", device.name));
 		}
 		// Added when the renderer learned bluetooth. A block the base defines

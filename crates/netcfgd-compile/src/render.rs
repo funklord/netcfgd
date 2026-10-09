@@ -76,7 +76,6 @@ pub fn round_trip(document: &Document) -> Result<(), String> {
 	back.add("rendered.conf", &rendered);
 	match crate::compile(&back, &mut crate::NoHooks) {
 		Ok(again) if again == *document => Ok(()),
-		Ok(again) if silent_devices_aside(document, &again) => Ok(()),
 		Ok(_) => Err(format!(
 			"what it wrote compiles to a DIFFERENT document.\nrendered:\n{rendered}"
 		)),
@@ -85,50 +84,6 @@ pub fn round_trip(document: &Document) -> Result<(), String> {
 			diagnostics.render(&back)
 		)),
 	}
-}
-
-/// Whether the two documents differ ONLY by devices the renderer writes nothing
-/// for -- which is this predicate's one known limit, pinned rather than left for
-/// a reader to discover.
-///
-/// A device at every default renders to no block at all, so a document that
-/// declares one comes back without it. That is deliberate: writing it would
-/// emit `override device eth0 { }` for the synthesised per-interface device
-/// every document carries, and `override` on a block the base config never had
-/// cannot compile -- which broke `ncfg profile save` for any configuration
-/// declaring an interface and no device. 10.418 has the measurement and the two
-/// candidate fixes, both of which need the model to record which devices were
-/// DECLARED rather than synthesised; neither is this function's to make.
-///
-/// **It waives exactly that and nothing else.** Both sides are stripped of the
-/// devices the renderer is silent about, and the rest must still be equal, so
-/// any other difference fails as before. The silence is asked of
-/// `render_device` rather than recomputed from the fields.
-fn silent_devices_aside(before: &Document, after: &Document) -> bool {
-	fn speaking(document: &Document) -> Vec<Device> {
-		let overrides = Overrides::new();
-		let mut aside = Vec::new();
-		let ingress = IngressShaping::of(document, &mut aside);
-		document
-			.devices
-			.iter()
-			.filter(|device| {
-				let mut text = String::new();
-				let mut missing = Vec::new();
-				render_device(device, &overrides, &ingress, &mut text, &mut missing)
-			})
-			.cloned()
-			.collect()
-	}
-	// Only a dropped device can explain the difference; a gained one cannot.
-	if after.devices.len() >= before.devices.len() {
-		return false;
-	}
-	let mut a = before.clone();
-	let mut b = after.clone();
-	a.devices = speaking(before);
-	b.devices = speaking(after);
-	a == b
 }
 
 /// Render a whole document as configuration text.
@@ -1352,11 +1307,13 @@ fn render_device(
 	// case: it changes no plan, and netcfgd says so itself -- a device block
 	// alone is policy about hardware nobody asked it to configure.
 	//
-	// What that leaves open is narrow and is NOT fixed by writing the block:
-	// a declared empty device with nothing else to recreate its entry does
-	// not survive a round trip. 10.418 records the two candidate fixes and
-	// whose decision each is.
-	if body.is_empty() {
+	// **Unless somebody wrote it**, which `declared` is what records. Until
+	// the model carried that, an invented all-default device and a written
+	// empty one were byte-identical here, so a written one was lost: a
+	// `device wlan0 { }` beside an `access_point` naming it has nothing else
+	// to recreate its entry, and the save refused for not reproducing the
+	// machine. 10.418 for the measurement, 10.438 for the field.
+	if body.is_empty() && !device.declared.0 {
 		return false;
 	}
 	let head = opening("device", name, overrides);
@@ -3824,15 +3781,15 @@ mod tests {
 	/// `device` block measures as the `global` case rather than the interface
 	/// one: it changes no plan, and netcfgd says so itself.
 	///
-	/// **What is genuinely lost is asserted here rather than left implied**: a
-	/// declared empty device with nothing else to recreate its entry does not
-	/// survive a round trip. `round_trip` waives exactly that and nothing else.
-	/// Closing it needs the model to record which devices were DECLARED rather
-	/// than synthesised; 10.418 has the two candidate fixes and says whose
-	/// decision each is. If this test starts failing, one of them has landed
-	/// and this case should become the assertion it used to make.
+	/// **The written one is now kept, which this used to pin as lost.**
+	/// Closing it needed the model to record which devices were DECLARED
+	/// rather than synthesised, and 10.438 put `declared` in the wire form on
+	/// both sides, so the renderer can tell an invented all-default device
+	/// from a written empty one. This is the assertion the pin said it would
+	/// become: the block is written, the document round trips whole, and
+	/// `round_trip`'s waiver is gone rather than left with nothing to waive.
 	#[test]
-	fn an_empty_device_block_is_not_written_and_that_is_pinned() {
+	fn an_empty_device_block_is_written_when_somebody_wrote_it() {
 		let text = "device wlan0 { }\naccess_point \"home\" {\n\
 			 \tdevice = \"wlan0\"\n\
 			 \twifi { psk = \"@secret:ap\"; proto = \"wpa2\" }\n\
@@ -3848,23 +3805,19 @@ mod tests {
 
 		let rendered = render(&document, &Overrides::new()).expect("it renders");
 		assert!(
-			!rendered.contains("device wlan0"),
-			"a device at every default is written nowhere, because writing it \
-			 emits an `override` for a block the base never had:\n{rendered}"
+			rendered.contains("device wlan0"),
+			"a device somebody wrote is kept even with nothing in it, since \
+			 nothing else here recreates its entry:\n{rendered}"
 		);
 
-		// And the round trip tolerates that one loss while still proving
-		// everything else came back: the access point, its secret and its
-		// protocol all survive, so this is a narrow waiver rather than a
-		// disabled check.
-		round_trip(&document).expect("the rest round trips");
+		// And the whole document round trips, with no waiver: there is
+		// nothing left for one to be about.
+		round_trip(&document).expect("it round trips");
 		let mut back = crate::SourceMap::new();
 		back.add("rendered.conf", &rendered);
 		let again = crate::compile(&back, &mut crate::NoHooks).expect("it recompiles");
-		assert!(
-			again.devices.is_empty(),
-			"the device is the only thing lost"
-		);
+		assert_eq!(again.devices.len(), 1, "the device comes back");
+		assert!(again.devices[0].declared.0, "and as one somebody wrote");
 		assert_eq!(
 			again.access_points.len(),
 			1,

@@ -12385,6 +12385,53 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.439 The Rust renderer had the same hole, and a waiver with nothing left to waive
+
+Taking "port the renderer" literally for once: compare the two renderers
+function by function rather than hunt for gaps. 50 functions in `render.rs`, 12
+with no same-named counterpart in the C -- and eleven of those are the C's word
+tables (`drift_name`, `toggle_name`, `proto_name` and the rest), `render_rate`
+under another name, or `ncfg_render_list_emit`'s bracket flag.
+
+**The twelfth was `silent_devices_aside`**, the Rust's waiver for the
+empty-device hole, with `speaking` as its helper. Its doc comment cited 10.418's
+two candidate fixes and said *"neither is this function's to make"* -- and
+10.438 made one. **A waiver whose stated blocker has been removed is a waiver
+nobody will revisit**, because nothing in the ordinary course of work brings the
+sentence together with the decision that retired it.
+
+### Closing it is one line on each side, mirroring the C
+
+    render.rs:1359    `if body.is_empty() && !device.declared.0`
+    config.rs:2672    the override list filtered to `device.declared.0`
+
+Both are the C's changes transliterated, and with them the waiver and its helper
+are gone rather than left standing. **The Rust's own pin fired on the first
+build** -- `an_empty_device_block_is_not_written_and_that_is_pinned`, whose
+comment ends *"if this test starts failing, one of them has landed and this case
+should become the assertion it used to make."* It is that assertion now, and
+renamed to say so.
+
+So the hole is closed in both implementations rather than in the one that ships,
+which is what keeps the agree gate meaningful: 10.437 recorded that the gate's
+zero did not cover this behaviour because the C was ahead with no configuration
+to show it. The C is not ahead any more.
+
+### Four failed edits before one landed, all the same mistake
+
+The pin took four attempts, and every failure was an anchor I had written from
+memory of the file rather than read out of it: two tabs where the body has
+three, and a doc comment whose lines are tab-indented because the test lives
+inside `mod tests`. Each time the `assert` on the match count refused and wrote
+nothing, which is the guard working -- `evidence.md`'s rule that an anchor
+retyped rather than read matches nothing, and that the same count assertion
+catches it.
+
+What fixed it was giving up on text anchors and editing **by line number**,
+located by a substring search rather than by a remembered shape. The lesson is
+narrow and worth keeping: in a file this module's size, the cheap anchor is a
+line found by searching, not a literal reproduced by hand.
+
 ## 10.438 `declared` goes into the wire form, and equality has to leave it out
 
 10.437 kept the field out of the serialisation and 10.437's own last section
