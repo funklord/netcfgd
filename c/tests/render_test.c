@@ -2475,6 +2475,53 @@ static void the_other_side_of_a_two_way_write(void)
 	free(peer);
 }
 
+
+/*
+ * A block at every default is omitted, which no round trip can check.
+ *
+ * `render_control` returns before writing anything when all three tiers are
+ * root, and `render_remote` likewise when no tier is enabled and the agent is
+ * root. Both arms were among the never-taken branches of 10.431, and this is
+ * the one place that mattered.
+ *
+ * **Delete both early returns and every check in `render_test` and
+ * `lower_test` still passes.** That is not a corpus gap: a redundant
+ * `control { observe = "root"; wifi = "root"; admin = "root" }` compiles to
+ * exactly the document it came from, so the round trip is structurally unable
+ * to see it. Only a text assertion can -- the same shape as the alias
+ * normalisation of 10.428, where a renderer preserving `dev` instead of
+ * `parent` also round trips.
+ *
+ * What it would cost is not data: it is that every profile `ncfg profile save`
+ * writes would gain blocks stating defaults, where the convention this module
+ * follows everywhere else is to emit the short form a person would have
+ * written. A convention nothing checks is one that drifts in the direction of
+ * whoever edits next.
+ *
+ * The other direction is covered already and deliberately left to the corpora:
+ * a non-default `control` or `remote` block appears in all four of them, so an
+ * omission arm that fired when it should not would drop real data and fail a
+ * round trip loudly.
+ */
+static void a_block_at_every_default_is_left_out(void)
+{
+	char *plain;
+
+	plain = rendering_of("interface eth0 { config = \"dhcp\" }\n");
+	check(plain && lacks(plain, "control {"),
+	    "a document with no control policy gains no control block");
+	check(plain && lacks(plain, "remote {"),
+	    "and no remote block either, both tiers being at their defaults");
+	free(plain);
+
+	/* And the positive half, so the assertions above cannot pass by the
+	 * renderer having lost the blocks altogether. */
+	plain = rendering_of("global {\n\tcontrol { wifi = \"group:netdev\" }\n}\n");
+	check(plain && holds(plain, "control {") && holds(plain, "wifi = \"group:netdev\""),
+	    "while one that sets a tier keeps the block and the tier");
+	free(plain);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2493,6 +2540,7 @@ int main(int argc, char **argv)
 	a_vlans_protocol_round_trips();
 	the_writes_no_corpus_reached();
 	the_other_side_of_a_two_way_write();
+	a_block_at_every_default_is_left_out();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

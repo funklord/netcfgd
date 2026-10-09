@@ -12385,6 +12385,77 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.432 The one branch that mattered: a default block nothing checks is omitted
+
+Of the never-taken branches in 10.431, `render.c` was the weakest file at
+81.38%, and two of its arms are the same shape: **write nothing when everything
+is at its default.** `render_control` returns before emitting anything when all
+three tiers are root; `render_remote` likewise when no tier is enabled and the
+agent is root.
+
+**Delete both early returns and every check in `render_test` and `lower_test`
+passes.** That was measured before anything was written, which is the right
+order -- the gap is proved, then closed.
+
+It is not a corpus gap and no corpus can close it. A redundant
+`control { observe = "root"; wifi = "root"; admin = "root" }` **compiles to
+exactly the document it came from**, so the round trip is structurally unable
+to see it:
+
+    render(doc) -> text with a redundant default block
+    compile(text) -> the same doc
+    -> the documents agree, and the comparison is the whole test
+
+Same shape as 10.428's alias normalisation, where a renderer preserving `dev`
+instead of `parent` also round trips. **Both are cases where the renderer's
+output is wrong and its meaning is right**, and a test comparing meaning cannot
+be made sensitive to them by adding documents.
+
+### Which direction was already covered, and why that is the interesting half
+
+The *other* arm -- an omission firing when it should not -- would drop a real
+control policy, and that is covered: a non-default `control` or `remote` block
+appears in all four corpora, so the loss would fail a round trip loudly.
+
+So the two directions of one condition have completely different custodians.
+Dropping data is the corpora's job and they do it. Emitting redundant data is
+nobody's, because it costs nothing a document comparison can measure -- and
+what it would actually cost is the convention: every profile `ncfg profile
+save` writes would gain blocks stating defaults, where this module's rule
+everywhere else is the short form a person would have written. **A convention
+nothing checks drifts toward whoever edits next.**
+
+`a_block_at_every_default_is_left_out` asserts the omission and, so that it
+cannot pass by the blocks having been lost altogether, also asserts that a
+document setting one tier keeps the block and the tier. Re-applying the
+sabotage fails exactly those two checks and nothing else, which is the control
+landing through the check under test rather than through something upstream.
+
+### And the gate caught me instead: a sabotage run under a check in flight
+
+The `make check` covering 10.431 came back **rc=2**, with the agree gate
+reporting that `profile save` wrote a different profile for five
+configurations. No commit in that range touched renderer behaviour -- the one
+that touched renderer source changed a comment.
+
+**The concurrent writer was this session.** The sabotages above were applied to
+`c/src/compile/render.c` and `render_link.c` while the check was running, and
+`make check` reads the working tree. So the agree gate compiled a renderer with
+one of my omission arms deleted and correctly reported that the two programs
+disagreed.
+
+`running-code.md` warns that a concurrent build is a candidate explanation for
+an inconsistent result, and names another session as the writer. **One session
+is enough**, as soon as it edits source under its own long-running check.
+
+It was confirmed rather than assumed, which is the part worth keeping: `make
+agree` re-run on the restored tree passes -- 11 configurations, 4 round
+tripped, 0 divergences -- so the comfortable explanation was tested instead of
+accepted. The remedy is the one the coverage work already used by accident:
+**sabotage in a `git archive` copy, or do not start a long check while
+iterating on source.** The first costs a scratch directory; the second costs
+nothing but attention, which is what ran out here.
+
 ## 10.431 A never-taken branch is not automatically an undetected defect
 
 10.430's line coverage found four writes nothing reached. `gcov -b` on the same
