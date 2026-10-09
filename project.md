@@ -12464,6 +12464,44 @@ That the `set` succeeds is itself the premise under test: a plain
 device is not a definition anything must override -- which is exactly what
 `collect_overrides` had been claiming.
 
+### The carry-over is not enough, and the second route is reachable
+
+**One site was not all of them, and deriving from the fix is what found it.**
+`declared` survives only while a document stays in the process that lowered it,
+so every persistence path loses it -- and carrying it needs both documents in
+scope, which is true in exactly one place.
+
+The other route, traced rather than supposed:
+
+    daemon/confirm.c:695     state->desired = last_good
+                             <- ncfg_document_read, off disk, nothing declared
+    main/daemon_answer.c:610 ncfg_profile_save(..., desk->state->desired, ...)
+
+So **a `profile save` taken after a commit-confirm revert sees nothing
+declared**, and an operator's empty `device wlan0 { }` is omitted again.
+
+**It fails in the safe direction**, which is why it is a gap and not a
+regression: `profile_save` verifies that the profile reproduces the running
+document, finds it does not, and refuses. The operator gets a refusal where
+they should have got a profile -- the 10.418 symptom, by a second route.
+
+**And the provenance is genuinely unrecoverable there.** The last-good document
+does not record which blocks were written, and the configuration that would say
+so is the one the revert has just rejected. There is nothing to carry from.
+
+So it is pinned rather than fixed:
+`a_document_from_json_has_nothing_declared` compiles `device wlan0 { }`, renders
+it directly as a control -- the block is there -- then writes it with
+`ncfg_document_write`, reads it back, and renders again. It walks the path
+rather than modelling it, since that write-and-read-back is the idiom
+`daemon_answer.c` uses for its own deep copy.
+
+**The choice is 0020's.** Serialising the field closes both routes and costs a
+witness re-blessing, a version statement, and a model change in the
+implementation being retired; leaving it costs a refused save after a revert on
+a machine with an empty declared device. Whose decision: the copyright
+holder's. If it is ever serialised, that case fails and says why.
+
 ### How far the hole went, bounded rather than assumed
 
 The fix's shape is **the model lacking a fact the renderer needed**, so the

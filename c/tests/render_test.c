@@ -179,6 +179,45 @@ static char *rendering_of(const char *text)
 }
 
 /*
+ * Compile, serialise, read back, render -- which is the path, not a model of
+ * it: `host/profile_save.c` round trips a document through json to drop what
+ * the base already says, and `daemon/confirm.c` reads one off disk after a
+ * revert. A reader cannot know what the lowering knew, so this is a different
+ * document for the same machine.
+ */
+static char *rendering_after_a_json_round_trip(const char *text)
+{
+	char             message[NCFG_ERROR_MAX];
+	ncfg_document_t *document = compiled(text, "a case's own configuration");
+	ncfg_document_t *reread;
+	ncfg_buf_t       json;
+	char            *out;
+
+	if (!document) {
+		return NULL;
+	}
+	message[0] = '\0';
+	ncfg_buf_init(&json, 0);
+	if (!ncfg_document_write(document, &json, message, sizeof(message))) {
+		printf("  the case's own document would not serialise: %s\n", message);
+		ncfg_buf_free(&json);
+		ncfg_document_free(document);
+		return NULL;
+	}
+	ncfg_document_free(document);
+	reread = ncfg_document_read(ncfg_buf_text(&json), strlen(ncfg_buf_text(&json)), message,
+	    sizeof(message));
+	ncfg_buf_free(&json);
+	if (!reread) {
+		printf("  the case's own document would not read back: %s\n", message);
+		return NULL;
+	}
+	out = render_document(reread);
+	ncfg_document_free(reread);
+	return out;
+}
+
+/*
  * **The gate this module exists behind**: render, read it back, and the
  * document must be the same one.
  */
@@ -2710,6 +2749,51 @@ static void the_empty_device_block_round_trips(void)
 	free(common);
 }
 
+
+/*
+ * `declared` is lost by every persistence path, which bounds where the fix
+ * reaches.
+ *
+ * **It is not in the wire form on purpose** -- `document.h` has why, and 0020
+ * makes putting it there a schema change with a version bump. The consequence
+ * is that it survives only while a document stays in the process that lowered
+ * it. `host/profile_save.c` carries it across the one round trip it performs
+ * itself, and that is the only place it can be carried, because carrying needs
+ * both documents in scope.
+ *
+ * **There is a second route and it is reachable.** `daemon/confirm.c` reads the
+ * last-good configuration from disk after a commit-confirm revert and assigns
+ * it straight to `state->desired`, which `main/daemon_answer.c` is what hands
+ * to `ncfg_profile_save`. So a save taken after a revert sees nothing declared.
+ *
+ * It fails in the safe direction rather than silently: the renderer omits the
+ * block, `profile_save`'s own verification finds the profile does not reproduce
+ * the running document, and the save is refused. An operator gets a refusal
+ * where they should have got a profile.
+ *
+ * Provenance is genuinely unrecoverable there -- the last-good document does
+ * not record which blocks were written, and the configuration that would say
+ * so is the one the revert just rejected. So this is pinned rather than fixed,
+ * and the choice between serialising the field and living with the gap is
+ * 0020's to make. If it ever is serialised, this case fails and says so.
+ */
+static void a_document_from_json_has_nothing_declared(void)
+{
+	char *rendered;
+
+	/* The control first: compiled and rendered directly, the block survives. */
+	rendered = rendering_of("device wlan0 { }\n");
+	check(rendered && holds(rendered, "device wlan0"),
+	    "a written empty device survives while the document stays in one process");
+	free(rendered);
+
+	rendered = rendering_after_a_json_round_trip("device wlan0 { }\n");
+	check(rendered != NULL, "and the same document survives a json round trip");
+	check(rendered && lacks(rendered, "device wlan0"),
+	    "  but the block does not, `declared` not being in the wire form");
+	free(rendered);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2732,6 +2816,7 @@ int main(int argc, char **argv)
 	the_connectivity_policys_unreached_arms();
 	the_other_two_escapes_round_trip();
 	the_empty_device_block_round_trips();
+	a_document_from_json_has_nothing_declared();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
