@@ -2522,6 +2522,79 @@ static void a_block_at_every_default_is_left_out(void)
 	free(plain);
 }
 
+/*
+ * The connectivity policy's three unexercised arms, all one family.
+ *
+ * `render_connectivity` is the third member of the omit-at-default family
+ * 10.432 found in `render_control` and `render_remote`, and it carries two
+ * more arms nothing reached.
+ *
+ * **The element-wise ignore comparison ran 40,210 times and had never once
+ * been asked a question it could get wrong.** The first version of this
+ * comment said it had never run at all, which `gcov` disproves on the very
+ * line: every document with no explicit `ignore` is given the default
+ * five-member list by the lowering, so
+ *
+ *     ignore_differs = count != default_count;
+ *     for (i = 0; !ignore_differs && i < count; i++)
+ *             ignore_differs = strcmp(ignore[i], default_ignore[i]) != 0;
+ *
+ * runs its five comparisons on every one of them -- and every comparison is
+ * between a member and itself. Replace the whole loop with the count test
+ * alone and **both suites still pass**, because for a list that is equal and
+ * for a list of a different length the two give the same answer.
+ *
+ * **The only input that separates them is a list of the SAME LENGTH that is
+ * not equal**, and no corpus had one: every `ignore` in the tree has nought
+ * or one member against a default of five. A five-member list differing only
+ * in its last is what makes the comparison decide something, and if it were
+ * wrong those five custom patterns would be read as the default and
+ * **replaced by it**.
+ *
+ * So this one is invisible to line coverage and to branch coverage alike --
+ * the line runs, every branch on it is taken -- and the lesson is that a high
+ * execution count is not evidence of being tested. It was found by reading the
+ * condition and asking which input could make it answer differently, which is
+ * the question neither instrument asks.
+ */
+static void the_connectivity_policys_unreached_arms(void)
+{
+	char *same_length;
+	char *no_requires;
+	char *defaults;
+
+	/* Five patterns, four of them the shipped ones, differing in the last --
+	 * so `ignore_differs` can only come out right by comparing contents, and
+	 * the loop must reach its final index to do it. */
+	round_trips("global {\n\tconnectivity {\n\t\tignore = [\"docker*\", \"br-*\", "
+	    "\"veth*\", \"virbr*\", \"tap*\"]\n\t}\n}\n",
+	    "an ignore list as long as the default but not equal to it round trips");
+	same_length = rendering_of("global { connectivity { ignore = [\"docker*\", "
+	    "\"br-*\", \"veth*\", \"virbr*\", \"tap*\"] } }\n");
+	check(same_length && holds(same_length, "tap*"),
+	    "and keeps the member that differs, rather than taking the default list");
+	check(same_length && lacks(same_length, "vnet*"),
+	    "with the default's own last member absent, which is what replacing means");
+	free(same_length);
+
+	/* `requires` is omitted at its default, so a policy that only sets
+	 * `ignore` writes the block without it -- the arm the existing case
+	 * cannot reach, because it sets both. */
+	no_requires = rendering_of("global { connectivity { ignore = [\"wg0\"] } }\n");
+	check(no_requires && holds(no_requires, "connectivity {") &&
+	        holds(no_requires, "wg0") && lacks(no_requires, "requires"),
+	    "a policy setting only `ignore` writes no `requires`, that being default");
+	free(no_requires);
+
+	/* And the whole block goes when nothing in it differs, which no round
+	 * trip can check: an empty `connectivity { }` compiles to these same
+	 * defaults, so only the text says whether it was written. */
+	defaults = rendering_of("global { connectivity { requires = \"route\" } }\n");
+	check(defaults && lacks(defaults, "connectivity"),
+	    "and a policy at every default is left out altogether");
+	free(defaults);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2541,6 +2614,7 @@ int main(int argc, char **argv)
 	the_writes_no_corpus_reached();
 	the_other_side_of_a_two_way_write();
 	a_block_at_every_default_is_left_out();
+	the_connectivity_policys_unreached_arms();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

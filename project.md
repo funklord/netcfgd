@@ -12385,6 +12385,67 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.433 A line that ran 40,210 times and was never tested
+
+`render_connectivity` is the third member of 10.432's omit-at-default family,
+and it carried three unexercised arms. Two are the family's shape again and are
+closed the same way. **The third is invisible to both coverage instruments and
+is the one worth the entry.**
+
+    ignore_differs = count != default_count;
+    for (i = 0; !ignore_differs && i < count; i++)
+            ignore_differs = strcmp(ignore[i], default_ignore[i]) != 0;
+
+**Delete the loop entirely and both suites pass.** That was measured before
+anything was written, as in 10.432.
+
+### The first explanation was wrong, and gcov said so on the line itself
+
+The obvious reading is that the loop never runs: every `ignore` list in the
+tree has nought or one member, the default has five, so the count differs and
+the loop is skipped. That is what this was first written up as.
+
+    40210: 578:  ignore_differs = strcmp(policy->ignore[i] ? ...
+    24133: 577:  for (i = 0; !ignore_differs && i < policy->ignore_count; i++)
+                 branch 0 taken 100%  branch 1 taken 1%
+                 branch 2 taken  83%  branch 3 taken 17%
+
+**It runs forty thousand times and every branch on it is taken.** The lowering
+gives every document without an explicit `ignore` the default five-member list,
+so the loop compares all five on almost every render -- each member against
+itself.
+
+### So the gap is not coverage, and no coverage tool could have found it
+
+Equal lists and different-length lists give the **same answer** with the loop
+and without it. The only input that separates a real comparison from a
+count-only one is **a list of the same length that is not equal**, and nothing
+in the tree had one.
+
+That makes it the sharpest instance here of a rule the suite has met before
+from other directions: **a high execution count is not evidence of being
+tested.** Line coverage says the line runs. Branch coverage says every branch
+on it is taken. Both are true, and the comparison had never been asked a
+question it could answer wrongly.
+
+**It was found by reading the condition and asking which input would make it
+decide something** -- which is the question neither instrument asks, and the
+reason the two of them were worth running first rather than instead.
+
+### What it would have cost
+
+A five-member custom ignore list read as the default and replaced by it: an
+operator's `docker*, br-*, veth*, virbr*, tap*` coming back as the shipped
+`...vnet*`, so `wait-online` and the tray would consult an interface the
+operator had excluded and ignore one they had not. The fixture differs from the
+default only in its last member, so the loop must reach its final index and the
+comparison must be the thing that decides.
+
+Removing the loop fails exactly two checks, the round trip and the content
+assertion, and nothing else -- so the corpus case is what closes it, and it
+closes it for the round trip as well, which could always have seen this and had
+never been given the document.
+
 ## 10.432 The one branch that mattered: a default block nothing checks is omitted
 
 Of the never-taken branches in 10.431, `render.c` was the weakest file at
