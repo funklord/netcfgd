@@ -60,12 +60,23 @@ static const char *const psk_proto_words[] = { "wpa2", "wpa3", "wpa2+wpa3" };
  * `dhcp6` and `slaac` carry settings the language expresses as modifiers after
  * the word, and `dhcp` carries settings it cannot express at all.
  *
- * **The Rust this ports wrote the bare word and dropped every one of them in
- * silence**, which is the defect this module exists to refuse rather than a
- * rendering choice. The modifiers are written; what has no words is named.
- * `slaac privacy` is worth the distinction on its own: losing it puts a
- * machine back on stable addresses, which is a privacy property the operator
- * chose and which nothing downstream would report.
+ * The modifiers are written; what has no words is named. `slaac privacy` is
+ * worth the distinction on its own: losing it puts a machine back on stable
+ * addresses, which is a privacy property the operator chose and which nothing
+ * downstream would report.
+ *
+ * ~~The Rust this ports wrote the bare word and dropped every one of them in
+ * silence.~~ **Measured 2026-10-09 and no longer true**, by saving a profile
+ * from both programs over a configuration carrying `slaac privacy
+ * prefer_temporary`, a static address with `peer` and both lifetimes, and
+ * `dhcp6 pd pd_length 56`: the two profiles agree on every modifier. The claim
+ * was a reason to write this function and had become a claim about another
+ * implementation that nobody re-took.
+ *
+ * **One divergence survives and it is presentational.** This writes `dhcp6 pd
+ * pd_length 56` and the Rust writes `dhcp6 pd_length 56`; both compile to the
+ * same document, `pd_length` implying `pd`, and writing `pd` out is this
+ * module's own choice rather than a correction. 10.441 has the measurement.
  */
 static void render_lease_modifiers(const ncfg_address_source_t *source, ncfg_buf_t *slot,
     ncfg_unrenderable_t *missing, const char *scope, const char *name)

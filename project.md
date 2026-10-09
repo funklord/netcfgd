@@ -12385,6 +12385,58 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.441 The other two traced: one split, one stale claim, one text divergence
+
+10.440 left `render_lease_modifiers` and `render_network_keys` untraced.
+
+### `render_network_keys` is a split, not a feature
+
+Its own comment says so -- *"the keys that sit beside `wifi` rather than inside
+it. A function of its own because the block's two halves are written by two
+functions and the split is where a key ends up at the wrong nesting."* The Rust
+writes `bssid`, `hidden`, `ssid`, `config` and `roam` from one function instead.
+No gap.
+
+### `render_lease_modifiers` carried a claim about the other implementation
+
+Its header read: *"**The Rust this ports wrote the bare word and dropped every
+one of them in silence**, which is the defect this module exists to refuse."*
+
+**Measured, and no longer true.** Saving a profile from both programs over a
+configuration carrying `slaac privacy prefer_temporary`, a static address with
+`peer` and both lifetimes, and `dhcp6 pd pd_length 56` -- the two profiles agree
+on every modifier. `privacy none` is omitted by both, which is the default.
+
+This is `evidence.md`'s claim that outlived its subject, in the worst place for
+one: **a comment about a sibling implementation, which nothing in the ordinary
+course of work brings together with that implementation.** A claim about the C's
+own behaviour would eventually be tripped over; a claim about the Rust's is read
+by people working on the C and never checked. The reason to write the function
+was real and the sentence had outlived it.
+
+### What does survive is a text divergence, and it is the class again
+
+    C      config = "dhcp6 pd pd_length 56"
+    Rust   config = "dhcp6 pd_length 56"
+
+Both compile to the identical document -- `pd_length` implies `pd`, checked by
+compiling both forms and comparing the addressing they produce. Writing `pd`
+out is this module's own choice, recorded at the site, rather than a correction
+of the Rust.
+
+**So it is 10.436's class at the inter-implementation level**, which that
+enumeration did not reach: it listed seven choices *within* the C renderer where
+output can be wrong while meaning is right. Between two renderers the same thing
+happens, and the instrument is the agree gate rather than a text assertion --
+it compares saved profiles byte for byte, so a corpus configuration carrying
+`dhcp6 pd_length` would turn it red and need a `SAVE_AHEAD` entry.
+
+**None does**, which is the third coverage gap of this shape after 10.437's
+empty device and 10.440's connectivity policy. The pattern is worth naming now
+that there are three: **the gate's corpus was assembled to exercise compiling
+and refusing, and it is thin exactly where two renderers can disagree while
+both being right.**
+
 ## 10.440 The C renders a connectivity policy and the Rust refuses the save
 
 The other direction of 10.439's comparison, which that entry ran one way only.
