@@ -12385,6 +12385,104 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.430 Four writes no corpus reached, found by asking what ran
+
+10.427 to 10.429 asked "is every key handled" four ways -- the gate, the alias
+spellings, the corpus count, the denominator's own spelling -- and all four
+agreed. **The frame was keys, and a frame that has just been right four times
+is the one that supplies no friction.** `evidence.md` names the remedy: ask
+what observation the frame cannot represent.
+
+It cannot represent a **write**. Every one of those instruments reads source
+text; none asks what executed. So: build with `--coverage` from
+`git archive HEAD` and run every test binary that touches the renderer.
+
+    render.c  93.61%   render_device.c  98.28%   render_link.c  94.78%
+    95.66% of 1130 lines, and the 49 that never ran:
+      ~22  allocation-failure arms, unreachable without fault injection
+      ~23  refusals the lowering makes unreachable from a config file
+        4  conditional writes nothing exercises
+
+**The denominator was checked before the finding was believed.** Five test
+binaries reference the renderer, not the two first measured -- `render_test`,
+`lower_test`, `config_test`, `proto_test`, `cli_control_test` -- and the figure
+is *identical* for two and for five, so the other three cover no renderer line
+the first two do not. Had it differed, the four would have been a claim about a
+subset.
+
+### The four
+
+    render.c:596          `ignore = []`, a connectivity policy ignoring nothing
+    render_device.c:616   `"%lldbit"`, a rate no suffix divides evenly
+    render_link.c:834     an access point's `ssid`, when it is not the label
+    render_link.c:890     `autoconnect = false` on a wifi network
+
+**Two are the `require_lease` shape, a fourth and fifth time.**
+`network.autoconnect` is set to 1 in `lower_network` and written only when
+false; the access point's ssid is written only when it differs from the label.
+A corpus assembled from ordinary configurations contains neither, which is what
+that shape means rather than an accident of these corpora.
+
+**`ignore = []` is an instruction, not an absence.** `lower_global` records
+that writing `ignore` *replaces* the default list, so the empty list says
+"consult every interface" where omitting the key says "use the defaults". A
+renderer that dropped it would turn one into the other silently.
+
+**The bare `bit` is the two tables disagreeing in a way that happens to be
+right.** The renderer's units run gbit, mbit, kbit and stop, falling through to
+a bare suffix; the parser's run gbit, mbit, kbit, **bit**. So the fallback is
+accepted -- checked, not assumed, because had it not been the write would have
+produced a profile that does not compile.
+
+### The access point's ssid is the one worth the most
+
+`render_link` carries that comparison **twice** -- line 757 for a network, 834
+for an access point -- and only the network copy had a test. The network copy
+exists because dropping it was a real shipped defect: `ssid = "@bssid"`
+vanished, the document came back as a network named after its label, and
+`profile save` refused on any machine with a network pinned by access point.
+
+**So the untested one was the second copy of a construct that had already
+bitten.** `evidence.md` has this as a naming rule -- a deliberate parallel copy
+needs a distinct name -- and here the cost was not a link collision but a test
+that looked like it covered both and covered one.
+
+### Proved by re-measuring, not by assertion
+
+The four cases are in `the_writes_no_corpus_reached`. Coverage was re-run after
+adding them, and the four lines report an execution count of 2 where they
+reported `#####` before -- which is the claim itself rather than the 96.19%
+the percentage moved to.
+
+**And the fixtures were wrong twice before they were right**, both times
+because I wrote what an ssid looked like instead of reading it. An access
+point's `ssid` is **hex** -- `ncfg_ssid_from_hex`, which is why the renderer
+has a `quote_ssid` at all, the bytes not needing to be text -- and an access
+point with no `wifi` block is refused because it would be open. The compiler
+said both in one diagnostic. A test's own configuration is as much a claim
+about the language as the check underneath it.
+
+### The method, and what it would cost to keep
+
+Reproducing it is four steps and no installed tooling beyond `gcov`:
+
+    git archive HEAD | tar -x -C <scratch>
+    append `CFLAGS += --coverage` and `LDFLAGS += --coverage` in c/Makefile
+    make the five test binaries, run each from c/
+    gcov -o src/compile src/compile/render*.c, then read for `#####`
+
+**A standing target is the holder's call, not mine.** The cost: the renderer's
+objects are built in place rather than under `BUILD_DIR`, so a coverage build
+cannot share the tree with a normal one -- it needs the scratch copy, which is
+about two minutes and a temporary directory per run. The benefit is that this
+class has now produced six findings (`require_lease`, a vlan's `protocol`, and
+these four) and a method written in prose does not get re-run.
+
+**It would be a reporting target and not a gate.** The 45 remaining uncovered
+lines are legitimately uncovered, so a gate would need a waiver list longer
+than its findings -- which is the reason the phrase-keyword sweep in 10.427 was
+recorded rather than gated.
+
 ## 10.429 The denominator was sixteen keys short, and one key no round trip reached
 
 **Chasing `group` is what found it.** The renderer writes `"\t\tgroup = "` for a

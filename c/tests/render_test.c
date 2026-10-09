@@ -2265,6 +2265,99 @@ static void a_vlans_protocol_round_trips(void)
 	free(alias);
 }
 
+
+/*
+ * Four writes `gcov` says no corpus reaches.
+ *
+ * The key-counting instruments of 10.427 to 10.429 answered "is every key
+ * handled" four ways and agreed. **That frame cannot see a write no document
+ * triggers**, because it reads source text rather than asking what ran.
+ *
+ * Built with `--coverage` from `git archive HEAD` and driven by all five test
+ * binaries that touch the renderer -- this one, `lower_test`, `config_test`,
+ * `proto_test` and `cli_control_test` -- the three renderer modules execute
+ * 95.66% of 1130 lines. The other three contribute nothing the first two do
+ * not, measured rather than assumed: the figure is identical with two suites
+ * and with five. Of the 49 lines that never ran, the rest are
+ * allocation-failure arms and refusals the lowering makes unreachable; these
+ * four are conditional writes nothing exercises.
+ *
+ * Two are the `require_lease` shape a fourth and fifth time: a value written
+ * only when it differs from a default, so the case that reaches it is the one
+ * a corpus assembled from ordinary configurations never contains.
+ *
+ * The access point's `ssid` is the one worth the most. `render_link` carries
+ * that comparison TWICE -- once for a network at line 757 and once for an
+ * access point at 834 -- and only the network copy had a test. The network
+ * copy is there because dropping it was a real shipped defect: `ssid =
+ * "@bssid"` vanished and the document came back as a network named after its
+ * label, so `profile save` refused on any machine with a network pinned by
+ * access point. The second copy of a construct that has already bitten once
+ * was the untested one.
+ */
+static void the_writes_no_corpus_reached(void)
+{
+	char *point;
+	char *network;
+	char *ignore;
+	char *odd;
+
+	/*
+	 * An access point whose SSID is not its label. An ssid is given as hex,
+	 * which is why the renderer has a `quote_ssid` at all -- the bytes need
+	 * not be text. `4775657374` is `Guest` and `677565737473` is `guests`,
+	 * so the pair below is a differing ssid and a label-equal one, and both
+	 * states are asserted because omission is what equality means.
+	 */
+	round_trips("access_point \"guests\" {\n\tdevice = \"wlan0\"\n"
+	    "\tssid = \"4775657374\"\n\tchannel = 6\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "an access point whose ssid differs from its label round trips");
+	point = rendering_of("access_point \"guests\" { device = \"wlan0\"; "
+	    "ssid = \"4775657374\"; wifi { psk = \"@secret:ap\" } }\n");
+	check(point && holds(point, "ssid = \"4775657374\""),
+	    "and keeps the ssid, which is not recoverable from the label");
+	free(point);
+	point = rendering_of("access_point \"guests\" { device = \"wlan0\"; "
+	    "ssid = \"677565737473\"; wifi { psk = \"@secret:ap\" } }\n");
+	check(point && lacks(point, "ssid ="),
+	    "while a label-equal ssid stays omitted, the shorter form being faithful");
+	free(point);
+
+	/* `autoconnect` defaults to 1 in `lower_network`, so the renderer writes
+	 * it only when off -- the same polarity that hid `require_lease`. */
+	round_trips("network \"office\" {\n\twifi {\n\t\tpsk = \"@secret:office\"\n"
+	    "\t\tautoconnect = false\n\t}\n}\n",
+	    "a network that must not be joined automatically round trips");
+	network = rendering_of("network \"office\" { wifi { psk = \"@secret:office\"; "
+	    "autoconnect = false } }\n");
+	check(network && holds(network, "autoconnect = false"),
+	    "and says so, because absent means it joins by itself");
+	free(network);
+
+	/* `ignore` REPLACES the default list, so an empty one is an instruction
+	 * and not an absence: `[]` means consult every interface. */
+	round_trips("global {\n\tconnectivity {\n\t\trequires = \"probe\"\n"
+	    "\t\tignore = []\n\t}\n}\n",
+	    "a connectivity policy ignoring nothing round trips");
+	ignore = rendering_of("global { connectivity { requires = \"probe\"; "
+	    "ignore = [] } }\n");
+	check(ignore && holds(ignore, "ignore = []"),
+	    "and keeps the empty list, which is not the same as leaving it out");
+	free(ignore);
+
+	/* The rate units run gbit, mbit, kbit and stop; a rate no suffix divides
+	 * falls through to a bare `bit`, which the parser's own table takes. */
+	round_trips("device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"1500bit\"\n\t}\n}\n",
+	    "a rate no suffix divides evenly round trips");
+	odd = rendering_of("device eth0 { qdisc { kind = \"cake\"; "
+	    "bandwidth = \"1500bit\" } }\n");
+	check(odd && holds(odd, "bandwidth = \"1500bit\""),
+	    "staying in bits rather than being rounded to the nearest kbit");
+	free(odd);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2281,6 +2374,7 @@ int main(int argc, char **argv)
 	a_default_roam_block_survives();
 	the_alias_spellings_round_trip();
 	a_vlans_protocol_round_trips();
+	the_writes_no_corpus_reached();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
