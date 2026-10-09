@@ -12385,6 +12385,114 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.446 The renderer's gaps asked from the document's side, and `schema_version`
+
+Every instrument pointed at the renderer so far has asked the question from the
+*language's* side: `key_coverage_gate.py` takes the keys the lowering's `strcmp`
+arms accept and requires the renderer to write each one, and it is satisfied --
+141 accepted, 132 written, 9 waived aliases. That instrument is structurally
+unable to see the class that has twice cost a `profile save`, because both
+instances were **fields no key can express**: `declared` (10.437) and the
+ingress shaper before it. A key-side gate cannot ask about a field the language
+has no word for.
+
+So ask the other side. The model's reflection tables in `document.c` are the
+document's own field list -- 52 tables, 260 entries, each carrying
+`.offset = offsetof(type, member)` -- and the renderer either reads a member or
+cannot possibly write or refuse it.
+
+**Thirteen fields the renderer's code never touched, and four were the probe
+being wrong.** Three `hook_fields` members plus `interface.hooks` and
+`network.hooks` looked unread because the refusal is keyed on the list's
+companion count -- `render_link.c:651` and `:939` refuse on
+`interface->hook_count`, which is enough. Accepting `count_offset` as a read
+dropped the count to nine, and two more candidates disappeared with it:
+`dhcp4.request_options` and `dns_policy.options` are read and refused by name.
+
+The nine that remain are all accounted for, in three groups:
+
+    version.major, version.minor, document.schema_version   the format
+    document.generated_by                                   provenance
+    hook.phase, hook.sha256, hook.run_as                    inside `hooks`
+    device_match.driver, device_match.name_glob             inside `match`
+
+The last two groups are inner fields of a block refused whole -- `a match
+block`, `hooks` -- so not reading them is correct. Which leaves the format.
+
+### `schema_version` was counted by an equality the renderer cannot satisfy
+
+`render.c` says at the walk that `schema_version` and `generated_by` are
+deliberately not written, the language having no key for either.
+`document_compare.c` leaves out `generated_by` and did **not** leave out
+`schema_version`. So a document recompiled from a rendering carries whatever
+this build stamps, and any document that said something else fails the
+comparison on the one member the renderer was never able to carry.
+
+**That is reachable, and not by a hypothetical.** `canonical.c:588` refuses a
+document whose *major* this build does not speak and accepts any *minor* --
+which is what a minor version is for. This build is 1.1, so a 1.0 document is
+readable by design. Reproduced by taking a document through the writer,
+changing the minor to 0 in the JSON, reading it back and asking for the round
+trip:
+
+    and a 1.0 document is readable by this build                  ok
+    with the older minor kept rather than restamped               ok
+    what it wrote compiles to a DIFFERENT document
+
+`ncfg profile save` would refuse to save a machine whose desired state came
+from a profile an older build wrote. Excluding the member symmetrically, which
+is `generated_by`'s argument and not a second one, closes it: the schema
+version is a property of the document's format rather than of the machine, and
+a minor is by definition one this build reads.
+
+**It has never been able to fire, and that is not the comparison being right.**
+`NCFG_SCHEMA_MINOR` has never moved off its first value -- 0038 keeps it there
+until a release -- so one minor exists and no document can disagree with it.
+The check passed on a property of the version counter, and the counter is going
+to move.
+
+**Both implementations have it and only the C is fixed.** The Rust's
+hand-written `PartialEq` in `netcfgd-model/src/lib.rs` destructures `Document`
+exactly so that a new field cannot be forgotten, excludes `generated_by` in as
+many words, and compares `schema_version`. So this is not a port gap -- the C
+inherited the defect faithfully -- and under 0263/0266 the Rust is a comparison
+oracle rather than something to fix. Recorded, not edited. The agree gate cannot
+see the difference either way: its eleven configurations are all freshly
+compiled, so both programs stamp the current version and no document in it
+disagrees.
+
+### The test was wrong twice before it was right, both times silently
+
+Worth keeping because both failures *passed*.
+
+**A bare early return made the case vacuous.** The fixture
+`interface eth0 { address = 192.0.2.5/24 }` does not compile -- numbers in this
+language are integers, so the address wants quoting -- and the case began
+`if (!document) { return; }`. The suite printed the parse diagnostic and
+reported every check passed, because the case asserted nothing at all. The
+guard is a `check` now, so a fixture that stops compiling fails rather than
+disappears.
+
+**Then the mutation did not happen and the round trip passed on an unmodified
+document.** The search string was `"minor": ` taken from
+`doc/schema/document.json`, which is the *pretty-printed* witness;
+`ncfg_document_write` is the compact writer and emits no space. `strstr` found
+nothing, the minor stayed 1, and the final assertion passed -- a green line
+asserting the round trip survives a change that was never made. It steps over
+the separator rather than spelling it now, and the assertion that the reread
+document holds minor 0 is what makes a failed mutation impossible to miss.
+
+Both are the same shape as the earlier `\t`-fused-with-names fault in
+`key_coverage_gate.py`: a probe whose failure to look reads as a clean result.
+
+### What the field-side instrument is and is not evidence of
+
+Its **alarm** is sound: a member the renderer's code never mentions cannot be
+written or refused by it. Its **clear** is weak, and saying so matters -- 251
+fields passed by being read somewhere, and reading a member is not writing it.
+What covers those is the round trip over 5000 mutations and the key gate, which
+is why this is a third instrument rather than a replacement.
+
 ## 10.445 `c-port` is gone and master is the working branch
 
 The branch existed to keep an unfinished port off the default branch, and the

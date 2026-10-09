@@ -2809,6 +2809,98 @@ static void declared_survives_a_json_round_trip(void)
 	free(rendered);
 }
 
+/*
+ * A document a build speaking an older minor wrote still round trips.
+ *
+ * `canonical.c` refuses a document whose MAJOR this build does not speak and
+ * accepts any minor, which is what a minor version is for: 1.0 is readable
+ * here. The renderer cannot write `schema_version` -- the configuration
+ * language has no key for it, and `render.c` says so at the walk -- so the
+ * recompiled document carries whatever this build stamps rather than what the
+ * original said.
+ *
+ * `document_compare.c` leaves out `generated_by` and `declared` for exactly
+ * that reason and does not leave out this member, so a document from an older
+ * minor compiles to a DIFFERENT document by the only member the renderer was
+ * never able to carry -- and `ncfg profile save` refuses to save a machine
+ * whose desired state came from one.
+ *
+ * **It has never been able to fire, and not because the comparison is right.**
+ * `NCFG_SCHEMA_MINOR` has never moved off its first value (decision 0038 keeps
+ * it there until a release), so there is one minor in existence and no
+ * document can disagree with it. That is a claim about the version counter,
+ * not about the round trip, and the counter is going to move.
+ */
+static void an_older_minor_still_round_trips(void)
+{
+	char             message[NCFG_ERROR_MAX];
+	ncfg_document_t *document = compiled("device wlan0 { }\n", "a case's own configuration");
+	ncfg_document_t *reread = NULL;
+	ncfg_buf_t       json;
+	char            *older = NULL;
+	char            *at = NULL;
+
+	/* Not a bare return: a fixture that stops compiling would make every
+	 * assertion below vanish and the case pass by saying nothing. */
+	check(document != NULL, "the case's own configuration compiles");
+	if (!document) {
+		return;
+	}
+	message[0] = '\0';
+	ncfg_buf_init(&json, 0);
+	if (ncfg_document_write(document, &json, message, sizeof(message))) {
+		older = strdup(ncfg_buf_text(&json));
+	}
+	ncfg_buf_free(&json);
+	ncfg_document_free(document);
+	check(older != NULL, "the case's own document serialises");
+
+	/* The first `minor` in the document is the schema version's: the writer puts
+	 * `schema_version` first, which `doc/schema/document.json` shows.
+	 *
+	 * The separator is stepped over rather than spelled, because this writer is
+	 * the compact one and the witness is the pretty-printed one -- searching for
+	 * the witness's `"minor": ` found nothing here, the mutation silently did not
+	 * happen, and the round trip then passed on an unmodified document. */
+	at = older ? strstr(older, "\"minor\"") : NULL;
+	if (at) {
+		at += sizeof("\"minor\"") - 1u;
+		while (*at == ' ' || *at == '\t' || *at == '\n' || *at == ':') {
+			at++;
+		}
+		if (*at < '0' || *at > '9') {
+			at = NULL;
+		}
+	}
+	check(at != NULL, "  and states a minor version as a number");
+	if (at) {
+		/* One digit, `NCFG_SCHEMA_MINOR` being one; the assertion on the reread
+		 * document is what would catch this having written the wrong thing. */
+		*at = '0';
+	}
+
+	message[0] = '\0';
+	reread = older ? ncfg_document_read(older, strlen(older), message, sizeof(message)) : NULL;
+	if (!reread && older) {
+		printf("  a 1.0 document would not read back: %s\n", message);
+	}
+	check(reread != NULL, "  and a 1.0 document is readable by this build");
+	if (reread) {
+		check(reread->schema_version.major == NCFG_SCHEMA_MAJOR
+		    && reread->schema_version.minor == 0,
+		    "  with the older minor kept rather than restamped");
+		message[0] = '\0';
+		if (!ncfg_config_round_trips(reread, message, sizeof(message))) {
+			printf("  %s\n", message);
+		}
+		message[0] = '\0';
+		check(ncfg_config_round_trips(reread, message, sizeof(message)),
+		    "  and it still round trips, the renderer never having written the version");
+	}
+	free(older);
+	ncfg_document_free(reread);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2832,6 +2924,7 @@ int main(int argc, char **argv)
 	the_other_two_escapes_round_trip();
 	the_empty_device_block_round_trips();
 	declared_survives_a_json_round_trip();
+	an_older_minor_still_round_trips();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

@@ -1808,6 +1808,11 @@ typedef struct {
  * documents.
  */
 typedef struct {
+	/* The document's own format, and **excluded from equality** for the reason
+	 * `generated_by` is: the renderer cannot write it, so a document recompiled
+	 * from a rendering carries this build's version rather than the original's,
+	 * and a minor this build reads describes the same machine. `canonical.c`
+	 * refuses a major it does not speak; a minor is accepted by design. */
 	ncfg_version_t           schema_version;
 	/* Informational provenance, and **excluded from equality**: two documents
 	 * that differ only here describe the same desired state, and a plan

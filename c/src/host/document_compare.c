@@ -28,6 +28,11 @@
  *   it is excluded from equality: two documents differing only there describe
  *   the same desired state and must plan identically.
  *
+ *   `schema_version` is left out for the same reason and was not, until a
+ *   document from an older minor was put through the round trip and failed it
+ *   on the one member the renderer has never been able to write. The counter
+ *   has not moved yet, which is why nothing had noticed.
+ *
  *   `globals.profile` is stated by the caller rather than taken from either
  *   document, because every comparison here is "the same but for the
  *   selection" and the selection is the one thing being changed. Comparing the
@@ -363,6 +368,22 @@ int ncfg_config_documents_agree(const ncfg_document_t *want, const char *profile
 		memcpy(key, name, length);
 		key[length] = '\0';
 		if (strcmp(key, "generated_by") == 0) {
+			continue;
+		}
+		/* The renderer cannot write `schema_version` -- the configuration language
+		 * has no key for it and `render.c` says so at the walk -- so a document
+		 * recompiled from a rendering carries whatever THIS build stamps. Counting
+		 * the member therefore fails every document written by a build speaking an
+		 * older minor, which `canonical.c` deliberately accepts: it refuses a major
+		 * it does not speak and reads any minor. Measured before this skip existed:
+		 * a 1.0 document read back and rendered compiled to a "DIFFERENT document",
+		 * so `ncfg profile save` refused to save a machine whose desired state came
+		 * from one.
+		 *
+		 * Skipping it is the same argument as `generated_by` above rather than a
+		 * second one: the schema version is a property of the document's format and
+		 * not of the machine, and a minor is by definition one this build reads. */
+		if (strcmp(key, "schema_version") == 0) {
 			continue;
 		}
 		other = ncfg_json_member(theirs, ncfg_json_root(theirs), key);
