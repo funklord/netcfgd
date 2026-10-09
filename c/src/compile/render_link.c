@@ -374,6 +374,9 @@ static void render_eap(const ncfg_eap_config_t *eap, ncfg_buf_t *body)
 {
 	static const char *const keys[] = { "ca_cert", "client_cert", "private_key" };
 	const ncfg_cert_source_t *sources[3];
+	/* Paired, as above. */
+	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(sources),
+	    "a sources per keys");
 	const char               *method;
 	size_t                    i;
 
@@ -454,6 +457,9 @@ static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
 	} numbers[] = { { "interval", 30 }, { "timeout", 5 }, { "down_after", 3 },
 		{ "up_after", 2 }, { "hold_down", 0 } };
 	int64_t            values[5];
+	/* Paired, as above. */
+	_Static_assert(NCFG_COUNT_OF(numbers) == NCFG_COUNT_OF(values),
+	    "a values per numbers");
 	ncfg_render_list_t args;
 	size_t             i;
 

@@ -59,6 +59,9 @@ static void render_bridge(const ncfg_bridge_config_t *bridge, ncfg_buf_t *body)
 	static const char *const keys[] = { "forward_delay", "hello_time", "ageing_time",
 		"priority" };
 	const ncfg_optint_t *values[4];
+	/* Paired, as above. */
+	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(values),
+	    "a values per keys");
 	ncfg_render_list_t   members;
 	size_t               i;
 
@@ -118,6 +121,9 @@ static void render_vxlan(const ncfg_vxlan_config_t *vxlan, ncfg_buf_t *body)
 {
 	static const char *const keys[] = { "parent", "local", "remote" };
 	const char              *values[3];
+	/* Paired, as above. */
+	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(values),
+	    "a values per keys");
 	size_t                   i;
 
 	ncfg_buf_addf(body, "\tvxlan {\n\t\tid = %lld\n", (long long)vxlan->id);

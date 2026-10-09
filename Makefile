@@ -1257,6 +1257,12 @@ packaging:
 	@# counted by document equality and unwritable by the renderer, so every
 	@# document from an older schema minor failed the round trip.
 	@python3 tool/field_coverage_gate.py
+	@# And every word table against the enum it indexes. The renderer keeps the
+	@# language's spellings rather than the document's, deliberately; a value
+	@# added to one of those enums without its word makes the renderer write
+	@# `powersave = "?"` and report success, and no round trip covers it because
+	@# the value that has just been added is the one no corpus sets.
+	@python3 tool/word_table_gate.py
 	@# And every public header in one file. `tun.h` declared an enum `document.h`
 	@# already had, so any translation unit including both failed to compile --
 	@# and none did, so the module built and its tests passed.

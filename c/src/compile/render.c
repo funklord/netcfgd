@@ -522,6 +522,26 @@ static void render_control(const ncfg_control_t *control, ncfg_buf_t *body)
 {
 	static const char *const keys[] = { "observe", "wifi", "admin" };
 	const ncfg_principal_t  *tiers[3];
+	/*
+	 * A loop over one of these indexes the other, and the sibling's length is
+	 * written by hand, so adding a key without its value reads past the end and
+	 * dereferences what it finds.
+	 *
+	 * **gcc already says something, and what it says is a property of the
+	 * optimisation level rather than of the source.** Measured on the break
+	 * itself -- a fifth bridge key with no fifth value -- at this tree's warning
+	 * flags: `iteration 4 invokes undefined behavior` at `-Os`, `-O2` and `-Og`,
+	 * and NOTHING at `-O0`, the diagnostic coming from the loop optimiser. There
+	 * is no `-Werror` here either, so where it does speak it is a line a build
+	 * scrolls past.
+	 *
+	 * So this is not redundant with the warning and does not replace it: it is a
+	 * hard error at every level, including the one where the compiler is silent.
+	 * Same device as the `sizeof(ncfg_device_t)` assertion in render_device.c and
+	 * for the same reason -- make the rot loud at build time.
+	 */
+	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(tiers),
+	    "a tiers per keys");
 	size_t                   i;
 
 	tiers[0] = &control->observe;
@@ -544,6 +564,9 @@ static void render_remote(const ncfg_remote_policy_t *remote, ncfg_buf_t *body)
 {
 	static const char *const keys[] = { "observe", "wifi", "admin" };
 	int                      tiers[3];
+	/* Paired, as above. */
+	_Static_assert(NCFG_COUNT_OF(keys) == NCFG_COUNT_OF(tiers),
+	    "a tiers per keys");
 	size_t                   i;
 
 	tiers[0] = remote->observe;

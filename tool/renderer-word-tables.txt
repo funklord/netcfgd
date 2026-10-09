@@ -1,0 +1,27 @@
+# Which enum each of the renderer's word tables indexes, read by
+# tool/word_table_gate.py. One table, then the enum, then why the pairing is
+# right where that is not obvious from the names.
+#
+# These tables hold the CONFIGURATION LANGUAGE's spellings, indexed by the
+# MODEL's enum, and `render.c`'s header says why the duplication is deliberate:
+# the two sides spell several values differently, and reaching for the model's
+# name function instead has shipped a silently missing feature twice. So the
+# words are the language's and only the COUNT is the model's -- which is the
+# one thing this gate checks, because a short table makes the renderer write
+# `?` for the values it has no word for.
+#
+# A table absent from this file fails the gate rather than being skipped: a new
+# one cannot arrive without saying what indexes it.
+
+requires_words        ncfg_requires_t
+eap_method_words      ncfg_eap_method_t
+psk_proto_words       ncfg_psk_proto_t         `wpa2+wpa3` here against the document's `wpa2_wpa3`
+ra_backend_words      ncfg_ra_backend_kind_t
+bond_mode_words       ncfg_bond_mode_t         the kernel's spellings, hyphenated and `802.3ad`
+vlan_protocol_words   ncfg_vlan_protocol_t
+macvlan_mode_words    ncfg_macvlan_mode_t
+wifi_backend_words    ncfg_wifi_backend_t
+powersave_words       ncfg_powersave_t
+mac_policy_words      ncfg_mac_policy_t
+toggle_words          ncfg_toggle_t            `unmanaged` is the word for the absent case
+prefixes              ncfg_secret_provider_t   the `@secret:` forms, one per provider

@@ -12385,6 +12385,106 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.448 The renderer's word tables: nothing wrong, two things unguarded
+
+The lens this time was the renderer's own duplication. `render.c`'s header says
+the eleven word tables deliberately copy sets the model already has, because
+the two sides spell values differently -- `wire_guard` against `wireguard`,
+`wpa2_wpa3` against `wpa2+wpa3` -- and reaching for the model's name function
+instead "is a defect this project has shipped twice". A deliberate copy is a
+thing to hold to what it copies.
+
+**Nothing is wrong today, and that is the finding.** Measured rather than
+assumed:
+
+  * all eleven tables hold exactly one word per value of the enum they index,
+    `bond_mode_words` included at seven;
+  * of the nine model name functions the renderer calls, two
+    (`ncfg_tunnel_mode_name`, `ncfg_qdisc_kind_name`) live in `compile/` and
+    are therefore the language's own words, four more are symmetric -- the
+    lowering parses with the `*_from_name` beside them, one table in both
+    directions, so no divergence is possible -- and `interface_kind` already
+    goes through `ncfg_interface_kind_language_name`, the variant the
+    three-times-wrong history produced;
+  * `ncfg_rule_family_name`'s words ARE written into output, and
+    `lower_rule.c` accepts both of them (`inet`, `inet6`) with `ipv4` and
+    `ipv6` as aliases, so the written word reads back;
+  * `ncfg_address_source_kind_name` appears only in a refusal, and in one whose
+    `default:` arm cannot be reached -- the switch above it handles all seven
+    kinds -- so the document's spelling in it cannot be observed.
+
+### What a short table would do, measured
+
+Set a value outside a table's range and the renderer writes `powersave = "?"`
+and **returns success with no refusals**, which is the one thing its contract
+forbids: a refusal is not a drop, and this is neither.
+
+Traced to the end rather than left as an alarm. `profile_save` renders, writes
+the file, selects the profile, and only then proves by recompiling -- and `?`
+is not a word the language reads, so the proof fails, and the outer
+`ncfg_profile_save` unlinks the snapshot, removes the directory, restores the
+selection as a file or an absence, and restores the folded configuration. So
+"nothing was kept" in its message is true, and the operator gets an honest
+refusal saying it is a fault in the snapshot worth reporting.
+
+**Which settles what the gap is worth.** Converting the twenty-one
+`_or_gap` sites to refuse means threading a refusal buffer through functions
+that take none -- `render_eap`, `render_toggle` -- to improve a message on a
+path only a library consumer hand-building a document can reach, since the
+reader checks every closed set. Not done, deliberately.
+
+What IS reachable from an ordinary change is the other half: a value added to
+one of those enums without its word. **No round trip can cover that**, because
+a round trip only exercises values some document sets and the value just added
+is the one no corpus sets yet. So `tool/word_table_gate.py`, with
+`tool/renderer-word-tables.txt` naming what each table indexes, held in both
+directions so a new table cannot arrive without saying.
+
+**It found a table the survey missed on its first run.** `prefixes` in
+`ncfg_render_quote_secret` is enum-indexed by `ncfg_secret_provider_t` and is
+not called `*_words`, so the `*_words` grep that produced the list above never
+saw it -- a name-keyed filter under-counting, which is `running-code.md`'s
+lesson about process tables arriving in a source tree. The gate's scope is
+defined by USE now, tables handed to `ncfg_render_word`, which also excludes
+the two function-local `keys[]` lists that are parallel to a values array
+rather than indexed by anything -- and those two share a name, so a name-keyed
+table could not have spoken about either.
+
+Three controls in a `git archive HEAD` copy: an enum gaining a value, a table
+losing a word, and a mapping entry for a table that is gone. The fourth fired
+in the wild, on the first run, as the two tables above.
+
+### The better find was beside it: six hand-sized parallel arrays
+
+Those `keys[]` lists are the visible half of a pattern the renderer uses six
+times -- a loop bounded by `NCFG_COUNT_OF(one)` indexing a sibling whose length
+is a literal:
+
+    render.c         control's keys / tiers[3], and remote's keys / tiers[3]
+    render_link.c    eap's keys / sources[3], probe's numbers / values[5]
+    render_device.c  bridge's keys / values[4], vxlan's keys / values[3]
+
+Add a key without its value and the loop dereferences past the end, in a
+library whose own header says it is not allowed to crash. Six
+`_Static_assert`s now, the device `render_device.c` already uses for
+`sizeof(ncfg_device_t)`.
+
+**And the rationale had to be corrected, because gcc is not silent.** The
+prediction written into the first draft of the comment was that the toolchain
+says nothing. It says `iteration 4 invokes undefined behavior` -- measured on
+the break itself, a fifth bridge key with no fifth value:
+
+    -Os  warns      -O2  warns      -Og  warns      -O0  SILENT
+
+That is `-Waggressive-loop-optimizations`, a diagnostic from the loop
+optimiser, which is `evidence.md`'s rule about a verdict being a property of
+the toolchain rather than of the source, met in the place it is easiest to miss
+-- the protection that already existed was a property of the optimisation
+level. There is no `-Werror` here either, so where gcc does speak it is a line
+a build scrolls past. The assertions are a hard error at every level including
+the one where the compiler is quiet, which is why they stay, and the comment
+carries the table so nobody removes them as redundant.
+
 ## 10.447 Two notions of the same configuration, and one of them was conditional
 
 10.446's defect had a shape worth reusing: **a comparison counting something
