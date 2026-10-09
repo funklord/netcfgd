@@ -12385,6 +12385,131 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.434 A test matched its own temporary directory, and the fix was already here
+
+`make check` came back red on `service_test`, in a suite nothing in this
+session's commits touches:
+
+    and solicits no delegation nobody wrote down    FAILED
+
+**Reproduced: 2 failures in 200 runs**, so a real intermittent rather than a
+one-off, and the renderer work was pushed separately on the strength of that.
+
+**The answer was in a sibling test file the whole time, with its reasoning.**
+`c/tests/dhcp_test.c` carried `argv_has` and a comment naming this exact fault
+-- the `mkdtemp` suffix, the one-in-sixty-two rate, and the observation that
+the positive assertion is the worse half. `service_test.c` carried the same
+`strstr(said, "-P")` with none of it, and arriving back at the same answer cost
+a session: three mechanisms proposed and refused before anybody looked at the
+pattern itself.
+
+So the finding worth keeping is not the fault. **It is that a fix with its full
+reasoning sat twenty files away and nothing connected the two copies** -- which
+is `harmonization.md`'s argument about a dependency forking, met inside one
+tree between two tests. The investigation below is recorded because the method
+is reusable; the cost was avoidable.
+
+### Three mechanisms proposed and disproved, each by reading rather than guessing
+
+- **A write race.** The stand-in `odhcp6c` is a synchronous `/bin/sh` script
+  and `backend_run.c` waits for the child unconditionally in a loop, so the
+  record is complete before the start returns.
+- **PID reuse in adoption.** `ncfg_dhcp_adopt` can return success without
+  launching, which would leave the record unlinked -- but `pid_of_as` tests
+  `cmdline_has_argument(pid, marker)` **and** `ncfg_process_ours`, and the
+  marker is a unique path under the suite's own `mkdtemp`.
+- **An uninitialised request buffer.** `start_dhcp6` declares `char
+  request[128]` and `prefix_request_on` returns early when no interface
+  matches -- but it writes `out[0] = '\0'` before anything else.
+
+Each was plausible, each took one file to refuse, and **none of them was it.**
+
+### What it was: an unanchored pattern, in an assertion rather than a grep
+
+    check(said && strstr(said, "-P") == NULL, ...)
+
+`said` is the recorded command line, newline-joined, and it carries two
+absolute paths. The suite's directory template is `netcfgd-c-<what>-XXXXXX`, so
+**a `mkdtemp` suffix beginning with `P` puts the literal `-P` in the path** and
+the assertion matches its own scratch directory.
+
+    1/62 of suffixes start with P   ~1.6% predicted
+    2 of 200 runs failed             1.0% observed
+
+Confirmed deterministically rather than left at arithmetic, because `testdir.h`
+honours `TMPDIR`: a base named `base-Pyes` fails every run and `base-Qno` never
+does. The diagnostic shows the argv as `-d | -p <path> | -s <path> | wan0` --
+**no `-P` argument at all.** The code was right the whole time.
+
+This is `evidence.md`'s `nat` matching *signature*, moved from a survey grep
+into a test, where it is worse: a grep is read once by the person who ran it,
+and an assertion is believed by everyone afterwards.
+
+### The negative half failed safe; the positive half could pass vacuously
+
+    check(said && strstr(said, "-P") != NULL && strstr(said, "...::/56") != NULL, ...)
+
+The failing check treated a path match as a delegation and went red, which is
+merely confusing. **Its sibling treats a path match as proof the flag was
+passed.** Demonstrated: delete the `-P` push from `ncfg_dhcp_odhcp6c_args`, run
+with a base containing `-P`, and the old assertion reports *"the request came
+out of the document rather than being dropped"* -- **ok**, on a build that had
+stopped passing it entirely.
+
+So the loose pattern cost one visible failure and hid one silent pass, and the
+silent one was in the half that matters.
+
+`argv_had` replaces both: the stand-in writes one argument per line, so a whole
+line is an argument and a substring is not. Dropping the `-P` push now fails
+exactly the positive check.
+
+### One copy, in the header all three include
+
+Three sites, not two: `supplicant_launch_test.c` used the raw `strstr(seen,
+"-P")` as a **liveness** check, so that a silence below meant a silence rather
+than an empty buffer -- and its comment claimed "a string that is known to be
+there", which a path satisfies on its own. A liveness proof resting on the
+directory name is not one.
+
+`argv_has` now lives in `c/tests/testdir.h`, which `dhcp_test`, `service_test`
+and `supplicant_launch_test` all already include, and the two local copies are
+gone. The comment moved with it, because the comment is the part that was
+expensive, and it gained a paragraph saying why the function is in a header:
+so the next test that reads a recorded command line finds it without being
+told.
+
+Proved after the move rather than assumed: deleting the `-P` push from
+`ncfg_dhcp_odhcp6c_args` fails two checks in `dhcp_test` and one in
+`service_test`, through the shared helper.
+
+**And the sweep has a bound, which is what makes it finishable rather than a
+standing worry.** Swept across the suite, about twenty assertions match a
+flag-shaped needle. The discriminator is not the needle but the haystack: an
+error message is prose this project writes, while a recorded command line holds
+paths it was handed. Within the recordings, the `mkdtemp` suffix is
+alphanumeric with one hyphen in front of it:
+
+    -P                  1 in 62, which is the rate measured
+    --auth-user-pass    impossible -- the suffix carries no hyphen
+
+So `openvpn_test`'s `strstr(arguments, "--auth-user-pass")` is sound for a
+structural reason rather than by luck, and the at-risk set was exactly the
+short `-X` needles over recordings. It is now empty. The bound is in the
+header's comment beside the function, because the next person to meet this
+will be reading that and not this file.
+
+### And my own experiment produced a finding that was not one
+
+Running under `TMPDIR` pointing at this session's scratchpad failed **six**
+further checks -- "a fake access point could be started", "a fake supplicant
+could be started" -- which read as a systemic version of the same bug. It is
+not. That path is about 130 characters and a unix socket's `sun_path` is capped
+near 108, so the fakes could not bind their control sockets. A short base named
+`/tmp/n-Pq` passes everything, and `/tmp/n-Qq` likewise.
+
+**An artifact of the harness reads exactly like a finding**, and what separated
+them was varying one thing at a time: same content, shorter path.
+
 ## 10.433 A line that ran 40,210 times and was never tested
 
 `render_connectivity` is the third member of 10.432's omit-at-default family,

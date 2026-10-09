@@ -1128,7 +1128,7 @@ static void a_dhcp6_start_finds_the_request_in_the_document(void)
 	      sizeof(message)),
 	    "a dhcp6 start on an interface that asked for a prefix runs the client");
 	said = testdir_read(record, NULL);
-	check(said && strstr(said, "-P") != NULL && strstr(said, "2001:db8::/56") != NULL,
+	check(said && argv_has(said, "-P") && strstr(said, "2001:db8::/56") != NULL,
 	    "  and the request came out of the document rather than being dropped");
 	free(said);
 
@@ -1141,7 +1141,7 @@ static void a_dhcp6_start_finds_the_request_in_the_document(void)
 	      sizeof(message)),
 	    "an interface that asked for none runs it too");
 	said = testdir_read(record, NULL);
-	check(said && strstr(said, "-P") == NULL,
+	check(said && !argv_has(said, "-P"),
 	    "  and solicits no delegation nobody wrote down");
 	free(said);
 }

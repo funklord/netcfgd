@@ -1064,38 +1064,6 @@ static void a_machine(ncfg_dhcp_machine_t *machine, const char *dhcpcd, const ch
 }
 
 /*
- * A whole argument in the recorder's output, rather than a substring of it.
- *
- * `strstr(said, "-P")` reads a file of newline-separated argv as one string,
- * and several of those arguments are **paths**: the run directory, the hook.
- * This binary's scratch directory is `netcfgd-c-dhcp-XXXXXX`, so a `mkdtemp`
- * that picks `P` for the first of its six characters puts a literal `-P` into
- * every path the client is given, and "no delegation is solicited" fails for a
- * directory name. One run in sixty-two -- which is the rate at which a failure
- * is read as somebody else's flake rather than as a defect in the check.
- *
- * The positive assertion had the same fault pointing the other way, and it is
- * the worse half: it would have passed on the directory name alone with the
- * `-P` deleted from the argv builder entirely.
- */
-static int argv_has(const char *recorded, const char *argument)
-{
-	size_t length = strlen(argument);
-	const char *at = recorded;
-
-	while (at && *at) {
-		const char *end = strchr(at, '\n');
-		size_t      span = end ? (size_t)(end - at) : strlen(at);
-
-		if (span == length && memcmp(at, argument, length) == 0) {
-			return 1;
-		}
-		at = end ? end + 1 : NULL;
-	}
-	return 0;
-}
-
-/*
  * A DHCPv6 start: which client, what it is given, and the file it leaves.
  *
  * **The recorder is the whole instrument.** `write_recorder` puts a shell

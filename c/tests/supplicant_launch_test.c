@@ -1400,10 +1400,13 @@ int main(int argc, char **argv)
 	{
 		char *seen = argv_seen();
 
-		/* **And the instrument is checked too.** The same `strstr` over the
-		 * same buffer finds a string that is known to be there, so a silence
-		 * below is a silence rather than an empty file. */
-		check(strstr(seen, "-P") != NULL,
+		/* **And the instrument is checked too.** The same buffer is asked for
+		 * an argument known to be there, so a silence below is a silence
+		 * rather than an empty file -- by whole argument rather than by
+		 * substring, because the recorded line carries absolute paths and a
+		 * `mkdtemp` suffix beginning with `P` supplies `-P` on its own. That
+		 * would satisfy a liveness check on the directory name alone. */
+		check(argv_has(seen, "-P"),
 		    "the recorded command line is really there, which is what makes its "
 		    "silence mean something");
 		check(strstr(seen, CANARY) == NULL,
