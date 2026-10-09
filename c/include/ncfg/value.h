@@ -158,6 +158,32 @@ int ncfg_roam_signal_in_range(int64_t signal);
 int ncfg_roam_intervals_ordered(int64_t interval, int64_t slow_interval);
 
 /*
+ * The network `text` names, written to `out`.
+ *
+ * 1 where it already was a network, 0 where it had host bits set -- and `out`
+ * then holds the network it names, which is what a diagnostic should show -- and
+ * -1 where it is not a prefix at all.
+ *
+ * **A route destination is masked by the kernel and an address is not**, which
+ * is why this is separate from `ncfg_address_canonical`. `ip route add
+ * 10.1.2.3/8` is refused outright with `EINVAL`, and `2001:db8:1::5/64` is
+ * accepted and stored as `2001:db8:1::/64` -- so the desired text never matches
+ * what comes back, `route.add` is planned again, and the second apply fails
+ * `EEXIST`.
+ *
+ * Measured, and the blast radius is what makes it worth a refusal rather than a
+ * silent mask: execution stops at the first failed action, so one destination
+ * with host bits abandons every later action in the plan, on every apply, for
+ * ever.
+ *
+ * **Here rather than in the lowering, because the renderer needs the same
+ * answer.** It was `ncfg_network_of` there, pure but for allocating its result
+ * through the lowering's context; the renderer must know a destination it
+ * cannot write back, and the masking is the half it must not reimplement.
+ */
+int ncfg_address_network_of(const char *text, char *out, size_t out_size);
+
+/*
  * The address a delegated prefix, a subnet selector and a suffix produce.
  *
  * **This is `netcfgd_model::derive_from_delegation`**, and it is here rather

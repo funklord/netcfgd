@@ -3399,6 +3399,46 @@ static void a_nameless_secret_is_refused(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * A route destination that is not one is refused, host bits included.
+ *
+ * `lower_address.c` takes `default` or a network and nothing else, and the
+ * member is a plain string. Host bits are the interesting half: the kernel
+ * refuses `ip route add 10.1.2.3/8` outright, and one such destination stops
+ * the plan at that action and abandons every later one, on every apply.
+ *
+ * The verdict is `ncfg_address_network_of`, the model's own masking, so this
+ * asserts the renderer agrees with the compiler rather than with a shape
+ * written here.
+ */
+static void a_route_destination_that_is_not_one_is_refused(void)
+{
+	static const char *const bad[] = { "10.1.2.3/8", "not-a-network", "10.0.0.0", "" };
+	size_t which;
+
+	for (which = 0; which < sizeof(bad) / sizeof(bad[0]); which++) {
+		ncfg_document_t *document = compiled(
+		    "interface eth0 {\n\tconfig = [\"192.0.2.5/24\"]\n"
+		    "\troutes = [\"10.0.0.0/8 via 192.0.2.1\"]\n}\n", "a case's own route");
+
+		if (!document || document->interface_count == 0u
+		    || document->interfaces[0].route_count == 0u) {
+			check(0, "the case's own route compiles");
+			ncfg_document_free(document);
+			return;
+		}
+		if (which == 0u) {
+			check(renders(document), "a route to a network renders, which is the control");
+		}
+		free(document->interfaces[0].routes[0].destination);
+		document->interfaces[0].routes[0].destination = strdup(bad[which]);
+		check(document->interfaces[0].routes[0].destination != NULL
+		    && refusal_names(document, "eth0", "neither `default` nor a network"),
+		    "  and a destination that is not one is refused by name");
+		ncfg_document_free(document);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3431,6 +3471,7 @@ int main(int argc, char **argv)
 	the_pairs_and_bounds_the_compiler_checks();
 	a_name_or_address_the_language_refuses();
 	a_nameless_secret_is_refused();
+	a_route_destination_that_is_not_one_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

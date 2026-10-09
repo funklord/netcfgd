@@ -12385,6 +12385,60 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.457 Two more pins, one of which I had sized wrongly
+
+Nine left, from fifteen. Two went this pass and they are worth separating,
+because one was the refactor I said it was and the other was not.
+
+### The route destination, which was a real extraction
+
+`ncfg_network_of` was pure apart from allocating its result through the
+lowering's context, so the masking moved to the model as
+`ncfg_address_network_of(text, out, out_size)` -- 1 where the text already was
+a network, 0 where it had host bits set, -1 where it is not a prefix -- and the
+lowering keeps a six-line wrapper that allocates. The reason the function
+exists moved with it, since both callers need it: the kernel refuses
+`ip route add 10.1.2.3/8` outright, and execution stops at the first failed
+action, so **one destination with host bits abandons every later action in the
+plan, on every apply, for ever.**
+
+The renderer now takes `default`, or a network by that function, and refuses
+anything else. Four cases measured: host bits set, not an address at all, no
+prefix, and empty.
+
+### The network name, which was a one-liner I filed as a refactor
+
+10.455 said this one "needs `ncfg_ssid_from_bytes`, which is in the compile
+layer rather than the model, so the same extraction question". **That was
+wrong, and wrong in the direction that matters** -- it made a one-line guard
+look like a layer problem and parked it for a later pass. The whole of that
+function is
+
+    if (length > NCFG_SSID_MAX_LEN) { *why = "an ssid is at most 32 octets"; }
+
+and `NCFG_SSID_MAX_LEN` is public in `document.h` already. Nothing needed
+extracting; the renderer needed a `strlen`.
+
+I had filed it from the function's NAME and its header, not from its body. The
+same reading error as 10.453's grep, one layer up: a claim about what a thing
+would cost, made without opening it.
+
+**And guarding the network's label alone left the pin firing**, which is how I
+found the second half: `cannot be a network name` is raised at two sites, a
+network's label and an access point's, and both are the SSID. The pin not
+clearing is what said so -- had the sweep only reported faults rather than
+asserting its pins still fire, a half-done guard would have read as a whole
+one.
+
+### What that leaves
+
+Nine pinned, all of them a validator the lowering holds privately: regdom,
+Bluetooth address, IPv6 literal, `http://` URL, hostname, duplex, band, an
+addressing entry this guard does not reach, a `group:` principal, and an empty
+APN. None needs a layer moved, on the evidence of this pass -- which is exactly
+what I claimed about the last one before reading it, so each will be opened
+before it is sized.
+
 ## 10.456 The largest pin, and why the pre-walk pass keeps being the answer
 
 Nineteen of 10.454's fault lines were one member: `ncfg_secret_ref_t.name`.
@@ -12472,8 +12526,11 @@ pinned rather than half-done:
     renderer must not reimplement, since a destination with host bits set
     "abandons every later action in the plan". Sharing it is a refactor of that
     function, not a call.
-  * **a network name** needs `ncfg_ssid_from_bytes`, which is in the compile
-    layer rather than the model, so the same extraction question.
+  * **a network name** was filed here as needing `ncfg_ssid_from_bytes`
+    extracted, and that was wrong: the whole of that function is a comparison
+    against `NCFG_SSID_MAX_LEN`, which is public in `document.h` already. It
+    was a one-line guard misfiled as a refactor -- see 10.457, which also has
+    the part I did get wrong about it.
   * the rest -- regdom, Bluetooth address, IPv6 literal, `http://` URL,
     hostname, duplex, band, addressing entry, `group:` principal, APN -- are
     each a validator the lowering holds privately. Each is small; there are

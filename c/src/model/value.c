@@ -388,6 +388,42 @@ int ncfg_addresses_same_family(const char *one, const char *other)
 	return (strchr(one, ':') == NULL) == (strchr(other, ':') == NULL);
 }
 
+int ncfg_address_network_of(const char *text, char *out, size_t out_size)
+{
+	ncfg_address_t address;
+	unsigned char  original[16];
+	unsigned       width;
+	unsigned       i;
+	int            same = 1;
+
+	if (!text || !strchr(text, '/') || !ncfg_address_parse(text, &address, NULL, 0)
+	    || !address.has_prefix) {
+		return -1;
+	}
+	memcpy(original, address.bytes, sizeof(original));
+	width = address.is_ipv6 ? 16u : 4u;
+	for (i = 0; i < width; i++) {
+		unsigned      bits = i * 8u;
+		unsigned char mask;
+
+		if (address.prefix >= bits + 8u) {
+			mask = 0xffu;
+		} else if (address.prefix <= bits) {
+			mask = 0;
+		} else {
+			mask = (unsigned char)(0xffu << (8u - (address.prefix - bits)));
+		}
+		address.bytes[i] = (unsigned char)(address.bytes[i] & mask);
+		if (address.bytes[i] != original[i]) {
+			same = 0;
+		}
+	}
+	if (!ncfg_address_render(&address, out, out_size, NULL, 0)) {
+		return -1;
+	}
+	return same;
+}
+
 int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *err,
     size_t err_size)
 {

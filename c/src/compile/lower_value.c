@@ -582,51 +582,20 @@ int ncfg_check_cidr(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span)
 }
 
 /*
- * **A route destination is masked by the kernel and an address is not**, which
- * is why this is separate from `ncfg_canonical_address`. `ip route add
- * 10.1.2.3/8` is refused outright with `EINVAL`, and `2001:db8:1::5/64` is
- * accepted and stored as `2001:db8:1::/64` -- so the desired text never
- * matches what comes back, `route.add` is planned again, and the second apply
- * fails `EEXIST`.
+ * The network a destination names, allocated through the context.
  *
- * Measured, and the blast radius is what makes it worth a compile-time refusal
- * rather than a silent mask: execution stops at the first failed action, so one
- * destination with host bits abandons every later action in the plan, on every
- * apply, for ever.
+ * The masking itself is `ncfg_address_network_of` in the model, and that is
+ * where the reason it exists is written: the renderer needs the same answer to
+ * know a destination it cannot write back, and a second copy of the masking is
+ * two rules about what the kernel does.
  */
 int ncfg_network_of(ncfg_lower_ctx_t *ctx, const char *text, char **out)
 {
-	ncfg_address_t address;
-	unsigned char  original[16];
-	char           rendered[NCFG_ADDRESS_MAX];
-	unsigned       width;
-	unsigned       i;
-	int            same = 1;
+	char rendered[NCFG_ADDRESS_MAX];
+	int  same = ncfg_address_network_of(text, rendered, sizeof(rendered));
 
 	*out = NULL;
-	if (!strchr(text, '/') || !ncfg_address_parse(text, &address, NULL, 0) ||
-	    !address.has_prefix) {
-		return -1;
-	}
-	memcpy(original, address.bytes, sizeof(original));
-	width = address.is_ipv6 ? 16u : 4u;
-	for (i = 0; i < width; i++) {
-		unsigned bits = i * 8u;
-		unsigned char mask;
-
-		if (address.prefix >= bits + 8u) {
-			mask = 0xffu;
-		} else if (address.prefix <= bits) {
-			mask = 0;
-		} else {
-			mask = (unsigned char)(0xffu << (8u - (address.prefix - bits)));
-		}
-		address.bytes[i] = (unsigned char)(address.bytes[i] & mask);
-		if (address.bytes[i] != original[i]) {
-			same = 0;
-		}
-	}
-	if (!ncfg_address_render(&address, rendered, sizeof(rendered), NULL, 0)) {
+	if (same < 0) {
 		return -1;
 	}
 	*out = ncfg_dup(ctx, rendered);

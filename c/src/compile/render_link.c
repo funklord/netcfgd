@@ -315,9 +315,25 @@ static void render_routes(const ncfg_route_t *routes, size_t count, const char *
 	for (i = 0; i < count; i++) {
 		const ncfg_route_t *route = &routes[i];
 		ncfg_buf_t          phrase;
+		char                network[NCFG_ADDRESS_MAX];
 
+		/*
+		 * **`default`, or a network, and nothing else**, which is what
+		 * `lower_address.c` takes. The member is a plain string, so a document
+		 * read from JSON holds a destination with host bits set or no prefix at
+		 * all, and the renderer wrote it back; `ncfg_address_network_of` is the
+		 * model's own masking, used by both sides, and its comment says what one
+		 * unmasked destination costs a plan.
+		 */
+		if (!route->destination || (strcmp(route->destination, "default") != 0
+		    && ncfg_address_network_of(route->destination, network, sizeof(network))
+		    <= 0)) {
+			ncfg_render_refuse(missing, scope, name, "a route to `%s`, which is neither"
+			    " `default` nor a network", route->destination ? route->destination : "");
+			continue;
+		}
 		ncfg_buf_init(&phrase, 0);
-		ncfg_buf_add_text(&phrase, route->destination ? route->destination : "");
+		ncfg_buf_add_text(&phrase, route->destination);
 		if (route->via) {
 			ncfg_buf_addf(&phrase, " via %s", route->via);
 		}
@@ -970,6 +986,16 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 		ncfg_buf_add_text(&body, "] }\n");
 	}
 
+	/* An access point's label is its SSID too, and bounded the same way -- the
+	 * same `ncfg_ssid_from_bytes` refusal, raised from the other of its two
+	 * sites. Guarding the network's alone left this one faulting. */
+	if (!point->id || point->id[0] == '\0' || strlen(point->id) > NCFG_SSID_MAX_LEN) {
+		ncfg_render_refuse(missing, "access_point", point->id,
+		    "a name of %zu octets, which an ssid cannot be (1 to %d)",
+		    point->id ? strlen(point->id) : (size_t)0, NCFG_SSID_MAX_LEN);
+		ncfg_buf_free(&body);
+		return;
+	}
 	ncfg_render_opening(text, "access_point", point->id, overrides);
 	ncfg_render_quote(text, point->id);
 	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
@@ -1049,11 +1075,21 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 		ncfg_render_refuse(missing, "network", id, "hooks");
 	}
 
-	/* An empty label renders as `network "" {` and the lowering refuses it: the
-	 * label is the SSID, so there is nothing to call the network. */
+	/* The label IS the SSID, so it is empty-to-32-octets like one. An empty label
+	 * renders as `network "" {` and leaves nothing to call the network; a label
+	 * past `NCFG_SSID_MAX_LEN` is one `ncfg_ssid_from_bytes` refuses. The `id` is
+	 * a separate string from `ssid` and carries no length of its own, so a
+	 * document read from JSON can hold a long one beside a legal ssid. */
 	if (!id || id[0] == '\0') {
 		ncfg_render_refuse(missing, "network", NULL,
 		    "a network with no name, which the language has no way to write");
+		ncfg_buf_free(&body);
+		return;
+	}
+	if (strlen(id) > NCFG_SSID_MAX_LEN) {
+		ncfg_render_refuse(missing, "network", id,
+		    "a name of %zu octets, which is more than an ssid's %d", strlen(id),
+		    NCFG_SSID_MAX_LEN);
 		ncfg_buf_free(&body);
 		return;
 	}

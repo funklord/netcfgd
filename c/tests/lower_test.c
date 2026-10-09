@@ -2214,8 +2214,6 @@ static const struct {
 	const char *reason;
 	const char *what;
 } unguarded_strings[] = {
-	{ "is not a route destination", "a route's `destination`" },
-	{ "cannot be a network name", "a network name the lowering reserves" },
 	{ "is not a regulatory domain", "an access point's `regdom`" },
 	{ "is not a Bluetooth address", "a bluetooth device's address" },
 	{ "is not an IPv6 address", "an IPv6 literal, in a token or a delegation" },
