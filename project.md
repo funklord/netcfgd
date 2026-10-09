@@ -12385,6 +12385,81 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.431 A never-taken branch is not automatically an undetected defect
+
+10.430's line coverage found four writes nothing reached. `gcov -b` on the same
+build is one notch sharper -- a line can execute every run while one side of
+its condition never does -- and of 704 branches in the three renderer modules,
+81% to 91% were taken at least once.
+
+**The headline finding was wrong, and the correction is worth more than it
+was.** `nat` and `forwarding` are each written `value ? "true" : "false"`, and
+every corpus in this tree sets them true, so the string `false` had never once
+been rendered for either. That reads exactly like 10.429's `vlan_protocol_words`
+ordering fault, where reversing a two-word table renders a wrong value that
+still compiles. The conclusion -- that an inverted ternary would pass every
+test -- was drawn and was false.
+
+**The control said so.** Inverting both fails five checks, and two of them are
+pre-existing: the `nat = true` round trip here and `lower_test`'s guard on a
+`forwarding = true` document.
+
+    a round trip compares DOCUMENTS, not text
+    -> a wrong word recompiles to a wrong value
+    -> the fixture that sets `true` catches the inversion from its own side
+
+So **one polarity polices both, wherever the branch chooses between two
+renderings of a value the document holds.** The vlan word table was different
+in a way that now has a name: there the two orderings are both parseable AND
+both round trip, because the mapping is a permutation of the enum rather than a
+change of value, so only a text assertion separates them.
+
+What the two cases do buy is narrower and real: the `false` arm had never
+executed, so a fault that manifests only while rendering it -- a quoting slip,
+a crash, output the parser cannot read -- had nothing watching.
+
+### The second misreading: which clause of a compound condition
+
+A delegated address with a non-default suffix looked like another unreached
+arm. It is not. Line 209 is `suffix && strcmp(suffix, default_suffix) != 0`,
+gcov reports several branches for it, and **the untaken one is the NULL test
+rather than the comparison** -- an existing case already renders a non-default
+suffix. Dropping the write proves it: four checks fail and two are that older
+case.
+
+**"A never-taken branch on line N" does not say which clause it belongs to.**
+Attributing it to the interesting-looking clause is a guess that reads like a
+measurement, which is the shape `evidence.md` warns about under reading a
+reduction as evidence of a mechanism.
+
+### What the five cases are worth, measured
+
+    render_device.c   88.76% -> 89.16%      +1 branch
+    render_link.c     90.87% -> 92.31%      +3 branches
+
+Four branches: `nat = false`, `forwarding = false`, a route with no gateway,
+and a wireguard peer with no keepalive. The delegated-suffix case adds **none**
+and is kept for a different reason, stated at the case: the older suffix case
+carries a subnet too, so this is the only `@pd:source=suffix` document in the
+tree without one -- a shape rather than a branch.
+
+### Where that leaves the renderer, and what the two lenses were each good for
+
+Six instruments now, and the division of labour is the finding rather than the
+total:
+
+    the key gate and its three cross-checks   every accepted key is written
+    four document corpora                     every key comes back
+    line coverage (gcov)                      four writes nothing reached
+    branch coverage (gcov -b)                 four arms nothing took
+
+**Line coverage was the productive one and branch coverage was the corrective
+one.** Line coverage found four genuine gaps because a line that never runs
+cannot be policed by anything. Branch coverage found four arms worth taking and
+two findings that dissolved under their controls -- which is what a sharper
+instrument does once the coarse faults are gone: its hits need a control each,
+and the control is where the value is.
+
 ## 10.430 Four writes no corpus reached, found by asking what ran
 
 10.427 to 10.429 asked "is every key handled" four ways -- the gate, the alias

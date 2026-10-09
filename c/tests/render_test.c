@@ -2358,6 +2358,123 @@ static void the_writes_no_corpus_reached(void)
 	free(odd);
 }
 
+
+/*
+ * The other side of a write that chooses between two words or two shapes.
+ *
+ * `gcov -b` on the same coverage build is one notch sharper than the line
+ * coverage that found the four above: a line can execute every run while one
+ * side of its condition never does. Of 704 branches in the three renderer
+ * modules, 81% to 91% are taken at least once, and after the error arms and
+ * the unreachable refusals the residue is conditions whose other side no
+ * corpus produces.
+ *
+ * **`nat` and `forwarding` looked like the `vlan_protocol_words` fault and are
+ * not, and the correction is the useful part of this entry.** Each is written
+ * `value ? "true" : "false"` and every corpus sets them true, so the string
+ * `false` had never once been rendered for either. The conclusion drawn from
+ * that -- that an inverted ternary would pass every test -- was wrong, and the
+ * control said so: inverting both fails five checks, and one of the five is the
+ * PRE-EXISTING `nat = true` round trip here, with `lower_test`'s guard failing
+ * on `forwarding = true` as well.
+ *
+ * The reason is worth carrying. A round trip compares DOCUMENTS, so a wrong
+ * word recompiles to a wrong value and the fixture that sets `true` catches an
+ * inversion from its own side. **A never-taken branch is therefore not
+ * automatically an undetected-defect window**: where the branch chooses
+ * between two renderings of a value the document holds, one polarity is enough
+ * to police both.
+ *
+ * What these two cases buy is narrower and still real: the `false` arm had
+ * never executed, so a fault that only manifests while rendering it -- a
+ * quoting slip, a crash, output the parser cannot read -- had nothing watching.
+ * Unlike the vlan word table, where the two orderings are both parseable and
+ * only the text assertion separates them.
+ *
+ * The other three cases are not polarity but SHAPE, and there the round trip
+ * from the other side covers nothing: a route carrying a gateway does not
+ * exercise the gatewayless arm at all.
+ *
+ * **What these five cases are worth was measured rather than argued, and one
+ * of them is worth nothing at branch level.** Re-running `gcov -b` with them
+ * in moves `render_device.c` from 88.76% to 89.16% and `render_link.c` from
+ * 90.87% to 92.31%, which is four branches: `nat = false`, `forwarding =
+ * false`, the gatewayless route and the peer with no keepalive.
+ *
+ * The delegated suffix added none, and the reason is a misreading worth
+ * recording. Line 209 is `suffix && strcmp(suffix, default) != 0`, which gcov
+ * reports as several branches, and the untaken one is the NULL test rather
+ * than the comparison -- an existing case already renders a non-default
+ * suffix. Dropping the write proves it: four checks fail and two of them are
+ * that older case. **"A never-taken branch on line N" does not say which
+ * clause of a compound condition it belongs to**, and attributing it is a
+ * guess that reads like a measurement.
+ *
+ * It is kept because the older case carries a subnet as well, so this remains
+ * the only `@pd:source=suffix` document with no subnet in it -- a shape rather
+ * than a branch, and said so rather than left looking like coverage.
+ */
+static void the_other_side_of_a_two_way_write(void)
+{
+	char *off;
+	char *bare;
+	char *suffix;
+	char *peer;
+
+	off = rendering_of("interface eth0 { config = \"dhcp\"; nat = false }\n");
+	check(off && holds(off, "nat = false"),
+	    "`nat = false` renders as false, not as the other word of the pair");
+	free(off);
+	round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tnat = false\n}\n",
+	    "and an interface told not to translate round trips");
+
+	off = rendering_of("interface eth0 { config = \"dhcp\"; forwarding = false }\n");
+	check(off && holds(off, "forwarding = false"),
+	    "and `forwarding = false`, which asks netcfgd to hold the sysctl down");
+	free(off);
+	round_trips("interface eth0 {\n\tconfig = \"dhcp\"\n\tforwarding = false\n}\n",
+	    "and an interface told not to forward round trips");
+
+	/* A route is a destination and then optional keywords, so one with no
+	 * `via` is an ordinary on-link route and the `if (route->via)` arm has a
+	 * second side. Every routes fixture in this suite had a gateway. */
+	round_trips("interface eth0 {\n\tconfig = \"192.0.2.1/24\"\n"
+	    "\troutes = \"198.51.100.0/24\"\n}\n",
+	    "a route with no gateway round trips");
+	bare = rendering_of("interface eth0 { config = \"192.0.2.1/24\"; "
+	    "routes = \"198.51.100.0/24\" }\n");
+	check(bare && holds(bare, "routes = \"198.51.100.0/24\"") &&
+	        lacks(bare, "via"),
+	    "and stays gatewayless rather than acquiring one");
+	free(bare);
+
+	/* `@pd:source=suffix` omits the suffix when it is the default `::1/64`,
+	 * so the written form had never been produced. */
+	round_trips("interface wan0 {\n\tconfig = \"dhcp6 pd\"\n}\n"
+	    "interface lan0 {\n\tconfig = \"@pd:wan0=::2/64\"\n}\n",
+	    "a delegated address with a non-default suffix round trips");
+	suffix = rendering_of("interface wan0 { config = \"dhcp6 pd\" }\n"
+	    "interface lan0 { config = \"@pd:wan0=::2/64\" }\n");
+	check(suffix && holds(suffix, "=::2/64"),
+	    "and carries the suffix, which the default form leaves unwritten");
+	free(suffix);
+
+	/* The wireguard fixture sets `keepalive`, so the omission arm was unrun. */
+	round_trips("device wg0 {\n\twireguard {\n\t\tprivate_key = \"@secret:wg\"\n"
+	    "\t\tpeer \"office\" {\n"
+	    "\t\t\tpublic_key = \"0000000000000000000000000000000000000000000=\"\n"
+	    "\t\t\tallowed_ips = [\"0.0.0.0/0\"]\n"
+	    "\t\t}\n\t}\n}\n",
+	    "a wireguard peer with no keepalive round trips");
+	peer = rendering_of("device wg0 { wireguard { private_key = \"@secret:wg\"; "
+	    "peer \"office\" { "
+	    "public_key = \"0000000000000000000000000000000000000000000=\"; "
+	    "allowed_ips = [\"0.0.0.0/0\"] } } }\n");
+	check(peer && lacks(peer, "keepalive"),
+	    "without acquiring one, since absent is not the same as zero");
+	free(peer);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2375,6 +2492,7 @@ int main(int argc, char **argv)
 	the_alias_spellings_round_trip();
 	a_vlans_protocol_round_trips();
 	the_writes_no_corpus_reached();
+	the_other_side_of_a_two_way_write();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
