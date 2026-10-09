@@ -12430,9 +12430,33 @@ renderer writes it -- it must -- and the recompile reads a block somebody
 wrote. The fact is about the *text*, and rendering is what produces the text;
 there is no syntax for "this block was invented" to preserve it with.
 
-Two round trips went red immediately. The fix is the treatment `generated_by`
-already has: **in the canonical form, out of equality.** Those two are
-deliberately different places, which this made explicit --
+Two round trips went red immediately **in the C, and two more in the Rust** --
+and the Rust's were the harder half, because its equality is `#[derive(PartialEq)]`
+and a derive has no way to exclude a field. Worse, that equality is what
+`profile save` verifies with (`crates/netcfgd-host/src/config.rs`, one `!=` on
+whole documents), so the field would have refused every save of a bridge or
+bond config there.
+
+**The fix is a type whose values all compare equal**, which is better than
+normalising at each comparison site:
+
+    #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+    #[serde(transparent)]
+    pub struct Declared(pub bool);
+    impl PartialEq for Declared { fn eq(&self, _: &Self) -> bool { true } }
+
+`#[serde(transparent)]` keeps the wire form a bare bool, so **the witness did
+not move again**. The exclusion then holds at every comparison in that
+implementation including ones nobody has written yet, and the Rust's own
+round-trip helper needed no edit at all -- which three hand-normalised call
+sites would not have given. `field.h` is why that mattered: a hand-written
+equality there missed `bluetooth` for as long as the field existed, and a type
+cannot drift the way a maintained list does.
+
+In the C the same exclusion is one `continue` in `document_compare.c`, which is
+the treatment `generated_by` already has: **in the canonical form, out of
+equality.** Those two are deliberately different places, which this made
+explicit --
 
     canonical form      the document's IDENTITY, everything the writer writes;
                         shared with the Rust for the confirm window's hash

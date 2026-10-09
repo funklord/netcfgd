@@ -44,7 +44,7 @@ use netcfgd_model::route::{Route, RouteScope};
 use netcfgd_model::rule::{RoutingRule, RuleAction, RuleFamily};
 use netcfgd_model::security::{EapConfig, EapMethod, PskConfig, PskProto, Security};
 use netcfgd_model::{
-	AddressSource, CertSource, Control, Dhcp4, Dhcp6, Document, DriftPolicy, Globals,
+	AddressSource, CertSource, Control, Declared, Dhcp4, Dhcp6, Document, DriftPolicy, Globals,
 	HostnamePolicy, Interface, InterfaceKind, Key, Principal, QdiscPolicy, RemotePolicy,
 	SecretProvider, SecretRef, Ssid, WifiNetwork,
 };
@@ -424,7 +424,7 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 /// now, and the qdisc and port VLANs came with it.
 fn maximal_device(name: &str, kind: InterfaceKind) -> Device {
 	Device {
-		declared: true,
+		declared: Declared(true),
 		name: name.to_owned(),
 		r#match: None,
 		managed: true,
@@ -637,7 +637,7 @@ fn every_network() -> Vec<WifiNetwork> {
 /// what pins that neither can vanish from the schema unnoticed.
 fn every_device() -> Vec<Device> {
 	vec![Device {
-		declared: true,
+		declared: Declared(true),
 		kind: InterfaceKind::Physical,
 		master: None,
 		qdisc: None,

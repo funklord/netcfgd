@@ -161,6 +161,35 @@ impl Default for WifiDevicePolicy {
 	}
 }
 
+/// A fact about the configuration *text* rather than about the machine.
+///
+/// **Every value compares equal**, which is how provenance stays out of
+/// document equality without a hand-written `PartialEq`. `field.h` in the C
+/// port records what that alternative costs: `Document`'s equality was written
+/// by hand there, `bluetooth` was missed for as long as the field existed, and
+/// `ncfg profile save` accepted a snapshot that did not reproduce the machine.
+/// A list that has to agree with a struct and is maintained by hand does not
+/// stay agreeing, and this is a type that cannot drift.
+///
+/// It is needed because a provenance field **cannot survive a round trip**. A
+/// synthesised member device carries a `master`, so the renderer writes it --
+/// it must -- and the recompile reads a block somebody wrote. The fact is
+/// about the text and rendering is what produces the text; there is no syntax
+/// for "this block was invented" to preserve it with. Two documents differing
+/// only here describe the same machine and must plan identically, which is the
+/// sentence the C's `document.h` already makes about `generated_by`.
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Declared(pub bool);
+
+impl PartialEq for Declared {
+	fn eq(&self, _other: &Self) -> bool {
+		true
+	}
+}
+
+impl Eq for Declared {}
+
 /// A device netcfgd knows about.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -262,7 +291,7 @@ pub struct Device {
 	/// read back with `deny_unknown_fields`, so a member the C writes has to
 	/// exist on both sides or neither.
 	#[serde(default)]
-	pub declared: bool,
+	pub declared: Declared,
 }
 
 /// What hardware address a radio presents.

@@ -13,7 +13,7 @@
 //! to rediscover. What moves is the index, which is derived and disposable and
 //! gone after a reboot, so a cold start begins at the preference again.
 
-use netcfgd_model::{Device, Document, ObservedReport};
+use netcfgd_model::{Declared, Device, Document, ObservedReport};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -307,7 +307,7 @@ mod tests {
 	fn document(sim: &[&str], apn: Option<&str>) -> Document {
 		let mut document = Document::default();
 		document.devices.push(Device {
-			declared: false,
+			declared: Declared(false),
 			name: "wwan0".to_owned(),
 			r#match: None,
 			managed: true,

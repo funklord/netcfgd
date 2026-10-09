@@ -256,7 +256,7 @@ fn expand_ingress_shapers(
 	// Now it is what it is.
 	for (name, rate) in wanted {
 		document.devices.push(netcfgd_model::Device {
-			declared: false, // invented for an `ingress_bandwidth`
+			declared: netcfgd_model::Declared(false), // invented for an `ingress_bandwidth`
 			name,
 			r#match: None,
 			managed: true,
@@ -298,7 +298,7 @@ fn expand_ingress_shapers(
 			continue;
 		}
 		document.devices.push(netcfgd_model::Device {
-			declared: false, // invented for an interface with no device block
+			declared: netcfgd_model::Declared(false), // invented for an interface with no device block
 			name: interface.name.clone(),
 			r#match: None,
 			managed: true,
@@ -548,7 +548,7 @@ fn expand_members(
 		// device half. That it used to need an `Interface` -- eleven fields of
 		// `None` around one `master` -- is the conflation the pass removed.
 		document.devices.push(netcfgd_model::Device {
-			declared: false, // invented for a bridge or bond member
+			declared: netcfgd_model::Declared(false), // invented for a bridge or bond member
 			name: member,
 			r#match: None,
 			managed: true,
@@ -1180,7 +1180,7 @@ fn lower_device(
 ) -> Option<Device> {
 	let name = require_interface_label(block, diags)?;
 	let mut device = Device {
-		declared: true, // the one site that lowers a written block
+		declared: netcfgd_model::Declared(true), // the one site that lowers a written block
 		name,
 		r#match: None,
 		managed: true,
