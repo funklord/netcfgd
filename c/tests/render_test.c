@@ -2595,6 +2595,51 @@ static void the_connectivity_policys_unreached_arms(void)
 	free(defaults);
 }
 
+/*
+ * The two escapes nothing exercised, and the agreement that makes them work.
+ *
+ * The lexer takes four escapes in a string -- `\"`, `\\`, `\n` and `\t` -- and
+ * `ncfg_render_quote` writes back only two of them, escaping a backslash and a
+ * quote and passing a newline or a tab through **raw**. That round trips for
+ * one reason: `lex_string` lets a string run to its closing quote *across
+ * lines*, which it says in an error message and nowhere else.
+ *
+ * **What this case uniquely holds was measured, not assumed, and it is the text
+ * assertion rather than the round trips.** Two sabotages:
+ *
+ *     renderer escapes the newline   only the text assertion here fails;
+ *                                    `lower_test` and `config_test` pass
+ *     lexer refuses a raw newline    this round trip fails -- and so do two
+ *                                    checks in `lower_test`
+ *
+ * The second is already guarded, because a string carrying newlines is a
+ * documented LIST form in this language and `lower_test` compiles one. What
+ * nothing else watches is the renderer's choice: an escaped `\n` re-lexes to
+ * the same value, so every round trip in the tree passes either way and only
+ * the output's bytes say which was written.
+ *
+ * That is the third instance of one shape -- **output wrong, meaning right,
+ * round trip blind** -- after the alias normalisation of 10.428 and the
+ * omit-at-default family of 10.432. A test comparing documents cannot be made
+ * sensitive to any of them by adding documents.
+ */
+static void the_other_two_escapes_round_trip(void)
+{
+	char *rendered;
+
+	round_trips("network \"two\\tcolumns\" {\n\twifi {\n\t\topen = true\n\t}\n}\n",
+	    "a tab in a name survives the round trip");
+	round_trips("network \"two\\nlines\" {\n\twifi {\n\t\topen = true\n\t}\n}\n",
+	    "and so does a newline, which the renderer writes raw");
+
+	/* The raw half is the claim, so read it: an escaped `\n` in the output
+	 * would round trip too, and only the text says which was written. */
+	rendered = rendering_of("network \"two\\nlines\" { wifi { open = true } }\n");
+	check(rendered && strstr(rendered, "two\nlines") != NULL,
+	    "written as a real newline inside the quotes, not as an escape");
+	free(rendered);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2615,6 +2660,7 @@ int main(int argc, char **argv)
 	the_other_side_of_a_two_way_write();
 	a_block_at_every_default_is_left_out();
 	the_connectivity_policys_unreached_arms();
+	the_other_two_escapes_round_trip();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

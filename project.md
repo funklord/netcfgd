@@ -12385,6 +12385,54 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.436 Output wrong, meaning right: the third instance makes it a class
+
+The escaping surface. The lexer takes four escapes in a string -- `\"`, `\\`,
+`\n` and `\t` -- and `ncfg_render_quote` writes back only two, escaping a
+backslash and a quote and passing a newline or a tab through **raw**.
+`a_name_needing_escapes_round_trips` covered the quote; nothing covered the
+other two.
+
+**What the new case uniquely holds was measured rather than argued, and it is
+not what the first draft of its comment claimed.** Two sabotages:
+
+    renderer escapes the newline   only the text assertion fails; lower_test
+                                   and config_test pass
+    lexer refuses a raw newline    the round trip fails -- and so do two
+                                   checks in lower_test
+
+So the lexer half was already guarded, and by something better than this: **a
+string carrying newlines is a documented LIST form in this language**, which is
+what `lower_test`'s "spaces and newlines both separate entries" compiles. The
+first draft of the comment said tightening the lexer would let `profile save`
+write unreadable profiles -- true, and `lower_test` would go red first and
+louder.
+
+**What nothing else watches is the renderer's choice.** An escaped `\n`
+re-lexes to the same value, so every round trip in the tree passes either way
+and only the output's bytes say which was written.
+
+### The class
+
+That is the third instance of one shape, and three is what turns a coincidence
+into something to look for:
+
+    10.428   a renderer preserving `dev` where it should write `parent`
+    10.432   a redundant `control { }` block at every default
+    10.436   a newline escaped instead of written raw
+
+**Output wrong, meaning right, round trip blind.** In each the renderer emits
+something a reader would not have written, the compiler reads it back to the
+identical document, and a test comparing documents cannot be made sensitive to
+it **by adding documents** -- which is the move every corpus lens makes. Only
+an assertion on the text can see any of them.
+
+So the useful generalisation for the next renderer change: **ask whether the
+property is about what the document MEANS or about what the file SAYS.** The
+first is the round trip's and four corpora already cover it. The second has no
+instrument but a text assertion, and this tree has now paid for that three
+times.
+
 ## 10.435 The renderer's reachability boundary, measured
 
 The lens from 10.433 -- a comparison that ran constantly and was never asked a
