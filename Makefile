@@ -1251,6 +1251,12 @@ packaging:
 	@# not to -- found by one example setting it, and invisible to every
 	@# instrument that starts from a document.
 	@python3 tool/key_coverage_gate.py
+	@# And the same question from the document's side, which the one above cannot
+	@# ask: a field no key expresses is invisible to a key-side gate, and both
+	@# renderer defects of that kind cost a `profile save`. `schema_version` was
+	@# counted by document equality and unwritable by the renderer, so every
+	@# document from an older schema minor failed the round trip.
+	@python3 tool/field_coverage_gate.py
 	@# And every public header in one file. `tun.h` declared an enum `document.h`
 	@# already had, so any translation unit including both failed to compile --
 	@# and none did, so the module built and its tests passed.

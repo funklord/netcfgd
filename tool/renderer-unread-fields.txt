@@ -1,0 +1,30 @@
+# Fields the document holds that the renderer deliberately never reads, read by
+# tool/field_coverage_gate.py. One `type.member`, then the reason.
+#
+# Two kinds belong here and nothing else does.
+#
+# THE DOCUMENT'S OWN FORMAT AND PROVENANCE. The configuration language has no
+# key for either, `render.c` says so at the walk, and the compiler regenerates
+# both -- so they are excluded from document equality rather than written. The
+# second half of that sentence is load-bearing: `schema_version` was NOT
+# excluded, and every document from an older schema minor failed the round trip
+# on the one member the renderer could never carry. A field waived here must be
+# left out of `document_compare.c` too, or the waiver is this gate agreeing
+# with a defect.
+#
+# A MEMBER INSIDE A BLOCK REFUSED WHOLE. The renderer refuses `hooks` and `a
+# match block` by name, so it has no reason to look inside either. If such a
+# block ever becomes renderable, these stop being waivers and become fields.
+#
+# A field that is neither is not a waiver. It is the class this gate was
+# written for.
+
+ncfg_version_t.major          the schema version's own struct; no key expresses it
+ncfg_version_t.minor          the schema version's own struct; no key expresses it
+ncfg_document_t.schema_version  the document's format, excluded from equality
+ncfg_document_t.generated_by  provenance, excluded from equality
+ncfg_hook_ref_t.phase         inside `hooks`, which render_link.c refuses whole
+ncfg_hook_ref_t.sha256        inside `hooks`, which render_link.c refuses whole
+ncfg_hook_ref_t.run_as        inside `hooks`, which render_link.c refuses whole
+ncfg_device_match_t.driver    inside a `match` block, which render_device.c refuses whole
+ncfg_device_match_t.name_glob  inside a `match` block, which render_device.c refuses whole

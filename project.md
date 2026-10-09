@@ -12493,6 +12493,38 @@ fields passed by being read somewhere, and reading a member is not writing it.
 What covers those is the round trip over 5000 mutations and the key gate, which
 is why this is a third instrument rather than a replacement.
 
+### The probe is a gate, and its hole is measured rather than described
+
+`tool/field_coverage_gate.py`, with `tool/renderer-unread-fields.txt` holding
+the nine in both directions the way the key gate's waiver list is held, wired
+into `make packaging` beside it: 260 fields the document holds, 251 the
+renderer reads, 9 waived. The waiver file names the two kinds that may be
+waived -- the document's own format and provenance, and a member inside a block
+refused whole -- and says that a field waived on the first ground must also be
+left out of `document_compare.c`, since that is exactly what `schema_version`
+was not.
+
+**Four controls, each seen to fail with the right sentence.** The one that
+matters is the first, because it is the failure the gate exists for rather than
+a failure of its bookkeeping: every read of `mtu` blanked in
+`render_device.c` -- in a `git archive HEAD` copy, not the working tree -- and
+the gate names `ncfg_device_t.mtu`. Then a dropped waiver, a waiver for a
+member nothing has, and a waiver for a field the renderer does read; the last
+two are what stop the list becoming one nobody has looked at since.
+
+**The hole is in the clear, it is large, and it is stated rather than closed.**
+The read is matched by member NAME, because `x->mode` does not say what `x` is
+and nothing short of a C parser can. So two types sharing a member name mask
+each other, and that is not a corner: 39 of the 197 distinct names are used by
+more than one type, which puts **102 of the 260 entries' clears** within reach
+of a sibling. `mode` and `id` are six types each.
+
+For the job the gate is actually for -- a field added to the model and never
+wired into the renderer -- the consequence is that a new field hides if its
+name collides with one of those 39 and is caught otherwise. That is worth
+having, and worth not overstating: the gate's docstring carries these numbers
+so the next reader does not have to take the word *weak* on trust.
+
 ## 10.445 `c-port` is gone and master is the working branch
 
 The branch existed to keep an unfinished port off the default branch, and the
