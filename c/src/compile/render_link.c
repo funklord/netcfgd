@@ -393,13 +393,19 @@ static void render_eap(const ncfg_eap_config_t *eap, ncfg_buf_t *body)
 		ncfg_buf_add_char(body, '\n');
 	}
 	/*
-	 * **Dropped in silence by the Rust this ports, and it weakens a network.**
+	 * **Why it is written at all, and it weakens a network to lose it.**
 	 * `ca_cert` alone answers "who signed this", not "who is this": it accepts
 	 * any certificate the pinned issuer signed, which is nearly worthless when
 	 * that issuer is a public CA -- and a commercial certificate on a RADIUS
-	 * server is ordinary (0206). `lower.rs` reads the key on both a `dot1x`
+	 * server is ordinary (0206). The lowering reads the key on both a `dot1x`
 	 * block and a network's `wifi`, so there is nothing to decide and nothing
 	 * stopping it being written.
+	 *
+	 * ~~Dropped in silence by the Rust this ports.~~ **Re-taken 2026-10-09 and
+	 * no longer true**: saving a profile from both programs over a `wifi` block
+	 * carrying `domain_suffix_match` produces byte-identical profiles. The
+	 * reason to write it is the paragraph above and does not need the other
+	 * implementation to be wrong.
 	 */
 	if (eap->domain_suffix_match) {
 		ncfg_buf_add_text(body, "\t\tdomain_suffix_match = ");

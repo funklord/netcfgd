@@ -31,11 +31,21 @@ static const char *const macvlan_mode_words[] = { "private", "vepa", "bridge", "
  * rendered like any other: the compiler accepts it and netcfgd refuses it at
  * use (0014), so a profile that dropped it would turn a configuration netcfgd
  * explains itself about into one it silently approves. */
-/* **In the enum's order, which is not the Rust enum's.** `ncfg_wifi_backend_t`
- * is AUTO, IWD, WPA_SUPPLICANT; the Rust one is Auto, WpaSupplicant, Iwd. A
- * table written from the other language's order renders `wpa_supplicant` as
- * `iwd` and vice versa, which is a configuration this build refuses at use
- * reported as one it serves. Read from `document.h` rather than carried over. */
+/*
+ * **In `ncfg_wifi_backend_t`'s order, because it is indexed by it.** AUTO, IWD,
+ * WPA_SUPPLICANT. A table out of step with the enum it is indexed by renders
+ * `wpa_supplicant` as `iwd` and vice versa, which is a configuration this
+ * build refuses at use reported as one it serves -- so read the order from
+ * `document.h` rather than from anywhere else.
+ *
+ * ~~Which is not the Rust enum's: the Rust one is Auto, WpaSupplicant, Iwd.~~
+ * **That was never true.** `WifiBackend` has been Auto, Iwd, WpaSupplicant
+ * since the commit that created it, checked with `git show`, so this is an
+ * invented claim rather than one that went stale -- and a dangerous one, since
+ * it invites somebody to "correct" the table into the bug the paragraph warns
+ * about. The invariant that matters is the local one above and needs no
+ * comparison to state.
+ */
 static const char *const wifi_backend_words[] = { "auto", "iwd", "wpa_supplicant" };
 static const char *const powersave_words[] = { "default", "on", "off" };
 static const char *const mac_policy_words[] = { "permanent", "per_network", "per_connection" };

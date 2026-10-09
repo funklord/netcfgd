@@ -12385,6 +12385,61 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.442 Four claims this renderer makes about the other one: two were wrong
+
+10.441 found one comment in the C asserting something about the Rust that had
+stopped being true. That is a class, and it is greppable: **14 cross-implementation
+claims in `render*.c`**, of which ten are history -- *"found on the Rust side and
+fixed in both"* -- and cannot rot. Four are present-tense claims about what the
+Rust does now. Each was taken.
+
+    render.c:560          `remote.agent` dropped in silence        HOLDS
+    render.c:579          `connectivity` neither rendered nor      HOLDS
+                          refused                                  (10.440)
+    render_link.c:396     `domain_suffix_match` dropped            STALE
+    render_device.c:34    the Rust's enum is Auto, WpaSupplicant,  NEVER TRUE
+                          Iwd
+
+**Two of four wrong, and the ratio is the point**: the claims are not uniformly
+rotten, so a sweep that assumed decay would have been as wrong as one that
+assumed accuracy. Each needed taking.
+
+### The method, which is four commands and reusable
+
+Put the feature in a **profile** rather than the base -- a profile is a diff
+against the base, so a thing in the base is correctly trimmed and both programs
+agree for the wrong reason -- then `profile set`, `profile save` under each
+binary, and diff the artefacts. And test one feature at a time: a first run
+carrying both `remote.agent` and `domain_suffix_match` had the C save and the
+Rust refuse, which attributes to neither until they are separated.
+
+    remote.agent           C saved, Rust REFUSED
+    domain_suffix_match    both saved, profiles byte-identical
+
+### Stale and invented are different, and `git show` is what earns the word
+
+`render_device.c`'s claim was not stale. `WifiBackend` has been
+`Auto, Iwd, WpaSupplicant` **since the commit that created it**, so the comment
+was wrong on the day it was written. `evidence.md` draws exactly this
+distinction and says the detector cannot tell the two apart -- here `git show`
+on the enum's first commit can, and it costs one command.
+
+**And this one carried a hazard the others did not.** It tells a reader the two
+enums differ in a specific way, which invites "correcting" the C's table into
+the bug the same paragraph warns about: a word table out of step with the enum
+indexing it renders `wpa_supplicant` as `iwd`. The local invariant -- the table
+is in `ncfg_wifi_backend_t`'s order because it is indexed by it -- needs no
+comparison to state, and that is what the comment says now.
+
+### Why this class rots unobserved
+
+A claim about this port's own behaviour gets tripped over: somebody acts on it,
+the code disagrees, the comment loses. **A claim about the sibling
+implementation is read by people working on this one and never checked**, and
+nothing in the ordinary course of work brings the sentence together with the
+code it describes. Ten of the fourteen are history and safe; the exposure is
+exactly the present tense.
+
 ## 10.441 The other two traced: one split, one stale claim, one text divergence
 
 10.440 left `render_lease_modifiers` and `render_network_keys` untraced.
