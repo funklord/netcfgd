@@ -12385,6 +12385,96 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.452 The class closed from the language's side, and a sweep abandoned on the way
+
+Four instances of "a document holds what the language refuses" had been fixed
+one at a time. The fifth was not going to arrive by luck, so this closes the
+enumeration -- and the first attempt at closing it was the wrong one, which is
+the more useful half.
+
+### The sweep that was abandoned, and why
+
+The obvious instrument is document-side: walk every numeric field, set it to
+each end of its range, and require **refused by name, or round trips** --
+never *renders and then fails to recompile*. It is the document-side analogue
+of the mutation sweep `lower_test.c` already has, and that sweep structurally
+cannot find this class: it mutates CONFIG TEXT, so every document it produces
+came from compiling, and a document that came from compiling cannot hold a
+value the compiler refuses.
+
+There are 53 such fields -- 34 `R_U32`, 11 `R_U16`, 5 `R_U8`, 2 `R_U64`, 1
+`R_I32`. Two things stopped it:
+
+  * **The field tables are `static` in `document.c`**, so a reflection-driven
+    walk needs them exported. Exporting the model's internals for a test is a
+    change to the thing under test.
+  * **The witness is not a usable base.** `doc/schema/document.json` is the one
+    document with every field set, and it is deliberately unrenderable -- a
+    `kind ifb`, a match block, a qdisc metering arriving traffic, dns options.
+    `render_test` asserts exactly that. So every mutant reports `refused` for a
+    reason that was already there, the round trip never runs, and the
+    instrument answers a question nobody asked.
+
+Carving a renderable base out of the witness by hand is available and was
+declined: a hand-carved fixture is what produced 10.449's false defect, where a
+document missing the device an `interface` implies looked like a renderer fault.
+
+### The enumeration that worked, from the other side
+
+Ask the LANGUAGE what it refuses, not the document what it can hold. The
+lowering's semantic rejections -- the checks beyond a type -- are seven
+messages across all eight `lower_*.c` files, and that set is both smaller than
+53 and exactly the set that matters. Five were already accounted for:
+
+    a shaped rate of zero would pass nothing          10.449
+    `interval` has to be at least 1 second            10.449
+    `up_after` and `down_after` have to be at least 1 10.449
+    vlan id must be between 0 and 4095                10.450
+    channel %lld is not in the %s GHz band            10.451
+    `%s` is too large a rate                          harmless: INT64_MAX round trips
+    a credential must be a secret reference           a string, not a range
+
+Two had never been followed up, and both were instances.
+
+**A vxlan whose ends disagree.** `local` and `remote` are strings with no
+family in the field table, so a document can hold one of each; the kernel will
+not build such a tunnel and the compiler refuses it. The renderer wrote both
+and the recompile said so. **This is a PAIR, not a bound** -- neither end is
+wrong alone -- which is the sub-shape a per-field range check cannot reach, and
+the channel-in-band case was the same sub-shape wearing a number.
+
+**A port VLAN outside 1 to 4094.** The member's range is `R_U16` while
+`ncfg_lower_bridge_vlans` takes 1 to 4094, 0 not being a VLAN to put on a port
+and 4095 being reserved. Measured: 0, 4095 and 5000 each rendered and failed
+the round trip in the compiler's words.
+
+Both named now, both with a control that still round trips:
+
+    device vx0: a vxlan whose `local` and `remote` are different address families
+    device eth0: a port vlan of 4095, which is not one (1 to 4094)
+
+### Each fix put the shared rule in one place, because that is this week's fault
+
+The family test was `(strchr(local, ':') == NULL) != (strchr(remote, ':') ==
+NULL)`, inline in the lowering. Copying it into the renderer would have been a
+second implementation of one rule -- which is what `ncfg_channel_in_band` was
+moved into the model to stop. It is `ncfg_addresses_same_family` there now,
+used by both. One colon decides it, which is why it looked too small to share,
+and sharing it is not about the size of the expression.
+
+`NCFG_BRIDGE_VLAN_ID_MIN` sits beside `NCFG_VLAN_ID_MAX` with a comment saying
+why a port's minimum is 1 and a vlan device's is 0, so the next reader
+harmonising them has the reason in front of them. `lower_device.c` builds its
+diagnostic from both constants now, so the message cannot drift from the bound
+the way the vlan device's did.
+
+**The class is closed on this axis**: every semantic rejection the lowering has
+is either mirrored in the renderer or measured unreachable. What remains
+unguarded is a NEW one -- a check added to the lowering without a matching
+refusal in the renderer -- and nothing holds those together yet. The
+document-side sweep above is what would, which is why its two obstacles are
+written down rather than left as a shrug.
+
 ## 10.451 A channel outside its band, and the sweep that should have been finished first
 
 10.450's lens -- **a number inherited from the Rust that is a type width rather

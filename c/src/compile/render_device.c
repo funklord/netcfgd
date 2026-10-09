@@ -117,7 +117,8 @@ static void render_bond(const ncfg_bond_config_t *bond, ncfg_buf_t *body)
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
-static void render_vxlan(const ncfg_vxlan_config_t *vxlan, ncfg_buf_t *body)
+static void render_vxlan(const ncfg_vxlan_config_t *vxlan, const char *name,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
 	static const char *const keys[] = { "parent", "local", "remote" };
 	const char              *values[3];
@@ -126,6 +127,15 @@ static void render_vxlan(const ncfg_vxlan_config_t *vxlan, ncfg_buf_t *body)
 	    "a values per keys");
 	size_t                   i;
 
+	/* The kernel will not build a vxlan whose two ends are in different
+	 * families, so the compiler refuses one and this cannot write one back.
+	 * `ncfg_addresses_same_family` is the model's, used by both, because a
+	 * predicate copied into the renderer is a second rule waiting to drift. */
+	if (!ncfg_addresses_same_family(vxlan->local, vxlan->remote)) {
+		ncfg_render_refuse(missing, "device", name,
+		    "a vxlan whose `local` and `remote` are different address families");
+		return;
+	}
 	ncfg_buf_addf(body, "\tvxlan {\n\t\tid = %lld\n", (long long)vxlan->id);
 	values[0] = vxlan->parent;
 	values[1] = vxlan->local;
@@ -436,7 +446,7 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		ncfg_buf_add_text(body, "\t}\n");
 		break;
 	case NCFG_KIND_VXLAN:
-		render_vxlan(&kind->vxlan, body);
+		render_vxlan(&kind->vxlan, name, body, missing);
 		break;
 	case NCFG_KIND_MACVLAN:
 		ncfg_buf_add_text(body, "\tmacvlan {\n\t\tparent = ");
@@ -896,7 +906,8 @@ static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, int
  * did before, and the kernel accepts a second PVID and moves it without
  * reporting anything.
  */
-static void render_bridge_vlans(const ncfg_bridge_vlan_t *vlans, size_t count, ncfg_buf_t *body)
+static void render_bridge_vlans(const ncfg_bridge_vlan_t *vlans, size_t count,
+    const char *name, ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
 	ncfg_render_list_t phrases;
 	size_t             i;
@@ -905,6 +916,18 @@ static void render_bridge_vlans(const ncfg_bridge_vlan_t *vlans, size_t count, n
 	for (i = 0; i < count; i++) {
 		char phrase[48];
 
+		/* A port's VLAN is 1 to `NCFG_VLAN_ID_MAX` -- 0 is not a VLAN to put on
+		 * a port and 4095 is reserved -- while the document's range for the
+		 * member is `R_U16`, so a document read from JSON holds ids this cannot
+		 * write back. Measured: 0, 4095 and 5000 each rendered and then failed
+		 * the round trip in the compiler's own words. */
+		if (vlans[i].vid < NCFG_BRIDGE_VLAN_ID_MIN
+		    || vlans[i].vid > NCFG_VLAN_ID_MAX) {
+			ncfg_render_refuse(missing, "device", name,
+			    "a port vlan of %lld, which is not one (%d to %d)",
+			    (long long)vlans[i].vid, NCFG_BRIDGE_VLAN_ID_MIN, NCFG_VLAN_ID_MAX);
+			continue;
+		}
 		/* `tagged` is the absence of `untagged` and the parser's default, so
 		 * writing it would be noise that reads as a setting. */
 		snprintf(phrase, sizeof(phrase), "%lld%s%s", (long long)vlans[i].vid,
@@ -977,7 +1000,8 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		ncfg_render_quote(&body, device->master);
 		ncfg_buf_add_char(&body, '\n');
 	}
-	render_bridge_vlans(device->bridge_vlans, device->bridge_vlan_count, &body);
+	render_bridge_vlans(device->bridge_vlans, device->bridge_vlan_count, name, &body,
+	    missing);
 	/*
 	 * **It is still not a config key, and it is no longer refused.** The
 	 * comment here used to say the `ingress_bandwidth` it came from "is not

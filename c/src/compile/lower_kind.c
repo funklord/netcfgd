@@ -333,8 +333,7 @@ static int lower_vxlan(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	}
 	/* Both families in one tunnel is not a thing the kernel will build, and
 	 * the error it gives says nothing about which end was wrong. */
-	if (config.local && config.remote &&
-	    (strchr(config.local, ':') == NULL) != (strchr(config.remote, ':') == NULL)) {
+	if (!ncfg_addresses_same_family(config.local, config.remote)) {
 		ncfg_diag(ctx, block->span, "`local` and `remote` must be the same address family");
 		goto drop;
 	}

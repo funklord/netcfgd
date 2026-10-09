@@ -622,6 +622,14 @@ typedef struct {
  */
 #define NCFG_VLAN_ID_MAX 4094
 
+/*
+ * The smallest VLAN id a BRIDGE PORT may carry, which is not the smallest a
+ * vlan device may: 0 is not a VLAN to put on a port, and the kernel refuses it
+ * with an errno rather than a name. `NCFG_VLAN_ID_MAX` above says why the two
+ * bounds differ and must stay differing; this is the half that differs.
+ */
+#define NCFG_BRIDGE_VLAN_ID_MIN 1
+
 typedef struct {
 	char   *parent;
 	int64_t id;

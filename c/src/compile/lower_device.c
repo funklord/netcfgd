@@ -294,8 +294,10 @@ void ncfg_lower_bridge_vlans(ncfg_lower_ctx_t *ctx, const ncfg_word_t *entry,
 	}
 	/* 0 is not a VLAN and 4095 is reserved. The kernel refuses both, with an
 	 * errno rather than a name. */
-	if (first == 0 || last > 4094u) {
-		ncfg_diag(ctx, entry->span, "`%s` is not a VLAN id: between 1 and 4094", head);
+	if (first < (unsigned long)NCFG_BRIDGE_VLAN_ID_MIN
+	    || last > (unsigned long)NCFG_VLAN_ID_MAX) {
+		ncfg_diag(ctx, entry->span, "`%s` is not a VLAN id: between %d and %d", head,
+		    NCFG_BRIDGE_VLAN_ID_MIN, NCFG_VLAN_ID_MAX);
 		goto done;
 	}
 

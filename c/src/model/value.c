@@ -370,6 +370,14 @@ int ncfg_address_render(const ncfg_address_t *address, char *out, size_t out_siz
 	return 1;
 }
 
+int ncfg_addresses_same_family(const char *one, const char *other)
+{
+	if (!one || !other) {
+		return 1;
+	}
+	return (strchr(one, ':') == NULL) == (strchr(other, ':') == NULL);
+}
+
 int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *err,
     size_t err_size)
 {

@@ -3184,6 +3184,106 @@ static void a_channel_outside_its_band_is_refused(void)
 	ncfg_document_free(document);
 }
 
+/* Whether the document renders at all, with nothing to say about refusals. */
+static int renders(const ncfg_document_t *document)
+{
+	ncfg_buf_t          out;
+	ncfg_unrenderable_t missing;
+	char                message[NCFG_ERROR_MAX];
+	int                 ok;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	ok = ncfg_render(document, NULL, &out, &missing, message, sizeof(message));
+	if (!ok && missing.count) {
+		printf("  refused unexpectedly: %s\n", missing.items[0]);
+	}
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+	return ok;
+}
+
+/* The render is refused, and some refusal names both of these. */
+static int refusal_names(const ncfg_document_t *document, const char *one, const char *other)
+{
+	ncfg_buf_t          out;
+	ncfg_unrenderable_t missing;
+	char                message[NCFG_ERROR_MAX];
+	int                 found = 0;
+	size_t              i;
+
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	if (ncfg_render(document, NULL, &out, &missing, message, sizeof(message))) {
+		printf("  rendered when it should have refused\n");
+	}
+	for (i = 0; i < missing.count && !found; i++) {
+		found = strstr(missing.items[i], one) != NULL
+		    && strstr(missing.items[i], other) != NULL;
+	}
+	if (!found) {
+		for (i = 0; i < missing.count; i++) {
+			printf("  refused: %s\n", missing.items[i]);
+		}
+	}
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+	return found;
+}
+
+/*
+ * Two pair-and-bound constraints the compiler has and the renderer did not.
+ *
+ * Both are 10.449's class: a document read from JSON holds something the
+ * configuration language refuses, so the renderer wrote it and the recompile
+ * said no. The vxlan is a PAIR -- neither end is wrong alone -- and the port
+ * vlan is a bound the document's `R_U16` does not carry.
+ */
+static void the_pairs_and_bounds_the_compiler_checks(void)
+{
+	const char      *vx = "device vx0 {\n\tvxlan {\n\t\tid = 42\n"
+	    "\t\tlocal = \"192.0.2.1\"\n\t\tremote = \"192.0.2.2\"\n\t}\n}\n";
+	const char      *br = "device br0 {\n\tbridge { members = [\"eth0\"] }\n}\n"
+	    "device eth0 {\n\tvlans = [\"10 pvid untagged\", \"20\"]\n}\n";
+	const int64_t    outside[] = { 0, NCFG_VLAN_ID_MAX + 1, 5000 };
+	ncfg_document_t *document;
+	size_t           which;
+	size_t           at;
+
+	document = compiled(vx, "a case's own vxlan");
+	check(document != NULL && document->device_count == 1u,
+	    "a vxlan with both ends in one family compiles");
+	if (document && document->device_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		free(document->devices[0].kind.vxlan.remote);
+		document->devices[0].kind.vxlan.remote = strdup("2001:db8::2");
+		check(refusal_names(document, "vx0", "address families"),
+		    "  and one end in the other family is refused by name");
+	}
+	ncfg_document_free(document);
+
+	document = compiled(br, "a case's own bridge");
+	check(document != NULL, "a bridge with per-port vlans compiles");
+	if (!document) {
+		return;
+	}
+	check(renders(document), "  and renders, which is the control");
+	for (at = 0; at < document->device_count; at++) {
+		if (document->devices[at].bridge_vlan_count == 0u) {
+			continue;
+		}
+		for (which = 0; which < sizeof(outside) / sizeof(outside[0]); which++) {
+			document->devices[at].bridge_vlans[0].vid = outside[which];
+			check(refusal_names(document, "eth0", "not one"),
+			    "  and a port vlan outside 1 to the maximum is refused by name");
+		}
+		break;
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3213,6 +3313,7 @@ int main(int argc, char **argv)
 	a_probe_count_below_the_floor_is_refused();
 	a_vlan_id_out_of_range_is_refused();
 	a_channel_outside_its_band_is_refused();
+	the_pairs_and_bounds_the_compiler_checks();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

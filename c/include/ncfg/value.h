@@ -121,6 +121,21 @@ int ncfg_address_canonical(const char *text, char *out, size_t out_size, char *e
     size_t err_size);
 
 /*
+ * Whether two addresses belong to the same family.
+ *
+ * One colon decides it, which is the whole test and is why this looked too
+ * small to share. **It is here because it is needed twice**: the compiler
+ * refuses a vxlan whose `local` and `remote` disagree -- the kernel will not
+ * build one and its error says nothing about which end was wrong -- and the
+ * renderer needs the same answer to know it cannot write such a pair back.
+ * Either side holding its own copy of a predicate is how two implementations
+ * of one rule start, which `ncfg_channel_in_band` is in this layer to avoid.
+ *
+ * Two NULLs, or one, are the same family: there is no pair to disagree.
+ */
+int ncfg_addresses_same_family(const char *one, const char *other);
+
+/*
  * The address a delegated prefix, a subnet selector and a suffix produce.
  *
  * **This is `netcfgd_model::derive_from_delegation`**, and it is here rather
