@@ -659,6 +659,17 @@ static int our_ifb_name(const char *name, const char *shaped)
  * `ncfg_device_t` is one this stops looking at, and the symptom would be a
  * profile that quietly dropped it. The assertion below fires when the struct
  * grows and sends whoever grew it here.
+ *
+ * **Every clause here is defence rather than a gap, and that was measured** --
+ * so do not go writing a case per field, which is the obvious next step and is
+ * wasted. No document the renderer is asked to write can carry an `ifb` that
+ * is not the shape above: `ifb` is not a kind the configuration language has,
+ * an operator's own `device ifb-e0 { }` beside a shaped interface is refused
+ * by `lower.c` as a duplicate, and every document reaching the renderer comes
+ * from the lowering -- directly, or through the JSON round trip
+ * `host/profile_save.c` does, which filters globals and leaves devices alone.
+ * The clauses stay because the assertion above cannot see a field that is
+ * merely unexamined, and because the cost of being wrong here is silence.
  */
 #define NCFG_RENDER_DEVICE_SIZE 584u /* measured, x86-64, 2026-10-08 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,

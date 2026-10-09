@@ -12385,6 +12385,74 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.435 The renderer's reachability boundary, measured
+
+The lens from 10.433 -- a comparison that ran constantly and was never asked a
+question it could get wrong -- generalises to every comparison in the renderer
+that gates a write. There are nine:
+
+    render.c:156          override lookup, kind and name together
+    render.c:578          the ignore list, closed in 10.433
+    render_link.c:209     a delegated suffix against the default
+    render_link.c:756     a network's ssid against its label
+    render_link.c:833     an access point's ssid, closed in 10.430
+    render_device.c:645   `our_ifb_name`, two comparisons
+    render_device.c:701   finding a redirect's target
+    render_device.c:728   the redirect pointing back
+
+Seven are exercised in both directions. **The two in the shaper-undo are not,
+and they are the ones worth the entry -- because the answer is that they cannot
+be.**
+
+### `bare_ifb` is seventeen clauses nothing can reach
+
+It decides whether an `ifb` device is one `lower.c` synthesised, in which case
+the shaper is undone and the device omitted, or an operator's own, in which
+case omitting it would discard their field in silence. Each clause guards one
+field, and 10.431's branch sweep found the whole block among the never-taken.
+
+Writing seventeen cases was the obvious next step and would have been wasted.
+**No document reaching the renderer can carry an `ifb` that is not the
+synthesised shape:**
+
+  * `ifb` is **not a kind the configuration language has** -- no `"ifb"` arm in
+    any lowering -- so a config cannot declare one;
+  * an operator writing `device ifb-e0 { }` beside a shaped interface is
+    refused by `lower.c` as a duplicate entry, deliberately and with a message;
+  * so a compiled document's `ifb` devices are exactly what
+    `expand_ingress_shapers` built, with exactly the fields it sets.
+
+### And every document the renderer sees is lowering-originated
+
+That argument only holds if nothing else feeds the renderer, which needed
+checking rather than assuming -- `ncfg_document_read` turns out to have three
+production callers:
+
+    host/profile_save.c:298     a JSON round trip of the compiled document,
+                                globals filtered, then rendered
+    main/daemon_answer.c:753    a serialise-and-read-back deep copy of
+                                `state->desired` for a deferred scan; not
+                                rendered
+    daemon/confirm.c:348        the last-good configuration from disk, applied
+                                to roll back; that file has no `render` in it
+
+So the renderer does see a document built by `ncfg_document_read` rather than
+by the lowering -- which **sharpens 10.426's claim rather than contradicting
+it.** The content is still a compiled document's; what passes through JSON is
+the serialisation, and the trim filters globals rather than devices.
+
+**The boundary, stated once so the next lens does not have to re-derive it:
+every document the renderer is asked to write originates from the lowering,
+directly or through a round trip of one.** A refusal or a guard that names
+something only a hand-written JSON document could carry is defence rather than
+a gap, and the witness already exercises that family through `refusals_of_json`.
+
+**So this is an empty result with its method**, which is the useful kind: the
+comparison lens is finished, seven of nine were already sound, and the other
+two are unreachable for a reason that is a property of the language rather than
+of the corpora. The next renderer gap, if there is one, is not behind a
+comparison.
+
 ## 10.434 A test matched its own temporary directory, and the fix was already here
 
 `make check` came back red on `service_test`, in a suite nothing in this
