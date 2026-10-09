@@ -2935,6 +2935,135 @@ static void a_document_carrying_provenance_round_trips(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * A shaped rate of zero is refused by name, not written as `"0gbit"`.
+ *
+ * The document's range for the field is `R_U64`, low zero, so a document read
+ * from JSON can hold one; `lower_device.c` refuses a zero rate on purpose,
+ * "a shaped rate of zero would pass nothing". Before the guard, `render_rate`
+ * wrote `"0gbit"` -- zero divides by the first suffix it tries -- so
+ * `ncfg profile save` wrote the file, failed its own proof on the lowerer's
+ * words and rolled the whole thing back, telling the operator it was a fault
+ * in the snapshot worth reporting. A refusal names the device instead.
+ *
+ * The control is the line above it: the same configuration with a real rate
+ * renders, so this is not a case that refuses everything.
+ */
+static void a_shaped_rate_of_zero_is_refused(void)
+{
+	const char         *text = "device eth0 {\n\tqdisc {\n\t\tkind = \"cake\"\n"
+	    "\t\tbandwidth = \"100mbit\"\n\t}\n}\n";
+	ncfg_document_t    *document = compiled(text, "a case's own configuration");
+	ncfg_buf_t          out;
+	ncfg_unrenderable_t missing;
+	char                message[NCFG_ERROR_MAX];
+	size_t              i;
+	int                 named = 0;
+
+	check(document != NULL, "the case's own configuration compiles");
+	if (!document || document->device_count == 0u || !document->devices[0].qdisc) {
+		check(0, "  and carries a qdisc with a bandwidth");
+		ncfg_document_free(document);
+		return;
+	}
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	check(ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+	    "  and renders with a real rate");
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+
+	document->devices[0].qdisc->bandwidth_bits.value = 0;
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	check(!ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+	    "  and a rate of zero is refused rather than rendered");
+	check(ncfg_buf_text(&out)[0] == '\0', "  with no half-written text handed out");
+	for (i = 0; i < missing.count && !named; i++) {
+		named = strstr(missing.items[i], "eth0") != NULL
+		    && strstr(missing.items[i], "not a rate") != NULL;
+	}
+	if (!named) {
+		for (i = 0; i < missing.count; i++) {
+			printf("  refused: %s\n", missing.items[i]);
+		}
+	}
+	check(named, "  and the refusal names the device and what is wrong with it");
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+	ncfg_document_free(document);
+}
+
+/*
+ * A probe count below the language's floor is refused by name.
+ *
+ * `lower_interface.c` refuses `interval` under 1 and `up_after` and
+ * `down_after` under 1, while the document's range for all three is `R_U32`,
+ * low zero -- so a document read from JSON holds a zero the language will not
+ * take back, and the renderer wrote it out as `interval = 0`. Same shape as
+ * the shaped rate of zero above: a value the model admits, the renderer
+ * writes, and the recompile refuses.
+ */
+static void a_probe_count_below_the_floor_is_refused(void)
+{
+	const char *text = "interface eth1 {\n\tconfig = \"dhcp\"\n"
+	    "\tprobe { command = \"/usr/bin/true\" }\n}\n";
+	const struct {
+		const char *key;
+		size_t      at;
+	} floors[] = { { "interval", 0 }, { "down_after", 1 }, { "up_after", 2 } };
+	size_t which;
+
+	for (which = 0; which < sizeof(floors) / sizeof(floors[0]); which++) {
+		ncfg_document_t    *document = compiled(text, "a case's own configuration");
+		ncfg_buf_t          out;
+		ncfg_unrenderable_t missing;
+		char                message[NCFG_ERROR_MAX];
+		int                 named = 0;
+		size_t              i;
+
+		if (!document || document->interface_count == 0u || !document->interfaces[0].probe) {
+			check(0, "the case's own configuration compiles, with a probe");
+			ncfg_document_free(document);
+			return;
+		}
+		/* The control is the first iteration's own starting point: this same
+		 * document renders before the field is lowered, which
+		 * `a_bare_probe_round_trips` asserts directly. */
+		switch (floors[which].at) {
+		case 0:
+			document->interfaces[0].probe->interval = 0;
+			break;
+		case 1:
+			document->interfaces[0].probe->down_after = 0;
+			break;
+		default:
+			document->interfaces[0].probe->up_after = 0;
+			break;
+		}
+		ncfg_buf_init(&out, 0);
+		ncfg_unrenderable_init(&missing);
+		message[0] = '\0';
+		check(!ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+		    "a probe count of zero is refused rather than written");
+		for (i = 0; i < missing.count && !named; i++) {
+			named = strstr(missing.items[i], floors[which].key) != NULL
+			    && strstr(missing.items[i], "eth1") != NULL;
+		}
+		if (!named) {
+			for (i = 0; i < missing.count; i++) {
+				printf("  refused: %s\n", missing.items[i]);
+			}
+		}
+		check(named, "  and the refusal names the interface and the key");
+		ncfg_buf_free(&out);
+		ncfg_unrenderable_free(&missing);
+		ncfg_document_free(document);
+	}
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2960,6 +3089,8 @@ int main(int argc, char **argv)
 	declared_survives_a_json_round_trip();
 	an_older_minor_still_round_trips();
 	a_document_carrying_provenance_round_trips();
+	a_shaped_rate_of_zero_is_refused();
+	a_probe_count_below_the_floor_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

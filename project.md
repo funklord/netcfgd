@@ -12385,6 +12385,107 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.449 Values the model admits that the language refuses
+
+The word-table lens (10.448) came up empty on names, so this one went at the
+arithmetic -- the presentational class includes "a rate under the largest
+suffix that divides it", and unit conversion is where precision goes quietly.
+The argument for looking is 10.448's: a boundary value is the one no corpus
+sets.
+
+**The suffix arithmetic is sound, measured rather than read.** `render_rate`
+tries gbit, mbit, kbit and takes the first that divides exactly, falling back to
+a bare `bit` which the parser also reads. Through the round trip: 1 bit, 1001
+bits and `INT64_MAX` all survive. The fallback is invisible to
+`key_coverage_gate.py` -- the literal is `"%lldbit"`, so no bare word to find --
+and it is accepted all the same.
+
+### Zero is the one that fails, and it is a class
+
+`bandwidth_bits` is `R_U64` in the field table: **low zero**. `rate_bits` in
+`lower_device.c` refuses zero on purpose -- "a shaped rate of zero would pass
+nothing". So a document read from JSON holds a rate the language will not take
+back, and zero divides by the first suffix tried, so the renderer wrote
+`"0gbit"`.
+
+Traced to the end before being called a defect. `profile_save` renders, writes
+the file, selects the profile, and only then proves by recompiling -- so the
+whole thing was written, the proof failed on the lowerer's own words, and the
+outer save rolled every part of it back and told the operator it was "a fault
+in the snapshot rather than in your configuration... please report it". Honest,
+and the wrong conversation: the renderer knew it could not write that value.
+
+**Then the shape was swept rather than the instance fixed.** Four numeric
+constraints exist in the lowering beyond the rate's upper bound, and three are
+the same divergence:
+
+    probe.interval     R_U32, low 0    the language wants at least 1 second
+    probe.down_after   R_U32, low 0    at least 1: consecutive-result counts
+    probe.up_after     R_U32, low 0    the same
+
+All three confirmed the same way -- read from JSON, rendered, and the recompile
+refused in the lowerer's words. Both renderers name them now:
+
+    device eth0: a bandwidth of 0, which is not a rate
+    interface eth1: a probe `interval` of 0, which is below the 1 the language takes
+
+Refusing rather than narrowing the field ranges to low 1. The reader's range is
+what documents this build will accept, and narrowing it makes a document other
+things still read unreadable here -- a bigger decision than a renderer gap, and
+one that would diverge from the Rust's reader as well. Refusing is what this
+module does with everything else it cannot write.
+
+### The first fixture produced a false defect, and the diff is why it did not get reported
+
+The probe control -- a valid probe at the language's own defaults -- reported
+"compiles to a DIFFERENT document", which read like a far bigger find than the
+zeroes. It was not. Dumping both canonical forms: the recompiled document
+carries a synthesised `device eth0` that an `interface` block always implies
+and my hand-written JSON had omitted. **The fixture was never a document the
+compiler could produce**, so the round trip was being asked about a state that
+cannot arise.
+
+It also confounded the three real findings, which were measured against the
+same fixture: their failures were compile failures, strictly earlier than the
+comparison, but the evidence was still mixed. Re-measured with the implied
+device present -- control round trips, the three zeroes refuse -- and only then
+written down.
+
+### What holds the two default tables together, since nothing visibly does
+
+`render_probe` omits a value equal to its own fallback table and
+`lower_interface.c` sets the defaults a bare `probe` block gets. Two tables,
+maintained by hand, and they agree: 30, 5, 3, 2, 0, and `require_lease` true.
+
+Nothing says so in either place, but the agreement is in fact guarded, and by
+a test that predates the question: `a_bare_probe_round_trips` compiles a probe
+with nothing but its command, which renders back to nothing but its command
+precisely because every value equals a fallback, and comes back through the
+lowering's defaults. If the tables disagreed on any of the five, that round
+trip would fail. Worth recording because the guard is not where a reader
+looking at either table would think to find it.
+
+### Raised rather than resolved: the vlan id bound
+
+`lower_kind.c` reads a vlan `id` with
+`ncfg_as_narrow_opt(ctx, value, 65535, &id)` and, when that drops the value,
+says **"vlan id must be between 0 and 4095"**. The code enforces 0 to 65535;
+802.1Q ids are twelve bits, so 4096 and up are not vlan ids at all, and one
+round trips through this build today without complaint.
+
+Two statements of intent sit in that one function and they disagree. The
+message says 4095. The comment on `ncfg_as_narrow_opt` says the silent drop is
+"the Rust's `.and_then(|n| u16::try_from(n).ok())`, preserved deliberately" --
+so the 65535 is a faithful port rather than a slip, and the Rust has the same
+pair.
+
+Narrowing to 4095 stops configurations compiling that compile now; widening the
+message to 65535 writes a bound into the language that 802.1Q does not have.
+Neither is a renderer gap and neither is mine to pick, so it is recorded here
+and raised, per *the document and the code contradict each other* in
+`working-practice.md` -- which is about this exact situation and says the answer
+is often a third thing neither branch contains.
+
 ## 10.448 The renderer's word tables: nothing wrong, two things unguarded
 
 The lens this time was the renderer's own duplication. `render.c`'s header says

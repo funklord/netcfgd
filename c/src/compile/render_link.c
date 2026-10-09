@@ -449,13 +449,26 @@ static void render_eap(const ncfg_eap_config_t *eap, ncfg_buf_t *body)
  * it is OFF, because its default is on. The reasoning is at the write itself,
  * along with how the omission was found.
  */
-static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
+static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
+    const char *name, ncfg_buf_t *body, ncfg_unrenderable_t *missing)
 {
+	/*
+	 * **`least` is the lowering's own floor, not a second opinion.**
+	 * `lower_interface.c` refuses `interval` below 1 ("has to be at least 1
+	 * second") and `up_after` and `down_after` below 1 ("consecutive-result
+	 * counts; zero would switch on no result"), while the document's range for
+	 * all three is `R_U32`, low zero -- so a document read from JSON can hold a
+	 * zero the language will not take back. Measured: a probe with
+	 * `interval` 0 read, rendered `interval = 0`, and failed its own round trip
+	 * on the lowerer's words. `timeout` and `hold_down` have no floor there and
+	 * none here.
+	 */
 	static const struct {
 		const char *key;
 		int64_t     fallback;
-	} numbers[] = { { "interval", 30 }, { "timeout", 5 }, { "down_after", 3 },
-		{ "up_after", 2 }, { "hold_down", 0 } };
+		int64_t     least;
+	} numbers[] = { { "interval", 30, 1 }, { "timeout", 5, 0 }, { "down_after", 3, 1 },
+		{ "up_after", 2, 1 }, { "hold_down", 0, 0 } };
 	int64_t            values[5];
 	/* Paired, as above. */
 	_Static_assert(NCFG_COUNT_OF(numbers) == NCFG_COUNT_OF(values),
@@ -480,10 +493,16 @@ static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
 	values[3] = probe->up_after;
 	values[4] = probe->hold_down;
 	for (i = 0; i < NCFG_COUNT_OF(numbers); i++) {
-		if (values[i] != numbers[i].fallback) {
-			ncfg_buf_addf(body, "\t\t%s = %lld\n", numbers[i].key,
-			    (long long)values[i]);
+		if (values[i] == numbers[i].fallback) {
+			continue;
 		}
+		if (values[i] < numbers[i].least) {
+			ncfg_render_refuse(missing, scope, name, "a probe `%s` of %lld, which is"
+			    " below the %lld the language takes", numbers[i].key,
+			    (long long)values[i], (long long)numbers[i].least);
+			continue;
+		}
+		ncfg_buf_addf(body, "\t\t%s = %lld\n", numbers[i].key, (long long)values[i]);
 	}
 	/*
 	 * **The one field of nine this wrote nothing for**, and the only one whose
@@ -515,7 +534,8 @@ static void render_probe(const ncfg_probe_policy_t *probe, ncfg_buf_t *body)
  * which is the same reason its siblings are functions -- not because these
  * belong together as an idea.
  */
-static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t *body)
+static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing)
 {
 	if (interface->preference.has) {
 		ncfg_buf_addf(body, "\tpreference = %lld\n", (long long)interface->preference.value);
@@ -539,7 +559,7 @@ static void render_interface_keys(const ncfg_interface_t *interface, ncfg_buf_t 
 		ncfg_buf_add_text(body, "\t}\n");
 	}
 	if (interface->probe) {
-		render_probe(interface->probe, body);
+		render_probe(interface->probe, "interface", interface->name, body, missing);
 	}
 }
 
@@ -658,7 +678,7 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	}
 
 	ncfg_buf_init(&body, 0);
-	render_interface_keys(interface, &body);
+	render_interface_keys(interface, &body, missing);
 	if (!interface->enabled) {
 		ncfg_buf_add_text(&body, "\tenabled = false\n");
 	}

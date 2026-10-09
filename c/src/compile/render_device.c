@@ -777,6 +777,39 @@ static int derived_ifb(const ncfg_document_t *document, const ncfg_device_t *dev
 }
 
 /*
+ * A rate the parser will read back, or a refusal saying why it will not.
+ *
+ * **Zero is the case, and it is reachable.** `rate_bits` in `lower_device.c`
+ * refuses it on purpose -- "a shaped rate of zero would pass nothing" -- while
+ * the document's own range for these fields is `R_U64`, low zero, so a
+ * document read from JSON can hold one. `render_rate` would then write
+ * `"0gbit"`, zero being divisible by the first suffix it tries, and the
+ * profile would not compile. Measured before this guard: a device whose
+ * `bandwidth_bits` is 0 read back, rendered, and failed its own round trip on
+ * the lowerer's own words.
+ *
+ * Refusing rather than widening the field's range: the reader's range is what
+ * documents this build will accept, and narrowing it would make a document
+ * other things still read unreadable here, which is a bigger decision than a
+ * renderer gap. Refusing is what this module does with everything else it
+ * cannot write, and it names the device instead of writing a word the language
+ * does not have.
+ *
+ * Negative is the same door from the other side -- out of the reader's range
+ * today, and cheaper to name than to reason about.
+ */
+static int rate_is_renderable(int64_t bits, const char *what, const char *name,
+    ncfg_unrenderable_t *missing)
+{
+	if (bits > 0) {
+		return 1;
+	}
+	ncfg_render_refuse(missing, "device", name, "%s of %lld, which is not a rate", what,
+	    (long long)bits);
+	return 0;
+}
+
+/*
  * A device's root qdisc, in whichever of its two forms the document needs.
  *
  * **Refused wholesale until now.** `qdisc = "fq_codel"` is the shorthand for a
@@ -812,7 +845,8 @@ static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, int
 	ncfg_buf_add_text(body, "\tqdisc {\n");
 	ncfg_buf_addf(body, "\t\tkind = \"%s\"\n",
 	    ncfg_render_word_or_gap(ncfg_qdisc_kind_name(qdisc->kind)));
-	if (qdisc->bandwidth_bits.has) {
+	if (qdisc->bandwidth_bits.has
+	    && rate_is_renderable(qdisc->bandwidth_bits.value, "a bandwidth", name, missing)) {
 		ncfg_buf_add_text(body, "\t\tbandwidth = ");
 		render_rate(body, qdisc->bandwidth_bits.value);
 		ncfg_buf_add_char(body, '\n');
@@ -821,10 +855,14 @@ static void render_qdisc(const ncfg_qdisc_policy_t *qdisc, const char *name, int
 	 * to. Never both: the expansion clears the field as it moves it, and
 	 * `bare_ifb` refuses an `ifb` whose own field is set. */
 	if (qdisc->ingress_bandwidth_bits.has || ingress != 0) {
-		ncfg_buf_add_text(body, "\t\tingress_bandwidth = ");
-		render_rate(body, qdisc->ingress_bandwidth_bits.has
-		    ? qdisc->ingress_bandwidth_bits.value : ingress);
-		ncfg_buf_add_char(body, '\n');
+		int64_t rate = qdisc->ingress_bandwidth_bits.has
+		    ? qdisc->ingress_bandwidth_bits.value : ingress;
+
+		if (rate_is_renderable(rate, "an ingress bandwidth", name, missing)) {
+			ncfg_buf_add_text(body, "\t\tingress_bandwidth = ");
+			render_rate(body, rate);
+			ncfg_buf_add_char(body, '\n');
+		}
 	}
 	ncfg_buf_add_text(body, "\t}\n");
 }
