@@ -3116,6 +3116,74 @@ static void a_vlan_id_out_of_range_is_refused(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * A channel outside its band is refused by name rather than written.
+ *
+ * The document's range for a channel is `R_U16` and the language takes 1 to 14
+ * or 36 to 177 depending on the band, so a document read from JSON holds
+ * channels the renderer cannot write back -- the fourth instance of the class
+ * in this file, after the shaped rate, the probe counts and the vlan id.
+ *
+ * The verdict uses the model's own `ncfg_channel_in_band` on both sides, so
+ * this asserts that the renderer agrees with the compiler rather than that it
+ * agrees with a number written here.
+ */
+static void a_channel_outside_its_band_is_refused(void)
+{
+	const char *text = "access_point \"guests\" {\n\tdevice = \"wlan0\"\n"
+	    "\tchannel = 6\n\tband = \"2.4\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n";
+	const int64_t outside[] = { 0, 20, 300, 65535 };
+	size_t        which;
+	ncfg_document_t    *document = compiled(text, "a case's own configuration");
+	ncfg_buf_t          out;
+	ncfg_unrenderable_t missing;
+	char                message[NCFG_ERROR_MAX];
+
+	check(document != NULL && document->access_point_count == 1u,
+	    "the case's own configuration compiles to one access point");
+	if (!document || document->access_point_count != 1u) {
+		ncfg_document_free(document);
+		return;
+	}
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	check(ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+	    "  and channel 6 on 2.4 GHz renders, which is the control");
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+
+	/* `band` dropped, so the channel number chooses the band and each of these
+	 * is outside whichever one it chose. */
+	free(document->access_points[0].band);
+	document->access_points[0].band = NULL;
+	for (which = 0; which < sizeof(outside) / sizeof(outside[0]); which++) {
+		int    named = 0;
+		size_t i;
+
+		document->access_points[0].channel.value = outside[which];
+		ncfg_buf_init(&out, 0);
+		ncfg_unrenderable_init(&missing);
+		message[0] = '\0';
+		check(!ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+		    "a channel outside its band is refused rather than written");
+		for (i = 0; i < missing.count && !named; i++) {
+			named = strstr(missing.items[i], "guests") != NULL
+			    && strstr(missing.items[i], "GHz band") != NULL;
+		}
+		if (!named) {
+			for (i = 0; i < missing.count; i++) {
+				printf("  refused: %s\n", missing.items[i]);
+			}
+		}
+		check(named, "  and the refusal names the access point and the band");
+		ncfg_buf_free(&out);
+		ncfg_unrenderable_free(&missing);
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3144,6 +3212,7 @@ int main(int argc, char **argv)
 	a_shaped_rate_of_zero_is_refused();
 	a_probe_count_below_the_floor_is_refused();
 	a_vlan_id_out_of_range_is_refused();
+	a_channel_outside_its_band_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

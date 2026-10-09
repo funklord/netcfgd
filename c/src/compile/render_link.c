@@ -861,7 +861,7 @@ static void render_network_keys(const ncfg_wifi_network_t *network, ncfg_buf_t *
  * than a single permitted address.
  */
 void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overrides_t *overrides,
-    ncfg_buf_t *text)
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
 	ncfg_buf_t body;
 	size_t     length;
@@ -879,7 +879,34 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 		ncfg_buf_add_char(&body, '\n');
 	}
 	if (point->channel.has) {
-		ncfg_buf_addf(&body, "\tchannel = %lld\n", (long long)point->channel.value);
+		/*
+		 * **The model's test, not a copy.** That is the rule `check_channel_in_band`
+		 * states after the compiler grew its own pair of statics: one implementation of
+		 * which channels are in which band, in the model, used by the compiler, by the
+		 * hostapd renderer and now by this.
+		 *
+		 * The document's range for a channel is `R_U16` while the language takes 1 to 14
+		 * or 36 to 177 depending on the band, so a document read from JSON holds
+		 * channels this cannot write back. Measured: 0, 20, 300 and 65535 each rendered
+		 * and then failed the round trip in the compiler's own words.
+		 *
+		 * A band with no channel range of its own -- `6`, which the compiler accepts
+		 * deliberately -- writes the channel as it stands. Band 6 is refused by the
+		 * hostapd renderer, which is where it belongs: the configuration language reads
+		 * `band = "6"` back perfectly well, so refusing it here would stop a profile
+		 * saving over something this file can in fact write.
+		 */
+		const char *band = ncfg_access_point_effective_band(point->band,
+		    &point->channel);
+
+		if (band && !ncfg_channel_in_band(band, point->channel.value)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "channel %lld, which is not in the %s GHz band",
+			    (long long)point->channel.value, band);
+		} else {
+			ncfg_buf_addf(&body, "\tchannel = %lld\n",
+			    (long long)point->channel.value);
+		}
 	}
 	if (point->band) {
 		ncfg_buf_add_text(&body, "\tband = ");

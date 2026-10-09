@@ -115,7 +115,7 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 /* One `access_point` block. In `render_link.c` with the networks, because it
  * reuses that file's `render_security` and `quote_ssid`. */
 void ncfg_render_access_point(const ncfg_access_point_t *point,
-    const ncfg_overrides_t *overrides, ncfg_buf_t *text);
+    const ncfg_overrides_t *overrides, ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 
 void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);

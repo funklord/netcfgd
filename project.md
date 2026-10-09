@@ -12385,6 +12385,80 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.451 A channel outside its band, and the sweep that should have been finished first
+
+10.450's lens -- **a number inherited from the Rust that is a type width rather
+than a fact about the domain** -- was applied to two of the eight lowering
+files. Finishing it found one more site and then something better behind it.
+
+`lower_network.c` narrows an access point's `channel` to 65535. A WiFi channel
+is a small number, so that is a type width by the same reasoning that condemned
+the vlan id's.
+
+**It is harmless, and the reason is worth more than the site.** There is a
+second gate: `check_channel_in_band`, added by 0222 after `band = "2.4"` with
+`channel = 36` compiled, planned and failed at `ncfg apply` with the interface
+already up. With no `band` the band is inferred -- 14 and below is 2.4 GHz,
+above it is 5 -- and then membership is required, 1 to 14 or 36 to 177. So
+channel 65535 infers 5 GHz and is refused for not being in it. The loose narrow
+never decides anything.
+
+So the remaining five numeric bounds in those files are all genuine: bridge
+`priority`, vxlan `port`, wireguard `listen_port` and `keepalive` really are
+sixteen bits, and a tunnel `ttl` is eight. **The lens is spent**, with one true
+positive out of seven candidates.
+
+### What the finishing found instead
+
+The compiler bounds a channel by its band. The **configuration renderer did
+not**, and could not: `ncfg_render_access_point` took no
+`ncfg_unrenderable_t` at all, so it had no way to refuse anything. It wrote
+`channel`, `band` and `regdom` as it found them.
+
+The document's range for a channel is `R_U16`, so a document read from JSON
+holds channels the language will not take back. Measured, four of them, with
+`band` dropped so the number chooses the band:
+
+    channel 0      refused on recompile: not in the 2.4 GHz band
+    channel 20     not in the 5 GHz band
+    channel 300    not in the 5 GHz band
+    channel 65535  not in the 5 GHz band
+
+and a fifth with `band = "2.4"` kept and channel 300. Each rendered cleanly and
+failed its own round trip in the compiler's words -- so `ncfg profile save` on
+such a machine wrote the profile, failed its proof, rolled it back and reported
+a fault in the snapshot. The fourth instance of 10.449's class, after the
+shaped rate, the probe counts and the vlan id.
+
+`ncfg_render_access_point` takes the refusal buffer now and uses **the model's
+own** `ncfg_access_point_effective_band` and `ncfg_channel_in_band` rather than
+a copy -- which is the rule `check_channel_in_band` states in a comment, after
+the compiler grew its own pair of statics and became "exactly the second
+implementation `hostapd.h` had a paragraph warning against".
+
+    access_point guests: channel 300, which is not in the 2.4 GHz band
+
+### A comment I suspected and was wrong about
+
+`ncfg_access_point_effective_band` returns NULL for band `6` and says the
+compiler accepts it "on purpose so that the renderer can refuse it in its own
+words". The configuration renderer cannot refuse anything, and band `6` round
+trips through it untouched -- which read like a stale claim of the kind this
+file has been collecting.
+
+It is not. **"The renderer" there is the hostapd one**, and it refuses band 6
+by name: "the 6 GHz band needs an operating class and HE parameters, which the
+document has no fields for and which this build has never run against a radio".
+That renderer also applies `ncfg_channel_in_band` itself, so the apply path was
+guarded all along and only the profile-writing path was not.
+
+Which is why the new guard writes the channel unchanged when the effective band
+is NULL, mirroring `check_channel_in_band`'s own arm for it: the configuration
+language reads `band = "6"` back perfectly well, so refusing it in the
+configuration renderer would stop a profile saving over something that file can
+in fact write. **Two renderers, two different questions, and the band belongs to
+the other one.**
+
 ## 10.450 A vlan id is twelve bits, and neither number on offer was right
 
 Settled by the copyright holder 2026-10-09, on 10.449's open question: **the
