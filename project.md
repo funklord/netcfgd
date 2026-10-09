@@ -12453,6 +12453,49 @@ two are unreachable for a reason that is a property of the language rather than
 of the corpora. The next renderer gap, if there is one, is not behind a
 comparison.
 
+### The same boundary answers the unproduced-diagnostic lens too
+
+`evidence.md` carries a lens this tree had not pointed at the renderer: **a
+diagnostic no test produces.** For a refusal it is sharper than usual, because
+the sentence is what an operator reads when `profile save` declines -- "a
+refusal is not a drop" makes the wording load-bearing.
+
+    29 refusal sentences in render*.c
+    11 produced by no test in render_test or lower_test
+     0 of those 11 reachable from a configuration file
+
+Triaged one at a time rather than as a class, and the boundary above is what
+settles every one: an exec advertise backend is never set by
+`lower_interface.c`, which writes only `AUTO`, `RADVD` and `ODHCPD`; an openvpn
+tunnel with no config file is refused by the lowering first; a delegated
+prefix's index is hardcoded to 0. The `dns mode exec` site says it itself --
+*"the model has the mode and the language has no word for it."*
+
+**That the same boundary did the work twice is the evidence it is the right
+frame** rather than a convenient one: it was derived for `bare_ifb` and then
+answered eleven sentences nobody had asked it about.
+
+**And the instrument was wrong first.** Extracting the sentences by taking
+every string literal in each `ncfg_render_refuse` call concatenated the `scope`
+argument onto the front -- "devicean openvpn tunnel with no config file" -- so
+the prefix comparison against the tests was against mangled text and reported
+18. It was caught by recognising entries that are in `render_the_witness`'s own
+expected list, which is the cheapest check available and only works because
+something in the tree already knew the answer.
+
+### An observation, with a cost and an owner
+
+The `dns mode exec` comment cited `lower.rs` -- a Rust file, from C, for a fact
+true of both implementations. Corrected in place while reading it. Swept:
+**77 `.rs` references in C comments**, `lib.rs` 14 and `lower.rs` 13 among them.
+
+They are not automatically stale, which is why this is an observation rather
+than a change: 0266 keeps the Rust as a comparison oracle, so a cross-reference
+to it is legitimate, and the real question is whether a reader of a C file
+should be sent to the C reason or the Rust one. **That is a whole-tree pass
+nobody asked for, so it is named here with its size and left.** Whose decision:
+the copyright holder's.
+
 ## 10.434 A test matched its own temporary directory, and the fix was already here
 
 `make check` came back red on `service_test`, in a suite nothing in this
