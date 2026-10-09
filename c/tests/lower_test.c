@@ -2214,7 +2214,6 @@ static const struct {
 	const char *reason;
 	const char *what;
 } unguarded_strings[] = {
-	{ "a secret reference needs a name", "a secret ref's `name`" },
 	{ "is not a route destination", "a route's `destination`" },
 	{ "cannot be a network name", "a network name the lowering reserves" },
 	{ "is not a regulatory domain", "an access point's `regdom`" },

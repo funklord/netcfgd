@@ -12385,6 +12385,53 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.456 The largest pin, and why the pre-walk pass keeps being the answer
+
+Nineteen of 10.454's fault lines were one member: `ncfg_secret_ref_t.name`.
+`@secret:` needs a name after it, `lower_value.c` refuses one without, and the
+member is a plain string -- so a document read from JSON carries a nameless
+reference and the renderer wrote `psk = "@secret:"`, which does not compile.
+
+**Seven places, four with no refusal buffer**, which is what made it the
+largest pin rather than the easiest: `render_pppoe`, `quote_cert_source`,
+`render_eap` and `render_security` take a buffer and a value and nothing else.
+Threading a refusal through all seven is the shape 10.449 declined for
+`_or_gap`, and declining it again means the check goes where the names already
+went -- the pass before the walk.
+
+That is now the third thing that pass does, and the pattern is worth naming
+since it has decided three fixes in a row:
+
+  * a check belongs AT the site when the site already has the context --
+    `render_qdisc`, `render_probe`, `render_kind` each refuse in place;
+  * it belongs in the PRE-WALK PASS when the sites do not, and especially when
+    there are several of them, because one list is one place to forget.
+
+The enumeration here is the seven `ncfg_secret_ref_t` members in `document.h`
+and the four owners a `security` or an `eap` hangs off: a network's security, an
+access point's, an interface's `dot1x`, and the three device kinds carrying one
+of their own. A cert source counts only on its `stored` arm, a path being a
+path.
+
+### The pin list reported this one too
+
+Same as the three before it: the guard went in, the sweep stopped faulting, and
+the both-directions check failed with "`a secret reference needs a name` no
+longer faults ... so drop the pin". Four pins have now been retired by the list
+telling me, not by my remembering -- which is the whole argument for asserting
+that a pin still fires.
+
+Eleven remain, and the set still cannot grow.
+
+### The test takes three owners rather than three members
+
+`a_nameless_secret_is_refused` empties a network's `psk`, a wireguard device's
+`private_key`, and then -- with the key put back, so the peer is tested alone --
+a peer's `preshared_key`. Three different owners, so the pass is exercised
+rather than one branch of it three times. The put-back is the part that matters:
+without it the second refusal would prove nothing, the first still being in the
+list.
+
 ## 10.455 Three pins cleared, and the pin list catching its own staleness
 
 10.454 left fifteen pinned string constraints, each a named piece of work.

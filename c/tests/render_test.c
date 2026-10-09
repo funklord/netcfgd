@@ -3342,6 +3342,63 @@ static void a_name_or_address_the_language_refuses(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * A secret reference with no name is refused, in each of its places.
+ *
+ * `@secret:` needs a name after it and `ncfg_secret_ref_t.name` is a plain
+ * string, so a document read from JSON carries a nameless one and the renderer
+ * wrote `psk = "@secret:"`, which does not compile. Nineteen of the fault
+ * lines 10.454 pinned were this one member.
+ *
+ * Three of its seven places, chosen because they hang off three different
+ * owners -- a network's security, a device kind's own secret, and a wireguard
+ * peer's -- so the pass is exercised rather than one branch of it.
+ */
+static void a_nameless_secret_is_refused(void)
+{
+	ncfg_document_t *document;
+
+	document = compiled("network \"home\" {\n\twifi { psk = \"@secret:home\" }\n}\n",
+	    "a case's own network");
+	check(document != NULL && document->network_count == 1u,
+	    "a network with a psk compiles");
+	if (document && document->network_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		free(document->networks[0].security.psk.passphrase.name);
+		document->networks[0].security.psk.passphrase.name = strdup("");
+		check(refusal_names(document, "home", "no name"),
+		    "  and a nameless psk is refused by name");
+	}
+	ncfg_document_free(document);
+
+	document = compiled("device wg0 {\n\twireguard {\n"
+	    "\t\tprivate_key = \"@secret:wg\"\n\t\tpeer \"office\" {\n"
+	    "\t\t\tpublic_key = \"0000000000000000000000000000000000000000000=\"\n"
+	    "\t\t\tpreshared_key = \"@secret:psk\"\n"
+	    "\t\t\tallowed_ips = [\"10.0.0.0/24\"]\n\t\t}\n\t}\n}\n",
+	    "a case's own wireguard");
+	check(document != NULL && document->device_count >= 1u,
+	    "a wireguard device compiles");
+	if (document && document->device_count >= 1u) {
+		check(renders(document), "  and renders, which is the control");
+		free(document->devices[0].kind.wireguard.private_key.name);
+		document->devices[0].kind.wireguard.private_key.name = strdup("");
+		check(refusal_names(document, "wg0", "no name"),
+		    "  and a nameless private key is refused by name");
+		free(document->devices[0].kind.wireguard.private_key.name);
+		document->devices[0].kind.wireguard.private_key.name = strdup("wg");
+		check(renders(document), "  with the key put back, so the peer is tested alone");
+		if (document->devices[0].kind.wireguard.peer_count > 0u
+		    && document->devices[0].kind.wireguard.peers[0].preshared_key) {
+			free(document->devices[0].kind.wireguard.peers[0].preshared_key->name);
+			document->devices[0].kind.wireguard.peers[0].preshared_key->name = strdup("");
+			check(refusal_names(document, "wg0", "no name"),
+			    "  and a nameless peer key is refused too, which is the other branch");
+		}
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3373,6 +3430,7 @@ int main(int argc, char **argv)
 	a_channel_outside_its_band_is_refused();
 	the_pairs_and_bounds_the_compiler_checks();
 	a_name_or_address_the_language_refuses();
+	a_nameless_secret_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

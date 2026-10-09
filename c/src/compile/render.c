@@ -954,6 +954,119 @@ static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrender
 	}
 }
 
+/*
+ * A secret reference the language can write, or a refusal.
+ *
+ * `@secret:` needs a name after it -- `lower_value.c` refuses one without, and
+ * the member is a plain string, so a document read from JSON carries a
+ * nameless reference and the renderer wrote `psk = "@secret:"` which does not
+ * compile. Nineteen of the fault lines 10.454 pinned were this one member in
+ * its seven places.
+ *
+ * **In the pre-walk pass rather than threaded to those seven.** Four of them --
+ * `render_pppoe`, `quote_cert_source`, `render_eap`, `render_security` -- take
+ * no refusal buffer, and 10.449 declined exactly that threading for
+ * `_or_gap`. One list here is one place to forget rather than seven.
+ */
+static void refuse_nameless_secret(ncfg_unrenderable_t *missing, const char *scope,
+    const char *owner, const char *what, const ncfg_secret_ref_t *reference)
+{
+	if (!reference || (reference->name && reference->name[0] != '\0')) {
+		return;
+	}
+	ncfg_render_refuse(missing, scope, owner, "%s with no name, which `@secret:` cannot say",
+	    what);
+}
+
+/* A certificate kept in the secret store rather than at a path. */
+static void refuse_nameless_cert(ncfg_unrenderable_t *missing, const char *scope,
+    const char *owner, const char *what, const ncfg_cert_source_t *source)
+{
+	if (!source->has || source->kind != NCFG_CERT_SOURCE_STORED) {
+		return;
+	}
+	refuse_nameless_secret(missing, scope, owner, what, &source->stored);
+}
+
+static void refuse_nameless_eap(ncfg_unrenderable_t *missing, const char *scope,
+    const char *owner, const ncfg_eap_config_t *eap)
+{
+	refuse_nameless_secret(missing, scope, owner, "an eap `password`", eap->password);
+	refuse_nameless_cert(missing, scope, owner, "an eap `ca_cert`", &eap->ca_cert);
+	refuse_nameless_cert(missing, scope, owner, "an eap `client_cert`", &eap->client_cert);
+	refuse_nameless_cert(missing, scope, owner, "an eap `private_key`", &eap->private_key);
+}
+
+static void refuse_nameless_security(ncfg_unrenderable_t *missing, const char *scope,
+    const char *owner, const ncfg_security_t *security)
+{
+	switch (security->kind) {
+	case NCFG_SECURITY_PSK:
+		refuse_nameless_secret(missing, scope, owner, "a `psk`", &security->psk.passphrase);
+		break;
+	case NCFG_SECURITY_EAP:
+		refuse_nameless_eap(missing, scope, owner, &security->eap);
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * Every secret a document can carry, checked once before the walk.
+ *
+ * The list is the seven `ncfg_secret_ref_t` members in `document.h` and the
+ * four places a `security` or an `eap` hangs off: a network's and an access
+ * point's `security`, an interface's `dot1x`, and the three device kinds that
+ * hold one of their own.
+ */
+static void refuse_nameless_secrets(const ncfg_document_t *document,
+    ncfg_unrenderable_t *missing)
+{
+	size_t i;
+	size_t j;
+
+	for (i = 0; i < document->device_count; i++) {
+		const ncfg_device_t         *device = &document->devices[i];
+		const ncfg_interface_kind_t *kind = &device->kind;
+
+		switch (kind->kind) {
+		case NCFG_KIND_WIREGUARD:
+			refuse_nameless_secret(missing, "device", device->name, "a `private_key`",
+			    &kind->wireguard.private_key);
+			for (j = 0; j < kind->wireguard.peer_count; j++) {
+				refuse_nameless_secret(missing, "device", device->name,
+				    "a peer's `preshared_key`", kind->wireguard.peers[j].preshared_key);
+			}
+			break;
+		case NCFG_KIND_OPENVPN:
+			refuse_nameless_secret(missing, "device", device->name, "an openvpn `password`",
+			    kind->openvpn.password);
+			break;
+		case NCFG_KIND_PPPOE:
+			refuse_nameless_secret(missing, "device", device->name, "a pppoe `password`",
+			    &kind->pppoe.password);
+			break;
+		default:
+			break;
+		}
+	}
+	for (i = 0; i < document->interface_count; i++) {
+		if (document->interfaces[i].dot1x) {
+			refuse_nameless_eap(missing, "interface", document->interfaces[i].name,
+			    document->interfaces[i].dot1x);
+		}
+	}
+	for (i = 0; i < document->network_count; i++) {
+		refuse_nameless_security(missing, "network", document->networks[i].id,
+		    &document->networks[i].security);
+	}
+	for (i = 0; i < document->access_point_count; i++) {
+		refuse_nameless_security(missing, "access_point", document->access_points[i].id,
+		    &document->access_points[i].security);
+	}
+}
+
 int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing, char *err, size_t err_size)
 {
@@ -976,6 +1089,7 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	/* Before anything is written, because a name the language will not read
 	 * back makes the whole profile unusable rather than one block. */
 	refuse_unusable_names(document, missing);
+	refuse_nameless_secrets(document, missing);
 
 	/* `schema_version` and `generated_by` are deliberately not written: the
 	 * configuration language cannot express either, and the compiler
