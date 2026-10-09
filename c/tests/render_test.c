@@ -2901,6 +2901,40 @@ static void an_older_minor_still_round_trips(void)
 	ncfg_document_free(reread);
 }
 
+/*
+ * A document carrying provenance round trips.
+ *
+ * `round_trip.c`'s header says this is the case it exists for -- the writer
+ * emits `generated_by` and the renderer deliberately does not, so the
+ * recompiled document has none -- and names
+ * `ncfg_config_documents_agree` as where the exclusion is implemented. It was
+ * not: the exclusion skipped the member in the walk while the root member
+ * TALLY counted it, so it held only when both documents carried the member and
+ * a document with provenance was unequal to the same document without. Every
+ * document with provenance failed the round trip, and no suite had one.
+ */
+static void a_document_carrying_provenance_round_trips(void)
+{
+	ncfg_document_t *document = compiled("device wlan0 { }\n", "a case's own configuration");
+	char             why[NCFG_ERROR_MAX];
+
+	check(document != NULL, "the case's own configuration compiles");
+	if (!document) {
+		return;
+	}
+	free(document->generated_by);
+	document->generated_by = strdup("netcfgd, in a test");
+	check(document->generated_by != NULL, "  and provenance can be put on it");
+	why[0] = '\0';
+	if (document->generated_by && !ncfg_config_round_trips(document, why, sizeof(why))) {
+		printf("  %s\n", why);
+	}
+	why[0] = '\0';
+	check(document->generated_by && ncfg_config_round_trips(document, why, sizeof(why)),
+	    "  and it still round trips, the renderer never having written that either");
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2925,6 +2959,7 @@ int main(int argc, char **argv)
 	the_empty_device_block_round_trips();
 	declared_survives_a_json_round_trip();
 	an_older_minor_still_round_trips();
+	a_document_carrying_provenance_round_trips();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

@@ -99,11 +99,14 @@ int ncfg_daemon_document_hash(const ncfg_document_t *document, char *out, char *
     size_t err_size)
 {
 	ncfg_buf_t  text;
-	/* Cast away const to clear one field and put it back. The alternative is
-	 * a deep copy of the whole document to hash it, which is the shape the
-	 * Rust takes because a clone is one line there and a page here. */
+	/* Cast away const to clear the excluded fields and put them back. The
+	 * alternative is a deep copy of the whole document to hash it, which is the
+	 * shape the Rust takes because a clone is one line there and a page here. */
 	ncfg_document_t *mutable_document = (ncfg_document_t *)document;
 	char        *generated_by;
+	ncfg_version_t schema_version;
+	int         *declared = NULL;
+	size_t       at;
 	int          written;
 
 	if (!out) {
@@ -116,15 +119,51 @@ int ncfg_daemon_document_hash(const ncfg_document_t *document, char *out, char *
 		return 0;
 	}
 	/*
-	 * `generated_by` names the version that produced the document. Leaving it
-	 * in would make an upgrade look like an edit, and the whole use of this
-	 * is telling "the same configuration" from "a different one".
+	 * **What this neutralises is what `document_compare.c` leaves out, and the
+	 * two lists must stay the same list.** This is the second notion of "the
+	 * same configuration" in the tree -- the first being
+	 * `ncfg_config_documents_agree` -- and they had diverged: equality excluded
+	 * three members and this excluded one, so two documents the system called
+	 * equal hashed differently. `the_hash_ignores_what_equality_ignores` in
+	 * `confirm_test.c` is what holds them together, because a comment does not.
+	 *
+	 * Each of the three is excluded for one reason wearing three hats: it is
+	 * something the configuration does not say, so letting it into the hash
+	 * makes an upgrade look like an edit -- and the whole use of this is telling
+	 * "the same configuration" from "a different one".
+	 *
+	 *   `generated_by`    names the build that produced the document
+	 *   `schema_version`  names the format, and a minor moves on upgrade
+	 *   `declared`        says a device was written rather than implied, and a
+	 *                     state file older than the member reads it as 0 while a
+	 *                     fresh compile of the same configuration sets it
 	 */
 	generated_by = mutable_document->generated_by;
 	mutable_document->generated_by = NULL;
+	schema_version = mutable_document->schema_version;
+	mutable_document->schema_version.major = NCFG_SCHEMA_MAJOR;
+	mutable_document->schema_version.minor = NCFG_SCHEMA_MINOR;
+	if (mutable_document->device_count > 0u) {
+		declared = calloc(mutable_document->device_count, sizeof(*declared));
+		if (!declared) {
+			mutable_document->generated_by = generated_by;
+			mutable_document->schema_version = schema_version;
+			ncfg_error_set(err, err_size, "out of memory hashing a document");
+			return 0;
+		}
+		for (at = 0; at < mutable_document->device_count; at++) {
+			declared[at] = mutable_document->devices[at].declared;
+			mutable_document->devices[at].declared = 0;
+		}
+	}
 	ncfg_buf_init(&text, 0);
 	written = ncfg_document_write_canonical(mutable_document, &text, err, err_size);
 	mutable_document->generated_by = generated_by;
+	mutable_document->schema_version = schema_version;
+	for (at = 0; declared && at < mutable_document->device_count; at++) {
+		mutable_document->devices[at].declared = declared[at];
+	}
+	free(declared);
 	if (!written) {
 		ncfg_buf_free(&text);
 		return 0;

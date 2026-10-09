@@ -12385,6 +12385,92 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.447 Two notions of the same configuration, and one of them was conditional
+
+10.446's defect had a shape worth reusing: **a comparison counting something
+the producer on the other side cannot reproduce.** `document_compare.c` was one
+site. The lens is every other place a document is compared or hashed, and there
+is exactly one more -- `ncfg_daemon_document_hash`, which `confirm.c` calls the
+identity of a document and which backs confirm windows, revert targets, the
+rejected-document memory and the before/after of a reconcile pass.
+
+It clears `generated_by` and nothing else, with a comment saying why: "leaving
+it in would make an upgrade look like an edit, and the whole use of this is
+telling the same configuration from a different one". That is equality's job
+described in equality's words -- and equality excluded three members while the
+hash excluded one.
+
+**Demonstrated rather than argued, with a control.** The same configuration
+twice agrees on both instruments; flipping every device's `declared`, and
+bumping the schema minor, each produced "equality says the same document, the
+hash says different documents".
+
+`declared` is the reachable one, by the route the hash's own comment names: a
+state file written before the member was serialised reads back as 0 for every
+device, while a fresh compile of the same configuration sets it. So an upgrade
+looks like an edit -- the precise harm the exclusion exists to prevent.
+
+The hash neutralises all three now. `declared` is per-device, so it costs a
+`calloc` of the flags to restore them; that is the same trade the function
+already took for `generated_by`, whose comment says a deep copy of the document
+is a page of C here and one line in the Rust.
+
+### Then the test for it found the bigger defect
+
+`the_hash_ignores_what_equality_ignores` asserts the relationship rather than
+either verdict, over four mutations equality ignores plus one it notices. The
+last is not decoration: a hash returning a constant satisfies every line above
+it.
+
+Its `generated_by` case failed, and not because of the hash. **The exclusion in
+`ncfg_config_documents_agree` was conditional on both documents carrying the
+member.** The skip lived in the walk over the root's members; the tally
+compared `ncfg_json_count` of each root. A NULL string is not written at all,
+so a document with provenance has one more root member than the same document
+without, the tally disagreed before the walk could skip anything, and the
+verdict was "different documents".
+
+Which means: **no document carrying provenance round-tripped.** Measured
+directly --
+
+    without provenance: round trips: yes
+    carrying provenance: round trips: NO
+
+-- and that is the case `round_trip.c`'s own header says it exists for, in as
+many words: the writer emits provenance, the renderer deliberately does not, so
+the recompiled document has none, and `ncfg_config_documents_agree` "is where
+that exclusion is implemented". It was not, and nothing caught it because no
+suite round-tripped a document with provenance. The 67 plan fixtures that
+motivated the exclusion are not among the documents the round trip is asked
+about.
+
+The fix is **one list with two users** -- `excluded_from_equality` consulted by
+the walk and by a tally that skips what the walk skips -- rather than a second
+`strcmp` added to the count, because two lists are what produced this.
+
+### The controls, and the stale binary that nearly hid them
+
+Both tests were built against `git archive HEAD` -- the tree carrying 10.446's
+fix and not this one -- and all three axes fire there: the provenance round
+trip fails in `render_test`, and `confirm_test` fails three of five with the
+real-difference control still passing, one failure per member the hash counted
+that equality did not.
+
+**And the first verdict after the fix was wrong, from a binary the build had
+not relinked.** The scratch probes were compiled against the earlier
+`libncfg.a`; `make` rebuilt the library and left them alone, so they went on
+reporting the defect and the fix looked ineffective. `build-and-commit.md` says
+not to conclude anything from a binary the build step did not rebuild, and a
+hand-rolled probe is exactly the binary no build step owns.
+
+### One thing observed and not fixed
+
+Both failures reported `The two differ in a block this cannot name.` A
+difference in a root scalar member is one `name_the_difference` cannot locate,
+so the diagnostic is accurate and useless in exactly the cases this entry is
+about. Left alone: it misled nobody here, because the probes printed the
+documents.
+
 ## 10.446 The renderer's gaps asked from the document's side, and `schema_version`
 
 Every instrument pointed at the renderer so far has asked the question from the

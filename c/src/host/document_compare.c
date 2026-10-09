@@ -315,6 +315,61 @@ static void name_the_difference(const ncfg_json_doc_t *want, const ncfg_json_doc
 	}
 }
 
+/*
+ * The root members equality does not look at.
+ *
+ * **One list with two users, because two lists diverged.** The skip used to
+ * live in the walk alone while the tally below counted every member, so the
+ * exclusion held only when BOTH documents carried the member and was defeated
+ * whenever one of them omitted it -- which is the usual case, a NULL string
+ * not being written at all. Measured: a document carrying `generated_by`
+ * compared unequal to the same document without it, so
+ * `ncfg_config_round_trips` refused every document with provenance on it --
+ * the very case `round_trip.c`'s own header says this function exists to
+ * handle. Nothing noticed because no suite round-tripped such a document.
+ *
+ *   `generated_by`    names the build that produced the document
+ *   `schema_version`  names the format: the renderer cannot write it, so a
+ *                     document recompiled from a rendering carries whatever
+ *                     THIS build stamps, and `canonical.c` accepts any minor
+ *                     of a major it speaks
+ *
+ * `ncfg_daemon_document_hash` neutralises the same members plus `declared`,
+ * which is not here because it is a device's and not the document's.
+ * `the_hash_ignores_what_equality_ignores` in `confirm_test.c` holds the two
+ * notions together.
+ */
+static int excluded_from_equality(const char *key)
+{
+	return strcmp(key, "generated_by") == 0 || strcmp(key, "schema_version") == 0;
+}
+
+/* Root members that count towards equality, the excluded ones left out of the
+ * tally exactly as they are left out of the walk. */
+static uint32_t counted_root_members(const ncfg_json_doc_t *doc)
+{
+	uint32_t child;
+	uint32_t count = 0;
+
+	for (child = ncfg_json_node(doc, ncfg_json_root(doc))->first_child;
+	    child != NCFG_JSON_NONE; child = ncfg_json_node(doc, child)->next_sibling) {
+		size_t      length = 0;
+		const char *name = ncfg_json_key(doc, child, &length);
+		char        key[64];
+
+		if (!name || length + 1u > sizeof(key)) {
+			continue;
+		}
+		memcpy(key, name, length);
+		key[length] = '\0';
+		if (excluded_from_equality(key)) {
+			continue;
+		}
+		count++;
+	}
+	return count;
+}
+
 int ncfg_config_documents_agree(const ncfg_document_t *want, const char *profile,
     const ncfg_document_t *got, char *where, size_t where_size)
 {
@@ -351,8 +406,7 @@ int ncfg_config_documents_agree(const ncfg_document_t *want, const char *profile
 		return 0;
 	}
 
-	agree = ncfg_json_count(mine, ncfg_json_root(mine)) ==
-	    ncfg_json_count(theirs, ncfg_json_root(theirs));
+	agree = counted_root_members(mine) == counted_root_members(theirs);
 	root = ncfg_json_node(mine, ncfg_json_root(mine));
 	for (child = root->first_child; agree && child != NCFG_JSON_NONE;
 	    child = ncfg_json_node(mine, child)->next_sibling) {
@@ -367,23 +421,7 @@ int ncfg_config_documents_agree(const ncfg_document_t *want, const char *profile
 		}
 		memcpy(key, name, length);
 		key[length] = '\0';
-		if (strcmp(key, "generated_by") == 0) {
-			continue;
-		}
-		/* The renderer cannot write `schema_version` -- the configuration language
-		 * has no key for it and `render.c` says so at the walk -- so a document
-		 * recompiled from a rendering carries whatever THIS build stamps. Counting
-		 * the member therefore fails every document written by a build speaking an
-		 * older minor, which `canonical.c` deliberately accepts: it refuses a major
-		 * it does not speak and reads any minor. Measured before this skip existed:
-		 * a 1.0 document read back and rendered compiled to a "DIFFERENT document",
-		 * so `ncfg profile save` refused to save a machine whose desired state came
-		 * from one.
-		 *
-		 * Skipping it is the same argument as `generated_by` above rather than a
-		 * second one: the schema version is a property of the document's format and
-		 * not of the machine, and a minor is by definition one this build reads. */
-		if (strcmp(key, "schema_version") == 0) {
+		if (excluded_from_equality(key)) {
 			continue;
 		}
 		other = ncfg_json_member(theirs, ncfg_json_root(theirs), key);

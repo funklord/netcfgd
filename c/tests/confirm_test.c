@@ -29,6 +29,8 @@
  *   the document and the plan before the revert runs, which under
  *   `make SANITIZE=1` is a use-after-free detector rather than a hope.
  */
+#include "../src/host/config_internal.h"
+
 #include "ncfg/apply.h"
 #include "ncfg/base.h"
 #include "ncfg/daemon.h"
@@ -1397,6 +1399,89 @@ static void a_sweep_that_signals_nothing_says_so(const char *base)
  * main
  * ------------------------------------------------------------------------ */
 
+/*
+ * The hash agrees with document equality about these two, either way round.
+ */
+static void hash_agrees_with_equality(ncfg_document_t *a, ncfg_document_t *b, const char *what)
+{
+	char one[NCFG_DAEMON_HASH_MAX];
+	char two[NCFG_DAEMON_HASH_MAX];
+	char where[NCFG_ERROR_MAX];
+	int  equal;
+	int  same;
+
+	if (!a || !b) {
+		check(0, what);
+		return;
+	}
+	where[0] = '\0';
+	equal = ncfg_config_documents_agree(a, NULL, b, where, sizeof(where));
+	if (!ncfg_daemon_document_hash(a, one, NULL, 0u)
+	    || !ncfg_daemon_document_hash(b, two, NULL, 0u)) {
+		check(0, what);
+		return;
+	}
+	same = strcmp(one, two) == 0;
+	if (equal != same) {
+		printf("  equality says %s, the hash says %s%s%s\n",
+		    equal ? "the same document" : "different documents",
+		    same ? "the same document" : "different documents",
+		    where[0] ? "; " : "", where);
+	}
+	check(equal == same, what);
+}
+
+/*
+ * **The hash and document equality are two notions of "the same
+ * configuration", and they have to be one notion.** `ncfg_config_documents_agree`
+ * leaves three members out; `ncfg_daemon_document_hash` left one out, so two
+ * documents the system called equal hashed differently, and the thing the hash
+ * is for is telling a configuration from a different one.
+ *
+ * Each case below asserts the RELATIONSHIP rather than either verdict, so it
+ * holds whichever way a future exclusion goes. The last is the control and is
+ * not decoration: a hash that returned a constant would satisfy every line
+ * above it, and this is the line it would fail.
+ */
+static void the_hash_ignores_what_equality_ignores(void)
+{
+	const char      *base = "\"interfaces\":[],\"devices\":[{\"name\":\"eth0\",\"mtu\":1400}]";
+	ncfg_document_t *one = document_of(base);
+	ncfg_document_t *two = document_of(base);
+
+	hash_agrees_with_equality(one, two, "the same document twice is the same document to both");
+	ncfg_document_free(two);
+
+	/* `declared` says a device was written rather than implied. A state file
+	 * older than the member reads it as 0 while a fresh compile of the same
+	 * configuration sets it, so letting it into the hash makes an upgrade look
+	 * like an edit. */
+	two = document_of("\"interfaces\":[],\"devices\":[{\"name\":\"eth0\",\"mtu\":1400,\"declared\":true}]");
+	hash_agrees_with_equality(one, two, "and `declared` moves neither verdict");
+	ncfg_document_free(two);
+
+	two = document_of(base);
+	if (two) {
+		two->schema_version.minor = one->schema_version.minor + 1;
+	}
+	hash_agrees_with_equality(one, two, "nor a schema minor this build still reads");
+	ncfg_document_free(two);
+
+	two = document_of(base);
+	if (two) {
+		free(two->generated_by);
+		two->generated_by = strdup("some other build");
+	}
+	hash_agrees_with_equality(one, two, "nor the build that produced the document");
+	ncfg_document_free(two);
+
+	/* The control. */
+	two = document_of("\"interfaces\":[],\"devices\":[{\"name\":\"eth0\",\"mtu\":1500}]");
+	hash_agrees_with_equality(one, two, "and a real difference moves both");
+	ncfg_document_free(two);
+	ncfg_document_free(one);
+}
+
 int main(void)
 {
 	const char *base = testdir_make("confirm");
@@ -1416,6 +1501,7 @@ int main(void)
 	only_done_actions_with_an_inverse_are_undone();
 	the_inverses_are_replayed_newest_first();
 	what_a_window_covers_outlives_the_document_it_came_from();
+	the_hash_ignores_what_equality_ignores();
 
 	a_window_is_refused_where_there_is_nothing_to_go_back_to(base);
 	arming_writes_the_window_and_says_so(base);
