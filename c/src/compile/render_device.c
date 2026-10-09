@@ -211,6 +211,12 @@ static void render_openvpn(const ncfg_openvpn_config_t *openvpn, const char *nam
 		    "an openvpn tunnel with only half of a login");
 		return;
 	}
+	/* `lower_kind.c` requires it absolute, for the reason a probe command is. */
+	if (openvpn->config[0] != '/') {
+		ncfg_render_refuse(missing, "device", name,
+		    "an openvpn config `%s`, which is not an absolute path", openvpn->config);
+		return;
+	}
 	ncfg_buf_add_text(body, "\topenvpn {\n\t\tconfig = ");
 	ncfg_render_quote(body, openvpn->config);
 	ncfg_buf_add_char(body, '\n');

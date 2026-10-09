@@ -499,6 +499,14 @@ static void render_probe(const ncfg_probe_policy_t *probe, const char *scope,
 	ncfg_render_list_t args;
 	size_t             i;
 
+	/* `lower_interface.c` requires the command to be absolute -- a probe runs as
+	 * root, so where it is from is not a thing to leave to a search path -- and
+	 * the member is `NCFG_F_STR`, which says nothing about that. */
+	if (!probe->command || probe->command[0] != '/') {
+		ncfg_render_refuse(missing, scope, name, "a probe command `%s`, which is not an"
+		    " absolute path", probe->command ? probe->command : "");
+		return;
+	}
 	ncfg_buf_add_text(body, "\tprobe {\n");
 	ncfg_buf_add_text(body, "\t\tcommand = ");
 	ncfg_render_quote(body, probe->command);
@@ -1041,6 +1049,14 @@ void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_override
 		ncfg_render_refuse(missing, "network", id, "hooks");
 	}
 
+	/* An empty label renders as `network "" {` and the lowering refuses it: the
+	 * label is the SSID, so there is nothing to call the network. */
+	if (!id || id[0] == '\0') {
+		ncfg_render_refuse(missing, "network", NULL,
+		    "a network with no name, which the language has no way to write");
+		ncfg_buf_free(&body);
+		return;
+	}
 	ncfg_render_opening(text, "network", id, overrides);
 	ncfg_render_quote(text, id);
 	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));

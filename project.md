@@ -12385,6 +12385,58 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.455 Three pins cleared, and the pin list catching its own staleness
+
+10.454 left fifteen pinned string constraints, each a named piece of work.
+Three are closed, and what is worth recording is that **the both-directions
+check found them before I did**: the guards went in, the sweep stopped
+faulting, and two pins failed as stale with the sentence they were given --
+"`a `network` block needs a name` no longer faults ... so drop the pin". A pin
+list that only grows is the list nobody has looked at since; this one reports
+its own obsolescence.
+
+The three:
+
+  * **a probe's `command`** must be absolute, because a probe runs as root and
+    where it comes from is not a thing to leave to a search path. One pin
+    covered a hook path as well, and that half never fired -- hooks are skipped
+    by the sweep for the reason `compiles` gives -- so the pin went when the
+    command was guarded.
+  * **an openvpn tunnel's `config`**, the same requirement for the same reason.
+  * **a network's label**, which renders as `network "" {` when empty and which
+    the lowering refuses because the label IS the SSID, so an empty one leaves
+    nothing to call the network by.
+
+### What the twelve remaining ones need, which is why they are still pinned
+
+Not one of them is a one-line guard, and saying so is the point of leaving them
+pinned rather than half-done:
+
+  * **secret reference names** (19 fault lines, the largest) are written at
+    seven sites, four of which take no refusal buffer -- `render_pppoe`,
+    `quote_cert_source`, `render_eap`, `render_security`. Threading it through
+    all of them is the shape 10.449 declined for `_or_gap`; the consistent
+    answer is the pre-walk pass that `refuse_unusable_names` already is, which
+    means enumerating every secret a document can carry. One place, one list,
+    and its own piece of work.
+  * **a route's `destination`** needs `ncfg_network_of`, which is pure apart
+    from allocating through the lowering's context. Its test is `default`, or a
+    prefix with its host bits clear -- and the host-bits half is the part a
+    renderer must not reimplement, since a destination with host bits set
+    "abandons every later action in the plan". Sharing it is a refactor of that
+    function, not a call.
+  * **a network name** needs `ncfg_ssid_from_bytes`, which is in the compile
+    layer rather than the model, so the same extraction question.
+  * the rest -- regdom, Bluetooth address, IPv6 literal, `http://` URL,
+    hostname, duplex, band, addressing entry, `group:` principal, APN -- are
+    each a validator the lowering holds privately. Each is small; there are
+    nine of them, and nine rushed extractions in one pass is how a layer
+    boundary gets blurred.
+
+**The baseline is twelve now and cannot grow**, which is what the pinning buys:
+a sixteenth constraint arriving unpinned fails the sweep, and a pin outliving
+its fix fails it too.
+
 ## 10.454 The string half, which is wider than the numeric one, and a silent truncation
 
 10.453's sweep reads **numeric** leaves. The vxlan family pair in 10.452 was a

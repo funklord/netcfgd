@@ -2217,8 +2217,6 @@ static const struct {
 	{ "a secret reference needs a name", "a secret ref's `name`" },
 	{ "is not a route destination", "a route's `destination`" },
 	{ "cannot be a network name", "a network name the lowering reserves" },
-	{ "a `network` block needs a name", "a network's label" },
-	{ "is not an absolute path", "a probe `command` and a hook path" },
 	{ "is not a regulatory domain", "an access point's `regdom`" },
 	{ "is not a Bluetooth address", "a bluetooth device's address" },
 	{ "is not an IPv6 address", "an IPv6 literal, in a token or a delegation" },
