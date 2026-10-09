@@ -2693,6 +2693,21 @@ static void the_empty_device_block_round_trips(void)
 	check(common && lacks(common, "device eth0"),
 	    "while a device nobody wrote stays out of the profile altogether");
 	free(common);
+
+	/*
+	 * And the same question for every other block that can be declared empty,
+	 * which is one: `interface eth0 { }`. Probed against the program rather
+	 * than guessed -- `network`, `linkset`, `bluetooth`, `access_point` and
+	 * `rule` are each refused empty for want of a required key, and `global`
+	 * is a singleton whose empty form carries nothing. An interface is the
+	 * only one that compiles with nothing in it, and it had no case.
+	 */
+	round_trips("interface eth0 { }\n",
+	    "an interface declared with nothing in it round trips");
+	common = rendering_of("interface eth0 { }\n");
+	check(common && holds(common, "interface eth0"),
+	    "and is in the text, the device it implies still being left out");
+	free(common);
 }
 
 int main(int argc, char **argv)

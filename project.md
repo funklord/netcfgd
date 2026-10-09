@@ -12464,6 +12464,39 @@ That the `set` succeeds is itself the premise under test: a plain
 device is not a definition anything must override -- which is exactly what
 `collect_overrides` had been claiming.
 
+### How far the hole went, bounded rather than assumed
+
+The fix's shape is **the model lacking a fact the renderer needed**, so the
+question after it is what else is in that position. Two halves, both measured.
+
+**Only devices are synthesised.** Eight sites append to a document-level list
+in `lower.c`; seven take a lowered block, and the eighth is `push_device`,
+reached for an interface with no `device` block, for a bridge or bond member,
+and for an `ingress_bandwidth`. So no interface, network, access point,
+bluetooth device, rule or linkset can be invented, and `declared` has no
+sibling to want.
+
+**And only two blocks can be declared empty at all**, probed against the
+program rather than reasoned about:
+
+    interface eth0 { }                 compiles
+    global { }                         compiles
+    network "x" { }                    refused
+    linkset "l" { }                    refused
+    bluetooth "aa:bb:..." { }          refused
+    access_point "ap" { }              refused
+    rule { }                           refused
+
+The five refusals are each for want of a required key, so there is no block
+behind them to lose. `global` is a singleton whose sub-blocks merge, and an
+empty one carries nothing, so omitting it loses nothing -- which is why the
+second of the renderer's two empty-body skips is harmless where the first was
+the hole.
+
+An empty interface **already round tripped** and had no case; it has one now.
+That is the useful half of an empty result: the behaviour was right and
+unwitnessed, so it would have been free to break.
+
 ### The agree gate does not cover this change, and will not
 
 `make check` came back green with the gate reporting 11 configurations and 0
