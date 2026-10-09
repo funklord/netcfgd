@@ -12385,6 +12385,68 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.440 The C renders a connectivity policy and the Rust refuses the save
+
+The other direction of 10.439's comparison, which that entry ran one way only.
+69 functions in the C renderer, 27 with no name in `render.rs` -- and almost all
+are plumbing the Rust gets from `Vec`, `String` and `HashSet`, or the C's
+decomposition of `IngressShaping::of` into `bare_ifb`, `derived_ifb`,
+`our_ifb_name` and `shaper_rate`.
+
+**Three were rendering functions rather than plumbing**, and one of them is a
+real divergence: `connectivity` appears **zero times** in `render.rs`.
+
+### Measured with both programs, not inferred from the grep
+
+    base            interface eth0 { config = "dhcp" }
+    profile `net`   global { connectivity { requires = "probe"
+                                            ignore = ["docker0"] } }
+    then            profile set net; profile save kept2
+
+    ./c/ncfg              wrote the profile
+    ./target/debug/ncfg   ncfg: saving `kept2` would not reproduce what this
+                          machine is running, so nothing was kept
+
+The C's profile carries the block, `ignore` unwrapped to a bare value because
+one entry is not a list:
+
+    global {
+        connectivity {
+            requires = "probe"
+            ignore = "docker0"
+        }
+    }
+
+**The first attempt measured nothing**, and for the reason that caught the
+`collect_overrides` test too: the connectivity was put in the *base*, so both
+programs correctly trimmed it from the profile and both succeeded. A profile is
+a diff against the base, so a thing has to be in the running state and NOT in
+the base for the renderer to be asked about it -- which the fold being taken
+out when a snapshot is saved is what arranges.
+
+### The Rust fails safe, and that is why nobody had met it
+
+It refuses rather than writing a lossy profile, because its own verification
+finds the profile does not reproduce the machine. But **the drop is caught by a
+later check rather than named by the renderer** -- `connectivity` is in neither
+its rendering nor its refusal list -- so the message blames the snapshot in
+general where it could have named the block. That is precisely the distinction
+this project calls *a refusal is not a drop*, and the Rust has the drop.
+
+### Not acted on, and why
+
+`SAVE_AHEAD` is the mechanism for "the C renders something the Rust refuses",
+and the holder's decision on the last gate-coverage gap of this shape (10.437's
+empty device) was to record rather than pin, because 0266 retires the Rust and a
+pin waiting for the divergence to close would never fire. The same reasoning
+applies, so the same answer is taken.
+
+What is *not* the same is that this one is a functional divergence rather than
+only a coverage gap: a machine with a connectivity policy cannot save a profile
+under the Rust. Porting the block to `render.rs` would close it, and that is
+work in the implementation being retired. **Whose decision: the copyright
+holder's.** The reproduction above is four commands and re-runs.
+
 ## 10.439 The Rust renderer had the same hole, and a waiver with nothing left to waive
 
 Taking "port the renderer" literally for once: compare the two renderers
