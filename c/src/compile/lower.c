@@ -575,6 +575,10 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 				    &ctx.document->device_count, sizeof(*slot));
 
 				if (slot) {
+					/* Written, as against the three `push_device` sites
+					 * below, which invent one. `document.h` says why the
+					 * renderer cannot tell them apart otherwise. */
+					device.declared = 1;
 					*slot = device;
 				}
 			}

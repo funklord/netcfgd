@@ -1225,6 +1225,31 @@ typedef struct {
 	 */
 	ncfg_bridge_vlan_t   *bridge_vlans;
 	size_t                bridge_vlan_count;
+	/*
+	 * Whether a `device` block was WRITTEN, as against synthesised.
+	 *
+	 * **Deliberately absent from `device_fields[]`, so it is not in the
+	 * document's wire form, not in the witness, and not in equality.** The
+	 * lowering invents a device for every interface, for every bridge or bond
+	 * member, and for every `ingress_bandwidth`, and an invented all-default
+	 * one is byte-identical to a deliberately-written empty one. The renderer
+	 * has to tell them apart: writing the invented ones puts `override device
+	 * eth0 { }` into a profile for a block the base never had, which does not
+	 * compile, and skipping the written ones loses an operator's block.
+	 *
+	 * It is provenance rather than desired state, which is why it stays out of
+	 * the serialisation. `document.c` says what the alternative costs: a field
+	 * that starts writing itself re-blesses the frozen witness "for no change
+	 * in what the machine does", and 0020 makes that a schema change with a
+	 * version bump attached. Two documents differing only here describe the
+	 * same machine and must plan identically -- the same sentence this header
+	 * already makes about `generated_by`.
+	 *
+	 * The cost of that choice is one place: it does not survive
+	 * `ncfg_document_read`, so `host/profile_save.c`, which round trips
+	 * through JSON to trim globals, carries it across by name and says so.
+	 */
+	int                   declared;
 } ncfg_device_t;
 
 /* ------------------------------------------------------------------------ *

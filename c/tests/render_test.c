@@ -720,10 +720,11 @@ static void an_access_point_round_trips(void)
 	char *denied;
 	char *plain;
 
-	/* No `device wlan0 { }` beside it, and deliberately so: an access point
-	 * needs none, and an empty device block is currently dropped by
-	 * `render_device` -- a separate open question (10.408) that would make this
-	 * case fail for a reason that has nothing to do with access points. */
+	/* No `device wlan0 { }` beside it, because an access point needs none.
+	 * It used to say more: an empty device block was dropped by
+	 * `render_device`, so one here would have failed this case for a reason
+	 * with nothing to do with access points. 10.437 closed that, and
+	 * `the_empty_device_block_round_trips` is the case for it. */
 	round_trips("access_point \"guests\" {\n"
 	    "\tdevice = \"wlan0\"\n"
 	    "\tchannel = 6\n"
@@ -2640,6 +2641,60 @@ static void the_other_two_escapes_round_trip(void)
 	free(rendered);
 }
 
+
+/*
+ * A `device` block somebody wrote and left empty, which used to be lost.
+ *
+ * **The reproduction from 10.418, which stood open as the renderer's last
+ * hole.** `device wlan0 { }` has nothing to recreate its entry: an access
+ * point naming the device does not make the compiler invent one, so the
+ * document went in with a device and came back without:
+ *
+ *     devices before: [{"name": "wlan0", "managed": true, ...}]
+ *     devices after:  []
+ *
+ * `ncfg profile save` therefore refused on such a machine, having failed to
+ * reproduce what was running -- the same shape as the `4g0` label, a snapshot
+ * the renderer could not write.
+ *
+ * **The same case with an `interface wlan0` beside it passed, and passed for
+ * the wrong reason**, which is why this one is written without it: rendering
+ * the interface makes the recompile invent the device entry again, so the
+ * documents matched by coincidence and a probe would have read as a pass.
+ *
+ * The fix is `declared`, because nothing else separates the two: an invented
+ * all-default device is byte-identical to a written empty one. The other half
+ * is below -- the common case must stay skipped, or every profile gains
+ * `override device eth0 { }` for a block the base never had.
+ */
+static void the_empty_device_block_round_trips(void)
+{
+	char *written;
+	char *common;
+
+	round_trips("device wlan0 { }\n"
+	    "access_point \"ap\" {\n\tdevice = \"wlan0\"\n\tssid = \"686f6d65\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "a written empty device with nothing else to recreate it round trips");
+	written = rendering_of("device wlan0 { }\n"
+	    "access_point \"ap\" { device = \"wlan0\"; ssid = \"686f6d65\"; "
+	    "wifi { psk = \"@secret:ap\" } }\n");
+	check(written && holds(written, "device wlan0 {"),
+	    "and the block is in the text, which is the only way it survives");
+	free(written);
+
+	/*
+	 * And the invented one stays out. `interface eth0 { config = "dhcp" }`
+	 * declares no device and the document carries one, so writing it is what
+	 * broke `master`: `override device eth0 { }` for a block the base config
+	 * never had, which does not compile.
+	 */
+	common = rendering_of("interface eth0 { config = \"dhcp\" }\n");
+	check(common && lacks(common, "device eth0"),
+	    "while a device nobody wrote stays out of the profile altogether");
+	free(common);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -2661,6 +2716,7 @@ int main(int argc, char **argv)
 	a_block_at_every_default_is_left_out();
 	the_connectivity_policys_unreached_arms();
 	the_other_two_escapes_round_trip();
+	the_empty_device_block_round_trips();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

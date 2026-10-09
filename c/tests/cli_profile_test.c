@@ -788,6 +788,79 @@ static void list_reports_both_layers_and_who_owns_a_name(void)
  * chosen at the start must come out of it untouched -- which is the whole
  * reason saving is a separate explicit act.
  */
+
+/*
+ * A device the base only implies must not be saved as an `override`.
+ *
+ * **The other half of 10.437, and the half with a reachable failure.** The
+ * lowering invents a device for every interface, so a base of
+ * `interface eth0 { config = "dhcp" }` compiles to a document carrying a
+ * `device eth0` the base never wrote. `collect_overrides` read that document
+ * and told the renderer the base defines the block, so the snapshot was
+ * written as `override device eth0` -- and `override` on a block nothing
+ * defines is a compile error, so the profile could not be read back.
+ *
+ * **The scenario has to put the device in the PROFILE, not in `conf.d`.** A
+ * drop-in is part of the base, so an override over it is correct; the first
+ * attempt at this test used one and was measuring the fixture rather than the
+ * fault. What makes the base only imply the device is that the fold is taken
+ * out of it when a snapshot is saved, leaving `netcfgd.conf` alone.
+ *
+ * That a plain `device eth0` compiles beside `interface eth0` is the premise
+ * and is checked here by the `set` succeeding: an invented device is not a
+ * definition anything must override.
+ *
+ * It stayed hidden because the renderer's empty-body skip meant an invented
+ * device was never written at all, so the wrong entry was never consulted.
+ * Closing that hole made this reachable, which is why the two belong in one
+ * commit.
+ */
+static void a_device_the_base_only_implies_is_not_an_override(void)
+{
+	static const char *const implied = "interface eth0 {\n\tconfig = \"dhcp\"\n}\n";
+	static const char *const in_profile = "device eth0 { mtu = 1400 }\n";
+	const char              *positional[3];
+	char                     err[NCFG_ERROR_MAX];
+	char                     path[512];
+	char                    *saved;
+
+	reset();
+	(void)snprintf(path, sizeof(path), "%s/netcfgd.conf", config_dir);
+	(void)testdir_write(path, implied, strlen(implied));
+	(void)snprintf(path, sizeof(path), "%s/profile/implied", config_dir);
+	testdir_mkdirp(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/implied/10-implied.conf", config_dir);
+	(void)testdir_write(path, in_profile, strlen(in_profile));
+
+	positional[0] = "set";
+	positional[1] = "implied";
+	check(run_profile(positional, 2u, err, sizeof(err)),
+	    "a profile declaring a device the base only implies is selected");
+	if (err[0] != '\0') {
+		detail("said", err);
+	}
+
+	positional[0] = "save";
+	positional[1] = "fresh";
+	check(run_profile(positional, 2u, err, sizeof(err)), "and the snapshot saves");
+	if (err[0] != '\0') {
+		detail("said", err);
+	}
+
+	(void)snprintf(path, sizeof(path), "%s/profile/fresh/00-saved.conf", config_dir);
+	saved = testdir_read(path, NULL);
+	check(saved && strstr(saved, "device eth0") != NULL, "  with the device in it");
+	check(saved && strstr(saved, "override device eth0") == NULL,
+	    "  and not as an override, the base having declared no such block");
+	free(saved);
+
+	(void)snprintf(path, sizeof(path), "%s/profile/implied/10-implied.conf", config_dir);
+	(void)unlink(path);
+	(void)snprintf(path, sizeof(path), "%s/profile/implied", config_dir);
+	(void)rmdir(path);
+	reset();
+}
+
 static void the_set_change_save_workflow_keeps_what_is_running(void)
 {
 	const char      *positional[3];
@@ -1170,6 +1243,7 @@ int main(void)
 
 	list_reports_both_layers_and_who_owns_a_name();
 	the_set_change_save_workflow_keeps_what_is_running();
+	a_device_the_base_only_implies_is_not_an_override();
 	saving_over_a_profile_needs_saying_so();
 	json_answers_every_profile_subcommand_in_one_word();
 	json_list_is_the_socket_payload_with_the_tag_off();

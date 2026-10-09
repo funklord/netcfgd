@@ -216,32 +216,6 @@ static ncfg_document_t *build_one(const char *text)
 }
 
 /* Compiles, and the caller goes on to look at the document. */
-/*
- * Whether this document declares a device the renderer writes nothing for,
- * which is the one recorded hole and so has no round trip to assert.
- *
- * Structural and asked of the renderer, exactly as `carries_hooks` is
- * structural: the alternative is reading the failure's message for a device
- * name, and a check keyed on a sentence breaks when the sentence improves.
- *
- * `compiles_but_cannot_round_trip` pins the hole with a named case, so skipping
- * it here does not hide it -- the mutation sweep reaches it constantly, because
- * deleting the one line in `device eth1 { qdisc = "fq_codel" }` leaves exactly
- * that shape, and a sweep that failed on it would report the known hole
- * hundreds of times instead of a new fault once.
- */
-static int carries_silent_device(const ncfg_document_t *document)
-{
-	size_t i;
-
-	for (i = 0; i < document->device_count; i++) {
-		if (ncfg_render_device_writes_nothing(&document->devices[i], document)) {
-			return 1;
-		}
-	}
-	return 0;
-}
-
 /* Whether anything in this document holds a hook, which has no rendering by
  * construction -- see `compiles` below. */
 static int carries_hooks(const ncfg_document_t *document)
@@ -259,49 +233,6 @@ static int carries_hooks(const ncfg_document_t *document)
 		}
 	}
 	return 0;
-}
-
-/*
- * Compiles, and **deliberately does not survive a round trip** -- the one
- * recorded hole, pinned rather than skipped.
- *
- * A device the operator declared and left at every default is written nowhere:
- * the renderer skips a device whose body comes out empty, and it must, because
- * writing it emits `override device eth0 { }` for the synthesised
- * per-interface device every document carries, which cannot compile. 10.418
- * has the measurement and the two candidate fixes, both of which need the model
- * to record which devices were DECLARED rather than synthesised.
- *
- * Asserted rather than waived, so closing the hole fails here and sends the
- * next reader to 10.418 instead of leaving a silent exception behind. The
- * reason is matched as well as the failure, so this cannot pass for some other
- * reason.
- */
-static ncfg_document_t *compiles_but_cannot_round_trip(const char *text, const char *what,
-    const char *because)
-{
-	ncfg_document_t *document = build_one(text);
-	char             why[NCFG_ERROR_MAX];
-
-	if (!document) {
-		printf("%-70s %s\n", what, "FAILED");
-		printf("    expected success, got:\n%s", said);
-		failures++;
-		return NULL;
-	}
-	why[0] = '\0';
-	if (ncfg_config_round_trips(document, why, sizeof(why))) {
-		printf("%-70s %s\n", what, "FAILED");
-		printf("    it round trips now, so 10.418's hole is closed and this case\n"
-		    "    should become an ordinary `compiles` -- read that entry first\n");
-		failures++;
-	} else if (!strstr(why, because)) {
-		printf("%-70s %s\n", what, "FAILED");
-		printf("    expected it to fail with `%s`, and it failed with:\n    %s\n",
-		    because, why);
-		failures++;
-	}
-	return document;
 }
 
 static ncfg_document_t *compiles(const char *text, const char *what)
@@ -1422,8 +1353,12 @@ static void device_cases(void)
 		    device->link_settings->speed.value == 1000, "  even though nothing applies them");
 		ncfg_document_free(document);
 	}
-	document = compiles_but_cannot_round_trip("device eth0 { ethtool { } }\n",
-	    "an empty ethtool block produces nothing", "`device eth0` is what differs");
+	/* Pinned as the one document that compiled and could not round trip until
+	 * 10.437: an empty `ethtool` leaves the device body empty, and such a
+	 * device was written nowhere. `declared` tells the renderer the block was
+	 * written, so it comes back as `device eth0 { }` and this is ordinary. */
+	document = compiles("device eth0 { ethtool { } }\n",
+	    "an empty ethtool block produces nothing");
 	if (document) {
 		device = device_named(document, "eth0");
 		check(device && device->link_settings == NULL, "  rather than a structure of defaults");
@@ -2390,7 +2325,7 @@ static void example_cases(void)
 					continue;
 				}
 				compiled_mutations++;
-				if (!carries_hooks(copy) && !carries_silent_device(copy)) {
+				if (!carries_hooks(copy)) {
 					char why[NCFG_ERROR_MAX];
 
 					why[0] = '\0';
@@ -2440,7 +2375,19 @@ static void example_cases(void)
 	 */
 	check(compiled_mutations >= 3000u,
 	    "  and the mutations reach the compiler rather than all being refused");
-	check(round_tripped_mutations >= 1500u, "  and enough of them to be worth asking");
+	/*
+	 * Raised from 1500 with 10.437, because the fix moved the denominator.
+	 * While the empty-device hole stood, 3006 of these were waived and 3650
+	 * round tripped; closing it waives 230 and round trips 6426 -- the hole
+	 * was suppressing 42% of this sweep. A floor of 1500 against 6426 is one
+	 * that cannot fail, which is 10.426's own lesson about the 400 and 300 it
+	 * started with, arriving a second time by a different route: **a fix can
+	 * make a gate vacuous as surely as a regression can.**
+	 *
+	 * Only a regression crosses this downward. More blocks in the example mean
+	 * more mutations, so growth moves it the other way.
+	 */
+	check(round_tripped_mutations >= 5000u, "  and enough of them to be worth asking");
 	printf("    %zu mutations compiled, %zu round tripped, %zu refused, %zu waived\n",
 	    compiled_mutations, round_tripped_mutations, refused_mutations, waived_mutations);
 	if (found < 50u) {

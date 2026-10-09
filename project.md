@@ -12385,6 +12385,102 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.437 `declared`: the empty-device hole closed, and both candidates were halves
+
+10.418 left this open with two candidate fixes and said the choice was the
+holder's. Instructed to fix it. **The two were not alternatives.** The renderer
+had to know which devices were written, and `collect_overrides` was wrong
+underneath it -- with only the first, a profile still refuses the moment the
+renderer starts writing those blocks.
+
+### The field is provenance, so it stays out of the wire form
+
+`int declared` on `ncfg_device_t`, set at the one site in `lower.c` that appends
+a lowered block and left at zero by all three `push_device` callers, which
+invent one. **Deliberately absent from `device_fields[]`**, and that was the
+design decision rather than an omission:
+
+  * `document.c` says what the alternative costs -- a field that starts writing
+    itself "re-blesses a witness for no change in what the machine does", and
+    0020 makes that a schema change with a version bump attached;
+  * `doc/schema/document.json` is byte-compared by `document_test` **and** read
+    by three Rust test files, so serialising it would oblige 23 devices in the
+    witness and a model change in the implementation being retired;
+  * two documents differing only here describe the same machine, which is the
+    sentence `document.h` already makes about `generated_by`.
+
+`document_test` passing is the check on that: the witness did not move.
+
+**The cost is one place and it is written down.** The flag does not survive
+`ncfg_document_read`, and `host/profile_save.c` round trips through JSON to drop
+what the base already says -- so it carries the flag across by name, with the
+reason at the call.
+
+### Two halves, each with its own control
+
+    render_device   `|| device->declared` on the empty-body skip
+    collect_overrides   skip a device the base did not write
+
+Reverting the first fails the reproduction **and the mutation sweep**. Reverting
+the second makes `ncfg profile save` refuse outright, with the message 10.418
+predicted:
+
+    `override device eth0` has nothing to override: remove `override`, or
+    check the name
+
+### The hole was suppressing 42% of the mutation sweep
+
+The pin `compiles_but_cannot_round_trip` fired on the first build, carrying its
+own instruction -- *"it round trips now, so 10.418's hole is closed and this
+case should become an ordinary `compiles`"* -- which is what a pin is for. It is
+gone, with its one case converted, and so is `carries_silent_device`, the
+structural skip that existed only to keep the sweep from reporting the known
+hole hundreds of times.
+
+    before   6656 compiled, 3650 round tripped, 5423 refused, 3006 waived
+    after    6656 compiled, 6426 round tripped, 5423 refused,  230 waived
+
+**2,776 mutations were being waived**, and they round trip. That is the part
+worth keeping: a recorded hole is not only the case that names it, it is
+whatever else got waived to keep the suite quiet about it.
+
+**And the fix made a gate vacuous, which needed fixing too.** 10.426 set the
+round-trip floor at 1500 against a run of 3650. Against 6426 a floor of 1500
+cannot fail, so it is 5000 now. 10.426 already learned this once, from 400 and
+300; the second time arrives by the opposite route -- **a fix can make a gate
+unable to fail as surely as a regression can**, and nothing prompts you to look
+because the suite went greener.
+
+### The test I wrote first was measuring the fixture
+
+The `collect_overrides` case needs the device to come from the **profile**, not
+from `conf.d`. A drop-in is part of the base, so an override over it is correct,
+and the first attempt put it there and failed for that reason. What makes a base
+only *imply* a device is that the fold is taken out of it when a snapshot is
+saved, leaving `netcfgd.conf` alone.
+
+That the `set` succeeds is itself the premise under test: a plain
+`device eth0 { mtu = 1400 }` compiles beside `interface eth0`, so an invented
+device is not a definition anything must override -- which is exactly what
+`collect_overrides` had been claiming.
+
+### Two smaller things the change forced
+
+The `_Static_assert` on `sizeof(ncfg_device_t)` fired on the first build and
+sent whoever added the field to `bare_ifb`, which is what it is for. Answered
+there: `declared` goes in as the **first** clause, because every clause below it
+is a field that, if set, means an operator wrote the block, and this says so
+outright. Unreachable today -- `lower.c` refuses an operator's `device ifb-e0`
+as a duplicate -- and kept because it fails safe, a declared `ifb` being refused
+by name rather than silently undone. The size is 592, up from 584: an `int` cost
+8 with padding.
+
+**And `ncfg_render_device_writes_nothing` now has no caller.** It was added in
+10.426 so the sweep could ask the renderer rather than recompute; the sweep no
+longer needs to ask. It is exported from `render.h`, so removing it is an API
+change rather than a tidy-up, and it is left in place and named here instead.
+Whose decision: the copyright holder's.
+
 ## 10.436 Output wrong, meaning right: the third instance makes it a class
 
 The escaping surface. The lexer takes four escapes in a string -- `\"`, `\\`,
@@ -13949,10 +14045,11 @@ default", and still fails for any other loss. Proved by sabotaging a different
 one: dropping a device's `mtu` fails ten checks including three of the 237
 planner fixtures.
 
-The two candidate fixes stand, and both need the model to record which devices
-were DECLARED rather than synthesised, since a synthesised all-default device
-and a deliberately-declared empty one are indistinguishable without it. Whose
-decision: the copyright holder's.
+~~The two candidate fixes stand, and both need the model to record which
+devices were DECLARED rather than synthesised. Whose decision: the copyright
+holder's.~~ **Closed in 10.437 on the holder's instruction**, and both
+candidates turned out to be halves of one fix rather than alternatives: the
+renderer needed to know, and `collect_overrides` was wrong underneath it.
 
 ## 10.417 Every device kind renders but the one netcfgd makes itself
 

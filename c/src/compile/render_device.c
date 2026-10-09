@@ -671,12 +671,28 @@ static int our_ifb_name(const char *name, const char *shaped)
  * The clauses stay because the assertion above cannot see a field that is
  * merely unexamined, and because the cost of being wrong here is silence.
  */
-#define NCFG_RENDER_DEVICE_SIZE 584u /* measured, x86-64, 2026-10-08 */
+#define NCFG_RENDER_DEVICE_SIZE 592u /* measured, x86-64, 2026-10-09 */
 _Static_assert(sizeof(ncfg_device_t) == NCFG_RENDER_DEVICE_SIZE,
     "ncfg_device_t changed shape: bare_ifb() enumerates its fields, so re-read it");
 
 static int bare_ifb(const ncfg_device_t *device, int64_t *rate)
 {
+	/*
+	 * **The direct form of the question the rest of this asks indirectly.**
+	 * `declared` arrived for 10.418 and the assertion above sent whoever added
+	 * it here, which is what it is for. It belongs at the front: every clause
+	 * below is a field that, if set, means an operator wrote this block, and
+	 * this says so outright.
+	 *
+	 * Unreachable today -- `lower.c` refuses an operator's `device ifb-e0 { }`
+	 * beside a shaped interface as a duplicate entry, so no written device can
+	 * carry this kind. Kept because it fails in the safe direction: a declared
+	 * `ifb` stops being undone and is refused by name instead, which is this
+	 * module's rule rather than a silent drop.
+	 */
+	if (device->declared) {
+		return 0;
+	}
 	if (device->kind.kind != NCFG_KIND_IFB || !device->qdisc) {
 		return 0;
 	}
@@ -988,9 +1004,27 @@ void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *ove
 		render_modem(device->modem, &body);
 	}
 
-	/* A device with nothing to say is not written at all, which is right --
-	 * and see the paragraph above for what has to be written before this runs. */
-	if (ncfg_buf_text(&body)[0] != '\0') {
+	/*
+	 * A device with nothing to say is not written -- **unless somebody wrote
+	 * it**, and the two were indistinguishable until `declared` existed.
+	 *
+	 * The lowering invents a device for every interface, so skipping the empty
+	 * ones is what stops a profile saying `override device eth0 { }` for a
+	 * block the base config never had, which does not compile. That is 10.418,
+	 * and `master` once removed this skip and broke `ncfg profile save` on
+	 * `interface eth0 { config = "dhcp" }`.
+	 *
+	 * It also lost a block an operator had written. `device wlan0 { }` beside
+	 * an `access_point` naming it has nothing else to recreate its entry, so
+	 * the save refused: the profile did not reproduce the machine. The same
+	 * case with an `interface wlan0` beside it passed, and passed for the
+	 * wrong reason -- rendering the interface makes the recompile invent the
+	 * entry again, so the documents matched by coincidence.
+	 *
+	 * `declared` separates them, and nothing else can: an invented all-default
+	 * device is byte-identical to a written empty one.
+	 */
+	if (ncfg_buf_text(&body)[0] != '\0' || device->declared) {
 		ncfg_render_opening(text, "device", name, overrides);
 		ncfg_render_label(text, name);
 		ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
