@@ -157,10 +157,33 @@ static void render_lease_modifiers(const ncfg_address_source_t *source, ncfg_buf
  * character the text has to escape, and escaping is what `ncfg_render_quote`
  * is for.
  */
-static void render_static_address(const ncfg_static_t *address, ncfg_buf_t *slot)
+/*
+ * **The model's parser decides, not a shape written here.** A static address
+ * is `NCFG_F_STR` in the field tables, so a document read from JSON holds text
+ * that is not an address; `lower_address.c` refuses it on the way in and this
+ * wrote it back out. Measured: an `address` of `not-an-address` rendered and
+ * then failed its own round trip. `ncfg_address_canonical` takes CIDR and bare
+ * alike and refuses garbage and an out-of-range prefix, which is the same test
+ * the compiler applies.
+ */
+static void render_static_address(const ncfg_static_t *address, const char *scope,
+    const char *name, ncfg_buf_t *slot, ncfg_unrenderable_t *missing)
 {
 	ncfg_buf_t value;
+	char       canonical[NCFG_ADDRESS_MAX];
 
+	if (!ncfg_address_canonical(address->address ? address->address : "", canonical,
+	    sizeof(canonical), NULL, 0)) {
+		ncfg_render_refuse(missing, scope, name, "an address `%s`, which is not one",
+		    address->address ? address->address : "");
+		return;
+	}
+	if (address->peer && !ncfg_address_canonical(address->peer, canonical,
+	    sizeof(canonical), NULL, 0)) {
+		ncfg_render_refuse(missing, scope, name, "a `peer` address `%s`, which is not one",
+		    address->peer);
+		return;
+	}
 	ncfg_buf_init(&value, 0);
 	ncfg_buf_add_text(&value, address->address ? address->address : "");
 	if (address->peer) {
@@ -238,8 +261,8 @@ static void render_addressing(const ncfg_address_source_t *sources, size_t count
 
 		switch (source->kind) {
 		case NCFG_ADDRESS_SOURCE_STATIC:
-			render_static_address(&source->static_address,
-			    ncfg_render_list_next(&config));
+			render_static_address(&source->static_address, scope, name,
+			    ncfg_render_list_next(&config), missing);
 			continue;
 		case NCFG_ADDRESS_SOURCE_DHCP4:
 			word = "dhcp";

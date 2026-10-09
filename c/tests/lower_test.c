@@ -2192,6 +2192,48 @@ static int mutate_block(const char *source, char *out, size_t out_size)
 }
 
 /*
+ * String constraints the language has and the renderer does not yet apply.
+ *
+ * **A pinned baseline rather than a disabled sweep.** The string half of this
+ * sweep found fifteen of these on the run that added it, each a validator the
+ * compiler applies on the way in and the renderer does not apply on the way
+ * out -- so a document read from JSON carrying one is written and then refused
+ * by the program that wrote it. Fixing fifteen guards at once would be fifteen
+ * rushed guards; pinning them keeps the instrument running, stops the set
+ * growing, and leaves each one a named piece of work with a reproduction.
+ *
+ * Keyed on the COMPILER'S reason rather than on the JSON key, because a key is
+ * shared: `name` is a secret reference's here and a device's elsewhere, and the
+ * device's is guarded -- a pin on `name` would have masked that guard's
+ * removal. A reason names one constraint.
+ *
+ * Held in both directions: each pin must still fire, or it has been fixed and
+ * the entry is stale.
+ */
+static const struct {
+	const char *reason;
+	const char *what;
+} unguarded_strings[] = {
+	{ "a secret reference needs a name", "a secret ref's `name`" },
+	{ "is not a route destination", "a route's `destination`" },
+	{ "cannot be a network name", "a network name the lowering reserves" },
+	{ "a `network` block needs a name", "a network's label" },
+	{ "is not an absolute path", "a probe `command` and a hook path" },
+	{ "is not a regulatory domain", "an access point's `regdom`" },
+	{ "is not a Bluetooth address", "a bluetooth device's address" },
+	{ "is not an IPv6 address", "an IPv6 literal, in a token or a delegation" },
+	{ "is not an `http", "a portal's `portal_check` URL" },
+	{ "is not a hostname", "`global`'s hostname" },
+	{ "is not a duplex setting", "an ethtool `duplex`" },
+	{ "is not a band", "an access point's `band`" },
+	{ "is not an address or keyword", "an addressing entry this guard does not reach" },
+	{ "needs a name after it", "a `group:` principal" },
+	{ "an APN cannot be empty", "a modem's `apn`" },
+};
+
+static unsigned char unguarded_seen[sizeof(unguarded_strings) / sizeof(unguarded_strings[0])];
+
+/*
  * Every numeric leaf of a document, taken to an extreme.
  *
  * **What this asks that nothing else did.** `mutate_block` mutates the
@@ -2222,7 +2264,16 @@ static int mutate_block(const char *source, char *out, size_t out_size)
 static void numeric_extremes(const ncfg_document_t *document, size_t line, size_t *checked,
     size_t *refused, size_t *faults)
 {
-	static const char *const extremes[] = { "0", "99999" };
+	static const char *const numbers[] = { "0", "99999" };
+	/* A string the language will not take: one with whitespace in it, an empty
+	 * one, and one too long for a link name. The members' own type is
+	 * `NCFG_F_STR`, which carries no shape, so the reader accepts all three and
+	 * the question is whether the renderer notices. They are quoted here as
+	 * they go into JSON. */
+	static const char *const strings[] = {
+		"\"a b\"", "\"\"",
+		"\"0123456789012345678901234567890123456789012345678901234567890123\""
+	};
 	ncfg_buf_t  canonical;
 	const char *text;
 	size_t      at;
@@ -2244,8 +2295,17 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 		if (text[at] != '"' || text[at + 1u] != ':' || text[at + 2u] != ' ') {
 			continue;
 		}
+		const char *const *extremes;
+		size_t             count;
+
 		start = at + 3u;
-		if (text[start] != '-' && (text[start] < '0' || text[start] > '9')) {
+		if (text[start] == '-' || (text[start] >= '0' && text[start] <= '9')) {
+			extremes = numbers;
+			count = sizeof(numbers) / sizeof(numbers[0]);
+		} else if (text[start] == '"') {
+			extremes = strings;
+			count = sizeof(strings) / sizeof(strings[0]);
+		} else {
 			continue;
 		}
 		/* The document's own format, which the renderer never writes: mutating it
@@ -2254,14 +2314,28 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 		    || strncmp(text + at - 5u, "minor", 5u) == 0)) {
 			continue;
 		}
-		end = start + (text[start] == '-' ? 1u : 0u);
-		while (text[end] >= '0' && text[end] <= '9') {
+		if (extremes == strings) {
+			/* The writer escapes what it puts in a string, so the first
+			 * unescaped quote ends it. */
+			end = start + 1u;
+			while (text[end] != '\0' && text[end] != '"') {
+				end += (text[end] == '\\' && text[end + 1u] != '\0') ? 2u : 1u;
+			}
+			if (text[end] != '"') {
+				continue;
+			}
 			end++;
+		} else {
+			end = start + (text[start] == '-' ? 1u : 0u);
+			while (text[end] >= '0' && text[end] <= '9') {
+				end++;
+			}
 		}
-		for (which = 0; which < sizeof(extremes) / sizeof(extremes[0]); which++) {
+		for (which = 0; which < count; which++) {
 			ncfg_buf_t       variant;
 			ncfg_document_t *other;
 			char             why[NCFG_ERROR_MAX];
+			size_t           pin;
 
 			if ((size_t)(end - start) == strlen(extremes[which])
 			    && strncmp(text + start, extremes[which], end - start) == 0) {
@@ -2286,6 +2360,18 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 				continue;
 			}
 			if (strncmp(why, "it cannot be rendered at all", 28u) == 0) {
+				(*refused)++;
+				ncfg_document_free(other);
+				continue;
+			}
+			for (pin = 0; pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0]);
+			    pin++) {
+				if (strstr(why, unguarded_strings[pin].reason)) {
+					unguarded_seen[pin] = 1u;
+					break;
+				}
+			}
+			if (pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0])) {
 				(*refused)++;
 				ncfg_document_free(other);
 				continue;
@@ -2488,6 +2574,22 @@ static void example_cases(void)
 	    "  and the numeric sweep reached documents rather than nothing");
 	check(numeric_refused >= 8u,
 	    "  with some refused, which is what says the guards are reached");
+	/* And every pin still fires, so the list cannot become one of constraints
+	 * somebody has since guarded. A pin that has stopped firing is a fix that
+	 * nobody took the entry out for. */
+	{
+		size_t pin;
+
+		for (pin = 0; pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0]);
+		    pin++) {
+			if (!unguarded_seen[pin]) {
+				printf("    `%s` no longer faults -- %s is guarded, so drop the pin\n",
+				    unguarded_strings[pin].reason, unguarded_strings[pin].what);
+			}
+			check(unguarded_seen[pin] != 0u,
+			    "  and each pinned string constraint still fails, or its pin is stale");
+		}
+	}
 	/*
 	 * **The floors, which are the control.** A `mutate_block` that produced
 	 * garbage would make every mutation refuse, and a sweep where nothing

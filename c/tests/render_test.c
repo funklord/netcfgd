@@ -3284,6 +3284,64 @@ static void the_pairs_and_bounds_the_compiler_checks(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * A name or an address the language will not read back is refused.
+ *
+ * Both are `NCFG_F_STR` in the field tables, which carry no shape at all, so a
+ * document read from JSON holds names no `device` block could have declared
+ * and text that is not an address. The renderer wrote them and the recompile
+ * refused -- the string half of the class whose numeric half is above.
+ *
+ * The two tests are the language's own: `ncfg_usable_name`, which
+ * `lower_value.c` wraps as `ncfg_name_ok` and the supplicant backend calls
+ * directly, and `ncfg_address_canonical`.
+ */
+static void a_name_or_address_the_language_refuses(void)
+{
+	static const char *const bad_names[] = {
+		"eth 0", "", "a\nb",
+		"0123456789012345678901234567890123456789012345678901234567890123"
+	};
+	size_t           which;
+	ncfg_document_t *document;
+
+	for (which = 0; which < sizeof(bad_names) / sizeof(bad_names[0]); which++) {
+		document = compiled("device eth0 {\n\tmtu = 1400\n}\n", "a case's own device");
+		if (!document || document->device_count == 0u) {
+			check(0, "the case's own device compiles");
+			ncfg_document_free(document);
+			return;
+		}
+		if (which == 0u) {
+			check(renders(document), "a device named `eth0` renders, which is the control");
+		}
+		free(document->devices[0].name);
+		document->devices[0].name = strdup(bad_names[which]);
+		check(document->devices[0].name != NULL
+		    && refusal_names(document, "name", "not a name the language takes"),
+		    "  and a name the language would not take is refused by name");
+		ncfg_document_free(document);
+	}
+
+	document = compiled("interface eth0 {\n\tconfig = [\"192.0.2.5/24\"]\n}\n",
+	    "a case's own interface");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u,
+	    "an interface with a static address compiles");
+	if (!document || document->interface_count != 1u
+	    || document->interfaces[0].addressing_count != 1u) {
+		ncfg_document_free(document);
+		return;
+	}
+	check(renders(document), "  and renders, which is the control");
+	free(document->interfaces[0].addressing[0].static_address.address);
+	document->interfaces[0].addressing[0].static_address.address = strdup("not-an-address");
+	check(document->interfaces[0].addressing[0].static_address.address != NULL
+	    && refusal_names(document, "eth0", "which is not one"),
+	    "  and text that is not an address is refused by name");
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3314,6 +3372,7 @@ int main(int argc, char **argv)
 	a_vlan_id_out_of_range_is_refused();
 	a_channel_outside_its_band_is_refused();
 	the_pairs_and_bounds_the_compiler_checks();
+	a_name_or_address_the_language_refuses();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

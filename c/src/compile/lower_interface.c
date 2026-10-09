@@ -273,11 +273,32 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 				value += 4;
 				slash = strchr(value, '/');
 				length = slash ? (size_t)(slash - value) : strlen(value);
-				if (length >= sizeof(name)) {
-					length = sizeof(name) - 1u;
+				/*
+				 * **It used to truncate here, and truncating a reference points it at a
+				 * different interface.** `@pd:` and 64 characters, and `@pd:` and 70,
+				 * both became the same 63-character source: two configurations naming
+				 * different interfaces compiled to one document, with the delegation
+				 * taken from a name nobody had written. Nothing validated the source
+				 * either, so `@pd:eth 0` and a bare `@pd:` were accepted as well.
+				 *
+				 * `ncfg_name_ok` is what every other name in the language goes through,
+				 * and a name it accepts cannot reach this buffer's length -- so the
+				 * length test is a refusal now rather than a silent shortening, and it
+				 * has to come first because the check below reads a copy.
+				 */
+				if (length > NCFG_DELEGATION_SOURCE_MAX) {
+					ncfg_diag(ctx, assignment->span,
+					    "`%s` is not an interface name: it is longer than any name the kernel "
+					    "takes: %s", value, ncfg_link_name_help);
+					ncfg_words_free(&words);
+					goto drop;
 				}
 				memcpy(name, value, length);
 				name[length] = '\0';
+				if (!ncfg_name_ok(ctx, name, assignment->span, ncfg_link_name_help)) {
+					ncfg_words_free(&words);
+					goto drop;
+				}
 				if (slash) {
 					char         *end;
 					unsigned long index = strtoul(slash + 1, &end, 10);

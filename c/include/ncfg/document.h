@@ -157,6 +157,17 @@ typedef struct {
  * stop being a pure function of the config files, and two compiles of one
  * config would differ (`doc/decision/0009`).
  */
+/*
+ * The longest delegation source the configuration language can carry.
+ *
+ * A buffer size in `lower_address.c` and `lower_interface.c` until it was two
+ * buffer sizes and a silent truncation: `@pd:` with 64 characters and `@pd:`
+ * with 70 both became the same 63, so two configurations asking for different
+ * delegations compiled to one document. Both refuse now, and the renderer needs
+ * the same number to know what it cannot write back.
+ */
+#define NCFG_DELEGATION_SOURCE_MAX 63
+
 typedef struct {
 	char   *source; /* interface whose delegation supplies it */
 	int64_t index;  /* which delegated prefix; u8 */

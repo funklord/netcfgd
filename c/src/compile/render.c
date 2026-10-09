@@ -813,6 +813,147 @@ static void render_rule(const ncfg_routing_rule_t *rule, const ncfg_overrides_t 
 	ncfg_buf_free(&body);
 }
 
+/*
+ * A name the language will read back, or a refusal saying why not.
+ *
+ * `ncfg_usable_name` is the model's and is the one test the configuration
+ * language applies to a link name -- `lower_value.c` wraps it as
+ * `ncfg_name_ok` to attach a span and a sentence, and the supplicant backend
+ * calls it directly. Nothing in the document's field tables applies it: a name
+ * is `NCFG_F_STR`, so a document read from JSON holds names no `device` block
+ * could have declared.
+ *
+ * Measured before this existed: a device renamed to `eth 0`, to the empty
+ * string, to one with a newline in it, or to 64 characters each rendered
+ * cleanly and then failed its own round trip on the lowerer's words. So
+ * `ncfg profile save` wrote the profile, failed its proof and rolled it back,
+ * telling the operator it was a fault in the snapshot.
+ */
+static void refuse_unusable_name(ncfg_unrenderable_t *missing, const char *scope,
+    const char *owner, const char *what, const char *name)
+{
+	const char *why;
+
+	if (!name) {
+		return;
+	}
+	why = ncfg_usable_name(name);
+	if (!why) {
+		return;
+	}
+	ncfg_render_refuse(missing, scope, owner, "%s `%s`, which is not a name the language takes: %s",
+	    what, name, why);
+}
+
+/*
+ * Every name this renderer can write, checked once before the walk.
+ *
+ * **One pass rather than a guard at each of fifteen sites.** The names are
+ * spread over three files and a tagged union, and a check per site is fifteen
+ * places to forget; this is one list, and the list's obligation is to track
+ * what the LOWERING validates -- `ncfg_require_interface_label` for a block's
+ * label, and the ten `ncfg_as_interface_name` call sites plus the per-word
+ * check in `lower_kind.c` for the references.
+ *
+ * **Deliberately not stricter than the language.** `ingress_redirect` is a
+ * name the lowering does NOT validate, so it is not here: refusing it would
+ * stop a profile saving over something the language reads back perfectly well,
+ * which is the mistake the band-6 case in `render_link.c` records.
+ */
+static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrenderable_t *missing)
+{
+	size_t i;
+	size_t j;
+
+	for (i = 0; i < document->device_count; i++) {
+		const ncfg_device_t         *device = &document->devices[i];
+		const ncfg_interface_kind_t *kind = &device->kind;
+
+		refuse_unusable_name(missing, "device", device->name, "its own name", device->name);
+		refuse_unusable_name(missing, "device", device->name, "`master`", device->master);
+		switch (kind->kind) {
+		case NCFG_KIND_BRIDGE:
+			for (j = 0; j < kind->bridge.member_count; j++) {
+				refuse_unusable_name(missing, "device", device->name, "a bridge member",
+				    kind->bridge.members[j]);
+			}
+			break;
+		case NCFG_KIND_BOND:
+			for (j = 0; j < kind->bond.member_count; j++) {
+				refuse_unusable_name(missing, "device", device->name, "a bond member",
+				    kind->bond.members[j]);
+			}
+			break;
+		case NCFG_KIND_VLAN:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->vlan.parent);
+			break;
+		case NCFG_KIND_VXLAN:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->vxlan.parent);
+			break;
+		case NCFG_KIND_MACVLAN:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->macvlan.parent);
+			break;
+		case NCFG_KIND_TUNNEL:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->tunnel.parent);
+			break;
+		case NCFG_KIND_PPPOE:
+			refuse_unusable_name(missing, "device", device->name, "`parent`",
+			    kind->pppoe.parent);
+			break;
+		case NCFG_KIND_VETH:
+			refuse_unusable_name(missing, "device", device->name, "`peer`",
+			    kind->veth.peer);
+			break;
+		default:
+			break;
+		}
+	}
+	for (i = 0; i < document->interface_count; i++) {
+		const ncfg_interface_t *interface = &document->interfaces[i];
+
+		refuse_unusable_name(missing, "interface", interface->name, "its own name",
+		    interface->name);
+		/* A prefix to advertise names the interface whose delegation it comes
+		 * from, so it is a link name like any other -- and `lower_interface.c`
+		 * silently truncated one until it was made to refuse. */
+		for (j = 0; interface->advertise && j < interface->advertise->prefix_count; j++) {
+			refuse_unusable_name(missing, "interface", interface->name,
+			    "an advertised prefix's source",
+			    interface->advertise->prefixes[j].source);
+		}
+	}
+	/* A length and not `ncfg_usable_name`: the member's comment calls a
+	 * delegation source an interface name and the example file writes one that
+	 * is not, so whether it must be a name is open -- see `project.md`. The
+	 * length is not open, and truncating it named a different delegation. */
+	for (i = 0; i < document->interface_count; i++) {
+		const ncfg_interface_t *interface = &document->interfaces[i];
+
+		for (j = 0; j < interface->addressing_count; j++) {
+			const char *source = interface->addressing[j].delegated.prefix.source;
+
+			if (interface->addressing[j].kind != NCFG_ADDRESS_SOURCE_DELEGATED
+			    || !source || strlen(source) <= NCFG_DELEGATION_SOURCE_MAX) {
+				continue;
+			}
+			ncfg_render_refuse(missing, "interface", interface->name,
+			    "a delegation source `%s`, longer than the language carries", source);
+		}
+	}
+	for (i = 0; i < document->rule_count; i++) {
+		refuse_unusable_name(missing, "rule", NULL, "`iif`", document->rules[i].iif);
+		refuse_unusable_name(missing, "rule", NULL, "`oif`", document->rules[i].oif);
+	}
+	for (i = 0; i < document->access_point_count; i++) {
+		refuse_unusable_name(missing, "access_point", document->access_points[i].id,
+		    "`device`", document->access_points[i].device);
+	}
+}
+
 int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing, char *err, size_t err_size)
 {
@@ -831,6 +972,10 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 		    "a document was rendered with nowhere to report what it could not render");
 		return 0;
 	}
+
+	/* Before anything is written, because a name the language will not read
+	 * back makes the whole profile unusable rather than one block. */
+	refuse_unusable_names(document, missing);
 
 	/* `schema_version` and `generated_by` are deliberately not written: the
 	 * configuration language cannot express either, and the compiler

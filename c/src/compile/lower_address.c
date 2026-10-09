@@ -298,8 +298,24 @@ static int delegated_source(ncfg_lower_ctx_t *ctx, const entry_t *entry,
 	size_t      length = equals ? (size_t)(equals - rest) : strlen(rest);
 	int64_t     subnet = 0;
 
-	if (length >= sizeof(source)) {
-		length = sizeof(source) - 1u;
+	/*
+	 * **Refused rather than shortened.** Truncating a delegation's source makes
+	 * it name something else: `@pd:` with 64 characters and `@pd:` with 70 both
+	 * became the same 63, so two configurations asking for different
+	 * delegations compiled to one document. The same shortening was in
+	 * `lower_interface.c`'s advertised prefixes and is gone from there too.
+	 *
+	 * It is a length test and not `ncfg_name_ok`, deliberately. The member's
+	 * comment calls the source "interface whose delegation supplies it", and
+	 * `doc/netcfgd.conf.example` writes `@pd:0::1/64`, which under this grammar
+	 * is a source of `0::1` and no interface name at all. One of those two is
+	 * wrong and it is not this function's to decide -- see `project.md`.
+	 */
+	if (length > NCFG_DELEGATION_SOURCE_MAX) {
+		ncfg_diag(ctx, entry->span,
+		    "`%s` is longer than any interface name, so it names no delegation",
+		    rest);
+		return 0;
 	}
 	memcpy(source, rest, length);
 	source[length] = '\0';

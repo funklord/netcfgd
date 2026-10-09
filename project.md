@@ -12385,6 +12385,105 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.454 The string half, which is wider than the numeric one, and a silent truncation
+
+10.453's sweep reads **numeric** leaves. The vxlan family pair in 10.452 was a
+pair of STRINGS and was found by hand, so the string half of the class was
+untested. It is much the larger half.
+
+### Five found by hand first
+
+A device's `name` is `NCFG_F_STR` in the field tables, which carry no shape at
+all. Set to `eth 0`, to the empty string, to one with a newline, or to 64
+characters, each rendered cleanly and then failed its own round trip on the
+lowerer's words -- and so did a static address set to `not-an-address`.
+
+Two that do NOT fault are worth recording: a device named `global`, which is a
+block keyword, and one named `a{b`. **Quoting already covers the lexical
+half** -- the renderer writes the label quoted, so the lexer reads it back
+whole. What quoting cannot cover is the semantic half, which is the lowering's
+name rules, and that is the gap.
+
+**Both validators already existed and were already public.** `ncfg_usable_name`
+is in `document.h` and the supplicant backend calls it; `lower_value.c` wraps
+it as `ncfg_name_ok` only to attach a span and a sentence. `ncfg_address_canonical`
+takes CIDR and bare alike. Nothing needed extracting into the model, which the
+three fixes before this one each did -- the separation was already there and
+the renderer simply never called it.
+
+**One pass, not fifteen guards.** The names are spread over three files and a
+tagged union; a check per site is fifteen places to forget. `render.c` checks
+them all once before the walk, and the list's obligation is to track what the
+LOWERING validates: `ncfg_require_interface_label` for a block's label, the ten
+`ncfg_as_interface_name` call sites, and the per-word check in `lower_kind.c`.
+`ingress_redirect` is deliberately absent, being a name the lowering does not
+validate -- refusing it would stop a profile saving over something the language
+reads back perfectly well, which is the band-6 lesson from 10.451.
+
+### Then the sweep was extended, because the lesson was to exercise rather than read
+
+10.453's own conclusion was that an enumeration of a behaviour has to come from
+exercising it. So the sweep learned about string leaves -- whitespace, empty,
+over-long -- and found **113 fault lines over fifteen distinct constraints**,
+against six for the whole numeric half:
+
+    a secret reference needs a name        a `network` block needs a name
+    is not a route destination            cannot be a network name
+    is not an absolute path                is not a regulatory domain
+    is not a Bluetooth address             is not an IPv6 address
+    is not an `http://` URL                is not a hostname
+    is not a duplex setting                is not a band
+    is not an address or keyword           needs a name after it
+    an APN cannot be empty
+
+**Pinned rather than disabled.** Fifteen guards at once would be fifteen rushed
+guards, so they are a baseline the sweep carries: the set cannot grow, and each
+entry is a named piece of work with a reproduction. That is the agree gate's
+`SAVE_AHEAD` idiom, which pins what is known-open so a new one fails.
+
+Keyed on the **compiler's reason** and not on the JSON key, because a key is
+shared: `name` here is a secret reference's, while a device's `name` is guarded
+by the pass above -- a pin on `name` would have masked that guard's removal. And
+held in both directions: all fifteen are asserted to still fire, so a pin left
+behind after a fix fails rather than going quiet.
+
+### The one fault that was not a refusal
+
+Fourteen of the fifteen say "does not compile". One said **"compiles to a
+DIFFERENT document"** -- the renderer wrote something that compiles and means
+something else, which is worse than anything else here.
+
+It is a silent truncation, in two places. A delegation source is copied into a
+fixed buffer:
+
+    if (length >= sizeof(name)) { length = sizeof(name) - 1u; }
+
+So `@pd:` with 64 characters and `@pd:` with 70 both became the same 63, and
+**two configurations naming different delegations compiled to one document**,
+with the prefix taken from a name nobody wrote. Reachable from a configuration
+file, not only from JSON -- measured with both lengths and the same stored
+result. The advertised-prefix source was not validated as a name at all either,
+so `@pd:eth 0` and a bare `@pd:` were accepted.
+
+Both refuse now. The advertised source goes through `ncfg_name_ok` like every
+other name, the length is `NCFG_DELEGATION_SOURCE_MAX` in `document.h` rather
+than two buffer sizes, and the renderer refuses an over-long one so the JSON
+route is closed as well.
+
+### Raised rather than resolved: is a delegation source a name?
+
+`ncfg_prefix_ref_t.source` is commented "interface whose delegation supplies
+it". `doc/netcfgd.conf.example` writes `config = ["192.168.1.1/24",
+"@pd:0::1/64"]`, and under the grammar `@pd:<source>[/<subnet>][=<suffix>]`
+that is a source of `0::1` with subnet 64 -- which names no interface, so the
+delegation could never resolve.
+
+One of those two is wrong. Either the example means `@pd:<iface>=::1/64` and is
+a typo in the document a reader meets first, or a source is not always an
+interface name and the member's comment is. Applying `ncfg_name_ok` there would
+reject the example file, which is why the addressing source gets only the length
+check and the name question is left open.
+
 ## 10.453 The sweep got built after all, and found what reading had missed
 
 10.452 said the document-side sweep was blocked on two things: the field tables
