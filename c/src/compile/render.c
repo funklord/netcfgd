@@ -23,6 +23,22 @@
  *   though the model defaults it, so a bond whose mode happened to equal the
  *   default would render as a block that no longer compiles. A model default
  *   and a language default are not the same fact.
+ *
+ * A CHOICE THE ROUND TRIP CANNOT SEE NEEDS AN ASSERTION ON THE TEXT
+ *   Adding a form here? Ask whether it changes what the document MEANS or what
+ *   the file SAYS. The round trip and four corpora cover the first. For the
+ *   second they are structurally blind, because both forms compile to the same
+ *   document -- so no number of further corpora helps, and only an assertion
+ *   on the output's bytes can tell them apart.
+ *
+ *   Seven such choices exist today and all seven are pinned that way: the
+ *   canonical spelling of an alias, omitting a block that is entirely default,
+ *   a newline written raw rather than escaped, a label bare rather than
+ *   quoted, a single-entry list bracketed rather than bare, a rate under the
+ *   largest suffix that divides it, and a `qdisc` in the short form. Three of
+ *   those were found missing in one pass after the first two had been fixed
+ *   separately, which is what the class costs when it has no name: each
+ *   instance looks like its own oversight.
  */
 #include "ncfg/render.h"
 

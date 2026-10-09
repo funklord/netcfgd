@@ -12433,6 +12433,38 @@ first is the round trip's and four corpora already cover it. The second has no
 instrument but a text assertion, and this tree has now paid for that three
 times.
 
+### The class, swept
+
+Naming a class is worth little until it has been enumerated, so: every choice
+the renderer makes between two forms that compile to the same document.
+
+    alias vs canonical spelling        closed 10.428, nine cases
+    omit vs write a block at default   closed 10.432, four members
+    raw vs escaped newline             closed here
+    bare vs quoted label               already sound
+    bare vs bracketed list             already sound
+    rate units                         already sound
+    short vs block `qdisc` form        already sound
+
+**Three were gaps and four were already pinned, which is the useful ratio** --
+this is not a tree that had ignored the question, it is one that had answered
+it four times without naming it, so the three that were missed look like
+oversights rather than a missing practice.
+
+The four that hold are worth reading for how. `ncfg_render_label` is the best
+of them: a population of three names that must be quoted -- `.th0`, `2eth`,
+`4g0`, every one a name the kernel makes happily -- against three that must
+stay bare, `eth0`, `eth0.42`, `br-lan`. Both directions, in the text, with the
+hard case (`eth0.42`, a dot being legal inside an identifier and not at its
+start) chosen deliberately as the control. And `servers = ["10.4.0.53"]` is
+asserted with a **single** entry, which is the whole of what `always_bracket`
+buys: drop the flag and one server renders bare, splits on whitespace back into
+one server, and the document is identical.
+
+So the sweep is finished rather than open. A new choice of this kind arrives
+with a new renderer form, and the question to ask it is the one above: does
+this change what the document MEANS or what the file SAYS.
+
 ## 10.435 The renderer's reachability boundary, measured
 
 The lens from 10.433 -- a comparison that ran constantly and was never asked a
