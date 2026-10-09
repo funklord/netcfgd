@@ -12385,6 +12385,45 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.445 `c-port` is gone and master is the working branch
+
+The branch existed to keep an unfinished port off the default branch, and the
+port is what the tree is now. Settled by the copyright holder 2026-10-09: work
+on master directly, and delete the branch.
+
+    origin/master   88462831 -> 10890b28   fast-forward
+    c-port          deleted, local and remote
+    local master    acf7addb -> 10890b28   (it had sat 335 behind)
+
+**The deletion was safe because the ancestry said so, not because the branches
+looked the same.** `git merge-base --is-ancestor origin/master c-port` passed
+and both `c-port..master` and `c-port..origin/master` were empty, so every
+commit either ref held was reachable from the new tip; the local delete used
+`git branch -d`, which refuses on exactly the condition that would matter, and
+`backup/pre-c-port-rebase` still holds the pre-rebase history.
+
+**What needed care was somebody else's uncommitted work, not the refs.** Two
+files in `tool/` were dirty and belong to another session. Pointing master at
+the c-port tip *before* checking it out makes the checkout a no-op on the
+working tree, which is what lets a dirty tree cross a branch switch untouched;
+the alternative order asks git to change files that are not yours. Verified by
+hashing both files either side of the switch rather than by reading
+`git status`, which reports them modified in both arrangements and so cannot
+tell the two apart.
+
+**Nothing selected on the branch name**, which was worth checking before
+removing it: no workflow trigger, no Makefile target, no tool. What does name
+it is prose -- decision 0263 opens by saying the conversion happens "on the
+branch `c-port`". That record is accepted and is not edited, so the sentence
+stands as the history it is, and this entry is where a reader learns the branch
+no longer exists.
+
+**The arrangement it replaces had already started drifting again.** Master was
+fast-forwarded to the c-port tip earlier the same day, after 334 commits of
+divergence; one commit later the two had separated again. A scheme that needs a
+deliberate act per commit to stay converged is one that diverges whenever the
+act is forgotten, and the act was forgotten once within the hour.
+
 ## 10.444 `ncfg_render_device_writes_nothing` removed
 
 Added in 10.426 so the mutation sweep could ask the renderer whether a device
