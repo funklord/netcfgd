@@ -13,7 +13,7 @@
 //! to rediscover. What moves is the index, which is derived and disposable and
 //! gone after a reboot, so a cold start begins at the preference again.
 
-use netcfgd_model::{Declared, Device, Document, ObservedReport};
+use netcfgd_model::{Device, Document, ObservedReport};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -302,7 +302,7 @@ fn publish(run_dir: &Path, device: &str, sim: Option<&String>, apn: Option<&str>
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use netcfgd_model::{Device, ModemPolicy, OnUnmanage};
+	use netcfgd_model::{Declared, Device, ModemPolicy, OnUnmanage};
 
 	fn document(sim: &[&str], apn: Option<&str>) -> Document {
 		let mut document = Document::default();

@@ -12453,6 +12453,16 @@ sites would not have given. `field.h` is why that mattered: a hand-written
 equality there missed `bluetooth` for as long as the field existed, and a type
 cannot drift the way a maintained list does.
 
+**And the check caught my own verification being too narrow**, which is worth
+more than the bug. Clippy refused an unused import of `Declared` in
+`netcfgd-daemon`: the usage is inside `#[cfg(test)] mod tests`, the import had
+gone to the module level, and a non-test build therefore sees it unused. What
+let it through was that I had checked for unused imports with
+`cargo test -p netcfgd-model`, one crate, and read the zero as a fact about the
+workspace -- `evidence.md`'s rule that a search's scope is chosen before you
+know who owns the answer, met in a verification rather than in a sweep. `make
+clippy` is the gate and it is workspace-wide for exactly this reason.
+
 In the C the same exclusion is one `continue` in `document_compare.c`, which is
 the treatment `generated_by` already has: **in the canonical form, out of
 equality.** Those two are deliberately different places, which this made
