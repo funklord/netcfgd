@@ -12717,6 +12717,21 @@ by the lowering -- which **sharpens 10.426's claim rather than contradicting
 it.** The content is still a compiled document's; what passes through JSON is
 the serialisation, and the trim filters globals rather than devices.
 
+**And the caller contract is sound, which is the other half of that boundary.**
+`ncfg_render` has two production callers and trusts three facts from them, each
+checked rather than assumed: the `document` (both pass a whole one, which
+`shaper_rate` needs to look up a redirect's target), `overrides` (NULL from
+`host/round_trip.c`, which renders a standalone document with nothing to
+override, and `collect_overrides` from `host/profile_save.c`), and `missing`.
+
+The third is the one worth naming, because it is where a refusal could have
+become a drop: **`ncfg_render` returns 0 when anything was refused** and frees
+the text as it goes -- *"half a profile that looks whole is worse than none"* --
+so a caller cannot proceed on a partial render, and both callers read the list
+to say what was in the way. A caller passing nowhere to put refusals is refused
+outright. That is `evidence.md`'s rule about a guard's failure having to become
+the caller's failure, already built in rather than missing.
+
 **The boundary, stated once so the next lens does not have to re-derive it:
 every document the renderer is asked to write originates from the lowering,
 directly or through a round trip of one.** A refusal or a guard that names
