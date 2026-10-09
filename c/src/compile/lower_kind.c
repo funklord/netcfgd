@@ -193,10 +193,13 @@ static int lower_vlan(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			free(parent);
 			parent = ncfg_as_interface_name(ctx, assignment->value);
 		} else if (strcmp(key, "id") == 0) {
-			ncfg_as_narrow_opt(ctx, assignment->value, 65535, &id);
+			/* `NCFG_VLAN_ID_MAX` carries the reason: twelve bits with 4095
+			 * reserved, so the kernel takes 0 through 4094. This said 65535,
+			 * which was the Rust's `u16` and not a bound on anything. */
+			ncfg_as_narrow_opt(ctx, assignment->value, NCFG_VLAN_ID_MAX, &id);
 			if (!id.has) {
 				ncfg_diag(ctx, assignment->value->span,
-				    "vlan id must be between 0 and 4095");
+				    "vlan id must be between 0 and %d", NCFG_VLAN_ID_MAX);
 			}
 		} else if (strcmp(key, "protocol") == 0) {
 			char *name = ncfg_as_string(ctx, assignment->value);

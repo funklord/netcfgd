@@ -3064,6 +3064,58 @@ static void a_probe_count_below_the_floor_is_refused(void)
 	}
 }
 
+/*
+ * A vlan id the language will not take back is refused rather than written.
+ *
+ * The document's range for the id is `R_U16` and the language stops at
+ * `NCFG_VLAN_ID_MAX`, so a document read from JSON holds ids this cannot write
+ * -- the same shape as the shaped rate of zero and the probe counts above.
+ */
+static void a_vlan_id_out_of_range_is_refused(void)
+{
+	const char *text = "device v {\n\tvlan {\n\t\tparent = \"eth0\"\n"
+	    "\t\tid = 4094\n\t}\n}\n";
+	ncfg_document_t    *document = compiled(text, "a case's own configuration");
+	ncfg_buf_t          out;
+	ncfg_unrenderable_t missing;
+	char                message[NCFG_ERROR_MAX];
+	int                 named = 0;
+	size_t              i;
+
+	check(document != NULL, "the case's own configuration compiles at the top of the range");
+	if (!document || document->device_count == 0u) {
+		ncfg_document_free(document);
+		return;
+	}
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	check(ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+	    "  and 4094 renders, which is the control");
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+
+	document->devices[0].kind.vlan.id = NCFG_VLAN_ID_MAX + 1;
+	ncfg_buf_init(&out, 0);
+	ncfg_unrenderable_init(&missing);
+	message[0] = '\0';
+	check(!ncfg_render(document, NULL, &out, &missing, message, sizeof(message)),
+	    "  and one above it is refused rather than written");
+	for (i = 0; i < missing.count && !named; i++) {
+		named = strstr(missing.items[i], "4095") != NULL
+		    && strstr(missing.items[i], "vlan id") != NULL;
+	}
+	if (!named) {
+		for (i = 0; i < missing.count; i++) {
+			printf("  refused: %s\n", missing.items[i]);
+		}
+	}
+	check(named, "  and the refusal says which id and that it is not one");
+	ncfg_buf_free(&out);
+	ncfg_unrenderable_free(&missing);
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3091,6 +3143,7 @@ int main(int argc, char **argv)
 	a_document_carrying_provenance_round_trips();
 	a_shaped_rate_of_zero_is_refused();
 	a_probe_count_below_the_floor_is_refused();
+	a_vlan_id_out_of_range_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

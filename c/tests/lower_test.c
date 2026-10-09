@@ -2896,6 +2896,36 @@ static void provenance_cases(void)
 	a_key_that_does_not_fit_is_not_recorded_by_halves();
 }
 
+/*
+ * A vlan id is twelve bits with 4095 reserved, so the language stops at 4094.
+ *
+ * It stopped at 65535 and said "between 0 and 4095", the 65535 being a
+ * faithful port of the Rust's `u16::try_from` -- the width of a C short rather
+ * than a fact about VLANs. Ids from 4095 up compiled and reached a kernel that
+ * refuses them with an errno instead of a name. Settled by the copyright
+ * holder 2026-10-09: the spec decides this, not the Rust.
+ *
+ * Both edges, because a bound asserted on one side is half a bound.
+ */
+static void vlan_id_cases(void)
+{
+	const char *top = "device v {\n\tvlan {\n\t\tparent = \"eth0\"\n"
+	    "\t\tid = 4094\n\t}\n}\n";
+	/* `compiles` proves the round trip as well, so the renderer's own new bound
+	 * is asserted against the top of the range by the same line. */
+	ncfg_document_t *document = compiles(top, "a vlan id of 4094 is the top, and round trips");
+
+	if (document) {
+		check(document->device_count == 1u && document->devices[0].kind.vlan.id == 4094,
+		    "  and keeps the id it was given");
+		ncfg_document_free(document);
+	}
+	refuses("device v {\n\tvlan {\n\t\tparent = \"eth0\"\n\t\tid = 4095\n\t}\n}\n",
+	    "between 0 and 4094", "and 4095, which 802.1Q reserves, is refused by name");
+	refuses("device v {\n\tvlan {\n\t\tparent = \"eth0\"\n\t\tid = 65535\n\t}\n}\n",
+	    "between 0 and 4094", "and so is the old bound's own upper limit");
+}
+
 int main(void)
 {
 	addressing_cases();
@@ -2908,6 +2938,7 @@ int main(void)
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();
 	kind_cases();
+	vlan_id_cases();
 	qdisc_cases();
 	rule_cases();
 	linkset_cases();

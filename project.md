@@ -12385,6 +12385,95 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.450 A vlan id is twelve bits, and neither number on offer was right
+
+Settled by the copyright holder 2026-10-09, on 10.449's open question: **the
+spec decides this, not the Rust the C is replacing.** The two candidates were
+4095 (the diagnostic's number) and 65535 (the code's). The spec's answer is
+**4094**, and the reason is worth keeping because it is why asking beat
+picking.
+
+802.1Q gives the VID twelve bits. 4095 is **reserved for implementation use**,
+and Linux spells that `VLAN_VID_MASK` and refuses anything not below it. So a
+vlan device takes 0 through 4094: the diagnostic was wrong at the top as well
+as disagreeing with the code, and nobody looking only at those two numbers
+would have found the third.
+
+`working-practice.md` says a discrepancy held open produces answers neither
+branch contains. This is a small instance of exactly that, and it is the second
+in this tree -- the terminal's selection rule was the first.
+
+**The old 65535 was never a bound.** It was the width of a C short, inherited
+from `u16::try_from`, and a faithful port of a number that is not a fact about
+VLANs. Ids from 4095 up compiled and were handed to a kernel that refuses them
+with an errno rather than a name.
+
+### The tree already had the spec right twice, which is where the shape came from
+
+The sweep that found this checked every numeric bound in `lower_kind.c` and
+`lower_device.c`. Bridge `priority`, vxlan `port`, wireguard `listen_port` and
+`keepalive` are genuinely sixteen bits and tunnel `ttl` is eight, so those
+65535s and that 255 are bounds. Two neighbours are spec-correct and say so:
+
+  * the **VXLAN VNI** rejects 1 << 24 and up with "a VNI is 24 bits, so at most
+    16777215", and its comment names the harm -- the kernel truncates silently,
+    so two tunnels that look distinct in the config become one;
+  * the **per-port bridge VLAN** rejects 0 and anything over 4094 with "not a
+    VLAN id: between 1 and 4094", and its comment says 0 is not a VLAN and 4095
+    is reserved and the kernel refuses both with an errno.
+
+So the vlan device id was the lone outlier among six, which is what made it
+worth doubting rather than a lone oddity worth explaining away.
+
+**The bridge-port bound stays stricter, and the difference is recorded where it
+will be met.** 1 to 4094 there, because 0 is not a VLAN to put on a port; 0 to
+4094 for a vlan device, because the kernel accepts one. A later reader
+harmonising the two would be wrong, so `NCFG_VLAN_ID_MAX`'s comment says which
+is which and why.
+
+### One bound, two users, because that is the fault this session kept finding
+
+`NCFG_VLAN_ID_MAX` is in `document.h` beside `ncfg_vlan_config_t` rather than
+written into either file that needs it. The lowering needs it to refuse a
+configuration; the renderer needs the same number to know what it cannot write
+back -- and two copies of a bound is precisely how this one came to disagree
+with itself.
+
+**Narrowing the language creates a renderer gap, so both halves land
+together.** The document's range for the id is `R_U16`, so a document read from
+JSON still holds ids up to 65535 that the language will no longer take. Left
+alone, the renderer would write `id = 5000` and the recompile would refuse --
+10.449's class, created by 10.449's fix. `render_kind` names it instead:
+
+    device v: a vlan id of 4096, which is not one (0 to 4094)
+
+Refusing rather than narrowing `R_U16` to match, for the reason 10.449 gives:
+the reader's range is what documents this build accepts, and narrowing it makes
+a document other things still read unreadable here.
+
+### The C is stricter than the Rust now, deliberately, and no gate can see it
+
+This is the first place the port has gone **past** the thing it ports rather
+than matching it, and that is the instruction: 0266 makes the Rust a comparison
+oracle, and the holder's words were that the spec decides. So the Rust still
+accepts ids to 65535 and the C stops at 4094, on purpose.
+
+**The agree gate stays green and is not evidence of anything here.** Its eleven
+configurations hold no vlan id above 4094, so the two programs cannot disagree
+about one -- a passing gate over an input set that cannot produce the
+difference, which is `evidence.md`'s vacuous pass wearing the oracle's clothes.
+Written down because a later session finding the divergence has a green gate, a
+sibling implementation and no note, and "the two should agree" is the
+comfortable reading.
+
+### Asserted at both edges, because a bound checked on one side is half a bound
+
+`lower_test.c` takes 4094 through `compiles`, which proves the round trip too,
+so the renderer's new bound is asserted against the top of the range by the
+same line; then 4095 and 65535 are refused by name. `render_test.c` renders
+4094 as its control and refuses `NCFG_VLAN_ID_MAX + 1`, written as that rather
+than as a literal so the test cannot drift from the bound it is testing.
+
 ## 10.449 Values the model admits that the language refuses
 
 The word-table lens (10.448) came up empty on names, so this one went at the
@@ -12465,26 +12554,19 @@ lowering's defaults. If the tables disagreed on any of the five, that round
 trip would fail. Worth recording because the guard is not where a reader
 looking at either table would think to find it.
 
-### Raised rather than resolved: the vlan id bound
+### The vlan id bound, raised here and settled in 10.450
 
-`lower_kind.c` reads a vlan `id` with
-`ncfg_as_narrow_opt(ctx, value, 65535, &id)` and, when that drops the value,
-says **"vlan id must be between 0 and 4095"**. The code enforces 0 to 65535;
-802.1Q ids are twelve bits, so 4096 and up are not vlan ids at all, and one
-round trips through this build today without complaint.
+`lower_kind.c` read a vlan `id` with `ncfg_as_narrow_opt(ctx, value, 65535,
+&id)` while its own diagnostic said **"vlan id must be between 0 and 4095"** --
+two statements of intent in one function, disagreeing, with the Rust carrying
+the same pair and its comment calling the narrowing a deliberate port of
+`u16::try_from`.
 
-Two statements of intent sit in that one function and they disagree. The
-message says 4095. The comment on `ncfg_as_narrow_opt` says the silent drop is
-"the Rust's `.and_then(|n| u16::try_from(n).ok())`, preserved deliberately" --
-so the 65535 is a faithful port rather than a slip, and the Rust has the same
-pair.
-
-Narrowing to 4095 stops configurations compiling that compile now; widening the
-message to 65535 writes a bound into the language that 802.1Q does not have.
-Neither is a renderer gap and neither is mine to pick, so it is recorded here
-and raised, per *the document and the code contradict each other* in
-`working-practice.md` -- which is about this exact situation and says the answer
-is often a third thing neither branch contains.
+Raised rather than resolved, because narrowing stops configurations compiling
+that compiled and widening the message writes a bound into the language that
+802.1Q does not have. **The copyright holder settled it the same day: the spec
+decides, not the Rust.** 10.450 has what that turned out to mean, which was
+neither of the two numbers on offer.
 
 ## 10.448 The renderer's word tables: nothing wrong, two things unguarded
 

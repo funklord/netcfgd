@@ -415,6 +415,16 @@ static void render_kind(const ncfg_interface_kind_t *kind, const char *name, ncf
 		render_bond(&kind->bond, body);
 		break;
 	case NCFG_KIND_VLAN:
+		/* The document's range for the id is `R_U16` and the language takes
+		 * `NCFG_VLAN_ID_MAX`, so a document read from JSON can hold an id
+		 * this cannot write back -- the same shape as a shaped rate of zero,
+		 * and named rather than written for the same reason. */
+		if (kind->vlan.id < 0 || kind->vlan.id > NCFG_VLAN_ID_MAX) {
+			ncfg_render_refuse(missing, "device", name,
+			    "a vlan id of %lld, which is not one (0 to %d)",
+			    (long long)kind->vlan.id, NCFG_VLAN_ID_MAX);
+			break;
+		}
 		ncfg_buf_add_text(body, "\tvlan {\n\t\tparent = ");
 		ncfg_render_quote(body, kind->vlan.parent);
 		ncfg_buf_addf(body, "\n\t\tid = %lld\n", (long long)kind->vlan.id);

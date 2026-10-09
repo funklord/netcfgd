@@ -597,6 +597,31 @@ typedef struct {
 	ncfg_optint_t miimon;
 } ncfg_bond_config_t;
 
+/*
+ * The largest 802.1Q VLAN id a device may carry.
+ *
+ * **Twelve bits, and 4095 of those is reserved.** 802.1Q gives the VID twelve
+ * bits; 4095 is reserved for implementation use, and Linux spells that
+ * `VLAN_VID_MASK` and refuses anything not below it -- so a vlan device takes
+ * 0 through 4094 and nothing above.
+ *
+ * **Here rather than at either user, because there were two bounds and one of
+ * them was not a bound.** `lower_kind.c` narrowed the id to 65535 while its own
+ * diagnostic said "between 0 and 4095": the 65535 was a faithful port of the
+ * Rust's `u16::try_from`, which is the width of a C short and not a fact about
+ * VLANs, so ids from 4095 up compiled and were handed to a kernel that refuses
+ * them with an errno rather than a name. The renderer needs the same number to
+ * know what it cannot write back, and two copies of a bound is how this one
+ * came to disagree with itself.
+ *
+ * **The per-port bridge VLAN is stricter on purpose and must stay so.** A VLAN
+ * on a bridge port is 1 to 4094, because 0 is not a VLAN to put on a port;
+ * `ncfg_lower_bridge_vlans` enforces that and says why. A vlan DEVICE of id 0
+ * is a different thing, and one the kernel accepts, so this bound is the
+ * kernel's and not that one.
+ */
+#define NCFG_VLAN_ID_MAX 4094
+
 typedef struct {
 	char   *parent;
 	int64_t id;
