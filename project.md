@@ -12385,6 +12385,37 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.443 The renderer's last unexamined region, closed by arithmetic
+
+Every lens so far has read source or driven documents. What none touched is the
+renderer's **failure paths** -- about 22 of the lines 10.430 found never
+executed, which that entry set aside as "unreachable without fault injection".
+One of them looked different:
+
+    if (ncfg_buf_failed(text)) {
+            ncfg_error_set(err, err_size, "the rendered configuration did not fit");
+
+That is not an allocation failure. `buf.h` says a buffer "will not grow past
+`limit` bytes" and that a `limit` of 0 means "the default ceiling, which is
+generous enough for any document netcfgd compiles" -- so the path is reachable
+from a document large enough, and both renderer callers pass 0.
+
+**Measured rather than assumed, in both halves.** The ceiling is
+`DEFAULT_LIMIT`, 16 MiB. And a rendered block is small, because the renderer
+omits every default: 200 `network` blocks each carrying a psk and a protocol
+render to **11,507 bytes**, about 58 bytes a block.
+
+    16 MiB / 58 bytes  ~=  292,000 network blocks
+
+So the path needs a machine with a quarter of a million saved wireless
+networks. It is unreachable in the same sense as the allocation arms beside it,
+and now for a stated reason rather than by being lumped in with them.
+
+**The useful by-product is the other half of that measurement**: a profile with
+200 networks saves, and quickly. Nothing in this module had been asked to
+render a configuration of that size before, and "it does not fall over on a
+large document" was an assumption until now.
+
 ## 10.442 Four claims this renderer makes about the other one: two were wrong
 
 10.441 found one comment in the C asserting something about the Rust that had
