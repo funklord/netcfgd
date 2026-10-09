@@ -94,7 +94,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-bridge",
@@ -133,7 +134,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-dummy",
@@ -163,7 +165,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-ifb",
@@ -193,7 +196,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-macvlan",
@@ -225,7 +229,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-openvpn",
@@ -261,7 +266,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-physical",
@@ -291,7 +297,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-pppoe",
@@ -329,7 +336,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-tun",
@@ -362,7 +370,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-tunnel",
@@ -398,7 +407,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-veth",
@@ -429,7 +439,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-vlan",
@@ -462,7 +473,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-vrf",
@@ -493,7 +505,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-vxlan",
@@ -528,7 +541,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "k-wireguard",
@@ -579,7 +593,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-geneve",
@@ -610,7 +625,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-gre",
@@ -641,7 +657,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-gretap",
@@ -672,7 +689,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-ip6gre",
@@ -703,7 +721,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-ip6tnl",
@@ -734,7 +753,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-ipip",
@@ -765,7 +785,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "t-sit",
@@ -796,7 +817,8 @@
           "pvid": false,
           "untagged": false
         }
-      ]
+      ],
+      "declared": true
     },
     {
       "name": "wlan0",
@@ -842,7 +864,8 @@
       "kind": {
         "kind": "physical"
       },
-      "bridge_vlans": []
+      "bridge_vlans": [],
+      "declared": true
     }
   ],
   "interfaces": [

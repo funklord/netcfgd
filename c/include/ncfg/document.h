@@ -1228,26 +1228,29 @@ typedef struct {
 	/*
 	 * Whether a `device` block was WRITTEN, as against synthesised.
 	 *
-	 * **Deliberately absent from `device_fields[]`, so it is not in the
-	 * document's wire form, not in the witness, and not in equality.** The
-	 * lowering invents a device for every interface, for every bridge or bond
-	 * member, and for every `ingress_bandwidth`, and an invented all-default
-	 * one is byte-identical to a deliberately-written empty one. The renderer
-	 * has to tell them apart: writing the invented ones puts `override device
-	 * eth0 { }` into a profile for a block the base never had, which does not
-	 * compile, and skipping the written ones loses an operator's block.
+	 * The lowering invents a device for every interface, for every bridge or
+	 * bond member, and for every `ingress_bandwidth`, and an invented
+	 * all-default one is byte-identical to a deliberately-written empty one.
+	 * The renderer has to tell them apart: writing the invented ones puts
+	 * `override device eth0 { }` into a profile for a block the base never
+	 * had, which does not compile, and skipping the written ones loses an
+	 * operator's block.
 	 *
-	 * It is provenance rather than desired state, which is why it stays out of
-	 * the serialisation. `document.c` says what the alternative costs: a field
-	 * that starts writing itself re-blesses the frozen witness "for no change
-	 * in what the machine does", and 0020 makes that a schema change with a
-	 * version bump attached. Two documents differing only here describe the
-	 * same machine and must plan identically -- the same sentence this header
-	 * already makes about `generated_by`.
+	 * **In the wire form, and excluded from equality** -- the same treatment
+	 * `generated_by` gets, and for the same reason. It began outside the
+	 * serialisation, on the argument that provenance is not desired state;
+	 * that left it surviving only inside the process that lowered it, and a
+	 * save taken after a commit-confirm revert reads its document off disk and
+	 * so saw nothing declared. Serialising closed that. No version bump: 0038
+	 * holds the schema version until the first release, and the witness moving
+	 * under a deliberate `make schema-bless` is what makes the change visible.
 	 *
-	 * The cost of that choice is one place: it does not survive
-	 * `ncfg_document_read`, so `host/profile_save.c`, which round trips
-	 * through JSON to trim globals, carries it across by name and says so.
+	 * **It cannot be round-trip stable**, which is why equality leaves it out.
+	 * A synthesised member device carries a `master`, so the renderer writes
+	 * it and the recompile reads a block somebody wrote. The fact is about the
+	 * text and rendering is what produces the text; there is no syntax for
+	 * "this block was invented" to preserve it with. Two documents differing
+	 * only here describe the same machine and plan identically.
 	 */
 	int                   declared;
 } ncfg_device_t;

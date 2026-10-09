@@ -424,6 +424,7 @@ fn credentialled_kinds() -> Vec<(&'static str, InterfaceKind)> {
 /// now, and the qdisc and port VLANs came with it.
 fn maximal_device(name: &str, kind: InterfaceKind) -> Device {
 	Device {
+		declared: true,
 		name: name.to_owned(),
 		r#match: None,
 		managed: true,
@@ -636,6 +637,7 @@ fn every_network() -> Vec<WifiNetwork> {
 /// what pins that neither can vanish from the schema unnoticed.
 fn every_device() -> Vec<Device> {
 	vec![Device {
+		declared: true,
 		kind: InterfaceKind::Physical,
 		master: None,
 		qdisc: None,

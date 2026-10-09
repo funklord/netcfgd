@@ -307,6 +307,7 @@ mod tests {
 	fn document(sim: &[&str], apn: Option<&str>) -> Document {
 		let mut document = Document::default();
 		document.devices.push(Device {
+			declared: false,
 			name: "wwan0".to_owned(),
 			r#match: None,
 			managed: true,

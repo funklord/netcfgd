@@ -297,41 +297,6 @@ static ncfg_document_t *without_what_the_base_says(const ncfg_document_t *runnin
 	}
 	out = ncfg_document_read(trimmed_text, trimmed_length, err, err_size);
 	free(trimmed_text);
-	/*
-	 * **`declared` does not travel in JSON, so carry it across by name.**
-	 *
-	 * It is provenance rather than desired state, and `document.h` says why it
-	 * is kept out of the wire form: a field that starts writing itself
-	 * re-blesses the frozen witness for no change in what the machine does,
-	 * which 0020 makes a schema change. The price is exactly here -- this
-	 * function round trips through JSON to drop what the base already says,
-	 * and the reader cannot know which `device` blocks somebody wrote.
-	 *
-	 * Without this the renderer sees nothing declared and skips every empty
-	 * device, which is the hole 10.418 records: an operator's
-	 * `device wlan0 { }` is lost and the save refuses, having failed to
-	 * reproduce the machine.
-	 *
-	 * Matched by name because that is what identifies a device here -- the
-	 * trim drops globals and leaves devices alone, so the lists agree in
-	 * practice, and matching by name rather than by index stays right if that
-	 * ever stops being true.
-	 */
-	if (out) {
-		size_t i;
-
-		for (i = 0; i < out->device_count; i++) {
-			size_t at;
-
-			for (at = 0; at < running->device_count; at++) {
-				if (out->devices[i].name && running->devices[at].name &&
-				    strcmp(out->devices[i].name, running->devices[at].name) == 0) {
-					out->devices[i].declared = running->devices[at].declared;
-					break;
-				}
-			}
-		}
-	}
 	return out;
 }
 

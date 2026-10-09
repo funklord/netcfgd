@@ -246,6 +246,23 @@ pub struct Device {
 	/// authority is over ports that are configured, not over the bridge.
 	#[serde(default)]
 	pub bridge_vlans: Vec<BridgeVlan>,
+	/// Whether a `device` block was written, as against synthesised.
+	///
+	/// The lowering invents a device for every interface, for every bridge or
+	/// bond member and for every `ingress_bandwidth`, and an invented
+	/// all-default device is byte-identical to a deliberately-written empty
+	/// one. The renderer has to tell them apart: writing the invented ones
+	/// puts `override device eth0 { }` into a profile for a block the base
+	/// never had, which does not compile, and skipping the written ones loses
+	/// an operator's block.
+	///
+	/// **This port does not act on it.** 0266 has the C as what `make` builds
+	/// and installs, and the C's renderer is where the distinction is used.
+	/// It is in this model because the frozen witness is blessed from here and
+	/// read back with `deny_unknown_fields`, so a member the C writes has to
+	/// exist on both sides or neither.
+	#[serde(default)]
+	pub declared: bool,
 }
 
 /// What hardware address a radio presents.

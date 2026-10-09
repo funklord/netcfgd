@@ -130,6 +130,30 @@ int ncfg_config_json_same(const ncfg_json_doc_t *a, uint32_t x, const ncfg_json_
 			    (left_key && memcmp(left_name, right_name, left_key) != 0)) {
 				return 0;
 			}
+			/*
+			 * **`declared` is provenance and cannot be round-trip stable**, so
+			 * it is left out here exactly as `generated_by` is at the root.
+			 *
+			 * It says whether a `device` block was written rather than
+			 * invented. A synthesised member device carries a `master`, so the
+			 * renderer writes it -- it must -- and the recompile reads a block
+			 * somebody wrote. The fact is about the text, and rendering is
+			 * what produces the text, so no renderer could preserve it and
+			 * there is no syntax for "this block was invented" to preserve it
+			 * with.
+			 *
+			 * Two documents differing only here describe the same machine and
+			 * plan identically, which is the sentence `document.h` already
+			 * makes about `generated_by`. Skipping it symmetrically is exact:
+			 * both sides are written by this module's own writer, so the
+			 * member is present in the same position on both or on neither.
+			 */
+			if (left_key == sizeof("declared") - 1u &&
+			    memcmp(left_name, "declared", left_key) == 0) {
+				left = ncfg_json_node(a, left)->next_sibling;
+				right = ncfg_json_node(b, right)->next_sibling;
+				continue;
+			}
 			if (!ncfg_config_json_same(a, left, b, right)) {
 				return 0;
 			}

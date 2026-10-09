@@ -48,6 +48,7 @@
  */
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/config.h"
 #include "ncfg/document.h"
 #include "ncfg/lower.h"
 #include "ncfg/parse.h"
@@ -228,7 +229,10 @@ static void round_trips(const char *text, const char *what)
 	char            *rendered = NULL;
 	char            *want = NULL;
 	char            *got = NULL;
+	char             why[NCFG_ERROR_MAX];
 	int              same = 0;
+
+	why[0] = '\0';
 
 	if (before) {
 		rendered = render_document(before);
@@ -237,9 +241,24 @@ static void round_trips(const char *text, const char *what)
 		after = compiled(rendered, "the rendering");
 	}
 	if (after) {
+		/*
+		 * **The verdict is production's equality, not a text comparison.**
+		 * This compared the two canonical forms, which is the document's
+		 * *identity* -- everything the writer writes, provenance included.
+		 * That was adequate only while no provenance field ever differed.
+		 * `declared` does: a synthesised member device carries a `master`, so
+		 * the renderer writes it and the recompile reads a block somebody
+		 * wrote. `ncfg_config_round_trips` asks the host's own comparison,
+		 * which leaves provenance out exactly as `profile save` does, so a
+		 * case here cannot disagree with the operation it stands for.
+		 *
+		 * The canonical pair is still computed, for the printout: it is what
+		 * says *where* two documents differ, and identity is the right thing
+		 * to show a reader even when it is the wrong thing to judge on.
+		 */
 		want = canonical(before);
 		got = canonical(after);
-		same = want && got && strcmp(want, got) == 0;
+		same = ncfg_config_round_trips(before, why, sizeof(why));
 		if (!same && want && got) {
 			printf("  the document changed across the round trip\n"
 			    "  rendered as:\n%s\n  before: %s\n  after:  %s\n",
@@ -2751,37 +2770,33 @@ static void the_empty_device_block_round_trips(void)
 
 
 /*
- * `declared` is lost by every persistence path, which bounds where the fix
- * reaches.
+ * `declared` survives a json round trip, which is what serialising it bought.
  *
- * **It is not in the wire form on purpose** -- `document.h` has why, and 0020
- * makes putting it there a schema change with a version bump. The consequence
- * is that it survives only while a document stays in the process that lowered
- * it. `host/profile_save.c` carries it across the one round trip it performs
- * itself, and that is the only place it can be carried, because carrying needs
- * both documents in scope.
+ * **This case used to assert the opposite.** The field began outside the wire
+ * form, on the argument that provenance is not desired state and that adding
+ * it would re-bless the frozen witness for no change in what the machine does.
+ * That left one carry-over site in `host/profile_save.c` and a second route it
+ * could not reach: `daemon/confirm.c` assigns the last-good document, read off
+ * disk, straight to `state->desired`, which is what `main/daemon_answer.c`
+ * hands to `ncfg_profile_save` -- so a save taken after a commit-confirm
+ * revert saw nothing declared and refused.
  *
- * **There is a second route and it is reachable.** `daemon/confirm.c` reads the
- * last-good configuration from disk after a commit-confirm revert and assigns
- * it straight to `state->desired`, which `main/daemon_answer.c` is what hands
- * to `ncfg_profile_save`. So a save taken after a revert sees nothing declared.
+ * The holder's decision was to serialise it, which closes both routes and
+ * retires the carry-over. **No version bump**: 0038 holds the schema version
+ * until the first release, there being no consumer built against the old one,
+ * and what makes the change visible is that the witness moved under a
+ * deliberate `make schema-bless`.
  *
- * It fails in the safe direction rather than silently: the renderer omits the
- * block, `profile_save`'s own verification finds the profile does not reproduce
- * the running document, and the save is refused. An operator gets a refusal
- * where they should have got a profile.
- *
- * Provenance is genuinely unrecoverable there -- the last-good document does
- * not record which blocks were written, and the configuration that would say
- * so is the one the revert just rejected. So this is pinned rather than fixed,
- * and the choice between serialising the field and living with the gap is
- * 0020's to make. If it ever is serialised, this case fails and says so.
+ * The case is kept pointing the other way rather than deleted, because the
+ * property it asserts is the one the fix depends on and nothing else states
+ * it: the path is real, not a model of it, since write-and-read-back is the
+ * idiom `daemon_answer.c` uses for its own deep copy.
  */
-static void a_document_from_json_has_nothing_declared(void)
+static void declared_survives_a_json_round_trip(void)
 {
 	char *rendered;
 
-	/* The control first: compiled and rendered directly, the block survives. */
+	/* The control first: compiled and rendered directly. */
 	rendered = rendering_of("device wlan0 { }\n");
 	check(rendered && holds(rendered, "device wlan0"),
 	    "a written empty device survives while the document stays in one process");
@@ -2789,8 +2804,8 @@ static void a_document_from_json_has_nothing_declared(void)
 
 	rendered = rendering_after_a_json_round_trip("device wlan0 { }\n");
 	check(rendered != NULL, "and the same document survives a json round trip");
-	check(rendered && lacks(rendered, "device wlan0"),
-	    "  but the block does not, `declared` not being in the wire form");
+	check(rendered && holds(rendered, "device wlan0"),
+	    "  with the block still there, `declared` being in the wire form now");
 	free(rendered);
 }
 
@@ -2816,7 +2831,7 @@ int main(int argc, char **argv)
 	the_connectivity_policys_unreached_arms();
 	the_other_two_escapes_round_trip();
 	the_empty_device_block_round_trips();
-	a_document_from_json_has_nothing_declared();
+	declared_survives_a_json_round_trip();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

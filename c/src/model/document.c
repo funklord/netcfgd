@@ -1693,7 +1693,13 @@ static const ncfg_field_t device_fields[] = {
 	{ .name = "bridge_vlans", .kind = NCFG_F_LIST, .type = &bridge_vlan_type,
 	    .element_size = sizeof(ncfg_bridge_vlan_t),
 	    .offset = offsetof(ncfg_device_t, bridge_vlans),
-	    .count_offset = offsetof(ncfg_device_t, bridge_vlan_count) }
+	    .count_offset = offsetof(ncfg_device_t, bridge_vlan_count) },
+	/* Last, because the Rust's struct has it last and the witness compares
+	 * members in order. Absent reads as 0, which is the safe direction: a
+	 * document written before this field existed has no written devices as far
+	 * as the renderer is concerned, which is what it did anyway. */
+	{ .name = "declared", .kind = NCFG_F_BOOL,
+	    .offset = offsetof(ncfg_device_t, declared) }
 };
 static const ncfg_type_t device_type = TYPE("device", device_fields);
 

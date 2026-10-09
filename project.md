@@ -12385,6 +12385,76 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.438 `declared` goes into the wire form, and equality has to leave it out
+
+10.437 kept the field out of the serialisation and 10.437's own last section
+found the route that choice could not cover: a save taken after a
+commit-confirm revert reads its document off disk and sees nothing declared.
+**Instructed to serialise it.** What that cost, and the one thing it broke.
+
+### No version bump, and the witness is what makes it visible
+
+0038 holds the schema version until the first release -- *"there is no consumer
+anywhere that was built against 1.1 and could be handed a 1.2 document"* -- so
+no bump is taken, which is the statement 0020 asks every schema commit to make.
+What makes the change visible is the witness moving under a deliberate
+`make schema-bless`, which is 0038's own answer to the same question.
+
+**The bless carries a proof rather than a diff to read.** 46 lines added, 23
+removed in `doc/schema/document.json`, and the new witness with `declared`
+stripped from every device **equals the previous one exactly** -- the other 23
+added lines are the former last member gaining a comma. All 23 devices carry
+`declared: true`, so the field is populated rather than merely present.
+`socket.json` did not move, which confirms what `scope.c` says: nothing in a
+device travels on the wire.
+
+### It obliged the implementation being retired
+
+`make schema-bless` is driven by the Rust (`cargo test -p netcfgd-model --test
+frozen` under `NCFG_BLESS=1`), and the witness is read back with
+`deny_unknown_fields`. So a member the C writes has to exist on both sides or
+neither, and the field went into `netcfgd-model`'s `Device` as well -- with a
+doc comment saying this port does not act on it, 0266 having the C as what ships.
+
+The compiler found the sites rather than a sweep: 4 in `netcfgd-compile`'s
+lowering, which is where it matters and where the three invented-device cases
+and the one written one mirror the C exactly, and 7 in tests and `sim.rs` where
+the value is immaterial. That is 0020 working as designed -- *"writing it out is
+what forces somebody adding a field to look at every other field."*
+
+### The thing it broke, which is the entry's point
+
+Serialising a field puts it into **equality**, and `declared` cannot be
+round-trip stable. A synthesised member device carries a `master`, so the
+renderer writes it -- it must -- and the recompile reads a block somebody
+wrote. The fact is about the *text*, and rendering is what produces the text;
+there is no syntax for "this block was invented" to preserve it with.
+
+Two round trips went red immediately. The fix is the treatment `generated_by`
+already has: **in the canonical form, out of equality.** Those two are
+deliberately different places, which this made explicit --
+
+    canonical form      the document's IDENTITY, everything the writer writes;
+                        shared with the Rust for the confirm window's hash
+    equality            what "the same machine" means, provenance excluded
+
+### And the test had its own notion of equality, which only showed now
+
+`render_test`'s `round_trips` compared the two **canonical** forms with
+`strcmp` -- identity, not equality. That was adequate for as long as no
+provenance field ever differed, and `generated_by` never did in these fixtures.
+`declared` does, so the verdict now goes through `ncfg_config_round_trips`,
+which asks the host's own comparison. A case cannot disagree with the operation
+it stands for.
+
+The canonical pair is still computed, for the failure printout: identity is the
+right thing to *show* a reader even where it is the wrong thing to judge on.
+
+**Two notions of equality in one tree is the finding**, not the inconvenience.
+It cost nothing while they agreed, and the moment they did not it cost two red
+round trips whose message said "the document changed" about two documents that
+describe the same machine.
+
 ## 10.437 `declared`: the empty-device hole closed, and both candidates were halves
 
 10.418 left this open with two candidate fixes and said the choice was the

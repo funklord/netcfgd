@@ -13,6 +13,7 @@ use std::net::IpAddr;
 
 fn dev(name: &str) -> Device {
 	Device {
+		declared: false,
 		name: name.to_owned(),
 		r#match: None,
 		managed: true,
@@ -150,6 +151,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 	forward.networks.push(wifi("alpha"));
 	forward.networks.push(wifi("beta"));
 	forward.devices.push(Device {
+		declared: false,
 		kind: netcfgd_model::InterfaceKind::Physical,
 		master: None,
 		qdisc: None,
@@ -173,6 +175,7 @@ fn insertion_order_does_not_survive_canonicalisation() {
 	backward.networks.push(wifi("beta"));
 	backward.networks.push(wifi("alpha"));
 	backward.devices.push(Device {
+		declared: false,
 		kind: netcfgd_model::InterfaceKind::Physical,
 		master: None,
 		qdisc: None,
@@ -716,6 +719,7 @@ fn the_encoding_contains_no_floats() {
 	// numbers the count below insists on -- so it moves here rather than
 	// leaving the guard to fail for the wrong reason.
 	doc.devices.push(netcfgd_model::Device {
+		declared: false,
 		kind: netcfgd_model::InterfaceKind::Physical,
 		master: None,
 		qdisc: None,
