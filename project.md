@@ -12464,6 +12464,35 @@ That the `set` succeeds is itself the premise under test: a plain
 device is not a definition anything must override -- which is exactly what
 `collect_overrides` had been claiming.
 
+### The agree gate does not cover this change, and will not
+
+`make check` came back green with the gate reporting 11 configurations and 0
+divergences, and **that agreement is for lack of a case rather than because
+both programs are right.** The C now writes `device wlan0 { }` for a written
+empty device; the Rust has no `declared` and still drops it, so a configuration
+holding one would diverge.
+
+Measured over the gate's corpus -- 12 `.conf` files -- **none has an empty
+device block.** Device blocks are not absent from it: `device br0`,
+`device eth0` and `device wlan0` all appear, every one with a body. It is the
+single shape that discriminates that is missing, which is the worst way for a
+corpus to be short, because the gate looks exercised.
+
+`SAVE_AHEAD` is the mechanism built for this, and its docstring describes this
+exact situation -- "the one this port creates as it goes", where the C renders
+something the Rust refuses. **It is deliberately not used here**, on the
+holder's decision, and the reason is the mechanism's own: its value is that a
+divergence which gets closed makes the gate go red *asking for its own
+exception to be deleted*. 0266 retires the Rust rather than fixing it, so a pin
+waiting for this divergence to close would never fire and would be removed with
+the gate.
+
+So what is recorded instead is the shape of the gap: **the gate's zero is a
+statement about its corpus and not about the two renderers**, and for this one
+behaviour the C is ahead with nothing comparing them. What establishes the C's
+side is `the_empty_device_block_round_trips` and the profile-save case, both
+with their own controls.
+
 ### Two smaller things the change forced
 
 The `_Static_assert` on `sizeof(ncfg_device_t)` fired on the first build and
