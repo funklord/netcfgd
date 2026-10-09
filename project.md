@@ -12385,6 +12385,33 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.444 `ncfg_render_device_writes_nothing` removed
+
+Added in 10.426 so the mutation sweep could ask the renderer whether a device
+would be written rather than recompute "at every default" and keep that
+enumeration current. 10.437 closed the skip it reported on, 10.439 removed the
+last caller, and it has been exported with none since. Removed on the holder's
+instruction.
+
+    render_device.c   29 lines, the definition and its comment
+    render.h          13 lines, the declaration and its comment
+
+**Checked across the whole tree first, not just `c/`.** The earlier survey had
+looked at `c/` alone and would have missed a caller in the client, the gui or a
+tool; there was none, and the only other mentions were the two records in this
+file, both now corrected rather than left standing.
+
+Both gates that could have had an opinion pass unchanged -- 52 headers each
+reached by a test, 52 public headers each in one file -- which says the gates
+count headers rather than exported functions, so nothing was holding this in
+place but the API question the holder has now answered.
+
+**The reason it was written is not retired with it.** Asking the renderer
+instead of reproducing its rule is why `bare_ifb` carries a size assertion and
+why the ingress-shaper undo is read off `render_device` rather than recomputed.
+What went away is one instance, because the thing it was asked about stopped
+existing.
+
 ## 10.443 The renderer's last unexamined region, closed by arithmetic
 
 Every lens so far has read source or driven documents. What none touched is the
@@ -12926,11 +12953,10 @@ as a duplicate -- and kept because it fails safe, a declared `ifb` being refused
 by name rather than silently undone. The size is 592, up from 584: an `int` cost
 8 with padding.
 
-**And `ncfg_render_device_writes_nothing` now has no caller.** It was added in
-10.426 so the sweep could ask the renderer rather than recompute; the sweep no
-longer needs to ask. It is exported from `render.h`, so removing it is an API
-change rather than a tidy-up, and it is left in place and named here instead.
-Whose decision: the copyright holder's.
+**And `ncfg_render_device_writes_nothing` had no caller.** It was added in
+10.426 so the sweep could ask the renderer rather than recompute; the sweep
+stopped needing to ask once 10.437 closed the skip. Removed on the holder's
+instruction -- 10.444.
 
 ## 10.436 Output wrong, meaning right: the third instance makes it a class
 
@@ -13967,11 +13993,13 @@ once, so those mutations are skipped structurally, exactly as hook-carrying
 documents are.
 
 **Asked of the renderer rather than recomputed.**
-`ncfg_render_device_writes_nothing` renders the device and reports whether
-anything came out, so the test cannot disagree with the renderer about what it
-writes -- and no second enumeration of `ncfg_device_t` exists to go stale. The
-alternative considered and rejected was reading the failure's message for a
-device name, which breaks when the sentence improves.
+~~`ncfg_render_device_writes_nothing` renders the device and reports whether
+anything came out~~ -- it did, and the function is **gone** (10.444): the skip
+it reported on closed in 10.437, so the sweep stopped needing to ask. The
+alternative considered and rejected at the time was reading the failure's
+message for a device name, which breaks when the sentence improves, and the
+reason for asking the renderer rather than recomputing stands even though this
+instance of it does not.
 
 The hole stays pinned by its own named case in `compiles_but_cannot_round_trip`,
 so skipping it in the sweep hides nothing.

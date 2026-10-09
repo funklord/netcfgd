@@ -889,36 +889,6 @@ static void render_modem(const ncfg_modem_policy_t *modem, ncfg_buf_t *body)
 	ncfg_buf_add_text(body, "\t}\n");
 }
 
-/*
- * Whether this device would be written at all.
- *
- * Exposed because a suite needs to ask it, and must not answer it for itself:
- * a predicate spelling out "at every default" elsewhere would enumerate
- * `ncfg_device_t` and go stale the next time it grew, which is the same
- * argument `bare_ifb` carries an assertion for. This renders and reports
- * whether anything came out, so it cannot disagree with the renderer.
- *
- * A caller wanting this is usually asking whether a document can round trip:
- * a device the operator declared and left at every default is written nowhere,
- * so such a document does not survive. 10.418 has why writing it instead broke
- * `ncfg profile save`.
- */
-int ncfg_render_device_writes_nothing(const ncfg_device_t *device,
-    const ncfg_document_t *document)
-{
-	ncfg_buf_t          text;
-	ncfg_unrenderable_t missing;
-	int                 silent;
-
-	ncfg_buf_init(&text, 0);
-	ncfg_unrenderable_init(&missing);
-	ncfg_render_device(device, NULL, document, &text, &missing);
-	silent = ncfg_buf_text(&text)[0] == '\0';
-	ncfg_unrenderable_free(&missing);
-	ncfg_buf_free(&text);
-	return silent;
-}
-
 void ncfg_render_device(const ncfg_device_t *device, const ncfg_overrides_t *overrides,
     const ncfg_document_t *document, ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
