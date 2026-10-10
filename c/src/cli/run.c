@@ -1554,30 +1554,57 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 	count = ncfg_json_count(payload->doc, records);
 	for (at = 0; at < count; at++) {
 		uint32_t    record = ncfg_json_at(payload->doc, records, at);
-		const char *outcome = ncfg_json_string(payload->doc,
-		    ncfg_json_member(payload->doc, record, "outcome"), NULL);
+		uint32_t    outcome = ncfg_json_member(payload->doc, record, "outcome");
+		size_t      op_length = 0;
+		size_t      why_length = 0;
+		size_t      outcome_length = 0;
 		const char *op = ncfg_json_string(payload->doc,
-		    ncfg_json_member(payload->doc, record, "op"), NULL);
+		    ncfg_json_member(payload->doc, record, "op"), &op_length);
 		const char *why = ncfg_json_string(payload->doc,
-		    ncfg_json_member(payload->doc, record, "error"), NULL);
-		const char *shown = outcome;
+		    ncfg_json_member(payload->doc, record, "error"), &why_length);
+		const char *raw = ncfg_json_string(payload->doc, outcome, &outcome_length);
+		const char *shown = NULL;
 		size_t      which;
 
+		/*
+		 * **Counted, never terminated**, which is `ncfg_json_string`'s
+		 * contract and this function ignored: every string it handed out ran
+		 * to the end of the buffer, so one `strcmp` against `"done"` failed,
+		 * the lookup fell through to the raw bytes, and `%s` printed the rest
+		 * of the document. `ncfg apply --confirm-within N` therefore answered
+		 * with the whole journal's text run together with its separators
+		 * stripped -- for every record but the last, whose value happens to
+		 * sit at the end of the buffer and so compared equal.
+		 *
+		 * So the outcome is matched with `ncfg_json_string_equals`, which
+		 * exists for exactly this and says so, and the op and the reason are
+		 * printed with their lengths.
+		 */
 		for (which = 0; which < sizeof(outcomes) / sizeof(outcomes[0]); which++) {
-			if (outcome && strcmp(outcome, outcomes[which].wire) == 0) {
+			if (ncfg_json_string_equals(payload->doc, outcome,
+			    outcomes[which].wire)) {
 				shown = outcomes[which].shown;
 				break;
 			}
 		}
-		if (strcmp(shown ? shown : "", "Failed") == 0) {
+		if (shown && strcmp(shown, "Failed") == 0) {
 			failed = 1;
 		}
 		if (!options->json) {
-			ncfg_out_writef("%s %s\n", shown ? shown : "?", op ? op : "?");
+			if (shown) {
+				ncfg_out_writef("%s %.*s\n", shown, (int)op_length,
+				    op ? op : "");
+			} else {
+				/* An outcome word this build does not know is said as it
+				 * came, rather than as `?`: the daemon and the client can
+				 * be different versions, and the word is the news. */
+				ncfg_out_writef("%.*s %.*s\n", (int)outcome_length,
+				    raw ? raw : "", (int)op_length, op ? op : "");
+			}
 			if (why) {
 				/* Five spaces, under the outcome word, which is where the
 				 * local renderer puts an action's detail too. */
-				ncfg_out_writef("     %s\n", why);
+				ncfg_out_writef("     %.*s\n", (int)why_length, why);
 			}
 		}
 	}
