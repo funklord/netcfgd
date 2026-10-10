@@ -248,6 +248,26 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
     ncfg_journal_t *journal, char *err, size_t err_size);
 
 /*
+ * The same, without the engine's own per-action line in the log.
+ *
+ * **For a caller that renders the journal itself**, which is `ncfg apply`: it
+ * prints every action with its outcome and its error, so the engine's line is
+ * that said a second time and said less well. `main.c` accepts `WARNING`, so
+ * the `INFO` lines were dropped and the `ERROR` one kept -- and exactly the
+ * failing action was doubled, which `tests/live/ap.sh` and `acl.sh` count.
+ *
+ * **A flag here rather than a severity the caller turns down**, which is what
+ * it was first: bracketing the call with `ncfg_log_accept(NCFG_LOG_CRITICAL)`
+ * silenced everything the BACKENDS say during the apply as well. That cost
+ * the dhcp adoption notice -- `tests/live/dhcpcd_orphan.sh` reads it to tell
+ * adoption from a blind re-run, and a silent adoption is indistinguishable
+ * from netcfgd having started a second client. The narration is this engine's
+ * to withhold; nobody else's lines are its to take.
+ */
+int ncfg_apply_silently(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_journal_t *journal, char *err, size_t err_size);
+
+/*
  * Put back what this apply did, newest first.
  *
  * **An apply that cannot be confirmed puts the machine back**, and this is the

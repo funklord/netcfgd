@@ -270,8 +270,17 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
  * Running a plan
  * ------------------------------------------------------------------------ */
 
-int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
-    ncfg_journal_t *journal, char *err, size_t err_size)
+/*
+ * Both entry points, and `narrates` is the only difference between them.
+ *
+ * **The narration belongs to the caller and not to the engine**, which is
+ * what the two names say. In the daemon that log IS how an operator sees what
+ * happened, so there it stays on; `ncfg` prints the journal instead, every
+ * action with its outcome and its error, so there the line is the same thing
+ * said twice and said less well.
+ */
+static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_journal_t *journal, int narrates, char *err, size_t err_size)
 {
 	int    stopped = 0;
 	size_t i;
@@ -362,9 +371,12 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 				ncfg_reason_t said = record.reason;
 
 				said.interface = NULL;
-				ncfg_log_aboutf("apply", record.interface, NCFG_LOG_INFO, "%s",
-				    ncfg_action_describe(record.op, &said, message,
-				        sizeof(message)));
+				if (narrates) {
+					ncfg_log_aboutf("apply", record.interface,
+					    NCFG_LOG_INFO, "%s",
+					    ncfg_action_describe(record.op, &said, message,
+					        sizeof(message)));
+				}
 			}
 			message[0] = '\0';
 		} else {
@@ -380,9 +392,11 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 			 * that the rest of the plan stops here, which is the part an
 			 * operator cannot infer from a single failed line.
 			 */
-			ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
-			    "%s failed: %s -- the rest of this plan is skipped", record.op,
-			    record.error);
+			if (narrates) {
+				ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
+				    "%s failed: %s -- the rest of this plan is skipped",
+				    record.op, record.error);
+			}
 		}
 		ncfg_journal_push(journal, &record);
 	}
@@ -394,6 +408,18 @@ int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 		return 0;
 	}
 	return 1;
+}
+
+int ncfg_apply(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_journal_t *journal, char *err, size_t err_size)
+{
+	return run_plan(plan, executor, journal, 1, err, err_size);
+}
+
+int ncfg_apply_silently(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
+    ncfg_journal_t *journal, char *err, size_t err_size)
+{
+	return run_plan(plan, executor, journal, 0, err, err_size);
 }
 
 /* ------------------------------------------------------------------------ *

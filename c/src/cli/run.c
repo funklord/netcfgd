@@ -1853,23 +1853,17 @@ static int command_apply(const ncfg_cli_options_t *options)
 	 * wants 1, `acl.sh` counts `did not answer its control socket` and wants
 	 * 1, and the C gave 2 for each.
 	 *
-	 * **Unconditional, and the first attempt was not.** Quietening only while
-	 * the level was below `INFO` left the duplicate for anybody who asked for
-	 * more with `NCFG_LOG` -- and the Rust passes `ap.sh` at `NCFG_LOG=info`
-	 * too, so it logs no per-action line in this path at any level. The
-	 * conditional preserved the divergence it was written to remove, which
-	 * running the oracle at that level is the only thing that said.
-	 *
-	 * Nothing is lost: `CRITICAL` still passes, and the journal report this
-	 * caller prints names every action, its outcome and its error.
+	 * **Asking the engine to stay quiet, rather than turning the log down.**
+	 * This was first written as `ncfg_log_accept(NCFG_LOG_CRITICAL)` around the
+	 * call, which silenced every line the BACKENDS emit while the plan ran as
+	 * well -- and the dhcp adoption notice is one of those.
+	 * `tests/live/dhcpcd_orphan.sh` reads that notice to tell adoption from a
+	 * blind re-run, because the client count cannot: a second `dhcpcd -b`
+	 * against a running one is a silent no-op, so the count is 1 either way.
+	 * Suppressing it made a correct adoption indistinguishable from netcfgd
+	 * having started a second client on an interface that already had one.
 	 */
-	{
-		ncfg_severity_t accepted = ncfg_log_accepted();
-
-		ncfg_log_accept(NCFG_LOG_CRITICAL);
-		(void)ncfg_apply(plan, &executor, &journal, err, sizeof(err));
-		ncfg_log_accept(accepted);
-	}
+	(void)ncfg_apply_silently(plan, &executor, &journal, err, sizeof(err));
 
 	/*
 	 * The scopes a `dns.apply` in this plan delivered, which is what the fold

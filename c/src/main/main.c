@@ -41,26 +41,32 @@ int main(int argc, char **argv)
 		 * one's: a second parse of `argv` here is a second answer.
 		 */
 		/*
-		 * **Quiet by default, and `NCFG_LOG` still obeyed.**
+		 * **`NCFG_LOG` obeyed, and the level left where the log module puts
+		 * it.** The client never read `NCFG_LOG` at all -- only the daemon
+		 * did -- so `NCFG_LOG=debug ncfg status` turned nothing up, which is
+		 * the first thing anybody would try. That half is this line.
 		 *
-		 * Two things were wrong and one line fixes both. The client never
-		 * read `NCFG_LOG` at all -- only the daemon did -- so
-		 * `NCFG_LOG=debug ncfg status` turned nothing up, which is the
-		 * first thing anybody would try. And the default is `INFO`, while
-		 * a command's report is its STDOUT: now that applying an action
-		 * logs one, `ncfg apply` would print every action twice, once as
-		 * its own output and once as a log line beside it.
+		 * **The other half was a `WARNING` floor, and it is gone.** It was
+		 * put here because `ncfg apply` printed every action twice, once as
+		 * its own report and once as the apply engine's `INFO` line beside
+		 * it -- and a floor silences a duplicate by silencing the whole
+		 * level, which is two steps stricter than the Rust, whose default is
+		 * `Info`. Everything the backends say at `INFO` went with it: the
+		 * dhcp adoption notice is one, and `tests/live/dhcpcd_orphan.sh`
+		 * reads it to tell adoption from a blind re-run because the client
+		 * count cannot -- a second `dhcpcd -b` against a running one is a
+		 * silent no-op, so the count is 1 either way.
 		 *
-		 * So the floor is `WARNING` and `accept_from_env` overrides it when
-		 * asked. A warning still reaches the operator, which is what the
-		 * `!` lines on an unprivileged `ncfg status` are; what goes is the
-		 * running commentary that duplicates the thing being printed.
+		 * `ncfg_apply_silently` is the duplicate's actual fix: the engine
+		 * withholds its own narration for the one caller that renders the
+		 * journal, and nobody else's lines are taken. So the floor has no
+		 * remaining reason and the levels agree across the two builds.
 		 *
-		 * Here and not in `ncfg_cli_main_on`, because this is a policy of
-		 * the PROGRAM: a test driving the same entry point, or an embedder
-		 * with its own logging, inherits nothing from it.
+		 * Here and not in `ncfg_cli_main_on`, because reading the
+		 * environment is a policy of the PROGRAM: a test driving the same
+		 * entry point, or an embedder with its own logging, inherits
+		 * nothing from it.
 		 */
-		ncfg_log_accept(NCFG_LOG_WARNING);
 		ncfg_log_accept_from_env();
 		return ncfg_cli_main_on(argc, argv, ncfg_main_cli_machine());
 	case NCFG_MAIN_PROGRAM_DAEMON:
