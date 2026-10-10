@@ -19,6 +19,7 @@
 #include "ncfg/process.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,12 +52,26 @@ void ncfg_dhcp_machine(ncfg_dhcp_machine_t *out)
 	if (!out) {
 		return;
 	}
+	const char *set;
+
 	memset(out, 0, sizeof(*out));
 	/* The three programs stay NULL: "find the conventional name" is what a
 	 * daemon means, and a path is what a test passes. */
 	out->hook = NCFG_DHCP_HOOK_DEFAULT;
 	out->dhcpcd_run_dir = NCFG_DHCPCD_RUN_DIR_DEFAULT;
 	out->dhcpcd_config = NCFG_DHCPCD_CONFIG_DEFAULT;
+	/* An empty value is the variable not being set, which is
+	 * `ncfg_supplicant_ctrl_dir`'s rule: a hook of "" would be handed to
+	 * dhcpcd's `-c` and a run directory of "" would make every control
+	 * socket relative to the working directory. */
+	set = getenv(NCFG_DHCPCD_HOOK_ENV);
+	if (set && set[0] != '\0') {
+		out->hook = set;
+	}
+	set = getenv(NCFG_DHCPCD_RUN_DIR_ENV);
+	if (set && set[0] != '\0') {
+		out->dhcpcd_run_dir = set;
+	}
 }
 
 /* ------------------------------------------------------------------------ *
@@ -580,6 +595,63 @@ char *ncfg_dhcp_binary(const char *name)
 }
 
 /*
+ * Why one candidate was not the client, accumulated for the message at the end.
+ *
+ * **Three candidates and one sentence used to mean three facts lost.** The loop
+ * below tried dhcpcd, udhcpc and busybox, dropped whichever did not answer, and
+ * said "no DHCPv4 client found" -- so a dhcpcd that was there and not
+ * executable read as a machine with no dhcpcd, and an operator was told to
+ * install what they already had. 0182 is the audit that asked for this and
+ * `tests/live/exec_refused.sh` is what holds it: ten checks on which fault is
+ * named.
+ */
+static void why_not(char *text, size_t text_size, const char *fmt, ...)
+{
+	size_t at = strlen(text);
+	va_list args;
+
+	if (at + 2u >= text_size) {
+		return;
+	}
+	if (at > 0u) {
+		text[at++] = ';';
+		text[at++] = ' ';
+		text[at] = '\0';
+	}
+	va_start(args, fmt);
+	(void)vsnprintf(text + at, text_size - at, fmt, args);
+	va_end(args);
+}
+
+/*
+ * The names that were simply absent, as a sentence: "udhcpc and busybox are not
+ * installed". Spelled out because that is the half an operator acts on, and
+ * "install dhcpcd, udhcpc or busybox" does not say which of the three they
+ * already have.
+ */
+static void say_absent(char *text, size_t text_size, const char *const *names, size_t count)
+{
+	char list[128];
+	size_t at = 0u;
+	size_t i;
+
+	if (count == 0u) {
+		return;
+	}
+	list[0] = '\0';
+	for (i = 0u; i < count; i++) {
+		const char *join = i == 0u ? "" : (i + 1u == count ? " and " : ", ");
+		int         put = snprintf(list + at, sizeof(list) - at, "%s%s", join, names[i]);
+
+		if (put < 0 || (size_t)put >= sizeof(list) - at) {
+			break;
+		}
+		at += (size_t)put;
+	}
+	why_not(text, text_size, "%s %s not installed", list, count == 1u ? "is" : "are");
+}
+
+/*
  * Which program to run for one candidate, or NULL where it is not installed.
  *
  * **An explicit path that is not there reads as "not installed"**, which is
@@ -902,6 +974,12 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 	char             dir[NCFG_DHCP_PATH_MAX];
 	char             recited[NCFG_DHCP_PATH_MAX];
 	char             said[NCFG_ERROR_MAX];
+	char             why[NCFG_ERROR_MAX];
+	const char      *absent[3];
+	size_t           absent_count = 0u;
+	struct stat      hook_about;
+	int              found_any = 0;
+	int              hook_ok;
 	ncfg_dhcp_args_t args;
 	pid_t            adopted = 0;
 	size_t           at;
@@ -918,6 +996,9 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 		    "a dhcp client was started without a run directory or an interface");
 		return 0;
 	}
+	/* What every candidate that was not the answer said, accumulated by
+	 * `why_not` and reported together at the end. */
+	why[0] = '\0';
 
 	/*
 	 * **A client netcfgd's own record already names is already running**, and
@@ -991,42 +1072,87 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 
 	/*
 	 * Three candidates, in order. The first that is installed and runs is the
-	 * answer; one that is installed and refuses fails the start rather than
-	 * falling through, because a machine with a dhcpcd that will not take this
-	 * configuration has a fault to report and not a second client to try.
+	 * answer; one that is installed and refuses the configuration fails the
+	 * start rather than falling through, because a machine with a dhcpcd that
+	 * will not take this configuration has a fault to report and not a second
+	 * client to try.
+	 *
+	 * **Everything short of that is recorded and fallen through**, and `why`
+	 * is what carries it. A candidate can fail to be the answer in three
+	 * ways that are not the same fault -- it is not installed, it is
+	 * installed and cannot be executed, or it is dhcpcd and its hook is
+	 * missing -- and the first version of this loop discarded all three with
+	 * a bare `continue`, reaching the tail with one sentence naming none of
+	 * them. An operator holding `no DHCPv4 client found` cannot tell a
+	 * machine with nothing installed from one whose dhcpcd is mode 0644.
 	 */
+	/*
+	 * **The hook is asked once here, and it disqualifies dhcpcd rather than
+	 * refusing the start.** It is dhcpcd's alone -- udhcpc never runs it -- so
+	 * a machine whose only client is busybox was being refused its lease over
+	 * a file that would not have been used, and 0178's audit script read back
+	 * a message about the hook in place of every message it was written for,
+	 * because the refusal happened before a client was even looked for.
+	 *
+	 * Asked before the loop and not at `at == 0u` inside it, which is the
+	 * difference between the two: a dhcpcd-only machine with no hook must be
+	 * told the hook is why, and inside the loop that sentence is unreachable
+	 * when dhcpcd is also not installed -- which is the state an uninstalled
+	 * tree is in, and the state an operator who has just removed the package
+	 * is in. The absent list then names the other two only, so nobody is told
+	 * to install a dhcpcd they have.
+	 */
+	if (!machine->hook || machine->hook[0] == '\0' || stat(machine->hook, &hook_about) != 0) {
+		hook_ok = 0;
+		why_not(why, sizeof(why),
+		    "the dhcpcd hook is not installed at %s, so a lease's nameservers would "
+		    "never reach netcfgd and the resolver would be written empty. It ships "
+		    "with netcfgd; `make install` places it",
+		    machine->hook && machine->hook[0] != '\0' ? machine->hook :
+		    NCFG_DHCP_HOOK_DEFAULT);
+	} else {
+		hook_ok = 1;
+	}
+
 	for (at = 0u; at < 3u; at++) {
 		const char *named = at == 0u ? machine->dhcpcd_program :
 		    at == 1u ? machine->udhcpc_program : machine->busybox_program;
 		const char *name = at == 0u ? "dhcpcd" : at == 1u ? "udhcpc" : "busybox";
 		char       *owned = NULL;
 		const char *program = program_for(named, name, &owned);
+		char        refusal[NCFG_ERROR_MAX];
 		int         ok;
 
+		if (at == 0u && !hook_ok) {
+			free(owned);
+			continue;
+		}
 		if (!program) {
+			absent[absent_count++] = name;
+			continue;
+		}
+		found_any = 1;
+		/*
+		 * **There and not runnable is a different fact from absent**, and the
+		 * one 0182 is about: `access` refuses a file with no executable bit
+		 * and a file on a `noexec` mount with the same `EACCES`, and
+		 * `ncfg_process_exec_refusal` tells them apart by reading the mode.
+		 * Falling through to the next candidate rather than failing here: a
+		 * machine whose dhcpcd cannot run still has a lease to get from
+		 * udhcpc, and the reason is kept for the message either way.
+		 */
+		if (access(program, X_OK) != 0) {
+			refusal[0] = '\0';
+			if (ncfg_process_exec_refusal(program, errno, refusal, sizeof(refusal))) {
+				why_not(why, sizeof(why), "could not run %s: %s", name, refusal);
+			} else {
+				why_not(why, sizeof(why), "could not run %s at %s: %s", name,
+				    program, strerror(errno));
+			}
+			free(owned);
 			continue;
 		}
 		if (at == 0u) {
-			/*
-			 * **The hook is checked here rather than before the loop**, which
-			 * is a divergence with a measured reason: it is dhcpcd's and
-			 * udhcpc never runs it, so a machine whose only client is busybox
-			 * was refused its lease over a file that would not have been
-			 * used. See 0263.
-			 */
-			struct stat about;
-
-			if (!machine->hook || machine->hook[0] == '\0' ||
-			    stat(machine->hook, &about) != 0) {
-				free(owned);
-				ncfg_error_set(err, err_size,
-				    "the dhcpcd hook is not installed at %s, so a lease's nameservers "
-				    "would never reach netcfgd and the resolver would be written "
-				    "empty. It ships with netcfgd; `make install` places it",
-				    machine->hook && machine->hook[0] != '\0' ? machine->hook :
-				    NCFG_DHCP_HOOK_DEFAULT);
-				return 0;
-			}
 			ok = ncfg_dhcp_dhcpcd_args(program, NCFG_DHCP_FAMILY_V4, iface, metric,
 			    machine->hook, config, &args, err, err_size);
 		} else {
@@ -1059,8 +1185,16 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 		}
 		return 1;
 	}
-	ncfg_error_set(err, err_size,
-	    "no DHCPv4 client found for %s; install dhcpcd, udhcpc or busybox", iface);
+	/*
+	 * **The install line is only for a machine that had nothing to run.**
+	 * Telling an operator whose dhcpcd is mode 0644 to install dhcpcd sends
+	 * them to `apt` for a fault a `chmod` fixes, and it is the sentence they
+	 * will read first because it is the one that names an action.
+	 */
+	say_absent(why, sizeof(why), absent, absent_count);
+	ncfg_error_set(err, err_size, "no DHCPv4 client found for %s: %s%s", iface,
+	    why[0] ? why : "none of the three answered",
+	    found_any ? "" : "; install dhcpcd, udhcpc or busybox");
 	return 0;
 }
 

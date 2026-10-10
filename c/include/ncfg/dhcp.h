@@ -131,6 +131,24 @@
 #define NCFG_DHCPCD_CONFIG_DEFAULT "/etc/dhcpcd.conf"
 
 /*
+ * What a test puts in front of those two defaults.
+ *
+ * **The names only, and `ncfg_dhcp_machine` is the one function that reads
+ * them** -- the same arrangement `NCFG_SUPPLICANT_PROGRAM_ENV` has, and for
+ * the same reason: the start functions take the hook and the run directory as
+ * members, so a test passes what it wrote and nothing it did not ask for can
+ * reach them. `ncfg_dhcp_machine` is where "what this machine is" is
+ * answered, which is the place `NCFG_RUN_DIR` is read as well.
+ *
+ * An uninstalled tree needs the first of them to be usable at all: the hook
+ * ships to `/usr/libexec` and six of the live scripts drive a build directory,
+ * so without it every dhcpcd check in them reads back a message about a hook
+ * that is missing because nobody has run `make install`.
+ */
+#define NCFG_DHCPCD_HOOK_ENV "NCFG_DHCPCD_HOOK"
+#define NCFG_DHCPCD_RUN_DIR_ENV "NCFG_DHCPCD_RUN_DIR"
+
+/*
  * How long `dhcpcd -k` is given to take effect before the stop is a failure.
  *
  * A `-k` returns as soon as it has sent the signal, so an immediate look would
@@ -148,13 +166,19 @@
 /*
  * What this module needs from the machine and will not assume.
  *
- * `ncfg_service_t`'s bargain, taken for its reason: **nothing here has a
- * default and nothing here reads the environment**, because the machine these
- * tests are built on is a workstation whose network is live and a default is
- * how the difference between a check and an outage becomes a variable somebody
- * remembered to set. The Rust reads `NCFG_DHCPCD_HOOK` and
- * `NCFG_DHCPCD_RUN_DIR`; here they are members, and a member left NULL refuses
- * by name what needs it.
+ * `ncfg_service_t`'s bargain, taken for its reason: **nothing in this struct
+ * has a default and no function taking it reads the environment**, because
+ * the machine these tests are built on is a workstation whose network is live
+ * and a default is how the difference between a check and an outage becomes a
+ * variable somebody remembered to set. The Rust reads `NCFG_DHCPCD_HOOK` and
+ * `NCFG_DHCPCD_RUN_DIR` at the point of use; here they are members, and a
+ * member left NULL refuses by name what needs it.
+ *
+ * `ncfg_dhcp_machine` fills the two from those variables where they are set,
+ * and it is the only function here that looks -- see them above. That keeps
+ * the reading in one place a reader can find rather than in the three callers
+ * that each want the same answer, and leaves every start function taking only
+ * what it was handed.
  *
  * The three programs are the one exception and it is `ncfg_ra_start`'s: NULL
  * means "find the conventional name", which is what a daemon wants and what a
