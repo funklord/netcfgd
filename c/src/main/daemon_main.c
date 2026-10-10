@@ -732,6 +732,10 @@ static const char *rfkill_device_from_environment(void)
  * is a dotfile so the config loader would ignore it even if a crash left one
  * behind (0121).
  *
+ * **Called before the watchers open, and the call site says why**: creating
+ * and unlinking this file moves the configuration directory's mtime, which is
+ * part of the polling watcher's baseline.
+ *
  * Only a refusal is reported. A full disk or a name that already exists is
  * some other problem, and guessing here would put a sentence about sandboxes
  * in front of somebody whose disk is full.
@@ -921,6 +925,32 @@ static int start(const options_t *options)
 	/* The dead reply sockets in that directory are swept by
 	 * `ncfg_main_watchers_open`, which is the first thing here that lists it
 	 * -- and is somewhere a test can drive. */
+	/*
+	 * **Before the watchers, because it writes into the directory they
+	 * watch.** The probe is a real `open(O_CREAT|O_EXCL)` and an `unlink`,
+	 * which bumps the configuration directory's own mtime -- and the
+	 * polling watcher's baseline is the mtime of that directory and
+	 * everything in it, taken when the watch opens. Probing afterwards left
+	 * the baseline one modification behind the directory, so the first tick
+	 * reported a configuration change that had not happened.
+	 *
+	 * Measured: with inotify exhausted (or `--poll-config`), the daemon
+	 * recompiled on its first tick on every start -- `.netcfgd-write-probe`
+	 * created and unlinked 4ms after the baseline, visible in `strace` and
+	 * in the directory's mtime moving with nothing having touched it. The
+	 * recompile re-materialises every hook under `<run>/hooks/`, which is
+	 * how it was found: `tests/live/hooks.sh` tampers with a materialised
+	 * hook and expects the content hash to refuse it, and the rewrite put
+	 * the original back before the hash was ever read. 0063's control was
+	 * silently disarmed on any machine without a spare inotify instance.
+	 *
+	 * So the invariant is the ordering: **nothing this daemon does may write
+	 * into a watched directory after `ncfg_main_watchers_open`.** A refresh
+	 * after the fact would hide a real edit made while the daemon was
+	 * starting, which is the opposite mistake.
+	 */
+	report_writability(where.config);
+
 	memset(&watch, 0, sizeof(watch));
 	watch.config_dir = where.config;
 	/*
@@ -1047,7 +1077,6 @@ static int start(const options_t *options)
 	        ? ncfg_watch_mechanism_name(ncfg_watch_mechanism(&watchers.watch))
 	        : "nothing",
 	    ncfg_daemon_server_path(local));
-	report_writability(where.config);
 
 	/*
 	 * **What was already here, before anything is adopted or applied.**
