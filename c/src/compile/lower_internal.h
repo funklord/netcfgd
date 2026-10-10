@@ -304,6 +304,16 @@ int   ncfg_check_cidr(ncfg_lower_ctx_t *ctx, const char *text, ncfg_span_t span)
 int   ncfg_network_of(ncfg_lower_ctx_t *ctx, const char *text, char **out);
 /* Whether a string is a hostname the kernel will take. */
 int   ncfg_is_hostname(const char *name);
+/*
+ * Three closed sets the document stores as free strings, so the reader admits
+ * anything and the renderer has to ask the same question the lowering does.
+ * Declared here rather than moved to the model because the renderer is this
+ * module's own: `render_device.c` and `render_link.c` already include this
+ * header.
+ */
+int   ncfg_is_regdom(const char *name);
+int   ncfg_is_duplex(const char *name);
+int   ncfg_is_band(const char *name);
 /* An IPv4 netmask as a prefix length, or -1 for a non-contiguous one. */
 int   ncfg_netmask_to_prefix(const char *text);
 

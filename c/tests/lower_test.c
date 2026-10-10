@@ -2192,41 +2192,21 @@ static int mutate_block(const char *source, char *out, size_t out_size)
 }
 
 /*
- * String constraints the language has and the renderer does not yet apply.
+ * **The pinned baseline is gone because it reached zero.**
  *
- * **A pinned baseline rather than a disabled sweep.** The string half of this
- * sweep found fifteen of these on the run that added it, each a validator the
- * compiler applies on the way in and the renderer does not apply on the way
- * out -- so a document read from JSON carrying one is written and then refused
- * by the program that wrote it. Fixing fifteen guards at once would be fifteen
- * rushed guards; pinning them keeps the instrument running, stops the set
- * growing, and leaves each one a named piece of work with a reproduction.
+ * The string half of the sweep below found fifteen constraints the language
+ * applied and the renderer did not, and carried them as a pinned list keyed on
+ * the compiler's reason -- so the set could not grow while they were cleared
+ * one batch at a time. All fifteen are guarded now, so a fault is a fault again
+ * and nothing is waived.
  *
- * Keyed on the COMPILER'S reason rather than on the JSON key, because a key is
- * shared: `name` is a secret reference's here and a device's elsewhere, and the
- * device's is guarded -- a pin on `name` would have masked that guard's
- * removal. A reason names one constraint.
- *
- * Held in both directions: each pin must still fire, or it has been fixed and
- * the entry is stale.
+ * Kept as a note rather than as an empty table, which C has no spelling for.
+ * If a batch of findings ever needs landing again, the shape to bring back is:
+ * pin on the compiler's REASON and not on the JSON key -- a key is shared, and
+ * a pin on `name` would have masked the device-name guard -- and assert that
+ * every pin still fires, which is what reported four of the fifteen as fixed
+ * before anybody thought to look.
  */
-static const struct {
-	const char *reason;
-	const char *what;
-} unguarded_strings[] = {
-	{ "is not a regulatory domain", "an access point's `regdom`" },
-	{ "is not a Bluetooth address", "a bluetooth device's address" },
-	{ "is not an IPv6 address", "an IPv6 literal, in a token or a delegation" },
-	{ "is not an `http", "a portal's `portal_check` URL" },
-	{ "is not a hostname", "`global`'s hostname" },
-	{ "is not a duplex setting", "an ethtool `duplex`" },
-	{ "is not a band", "an access point's `band`" },
-	{ "is not an address or keyword", "an addressing entry this guard does not reach" },
-	{ "needs a name after it", "a `group:` principal" },
-	{ "an APN cannot be empty", "a modem's `apn`" },
-};
-
-static unsigned char unguarded_seen[sizeof(unguarded_strings) / sizeof(unguarded_strings[0])];
 
 /*
  * Every numeric leaf of a document, taken to an extreme.
@@ -2330,7 +2310,6 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 			ncfg_buf_t       variant;
 			ncfg_document_t *other;
 			char             why[NCFG_ERROR_MAX];
-			size_t           pin;
 
 			if ((size_t)(end - start) == strlen(extremes[which])
 			    && strncmp(text + start, extremes[which], end - start) == 0) {
@@ -2355,18 +2334,6 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 				continue;
 			}
 			if (strncmp(why, "it cannot be rendered at all", 28u) == 0) {
-				(*refused)++;
-				ncfg_document_free(other);
-				continue;
-			}
-			for (pin = 0; pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0]);
-			    pin++) {
-				if (strstr(why, unguarded_strings[pin].reason)) {
-					unguarded_seen[pin] = 1u;
-					break;
-				}
-			}
-			if (pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0])) {
 				(*refused)++;
 				ncfg_document_free(other);
 				continue;
@@ -2569,22 +2536,6 @@ static void example_cases(void)
 	    "  and the numeric sweep reached documents rather than nothing");
 	check(numeric_refused >= 8u,
 	    "  with some refused, which is what says the guards are reached");
-	/* And every pin still fires, so the list cannot become one of constraints
-	 * somebody has since guarded. A pin that has stopped firing is a fix that
-	 * nobody took the entry out for. */
-	{
-		size_t pin;
-
-		for (pin = 0; pin < sizeof(unguarded_strings) / sizeof(unguarded_strings[0]);
-		    pin++) {
-			if (!unguarded_seen[pin]) {
-				printf("    `%s` no longer faults -- %s is guarded, so drop the pin\n",
-				    unguarded_strings[pin].reason, unguarded_strings[pin].what);
-			}
-			check(unguarded_seen[pin] != 0u,
-			    "  and each pinned string constraint still fails, or its pin is stale");
-		}
-	}
 	/*
 	 * **The floors, which are the control.** A `mutate_block` that produced
 	 * garbage would make every mutation refuse, and a sweep where nothing

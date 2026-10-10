@@ -12385,6 +12385,74 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.458 The baseline reaches zero, and the pinning comes out
+
+The last ten pins are guarded and the pinned list is gone: a fault in the
+string sweep is a fault again, and nothing is waived. Fifteen constraints in
+all, cleared over four passes.
+
+**It cost far less than the first estimate**, and the reason is the thing to
+keep. 10.455 said nine of them each "hold a small validator privately" and
+filed them as extraction work. Then `render_link.c` turned out to already
+include `lower_internal.h`: **the renderer and the lowering are siblings in
+`compile/`**, so a pure predicate the lowering already declares is simply
+callable. `ncfg_is_hostname` was one of those -- no extraction, a direct call.
+Of the ten, two used functions already public in `value.h`
+(`ncfg_hardware_address_strict`, `ncfg_address_parse`), one was reachable in
+the module header, three needed a one-line predicate promoted out of an `if`,
+and four were a comparison written out.
+
+So the sizing error of 10.457 was not a one-off. **Both times the cost was
+estimated from where a thing lived rather than from what it was**, and both
+times it was an overestimate that parked real work. The first was a function's
+name; the second was a layer boundary that is not one.
+
+### What each of the ten turned out to be
+
+    hostname            ncfg_is_hostname, already declared for this module
+    bluetooth address   ncfg_hardware_address_strict, already public
+    ipv6_token          ncfg_address_parse with the lowering's three conditions
+    regdom              two alphabetic characters, promoted to a predicate
+    duplex              full or half, promoted
+    band                2.4, 5 or 6, promoted
+    portal_check        starts with `http://`
+    apn                 not empty
+    group: principal    a `user:` or `group:` with a name after it
+    addressing entry    no space in a delegation's source or suffix
+
+**Three of them are closed sets the document stores as free strings** --
+`regdom`, `duplex`, `band` -- which is why the hole existed at all. Were they
+enums, the reader would refuse nonsense and the renderer would have nothing to
+check. Making them enums changes the wire form and so the frozen witness, which
+is 0020's territory and a decision rather than a guard; recorded here because it
+is the shape behind three of the fifteen.
+
+### The last one was not the constraint it looked like
+
+`is not an address or keyword` read as another validator to apply. It is not:
+an addressing entry is **word-split** by `ncfg_as_words`, so `@pd:a b` is two
+entries by the time the lowering sees it, and the second is not an address.
+Quoting cannot help -- the entry is already a quoted string and the split is in
+the entry's own grammar rather than the lexer's.
+
+So the guard is "no space in a delegation's source or suffix", which is a
+different kind of rule from the other fourteen: not *is this a valid X* but
+*can this text survive the syntax it is written into*. It also sidesteps the
+open question about whether a source must be an interface name, since it holds
+either way and a name could not contain a space.
+
+### What the pinning bought, written down because it is gone
+
+Four of the fifteen were reported fixed by the list itself, before I looked.
+One of those reports caught a HALF-done guard: `cannot be a network name` is
+raised at two sites, and guarding the network's label alone left the pin
+firing. A sweep that only reported faults would have read that as complete.
+
+The shape to bring back, if a batch ever needs landing again: pin on the
+compiler's REASON rather than the JSON key -- a key is shared, and a pin on
+`name` would have masked the device-name guard -- and assert that every pin
+still fires.
+
 ## 10.457 Two more pins, one of which I had sized wrongly
 
 Nine left, from fifteen. Two went this pass and they are worth separating,
@@ -12432,7 +12500,8 @@ one.
 
 ### What that leaves
 
-Nine pinned, all of them a validator the lowering holds privately: regdom,
+Ten pinned -- I said nine in the report and miscounted -- all of them a
+validator the lowering holds privately: regdom,
 Bluetooth address, IPv6 literal, `http://` URL, hostname, duplex, band, an
 addressing entry this guard does not reach, a `group:` principal, and an empty
 APN. None needs a layer moved, on the evidence of this pass -- which is exactly

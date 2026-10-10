@@ -42,6 +42,7 @@
  */
 #include "ncfg/render.h"
 
+#include "lower_internal.h"
 #include "render_private.h"
 
 #include "ncfg/base.h"
@@ -943,6 +944,36 @@ static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrender
 			ncfg_render_refuse(missing, "interface", interface->name,
 			    "a delegation source `%s`, longer than the language carries", source);
 		}
+		/*
+		 * **An addressing entry is word-split, so no part of one may hold a
+		 * space.** `@pd:a b` is two entries by the time `ncfg_as_words` has
+		 * finished, and the second is not an address -- which is the message the
+		 * compiler gives. Quoting cannot help: the entry is already a quoted
+		 * string and the split is in the entry's own grammar, not the lexer's.
+		 *
+		 * This is not the open question about whether a source must be an
+		 * interface name -- it holds either way, and a name could not contain a
+		 * space anyway.
+		 */
+		for (j = 0; j < interface->addressing_count; j++) {
+			const ncfg_delegated_t *delegated = &interface->addressing[j].delegated;
+			const char             *parts[2];
+			size_t                  which;
+
+			if (interface->addressing[j].kind != NCFG_ADDRESS_SOURCE_DELEGATED) {
+				continue;
+			}
+			parts[0] = delegated->prefix.source;
+			parts[1] = delegated->suffix;
+			for (which = 0; which < NCFG_COUNT_OF(parts); which++) {
+				if (!parts[which] || !strpbrk(parts[which], " \t")) {
+					continue;
+				}
+				ncfg_render_refuse(missing, "interface", interface->name,
+				    "a delegation %s `%s`, which holds a space an entry cannot",
+				    which == 0u ? "source" : "suffix", parts[which]);
+			}
+		}
 	}
 	for (i = 0; i < document->rule_count; i++) {
 		refuse_unusable_name(missing, "rule", NULL, "`iif`", document->rules[i].iif);
@@ -1067,6 +1098,123 @@ static void refuse_nameless_secrets(const ncfg_document_t *document,
 	}
 }
 
+/*
+ * The strings whose shape the field tables do not carry.
+ *
+ * **Nine validators the language applies and the document does not.** Each
+ * member here is `NCFG_F_STR`, so the reader accepts any text and the renderer
+ * wrote it back for the compiler to refuse. 10.454's sweep found them by
+ * exercising the program rather than by reading it, and pinned them until each
+ * had a guard; these are the ones whose test was already reachable or was one
+ * line to promote.
+ *
+ * **Three of them are closed sets stored as free strings** -- `regdom`,
+ * `duplex`, `band` -- which is the reason the hole exists at all: were they
+ * enums, the reader would refuse nonsense and none of this would arise. Making
+ * them enums changes the document's wire form and so the frozen witness, which
+ * is a decision with 0020 attached and not one to take while guarding.
+ */
+static void refuse_unwritable_strings(const ncfg_document_t *document,
+    ncfg_unrenderable_t *missing)
+{
+	static const char *const tiers[] = { "observe", "wifi", "admin" };
+	const ncfg_principal_t  *who[4];
+	ncfg_address_t           address;
+	char                     normal[64];
+	size_t                   i;
+
+	if (document->globals.hostname_policy.kind == NCFG_HOSTNAME_POLICY_STATIC
+	    && !ncfg_is_hostname(document->globals.hostname_policy.name)) {
+		ncfg_render_refuse(missing, "global", NULL, "a hostname `%s`, which is not one",
+		    document->globals.hostname_policy.name
+		        ? document->globals.hostname_policy.name : "");
+	}
+
+	/* A `user:` or `group:` principal is the word and then a name, so an empty
+	 * one renders as `user:` and the parser has nothing to take. */
+	who[0] = &document->globals.control.observe;
+	who[1] = &document->globals.control.wifi;
+	who[2] = &document->globals.control.admin;
+	who[3] = &document->globals.remote.agent;
+	for (i = 0; i < NCFG_COUNT_OF(who); i++) {
+		if (who[i]->kind != NCFG_PRINCIPAL_USER && who[i]->kind != NCFG_PRINCIPAL_GROUP) {
+			continue;
+		}
+		if (who[i]->name && who[i]->name[0] != '\0') {
+			continue;
+		}
+		ncfg_render_refuse(missing, "global", NULL,
+		    "a `%s` principal with no name after it",
+		    i < NCFG_COUNT_OF(tiers) ? tiers[i] : "agent");
+	}
+
+	for (i = 0; i < document->device_count; i++) {
+		const ncfg_device_t *device = &document->devices[i];
+
+		if (device->wifi) {
+			if (device->wifi->regdom && !ncfg_is_regdom(device->wifi->regdom)) {
+				ncfg_render_refuse(missing, "device", device->name,
+				    "a `regdom` of `%s`, which is not a country code",
+				    device->wifi->regdom);
+			}
+			if (device->wifi->portal_check
+			    && strncmp(device->wifi->portal_check, "http://", 7u) != 0) {
+				ncfg_render_refuse(missing, "device", device->name,
+				    "a `portal_check` of `%s`, which is not an `http://` url",
+				    device->wifi->portal_check);
+			}
+		}
+		if (device->link_settings && device->link_settings->duplex
+		    && !ncfg_is_duplex(device->link_settings->duplex)) {
+			ncfg_render_refuse(missing, "device", device->name,
+			    "a `duplex` of `%s`, which is neither full nor half",
+			    device->link_settings->duplex);
+		}
+		if (device->modem && device->modem->apn && device->modem->apn[0] == '\0') {
+			ncfg_render_refuse(missing, "device", device->name, "an `apn` with nothing in it");
+		}
+	}
+
+	/* A token is an interface identifier, so an address with no prefix -- the
+	 * lowering's own three conditions. */
+	for (i = 0; i < document->interface_count; i++) {
+		const char *token = document->interfaces[i].ipv6_token;
+
+		if (!token) {
+			continue;
+		}
+		if (ncfg_address_parse(token, &address, NULL, 0) && !address.has_prefix
+		    && address.is_ipv6) {
+			continue;
+		}
+		ncfg_render_refuse(missing, "interface", document->interfaces[i].name,
+		    "an `ipv6_token` of `%s`, which is not an IPv6 address", token);
+	}
+
+	for (i = 0; i < document->bluetooth_count; i++) {
+		const char *at = document->bluetooth[i].address;
+
+		if (at && ncfg_hardware_address_strict(at, normal, sizeof(normal), NULL, 0)) {
+			continue;
+		}
+		ncfg_render_refuse(missing, "bluetooth", document->bluetooth[i].id,
+		    "an address `%s`, which is not a Bluetooth address", at ? at : "");
+	}
+
+	for (i = 0; i < document->access_point_count; i++) {
+		const ncfg_access_point_t *point = &document->access_points[i];
+
+		if (point->regdom && !ncfg_is_regdom(point->regdom)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a `regdom` of `%s`, which is not a country code", point->regdom);
+		}
+		if (point->band && !ncfg_is_band(point->band)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a `band` of `%s`, which is not one of 2.4, 5 or 6", point->band);
+		}
+	}
+}
+
 int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing, char *err, size_t err_size)
 {
@@ -1090,6 +1238,7 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	 * back makes the whole profile unusable rather than one block. */
 	refuse_unusable_names(document, missing);
 	refuse_nameless_secrets(document, missing);
+	refuse_unwritable_strings(document, missing);
 
 	/* `schema_version` and `generated_by` are deliberately not written: the
 	 * configuration language cannot express either, and the compiler

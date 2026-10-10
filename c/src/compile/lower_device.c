@@ -435,7 +435,7 @@ static void lower_ethtool(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 			if (!name) {
 				continue;
 			}
-			if (strcmp(name, "full") == 0 || strcmp(name, "half") == 0) {
+			if (ncfg_is_duplex(name)) {
 				free(settings->duplex);
 				settings->duplex = name;
 			} else {
@@ -478,7 +478,7 @@ void ncfg_lower_band(ncfg_lower_ctx_t *ctx, char **band, const ncfg_ast_assignme
 	if (!name) {
 		return;
 	}
-	if (strcmp(name, "2.4") == 0 || strcmp(name, "5") == 0 || strcmp(name, "6") == 0) {
+	if (ncfg_is_band(name)) {
 		free(*band);
 		*band = name;
 		return;
@@ -487,6 +487,26 @@ void ncfg_lower_band(ncfg_lower_ctx_t *ctx, char **band, const ncfg_ast_assignme
 	    "`%s` is not a band: one of 2.4, 5, 6 -- or leave `band` out and let the channel "
 	    "number say which", name);
 	free(name);
+}
+
+/* Two letters, which is an ISO 3166-1 alpha-2 country code; the case is the
+ * renderer's business and either is read back. */
+int ncfg_is_regdom(const char *name)
+{
+	return name && strlen(name) == 2u
+	    && ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z'))
+	    && ((name[1] >= 'a' && name[1] <= 'z') || (name[1] >= 'A' && name[1] <= 'Z'));
+}
+
+int ncfg_is_duplex(const char *name)
+{
+	return name && (strcmp(name, "full") == 0 || strcmp(name, "half") == 0);
+}
+
+int ncfg_is_band(const char *name)
+{
+	return name && (strcmp(name, "2.4") == 0 || strcmp(name, "5") == 0
+	    || strcmp(name, "6") == 0);
 }
 
 /*
@@ -508,15 +528,11 @@ void ncfg_lower_regdom(ncfg_lower_ctx_t *ctx, char **regdom,
     const ncfg_ast_assignment_t *assignment)
 {
 	char *name = ncfg_as_string(ctx, assignment->value);
-	int   alphabetic;
 
 	if (!name) {
 		return;
 	}
-	alphabetic = strlen(name) == 2u &&
-	    ((name[0] >= 'a' && name[0] <= 'z') || (name[0] >= 'A' && name[0] <= 'Z')) &&
-	    ((name[1] >= 'a' && name[1] <= 'z') || (name[1] >= 'A' && name[1] <= 'Z'));
-	if (!alphabetic) {
+	if (!ncfg_is_regdom(name)) {
 		ncfg_diag(ctx, assignment->span,
 		    "`%s` is not a regulatory domain: an ISO 3166-1 alpha-2 country code, such as "
 		    "\"SE\"", name);
