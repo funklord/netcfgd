@@ -1263,6 +1263,14 @@ packaging:
 	@# `powersave = "?"` and report success, and no round trip covers it because
 	@# the value that has just been added is the one no corpus sets.
 	@python3 tool/word_table_gate.py
+	@# And every named block the renderer can open against the list
+	@# `profile save` overrides from. That omission has happened three times --
+	@# `device` counted when it should not be, `bluetooth` missed when the
+	@# renderer learned it, and `rule`, `access_point` and `linkset` missed for
+	@# as long as it could write them -- and each time it made `ncfg profile
+	@# save` refuse a faithful snapshot for a redefinition. A round trip cannot
+	@# see it: it renders a document with no base to collide with.
+	@python3 tool/override_coverage_gate.py
 	@# And every public header in one file. `tun.h` declared an enum `document.h`
 	@# already had, so any translation unit including both failed to compile --
 	@# and none did, so the module built and its tests passed.

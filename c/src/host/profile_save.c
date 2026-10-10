@@ -356,6 +356,39 @@ static int collect_overrides(const ncfg_document_t *base, ncfg_overrides_t *over
 			return 0;
 		}
 	}
+	/*
+	 * **And the three the renderer could already write and this list had never
+	 * named.** `tests/live/profile.sh` found it the way the bluetooth entry was
+	 * found and at a cost one step worse: its base defines `rule
+	 * profile-probe`, the snapshot restated it bare, and `ncfg profile save`
+	 * answered *"that would stop the configuration compiling ... `rule
+	 * profile-probe` is already defined"* -- so the verb was unusable on any
+	 * machine with a rule, an access point or a linkset in its configuration,
+	 * which is every machine running an access point.
+	 *
+	 * Three recurrences of one omission is a class rather than three
+	 * oversights, so `tool/override_coverage_gate.py` now reads the kinds out
+	 * of the renderer's own `ncfg_render_opening` calls and fails when this
+	 * function does not name one of them. The list cannot silently fall behind
+	 * the renderer a fourth time.
+	 */
+	for (i = 0; i < base->rule_count; i++) {
+		if (!ncfg_overrides_add(overrides, "rule", base->rules[i].id, err, err_size)) {
+			return 0;
+		}
+	}
+	for (i = 0; i < base->access_point_count; i++) {
+		if (!ncfg_overrides_add(overrides, "access_point", base->access_points[i].id, err,
+		    err_size)) {
+			return 0;
+		}
+	}
+	for (i = 0; i < base->linkset_count; i++) {
+		if (!ncfg_overrides_add(overrides, "linkset", base->linksets[i].name, err,
+		    err_size)) {
+			return 0;
+		}
+	}
 	return 1;
 }
 
