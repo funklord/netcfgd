@@ -12385,6 +12385,223 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.470 The four port gaps, and what each turned out to be
+
+Settled 2026-10-10: fix the four 10.469 measured. All four are closed and the
+scripts pass. Not one of them was the thing its failing check appeared to name,
+and two were caused by this port's own earlier work.
+
+    exec_refused.sh    10 checks   two faults, plus a variable nothing read
+    hooks.sh            2 checks   a spurious reload, from a writability probe
+    profile.sh          3 checks   three block kinds a list had never named
+    dhcpcd_orphan.sh    1 check    10.468's fix, silencing more than its target
+
+### `exec_refused.sh`: the reason was computed and thrown away
+
+Two faults in one loop. `ncfg_dhcp_start` tries dhcpcd, udhcpc and busybox in
+order; `program_for` returns NULL for *both* "not installed" and "installed and
+unusable", so the loop's `continue` discarded the distinction and the tail said
+one generic sentence naming none of the three. An operator holding `no DHCPv4
+client found` could not tell a machine with nothing installed from one whose
+dhcpcd is mode 0644 -- and `ncfg_process_exec_refusal` already produced exactly
+the sentence that tells those apart (0178/0182), with nobody calling it from
+here.
+
+The second was the dhcpcd hook check, which `return`ed and so **refused the
+start before a client was ever looked for**. The hook is dhcpcd's alone and
+udhcpc never runs it, so a machine whose working client is busybox was refused
+its lease over a file that would not have been used. Worse for the script
+itself: in an uninstalled tree every check in it read back a message about the
+hook instead of the one it was written for, which is what its own header says
+it exists to avoid.
+
+So the loop accumulates a reason per candidate -- absent names collected into
+one sentence, an `access(X_OK)` refusal reported through the refusal helper that
+distinguishes a missing executable bit from a `noexec` mount, the hook asked
+once before the loop and disqualifying dhcpcd rather than failing the start --
+and the "install dhcpcd, udhcpc or busybox" line is emitted **only where
+nothing was found to run**. Telling an operator whose dhcpcd is 0644 to install
+dhcpcd sends them to `apt` for a fault a `chmod` fixes, and it is the sentence
+they read first because it is the one naming an action.
+
+### And underneath it, two environment variables the C never read
+
+`NCFG_DHCPCD_HOOK` and `NCFG_DHCPCD_RUN_DIR` are how an uninstalled tree is
+driven at all: the hook ships to `/usr/libexec`, so **six** live scripts set one
+or both -- five of them pointing the hook at `packaging/hooks/dhcpcd-hook` in
+this tree, and the sixth the run directory. The Rust reads both. `ncfg_dhcp_machine` filled its members from the
+compiled-in defaults and looked at nothing, so every dhcpcd check in those six
+was answered about a hook nobody had installed.
+
+`dhcp.h` says of that struct that nothing in it has a default and no function
+taking it reads the environment -- which is right and stays. The reading goes
+in `ncfg_dhcp_machine`, the one function whose job is "what this machine is",
+beside where the daemon resolves its run directory, and the header now says so
+rather than describing an arrangement its own constructor did not keep. Three
+callers wanted the same answer; one place looks.
+
+### `hooks.sh`: a writability probe disarmed 0063's hash control
+
+The check is that a materialised hook edited after the configuration was
+compiled does not run: the document carries its content hash, and the executor
+refuses a file that no longer matches. The C ran the hook and reported success.
+
+The hash check was present and correct. What happened is that **the file was
+rewritten with its original contents before the hash was read**. A `sha256sum`
+either side showed it: tampered going in, pristine coming out.
+
+Three theories, all wrong, and each cost a run: a reconcile pass woken by the
+`ip link set up`; the confirm path recompiling to find its revert target; the
+apply request reloading. A `sleep 2` with no apply showed the tamper surviving,
+which killed the first; reading `ncfg_confirm_may_arm` and
+`ncfg_daemon_apply_request` killed the other two. One `strace -f -e
+trace=openat,unlink` on the daemon answered it in a single run:
+
+    openat(".../etc/.netcfgd-write-probe.4659", O_WRONLY|O_CREAT|O_EXCL) = 12
+    unlink(".../etc/.netcfgd-write-probe.4659")                          = 0
+
+`report_writability` probes the configuration directory with a real
+`open(O_CREAT|O_EXCL)` and an `unlink`, because `access(2)` walks straight past
+a read-only *mount* and that is the case it exists for (0178 one layer up). The
+probe is right. It ran **after** `ncfg_main_watchers_open`, and creating and
+removing a file bumps the containing directory's own mtime -- which is part of
+the polling watcher's baseline. So the baseline was one modification behind the
+directory from the moment it was taken, and the first tick reported a
+configuration change that had not happened. The reload re-materialises every
+hook under `<run>/hooks/`, putting the original back.
+
+**The cost is not the test.** On any machine whose inotify instances are
+exhausted -- or anybody running `--poll-config` -- the daemon recompiled on its
+first tick, every start, and 0063's hash control was silently disarmed. Nothing
+said so: a successful reload logs nothing, which is correct and is also why this
+hid.
+
+The fix is the ordering, and the invariant is written at both ends: **nothing
+this daemon does may write into a watched directory after the watchers open.** A
+refresh after the fact was the other candidate and is worse -- it would hide a
+real edit made while the daemon was starting, which is the opposite mistake.
+
+Measured before and after with nothing touching the config: two reloads in five
+seconds became one, the one at startup.
+
+### And the journal over the socket was printing the whole document
+
+Found in the same output while reading it. `ncfg apply --confirm-within N` is
+the daemon's to carry out, and the client prints the journal it answers with --
+as, measured:
+
+    doneid1opaddr.delinterfacehooked0reasoninterfacehooked0fieldenabled...
+
+`ncfg_json_string` hands out **counted, not terminated** bytes, and says so in
+as many words; `say_journal` passed NULL for the length and used `%s` and
+`strcmp`. Every string ran to the end of the buffer, so the `strcmp` against
+`"done"` failed, the outcome lookup fell through to the raw bytes, and `%s`
+printed the rest of the document. Only the last record came out right, its
+value being the one that happens to sit at the buffer's end -- which is why the
+one `Done hook.run` in the output looked like the shape working.
+
+Matched with `ncfg_json_string_equals`, which exists for exactly this, and
+printed with `%.*s`. It reads as the Rust's does now.
+
+### `profile.sh`: the third time this list fell behind the renderer
+
+`ncfg profile save` renders the running document beside the base, so a block the
+base defines has to be restated as `override`; `collect_overrides` says which
+those are. It named interface, network, device and bluetooth. The renderer opens
+**seven** kinds, and `rule`, `access_point` and `linkset` were never in the
+list, for as long as it could write them. The base in that script defines `rule
+profile-probe`, the snapshot restated it bare, and the save rolled itself back
+with *"that would stop the configuration compiling"* -- about a faithful
+snapshot. The verb was unusable on any machine with a rule, an access point or a
+linkset in its configuration, which is every machine running an access point.
+
+Three recurrences of one omission is a class: `device` was counted when it
+should not have been, `bluetooth` was missed when the renderer learned it, and
+now three at once. `tool/override_coverage_gate.py` reads the kinds out of the
+renderer's own `ncfg_render_opening` calls and out of `collect_overrides`, and
+fails in both directions. Seen to fail both ways before being trusted. A round
+trip cannot cover this: it renders a document with no base to collide with.
+
+### `dhcpcd_orphan.sh`: 10.468's fix was broader than its target
+
+The check reads `adopted the dhcp client already running on ...` from the apply
+output, and it is **the only discriminator there is**: a second `dhcpcd -b`
+against a running one is a silent no-op, so the client count is 1 whether
+netcfgd adopted or blindly re-ran. A silent adoption is indistinguishable from
+netcfgd having started a second client.
+
+The message was there, at `INFO`, and two things of this port's own making
+stopped it. 10.468 bracketed the CLI's `ncfg_apply` with
+`ncfg_log_accept(NCFG_LOG_CRITICAL)` to stop the engine's per-action line being
+printed beside the journal that already says it -- and that silences **every
+line the backends emit while the plan runs**, not the engine's. And `main.c`
+imposed a `WARNING` floor for the same duplicate, which is two steps stricter
+than the Rust, whose default is `Info`: so even unbracketed, no `INFO` line a
+backend emits reached an operator of the C.
+
+Both are gone. `ncfg_apply_silently` is the duplicate's actual fix -- the engine
+withholds *its own* narration for the one caller that renders the journal, and
+takes nobody else's lines -- and the floor had no remaining reason, so the two
+builds' default levels agree. `ap.sh` and `acl.sh`, the two scripts 10.468 was
+fixing, still pass.
+
+**A severity floor silences by level what wanted silencing by author**, and the
+blunt instrument was mine. The narration belongs to the caller; that is what the
+two function names say now.
+
+### The whole suite re-run afterwards, because one of these fixes is broad
+
+Removing the `WARNING` floor changes what every `ncfg` command prints, so the
+83 scripts were run again end to end. **Two fail, and they are the two that
+failed against both builds before any of this.** The rest:
+
+    70  pass          67 saying "all checks passed", 3 wording it their own way
+     8  cannot run    no /dev/vhci, no mac80211_hwsim, no systemctl, no nmcli,
+                      no odhcp6c, and two wanting an artefact built first
+     3  not tests     control_helper.sh and the two fake modem CLIs are
+                      fixtures the others drive, and say so when run alone
+     2  fail          confirm.sh, control_exposure.sh -- shared, see below
+
+**My own tally was wrong first, by its own detector.** It counted lines whose
+first field was `FAIL`, and the sweep writes the failing check names underneath
+the script's verdict line -- so two failing scripts and three failing checks
+read as five failing scripts. A count inherits its detector, in a script I
+wrote to count.
+
+**And `gui_wifi.sh` passes.** 10.469 recorded it running to the 180-second
+timeout on two separate sweeps, the one entry in that table that was neither a
+pass, a failure, nor a statement about the machine. It now passes bare and
+under `NCFG_LIVE=1`, which is the condition it hung in. Recorded rather than
+claimed: nothing here was aimed at it, and I have no mechanism connecting any
+of these five fixes to it. If it hangs again that is the thing to know first.
+
+### The two that fail against both, re-measured
+
+Worth re-running because a "shared failure" is a claim about the other build and
+goes stale the moment either moves. Both still fail on both, 2026-10-10:
+`control_exposure.sh` on "and the socket belongs to the group named", one check
+each; `confirm.sh` on "and the drift was still corrected" and "and it says why".
+
+**And `confirm.sh` now separates them the other way.** It fails three checks
+against the Rust and two against the C -- the Rust also fails "the windowed
+apply set the MTU" -- so on that script the C is ahead. Not pursued here; it is
+recorded because the next reader of "fails against both" should know the two
+counts are no longer equal.
+
+### What this cost, and the two habits that cost it
+
+**Theorising about a mechanism before reading the input cost three runs** on the
+hooks defect. Every theory was about which of netcfgd's own paths reloaded, and
+the answer was a syscall nobody had looked for; one `strace` was cheaper than
+all three. `evidence.md` has this as *read the input before theorising about the
+mechanism*, and the shape to recognise is that each theory was plausible, each
+was testable, and testing them one at a time is the expensive way to search.
+
+**And `kill "${daemon:-0}"` in a trap signals the process group.** My first
+probe exited before the variable was set, the trap fired, and the whole group
+including `timeout` took the signal -- which read as a 180-second hang in the
+thing being probed. A default of `0` in a `kill` is not a no-op.
+
 ## 10.469 The whole acceptance suite against the C: four port gaps
 
 All 78 scripts the Makefile names, against the C build, each in its own
@@ -12409,7 +12626,12 @@ same namespace, same `NCFG_LIVE=1`, differing only in `NCFG_LIVE_BUILD`:
 
 `hooks.sh` and `profile.sh` abort part-way under `set -e` rather than reporting
 a count, so the check named is the first to fail and there may be more behind
-it.
+it -- and for both of them there was.
+
+**All four are closed; 10.470 has what each turned out to be.** Not one was the
+thing its failing check appeared to name, and two were caused by this port's own
+earlier work. The two that fail against both builds, and the eight that cannot
+run here, are unchanged and are below.
 
 ### The two that fail against both are not the port's
 
