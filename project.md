@@ -12385,6 +12385,73 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.469 The whole acceptance suite against the C: four port gaps
+
+All 78 scripts the Makefile names, against the C build, each in its own
+throwaway namespace with `NCFG_LIVE=1` so that a script which cannot run says
+so loudly instead of passing quietly. This is the first time the suite 0263
+names as the port's acceptance criterion has been run end to end against the C.
+
+    63  pass
+     4  fail where the Rust passes        port gaps
+     2  fail against both builds          not the port's
+     8  cannot run here                   environment or an unbuilt prerequisite
+     1  hangs
+
+**The four, each confirmed by running the same script against the Rust** --
+same namespace, same `NCFG_LIVE=1`, differing only in `NCFG_LIVE_BUILD`:
+
+    exec_refused.sh    10 checks   "it says the hook is why dhcpcd was not used"
+    hooks.sh           aborts      "a tampered down hook is refused by hash"
+    profile.sh         aborts      "saving asks the daemon rather than writing
+                                    the file itself"
+    dhcpcd_orphan.sh    1 check
+
+`hooks.sh` and `profile.sh` abort part-way under `set -e` rather than reporting
+a count, so the check named is the first to fail and there may be more behind
+it.
+
+### The two that fail against both are not the port's
+
+`control_exposure.sh` fails one check on each build -- "and the socket belongs
+to the group named" -- and `confirm.sh` aborts on each without printing a
+summary. A failure that both implementations share is not a port gap, which is
+the one thing this comparison is for and the reason it is worth the second run
+every time.
+
+### What cannot run, and the three that were my own fault
+
+`bluetooth.sh` needs `/dev/vhci`, `hwsim.sh` cannot `modprobe mac80211_hwsim`
+("Operation not permitted"), `sandbox_writes.sh` wants a real systemd,
+`dhcpcd.sh` has no dhcpcd to start, `nm.sh` no `nmcli`, `delegation.sh` no
+`odhcp6c`, and `association.sh` and `c_nm_signals.sh` each need an artefact
+built first -- a cargo example and the NM shim.
+
+Three more had reported "cannot run" and were **my invocation**:
+
+  * `slaac.sh` and `dhcpcd.sh` and `dhcpcd_orphan.sh` make their own
+    namespaces, and the Makefile runs them bare for that reason; I had wrapped
+    them in `unshare -rn`, which forbids the nested `setgroups` they need. Run
+    bare: `slaac.sh` passes, `dhcpcd.sh` meets the missing client, and
+    `dhcpcd_orphan.sh` is the fourth port gap.
+  * `c_dns_delivery.sh` is the one script the Makefile runs with `unshare
+    -rmn`, needing a mount namespace to bind over `/etc/resolv.conf`. With
+    `-rmn` it passes.
+
+So of my first sweep's apparent problems, four were the sweep. **The invocation
+is part of the measurement**, and a runner that is nearly right produces a
+failure list that is mostly artefact -- which is why each of the four gaps was
+re-run under the project's own invocation and then against the Rust before
+being written down.
+
+### And one script hangs rather than saying it cannot run
+
+`gui_wifi.sh` runs until the 180-second timeout, twice, on two different
+sweeps. With `NCFG_LIVE=1` set a script that cannot run is supposed to say so
+and exit, which seven others do; this one waits. Not diagnosed further here --
+it is the one entry in the table that is neither a pass, a failure, nor a
+statement about the machine.
+
 ## 10.468 One duplicate line, three failing checks, and a conditional that preserved the bug
 
 Settled 2026-10-10: fix the three. All three were **one line said twice**.
