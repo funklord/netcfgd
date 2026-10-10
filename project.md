@@ -12385,6 +12385,49 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.466 The example's delegation line named no interface, and why that survived
+
+10.454 raised a contradiction and left it open: `ncfg_prefix_ref_t.source` is
+commented "interface whose delegation supplies it", and
+`doc/netcfgd.conf.example` writes `config = ["192.168.1.1/24", "@pd:0::1/64"]`.
+**The open half is a design question; the example was simply wrong, and
+measuring it says so.**
+
+Compiled, the line as written against the line it meant:
+
+    @pd:0::1/64       source `0::1`, subnet 64, suffix `::1/64`
+    @pd:wan0=::1/64   source `wan0`, subnet 0,  suffix `::1/64`
+
+So it asked for the delegation of an interface called `0::1`, sub-prefix 64 --
+and its `::1/64` was not read as a suffix at all. The suffix came out as
+`::1/64` only because that is the DEFAULT, so the text an author wrote to
+demonstrate the suffix syntax was doing nothing and looked like it worked.
+
+The prose above the block decides what was meant: "The inside interface takes a
+piece of what the outside one was delegated, and advertises it", the outside one
+being the `eth0` of the block above with `dhcp6 pd`, and the `advertise` block
+three lines below already spelling it `prefixes = ["@pd:eth0"]`. So the config
+line is `@pd:eth0` now, which compiles to source `eth0`, subnet 0, suffix
+`::1/64` -- the default suffix, stated once by the grammar rather than twice and
+wrongly.
+
+### Why the gate that reads this file could not see it
+
+`example_gate.py` compiles each block and a block that compiles passes. This
+one compiled, because **nothing validates a delegation source as a name** --
+which is the open question, met from a direction that was not on the list.
+
+That is a second cost for it, and the first argument either way that is not an
+appeal to the comment: leaving a source unvalidated let a typo live in the
+document a reader meets first, where it would be copied. 10.454's guard gives
+the source a length check only, deliberately, since applying `ncfg_name_ok`
+there would have rejected this very line -- the gate would have gone red on the
+example rather than on the code, which is how the question would have been
+answered by accident.
+
+**Still open, and still the holder's**: whether a delegation source must be an
+interface name. The example no longer depends on the answer.
+
 ## 10.465 The test measures the machine now, and the fall-back got the test it never had
 
 10.464 left `loop_test` failing on a machine at its inotify instance cap and
