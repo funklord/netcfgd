@@ -12428,6 +12428,16 @@ this machine -- no separate mount, which is itself worth knowing because this
 workspace's notes describe a machine where `/tmp` is a 16 GiB tmpfs and a leak
 there is charged to memory).
 
+**And `lsof +L1` earned its place in the same sweep, on my own process.** The
+`strace -f` that diagnosed 10.470's hooks defect was still running 27 minutes
+later, its output file inside a probe directory I had already removed -- so the
+file belonged to no directory, `du` could not see it, and deleting the directory
+freed nothing. `lsof +L1` named it; killing the tracer and the daemon it had
+stopped took `/` from 72 per cent to 69, about 3 GiB. Two details from
+`running-code.md` were both load-bearing: a traced process ignores `SIGTERM`, so
+the `kill` I sent first reported success and cleaned up nothing, and the tracer
+has to go first or the kernel keeps the traced one around for it.
+
 **And two of my own counts were wrong by their own detectors, in one
 afternoon.** The live sweep's tally counted lines whose first field was `FAIL`
 and so read two failing scripts as five, because the script writes the failing
