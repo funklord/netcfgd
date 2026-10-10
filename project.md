@@ -12385,6 +12385,51 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.463 The sentences move to tui.c, on the holder's instruction
+
+Settled 2026-10-10: move them. The three sentences `tui_term.c` composed are
+`tui.c`'s now, and `tui_test.c` asserts all three.
+
+**It needed no boundary redrawn, which is the part I had wrong.** 10.462 said
+obeying the rule meant moving the event handling too, or passing more structure
+across the module line. It did not: the sentence is a function of the choice
+already in hand, so
+
+    void ncfg_tui_use_says(const ncfg_tui_use_t *chosen, char *out, size_t out_size);
+    const char *ncfg_tui_no_radio(void);
+
+take the composing half and leave the event handling exactly where it was.
+`tui_term.c` calls them and copies the result, which it was already doing for
+the daemon's own refusals. The second follows `ncfg_tui_help` precisely -- a
+const sentence, which `tui_test` already asserted against `tui.message` -- so
+the pattern was in the tree and I had not looked for it before estimating.
+
+That is twice in three entries that I have sized a piece of work from where it
+sat rather than from what it was. 10.457 called a `strlen` a refactor; this
+called two function signatures a redrawn boundary.
+
+**What is left in `tui_term.c` is five `snprintf`s and every one is `"%s"`** --
+the daemon's refusal, a caller's `done` literal. No sentence is composed there,
+so the rule its header states is true again rather than aspirational.
+
+### What the tests pin, and why one of them is worth more than the others
+
+`ncfg_tui_no_radio` carries a decision rather than a wording: **the machine
+rather than the configuration.** This wave has no loader, a radio comes from
+the kernel's own link table, and sending somebody to edit a file about a fact
+that came from elsewhere is the wrong instruction -- the Rust says "in the
+configuration" and 0263 records the divergence.
+
+So the test asserts the distinguishing word and not the sentence: `machine`
+present, `configuration` absent. Rewording it does not fail the test; reversing
+the decision does. Verified by reversing it in a `git archive` copy -- the check
+fails and names itself.
+
+The other two pin an argument each: a radio's sentence names the interface, a
+network's names the network and not the radio, which is the transposition a
+copy-paste of either would make. And a `NOTHING` choice writes an empty string,
+because the buffer is the caller's and is reused between the two arms.
+
 ## 10.462 Where the suite is weakest, measured, and one rule that has drifted
 
 The renderer is closed by every instrument built for it -- line and branch
@@ -12430,23 +12475,21 @@ machine state is composed in there.
 ### And the rule has drifted, in the way its own comment predicted
 
 The header names the risk in so many words: "one `snprintf` of a row in here
-would be a row no test can see." There are **eight** `snprintf`s of
-user-visible text in there now -- `"joining %s"`, `"%s is netcfgd's now;
-scanning"`, and six more into `tui->message` -- and every one of them sits in
-`static` functions of a file whose entry point needs a terminal. No test can
-call them, so their wording, their truncation and their arguments are
-unverified.
+would be a row no test can see." There were seven `snprintf`s of user-visible
+text in there, all in `static` functions of a file whose entry point needs a
+terminal, so no test could call them.
+
+**I reported that as eight and it was three.** Seven `snprintf`s, of which four
+are bare `"%s"` copies of a string composed elsewhere -- the daemon's own
+refusal, or a `done` literal a caller passed in -- and one more was an
+`fprintf` to stderr on the fatal path, which is not a message at all. The
+compositions were three: `"no wireless device on this machine"`,
+`"%s is netcfgd's now; scanning"` and `"joining %s"`. A count wrong twice in
+one sentence, in the entry that reports a measurement.
 
 They are not rows of document state, which is why the stricter reading of the
-rule still holds. They are sentences an operator reads.
-
-**Flagged rather than moved.** The messages are set at event-handling sites
-inside the loop, so obeying the rule means moving the event handling to `tui.c`
-as well, or passing more structure across the boundary -- a design decision
-about where the TUI's control flow lives, not a mechanical relocation. Whose
-decision: the copyright holder's. The cost of leaving it is eight unverified
-sentences; the cost of moving it is a boundary redrawn in a feature nothing
-else needed changed.
+rule still holds -- zero document types in the file. They are sentences an
+operator reads, and 10.463 moves them.
 
 ## 10.461 A line is not an arm, and the second time I learned it
 

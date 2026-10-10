@@ -1556,6 +1556,59 @@ static void the_envelopes_these_tests_compose_are_the_ones_the_socket_pins(void)
  * The run
  * ------------------------------------------------------------------------ */
 
+/*
+ * The sentences `tui_term.c` used to compose.
+ *
+ * **Why they are testable at all.** `tui_term.c` owns the terminal and is the
+ * one source no test executes -- 327 lines at zero per cent, which is its
+ * design working, since it is meant to hold nothing a test would want to
+ * assert. Its own header predicted the drift: "one `snprintf` of a row in here
+ * would be a row no test can see." Three sentences had arrived there, in
+ * `static` functions behind an entry point that needs a tty, so their wording
+ * and their arguments were unverifiable. They are `tui.c`'s now and this is
+ * what verifies them.
+ */
+static void the_sentences_the_terminal_file_may_not_compose(void)
+{
+	ncfg_tui_use_t chosen;
+	char           said[NCFG_TUI_MESSAGE_MAX];
+
+	/*
+	 * **The machine rather than the configuration**, which is the divergence
+	 * 0263 records: this wave has no loader, a radio comes from the kernel's own
+	 * link table, and sending somebody to edit a file about a fact that came
+	 * from somewhere else is the wrong instruction. The Rust says "in the
+	 * configuration". Asserted on the distinguishing word rather than the whole
+	 * sentence, so rewording it does not fail this and reversing the decision
+	 * does.
+	 */
+	check(strstr(ncfg_tui_no_radio(), "machine") != NULL
+	    && strstr(ncfg_tui_no_radio(), "configuration") == NULL,
+	    "the no-radio sentence blames the machine, not the configuration");
+
+	memset(&chosen, 0, sizeof(chosen));
+	chosen.kind = NCFG_TUI_USE_RADIO;
+	(void)snprintf(chosen.interface, sizeof(chosen.interface), "%s", "wlan0");
+	ncfg_tui_use_says(&chosen, said, sizeof(said));
+	check(strcmp(said, "wlan0 is netcfgd's now; scanning") == 0,
+	    "adopting a radio names it and says a scan follows");
+
+	memset(&chosen, 0, sizeof(chosen));
+	chosen.kind = NCFG_TUI_USE_NETWORK;
+	(void)snprintf(chosen.interface, sizeof(chosen.interface), "%s", "wlan0");
+	(void)snprintf(chosen.network, sizeof(chosen.network), "%s", "home");
+	ncfg_tui_use_says(&chosen, said, sizeof(said));
+	check(strcmp(said, "joining home") == 0,
+	    "joining a network names the network and not the radio");
+
+	/* A kind `c` cannot mean says nothing rather than something stale: the
+	 * buffer is the caller's and is reused between the two arms above. */
+	memset(&chosen, 0, sizeof(chosen));
+	chosen.kind = NCFG_TUI_USE_NOTHING;
+	ncfg_tui_use_says(&chosen, said, sizeof(said));
+	check(said[0] == '\0', "and a choice that is neither says nothing at all");
+}
+
 int main(void)
 {
 	size_t observed_length = 0;
@@ -1631,6 +1684,7 @@ int main(void)
 	the_row_ceiling_counts_what_it_drops();
 	the_radio_comes_from_the_status_answer();
 	the_envelopes_these_tests_compose_are_the_ones_the_socket_pins();
+	the_sentences_the_terminal_file_may_not_compose();
 
 	ncfg_tui_lines_free(&body);
 	ncfg_tui_free(&tui);

@@ -465,6 +465,51 @@ const char *ncfg_tui_keys(void)
 	    "c use  q quit";
 }
 
+/*
+ * What the TUI says it is doing about the selected row.
+ *
+ * One function rather than a sentence at each call site, because the sentence
+ * IS a function of the choice: adopting a radio and joining a network are the
+ * two things `c` can mean, and the kind says which.
+ */
+void ncfg_tui_use_says(const ncfg_tui_use_t *chosen, char *out, size_t out_size)
+{
+	if (!out || out_size == 0u) {
+		return;
+	}
+	out[0] = '\0';
+	if (!chosen) {
+		return;
+	}
+	switch (chosen->kind) {
+	case NCFG_TUI_USE_RADIO:
+		/* "netcfgd's now" rather than "activated": the pane's whole point is
+		 * that a radio the daemon does not own cannot be scanned with. */
+		(void)snprintf(out, out_size, "%s is netcfgd's now; scanning",
+		    chosen->interface);
+		break;
+	case NCFG_TUI_USE_NETWORK:
+		(void)snprintf(out, out_size, "joining %s", chosen->network);
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * What a pane says when it needs a radio and the machine has none.
+ *
+ * **The machine rather than the configuration.** This wave has no loader, the
+ * radio would have come from the kernel's own link table, and sending somebody
+ * to edit a file about a fact that came from somewhere else is the wrong
+ * instruction. The Rust says "no wireless device in the configuration" here --
+ * see 0263 -- and `run.c` diverges from it for the same reason.
+ */
+const char *ncfg_tui_no_radio(void)
+{
+	return "no wireless device on this machine";
+}
+
 const char *ncfg_tui_help(void)
 {
 	return "d w s p e switch panes (s is clients). a applies with a 60s window: y "

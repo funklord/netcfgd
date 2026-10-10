@@ -905,6 +905,23 @@ typedef struct {
 int ncfg_tui_use(const ncfg_tui_t *tui, ncfg_tui_use_t *out, char *err, size_t err_size);
 
 /*
+ * What the TUI says it is doing about a choice, and what it says when a pane
+ * needs a radio the machine has not got.
+ *
+ * **Here because `tui_term.c` may not compose a sentence.** That file owns the
+ * terminal and is the one source no test executes -- 327 lines at zero per
+ * cent, which is its design working rather than a gap, since everything a test
+ * would want to assert is meant to be reachable without a terminal. Its own
+ * header predicted the drift in so many words: "one `snprintf` of a row in here
+ * would be a row no test can see." Three sentences had arrived there, in
+ * `static` functions behind an entry point that needs a tty, so their wording
+ * and their arguments were unverifiable. These two are the composing half,
+ * moved where `ncfg_tui_help` already lives.
+ */
+void ncfg_tui_use_says(const ncfg_tui_use_t *chosen, char *out, size_t out_size);
+const char *ncfg_tui_no_radio(void);
+
+/*
  * `ncfg tui`, from the options: the terminal, the socket and the loop.
  *
  * Returns the process's exit code. Refuses before touching the terminal where

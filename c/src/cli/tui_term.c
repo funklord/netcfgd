@@ -374,17 +374,10 @@ static void refresh(ncfg_tui_t *tui, const char *socket_path)
 			request.u.interface = ncfg_proto_str(interface);
 			(void)fetch(tui, socket_path, &tui->stations, &request);
 		} else {
-			/*
-			 * **The machine rather than the configuration**, which is the
-			 * sentence `run.c` already diverges on for the same reason: this
-			 * wave has no loader, the radio came from the kernel's own link
-			 * table, and sending somebody to edit a file about a fact that
-			 * came from somewhere else is the wrong instruction. The Rust says
-			 * "no wireless device in the configuration" here and says the
-			 * opposite two arms above -- see 0263.
-			 */
-			(void)snprintf(tui->message, sizeof(tui->message),
-			    "no wireless device on this machine");
+			/* The sentence is `tui.c`'s, with the reason it differs from the
+			 * Rust's kept beside it; this file may not compose one. */
+			(void)snprintf(tui->message, sizeof(tui->message), "%s",
+			    ncfg_tui_no_radio());
 		}
 		return;
 	case NCFG_TUI_PANE_EVENTS:
@@ -433,8 +426,7 @@ static void use(ncfg_tui_t *tui, const char *socket_path)
 		request.kind = NCFG_PROTO_REQ_RADIO_SET;
 		request.u.radio_set.interface = ncfg_proto_str(chosen.interface);
 		request.u.radio_set.activate = 1u;
-		(void)snprintf(said, sizeof(said), "%s is netcfgd's now; scanning",
-		    chosen.interface);
+		ncfg_tui_use_says(&chosen, said, sizeof(said));
 		settle(tui, socket_path, &request, said);
 		/* Straight into a scan rather than waiting for `r`: activating is only
 		 * ever a step towards looking at what is in range, and the supplicant
@@ -448,7 +440,7 @@ static void use(ncfg_tui_t *tui, const char *socket_path)
 	request.kind = NCFG_PROTO_REQ_WIFI_CONNECT;
 	request.u.wifi_connect.interface = ncfg_proto_str(chosen.interface);
 	request.u.wifi_connect.network = ncfg_proto_str(chosen.network);
-	(void)snprintf(said, sizeof(said), "joining %s", chosen.network);
+	ncfg_tui_use_says(&chosen, said, sizeof(said));
 	settle(tui, socket_path, &request, said);
 }
 
