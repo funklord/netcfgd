@@ -12385,6 +12385,57 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.471 222 directories the suite left in /tmp, and nothing failed
+
+Found while sweeping up after the probes 10.470's hooks defect needed, which is
+the sweep `running-code.md` asks for after running anything -- and the thing it
+turned up was not mine.
+
+    111  /tmp/ncfg-apply-hook-*      each holding one `bssid`
+    111  /tmp/ncfg-apply-kernel-*    each holding an empty `run/wireguard`
+
+888 KiB, oldest 2026-10-08, accumulated over two days of ordinary `make test`
+runs while every one of them printed that every check passed.
+
+**`tempdir.h` already stated the rule and no caller could be checked against
+it.** Its header says "a test that makes a directory removes what it made, by
+name, at the end", and every caller ended `(void)rmdir(dir)`. `rmdir` refuses a
+directory with anything in it, so each of these two fixtures named some of what
+it wrote, left one thing out, and discarded the refusal:
+
+  * `apply_test`'s hook checks share a directory and remove `hook.sh`; the
+    `NCFG_BSSID` check writes a `bssid` marker that nothing named.
+  * `apply_kernel_test`'s secrets fixture removes `wg0`, `psk` and `broken`;
+    the record half makes `<dir>/run` and `ncfg_kernel_wg_write_record` makes
+    `run/wireguard` under it, and neither was removed.
+
+**The fix is not a better `rmdir`.** `tempdir_gone` returns whether the
+directory went, and the three callers assert on it -- so `rmdir`'s refusal is
+now the failure of the test that caused it, and the assertion states the
+property the header claims rather than that somebody called the function.
+
+Proved by reverting it, which is the evidence that entry asks for and the only
+kind worth having here:
+
+    fix in        make test exits 0,  leaves 0 directories
+    fix reverted  make test exits 2,  leaves 1, and the check says FAILED
+
+**Why it went unseen for two days is the part worth keeping.** None of the
+obvious instruments looks at it: the suite is green, the directories are in
+`/tmp` rather than in the tree, and `df -h .` in a source tree answers for
+`/home` while the scratch is on `/` here (`findmnt /tmp` returns nothing on
+this machine -- no separate mount, which is itself worth knowing because this
+workspace's notes describe a machine where `/tmp` is a 16 GiB tmpfs and a leak
+there is charged to memory).
+
+**And two of my own counts were wrong by their own detectors, in one
+afternoon.** The live sweep's tally counted lines whose first field was `FAIL`
+and so read two failing scripts as five, because the script writes the failing
+check names underneath each verdict. Then `grep -icE warning` over the suite
+log returned 24, which were check descriptions containing the word rather than
+compiler warnings. Both were mine, in throwaway code, and both would have been
+quoted as measurements if I had not looked at what the detector matched.
+
 ## 10.470 The four port gaps, and what each turned out to be
 
 Settled 2026-10-10: fix the four 10.469 measured. All four are closed and the
