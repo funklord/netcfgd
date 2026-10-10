@@ -12385,6 +12385,69 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.462 Where the suite is weakest, measured, and one rule that has drifted
+
+The renderer is closed by every instrument built for it -- line and branch
+coverage both down to defensive arms, three gates on keys, fields and words,
+the numeric and string axes swept, over-refusal shown across 6656 compiling
+mutations. Hunting further in it would be inventing work, so the same
+instrument was pointed at the whole tree to say where the next work is.
+
+`gcov` over all 204 C sources, the whole suite:
+
+    79.46% of 47,127 lines
+
+and the renderer's 95 to 99 per cent is far above that. Ranked by UNCOVERED
+lines rather than by percentage, which is what says where the mass is:
+
+    379  48.71%  src/cli/run.c
+    327   0.00%  src/cli/tui_term.c
+    266  17.90%  src/apply/kernel.c
+    247  47.89%  src/backend/dns/deliver.c
+    240  41.79%  src/main/daemon_main.c
+    191  66.19%  src/daemon/reconcile_pass.c
+
+**Most of that is the shape of the thing rather than a gap.** `apply/kernel.c`
+talks netlink, `daemon_main.c` is an entry point, `tui_term.c` owns a terminal
+-- and this project has a VM tier for exactly the paths a namespace cannot
+reach. A low number there is a statement about where the code runs, not about
+what nobody checked.
+
+### The 0.00 per cent file is the design working
+
+`tui_term.c` is 327 lines and no test executes one of them, which looks like
+the worst entry in the table and is the best. Its header says why: it is "the
+only part of `ncfg tui` that owns a terminal" -- descriptors, termios, signals
+and `poll` -- and explicitly **no rendering**, because "the frame is composed by
+`tui.c` into a buffer and this writes it, so that everything a test would want
+to assert is reachable without a terminal".
+
+So the untestable code was deliberately gathered into one file, and the file
+being at zero is that decision having worked. **Measured against its own rule:
+zero references to `ncfg_document_t` or any document type**, so no row of
+machine state is composed in there.
+
+### And the rule has drifted, in the way its own comment predicted
+
+The header names the risk in so many words: "one `snprintf` of a row in here
+would be a row no test can see." There are **eight** `snprintf`s of
+user-visible text in there now -- `"joining %s"`, `"%s is netcfgd's now;
+scanning"`, and six more into `tui->message` -- and every one of them sits in
+`static` functions of a file whose entry point needs a terminal. No test can
+call them, so their wording, their truncation and their arguments are
+unverified.
+
+They are not rows of document state, which is why the stricter reading of the
+rule still holds. They are sentences an operator reads.
+
+**Flagged rather than moved.** The messages are set at event-handling sites
+inside the loop, so obeying the rule means moving the event handling to `tui.c`
+as well, or passing more structure across the boundary -- a design decision
+about where the TUI's control flow lives, not a mechanical relocation. Whose
+decision: the copyright holder's. The cost of leaving it is eight unverified
+sentences; the cost of moving it is a boundary redrawn in a feature nothing
+else needed changed.
+
 ## 10.461 A line is not an arm, and the second time I learned it
 
 Line coverage satisfied, so the same instrument one notch sharper. `gcov -b`
