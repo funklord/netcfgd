@@ -12385,6 +12385,65 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.464 `loop_test` fails when the machine runs out of inotify, and 79 per cent was one suite of several
+
+Two findings from going back for the ranked list in 10.462, and the first is
+the one to read before debugging anything here.
+
+### The suite fails on a machine condition, not on the code
+
+`loop_test` reports two failures -- "an inotify watch has one" and "the
+supplicant's control directory is watched" -- in a `git archive` build that had
+passed three times the same day. It reproduces, so it is not a flake.
+
+    /proc/sys/fs/inotify/max_user_instances   128
+    instances held by this account            126
+    of those, `dbus-daemon --session`         100
+    orphaned session buses (parent is init)   102
+
+**The bus leak has stopped being clutter and started failing tests.** Two
+instances were left, and `inotify_init` fails rather than returns a descriptor,
+so the watch the loop needs cannot be created. Any test in any tree that wants
+an inotify instance fails the same way, for reasons nothing in its own output
+points at.
+
+The diagnosis, which is the artefact worth keeping:
+
+    cat /proc/sys/fs/inotify/max_user_instances
+    for d in /proc/[0-9]*; do
+        n=$(find "$d/fd" -lname 'anon_inode:inotify' 2>/dev/null | wc -l)
+        [ "$n" -gt 0 ] && printf '%4d %s\n' "$n" "$(tr -d '\0' < $d/cmdline)"
+    done | sort -rn
+
+Not reaped from here. A hundred of them belong to other sessions, and
+`running-code.md` records a sweep that `SIGKILL`ed a live selftest worker
+through PID reuse while clearing exactly this leak. The remedy is the holder's
+and is partly applied already -- `~/.screenrc` sets a bus address now, which
+covers screens started after it and not the ones already running.
+
+### And 79.46 per cent was one suite of several
+
+10.462 ranked the tree by uncovered lines and called `cli/run.c` the largest at
+48.71 per cent of 739. Its 379 uncovered lines are in **180 blocks**, averaging
+two lines each, the largest eleven. That is not an untested algorithm; it is
+forty-odd verb arms, each of which builds a request, asks a socket and prints.
+
+None of them runs without a daemon -- and **the measurement could not see the
+tier that runs them.** `gcov` over `make -C c test` excludes the agree gate,
+which drives 27 read-only invocations, 10 sequences of writing verbs and 5 of
+the daemon's own against the real binaries, and excludes the VM tier entirely.
+
+So the tree-wide figure is coverage from the C unit suite alone, and it
+understates most where the other tiers do their work: a CLI dispatch, a netlink
+path, an entry point. The renderer's 95 to 99 per cent is not flattered the
+same way, being a pure function the unit suite can reach in full -- which is
+why that number was worth acting on and this one is not a ranking of where work
+is owed.
+
+**The honest version of 10.462's question**: there is no single number for this
+tree, because the suites are tiered on purpose and only one of them is
+instrumented.
+
 ## 10.463 The sentences move to tui.c, on the holder's instruction
 
 Settled 2026-10-10: move them. The three sentences `tui_term.c` composed are
