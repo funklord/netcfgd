@@ -20,6 +20,21 @@
  *   made, by name, at the end -- which is what keeps a cleanup from turning
  *   into a pattern that could match something it did not create. The tag is for
  *   whoever finds one that survived a crash: it should say which test.
+ *
+ * AND WHAT `tempdir_gone` IS FOR
+ *   That rule was stated here and obeyed nowhere it could be checked: every
+ *   caller ended `(void)rmdir(dir)`, so a file the cleanup did not name made
+ *   the `rmdir` fail and nothing said so. Measured 2026-10-10: 111 directories
+ *   from `apply_test`, each holding one `bssid` marker, and 111 from
+ *   `apply_kernel_test`, each holding a `run/wireguard` the fixture made the
+ *   way a daemon would -- 222 in all, accumulated over two days of ordinary
+ *   runs while the suite printed that everything passed.
+ *
+ *   So the removal returns its answer and a caller asserts on it. `rmdir` is
+ *   the right instrument precisely because it refuses a directory with
+ *   anything in it: the assertion then says "this test removed everything it
+ *   made", which is the property the paragraph above claims, rather than "this
+ *   test called rmdir".
  */
 #ifndef NCFG_TESTS_TEMPDIR_H
 #define NCFG_TESTS_TEMPDIR_H
@@ -50,6 +65,24 @@ static int tempdir_make(const char *tag, char *out, size_t out_size)
 		return 0;
 	}
 	return mkdtemp(out) != NULL;
+}
+
+/*
+ * Remove one, and say whether it is gone. 1 when it is.
+ *
+ * A caller asserts on this, so a file it forgot to name fails the test that
+ * left it rather than filling a filesystem nobody is watching.
+ *
+ * `static inline` rather than `static`, unlike `tempdir_make` above: this
+ * header reaches every test binary and only three of them remove a directory,
+ * so a plain `static` is an unused-function warning in all the rest.
+ */
+static inline int tempdir_gone(const char *dir)
+{
+	if (!dir || dir[0] == '\0') {
+		return 0;
+	}
+	return rmdir(dir) == 0;
 }
 
 #endif /* NCFG_TESTS_TEMPDIR_H */

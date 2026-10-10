@@ -1768,11 +1768,23 @@ static void the_hook_runner(void)
 	the_phase_s_own_variable_reaches_the_hook(dir);
 	a_prompt_hook_succeeds_and_is_told_its_phase(dir);
 	a_hooks_own_children_are_killed_with_it(dir);
-	/* By name, never by pattern: this directory holds one file this test wrote
-	 * and nothing else it is entitled to remove. */
+	/*
+	 * By name, never by pattern: this directory holds only what these checks
+	 * wrote, and each of those is named here.
+	 *
+	 * **`bssid` was not, and `rmdir`'s answer was thrown away**, so the
+	 * directory survived every run -- 111 of them by the time anybody looked,
+	 * each holding that one marker, while the suite reported that everything
+	 * passed. `tempdir_gone` returns whether the directory went, and this
+	 * asserts on it: `rmdir` refuses a directory with anything left in it, so
+	 * the check says "these checks removed everything they made" rather than
+	 * "these checks called rmdir".
+	 */
 	(void)snprintf(script, sizeof(script), "%s/hook.sh", dir);
 	(void)remove(script);
-	(void)rmdir(dir);
+	(void)snprintf(script, sizeof(script), "%s/bssid", dir);
+	(void)remove(script);
+	check(tempdir_gone(dir), "and the hook checks leave nothing behind");
 }
 
 /* ------------------------------------------------------------------------ *

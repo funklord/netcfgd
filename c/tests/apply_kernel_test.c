@@ -1839,7 +1839,18 @@ static void check_wireguard(void)
 	(void)unlink(path);
 	(void)snprintf(path, sizeof(path), "%s/broken", dir);
 	(void)unlink(path);
-	(void)rmdir(dir);
+	/*
+	 * And the run directory the record half made, innermost first. It was not
+	 * removed at all and `rmdir`'s answer was thrown away, so this fixture
+	 * survived every run -- 111 directories by the time anybody looked, each
+	 * holding an empty `run/wireguard`. `tempdir_gone` is asserted rather than
+	 * called: `rmdir` refuses a directory with anything left in it.
+	 */
+	(void)snprintf(path, sizeof(path), "%s/run/wireguard", dir);
+	(void)rmdir(path);
+	(void)snprintf(path, sizeof(path), "%s/run", dir);
+	(void)rmdir(path);
+	check(tempdir_gone(dir), "and the secrets fixture leaves nothing behind");
 	(void)held;
 }
 
@@ -2129,7 +2140,7 @@ static void check_tun(void)
 	(void)unlink(passwd);
 	(void)unlink(group);
 	(void)unlink(clone);
-	(void)rmdir(dir);
+	check(tempdir_gone(dir), "and the tun fixture leaves nothing behind");
 }
 
 /* ------------------------------------------------------------------------ *
