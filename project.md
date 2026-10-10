@@ -12385,6 +12385,67 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.468 One duplicate line, three failing checks, and a conditional that preserved the bug
+
+Settled 2026-10-10: fix the three. All three were **one line said twice**.
+
+`ncfg apply` printed, before its own report:
+
+    netcfgd: [apply/ap0] Error: backend.start failed: hostapd would not start
+    on ap0: nl80211: ... -- the rest of this plan is skipped
+    ok   link.create ap0  kind: dummy (was <absent>)
+    ok   link.up ap0  enabled: true (was false)
+    FAIL backend.start ap0  access_point: access_point (was <absent>)
+         hostapd would not start on ap0: nl80211: ...
+
+The Rust prints that without the first line. So `ncfg_apply` logs every action
+-- `INFO` on success, `ERROR` on failure with the executor's own words -- which
+is right in the daemon, where that log IS how an operator sees what happened.
+In the CLI it is a second rendering of what the journal report already says,
+and `main.c` accepts `WARNING`, which drops the `INFO` lines and keeps the
+`ERROR` one. So exactly the failing action was doubled, which is why all three
+checks were `expected: 1, actual: 2`:
+
+    ap.sh    `grep -c hostapd`                              1 -> 2
+    ap.sh    `grep -c 'nl80211\|Could not read interface'`   1 -> 2
+    acl.sh   `grep -c 'did not answer its control socket'`   1 -> 2
+
+The CLI brackets its own `ncfg_apply` with `ncfg_log_accept(NCFG_LOG_CRITICAL)`
+now, restoring the level afterwards. The daemon's callers are untouched.
+
+### The first fix was conditional and that was wrong
+
+I quietened only while the accepted level was below `INFO`, reasoning that an
+operator who asked for the engine's chatter with `NCFG_LOG` had asked for this
+line too. **Then I ran the oracle at that level.** `ap.sh` passes against the
+Rust at `NCFG_LOG=info` as well, so the Rust logs no per-action line in this
+path at ANY level, and the conditional preserved the divergence it was written
+to remove.
+
+Nothing but running the Rust at that level would have said so -- the
+conditional was defensible from the C alone, and wrong. It is unconditional
+now, and all four cells agree:
+
+                   default   NCFG_LOG=info
+    the C          passes    passes
+    the Rust       passes    passes
+
+Nothing is lost by it: `CRITICAL` still passes, and the journal report names
+every action, its outcome and its error -- strictly more than the log line did.
+
+### And a stray brace that compiled
+
+The edit that made it unconditional left an extra `}`, which closed
+`ncfg_cli_apply` early. **It compiled** -- the remainder of the function parsed
+at file scope -- and the only signs were three "unused variable" warnings for
+locals used fifty lines further down and one "data definition has no type or
+storage class". The binary built, ran, and reported the old behaviour, which is
+how a fix verified against a stale-looking result nearly got believed.
+
+Second time today that computing an edit's end by index rather than by an exact
+string cut the wrong amount. The anchored replacements in the same session have
+all held; the two that bit were both `src.index(...)` arithmetic.
+
 ## 10.467 Three live-suite checks the C fails and the Rust passes
 
 0263 says a module of the C port may replace its Rust half "only once it passes

@@ -1812,7 +1812,37 @@ static int command_apply(const ncfg_cli_options_t *options)
 	}
 	ncfg_journal_init(&journal);
 	err[0] = '\0';
-	(void)ncfg_apply(plan, &executor, &journal, err, sizeof(err));
+	/*
+	 * **The engine's per-action log is a duplicate HERE and nowhere else.**
+	 * `ncfg_apply` logs each action -- `INFO` on success, `ERROR` on failure
+	 * with the executor's own words -- because in the daemon that log IS how
+	 * an operator sees what happened. This caller prints the journal instead,
+	 * every action with its outcome and its error, so the log line says the
+	 * same thing a second time and says it less well.
+	 *
+	 * `main.c` accepts `WARNING`, which dropped the `INFO` lines and kept the
+	 * `ERROR` one, so exactly the failing action was said twice: measured
+	 * against the Rust, `tests/live/ap.sh` counts `hostapd` in the output and
+	 * wants 1, `acl.sh` counts `did not answer its control socket` and wants
+	 * 1, and the C gave 2 for each.
+	 *
+	 * **Unconditional, and the first attempt was not.** Quietening only while
+	 * the level was below `INFO` left the duplicate for anybody who asked for
+	 * more with `NCFG_LOG` -- and the Rust passes `ap.sh` at `NCFG_LOG=info`
+	 * too, so it logs no per-action line in this path at any level. The
+	 * conditional preserved the divergence it was written to remove, which
+	 * running the oracle at that level is the only thing that said.
+	 *
+	 * Nothing is lost: `CRITICAL` still passes, and the journal report this
+	 * caller prints names every action, its outcome and its error.
+	 */
+	{
+		ncfg_severity_t accepted = ncfg_log_accepted();
+
+		ncfg_log_accept(NCFG_LOG_CRITICAL);
+		(void)ncfg_apply(plan, &executor, &journal, err, sizeof(err));
+		ncfg_log_accept(accepted);
+	}
 
 	/*
 	 * The scopes a `dns.apply` in this plan delivered, which is what the fold
