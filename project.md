@@ -12385,6 +12385,60 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.465 The test measures the machine now, and the fall-back got the test it never had
+
+10.464 left `loop_test` failing on a machine at its inotify instance cap and
+said the remedy was the holder's. The leak is, and that has not changed. **But
+the failure was the test's.**
+
+`daemon_watchers.c` watches the configuration directory "by inotify where the
+kernel allows it and by mtime otherwise", and `watch.h` says the fall-back is
+not defensive programming: `inotify_init1` fails with `EMFILE` on a busy
+machine and some container runtimes refuse it outright. So **a machine with no
+inotify instance is a supported environment**, and the daemon degrades into it
+by design -- `ncfg_inotify_open` even names the cap in its own message, "cannot
+watch for configuration changes: Too many open files;
+fs.inotify.max_user_instances is exhausted".
+
+The test asserted the undegraded path unconditionally. With the cap reached it
+reported "an inotify watch has one  FAILED", which reads as a defect in the
+watch and was a defect in nothing.
+
+### What changed
+
+`inotify_obtainable()` asks the machine -- opens an instance, closes it, says
+what `errno` was if it could not -- and the two assertions branch on the
+answer:
+
+    inotify available      a watch has a descriptor; the radio directory is a source
+    none to be had         it polls instead; there is no radio-directory source
+
+**Asserted either way rather than skipped.** A gate that skips when the thing
+it checks for is absent is weakest exactly where it matters, so the degraded
+arm carries the same strictness as the other two -- and the absence has to be
+the one the environment forces rather than one a regression introduced.
+
+**The fall-back gained a test it had never had.** On a machine where inotify
+works, nothing exercised the mtime path through `watchers_open`; the test had
+one forced-polling run, which sets `poll_config` rather than finding the
+resource gone. The arm that a busy machine actually takes was unasserted until
+the busy machine arrived.
+
+### The control, because the easy mistake here is a test that cannot fail
+
+Forcing `inotify_obtainable()` to return 1 in a `git archive` copy -- claiming
+the machine can when it cannot -- fails both strict assertions. So the branch is
+a branch and not a way of passing regardless.
+
+### And what it says about every earlier green run
+
+The result depended on a machine-wide resource, so it was passing when two
+instances happened to be free and failing when they were not. `make -C c test`
+passed in this tree and the same build failed in a scratch tree minutes apart,
+which is the whole of the evidence that nothing about the code had changed.
+A suite whose verdict races a global limit is a suite whose green is worth less
+than it looks, and that is fixed here rather than explained.
+
 ## 10.464 `loop_test` fails when the machine runs out of inotify, and 79 per cent was one suite of several
 
 Two findings from going back for the ranked list in 10.462, and the first is

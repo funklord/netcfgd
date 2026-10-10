@@ -55,6 +55,7 @@
 #include "testdir.h"
 
 #include <errno.h>
+#include <sys/inotify.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
@@ -1111,6 +1112,35 @@ static void a_signal_mid_wait_does_not_restart_the_backstop(void)
 	(void)close(writing);
 }
 
+/*
+ * Whether this machine will give out an inotify instance at all.
+ *
+ * **Measured rather than assumed, because the daemon falls back on purpose.**
+ * `daemon_watchers.c` watches the configuration directory "by inotify where
+ * the kernel allows it and by mtime otherwise", and `watch.h` says the
+ * fall-back is not defensive programming: `inotify_init1` fails with `EMFILE`
+ * on a busy machine and some container runtimes refuse it outright. So a
+ * machine at `fs.inotify.max_user_instances` is a SUPPORTED environment, and a
+ * test that assumed otherwise reported the fall-back working as a failure.
+ *
+ * Measured on this machine when it happened: 126 of 128 instances held, 100 of
+ * them by orphaned `dbus-daemon --session` processes, and the only sign in the
+ * output was "an inotify watch has one  FAILED" -- which reads as a defect in
+ * the watch and is a defect in nothing.
+ */
+static int inotify_obtainable(void)
+{
+	int fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+
+	if (fd >= 0) {
+		(void)close(fd);
+		return 1;
+	}
+	printf("    no inotify instance to be had (%s)%s\n", strerror(errno),
+	    errno == EMFILE ? ": fs.inotify.max_user_instances is exhausted" : "");
+	return 0;
+}
+
 /* ------------------------------------------------------------------------ *
  * The real watchers
  * ------------------------------------------------------------------------ */
@@ -1156,9 +1186,15 @@ static void the_configuration_watch_answers_the_same_question_either_way(const c
 		 */
 		check(ncfg_watch_descriptor(&watchers.watch) < 0,
 		    "a polling watch has no descriptor to wait on, and says so");
-	} else {
+	} else if (inotify_obtainable()) {
 		check(ncfg_watch_descriptor(&watchers.watch) >= 0,
 		    "an inotify watch has one");
+	} else {
+		/* The fall-back, asserted rather than skipped: this is the arm a
+		 * machine at its instance cap takes, and it is the designed
+		 * behaviour, so it gets the same strictness as the other two. */
+		check(ncfg_watch_descriptor(&watchers.watch) < 0,
+		    "and with no instance to be had it polls instead, as designed");
 	}
 
 	memset(&run, 0, sizeof(run));
@@ -1564,10 +1600,27 @@ static void a_station_that_moved_is_carried_out_of_the_round(const char *base)
 		(void)unlink(path);
 		return;
 	}
-	check(ncfg_main_sources_find(&watchers.sources, NCFG_MAIN_SOURCE_RADIO_DIR) <
-	    watchers.sources.count,
-	    "the supplicant's control directory is watched, so a radio appearing is noticed "
-	    "at once rather than on the tick");
+	/*
+	 * **This watch has no mtime fall-back**, unlike the configuration
+	 * directory's: `daemon_watchers.c` calls a station moving to a different
+	 * access point "the one event an observation cannot catch". So on a machine
+	 * with no inotify instance to be had the source is simply absent and the
+	 * radio is noticed on the tick instead -- slower, and still correct.
+	 *
+	 * Asserted either way rather than skipped, so that the absence has to be
+	 * the absence the environment forces and not one a regression introduced.
+	 */
+	if (inotify_obtainable()) {
+		check(ncfg_main_sources_find(&watchers.sources, NCFG_MAIN_SOURCE_RADIO_DIR) <
+		    watchers.sources.count,
+		    "the supplicant's control directory is watched, so a radio appearing is "
+		    "noticed at once rather than on the tick");
+	} else {
+		check(ncfg_main_sources_find(&watchers.sources, NCFG_MAIN_SOURCE_RADIO_DIR) >=
+		    watchers.sources.count,
+		    "and with no instance to be had there is no such source, so the tick "
+		    "finds the radio instead");
+	}
 
 	memset(&run, 0, sizeof(run));
 	run.sources = &watchers.sources;
