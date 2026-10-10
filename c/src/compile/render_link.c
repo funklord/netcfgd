@@ -332,6 +332,19 @@ static void render_routes(const ncfg_route_t *routes, size_t count, const char *
 			    " `default` nor a network", route->destination ? route->destination : "");
 			continue;
 		}
+		/*
+		 * **A route phrase is word-split, so `via` and `src` must each be one
+		 * word that is an address.** `ncfg_is_bare_address` is the lowering's own
+		 * test, reachable because the renderer is this module's own. A `via` of
+		 * `192.0.2.1 metric 9` otherwise renders a route carrying a metric the
+		 * document never had -- silently, since the words parse.
+		 */
+		if ((route->via && !ncfg_is_bare_address(route->via))
+		    || (route->src && !ncfg_is_bare_address(route->src))) {
+			ncfg_render_refuse(missing, scope, name, "a route to `%s` whose `via` or `src` is"
+			    " not a single address", route->destination);
+			continue;
+		}
 		ncfg_buf_init(&phrase, 0);
 		ncfg_buf_add_text(&phrase, route->destination);
 		if (route->via) {

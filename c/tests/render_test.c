@@ -3439,6 +3439,73 @@ static void a_route_destination_that_is_not_one_is_refused(void)
 	}
 }
 
+/*
+ * A delimiter inside a composite value, which the sweep cannot find.
+ *
+ * The renderer writes three composite strings -- `@secret:<provider>:<name>`,
+ * `@pd:<source>/<subnet>=<suffix>` and a route's word-split phrase -- and a
+ * value carrying one of their separators comes back meaning something ELSE
+ * rather than failing. All three cases here were measured as "compiles to a
+ * DIFFERENT document" before the guards.
+ *
+ * **The sweep in `lower_test.c` finds the loud half of this and not the quiet
+ * half**, which is why these are written out. Its delimiter mutations are
+ * `a:b` and `a/b=c`: both are invalid under the other parse, so both are
+ * refused on recompile. Reaching the silent half needs a value that is VALID
+ * under the other reading -- `keyring:wifi` names a real provider, `wan0/9` a
+ * real subnet -- and that is domain knowledge rather than mutation.
+ */
+static void a_delimiter_inside_a_value_is_refused(void)
+{
+	ncfg_document_t *document;
+
+	document = compiled("network \"home\" {\n\twifi { psk = \"@secret:home\" }\n}\n",
+	    "a case's own network");
+	check(document != NULL && document->network_count == 1u, "a network with a psk compiles");
+	if (document && document->network_count == 1u) {
+		/* A FILE secret named `keyring:wifi` renders to exactly what a KEYRING
+		 * secret named `wifi` renders to: the rendering stops being injective. */
+		free(document->networks[0].security.psk.passphrase.name);
+		document->networks[0].security.psk.passphrase.name = strdup("keyring:wifi");
+		document->networks[0].security.psk.passphrase.provider = NCFG_SECRET_PROVIDER_FILE;
+		check(refusal_names(document, "home", "colon that separates"),
+		    "  and a secret name that reads as another provider is refused");
+	}
+	ncfg_document_free(document);
+
+	document = compiled("interface br0 {\n\tconfig = [\"@pd:wan0=::1/64\"]\n}\n",
+	    "a case's own delegation");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u,
+	    "an interface taking a delegation compiles");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		/* `wan0/9` is a real subnet number, so the recompile accepts it and the
+		 * document gains a subnet nobody wrote. */
+		free(document->interfaces[0].addressing[0].delegated.prefix.source);
+		document->interfaces[0].addressing[0].delegated.prefix.source = strdup("wan0/9");
+		check(refusal_names(document, "br0", "delegation source"),
+		    "  and a source carrying the subnet delimiter is refused");
+	}
+	ncfg_document_free(document);
+
+	document = compiled("interface eth0 {\n\tconfig = [\"192.0.2.5/24\"]\n"
+	    "\troutes = [\"10.0.0.0/8 via 192.0.2.1\"]\n}\n", "a case's own route");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].route_count == 1u, "an interface with a route compiles");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].route_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		/* Every word parses, so this is a route with a metric nobody wrote. */
+		free(document->interfaces[0].routes[0].via);
+		document->interfaces[0].routes[0].via = strdup("192.0.2.1 metric 9");
+		check(refusal_names(document, "eth0", "not a single address"),
+		    "  and a `via` smuggling another modifier is refused");
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3472,6 +3539,7 @@ int main(int argc, char **argv)
 	a_name_or_address_the_language_refuses();
 	a_nameless_secret_is_refused();
 	a_route_destination_that_is_not_one_is_refused();
+	a_delimiter_inside_a_value_is_refused();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();

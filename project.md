@@ -12385,6 +12385,66 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.459 Delimiters inside composite values, and the half a sweep cannot find
+
+10.458's last guard was not "is this a valid X" but "can this text survive the
+syntax it is written into" -- an addressing entry is word-split, so a space in
+one part makes two. That is a different kind of rule from the fourteen before
+it, and following it gave the next lens: **the renderer writes composite
+strings, and a value carrying their separator comes back meaning something
+else.**
+
+Three such forms:
+
+    @secret:<provider>:<name>
+    @pd:<source>/<subnet>=<suffix>
+    <destination> via <address> src <address> metric <n> ...
+
+And three faults, every one of them **"compiles to a DIFFERENT document"**
+rather than a refusal:
+
+  * a FILE secret named `keyring:wifi` renders to exactly what a KEYRING secret
+    named `wifi` renders to. **The rendering stops being injective** -- two
+    distinct documents produce identical text, so a profile can no longer tell
+    them apart, and the one that is read back is whichever the parse prefers.
+  * a delegation source of `wan0/9` comes back as source `wan0` with subnet 9,
+    and `wan0=x` as source `wan0` with suffix `x`.
+  * a route `via` of `192.0.2.1 metric 9` comes back as a route **carrying a
+    metric nobody wrote**. Every word parses, so nothing complains.
+
+All three refuse by name now. `ncfg_is_bare_address` does the route's two
+modifiers -- the lowering's own test, reachable because the renderer is this
+module's own, which is 10.458's lesson being used rather than relearned.
+
+### The sweep found the loud half and could not find the quiet half
+
+The sweep's string mutations were whitespace, empty and over-long, and they
+missed all three. Adding delimiter-bearing mutations -- `a:b` and `a/b=c` --
+found **twenty faults, and every one a refusal**: `a` is not a provider,
+`b` is not a subnet number. The three silent cases above stayed invisible.
+
+**The reason is worth more than the twenty.** A mutation finds a delimiter
+fault loudly when the injected value is INVALID under the other parse, and
+silently only when it is VALID under it: `keyring:wifi` names a real provider,
+`wan0/9` a real subnet, `metric 9` a real modifier. Producing a value that is
+valid under a reading the mutator does not know about is domain knowledge, not
+mutation -- so the quiet half of this class is not reachable by generic
+fuzzing at all, and the three cases are written out as their own test with that
+said in its comment.
+
+This is the first limit of the instrument that is structural rather than a gap
+in its inputs. 10.453 said an enumeration should come from exercising rather
+than reading; this is the exception that sharpens it -- **exercising finds what
+breaks, and only reading finds what quietly means something else.**
+
+### One defect of my own, in the refusal
+
+The first version of the secret refusal carried a literal `\n` in its format
+string -- I split the C literal with `\n"` instead of `"` -- so the sentence
+arrived across two lines in the middle of a refusal list. Caught by reading the
+probe's output rather than by any check: a refusal's text is the one thing here
+that nothing asserts on, since the tests match substrings.
+
 ## 10.458 The baseline reaches zero, and the pinning comes out
 
 The last ten pins are guarded and the pinned list is gone: a fault in the

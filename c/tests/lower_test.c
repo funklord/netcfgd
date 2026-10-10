@@ -2247,7 +2247,15 @@ static void numeric_extremes(const ncfg_document_t *document, size_t line, size_
 	 * they go into JSON. */
 	static const char *const strings[] = {
 		"\"a b\"", "\"\"",
-		"\"0123456789012345678901234567890123456789012345678901234567890123\""
+		"\"0123456789012345678901234567890123456789012345678901234567890123\"",
+		/* **Delimiters, because the renderer writes composite strings.**
+		 * `@secret:<provider>:<name>`, `@pd:<source>/<subnet>=<suffix>` and a
+		 * route's word-split phrase each carry a separator, and a value holding
+		 * one comes back meaning something else rather than failing -- a `via` of
+		 * `192.0.2.1 metric 9` is a route with a metric nobody wrote. Whitespace
+		 * alone could not find those: the first three strings above missed every
+		 * one. */
+		"\"a:b\"", "\"a/b=c\""
 	};
 	ncfg_buf_t  canonical;
 	const char *text;

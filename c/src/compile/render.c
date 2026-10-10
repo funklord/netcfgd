@@ -966,7 +966,12 @@ static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrender
 			parts[0] = delegated->prefix.source;
 			parts[1] = delegated->suffix;
 			for (which = 0; which < NCFG_COUNT_OF(parts); which++) {
-				if (!parts[which] || !strpbrk(parts[which], " \t")) {
+				/* `/` opens the subnet and `=` opens the suffix, so a source holding
+				 * either comes back as a different source with a subnet or a suffix
+				 * the document never had -- silently, where a space is merely
+				 * refused. The suffix is last, so only whitespace can split it. */
+				if (!parts[which]
+				    || !strpbrk(parts[which], which == 0u ? " \t/=" : " \t")) {
 					continue;
 				}
 				ncfg_render_refuse(missing, "interface", interface->name,
@@ -1002,7 +1007,25 @@ static void refuse_unusable_names(const ncfg_document_t *document, ncfg_unrender
 static void refuse_nameless_secret(ncfg_unrenderable_t *missing, const char *scope,
     const char *owner, const char *what, const ncfg_secret_ref_t *reference)
 {
-	if (!reference || (reference->name && reference->name[0] != '\0')) {
+	if (!reference) {
+		return;
+	}
+	/*
+	 * **A colon is the provider's delimiter, so a name cannot hold one.**
+	 * `@secret:<provider>:<name>` is read by splitting on it, so a FILE secret
+	 * named `keyring:wifi` renders to exactly what a KEYRING secret named
+	 * `wifi` renders to -- the rendering stops being injective, and the two
+	 * documents are no longer distinguishable in a profile. A name whose first
+	 * part is NOT a provider word is merely refused on recompile, which is the
+	 * loud half of the same fault.
+	 */
+	if (reference->name && strchr(reference->name, ':')) {
+		ncfg_render_refuse(missing, scope, owner,
+		    "%s named `%s`, which holds the colon that separates a provider from a name",
+		    what, reference->name);
+		return;
+	}
+	if (reference->name && reference->name[0] != '\0') {
 		return;
 	}
 	ncfg_render_refuse(missing, scope, owner, "%s with no name, which `@secret:` cannot say",
