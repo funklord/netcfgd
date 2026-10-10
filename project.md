@@ -12385,6 +12385,76 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.460 Coverage as the lens, after the invented ones ran out
+
+Fifteen lenses in, each new one was finding less, and the next would have been
+invented rather than derived. So: measure what the suite does not execute, and
+let that be the list.
+
+`gcov` over the whole C suite, built from `git archive HEAD` with `-O0
+--coverage` in a scratch tree:
+
+    render.c          94.88% of 586 lines
+    render_link.c     95.55% of 427
+    render_device.c   97.97% of 444
+
+**The unexecuted lines sort cleanly into two kinds**, which is what made the
+measurement worth taking:
+
+  * **allocation failures and NULL-argument guards** -- `return NULL` after a
+    failed `malloc`, "an override was recorded with nowhere to put it",
+    `missing->failed = 1` where recording a refusal itself failed. Almost all
+    of `render.c`'s thirty are these. Reaching them needs allocation injected,
+    and they are the error paths of a library that is not allowed to crash;
+    uncovered is the honest state.
+  * **refusals nothing exercises.** About nine, and these are behaviour with a
+    sentence nobody has ever read back.
+
+### One of them was mine, added without a test
+
+`render_link.c:183` is the static address `peer` guard from 10.454. I tested
+the address beside it and not the peer. It had never run.
+
+That is the sharper half of this measurement: coverage did not find a gap in
+somebody else's old code, it found a guard I had added four passes earlier and
+believed tested because its sibling was.
+
+### Six are tested now, and what the others are
+
+    a `peer` that is not an address              now tested
+    a delegation's `index`                       now tested
+    an advertised prefix's `index`                now tested
+    an advertise backend of `exec`                now tested
+    an advertise block with no prefix             now tested
+    a wireguard key that will not render          measured, not testable
+
+`render_link.c` goes 95.55% to 98.59% on that. The `index` pair is the
+interesting one: the member exists in the model and `@pd:` has no spelling for
+it, so a document read from JSON can say which delegation it means and the
+language cannot -- two separate sites, two separate refusals, neither ever run.
+
+**The wireguard one cannot be reached from a document and the test says so.**
+`ncfg_key_render` refuses only on a buffer too small, and a key of every bit
+set still renders -- base64 has no invalid byte -- so the refusal is a caller's
+bug and not a document's. The case asserts that the all-ones key renders, which
+is a fact that can fail, rather than asserting the refusal, which cannot fire.
+
+**And the first draft of that case was vacuous.** It read
+`check(!renders(document) || 1, ...)` -- a tautology, written while reaching
+for "accepted or refused, either is fine". A check that cannot fail is the
+thing this file has been complaining about for ten entries, and I wrote one.
+It is the assertion above instead.
+
+### The method, because repeating it has a trap
+
+`CFLAGS` given on the make command line **overrides the makefile's `+=`**, so
+`make CFLAGS="... --coverage"` silently drops `-Iinclude -I../client` and the
+build fails on a missing header three files in. The flags have to be passed
+whole:
+
+    make -C c CFLAGS="-std=c11 -O0 -g --coverage -D_DEFAULT_SOURCE \
+        -Iinclude -I../client -MMD -MP" LDFLAGS="--coverage" test
+
 ## 10.459 Delimiters inside composite values, and the half a sweep cannot find
 
 10.458's last guard was not "is this a valid X" but "can this text survive the

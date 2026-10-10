@@ -3506,6 +3506,102 @@ static void a_delimiter_inside_a_value_is_refused(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * The refusals no corpus reaches, which coverage found rather than reading.
+ *
+ * `gcov` over the whole suite leaves the three renderer files at 94.9, 95.6 and
+ * 98.0 per cent, and the unexecuted lines sort into two kinds: allocation
+ * failures and NULL-argument guards, which need malloc injected to reach, and
+ * **refusals nothing exercises**. The second kind is behaviour with a message
+ * that nobody has ever read back, and one of them was a guard added in 10.454
+ * with no test of its own -- a static address's `peer`.
+ *
+ * Each is reachable only from a document the configuration language cannot
+ * write, which is why no corpus reaches them: the `index` of a delegation has
+ * no spelling in `@pd:`, a `peer` is parsed as an address, and an openvpn
+ * block without a config file does not compile. A document read from JSON
+ * holds all of them.
+ */
+static void the_refusals_no_corpus_reaches(void)
+{
+	ncfg_document_t *document;
+
+	/* A `peer` address that is not one -- 10.454's guard, untested until now. */
+	document = compiled("interface eth0 {\n\tconfig = [\"192.0.2.5/24 peer 192.0.2.6\"]\n}\n",
+	    "a case's own point-to-point address");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u,
+	    "an address with a peer compiles");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		free(document->interfaces[0].addressing[0].static_address.peer);
+		document->interfaces[0].addressing[0].static_address.peer = strdup("not-an-address");
+		check(refusal_names(document, "eth0", "`peer` address"),
+		    "  and a peer that is not an address is refused by name");
+	}
+	ncfg_document_free(document);
+
+	/* `index` says which of several delegations, and `@pd:` has no spelling for
+	 * it, so the renderer refuses rather than losing it. */
+	document = compiled("interface br0 {\n\tconfig = [\"@pd:wan0\"]\n}\n",
+	    "a case's own delegation");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u) {
+		check(renders(document), "a delegation renders, which is the control");
+		document->interfaces[0].addressing[0].delegated.prefix.index = 1;
+		check(refusal_names(document, "br0", "which delegation it is"),
+		    "  and one naming which delegation it is is refused");
+	}
+	ncfg_document_free(document);
+
+	/* The same member on an advertised prefix, which is a separate site. */
+	document = compiled("interface br0 {\n\tconfig = [\"192.168.1.1/24\"]\n"
+	    "\tadvertise { prefixes = [\"@pd:wan0\"] }\n}\n", "a case's own advertise block");
+	if (document && document->interface_count == 1u && document->interfaces[0].advertise) {
+		ncfg_ra_policy_t *policy = document->interfaces[0].advertise;
+
+		check(renders(document), "an advertise block renders, which is the control");
+		if (policy->prefix_count > 0u) {
+			policy->prefixes[0].index = 1;
+			check(refusal_names(document, "br0", "which delegation it is"),
+			    "  and an advertised prefix naming one is refused");
+			policy->prefixes[0].index = 0;
+		}
+		/* An advertise block with nothing to advertise, and one whose backend is
+		 * `exec` -- the compiler accepts both so the renderer can say so. */
+		policy->backend.kind = NCFG_RA_BACKEND_EXEC;
+		check(refusal_names(document, "br0", "backend of exec"),
+		    "  and an advertise backend of exec is refused");
+		policy->backend.kind = NCFG_RA_BACKEND_AUTO;
+		policy->prefix_count = 0u;
+		check(refusal_names(document, "br0", "no prefix"),
+		    "  and an advertise block with no prefix is refused");
+	}
+	ncfg_document_free(document);
+
+	/* A wireguard peer whose public key will not render back. */
+	document = compiled("device wg0 {\n\twireguard {\n"
+	    "\t\tprivate_key = \"@secret:wg\"\n\t\tpeer \"office\" {\n"
+	    "\t\t\tpublic_key = \"0000000000000000000000000000000000000000000=\"\n"
+	    "\t\t\tallowed_ips = [\"10.0.0.0/24\"]\n\t\t}\n\t}\n}\n",
+	    "a case's own wireguard peer");
+	if (document && document->device_count >= 1u
+	    && document->devices[0].kind.wireguard.peer_count > 0u) {
+		check(renders(document), "a wireguard peer renders, which is the control");
+		/* A key of every bit set still renders -- it is 32 valid bytes, and
+		 * base64 has no invalid byte -- so `ncfg_key_render`'s refusal is
+		 * reachable only by a buffer too small, which is a caller's bug and
+		 * not a document's. The refusal stays and this says why it is not
+		 * tested rather than asserting something that cannot fail. */
+		memset(document->devices[0].kind.wireguard.peers[0].public_key, 0xff,
+		    sizeof(document->devices[0].kind.wireguard.peers[0].public_key));
+		check(renders(document),
+		    "  and a key of every bit set still renders, base64 having no bad byte");
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3540,6 +3636,7 @@ int main(int argc, char **argv)
 	a_nameless_secret_is_refused();
 	a_route_destination_that_is_not_one_is_refused();
 	a_delimiter_inside_a_value_is_refused();
+	the_refusals_no_corpus_reaches();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
