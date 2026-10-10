@@ -12385,6 +12385,61 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.461 A line is not an arm, and the second time I learned it
+
+Line coverage satisfied, so the same instrument one notch sharper. `gcov -b`
+over the whole suite:
+
+                       lines    branches taken at least once
+    render.c           94.88%   86.24% of 407
+    render_link.c      98.59%   92.37% of 262
+    render_device.c    97.97%   89.01% of 273
+
+**Three reachable arms, and one was the other half of my own guard.**
+`render_routes` refuses a `via` or a `src` that is not a single address, and
+only the `via` arm had ever been taken -- 10.459 tested `via`, the line went
+green, and `src` went untested behind it.
+
+That is the same mistake as 10.460's `peer`, which was untested beside the
+`address` it shares a guard with. **Twice now: a guard covering a pair, one
+member exercised, the other believed covered because the LINE was.** The fix is
+not vigilance, it is knowing the shape -- when a condition is `a || b` over two
+members, two tests, and line coverage will not say so.
+
+The other two were pre-existing refusals nothing had run: an openvpn tunnel
+with no config file, and one with only half of a login -- neither compiles, so
+only a document read from JSON holds either. Plus a dhcp6 lease naming a mode,
+which the language has no key for.
+
+All four tested now. `render_link.c` goes 92.37 to 93.13 per cent and
+`render_device.c` 89.01 to 89.74.
+
+### Why render.c did not move, and should not
+
+86.24 per cent, unchanged, and that is the right end state. Its 56 never-taken
+arms are, read one by one, all of one kind: `if (!overrides)`, `if (!key)`,
+`if (!missing || missing->failed)`, `kind ? kind : ""`, and the short-circuit
+arms of conditions that cannot both be false -- `principal_is_root(tiers[0]) &&
+...` with three tiers that are root together or not at all. They are the
+defensive half of a library that may not crash, and reaching them needs
+allocation injected rather than a document written.
+
+So the renderer's branch gap is now defensive arms and nothing else, which is a
+measurement rather than a hope.
+
+### The two instruments are covering different things
+
+A puzzle on the way: the pre-walk pass's refusals -- an `ipv6_token` that is
+not one, a principal with no name, a bluetooth address -- never appeared in the
+LINE gap, although no named test exercises them. **The string sweep in
+`lower_test.c` reaches them**, mutating those members to `a b` and the empty
+string, so the lines run and only their NULL arms stay untaken.
+
+Which is worth knowing when reading either number: coverage over this suite is
+the union of hand-written cases and a mutation sweep, and a line being green
+says nothing about which of the two made it so. The sweep found reachability
+the cases did not ask about; the cases found arms the sweep cannot reach.
+
 ## 10.460 Coverage as the lens, after the invented ones ran out
 
 Fifteen lenses in, each new one was finding less, and the next would have been

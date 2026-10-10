@@ -3602,6 +3602,81 @@ static void the_refusals_no_corpus_reaches(void)
 	ncfg_document_free(document);
 }
 
+/*
+ * The arms branch coverage found, after line coverage was satisfied.
+ *
+ * `gcov -b` over the same suite: 86.2, 92.4 and 89.0 per cent of branches taken
+ * at least once, against 94.9 to 98.6 per cent of lines. Most of the gap is
+ * NULL-guard and allocation arms -- `if (!overrides)`, `kind ? kind : ""` --
+ * which are the defensive half of a library that may not crash. Three were
+ * not.
+ *
+ * **One of them was the second half of a guard whose first half I tested.**
+ * `render_routes` refuses a `via` or a `src` that is not a single address, and
+ * only the `via` arm had ever been taken. The `peer` miss in 10.460 was the
+ * same shape: a guard covering a pair, with one member exercised and the other
+ * believed covered because the line was. A line is not an arm.
+ */
+static void the_arms_line_coverage_missed(void)
+{
+	ncfg_document_t *document;
+
+	/* The `src` arm, which the `via` test never reached. */
+	document = compiled("interface eth0 {\n\tconfig = [\"192.0.2.5/24\"]\n"
+	    "\troutes = [\"10.0.0.0/8 via 192.0.2.1 src 192.0.2.5\"]\n}\n",
+	    "a case's own route with a source");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].route_count == 1u,
+	    "a route with a preferred source compiles");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].route_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		free(document->interfaces[0].routes[0].src);
+		document->interfaces[0].routes[0].src = strdup("192.0.2.5 table 9");
+		check(refusal_names(document, "eth0", "not a single address"),
+		    "  and a `src` smuggling a modifier is refused, as a `via` is");
+	}
+	ncfg_document_free(document);
+
+	/* An openvpn tunnel with no config file, and with half a login. Neither
+	 * compiles, so only a document read from JSON holds one. */
+	document = compiled("device vpn0 {\n\topenvpn {\n\t\tconfig = \"/etc/openvpn/a.conf\"\n"
+	    "\t\tusername = \"someone\"\n\t\tpassword = \"@secret:vpn\"\n\t}\n}\n",
+	    "a case's own openvpn tunnel");
+	check(document != NULL && document->device_count >= 1u,
+	    "an openvpn tunnel with a login compiles");
+	if (document && document->device_count >= 1u) {
+		ncfg_openvpn_config_t *vpn = &document->devices[0].kind.openvpn;
+
+		check(renders(document), "  and renders, which is the control");
+		free(vpn->username);
+		vpn->username = NULL;
+		check(refusal_names(document, "vpn0", "half of a login"),
+		    "  and a password with no username is refused");
+		vpn->username = strdup("someone");
+		free(vpn->config);
+		vpn->config = NULL;
+		check(refusal_names(document, "vpn0", "no config file"),
+		    "  and a tunnel with no config file is refused");
+	}
+	ncfg_document_free(document);
+
+	/* A dhcp6 lease asking for a mode, which the language has no key for. */
+	document = compiled("interface eth0 {\n\tconfig = [\"dhcp6\"]\n}\n",
+	    "a case's own dhcp6 interface");
+	check(document != NULL && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u,
+	    "a dhcp6 interface compiles");
+	if (document && document->interface_count == 1u
+	    && document->interfaces[0].addressing_count == 1u) {
+		check(renders(document), "  and renders, which is the control");
+		document->interfaces[0].addressing[0].dhcp6.mode = NCFG_DHCP6_MODE_OTHER_CONF;
+		check(refusal_names(document, "eth0", "dhcp6 lease's mode"),
+		    "  and a lease naming a mode is refused");
+	}
+	ncfg_document_free(document);
+}
+
 int main(int argc, char **argv)
 {
 	render_the_witness(argc, argv);
@@ -3637,6 +3712,7 @@ int main(int argc, char **argv)
 	a_route_destination_that_is_not_one_is_refused();
 	a_delimiter_inside_a_value_is_refused();
 	the_refusals_no_corpus_reaches();
+	the_arms_line_coverage_missed();
 
 	the_ordinary_interfaces();
 	a_routes_source_and_onlink_round_trip();
