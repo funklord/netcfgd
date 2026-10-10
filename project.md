@@ -12385,6 +12385,79 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.467 Three live-suite checks the C fails and the Rust passes
+
+0263 says a module of the C port may replace its Rust half "only once it passes
+the Rust's own tests for the same behaviour", and names the 83 scripts under
+`tests/live/` as the whole of that suite -- the Rust's 536 unit tests cannot be
+pointed at another binary, and these can. **Nobody had run them against the C
+recently, and three checks fail.**
+
+The comparison, same script, same `unshare -rn`, same `NCFG_LIVE=1`, differing
+only in `NCFG_LIVE_BUILD`:
+
+                    the Rust            the C
+    acl.sh          all checks passed   1 check failed
+    ap.sh           all checks passed   2 checks failed
+
+So these are port gaps and not tests that are wrong for both, which is the one
+thing the comparison settles and reading could not.
+
+    acl.sh   "and says which of the two states it found"
+             `did not answer its control socket` expected once, said twice
+    ap.sh    "and named hostapd rather than the action"
+    ap.sh    "quoting what hostapd said"
+
+All three are about what the operator READS on a failed apply, and the Rust
+gets them right. The first has a diagnosis started: `ncfg_plan_wedged_backends`
+has one emission site and `ncfg apply` builds one plan, so the duplicate is
+most likely the same backend appearing twice in `observed->backends` rather
+than two warnings. Confirming that needs the observation instrumented inside a
+live run, which is where this stops rather than guessing.
+
+### The suite is runnable without cargo, which is how this was found at all
+
+`make live` builds the Rust workspace and runs three Rust test binaries beside
+the scripts, so it looks like the scripts need cargo. They do not: each is
+standalone shell that takes its binaries from `$build` and runs under
+`unshare -rn` on its own. One script took three minutes to try.
+
+### What the Makefile said about this, and what is true
+
+Its "WHICH BUILD THE SCRIPTS DRIVE" block said the scripts default to
+`target/debug` and that `NCFG_LIVE_BUILD=$PWD/c` opts into the C. **Counted:
+69 of the 83 take `${NCFG_LIVE_BUILD:-$repo/c}`, none defaults to
+`target/debug`, and 14 need no binary.** The default flipped to the C and the
+block did not notice, so a reader following it would believe the acceptance
+suite still tests the superseded implementation. Rewritten with the count, and
+with the inverse spelling -- pointing the suite at the Rust is what takes a
+variable now.
+
+### Two flaws in my own sweep, which is why no total is quoted
+
+I globbed `tests/live/*.sh` and ran every one without `NCFG_LIVE=1`. Both are
+wrong:
+
+  * **the glob includes helpers.** `fake_mbimcli.sh` and `fake_umbim.sh` are
+    fakes other scripts invoke; run alone they exit non-zero ("nothing asked
+    for"), and I counted them as failures.
+  * **`NCFG_LIVE` inverts skip semantics.** The scripts read it, and with it set
+    a skip becomes a loud failure -- which is the right design, since asking
+    for the live tier and getting a skip is a result worth a red line. Without
+    it they skip quietly, so my six SKIPs are not what the project's own run
+    would report.
+
+Stopped at 31 of 83 rather than finished: scripts began hitting the 150-second
+timeout, the remainder would have taken an hour, and the count it produced
+would not have been comparable to anything. The three confirmed failures were
+each re-run under the project's own invocation before being believed.
+
+**Also reported as failures rather than skips**: `bluetooth.sh` without
+`/dev/vhci` and `c_daemon_tryout.sh` without systemd, where `association.sh`,
+`c_dns_delivery.sh` and `c_nm_signals.sh` say "skipping: <reason>" for the same
+kind of absence. Same class as 10.465's inotify fix, in the live tier, and not
+touched here.
+
 ## 10.466 The example's delegation line named no interface, and why that survived
 
 10.454 raised a contradiction and left it open: `ncfg_prefix_ref_t.source` is

@@ -2026,22 +2026,31 @@ vm-image:
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
-#   directory, `$$build`, defaulting to `target/debug` -- so `NCFG_LIVE_BUILD`
-#   points the same suite at another build without a script being edited. Both
-#   trees present the same pair: `netcfgd` with `ncfg` a symlink beside it.
+#   directory, `$$build`, so `NCFG_LIVE_BUILD` points the same suite at another
+#   build without a script being edited. Both trees present the same pair:
+#   `netcfgd` with `ncfg` a symlink beside it.
 #
 #   That is what 0263 asks for before a module of the C port may replace its
 #   Rust half -- "only once it passes the Rust's own tests for the same
 #   behaviour". The Rust's own *unit* tests cannot be pointed anywhere: 536 of
 #   them across 24 files, and only 2 of those files drive a binary at all; the
-#   rest call Rust functions directly. These 79 scripts drive a binary, and
-#   they are therefore the whole of the Rust's suite that the C can be put
-#   under (project.md 10.293).
+#   rest call Rust functions directly. These scripts drive a binary, and they
+#   are therefore the whole of the Rust's suite that the C can be put under
+#   (project.md 10.293).
 #
-#       make live                                    the Rust, as before
-#       NCFG_LIVE_BUILD=$$PWD/c make live            the C
+#   **The default is the C build and this block said the opposite.** Counted
+#   2026-10-10 across the 83 scripts: 69 take `$${NCFG_LIVE_BUILD:-$$repo/c}`,
+#   none defaults to `target/debug`, and 14 need no binary. So pointing the
+#   suite at the Rust is now the thing that takes a variable:
 #
-#   `make live` does not set it, so this target is unchanged.
+#       make live                                            the C
+#       NCFG_LIVE_BUILD=$$PWD/target/debug make live         the Rust
+#
+#   The `live` target still builds the Rust workspace, because the three test
+#   binaries it runs beside the scripts -- `wg-*`, `netcfgd_sys-*`, `live-*` --
+#   are Rust ones. The scripts themselves need neither cargo nor that target: a
+#   script is standalone shell and runs under `unshare -rn` on its own, which
+#   is how 10.467 came to measure all 83 of them.
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
 	$(CARGO) build --workspace
