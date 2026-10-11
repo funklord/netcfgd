@@ -2101,6 +2101,20 @@ live:
 	@# changing reports whichever instant it sampled -- which is true of both
 	@# and is not a difference between them.
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_answers.sh"
+	@# And what the switcher does when the network goes, against stubs for
+	@# `ping`, `getent` and `systemctl`. `c_daemon_tryout.sh` is a safety net,
+	@# and a safety net nobody has dropped anything into is a claim: this is
+	@# the 26 checks that drop something into it, both halves -- it stops the C
+	@# daemon and starts the Rust one when the network stops answering, and
+	@# does neither when the network is fine.
+	@#
+	@# **Named here from 2026-10-11, having been named nowhere.** Of the 83
+	@# scripts in `tests/live/`, this target named 79; the four it left out
+	@# were the two fake modem CLIs and `c_daemon_tryout.sh`, which are
+	@# fixtures other scripts drive, and this, which is a test. So it ran only
+	@# for somebody globbing the directory by hand. It passes, and it is not
+	@# quick -- the tryout waits out its own deadlines.
+	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_watch.sh"
 	@# **`-rmn`, and it is the only one.** A resolver delivery writes the file
 	@# that decides whether this machine can resolve a name, so the script
 	@# bind-mounts a sentinel over `/etc/resolv.conf` before it runs anything
