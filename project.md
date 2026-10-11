@@ -12781,21 +12781,34 @@ of this entry**: the environmental story was available from the first reading of
 the tick constant, and a comfortable explanation that ends an investigation is
 worth less than no explanation -- so it was tested, and it held.
 
-**`control_exposure.sh`'s one cannot pass under `unshare -rn` at all.** It
-asserts that a remote socket configured with `agent = "group:<g>"` is chgrp'd to
-that group, and picks `<g>` as the first entry of `id -Gn` that is not the
-primary group -- deliberately, because a socket is already created owned by its
-creator's primary group and asserting against that would pass with the chown
-reverted. In a user namespace made by `unshare -r` the gid map has exactly one
-entry, so the only secondary group on offer is `nogroup`, which is unmapped:
+**~~`control_exposure.sh`'s one cannot pass under `unshare -rn` at all.~~ It
+was never failing: my sweep invoked it wrongly.** The diagnosis below is
+correct about the namespace and wrong about mattering -- `make live` runs this
+script **bare on the host**, where `id -Gn` offers `dialout` and the chgrp
+works. Run as the Makefile runs it: all checks pass. Corrected 2026-10-11,
+hours after being written here.
+
+What the namespace does to it, kept because the mechanism is real and the next
+sweep will meet it again: the script asserts that a remote socket configured
+with `agent = "group:<g>"` is chgrp'd to that group, and picks `<g>` as the
+first entry of `id -Gn` that is not the primary group -- deliberately, because
+a socket is already created owned by its creator's primary group and asserting
+against that would pass with the chown reverted. In a user namespace made by
+`unshare -r` the gid map has exactly one entry, so the only secondary group on
+offer is `nogroup`, which is unmapped:
 
     gid_map:  0  1000  1
     id -Gn:   root nogroup
     chgrp nogroup <file>  ->  Invalid argument
 
-The daemon therefore cannot move the socket's group and it stays `root`, which
-is what the check reports. The script's rule is right and has no usable
-candidate here.
+**And that is the invocation error 10.469 wrote a paragraph about, made again
+by the same sweep runner.** `make live` runs 23 of the 83 scripts bare on the
+host; my sweep ran 3 of those bare and wrapped the other **20** in `unshare
+-rn`. For most it costs nothing -- a pass in a stricter environment is still a
+pass -- but a FAIL from that sweep is not evidence until it has been re-run the
+way the Makefile invokes it, and the one failure I did re-run that way
+evaporated. So **the sweep's passes stand and its failures were never
+load-bearing**, which is not what either sweep's tally implied.
 
 **`make live` could not complete on this machine until one of those moved**,
 since the target stops at the first failing script and `confirm.sh` is the
@@ -12807,9 +12820,10 @@ or reap the orphaned session buses holding most of those.
 
 **The first was taken, on the holder's instruction -- 10.472 has it**, and it
 turned up more than the two failures: the negative half of each case was
-vacuous, passing at a moment no implementation could have failed it.
-`control_exposure.sh` is the next thing the target stops at, and its cause is
-not a wait.
+vacuous, passing at a moment no implementation could have failed it. With
+`confirm.sh` passing and `control_exposure.sh` never having been a blocker,
+the next thing the target stops at is `c_nm_signals.sh`, whose skip is
+deliberately loud and which needs an artefact `make live` does not build.
 
 **And `confirm.sh` separates the two builds the other way.** It fails three
 checks against the Rust and two against the C -- the Rust also fails "the
@@ -12869,6 +12883,14 @@ to the group named" -- and `confirm.sh` aborts on each without printing a
 summary. A failure that both implementations share is not a port gap, which is
 the one thing this comparison is for and the reason it is worth the second run
 every time.
+
+**Both of those readings are now superseded, and one of them was this sweep's
+own fault.** `confirm.sh`'s failures were a wait shorter than the loop tick and
+are fixed (10.470, 10.472). `control_exposure.sh` was never failing: this sweep
+wrapped it in `unshare -rn`, where the only secondary group is an unmapped
+`nogroup`, and `make live` runs it bare on the host where the chgrp works. It is
+the invocation error the section below this one is about, made again by the same
+runner on twenty more scripts -- see 10.470.
 
 ### What cannot run, and the three that were my own fault
 
