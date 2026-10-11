@@ -12385,6 +12385,120 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.472 The suite's waits, and the negative checks that were vacuous
+
+Settled 2026-10-11: fix them. `make live` stopped at `confirm.sh`, and 10.470
+established why -- a 3-second wait against a 5-second tick on a machine whose
+config watcher has fallen back to mtime polling. This is the fix, and the half
+that was not expected is the more interesting one.
+
+### The rule was already in the file, twenty lines above the cases that broke it
+
+`confirm.sh` carries it in a comment over `await_window`:
+
+> **Wait for the outcome, do not sleep for it.** [...] A fixed sleep shorter
+> than the thing it waits for is a test that reports on the load average.
+>
+> These are for asserting that something *did* happen. Asserting that something
+> did **not** still wants a fixed sleep: there is no outcome to wait for, and
+> returning early would only mean not having looked long enough.
+
+That is the whole doctrine, correct, and paid for by an earlier case that
+"passed every time it was run alone and failed inside the full suite". Cases 14
+and 15 were never converted to it. **A working sibling explaining itself is a
+cheaper source of a project's decisions than the document is** --
+`working-practice.md` says so, and here the sibling was in the same file.
+
+### The negative checks were the worse half
+
+Each of those cases pairs a positive assertion with a negative one:
+
+    sleep 3
+    check "an identical rewrite over drift arms nothing"   <- negative
+    check "and the drift was still corrected"              <- positive
+
+The positive one failed, which is what sent anybody looking. The negative one
+**passed, and could not have failed**: at 3 seconds the daemon had not yet
+looked at the rewrite, so no window existed to find whatever the guard did.
+Any implementation passes that, including one with the guard deleted -- which
+is `evidence.md`'s vacuous pass, arrived at by timing rather than by an empty
+file list.
+
+The fix is an ordering and it is not arbitrary: **the pass that corrects the
+drift is the pass that would have armed the window.** So wait for the
+correction, then ask about the window, and both answers are about the same
+pass. Case 15 is the same shape -- the pass that declines to arm is the pass
+that logs why -- and case 9's control was the same again, `sleep 2` then "arms
+nothing", now waiting for the address that pass also produces.
+
+**Case 9's other sleep stays, and that is the distinction working.** Its
+`sleep 7` waits for a window that should not exist to fail to expire. There is
+no outcome to wait for, so it is a fixed sleep, and it is where that case's
+teeth are.
+
+### `config_arrives.sh`: the count that proved nothing
+
+It asserts a broken configuration is complained about once rather than per
+pass, after two touches a second apart. On a 5-second tick the daemon need not
+have read either, so a count still reading 1 was consistent with no
+de-duplication at all. Six seconds each instead: it still reads 1, so the guard
+is real and the check now exercises it. Nothing to wait for here either -- the
+claim is that a second line never appears -- which is why this one had to get
+longer rather than smarter.
+
+### What was deliberately left alone, and the criterion
+
+Of **295** fixed sleeps in the suite, **40** sit immediately before a check in
+a script that runs a daemon. Four scripts' worth were wrong. All the rest are
+one of two things that are not:
+
+  * **a non-event assertion** -- "is not a roam", "provokes nothing", "is not
+    adopted", "does not run the portal", "everything else is still dropped".
+    Converting these to a poll would make them return as soon as the answer is
+    the one wanted, which for a non-event is immediately and always.
+  * **a wait on an event-driven path** -- `roam.sh`, `wifi_trouble.sh` and
+    `drift.sh` wait on supplicant control-socket events and netlink, which
+    arrive in milliseconds. No tick is involved and a second is generous.
+
+So the criterion is not "is this sleep short" but **"is the thing being waited
+for produced by a poll"**. Only the configuration watcher and a sysctl the
+kernel announces no event for are, and they are what the four scripts touched
+here were waiting on.
+
+### Verified both ways
+
+    confirm.sh        C: all pass (was 2 failed)   Rust: 1 failed (was 3)
+    adopt.sh          C: all pass                  Rust: all pass
+    altname.sh        C: all pass                  Rust: all pass
+    config_arrives.sh C: 11 of 11                  Rust: 4 failed, pre-existing
+
+**The Rust's remaining `confirm.sh` failure is not a timing fault and the C
+passes it.** "The windowed apply set the MTU" expects 1400 and the Rust leaves
+1500. That was one of the three it failed before this change and is the one the
+other two were hiding; under 0263 it is the port being ahead rather than
+behind, and it is unexplained here.
+
+### And a second place the C is ahead, found by running the oracle at all
+
+`config_arrives.sh` had never been run against the Rust -- the sweeps that
+produced 10.469 and 10.470 drove the C, and the oracle was only brought out for
+the scripts that failed. It fails **4 of 11** against the Rust and passes 11 of
+11 against the C, and the cause is one thing: **the Rust's daemon never logs
+that a configuration does not compile.** Every check that counts that line, or
+the file name in it, or the recovery line that follows it, reads zero.
+
+**Not caused by this change, and the reason is structural rather than a
+judgement.** The first of the four is reached through `awaits 'grep -q "does
+not compile" ...'`, a helper this commit does not touch, and it fails before
+execution reaches the sleeps that were lengthened. A longer wait cannot
+manufacture a line the daemon does not write.
+
+What it says about method: **the oracle is only an oracle where it is
+consulted.** A script that passes against the C was never compared, so a port
+difference in the C's favour sat unrecorded -- and the asymmetry matters,
+because a difference the C *loses* shows up as a failing check whereas one it
+*wins* shows up as nothing at all.
+
 ## 10.471 222 directories the suite left in /tmp, and nothing failed
 
 Found while sweeping up after the probes 10.470's hooks defect needed, which is
@@ -12683,14 +12797,19 @@ The daemon therefore cannot move the socket's group and it stays `root`, which
 is what the check reports. The script's rule is right and has no usable
 candidate here.
 
-**`make live` cannot complete on this machine until one of those moves**, since
-the target stops at the first failing script and `confirm.sh` is the tenth
-thing it runs. Three ways out, and which to take is not this entry's to
-choose: wait for the condition rather than sleeping a fixed three seconds
-(the suite already has `await` helpers, and it would make the scripts correct
-on any machine without a spare inotify instance); raise
-`fs.inotify.max_user_instances`, which is 128 with 126 in use; or reap the
-orphaned session buses holding most of those.
+**`make live` could not complete on this machine until one of those moved**,
+since the target stops at the first failing script and `confirm.sh` is the
+tenth thing it runs. Three ways out were open: wait for the condition rather
+than sleeping a fixed three seconds (the suite already has `await` helpers, and
+it would make the scripts correct on any machine without a spare inotify
+instance); raise `fs.inotify.max_user_instances`, which is 128 with 126 in use;
+or reap the orphaned session buses holding most of those.
+
+**The first was taken, on the holder's instruction -- 10.472 has it**, and it
+turned up more than the two failures: the negative half of each case was
+vacuous, passing at a moment no implementation could have failed it.
+`control_exposure.sh` is the next thing the target stops at, and its cause is
+not a wait.
 
 **And `confirm.sh` separates the two builds the other way.** It fails three
 checks against the Rust and two against the C -- the Rust also fails "the
