@@ -2388,6 +2388,23 @@ live:
 	@# dbus-monitor and no NetworkManager, where nm.sh needs nmcli -- and a
 	@# quiet bus is what a converged machine and a broken emitter both look
 	@# like, so a skip here must be loud.
+	@# **The shim is built here, because that script's skip is deliberately
+	@# loud.** This target already builds the Qt live projects before
+	@# `gui_wifi.sh` and did not build this, so the one script whose skip is
+	@# a failure by design was the one thing the suite could not get past:
+	@# measured 2026-10-11, `make live` ran 69 scripts, failed none, and
+	@# stopped here on `the C shim is not built`. With it built the script
+	@# passes its 10 checks.
+	@#
+	@# Guarded on libdbus rather than built unconditionally: without it the
+	@# shim cannot compile and the script cannot run either, and the script's
+	@# own sentence is a better thing to read than a compile error. Its own
+	@# build recurses into `client/`, so one step covers the archive too.
+	@if pkg-config --exists dbus-1 2>/dev/null; then \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c >/dev/null || \
+			{ echo "live: the C NetworkManager shim does not build against this tree" >&2; \
+			  exit 1; }; \
+	fi
 	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_nm_signals.sh"
 	@# The AT modem helper, against a modem that is a pty. No root and no
 	@# hardware: the fake is a real character device, so termios, CR-terminated
