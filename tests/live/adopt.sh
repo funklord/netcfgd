@@ -102,6 +102,24 @@ start_daemon() {
 	sleep 2
 }
 
+# **Waited for, not slept on**, which is confirm.sh's rule and its reason: the
+# startup apply runs as soon as the socket is up rather than on the loop's
+# 5-second tick, so a second after `start_daemon`'s own settle is usually
+# enough -- and "usually" is all a fixed sleep buys. This costs nothing when
+# the answer is already right and does not report on the load average when it
+# is not.
+address_hits() { ip -4 addr show net0 2>/dev/null | grep -c '10\.9\.9\.1'; }
+
+await_address_hits() {
+	waited=0
+	while [ "$(address_hits)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 150 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
 stop_daemon() {
 	[ -n "$daemon" ] || return 0
 	kill "$daemon" 2>/dev/null || true
@@ -163,10 +181,10 @@ interface net0 {
 CONF
 
 start_daemon d2
-sleep 1
+await_address_hits 0 || true
 
 check "the restarted daemon removes the address it no longer wants" \
-	"$(ip -4 addr show net0 | grep -c '10\.9\.9\.1')" "0"
+	"$(address_hits)" "0"
 check "and removes the route" \
 	"$(ip -4 route show dev net0 | grep -c '10\.9\.9\.254')" "0"
 

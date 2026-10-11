@@ -90,6 +90,22 @@ start_daemon() {
 	sleep 2
 }
 
+# **Waited for, not slept on**, which is confirm.sh's rule and its reason: the
+# startup apply runs as soon as the socket is up rather than on the loop's
+# 5-second tick, so a second after `start_daemon`'s own settle is usually
+# enough -- and "usually" is all a fixed sleep buys.
+bridge_state() { ip link show ncbr0 >/dev/null 2>&1 && echo present || echo gone; }
+
+await_bridge() {
+	waited=0
+	while [ "$(bridge_state)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 150 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
 stop_daemon() {
 	[ -n "$daemon" ] || return 0
 	kill "$daemon" 2>/dev/null || true
@@ -148,10 +164,10 @@ cat > "$work/etc/netcfgd.conf" <<'CONF'
 CONF
 
 start_daemon d2
-sleep 1
+await_bridge gone || true
 
 check "the restarted daemon removes the bridge it created" \
-	"$(ip link show ncbr0 >/dev/null 2>&1 && echo present || echo gone)" "gone"
+	"$(bridge_state)" "gone"
 check "and leaves the link that was never its own" \
 	"$(ip link show keep0 >/dev/null 2>&1 && echo present || echo gone)" "present"
 

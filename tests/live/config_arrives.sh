@@ -236,10 +236,20 @@ check "naming the file and the line, which is what a person acts on" \
 # without the de-duplication this is a line per pass for as long as somebody
 # takes to fix it -- which is `drift.sh`'s storm in the one place an operator
 # is already having a bad time.
+#
+# **A fixed sleep, and it has to be longer than a tick.** There is nothing to
+# wait for here -- the claim is that a second line never appears -- so `awaits`
+# cannot help, and that is the distinction confirm.sh's helpers are written
+# around: wait for an outcome, sleep for a non-event. But a non-event is only
+# evidence once the thing that would have produced it has run, and where the
+# config watcher has fallen back to mtime polling that is the loop's 5-second
+# tick. At `sleep 1` the daemon had not necessarily looked at either touch, so
+# the count staying at 1 said nothing about de-duplication and everything about
+# having asked too early.
 touch "$work/etc/netcfgd.conf"
-sleep 1
+sleep 6
 touch "$work/etc/netcfgd.conf"
-sleep 1
+sleep 6
 check "and said once, not on every pass while the file stays broken" \
 	"$(grep -c 'does not compile' "$work/daemon.log" || true)" 1
 

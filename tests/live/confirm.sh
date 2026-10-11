@@ -373,6 +373,8 @@ address_of() { ip -4 -br addr show probe0 2>/dev/null | tr -s ' ' | cut -d' ' -f
 # The sibling, not the runtime directory: 0163 keeps the promise where a real
 # stop cannot take it.
 window_open() { [ -e "$work/run-confirm/confirm.json" ] && echo yes || echo no; }
+forwarding_of() { cat /proc/sys/net/ipv4/conf/probe0/forwarding 2>/dev/null; }
+said_count() { grep -ac "$1" "$work/daemon.log" 2>/dev/null || true; }
 
 # **Wait for the outcome, do not sleep for it.** Case 16 asserted an address
 # after `sleep 3`, where the reconcile it waits for happens on the loop's
@@ -396,6 +398,30 @@ await_window() {
 await_address() {
 	waited=0
 	while [ "$(address_of)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 200 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
+# The same two for the other outcomes cases 14 and 15 wait on: a sysctl the
+# kernel announces no event for, and a line in the daemon's own log. Both were
+# `sleep 3` against a 5-second tick -- see the comment above await_window; the
+# rule was written here and these two cases were not converted to it.
+await_forwarding() {
+	waited=0
+	while [ "$(forwarding_of)" != "$1" ]; do
+		waited=$((waited + 1))
+		[ "$waited" -gt 200 ] && return 1
+		sleep 0.1
+	done
+	return 0
+}
+
+await_said() {
+	waited=0
+	while [ "$(said_count "$1")" = 0 ]; do
 		waited=$((waited + 1))
 		[ "$waited" -gt 200 ] && return 1
 		sleep 0.1
@@ -443,8 +469,10 @@ check "and the window is closed" "$(window_open)" "no"
 stop_daemon
 
 # 9. The control, and the opt-in half: a machine that never wrote the key gets
-#    nothing. Same change, same timings -- only the key differs, so a pass here
-#    cannot come from the change failing to apply.
+#    nothing. Same change as case 8 and only the key differs, so a pass here
+#    cannot come from the change failing to apply -- which is now asserted
+#    rather than arranged by matching timings: case 8 waits for its window and
+#    this waits for the address, so both know their pass ran.
 cat > "$work/etc/netcfgd.conf" <<'CONF'
 device probe0 {
 	kind   = "dummy"
@@ -463,7 +491,17 @@ interface probe0 {
 	config = "10.9.9.2/24"
 }
 CONF
-sleep 2
+#    **Waited for, not slept on, and this one cannot wait for the window.**
+#    That is the whole claim -- there is no window to appear -- so it waits for
+#    the *change*, which is the outcome of the same pass, and asks about the
+#    window afterwards. At `sleep 2` against a 5-second tick the pass had not
+#    run, so "arms nothing" was true of a daemon that had not yet looked: the
+#    control passed without controlling for anything.
+#
+#    The `sleep 7` below stays a fixed sleep and has to: it is waiting for a
+#    window that should not exist to fail to expire, and there is no outcome to
+#    wait for. That check is where this case's teeth are.
+await_address 10.9.9.2/24 || true
 check "without the key the same change arms nothing" "$(window_open)" "no"
 sleep 7
 check "and it stays applied" "$(address_of)" "10.9.9.2/24"
@@ -627,15 +665,25 @@ interface probe0 {
 CONF
 start_daemon ""
 await yes || true
-sleep 1
-check "the sysctl is set" \
-	"$(cat /proc/sys/net/ipv4/conf/probe0/forwarding 2>/dev/null)" "1"
+await_forwarding 1 || true
+check "the sysctl is set" "$(forwarding_of)" "1"
 echo 0 > /proc/sys/net/ipv4/conf/probe0/forwarding 2>/dev/null || true
 touch "$work/etc/netcfgd.conf"
-sleep 3
+#     **The outcome is waited for, and the thing that must NOT happen is asked
+#     about afterwards.** The pass that corrects the drift is the pass that
+#     would have armed the window, so asking about the window before that pass
+#     has run is a question with no subject -- and `sleep 3` guaranteed it had
+#     not run: measured on a machine whose config watcher had fallen back to
+#     mtime polling, the correction landed at 4.53s. So "arms nothing" was true
+#     of a daemon that had not yet looked, and "was still corrected" was false
+#     of one that was about to. Both read as the C and the Rust failing, which
+#     is what two implementations agreeing on a failure usually means.
+#
+#     Waiting for the correction first makes both answers about the same pass,
+#     which is the only arrangement in which the negative one says anything.
+await_forwarding 1 || true
+check "and the drift was still corrected" "$(forwarding_of)" "1"
 check "an identical rewrite over drift arms nothing" "$(window_open)" "no"
-check "and the drift was still corrected" \
-	"$(cat /proc/sys/net/ipv4/conf/probe0/forwarding 2>/dev/null)" "1"
 stop_daemon
 
 # 15. A window is not armed against the empty placeholder.
@@ -675,10 +723,15 @@ sleep 1
 check "a failed startup apply leaves the placeholder in place" \
 	"$(grep -c '"interfaces": \[\]' "$work/run-confirm/last-good.json" 2>/dev/null)" "1"
 sed -i 's/10\.9\.9\.1/10.9.9.4/' "$work/etc/netcfgd.conf"
-sleep 3
-check "and no window is armed against it" "$(window_open)" "no"
+#     Case 14's ordering, for case 14's reason: the pass that declines to arm
+#     is the pass that logs why, so the log line is the signal that the
+#     question has an answer at all. At `sleep 3` neither had happened -- the
+#     line arrives at 4.53s on this machine -- so the negative check passed
+#     vacuously and the positive one failed.
+await_said 'the last-good configuration is empty' || true
 check "and it says why" \
-	"$(grep -ac 'the last-good configuration is empty' "$work/daemon.log")" "1"
+	"$(said_count 'the last-good configuration is empty')" "1"
+check "and no window is armed against it" "$(window_open)" "no"
 sleep 6
 # The address is still the one from before the edit, and that is the assertion:
 # the edit itself cannot apply, because a failing action stops the rest of the
