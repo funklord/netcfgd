@@ -12385,6 +12385,65 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.473 `make live` runs the whole suite, and stops on its last line
+
+Three runs today, same machine, same build, and the only thing that changed
+between them is in this repository:
+
+    run 1   stopped at the 10th script       confirm.sh, 2 failed
+    run 2   69 scripts, 0 failed             c_nm_signals.sh, shim not built
+    run 3   73 scripts, 0 failed             sandbox_writes.sh, no systemd
+
+Run 1 is 10.470's measurement, run 2 followed 10.472's waits, and run 3
+followed building the shim. **Zero failing checks in the last two runs**, and
+the only stops are a missing artefact and a missing init system.
+
+### The shim was the one artefact the target did not build
+
+`c_nm_signals.sh` runs under `NCFG_LIVE=1` on purpose -- the target's own
+comment says a quiet bus is what a converged machine and a broken emitter both
+look like, so a skip there must be loud -- and it skips when
+`adapter/netcfgd-nm/c/netcfgd-nm` is absent. Nothing built it. So the one
+script whose skip is a failure by design was the one thing the suite could not
+get past, and the fix is the shape this target already uses for the Qt live
+projects before `gui_wifi.sh`: build the thing, then run the script. Built, it
+passes its 10 checks. Guarded on `pkg-config --exists dbus-1`, because without
+libdbus neither the shim nor the script can run and the script's own sentence
+reads better than a compile error.
+
+### What remains cannot be built, and is the suite's policy
+
+`sandbox_writes.sh` is the target's last recipe line, is also run under
+`NCFG_LIVE=1`, and exits 1 here with *"no systemd here, so the unit's real
+sandbox is unchecked"*. Under `NCFG_LIVE` this suite treats "cannot check" as a
+failure, deliberately; systemd is not something a recipe can supply. So on this
+machine `make live` reaches its final script and no further, and that is a
+statement about the machine rather than a defect. Left alone: changing it is a
+decision about what the acceptance suite asserts.
+
+The five quiet skips are all scripts the target runs bare, without `NCFG_LIVE`,
+which is how it says "not every machine has this": no nmcli, no real root for
+`/dev/vhci` or for module loading, no cargo example built, no odhcp6c.
+
+### And `make`'s own line number sent me to the wrong script
+
+The failure printed as `make: *** [Makefile:2434: live] Error 1`, and line 2434
+is `@sh tests/live/association.sh` -- which skipped cleanly and exits 0.
+`sandbox_writes.sh` is line 2458.
+
+Established rather than assumed, because the first reading was "association.sh
+failed": all four scripts at and after 2434 reported in that run, including
+`delegation.sh` at 2443, so execution continued 24 lines past the line make
+blamed. The direct measurement agrees -- `NCFG_LIVE=1 sh
+tests/live/sandbox_writes.sh` exits 1 on its own.
+
+**The cause is unestablished and the number is simply not to be trusted here.**
+It was accurate in an earlier run and drifted as comment lines were added to
+this recipe; `.ONESHELL` is not set, `SHELL` is not overridden, GNU Make 4.4.1.
+Two arithmetic explanations were tried and neither fits. What matters is the
+habit: in a 394-line recipe, read the script's own last words rather than the
+line make attributes the failure to.
+
 ## 10.472 The suite's waits, and the negative checks that were vacuous
 
 Settled 2026-10-11: fix them. `make live` stopped at `confirm.sh`, and 10.470
@@ -12822,8 +12881,8 @@ or reap the orphaned session buses holding most of those.
 turned up more than the two failures: the negative half of each case was
 vacuous, passing at a moment no implementation could have failed it. With
 `confirm.sh` passing and `control_exposure.sh` never having been a blocker,
-the next thing the target stops at is `c_nm_signals.sh`, whose skip is
-deliberately loud and which needs an artefact `make live` does not build.
+the target went on to run the whole suite -- 10.473 has the three runs and
+where each stopped.
 
 **And `confirm.sh` separates the two builds the other way.** It fails three
 checks against the Rust and two against the C -- the Rust also fails "the
