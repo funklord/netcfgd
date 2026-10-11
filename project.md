@@ -12636,18 +12636,67 @@ under `NCFG_LIVE=1`, which is the condition it hung in. Recorded rather than
 claimed: nothing here was aimed at it, and I have no mechanism connecting any
 of these five fixes to it. If it hangs again that is the thing to know first.
 
-### The two that fail against both, re-measured
+### The two that fail against both are this machine, not either build
 
-Worth re-running because a "shared failure" is a claim about the other build and
-goes stale the moment either moves. Both still fail on both, 2026-10-10:
-`control_exposure.sh` on "and the socket belongs to the group named", one check
-each; `confirm.sh` on "and the drift was still corrected" and "and it says why".
+Re-measured 2026-10-10 because a "shared failure" is a claim about the other
+build and goes stale the moment either moves: both still failed on both.
+**Diagnosed 2026-10-11, and neither is a defect in the C or the Rust.** Each is
+a premise the script needs that this machine cannot supply, and "it fails on
+both builds" was the clue -- two independent implementations agreeing on a
+failure is usually a statement about the third party in the room.
 
-**And `confirm.sh` now separates them the other way.** It fails three checks
-against the Rust and two against the C -- the Rust also fails "the windowed
-apply set the MTU" -- so on that script the C is ahead. Not pursued here; it is
-recorded because the next reader of "fails against both" should know the two
-counts are no longer equal.
+**`confirm.sh`'s two are a 3-second wait against a 5-second tick.** Cases 14 and
+15 edit the configuration and check a consequence after `sleep 3`: that drift was
+still corrected, and that the daemon logged why it would not arm a window. Both
+depend on the daemon noticing the configuration changed, and
+`NCFG_MAIN_TICK_MS` is 5000 -- so on a machine where the config watcher has
+fallen back to mtime polling, the news arrives on the next tick rather than at
+once. This machine is that machine: its inotify instances are exhausted, which
+is the same condition that hid the hook defect in 10.470.
+
+Measured rather than inferred, by replaying each case with the wait
+instrumented instead of fixed -- the daemon reporting `via mtime polling` in
+both runs:
+
+    case 14   forwarding back to 1        after 4.53s   script allows 3s
+    case 15   "the last-good ... empty"   after 4.53s   script allows 3s
+
+So the behaviour both builds are accused of losing happens, 1.5 seconds after
+the script stops looking. **Naming the experiment and running it is the whole
+of this entry**: the environmental story was available from the first reading of
+the tick constant, and a comfortable explanation that ends an investigation is
+worth less than no explanation -- so it was tested, and it held.
+
+**`control_exposure.sh`'s one cannot pass under `unshare -rn` at all.** It
+asserts that a remote socket configured with `agent = "group:<g>"` is chgrp'd to
+that group, and picks `<g>` as the first entry of `id -Gn` that is not the
+primary group -- deliberately, because a socket is already created owned by its
+creator's primary group and asserting against that would pass with the chown
+reverted. In a user namespace made by `unshare -r` the gid map has exactly one
+entry, so the only secondary group on offer is `nogroup`, which is unmapped:
+
+    gid_map:  0  1000  1
+    id -Gn:   root nogroup
+    chgrp nogroup <file>  ->  Invalid argument
+
+The daemon therefore cannot move the socket's group and it stays `root`, which
+is what the check reports. The script's rule is right and has no usable
+candidate here.
+
+**`make live` cannot complete on this machine until one of those moves**, since
+the target stops at the first failing script and `confirm.sh` is the tenth
+thing it runs. Three ways out, and which to take is not this entry's to
+choose: wait for the condition rather than sleeping a fixed three seconds
+(the suite already has `await` helpers, and it would make the scripts correct
+on any machine without a spare inotify instance); raise
+`fs.inotify.max_user_instances`, which is 128 with 126 in use; or reap the
+orphaned session buses holding most of those.
+
+**And `confirm.sh` separates the two builds the other way.** It fails three
+checks against the Rust and two against the C -- the Rust also fails "the
+windowed apply set the MTU". Recorded because the next reader of "fails against
+both" should know the counts are not equal; whether the Rust's third has the
+same timing cause is unmeasured.
 
 ### What this cost, and the two habits that cost it
 
