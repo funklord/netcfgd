@@ -12441,6 +12441,25 @@ rewritten shape, including the slowest script in the target -- pass under it.
 The `qmake6` block is deliberately not bounded: it builds the Qt live projects
 rather than running a script, and bounding builds is a different question.
 
+### And one invocation a `timeout` cannot reach
+
+`make live-container` runs `make live` **inside** a container, so the per-script
+bound travels with it -- the Makefile is copied in. The container itself is the
+thing that bound cannot reach: it is a child of the docker daemon, so an outer
+`timeout` would kill the client and leave the container compiling, which
+`running-code.md` measured at `Up 10 minutes` after its supervisor had gone. It
+had no `--name`, which that file calls the one thing that makes recovery
+possible at all. It has one now, pid-suffixed so two can run, announced on
+stdout with the `docker kill` that stops it.
+
+**And the first version of that announcement was wrong, which is the lesson.**
+It was a recipe line of its own, and **each recipe line is its own shell** -- so
+the `$$` it printed was a different pid from the `$$` the container was named
+with, and the message named a container that did not exist. Both halves are one
+line now, and the proof is a stub `docker` on `PATH` showing the announced name
+is the string `--name` received. Checking the expansion of each line separately,
+which is what I did first, could not have caught it.
+
 ## 10.474 What the port still owes, measured: two features and no gaps
 
 Asked what to do next with the acceptance suite green, and the honest answer is

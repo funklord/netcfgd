@@ -1628,7 +1628,26 @@ live-container:
 		'make ncfg-link PROFILE=debug >/dev/null' \
 		'exec make live' \
 		> $(DIST)/live-container.sh
-	docker run --rm --privileged -v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
+	@# **Named, because the name is the only handle on it.** An outer
+	@# `timeout` would bound this `docker run` and not the container: the
+	@# container is a child of the daemon, so killing the client leaves it
+	@# compiling, which `running-code.md` measured at `Up 10 minutes` after
+	@# its supervisor had gone. `--name` is what makes `docker ps --filter`
+	@# and then `docker kill` possible at all, and the pid suffix is so two
+	@# of these can run without colliding.
+	@#
+	@# The inner `make live` carries `LIVE_TIMEOUT` with it, so the
+	@# per-script bound applies in here as well; this is the bound on the
+	@# thing that bound cannot reach.
+	@# One recipe line, because each one is its own shell: announcing the
+	@# name from a line of its own printed a different `$$$$` from the one
+	@# the container got, so the message named a container that did not
+	@# exist. Unprefixed, so make echoes what ran -- a docker run is
+	@# network access and worth seeing.
+	name=netcfgd-live-$$$$; \
+	echo "live-container: $$name; stop it with 'docker kill $$name'"; \
+	docker run --rm --privileged --name "$$name" \
+		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
 		$(LIVE_IMAGE) sh /dist/live-container.sh
 
 # What the shipped binary is allowed to link.
