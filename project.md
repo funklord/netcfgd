@@ -12385,6 +12385,62 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.475 Bounding the live target, and the two faults the proof caught
+
+`make live` had no bound on any of its **85** invocations, so a script that
+wedged wedged the target for as long as anybody left it. The one time that
+happened -- `gui_wifi.sh` running to a ceiling twice in an evening's sweeps --
+it was noticed only because the *sweep* had a ceiling; the target has none.
+Each invocation now runs under `timeout -k 30 $(LIVE_TIMEOUT)`, default 600.
+
+`timeout` rather than a kill, for `running-code.md`'s reason: every one of
+these scripts traps `INT` and `TERM` and removes its work directory, stops its
+daemon and unmounts what it mounted. A signal runs that trap; a task-kill does
+not, which is how a stopped `check-ci.sh` once left a container `Up 7 minutes`.
+`-k 30` is the other half, for a script that ignores `TERM`.
+
+**600 is four times a measured ceiling, not a feeling**: across two full sweeps
+of all 83 scripts, every one finished inside 150 seconds.
+
+### The interesting part is that the proof failed twice
+
+`evidence.md` asks a mechanical change to carry a proof -- state what must not
+change, check it in the tool, refuse to write when it fails. Here the property
+was "every invocation is bounded and every one still runs", and checking it
+caught two faults that would both have shipped.
+
+**The count inherited its detector.** The transform reported 78 of 85, because
+seven invocations are spelled `unshare -rn sh -c "sh tests/live/X.sh"` with no
+`NCFG_LIVE=1` and the first pattern required one. Those seven would have stayed
+unbounded, and the commit would have claimed otherwise. Found by *listing what
+was left* rather than by reading the number -- which is the same correction
+this project has now made to a count four times in a week.
+
+**And `timeout` cannot take a variable assignment.** Twelve invocations were
+rewritten to `timeout -k 30 $(LIVE_TIMEOUT) NCFG_LIVE=1 sh tests/live/X.sh`,
+and `timeout` execs its command rather than running a shell, so that tries to
+exec a program named `NCFG_LIVE=1`:
+
+    timeout: failed to run command 'NCFG_LIVE=1': No such file or directory
+    exit=127
+
+Measured before fixing. The assignment belongs in front of `timeout`, where
+the shell applies it; the ones inside `sh -c "..."` were always fine because a
+shell runs those. **Reading the diff is what found it** -- the shape was wrong
+in a way no count could show, which is the half of a mechanical proof that is
+not arithmetic.
+
+### Seen to fire
+
+A fixture that traps and then wedges exits 124 under the bound and its work
+directory is gone afterwards, so the trap ran rather than the process being
+destroyed. `LIVE_TIMEOUT=0` runs past the duration and exits 0, as the comment
+claims. `links.sh`, `log_shape.sh` and `c_daemon_watch.sh` -- one of each
+rewritten shape, including the slowest script in the target -- pass under it.
+
+The `qmake6` block is deliberately not bounded: it builds the Qt live projects
+rather than running a script, and bounding builds is a different question.
+
 ## 10.474 What the port still owes, measured: two features and no gaps
 
 Asked what to do next with the acceptance suite green, and the honest answer is

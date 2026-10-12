@@ -2059,6 +2059,32 @@ vm-image:
 #   are Rust ones. The scripts themselves need neither cargo nor that target: a
 #   script is standalone shell and runs under `unshare -rn` on its own, which
 #   is how 10.467 came to measure all 83 of them.
+# How long any one live script may run before the suite stops waiting for it.
+#
+# **The target had no bound at all on any of its 85 invocations**, so a script
+# that wedged wedged `make live` for as long as anybody left it -- and that is
+# not hypothetical: `gui_wifi.sh` ran to a 180-second ceiling twice in one
+# evening's sweeps, and the only reason it was noticed is that the sweep had a
+# ceiling of its own. `running-code.md` is explicit that a wrapper is not the
+# bound that matters and the program should refuse on its own; these scripts do
+# not, so until they do this is the bound there is.
+#
+# **`timeout` and not a kill, deliberately.** Every one of these scripts traps
+# `INT` and `TERM` and removes its work directory, stops the daemon it started
+# and unmounts what it mounted. A signal runs that trap; the harness's own way
+# of stopping a task does not, which is how a stopped `check-ci.sh` once left a
+# container `Up 7 minutes`. So the bound signals, and `-k 30` is the second
+# half: a script that ignores `TERM` gets thirty seconds and then `KILL`, which
+# is worse than a clean stop and better than hanging for ever.
+#
+# **600 seconds, from a measurement rather than a feeling.** Across two full
+# sweeps of all 83 scripts, every one completed inside 150 seconds, so this is
+# four times the measured worst case. `make live LIVE_TIMEOUT=1200` raises it,
+# and `LIVE_TIMEOUT=0` removes it -- coreutils treats a zero duration as no
+# timeout -- which is what to reach for when bisecting a slow script rather
+# than editing this file.
+LIVE_TIMEOUT ?= 600
+
 live: export PATH := $(PATH):/sbin:/usr/sbin
 live:
 	$(CARGO) build --workspace
@@ -2067,7 +2093,7 @@ live:
 	@# WireGuard needs CAP_NET_ADMIN and the module; it skips without either.
 	@binary=$$(ls -t target/debug/deps/wg-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -n "$$binary" ]; then \
-		unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
+		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
 	fi
 	@# netcfgd-sys's own unit tests, and this is the only place they can say
 	@# anything. `shed()` is observable only from a process that has something
@@ -2076,31 +2102,31 @@ live:
 	@# until a root run met it. `unshare -r` is the full set they need.
 	@binary=$$(ls -t target/debug/deps/netcfgd_sys-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -n "$$binary" ]; then \
-		unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
+		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1"; \
 	fi
 	@binary=$$(ls -t target/debug/deps/live-* 2>/dev/null | grep -v '\.d$$' | head -1); \
 	if [ -z "$$binary" ]; then echo "live: no test binary was built"; exit 1; fi; \
-	unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \
+	timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 $$binary --test-threads=1" || { \
 		echo "live: if this failed to unshare, the kernel may have"; \
 		echo "live:   user namespaces restricted; run as root instead"; \
 		exit 1; \
 	}
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/links.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/links.sh"
 	@# What a device the C port creates actually carries, compared against the
 	@# Rust on one kernel and read back by `ip -d`. Most kinds ride along in the
 	@# create message; a bridge deliberately does not (0057) and this port was
 	@# making every one of them on the kernel's defaults.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_link_settings.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_link_settings.sh"
 	@# What the two implementations *say* about a document. The gate compares
 	@# `show --json` because a plan observes the machine; a fresh namespace is
 	@# what holds the machine still enough to compare one.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_warnings.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_warnings.sh"
 	@# Both daemons, one client, the same requests. The ledger says the two
 	@# request taxonomies are whole; this is what says the answers are. Nothing
 	@# in it applies, because a daemon watching a machine a third process is
 	@# changing reports whichever instant it sampled -- which is true of both
 	@# and is not a difference between them.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_answers.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_answers.sh"
 	@# And what the switcher does when the network goes, against stubs for
 	@# `ping`, `getent` and `systemctl`. `c_daemon_tryout.sh` is a safety net,
 	@# and a safety net nobody has dropped anything into is a claim: this is
@@ -2114,110 +2140,110 @@ live:
 	@# fixtures other scripts drive, and this, which is a test. So it ran only
 	@# for somebody globbing the directory by hand. It passes, and it is not
 	@# quick -- the tryout waits out its own deadlines.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_watch.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_daemon_watch.sh"
 	@# **`-rmn`, and it is the only one.** A resolver delivery writes the file
 	@# that decides whether this machine can resolve a name, so the script
 	@# bind-mounts a sentinel over `/etc/resolv.conf` before it runs anything
 	@# and checks the sentinel afterwards. A test for the defect that sends a
 	@# delivery to the wrong place must not be able to cause it -- which is not
 	@# hypothetical here (project.md 10.277).
-	@unshare -rmn sh -c "NCFG_LIVE=1 sh tests/live/c_dns_delivery.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rmn sh -c "NCFG_LIVE=1 sh tests/live/c_dns_delivery.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/confirm.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/nat.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/privacy.sh"
 	@# SLAAC against a real advertisement, which is the half privacy.sh will not
 	@# do. Neither under NCFG_LIVE nor under unshare: dnsmasq is a package, and it
 	@# drops privileges at startup -- which `unshare -rn` forbids, so the script
 	@# makes its own namespace the way dhcpcd.sh does.
-	@sh tests/live/slaac.sh
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/hooks.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/slaac.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/hooks.sh"
 	@# A write that fails after the file is already open, which is what a full
 	@# filesystem produces and what every unit test beside those writers
 	@# cannot reach: they refuse at the open. It also holds the only check on
 	@# `replace` declining to fall back on a full disk -- the fallback there
 	@# truncates a working resolv.conf and then reports success. 0180.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/write_full.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/write_full.sh"
 	@# The read side of the same question, and the more expensive half: a
 	@# configuration that could not be *read* was compiled as an empty one,
 	@# which is a meaningful state -- so `ncfg apply` took the address off the
 	@# interface and exited 0. `Path::is_file` answers false for a file it
 	@# cannot examine. 0181.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_unreadable.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_unreadable.sh"
 	@# The third audit: a program netcfgd runs and cannot. `Permission denied`
 	@# is two faults with one message from the kernel -- no executable bit, or
 	@# an executable file on a `noexec` mount -- and 0178 is the second one
 	@# costing a day. 0182.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/exec_refused.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/exec_refused.sh"
 	@# Two applies at once. An apply is observe, plan, act, and nothing
 	@# serialised the three: measured, two simultaneous applies produced a
 	@# failed `route.add` every run, because the second planned against a
 	@# machine the first then changed. 0184.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/apply_race.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/apply_race.sh"
 	@# A daemon that has done work does not keep growing. `make rss` measures
 	@# one two seconds after it starts, which is the floor and not the risk: a
 	@# kilobyte per reconcile is invisible at startup and is 100 MB by the end
 	@# of a quarter. No namespace: it binds a socket and touches no interface.
-	@NCFG_LIVE=1 sh tests/live/steady_state.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/steady_state.sh
 	@# Every message carries a severity and a subsystem, and a level turns them
 	@# down -- flog's shape, from the sibling projects. Before it, fifty
 	@# `eprintln!` calls with no severity, no subsystem and no filter. 0187.
-	@NCFG_LIVE=1 sh tests/live/log_shape.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/log_shape.sh
 	@# Stopping, killing and restarting the daemon. netcfgd has no signal
 	@# handler and no ExecStop on purpose (0134): stopping it must not take the
 	@# network down, and that was a claim nothing checked. 0188.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/restart.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/restart.sh"
 	@# The one hook phase that is not a plan action, and therefore the one
 	@# hooks.sh cannot reach: it needs a running daemon rather than an apply.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/drift.sh"
 	@# Write a file, touch nothing else, does the machine change. Thirty
 	@# scripts here write configuration while a daemon runs and every one of
 	@# them then calls `ncfg apply` or drives the daemon by hand, so the one
 	@# question project.md 10.338 asks had no witness at all. It calls `apply`
 	@# nowhere, which is the point of it.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
 	@# The same question one layer up, on a radio and a supplicant netcfgd
 	@# started, which is the shape 10.338 actually had. `switch_network.sh`
 	@# shares this fixture and drives it with `ncfg apply` at every step; this
 	@# one asks whether the daemon does it unasked.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/network_arrives.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/network_arrives.sh"
 	@# A linkset choosing between two links, and the case metrics cannot
 	@# handle on their own: a link that is up, has carrier and reaches
 	@# nothing keeps its better metric while doing so, and only a probe tells
 	@# it apart from one that works. Needs a running daemon for the same
 	@# reason drift.sh does -- a probe is a question asked on a timer, not a
 	@# plan action.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/linkset.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/resolv_owned.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/linkset.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/resolv_owned.sh"
 	@# Bare, and it must stay bare: it makes its own *pid* namespace so the
 	@# sweep it exercises can only see its own children. Under the suite's
 	@# usual `unshare -rn` -- a network namespace only -- /proc still shows
 	@# every process on the machine, and the test would terminate the
 	@# developer's real NetworkManager or dhclient.
-	@NCFG_LIVE=1 sh tests/live/resolv_defended.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/resolv_defended.sh
 	@# The switcher's systemd paths, driven with a recording systemctl on a
 	@# machine that has none. Bare, because it makes its own mount namespace
 	@# to put a tmpfs over /run.
-	@NCFG_LIVE=1 sh tests/live/select.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/select.sh
 	@# The other daemon-driven hook: a roam is wpa_supplicant's decision and
 	@# reaches netcfgd on its event socket, so no apply can exercise it.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/roam.sh"
 	@# The other half of that event socket, which was read for one event and
 	@# throwing away every one that says a link is failing. Both ends: the
 	@# supplicant's trouble events becoming lines in netcfgd's log, and the
 	@# `LIST_NETWORKS` flags reaching `ncfg wifi status`.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_trouble.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_trouble.sh"
 	@# And the thing a roam is not: the station moving to a DIFFERENT network,
 	@# where the association netcfgd observes has to follow and the new lease's
 	@# resolver has to replace the old one rather than sit beside it. roam.sh
 	@# is one network under two access points and says so in its first line;
 	@# this was the half nothing drove.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch_network.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/switch_network.sh"
 	@# The wireless journey with nothing configured to begin with, which is
 	@# the state every M8 wifi fault was found in and no test was ever run
 	@# from. It asserts the machine rather than the artifacts: a supplicant
 	@# that is running, a scan that returns, a network that reached it.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_journey.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi_journey.sh"
 	@# The same journey through the GUI's own buttons, which is the client the
 	@# "buttons don't work properly" report was about. Skips without Qt, which
 	@# is a dependency a machine may reasonably not have.
@@ -2229,135 +2255,135 @@ live:
 	@# `make live` on this machine. The build belongs outside the namespace;
 	@# the script checks the artifacts.
 	@if command -v qmake6 >/dev/null 2>&1; then 		$(MAKE) --no-print-directory -C client >/dev/null; 		for project in gui/tests/live/*.pro; do 			name=$$(basename $$project .pro); 			mkdir -p gui/tests/live/build/$$name; 			( cd gui/tests/live/build/$$name && qmake6 ../../$$name.pro >/dev/null && 			  $(MAKE) --no-print-directory >/dev/null ) || 				{ echo "live: $$name does not build against this tree" >&2; exit 1; }; 		done; 	fi
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/gui_wifi.sh"
 	@# The profile verbs against a running daemon. The gui's tray lists and
 	@# switches profiles over the socket rather than off its own disk, so what
 	@# the tray can do is exactly what these two verbs do -- and neither had
 	@# ever been spoken to a daemon. No namespace: this touches no interface,
 	@# it reads and writes configuration.
-	@sh tests/live/profile.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/profile.sh
 	@# The 802.1X path, where the worst fault of M8 was and which had no live
 	@# coverage: a certificate must reach the supplicant as a path it can open,
 	@# never as the content of a key.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/enterprise.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/enterprise.sh"
 	@# Taking a radio over when another manager lets go, which is what
 	@# displacement means and the half no test covered: a guard that declines
 	@# and never stops declining looks exactly like a daemon that does not work.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/displace.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/displace.sh"
 	@# A supplicant that died under a radio netcfgd owns, which is the state a
 	@# crash leaves behind and the one every client reports as "cannot reach
 	@# supplicant". The fix loop has to notice without being asked.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/revive.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/revive.sh"
 	@# The supplicant netcfgd left running when it stopped, after the run
 	@# directory took its pid file. The process lives, the handle does not --
 	@# and without recovering it netcfgd refuses its own child for ever.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/orphan.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/orphan.sh"
 	@# What systemd does to the backends when the unit stops. Checks the
 	@# declaration rather than the behaviour, and says so: the defect was an
 	@# absent setting, and an absent setting is what this catches.
-	@sh tests/live/killmode.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/killmode.sh
 	@# The other half of 0140, one backend over: udhcpc keeps netcfgd's marker
 	@# in argv but has no instance lock, so a lost handle means a second client
 	@# and a second lease rather than a refusal.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/udhcpc_orphan.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/udhcpc_orphan.sh"
 	@# The backend whose mark cannot be read from the process: dhcpcd destroys
 	@# argv and environ alike, so netcfgd asks it over its control socket which
 	@# config it was started with. Makes its own namespace, like dhcpcd.sh.
-	@NCFG_LIVE=1 sh tests/live/dhcpcd_orphan.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/dhcpcd_orphan.sh
 	@# Adopting the network after the ownership record is gone, which is what a
 	@# restart does to it. Holding is safe and is not enough: a netcfgd that
 	@# cannot recognise its own work can never remove it either.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/adopt.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/adopt.sh"
 	@# The mark netcfgd leaves on a link it creates, which is the one object
 	@# kind with no protocol field to stamp -- so it was the last piece of
 	@# ownership that lived only in the record a restart deletes.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/altname.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/altname.sh"
 	@# The sysctls netcfgd set, and the limit of what survives losing the
 	@# record -- a value has nothing to stamp, so this is the one part of
 	@# ownership that genuinely depends on /run.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/sysctl.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/sysctl.sh"
 	@# The captive portal check, against a real HTTP server: the probe is a
 	@# question rather than a change, so no apply can exercise it either.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/portal.sh"
 	@# A supplicant that has bound its socket and stopped answering. Both what
 	@# netcfgd says about it and how long it takes to say it -- the round trip
 	@# is in the reconcile loop.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wedged.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wedged.sh"
 	@# Bare, like slaac.sh and dhcpcd.sh: this one picks its own namespace,
 	@# because which one it needs depends on which DHCP server it found.
 	@# busybox udhcpd wants nothing special; the dnsmasq fallback drops
 	@# privileges, which `unshare -rn` forbids.
-	@NCFG_LIVE=1 sh tests/live/dhcp.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/dhcp.sh
 	@# The other client, and the one netcfgd prefers. Neither under NCFG_LIVE
 	@# nor under unshare: dhcpcd is a package, and it drops privileges to a user
 	@# that a namespace with one mapped uid does not have -- so the script makes
 	@# its own namespaces, which is also how it keeps the machine's own dhcpcd
 	@# state, hostname and resolv.conf out of reach.
-	@sh tests/live/dhcpcd.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/dhcpcd.sh
 	@# Not under `unshare -rn`, and that is the point: a network namespace has
 	@# none of the machine's real interfaces, so the radio this reads would not be
 	@# there. It changes nothing -- `status` and `plan` only -- so running it
 	@# against the host is safe.
-	@NCFG_LIVE=1 sh tests/live/rfkill.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/rfkill.sh
 	@# And the event stream, against a fifo rather than the real device: the
 	@# write path on /dev/rfkill blocks every radio on the machine, and rfkill
 	@# is not namespaced, so `unshare -rn` would be no protection.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rfkill_stream.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rules.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/readonly.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/unmanage.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rfkill_stream.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/rules.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/qdisc.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/ingress.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/readonly.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/unmanage.sh"
 	@# No namespace: this one touches no interface and no socket. It drives a
 	@# process that reads a pipe and writes a file, which is the whole of what
 	@# the privileged half of administrator mode does.
-	@NCFG_LIVE=1 sh tests/live/control_helper.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/control_helper.sh
 	@# What the control sockets expose to a local caller, from a real daemon. No
 	@# namespace: it binds unix sockets and reads their modes, and it needs a
 	@# real uid with a real secondary group, which `unshare -r` does not have.
-	@NCFG_LIVE=1 sh tests/live/control_exposure.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/control_exposure.sh
 	@# What a remote connection may DO, which is the other half of the one
 	@# above: that checks who may open the remote socket (0159), this asks the
 	@# daemon what a caller on it is allowed, and the discriminator is that the
 	@# same daemon answers differently on its two sockets. No namespace, for
 	@# the same reason -- it binds unix sockets and needs a real uid. Skipped
 	@# where `bridge/` is not built, since the bridge is what connects.
-	@NCFG_LIVE=1 sh tests/live/remote_tiers.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/remote_tiers.sh
 	@# The interface reporting contract, checked from the side a writer writes.
 	@# Under NCFG_LIVE: it needs no modem and no module, only a file.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/report.sh"
 	@# The reference helper, against a fake mbimcli. Under NCFG_LIVE: it
 	@# needs no modem and no mbimcli, only the shell.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/helper.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/helper.sh"
 	@# An OpenVPN tunnel, against a fake daemon that speaks the real
 	@# management protocol. Under NCFG_LIVE: it needs no openvpn package.
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/openvpn.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/openvpn.sh"
 	@# The same tunnel against a *real* openvpn, which is the only thing that
 	@# can say what it puts in a --route-up script's environment. Deliberately
 	@# not under NCFG_LIVE, for the reason ap.sh is not: openvpn is a package a
 	@# machine with no VPN has no reason to have.
-	@unshare -rn sh -c "sh tests/live/tunnel.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/tunnel.sh"
 	@# What netcfgd hands pppd, against a real pppd. Same reasoning: ppp is a
 	@# package a machine with no DSL line has no reason to have, and a session
 	@# cannot be dialled without real root either way.
-	@unshare -rn sh -c "sh tests/live/ppp.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/ppp.sh"
 	@# Deliberately not under NCFG_LIVE: it needs the `wireguard` module, which
 	@# a kernel may simply not have -- and nothing else in netcfgd does.
-	@unshare -rn sh -c "sh tests/live/strand.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/strand.sh"
 	@# The same module, plus `wg` itself as the reference tool -- reading the
 	@# state back through netcfgd would only prove netcfgd agrees with itself.
 	@# The script's header says how to get `wg` without installing it.
-	@unshare -rn sh -c "sh tests/live/wireguard.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/wireguard.sh"
 	@# The same module, asking the question before that one: whether the device
 	@# the C port *creates* carries anything at all. It did not, and no unit
 	@# check could say so -- everything after the netlink send needs
 	@# CAP_NET_ADMIN. `wg` is not needed here: the independent reader is the
 	@# Rust ncfg, observing the same kernel through its own code.
-	@unshare -rn sh -c "sh tests/live/c_wireguard.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/c_wireguard.sh"
 	@# The only python test. A TUI needs a pty to say anything about, and
 	@# script(1) cannot drive input reliably; see the file's own header.
 	@if command -v python3 >/dev/null 2>&1; then \
-		unshare -rn sh -c "NCFG_LIVE=1 python3 tests/live/tui.py"; \
+		timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 python3 tests/live/tui.py"; \
 	else \
 		echo "tui.py: skipping: no python3"; \
 	fi
@@ -2366,23 +2392,23 @@ live:
 	@# pipe has no echo to turn off, so only a pty can say. It needs no daemon
 	@# and no namespace; it writes a config file in a temporary directory.
 	@if command -v python3 >/dev/null 2>&1; then \
-		NCFG_LIVE=1 python3 tests/live/wifi_add.py; \
+		NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) python3 tests/live/wifi_add.py; \
 	else \
 		echo "wifi_add.py: skipping: no python3"; \
 	fi
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/stations.sh"
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/acl.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/wifi.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/dot1x.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/stations.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/acl.sh"
 	@# Deliberately not under NCFG_LIVE: unlike wpa_supplicant, which decision
 	@# 0014 makes the floor for wireless, hostapd is an optional package that a
 	@# machine never running an access point has no reason to install (0026).
 	@# A missing one is a skip rather than a failed suite.
-	@unshare -rn sh -c "sh tests/live/ap.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/ap.sh"
 	@# The NetworkManager shim, against a real nmcli on a private bus. Not under
 	@# NCFG_LIVE: nmcli comes from the network-manager package, which is exactly
 	@# what a netcfgd machine is expected not to have installed.
-	@unshare -rn sh -c "sh tests/live/nm.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "sh tests/live/nm.sh"
 	@# The shim's signals, with a link forced in and out so the bus has to say
 	@# something. Under NCFG_LIVE, unlike nm.sh: this needs dbus-daemon and
 	@# dbus-monitor and no NetworkManager, where nm.sh needs nmcli -- and a
@@ -2405,42 +2431,42 @@ live:
 			{ echo "live: the C NetworkManager shim does not build against this tree" >&2; \
 			  exit 1; }; \
 	fi
-	@unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_nm_signals.sh"
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/c_nm_signals.sh"
 	@# The AT modem helper, against a modem that is a pty. No root and no
 	@# hardware: the fake is a real character device, so termios, CR-terminated
 	@# writes and byte-at-a-time reads are exercised rather than stubbed.
-	@sh tests/live/modem_at.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/modem_at.sh
 	@# The gpiod SIM-select hook, against an expander that is a Python script.
 	@# No root and no board: what is faked is the expander, and what runs is
 	@# the hook -- its backgrounding, its bounded wait, its kill, its check
 	@# after the release, and its trap.
-	@sh tests/live/sim_select.sh
-	@sh tests/live/umbim.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/sim_select.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/umbim.sh
 	@# A Bluetooth adapter, which needs real root: /dev/vhci is root-only and
 	@# the module autoloads on the open. Not under NCFG_LIVE and not under
 	@# unshare -- the adapter belongs to the machine, and a machine that
 	@# cannot make one gets a skip rather than a failure.
-	@sh tests/live/bluetooth.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/bluetooth.sh
 	@# Association, which needs real root and a loadable mac80211_hwsim. Not
 	@# under NCFG_LIVE and not under unshare: it does its own namespace, and a
 	@# machine that cannot run it should get a skip rather than a failure.
-	@sh tests/live/hwsim.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/hwsim.sh
 	@# The same question against the radio this machine actually has, which is
 	@# the one thing hwsim.sh cannot be: a real association, to a real access
 	@# point, resolved against the document a real daemon is running. Reads
 	@# only -- no reconfigure and no write under /run -- so it is safe on the
 	@# machine somebody is using, over the very wifi it asks about. Skips when
 	@# there is no radio, no association, or no root.
-	@sh tests/live/association.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/association.sh
 	@# A real PPPoE session, same bucket: /dev/ppp is root-only and the rp-pppoe
 	@# plugin opens it as it loads, so an unprivileged machine cannot dial. It
 	@# makes its own namespaces too, and skips rather than fails without root.
-	@sh tests/live/pppoe-session.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/pppoe-session.sh
 	@# A real delegated prefix, from a real kea to a real odhcp6c, advertised
 	@# by a real radvd to a host that configures itself. Root because both ends
 	@# bind a privileged port, and odhcp6c is not packaged for Debian -- the
 	@# script's header says how to build it, and skips without it.
-	@sh tests/live/delegation.sh
+	@timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/delegation.sh
 	@# Writing files under the sandbox a systemd unit imposes. No
 	@# outer namespace: it makes its own mount namespace, and it must, because
 	@# a chmod reproduces the symptom for an unprivileged process and not for
@@ -2455,7 +2481,7 @@ live:
 	@# way through and the whole tunnel, wifi, modem and bluetooth tail went
 	@# unexercised for as long as that was where it sat. Moved here so the
 	@# refusal is the last thing a run reports rather than the only thing.
-	@NCFG_LIVE=1 sh tests/live/sandbox_writes.sh
+	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/sandbox_writes.sh
 
 fuzz:
 	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
