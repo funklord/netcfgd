@@ -12385,6 +12385,54 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.477 The inotify exhaustion is not this suite's, and what it costs here
+
+Two of this session's hardest diagnoses turned on one environmental fact -- the
+config watcher falling back to mtime polling -- so the fact itself was worth
+measuring rather than accepting. **It is not netcfgd's doing**, and that is
+established rather than assumed.
+
+    165   orphaned `dbus-daemon --session` processes owned by this account
+    363   MB resident between them
+    100   of the machine's 128 inotify instances, held by those 165
+      2   netcfgd scripts start a bus at all
+
+**Measured, not inferred.** `c_nm_signals.sh` starts one with
+`dbus-daemon --session --print-address=1 --print-pid=1 --fork`, so it
+daemonises and is never the script's child -- which is why `wait` was correctly
+excluded for it in 10.476. Counting orphaned buses either side of a full run:
+165 before, 165 after. Its cleanup kills the printed pid and the kill works.
+`nm.sh` is the only other starter and it skips here for want of nmcli, so it
+cannot leak on this machine.
+
+The cause is the workspace-level session-bus leak that
+`claude-guidelines`' own signal list already carries, together with the
+holder's fix of setting a bus address in `~/.screenrc`.
+
+### What it costs netcfgd specifically, which is the part worth knowing
+
+With 100 of 128 instances held, `ncfg_watch_open` gets no inotify descriptor
+and the daemon falls back to the 5-second tick. That is not a cosmetic
+difference:
+
+  * it is why the hook-materialisation defect in 10.470 was invisible -- the
+    spurious reload it caused only happens on the polling path;
+  * it is why `confirm.sh`'s two `sleep 3` checks failed, measuring 4.53s
+    against a 3-second wait (10.472).
+
+So a machine with no spare inotify instance does not merely run the suite more
+slowly, it runs a **different** netcfgd -- and both defects that produced were
+real, which is the uncomfortable half: the degraded machine found two faults a
+healthy one would have hidden.
+
+**The reaping is not done here.** 165 processes belonging to this account are
+not a netcfgd question, killing a bus a live session is using would break that
+session, and `evidence.md`'s PID-reuse hazard applies to any sweep of them --
+a pid recorded as a dbus-daemon has already, once in this workspace, become a
+live worker by the time the kill landed. Recorded so that the next session
+meeting `via mtime polling` knows what it is looking at and that it is not
+theirs.
+
 ## 10.476 The live suite's cleanups raced the daemon they had just killed
 
 Found by the sweep `running-code.md` asks for after a run, which is also how
