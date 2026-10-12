@@ -13322,6 +13322,32 @@ runner on twenty more scripts -- see 10.470.
 `odhcp6c`, and `association.sh` and `c_nm_signals.sh` each need an artefact
 built first -- a cargo example and the NM shim.
 
+**Two of those are wrong and the reason is the sweep's PATH, which is the
+third invocation error of the same family.** `make live` opens with `live:
+export PATH := $(PATH):/sbin:/usr/sbin` and my runner did not, so every tool
+that lives in `sbin` read as absent. Measured 2026-10-12:
+
+    dhcpcd      /sbin/dhcpcd        installed -- `dhcpcd.sh` passes under
+                                    `make live`, it does not skip
+    pppd        /sbin/pppd          installed; `pppoe-session.sh` skips for
+                                    real root on /dev/ppp, not for pppd
+    dnsmasq     /sbin/dnsmasq       installed
+    hostapd     /sbin/hostapd       installed
+    wpa_suppl.  /sbin/wpa_supplicant installed
+    odhcp6c, nmcli, radvd           genuinely absent
+
+So of the eight, `dhcpcd.sh` and `c_nm_signals.sh` now pass -- the first
+because it always could and the sweep could not see its client, the second
+because `make live` builds the shim (10.473). `delegation.sh`,
+`pppoe-session.sh`, `bluetooth.sh` and `hwsim.sh` all skip for **real root**
+rather than for a missing program, which is a different and less fixable
+thing. `nm.sh` and `association.sh` are the two genuine missing-artefact
+cases.
+
+**Running one of these scripts by hand needs that PATH**, which is the
+transferable part: `PATH=$PATH:/sbin:/usr/sbin` before any of them, or the
+measurement is about a machine with fewer tools than this one has.
+
 Three more had reported "cannot run" and were **my invocation**:
 
   * `slaac.sh` and `dhcpcd.sh` and `dhcpcd_orphan.sh` make their own
