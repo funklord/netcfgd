@@ -12449,7 +12449,56 @@ Either alone round-trips. The secret is irrelevant.
   * **A bare `device` block alone.** It renders and recompiles cleanly on its
     own, with or without the network's absence.
 
-### What is still unnamed, and the cheapest way to get it
+### Root-caused: the daemon's document is stale, and nothing promised otherwise
+
+Instrumented `write_profile_snapshot` to print the counts, which is the step
+this entry named:
+
+    running: nets=0 devs=2 ifaces=1 | to_write: nets=0 devs=2 ifaces=1
+
+**The document handed to `profile save` has no networks**, while
+`desired.json` on disk has one and the configuration directory carries
+`conf.d/wifi-TestNet.conf`. So nothing downstream is misbehaving: the renderer
+is right, `copy_json` is right, `ncfg_render` correctly fails on a refusal and
+did not refuse, and `profile save` honestly refuses because a snapshot of a
+document without the network cannot reproduce a directory that has it. The
+message is accurate; the input was wrong.
+
+Confirmed by changing one thing:
+
+    wifi add, then save                     running nets=0   refuses
+    wifi add, then `ncfg reload`, then save  running nets=1   saves
+
+**`ncfg wifi add` writes the drop-in through the daemon and does not make the
+daemon re-read it.** Nor does `config put`: both leave it to the config
+watcher, which is asynchronous. `config put` gets away with it here only
+because three other verbs separate it from the save, while `wifi add` is
+immediately before it -- so this is a race between the watcher and the next
+request, not a property of either verb.
+
+And the client already claims otherwise: `config put` prints *"stored `extra`
+and re-read its configuration"*, which is a promise nothing enforces.
+
+**The operational consequence is not confined to the suite.** A script writing
+`ncfg wifi add X && ncfg profile save P` is racing the daemon, and the two
+outcomes are a refusal -- which is the good one -- or a profile saved without
+the network, depending on whether the watcher has fired.
+
+### The fix, and the hazard that makes it worth deciding rather than patching
+
+A configuration write should re-read before replying, so that `ok` means "in
+force" and the message above is true. `ncfg_daemon_state_reload` is the call,
+and the kinds are the ones that write configuration: `config put`,
+`config delete`, `wifi add`, `wifi forget`.
+
+**What makes it more than a one-liner is that a reload re-materialises every
+hook** -- `ncfg_daemon_state_reload` writes the pending hook bodies, which is
+the mechanism behind 10.470's silently disarmed hash control. A reload per
+configuration write is probably right, because the configuration really did
+change, but it puts hook re-materialisation on the request path and that
+interacts with 0063. Not patched here for that reason.
+
+### What was unnamed before this, kept for the method
 
 Which block differs. The Rust's successful snapshot is on record in full and
 emits, in order, `override interface dd0`, `override network "TestNet"`,
