@@ -46,6 +46,9 @@ command -v python3 >/dev/null 2>&1 || skip "no python3"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-acl.XXXXXX")
 cleanup() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$fake" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
 	# exits non-zero fails the whole run after every check has passed, which is

@@ -59,6 +59,9 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-resolv.XXXXXX")
 daemon=
 cleanup() {
 	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$daemon" 2>/dev/null || true
 	waited=0
 	while [ -d "$work" ]; do
 		rm -rf "$work" 2>/dev/null && break

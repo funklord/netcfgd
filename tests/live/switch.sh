@@ -43,6 +43,9 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-switch.XXXXXX")
 cleanup() {
 	[ -n "${daemon:-}" ] && kill "$daemon" 2>/dev/null
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$daemon" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
 	# exits non-zero fails the whole run after every check has passed, which is

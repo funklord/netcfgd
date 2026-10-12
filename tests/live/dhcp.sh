@@ -123,6 +123,9 @@ cleanup() {
 	# The server is alive at the end of this script, so it has never bitten
 	# here -- it bit `dhcpcd.sh`, which stops its own before exiting.
 	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$server" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
 	# exits non-zero fails the whole run after every check has passed, which is

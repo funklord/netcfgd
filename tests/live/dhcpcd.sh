@@ -181,6 +181,10 @@ cleanup() {
 	# is how it was noticed: five of them side by side.
 	if [ -n "$dnsmasq_pid" ]; then kill "$dnsmasq_pid" 2>/dev/null || true; fi
 	if [ -n "$server" ]; then kill "$server" 2>/dev/null || true; fi
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$dnsmasq_pid" 2>/dev/null || true
+	wait "$server" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
 	# exits non-zero fails the whole run after every check has passed, which is

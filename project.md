@@ -12385,6 +12385,66 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.476 The live suite's cleanups raced the daemon they had just killed
+
+Found by the sweep `running-code.md` asks for after a run, which is also how
+10.471 was found: three directories in `/tmp` after a `make live` whose every
+script had passed.
+
+    /tmp/ncfg-qdisc.*    /tmp/ncfg-rules.*    /tmp/ncfg-switch.*
+
+Each holding `run/observed.json` -- netcfgd's own state, not the script's.
+
+### The cleanups were already careful, and that is what hid it
+
+These scripts do not forget to clean up. Their traps kill the daemon, then
+retry the removal for five seconds, then **say so** if it has not worked:
+
+    note: /tmp/ncfg-switch.FHIE3I outlived five seconds of trying to remove it
+
+One of the three said that. The other two said nothing and leaked anyway,
+which is the part worth the entry.
+
+**`sh -x` settled it in one run.** The trace shows the first `rm -rf` fail, the
+retry succeed, the loop break, and the final `[ -d "$work" ]` test come out
+false -- so at the moment the trap finished, the directory was gone and there
+was correctly nothing to report. It is there now. **The daemon re-created it
+after the trap had finished**, because `kill` returns when the signal is sent
+and nothing waited for the process to go.
+
+So the retry loop covers the case where `rm` *fails* and is blind to the case
+where `rm` *succeeds and the writer comes back*. The comment above it names the
+right hazard -- "a signalled daemon writes on its way out" -- and the remedy it
+chose can only see one half of it.
+
+### 28 of the suite's scripts already had the answer
+
+`wait "$daemon" 2>/dev/null || true` after the kill, which is `drift.sh`'s shape
+and `adopt.sh`'s and twenty-six others'. **Twenty did not**, and the correct
+pattern being the majority in the same directory is this project's recurring
+lesson: a working sibling explaining itself is a cheaper source of a decision
+than any document.
+
+Proved on the reproducible one before touching the rest: `rules.sh` leaked on
+every run, and with the wait added it leaked on neither of two.
+
+**Nineteen fixed, and `wait` only where the pid is a direct child.** A blanket
+insert would have claimed a fix that does nothing: `wait` works on children of
+the current shell, so a forked `dbus-daemon` whose pid came from
+`--print-pid`, and the adopted clients `udhcpc_orphan.sh` finds by pid file,
+are killed without being waited for -- correctly, since neither writes the
+state files this race is about. `sim_select.sh` is the twentieth and is left
+alone deliberately: it `pkill`s a `gpioset` stub by pattern, which is not a
+child and writes nothing into the work directory.
+
+### Why it went unseen, which is 10.471's answer again
+
+A green suite, directories in `/tmp` rather than in the tree, and `df` in a
+source tree answering for the wrong filesystem. What is new here is that the
+cleanup *reported* in one case out of three -- so the signal existed, in the
+log, once, and nothing was watching for it. A note on stderr in a 400-line run
+is not a mechanism.
+
 ## 10.475 Bounding the live target, and the two faults the proof caught
 
 `make live` had no bound on any of its **85** invocations, so a script that

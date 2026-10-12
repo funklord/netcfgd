@@ -68,6 +68,10 @@ c_pid=""
 cleanup() {
 	[ -n "$rust_pid" ] && kill "$rust_pid" 2>/dev/null || true
 	[ -n "$c_pid" ] && kill "$c_pid" 2>/dev/null || true
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$rust_pid" 2>/dev/null || true
+	wait "$c_pid" 2>/dev/null || true
 	rm -rf "$work"
 }
 trap cleanup EXIT INT TERM

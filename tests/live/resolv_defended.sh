@@ -69,6 +69,9 @@ cleanup() {
 	# Anything the test started that netcfgd did not remove. Killed by pid,
 	# never by pattern -- the rule this project keeps paying for.
 	for p in ${started:-}; do kill -9 "$p" 2>/dev/null || true; done
+	# **Waited for, not just signalled**: `kill` returns before the child has
+	# stopped writing, and the `rm` below then races it (project.md 10.476).
+	wait "$daemon" 2>/dev/null || true
 	rm -rf "$work" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM
