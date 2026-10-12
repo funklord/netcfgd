@@ -12385,6 +12385,63 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.478 OPEN: `profile save` through the C daemon refuses its own snapshot
+
+Found by running the suite on a machine with inotify available, which this one
+had not been for the whole of the work above.
+
+`tests/live/c_daemon_answers.sh` fails two checks. The transcript names the
+sides: `expected:` is the Rust's and `actual:` is the C's, and what the C says
+where the Rust saves is
+
+    ncfg: saving `saved` would not reproduce what this machine is running, so
+    nothing was kept. That is a fault in the snapshot rather than in your
+    configuration; write the profile by hand and please report it. The two
+    differ in a block this cannot name.
+
+So the C's daemon renders the running document, recompiles it, finds the result
+unequal and rolls the whole save back -- about a configuration the Rust saves
+without complaint. The message asks the operator to report it, which is this
+entry.
+
+**It is the daemon path, not the CLI path.** `tests/live/profile.sh` passes and
+covers `ncfg profile save` run locally; this one goes over the socket, where
+the document being reproduced is the daemon's own `desired` rather than a fresh
+compile. That distinction is why two days of renderer round-trip work did not
+touch it.
+
+**The polling fallback was hiding it.** Measured across three full runs, same
+tree:
+
+    run 4   config watcher polling    c_daemon_answers.sh  all checks passed
+    run 5   config watcher polling    c_daemon_answers.sh  all checks passed
+    run 6   config watcher inotify    c_daemon_answers.sh  2 check(s) failed
+
+And it reproduces standalone on the inotify path, so it is deterministic here
+rather than a race inside a long run.
+
+### What is not yet known, stated rather than guessed
+
+**A hand-built reproduction does not fail.** The script's configuration is a
+declared `device dd0` with an interface carrying a static address and a route,
+plus `device extra0 { kind = "dummy" }` with no interface, plus a stored
+secret. Driving exactly that through a running C daemon -- including writing
+the drop-in with `ncfg config put`, the put/rm/put sequence, and `secret set`
+-- saves successfully. So the script does something more than that and the
+difference has not been isolated.
+
+Two things were ruled out on the way, and both were plausible: a bare `device`
+block with no `interface` round-trips on its own, and the sequence of writing
+verbs through the daemon does not by itself break it.
+
+**The next measurement is the differing block.** "A block this cannot name" is
+`document_compare.c` reaching its fallback: `globals_agree` passed and none of
+the four lists it walks -- interfaces, devices, networks, bluetooth -- differs,
+so the difference is in a list it does not walk or in a member count. Dumping
+the daemon's `desired` beside the recompile of the written profile, from the
+script's own work directory before its trap removes it, names the block in one
+run. That has not been done.
+
 ## 10.477 The inotify exhaustion is not this suite's, and what it costs here
 
 Two of this session's hardest diagnoses turned on one environmental fact -- the
