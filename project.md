@@ -12420,27 +12420,51 @@ tree:
 And it reproduces standalone on the inotify path, so it is deterministic here
 rather than a race inside a long run.
 
-### What is not yet known, stated rather than guessed
+### Reproduced in forty lines, and the condition is exact
 
-**A hand-built reproduction does not fail.** The script's configuration is a
-declared `device dd0` with an interface carrying a static address and a route,
-plus `device extra0 { kind = "dummy" }` with no interface, plus a stored
-secret. Driving exactly that through a running C daemon -- including writing
-the drop-in with `ncfg config put`, the put/rm/put sequence, and `secret set`
--- saves successfully. So the script does something more than that and the
-difference has not been isolated.
+`sh -x` on the script named the step a hand-built reproduction was missing --
+`ncfg wifi add TestNet --open`, immediately before the save -- and with the
+script's own shape (its own config directory, a run directory beside it,
+`--no-apply-on-start`, the five verbs in order) a local probe refuses
+identically.
 
-Two things were ruled out on the way, and both were plausible: a bare `device`
-block with no `interface` round-trips on its own, and the sequence of writing
-verbs through the daemon does not by itself break it.
+Bisected by omitting one verb at a time:
 
-**The next measurement is the differing block.** "A block this cannot name" is
-`document_compare.c` reaching its fallback: `globals_agree` passed and none of
-the four lists it walks -- interfaces, devices, networks, bluetooth -- differs,
-so the difference is in a list it does not walk or in a member count. Dumping
-the daemon's `desired` beside the recompile of the written profile, from the
-script's own work directory before its trap removes it, names the block in one
-run. That has not been done.
+    all five verbs                     refuses
+    without the `extra0` drop-in       saves
+    without `secret set`               refuses
+    without `wifi add TestNet`         saves
+
+**So it takes a declared device with no interface AND a network, together.**
+Either alone round-trips. The secret is irrelevant.
+
+### Three plausible causes ruled out
+
+  * **A stale daemon document.** The daemon's `desired.json` and a fresh
+    `ncfg show --json` of the same directory are identical, key for key -- so
+    the snapshot is not being rendered from a document that has drifted from
+    the configuration.
+  * **The writing verbs themselves.** put/rm/put, `secret set` and `wifi add`
+    through the daemon do not break it without the device block present.
+  * **A bare `device` block alone.** It renders and recompiles cleanly on its
+    own, with or without the network's absence.
+
+### What is still unnamed, and the cheapest way to get it
+
+Which block differs. The Rust's successful snapshot is on record in full and
+emits, in order, `override interface dd0`, `override network "TestNet"`,
+`override device dd0`, `override device extra0` -- so whatever the C writes,
+that is the shape that compiles back. The C's own snapshot was not captured: it
+writes, recompiles, compares and removes faster than a 10ms poll of the
+directory catches, so the next attempt wants the file held open or the compare
+instrumented rather than the directory watched.
+
+The suspicion worth testing first, from `profile_save.c`'s own order: the fold
+comes out of `conf.d` before the overrides are collected, so a device declared
+*only* in a folded drop-in is no longer declared in the base when
+`collect_overrides` runs -- and the `!declared` skip added for 10.418's
+invented devices would then drop it. A document carrying a network is what
+makes that reachable, and why is the part not yet understood.
 
 ## 10.477 The inotify exhaustion is not this suite's, and what it costs here
 
