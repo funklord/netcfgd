@@ -12437,6 +12437,14 @@ state files this race is about. `sim_select.sh` is the twentieth and is left
 alone deliberately: it `pkill`s a `gpioset` stub by pattern, which is not a
 child and writes nothing into the work directory.
 
+### Proved suite-wide, not only on the one that reproduced
+
+Two full `make live` runs, same machine, same 73 passing scripts and no failing
+check in either, differing only by these nineteen files:
+
+    before   3 directories left in /tmp   qdisc, rules, switch
+    after    0
+
 ### Why it went unseen, which is 10.471's answer again
 
 A green suite, directories in `/tmp` rather than in the tree, and `df` in a
@@ -12744,6 +12752,7 @@ lines:
 
     run 2   rule at 2063 + index 308 = 2371   make blamed 2371   c_nm_signals
     run 4   rule at 2089 + index 371 = 2460   make blamed 2460   sandbox_writes
+    run 5   rule at 2108 + index 371 = 2479   make blamed 2479   sandbox_writes
 
 So in this target the gap is 24, which is exactly the extra physical lines its
 backslash continuations consume. **The habit is unchanged and now has a
