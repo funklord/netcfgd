@@ -12448,12 +12448,45 @@ optional by construction -- NULL means "find the conventional name", an absent
 one is a refusal that names what to install, and that is the sentence
 `exec_refused.sh` holds netcfgd to.
 
-**Whose decision was left, and why it is no longer blocking**: the semantics
-were the holder's and are already taken; what remained was a dependency choice,
-and the convention that backend programs are optional and refused by name
-removes it. A record is not the vehicle here either -- of 255 records in
-`doc/decision/`, 253 are `accepted` and two `superseded`, so a record in this
-project states a decision that has been made rather than proposing one.
+A record is not the vehicle here either -- of 255 records in `doc/decision/`,
+253 are `accepted` and two `superseded`, so a record in this project states a
+decision that has been made rather than proposing one.
+
+### So the implementation was attempted, and one gate stops it by design
+
+Mapped before editing, which is the half worth writing down, because four of
+the five things I expected to be in the way are not:
+
+  * **No new op.** `backend.start` and `backend.stop` are generic and carry a
+    `ncfg_backend_kind_t`, so `op_gate` needs nothing: this is a new *kind*,
+    not a new verb.
+  * **No packaging decision.** A backend program here is optional by
+    construction, so an absent client is the refusal `exec_refused.sh` already
+    holds netcfgd to.
+  * **`agree` is not affected.** It compares `ncfg show --json`, which is the
+    document, and the document already carries `link_local` in both trees --
+    the compiler accepts it and the renderer writes it. The observation is a
+    different surface.
+  * **`word_table_gate` is not affected either.** It reads enums out of
+    `document.h`; `ncfg_backend_kind_t` lives in `observed.h`.
+
+**What does stop it is `doc/schema/observed.json`.** It freezes all nine
+backend kinds, and it is generated from the **Rust** model --
+`crates/netcfgd-model/tests/observed.rs`, "populated by hand, regenerated
+deliberately with `make schema-bless`, and the diff is the review". Its
+matches are exhaustive with no `_` arm **specifically so that adding a variant
+is a compile error**, and `schema-bless` ends by printing "say in the commit
+whether this is a minor or a major bump".
+
+So a tenth backend kind cannot land in the C alone. It moves a frozen surface
+owned by the implementation 0266 retired, through a mechanism built to require
+a deliberate human act -- which is the project saying, in code, that this is
+not a change to make in passing.
+
+**Which reduces the decision to one question**: bless a schema bump adding a
+tenth `BackendKind`, and accept that the retired oracle gains a variant for a
+feature only the C will have. Everything else about link-local is already
+settled or already built.
 
 ### Three lenses on the way, all clean, and that is the finding
 
