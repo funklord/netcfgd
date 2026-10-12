@@ -12657,12 +12657,38 @@ failed": all four scripts at and after 2434 reported in that run, including
 blamed. The direct measurement agrees -- `NCFG_LIVE=1 sh
 tests/live/sandbox_writes.sh` exits 1 on its own.
 
-**The cause is unestablished and the number is simply not to be trusted here.**
-It was accurate in an earlier run and drifted as comment lines were added to
-this recipe; `.ONESHELL` is not set, `SHELL` is not overridden, GNU Make 4.4.1.
-Two arithmetic explanations were tried and neither fits. What matters is the
-habit: in a 394-line recipe, read the script's own last words rather than the
-line make attributes the failure to.
+**The cause is established, and it is arithmetic rather than a bug.** GNU Make
+reports
+
+    <the line of the rule>  +  <the index of the failing LOGICAL recipe line>
+
+and not the physical line of the command that failed. Where a recipe is a
+plain list of one-line commands the two coincide, which is why nobody meets
+this; where it is not, the report drifts by however much the recipe's physical
+and logical line counts differ.
+
+Reproduced in four six-line makefiles, which is what turns this from a theory
+into a fact, and which also says exactly which line kinds create the gap:
+
+    recipe line kind              counted?
+    a tab-indented command        yes
+    `@#`, a tab-indented comment  yes -- it IS a recipe line
+    a backslash continuation      once, however many physical lines it spans
+    a blank line inside a recipe  no
+    `#` at column 0 inside one    no
+
+Then confirmed on the real case twice, against the Makefile each run actually
+read rather than the one in the tree now -- which is where the first attempt
+went wrong, having compared a blamed line against a file that had since gained
+lines:
+
+    run 2   rule at 2063 + index 308 = 2371   make blamed 2371   c_nm_signals
+    run 4   rule at 2089 + index 371 = 2460   make blamed 2460   sandbox_writes
+
+So in this target the gap is 24, which is exactly the extra physical lines its
+backslash continuations consume. **The habit is unchanged and now has a
+reason**: read the script's own last words, because the number make prints is
+an index into the recipe wearing a file position's clothes.
 
 ## 10.472 The suite's waits, and the negative checks that were vacuous
 
