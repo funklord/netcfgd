@@ -12413,16 +12413,47 @@ one a configuration can already ask for and silently not get.
 speak -- probe the candidate with ARP, defend it, and re-pick on conflict.
 This tree's settled answer for anything needing a protocol daemon is to
 delegate and supervise: dhcpcd/udhcpc/busybox for DHCP, pppd, wpa_supplicant,
-mbimcli/umbim. `avahi-autoipd` is the conventional Linux IPv4LL client, and the
-machinery a delegated client needs already exists -- a machine struct of named
-programs with environment overrides, `ncfg_backend_find_program`,
-`ncfg_process_exec_refusal`, the run-directory marks and the adopt-or-refuse
-path. Writing the protocol into netcfgd instead would be the first time this
-tree did that, which is the part worth deciding rather than assuming.
+mbimcli/umbim. The machinery a delegated client needs already exists -- a
+machine struct of named programs with environment overrides,
+`ncfg_backend_find_program`, `ncfg_process_exec_refusal`, the run-directory
+marks and the adopt-or-refuse path. Writing the protocol into netcfgd instead
+would be the first time this tree did that.
 
-**Whose**: the copyright holder's. Named here because a record that describes a
-mechanism accurately becomes the obvious next step by weight of description
-alone, and this one is not mine to take.
+### And then the question turned out to be decided already, twice over
+
+**This entry deferred a design question that the tree had answered**, which is
+the error `working-practice.md` says is caught by nothing: a wrongly-deferred
+question sits in the document looking exactly like diligence. Measured within
+the hour, after it was written:
+
+  * **`dhcpcd` already speaks IPv4LL** -- it probes for a valid IPv4LL address
+    and `-L, --noipv4ll` turns that off -- so the obvious cheap answer is to
+    reuse the client netcfgd already delegates to. **It is excluded, by this
+    project's own stated intent rather than by taste.** dhcpcd reaches IPv4LL
+    only as a fallback from the discover phase (`-y, --reboot seconds`, "IPv4LL
+    is started when the first reboot timeout is reached"), and there is no
+    IPv4LL-only switch -- so an explicit `link-local` request would broadcast
+    DHCPDISCOVER first and take a lease if one answered.
+  * **`document.h` has already decided that is wrong.** Beside
+    `NCFG_ADDRESS_SOURCE_LINK_LOCAL`: *"IPv4 link-local coexists with routable
+    addresses rather than being a fallback, because a timeout-triggered
+    fallback would be state hidden in the reconciler that no config explains."*
+    That is the semantics settled, in the model header rather than in a
+    decision record, and it rejects dhcpcd's mechanism by name.
+
+So the option space is one program: a purpose-built IPv4LL-only client, which
+on Debian is `avahi-autoipd` (packaged, `0.8-16devuan1`, not installed here).
+And it forces no packaging decision, because a backend program in this tree is
+optional by construction -- NULL means "find the conventional name", an absent
+one is a refusal that names what to install, and that is the sentence
+`exec_refused.sh` holds netcfgd to.
+
+**Whose decision was left, and why it is no longer blocking**: the semantics
+were the holder's and are already taken; what remained was a dependency choice,
+and the convention that backend programs are optional and refused by name
+removes it. A record is not the vehicle here either -- of 255 records in
+`doc/decision/`, 253 are `accepted` and two `superseded`, so a record in this
+project states a decision that has been made rather than proposing one.
 
 ### Three lenses on the way, all clean, and that is the finding
 
