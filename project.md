@@ -12385,6 +12385,87 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.474 What the port still owes, measured: two features and no gaps
+
+Asked what to do next with the acceptance suite green, and the honest answer is
+read the register rather than invent work. `warn_unported` in
+`c/src/plan/build.c` is that register -- 0263 requires an arm to come out of it
+in the same commit as the pass that lands -- and every arm in it now says "this
+is read elsewhere" except two calls to `ncfg_plan_warn_unbuilt`:
+
+  * **link-local addressing.** `config = "link-local"` compiles and no pass
+    claims an RFC 3927 `169.254.0.0/16` address.
+  * **bluetooth.** Nothing pairs a device, connects it, or brings a `pan` link
+    up.
+
+**Neither is something the C owes the Rust.** Re-measured rather than taken
+from the arm's own comment: `AddressSource::LinkLocal` has readers in the
+model, the compiler, the renderer and the planner's warning in **both** trees
+and nowhere else. So these are scope rather than porting, and
+`doc/decision/` is where that gets settled.
+
+### Whose decision, and what it costs
+
+**The option**: implement link-local, which is the smaller of the two and the
+one a configuration can already ask for and silently not get.
+
+**The cost**: IPv4LL is not in the kernel, so it is a protocol somebody has to
+speak -- probe the candidate with ARP, defend it, and re-pick on conflict.
+This tree's settled answer for anything needing a protocol daemon is to
+delegate and supervise: dhcpcd/udhcpc/busybox for DHCP, pppd, wpa_supplicant,
+mbimcli/umbim. `avahi-autoipd` is the conventional Linux IPv4LL client, and the
+machinery a delegated client needs already exists -- a machine struct of named
+programs with environment overrides, `ncfg_backend_find_program`,
+`ncfg_process_exec_refusal`, the run-directory marks and the adopt-or-refuse
+path. Writing the protocol into netcfgd instead would be the first time this
+tree did that, which is the part worth deciding rather than assuming.
+
+**Whose**: the copyright holder's. Named here because a record that describes a
+mechanism accurately becomes the obvious next step by weight of description
+alone, and this one is not mine to take.
+
+### Three lenses on the way, all clean, and that is the finding
+
+Derived from the last defects rather than chosen in advance. The `rmdir` whose
+status was discarded cost 222 directories (10.471), so the shape swept for was
+**a call whose failure means the thing did not happen, with the status thrown
+away**:
+
+  * **A written stream closed without checking.** One `(void)fclose` on a
+    `"wb"` stream in all of `c/src`, and it is on the error path after
+    `fprintf` had already failed; the success path checks `fclose(file) != 0`
+    and reports. 0180's rule is being kept.
+  * **Process control before an exec.** All fourteen `setpgid`/`dup2` sites
+    discard, and correctly: the child calls `setpgid(0, 0)` and the parent
+    `setpgid(child, child)`, which is the race-free idiom in which **both**
+    failures are expected -- whichever loses the race, or arrives after the
+    exec, gets `EACCES`.
+  * **An origin nothing produces.** Of `ncfg_origin_t`'s six values, only
+    `NCFG_ORIGIN_STATIC` has a producer; the other five appear solely in the
+    enum and in `explain.c`'s renderer. That looked like 0006 rule 7 collapsing
+    -- the rule that stops the planner re-adding a vanished DHCP address
+    instead of restarting the backend. It is not: origin comes from netcfgd's
+    own route-protocol tag, and the planner uses it as a **positive** gate,
+    removing only what it tagged. Everything untagged is skipped, which is the
+    conservative direction. And the C is at parity: both trees read the
+    recorded prior state first and fall back to the tag, and in both the tag
+    can only yield `Static`, so `explain`'s four other arms are unreachable in
+    production and the Rust's tests are what keep them alive.
+
+**The third one is the useful half, because it prices the decision above.** A
+link-local address netcfgd caused ought to be recorded as `link_local` rather
+than inheriting the static tag -- which is what that value is for, and why the
+C's fallback carries a comment about a `dhcp4` record no producer writes yet.
+Whoever implements either feature writes the first producer of a non-static
+origin, and `explain` starts being able to say what it already knows how to
+print.
+
+**And three clean lenses is a reason to stop rather than to run a fourth.**
+The payout pattern in 10.460's sweep was lenses derived from defects that had
+already happened *in the code being read*; these were derived from defects in
+the test harness and the build, which is a different population. Worth knowing
+before the next sweep picks its lenses.
+
 ## 10.473 `make live` runs the whole suite, and stops on its last line
 
 Three runs today, same machine, same build, and the only thing that changed
