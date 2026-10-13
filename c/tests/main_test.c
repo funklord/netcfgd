@@ -1210,6 +1210,30 @@ static void the_ledger_walks_every_kind(const char *dir)
 		}
 		at = (size_t)(end - text);
 	}
+	/*
+	 * **The last enumerator is named on purpose here, and naming it in the
+	 * dump's own loops was the defect.** These four expectations used to be
+	 * copies of the bounds `ncfg_main_netcfgd_supported` looped to -- the
+	 * same `NCFG_BACKEND_DNS` on both sides -- so when a tenth backend kind
+	 * arrived neither moved, they went on agreeing, and the dump reported
+	 * eight kinds of ten with this check green above it. A check that reads
+	 * its expectation from the generator tests that the generator agrees
+	 * with itself.
+	 *
+	 * The loops are bounded by their name tables now, so they grow on their
+	 * own and these constants do not. That is the whole point: the next kind
+	 * appended to an enum makes the dump emit one more and leaves the number
+	 * below it unchanged, and this check fails and says which of the four
+	 * grew. The hard-coded member is the witness precisely because it cannot
+	 * track what it is watching.
+	 *
+	 * It is also the only thing holding `backend_kind_words` to
+	 * `ncfg_backend_kind_t`: `word_table_gate.py` reads the renderer's
+	 * language tables and `observed.c`'s model tables are not among them, so
+	 * a kind appended without a word would shorten the table-bounded loop
+	 * instead of lengthening it -- and this check fails for that too, from
+	 * the other side.
+	 */
 	check(requests == (size_t)NCFG_PROTO_REQ_COUNT,
 	    "every request kind the protocol has is in the ledger");
 	/* The four whose answer is a function of a kind are asked per kind
@@ -1218,7 +1242,7 @@ static void the_ledger_walks_every_kind(const char *dir)
 	    "and every op but the four asked per kind");
 	check(creates == (size_t)NCFG_KIND_IFB + 1u,
 	    "and `link.create` once for every interface kind there is");
-	check(backends == ((size_t)NCFG_BACKEND_DNS + 1u) * 3u,
+	check(backends == ((size_t)NCFG_BACKEND_LINK_LOCAL + 1u) * 3u,
 	    "and each backend kind under each of the three backend verbs");
 	free(text);
 }

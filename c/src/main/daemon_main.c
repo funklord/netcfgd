@@ -149,13 +149,27 @@ void ncfg_main_netcfgd_supported(void)
 		say_one("request", ncfg_proto_request_name((ncfg_proto_request_kind_t)kind), 1,
 		    NULL);
 	}
-	for (kind = 0; kind <= (int)NCFG_OP_COMMIT_REVERT; kind++) {
+	/*
+	 * Bounded by the name table rather than by the last member of the enum,
+	 * and the three loops below are the same for the same reason. A bound
+	 * written as `<= NCFG_BACKEND_DNS` was correct when it was written and
+	 * silently went short the day a tenth kind arrived: the dump reported
+	 * eight of ten, omitting `router_advert` entirely, and nothing failed --
+	 * `ledger_gate.py` reads the witness and asks the C to answer for each
+	 * name in it, so a kind the C has and the witness does not is a kind no
+	 * gate is looking at. A name lookup answers for whatever the enum is
+	 * now, which is the one bound that cannot rot.
+	 */
+	for (kind = 0;; kind++) {
 		ncfg_op_t op;
 		char      why[NCFG_ERROR_MAX];
 		int       ok;
 
 		memset(&op, 0, sizeof(op));
 		op.kind = kind;
+		if (ncfg_op_name(&op)[0] == '\0') {
+			break;
+		}
 		if (kind == (int)NCFG_OP_LINK_CREATE || kind == (int)NCFG_OP_BACKEND_START ||
 		    kind == (int)NCFG_OP_BACKEND_STOP || kind == (int)NCFG_OP_BACKEND_RELOAD) {
 			/* Asked per kind below, where the answer is decided. */
@@ -165,7 +179,7 @@ void ncfg_main_netcfgd_supported(void)
 		ok = ncfg_apply_supported(&op, why, sizeof(why));
 		say_one("op", ncfg_op_name(&op), ok, why);
 	}
-	for (kind = 0; kind <= (int)NCFG_KIND_IFB; kind++) {
+	for (kind = 0; ncfg_interface_kind_name(kind) != NULL; kind++) {
 		ncfg_interface_kind_t created;
 		ncfg_op_t             op;
 		char                  why[NCFG_ERROR_MAX];
@@ -181,7 +195,7 @@ void ncfg_main_netcfgd_supported(void)
 		ok = ncfg_apply_supported(&op, why, sizeof(why));
 		say_one("link.create", ncfg_interface_kind_name(kind), ok, why);
 	}
-	for (kind = 0; kind <= (int)NCFG_BACKEND_DNS; kind++) {
+	for (kind = 0; ncfg_backend_kind_name(kind) != NULL; kind++) {
 		static const int verbs[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
 			NCFG_OP_BACKEND_RELOAD };
 		size_t           at;

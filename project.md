@@ -12385,6 +12385,129 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.480 Link-local wired, and a loop bound that had been short for two kinds
+
+The feature 10.479 designed is landed: the tenth backend kind reaches the plan
+from the document's addressing, the executor from the plan, and the observation
+from the machine, and `tests/live/link_local.sh` checks the three are joined
+rather than merely present. What the wiring turned up is worth more than the
+wiring.
+
+### `--supported` had been reporting eight backend kinds of nine
+
+The dump enumerates each taxonomy so that an operator can ask the build what it
+can do. Its backend loop was
+
+    for (kind = 0; kind <= (int)NCFG_BACKEND_DNS; kind++)
+
+which was correct the day it was written and went short the day
+`router_advert` was appended after `NCFG_BACKEND_DNS`. Nobody noticed, because
+nothing compares the dump to the enum: `ledger_gate.py` reads the frozen
+witness and asks the C to answer for every name in it, which is the
+witness-to-C direction only, so a kind the C has and the witness does not is a
+kind no gate is looking at. Adding `link_local` made it eight of ten.
+
+Three of the four loops in that function were bounded by a named member rather
+than by a count. `NCFG_OP_COMMIT_REVERT` and `NCFG_KIND_IFB` were still the
+real last members, so only the backend loop had actually rotted -- but all
+three carried the same hazard, and they are bounded by their name tables now.
+`ncfg_backend_kind_name` and `ncfg_interface_kind_name` return NULL past the
+end of the word table they read, and `ncfg_op_name` returns the empty string,
+so each loop grows with the enum it walks.
+
+### The test that should have caught it was a copy of the loop's own bound
+
+`main_test.c`'s completeness ledger asserted
+
+    backends == ((size_t)NCFG_BACKEND_DNS + 1u) * 3u
+
+against a loop bounded by `NCFG_BACKEND_DNS`. Both sides read the same
+constant, so neither moved when a kind arrived, they went on agreeing, and the
+check printed `ok` directly above a dump that was missing a kind. This is
+`evidence.md`'s *a gate that compares an artifact to its generator tests
+agreement*, in four lines.
+
+The fix is not to make the expectation cleverer. It is that the same
+hard-coded member is a defect in the generator and the whole point in the
+check: now that the loops read their tables and grow on their own, the named
+constants below them cannot track what they are watching, so the next kind
+appended to an enum makes the dump emit one more, leaves the number unchanged,
+and fails the check. Confirmed by control -- pointing the expectation at
+`NCFG_BACKEND_ROUTER_ADVERT` fails exactly that one check and nothing else.
+
+It is also the only thing holding `backend_kind_words` to
+`ncfg_backend_kind_t`. `word_table_gate.py` reads the renderer's language
+tables, and `observed.c`'s model tables are not among them, so a kind appended
+without a word would shorten the now table-bounded loop instead of lengthening
+it. The same check fails for that, from the other side.
+
+### The permissive default would have left the client running for ever
+
+`backend_wanted` in `plan/backend.c` answers "wanted" from its `default` arm
+for any kind no pass names -- the safe direction for a kind nothing starts, and
+the wrong one for a kind something does. The `pppoe` arm is in that switch
+because `pppd` held a line up with `persist` and `maxfail 0` after its device
+was deleted; an IPv4LL client left running keeps a `169.254/16` address nobody
+asked for, and `--force-bind` means it keeps it beside whatever replaced it.
+Three cases in `plan_gaps_test.c` cover it, and all three fail with the arm
+removed.
+
+`addressing_asks_for` was the other half and was a latent wrong answer rather
+than a missing one:
+
+    int source_kind = kind == NCFG_BACKEND_DHCP4 ? NCFG_ADDRESS_SOURCE_DHCP4 :
+        NCFG_ADDRESS_SOURCE_DHCP6;
+
+Anything that was not `dhcp4` answered for *dhcp6*. Correct while only the two
+DHCP clients reached it, and a wrong answer waiting for a third -- which is
+what makes a two-valued mapping worth spelling as a switch even when it has two
+values. It has a `default` that answers no rather than guessing.
+
+### The seam, and a refusal that named the wrong program
+
+`service.autoip_program` was declared and read and assigned by nothing, so it
+was always NULL -- which the header documents as "find the conventional name",
+and is right for the daemon's own path. It left no way to substitute a
+stand-in, which is how the other three backend programs are tested, so
+`NCFG_AVAHI_AUTOIPD` is wired through `ncfg_main_world_where_from_environment`
+and reaches the client's executor as well as the daemon's, both going through
+`cli_machine.c`.
+
+With an explicit path that is not installed, the refusal named
+`avahi-autoipd` rather than the path asked for -- which sends an operator who
+pointed the seam somewhere to look at a machine that may well have a client
+installed.
+
+### Two of my own checks were asking nothing, and a third asked the machine
+
+The case for that refusal used `/nonexistent/avahi-autoipd` and asserted the
+message contained `avahi-autoipd`. The path contains the string, so it passed
+against both messages: a fixture that cannot reach the thing it is about. A
+basename sharing no text with the constant is what makes the two separable.
+
+Replacing it, I wrote a second check for the other branch -- no path given, so
+the conventional name is looked for -- and it would have spawned a real IPv4LL
+client from the unit suite on any machine that has one.
+`ncfg_backend_find_program` searches `/usr/sbin` before `PATH` deliberately, so
+a stand-in on `PATH` is found only where nothing is installed. The check passed
+here because this machine has no `avahi-autoipd`, which is a verdict about the
+machine rather than the source. It is gone, with the reason written where the
+next person will reach for it.
+
+And in the live script, `grep -c '"kind":"link_local"'` found nothing and
+reported the observation broken. The daemon's JSON is pretty-printed, so the
+text is `"kind": "link_local"`. Reading `status --json` directly settled it in
+one run: the observation was correct and the pattern was not. Three check
+faults against two code faults, in one piece of work, all three found by
+looking at what the check could distinguish rather than at whether it passed.
+
+### Where it stands
+
+`make -C c test` is green, `make style` passes both modes, `make ledger`,
+`make packaging` and the seven standalone gates pass, and
+`tests/live/link_local.sh` is 19 checks, all passing, under a second, named in
+`make live`. The live suite is 84 scripts now.
+
 ## 10.479 Link-local: the client's own interface decides the design
 
 With 10.474's invented blockers gone, the feature is landable C-only and the
