@@ -175,6 +175,30 @@ pid_t ncfg_process_pid_of(const char *path, const char *marker);
 pid_t ncfg_process_pid_by_marker(const char *marker);
 
 /*
+ * The same, for a process every one of whose markers is a whole argument.
+ *
+ * **One marker is not always enough to name a process**, and the case that
+ * needed this is `autoip.h`'s: `avahi-autoipd` writes no pid file and takes no
+ * option to put one where netcfgd chooses, so the only identification left is
+ * the arguments netcfgd passed -- and neither `--force-bind` alone nor the
+ * interface name alone will do. The flag is on every client netcfgd starts
+ * whichever interface it is for, so searching by it could hand a start on one
+ * interface the pid of a client running on another, and then stop the wrong
+ * one; the interface name alone is in the command line of anything that
+ * mentions it.
+ *
+ * Both together, each as a whole argument, is as much as that client's
+ * invocation can be made to carry. Weaker than a path under `/run/netcfgd`,
+ * which is what every other backend here is identified by, and `autoip.h` says
+ * so where the claim is made rather than leaving it to be inferred.
+ *
+ * The lowest matching pid, the owning uid, and the whole-argument rule are all
+ * the single-marker form's and are not relaxed here.
+ */
+pid_t ncfg_process_pid_by_markers(const char *const *markers, size_t count);
+pid_t ncfg_process_pid_by_markers_as(const char *const *markers, size_t count, uid_t asking);
+
+/*
  * The two above, told who is asking.
  *
  * Public, where the Rust keeps them private and reaches them from a unit test

@@ -350,6 +350,46 @@ pid_t ncfg_process_pid_by_marker_as(const char *marker, uid_t asking)
 	return found;
 }
 
+pid_t ncfg_process_pid_by_markers_as(const char *const *markers, size_t count, uid_t asking)
+{
+	DIR           *proc;
+	struct dirent *entry;
+	pid_t          found = 0;
+
+	if (!markers || count == 0u) {
+		return 0;
+	}
+	proc = opendir("/proc");
+	if (!proc) {
+		return 0;
+	}
+	while ((entry = readdir(proc)) != NULL) {
+		pid_t  pid = pid_of_entry(entry->d_name);
+		size_t at;
+		int    all = 1;
+
+		if (pid == 0 || (found != 0 && pid > found)) {
+			continue;
+		}
+		for (at = 0; at < count && all; at++) {
+			if (!markers[at] || markers[at][0] == '\0' ||
+			    !cmdline_has_argument(pid, markers[at])) {
+				all = 0;
+			}
+		}
+		if (all && ncfg_process_ours(pid, asking)) {
+			found = pid;
+		}
+	}
+	(void)closedir(proc);
+	return found;
+}
+
+pid_t ncfg_process_pid_by_markers(const char *const *markers, size_t count)
+{
+	return ncfg_process_pid_by_markers_as(markers, count, my_uid());
+}
+
 pid_t ncfg_process_pid_by_marker(const char *marker)
 {
 	return ncfg_process_pid_by_marker_as(marker, my_uid());
