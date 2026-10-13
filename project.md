@@ -12932,13 +12932,36 @@ slowly, it runs a **different** netcfgd -- and both defects that produced were
 real, which is the uncomfortable half: the degraded machine found two faults a
 healthy one would have hidden.
 
-**The reaping is not done here.** 165 processes belonging to this account are
-not a netcfgd question, killing a bus a live session is using would break that
-session, and `evidence.md`'s PID-reuse hazard applies to any sweep of them --
-a pid recorded as a dbus-daemon has already, once in this workspace, become a
-live worker by the time the kill landed. Recorded so that the next session
-meeting `via mtime polling` knows what it is looking at and that it is not
-theirs.
+**The reaping was held off here and has since been done.** The reasons for
+holding off were sound and are kept: 165 processes belonging to this account
+are not a netcfgd question, killing a bus a live session is using would break
+that session, and `evidence.md`'s PID-reuse hazard applies to any sweep of
+them -- a pid recorded as a dbus-daemon has already, once in this workspace,
+become a live worker by the time the kill landed, which is why the sweep that
+was eventually run re-read each `/proc/<pid>/cmdline` immediately before
+signalling and skipped anything that had stopped being a bus.
+
+Only the clientless ones were taken, which is what made it safe to take any:
+165 reaped, and the measurement either side is the whole of the evidence --
+126 of 128 inotify instances in use before, 27 after. Re-measured on
+2026-10-13, after a `make live` and several days: **32 of 128 in use, one
+session bus on this account and none of it orphaned.** So it holds rather
+than merely having happened.
+
+### And the healthy machine stopped testing the path the sick one did
+
+This is the uncomfortable corollary of the paragraph above, which says a
+machine with no spare instance runs a different netcfgd rather than a slower
+one. With instances available, `ncfg_watch_open` succeeds here and **the
+mtime-polling fallback is no longer exercised by anything on this machine** --
+including by the suite. Both defects this entry credits to the degraded
+machine were real and neither would be found now.
+
+That is an argument for a seam rather than for leaving the machine broken, and
+naming whose it is matters more than naming which: the fallback is reached only
+when `inotify_init1` fails, so forcing it from a test means either a knob the
+daemon reads or exhausting the instances on purpose, and the second is the
+thing this entry exists to complain about. Written here rather than acted on.
 
 ## 10.476 The live suite's cleanups raced the daemon they had just killed
 
