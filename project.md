@@ -12517,6 +12517,29 @@ answer available.
     profile.sh            all checks passed
     make -C c test        0 failures
 
+Confirmed suite-wide afterwards: a full `make live` with zero failing checks,
+73 scripts passing, and nothing left in `/tmp` by the suite.
+
+### And the lens this defect suggests comes up clean
+
+The shape worth generalising is **a message asserting a fact the code does not
+establish** -- "stored `x` and re-read its configuration" was true of neither
+half until now. Swept for other success messages making a checkable claim, and
+the three sharpest are all honest:
+
+  * *"and removed the credential `%s`, which nothing refers to now"* --
+    `wifi_profile.c` recompiles **after** the removal, asks
+    `ncfg_secret_referring_to` of the whole document rather than of the other
+    networks, and fails closed: a configuration that cannot be read back keeps
+    every credential, because removing one on a guess is unrecoverable (0042).
+  * *"stored <path> (0600)"* -- measured: the file is 600 and the directory it
+    goes in is 700.
+  * *"nothing in the configuration refers to `@secret:x` yet"* -- the same
+    reference check, run in the other direction.
+
+So this was an isolated claim rather than a habit, which is worth knowing
+before anybody sweeps the messages again.
+
 ### What was unnamed before this, kept for the method
 
 Which block differs. The Rust's successful snapshot is on record in full and
