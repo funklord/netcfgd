@@ -12554,10 +12554,35 @@ value; both files have it now and both controls fail with an arm removed.
 The measured scope, since the two forms are indistinguishable at a glance:
 **39 taxonomies in this tree are stored as an `int` with the enum named only
 in a trailing comment**, and of the switches over a `kind` field, 27 cast and
-48 do not. Not every one of the 48 is unprotected -- some switch on a field
-genuinely declared with its enum type -- so that is a candidate count and not
-a defect count, and separating them is a tree-wide pass rather than something
-to do while finishing a feature.
+48 do not.
+
+**That pair of numbers was offered as a candidate count needing a tree-wide
+pass, and the pass does not exist. Re-derived rather than left standing:**
+
+    114   bare switches in `c/src` with no enum cast
+    107   of them carry a `default`
+      7   do not -- and all seven switch on an expression already declared
+          with its enum type, so `-Wswitch` is live on every one of them
+
+Controlled rather than inferred: removing an arm from `watch.c`'s bare
+`switch (mechanism)` produces `enumeration value 'NCFG_WATCH_POLLING' not
+handled in switch`, with no cast anywhere. **A cast is needed only where the
+declared type is `int`**, and outside the two sites already fixed there is no
+such switch left unprotected. So there is nothing mechanical left to sweep,
+and the earlier figure measured the wrong property -- it counted a spelling
+rather than the combination that costs anything.
+
+**What the re-derivation exposed is better than the number it replaced.**
+`plan/address.c` and `plan/build.c` both *had* a `default`, so by this
+discriminator neither was at risk -- and address.c was the real defect of this
+pass. A `default` buys defined behaviour and says nothing about correct
+behaviour: for a taxonomy where every value needs a decision, the `default`
+IS the hazard, because it answers for values nobody has thought about yet.
+That is not sweepable. It is a judgement per switch about whether the
+default's answer is right for a value that does not exist, and the 107 are
+where it lives. `backend_wanted` is the known instance, it keeps its
+permissive arm deliberately, and what guards it is the whole-taxonomy test
+above rather than anything the compiler can see.
 
 ### One switch the compiler can never protect, so it got a test
 
