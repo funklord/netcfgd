@@ -12385,6 +12385,70 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.479 Link-local: the client's own interface decides the design
+
+With 10.474's invented blockers gone, the feature is landable C-only and the
+next input is the client's actual command line. `avahi-autoipd` is not
+installed here and has no local man page, so this came from upstream
+documentation rather than from memory -- which matters, because the design
+turns entirely on it:
+
+    avahi-autoipd [options] interface
+    avahi-autoipd --kill interface
+    avahi-autoipd --check interface
+
+    -D, --daemonize    daemonize after startup; implies --syslog
+    -w, --wait         wait until an address is acquired before detaching;
+                       only valid with --daemonize
+        --force-bind   acquire an IPv4LL address even if a routable address
+                       is already configured on the interface
+
+    no --pid-file, and the action script is fixed at
+    /etc/avahi/avahi-autoipd.action
+
+### The obvious shape is unusable, and that is the finding
+
+`--kill interface` and `--check interface` act on **whichever** client is on
+that interface. There is no pid file to point somewhere netcfgd chose. So the
+delegation this tree uses everywhere else -- start it, record where, and prove
+ownership before signalling -- has nothing to prove ownership with, and
+`--kill` would stop an operator's IPv4LL client as readily as netcfgd's.
+
+That is the thing this project refuses to do, and it has the rules to say so:
+0141 on not spawning beside a running client, `ncfg_dhcpcd_whose` on telling
+ours from theirs, and `ra.h`'s own standard -- the marker is a path netcfgd
+chose, so "an operator's own radvd cannot match that, which is a stronger
+claim than `not by name`".
+
+### What makes it possible is the flag the semantics already require
+
+`document.h` settles that IPv4 link-local **coexists with routable addresses
+rather than being a fallback**. `--force-bind` is exactly that behaviour:
+without it the client declines when a routable address is present. So netcfgd
+must pass it on correctness grounds -- and a cmdline carrying `--force-bind`
+beside the interface is then netcfgd's marker.
+
+**It is weaker than radvd's and the header will say so.** An operator who
+passes `--force-bind` themselves is indistinguishable, where a radvd pointed at
+a path under `/run/netcfgd` cannot be. It is the same strength as the udhcpc
+adoption this tree already accepts -- "by the `-p` it was started with and the
+privilege it runs with" -- and it is strictly better than `--kill`, which
+asserts nothing at all.
+
+### So the design, settled
+
+  * **Start** `avahi-autoipd -D -w --force-bind <iface>`. `-w` makes the start
+    synchronous: it stays in the foreground until an address is acquired, so
+    `ncfg_backend_run` waits and gets a real status, which is the shape
+    `dhcpcd -b` already has here.
+  * **Record** the pid under `<run>/autoip/<iface>.pid`, found by the marker,
+    because the client writes no pid file of its own.
+  * **Stop** by reading that pid, checking `/proc/<pid>/cmdline` still carries
+    the marker, and terminating it. Never `--kill`, which would reach
+    somebody else's.
+  * **No new op**: `backend.start` and `backend.stop` carry a kind, and the
+    tenth kind is the C's own.
+
 ## 10.478 OPEN: `profile save` through the C daemon refuses its own snapshot
 
 Found by running the suite on a machine with inotify available, which this one
