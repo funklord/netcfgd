@@ -12463,6 +12463,18 @@ listing shows the shell and a number hides it. Where a count is wanted, capture
 `ps` to a file in one command and grep that file in another, so the grep's own
 argv was never in the data.
 
+**The cross-project half is signalled rather than fixed here**, because what
+produced four of the five is a command `running-code.md` prescribes: its
+*After it runs, look* section instructs
+`ps ... --ppid 1 | grep -i <name>`, which self-matches, while the arithmetic
+is stated ninety lines earlier in a section about watchers. Which form a
+shared document should prescribe is not netcfgd's to decide. Signalled as
+`claude-guidelines` commit `4443253`, *"`running-code.md` prescribes the
+self-matching sweep command, and 'one too many' is a false positive when the
+truth is zero"* -- named rather than asserted, since a sentence claiming to
+have signalled something leaves no artifact and two of three such claims
+measured elsewhere in this workspace were false.
+
 ## 10.481 The cast is the protection, and three switches never had it
 
 10.480's defects were four shapes, and `working-practice.md` says the shape of
