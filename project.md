@@ -12484,19 +12484,38 @@ and re-read its configuration"*, which is a promise nothing enforces.
 outcomes are a refusal -- which is the good one -- or a profile saved without
 the network, depending on whether the watcher has fired.
 
-### The fix, and the hazard that makes it worth deciding rather than patching
+### Fixed: `ok` now means in force
 
-A configuration write should re-read before replying, so that `ok` means "in
-force" and the message above is true. `ncfg_daemon_state_reload` is the call,
-and the kinds are the ones that write configuration: `config put`,
-`config delete`, `wifi add`, `wifi forget`.
+`wrote_configuration` in `daemon_answer.c` wraps the six kinds that write
+something the compiler reads -- the two `config` verbs, the two `wifi` ones and
+the two `profile` ones -- and re-reads before the reply goes out. Six, not the
+four this entry first named: `profile set` changes the selection and `profile
+save` writes a snapshot and a selection, and both change what compiles.
 
-**What makes it more than a one-liner is that a reload re-materialises every
-hook** -- `ncfg_daemon_state_reload` writes the pending hook bodies, which is
-the mechanism behind 10.470's silently disarmed hash control. A reload per
-configuration write is probably right, because the configuration really did
-change, but it puts hook re-materialisation on the request path and that
-interacts with 0063. Not patched here for that reason.
+Secrets are deliberately outside it. A `@secret:` reference is a name in the
+document and the store holds the value, so writing one changes nothing the
+compiler reads.
+
+**The hazard I flagged dissolved on measurement rather than being accepted.**
+The worry was that a reload re-materialises every hook, which is the mechanism
+behind 10.470's silently disarmed hash control. But the watcher reloads on the
+same write a moment later -- measured, `desired.json` ends with the network
+even when the save was refused -- so this changes **when** the reload happens
+and not **whether**. It adds no recompile and no re-materialisation that was
+not already coming, and 10.470's reload was spurious where this one is not:
+the configuration really did change. `hooks.sh` passes with the fix in, which
+is the check that matters for 0063.
+
+A reload that fails is logged rather than turned into a failed write: the file
+is on disk either way, `reload` keeps the previous desired document when the
+new one does not compile, and calling the write failed would be the one untrue
+answer available.
+
+    c_daemon_answers.sh   all checks passed   (was 2 failed)
+    hooks.sh              all checks passed
+    config_arrives.sh     11 of 11
+    profile.sh            all checks passed
+    make -C c test        0 failures
 
 ### What was unnamed before this, kept for the method
 

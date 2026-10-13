@@ -1208,6 +1208,56 @@ static int answer_plan(ncfg_main_desk_t *desk, ncfg_buf_t *out, char *err, size_
  * The dispatch
  * ------------------------------------------------------------------------ */
 
+/*
+ * A request that changed the configuration, answered only once the daemon has
+ * read it back.
+ *
+ * **`ok` has to mean "in force", and it did not.** Six kinds write something
+ * the compiler reads -- the two `config` verbs, the two `wifi` ones, and the
+ * two `profile` ones -- and every one of them left the re-read to the config
+ * watcher, which is asynchronous. So the next request saw the document as it
+ * was before the write, and `ncfg config put` has been printing "stored `x`
+ * and re-read its configuration" about a re-read nothing performed.
+ *
+ * Measured (project.md 10.478): `ncfg wifi add TestNet --open` followed
+ * immediately by `ncfg profile save` handed the save a document with no
+ * networks, so the snapshot could not reproduce a directory that had one and
+ * the save was refused -- correctly, about an input that was wrong. With a
+ * `reload` wedged between the two it saves. A script writing `ncfg wifi add X
+ * && ncfg profile save P` was racing the watcher, and the other outcome is a
+ * profile quietly missing the network.
+ *
+ * **It changes when the reload happens, not whether.** The watcher fires on
+ * the same write a moment later, so this adds no recompile and no hook
+ * re-materialisation that was not already coming -- which is what makes it
+ * safe beside 0063, whose hash control was once disarmed by a *spurious*
+ * reload (10.470). This one is not spurious: the configuration really did
+ * change.
+ *
+ * Secrets are deliberately not here. A `@secret:` reference is a name in the
+ * document and the store holds the value, so writing one changes nothing the
+ * compiler reads.
+ *
+ * A reload that fails is logged rather than turned into a failed write: the
+ * file is on disk either way, `reload` keeps the previous desired document
+ * when the new one does not compile, and reporting the write as having failed
+ * would be the one untrue answer available.
+ */
+static int wrote_configuration(ncfg_main_desk_t *desk, int answered)
+{
+	char why[NCFG_ERROR_MAX];
+
+	if (!answered || !desk->state) {
+		return answered;
+	}
+	why[0] = '\0';
+	if (!ncfg_daemon_state_reload(desk->state, why, sizeof(why))) {
+		ncfg_log_emitf("config", NCFG_LOG_WARNING,
+		    "the write succeeded and re-reading the configuration did not: %s", why);
+	}
+	return answered;
+}
+
 int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
     const ncfg_peer_t *peer, ncfg_arrival_t arrival, ncfg_buf_t *out, char *err,
     size_t err_size)
@@ -1290,26 +1340,32 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 	case NCFG_PROTO_REQ_WIFI_CONNECT:
 		return answer_wifi_connect(desk, &request->u.wifi_connect, out, err, err_size);
 	case NCFG_PROTO_REQ_WIFI_ADD:
-		return answer_wifi_add(desk, &request->u.wifi_add, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_wifi_add(desk, &request->u.wifi_add, out, err, err_size));
 	case NCFG_PROTO_REQ_WIFI_FORGET:
-		return answer_wifi_forget(desk, request->u.id, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_wifi_forget(desk, request->u.id, out, err, err_size));
 	case NCFG_PROTO_REQ_RADIOS:
 		return ncfg_wifi_radios(&desk->where, desk->state->desired, desk->state->observed,
 		    out, err, err_size);
 	case NCFG_PROTO_REQ_RADIO_SET:
 		return answer_radio_set(desk, &request->u.radio_set, out, err, err_size);
 	case NCFG_PROTO_REQ_CONFIG_PUT:
-		return answer_config_put(desk, &request->u.put, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_config_put(desk, &request->u.put, out, err, err_size));
 	case NCFG_PROTO_REQ_CONFIG_DELETE:
-		return answer_config_delete(desk, request->u.name, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_config_delete(desk, request->u.name, out, err, err_size));
 	case NCFG_PROTO_REQ_SECRET_PUT:
 		return answer_secret_put(desk, &request->u.secret_put, out, err, err_size);
 	case NCFG_PROTO_REQ_SECRET_DELETE:
 		return answer_secret_delete(desk, request->u.name, out, err, err_size);
 	case NCFG_PROTO_REQ_PROFILE_SET:
-		return answer_profile_set(desk, request->u.name, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_profile_set(desk, request->u.name, out, err, err_size));
 	case NCFG_PROTO_REQ_PROFILE_SAVE:
-		return answer_profile_save(desk, &request->u.profile_save, out, err, err_size);
+		return wrote_configuration(desk,
+		    answer_profile_save(desk, &request->u.profile_save, out, err, err_size));
 	/*
 	 * Every kind `ncfg_main_answer_unported` answered with a sentence, listed
 	 * so that `-Wswitch` notices a request added to the protocol and reaching
