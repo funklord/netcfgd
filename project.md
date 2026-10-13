@@ -12487,6 +12487,34 @@ reports `a running router_advert the document asks nothing of plans no stop`.
 It is checked for vacuity in both directions, since a walk that found no kinds
 and one where nothing was startable would both otherwise pass.
 
+### An expectation copied from the generator: three, all of them 10.480's
+
+The fourth lens is the one 10.480's ledger defect actually belonged to, and it
+is about independence rather than about a bound. Nine places in the C tests
+write an expectation as an enum member plus one. Three were the shape and are
+10.480's own, now paired with table-bounded loops; three are the witnesses this
+pass added; two are a qdisc filter handle and one is a loop over
+`NCFG_MAIN_SOURCE_PATIENCE`, neither of which is an enum end.
+
+The gates were worth checking for the same reason and come out clean, because
+nearly every one of them compares two independently written sides --
+`key_coverage_gate.py` the lowering against the renderer, `word_table_gate.py`
+a table's length against the enum indexing it, `agree_gate.py` the two
+programs against each other. The frozen witnesses under `doc/schema/` *are*
+compared to the generator that wrote them, which is what a frozen witness is
+for: `make schema-bless` rewrites them from the Rust and the unblessed run
+asks whether the Rust still agrees with itself, which is regression detection
+and correct. What makes them independent evidence about the **C** is that the
+Rust is a separate implementation, and that holds in the one direction
+`ledger_gate.py` uses them.
+
+`walk_test.c`'s emitter-against-parser check is the model for the shape done
+right, and it was already there: it guards its own vacuity with
+`check(emitted > 0, ...)`, it compares across a seam rather than a function
+with itself, it names which half is the weaker one, and it compares the
+spelling rather than whether the result parses -- because a slice that lost a
+character parses as a shorter value nobody would see was short.
+
 ### `fail to compile` is not what happens, measured
 
 Several comments in this tree say a kind added to a taxonomy will "fail to
