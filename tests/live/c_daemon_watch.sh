@@ -49,7 +49,49 @@ skip() {
 [ "$(id -u)" = 0 ] || skip "not root, and the script under test refuses without it"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-watch.XXXXXX")
-trap 'rm -rf "$work"' EXIT INT TERM
+# **The pattern is this run's own path, and that is the load-bearing half.**
+# `pkill -f fake-netcfgd` matches any run's stub, because the stub's name is the
+# same in every `$work`; the path is not. A bare name in the cleanup reaches a
+# concurrent run's process, and a bare name in the check further down -- the one
+# asserting nothing of the C daemon is left running -- reports somebody else's
+# stub as this script's failure to stop its own. Both are matched by
+# `$work/bin/fake-netcfgd` now, which no other run can be carrying.
+#
+# **The retry around the removal is the shape nineteen sibling scripts carry**
+# (project.md 10.476), and this script was added to `make live` after that pass
+# so it never got it. Unlike theirs, the race it guards has NOT been
+# demonstrated here, and the honest version of that is worth writing down
+# because the comfortable version was written first:
+#
+#   * `/tmp/ncfg-watch.H0ilKH` was found after a full suite run, 80K, holding
+#     four `netcfgd-c-tryout.*.log` files, with this script reporting 26 checks
+#     and 0 failures in that same run.
+#   * A probe in this cleanup reported **no stub alive** and a work directory
+#     of 84K, so nothing was writing when the removal ran. The race is refuted
+#     for that run, not confirmed.
+#   * Stopping this script mid-run leaves no directory, and so does stopping
+#     the suite's own `timeout ... unshare ... sh` invocation of it. A trap
+#     skipped by a kill is refuted too.
+#
+# So what left that directory is unknown, and its mtime -- the one thing that
+# would have attributed it to a run -- was destroyed by removing it before the
+# question was asked. The retry costs five seconds in the worst case and says
+# so when it gives up, which is worth having against an unexplained leak; it is
+# not evidence that the leak was this.
+cleanup() {
+	pkill -f "$work/bin/fake-netcfgd" 2>/dev/null || true
+	waited=0
+	while [ -d "$work" ]; do
+		rm -rf "$work" 2>/dev/null && break
+		waited=$((waited + 1))
+		[ "$waited" -gt 50 ] && break
+		sleep 0.1
+	done
+	if [ -d "$work" ]; then
+		echo "note: $work outlived five seconds of trying to remove it" >&2
+	fi
+}
+trap cleanup EXIT INT TERM
 mkdir -p "$work/bin"
 
 # The state the stubs keep between calls: whether the network answers, and what
@@ -164,9 +206,11 @@ grep -q "is back and steady after" "$down_out" &&
 	check 1 "  and waited for the network rather than claiming it was back"
 
 # And the one thing a fallback must never do: leave the C daemon running.
-if pgrep -f "fake-netcfgd" >/dev/null 2>&1; then
+# Matched by the full path for the trap's reason: a bare `fake-netcfgd` would
+# report another run's stub as this one's failure to stop its own.
+if pgrep -f "$work/bin/fake-netcfgd" >/dev/null 2>&1; then
 	check 1 "  with nothing of the C daemon left running"
-	pkill -f "fake-netcfgd" 2>/dev/null || true
+	pkill -f "$work/bin/fake-netcfgd" 2>/dev/null || true
 else
 	check 0 "  with nothing of the C daemon left running"
 fi

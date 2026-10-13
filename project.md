@@ -12385,6 +12385,78 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.482 A directory the sweep found, an explanation it refused, and four bad counts
+
+The sweep `running-code.md` asks for after a run found `/tmp/ncfg-watch.H0ilKH`
+left behind by a `make live` in which every check passed -- 80K, four
+`netcfgd-c-tryout.*.log` files in it, from `c_daemon_watch.sh`. The same shape
+10.471 and 10.476 were found by, and the sweep earning its place a third time.
+
+### What was fixed, and it is not what the first diagnosis said
+
+`c_daemon_watch.sh` matched its stub by name. `pkill -f fake-netcfgd` reaches
+**any** run's stub, because the stub has that name in every `$work` while the
+path is this run's alone -- so a bare name in the cleanup signals a concurrent
+run's process, and a bare name in the check asserting nothing of the C daemon
+is left running reports somebody else's stub as this script's failure to stop
+its own. Both are `$work/bin/fake-netcfgd` now.
+
+Proved rather than argued, with a stand-in from another run alive: the bare
+name matched three processes, two of them that other run's and one the shell
+doing the counting; a work-path pattern matched none. This is the rule in
+`CLAUDE.md` about deleting by name rather than by prefix, met from the signal
+side, and it is the half of the change that stands on its own.
+
+### The race was the comfortable explanation and it is refuted
+
+The first version of this said a single `rm -rf` had raced a daemon still
+writing, which is 10.476's finding in nineteen sibling scripts, and that this
+one missed the fix by joining `make live` after that pass. The sequencing is
+true and makes a tidy story. The story is wrong, or at least unproven, and
+`running-code.md` asks for the experiment that would confirm it rather than the
+sentence:
+
+  * A probe in the cleanup reported **no stub alive** and 84K in the work
+    directory. Nothing was writing when the removal ran.
+  * Stopping the script mid-run leaves no directory: the trap runs.
+  * Stopping the suite's own `timeout ... unshare -rn sh -c` invocation of it
+    leaves no directory either, so a kill that skips the trap through the
+    layers is refuted as well.
+
+Three branches removed and no explanation left. The retry loop stays, because
+it costs five seconds in the worst case and says so when it gives up, and
+because nineteen siblings carry it -- but it is hygiene here rather than a fix,
+and the script says so.
+
+**And the evidence was destroyed before the question was asked.** The
+directory's mtime was the one thing that could have attributed it to a run --
+the completed suite, or the earlier one stopped part-way -- and it was removed
+to get a clean baseline for the re-run. A clean baseline was worth less than
+the timestamp.
+
+### Four counts in one session that counted the thing doing the counting
+
+Every one of these was a `grep -c` or `pgrep -c` whose pattern appeared in the
+argv of the shell running it, so the measurement included itself:
+
+    qemu alive: 1          after a VM run that had cleaned up; 0 were alive
+    force-bind: 3          after the link-local script; 0 were alive
+    fake-netcfgd: 1        looking for a leftover stub; 0 were alive
+    bare vs path: 3 vs 2   where the path pattern could only be 0
+
+`running-code.md` records this for a `pgrep` watcher that never exits and
+notes in passing that counting them with `grep` returns one too many. The
+general form is worse than the watcher case, because it is silent: every one of
+those numbers was plausible, and the first three were read as evidence that
+something had leaked when nothing had.
+
+**`pgrep` excluding its own pid does not help**, which is what makes this easy
+to walk into -- the match is the *parent shell*, whose command line is the whole
+eval. Two remedies, and the first is enough: **list, do not count**, because a
+listing shows the shell and a number hides it. Where a count is wanted, capture
+`ps` to a file in one command and grep that file in another, so the grep's own
+argv was never in the data.
+
 ## 10.481 The cast is the protection, and three switches never had it
 
 10.480's defects were four shapes, and `working-practice.md` says the shape of
