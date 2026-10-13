@@ -12833,23 +12833,36 @@ the five things I expected to be in the way are not:
   * **`word_table_gate` is not affected either.** It reads enums out of
     `document.h`; `ncfg_backend_kind_t` lives in `observed.h`.
 
-**What does stop it is `doc/schema/observed.json`.** It freezes all nine
-backend kinds, and it is generated from the **Rust** model --
-`crates/netcfgd-model/tests/observed.rs`, "populated by hand, regenerated
-deliberately with `make schema-bless`, and the diff is the review". Its
-matches are exhaustive with no `_` arm **specifically so that adding a variant
-is a compile error**, and `schema-bless` ends by printing "say in the commit
-whether this is a minor or a major bump".
+**~~What does stop it is `doc/schema/observed.json`.~~ Nothing stops it, and
+both blockers I wrote here were asserted without being checked.** Corrected
+2026-10-13, after they had been used twice to decline the work:
 
-So a tenth backend kind cannot land in the C alone. It moves a frozen surface
-owned by the implementation 0266 retired, through a mechanism built to require
-a deliberate human act -- which is the project saying, in code, that this is
-not a change to make in passing.
+  * **The module numbering does not apply.** `module_order_gate` carries
+    0263's `ORDER` as `base, json, model, compile, sys` and says in as many
+    words that "anything not named here is in its sixth group, which that
+    decision leaves unordered". A new backend module falls in that sixth
+    group, so it needs no decision record and no renumbering.
+  * **The frozen schema is the Rust's, and a C-only addition does not touch
+    it.** `doc/schema/observed.json` enumerates nine backend kinds because it
+    is generated from `crates/netcfgd-model`'s `BackendKind`; the C's
+    `ncfg_backend_kind_t` is a separate enum that no gate compares to the
+    witness. `ledger_gate` reads the kinds *out of* the witness and requires
+    the C build to answer for each -- witness to C, not C to witness -- and
+    its only reverse check is for ops.
 
-**Which reduces the decision to one question**: bless a schema bump adding a
-tenth `BackendKind`, and accept that the retired oracle gains a variant for a
-feature only the C will have. Everything else about link-local is already
-settled or already built.
+So a tenth kind can be added to the C, and the Rust, the witness and
+`schema-bless` are untouched. What remains true is the earlier half: the
+*semantics* were settled in `document.h` and the client choice follows from
+them. The divergence that does appear is `ncfg status` reporting a backend kind
+the Rust has no word for -- visible only on a machine that has configured
+link-local, which is 0266's situation and not a gate.
+
+**The lesson is the one this file keeps relearning in the other direction.** A
+claim about an instrument is a measurement, and I wrote three of them from
+reading rather than running: that the module gate would reject a new module,
+that the schema witness bound the C, and that the oracle would have to gain
+arms. Each sounded like diligence and each was a guess with a gate's name
+attached.
 
 ### Three lenses on the way, all clean, and that is the finding
 
