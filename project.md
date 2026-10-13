@@ -12444,6 +12444,12 @@ argv of the shell running it, so the measurement included itself:
     fake-netcfgd: 1        looking for a leftover stub; 0 were alive
     bare vs path: 3 vs 2   where the path pattern could only be 0
 
+A fifth was a different fault with the same result, and it reached a commit:
+`grep -c 'dbus-daemon --session'` counted none where six were running, because
+the flag comes last in the command line those processes actually carry. 10.477
+has it. Both faults produce a plausible number that nothing downstream can
+question, and in that case the number was read as evidence a leak had stopped.
+
 `running-code.md` records this for a `pgrep` watcher that never exits and
 notes in passing that counting them with `grep` returns one too many. The
 general form is worse than the watcher case, because it is silent: every one of
@@ -13046,9 +13052,25 @@ signalling and skipped anything that had stopped being a bus.
 Only the clientless ones were taken, which is what made it safe to take any:
 165 reaped, and the measurement either side is the whole of the evidence --
 126 of 128 inotify instances in use before, 27 after. Re-measured on
-2026-10-13, after a `make live` and several days: **32 of 128 in use, one
-session bus on this account and none of it orphaned.** So it holds rather
-than merely having happened.
+2026-10-13, after a `make live` and several days: **32 of 128 in use.** So the
+headroom holds rather than merely having been won once.
+
+**The bus count in the first version of this correction was wrong, and the way
+it was wrong is the point.** It said one bus on this account and none
+orphaned, from `grep -c 'dbus-daemon --session'` -- a pattern requiring
+`--session` to follow the program name immediately. These are launched
+`dbus-daemon --syslog --fork --print-pid 4 --print-address 6 --session`, with
+the flag last, so the pattern matched none of them and the shortfall read as
+good news. Asking for both words anywhere in the argv instead: **seven buses,
+six of them this account's and parented to init**, two of those started during
+the session that wrote the sentence.
+
+So the leak recurs, which is consistent with what this entry already says
+about whose it is -- it arrives with session starts rather than with anything
+netcfgd runs -- and six buses are not what cost the inotify headroom, since
+the headroom is fine with them alive. What the reaping bought was the
+hundredfold case, and that is what holds. A count is not a trend, and a
+pattern that cannot match the thing it is counting is not a count at all.
 
 ### And the healthy machine stopped testing the path the sick one did
 
