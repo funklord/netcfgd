@@ -12533,6 +12533,17 @@ future compiler cannot break the way blanket `-Werror` can. Whose decision it
 is matters more than which is better, so it is written here and raised rather
 than taken.
 
+**What it would cost is measured, because the fear is the expensive half of
+that decision and the measurement is one loop.** Compiling every translation
+unit with the tree's own warning set plus `-Werror=switch`, output to
+`/dev/null` so nothing in the tree moves: **205 source files and 97 test
+files, and none of them fails.** So the flag would break nothing today and can
+only ever fire on an omission somebody is about to make, which is what the
+comments already promise it does. That does not decide it -- promoting a
+warning to an error is a policy choice and `-Werror=switch` is narrower than
+blanket `-Werror` by design rather than by luck -- but it removes the one
+objection nobody had checked.
+
 ## 10.480 Link-local wired, and a loop bound that had been short for two kinds
 
 The feature 10.479 designed is landed: the tenth backend kind reaches the plan
@@ -12655,6 +12666,25 @@ looking at what the check could distinguish rather than at whether it passed.
 `make packaging` and the seven standalone gates pass, and
 `tests/live/link_local.sh` is 19 checks, all passing, under a second, named in
 `make live`. The live suite is 84 scripts now.
+
+**And the whole suite was run after the wiring, which is what 0263 asks for
+rather than the script on its own**: 79 scripts reported a summary, every one
+of them passing, `link_local.sh` among them in-suite rather than only
+standalone, and no `FAIL` line anywhere in the log. `make` still exits
+non-zero, and on this machine it always will -- `sandbox_writes.sh` is the
+last invocation in the target and refuses under `NCFG_LIVE` because there is
+no systemd here to impose the unit's sandbox, which `make vm-sandbox` exists
+to answer. So the suite's exit code is not the acceptance signal on a sysvinit
+host and the absence of failing checks is.
+
+**That last script was then run where it can run**, rather than left as a
+pointer: `make vm-sandbox` exits 0 with `sandbox_writes.sh: all checks passed`
+in the Debian guest, and the three checks it adds there are its own controls --
+the write that cannot be refused without the unit's `ExecPaths=`, the signal
+that cannot cross a uid without its `CAP_KILL`, and the probe's own positive
+control showing a sandbox where `rw` would mean something different. So the
+acceptance after this feature is whole across both tiers rather than whole on
+the host and pointed at elsewhere.
 
 ## 10.479 Link-local: the client's own interface decides the design
 
