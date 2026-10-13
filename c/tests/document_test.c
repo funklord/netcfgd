@@ -364,24 +364,48 @@ int main(int argc, char **argv)
 		 * is a second copy of the table, and a second copy is what this pair
 		 * is here to stop having.
 		 */
+		/*
+		 * **The bound was `<= NCFG_KIND_IFB` and that made the walk's own
+		 * conclusion unreachable.** The loop breaks with `paired = 0` on a
+		 * missing word, so the case it exists for -- a sixteenth kind with a
+		 * word in one table and not the other -- was a kind the walk stopped
+		 * before reaching, leaving `paired` true. A bound naming the last
+		 * enumerator is a third copy of the table's length in a check whose
+		 * comment says in as many words that a second copy is what it is here
+		 * to stop having, and `--supported` reported eight backend kinds of
+		 * ten for two releases on exactly this (project.md 10.480).
+		 *
+		 * So the walk ends where both tables do, and the count is checked
+		 * against the enumerator below instead. The constant cannot track the
+		 * tables from there, which is what makes it a witness: a kind added to
+		 * the enum and to neither table fails the count, and one added to only
+		 * one table fails `paired`.
+		 */
 		{
 			int tag;
 			int paired = 1;
 			int differing = 0;
+			int walked = 0;
 
-			for (tag = (int)NCFG_KIND_PHYSICAL; tag <= (int)NCFG_KIND_IFB; tag++) {
+			for (tag = 0;; tag++) {
 				const char *document_word = ncfg_interface_kind_name(tag);
 				const char *language_word = ncfg_interface_kind_language_name(tag);
 
+				if (!document_word && !language_word) {
+					break;
+				}
 				if (!document_word || !language_word) {
 					paired = 0;
 					break;
 				}
+				walked++;
 				if (strcmp(document_word, language_word) != 0) {
 					differing++;
 				}
 			}
 			check(paired, "every kind has a word in both tables");
+			check(walked == (int)NCFG_KIND_IFB + 1,
+			    "  and the pair runs the whole length of the enum, not part of it");
 			/* Exactly the two, and naming the count rather than the words:
 			 * a third kind that started differing would be a spelling
 			 * somebody introduced without saying so here. */

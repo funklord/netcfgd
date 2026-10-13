@@ -1037,10 +1037,24 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 	static const ncfg_op_kind_t refused[] = { NCFG_OP_BACKEND_RELOAD };
 	int    every_refusal_names_its_op = 1;
 	int    every_op_answered = 1;
+	size_t walked = 0;
 	size_t kind;
 
-	/* `NCFG_OP_COMMIT_REVERT` is the last of the forty-eight. */
-	for (kind = 0; kind <= (size_t)NCFG_OP_COMMIT_REVERT; kind++) {
+	/*
+	 * **Bounded by the names rather than by `NCFG_OP_COMMIT_REVERT`**, with
+	 * the count held to that enumerator after the walk. This asserts that
+	 * every op is either carried out or refused with its own name in the
+	 * sentence, so a bound naming the last enumerator is the one shape that
+	 * can make it silently cover less: the forty-ninth op would be answered
+	 * by nobody and asked about by nothing. `ncfg_op_name` returns the empty
+	 * string past the end of its switch, which is where the walk stops.
+	 *
+	 * The same constant then becomes the witness it could not be as a bound
+	 * -- it cannot grow with the enum, so an op appended without being
+	 * answered fails the count. `--supported` had the other half of this
+	 * arrangement and nothing to catch it (project.md 10.480).
+	 */
+	for (kind = 0;; kind++) {
 		ncfg_op_t   op;
 		char        message[NCFG_ERROR_MAX];
 		const char *name;
@@ -1051,6 +1065,10 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 		memset(&op, 0, sizeof(op));
 		op.kind = (int)kind;
 		name = ncfg_op_name(&op);
+		if (name[0] == '\0') {
+			break;
+		}
+		walked++;
 		for (i = 0; i < sizeof(refused) / sizeof(refused[0]); i++) {
 			if ((size_t)refused[i] == kind) {
 				wanted = 0;
@@ -1075,6 +1093,8 @@ static void every_op_is_either_executed_or_refused_by_name(void)
 	}
 	check(every_op_answered, "every op is answered, and the answers are the expected ones");
 	check(every_refusal_names_its_op, "and every refusal names the op it is about");
+	check(walked == (size_t)NCFG_OP_COMMIT_REVERT + 1u,
+	    "  and the walk covered every op the enum has, not the ones it used to");
 }
 
 /*

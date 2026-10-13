@@ -466,7 +466,13 @@ static void warn_unported(ncfg_builder_t *builder)
 		const ncfg_interface_t *interface = &desired->interfaces[i];
 
 		for (j = 0; j < interface->addressing_count; j++) {
-			switch (interface->addressing[j].kind) {
+			/* Cast for `address.c`'s reason: the field is an `int`
+			 * carrying the enum, and `-Wswitch` checks a controlling
+			 * expression of enumerated type and nothing else. The
+			 * `default` that used to sit at the bottom of this switch
+			 * suppressed nothing, because there was nothing to
+			 * suppress. */
+			switch ((ncfg_address_source_kind_t)interface->addressing[j].kind) {
 			case NCFG_ADDRESS_SOURCE_STATIC:
 			/* SLAAC plans no addressing action -- the kernel builds the
 			 * address itself -- and the two sysctls that decide whether it
@@ -490,8 +496,6 @@ static void warn_unported(ncfg_builder_t *builder)
 			 * sources. The arm came out of this list in the same commit as the
 			 * pass that landed, which is 0263's rule for it. */
 			case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
-				break;
-			default:
 				break;
 			}
 		}

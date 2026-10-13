@@ -44,6 +44,10 @@
  */
 #include "planfix.h"
 
+/* `ncfg_apply_supported` is what the taxonomy walk below asks whether a kind
+ * is startable, rather than keeping a list of kinds here. */
+#include "ncfg/apply.h"
+
 #include <stdio.h>
 #include <string.h>
 
@@ -693,6 +697,81 @@ static void an_ipv4ll_client_follows_the_document(void)
 }
 
 /*
+ * **Every backend kind this build can start, it can also stop.**
+ *
+ * `backend_wanted` in `plan/backend.c` decides this with a switch whose
+ * `default` arm answers "wanted" for any kind no pass names. That direction is
+ * deliberate and the header argues it -- a kind nothing starts must not be
+ * stopped -- but it is also the arm a *startable* kind falls into when
+ * somebody forgets to name it, and the cost is a process netcfgd started and
+ * will never stop. `pppd` holding a line open after its device was deleted is
+ * in that switch for exactly this reason, and `link_local` nearly repeated it.
+ *
+ * **Nothing in the compiler can catch it**, which is why this is a test rather
+ * than a cast. `ncfg_observed_backend_t.kind` is an `int` carrying the enum,
+ * so `-Wswitch` does not apply to a bare switch over it -- and a `default`
+ * suppresses `-Wswitch` even where the controlling expression is cast, so the
+ * permissive arm and the diagnostic cannot both exist. When `link_local` was
+ * added, five switches over this taxonomy named the missing arm and gcc
+ * pointed at every one of them; this one it could not see, and the arm was
+ * found by reading (project.md 10.480).
+ *
+ * So the taxonomy is walked rather than listed, and the question is asked of
+ * the build rather than of a list somebody maintains here: for each kind,
+ * `ncfg_apply_supported` says whether this build starts one, and every kind it
+ * does must plan a stop when the document asks for nothing. A kind that falls
+ * to the default plans none.
+ */
+static void every_startable_backend_can_also_be_stopped(void)
+{
+	int kind;
+	int walked = 0;
+	int startable = 0;
+	int every_startable_stops = 1;
+
+	for (kind = 0; ncfg_backend_kind_name(kind) != NULL; kind++) {
+		ncfg_document_t *document;
+		ncfg_observed_t *observed;
+		ncfg_plan_t     *plan;
+		ncfg_op_t        start;
+		char             observation[512];
+		char             why[NCFG_ERROR_MAX];
+
+		walked++;
+		memset(&start, 0, sizeof(start));
+		start.kind = NCFG_OP_BACKEND_START;
+		start.u.backend.kind = kind;
+		start.u.backend.iface = "eth0";
+		why[0] = '\0';
+		if (!ncfg_apply_supported(&start, why, sizeof(why))) {
+			continue;
+		}
+		startable++;
+		(void)snprintf(observation, sizeof(observation),
+		    "\"links\":[" PLANFIX_LINK("eth0", "") "],\"backends\":[{\"kind\":\"%s\","
+		    "\"interface\":\"eth0\",\"running\":true}]",
+		    ncfg_backend_kind_name(kind));
+		plan = planfix_plan(PORT_DEVICE, "{\"name\":\"eth0\"}", "", "", observation,
+		    &document, &observed);
+		if (!plan || planfix_count(plan, "backend.stop") != 1u) {
+			printf("  a running %s the document asks nothing of plans no stop\n",
+			    ncfg_backend_kind_name(kind));
+			every_startable_stops = 0;
+		}
+		planfix_release(plan, document, observed);
+	}
+	check(every_startable_stops,
+	    "every backend kind this build can start, it also stops when unwanted");
+	/* **Not vacuous, and both halves matter.** A walk that found no kinds
+	 * would pass the check above, and so would one where nothing was
+	 * startable -- which is what a `ncfg_apply_supported` that refused
+	 * everything would look like. */
+	check(walked == (int)NCFG_BACKEND_LINK_LOCAL + 1,
+	    "  having walked the whole taxonomy rather than part of it");
+	check(startable >= 6, "  of which a useful number are kinds this build starts");
+}
+
+/*
  * The half of an `ethtool` block nothing encodes, which is neither language's
  * to have encoded.
  *
@@ -1143,6 +1222,7 @@ int main(void)
 	a_bluetooth_block_is_not_something_to_wait_for();
 	link_local_addressing_is_not_something_to_wait_for();
 	an_ipv4ll_client_follows_the_document();
+	every_startable_backend_can_also_be_stopped();
 	the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for();
 	a_probe_block_is_the_daemons_and_its_answer_is_acted_on();
 	a_modem_block_is_the_daemons_and_the_gap_is_named_exactly();

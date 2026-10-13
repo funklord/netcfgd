@@ -12385,6 +12385,126 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.481 The cast is the protection, and three switches never had it
+
+10.480's defects were four shapes, and `working-practice.md` says the shape of
+the last bug is the best guess at where the next one is. Three of the four were
+derived from something that had just gone wrong here rather than chosen in
+advance, so they were worth finishing as a set.
+
+### A loop bounded by a named enumerator: two more, both in tests
+
+Swept the C for a loop whose bound is a named enum member rather than a count.
+Thirteen candidates, eleven of them genuine tunables --
+`NCFG_TUI_EVENT_HISTORY`, `NCFG_MAIN_EVENT_BURST`, `NCFG_RESOLV_PATIENCE` and
+the like, where the constant is the bound and nothing else. Two were the shape:
+
+- `apply_test.c` walked `kind <= NCFG_OP_COMMIT_REVERT` to assert that every
+  op is either carried out or refused with its own name in the sentence.
+- `document_test.c` walked `tag <= NCFG_KIND_IFB` to assert that the document's
+  word table and the language's are paired index for index.
+
+Both were correct, because both named the real last enumerator. Both were
+coverage loops, which is the worse half: a value appended to either enum would
+not have failed anything, it would have been **walked past**. The
+`document_test` one was the sharper case -- the loop breaks with `paired = 0`
+on a missing word, so the sixteenth kind with a word in one table and not the
+other was a kind the walk stopped before reaching, and its comment says in as
+many words that a second copy of the table is what the check is there to stop
+having while the bound was a third copy of its length.
+
+Both walk their tables now, with the named enumerator kept below as the count
+to check against -- and re-running the sweep returns the eleven tunables and
+nothing else, which is the fix's own proof and is how the count above was
+recovered. Reading it back the first time gave thirteen against a `grep -c` of
+eleven, because the two that had been fixed no longer match the pattern that
+found them; a count that cannot be reconciled with its own listing is not one
+to write down. That is the asymmetry 10.480 arrived at, applied in the other
+direction: the same constant is a hazard as a bound and a witness as an
+expectation, and which one it is depends only on whether it can grow with the
+thing it is watching. Both controls fail on an off-by-one and pass restored.
+
+### A two-valued mapping over a multi-valued enum: nothing
+
+Eleven ternaries map to a pair of enum values, and every one of them maps a
+genuine **boolean** -- `recorded ?`, `tap ?`, `failed ?`, `seen ?`. A two-branch
+expression over a two-valued input is exact, so none of them is the defect.
+
+Three were worth a second look because they choose a **union member** by an
+equality test on one op kind, where a wrong branch is type confusion rather
+than a wrong string: the two WireGuard arms in `kernel_genl.c` and the qdisc
+one in `kernel_tc.c`. Each is reached from a switch arm naming exactly the two
+kinds it discriminates, immediately above in the dispatch, so each is exact
+today. Recorded rather than changed: the guard is visible at the call site and
+there is no defect to fix.
+
+A lens that finds nothing is still a finished lens. This one cost twenty
+minutes and removes a branch.
+
+### A permissive `default` over a taxonomy -- and my first fix was wrong
+
+`plan/address.c` decides whether an addressing source produces any action at
+all, and its switch named six of the seven sources with `default: return;`
+absorbing `NCFG_ADDRESS_SOURCE_SLAAC`. Planning nothing for SLAAC is right --
+the kernel builds the address and the two sysctls that decide whether it
+listens are `sysctl.c`'s -- but a `default` over a taxonomy is what turns the
+compiler's exhaustiveness check off, so I named SLAAC, removed the `default`,
+and wrote a comment saying the file was now covered.
+
+**The control said otherwise.** With the arms removed and no `default`, gcc
+said nothing. The reason is not the `default` at all:
+`ncfg_address_source_t.kind` is declared `int kind; /* ncfg_address_source_kind_t */`,
+and `-Wswitch` fires only for a controlling expression of enumerated type. So
+`switch (source->kind)` was unchecked whatever its arms were. What makes the
+five switches that *did* name the missing arm work is the cast --
+`switch ((ncfg_backend_kind_t)kind)` in `backend_ops.c` is the idiom, and it
+is easy to read as decoration. With the cast added, gcc names the missing
+value; both files have it now and both controls fail with an arm removed.
+
+The measured scope, since the two forms are indistinguishable at a glance:
+**39 taxonomies in this tree are stored as an `int` with the enum named only
+in a trailing comment**, and of the switches over a `kind` field, 27 cast and
+48 do not. Not every one of the 48 is unprotected -- some switch on a field
+genuinely declared with its enum type -- so that is a candidate count and not
+a defect count, and separating them is a tree-wide pass rather than something
+to do while finishing a feature.
+
+### One switch the compiler can never protect, so it got a test
+
+`backend_wanted` is the worst case and cannot be fixed by a cast: a `default`
+suppresses `-Wswitch` even where the controlling expression is cast, and its
+permissive arm is deliberate -- a kind no pass starts must not be stopped. So
+the permissive default and the diagnostic cannot both exist, and when
+`link_local` arrived gcc pointed at five switches over this taxonomy and could
+not see this one. The arm was found by reading.
+
+What it has now is the question asked of the build rather than of a list:
+every backend kind `ncfg_apply_supported` says this build can **start** must
+plan a `backend.stop` when the document asks for nothing. A kind that falls to
+the default plans none, so the walk names it. The control removes the
+`router_advert` arm -- a kind with no individual case anywhere -- and the walk
+reports `a running router_advert the document asks nothing of plans no stop`.
+It is checked for vacuity in both directions, since a walk that found no kinds
+and one where nothing was startable would both otherwise pass.
+
+### `fail to compile` is not what happens, measured
+
+Several comments in this tree say a kind added to a taxonomy will "fail to
+compile" if a switch has no arm for it. There is no `-Werror` in `c/Makefile`'s
+`WARNINGS`. Measured by removing an arm from `backend_ops.c`: gcc prints
+`warning: enumeration value ... not handled in switch [-Wswitch]`, make exits
+0, and the binary is produced and installed over the previous one. The
+protection is real and it is a warning, in a build whose `ar` line alone is
+longer than a terminal.
+
+This is the document-and-code contradiction `working-practice.md` says to flag
+rather than resolve in either direction, and the two obvious answers are both
+somebody else's: softening the comments makes the tree honest and weaker, and
+`-Werror=switch` makes the claim true and is a build-policy change that a
+future compiler cannot break the way blanket `-Werror` can. Whose decision it
+is matters more than which is better, so it is written here and raised rather
+than taken.
+
 ## 10.480 Link-local wired, and a loop bound that had been short for two kinds
 
 The feature 10.479 designed is landed: the tenth backend kind reaches the plan

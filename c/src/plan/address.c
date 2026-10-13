@@ -217,7 +217,7 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	 * `warn_unported`, with the block it is about, so a plan from this build
 	 * is never quieter than the configuration it was given.
 	 */
-	switch (source->kind) {
+	switch ((ncfg_address_source_kind_t)source->kind) {
 	case NCFG_ADDRESS_SOURCE_STATIC:
 		break;
 	case NCFG_ADDRESS_SOURCE_DHCP4:
@@ -244,7 +244,31 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	case NCFG_ADDRESS_SOURCE_REPORTED:
 		ncfg_plan_reported(builder, interface, index, base, out);
 		return;
-	default:
+	/*
+	 * **SLAAC plans nothing, and it is named rather than left to a `default`
+	 * because the cast above is useless without that.** The kernel builds a
+	 * SLAAC address itself and the two sysctls deciding whether it listens for
+	 * an advertisement are `sysctl.c`'s, planned per interface rather than per
+	 * source -- so there is nothing to do here, which is different from
+	 * nothing being known about it.
+	 *
+	 * **The cast is the whole of what the compiler checks**, and that is worth
+	 * stating because this switch had neither half and looked exactly like the
+	 * ones that do. `ncfg_address_source_t.kind` is an `int` carrying an
+	 * `ncfg_address_source_kind_t`, and `-Wswitch` fires only for a
+	 * controlling expression of enumerated type -- so `switch (source->kind)`
+	 * was unchecked whatever its arms were, and removing the `default` alone
+	 * bought nothing. Measured: with the arms removed and no cast, gcc says
+	 * nothing; with the cast, it names the missing value.
+	 *
+	 * This is the pass that decides whether an addressing source produces any
+	 * action at all, and six of the seven sources were named here with the
+	 * seventh absorbed by a `default` -- so nothing could say the file was
+	 * short when `link_local` arrived. It was found by reading, which is the
+	 * one way `--supported` missed a backend kind for two releases
+	 * (project.md 10.480).
+	 */
+	case NCFG_ADDRESS_SOURCE_SLAAC:
 		return;
 	}
 	address = source->static_address.address;
