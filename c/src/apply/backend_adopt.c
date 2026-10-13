@@ -147,6 +147,17 @@ int ncfg_service_backend_handle(const char *run, int kind, const char *iface, ch
 		           sizeof(scratch)) &&
 		    ncfg_hostapd_pid_path(run, iface, marker, marker_size, scratch,
 		        sizeof(scratch));
+	case NCFG_BACKEND_LINK_LOCAL:
+		/*
+		 * **Not adoptable from here, and it adopts itself instead.** Every
+		 * other kind is found by a pid file the daemon wrote and a path it
+		 * recites; `avahi-autoipd` writes no pid file and recites no path,
+		 * so there is nothing for this pair of paths to be. Answering 0
+		 * rather than inventing one: `ncfg_autoip_running_pid` asks the
+		 * machine by the arguments netcfgd passed when its own record is
+		 * gone, which is the same recovery one layer in.
+		 */
+		return 0;
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		/* radvd is started with `--config <path>`, so the generated file is
 		 * what it recites. */

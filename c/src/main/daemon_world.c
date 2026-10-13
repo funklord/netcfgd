@@ -475,6 +475,9 @@ void ncfg_main_world_where_from_environment(ncfg_main_world_where_t *where)
 	if (!where->openvpn_program) {
 		where->openvpn_program = program_from_environment(NCFG_OPENVPN_PROGRAM_ENV);
 	}
+	if (!where->autoip_program) {
+		where->autoip_program = program_from_environment(NCFG_AUTOIP_PROGRAM_ENV);
+	}
 }
 
 int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t *where,
@@ -506,6 +509,7 @@ int ncfg_main_world_open(ncfg_main_world_t *world, const ncfg_main_world_where_t
 	world->radvd_program = where->radvd_program;
 	world->openvpn_program = where->openvpn_program;
 	world->supplicant_program = where->supplicant_program;
+	world->autoip_program = where->autoip_program;
 	world->secrets.secrets_dir = where->secrets_dir;
 	world->secrets.materialise_dir = where->certs_dir;
 	world->state = state;

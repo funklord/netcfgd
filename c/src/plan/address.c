@@ -207,7 +207,7 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 	size_t                       i;
 
 	/*
-	 * Four sources are planned from here and each goes where its work is.
+	 * Five sources are planned from here and each goes where its work is.
 	 *
 	 * SLAAC is deliberately not one of them and is not a gap either: given a
 	 * router advertisement the kernel builds the address itself, so there is
@@ -226,6 +226,16 @@ void ncfg_plan_source(ncfg_builder_t *builder, const ncfg_interface_t *interface
 		return;
 	case NCFG_ADDRESS_SOURCE_DHCP6:
 		ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_DHCP6,
+		    ncfg_plan_internf(builder->plan, "addressing[%zu]", index), base, out);
+		return;
+	case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
+		/* A client netcfgd supervises, exactly as the two DHCP sources are:
+		 * RFC 3927 is a protocol and `autoip.h` says why delegating it is this
+		 * tree's answer. Planned per source rather than per interface because
+		 * a document may ask for link-local beside a routable address -- which
+		 * `document.h` requires, and is the whole reason `--force-bind` is
+		 * passed. */
+		ncfg_plan_backend(builder, interface->name, NCFG_BACKEND_LINK_LOCAL,
 		    ncfg_plan_internf(builder->plan, "addressing[%zu]", index), base, out);
 		return;
 	case NCFG_ADDRESS_SOURCE_DELEGATED:

@@ -190,6 +190,9 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	 * (project.md 10.290, 0050).
 	 */
 	case NCFG_BACKEND_DHCP6:
+	/* The tenth, and the first kind this build carries out that the Rust
+	 * has no word for at all -- 0266's situation rather than a gap. */
+	case NCFG_BACKEND_LINK_LOCAL:
 		return 1;
 	/* Answered above, before the verb was looked at, because the sentence is
 	 * the kind's rather than the verb's. Named here rather than removed so
@@ -723,6 +726,8 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_supplicant(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_PPPOE:
 		return start_session(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_LINK_LOCAL:
+		return ncfg_autoip_start(run_dir, iface, service->autoip_program, err, err_size);
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
 		break;
@@ -847,6 +852,10 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		return stop_access_point(run_dir, iface, service->patience_ms, err, err_size);
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		return ncfg_ra_stop(run_dir, iface, err, err_size);
+	case NCFG_BACKEND_LINK_LOCAL:
+		/* By the pid netcfgd recorded, never by `--kill <iface>`, which would
+		 * stop whichever client is on the interface. `autoip.h` argues it. */
+		return ncfg_autoip_stop(run_dir, iface, err, err_size);
 	case NCFG_BACKEND_OPENVPN:
 		/*
 		 * Through its own management socket, never by signalling a process

@@ -65,6 +65,7 @@
  */
 #include "ncfg/observe.h"
 
+#include "ncfg/autoip.h"
 #include "ncfg/base.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/hostapd.h"
@@ -152,6 +153,17 @@ static pid_t pid_of_backend(const ncfg_observed_backend_t *backend, const char *
 
 	*answerable = 1;
 	switch ((ncfg_backend_kind_t)backend->kind) {
+	case NCFG_BACKEND_LINK_LOCAL:
+		/*
+		 * **Always answerable, unlike the four below**, and for the opposite
+		 * reason to the DHCP arm's. Those cannot answer when the pid file is
+		 * missing, because the file is the daemon's and its absence says
+		 * netcfgd was never told. This file is netcfgd's own, and when it is
+		 * gone -- which `KillMode=process` makes ordinary -- the client is
+		 * still findable by the arguments netcfgd passed. So the answer here
+		 * is `yes` or `no` and never `cannot tell`.
+		 */
+		return ncfg_autoip_running_pid(run_dir, backend->interface);
 	case NCFG_BACKEND_SUPPLICANT:
 	case NCFG_BACKEND_ACCESS_POINT:
 	case NCFG_BACKEND_ROUTER_ADVERT:

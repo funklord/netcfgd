@@ -485,25 +485,11 @@ static void warn_unported(ncfg_builder_t *builder)
 			 * this build. */
 			case NCFG_ADDRESS_SOURCE_REPORTED:
 				break;
+			/* Applied since `autoip.h` landed: a client netcfgd supervises,
+			 * planned as `backend.start` from `address.c` like the two DHCP
+			 * sources. The arm came out of this list in the same commit as the
+			 * pass that landed, which is 0263's rule for it. */
 			case NCFG_ADDRESS_SOURCE_LINK_LOCAL:
-				/*
-				 * **The judgement above this arm was right and the sentence
-				 * under it contradicted it.** "Not yet applied by this
-				 * build" is a promise that a later release applies it, and
-				 * the reason given for keeping the wording was that it is
-				 * the Rust's own -- which is the argument 10.211 says does
-				 * not settle anything, because the Rust's sentence is about
-				 * the Rust. Re-checked against `crates/` rather than
-				 * inherited: `crates/netcfgd-plan/src/lib.rs:4033` is this
-				 * same warning on this same arm, and outside the model and
-				 * the compiler `AddressSource::LinkLocal` has no reader in
-				 * either language. So there is no release to wait for, and
-				 * this is `warn_unbuilt`'s sentence rather than a promise.
-				 */
-				ncfg_plan_warn_unbuilt(builder, interface->name,
-				    "link-local addressing is accepted and no pass applies "
-				    "it: nothing claims an RFC 3927 `169.254.0.0/16` address "
-				    "on the interface");
 				break;
 			default:
 				break;

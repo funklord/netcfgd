@@ -612,13 +612,83 @@ static void link_local_addressing_is_not_something_to_wait_for(void)
 	    "{\"name\":\"eth0\",\"addressing\":[{\"source\":\"link_local\"}]}", "", "",
 	    "\"links\":[" PLANFIX_LINK("eth0", "") "]", &document, &observed);
 
-	check(plan && planfix_warned(plan, "nothing claims an RFC 3927 `169.254.0.0/16` address"),
-	    "link-local addressing is named by what nobody does with it");
-	check(planfix_whole(planfix_warning_with(plan, "link-local addressing is accepted"),
-	    PLANFIX_UNBUILT_TAIL),
-	    "and marked as nobody's gap, in a sentence that arrives whole");
+	/* **Turned round rather than deleted**, which is `plan_test.c`'s rule for
+	 * the same pass: the case that asserted the warning now asserts the
+	 * action, so a pass that disappears again fails here too. */
+	check(plan && !planfix_warned(plan, "nothing claims an RFC 3927 `169.254.0.0/16` address"),
+	    "link-local addressing is acted on rather than named");
+	check(plan && planfix_action(plan, "backend.start") != NULL,
+	    "  by starting the client that claims the address");
 	check(plan && !planfix_warned(plan, "not yet applied by this build"),
-	    "and no longer as a release this port owes anybody");
+	    "and not as a release this port owes anybody");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * **An IPv4LL client the document stopped asking for is stopped**, and the
+ * teardown pass is the half that has to be written down rather than inferred.
+ *
+ * `backend_wanted` in `plan/backend.c` answers "wanted" from its default arm
+ * for any kind no pass names, which is the permissive direction on purpose: a
+ * kind nothing starts should not be stopped. For a kind something *does* start
+ * it is the wrong answer, and the cost is not theoretical -- the `pppoe` arm
+ * exists in that switch because `pppd` held a line up with `persist` after its
+ * device was deleted, for ever. An IPv4LL client left running keeps a
+ * `169.254/16` address nobody asked for, and `--force-bind` means it keeps it
+ * alongside whatever address replaced it.
+ *
+ * Three cases rather than one, because the middle one is what a wrong fix
+ * breaks: naming the kind in the switch without asking the document would stop
+ * a client on every reconcile.
+ */
+static void an_ipv4ll_client_follows_the_document(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	const ncfg_action_t *stop;
+	ncfg_plan_t         *plan;
+
+	/* Still asked for, and already running: neither started again nor stopped. */
+	plan = planfix_plan(PORT_DEVICE,
+	    "{\"name\":\"eth0\",\"addressing\":[{\"source\":\"link_local\"}]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "],\"backends\":[{\"kind\":\"link_local\","
+	    "\"interface\":\"eth0\",\"running\":true}]",
+	    &document, &observed);
+	check(plan && planfix_count(plan, "backend.start") == 0u,
+	    "a running IPv4LL client the document still asks for is not started again");
+	check(plan && planfix_count(plan, "backend.stop") == 0u,
+	    "  and is not stopped either, which is what asking the document buys");
+	planfix_release(plan, document, observed);
+
+	/* The addressing is gone from the interface: the client goes with it. */
+	plan = planfix_plan(PORT_DEVICE, "{\"name\":\"eth0\"}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "],\"backends\":[{\"kind\":\"link_local\","
+	    "\"interface\":\"eth0\",\"running\":true}]",
+	    &document, &observed);
+	stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+	check(plan && planfix_count(plan, "backend.stop") == 1u,
+	    "a running IPv4LL client the document no longer asks for is stopped");
+	check(stop && stop->op.u.backend.kind == (int)NCFG_BACKEND_LINK_LOCAL,
+	    "  and it is the IPv4LL client's own backend that is stopped");
+	check(stop && stop->reason.field && strcmp(stop->reason.field, "addressing") == 0,
+	    "  named by the block it went out of, which is `addressing`");
+	planfix_release(plan, document, observed);
+
+	/*
+	 * **And a `dhcp4` client is not stopped by a document that asks only for
+	 * link-local**, which is the case the old two-valued mapping would have
+	 * got wrong in the other direction. `addressing_asks_for` used to answer
+	 * for *dhcp6* whenever the kind was not `dhcp4`; a third kind reaching it
+	 * is what turned that from unused into wrong.
+	 */
+	plan = planfix_plan(PORT_DEVICE,
+	    "{\"name\":\"eth0\",\"addressing\":[{\"source\":\"link_local\"},"
+	    "{\"source\":\"dhcp4\"}]}", "", "",
+	    "\"links\":[" PLANFIX_LINK("eth0", "") "],\"backends\":[{\"kind\":\"dhcp4\","
+	    "\"interface\":\"eth0\",\"running\":true}]",
+	    &document, &observed);
+	check(plan && planfix_count(plan, "backend.stop") == 0u,
+	    "and a DHCP client beside a link-local address is left alone");
 	planfix_release(plan, document, observed);
 }
 
@@ -1072,6 +1142,7 @@ int main(void)
 
 	a_bluetooth_block_is_not_something_to_wait_for();
 	link_local_addressing_is_not_something_to_wait_for();
+	an_ipv4ll_client_follows_the_document();
 	the_ethtool_fields_nothing_encodes_are_not_something_to_wait_for();
 	a_probe_block_is_the_daemons_and_its_answer_is_acted_on();
 	a_modem_block_is_the_daemons_and_the_gap_is_named_exactly();

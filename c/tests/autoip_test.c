@@ -83,16 +83,37 @@ static void with_nothing_running_the_answers_are_the_quiet_ones(const char *run)
 	    "and stopping nothing is success, because it is the state asked for");
 }
 
+/*
+ * **The path is deliberately not named `avahi-autoipd`**, and the first
+ * version of this check was `/nonexistent/avahi-autoipd` -- which contains the
+ * conventional name, so `strstr(message, "avahi-autoipd")` matched whether the
+ * refusal named the path asked for or the name nobody asked for. It passed
+ * against both, which is to say it was asking nothing. A basename that shares
+ * no text with the constant is what makes the two answers separable.
+ */
 static void an_absent_client_is_refused_by_name(const char *run)
 {
 	char message[NCFG_ERROR_MAX];
 
 	message[0] = '\0';
-	check(!ncfg_autoip_start(run, "lan0", "/nonexistent/avahi-autoipd", message,
+	check(!ncfg_autoip_start(run, "lan0", "/nonexistent/ipv4ll-stand-in", message,
 	      sizeof(message)) &&
-	    strstr(message, "avahi-autoipd") != NULL &&
+	    strstr(message, "/nonexistent/ipv4ll-stand-in") != NULL &&
 	    strstr(message, "install") != NULL,
-	    "a machine with no IPv4LL client is told which one to install");
+	    "an explicit client that is not there is refused by the path asked for");
+	/*
+	 * **The other branch -- no path given, so the conventional name is looked
+	 * for -- is deliberately not checked here, and could not be checked
+	 * safely.** `ncfg_backend_find_program` searches `/usr/sbin` before
+	 * `PATH`, which `backend_run.c` argues at length after inverting it broke
+	 * finding the real hostapd; so a stand-in on `PATH` is found on a machine
+	 * with no client installed and ignored on one that has it. A check
+	 * written that way would spawn a real IPv4LL client from the unit suite on
+	 * exactly the machines where it mattered, and pass on this one because
+	 * nothing is installed -- a verdict about the machine rather than the
+	 * source. The program parameter is the seam, which is what every other
+	 * case here uses.
+	 */
 }
 
 /* --------------------------------------------------------- the arguments */

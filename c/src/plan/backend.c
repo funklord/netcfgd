@@ -46,11 +46,39 @@
 #include <string.h>
 
 /* Whether this interface's addressing asks for a client of this kind. */
+/*
+ * Whether the document asks this interface for the addressing a backend of
+ * this kind provides.
+ *
+ * **Spelled as a switch because the mapping is no longer two-valued.** It was
+ * a ternary on `kind == NCFG_BACKEND_DHCP4`, which silently answered *dhcp6*
+ * for every other kind in the enum -- correct while only the two DHCP clients
+ * reached it, and a wrong answer waiting for the third. `link_local` is the
+ * third, and the one it would have been wrong about asks whether to stop a
+ * running client.
+ *
+ * The default is unreachable from `backend_wanted` below, which names each
+ * kind that gets here; it answers no rather than guessing, so a kind added
+ * without an arm fails to stop a backend rather than stopping the wrong one.
+ */
 static int addressing_asks_for(const ncfg_interface_t *interface, int kind)
 {
-	int    source_kind = kind == NCFG_BACKEND_DHCP4 ? NCFG_ADDRESS_SOURCE_DHCP4 :
-	    NCFG_ADDRESS_SOURCE_DHCP6;
+	int    source_kind;
 	size_t i;
+
+	switch (kind) {
+	case NCFG_BACKEND_DHCP4:
+		source_kind = NCFG_ADDRESS_SOURCE_DHCP4;
+		break;
+	case NCFG_BACKEND_DHCP6:
+		source_kind = NCFG_ADDRESS_SOURCE_DHCP6;
+		break;
+	case NCFG_BACKEND_LINK_LOCAL:
+		source_kind = NCFG_ADDRESS_SOURCE_LINK_LOCAL;
+		break;
+	default:
+		return 0;
+	}
 
 	for (i = 0; i < interface->addressing_count; i++) {
 		if (interface->addressing[i].kind == source_kind) {
@@ -143,6 +171,17 @@ static int backend_wanted(const ncfg_builder_t *builder, const ncfg_observed_bac
 	switch (backend->kind) {
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_DHCP6:
+	case NCFG_BACKEND_LINK_LOCAL:
+		/*
+		 * **The IPv4LL client is here rather than in the default arm, and the
+		 * default arm is why it has to be.** That arm answers "wanted" for
+		 * any kind no pass names, so a client whose `config = "link-local"`
+		 * was deleted would keep its address and its process for ever -- the
+		 * same shape as the `pppoe` case below, which is in this switch
+		 * because `pppd` held a line up with `persist` after its device was
+		 * removed. An IPv4LL client is cheaper to leave running than a
+		 * dial-up line and it is still an address nobody asked for.
+		 */
 		*field = "addressing";
 		interface = ncfg_plan_interface(builder->desired, backend->interface);
 		return interface && addressing_asks_for(interface, backend->kind);

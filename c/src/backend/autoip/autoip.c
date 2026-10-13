@@ -90,10 +90,23 @@ pid_t ncfg_autoip_running_pid(const char *run, const char *iface)
 	 * the whole of the ownership claim: a pid file outlives its process and pids
 	 * are recycled. */
 	recorded = ncfg_process_pid_of(pid_path, marker[0]);
-	if (recorded <= 0) {
-		return 0;
+	if (recorded > 0) {
+		return ncfg_process_pid_by_markers(marker, 2u) == recorded ? recorded : 0;
 	}
-	return ncfg_process_pid_by_markers(marker, 2u) == recorded ? recorded : 0;
+	/*
+	 * **No record, so ask the machine** -- which is this module's whole
+	 * adoption, and it lives here because `backend_adopt.c` keys on a pid
+	 * file the daemon wrote plus a path it recites, and this client has
+	 * neither. `KillMode=process` leaves backends running across a netcfgd
+	 * stop and the stop takes `/run/netcfgd` with it (0134, 0142), so after
+	 * one the record is gone and the client is not. Starting a second would
+	 * put two processes probing for the same address.
+	 *
+	 * The markers are what make the question answerable at all, and they are
+	 * the weakest of the ten -- `autoip.h` says so rather than letting this
+	 * read as the equal of radvd's.
+	 */
+	return ncfg_process_pid_by_markers(marker, 2u);
 }
 
 int ncfg_autoip_stop(const char *run, const char *iface, char *err, size_t err_size)
@@ -173,8 +186,12 @@ int ncfg_autoip_start(const char *run, const char *iface, const char *program, c
 	 * over: netcfgd's own already running is the state this produces, and a
 	 * second client probing for the same address would fight the first.
 	 */
-	if (ncfg_autoip_running_pid(run, iface) > 0) {
-		return 1;
+	pid = ncfg_autoip_running_pid(run, iface);
+	if (pid > 0) {
+		/* Re-recorded rather than merely accepted: the one netcfgd found may
+		 * have been adopted from a run directory that is gone, and a stop
+		 * later needs the file. Writing it is idempotent. */
+		return record_pid(run, iface, pid, err, err_size);
 	}
 	if (!ncfg_autoip_run_dir(run, dir, sizeof(dir), err, err_size) ||
 	    !ncfg_backend_make_dir(dir, 0755, err, err_size) ||
@@ -198,10 +215,14 @@ int ncfg_autoip_start(const char *run, const char *iface, const char *program, c
 		use = (stat(program, &about) == 0 && S_ISREG(about.st_mode)) ? program : NULL;
 	}
 	if (!use) {
+		/* **The thing looked for, not the conventional name.** An operator who
+		 * pointed `NCFG_AVAHI_AUTOIPD` at a path wants to be told that path is
+		 * not there; being told `avahi-autoipd` is not installed sends them to
+		 * look at a machine that may well have one. */
 		ncfg_error_set(err, err_size,
 		    "no IPv4LL client found for %s: `%s` is not installed, so a `link-local` "
 		    "address cannot be claimed; install avahi-autoipd", iface,
-		    NCFG_AUTOIP_PROGRAM);
+		    (program && program[0]) ? program : NCFG_AUTOIP_PROGRAM);
 		return 0;
 	}
 	/*

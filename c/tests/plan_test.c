@@ -1719,12 +1719,10 @@ static void nothing_the_document_asks_for_is_passed_over_in_silence(void)
 	    "a qdisc block is acted on rather than named");
 	check(plan && !warned_about(plan, "a `rule` block") && has_name(plan, "rule.add"),
 	    "a rule block is acted on rather than named");
-	/* The product's gap rather than the port's -- and the sentence now says
-	 * that instead of contradicting it. It used to be the Rust's own, which
-	 * promises "not yet applied by **this build**"; `plan_gaps_test.c` carries
-	 * the case that checks the whole of the replacement. */
-	check(plan && warned_about(plan, "nothing acts on it in the Rust either"),
-	    "and link-local is marked as nobody's gap rather than as this port's");
+	/* And link-local, which was the last arm of `warn_unbuilt` and is a pass
+	 * now. Turned round for the two above's reason rather than deleted. */
+	check(plan && !warned_about(plan, "nothing acts on it in the Rust either"),
+	    "and link-local is acted on rather than named as nobody's gap");
 	release(plan, document, observed);
 }
 

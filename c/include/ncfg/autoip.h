@@ -67,6 +67,19 @@
 /* The conventional name, searched for when a caller passes no program. */
 #define NCFG_AUTOIP_PROGRAM "avahi-autoipd"
 
+/*
+ * What to run instead, for a test and for a machine that keeps its client
+ * somewhere else. The same arrangement `NCFG_SUPPLICANT_PROGRAM_ENV` and
+ * `NCFG_OPENVPN_PROGRAM_ENV` have, and named consistently with them.
+ *
+ * **An explicit path that is not a regular file reads as "not installed"**
+ * rather than being run and failing, which is `dhcp.c`'s `program_for` rule.
+ * That is what lets a check say "this machine has no IPv4LL client" by naming
+ * a path in its own directory, which is the only way to say it on a machine
+ * that does have one.
+ */
+#define NCFG_AUTOIP_PROGRAM_ENV "NCFG_AVAHI_AUTOIPD"
+
 /* The argument that makes the client obey `document.h`'s rule, and the marker
  * ownership is read from. One string, used for both, so the two cannot drift. */
 #define NCFG_AUTOIP_FORCE_BIND "--force-bind"

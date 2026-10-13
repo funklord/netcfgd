@@ -81,6 +81,7 @@
 #include <stddef.h>
 
 #include "ncfg/apply.h"
+#include "ncfg/autoip.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/dns.h"
 #include "ncfg/document.h"
@@ -336,6 +337,15 @@ typedef struct {
 	 * `/usr/libexec`.
 	 */
 	ncfg_dhcp_machine_t dhcp;
+	/*
+	 * The IPv4LL client to run, or NULL to find the conventional name.
+	 *
+	 * One member rather than a struct, because unlike a DHCP client there is
+	 * nothing else about the machine this needs: `avahi-autoipd` takes no
+	 * configuration file, writes no pid file and runs an action script from a
+	 * path netcfgd cannot move. `autoip.h` has why each of those is so.
+	 */
+	const char *autoip_program;
 	/* What each interface's client is started with, resolved. */
 	const ncfg_service_client_metric_t *client_metrics;
 	size_t                              client_metric_count;

@@ -2097,8 +2097,11 @@ vm-image:
 # is worse than a clean stop and better than hanging for ever.
 #
 # **600 seconds, from a measurement rather than a feeling.** Across two full
-# sweeps of all 83 scripts, every one completed inside 150 seconds, so this is
-# four times the measured worst case. `make live LIVE_TIMEOUT=1200` raises it,
+# sweeps of the 83 scripts there were on 2026-10-11, every one completed inside
+# 150 seconds, so this is four times the measured worst case. `link_local.sh`
+# arrived afterwards and is not in that figure: timed on its own, under a
+# second. The date is here because the count is the kind of number that goes
+# stale the next time somebody adds a script, which is exactly what happened. `make live LIVE_TIMEOUT=1200` raises it,
 # and `LIVE_TIMEOUT=0` removes it -- coreutils treats a zero duration as no
 # timeout -- which is what to reach for when bisecting a slow script rather
 # than editing this file.
@@ -2305,6 +2308,13 @@ live:
 	@# in argv but has no instance lock, so a lost handle means a second client
 	@# and a second lease rather than a refusal.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/udhcpc_orphan.sh"
+	@# The tenth backend kind, wired end to end: `config = "link-local"` to a
+	@# client running on the interface and back. The unit suite drives every
+	@# part of this separately, so what this asks is whether they are joined --
+	@# a missing arm in the plan, the executor or the observation leaves a
+	@# green suite and a setting that does nothing, which is what the warning
+	@# this feature replaced described for two generations.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/link_local.sh"
 	@# The backend whose mark cannot be read from the process: dhcpcd destroys
 	@# argv and environ alike, so netcfgd asks it over its control socket which
 	@# config it was started with. Makes its own namespace, like dhcpcd.sh.

@@ -1122,6 +1122,7 @@ typedef struct {
 	const char              *radvd_program;
 	const char              *openvpn_program;
 	const char              *supplicant_program;
+	const char              *autoip_program;
 	/*
 	 * What resolves a credential hostapd or the supplicant is given.
 	 *
@@ -1317,6 +1318,7 @@ typedef struct {
 	const char *radvd_program;
 	const char *openvpn_program;
 	const char *supplicant_program;
+	const char *autoip_program;
 } ncfg_main_world_where_t;
 
 /*

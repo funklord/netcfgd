@@ -886,7 +886,15 @@ typedef enum {
 	NCFG_BACKEND_PPPOE,
 	NCFG_BACKEND_OPENVPN,
 	NCFG_BACKEND_DNS,
-	NCFG_BACKEND_ROUTER_ADVERT
+	NCFG_BACKEND_ROUTER_ADVERT,
+	/*
+	 * An IPv4LL client, for `config = "link-local"`. Appended rather than
+	 * sorted in, so no existing value is renumbered -- and the tenth is the
+	 * C's own: the Rust has no word for it, which `ncfg status` shows on a
+	 * machine that configures one and nowhere else. `autoip.h` has the whole
+	 * of it, including why the ownership claim here is the weakest of the ten.
+	 */
+	NCFG_BACKEND_LINK_LOCAL
 } ncfg_backend_kind_t;
 
 const char *ncfg_backend_kind_name(int kind);
