@@ -12767,6 +12767,22 @@ no systemd here to impose the unit's sandbox, which `make vm-sandbox` exists
 to answer. So the suite's exit code is not the acceptance signal on a sysvinit
 host and the absence of failing checks is.
 
+**One thing the suite cannot establish, said here because the check looks as
+though it does.** `link_local.sh` asserts the exact argv netcfgd passes -- `-D
+-w --force-bind <iface>` -- against a stand-in that accepts anything, so both
+sides of that comparison were written in one sitting by one hand. It is a
+regression pin and not a validation, and the flags themselves came from
+`avahi-autoipd`'s upstream documentation because the client is not installed
+here and has no local man page. Only a real client can confirm them.
+
+What keeps that an acknowledged gap rather than a hidden one is that a wrong
+flag cannot be quiet. `ncfg_autoip_start` turns a non-zero exit into the
+client's own complaint lines, and an exit of 0 with no process carrying
+netcfgd's markers into a refusal saying netcfgd has nothing it could stop
+later -- which is the arm a careless version would omit, because that is the
+one where the program appeared to work. So the failure mode of being wrong
+about upstream is a refused apply with a reason attached.
+
 **That last script was then run where it can run**, rather than left as a
 pointer: `make vm-sandbox` exits 0 with `sandbox_writes.sh: all checks passed`
 in the Debian guest, and the three checks it adds there are its own controls --

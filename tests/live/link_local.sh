@@ -179,6 +179,21 @@ check "  and it carries both of the arguments netcfgd identifies it by" \
 
 # The four arguments `autoip.h` calls load-bearing, as one line, so a change to
 # any of them is one failure naming the whole invocation rather than four.
+#
+# **This pins the argv; it does not validate it, and the difference matters.**
+# The stand-in above accepts anything -- it records its arguments and
+# daemonises -- so both sides of this comparison were written in one sitting by
+# one hand, which `evidence.md` calls one witness rather than two. The flags
+# came from `avahi-autoipd`'s upstream documentation, because it is not
+# installed on the machine this was written on and has no local man page
+# (project.md 10.479). Only a real client can say they are right.
+#
+# What makes that an acceptable gap rather than a hidden one is that being
+# wrong about a flag cannot be quiet: `ncfg_autoip_start` turns a non-zero exit
+# into the client's own complaint lines, and -- the case a careless version
+# would miss -- an exit of 0 with no process carrying netcfgd's markers into a
+# refusal saying netcfgd has nothing it could stop later. So a wrong flag is a
+# failed apply with a reason, not an address nobody claimed.
 check "and the client was started with exactly the four arguments that matter" \
 	"$(cat "$work/invocations" 2>/dev/null || true)" "-D -w --force-bind $iface"
 
