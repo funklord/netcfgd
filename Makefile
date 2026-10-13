@@ -2224,6 +2224,24 @@ live:
 	@# question project.md 10.338 asks had no witness at all. It calls `apply`
 	@# nowhere, which is the point of it.
 	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 sh tests/live/config_arrives.sh"
+	@# **The same eleven questions of the other config-watching mechanism.**
+	@# `watch_test.c` makes `ncfg_watch_open_polling` public and asks both the
+	@# same question, because the fallback "only runs when something else has
+	@# already gone wrong, which makes it exactly the code nobody has ever seen
+	@# work". The daemon's matching seam is `--poll-config`, and nothing here
+	@# used it -- so the path was covered at unit level and not end to end.
+	@#
+	@# That gap is specific to this machine's history rather than theoretical:
+	@# two real defects were found only because it had run out of inotify
+	@# instances and the daemon was therefore polling (project.md 10.477), and
+	@# the fixed sleeps in that script are 6 seconds for the same reason. With
+	@# the instances back, nothing exercised the slower path at all.
+	@#
+	@# The run proves which mechanism it got, from the daemon's own log line, so
+	@# a flag silently dropped fails rather than passing as a second inotify
+	@# run. Controlled by pointing that assertion at `inotify` while the daemon
+	@# was told to poll: 1 of 12 failed, and it was that one.
+	@timeout -k 30 $(LIVE_TIMEOUT) unshare -rn sh -c "NCFG_LIVE=1 NCFG_LIVE_DAEMON_FLAGS=--poll-config sh tests/live/config_arrives.sh"
 	@# The same question one layer up, on a radio and a supplicant netcfgd
 	@# started, which is the shape 10.338 actually had. `switch_network.sh`
 	@# shares this fixture and drives it with `ncfg apply` at every step; this

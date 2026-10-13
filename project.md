@@ -13125,20 +13125,46 @@ the headroom is fine with them alive. What the reaping bought was the
 hundredfold case, and that is what holds. A count is not a trend, and a
 pattern that cannot match the thing it is counting is not a count at all.
 
-### And the healthy machine stopped testing the path the sick one did
+### And the healthy machine stopped testing the path the sick one did -- end to end
 
-This is the uncomfortable corollary of the paragraph above, which says a
-machine with no spare instance runs a different netcfgd rather than a slower
-one. With instances available, `ncfg_watch_open` succeeds here and **the
-mtime-polling fallback is no longer exercised by anything on this machine** --
-including by the suite. Both defects this entry credits to the degraded
-machine were real and neither would be found now.
+With instances available, `ncfg_watch_open` succeeds here, so the slower path
+stops being the one the suite runs. That is the uncomfortable corollary of the
+paragraph above: a machine with no spare instance runs a different netcfgd
+rather than a slower one, and both defects this entry credits to the degraded
+machine would be invisible on a healthy one.
 
-That is an argument for a seam rather than for leaving the machine broken, and
-naming whose it is matters more than naming which: the fallback is reached only
-when `inotify_init1` fails, so forcing it from a test means either a knob the
-daemon reads or exhausting the instances on purpose, and the second is the
-thing this entry exists to complain about. Written here rather than acted on.
+**The first version of this section said the fallback was exercised by nothing
+here, and asked for a seam. Both halves were wrong, and the tree had answered
+it twice.** `watch_test.c` makes `ncfg_watch_open_polling` public and asks both
+mechanisms the same assertions, with its header giving the reason in the terms
+this section was reaching for -- the fallback runs only once something else has
+gone wrong, "which makes it exactly the code nobody has ever seen work". And
+the daemon carries `--poll-config`, in `--help`, which forces the same path
+from outside. So the seam existed at both levels and the unit tier covers it on
+every `make -C c test`, whatever the machine's inotify headroom.
+
+**What was actually missing was narrower and is now closed.** Nothing in
+`tests/live` used `--poll-config`, so the DAEMON on the polling path -- the
+5-second tick, which is what changed the timing in both of those defects -- had
+no end-to-end witness. `config_arrives.sh` takes `NCFG_LIVE_DAEMON_FLAGS` now
+and `make live` runs it twice, which puts its eleven questions to both
+mechanisms for the cost of one line.
+
+It proves which mechanism it got, from the daemon's own `watching ... via ...`
+line, because a flag silently dropped would otherwise produce a second inotify
+run and twelve passing checks. Asserted strictly only under the flag: without
+it the mechanism is the machine's answer and pinning `inotify` would fail this
+file on exactly the exhausted host this entry is about. Controlled by pointing
+the strict assertion at `inotify` while the daemon was told to poll -- 1 of 12
+failed, and it was that one.
+
+**Three times in one session a question was handed over that the tree had
+already decided somewhere else**: this, `sandbox_writes.sh` (answered by the
+`vm-sandbox` target's own comment), and the cast sweep in 10.481 (which did not
+exist). `working-practice.md` says a wrongly-deferred question is caught by
+nothing, and the common thread in all three is that the answer was in a
+comment at the place doing the work rather than in a document -- which is also
+what that rule says to go looking for.
 
 ## 10.476 The live suite's cleanups raced the daemon they had just killed
 

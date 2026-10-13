@@ -51,9 +51,25 @@ build="${NCFG_LIVE_BUILD:-$repo/c}"
 
 # Kept for the reason drift.sh keeps it: asked of the binary rather than
 # inferred from the path, so a build from before 0265 still gets the flag.
-daemon_flags=
+#
+# **`NCFG_LIVE_DAEMON_FLAGS` exists so this file can be asked its own questions
+# of the OTHER config-watching mechanism**, which is `watch_test.c`'s
+# arrangement one tier up: that suite makes `ncfg_watch_open_polling` public
+# and asks both mechanisms the same question, because "the polling fallback
+# only runs when something else has already gone wrong, which makes it exactly
+# the code nobody has ever seen work."
+#
+# The daemon has the matching seam in `--poll-config`, and until now nothing in
+# `tests/live` used it -- so the mtime-polling path was covered at unit level
+# and not end to end, on a machine with inotify to spare. That mattered here
+# more than anywhere: two real defects were found only because this machine was
+# once exhausted of inotify instances and the daemon was therefore polling
+# (project.md 10.477), and the fixed sleeps below are 6 seconds precisely
+# because of it. The waits are sized for the slower path, so asking these
+# questions of it is the cheaper direction rather than the harder one.
+daemon_flags="${NCFG_LIVE_DAEMON_FLAGS:-}"
 if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
-	daemon_flags=--try-the-c-daemon
+	daemon_flags="$daemon_flags --try-the-c-daemon"
 fi
 
 skip() {
@@ -156,6 +172,33 @@ start_daemon
 awaits 'ip -br addr show arrive0 2>/dev/null | grep -q 10.20.0.1' || true
 check "the daemon converged on what it was started with" \
 	"$(has_address arrive0 10.20.0.1)" 1
+
+# **The run says which mechanism it exercised, and that is what stops a second
+# invocation being a vacuous repeat of the first.** Running this file again
+# with `NCFG_LIVE_DAEMON_FLAGS=--poll-config` is only worth anything if the
+# flag reached the daemon; a flag silently dropped would produce an identical
+# inotify run, eleven passing checks, and the impression that the polling path
+# had been covered.
+#
+# **Asserted strictly only where it was asked for**, which is the asymmetry
+# that matters. With the flag, `mtime polling` is the answer or the flag did
+# not work. Without it, the mechanism is the MACHINE's answer and not this
+# script's business: a host with no spare `fs.inotify.max_user_instances`
+# legitimately reports polling, and pinning `inotify` there would make this
+# file fail for the one reason 10.477 says it must not -- being run somewhere
+# that has already run out. So the default case asserts only that the daemon
+# said what it was doing.
+case " $daemon_flags " in
+*" --poll-config "*)
+	check "  and watched the configuration by mtime polling, as asked" \
+		"$(grep -c 'watching .* via mtime polling,' "$work/daemon.log" || true)" 1
+	;;
+*)
+	check "  and said which mechanism it is watching the configuration by" \
+		"$(grep -cE 'watching .* via (inotify|mtime polling),' "$work/daemon.log" \
+		    || true)" 1
+	;;
+esac
 
 # --------------------------------------------- 1: netcfgd.conf itself changes
 
