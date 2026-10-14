@@ -12385,6 +12385,62 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.483 Fold: link-local landed, and what the next session inherits
+
+Written at 95 per cent of the weekly window, under `CLAUDE.md`'s fold rule.
+The detail is in the entries this points at; what is here is the state.
+
+### What landed, and where its record is
+
+Link-local addressing is wired end to end and accepted in both tiers --
+10.480 for the wiring and the three code faults the wiring exposed, 10.481 for
+the lens set derived from them, 10.482 for the leaked directory and the
+counting faults. 10.477 is corrected twice over: once because the bus reaping
+it called undone had been done, and again because its claim that nothing
+exercised the mtime-polling fallback was wrong in both halves.
+
+`warn_unported` has one `warn_unbuilt` site left, `bluetooth_count != 0`. That
+is scope rather than porting and 10.474 says whose decision it is.
+
+### Open, and none of it blocking
+
+  * **`-Werror=switch`, or soften the comments that promise a missing switch
+    arm will "fail to compile".** Measured: it warns, `make` exits 0, the
+    binary is produced. Adopting the flag breaks nothing today -- 205 source
+    and 97 test files compile clean under it -- so the cost is known and the
+    choice is a policy one. 10.481.
+  * **What left `/tmp/ncfg-watch.H0ilKH`.** Three explanations eliminated and
+    the directory removed before its mtime was read, so this is not closable
+    from here. 10.482.
+  * **`avahi-autoipd`'s argv is unvalidated**, the client not being installed
+    here. A wrong flag fails loudly rather than quietly, which is why it was
+    acceptable to land. 10.480.
+
+A next session needs none of these to start something new. The tree is green:
+`make -C c test`, `make style` both modes, `make ledger`, `make packaging`, the
+standalone gates, and `make live` with no failing check in 79 reporting
+scripts plus `make vm-sandbox` for the one the host cannot run.
+
+### A declaration cleared with a word that was not in it stays declared
+
+Not a netcfgd finding and recorded here because it happened here, to the
+session that had been quoting `running-code.md` at itself all day. Two jobs
+were declared with `~/.claude/tool/running` and cleared with
+`running done poll2` and `running done link-local`. The tool matches on the
+declared text: `poll2` appears nowhere in "both mechanisms with the control,
+plus a negative control", and the declaration said `link_local.sh` with an
+underscore. Both clears printed nothing and neither was read, so two finished
+jobs sat in the status line as running and overdue until the file was opened
+for an unrelated reason.
+
+**The failure is not the mismatch, it is that a clear reports success by
+saying nothing.** A declaration is the one record that a job was somebody's,
+which is the argument `running-code.md` makes for declaring at all -- and a
+clear that silently matches nothing leaves exactly the false record the
+mechanism exists to prevent, while looking like tidiness. Read the file after
+clearing, or clear with a word taken from the declaration rather than from
+memory of it.
+
 ## 10.482 A directory the sweep found, an explanation it refused, and four bad counts
 
 The sweep `running-code.md` asks for after a run found `/tmp/ncfg-watch.H0ilKH`
