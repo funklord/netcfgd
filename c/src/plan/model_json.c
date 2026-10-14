@@ -317,7 +317,10 @@ void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer, const ncfg_inter
 	if (word) {
 		ncfg_json_write_member_string(writer, "kind", word);
 	}
-	switch (kind->kind) {
+	/* Cast for `plan/address.c`'s reason: the field is an `int` carrying the
+	 * enum, and `-Wswitch` checks a controlling expression of enumerated type
+	 * and nothing else. */
+	switch ((ncfg_interface_kind_tag_t)kind->kind) {
 	case NCFG_KIND_BRIDGE:
 		member_strings(writer, "members", kind->bridge.members,
 		    kind->bridge.member_count);
@@ -402,10 +405,15 @@ void ncfg_plan_write_interface_kind(ncfg_json_writer_t *writer, const ncfg_inter
 		member_text(writer, "owner", kind->tun.owner);
 		member_text(writer, "group", kind->tun.group);
 		break;
+	/* **The three with nothing to write, named rather than defaulted.** All
+	 * fifteen kinds are named here, so the `default` that used to sit under
+	 * these was redundant and cost only the diagnostic: a sixteenth kind with
+	 * attributes would have written `{"kind":"..."}` and silently none of
+	 * them, which is the shape that made `--supported` report eight kinds of
+	 * ten (project.md 10.480). */
 	case NCFG_KIND_PHYSICAL:
 	case NCFG_KIND_DUMMY:
 	case NCFG_KIND_IFB:
-	default:
 		break;
 	}
 	ncfg_json_write_object_end(writer);
