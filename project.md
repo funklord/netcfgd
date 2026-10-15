@@ -12493,8 +12493,18 @@ should act, because it inherits that decision and adds no dependency; C1 and D
 are both larger than the feature, for different reasons -- one reaches the
 build, the other reaches the document's own stated intent.
 
-None of this is settled by writing it down. 10.474 says bluetooth is scope
-rather than porting and `doc/decision/` is where scope is settled.
+**Settled the same day, and B was taken.** Decision 0272 records it: netcfgd
+observes adapters and does not pair or connect, the block stays in the
+language, and the warning says so by decision rather than for want of a pass.
+The arm left `warn_unbuilt`'s list in `plan/build.c`, which was its last --
+the first time an entry has left that register by a decision instead of by a
+pass landing.
+
+So the costing above is now the record of options rejected rather than a
+question, which is what `working-practice.md` asks for: C2 is where a later
+decision to connect a paired device would start, because it inherits 0272's
+reasoning instead of contradicting it, and it would want a guest with bluez
+since `bluetoothd` is absent here.
 
 ## 10.483 Fold: link-local landed, and what the next session inherits
 
@@ -13488,6 +13498,13 @@ is the string `--name` received. Checking the expansion of each line separately,
 which is what I did first, could not have caught it.
 
 ## 10.474 What the port still owes, measured: two features and no gaps
+
+**Both are answered now and the register is empty, so this entry is history
+rather than a list of work.** Link-local landed (10.480); bluetooth was settled
+as observed and not driven by decision 0272, from the costing in 10.484. The
+heading is kept because the measurement it records was right and the method is
+the point -- read the register rather than invent work -- but nothing below is
+outstanding.
 
 Asked what to do next with the acceptance suite green, and the honest answer is
 read the register rather than invent work. `warn_unported` in
