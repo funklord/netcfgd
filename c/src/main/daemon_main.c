@@ -144,8 +144,9 @@ void ncfg_main_netcfgd_supported(void)
 
 	for (kind = 0; kind < (int)NCFG_PROTO_REQ_COUNT; kind++) {
 		/* Named means the wire can carry it, and `daemon_answer.c` switches
-		 * over the same enum with no `default`, so a kind that reaches the
-		 * dispatcher without an arm does not compile. */
+		 * over the same enum with no `default`, so `-Wswitch` names a kind
+		 * that reaches the dispatcher without an arm. A warning rather than a
+		 * build failure; `apply.c` carries why. */
 		say_one("request", ncfg_proto_request_name((ncfg_proto_request_kind_t)kind), 1,
 		    NULL);
 	}

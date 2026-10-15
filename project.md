@@ -12404,11 +12404,22 @@ is scope rather than porting and 10.474 says whose decision it is.
 
 ### Open, and none of it blocking
 
-  * **`-Werror=switch`, or soften the comments that promise a missing switch
-    arm will "fail to compile".** Measured: it warns, `make` exits 0, the
-    binary is produced. Adopting the flag breaks nothing today -- 205 source
-    and 97 test files compile clean under it -- so the cost is known and the
-    choice is a policy one. 10.481.
+  * ~~**`-Werror=switch`, or soften the comments.**~~ **Settled by the
+    copyright holder 2026-10-15: soften the comments.** Nine sites asserted
+    that a missing switch arm would fail to compile and now say that
+    `-Wswitch` names it, which is what happens. `apply.c` carries the detail
+    once, since the others defer to "`apply.c`'s rule"; `privilege.c` had the
+    flattest version of it -- "the tree builds with warnings as failures" --
+    and now points at `authorize_test.c` instead, which `daemon.h` already
+    called the `match` moved from the compiler to a test.
+
+    **What decided it was that the flag buys less than the sentence
+    suggested.** It would have cost nothing today, but a `default:` suppresses
+    `-Wswitch` even where the controlling expression is cast, 107 of this
+    tree's 114 bare switches carry one, and it would have caught none of
+    10.480's defects: a short `for` bound, a check copying that bound, and two
+    missing arms in switches that had a `default`. Comments-only, proven by
+    the diff carrying no executable line.
   * **What left `/tmp/ncfg-watch.H0ilKH`.** Three explanations eliminated and
     the directory removed before its mtime was read, so this is not closable
     from here. 10.482.

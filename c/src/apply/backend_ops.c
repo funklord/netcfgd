@@ -197,8 +197,9 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	/* Answered above, before the verb was looked at, because the sentence is
 	 * the kind's rather than the verb's. Named here rather than removed so
 	 * that this switch stays exhaustive over the taxonomy -- which is what
-	 * makes a kind added to it fail to compile instead of falling silently
-	 * into a refusal that does not fit it. */
+	 * makes `-Wswitch` name a kind added to it instead of it falling silently
+	 * into a refusal that does not fit it. A warning rather than a build
+	 * failure; `apply.c` carries why. */
 	case NCFG_BACKEND_WIREGUARD:
 	case NCFG_BACKEND_DNS:
 		break;

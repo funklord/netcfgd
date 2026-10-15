@@ -336,9 +336,9 @@ static size_t restarts_cleared_by_running(ncfg_owned_state_t *owned,
 
 /*
  * **No `default:` arm**, which is `ncfg_apply_supported`'s rule and for its
- * reason: an op added to the taxonomy makes this fail to compile rather than
- * falling silently into "records nothing", which is the half that loses an
- * object netcfgd has installed.
+ * reason: `-Wswitch` names an op added to the taxonomy rather than letting it
+ * fall silently into "records nothing", which is the half that loses an
+ * object netcfgd has installed. A warning and not a build failure.
  */
 int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 {

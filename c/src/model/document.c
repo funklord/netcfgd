@@ -440,8 +440,8 @@ int ncfg_macvlan_mode_number(int mode)
  * big-endian and refuses at any other value -- so there is nothing here to
  * derive and the two numbers are written out.
  *
- * No `default:`, which is `apply.c`'s rule and for its reason: a protocol
- * added to the enum makes this fail to compile rather than quietly answering
+ * No `default:`, which is `apply.c`'s rule and for its reason: `-Wswitch`
+ * names a protocol added to the enum rather than letting it quietly answer
  * -1 for a tag the document can express. -1 for a value outside the set, which
  * is `ncfg_bond_mode_number`'s convention and means a protocol this build must
  * not send as some other protocol.
@@ -491,8 +491,8 @@ static const char *const offload_tx_checksum[] = { "tx-checksum-ip-generic",
 	} while (0)
 
 /*
- * No `default:`, which is `apply.c`'s rule and for its reason: a field added
- * to the enum makes this fail to compile rather than quietly answering "no
+ * No `default:`, which is `apply.c`'s rule and for its reason: `-Wswitch`
+ * names a field added to the enum rather than letting it quietly answer "no
  * names", which downstream reads as an offload nobody manages.
  */
 const char *const *ncfg_offload_field_names(int field, size_t *count)

@@ -164,8 +164,24 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
  * **No `default:` arm**, which is `action.c`'s rule and for its reason: a
  * wildcard is what let a kind be added twice in this project without an
  * answer, and `-Wswitch` is the only thing that can notice. Every op is listed,
- * so an op added to the taxonomy makes this fail to compile rather than
- * quietly fall into whichever half it was not meant to be in.
+ * so `-Wswitch` names an op added to the taxonomy rather than letting it fall
+ * quietly into whichever half it was not meant to be in.
+ *
+ * **It warns; it does not stop the build, and the comments in this tree said
+ * otherwise until 2026-10-15.** There is no `-Werror` in `c/Makefile`'s
+ * `WARNINGS`: gcc prints `enumeration value ... not handled in switch`, make
+ * exits 0, and the binary is produced over the previous one. This is the
+ * canonical note, since the switches elsewhere that defer to "`apply.c`'s
+ * rule" inherit it.
+ *
+ * `-Werror=switch` was measured -- 205 source and 97 test files compile clean
+ * under it, so it would cost nothing today -- and declined by the copyright
+ * holder in favour of the comments being accurate. The flag is worth less than
+ * it looks: a `default:` suppresses `-Wswitch` even where the controlling
+ * expression is cast, 107 of this tree's 114 bare switches carry one, and it
+ * would have caught none of the defects in project.md 10.480. What the rule
+ * above buys is a named omission in the build log, which is worth having and
+ * is not a gate.
  */
 int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 {

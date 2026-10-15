@@ -26,8 +26,9 @@
  *   management socket. The Rust has `backend_pid_file`, seven kinds in one
  *   function, which is a seventh spelling of six rules. This calls the six.
  *   The one thing written here is the *mapping*, and it is a switch with no
- *   `default:` so that a kind added to the taxonomy fails to compile rather
- *   than falling quietly into "cannot answer".
+ *   `default:` so that `-Wswitch` names a kind added to the taxonomy rather
+ *   than it falling quietly into "cannot answer". A warning and not a build
+ *   failure -- `apply.c` carries why.
  *
  * WHAT ELSE A DHCP CLIENT IS ASKED WHILE IT IS UP
  *   `started_metric`: the route metric the running client was started with, and

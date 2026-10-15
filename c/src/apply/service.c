@@ -14,9 +14,9 @@
  * WHY THERE IS NO `default:` IN THE SWITCH
  *   `apply.c`'s rule and for its reason: a wildcard is what let a kind be added
  *   twice in this project without an answer, and `-Wswitch` is the only thing
- *   that can notice. Every op in the taxonomy is listed, so an op added to it
- *   fails to compile here rather than falling quietly into the arm that says
- *   this module does not carry it.
+ *   that can notice. Every op in the taxonomy is listed, so `-Wswitch` names
+ *   an op added to it rather than letting it fall quietly into the arm that
+ *   says this module does not carry it. A warning and not a build failure.
  */
 #include "ncfg/service.h"
 

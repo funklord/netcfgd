@@ -272,8 +272,11 @@ static int walk_item(const ncfg_ast_item_t *item, const char *block,
 	 * The Rust gets an exhaustive `match` here so an `Item` variant added
 	 * later fails to compile rather than slipping through unclassified; C
 	 * cannot, so this switch names all four with no `default` -- which makes
-	 * a fifth a `-Wswitch` warning under the tree's strict set, and the tree
-	 * builds with warnings as failures.
+	 * a fifth a `-Wswitch` warning under the tree's strict set. A warning and
+	 * nothing more: this tree does not build with warnings as failures, which
+	 * this comment asserted until 2026-10-15. The guarantee here is
+	 * `authorize_test.c` asserting every request is classified, which
+	 * `daemon.h` describes as the `match` moved from the compiler to a test.
 	 */
 	switch (item->kind) {
 	case NCFG_AST_ITEM_HOOK:
