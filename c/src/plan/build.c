@@ -532,9 +532,29 @@ static void warn_unported(ncfg_builder_t *builder)
 		}
 	}
 	if (desired->bluetooth_count != 0u) {
-		ncfg_plan_warn_unbuilt(builder, NULL,
-		    "a `bluetooth` block: nothing pairs the device, connects it, or brings "
-		    "a `pan` link up");
+		/*
+		 * **Not `warn_unbuilt`, and that is the whole of decision 0272.**
+		 * That helper ends "the block is kept so a configuration written now
+		 * still means this when the code arrives", which promises a pass that
+		 * is coming. For bluetooth none is: netcfgd observes adapters and
+		 * does not pair or connect, decided 2026-10-15 rather than deferred,
+		 * so the sentence an operator gets has to say that instead of
+		 * implying a debt.
+		 *
+		 * The block stays in the language because the adapter facts it labels
+		 * are real and observed -- `ncfg_observe_bluetooth` names each
+		 * adapter and resolves its rfkill switch -- and because `document.h`
+		 * had already declined to carry pairing state, that being the key
+		 * store's fact rather than netcfgd's. This warning is the other half
+		 * of that sentence, said where a configuration meets it.
+		 */
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "a `bluetooth` block labels an adapter netcfgd observes, and nothing "
+		    "here pairs a device, connects one, or brings a `pan` link up -- by "
+		    "decision rather than for want of a pass, because pairing is the "
+		    "adapter's key store to own and consent is nobody's to automate. "
+		    "`bluetoothctl` is what connects a device; netcfgd reports what it "
+		    "sees and leaves the radio alone");
 	}
 }
 

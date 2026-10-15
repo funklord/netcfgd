@@ -1680,6 +1680,19 @@ typedef struct {
  * whether a device is paired is a fact about the adapter's key store,
  * established interactively, and writing it here would be a second source of
  * truth for something netcfgd does not own.
+ *
+ * **And nothing acts on it, by decision rather than by omission** -- 0272,
+ * taken 2026-10-15. netcfgd observes Bluetooth adapters and reports them:
+ * `ncfg_observe_bluetooth` names each one and resolves its rfkill switch, and
+ * `tests/live/bluetooth.sh` checks that against a virtual controller. It does
+ * not pair, connect, or bring a `pan` link up, and it is not waiting for a
+ * pass that would. The reason is the paragraph above carried to its
+ * conclusion: a daemon reconciling unattended has nobody to ask for the
+ * consent pairing requires, so the half netcfgd could automate is the half it
+ * has no business owning.
+ *
+ * The block therefore labels facts rather than requesting actions, and
+ * `plan/build.c` says so to anyone who writes one.
  */
 typedef struct {
 	char *id;      /* the operator's handle, and the sorting key */

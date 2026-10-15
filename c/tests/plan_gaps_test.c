@@ -532,14 +532,22 @@ static void a_bluetooth_block_is_not_something_to_wait_for(void)
 	    "\"profile\":\"a2dp-sink\",\"autoconnect\":true}]", "\"links\":[]", &document, &observed);
 
 	/*
-	 * Nothing pairs the device, connects it or brings a `pan` link up -- and
-	 * nothing in the Rust does either, which is the half the old sentence left
-	 * out. "This build of the planner does not act on it" reads as a port
-	 * catching up, so an operator keeps the block and waits for a release that
-	 * is not coming.
+	 * **Turned round for the third time, and this time by a decision rather
+	 * than by a pass.** The sentence was "this build of the planner does not
+	 * act on it", which read as a port catching up; it became
+	 * `warn_unbuilt`'s "nothing acts on it in the Rust either", which stopped
+	 * blaming the port but still ends "when the code arrives". Decision 0272
+	 * says no code is arriving: netcfgd observes adapters and does not pair or
+	 * connect, because consent is not a daemon's to automate. So the warning
+	 * names a decision, and the check follows it rather than being deleted --
+	 * which is this file's rule for the link-local pass one entry over.
 	 */
-	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
-	    "a `bluetooth` block is reported as a product gap and not as a port gap");
+	check(plan && !planfix_warned(plan, "nothing acts on it in the Rust either"),
+	    "a `bluetooth` block is no longer reported as anybody's unbuilt work");
+	check(plan && planfix_warned(plan, "by decision rather than for want of a pass"),
+	    "  but as a decision, so an operator is not waiting for a release");
+	check(plan && planfix_warned(plan, "netcfgd observes"),
+	    "  and is told what netcfgd does do with the block");
 	check(plan && !planfix_warned(plan, "a `bluetooth` block is carried in the document and "
 	    "this build of the planner"),
 	    "and no longer as something a later build of this port will do");
