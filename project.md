@@ -12385,6 +12385,117 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.484 What bluetooth would cost, four ways, and whose each one is
+
+Asked for the costs rather than a proposal, so each option below carries its
+price and who owns it. `working-practice.md` warns that describing a mechanism
+thoroughly is a way of proposing it, so the longest entry here is not the
+recommendation and the recommendation says so.
+
+### What already exists, measured rather than assumed
+
+  * **The document accepts the block.** `ncfg_bluetooth_device_t` carries
+    `id`, `address`, `profile` and `autoconnect` -- and its comment already
+    settles the hardest question: no pairing state and no codec, because
+    whether a device is paired "is a fact about the adapter's key store,
+    established interactively, and writing it here would be a second source of
+    truth for something netcfgd does not own."
+  * **Observation is done.** `ncfg_observe_bluetooth` lists
+    `/sys/class/bluetooth`, names each adapter and resolves its rfkill switch.
+  * **There is a live script.** `tests/live/bluetooth.sh` makes a virtual
+    controller through `/dev/vhci`, needs real root, reads sysfs only, starts
+    no daemon, and says in its own header that pairing and audio are beyond
+    its rig because one virtual controller has nobody to talk to and Debian's
+    bluez ships no `btvirt`.
+  * **Nothing acts.** `plan/build.c` warns that nothing pairs the device,
+    connects it, or brings a `pan` link up. That arm is the whole gap.
+
+Two facts about this machine that decide more than they look like:
+**`bluetoothd` is not installed** (`bluetoothctl` and `btmgmt` are), and **the
+C core contains no D-Bus code at all** -- `grep` for it over `c/src` and
+`c/include` returns nothing. What D-Bus this project has lives in
+`adapter/netcfgd-nm`, a separate Rust binary.
+
+### A. Remove the block
+
+Cost: a configuration that uses `bluetooth` stops compiling, so it is a
+breaking change to the language for anybody who wrote one. Buys honesty at
+once and the smallest surface. Whose: the holder's, as a scope decision.
+
+### B. Keep observation, and say that is all it is
+
+The warning promises a future -- `warn_unbuilt` is the register 0263 requires
+an arm to leave when a pass lands, so a sentence sitting in it reads as owed
+work. If netcfgd observes adapters and never pairs or connects, that arm
+becomes a statement of intent rather than a debt, and `bluetooth.sh`'s
+"a green run here must not be read as Bluetooth works" becomes the documented
+boundary rather than an apology.
+
+Cost: one comment, one warning's wording, one decision record. No code, no
+dependency, no new test rig. Whose: the holder's, and it is the only option
+that costs nothing to reverse later.
+
+### C. Connect an already-paired device, and only that
+
+This is the option that inherits the document's own pairing decision instead
+of fighting it: the operator pairs, netcfgd honours `autoconnect` and
+`profile` on a device the adapter already has keys for. It splits by how
+netcfgd reaches bluez, and the two halves have very different prices.
+
+**C1, through `org.bluez` over D-Bus.** The correct interface, and it would be
+**the first D-Bus dependency in the C core**. That is a dependency decision
+rather than a feature one: it reaches the build, the packaging, the static
+archive, and every machine the daemon runs on. It also needs `bluetoothd`
+running, which is a second daemon netcfgd does not supervise and cannot start
+on a machine that has not installed it.
+
+**C2, by driving a program.** `bluetoothctl connect <address>` fits the
+pattern every other backend here uses -- `backend_run.c` spawns a program,
+watches a pid, reads a marker -- and adds no dependency to the core. The price
+is the interface: `bluetoothctl` is a REPL written for people, its output is
+not a contract, and a parser over it is the thing this project has refused
+elsewhere. `btmgmt` is the lower-level sibling and is present here too.
+
+Cost either way: a backend kind, a plan arm, an executor arm, an observation
+arm, and the ownership discipline the other nine carry. Link-local was that
+shape and took a day with a clear upstream contract; this has no equivalent of
+`-D -w --force-bind`. Whose: C1's dependency question is the holder's; the
+shape of C2's interface is a design question worth settling in
+`doc/decision/` before code.
+
+### D. Pair, connect, and bring up `pan`
+
+Pairing needs an **agent** -- the thing bluez calls back to answer a
+passkey -- and consent is interactive by nature, which is what the document's
+own comment declines to own. A daemon reconciling unattended has nobody to
+ask. `pan` adds NAP against PANU, which is a network role rather than a
+connection.
+
+Cost: the largest, and it is the only option that contradicts a decision the
+tree has already made in writing. Whose: the holder's, and it would want the
+pairing comment in `document.h` revisited first, because implementing D means
+that sentence is no longer true.
+
+### What none of them can be tested against here
+
+`bluetoothd` is absent, so C and D cannot be exercised on this machine at all,
+and `bluetooth.sh` already states its rig cannot reach pairing. That is the
+same shape as `sandbox_writes.sh` -- a check the host cannot answer -- and the
+answer there was the VM tier. So any option past B carries a guest with bluez
+installed as part of its price, not as an afterthought.
+
+### The recommendation, and it is the short one
+
+**B.** It costs a comment and a decision record, it makes the register honest
+about a gap that is a choice rather than a debt, and it matches the pairing
+decision `document.h` already took. C2 is the natural second step if netcfgd
+should act, because it inherits that decision and adds no dependency; C1 and D
+are both larger than the feature, for different reasons -- one reaches the
+build, the other reaches the document's own stated intent.
+
+None of this is settled by writing it down. 10.474 says bluetooth is scope
+rather than porting and `doc/decision/` is where scope is settled.
+
 ## 10.483 Fold: link-local landed, and what the next session inherits
 
 Written at 95 per cent of the weekly window, under `CLAUDE.md`'s fold rule.
