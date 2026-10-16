@@ -12455,14 +12455,38 @@ for it, and that target is not part of `all` for the same reason tests are not
 -- so nobody had ever built it, in a tier whose purpose is to run that script.
 `vm-skipped` builds it now.
 
-**It still fails, and now for a reason worth having.** The verdict moved from
-"the probe is not built" to "no netcfgd is running to compare against": the
-script wants a system daemon on `/run/netcfgd/netcfgd.sock` to take an
-independent reading against. That is a capability this payload does not have
-rather than a prerequisite it forgot -- the guest has systemd and root, so it
-could start one, but whether this tier runs a system daemon is a design
-question about the tier and not a missing build. Left for whoever answers it,
-with the gate now naming the real obstacle instead of an artefact.
+**The daemon is started now too, and the gate moved twice more.** The payload
+starts `c/netcfgd` for that one script and stops it before the loop moves on,
+because several of these scripts run daemons of their own in namespaces they
+make and a system daemon left bound would be in the next one's way. It waits
+for the socket, bounded, and reports rather than hanging. Measured: the socket
+binds.
+
+The verdict went from "the probe is not built" to "no netcfgd is running" to
+**"ncfg wifi status did not answer"** -- and that message was wrong, which took
+a measurement to establish and is the part worth keeping. Suspicion fell on
+the obvious thing first: the payload starts the **C** daemon and the script
+reads with the **Rust** `ncfg`, so the port's interop premise was the candidate
+explanation. It holds. Both clients against one C daemon answer byte for byte:
+
+    ncfg: no wireless device in the configuration. Name the interface, or
+    add a `device` block with a `wifi` section.
+
+Both exit 1. So the daemon answered, clearly and usefully, and the script
+called that "did not answer" -- which is `evidence.md`'s *a failing check is
+not evidence either* in one sentence of prose. The gate distinguishes the two
+causes now, and does it by asking again on failure rather than reading
+`2>&1` into `$status`, which would have been shorter and a regression: the
+parse below takes the interface from `NR == 1`, so a log line on stderr would
+become an interface name.
+
+**What association.sh still needs is a rig, not a prerequisite.** Past this
+gate it wants a wifi device in the daemon's configuration, then a radio in
+state `COMPLETED`, then that radio on a network the document describes. The
+pieces exist in this tier already -- `hwsim.sh` builds `mac80211_hwsim` radios
+and passes here -- so it is hostapd on one, a supplicant association on the
+other, and a config whose network block matches. That is its own piece of work
+and is not what "fix the prerequisites" meant.
 
 So the tier's remaining failures are `pppoe-session.sh` at one check, `nm.sh`
 at fifty-one, and one unmet capability -- against four, two of which said

@@ -67,7 +67,30 @@ ncfg="$repo/target/debug/ncfg"
 # A radio that is not associated cannot answer the question this asks. Skipping
 # is the honest outcome: "no association found" would otherwise read as a pass
 # on a machine whose wifi is simply off.
-status=$("$ncfg" wifi status 2>/dev/null) || skip "ncfg wifi status did not answer"
+# **The two reasons this exits non-zero are not the same thing, and saying so
+# costs one line.** A daemon that is not there, and a daemon that answers "no
+# wireless device in the configuration" -- which is an answer, and a helpful
+# one -- both land here. The message used to call both of them "did not
+# answer", and it cost a measurement to tell them apart: the C daemon and the
+# Rust client were both suspected of not interoperating when the daemon had
+# simply been started with no configuration naming a radio.
+# **Stdout only on the success path, and the message fetched by asking again.**
+# Reading `2>&1` into `$status` would have been the shorter spelling and a
+# regression: the lines below take the interface from `NR == 1`, so a log line
+# on stderr would be parsed as an interface name. `wifi status` is a read-only
+# query, so re-asking it once on failure costs nothing and keeps the parse
+# exactly as it was.
+status=$("$ncfg" wifi status 2>/dev/null) || {
+	said=$("$ncfg" wifi status 2>&1 || true)
+	case "$said" in
+	*"no wireless device in the configuration"*)
+		skip "the daemon has no wifi device configured, so there is nothing to compare"
+		;;
+	*)
+		skip "ncfg wifi status did not answer: ${said:-no output}"
+		;;
+	esac
+}
 interface=$(printf '%s\n' "$status" | awk 'NR == 1 { print $1 }')
 state=$(printf '%s\n' "$status" | awk 'NR == 1 { print $2 }')
 [ -n "$interface" ] || skip "no wireless interface is managed"
