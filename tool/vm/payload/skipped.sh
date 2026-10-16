@@ -70,7 +70,13 @@ needs_netns() {
 
 passed=0
 failed=0
-for script in bluetooth hwsim ppp pppoe-session delegation killmode select nm \
+# **`delegation.sh` is deliberately absent.** It needs odhcp6c, which Debian
+# does not package, so it cannot run in this guest whatever this payload
+# installs -- and `make vm-delegation` exists to build it from source and pay
+# for that separately. While it sat in this list the tier reported one failure
+# that no change here could ever clear, which is the kind of red that teaches a
+# reader to skip the colour.
+for script in bluetooth hwsim ppp pppoe-session killmode select nm \
 	association; do
 	path="tests/live/$script.sh"
 	[ -f "$path" ] || {

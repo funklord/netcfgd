@@ -2021,11 +2021,28 @@ vm-sandbox: vm-image
 # installs what they need inside the guest first, so this one wants a network
 # and takes several minutes; `VM_TIMEOUT` is set high for that reason.
 #
-# It is expected to FAIL today, and the failures are the point: four scripts now
-# run that never ran, two of them pass, and 0265 records what is established
-# about each remaining failure and what is not. Two cannot run at all --
-# delegation.sh wants odhcp6c, which Debian does not package.
+# It is expected to FAIL today, and the failures are the point: scripts that
+# never ran anywhere run here, and 0265 records what is established about each
+# remaining failure and what is not.
+#
+# **The two kinds of failure are not the same and the payload now only carries
+# one.** `delegation.sh` cannot run here at all -- it wants odhcp6c, which
+# Debian does not package -- so it has left the payload's list for
+# `vm-delegation` below, which exists to pay for that build separately.
+# Keeping it in the list bought one permanent red verdict for a reason this
+# tree had already decided was not this payload's, and a tier whose verdict
+# cannot change is one nobody reads.
+#
+# **`association.sh` was the other kind: a prerequisite nobody built.** Its
+# probe is `c/examples/live_association`, which `association.sh` resolves
+# correctly off `$$build` -- the source is `c/examples/live_association.c` and
+# `c/Makefile` has an `examples` target for it. It is simply not part of `all`,
+# for the same reason tests are not, so neither `make live` nor this payload
+# had ever built it and the script reported "the probe is not built" in a tier
+# built to run it. Built here, on the host, because the guest reads these
+# binaries off the read-only share exactly as it reads `netcfgd` itself.
 vm-skipped: vm-image
+	@$(MAKE) --no-print-directory -C c examples
 	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/skipped.sh
 
 # `delegation.sh`, the one live script that has never run anywhere: it needs

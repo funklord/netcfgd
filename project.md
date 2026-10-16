@@ -12430,17 +12430,43 @@ assumed, and two of the four are missing prerequisites rather than defects:
     pppoe-session.sh  1 check
     nm.sh             51 checks
 
-The last two are real and are somebody's to read. The first two are the
-payload's own gap: it installs what most of the scripts need and not what
-those two need, so they fail for want of a build rather than for a fault --
-which is the vacuous-failure twin of a vacuous pass, and costs the same thing,
-because a tier whose verdict is always red is a tier nobody reads. That is the
-condition `build-and-commit.md` describes six repositories spending seventeen
-days in, and it trains a reader to wave the colour past.
+The last two are real and are somebody's to read. **The first two were two
+different problems wearing one label, and only one was the payload's to
+solve.** Re-run after fixing it: 5 passed, 3 failed of eight.
 
-Not acted on here: this tier is nine scripts across five subsystems and none of
-them is this session's. Recorded so the next pass reads a number rather than
-rediscovering it.
+**`delegation.sh` left the list rather than being fixed.** It wants odhcp6c,
+which Debian does not package, so no change to this payload could ever clear
+it -- and `make vm-delegation` already exists to build that from source,
+because charging it to the other scripts is "how a suite stops being run". A
+verdict that cannot change is the kind of red that teaches a reader to skip the
+colour, so the permanent failure is gone and the script is reached by the
+target that can pay for it.
+
+**`association.sh` needed a build nobody ran, and the three wrong turns on the
+way to that are the instructive part.** The probe is
+`c/examples/live_association`; the script resolves it off `$build` and resolves
+it *correctly*. First guess: the payload should build it in the guest -- wrong,
+the guest reads host-built binaries off the read-only share. Second: the script
+looks in the C tree for a Rust example, a path bug from the day the suite's
+default flipped -- wrong, and `target/debug/examples/live_association` sitting
+there built is exactly the decoy that makes it plausible. Third and right:
+`c/examples/live_association.c` exists, `c/Makefile` has an `examples` target
+for it, and that target is not part of `all` for the same reason tests are not
+-- so nobody had ever built it, in a tier whose purpose is to run that script.
+`vm-skipped` builds it now.
+
+**It still fails, and now for a reason worth having.** The verdict moved from
+"the probe is not built" to "no netcfgd is running to compare against": the
+script wants a system daemon on `/run/netcfgd/netcfgd.sock` to take an
+independent reading against. That is a capability this payload does not have
+rather than a prerequisite it forgot -- the guest has systemd and root, so it
+could start one, but whether this tier runs a system daemon is a design
+question about the tier and not a missing build. Left for whoever answers it,
+with the gate now naming the real obstacle instead of an artefact.
+
+So the tier's remaining failures are `pppoe-session.sh` at one check, `nm.sh`
+at fifty-one, and one unmet capability -- against four, two of which said
+nothing about the software.
 
 ## 10.484 What bluetooth would cost, four ways, and whose each one is
 
