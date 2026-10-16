@@ -12385,6 +12385,63 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.485 `bluetooth.sh`'s skip needed no fixing, and `make vm-skipped` is red
+
+Raised as a gap after a `make live` in which `bluetooth.sh` skipped quietly --
+`needs real root (/dev/vhci is root-only)` -- which looked wrong now that 0272
+makes adapter observation the whole of netcfgd's Bluetooth scope. It was not a
+gap, and the tree had the answer in two deliberate halves:
+
+  * **On the host it skips by decision**, and the `live` target says why: the
+    adapter belongs to the machine, `/dev/vhci` is root-only, the module
+    autoloads on the open, and a machine that cannot make one gets a skip
+    rather than a failure. No namespace makes that work, which is why it is
+    also not under `unshare`.
+  * **In the guest it cannot skip.** `tool/vm/payload/skipped.sh` runs
+    `NCFG_LIVE=1 sh tests/live/bluetooth.sh`, and a skip under `NCFG_LIVE`
+    exits 1. So the loud failure that was supposedly missing is exactly what
+    the tier that can answer already produces.
+
+Demonstrated rather than inferred, because this session had been wrong about
+"already covered" in both directions: `make vm-skipped` reports
+`bluetooth.sh: all checks passed` in a Debian guest. The kernel line beside it
+-- `Bluetooth: hci0: Opcode 0x0c03 failed: -110` -- is a virtual controller
+declining a command and not a failed check.
+
+**This was the fourth question in one session handed over or raised that the
+tree had already decided**, after `sandbox_writes.sh`, the cast sweep and the
+polling seam. The common thread is worth more than any of them: in all four the
+answer sat in a comment at the place doing the work, or in a sibling target,
+and never in a document. `working-practice.md` says a working sibling
+explaining itself is a cheaper source of a project's decisions than the
+document is, and four misses in a day is what ignoring that costs.
+
+### And the tier itself is failing, which is the finding worth keeping
+
+`make vm-skipped` exits non-zero: **5 passed, 4 failed** of the nine scripts it
+carries. None of it relates to the work of this session, checked rather than
+assumed, and two of the four are missing prerequisites rather than defects:
+
+    bluetooth hwsim ppp killmode select     passed
+    association.sh    the probe is not built -- `cargo build -p
+                      netcfgd-host --example live_association`
+    delegation.sh     needs `odhcp6c` from source, which `vm-delegation`
+                      exists to pay for separately
+    pppoe-session.sh  1 check
+    nm.sh             51 checks
+
+The last two are real and are somebody's to read. The first two are the
+payload's own gap: it installs what most of the scripts need and not what
+those two need, so they fail for want of a build rather than for a fault --
+which is the vacuous-failure twin of a vacuous pass, and costs the same thing,
+because a tier whose verdict is always red is a tier nobody reads. That is the
+condition `build-and-commit.md` describes six repositories spending seventeen
+days in, and it trains a reader to wave the colour past.
+
+Not acted on here: this tier is nine scripts across five subsystems and none of
+them is this session's. Recorded so the next pass reads a number rather than
+rediscovering it.
+
 ## 10.484 What bluetooth would cost, four ways, and whose each one is
 
 Asked for the costs rather than a proposal, so each option below carries its
