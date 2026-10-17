@@ -633,8 +633,13 @@ else
 
 	# RequestScan is a request: NM's own semantics have it return immediately
 	# and the results arrive as signals. What must not happen is an error.
-	check "a client can ask for a scan" \
-		"$(nmcli device wifi rescan ifname radio0 2>&1 | grep -c Error || true)" "0"
+	# **The message is kept, not just counted.** `grep -c Error` makes the
+	# actual value `1` and throws away the sentence that says why, which is
+	# the whole of what a reader needs -- so the error text goes into the
+	# check's own output when it fails.
+	rescan=$(nmcli device wifi rescan ifname radio0 2>&1 || true)
+	check "a client can ask for a scan${rescan:+ ($rescan)}" \
+		"$(printf '%s\n' "$rescan" | grep -c Error || true)" "0"
 
 	# A device that is not a radio has no Wireless interface at all, so the
 	# refusal a client sees comes from libnm before the call is made. The

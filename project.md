@@ -12385,6 +12385,65 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.486 nm.sh's 51 failures are the C adapter's unported activation surface
+
+Asked what `nm.sh` was failing for. It is not a broken subsystem and it is not
+fifty-one defects: **66 checks pass**, and the passing set proves the shim
+works -- it refuses to run without netcfgd, serves every link netcfgd reports,
+takes MTU and hardware address from the observation, refuses a second claim on
+the bus, serves WireGuard devices with their listen port and the key the kernel
+derived, serves VLANs with tag and parent, maps scan signal onto NM's scale
+against values a real daemon reported, and names the access point the radio is
+on. The fixture has a radio with an association, so the failures are not for
+want of one.
+
+### The first failure named itself once it was allowed to
+
+    Error: this interface has no such method in this build.
+
+The check reporting it had been `grep -c Error`, so its whole evidence was
+`actual: 1` and the sentence was discarded -- the same fault as five bad counts
+earlier in this session and as the `2>/dev/null` in 10.485. It carries nmcli's
+words now.
+
+### What is established
+
+`RequestScan`, `ActivateConnection` and `DeactivateConnection` are **not
+implemented in the C shim**, and `nm.sh` tests the C shim --
+`${NCFG_NM_SHIM:-$repo/adapter/netcfgd-nm/c/netcfgd-nm}`. The Rust shim has
+all three: `request_scan` at `src/device.rs:982` and `src/state.rs:300`,
+`activate_connection` at `src/manager.rs:134`, `deactivate_connection` at
+`src/manager.rs:209`. The C shim's method table has `AddConnection`, `Update`
+and `Delete` and nothing else of that family.
+
+So this band is a **port gap in the adapter**, measured rather than inferred,
+and `make vm-skipped` is the only thing that measures it. It is invisible to
+0263's register, which is the planner's `warn_unported` and says nothing about
+`adapter/`.
+
+### What is NOT established, and the distinction matters
+
+That all 51 have that cause. The failing labels read as a cascade from
+activation -- what is active on the device, the gateway of the active
+connection, its nameservers, its routes, its IPv6 -- which one missing
+`ActivateConnection` would explain entirely. But the band also contains "a
+client can write a static profile at all", and `AddConnection` **is**
+implemented in C, so at least one failure is something else.
+
+Fifty of the 51 still reduce their evidence to a count, so the difference
+between one cause and six is not readable from the log. Establishing it means
+giving those checks their messages, the way the first one now has. That is the
+next step and it is cheap per check; what it is not is a day spent reading
+fifty counts as fifty problems.
+
+### 0265's record of this script is stale in the good direction
+
+It lists `nm.sh` as "4+ failed" with "the loopback is a loopback, not an
+ethernet". That check **passes** now: the payload's own header records running
+all nine bare having put `nm.sh` on the guest's real network instead of the
+namespace its header documents, and `needs_netns` fixed it. So the recorded
+failure is cured and the recorded count was never the whole set.
+
 ## 10.485 `bluetooth.sh`'s skip needed no fixing, and `make vm-skipped` is red
 
 Raised as a gap after a `make live` in which `bluetooth.sh` skipped quietly --
