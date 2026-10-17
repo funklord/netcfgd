@@ -1364,6 +1364,13 @@ packaging:
 	@# outlived their probes that way before this existed, and the leak
 	@# surfaces an hour later as somebody else's confusing failure.
 	@python3 tool/probe_gate.py
+	@# A decision record's number is what source cites it by, so a number that
+	@# names two records makes every citation of it ambiguous. Three did --
+	@# 0263, 0264 and 0265, written within five days of each other -- because
+	@# the number of a new record is the highest existing one plus one and
+	@# nothing said what the highest was. This says it, which is the half that
+	@# stops it recurring.
+	@python3 tool/decision_gate.py
 	@fail=0; \
 	FILLED="$(FILLED)"; \
 	if [ -z "$$(sed -n 's/^Exec[A-Za-z]*=\([^ ]*\).*/\1/p' packaging/systemd/netcfgd.service)" ]; then \
@@ -1974,7 +1981,7 @@ FUZZ_ARGS   ?=
 #
 # A script run by hand still has the caller's PATH, which is what the headers
 # in tests/live/ already tell people to set.
-# The VM tier (0265): what a namespace cannot do, which is its own kernel, its
+# The VM tier (0275): what a namespace cannot do, which is its own kernel, its
 # own modules and its own init. Not in `check` and not in `live` -- it wants a
 # network for the first fetch, a writable /dev/kvm, and about a quarter of a
 # minute per guest. `live` stays the inner loop.

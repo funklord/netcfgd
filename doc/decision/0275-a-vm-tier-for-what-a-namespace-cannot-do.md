@@ -1,4 +1,4 @@
-# 0265: A VM tier, for exactly what a namespace cannot do
+# 0275: A VM tier, for exactly what a namespace cannot do
 
 Status: accepted; built and measured. `make vm` boots an Alpine guest and runs
 a payload in it, `make vm-cluster` boots two to five on a shared wire, and

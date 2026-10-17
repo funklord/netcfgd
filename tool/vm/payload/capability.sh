@@ -1,5 +1,5 @@
 # What this tier exists for, asserted inside a guest: its own kernel, its own
-# modules, its own init. Run by tool/vm/run.sh; see 0265.
+# modules, its own init. Run by tool/vm/run.sh; see 0275.
 #
 # **This asserts rather than reports, and the first version did not.** It ended
 # with an `echo`, so its exit status was that echo's and `make vm` would have

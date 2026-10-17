@@ -3,7 +3,7 @@
 # netcfgd ships four: systemd, sysvinit (LSB, which also serves OpenRC on
 # Debian), `packaging/openrc` (an `openrc-run` script for Gentoo and Alpine)
 # and procd. `sandbox_writes.sh` exercises the systemd unit; procd needs
-# OpenWrt and is named in 0265 as deliberately out of reach. **The other two
+# OpenWrt and is named in 0275 as deliberately out of reach. **The other two
 # have never run anywhere** -- 124 lines of LSB script and 28 of `openrc-run`,
 # shipped in the deb, read by nobody.
 #

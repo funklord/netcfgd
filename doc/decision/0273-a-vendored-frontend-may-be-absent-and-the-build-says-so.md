@@ -1,6 +1,8 @@
-# 0263: a vendored frontend may be absent, and the build says so rather than stopping
+# 0273: a vendored frontend may be absent, and the build says so rather than stopping
 
 Status: accepted
+
+Renumbered from 0263 on 2026-10-17: three records had been written with numbers already taken, so `0263`, `0264` and `0265` each named two decisions. The earlier record of each pair keeps its number, since it had it first and carries nearly all the citations; this one moves. Nothing of its substance changes, and the old number is recorded here because a citation written before today may still say it.
 Date: 2026-10-02
 Milestone: M9; the window can configure the machine. Confirms
 [0173](0173-a-build-that-lost-a-feature-says-so.md)

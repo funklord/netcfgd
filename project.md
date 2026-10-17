@@ -10172,7 +10172,7 @@ it, and whether that thing has ever executed.
 
 Asked for by the copyright holder 2026-10-07: a scripted cluster of small Linux
 VMs, as an integral part of testing. Settled as
-[0265](doc/decision/0265-a-vm-tier-for-what-a-namespace-cannot-do.md); what
+[0275](doc/decision/0275-a-vm-tier-for-what-a-namespace-cannot-do.md); what
 follows is what the question turned up, because the measurement made the case
 differently from the way it would have been argued.
 

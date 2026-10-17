@@ -80,7 +80,7 @@ QTTY_LIB = $(QTTY_DIR)/build/lib/libqtty.a
 # than an error, so both ends land on the same message they always did -- now
 # a report of something attempted rather than an instruction.
 .PHONY: qtty
-# **Three reasons it can be absent, and they are three messages (0263).**
+# **Three reasons it can be absent, and they are three messages (0273).**
 # `build-and-commit.md` asks that git's absence be reported as its own
 # condition rather than as a repository that is not one -- and the earlier
 # version collapsed "no git installed", "not a checkout" and "the fetch

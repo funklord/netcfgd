@@ -8,7 +8,7 @@
 # TWO GUESTS. `VM_GUEST` is `alpine` (the default) or `debian`.
 #   Alpine boots in about ten seconds and is for kernel-and-module work. Debian
 #   matches this machine's libc, so `target/debug/netcfgd` runs in it straight
-#   off the share, and it brings systemd. See 0265.
+#   off the share, and it brings systemd. See 0275.
 #
 #   They are driven differently and the difference is all in how a command
 #   reaches the guest. Alpine takes an apkovl over HTTP, because its initramfs
@@ -55,7 +55,7 @@
 #   Full control of the command line is tempting and costs the modules. The
 #   initramfs does not fetch the modloop; it adds `modloop` as a sysinit
 #   service and the booted system finds the squashfs on its media. The ISO
-#   carries it, and the modules are the whole reason this tier exists (0265).
+#   carries it, and the modules are the whole reason this tier exists (0275).
 set -eu
 
 repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)

@@ -1,6 +1,8 @@
-# 0264: the dhcpcd hook is dhcpcd's requirement and not every client's
+# 0274: the dhcpcd hook is dhcpcd's requirement and not every client's
 
 Status: accepted
+
+Renumbered from 0264 on 2026-10-17: three records had been written with numbers already taken, so `0264`, `0264` and `0265` each named two decisions. The earlier record of each pair keeps its number, since it had it first and carries nearly all the citations; this one moves. Nothing of its substance changes, and the old number is recorded here because a citation written before today may still say it.
 Date: 2026-10-03
 Milestone: M9. Refines
 [0178](0178-a-generated-hook-cannot-live-where-it-cannot-run.md), which stands
