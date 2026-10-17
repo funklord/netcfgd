@@ -369,6 +369,55 @@ static void put_pair(DBusMessageIter *into, const char *name, const char *text)
 	(void)dbus_message_iter_close_container(into, &entry);
 }
 
+/*
+ * The SSID, as NetworkManager requires it: `ay`, not a string.
+ *
+ * **`802-11-wireless` is invalid without this**, and the comment above the
+ * group already said it carries an SSID while the code wrote `ssid-text`,
+ * which is not a property NM has. libnm validates a profile in the CLIENT
+ * before calling `ActivateConnection`, so every activation of a wifi profile
+ * was refused with `802-11-wireless.ssid: property is missing` -- 51 checks of
+ * `nm.sh`, the activation itself and then everything about the connection it
+ * never made. `settings.rs` carries the same requirement in a comment and
+ * emits the bytes, which is what this is a port of.
+ *
+ * The bytes, not the characters: an SSID is 32 octets of anything and NM's
+ * clients render it themselves. A separate helper rather than a signature
+ * argument to `put_pair`, for `put_pair`'s own stated reason.
+ */
+static void put_ssid(DBusMessageIter *into, const char *text)
+{
+	DBusMessageIter entry;
+	DBusMessageIter variant;
+	DBusMessageIter bytes;
+	const char     *name = "ssid";
+	const char     *from = text ? text : "";
+	size_t          at;
+	size_t          length = strlen(from);
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "ay", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	if (!dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "y", &bytes)) {
+		(void)dbus_message_iter_abandon_container_if_open(&entry, &variant);
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	for (at = 0u; at < length; at++) {
+		unsigned char byte = (unsigned char)from[at];
+
+		(void)dbus_message_iter_append_basic(&bytes, DBUS_TYPE_BYTE, &byte);
+	}
+	(void)dbus_message_iter_close_container(&variant, &bytes);
+	(void)dbus_message_iter_close_container(&entry, &variant);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
 /* --------------------------------------------------------- `...Settings` */
 
 static int connection_paths(DBusMessageIter *into, nmc_connections_t *store)
@@ -1002,7 +1051,7 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 				}
 			} else if (wireless) {
 				put_pair(&pairs, "mode", "infrastructure");
-				put_pair(&pairs, "ssid-text", shown);
+				put_ssid(&pairs, shown);
 			}
 			(void)dbus_message_iter_close_container(&group, &pairs);
 			(void)dbus_message_iter_close_container(&groups, &group);

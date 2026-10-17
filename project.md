@@ -12421,20 +12421,55 @@ and `make vm-skipped` is the only thing that measures it. It is invisible to
 0263's register, which is the planner's `warn_unported` and says nothing about
 `adapter/`.
 
-### What is NOT established, and the distinction matters
+### Giving the checks their messages found a second defect under the first
 
-That all 51 have that cause. The failing labels read as a cascade from
-activation -- what is active on the device, the gateway of the active
-connection, its nameservers, its routes, its IPv6 -- which one missing
-`ActivateConnection` would explain entirely. But the band also contains "a
-client can write a static profile at all", and `AddConnection` **is**
-implemented in C, so at least one failure is something else.
+Most of the 51 needed nothing: **43 of them already reported `actual:` empty**
+against a concrete expectation -- `connected`, `9.9.9.9`, `600`, `42` -- which
+says the property is ABSENT rather than wrong. Forty-three wrong values would
+be forty-three bugs; forty-three absent ones are one thing not happening. Only
+eight reduced to an opaque count, and three of those had their messages
+already written to files nobody printed: `nmcli connection up` redirects into
+`$work/up.log` while the check asserts a `grep -c` over the supplicant's log.
+`check_saying` keeps the count as the assertion and adds the file as the
+diagnostic.
 
-Fifty of the 51 still reduce their evidence to a count, so the difference
-between one cause and six is not readable from the log. Establishing it means
-giving those checks their messages, the way the first one now has. That is the
-next step and it is cheap per check; what it is not is a day spent reading
-fifty counts as fifty problems.
+What it printed was not what this entry first predicted:
+
+    Error: device 'radio0' not compatible with connection 'HomeFiber':
+      The connection was not valid: 802-11-wireless.ssid: property is missing.
+
+**A real and separate defect, now fixed.** `settings.c` emitted
+`ssid-text` -- a key NetworkManager has never had -- where `802-11-wireless`
+requires `ssid` as `ay`. So libnm refused every wifi profile in the CLIENT,
+before any method was called, and the comment directly above that code already
+said the group "carries a mode and an SSID". `settings.rs` carries the same
+requirement in prose and emits the octets, which is what the fix is a port of.
+Measured after it: `up.log` no longer carries an error.
+
+**It was masking the original diagnosis rather than replacing it.** This entry
+first said the band was unported activation; the `ssid` error made that look
+wrong, and it was not. The C shim has no `ActivateConnection` anywhere -- its
+manager interface serves `GetManagedObjects` and the word appears in no method
+table -- so the fix moves the wall from libnm's validator to the absent
+method, which is why the count is still 51. Necessary, not sufficient.
+
+### And the compat interface advertises what this build has not got
+
+`compat.c`'s `SUPPORTED[]` names `activation` and `wifi_scan` among the tiers
+it serves. There is no `ActivateConnection`, and `RequestScan` answers
+`this interface has no such method in this build`. The convention it breaks is
+stated in its own comment, three lines above the list: **"a build that cannot
+activate a connection omits `activation` rather than saying false"**. So a
+client asking what this shim supports is told yes and then refused, which is
+worse than being told no -- and `nm.sh` asserts the list is served without
+asserting it is true, so nothing catches it.
+
+Not changed here, because one of the two is ambiguous and the pair wants
+deciding together. `activation` is unambiguous: the method does not exist.
+`wifi_scan` may legitimately mean reading scan results, which works -- the
+checks that every access point found is listed, with its signal mapped onto
+NM's scale, all pass -- while *requesting* a scan does not. Whether that tier
+means the read or the request is the adapter's to say.
 
 ### 0265's record of this script is stale in the good direction
 

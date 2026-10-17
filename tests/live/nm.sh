@@ -124,6 +124,27 @@ check() {
 	fi
 }
 
+# `check`, and on failure the output of the command the check is about.
+#
+# **The messages already existed and were being dropped.** The activation
+# checks below run `nmcli connection up` with its output redirected into
+# `$work/up.log` and then assert on a `grep -c` over the supplicant's log, so a
+# failure reported `actual: 0` and nmcli's own sentence sat unread in a file.
+# Measured once that sentence was let through for the scan check:
+# `Error: this interface has no such method in this build` -- which named the
+# cause of the whole band in six words (project.md 10.486).
+#
+# A count makes a good assertion and a poor diagnostic. This keeps the
+# assertion and adds the diagnostic, rather than replacing one with the other.
+check_saying() {
+	saying_before=$failures
+	check "$1" "$2" "$3"
+	if [ "$failures" -ne "$saying_before" ] && [ -s "$4" ]; then
+		echo "       and $4 says:"
+		sed 's/^/         /' "$4"
+	fi
+}
+
 mkdir -p "$work/etc/secrets" "$work/ctrl"
 printf 'hunter2hunter2' > "$work/etc/secrets/home"
 chmod 600 "$work/etc/secrets/home"
@@ -698,18 +719,21 @@ else
 	before=$(wc -l < "$work/fake.log")
 	nmcli connection up HomeFiber ifname radio0 > "$work/up.log" 2>&1 || true
 	since_up=$(tail -n +$((before + 1)) "$work/fake.log")
-	check "activating a profile reaches the supplicant" \
-		"$(printf '%s' "$since_up" | grep -c 'SELECT_NETWORK' || true)" "1"
+	check_saying "activating a profile reaches the supplicant" \
+		"$(printf '%s' "$since_up" | grep -c 'SELECT_NETWORK' || true)" "1" \
+		"$work/up.log"
 	# Through netcfgd's own join rather than a path of the shim's own: the
 	# network is added the way `ncfg wifi connect` adds it, which is what keeps
 	# decision 0013's boundary in one place.
-	check "and it went through netcfgd's join" \
-		"$(printf '%s' "$since_up" | grep -c 'ADD_NETWORK' || true)" "1"
+	check_saying "and it went through netcfgd's join" \
+		"$(printf '%s' "$since_up" | grep -c 'ADD_NETWORK' || true)" "1" \
+		"$work/up.log"
 
 	before=$(wc -l < "$work/fake.log")
 	nmcli connection down HomeFiber > "$work/down.log" 2>&1 || true
-	check "deactivating reaches it too" \
-		"$(tail -n +$((before + 1)) "$work/fake.log" | grep -c '^DISCONNECT' || true)" "1"
+	check_saying "deactivating reaches it too" \
+		"$(tail -n +$((before + 1)) "$work/fake.log" | grep -c '^DISCONNECT' || true)" "1" \
+		"$work/down.log"
 
 	# The device's own view. This is nmcli's CONNECTION column and an applet's
 	# "you are connected to" line, and it was empty until active connections
