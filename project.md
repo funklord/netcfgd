@@ -12464,12 +12464,31 @@ client asking what this shim supports is told yes and then refused, which is
 worse than being told no -- and `nm.sh` asserts the list is served without
 asserting it is true, so nothing catches it.
 
-Not changed here, because one of the two is ambiguous and the pair wants
-deciding together. `activation` is unambiguous: the method does not exist.
-`wifi_scan` may legitimately mean reading scan results, which works -- the
-checks that every access point found is listed, with its signal mapped onto
-NM's scale, all pass -- while *requesting* a scan does not. Whether that tier
-means the read or the request is the adapter's to say.
+**Settled by the copyright holder 2026-10-17: omit `activation`.** It is out,
+verified in the artefact rather than inferred from the build -- `strings` on
+the shim shows the key gone and the other nine tiers intact -- and the guest
+tier is unchanged at 66 and 51, so nothing depended on the claim. The comment
+records when it returns: in the same commit as `ActivateConnection` and not
+before, which is 0263's register rule applied to an advertised capability
+rather than to a planner's arm.
+
+**`wifi_scan` stays, and the asymmetry is written down rather than left to
+look like an oversight.** `RequestScan` refuses here too, but what that tier
+means to a client is reading what a scan found -- the access point list, each
+signal mapped onto NM's scale -- and all of that is served and checked.
+Removing the key would say the results are unavailable when they are there.
+
+**And it is pinned, because the hole was never the wrong key.** `nm.sh`
+asserted the tier list was SERVED and never that it was TRUE, which is why a
+build advertised an activation it could not perform for as long as it did. A
+check asserts the absence now, in the direction the build is in, so returning
+the key without the method fails. Controlled both ways in the guest: with
+`activation` restored the check reads FAIL, with it removed `ok`.
+
+What stays open is the general form. Proving every advertised tier is one the
+shim can serve is a different problem from grepping one key -- `secret_agents`
+and `connection_options` have no one-line equivalent -- so one tier is held
+and the rest are still only served.
 
 ### 0265's record of this script is stale in the good direction
 

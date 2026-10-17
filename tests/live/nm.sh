@@ -386,6 +386,19 @@ compat() {
 if command -v busctl >/dev/null 2>&1; then
 	check "the compat interface names what this really is" \
 		"$(compat Implementation)" "netcfgd-nm"
+	# **And the tier list is held to what the build can do, not just served.**
+	# `activation` was advertised while `ActivateConnection` did not exist, so
+	# a client that gated on the key was told yes and refused with "this
+	# interface has no such method in this build" -- and the checks here
+	# asserted the list was SERVED without ever asserting it was TRUE, which is
+	# why nothing caught it (project.md 10.486).
+	#
+	# Pinned in the direction the build is in, which is this file's rule for a
+	# gap that is a decision: `activation` must stay out while the method is
+	# out, so putting the key back without the method fails here. The pair
+	# moves together or this check says so.
+	check "and does not advertise an activation it cannot perform" \
+		"$(compat Supported | grep -c activation || true)" "0"
 	# The literal, not a value read back from the shim: this is a contract with
 	# clients that gate features on it, so changing it should fail a test
 	# rather than pass one that compares the shim against itself.

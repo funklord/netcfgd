@@ -50,8 +50,29 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * omits `activation` rather than saying false, and `manager.rs` has said so
  * since the interface existed.
  */
+/*
+ * **`activation` is omitted because this build has no `ActivateConnection`**,
+ * which is the convention the paragraph above states: a build that cannot
+ * activate omits the tier rather than claiming it. It was listed, and a client
+ * that gated on the key was told yes and then refused with
+ * `this interface has no such method in this build` -- worse than being told
+ * no, because a refusal a client was promised would not happen is one it has
+ * no branch for. Decided by the copyright holder 2026-10-17, from the finding
+ * in project.md 10.486.
+ *
+ * It goes back in the same commit as the method, not before it. `manager.rs`
+ * lists it because the Rust shim implements it, and the two lists differing is
+ * the mechanism working rather than drift.
+ *
+ * **`wifi_scan` stays, and the asymmetry is deliberate.** `RequestScan`
+ * refuses here too, but reading what a scan found is what this tier is about
+ * in every client that uses it -- the access point list, each one's signal
+ * mapped onto NM's scale -- and all of that is served and checked. Requesting
+ * a fresh one is the half that is missing, and removing the key would tell a
+ * client the results are unavailable when they are there.
+ */
 static const char *const SUPPORTED[] = {
-	"devices", "device_state", "wifi_scan", "connections", "activation",
+	"devices", "device_state", "wifi_scan", "connections",
 	"profile_writes", "profile_writes_wifi_only", "secret_agents", "ip_config",
 	"static_addressing", "connection_options"
 };
