@@ -12480,13 +12480,58 @@ causes now, and does it by asking again on failure rather than reading
 parse below takes the interface from `NR == 1`, so a log line on stderr would
 become an interface name.
 
-**What association.sh still needs is a rig, not a prerequisite.** Past this
-gate it wants a wifi device in the daemon's configuration, then a radio in
-state `COMPLETED`, then that radio on a network the document describes. The
-pieces exist in this tier already -- `hwsim.sh` builds `mac80211_hwsim` radios
-and passes here -- so it is hostapd on one, a supplicant association on the
-other, and a config whose network block matches. That is its own piece of work
-and is not what "fix the prerequisites" meant.
+**And then the rig turned out not to be the answer either.** Asked for next,
+and `association.sh`'s own header refuses it: "Nothing, and nothing. It
+reads", and it is "meant to be runnable on the machine somebody is using, over
+the very wifi it is asking about". It is a reader for a live machine with a
+real association, so rigging it contradicts what it is, and no prerequisite
+this payload installs can give a guest a real radio. It has left the list for
+`delegation.sh`'s reason -- a verdict that cannot change -- and the daemon
+start added for it one step earlier went with it, having been a fix to the
+wrong layer.
+
+**The rig already existed and the missing half was smaller than the question.**
+`hwsim.sh` loads `mac80211_hwsim`, moves both radios into a private namespace,
+stands an access point at `ssid="netcfgd-test"`, associates netcfgd from the
+other, and already read the socket side -- `ncfg wifi status` reaching
+`COMPLETED` and naming the block. What it never read was the observation path.
+So the comparison `association.sh` exists for is there now, against the
+simulated association: the probe's row for the station must name the same
+block the daemon does. Both paths share only `network_for`, which is why
+agreement is evidence rather than coincidence, and 0153 rests on it.
+
+### The probe read the wrong run directory, and four theories died before it said so
+
+The check failed first, and what it reported was an empty reading. The cause is
+one line of the probe's own stderr:
+
+    live_association: cannot read /run/netcfgd/desired.json
+
+`run_dir` is `argv[1]`, defaulting to `NCFG_RUN_DIR_DEFAULT`, and it does not
+read `NCFG_RUN_DIR` -- so invoked bare inside a rig whose everything is under
+`$work/run` it looked at the machine's real run directory. `association.sh`
+runs it bare and is right to; on a live machine the default is the answer.
+
+**That line was discarded by the first draft of the check**, which wrote
+`2>/dev/null`, and four theories were spent in its absence: the supplicant
+control directory (`innc` already exports `NCFG_WPA_CTRL_DIR`), the probe not
+being built (it was), C-and-Rust interop (disproved separately -- both clients
+answer one C daemon byte for byte), and the daemon not persisting
+`desired.json` (it does). `evidence.md` says read the input before theorising
+about the mechanism; the input was being thrown away.
+
+**The worse half is the check that passed beside the failure.** "Only the radio
+has a network" compares an empty list against empty, so with no rows at all it
+printed `ok` directly under the `FAIL` -- making a total absence of
+observation look like one narrow field being wrong. A vacuity guard now proves
+there is a reading before anything interprets its contents, and reports the
+probe's own words when there is not. The guard is worth more than the check it
+protects, and the wired assertion is labelled for what it establishes: that
+nothing else claimed a network, which in a rig with no wired row is true
+without asking anything.
+
+The tier stands at 5 passed and 2 failed of seven -- `pppoe-session.sh` at one
+check and `nm.sh` at fifty-one, both real and neither this session's.
 
 So the tier's remaining failures are `pppoe-session.sh` at one check, `nm.sh`
 at fifty-one, and one unmet capability -- against four, two of which said

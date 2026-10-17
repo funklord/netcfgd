@@ -530,6 +530,70 @@ if [ "$state" = COMPLETED ]; then
 	contains "ncfg agrees it is associated" "$own" "COMPLETED"
 	contains "and names the network block" "$own" "netcfgd-test"
 
+	# **And the other path agrees, which is the check `association.sh` exists
+	# for and could not make here.**
+	#
+	# The two readings above come through the daemon's socket. The probe below
+	# comes through the observation path -- netlink, sysfs and the supplicant's
+	# control socket -- and the two share only `network_for`. So agreement is
+	# evidence the wiring is right, and a disagreement names which side is
+	# wrong rather than only that something is. Decision 0153 depends on it:
+	# the planner can apply a `network`'s metric over its interface's
+	# preference only if the observation knows which network a radio joined.
+	#
+	# `association.sh` makes this comparison against a REAL association and
+	# says in its header that it does nothing to the machine, which is why it
+	# is not rigged and why the guest tier cannot run it: there is no real
+	# radio there to read. The rig is here, so the comparison belongs here
+	# too, against the simulated one.
+	probe="$build/examples/live_association"
+	if [ -x "$probe" ]; then
+		# **Stderr is kept, and the first version discarded it.** The probe
+		# refuses without root and refuses without a `desired.json` in the run
+		# directory, saying which on stderr -- and `2>/dev/null` turned both
+		# into an empty reading, which cost three wrong theories before the
+		# message was read.
+		# **The run directory is argv[1], not `NCFG_RUN_DIR`.** The probe
+		# reads `<run>/desired.json` and takes `<run>` from its first
+		# argument, defaulting to `/run/netcfgd` -- so invoked bare inside
+		# this rig it looked at the machine's real run directory and said
+		# `cannot read /run/netcfgd/desired.json`. `association.sh` runs it
+		# bare and is right to: on a live machine the default is the answer.
+		observed=$(innc "$probe" "$work/run" 2>"$work/probe.err" || true)
+		if [ -z "$observed" ]; then
+			# **Vacuity before assertion**: with no rows, "the radio
+			# resolves to netcfgd-test" fails for the wrong reason and "only
+			# the radio has a network" PASSES for the wrong reason -- which it
+			# did, beside the failure, in the run that found this.
+			echo "FAIL the observation probe produced no rows to compare"
+			sed 's/^/       /' < "$work/probe.err" 2>/dev/null || true
+			failures=$((failures + 1))
+		else
+			got=$(printf '%s\n' "$observed" |
+				awk -v want="$sta_dev" '$1 == want { print $3 }')
+			check "the observation resolves the association to the same block" \
+				"$got" "netcfgd-test"
+			# A wired link reporting a network would mean the field was
+			# filled from something other than an association, which a check
+			# reading only the radio's row cannot see.
+			#
+			# **What it establishes is one-sided, and saying so is cheaper
+			# than overclaiming.** It proves no wired row claims a network;
+			# in a rig with no wired row at all it is true without asking
+			# anything. The vacuity guard above covers the reading as a whole
+			# and not this row's existence, so read it as "nothing else
+			# claimed one" rather than as a wired link checked and cleared.
+			wired=$(printf '%s\n' "$observed" |
+				awk '$2 == "wired" && $3 != "-" { print $1 }')
+			check "and nothing but the radio claims a network" "$wired" ""
+		fi
+	else
+		# Loud rather than silent: a comparison that quietly does not happen
+		# is the vacuous pass `evidence.md` opens with.
+		echo "note no observation probe at $probe, so the two paths were not"
+		echo "     compared -- \`make -C c examples\` builds it"
+	fi
+
 	scan=$(innc "$ncfg" wifi scan 2>&1 || true)
 	contains "a scan finds the access point" "$scan" "netcfgd-test"
 

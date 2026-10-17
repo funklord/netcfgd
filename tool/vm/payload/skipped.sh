@@ -68,40 +68,6 @@ needs_netns() {
 	esac
 }
 
-# **`association.sh` compares a probe against a running daemon**, so it wants a
-# socket at the canonical `/run/netcfgd/netcfgd.sock` -- not a test directory,
-# because the reading it takes is meant to be the one an operator would get.
-# Nothing else here wants that, and several of these scripts run daemons of
-# their own in namespaces they make, so this one is started for that script
-# alone and stopped before the loop moves on. A system daemon left running
-# would be in the next script's way.
-daemon=
-start_daemon() {
-	# Relative, like `tests/live/$script.sh` in the loop: this payload runs
-	# from `/mnt/repo` and defines no `$repo`, and it runs under `set -u`, so
-	# naming one would end the payload here rather than skip the daemon.
-	[ -x c/netcfgd ] || return 1
-	c/netcfgd --no-apply-on-start > /tmp/daemon.log 2>&1 &
-	daemon=$!
-	# Waited for rather than slept at, and bounded: a daemon that never binds
-	# is this payload's failure to report, not a hang to sit through.
-	waited=0
-	while [ ! -S /run/netcfgd/netcfgd.sock ] && [ "$waited" -lt 100 ]; do
-		sleep 0.1
-		waited=$((waited + 1))
-	done
-	[ -S /run/netcfgd/netcfgd.sock ]
-}
-
-stop_daemon() {
-	[ -n "$daemon" ] || return 0
-	kill "$daemon" 2>/dev/null || true
-	# **Waited for, not just signalled**, which is project.md 10.476: `kill`
-	# returns before the child has stopped writing its run directory.
-	wait "$daemon" 2>/dev/null || true
-	daemon=
-}
-
 passed=0
 failed=0
 # **`delegation.sh` is deliberately absent.** It needs odhcp6c, which Debian
@@ -110,8 +76,19 @@ failed=0
 # for that separately. While it sat in this list the tier reported one failure
 # that no change here could ever clear, which is the kind of red that teaches a
 # reader to skip the colour.
-for script in bluetooth hwsim ppp pppoe-session killmode select nm \
-	association; do
+# **`association.sh` is deliberately absent too, and for its own reason rather
+# than delegation's.** Its header says it does nothing to the machine and is
+# "meant to be runnable on the machine somebody is using, over the very wifi it
+# is asking about" -- a reader beside a live daemon, over a real association.
+# This guest has no real radio, so no prerequisite this payload installs can
+# satisfy it, and a daemon started here only moved its gate from one skip to
+# the next.
+#
+# What it uniquely checks -- that the observation path and the socket path
+# resolve an association to the same `network` block -- is in `hwsim.sh` now,
+# which builds simulated radios, associates to one, and already read the socket
+# side. The comparison belongs where the rig is.
+for script in bluetooth hwsim ppp pppoe-session killmode select nm; do
 	path="tests/live/$script.sh"
 	[ -f "$path" ] || {
 		echo "=== $script.sh: NOT PRESENT"
@@ -126,14 +103,6 @@ for script in bluetooth hwsim ppp pppoe-session killmode select nm \
 	else
 		run="NCFG_LIVE=1 sh $path"
 	fi
-	if [ "$script" = association ]; then
-		if start_daemon; then
-			echo "    (netcfgd started for this script, socket bound)"
-		else
-			echo "    (netcfgd would not start or bind; see /tmp/daemon.log)"
-			sed 's/^/      /' < /tmp/daemon.log 2>/dev/null || true
-		fi
-	fi
 	if sh -c "$run" > /tmp/out.$script 2>&1; then
 		verdict=passed
 		passed=$((passed + 1))
@@ -141,7 +110,6 @@ for script in bluetooth hwsim ppp pppoe-session killmode select nm \
 		verdict=FAILED
 		failed=$((failed + 1))
 	fi
-	stop_daemon
 	sed 's/^/    /' < /tmp/out.$script
 	echo "    --> $verdict"
 done
