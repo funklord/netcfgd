@@ -30,46 +30,46 @@ RECORDS = pathlib.Path("doc/decision")
 
 
 def main() -> int:
-    if not RECORDS.is_dir():
-        print("decision-gate: no doc/decision, nothing to check")
-        return 0
-    seen: dict[str, list[str]] = {}
-    mismatched: list[str] = []
-    for path in sorted(RECORDS.glob("*.md")):
-        match = re.match(r"^(\d{4})-", path.name)
-        if not match:
-            print(f"decision-gate: {path.name} does not open with a four-digit number")
-            return 1
-        number = match.group(1)
-        seen.setdefault(number, []).append(path.name)
-        head = path.read_text(encoding="utf-8").split("\n", 1)[0]
-        title = re.match(r"^#\s*(\d{4})\s*:", head)
-        if not title:
-            mismatched.append(f"{path.name}: first line is not `# {number}: ...`")
-        elif title.group(1) != number:
-            mismatched.append(
-                f"{path.name}: titled {title.group(1)} and filed as {number}"
-            )
-    duplicates = {n: f for n, f in seen.items() if len(f) > 1}
-    for number, files in sorted(duplicates.items()):
-        print(f"decision-gate: {number} names {len(files)} records:")
-        for name in files:
-            print(f"    {name}")
-    for problem in mismatched:
-        print(f"decision-gate: {problem}")
-    if duplicates or mismatched:
-        print(
-            "decision-gate: a citation by number must name one decision. The next "
-            f"free number is {max(int(n) for n in seen) + 1:04d}."
-        )
-        return 1
-    print(
-        f"decision-gate: {len(seen)} records, each with a number of its own and a "
-        f"title that agrees with it; the next free number is "
-        f"{max(int(n) for n in seen) + 1:04d}"
-    )
-    return 0
+	if not RECORDS.is_dir():
+		print("decision-gate: no doc/decision, nothing to check")
+		return 0
+	seen: dict[str, list[str]] = {}
+	mismatched: list[str] = []
+	for path in sorted(RECORDS.glob("*.md")):
+		match = re.match(r"^(\d{4})-", path.name)
+		if not match:
+			print(f"decision-gate: {path.name} does not open with a four-digit number")
+			return 1
+		number = match.group(1)
+		seen.setdefault(number, []).append(path.name)
+		head = path.read_text(encoding="utf-8").split("\n", 1)[0]
+		title = re.match(r"^#\s*(\d{4})\s*:", head)
+		if not title:
+			mismatched.append(f"{path.name}: first line is not `# {number}: ...`")
+		elif title.group(1) != number:
+			mismatched.append(
+				f"{path.name}: titled {title.group(1)} and filed as {number}"
+			)
+	duplicates = {n: f for n, f in seen.items() if len(f) > 1}
+	for number, files in sorted(duplicates.items()):
+		print(f"decision-gate: {number} names {len(files)} records:")
+		for name in files:
+			print(f"    {name}")
+	for problem in mismatched:
+		print(f"decision-gate: {problem}")
+	if duplicates or mismatched:
+		print(
+			"decision-gate: a citation by number must name one decision. The next "
+			f"free number is {max(int(n) for n in seen) + 1:04d}."
+		)
+		return 1
+	print(
+		f"decision-gate: {len(seen)} records, each with a number of its own and a "
+		f"title that agrees with it; the next free number is "
+		f"{max(int(n) for n in seen) + 1:04d}"
+	)
+	return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+	sys.exit(main())

@@ -12446,9 +12446,22 @@ stayed.
 
 **Two decision records are numbered 0264**, dated 2026-09-18 and 2026-10-03,
 in a scheme whose whole value is one stable anchor per decision and which is
-cited by number from source hundreds of times. `settings.c`'s citation of
-"0264's unauthorized method" matches the text of neither, so a source comment
-points at a number that is both ambiguous and unresolvable.
+cited by number from source hundreds of times.
+
+**And `settings.c`'s citation of "0264's unauthorized method" is correct, which
+this entry twice said it was not.** 0264 records exactly that: `Writable` was
+reachable on the Settings.Connection interface and authorized nobody --
+"`Update` and `Delete` both call `caller_uid` and `may_write` and this does
+neither, because it was never meant to be reachable". The claim that it matched
+neither record came from `grep -rln 'unauthoriz'`, and the record says **"no
+authorization at all"**. A pattern that cannot match its subject again, which
+is 10.482's second kind of counting fault and the eighth instance of the class
+in one session -- this one published in an entry and two commit messages before
+being checked.
+
+So there was nothing wrong with the comment, and the collision was the whole of
+the defect: the number was ambiguous and is not any more, which leaves that
+citation resolving to the record it always meant.
 
 **And the claim that the gate was wired into nothing was mine and false.** It
 came from a grep piped through `head -8`, where matches in `authorize.c` and
