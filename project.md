@@ -12385,6 +12385,78 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.487 ActivateConnection is understood, written, and deliberately not landed
+
+Asked to port it. It is worked out end to end, it was written, it built, and it
+is reverted -- because what I had forwarded a write to netcfgd with no
+authorization at all, and the tree refused it before I noticed.
+
+### What stopped it, and the tree says it twice
+
+`bus_test.c` asserts the manager declares four methods, with the reason beside
+the number: **"The activation pair is a write and waits for the authorization
+gate."** A fifth failed that check, which is the suite working against me.
+
+`settings.c` then gives the order, and it is the whole argument: **every write
+authorizes first and is refused for not being built second.** An unauthorized
+caller gets the answer that will still be right once writing works; an
+authorized one is told the operation does not exist yet. The other way round
+"would mean the authorization arrived untested on the day the write did, which
+is exactly how 0264's unauthorized method came to exist".
+
+So the gate is live, tested and already deciding, with nothing behind it. The
+first real write behind it is a milestone, and this tree has paid once for
+getting that order wrong.
+
+### What the port needs, so it is not re-derived
+
+  * **`admin_principal` wants promoting.** It is `static` in `settings.c` and
+    called three times there; `manager.c` needs the same answer and a copy
+    would be two definitions of who may write. It belongs beside
+    `nmc_may_write`.
+  * **`nmc_device_up_of`**, mirroring `nmc_device_carrier_of`, because the
+    `up` flag lives in `device.c`'s private `facts_for` and an `interface`
+    profile already up is the state being asked for while one that is down
+    gets the reason. Drafted.
+  * **The handler**, with `refuse_add` as the exact template: `nmc_caller_uid`,
+    the admin principal, `nmc_may_write`, then act. For a `network` the act is
+    `ncfg_client_wifi_connect(client, interface, id)` -- netcfgd's own verb,
+    which keeps 0013's boundary in one place and is what `nm.sh` checks by
+    watching for `ADD_NETWORK` beside `SELECT_NETWORK`. `specific_object` is
+    accepted and ignored, as in `manager.rs`.
+  * **The answer** is `/org/freedesktop/NetworkManager/ActiveConnection/` plus
+    the device's number, which is what `device.c` answers and the manager
+    lists.
+  * **Then the bookkeeping**: `bus_test`'s count and its comment, `activation`
+    back in `SUPPORTED[]`, and `nm.sh`'s pin turned round -- which is what that
+    pin was written to be turned by.
+  * **Not ported, and it changes behaviour:** the secret-agent question
+    `manager.rs` asks first. Without it a network whose passphrase names a file
+    that is not there fails in netcfgd rather than being asked about.
+
+The draft is in this session's scratch and not in the tree, because a
+half-authorized write is not a thing to leave in a source file.
+
+### Three things the attempt turned up
+
+**The shim still advertises more than it serves.** `profile_writes` and
+`profile_writes_wifi_only` sit in `SUPPORTED[]` while every write refuses --
+the same fault as `activation`, which came out on instruction while these
+stayed.
+
+**Two decision records are numbered 0264**, dated 2026-09-18 and 2026-10-03,
+in a scheme whose whole value is one stable anchor per decision and which is
+cited by number from source hundreds of times. `settings.c`'s citation of
+"0264's unauthorized method" matches the text of neither, so a source comment
+points at a number that is both ambiguous and unresolvable.
+
+**And the claim that the gate was wired into nothing was mine and false.** It
+came from a grep piped through `head -8`, where matches in `authorize.c` and
+`bus_test.c` filled the eight lines and `settings.c` fell off the end. The
+sixth time in this session that reducing output before reading it produced a
+confident wrong answer, and the one that would have justified shipping an
+unauthorized write.
+
 ## 10.486 nm.sh's 51 failures are the C adapter's unported activation surface
 
 Asked what `nm.sh` was failing for. It is not a broken subsystem and it is not
@@ -12414,7 +12486,12 @@ implemented in the C shim**, and `nm.sh` tests the C shim --
 all three: `request_scan` at `src/device.rs:982` and `src/state.rs:300`,
 `activate_connection` at `src/manager.rs:134`, `deactivate_connection` at
 `src/manager.rs:209`. The C shim's method table has `AddConnection`, `Update`
-and `Delete` and nothing else of that family.
+and `Delete` and nothing else of that family -- **and having them in the table
+is not implementing them**, which this sentence first read as. Their handlers
+are `refuse_add` and `refuse_write`: they authorize the caller and then say the
+write is not built. So the write failures in this band have the same cause as
+the activation ones rather than a different one, and 10.487 has the order that
+is deliberate about.
 
 So this band is a **port gap in the adapter**, measured rather than inferred,
 and `make vm-skipped` is the only thing that measures it. It is invisible to
