@@ -209,6 +209,7 @@ kill "$server" 2>/dev/null || true
 wait "$server" 2>/dev/null || true
 server=
 before=$(runs)
+said_before=$(grep -c 'could not be checked' "$work/daemon.log" || true)
 ip addr del 10.3.3.1/24 dev portal0
 sleep 2
 "$build/ncfg" apply > /dev/null 2>&1 || true
@@ -216,8 +217,22 @@ sleep 3
 check "a network where nothing answers does not run the portal hook" "$(runs)" "$before"
 # And it said so rather than going quiet, so an operator reading the log knows
 # the check happened and could not be completed.
+#
+# **A delta, like the hook count two lines above, and it was a whole-log count
+# asserting exactly 1.** The message is one per failed probe by design -- the
+# section below is about the probe firing again on the next transition -- so
+# "exactly one in the whole log" asserts that only one probe ever failed, which
+# is a claim about how many times the reconcile loop ran rather than about what
+# netcfgd said. It held until the machine was busy: this failed inside a full
+# `make live` with `actual: 2`, and passed three times out of three run on its
+# own, which is 10.472's shape in this suite and the reason 10.477 gives --
+# what fits inside a `sleep 3` is not fixed when the loop may tick at 5s.
+#
+# The intent is that it said so rather than going quiet, which is growth and
+# not a total.
+said_now=$(grep -c 'could not be checked' "$work/daemon.log" || true)
 check "and says it could not be checked" \
-	"$(grep -c 'could not be checked' "$work/daemon.log" || true)" 1
+	"$([ "$said_now" -gt "$said_before" ] && echo said || echo silent)" "said"
 
 # **And a network that could not be checked is checked again.**
 #

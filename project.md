@@ -12385,6 +12385,42 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.488 portal.sh counted a whole log in a timed window, and stopped the suite
+
+A full `make live` aborted at `portal.sh` with `and says it could not be
+checked` reading `expected: 1, actual: 2`. The abort is the expensive half:
+`portal.sh` is at `Makefile:2366` and the suite's usual stopping point is at
+2507, so **36 scripts never ran** -- including the second `config_arrives.sh`
+on the polling path, which 10.477 added and which this run was partly for. A
+suite that stops on the first failure reports one failing check and an unknown
+for everything after it.
+
+### The instrument, not the daemon, and the script says so itself
+
+The check counted `could not be checked` across the whole daemon log and
+asserted exactly 1. The section immediately below it is about the probe firing
+again on the next transition -- the message is **one per failed probe by
+design** -- so "exactly one in the whole log" was never a claim about what
+netcfgd says. It was a claim about how many times the reconcile loop had run.
+
+Its own neighbour two lines above takes a baseline and compares, for exactly
+this reason. This one did not, and it is a delta now: `said_before` against
+`said_now`, asserting growth, which is what the comment already described --
+"it said so rather than going quiet".
+
+Measured rather than assumed: it failed inside a full suite and passed three
+times out of three on its own, and nothing in this session's work goes near the
+portal probe. **Three passes are not exoneration** -- non-reproduction is what
+intermittent means -- so what justifies calling it the instrument is that the
+instrument is wrong by construction rather than that it usually passes. The
+mechanism is 10.477's: what fits inside a `sleep 3` is not fixed when the loop
+may tick at 5 seconds, which is 10.472's finding in this suite already.
+
+**A looser assertion needs its control more, not less.** Pointed at a sentence
+netcfgd never writes, the delta reports `silent` and fails; restored, it
+passes. So it still catches the daemon going quiet, which is the property the
+check exists for, and has stopped asserting the one thing it could not know.
+
 ## 10.487 ActivateConnection is understood, written, and deliberately not landed
 
 Asked to port it. It is worked out end to end, it was written, it built, and it
