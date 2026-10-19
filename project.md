@@ -12586,13 +12586,45 @@ to take down and the device-state checks assert a `Connection` column the
 document cannot produce.
 
 **So a large part of that band asserts state its own fixture makes
-impossible**, and the methods are not what is failing. Which of the two moves
-is right -- give the fixture's radio an address, or reconsider what the shim
-calls active -- is a question about `nm.sh` and about NM's state machine rather
-than about this port, and `active.c` has already answered the second one on
-purpose. Worth knowing before anybody reads 48 failures as 48 defects: the
-`vm-skipped` target says this tier runs "scripts that never ran anywhere", so
-these assertions may never have passed rather than having regressed.
+impossible**, and the methods are not what is failing. Worth knowing before
+anybody reads 48 failures as 48 defects: the `vm-skipped` target says this tier
+runs "scripts that never ran anywhere", so these assertions may never have
+passed rather than having regressed.
+
+### radio0 has an address now, which buys one check of three
+
+Settled by the copyright holder: give it one. `interface radio0` carries
+`10.7.8.1/24` and an IPv6, on a different `/24` from `probe0`, and `nm.sh`
+moves to 71 and 47. What flipped is `a radio with an activation is connected,
+not disconnected`, which is the one that only wanted the address.
+
+**It costs the fixture a causal claim, and the config says so.** On a real
+radio the address arrives from the lease the joined network hands out, so that
+check would be evidence the activation did something. The supplicant here is a
+stand-in and no lease exists, so the address is the document's and the check
+evidences the shim's state MAPPING rather than the activation's EFFECT -- it
+would read `connected` whether or not the activation happened. There is no way
+to make it causal in this fixture, so the weaker claim is written down beside
+it rather than left for a reader to over-read.
+
+**The other two need the observation to name the network.** `deactivating
+reaches it too` and `the device names what is active on it` want `HomeFiber`,
+which is `nmc_active_profile_of` answering NETWORK -- and that depends on
+netcfgd reporting the radio as associated with that block. The activation
+demonstrably reached the supplicant, and the stand-in does not report back an
+association netcfgd reads as completed, so the active connection is the
+interface profile rather than the network. That is the same wall `hwsim.sh`
+gets past with real simulated radios, and it is a fixture capability rather
+than a shim defect.
+
+**And the IP-config failures were never about radio0 at all**, which is the
+correction this instruction turned up: `details()` queries `probe0`, which the
+document already addresses, so `10.7.7.1/24` and `10.7.7.254` are its. The
+address check passes and always did; the GATEWAY is what does not arrive. A
+diagnostic was first attached to the address check and never fired, because a
+diagnostic on a passing check is worth nothing -- it is on the gateway now,
+printing the kernel's default route beside nmcli's answer, which separates
+netcfgd never installing the route from the shim not projecting it.
 
 The secret-agent question `manager.rs` asks before connecting is not ported,
 so a network whose passphrase names a missing file fails in netcfgd rather

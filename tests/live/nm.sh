@@ -229,6 +229,25 @@ device radio0 {
 	kind = "dummy"
 }
 interface radio0 {
+	# **An address, so the radio can have an ActiveConnection at all.** The
+	# shim calls a device activated when it holds a routable address and the
+	# document gives it a profile -- `active.c` states that deliberately,
+	# because NM's own state machine calls an addressed link activated and an
+	# unaddressed one deactivated. With `interface radio0 { }` there was no
+	# address, so no ActiveConnection object, so `nmcli connection down`
+	# answered "not an active connection" and three checks below asserted a
+	# `Connection` column the document could not produce.
+	#
+	# **Static, and that costs this fixture a causal claim.** On a real radio
+	# the address arrives from the lease the joined network hands out, so
+	# "a radio with an activation is connected" would be evidence that the
+	# activation did something. Here the supplicant is a stand-in and no lease
+	# exists, so the address is the document's and the check below evidences
+	# the shim's state mapping rather than the activation's effect. Said here
+	# because a reader would otherwise take it for the stronger claim.
+	#
+	# A different /24 from `probe0`, which the IP-config checks query.
+	config = ["10.7.8.1/24", "2001:db8:8::1/64"]
 }
 
 # WPA3 deliberately, and not the WPA2 the scan flags say. The shim guesses
@@ -809,6 +828,17 @@ else
 
 	check "the address a panel shows is the one netcfgd applied" \
 		"$(detail 'IP4.ADDRESS[1]')" "10.7.7.1/24"
+	# **The kernel's answer beside nmcli's, on the check that actually fails.**
+	# The address above reports correctly, so `probe0` is addressed and the
+	# shim is reporting its IP config -- the gateway is the part that does not
+	# arrive, and whether netcfgd never installed the default route or the
+	# shim does not project it wants opposite fixes. A first attempt at this
+	# was attached to the address check, which passes, so it never fired:
+	# a diagnostic on a passing check is worth nothing.
+	if [ "$(detail IP4.GATEWAY)" != "10.7.7.254" ]; then
+		echo "note the default route per the kernel: $(ip -o -4 route show default 2>&1 | head -1)"
+		echo "note IP4.GATEWAY per nmcli:            [$(detail IP4.GATEWAY)]"
+	fi
 	check "and the gateway is the next hop of the default route" \
 		"$(detail IP4.GATEWAY)" "10.7.7.254"
 	# Establish that netcfgd has actually delivered the DNS, rather than
