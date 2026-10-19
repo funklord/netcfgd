@@ -71,8 +71,17 @@ typedef struct {
  *
  * `call`'s first argument is the `a{sa{sv}}` NM's `AddConnection` takes. Answers
  * 1 with `out` filled, or 0 with `err` carrying the sentence a client is shown.
+ *
+ * `stored` says the profile already has a credential by reference, which only
+ * an update can be sure of: **a client editing a profile sends back what
+ * `GetSettings` gave it, and that never contains the passphrase.** Without the
+ * flag, changing a hidden flag on a secured network would arrive with no `psk`
+ * and be refused for missing one. With it, the block keeps its `@secret:`
+ * reference and `has_secret` stays 0 -- the credential is not being changed, so
+ * the stored one stands and nothing needs to be written again.
  */
-int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_size);
+int nmc_block_render(DBusMessage *call, int stored, nmc_block_t *out, char *err,
+    size_t err_size);
 
 /*
  * Forget a rendered block, credential included.

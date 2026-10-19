@@ -489,6 +489,18 @@ int nmc_watch_set(nmc_watch_t *watch, const char *key, const char *const *names,
 
 /* ------------------------------------------------------------ the sending */
 
+void nmc_emit_plain(DBusConnection *connection, const char *path, const char *interface,
+    const char *member)
+{
+	DBusMessage *signal = dbus_message_new_signal(path, interface, member);
+
+	if (!signal) {
+		return;
+	}
+	(void)dbus_connection_send(connection, signal, NULL);
+	dbus_message_unref(signal);
+}
+
 void nmc_emit_path(DBusConnection *connection, const char *path, const char *interface,
     const char *member, const char *argument)
 {

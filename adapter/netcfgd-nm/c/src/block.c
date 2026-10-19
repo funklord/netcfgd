@@ -936,8 +936,8 @@ static int passphrase_fits(const char *passphrase, char *err, size_t err_size)
  * back what `GetSettings` gave it, which never contains the passphrase -- and
  * it belongs with `Update`, where there is an existing secret to leave alone.
  */
-static int security_of(DBusMessage *call, const char *id, nmc_block_t *out, char *security,
-    size_t cap, char *err, size_t err_size)
+static int security_of(DBusMessage *call, const char *id, int stored, nmc_block_t *out,
+    char *security, size_t cap, char *err, size_t err_size)
 {
 	char mechanism[48];
 	char passphrase[128];
@@ -956,13 +956,25 @@ static int security_of(DBusMessage *call, const char *id, nmc_block_t *out, char
 
 		if (!read_text(call, "802-11-wireless-security", "psk", passphrase,
 		        sizeof(passphrase))) {
-			(void)snprintf(err, err_size,
-			    "these settings ask for `%s` and carry no "
-			    "`802-11-wireless-security.psk`; netcfgd cannot store a credential "
-			    "it was not given, and a network referring to one that is not there "
-			    "is a network this machine will try to join and cannot",
-			    mechanism);
-			return 0;
+			if (!stored) {
+				(void)snprintf(err, err_size,
+				    "these settings ask for `%s` and carry no "
+				    "`802-11-wireless-security.psk`; netcfgd cannot store a "
+				    "credential it was not given, and a network referring to one "
+				    "that is not there is a network this machine will try to join "
+				    "and cannot",
+				    mechanism);
+				return 0;
+			}
+			/*
+			 * An edit of something else. The block keeps the reference it
+			 * already had and no credential is written: requiring one here
+			 * would refuse every change to a secured network that is not a
+			 * password change, which is most of them.
+			 */
+			(void)snprintf(security, cap, "psk = \"@secret:%s\"; proto = \"%s\"", id,
+			    strcmp(mechanism, "sae") == 0 ? "wpa3" : "wpa2");
+			return 1;
 		}
 		fits = passphrase_fits(passphrase, err, err_size);
 		if (fits) {
@@ -1101,7 +1113,7 @@ void nmc_block_forget(nmc_block_t *block)
 	}
 }
 
-int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_size)
+int nmc_block_render(DBusMessage *call, int stored, nmc_block_t *out, char *err, size_t err_size)
 {
 	text_t        text;
 	list_t        config;
@@ -1171,7 +1183,7 @@ int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_
 		    "what a station needs to find the network");
 		return 0;
 	}
-	if (!security_of(call, id, out, security, sizeof(security), err, err_size)) {
+	if (!security_of(call, id, stored, out, security, sizeof(security), err, err_size)) {
 		return 0;
 	}
 	/*

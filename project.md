@@ -12498,6 +12498,201 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.496 Update, and the flag that makes editing a secured network possible
+
+The last write. `Update`, `Update2` and `UpdateUnsaved` shared the read-only
+refusal; the first two now change a profile this shim wrote, and the third has
+the sentence that actually applies to it.
+
+### One flag, and the reason it cannot be inferred
+
+A client editing a profile sends back what `GetSettings` gave it, and that
+never contains the passphrase (0029, 0031). So a change to a hidden flag on a
+secured network arrives as `key-mgmt = wpa-psk` with no `psk`, which the create
+path refuses by name and must: a block referring to a credential that was never
+stored is a network this machine will try to join and cannot.
+
+`nmc_block_render` therefore takes `stored`, which only an update can answer.
+With it, the block keeps the `@secret:` reference it already had and
+`has_secret` stays 0 -- nothing is handed to the secret provider, there being
+nothing new -- and a passphrase that *does* arrive with an edit is a password
+change and goes, replacing.
+
+**The answer comes from the block netcfgd is holding, not from the secrets
+directory.** The Rust asks `has_secret(id)`, which stats
+`<config_dir>/secrets/<id>`; this reuses what `ours` already read for a
+different question -- whether the drop-in's text carries `"@secret:<id>"`. The
+two differ where it matters: a value stored under the profile's name that the
+block does not refer to would let a psk-less edit through on the Rust's
+question and not on this one, and the reference is what the file will actually
+resolve.
+
+### A rename is refused, where the Rust performs it and loses the credential
+
+The block's label is the profile's identity and the filename is derived from
+it, so changing `connection.id` is a remove and a create. `store.rs` does
+both: it removes the old profile and writes the new one.
+
+**For a secured profile that destroys the credential.** `store::remove` takes
+the old secret with the old file; the new block refers to a secret under the
+new name, and nothing can write it -- the value cannot be read back (0029,
+0031) and a client editing a profile never sends it. So the rename leaves a
+network that refers to a credential that does not exist, silently, and the
+operator finds out when it will not join.
+
+Refusing says so instead, and names the two steps and the one consequence: the
+passphrase will be asked for again. **That is a finding against the oracle
+rather than a divergence to reconcile** -- 0266 makes the Rust the comparison
+and this is a case where the comparison is wrong.
+
+### The order is the create's, reversed, and for the same reason
+
+A create stores the value and then writes the block that refers to it. An
+edit's reference already exists and is not what changes, so the file goes first
+and the credential second: the write that can fail without breaking anything
+goes last. The cost is visible rather than silent -- the settings are taken and
+the passphrase is not changed, which is a sentence a client can show and a
+retry can fix.
+
+### The ledger, now that three of eight methods are served
+
+`bus_test` carries the connection interface's whole disposition: every method,
+and whether it is served, refuses in its own words, or shares the read-only
+refusal. It fails if the count moves, if a method is missing from the list, if
+a read-only one drifts onto another handler, or if a served one is wired to the
+refusal.
+
+That is the third version of this check in two days and the first that
+asserts what it claims. The original compared each handler against
+`methods[0]` -- which IS `GetSettings` -- so it caught only a write wired to
+the getter, and `Delete` landing did not make it fail. Replacing it found
+`GetSecrets`, which must not share the read-only sentence because its own is a
+security property; writing it as a table found `UpdateUnsaved`, which wants a
+third sentence again, there being nowhere to put a profile that is not written
+to disk.
+
+**Proved able to fail**: claiming `Save` is served fails exactly one check.
+
+### A sabotage and its revert inside one second is the sabotage's verdict
+
+Worth recording because it looked like a real failure and is the session's
+third stale-artifact incident in a different costume. The control above was
+run by editing the ledger, building, reverting, and building again -- and the
+suite still failed, because the revert landed in the same second as the
+object file. Make compares mtimes and treats "not older" as up to date, so
+`bus_test.o` was never rebuilt: the binary that reported the failure was the
+sabotaged one, relinked.
+
+`touch` on the source cleared it. The rule is the one
+`build-and-commit.md` already states -- never read a verdict off a binary the
+build did not rebuild -- with the part nobody expects: **the build system
+itself can be the thing that did not notice**, at one-second granularity,
+which is exactly the window a positive control runs in.
+
+### The fault the guest tier found and the host rig could not
+
+**The prediction was 97 and 20 and the run said 96 and 21.** The check this
+slice was for started passing; one I was not watching stopped -- `and the
+credential too, rather than leaving it for nothing`, three checks later and in
+the delete band.
+
+The cause was not in `Update`. `GetSettings` left the `802-11-wireless-security`
+group out of its answer entirely, so a client sending the settings back -- which
+is what every edit is -- sent back no security group at all. `security_of` read
+that as an open network, exactly as it should, and rewrote the block without its
+`psk` line. **An edit to a hidden flag silently removed a network's
+passphrase.** The deletion then had no reference to follow and left the
+credential behind, which is the check that failed.
+
+**The two checks around it passed.** `editing a generated profile does not need
+the passphrase again` greps for `hidden = true`, which was there; `and the
+secret it never sent is still there` reads the secrets directory, which an
+update never touches. Between them they describe the operation and neither can
+see the thing that went wrong, so the failure surfaced in another band -- which
+is the argument for running the whole script rather than the checks a change is
+about.
+
+**And the host rig could not have found it, because its fixture was more
+generous than the client.** Every dictionary it built carried a security group,
+so the case nmcli produces was the one case never tested. That is
+`evidence.md`'s *a control has to be able to fail the way the thing it controls
+for fails*, met from the fixture side: a hand-built input tests the code
+against the author's model of the client, and the model was wrong in the one
+way that mattered.
+
+The replacement is a read-modify-write in dbus-python: `GetSettings`, change
+one key, `Update2`, which is what `nmcli connection modify` does. It reads
+before it writes, so it cannot be more generous than the read direction is.
+
+### The read direction was the fault, and its own comment said so
+
+`GetSettings` left the group out "because secrets are not in `GetSettings`
+even in NM" -- true of the passphrase and not of the group, and the two are not
+the same thing. NM carries `key-mgmt` and `psk-flags` there and the value in
+`GetSecrets`; the Rust shim does the same. So the group is reported now, with
+`psk-flags` 0 for system-owned, and `802-11-wireless.security` naming it the
+way NM cross-references the two.
+
+**`refuse_secrets` has been claiming this mechanism all along**: its comment
+says `psk-flags` already tells a client the daemon owns the credential, so it
+does not prompt. There were no `psk-flags` to read. A comment describing what
+the code would do if it did the thing is the hardest kind to catch, because it
+is right about everything except whether it happens.
+
+It costs a second thing nobody had noticed either: **a client could not see
+that a network was secured.** A panel listing netcfgd's networks showed every
+one of them as open.
+
+### One lossy round trip, recorded rather than solved
+
+`key-mgmt` takes exactly one value, so a network that accepts both PSK
+generations is reported as `sae` -- a WPA2-only client then refuses a network
+it could have joined, where reporting `wpa-psk` would have a WPA3 client
+silently downgrade, and the first is the better failure. The Rust makes the
+same choice.
+
+What that costs on the way back is new here: a client reading `sae` and writing
+it back pins `proto = "wpa3"` on a network that had accepted both. The document
+can say "both" and NM's field cannot, so the round trip narrows it. Nothing in
+the tree does this today -- no network in the fixtures accepts both -- and the
+fix would need a spelling NM does not have.
+
+### The signal nobody was sending
+
+**`Updated` was declared in the table, advertised in the introspection, and
+never emitted.** That did not matter while nothing could change a profile. It
+matters now, and nothing else can carry the news: every declared property on a
+connection is constant -- `VersionId` is deliberately 0, netcfgd having no
+revision to publish -- so the change poll compares equal values for ever. A
+panel holding a profile open would have gone on showing what it read before
+the edit, and a client waiting for the signal it was promised would have
+waited for ever.
+
+`nmc_emit_plain` is the missing shape: a signal with no arguments, beside the
+one that carries a path. Emitted only on a successful edit, which the rig
+confirms by counting -- two `Connection.Updated` for the two edits that took,
+and none for the rename, the in-memory flag or the hand-written block.
+
+This is *an interface is only as wired as its least-used method* arriving one
+layer up: the method was the thing being ported, and the signal that makes it
+observable was not part of it until the question was asked.
+
+### The band, and the whole write path served
+
+`nm.sh` goes from 96 and 21 to **97 and 20** -- and the diff against the run
+before `Update` is one line long: `editing a generated profile does not need
+the passphrase again` passes and nothing else moved. The second run was needed
+because the first had the fault above in it, and comparing the two failure
+lists rather than the counts is what showed that the credential check had come
+back rather than being traded for the new pass.
+
+**Every write a client can make on a profile is served now.** Create, create
+with a credential, edit, edit without being asked for the credential again,
+and remove. What remains of `nm.sh` is six checks for the secret agent and the
+activation that needs one, eleven read halves -- `GetSettings`' connection
+options and the `IP4Config` pair -- `Save` and `ClearSecrets`, which are NM
+operations netcfgd has no state for, and `RequestScan`.
+
 ## 10.495 Delete, and the three checks that were passing on nothing
 
 10.494 closed the create path and turned three checks from passing to failing
@@ -12603,7 +12798,8 @@ refused, and `RequestScan` is the straggler 10.486 recorded.
 Create, create-with-credential and delete are all served; what a client cannot
 do is edit one in place, and that is one method with a known shape -- the
 credential it must leave alone is the case `emit.rs` keeps
-`network_block_keeping_secret` for.
+`network_block_keeping_secret` for. Ported in 10.496, where that flag turned
+out to be the smaller half of the problem.
 
 ## 10.494 The credential half: the value to the provider, the reference to the file
 

@@ -376,6 +376,29 @@ static void put_pair(DBusMessageIter *into, const char *name, const char *text)
 }
 
 /*
+ * The same, for a `u`. The comment above says each type gains an appender of
+ * its own rather than one helper growing a signature argument; this is the
+ * second of them, and `psk-flags` is what wanted it.
+ */
+static void put_number(DBusMessageIter *into, const char *name, dbus_uint32_t value)
+{
+	DBusMessageIter entry;
+	DBusMessageIter variant;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "u", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&variant, DBUS_TYPE_UINT32, &value);
+	(void)dbus_message_iter_close_container(&entry, &variant);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
+/*
  * The SSID, as NetworkManager requires it: `ay`, not a string.
  *
  * **`802-11-wireless` is invalid without this**, and the comment above the
@@ -1105,7 +1128,7 @@ static int created(DBusConnection *connection, DBusMessage *call, void *object, 
 	 * now than it did when nothing was written: what the dictionary may carry
 	 * is a credential.
 	 */
-	if (!nmc_block_render(call, &block, err, err_size)) {
+	if (!nmc_block_render(call, 0, &block, err, err_size)) {
 		return 0;
 	}
 	wrote = installed(state, connection, &block, path, path_size, err, err_size);
@@ -1127,10 +1150,14 @@ static int add_connection(DBusConnection *connection, DBusMessage *call, DBusMes
 	    : 0;
 }
 
-/* The flags `AddConnection2` carries, which say where the profile is to live. */
-#define NMC_ADD_IN_MEMORY 0x1eu
+/*
+ * The flags `AddConnection2` and `Update2` carry, which say where the profile is
+ * to live: the four that ask for one not written to disk, which is what
+ * `AddConnectionUnsaved` is refused for.
+ */
+#define NMC_WRITE_IN_MEMORY 0x1eu
 
-static dbus_uint32_t add_flags(DBusMessage *call)
+static dbus_uint32_t write_flags(DBusMessage *call)
 {
 	DBusMessageIter args;
 	dbus_uint32_t   flags = 0u;
@@ -1179,7 +1206,7 @@ static int add_connection2(DBusConnection *connection, DBusMessage *call, DBusMe
 	char            path[96];
 	const char     *as_path = path;
 
-	if ((add_flags(call) & NMC_ADD_IN_MEMORY) != 0u) {
+	if ((write_flags(call) & NMC_WRITE_IN_MEMORY) != 0u) {
 		(void)snprintf(err, err_size, "%s", UNSAVED_WHY);
 		return 0;
 	}
@@ -1263,14 +1290,95 @@ const nmc_interface_t nmc_settings_interface = {
 /* ---------------------------------------------- `...Settings.Connection` */
 
 /* This connection as netcfgd has it, or 0 where it could not be read. */
+/*
+ * The words `saved_for` copies out of netcfgd's answer.
+ *
+ * Borrowed pointers would do inside one dispatch, since the window owns the
+ * list -- but only inside one, and `saved_for` has always copied rather than
+ * explained which. Two more strings follow the same rule.
+ */
+typedef struct {
+	char security[16];
+	char proto[16];
+} saved_text_t;
+
+/*
+ * How NM spells this network's security, or "" for one that needs no
+ * credential.
+ *
+ * `key-mgmt` is the field a client switches on to decide what to ask the user
+ * for, so the distinctions are the ones that change that answer.
+ *
+ * **A network that accepts both PSK generations is reported as SAE.** `key-mgmt`
+ * takes exactly one value: a WPA2-only client reading `sae` refuses a network
+ * it could in fact have joined, and one reading `wpa-psk` would silently
+ * downgrade a WPA3 network. The first is the better failure. It is also lossy
+ * in the other direction -- a client that reads this and writes it back pins
+ * `wpa3` on a network that had accepted both -- which is the round trip NM's
+ * single-valued field cannot carry, recorded rather than solved.
+ */
+static const char *key_management(const saved_text_t *text)
+{
+	if (strcmp(text->security, "psk") == 0) {
+		return strcmp(text->proto, "wpa2") == 0 ? "wpa-psk" : "sae";
+	}
+	if (strcmp(text->security, "eap") == 0) {
+		return "wpa-eap";
+	}
+	if (strcmp(text->security, "owe") == 0) {
+		return "owe";
+	}
+	return "";
+}
+
+/*
+ * The `802-11-wireless-security` group: what kind of credential, and who holds
+ * it.
+ *
+ * **Not the credential**, which is the distinction `get_settings` used to get
+ * wrong by leaving the whole group out. NM puts the group in `GetSettings` and
+ * the value in `GetSecrets`; omitting the group as well said nothing about the
+ * security at all, and cost two things. A client could not see that a network
+ * was secured. And a client sending the settings back -- which is what every
+ * edit is -- sent back no security group, so the block was rewritten as an open
+ * network: an edit to a hidden flag silently removed a network's passphrase.
+ * Found by the delete check that then had no credential to remove (10.496).
+ *
+ * `psk-flags` is 0, system-owned, and it means what it says: netcfgd holds the
+ * credential and will use it. A client reading that does not prompt, which is
+ * correct -- there is nothing for a user to type that netcfgd does not have.
+ * `refuse_secrets` has claimed this is what a client reads since before the
+ * group was sent at all.
+ */
+static void put_security_group(DBusMessageIter *groups, const char *mechanism)
+{
+	DBusMessageIter group;
+	DBusMessageIter pairs;
+	const char     *name = "802-11-wireless-security";
+
+	if (!dbus_message_iter_open_container(groups, DBUS_TYPE_DICT_ENTRY, NULL, &group)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&group, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&group, DBUS_TYPE_ARRAY, "{sv}", &pairs)) {
+		(void)dbus_message_iter_abandon_container_if_open(groups, &group);
+		return;
+	}
+	put_pair(&pairs, "key-mgmt", mechanism);
+	put_number(&pairs, "psk-flags", 0u);
+	(void)dbus_message_iter_close_container(&group, &pairs);
+	(void)dbus_message_iter_close_container(groups, &group);
+}
+
 static int saved_for(const nmc_connection_slot_t *slot, ncfg_saved_network_t *out, char *keep,
-    size_t keep_size)
+    size_t keep_size, saved_text_t *text)
 {
 	const ncfg_saved_networks_t *saved;
 	size_t                       at;
 	int                          found = 0;
 
 	memset(out, 0, sizeof(*out));
+	memset(text, 0, sizeof(*text));
 	keep[0] = '\0';
 	if (!slot || !slot->id) {
 		return 0;
@@ -1296,6 +1404,12 @@ static int saved_for(const nmc_connection_slot_t *slot, ncfg_saved_network_t *ou
 		    saved->items[at].name && saved->items[at].name[0] != '\0'
 		        ? saved->items[at].name
 		        : slot->id);
+		/* Copied for the same reason the name is: these belong to the
+		 * window's list, and the caller reads them after it has gone. */
+		(void)snprintf(text->security, sizeof(text->security), "%s",
+		    saved->items[at].security ? saved->items[at].security : "");
+		(void)snprintf(text->proto, sizeof(text->proto), "%s",
+		    saved->items[at].proto ? saved->items[at].proto : "");
 		found = 1;
 		break;
 	}
@@ -1362,17 +1476,27 @@ static int say_version_id(DBusMessageIter *into, void *object, char *err, size_t
 /*
  * `GetSettings` -- the connection as NM's nested dictionary.
  *
- * `a{sa{sv}}`: groups of settings, each a name to a variant. This answers the
- * two groups a client needs to show a wifi network in a list -- `connection`
- * and `802-11-wireless` -- and no `802-11-wireless-security`, because **secrets
- * are not in `GetSettings` even in NM**: they come from `GetSecrets`, which
- * refuses here.
+ * `a{sa{sv}}`: groups of settings, each a name to a variant. `connection` and
+ * `802-11-wireless` are what a client needs to show a network in a list;
+ * `802-11-wireless-security` says what kind of credential it uses and who
+ * holds it, and `ipv4` what addressing it asks for.
+ *
+ * **The security group is here and the secret is not**, which is NM's own
+ * arrangement: `GetSettings` carries `key-mgmt` and `psk-flags`, and the value
+ * comes from `GetSecrets`, which refuses here. This file said the group was
+ * left out because "secrets are not in GetSettings even in NM" -- true of the
+ * passphrase and not of the group, and the two are not the same thing. What it
+ * cost is in 10.496: a client sending the settings back, which is what every
+ * edit is, sent back no security group, so the block was rewritten as an open
+ * network and a network quietly lost its passphrase.
  */
 static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
     void *object, char *err, size_t err_size)
 {
 	const nmc_connection_slot_t *slot = object;
 	ncfg_saved_network_t         saved;
+	saved_text_t                 words;
+	const char                  *mechanism = "";
 	char                         shown[256] = "";
 	DBusMessageIter              out;
 	DBusMessageIter              groups;
@@ -1385,11 +1509,12 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 	 * profile's name IS its id, and there is no saved-network row for it.
 	 */
 	if (wireless) {
-		if (!saved_for(slot, &saved, shown, sizeof(shown))) {
+		if (!saved_for(slot, &saved, shown, sizeof(shown), &words)) {
 			(void)snprintf(err, err_size,
 			    "netcfgd does not report this network; it may have been forgotten");
 			return 0;
 		}
+		mechanism = key_management(&words);
 	} else {
 		(void)snprintf(shown, sizeof(shown), "%s", slot && slot->id ? slot->id : "");
 	}
@@ -1448,9 +1573,19 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 			} else if (wireless) {
 				put_pair(&pairs, "mode", "infrastructure");
 				put_ssid(&pairs, shown);
+				/* NM's own cross-reference: the wireless group names
+				 * the security group that goes with it, and a client
+				 * that reads this expects to find one. */
+				if (mechanism[0] != '\0') {
+					put_pair(&pairs, "security",
+					    "802-11-wireless-security");
+				}
 			}
 			(void)dbus_message_iter_close_container(&group, &pairs);
 			(void)dbus_message_iter_close_container(&groups, &group);
+		}
+		if (mechanism[0] != '\0') {
+			put_security_group(&groups, mechanism);
 		}
 	}
 	/*
@@ -1675,6 +1810,192 @@ static int delete_connection(DBusConnection *connection, DBusMessage *call, DBus
 	return 1;
 }
 
+/*
+ * Write an edited block back over the one that is there.
+ *
+ * **`replace` is true here and false in `installed`**, which is the difference
+ * between creating and editing rather than an inconsistency: the file this
+ * overwrites is one `ours` has just established the shim wrote, and refusing to
+ * replace it would make every profile a client created unchangeable.
+ *
+ * **The file goes first and the credential second, which is the create's order
+ * reversed.** A create had to store the value before the block could refer to
+ * it; an edit's reference already exists and is not what changes, so the write
+ * that can fail without breaking anything goes second. What that costs is
+ * visible rather than silent: the settings are taken and the passphrase is not
+ * changed, which is a sentence a client can show and a retry can fix.
+ */
+static int rewritten(nmc_state_t *state, const nmc_block_t *block, char *err, size_t err_size)
+{
+	ncfg_client_t *client = nmc_state_client(state);
+	char           why[NMC_ERROR_MAX] = "";
+
+	if (!client) {
+		(void)snprintf(err, err_size,
+		    "netcfgd is not answering, so `%s` cannot be changed: its files are the "
+		    "authority and this shim keeps no copy of them",
+		    block->label);
+		return 0;
+	}
+	if (!ncfg_client_config_put(client, block->stem, block->text, 1, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "netcfgd would not take the change to `%s`: %s",
+		    block->label, why);
+		return 0;
+	}
+	/*
+	 * Replacing, where a create refuses to: a passphrase arriving with an edit
+	 * is somebody changing it, and 0031's bridge needs an agent to be able to
+	 * say "no, this one" -- refusing because a stale value is already there
+	 * would leave the network unjoinable with no way to correct it.
+	 */
+	if (block->has_secret &&
+	    !ncfg_client_secret_put(client, block->label, block->secret, 1, why, sizeof(why))) {
+		(void)snprintf(err, err_size,
+		    "the settings for `%s` were taken and its credential was not changed: %s",
+		    block->label, why);
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * `Update`: change a profile this shim wrote.
+ *
+ * The same three questions `Delete` asks, in the same order -- who is calling,
+ * is this a network, and is the file one this shim wrote -- and then the
+ * renderer, with the one flag that only an update can set. A client sends back
+ * what `GetSettings` gave it, which never contains the passphrase, so `stored`
+ * is what keeps a change to a hidden flag from being refused for a missing
+ * credential. The answer comes from the block netcfgd is holding rather than
+ * from the secrets directory: whether the file refers to a credential is the
+ * question, and `ours` has already read the text to answer a different one.
+ *
+ * **A rename is refused rather than performed.** The block's label is the
+ * profile's identity and the filename is derived from it, so changing
+ * `connection.id` is a remove and a create. The Rust does both, and for a
+ * secured profile that loses the credential: `store::remove` takes the old
+ * secret with the old file, and the new block refers to a secret under the new
+ * name that nothing can write -- the value cannot be read back to re-store it
+ * (0029, 0031), and a client editing a profile never sends it. So the two
+ * writes are not interchangeable with a rename, and saying so is better than a
+ * network that silently stops joining.
+ */
+static int updated(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	const nmc_connection_slot_t *slot = object;
+	nmc_state_t                 *state = slot ? slot->state : NULL;
+	ncfg_client_t               *client;
+	nmc_principal_t              admin;
+	unsigned long                uid = 0u;
+	char                         why[NMC_ERROR_MAX] = "";
+	char                         stem[96];
+	nmc_block_t                  block;
+	int                          refers = 0;
+	int                          whose;
+	int                          wrote;
+
+	(void)reply;
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	if (!slot || !slot->id) {
+		(void)snprintf(err, err_size,
+		    "there is no profile at this path any more, so there is nothing to change");
+		return 0;
+	}
+	if (slot->kind != NMC_PROFILE_NETWORK) {
+		return say_read_only(slot, err, err_size);
+	}
+	client = nmc_state_client(state);
+	if (!client) {
+		(void)snprintf(err, err_size,
+		    "netcfgd is not answering, so `%s` cannot be changed: its files are the "
+		    "authority and this shim keeps no copy of them",
+		    slot->id);
+		return 0;
+	}
+	nmc_block_stem(slot->id, stem, sizeof(stem));
+	whose = ours(client, stem, slot->id, &refers, why, sizeof(why));
+	if (whose < 0) {
+		(void)snprintf(err, err_size,
+		    "netcfgd would not say which files it has, so whether `%s` is one this shim "
+		    "wrote is unknown and nothing has been changed: %s",
+		    slot->id, why);
+		return 0;
+	}
+	if (whose == 0) {
+		return say_read_only(slot, err, err_size);
+	}
+	if ((write_flags(call) & NMC_WRITE_IN_MEMORY) != 0u) {
+		(void)snprintf(err, err_size, "%s", UNSAVED_WHY);
+		return 0;
+	}
+	if (!nmc_block_render(call, refers, &block, err, err_size)) {
+		return 0;
+	}
+	if (strcmp(block.label, slot->id) != 0) {
+		(void)snprintf(err, err_size,
+		    "`%s` cannot be renamed to `%s` here: the name is the block's label and the "
+		    "file is named after it, so a rename is removing one network and creating "
+		    "another. Delete this one and add the new name -- and if it has a "
+		    "passphrase, you will be asked for it again, because netcfgd does not hand "
+		    "a stored credential back to anybody (decisions 0029 and 0031)",
+		    slot->id, block.label);
+		nmc_block_forget(&block);
+		return 0;
+	}
+	wrote = rewritten(state, &block, err, err_size);
+	nmc_block_forget(&block);
+	if (wrote) {
+		char path[96];
+
+		/*
+		 * **`Updated` is how a client learns the settings moved, and nothing
+		 * else here can tell it.** Every declared property is constant --
+		 * `VersionId` is deliberately 0, netcfgd having no revision to
+		 * publish -- so the change poll compares equal values for ever and a
+		 * panel holding this profile open would show what it read before the
+		 * edit. The signal was declared and never sent until there was an
+		 * edit to announce.
+		 */
+		(void)snprintf(path, sizeof(path), "%s/%u", NMC_SETTINGS_PATH, slot->number);
+		nmc_emit_plain(connection, path,
+		    "org.freedesktop.NetworkManager.Settings.Connection", "Updated");
+	}
+	return wrote;
+}
+
+/*
+ * `Update2`, which is the spelling `nmcli connection modify` calls.
+ *
+ * Its reply is the dictionary NM uses to report what it did beyond writing the
+ * profile. Nothing here does anything beyond that, and an invented key is worse
+ * than an absent one.
+ */
+static int updated2(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	DBusMessageIter into;
+	DBusMessageIter empty;
+
+	if (!updated(connection, call, reply, object, err, err_size)) {
+		return 0;
+	}
+	dbus_message_iter_init_append(reply, &into);
+	if (!dbus_message_iter_open_container(&into, DBUS_TYPE_ARRAY, "{sv}", &empty)) {
+		(void)snprintf(err, err_size, "no memory for the reply");
+		return 0;
+	}
+	return dbus_message_iter_close_container(&into, &empty) ? 1 : 0;
+}
+
 static const nmc_property_t CONNECTION_PROPERTIES[] = {
 	{ "Unsaved", "b", NMC_READ, say_unsaved, NULL },
 	{ "Flags", "u", NMC_READ, say_flags, NULL },
@@ -1685,13 +2006,13 @@ static const nmc_property_t CONNECTION_PROPERTIES[] = {
 static const nmc_method_t CONNECTION_METHODS[] = {
 	{ "GetSettings", "", "a{sa{sv}}", get_settings },
 	{ "GetSecrets", "s", "a{sa{sv}}", refuse_secrets },
-	{ "Update", "a{sa{sv}}", "", refuse_read_only },
+	{ "Update", "a{sa{sv}}", "", updated },
 	/* NM's newer spelling, and **the one `nmcli` actually calls**: with only
 	 * `Update` declared, a modify got "this interface has no such method in
 	 * this build" from the dispatcher instead of netcfgd's explanation. A
 	 * refusal that never runs is not a refusal. */
-	{ "Update2", "a{sa{sv}}ua{sv}", "a{sv}", refuse_read_only },
-	{ "UpdateUnsaved", "a{sa{sv}}", "", refuse_read_only },
+	{ "Update2", "a{sa{sv}}ua{sv}", "a{sv}", updated2 },
+	{ "UpdateUnsaved", "a{sa{sv}}", "", refuse_unsaved },
 	{ "Delete", "", "", delete_connection },
 	{ "Save", "", "", refuse_read_only },
 	{ "ClearSecrets", "", "", refuse_read_only }

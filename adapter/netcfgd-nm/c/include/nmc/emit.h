@@ -98,6 +98,19 @@ int nmc_watch_set(nmc_watch_t *watch, const char *key, const char *const *names,
     size_t room);
 
 /* Send one signal carrying a single object path. */
+/*
+ * A signal with no arguments, on one object.
+ *
+ * `Settings.Connection.Updated` is the case: NM's clients re-read a profile's
+ * settings when they see it, and nothing else here can tell them to. The
+ * declared properties are all constant -- `VersionId` is deliberately 0,
+ * because netcfgd publishes no revision -- so the change poll cannot notice an
+ * edit, and a signal that is advertised in the introspection and never sent is
+ * one a client waits for for ever.
+ */
+void nmc_emit_plain(DBusConnection *connection, const char *path, const char *interface,
+    const char *member);
+
 void nmc_emit_path(DBusConnection *connection, const char *path, const char *interface,
     const char *member, const char *argument);
 

@@ -346,7 +346,19 @@ static int rendered(const profile_t *profile, nmc_block_t *block, char *why, siz
 	int          ok;
 
 	why[0] = '\0';
-	ok = nmc_block_render(call, block, why, size);
+	ok = nmc_block_render(call, 0, block, why, size);
+	dbus_message_unref(call);
+	return ok;
+}
+
+/* The same, as an update of a profile that already has a credential stored. */
+static int edited(const profile_t *profile, nmc_block_t *block, char *why, size_t size)
+{
+	DBusMessage *call = profile_message(profile);
+	int          ok;
+
+	why[0] = '\0';
+	ok = nmc_block_render(call, 1, block, why, size);
 	dbus_message_unref(call);
 	return ok;
 }
@@ -645,63 +657,84 @@ int main(void)
 		    "not ported");
 
 		/*
-		 * **Every method but the two that are served shares the refusing
-		 * handler**, and the list of served ones is a ledger somebody has to
-		 * edit on purpose: a write that quietly started working, with or
-		 * without authorization, is the thing worth catching.
+		 * **The connection interface's ledger: every method, and what it is
+		 * supposed to do.** A write that quietly started working, a method
+		 * added without anybody deciding what it answers, and a refusal that
+		 * drifted onto the wrong sentence all fail this.
 		 *
-		 * This asserted something weaker and read as though it asserted
-		 * this. It compared each handler against `methods[0]`, which is
-		 * `GetSettings` -- so it would have caught a write wired to the
-		 * getter and nothing else, and a write wired to anything that works
-		 * would have passed. Found when `Delete` landed and the check did not
-		 * notice, which is the detector failing on the first case it existed
-		 * for.
+		 * It replaced a check that asserted something weaker and read as
+		 * though it asserted this: each handler was compared against
+		 * `methods[0]`, which is `GetSettings`, so it would have caught a
+		 * write wired to the getter and nothing else. `Delete` landing did not
+		 * make it fail -- the detector missing the first case it existed for --
+		 * and writing the replacement found two more: `GetSecrets` must not
+		 * share the read-only refusal, its sentence being a security property
+		 * rather than a gap, and `UpdateUnsaved` has a third sentence of its
+		 * own, because there is nowhere to put a profile that is not written
+		 * to disk.
 		 */
 		{
-			/*
-			 * The ledger. Each exemption carries the reason it is one, which
-			 * is what makes this a list somebody has to edit on purpose
-			 * rather than a number that drifts.
-			 *
-			 * **`GetSecrets` is the one the stronger check found.** It does
-			 * not share the read-only refusal and must not: its sentence is a
-			 * security property rather than a gap, and it is deliberately not
-			 * authorized first. The weaker version of this check could not
-			 * have told that apart from a write that had started working.
-			 */
-			static const char *const NOT_READ_ONLY[] = {
-				"GetSettings", /* a read */
-				"Delete",      /* removes a profile this shim wrote */
-				"GetSecrets"   /* refuses in its own words, by design */
-			};
-			const nmc_method_t *refusing = NULL;
-			size_t              which;
+			static const struct {
+				const char *name;
+				/* "served", "read-only", or "its own" refusal. */
+				const char *answers;
+			} LEDGER[] = { { "GetSettings", "served" }, { "GetSecrets", "its own" },
+				{ "Update", "served" }, { "Update2", "served" },
+				{ "UpdateUnsaved", "its own" }, { "Delete", "served" },
+				{ "Save", "read-only" }, { "ClearSecrets", "read-only" } };
+			const size_t count = sizeof(LEDGER) / sizeof(LEDGER[0]);
+			/* `nmc_method_t`'s handler, spelled out: the table declares it
+			 * anonymously, and comparing two of them needs a name here. */
+			int (*read_only)(DBusConnection *, DBusMessage *, DBusMessage *, void *,
+			    char *, size_t) = NULL;
+			int    all_listed = 1;
+			size_t which;
 
+			check(nmc_connection_interface.method_count == count,
+			    "the connection interface declares exactly the methods its ledger lists");
 			for (at = 0u; at < nmc_connection_interface.method_count; at++) {
-				if (strcmp(nmc_connection_interface.methods[at].name, "Update") == 0) {
-					refusing = &nmc_connection_interface.methods[at];
-				}
-			}
-			check(refusing != NULL,
-			    "`Update` is declared, so there is a refusal to compare against");
-			for (at = 0u; refusing && at < nmc_connection_interface.method_count; at++) {
 				const nmc_method_t *method = &nmc_connection_interface.methods[at];
-				int                 exempt = 0;
+				const char         *answers = NULL;
 
-				for (which = 0u;
-				    which < sizeof(NOT_READ_ONLY) / sizeof(NOT_READ_ONLY[0]); which++) {
-					if (strcmp(method->name, NOT_READ_ONLY[which]) == 0) {
-						exempt = 1;
+				for (which = 0u; which < count; which++) {
+					if (strcmp(method->name, LEDGER[which].name) == 0) {
+						answers = LEDGER[which].answers;
 					}
 				}
-				if (!exempt && method->call != refusing->call) {
-					every_write_refuses = 0;
+				if (!answers) {
+					all_listed = 0;
+					continue;
+				}
+				if (strcmp(answers, "read-only") == 0) {
+					if (!read_only) {
+						read_only = method->call;
+					} else if (method->call != read_only) {
+						every_write_refuses = 0;
+					}
+				}
+			}
+			check(all_listed, "  and no method it serves is missing from the ledger");
+			check(read_only != NULL, "  with a read-only refusal among them to compare to");
+			for (at = 0u; read_only && at < nmc_connection_interface.method_count; at++) {
+				const nmc_method_t *method = &nmc_connection_interface.methods[at];
+
+				for (which = 0u; which < count; which++) {
+					if (strcmp(method->name, LEDGER[which].name) != 0) {
+						continue;
+					}
+					/* A method the ledger says is served or refuses in its
+					 * own words must not be wired to the shared refusal:
+					 * that is how a write becomes a no, or a no becomes the
+					 * wrong sentence. */
+					if (strcmp(LEDGER[which].answers, "read-only") != 0 &&
+					    method->call == read_only) {
+						every_write_refuses = 0;
+					}
 				}
 			}
 		}
 		check(every_write_refuses,
-		    "and every method outside that ledger shares the read-only refusal");
+		    "  and each answers the way the ledger says rather than another's way");
 
 		check(nmc_settings_interface.property_count == 3u &&
 		        nmc_connection_interface.property_count == 4u,
@@ -1325,6 +1358,40 @@ int main(void)
 		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
 		        strstr(why, "psk") != NULL,
 		    "and a psk mechanism with no passphrase is refused, not written");
+		/*
+		 * **The same dictionary is legitimate as an update**, and this is the
+		 * pair that makes `Update` possible at all: a client editing a profile
+		 * sends back what `GetSettings` gave it, which never contains the
+		 * passphrase. Refusing it would refuse every change to a secured
+		 * network that is not a password change.
+		 */
+		check(edited(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "psk = \"@secret:Office\"") != NULL,
+		    "  while as an edit of a profile that has one, the reference stands");
+		check(block.has_secret == 0,
+		    "  and nothing is handed to the secret provider, there being nothing new");
+		/* A passphrase sent WITH an edit is a password change, and does go. */
+		asked.psk = "anewpassphrase";
+		check(edited(&asked, &block, why, sizeof(why)) == 1 && block.has_secret == 1 &&
+		        strcmp(block.secret, "anewpassphrase") == 0,
+		    "and a passphrase sent with an edit is a password change, which does");
+		nmc_block_forget(&block);
+		asked.psk = NULL;
+
+		/*
+		 * **No security group at all means an open network, even as an edit**,
+		 * and that is right rather than a hole: it is how a client removes a
+		 * password. What made it dangerous was the read direction -- this
+		 * shim's `GetSettings` left the security group out, so every client's
+		 * edit arrived looking like this and quietly unsecured the network.
+		 * The group is reported now, so a dictionary without one is a client
+		 * that means it (10.496).
+		 */
+		asked.key_mgmt = NULL;
+		asked.psk = NULL;
+		check(edited(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "wifi { open = true }") != NULL,
+		    "an edit with no security group at all is a network being opened");
 
 		asked.key_mgmt = "wpa-eap";
 		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
