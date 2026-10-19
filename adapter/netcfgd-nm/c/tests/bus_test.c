@@ -25,6 +25,7 @@
 #include "nmc/active.h"
 #include "nmc/accesspoint.h"
 #include "nmc/agent.h"
+#include "nmc/block.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +53,313 @@ static void check(int condition, const char *what)
 		printf("FAILED %s\n", what);
 		failures++;
 	}
+}
+
+/* --------------------------- a settings dictionary, as a client sends one */
+
+/*
+ * `AddConnection`'s argument, built here rather than driven over a bus.
+ *
+ * A `DBusMessage` is created and appended to with no connection at all, so the
+ * marshalling the file header says is out of reach is out of reach only for
+ * what this program WRITES. What it READS -- a variant inside a container
+ * inside a container, which is what a client sends -- can be built here, and
+ * the renderer that reads it is a pure function of it.
+ */
+static DBusMessage *settings_call(void)
+{
+	return dbus_message_new_method_call("org.freedesktop.NetworkManager",
+	    "/org/freedesktop/NetworkManager/Settings",
+	    "org.freedesktop.NetworkManager.Settings", "AddConnection");
+}
+
+static void open_group(DBusMessageIter *groups, const char *name, DBusMessageIter *entry,
+    DBusMessageIter *pairs)
+{
+	(void)dbus_message_iter_open_container(groups, DBUS_TYPE_DICT_ENTRY, NULL, entry);
+	(void)dbus_message_iter_append_basic(entry, DBUS_TYPE_STRING, &name);
+	(void)dbus_message_iter_open_container(entry, DBUS_TYPE_ARRAY, "{sv}", pairs);
+}
+
+static void close_group(DBusMessageIter *groups, DBusMessageIter *entry, DBusMessageIter *pairs)
+{
+	(void)dbus_message_iter_close_container(entry, pairs);
+	(void)dbus_message_iter_close_container(groups, entry);
+}
+
+/* One `sv` pair, whose variant is opened for the caller to fill. */
+static void open_pair(DBusMessageIter *pairs, const char *key, const char *signature,
+    DBusMessageIter *pair, DBusMessageIter *value)
+{
+	(void)dbus_message_iter_open_container(pairs, DBUS_TYPE_DICT_ENTRY, NULL, pair);
+	(void)dbus_message_iter_append_basic(pair, DBUS_TYPE_STRING, &key);
+	(void)dbus_message_iter_open_container(pair, DBUS_TYPE_VARIANT, signature, value);
+}
+
+static void close_pair(DBusMessageIter *pairs, DBusMessageIter *pair, DBusMessageIter *value)
+{
+	(void)dbus_message_iter_close_container(pair, value);
+	(void)dbus_message_iter_close_container(pairs, pair);
+}
+
+static void say_string(DBusMessageIter *pairs, const char *key, const char *text)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+
+	open_pair(pairs, key, "s", &pair, &value);
+	(void)dbus_message_iter_append_basic(&value, DBUS_TYPE_STRING, &text);
+	close_pair(pairs, &pair, &value);
+}
+
+static void say_number(DBusMessageIter *pairs, const char *key, dbus_uint32_t number)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+
+	open_pair(pairs, key, "u", &pair, &value);
+	(void)dbus_message_iter_append_basic(&value, DBUS_TYPE_UINT32, &number);
+	close_pair(pairs, &pair, &value);
+}
+
+static void say_signed(DBusMessageIter *pairs, const char *key, dbus_int32_t number)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+
+	open_pair(pairs, key, "i", &pair, &value);
+	(void)dbus_message_iter_append_basic(&value, DBUS_TYPE_INT32, &number);
+	close_pair(pairs, &pair, &value);
+}
+
+static void say_flag(DBusMessageIter *pairs, const char *key, int yes)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+	dbus_bool_t     said = yes ? TRUE : FALSE;
+
+	open_pair(pairs, key, "b", &pair, &value);
+	(void)dbus_message_iter_append_basic(&value, DBUS_TYPE_BOOLEAN, &said);
+	close_pair(pairs, &pair, &value);
+}
+
+/* An SSID: octets, which is the thing reading it as a string got wrong. */
+static void say_bytes(DBusMessageIter *pairs, const char *key, const char *text)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+	DBusMessageIter bytes;
+	size_t          at;
+
+	open_pair(pairs, key, "ay", &pair, &value);
+	(void)dbus_message_iter_open_container(&value, DBUS_TYPE_ARRAY, "y", &bytes);
+	for (at = 0u; text[at] != '\0'; at++) {
+		unsigned char byte = (unsigned char)text[at];
+
+		(void)dbus_message_iter_append_basic(&bytes, DBUS_TYPE_BYTE, &byte);
+	}
+	(void)dbus_message_iter_close_container(&value, &bytes);
+	close_pair(pairs, &pair, &value);
+}
+
+static void say_texts(DBusMessageIter *pairs, const char *key, const char *text)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+	DBusMessageIter texts;
+
+	open_pair(pairs, key, "as", &pair, &value);
+	(void)dbus_message_iter_open_container(&value, DBUS_TYPE_ARRAY, "s", &texts);
+	(void)dbus_message_iter_append_basic(&texts, DBUS_TYPE_STRING, &text);
+	(void)dbus_message_iter_close_container(&value, &texts);
+	close_pair(pairs, &pair, &value);
+}
+
+/* A member of one `aa{sv}` entry: text, or a number where `text` is NULL. */
+typedef struct {
+	const char   *name;
+	const char   *text;
+	dbus_uint32_t number;
+} member_t;
+
+/*
+ * An `aa{sv}` holding one entry, which is what `address-data` and `route-data`
+ * are. One entry rather than a list because every rule this exercises is per
+ * entry; the list is a loop around the same code.
+ */
+static void say_entry(DBusMessageIter *pairs, const char *key, const member_t *members,
+    size_t count)
+{
+	DBusMessageIter pair;
+	DBusMessageIter value;
+	DBusMessageIter array;
+	DBusMessageIter entry;
+	size_t          at;
+
+	open_pair(pairs, key, "aa{sv}", &pair, &value);
+	(void)dbus_message_iter_open_container(&value, DBUS_TYPE_ARRAY, "a{sv}", &array);
+	(void)dbus_message_iter_open_container(&array, DBUS_TYPE_ARRAY, "{sv}", &entry);
+	for (at = 0u; at < count; at++) {
+		if (members[at].text) {
+			say_string(&entry, members[at].name, members[at].text);
+		} else {
+			say_number(&entry, members[at].name, members[at].number);
+		}
+	}
+	(void)dbus_message_iter_close_container(&array, &entry);
+	(void)dbus_message_iter_close_container(&value, &array);
+	close_pair(pairs, &pair, &value);
+}
+
+/*
+ * What a client asked for, as a fixture.
+ *
+ * A struct rather than a builder per test because the interesting cases differ
+ * in one field each, and a designated initialiser naming that field is the test
+ * saying what it is about.
+ */
+typedef struct {
+	const char   *type;
+	const char   *id;
+	const char   *ssid;
+	const char   *key_mgmt;
+	const char   *psk;
+	const char   *v4_method;
+	const char   *address;
+	dbus_uint32_t prefix;
+	const char   *gateway;
+	const char   *route_dest;
+	dbus_uint32_t route_prefix;
+	const char   *route_next;
+	dbus_uint32_t route_metric;
+	const char   *v6_method;
+	const char   *dns;
+	const char   *dns_search;
+	int           priority_present;
+	dbus_int32_t  priority;
+	dbus_int32_t  metered;
+	int           hidden;
+	int           autoconnect_present;
+	int           autoconnect;
+	dbus_uint32_t mtu;
+} profile_t;
+
+static DBusMessage *profile_message(const profile_t *profile)
+{
+	DBusMessage    *call = settings_call();
+	DBusMessageIter args;
+	DBusMessageIter groups;
+	DBusMessageIter entry;
+	DBusMessageIter pairs;
+
+	dbus_message_iter_init_append(call, &args);
+	(void)dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sa{sv}}", &groups);
+
+	open_group(&groups, "connection", &entry, &pairs);
+	if (profile->id) {
+		say_string(&pairs, "id", profile->id);
+	}
+	if (profile->type) {
+		say_string(&pairs, "type", profile->type);
+	}
+	/* Always sent, always empty, and the dropped note must not name it: this is
+	 * the `is_empty` rule the Rust comment is about. */
+	say_string(&pairs, "interface-name", "");
+	if (profile->priority_present) {
+		say_signed(&pairs, "autoconnect-priority", profile->priority);
+	}
+	if (profile->metered != 0) {
+		say_signed(&pairs, "metered", profile->metered);
+	}
+	if (profile->autoconnect_present) {
+		say_flag(&pairs, "autoconnect", profile->autoconnect);
+	}
+	close_group(&groups, &entry, &pairs);
+
+	open_group(&groups, "802-11-wireless", &entry, &pairs);
+	if (profile->ssid) {
+		say_bytes(&pairs, "ssid", profile->ssid);
+	}
+	say_string(&pairs, "mode", "infrastructure");
+	if (profile->hidden) {
+		say_flag(&pairs, "hidden", 1);
+	}
+	if (profile->mtu != 0u) {
+		say_number(&pairs, "mtu", profile->mtu);
+	}
+	close_group(&groups, &entry, &pairs);
+
+	if (profile->key_mgmt) {
+		open_group(&groups, "802-11-wireless-security", &entry, &pairs);
+		say_string(&pairs, "key-mgmt", profile->key_mgmt);
+		if (profile->psk) {
+			say_string(&pairs, "psk", profile->psk);
+		}
+		close_group(&groups, &entry, &pairs);
+	}
+
+	open_group(&groups, "ipv4", &entry, &pairs);
+	if (profile->v4_method) {
+		say_string(&pairs, "method", profile->v4_method);
+	}
+	if (profile->address) {
+		member_t members[2] = { { "address", profile->address, 0u },
+			{ "prefix", NULL, profile->prefix } };
+
+		say_entry(&pairs, "address-data", members, 2u);
+	}
+	if (profile->gateway) {
+		say_string(&pairs, "gateway", profile->gateway);
+	}
+	if (profile->route_dest) {
+		member_t members[4] = { { "dest", profile->route_dest, 0u },
+			{ "prefix", NULL, profile->route_prefix },
+			{ "next-hop", profile->route_next, 0u },
+			{ "metric", NULL, profile->route_metric } };
+		size_t   count = profile->route_next ? 4u : 2u;
+
+		say_entry(&pairs, "route-data", members, count);
+	}
+	if (profile->dns) {
+		say_texts(&pairs, "dns-data", profile->dns);
+	}
+	if (profile->dns_search) {
+		say_texts(&pairs, "dns-search", profile->dns_search);
+	}
+	close_group(&groups, &entry, &pairs);
+
+	open_group(&groups, "ipv6", &entry, &pairs);
+	if (profile->v6_method) {
+		say_string(&pairs, "method", profile->v6_method);
+	}
+	say_string(&pairs, "addr-gen-mode", "stable-privacy");
+	close_group(&groups, &entry, &pairs);
+
+	(void)dbus_message_iter_close_container(&args, &groups);
+	return call;
+}
+
+/* Render one fixture, and let the message go. */
+static int rendered(const profile_t *profile, nmc_block_t *block, char *why, size_t size)
+{
+	DBusMessage *call = profile_message(profile);
+	int          ok;
+
+	why[0] = '\0';
+	ok = nmc_block_render(call, block, why, size);
+	dbus_message_unref(call);
+	return ok;
+}
+
+/* The fixture every case here starts from: an open network called Office. */
+static profile_t an_open_network(void)
+{
+	profile_t profile = { 0 };
+
+	profile.type = "802-11-wireless";
+	profile.id = "Office";
+	profile.ssid = "Office";
+	return profile;
 }
 
 int main(void)
@@ -361,7 +669,7 @@ int main(void)
 		 * deriving one is only worth it if that lookup exists. */
 		/* Eight on the connection: `Update2` is NM's newer spelling and the
 		 * one nmcli calls, so without it the refusal never ran. */
-		check(nmc_settings_interface.method_count == 7u &&
+		check(nmc_settings_interface.method_count == 8u &&
 		        nmc_connection_interface.method_count == 8u,
 		    "and seven and eight methods, which is what NM has");
 	}
@@ -845,6 +1153,228 @@ int main(void)
 		check(text[14] == '5', "the version nibble says 5");
 		check(text[19] == '8' || text[19] == '9' || text[19] == 'a' || text[19] == 'b',
 		    "and the variant bits are RFC 4122's");
+	}
+
+	/*
+	 * The renderer: what `AddConnection` writes.
+	 *
+	 * **The whole block is compared, not a fragment of it.** `tests/live/nm.sh`
+	 * greps the generated file for four of these lines, so a renderer that got
+	 * the shape right and the spacing wrong would pass every check keyed on a
+	 * substring and produce a file netcfgd refuses -- which, because the loader
+	 * compiles the drop-in directory as one document, would take every other
+	 * network on the machine down with it.
+	 *
+	 * Every other case changes one field of the same fixture, so what each
+	 * check is about is the line that sets it.
+	 */
+	{
+		static const char OFFICE[] =
+		    "# Written by netcfgd-nm from a NetworkManager client. This file is\n"
+		    "# ordinary netcfgd configuration: edit it, diff it, commit it, or delete\n"
+		    "# it. Deleting netcfgd-nm leaves it behind, still valid.\n"
+		    "\n"
+		    "network \"Office\" {\n"
+		    "\twifi { open = true }\n"
+		    "\tconfig = [\"192.0.2.5/24\", \"slaac\"]\n"
+		    "\troutes = [\"default via 192.0.2.1\", \"10.0.0.0/8 via 192.0.2.9 metric 600\"]\n"
+		    "}\n";
+		profile_t     asked;
+		nmc_block_t   block;
+		char          why[NMC_ERROR_MAX];
+		unsigned long metric = 0ul;
+
+		asked = an_open_network();
+		asked.v4_method = "manual";
+		asked.address = "192.0.2.5";
+		asked.prefix = 24u;
+		asked.gateway = "192.0.2.1";
+		asked.route_dest = "10.0.0.0";
+		asked.route_prefix = 8u;
+		asked.route_next = "192.0.2.9";
+		asked.route_metric = 600u;
+		asked.v6_method = "auto";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1,
+		    "a static wifi profile from a client renders");
+		if (strcmp(block.text, OFFICE) != 0) {
+			printf("       rendered instead:\n%s", block.text);
+		}
+		check(strcmp(block.text, OFFICE) == 0,
+		    "  into the block an operator would have written");
+		check(strcmp(block.stem, "nm-Office") == 0, "  and names conf.d/nm-Office.conf");
+
+		/* The addressing is netcfgd's one list rather than NM's two settings
+		 * (0006), which is why both families land in `config` above. An ipv6
+		 * `dhcp` is netcfgd's `dhcp6`, and the two names differing is the
+		 * translation rather than a typo. */
+		asked.v6_method = "dhcp";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "\"192.0.2.5/24\", \"dhcp6\"") != NULL,
+		    "an ipv6 method is spelled netcfgd's way beside the ipv4 one");
+		asked.v6_method = "auto";
+
+		/* An unrecognised method is refused rather than ignored: `shared` means
+		 * address translation for other machines, netcfgd cannot say it, and a
+		 * profile written as though it had not been asked for is one whose whole
+		 * point was removed in silence. */
+		asked.v4_method = "shared";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "shared") != NULL,
+		    "an addressing method netcfgd has no spelling for is refused by name");
+		asked.v4_method = "manual";
+
+		/* Checked where it is read, because the value goes into a file that has
+		 * to compile. */
+		asked.gateway = "no-such-address";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "no-such-address") != NULL,
+		    "a gateway that is not an address is refused, quoting it");
+		asked.gateway = "192.0.2.1";
+
+		/* **The slice's boundary.** A passphrase means a credential in the
+		 * secret provider and a `@secret:` reference in the block (0030, 0031),
+		 * and writing the open half of that would hand a client a secured
+		 * network with no credential and no error. */
+		asked.key_mgmt = "wpa-psk";
+		asked.psk = "correcthorsebattery";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0,
+		    "a network with a passphrase is refused by this build");
+		check(strstr(why, "ncfg wifi add") != NULL,
+		    "  naming the command that does write one");
+		/* A refusal crosses the bus and lands in a client's log. 0042: a
+		 * credential is the one thing on a machine nobody can get back. */
+		check(strstr(why, "correcthorsebattery") == NULL,
+		    "  and never quoting the passphrase back");
+
+		asked.key_mgmt = "wpa-eap";
+		asked.psk = NULL;
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "enterprise") != NULL,
+		    "enterprise wifi is refused, which netcfgd has no block for");
+
+		/* OWE is not a passphrase, so it writes: the refusal above is about the
+		 * secret rather than about security. */
+		asked.key_mgmt = "owe";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "\twifi { owe = true }\n") != NULL,
+		    "an OWE network writes, carrying no secret");
+		asked.key_mgmt = NULL;
+
+		/* 0034: what cannot be expressed is named rather than dropped. An MTU
+		 * belongs to an interface and an SSID does not have one, so this is the
+		 * setting with nowhere to go. */
+		asked.mtu = 1400u;
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "#   802-11-wireless.mtu\n") != NULL,
+		    "a setting netcfgd cannot express is named in the file");
+		/* And the keys every client sends are not: a note listing fifteen lines
+		 * of NM bookkeeping buries the one that matters. `interface-name` is
+		 * sent empty by the fixture, which is the emptiness rule. */
+		check(strstr(block.text, "connection.interface-name") == NULL &&
+		        strstr(block.text, "802-11-wireless.mode") == NULL,
+		    "  and what netcfgd derives or does not need is not");
+		asked.mtu = 0u;
+
+		/* An SSID is octets and a label is text, so a network whose name is not
+		 * exactly its SSID needs both -- and writing the hex form every time
+		 * would make every generated file harder to read. */
+		asked.ssid = "Office2";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "\tssid = \"4f666669636532\"\n") != NULL,
+		    "an SSID that is not the label is written as hex");
+		asked.ssid = "Office";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "ssid") == NULL,
+		    "  and is left out when it is the label");
+
+		/*
+		 * **The fixed point 0207 exists for, asserted rather than named.** The
+		 * write direction scales a priority up into a metric and the read
+		 * direction scales it back down, so the test is that the round trip
+		 * returns what went in -- not that the metric is any particular number,
+		 * which is the assertion that went stale in `nm.sh` by being read off
+		 * the code it was checking.
+		 */
+		asked.priority_present = 1;
+		asked.priority = 42;
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        sscanf(strstr(block.text, "\tmetric = ") ? strstr(block.text, "\tmetric = ")
+		                                                 : "",
+		            "\tmetric = %lu", &metric) == 1,
+		    "an autoconnect-priority becomes a network metric");
+		check((4096ul - metric) * 999ul / 4096ul == 42ul,
+		    "  and reading that metric back gives the priority that went in");
+		/* Zero is NM's default, and saying nothing leaves the interface's own
+		 * preference in charge, which is what an unranked network should do. */
+		asked.priority = 0;
+		/* The key, not the word: this fixture's route carries `metric 600`, so
+		 * a search for `metric` cannot tell a network-level one from it. */
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "\tmetric = ") == NULL,
+		    "  while NM's default priority writes no metric at all");
+		/* A metric counts up from zero, so a negative priority has no spelling.
+		 * Clamping would turn a network the operator deliberately
+		 * deprioritised into an ordinary one. */
+		asked.priority = -5;
+		check(rendered(&asked, &block, why, sizeof(why)) == 0,
+		    "  and a negative priority is refused rather than clamped");
+		asked.priority_present = 0;
+
+		/* The three per-connection options a settings panel offers beside the
+		 * address. `metered` is an enumeration on the bus and a boolean in the
+		 * block, so 1 is `NM_METERED_YES` rather than a flag. */
+		asked.metered = 1;
+		asked.hidden = 1;
+		asked.autoconnect_present = 1;
+		asked.autoconnect = 0;
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "\tmetered = true\n") != NULL &&
+		        strstr(block.text, "\thidden = true\n") != NULL &&
+		        strstr(block.text, "\tautoconnect = false\n") != NULL,
+		    "metered, hidden and autoconnect reach the block as netcfgd's keys");
+		asked.metered = 0;
+		asked.hidden = 0;
+		asked.autoconnect_present = 0;
+
+		/* One scope per network rather than one per address family, which is
+		 * 0007's shape rather than NM's. */
+		asked.dns = "1.1.1.1";
+		asked.dns_search = "example.com";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text,
+		            "\tdns { servers = [\"1.1.1.1\"]; search = [\"example.com\"] }\n") != NULL,
+		    "nameservers and search domains become one dns block");
+		asked.dns = NULL;
+		asked.dns_search = NULL;
+
+		/* The label is written between quotes, so a quote in it would end the
+		 * string and turn the rest of the line into configuration. */
+		asked.id = "Of\"fice";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0,
+		    "an id that would escape its own quotes is refused");
+		/* A label may hold a slash and a filename may not, so the stem is the
+		 * label sanitised -- and netcfgd catches two ids that sanitise the same,
+		 * because two blocks of one name is a compile error. */
+		asked.id = "Home Fibre/2";
+		asked.ssid = "Home Fibre/2";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strcmp(block.stem, "nm-Home_Fibre_2") == 0,
+		    "a label that is not a filename is sanitised into one");
+		asked.id = "Office";
+		asked.ssid = "Office";
+
+		/* The type is asked of the dictionary rather than assumed from the
+		 * groups in it, so that the refusal can name what was asked for. */
+		asked.type = "802-3-ethernet";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "802-3-ethernet") != NULL &&
+		        strstr(why, "interface") != NULL,
+		    "a profile that is not wifi is refused, naming the type and the way in");
+		asked.type = "802-11-wireless";
+
+		asked.ssid = NULL;
+		check(rendered(&asked, &block, why, sizeof(why)) == 0,
+		    "and a wifi profile with no ssid is refused");
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

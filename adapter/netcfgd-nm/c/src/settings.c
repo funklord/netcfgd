@@ -1,18 +1,22 @@
 /*
- * settings.c -- `...Settings` and `...Settings.Connection`, read-only for now.
+ * settings.c -- `...Settings` and `...Settings.Connection`, and the one write.
  *
  * WHAT IS SERVED AND WHAT IS REFUSED, AND WHY THAT IS THE SHAPE
  *   Reads are answered: the connection list, each connection's settings, the
- *   hostname. **Every write is declared and refused**, by name, saying so.
+ *   hostname. **One write is served** -- `AddConnection` and the newer
+ *   `AddConnection2` create a wifi network, which `block.c` renders and
+ *   `config_put` installs. Every other write is declared and refused by name,
+ *   saying so: an `Update`, a `Delete` or a `Save` reaches a hand-written
+ *   netcfgd block, which design section 9.4 keeps out of a GUI's reach, and
+ *   editing one this shim wrote is a later slice.
  *
- *   That is deliberate and is not laziness. A write here means `AddConnection`,
- *   `Update` or `Delete` reaching `ncfg_client_config_put`, and doing it
- *   correctly means establishing WHO is asking -- the caller's uid off the
- *   message, against netcfgd's own `control` policy -- before touching a file.
- *   0264 found the Rust shim exporting a method with no authorization at all,
- *   which any local process could call. **A half-built write path is how that
- *   defect gets rewritten**, so the writes refuse until the authorization is
- *   its own slice with its own tests.
+ *   The order is what made the first write safe to add, and it is 0264's: the
+ *   caller's uid off the message, against netcfgd's own `control` policy,
+ *   BEFORE the settings dictionary is so much as read. 0264 found the Rust shim
+ *   exporting a method with no authorization at all, which any local process
+ *   could call, and a half-built write path is how that defect gets rewritten
+ *   -- so the gate was built, tested and left refusing for two slices before
+ *   anything was written through it.
  *
  *   A refusal is also what NM itself answers a caller without permission, so a
  *   client meets a shape it already handles rather than a missing method.
@@ -27,6 +31,8 @@
  *   introspecting the shim can see. It is not ported.
  */
 #include "nmc/settings.h"
+#include "nmc/block.h"
+#include "nmc/emit.h"
 #include "nmc/uuid.h"
 #include "nmc/authorize.h"
 
@@ -837,82 +843,6 @@ static int refuse_read_only(DBusConnection *connection, DBusMessage *call, DBusM
 }
 
 /*
- * `connection.type` out of the settings dictionary a client sent.
- *
- * `a{sa{sv}}`: groups of named variants. The type is a string under `type` in the
- * `connection` group, and nothing else in the message says what kind of profile
- * is being asked for -- an `802-11-wireless` group being present is a hint and
- * not the answer, since a client may send groups for a type it did not name.
- *
- * Fills `out` with an empty string where the dictionary has no type, which is a
- * different complaint from an unsupported one and is reported as such.
- *
- * **It walks rather than trusting the signature.** `dbus_message_get_args`
- * cannot express a nested dictionary, so the iterator is stepped by hand; a
- * group whose shape is not what was declared is skipped rather than refused,
- * because the dispatcher has already checked the signature of the whole argument
- * and a surprise here would be libdbus disagreeing with itself.
- */
-static void settings_type_of(DBusMessage *call, char *out, size_t out_size)
-{
-	DBusMessageIter args;
-	DBusMessageIter groups;
-
-	if (out_size > 0u) {
-		out[0] = '\0';
-	}
-	if (!dbus_message_iter_init(call, &args) ||
-	    dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_ARRAY) {
-		return;
-	}
-	dbus_message_iter_recurse(&args, &groups);
-	while (dbus_message_iter_get_arg_type(&groups) == DBUS_TYPE_DICT_ENTRY) {
-		DBusMessageIter group;
-		DBusMessageIter pairs;
-		const char     *name = NULL;
-
-		dbus_message_iter_recurse(&groups, &group);
-		if (dbus_message_iter_get_arg_type(&group) == DBUS_TYPE_STRING) {
-			dbus_message_iter_get_basic(&group, &name);
-		}
-		if (!name || strcmp(name, "connection") != 0) {
-			dbus_message_iter_next(&groups);
-			continue;
-		}
-		(void)dbus_message_iter_next(&group);
-		if (dbus_message_iter_get_arg_type(&group) != DBUS_TYPE_ARRAY) {
-			return;
-		}
-		dbus_message_iter_recurse(&group, &pairs);
-		while (dbus_message_iter_get_arg_type(&pairs) == DBUS_TYPE_DICT_ENTRY) {
-			DBusMessageIter pair;
-			DBusMessageIter value;
-			const char     *key = NULL;
-			const char     *text = NULL;
-
-			dbus_message_iter_recurse(&pairs, &pair);
-			if (dbus_message_iter_get_arg_type(&pair) == DBUS_TYPE_STRING) {
-				dbus_message_iter_get_basic(&pair, &key);
-			}
-			(void)dbus_message_iter_next(&pair);
-			if (key && strcmp(key, "type") == 0 &&
-			    dbus_message_iter_get_arg_type(&pair) == DBUS_TYPE_VARIANT) {
-				dbus_message_iter_recurse(&pair, &value);
-				if (dbus_message_iter_get_arg_type(&value) == DBUS_TYPE_STRING) {
-					dbus_message_iter_get_basic(&value, &text);
-					if (text) {
-						(void)snprintf(out, out_size, "%s", text);
-						return;
-					}
-				}
-			}
-			dbus_message_iter_next(&pairs);
-		}
-		return;
-	}
-}
-
-/*
  * `GetConnectionByUuid`: the lookup that makes a derived uuid worth deriving.
  *
  * A client stores the uuid and comes back for the profile later. Because the
@@ -954,26 +884,234 @@ static int connection_by_uuid(DBusConnection *connection, DBusMessage *call,
 }
 
 /*
- * `AddConnection`, which says what it can create rather than that it cannot.
+ * `AddConnection`: the write direction of design section 9.4.
+ *
+ * A GUI is another editor of configuration files, so what comes out of this has
+ * to be a netcfgd `network` block an operator could have typed. `block.c`
+ * renders it and refuses by name anything netcfgd's language cannot say, which
+ * is why this reads as authorize, render, write.
  *
  * **It can create a wifi network and nothing else**, and that is not a gap to be
  * filled: an interface is configured by an `interface` block, which is a file to
  * edit rather than a profile to create. A client told "not implemented" goes
- * looking for a version where it is; one told this knows where to go.
+ * looking for a version where it is; one told that knows where to go.
  *
- * The creating half is a later slice. What is already right is the refusal's
- * shape -- authorized first, then the reason -- and the type check, which reads
- * the dictionary a client sent rather than refusing everything by default: that
- * is what makes the message name the type that was asked for.
+ * WHY THE WRITE GOES THROUGH NETCFGD RATHER THAN TO THE FILE
+ *   0127: netcfgd is the only writer of `/etc/netcfgd`, and `config_put` is the
+ *   call that says so. It also gives for free the half the Rust shim writes by
+ *   hand -- the daemon compiles the configuration back with the new file in it
+ *   and restores what was there when the result will not compile. So a block
+ *   that redefines a network another file already defines is refused here, as a
+ *   failed `AddConnection`, rather than leaving a machine whose next reload
+ *   changes nothing and says why in a log nobody is reading.
+ *
+ * WHY THE PATH IS LOOKED UP RATHER THAN PREDICTED
+ *   A client that reads the returned path straight away has to find an object
+ *   there, and the number is the connection store's to assign. Asking it also
+ *   makes the answer netcfgd's: a write that succeeded and then does not appear
+ *   in the saved list is reported, rather than papered over with a path that
+ *   resolves to nothing.
  */
-static int refuse_add(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+static int created(DBusConnection *connection, DBusMessage *call, void *object, char *path,
+    size_t path_size, char *err, size_t err_size)
+{
+	nmc_state_t                 *state = object;
+	nmc_connections_t           *store = state ? (nmc_connections_t *)state->connections : NULL;
+	nmc_principal_t              admin;
+	unsigned long                uid = 0u;
+	char                         why[NMC_ERROR_MAX] = "";
+	nmc_block_t                  block;
+	ncfg_client_t               *client;
+	const nmc_connection_slot_t *slot;
+
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	/*
+	 * **Authorized before the dictionary is read**, which is the order 0264 is
+	 * about: this shim authorizes the bus caller rather than its own socket
+	 * peer, and a method that worked out what to write first would be doing
+	 * work on behalf of somebody it had not asked about yet.
+	 */
+	if (!nmc_block_render(call, &block, err, err_size)) {
+		return 0;
+	}
+	client = nmc_state_client(state);
+	if (!client) {
+		(void)snprintf(err, err_size,
+		    "netcfgd is not answering, so there is nowhere to put `%s`: its files are "
+		    "the authority and this shim keeps no copy of them",
+		    block.label);
+		return 0;
+	}
+	/*
+	 * Never `replace`. `AddConnection` creates, and a client that has forgotten
+	 * a network of this name exists must not be able to overwrite it by sending
+	 * the name again -- the file it would clobber may be one an operator wrote.
+	 */
+	if (!ncfg_client_config_put(client, block.stem, block.text, 0, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "netcfgd would not take `%s`: %s", block.label, why);
+		return 0;
+	}
+	/*
+	 * **The dispatch's fact window is reopened, because this dispatch moved the
+	 * world.** `state.h` argues that a window scoped to one message cannot go
+	 * stale, and that holds for every read-only dispatch -- which is all of
+	 * them until this one. A getter that happened to have fetched the saved
+	 * list before the write would leave the lookup below asking the list from
+	 * before it, so the network would not be found and a client would be told
+	 * its write failed after the file was on disk. Nothing fetches it that
+	 * early today; the call order is the only thing keeping that true, and this
+	 * does not depend on the call order.
+	 */
+	nmc_window_end();
+	nmc_window_begin();
+	slot = nmc_connections_slot_of(store, NMC_PROFILE_NETWORK, block.label);
+	if (!slot) {
+		(void)snprintf(err, err_size,
+		    "wrote `%s` and netcfgd does not report it; another block of the same name "
+		    "may be overriding it",
+		    block.label);
+		return 0;
+	}
+	(void)snprintf(path, path_size, "%s/%u", NMC_SETTINGS_PATH, slot->number);
+	/*
+	 * **Announced before answering, or the client is told the object is not
+	 * there.** libnm learns what exists from `ObjectManager` alone, and
+	 * `nmcli` reads the path this returns the moment it has it:
+	 * `operation succeeded but object /Settings/8 does not exist` is what it
+	 * says when the announcement waits for the loop's next tick. The Rust shim
+	 * carries the same sentence in a comment, for the same race.
+	 *
+	 * The tick will announce it again when its membership pass notices the new
+	 * name, and that is harmless rather than merely tolerated: both audiences
+	 * key on the object path, so a second `InterfacesAdded` updates an object a
+	 * client has instead of adding one it does not. Suppressing it would mean
+	 * reaching into the loop's remembered set from a method handler.
+	 */
+	{
+		static const nmc_interface_t *const AS_CONNECTION[] = { &nmc_connection_interface,
+			NULL };
+		nmc_object_t object_added;
+
+		object_added.path = path;
+		object_added.interfaces = AS_CONNECTION;
+		/* The dispatcher's own resolver, so the announcement reads the object a
+		 * client would: the slot is the tail of the path it was just given. */
+		object_added.data = nmc_connections_resolve_for_bus(slot->label, store);
+		nmc_bus_announce(connection, &object_added, 1);
+		nmc_emit_path(connection, NMC_SETTINGS_PATH,
+		    "org.freedesktop.NetworkManager.Settings", "NewConnection", path);
+	}
+	return 1;
+}
+
+static int add_connection(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	char        path[96];
+	const char *as_path = path;
+
+	if (!created(connection, call, object, path, sizeof(path), err, err_size)) {
+		return 0;
+	}
+	return dbus_message_append_args(reply, DBUS_TYPE_OBJECT_PATH, &as_path, DBUS_TYPE_INVALID)
+	    ? 1
+	    : 0;
+}
+
+/* The flags `AddConnection2` carries, which say where the profile is to live. */
+#define NMC_ADD_IN_MEMORY 0x1eu
+
+static dbus_uint32_t add_flags(DBusMessage *call)
+{
+	DBusMessageIter args;
+	dbus_uint32_t   flags = 0u;
+
+	if (!dbus_message_iter_init(call, &args) || !dbus_message_iter_next(&args) ||
+	    dbus_message_iter_get_arg_type(&args) != DBUS_TYPE_UINT32) {
+		return 0u;
+	}
+	dbus_message_iter_get_basic(&args, &flags);
+	return flags;
+}
+
+/*
+ * Why an unsaved profile is refused, wherever it is asked for.
+ *
+ * There is nowhere for one to live: netcfgd's authority is its files, and a
+ * profile held only in this process would be exactly the hidden state
+ * constraint 1 exists to prevent.
+ */
+static const char UNSAVED_WHY[] =
+    "netcfgd has nowhere to put an unsaved profile. Its authority is its files, and a "
+    "profile held only in this process would be exactly the hidden state constraint 1 "
+    "exists to prevent";
+
+/*
+ * NM's newer spelling, and **the one `nmcli` actually calls** -- the same lesson
+ * `Update2` carries on the connection interface. With only `AddConnection`
+ * declared, libnm's `add_connection2` gets `this interface has no such method in
+ * this build` from the dispatcher and never reaches the method that would have
+ * done the work.
+ *
+ * The flags are read rather than dropped, because one of them changes the
+ * answer: a client asking for a profile that is not to touch the disk is asking
+ * for the thing `AddConnectionUnsaved` is refused for, and writing the file
+ * anyway would be obeying the method and ignoring the request.
+ *
+ * The result dictionary is empty. It is where NM reports what it did with the
+ * profile beyond creating it -- nothing here does anything beyond that, and an
+ * invented key is worse than an absent one.
+ */
+static int add_connection2(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	DBusMessageIter into;
+	DBusMessageIter empty;
+	char            path[96];
+	const char     *as_path = path;
+
+	if ((add_flags(call) & NMC_ADD_IN_MEMORY) != 0u) {
+		(void)snprintf(err, err_size, "%s", UNSAVED_WHY);
+		return 0;
+	}
+	if (!created(connection, call, object, path, sizeof(path), err, err_size)) {
+		return 0;
+	}
+	if (!dbus_message_append_args(reply, DBUS_TYPE_OBJECT_PATH, &as_path, DBUS_TYPE_INVALID)) {
+		(void)snprintf(err, err_size, "no memory for the reply");
+		return 0;
+	}
+	dbus_message_iter_init_append(reply, &into);
+	if (!dbus_message_iter_open_container(&into, DBUS_TYPE_ARRAY, "{sv}", &empty)) {
+		(void)snprintf(err, err_size, "no memory for the reply");
+		return 0;
+	}
+	return dbus_message_iter_close_container(&into, &empty) ? 1 : 0;
+}
+
+/*
+ * `AddConnectionUnsaved`, authorized and then refused.
+ *
+ * The order is `refuse_write`'s and for its reason: an unauthorized caller is
+ * told so, which is the answer that will still be right whatever this method
+ * learns to do, and an authorized one is told why netcfgd cannot hold what it
+ * asked for.
+ */
+static int refuse_unsaved(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
     void *object, char *err, size_t err_size)
 {
 	nmc_state_t    *state = object;
 	nmc_principal_t admin;
 	unsigned long   uid = 0u;
 	char            why[NMC_ERROR_MAX] = "";
-	char            kind[64] = "";
 
 	(void)reply;
 	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
@@ -985,18 +1123,7 @@ static int refuse_add(DBusConnection *connection, DBusMessage *call, DBusMessage
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	settings_type_of(call, kind, sizeof(kind));
-	if (strcmp(kind, "802-11-wireless") != 0) {
-		(void)snprintf(err, err_size,
-		    "netcfgd-nm can create wifi networks and nothing else; this asked for `%s`. "
-		    "An interface is configured by an `interface` block in /etc/netcfgd, which "
-		    "is a file to edit rather than a profile to create",
-		    kind[0] != '\0' ? kind : "no type at all");
-		return 0;
-	}
-	(void)snprintf(err, err_size,
-	    "you may change this machine's configuration and this build of the shim cannot "
-	    "yet write a network over the bus. Use `ncfg wifi add`");
+	(void)snprintf(err, err_size, "%s", UNSAVED_WHY);
 	return 0;
 }
 
@@ -1009,8 +1136,9 @@ static const nmc_property_t SETTINGS_PROPERTIES[] = {
 static const nmc_method_t SETTINGS_METHODS[] = {
 	{ "ListConnections", "", "ao", list_connections },
 	{ "GetConnectionByUuid", "s", "o", connection_by_uuid },
-	{ "AddConnection", "a{sa{sv}}", "o", refuse_add },
-	{ "AddConnectionUnsaved", "a{sa{sv}}", "o", refuse_add },
+	{ "AddConnection", "a{sa{sv}}", "o", add_connection },
+	{ "AddConnection2", "a{sa{sv}}ua{sv}", "oa{sv}", add_connection2 },
+	{ "AddConnectionUnsaved", "a{sa{sv}}", "o", refuse_unsaved },
 	{ "LoadConnections", "as", "bas", refuse_write },
 	{ "ReloadConnections", "", "b", refuse_write },
 	{ "SaveHostname", "s", "", refuse_write }

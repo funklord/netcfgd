@@ -2050,6 +2050,22 @@ vm-sandbox: vm-image
 # binaries off the read-only share exactly as it reads `netcfgd` itself.
 vm-skipped: vm-image
 	@$(MAKE) --no-print-directory -C c examples
+	@# **The shim the guest drives is this tree's binary, built here.** The
+	@# repository is mounted into the guest read-only over 9p, so what
+	@# `nm.sh` runs is whatever is sitting in the working tree -- and
+	@# `make test` in the adapter relinks the test binary and NOT the
+	@# program, so a change can be built, unit-tested and then driven in the
+	@# guest in its absence. Measured 2026-10-19: a fix for a real failure
+	@# was read as having not worked, over a twenty-minute cycle, because
+	@# the guest ran the binary from before it. `build-and-commit.md` names
+	@# exactly this -- never conclude a test's verdict from a binary the
+	@# build step did not rebuild -- and `live` already guards the same
+	@# build for `c_nm_signals.sh`, which is where this shape comes from.
+	@if pkg-config --exists dbus-1 2>/dev/null; then \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c >/dev/null || \
+			{ echo "vm-skipped: the C NetworkManager shim does not build against this tree" >&2; \
+			  exit 1; }; \
+	fi
 	VM_GUEST=debian VM_TIMEOUT=900 sh tool/vm/run.sh tool/vm/payload/skipped.sh
 
 # `delegation.sh`, the one live script that has never run anywhere: it needs

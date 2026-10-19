@@ -12498,6 +12498,198 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.493 AddConnection writes, for everything but a passphrase
+
+10.492 scoped this and defined the subset; this is that subset, built. The
+renderer is `adapter/netcfgd-nm/c/src/block.c` -- 1,155 lines against
+`emit.rs`'s 1,177 -- and `settings.c` authorizes the caller, calls it, and
+hands the text to `config_put`.
+
+### What it writes
+
+Everything the Rust renderer does except the credential: the `network` block
+and its label, `metered`, a `metric` scaled from `autoconnect-priority`, a hex
+`ssid` when the SSID is not the label, `wifi { open = true }` or
+`owe = true`, `hidden`, `autoconnect = false`, `config` from both families'
+methods and static addresses, `routes` from each family's `gateway` and
+`route-data`, a `dns` block from either spelling of the nameservers, and the
+comment naming what netcfgd cannot express (0034).
+
+The write itself is `ncfg_client_config_put`, which is where netcfgd's own
+rules do the work: 0127 makes the daemon the only writer of `/etc/netcfgd`,
+and the daemon compiles the configuration back with the new file in it and
+restores what was there if the result will not compile. **So the twelve lines
+`store.rs` spends undoing a bad write do not exist here** -- a block that
+redefines a network another file already defines is refused as a failed
+`AddConnection` rather than leaving a machine whose next reload changes
+nothing.
+
+### The boundary is the secret, and it refuses rather than drops
+
+A `key-mgmt` of `wpa-psk` or `sae` is refused by name, telling the caller to
+use `ncfg wifi add`. 10.492's argument, unchanged: a method that wrote the
+open case and silently dropped a `psk` would hand a client a secured network
+with no credential and no error. OWE writes, because OWE carries no secret --
+which is the line being drawn, security without a credential rather than
+security.
+
+The refusal never quotes the passphrase back, and that is a check rather than
+a habit: a refusal crosses the bus and lands in a client's log, and 0042 calls
+a credential the one thing on a machine nobody can get back.
+
+### `AddConnection2` is the method `nmcli` actually calls
+
+`Update2` taught this once already, on the connection interface, and the
+comment there says it: with only `Update` declared, a modify got
+`this interface has no such method in this build` from the dispatcher and the
+refusal never ran. The settings interface declared only `AddConnection`, and
+`compat.c` claims NM 1.44.0, so libnm takes the newer path every time.
+
+Its flags are read rather than dropped, because one of them changes the
+answer. `AddConnection2` carries NM's choice of where the profile lives, and a
+client asking for one that never touches the disk is asking for exactly what
+`AddConnectionUnsaved` is refused for -- so the in-memory bits refuse with the
+same sentence, which is now one constant both share.
+
+### The announcement is the write's other half
+
+**`nmcli` reported `operation succeeded but object /Settings/8 does not exist`
+while the file on disk was correct and all five of its content checks passed.**
+libnm learns what exists from `ObjectManager` and nothing else, and it reads
+the returned path the moment it has it -- so the loop's next membership tick is
+too late. The fix is to announce `InterfacesAdded` and `NewConnection` from the
+handler, before answering, which is what the Rust's `republish` call does and
+what its comment names with the same sentence.
+
+Worth keeping because the diagnosis was handed over by the shape of the
+failure: one check failed and the four below it passed, which is the opposite
+of the usual arrangement and said at once that the renderer was right and the
+reply was not.
+
+### And the fix was read as not having worked, because the guest ran the old binary
+
+**The second guest run reported the identical error, and the announcement was
+not in the binary it ran.** `make test` in the adapter relinks
+`tests/bus_test` and not `netcfgd-nm`, the repository is mounted into the
+guest read-only over 9p, and `vm-skipped` built `c/examples` and nothing else
+-- so the guest drove whatever program was sitting in the working tree, which
+was the one from before the fix. Twenty minutes, and a conclusion that the
+announcement had not helped.
+
+`build-and-commit.md` names this exactly -- never conclude a test's verdict
+from a binary the build step did not rebuild -- and it names the cure the
+convention costs: a fast default build has to be paid for by the dependencies
+being right. Here the dependency was missing from the target rather than from
+a rule, which is the version of it that no `.d` file can catch.
+
+So `vm-skipped` builds the shim now, guarded on `pkg-config --exists dbus-1`,
+which is the shape `live` already uses for `c_nm_signals.sh` and for the same
+reason. **What found it was a rig on the host**, which is the other lesson:
+`nm.sh` needs `nmcli` and this machine has none, but `gdbus` and a private
+`dbus-daemon` are enough to call `AddConnection2` and watch what the shim
+emits -- 20 seconds a cycle against the guest's twenty minutes, and the
+monitor showed no signals at all where the code plainly sent two.
+
+### The fact window had to be reopened, and that is new
+
+`state.h` argues that a cache scoped to one dispatch cannot go stale, and that
+is true of every read-only dispatch -- which was all of them. This one writes,
+so a getter that had fetched the saved list earlier in the same dispatch would
+leave the lookup after the write reading the list from before it: the network
+would not be found and a client would be told its write failed with the file
+already on disk. Nothing fetches it that early today, which is the point --
+the call order was the only thing keeping it true, and `nmc_window_end` then
+`nmc_window_begin` does not depend on the call order.
+
+### Four places it differs from the Rust deliberately
+
+- **`replace` is false.** `store.rs` passes `replace: true`, because its one
+  write serves `AddConnection` and `Update` alike. Add alone must not
+  overwrite: the uuid is derived from the id, so two profiles of one name are
+  one profile here, and overwriting would hand a client two paths to one file.
+  The file it would clobber may also be one an operator wrote by hand.
+- **An unrecognised addressing method is refused.** `addressing()` in Rust
+  ignores what it does not match, so `ipv4.method shared` -- address
+  translation for other machines -- writes a profile with no `config` line and
+  no complaint. That is 10.491's wrong-family fault from the other side: a
+  file that looks complete and is not.
+- **An empty string counts as absent.** The Rust reads `Some("")` and then
+  fails the address parse, so a client sending `gateway: ""` is told its
+  gateway is malformed. Saying once that an empty value is not a request is
+  clearer than three refusals that each have to explain themselves.
+- **No `dropped` note for a group it cannot read.** Both refuse what they
+  cannot express; the C list is the Rust's `UNINTERESTING` table verbatim, so
+  the note names the same settings.
+
+### The test builds the message rather than a struct
+
+`bus_test.c` said marshalling needs a live bus. That is true of what the
+program WRITES and not of what it READS: a `DBusMessage` is created and
+appended to with no connection at all, so a client's settings dictionary --
+a variant inside a container inside a container -- can be built in the unit
+suite, and the renderer is a pure function of it. 25 checks, of which the one
+that matters compares **the whole block** against a literal, because the live
+script greps the generated file for four of its lines and a renderer with the
+right shape and the wrong spacing would pass every check keyed on a fragment
+and write a file netcfgd refuses -- which, the loader compiling the drop-in
+directory as one document, would take every other network down with it.
+
+Proved able to fail: `open = true` to `open =true` fails exactly that check
+and no other.
+
+The metric check asserts the round trip rather than the number. `nm.sh`'s own
+version of it said `metric = 3924` and had been failing since 0207 moved the
+arithmetic, because an assertion read off the code it checks goes stale in
+silence -- so this one scales the written metric back down and asserts it
+returns the priority that went in.
+
+### `Filename` is a path the shim invents, and it is wrong twice
+
+Found by the host rig rather than looked for: the `Filename` property reported
+`/etc/netcfgd/conf.d/nm-Office.conf` for a profile written into a work
+directory. `say_filename` builds that string from a hardcoded prefix and the
+raw id, so it is wrong whenever `NCFG_CONFIG_DIR` is not the default -- which
+is every test rig -- and wrong again for any id a filename cannot carry, since
+it does not sanitise. `store.rs` gets both right through its `config_dir()`
+and `path_for`.
+
+It predates this change and nothing asserts it, which is why it is recorded
+rather than fixed here. The cheap answer is to read `NCFG_CONFIG_DIR` and
+share `block.c`'s stem rule, and the right one is to ask the daemon:
+`ncfg_client_configs` already answers with each drop-in's `file`, so the path
+would be netcfgd's own rather than a second guess at its layout.
+
+### A narrow edge, recorded rather than closed
+
+An id of 62 bytes or more makes a stem of 65 or more, and the daemon's name
+rule stops at 64 -- so a network `ncfg wifi add` would accept is refused here,
+with netcfgd's own sentence quoted inside the shim's. The `nm-` prefix is what
+costs the three bytes. Left alone: the refusal is legible, and the alternative
+is a second naming scheme for long ids.
+
+### Where it leaves the band
+
+`nm.sh` in the guest tier goes from 76 and 42 to **87 and 30** -- eleven more
+checks passing and twelve fewer failing, the twelfth being
+`a client can write a static profile at all`, which prints nothing when it
+passes because it is a guard on the command rather than a check on a value.
+
+What remains is three bands rather than a list. **Fifteen are downstream of
+the credential**: the `Roaming` profile and every agent check after it, which
+need the secret half this slice refuses. **Eleven are the read direction** --
+`GetSettings` does not yet report `metered`, `autoconnect-priority` or a
+profile's nameservers, and the `IP4Config` pair does not report what was
+applied -- so the write half of each of those passes now while the read half
+does not, which is the pair 0207's fixed point lives between. The last four
+are the activation and scan checks already recorded in 10.486 and 10.490.
+
+**The write direction was checked twice, by different instruments.** The
+guest tier drives a real `nmcli`; the host rig drives `gdbus` against the same
+shim, bus and daemon, and the two agree on the Office block, the dropped note
+and the refusal. That is worth saying because the first is slow and the second
+has no `nmcli` on this machine -- so neither is a substitute for the other,
+and the cheap one is what made the twenty-minute one worth starting.
+
 ## 10.492 AddConnection is 1,500 lines of Rust and writes credentials
 
 Asked for it after the `ipv4` group landed, since `a client can write a static
@@ -12552,10 +12744,10 @@ security group carries a secret, naming `ncfg wifi add`** -- the shape
 `nm.sh` is 76 and 42. Of what remains, this is the one with a clear
 specification and a known cost; the rest of the band needs the fixture to
 report an association, which is `hwsim.sh`'s territory rather than the shim's.
-Not started here, because a 1,500-line port whose last stage writes
-credentials is not work to begin at the end of a long session -- and the
-subset that avoids credentials is defined above and would be a reasonable
-first commit for whoever takes it.
+The subset defined above was then built, in 10.493, and the half this entry
+was most careful about -- a method that writes the open case and drops a
+credential -- is refused there by name rather than implemented. What remains
+of the Rust renderer is the secret itself.
 
 ## 10.491 The gateway nmcli shows is unavailable to the shim, three ways out
 
