@@ -12498,6 +12498,65 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.492 AddConnection is 1,500 lines of Rust and writes credentials
+
+Asked for it after the `ipv4` group landed, since `a client can write a static
+profile at all` is the band's last failure outside the activation pair. Scoped
+rather than started, and the measurement is the argument.
+
+### What it is
+
+`refuse_add` authorizes the caller, checks the type is `802-11-wireless`, and
+then says this build cannot write a network over the bus -- which is the order
+`settings.c` argues for and which 10.490 put the first real write behind. The
+write itself does not exist in C at all:
+
+    adapter/netcfgd-nm/src/emit.rs    1177   NM dictionary -> netcfgd config
+    adapter/netcfgd-nm/src/store.rs    285   the write, via config_put/secret_put
+
+`adapter/netcfgd-nm/c/src/emit.c` is 523 lines of D-Bus SIGNAL emission --
+the same word for a different job, which is worth saying because its presence
+reads like the renderer already being there.
+
+So this is the largest single item this session has met, and unlike the two
+activation methods it is not a handler plus a client call: it is a renderer.
+
+### Why it is not a smaller slice than it looks
+
+The test's own case is the easy instance -- an open network with static IPv4 --
+and a renderer covering only that would still have to **refuse what it cannot
+carry rather than drop it**, which is 0034's rule and already how the Rust
+behaves: the M7 record notes an MTU "named in the file as unexpressible rather
+than dropped". nmcli sends more than the test reads. It defaults
+`ipv6.method` to `auto`, and the test asserts `"slaac"` reaches the file --
+so a partial renderer that ignored what it did not recognise would write a
+profile quietly missing a client's settings, which is the wrong-family fault
+of 10.491 in another costume: a file that looks complete and is not.
+
+### And it writes secrets, which is the part to be slow about
+
+`store.rs` calls `secret_put` as well as `config_put`, and 0030 and 0031 set
+how: the passphrase goes to the secret provider and a `@secret:` reference
+into the block, inbound only, with `GetSecrets` still refusing. 0042 calls a
+credential the one thing on a machine nobody can get back.
+
+The test's network is open, so the minimal path touches none of that -- which
+is exactly the trap. A method that wrote the open case and silently dropped a
+psk would hand a client a secured network with no credential and no error.
+So the smallest honest slice is **write what can be written and refuse when a
+security group carries a secret, naming `ncfg wifi add`** -- the shape
+`refuse_add` already has, one step less refused.
+
+### Where this leaves the band
+
+`nm.sh` is 76 and 42. Of what remains, this is the one with a clear
+specification and a known cost; the rest of the band needs the fixture to
+report an association, which is `hwsim.sh`'s territory rather than the shim's.
+Not started here, because a 1,500-line port whose last stage writes
+credentials is not work to begin at the end of a long session -- and the
+subset that avoids credentials is defined above and would be a reasonable
+first commit for whoever takes it.
+
 ## 10.491 The gateway nmcli shows is unavailable to the shim, three ways out
 
 Asked to fix it. The diagnostic settles where it is lost, and the answer is
