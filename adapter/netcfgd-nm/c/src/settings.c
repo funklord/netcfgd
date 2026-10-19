@@ -820,15 +820,33 @@ static int refuse_secrets(DBusConnection *connection, DBusMessage *call, DBusMes
 }
 
 /*
- * `Update` and `Delete` on a block a person wrote.
+ * Why a block a person wrote is not this shim's to change.
  *
  * Design section 9.4 exposes hand-written blocks read-only for exactly this
  * reason: a stray click in a settings panel must not rewrite a tuned
- * `interface eth0`. Everything this shim serves today is hand-written -- it has
- * written nothing -- so this is every profile for now, and the sentence says
- * which profiles would be editable so that a client's user knows the rule rather
- * than concluding the shim is broken.
+ * `interface eth0`. The sentence names which profiles WOULD be editable, so
+ * that a client's user learns the rule rather than concluding the shim is
+ * broken -- and that half of it is now cashable rather than aspirational,
+ * since `Delete` removes the ones this shim wrote.
+ *
+ * **One function because the wording is a contract.** `tests/live/nm.sh` greps
+ * `read-only here` three times, and the refusal is now reached from two places
+ * -- the writes that are not built and the delete that checks whose file it is
+ * -- which is exactly how one sentence becomes two that disagree.
  */
+static int say_read_only(const nmc_connection_slot_t *slot, char *err, size_t err_size)
+{
+	(void)snprintf(err, err_size,
+	    "`%s` is a hand-written netcfgd block and is read-only here (design section 9.4). "
+	    "Edit it in /etc/netcfgd and run `ncfg apply` -- a GUI that could rewrite a tuned "
+	    "interface with a stray click is the thing that rule exists to prevent. Networks "
+	    "this shim created are editable, because it knows it wrote them",
+	    slot && slot->id ? slot->id : "this profile");
+	return 0;
+}
+
+/* `Update`, `Save` and `ClearSecrets`: authorized, then refused for not being
+ * built. `Delete` was here until it learned to tell whose file it is. */
 static int refuse_read_only(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
     void *object, char *err, size_t err_size)
 {
@@ -847,13 +865,7 @@ static int refuse_read_only(DBusConnection *connection, DBusMessage *call, DBusM
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	(void)snprintf(err, err_size,
-	    "`%s` is a hand-written netcfgd block and is read-only here (design section 9.4). "
-	    "Edit it in /etc/netcfgd and run `ncfg apply` -- a GUI that could rewrite a tuned "
-	    "interface with a stray click is the thing that rule exists to prevent. Networks "
-	    "this shim created are editable, because it knows it wrote them",
-	    slot && slot->id ? slot->id : "this profile");
-	return 0;
+	return say_read_only(slot, err, err_size);
 }
 
 /*
@@ -1477,6 +1489,192 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 	return dbus_message_iter_close_container(&out, &groups) ? 1 : 0;
 }
 
+/*
+ * Whether netcfgd has a drop-in under this name, and whether its block refers
+ * to a stored credential.
+ *
+ * Answers 1 for a file this shim wrote, 0 for a profile that has none, and -1
+ * when netcfgd could not be asked -- three answers because "I cannot tell"
+ * must not be served as "somebody wrote this by hand". The second is a
+ * sentence about design section 9.4 and would be the wrong thing to show
+ * somebody whose own profile is simply unreachable this second.
+ *
+ * **Asked of netcfgd rather than of the filesystem**, which is where this
+ * differs from the Rust shim: `is_machine_generated` stats
+ * `<config_dir>/conf.d/nm-<id>.conf`, and knowing that path means keeping a
+ * copy of where netcfgd keeps its configuration. 0127 makes the daemon the
+ * only writer of that directory, and the same argument makes it the only
+ * authority on what is in it -- `say_filename` guesses instead and is wrong in
+ * every test rig for exactly that reason (10.493).
+ *
+ * `refers` is answered while the text is here, because it decides whether the
+ * credential goes too and a second fetch would be a second chance for the two
+ * to disagree.
+ */
+static int ours(ncfg_client_t *client, const char *stem, const char *id, int *refers, char *err,
+    size_t err_size)
+{
+	ncfg_configs_t configs;
+	char           needle[128];
+	size_t         at;
+	int            found = 0;
+	int            wrote;
+
+	*refers = 0;
+	memset(&configs, 0, sizeof(configs));
+	if (!ncfg_client_configs(client, &configs, err, err_size)) {
+		return -1;
+	}
+	/*
+	 * The whole reference, quotes included, and never a truncation of one:
+	 * `@secret:Home` is a prefix of `@secret:HomeFiber`, and a profile is not
+	 * entitled to remove another's credential because its name starts the
+	 * same way. An id too long to build the reference for is reported as
+	 * referring to nothing, which leaves a credential behind rather than
+	 * taking the wrong one.
+	 */
+	wrote = snprintf(needle, sizeof(needle), "\"@secret:%s\"", id);
+	if (wrote < 0 || (size_t)wrote >= sizeof(needle)) {
+		needle[0] = '\0';
+	}
+	for (at = 0u; at < configs.count; at++) {
+		const ncfg_config_file_t *one = &configs.items[at];
+
+		if (one->name && strcmp(one->name, stem) == 0) {
+			found = 1;
+			*refers = needle[0] != '\0' && one->text &&
+			    strstr(one->text, needle) != NULL;
+		}
+	}
+	ncfg_configs_free(&configs);
+	return found;
+}
+
+/*
+ * `Delete`: take away a profile this shim wrote, and its credential with it.
+ *
+ * **Whose file it is decides, and netcfgd answers that.** A hand-written block
+ * is read-only here (design section 9.4) and gets the same sentence the
+ * unbuilt writes get, because the rule is the same one; a drop-in under this
+ * shim's own naming is ours to remove. The file is the marker rather than a
+ * list this process keeps, so the answer survives a restart.
+ *
+ * **The file goes first and the credential second**, which is the create's
+ * order read backwards and for the same reason: a block naming a credential
+ * that is gone is a network this machine will try to join and cannot, while a
+ * credential nothing refers to is inert. So the reference goes before the
+ * value.
+ *
+ * **And only the credential this block referred to.** Removing one because it
+ * shares the profile's name would destroy an operator's unrelated secret --
+ * the one thing 0042 says cannot be got back -- so the text netcfgd holds is
+ * read for the reference first. The Rust shim removes it unconditionally,
+ * which is safe for the profiles it writes and not for the name it is given.
+ *
+ * **A credential left behind does not fail the deletion.** The network is gone
+ * once the file is, and reporting failure for something that happened would
+ * have a client show an error about a profile it is also about to see removed.
+ * netcfgd takes the same position for `wifi forget`: what shows a leftover
+ * credential is the secrets list, where it is already named as the fault it
+ * is.
+ */
+static int delete_connection(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	const nmc_connection_slot_t *slot = object;
+	nmc_state_t                 *state = slot ? slot->state : NULL;
+	nmc_connections_t           *store = state ? (nmc_connections_t *)state->connections : NULL;
+	ncfg_client_t               *client;
+	nmc_principal_t              admin;
+	unsigned long                uid = 0u;
+	char                         why[NMC_ERROR_MAX] = "";
+	char                         stem[96];
+	char                         path[96];
+	int                          refers = 0;
+	int                          whose;
+
+	(void)reply;
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	if (!slot || !slot->id) {
+		(void)snprintf(err, err_size,
+		    "there is no profile at this path any more, so there is nothing to remove");
+		return 0;
+	}
+	/*
+	 * An `interface` block is not a profile that can be taken away: the device
+	 * it configures would still be there, and a client asking for this means
+	 * "stop configuring it" rather than "delete the interface".
+	 */
+	if (slot->kind != NMC_PROFILE_NETWORK) {
+		return say_read_only(slot, err, err_size);
+	}
+	client = nmc_state_client(state);
+	if (!client) {
+		(void)snprintf(err, err_size,
+		    "netcfgd is not answering, so `%s` cannot be removed: its files are the "
+		    "authority and this shim keeps no copy of them",
+		    slot->id);
+		return 0;
+	}
+	nmc_block_stem(slot->id, stem, sizeof(stem));
+	whose = ours(client, stem, slot->id, &refers, why, sizeof(why));
+	if (whose < 0) {
+		(void)snprintf(err, err_size,
+		    "netcfgd would not say which files it has, so whether `%s` is one this shim "
+		    "wrote is unknown and nothing has been removed: %s",
+		    slot->id, why);
+		return 0;
+	}
+	if (whose == 0) {
+		return say_read_only(slot, err, err_size);
+	}
+	if (!ncfg_client_config_delete(client, stem, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "netcfgd would not remove `%s`: %s", slot->id, why);
+		return 0;
+	}
+	if (refers && !ncfg_client_secret_delete(client, slot->id, why, sizeof(why))) {
+		(void)fprintf(stderr,
+		    "netcfgd-nm: removed the `%s` profile and its credential is still "
+		    "stored: %s\n",
+		    slot->id, why);
+	}
+	/*
+	 * The window is reopened and the store refreshed before the announcement,
+	 * so that the path has stopped resolving by the time a client is told the
+	 * object has gone -- the create's reason pointed the other way. A dispatch
+	 * that writes is one whose cached facts describe the world as it was.
+	 */
+	nmc_window_end();
+	nmc_window_begin();
+	(void)nmc_connections_refresh(store);
+	{
+		/* The departed object's interfaces cannot be asked of it, so the
+		 * plain list is passed and the data is NULL -- which is what
+		 * `nmc_bus_announce` reads for a removal, and what the loop's own
+		 * membership pass does for the same reason. */
+		static const nmc_interface_t *const AS_CONNECTION[] = { &nmc_connection_interface,
+			NULL };
+		nmc_object_t gone;
+
+		(void)snprintf(path, sizeof(path), "%s/%u", NMC_SETTINGS_PATH, slot->number);
+		gone.path = path;
+		gone.interfaces = AS_CONNECTION;
+		gone.data = NULL;
+		nmc_bus_announce(connection, &gone, 0);
+		nmc_emit_path(connection, NMC_SETTINGS_PATH,
+		    "org.freedesktop.NetworkManager.Settings", "ConnectionRemoved", path);
+	}
+	return 1;
+}
+
 static const nmc_property_t CONNECTION_PROPERTIES[] = {
 	{ "Unsaved", "b", NMC_READ, say_unsaved, NULL },
 	{ "Flags", "u", NMC_READ, say_flags, NULL },
@@ -1494,7 +1692,7 @@ static const nmc_method_t CONNECTION_METHODS[] = {
 	 * refusal that never runs is not a refusal. */
 	{ "Update2", "a{sa{sv}}ua{sv}", "a{sv}", refuse_read_only },
 	{ "UpdateUnsaved", "a{sa{sv}}", "", refuse_read_only },
-	{ "Delete", "", "", refuse_read_only },
+	{ "Delete", "", "", delete_connection },
 	{ "Save", "", "", refuse_read_only },
 	{ "ClearSecrets", "", "", refuse_read_only }
 };

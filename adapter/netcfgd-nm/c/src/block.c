@@ -1065,8 +1065,13 @@ static int network_metric(DBusMessage *call, long *out, int *present, char *err,
  *
  * Two ids that sanitise the same collide, and netcfgd catches that rather than
  * this: two blocks with one label is a compile error, which the write reports.
+ *
+ * **Exported because the delete side needs the same answer.** A profile is one
+ * this shim wrote if netcfgd has a drop-in under this name, so the rule that
+ * makes the name has to be one function -- two spellings of it would make a
+ * network that can be created and not removed.
  */
-static void stem_of(const char *id, char *out, size_t cap)
+void nmc_block_stem(const char *id, char *out, size_t cap)
 {
 	size_t at;
 	size_t used;
@@ -1252,6 +1257,6 @@ int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_
 		return 0;
 	}
 	(void)snprintf(out->label, sizeof(out->label), "%s", id);
-	stem_of(id, out->stem, sizeof(out->stem));
+	nmc_block_stem(id, out->stem, sizeof(out->stem));
 	return 1;
 }

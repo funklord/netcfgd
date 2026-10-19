@@ -644,22 +644,64 @@ int main(void)
 		    "`Writable` is not a method on Settings.Connection, which is 0264's defect "
 		    "not ported");
 
-		/* Every write refusing is this build's position, and a write that
-		 * quietly started working without authorization is the thing worth
-		 * catching. They share one handler, so one pointer comparison holds
-		 * all of them. */
-		for (at = 0u; at < nmc_connection_interface.method_count; at++) {
-			const nmc_method_t *method = &nmc_connection_interface.methods[at];
+		/*
+		 * **Every method but the two that are served shares the refusing
+		 * handler**, and the list of served ones is a ledger somebody has to
+		 * edit on purpose: a write that quietly started working, with or
+		 * without authorization, is the thing worth catching.
+		 *
+		 * This asserted something weaker and read as though it asserted
+		 * this. It compared each handler against `methods[0]`, which is
+		 * `GetSettings` -- so it would have caught a write wired to the
+		 * getter and nothing else, and a write wired to anything that works
+		 * would have passed. Found when `Delete` landed and the check did not
+		 * notice, which is the detector failing on the first case it existed
+		 * for.
+		 */
+		{
+			/*
+			 * The ledger. Each exemption carries the reason it is one, which
+			 * is what makes this a list somebody has to edit on purpose
+			 * rather than a number that drifts.
+			 *
+			 * **`GetSecrets` is the one the stronger check found.** It does
+			 * not share the read-only refusal and must not: its sentence is a
+			 * security property rather than a gap, and it is deliberately not
+			 * authorized first. The weaker version of this check could not
+			 * have told that apart from a write that had started working.
+			 */
+			static const char *const NOT_READ_ONLY[] = {
+				"GetSettings", /* a read */
+				"Delete",      /* removes a profile this shim wrote */
+				"GetSecrets"   /* refuses in its own words, by design */
+			};
+			const nmc_method_t *refusing = NULL;
+			size_t              which;
 
-			if (strcmp(method->name, "GetSettings") == 0) {
-				continue;
+			for (at = 0u; at < nmc_connection_interface.method_count; at++) {
+				if (strcmp(nmc_connection_interface.methods[at].name, "Update") == 0) {
+					refusing = &nmc_connection_interface.methods[at];
+				}
 			}
-			if (method->call == nmc_connection_interface.methods[0].call) {
-				every_write_refuses = 0;
+			check(refusing != NULL,
+			    "`Update` is declared, so there is a refusal to compare against");
+			for (at = 0u; refusing && at < nmc_connection_interface.method_count; at++) {
+				const nmc_method_t *method = &nmc_connection_interface.methods[at];
+				int                 exempt = 0;
+
+				for (which = 0u;
+				    which < sizeof(NOT_READ_ONLY) / sizeof(NOT_READ_ONLY[0]); which++) {
+					if (strcmp(method->name, NOT_READ_ONLY[which]) == 0) {
+						exempt = 1;
+					}
+				}
+				if (!exempt && method->call != refusing->call) {
+					every_write_refuses = 0;
+				}
 			}
 		}
 		check(every_write_refuses,
-		    "and every method but GetSettings shares the refusing handler");
+		    "and every method outside that ledger shares the read-only refusal");
 
 		check(nmc_settings_interface.property_count == 3u &&
 		        nmc_connection_interface.property_count == 4u,

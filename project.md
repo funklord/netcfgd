@@ -12498,6 +12498,113 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.495 Delete, and the three checks that were passing on nothing
+
+10.494 closed the create path and turned three checks from passing to failing
+-- the delete band, which asks whether a profile and its credential are gone
+and had never had anything to assert about. This is `Delete`, and those three
+are what it is measured against.
+
+### Whose file it is, asked of netcfgd
+
+A hand-written block is read-only through the bus (design section 9.4) and a
+drop-in under this shim's own naming is its to remove. The Rust decides by
+stat: `is_machine_generated` tests `<config_dir>/conf.d/nm-<id>.conf`, which
+means the shim keeping a copy of where netcfgd puts its configuration.
+
+**This asks for the drop-in list instead** -- `ncfg_client_configs`, which
+answers with each file's stem, its path relative to the configuration
+directory, and its text. 0127 makes the daemon the only writer of that
+directory, and the same argument makes it the only authority on what is in it.
+`say_filename` is the counter-example in the same file: it builds
+`/etc/netcfgd/conf.d/nm-<id>.conf` from a hardcoded prefix and is wrong in
+every test rig, which 10.493 recorded and this does not repeat.
+
+**"I cannot tell" is a third answer, not a no.** A failed fetch would
+otherwise be served as "somebody wrote this by hand", which is a sentence
+about section 9.4 and the wrong thing to show an operator whose own profile is
+briefly unreachable.
+
+### Only the credential the block referred to
+
+The Rust removes the secret named after the profile unconditionally. That is
+safe for a profile it wrote and not for a name it was handed: a secret under
+that name may be an operator's, and 0042 calls a credential the one thing
+nobody can get back.
+
+So the drop-in's text is read for the reference -- the whole thing, quotes
+included, because `@secret:Home` is a prefix of `@secret:HomeFiber` and a
+profile is not entitled to another's credential for starting with its name.
+One fetch answers both questions, so the two cannot come to disagree, and an
+id too long to build the reference from is reported as referring to nothing:
+that leaves a credential behind rather than taking the wrong one.
+
+Measured on the bus: `Road` and `Roadside`, both with passphrases, and
+removing `Road` leaves `Roadside`'s value intact.
+
+### The order is the create's, backwards
+
+The file goes first and the credential second. A block naming a credential
+that is gone is a network this machine will try to join and cannot; a
+credential nothing refers to is inert. The create writes the value then the
+reference for the same reason, read the other way round.
+
+**A credential left behind does not fail the deletion.** The network is gone
+once the file is, and reporting failure for something that happened would have
+a client show an error about a profile it is also about to see removed. It goes
+to stderr instead, which is the position netcfgd itself takes for
+`wifi forget`: what shows a leftover credential is the secrets list, where it
+is already named as the fault it is.
+
+### The window is reopened the other way round, too
+
+10.494 reopens the dispatch's fact window after a write so the new network can
+be found. This reopens it so the removed one cannot: the store is refreshed
+before the announcement, so the path has stopped resolving by the time a client
+is told the object has gone. Same rule -- a dispatch that writes is one whose
+cached facts describe the world as it was -- pointed in the other direction.
+
+### The ledger that said more than it checked
+
+`bus_test` asserted "every method but GetSettings shares the refusing
+handler", and compared each handler against `methods[0]`, which IS
+`GetSettings`. So it would have caught a write wired to the getter and nothing
+else: a write wired to anything that works passed. **`Delete` landing did not
+make it fail**, which is the detector missing the first case it existed for.
+
+It compares against `Update`'s handler now and carries a ledger of the methods
+that legitimately do not share it, each with its reason. Writing that found a
+third case nobody had noticed: **`GetSecrets` does not share the read-only
+refusal and must not** -- its sentence is a security property rather than a
+gap, and it is deliberately not authorized first. The weaker check could not
+have told that apart from a write that had quietly started working.
+
+Two failures, then, from one correction -- the exemption that was missing and
+the one that was wrong -- which is `evidence.md`'s *suspect the check before
+the code*, arriving as the check itself being the thing under test.
+
+### The band, and what is left of the write path
+
+`nm.sh` goes from 93 and 24 to **96 and 21**, which is the three checks of
+10.494's finding and nothing else -- predicted as 21 before the run, and the
+prediction is the point: the band was understood rather than improved by
+trial. `deleting one is refused` still passes, which is the hand-written half
+of the same method.
+
+The 21 that remain are three groups and one straggler. **Six are the secret
+agent** and the activation that needs one -- netcfgd asking a NM agent for a
+credential, which is `agent.c`'s path rather than this one's. **Eleven are the
+read direction**: `GetSettings` does not report the connection options this
+now writes, and the `IP4Config` pair does not report what was applied, so each
+is a pair with its write half passing. `Update` is the last write still
+refused, and `RequestScan` is the straggler 10.486 recorded.
+
+**Of what is left, nothing is a profile this shim wrote and cannot manage.**
+Create, create-with-credential and delete are all served; what a client cannot
+do is edit one in place, and that is one method with a known shape -- the
+credential it must leave alone is the case `emit.rs` keeps
+`network_block_keeping_secret` for.
+
 ## 10.494 The credential half: the value to the provider, the reference to the file
 
 10.493 wrote every network a client could ask for except a secured one, and
@@ -12614,7 +12721,8 @@ other checks were failing honestly, so the suite looked like a feature that
 was half built rather than one with three assertions that could not fail.
 **The population of such checks is "every assertion about the removal of
 something this build cannot create"**, which is a lens rather than a list, and
-`Delete` is where it points next.
+`Delete` is where it points next -- ported in 10.495, which is what turned
+these three back and is measured against them.
 
 The count was predicted before the run as 24 from this reasoning, and the run
 reported 24 -- which is the only part of the band's arithmetic that was worth

@@ -83,4 +83,14 @@ int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_
  */
 void nmc_block_forget(nmc_block_t *block);
 
+/*
+ * The drop-in stem a profile's id is filed under: `nm-` and the id sanitised
+ * into something a filename can be.
+ *
+ * The same answer `nmc_block_render` puts in `stem`, exported because removing
+ * a profile needs it without rendering one -- and because the name is what
+ * says the shim wrote the file, so there must be exactly one rule for it.
+ */
+void nmc_block_stem(const char *id, char *out, size_t cap);
+
 #endif /* NMC_BLOCK_H */
