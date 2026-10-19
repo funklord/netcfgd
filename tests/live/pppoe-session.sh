@@ -283,8 +283,41 @@ while ip link show ppp0 >/dev/null 2>&1; do
 	[ "$waited" -gt 100 ] && break
 	sleep 0.1
 done
-check "stopping the session takes the interface with it" \
+# **What is left, not just whether something is.** A surviving `ppp0` has two
+# possible causes wanting opposite fixes: pppd's own interface lingering after
+# the session was stopped, which is a defect in the stop, or netcfgd creating
+# the dummy the stop document below asks for, which is netcfgd obeying it. The
+# kernel's link kind tells them apart and a yes/no cannot.
+kind=$(ip -details link show ppp0 2>/dev/null | awk '$1 == "dummy" || $1 == "ppp" { print $1; exit }')
+check "stopping the session takes the interface with it${kind:+ (a $kind is left)}" \
 	"$(ip link show ppp0 >/dev/null 2>&1 && echo yes || echo no)" "no"
+if [ -n "$kind" ]; then
+	# The three facts that say whose fault a surviving `ppp0` is, printed
+	# together because each is useless alone: whether netcfgd thought it had
+	# stopped anything, whether a real pppd is still running, and whether the
+	# decoy -- which must survive -- is the one still there.
+	echo "       what netcfgd said when asked to stop:"
+	sed 's/^/         /' "$work/stop.txt" 2>/dev/null | head -8
+	echo "       pppd processes now:"
+	ps -eo pid=,args= 2>/dev/null | grep -E '[p]ppd' | sed 's/^/         /' | head -4
+	echo "       the decoy is pid $decoy"
+	# **Which half of the identification is missing.** netcfgd finds its pppd
+	# by reading `<dir>/<iface>.pid` in /run, /run/pppd, /var/run and
+	# /var/run/pppd, then confirming that pid's cmdline carries the options
+	# path it started pppd with. A stop that cannot do both reports success
+	# without killing anything, so the pid file and the options path are the
+	# two facts that say why.
+	echo "       candidate pid files:"
+	for d in /run /run/pppd /var/run /var/run/pppd; do
+		if [ -f "$d/ppp0.pid" ]; then
+			echo "         $d/ppp0.pid = $(cat "$d/ppp0.pid" 2>/dev/null)"
+		else
+			echo "         $d/ppp0.pid absent"
+		fi
+	done
+	echo "       the options file netcfgd would match on:"
+	ls -l "$work/run/ppp/ppp0" 2>&1 | sed 's/^/         /'
+fi
 # **pppd's ip-down REMOVES the report rather than emptying it**, which the
 # comment above this block had the other way round. Measured in a guest: the
 # file is gone, so `grep -c` printed nothing and this compared an empty string

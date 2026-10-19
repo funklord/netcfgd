@@ -16,6 +16,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+/* `nanosleep`, for waiting out a session that was asked to stop. */
+#include <time.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -431,7 +433,33 @@ pid_t ncfg_pppoe_running_pid(const char *run, const char *iface,
 	if (!run || !iface) {
 		return 0;
 	}
-	if (!machine) {
+	/*
+	 * **A machine with no pid directories means the defaults, not none**, and
+	 * taking it to mean none is why netcfgd could not stop a session at all.
+	 *
+	 * `service.h` states the contract: left zero, a session "looks for a pid
+	 * file in the machine's own directories, which is what
+	 * `ncfg_pppoe_machine` would have answered". This honoured it only for a
+	 * NULL pointer. The apply path passes `&service->pppoe`, which is
+	 * non-NULL and zeroed, because `ncfg_main_service_of` deliberately does
+	 * not call `ncfg_service_machine` -- that function exists so a test can
+	 * read what a daemon would use, and calling it there would put the real
+	 * `/proc` and `/run` into a world pointed at a scratch tree.
+	 *
+	 * So `pid_dir_count` was 0, the loop below ran over nothing, and this
+	 * returned 0 for a pppd whose pid file was sitting in `/run` naming it.
+	 * `ncfg_pppoe_stop` reads that as "nothing netcfgd can identify as its
+	 * own is running", removes the files and reports success -- so a stop
+	 * never stopped anything, said `ok`, and destroyed the evidence that
+	 * would have let the next attempt find it. Measured in the guest tier:
+	 * `/run/ppp0.pid` naming a live pppd, its cmdline still carrying the
+	 * options path, and `ok backend.stop ppp0` printed beside it.
+	 *
+	 * **No unit test could see it**, which is the other half: the tests build
+	 * their service with `ncfg_service_machine` and get a populated struct,
+	 * so they exercise the one arrangement the daemon never uses.
+	 */
+	if (!machine || !machine->pid_dirs || machine->pid_dir_count == 0u) {
 		ncfg_pppoe_machine(&defaults);
 		machine = &defaults;
 	}
@@ -516,9 +544,64 @@ int ncfg_pppoe_stop(const char *run, const char *iface, const char *report,
 		    iface, (long)pid, scratch);
 		return 0;
 	}
-	/* After the signal, never before: the options file is what identifies the
-	 * process, so a stop that failed must leave the evidence for the next
-	 * attempt to find. */
+	/*
+	 * **Waited for, not just signalled, and the files go only once it is
+	 * gone.** `ncfg_process_terminate` sends `SIGTERM` and returns: it says
+	 * the signal left, not that pppd died. The comment this replaces had the
+	 * right rule -- the options file is what identifies the process, so a stop
+	 * that failed must leave the evidence for the next attempt -- and applied
+	 * it to the signal CALL failing rather than to the process surviving,
+	 * which is the case that happens.
+	 *
+	 * What it cost, measured in the guest tier: `pppoe-session.sh` stopped a
+	 * session, netcfgd printed `ok backend.stop ppp0`, and pppd was still
+	 * alive ten seconds later holding `ppp0` -- with its options file already
+	 * removed, so `ncfg_pppoe_running_pid` answered 0 from then on and every
+	 * later stop took the "nothing netcfgd can identify" branch and reported
+	 * success. One surviving signal made the session permanently
+	 * unidentifiable and the failure permanently silent.
+	 *
+	 * `running-code.md` has the general rule and 10.476 applied it to twenty
+	 * of this suite's own scripts: `kill` returns before the child has
+	 * stopped. This is that, in the daemon.
+	 *
+	 * **The cmdline rather than `kill(pid, 0)`**, which reports a zombie as
+	 * alive -- an unreaped pppd would otherwise read as a stop that failed.
+	 * And no escalation to `SIGKILL`: whether netcfgd may hard-kill a dial-up
+	 * daemon that is ignoring `SIGTERM` is a question about modems rather than
+	 * about this function, so a survivor is reported with its pid and its
+	 * evidence intact for the next pass, which is what the rule above asks
+	 * for.
+	 */
+	{
+		struct timespec step = { 0, 100 * 1000 * 1000 };
+		size_t          waited;
+
+		/*
+		 * **Asked with the same function that identified it**, which is what
+		 * makes this immune to the zombie case `running-code.md` warns about:
+		 * `kill(pid, 0)` and `/proc/<pid>/comm` both report an unreaped
+		 * process as alive, while the cmdline a zombie carries is empty, so
+		 * the options marker cannot match and this answers 0. Re-asking also
+		 * means a pid recycled between the signal and the check is not
+		 * mistaken for the session, since a stranger does not carry the
+		 * marker either.
+		 */
+		for (waited = 0u; waited < 50u; waited++) {
+			if (ncfg_pppoe_running_pid(run, iface, machine) <= 0) {
+				break;
+			}
+			(void)nanosleep(&step, NULL);
+		}
+		if (ncfg_pppoe_running_pid(run, iface, machine) > 0) {
+			ncfg_error_set(err, err_size,
+			    "the pppoe session on %s was asked to stop and pid %ld is still "
+			    "running after five seconds; its options file is kept so the next "
+			    "attempt can find it",
+			    iface, (long)pid);
+			return 0;
+		}
+	}
 	remove_files(run, iface);
 	return 1;
 }

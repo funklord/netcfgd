@@ -12385,6 +12385,83 @@ failure -- a missing witness, a missing schema, a missing example file. Three
 times in one session. The suites are right to use relative paths; what was wrong
 is running them from anywhere else, and `make c-test` does not.
 
+## 10.489 netcfgd could not stop a pppoe session at all, and said ok
+
+Asked to fix `pppoe-session.sh`, whose one failing check in the guest tier is
+`stopping the session takes the interface with it`. The script was right. The
+defect is netcfgd's, it is unconditional rather than a race, and fixing the
+script would have buried it -- which I nearly did.
+
+### The chain, each link measured
+
+`ncfg_pppoe_running_pid` falls back to the default pid directories only when
+`machine == NULL`. The apply path passes `&service->pppoe`, which is non-NULL
+and **zeroed**, because `ncfg_main_service_of` deliberately does not call
+`ncfg_service_machine` -- and its comment gives a good reason: that function
+"exists so a test can read what a daemon would use", and calling it there would
+put the real `/proc` and `/run/wpa_supplicant` into a world somebody pointed at
+a scratch tree.
+
+So `pid_dir_count` was 0, the loop over directories **never executed**, and the
+lookup answered 0 for a pppd whose pid file was in `/run` naming it.
+`ncfg_pppoe_stop` reads 0 as "nothing netcfgd can identify as its own is
+running, which is the state this was asked to produce", removes the files and
+returns success. A stop that stopped nothing, printed `ok backend.stop ppp0`,
+and deleted the options file that was the only way to identify the process
+afterwards.
+
+Measured in the guest: `/run/ppp0.pid = 4129`, pid 4129 alive with
+`/usr/sbin/pppd file <run>/ppp/ppp0` in its cmdline, the options file gone, and
+`ok backend.stop ppp0` beside it. Controlled: with the fallback it passes, with
+`if (!machine)` restored the failure returns.
+
+**`service.h` already specified the right behaviour** -- "Left zero, a session
+start finds pppd by name and looks for a pid file in the machine's own
+directories, which is what `ncfg_pppoe_machine` would have answered". The
+header was right and the code honoured it for a NULL pointer only. A contract
+stated in prose and half implemented.
+
+### Why no unit test could see it
+
+The tests build their service with `ncfg_service_machine`, which populates the
+struct. So they exercise the one arrangement the daemon never uses, and the
+daemon's own arrangement -- a zeroed machine -- had no coverage at all. The
+suite was green against a configuration that does not occur in production,
+which is why a VM tier found this and 1,100 unit checks did not.
+
+### A vacuous loop in production, and the second fix under the first
+
+Iterating over zero directories and concluding absence is `evidence.md`'s
+vacuous pass, in shipped code rather than in a check: the search did not fail,
+it never ran. And the caller turns that into success, so the absence of
+evidence became a report of having acted.
+
+A second defect sits beneath it and is fixed with it.
+`ncfg_process_terminate` is `signal_one(pid, SIGTERM)` -- it says the signal
+left, not that pppd died -- and `remove_files` ran on that basis. The comment
+there had the right rule, that a failed stop must leave the evidence for the
+next attempt, and applied it to the signal CALL failing rather than to the
+process SURVIVING. So the stop now waits, bounded, re-asking
+`ncfg_pppoe_running_pid` rather than `kill(pid, 0)` or `/proc/<pid>/comm`,
+both of which report an unreaped process as alive while a zombie's empty
+cmdline cannot carry the marker. A survivor is reported with its pid and its
+files intact.
+
+**That fix was written first and was unreachable**, because the lookup it
+depends on always answered 0. Fixing the visible layer before the one beneath
+it produced a change that built, passed, and did nothing -- and the guest run
+that showed `ok backend.stop` with my new failure message absent is what said
+so.
+
+**No escalation to `SIGKILL`.** Whether netcfgd may hard-kill a dial-up daemon
+ignoring `SIGTERM` is a question about modems rather than about this function,
+so it is not taken here.
+
+### Where the tier stands
+
+6 passed and 1 failed of seven. `nm.sh` is the one left, on the
+`ActivateConnection` port 10.487 declines.
+
 ## 10.488 portal.sh counted a whole log in a timed window, and stopped the suite
 
 A full `make live` aborted at `portal.sh` with `and says it could not be
