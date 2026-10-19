@@ -653,6 +653,24 @@ int nmc_device_carrier_of(const nmc_device_slot_t *slot)
 }
 
 /*
+ * Whether the link is administratively up, which is neither carrier nor
+ * having an address.
+ *
+ * For `ActivateConnection`: an `interface` profile is not activated, since
+ * netcfgd brings interfaces up because the configuration says to. One already
+ * up is the state being asked for and answers success; one that is down gets
+ * the reason. `manager.c` needs the flag to tell those apart and `facts_for`
+ * is this file's own.
+ */
+int nmc_device_up_of(const nmc_device_slot_t *slot)
+{
+	facts_t facts;
+
+	facts_for(slot, &facts);
+	return facts.known && facts.up;
+}
+
+/*
  * The links enslaved to this one, as object paths.
  *
  * **Read backwards across every link, because `master` points the other way.** A

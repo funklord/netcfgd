@@ -51,7 +51,11 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * since the interface existed.
  */
 /*
- * **`activation` is omitted because this build has no `ActivateConnection`**,
+ * **`activation` is back, in the same commit as the method**, which is what
+ * the previous version of this comment said it would take. What follows is why
+ * it came out, kept because the next tier to go out wants the same reasoning.
+ *
+ * **It was omitted because this build had no `ActivateConnection`**,
  * which is the convention the paragraph above states: a build that cannot
  * activate omits the tier rather than claiming it. It was listed, and a client
  * that gated on the key was told yes and then refused with
@@ -72,7 +76,7 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * client the results are unavailable when they are there.
  */
 static const char *const SUPPORTED[] = {
-	"devices", "device_state", "wifi_scan", "connections",
+	"devices", "device_state", "wifi_scan", "connections", "activation",
 	"profile_writes", "profile_writes_wifi_only", "secret_agents", "ip_config",
 	"static_addressing", "connection_options"
 };

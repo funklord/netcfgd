@@ -23,6 +23,10 @@
 #include "nmc/store.h"
 #include "nmc/active.h"
 #include "nmc/device.h"
+/* `ActivateConnection` resolves a connection path to a profile and authorizes
+ * its caller before acting. */
+#include "nmc/settings.h"
+#include "nmc/authorize.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -476,10 +480,159 @@ static const nmc_property_t PROPERTIES[] = {
 	{ "GlobalDnsConfiguration", "a{sv}", NMC_READ, say_global_dns, NULL }
 };
 
+/*
+ * The tail of an object path, which is what both stores resolve by.
+ *
+ * NM's paths end in a number this process assigned, so a path from another
+ * implementation -- or one a client invented -- resolves to nothing and is
+ * refused by name rather than matched loosely.
+ */
+static const char *path_tail(const char *path)
+{
+	const char *slash;
+
+	if (!path || path[0] == '\0') {
+		return NULL;
+	}
+	slash = strrchr(path, '/');
+	return (slash && slash[1] != '\0') ? slash + 1 : NULL;
+}
+
+/*
+ * `ActivateConnection`, ported from `manager.rs`.
+ *
+ * **Authorized first, then acted on, and the order is the whole of it.** This
+ * is the first write this shim carries out, behind a gate that was written,
+ * tested and deciding with nothing behind it -- `settings.c` says why that
+ * order matters: an unauthorized caller gets the answer that will still be
+ * right once writing works, and doing it the other way round means the
+ * authorization arrives untested on the day the write does, "which is exactly
+ * how 0264's unauthorized method came to exist". netcfgd authorizes its socket
+ * PEER, which is this adapter, so asking netcfgd would answer for the more
+ * privileged of the two; `nmc_caller_uid` asks the BUS who called.
+ *
+ * **For a `network` block this is `ncfg wifi connect` reached over D-Bus**,
+ * with 0013's boundary intact: it joins what the configuration already
+ * describes and cannot create anything. The join goes through netcfgd's own
+ * verb rather than a path of the shim's own, which keeps that boundary in one
+ * place and is what `nm.sh` checks by watching for `ADD_NETWORK` beside
+ * `SELECT_NETWORK` in the supplicant's log.
+ *
+ * **An `interface` block is not activated.** netcfgd brings interfaces up
+ * because the configuration says to, so one already up is the state being
+ * asked for and answers success; one that is down gets the reason, which beats
+ * failing at something already true or pretending to have acted.
+ *
+ * **`specific_object` is accepted and ignored**, as in the Rust: netcfgd's
+ * socket has no argument for preferring one access point, `ncfg wifi connect`
+ * names a `network` block and lets the supplicant choose the BSS, and pinning
+ * one is a `bssid` in the configuration where it belongs. Taking the argument
+ * and saying so keeps a client's call valid.
+ *
+ * **Not ported: the secret-agent question** `manager.rs` asks before
+ * connecting. Without it a network whose passphrase refers to a file that is
+ * not there fails in netcfgd rather than being asked about first, which is a
+ * worse message and not a worse outcome.
+ */
+static int activate_connection(DBusConnection *connection, DBusMessage *call,
+    DBusMessage *reply, void *object, char *err, size_t err_size)
+{
+	nmc_state_t                 *state = object;
+	nmc_store_t                 *store = state ? (nmc_store_t *)state->store : NULL;
+	nmc_connections_t           *profiles =
+	    state ? (nmc_connections_t *)state->connections : NULL;
+	const char                  *profile_path = NULL;
+	const char                  *device_path = NULL;
+	const char                  *specific = NULL;
+	const nmc_connection_slot_t *profile;
+	nmc_device_slot_t           *device;
+	nmc_principal_t              admin;
+	unsigned long                uid = 0u;
+	char                         why[NMC_ERROR_MAX] = "";
+	char                         path[96];
+	const char                  *answer = path;
+	ncfg_client_t               *client;
+
+	if (!dbus_message_get_args(call, NULL, DBUS_TYPE_OBJECT_PATH, &profile_path,
+	        DBUS_TYPE_OBJECT_PATH, &device_path, DBUS_TYPE_OBJECT_PATH, &specific,
+	        DBUS_TYPE_INVALID)) {
+		snprintf(err, err_size, "this takes a connection, a device and a specific object");
+		return 0;
+	}
+	(void)specific;
+	if (!state || !store || !profiles) {
+		snprintf(err, err_size, "no state to activate against");
+		return 0;
+	}
+	/* Before anything is resolved, so an unauthorized caller learns nothing
+	 * about which paths exist. */
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	/* Refreshed before resolving, for `get_device_by_name`'s reason: a path
+	 * whose slot netcfgd has stopped reporting is refused rather than
+	 * answered from a stale list. */
+	(void)nmc_connections_refresh(profiles);
+	(void)nmc_store_enumerate_for_bus(NULL, 0u, store);
+	profile = nmc_connections_resolve_for_bus(path_tail(profile_path), profiles);
+	if (!profile) {
+		snprintf(err, err_size, "%s is not a netcfgd profile",
+		    profile_path ? profile_path : "");
+		return 0;
+	}
+	device = nmc_store_resolve(store, path_tail(device_path));
+	if (!device) {
+		snprintf(err, err_size,
+		    "%s is not a device netcfgd knows about. Activating a profile needs to be "
+		    "told which interface to use",
+		    device_path ? device_path : "");
+		return 0;
+	}
+	if (profile->kind == NMC_PROFILE_INTERFACE) {
+		if (!nmc_device_up_of(device)) {
+			snprintf(err, err_size,
+			    "netcfgd brings `%s` up from the configuration, not on request. It is "
+			    "currently down, which means the configuration says so or the last "
+			    "apply failed -- `ncfg plan` will say which",
+			    profile->id ? profile->id : "");
+			return 0;
+		}
+	} else {
+		client = nmc_state_client(state);
+		if (!client) {
+			snprintf(err, err_size, "netcfgd is not answering");
+			return 0;
+		}
+		if (!ncfg_client_wifi_connect(client, device->name, profile->id, err, err_size)) {
+			return 0;
+		}
+	}
+	/*
+	 * The activation this produced, by the device's own number, which is what
+	 * `device.c` answers for `ActiveConnection` and what the manager lists.
+	 * netcfgd applies asynchronously, so the object may not exist for another
+	 * moment; the path a client is handed is the one that will appear.
+	 */
+	(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/ActiveConnection/%u",
+	    device->number);
+	if (!dbus_message_append_args(reply, DBUS_TYPE_OBJECT_PATH, &answer, DBUS_TYPE_INVALID)) {
+		snprintf(err, err_size, "could not answer with the activation path");
+		return 0;
+	}
+	return 1;
+}
+
 static const nmc_method_t METHODS[] = {
 	{ "GetDevices", "", "ao", get_devices },
 	{ "GetAllDevices", "", "ao", get_devices },
 	{ "GetDeviceByIpIface", "s", "o", get_device_by_name },
+	{ "ActivateConnection", "ooo", "o", activate_connection },
 	/* Lowercase, which is NM's spelling for this one and not a slip. */
 	{ "state", "", "u", state_method }
 };

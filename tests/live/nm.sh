@@ -393,12 +393,14 @@ if command -v busctl >/dev/null 2>&1; then
 	# asserted the list was SERVED without ever asserting it was TRUE, which is
 	# why nothing caught it (project.md 10.486).
 	#
-	# Pinned in the direction the build is in, which is this file's rule for a
-	# gap that is a decision: `activation` must stay out while the method is
-	# out, so putting the key back without the method fails here. The pair
-	# moves together or this check says so.
-	check "and does not advertise an activation it cannot perform" \
-		"$(compat Supported | grep -c activation || true)" "0"
+	# **Turned round by the thing it was written for.** It pinned the key OUT
+	# while `ActivateConnection` did not exist; the method landed, so the key
+	# is back and this asserts the other direction. The activation checks
+	# below are what hold the claim honest: a build that advertises the tier
+	# and refuses the call fails those, and one that implements it and forgets
+	# the key fails this.
+	check "and advertises the activation it can now perform" \
+		"$(compat Supported | grep -c activation || true)" "1"
 	# The literal, not a value read back from the shim: this is a contract with
 	# clients that gate features on it, so changing it should fail a test
 	# rather than pass one that compares the shim against itself.

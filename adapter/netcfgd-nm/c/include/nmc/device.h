@@ -25,6 +25,9 @@ dbus_uint32_t nmc_device_type_of(const char *kind, int wireless, const char *nam
 void          nmc_device_address_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 void          nmc_device_kind_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 int           nmc_device_carrier_of(const nmc_device_slot_t *slot);
+/* Administratively up, which `ActivateConnection` needs to tell an `interface`
+ * profile already in the state being asked for from one that is not. */
+int           nmc_device_up_of(const nmc_device_slot_t *slot);
 void          nmc_device_addresses_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 void          nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 void          nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size);

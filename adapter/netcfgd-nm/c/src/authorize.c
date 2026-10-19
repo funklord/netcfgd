@@ -133,3 +133,24 @@ int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, si
 		return 0;
 	}
 }
+
+void nmc_admin_principal(nmc_state_t *state, nmc_principal_t *out)
+{
+	ncfg_client_t *client = nmc_state_client(state);
+	ncfg_globals_t globals;
+	char           problem[256] = "";
+
+	if (!out) {
+		return;
+	}
+	nmc_principal_parse(NULL, out);
+	if (!client) {
+		return;
+	}
+	memset(&globals, 0, sizeof(globals));
+	if (!ncfg_client_globals(client, &globals, problem, sizeof(problem))) {
+		return;
+	}
+	nmc_principal_parse(globals.control_admin, out);
+	ncfg_globals_free(&globals);
+}

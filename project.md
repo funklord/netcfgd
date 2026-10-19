@@ -12498,6 +12498,82 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.490 ActivateConnection is ported, authorized first, and acts
+
+10.487 worked it out and declined to land it. Asked again, so it is in, and
+the thing that made it worth declining the first time is the thing it is built
+around: this is **the first write this shim carries out**, behind a gate that
+was written, tested and deciding with nothing behind it.
+
+### Authorized before anything is resolved
+
+`nmc_caller_uid` asks the BUS who called -- never the message, since a sender
+name is whatever the client put in the header -- then `nmc_admin_principal`,
+then `nmc_may_write`. netcfgd authorizes its socket PEER, which is this
+adapter and the more privileged of the two, so asking netcfgd would answer the
+wrong question; that is the confused deputy `authorize.h` exists for and 0264
+is this tree's record of having got it wrong once.
+
+The gate runs **before** the paths are resolved, so an unauthorized caller
+learns nothing about which objects exist.
+
+`admin_principal` moved rather than being copied: it was `static` in
+`settings.c` and used three times there, `manager.c` needed the same answer,
+and two definitions of who may write is the duplication `authorize.h` exists
+to prevent. It is `nmc_admin_principal` in `authorize.c` now.
+
+**A cast was nearly shipped over a type that does not exist.** The first
+version forward-declared `struct nmc_state` so the header would not need
+`state.h` -- and `nmc_state_t` is an anonymous struct typedef, so that
+declared a different, unrelated incomplete type and the casts bridged the two.
+It compiled and worked, pointers being pointers, which in the authorization
+path is exactly the kind of working not to accept. It takes the real type now.
+
+### What it does, and what it proves
+
+Measured in the guest: `activating a profile reaches the supplicant` and
+**`and it went through netcfgd's join`** both pass. The second is the one that
+matters -- `ADD_NETWORK` beside `SELECT_NETWORK` in the supplicant's log is
+what shows the activation went through netcfgd's own verb rather than a path
+of the shim's own, which is 0013's boundary kept in one place. A method that
+merely returned would pass neither.
+
+`nm.sh` moves from 66 ok and 51 failing to **70 and 48**.
+
+An `interface` profile is not activated: netcfgd brings interfaces up because
+the configuration says to, so one already up answers success and one that is
+down gets the reason. `nmc_device_up_of` is new for that, mirroring
+`nmc_device_carrier_of`, because the flag lives in `device.c`'s private
+`facts_for`.
+
+`specific_object` is accepted and ignored, as in `manager.rs`: netcfgd's
+socket has no argument for preferring an access point, and pinning one is a
+`bssid` in the configuration.
+
+### The bookkeeping worked in the right order, which was the point of it
+
+`bus_test`'s method count refused the fifth method until both the number and
+the comment saying the activation pair "waits for the authorization gate" were
+updated. And `nm.sh`'s pin -- written to hold the `activation` tier OUT while
+the method was absent -- was turned by precisely the event it was written for.
+Neither depended on anybody remembering.
+
+### What this port leaves for later
+
+`DeactivateConnection` is not ported, so `deactivating reaches it too` still
+fails and the pair is half here; the method count says four plus one rather
+than six for that reason.
+
+The secret-agent question `manager.rs` asks before connecting is not ported,
+so a network whose passphrase names a missing file fails in netcfgd rather
+than being asked about first -- a worse message and not a worse outcome.
+
+And **this handler's refusal arm is not covered by a test.** The gate's own
+logic is unit-tested and `refuse_add` exercises the same calls, but `nm.sh`
+runs as root in the guest, so every activation there is authorized and the
+`AccessDenied` path is reasoned rather than observed. That is the half of a
+security change a green suite says least about.
+
 ## 10.487 ActivateConnection is understood, written, and deliberately not landed
 
 Asked to port it. It is worked out end to end, it was written, it built, and it

@@ -24,6 +24,11 @@
 
 #include <dbus/dbus.h>
 
+/* `nmc_admin_principal` takes the state the client hangs off. `nmc_state_t` is
+ * an anonymous struct typedef, so there is no `struct nmc_state` to forward
+ * declare -- an attempt at one compiles and is a different, unrelated type. */
+#include "nmc/state.h"
+
 #include <stddef.h>
 
 typedef enum {
@@ -67,5 +72,23 @@ int nmc_caller_uid(DBusConnection *connection, DBusMessage *call, unsigned long 
  * sentence is for an operator, so it says how to change the answer.
  */
 int nmc_may_write(unsigned long uid, const nmc_principal_t *admin, char *err, size_t err_size);
+
+/*
+ * Who the machine says may change its configuration, read from netcfgd.
+ *
+ * **Read per call rather than cached**: `control` is ordinary configuration a
+ * person edits, and a policy cached at startup is one that goes on granting
+ * after it was narrowed. The expensive direction is the safe one -- a round
+ * trip per write attempt, against a stale grant.
+ *
+ * Unknown when the daemon cannot be asked, which `nmc_may_write` refuses: a
+ * daemon that is not answering must not read as `any`.
+ *
+ * **Here rather than in `settings.c`**, where it was `static`, because
+ * `manager.c` needs the same answer for `ActivateConnection` and two
+ * definitions of who may write is the one duplication this file exists to
+ * prevent.
+ */
+void nmc_admin_principal(nmc_state_t *state, nmc_principal_t *out);
 
 #endif /* NMC_AUTHORIZE_H */

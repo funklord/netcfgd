@@ -131,10 +131,13 @@ int main(void)
 		check(nmc_manager_interface.property_count == 24u,
 		    "the manager declares twenty-four properties, as NM's own does");
 		/* Two device getters, the name lookup every client resolves a
-		 * device through, and the lowercase `state` older clients call. The
-		 * activation pair is a write and waits for the authorization gate. */
-		check(nmc_manager_interface.method_count == 4u,
-		    "and the four methods a libnm client reaches for");
+		 * device through, the lowercase `state` older clients call, and
+		 * `ActivateConnection` -- the first write this shim carries out,
+		 * behind the authorization gate this comment said it was waiting
+		 * for. `DeactivateConnection` is still absent, so the pair is half
+		 * here and the number says four plus one rather than six. */
+		check(nmc_manager_interface.method_count == 5u,
+		    "and the five methods a libnm client reaches for");
 		for (at = 0u; at < nmc_manager_interface.property_count; at++) {
 			const nmc_property_t *property = &nmc_manager_interface.properties[at];
 

@@ -516,32 +516,13 @@ static int list_connections(DBusConnection *connection, DBusMessage *call, DBusM
 }
 
 /*
- * The `admin` principal this machine's document names, or UNKNOWN.
+ * The `admin` principal is `nmc_admin_principal` in `authorize.c` now.
  *
- * Read per call rather than cached: `control` is ordinary configuration a person
- * edits, and a policy cached at startup is a policy that goes on granting after
- * it was narrowed. **The expensive direction is the safe one here** -- a round
- * trip per write attempt, against a stale grant.
+ * It was `static` here and `manager.c` needs the same answer for
+ * `ActivateConnection`, so it moved rather than being copied: two definitions
+ * of who may write is the duplication `authorize.h` exists to prevent, and
+ * the reason it reads per call rather than caching went with it.
  */
-static void admin_principal(nmc_state_t *state, nmc_principal_t *out)
-{
-	ncfg_client_t *client = nmc_state_client(state);
-	ncfg_globals_t globals;
-	char           problem[256] = "";
-
-	/* Unknown until something says otherwise, which `nmc_may_write` refuses:
-	 * a daemon that cannot be asked must not read as `any`. */
-	nmc_principal_parse(NULL, out);
-	if (!client) {
-		return;
-	}
-	memset(&globals, 0, sizeof(globals));
-	if (!ncfg_client_globals(client, &globals, problem, sizeof(problem))) {
-		return;
-	}
-	nmc_principal_parse(globals.control_admin, out);
-	ncfg_globals_free(&globals);
-}
 
 /*
  * **Every write: authorized first, then refused for not being built.**
@@ -579,7 +560,7 @@ static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessa
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	admin_principal(state, &admin);
+	nmc_admin_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -655,7 +636,7 @@ static int refuse_read_only(DBusConnection *connection, DBusMessage *call, DBusM
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	admin_principal(slot ? slot->state : NULL, &admin);
+	nmc_admin_principal(slot ? slot->state : NULL, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
@@ -813,7 +794,7 @@ static int refuse_add(DBusConnection *connection, DBusMessage *call, DBusMessage
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
-	admin_principal(state, &admin);
+	nmc_admin_principal(state, &admin);
 	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
