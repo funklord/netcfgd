@@ -12575,17 +12575,54 @@ the wrong family rather than a missing value, which is worse than empty.
 Measured: `and the gateway is the next hop of the default route` passes, and
 `nm.sh` moves to 72 and 46.
 
-**Two checks beside it are a different layer and are still failing.** `the
-gateway is the default route's next hop` and `a non-default route is in the
-route table, and the default is not` read the CONNECTION's `ipv4` setting
-through `nm_setting.py`, not the device's `IP4Config` -- so they want
-`settings.c` to emit `gateway` and `route-data` in that group, from the
-document's routes, which `ncfg_client_interface_config` already types with
-destination, via and metric. 0033 specifies the split they assert: NM keeps
-the default's next hop in `gateway` and everything else in `route-data`,
-because reporting it in both draws a duplicate row in every panel. That needs
-no decision and no new data, and `a static profile reports its method` failing
-beside them suggests the `ipv4` group may be absent rather than incomplete.
+### And the profile's `ipv4` group, which was absent rather than incomplete
+
+Four checks beside it read the CONNECTION's `ipv4` setting through
+`nm_setting.py` rather than the device's `IP4Config`, and all four were empty
+because **there was no `ipv4` group at all** -- so a panel opened on a static
+interface was told it had no method, no address, no gateway and no routes.
+`settings.c` emits one now and all four pass; `nm.sh` is 76 and 42, from 66
+and 51 when this thread started.
+
+**From the document and not the observation, which is the opposite of
+`IP4Config` and is the point rather than an inconsistency.** 0032 puts the
+details panel on the observation because it answers what the machine is doing;
+a profile answers what was asked for, and a client editing one must see its
+own request rather than the result. `ncfg_client_interface_config` is that
+view and already types the routes with destination, via and metric.
+
+**0033's split is NM's and not netcfgd's**: netcfgd keeps one `routes` list
+with the default as an entry, NM wants the next hop in `gateway` and the rest
+in `route-data`, so the default is deliberately absent from the table --
+reporting it in both draws a duplicate row in every panel, which is what the
+check asserts.
+
+**`method` has no honest mapping and the editable answer wins.** netcfgd
+allows several sources on one interface and NM's `method` is one enum, so a
+static address makes it `manual` even with a lease beside it: that is what a
+panel can edit, where `auto` would hide the address the document states. A
+judgement, and a real client acts on it.
+
+### The document does not label a source's family, and the first version did not either
+
+`config = ["10.7.7.1/24", "2001:db8:7::1/64"]` is two `static` sources and
+nothing more -- netcfgd's model does not split families because an interface's
+addressing is one list, and NM's does. So the group must tell them apart, and
+the first version did not: it reported a panel's **IPv4** addresses as
+`10.7.7.1/24 2001:db8:7::1/64`.
+
+That is the fault `ipconfig.c` names one layer over about the v6 gateway --
+**a wrong-family answer is worse than a missing one**, because empty reads as
+unknown while a populated field reads as a fact -- argued there an hour before
+being walked into here. A colon test now filters addresses, route
+destinations and the next hop alike, and it also stopped an IPv6-only
+interface claiming `manual` for addresses it has none of in that family.
+
+**The symmetric `ipv6` group is deliberately not added.** Nothing reads it, so
+it would be an untested projection of exactly the kind that just failed --
+guessing at property names and family handling at once, with no check to catch
+a mistake. `ipv4` served and `ipv6` absent is a visible gap rather than a
+false claim.
 
 ## 10.490 ActivateConnection is ported, authorized first, and acts
 

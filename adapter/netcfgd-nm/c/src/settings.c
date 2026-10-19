@@ -418,6 +418,192 @@ static void put_ssid(DBusMessageIter *into, const char *text)
 	(void)dbus_message_iter_close_container(into, &entry);
 }
 
+/*
+ * `address-data` and `route-data`: NM's dictionary shapes for an address and a
+ * route, each `{ "address"|"dest": s, "prefix": u }`.
+ *
+ * A separate pair of helpers rather than one taking the key, for `put_pair`'s
+ * stated reason: the two differ in the key AND in what a reader expects to
+ * find beside it, and a shared one would be a marshaller with the type
+ * checking argued away.
+ */
+static void put_cidr_entry(DBusMessageIter *array, const char *key, const char *cidr)
+{
+	DBusMessageIter entry;
+	DBusMessageIter pairs;
+	DBusMessageIter pair;
+	DBusMessageIter variant;
+	const char     *name;
+	char            address[64] = "";
+	const char     *slash;
+	dbus_uint32_t   prefix = 0u;
+
+	if (!cidr || cidr[0] == '\0') {
+		return;
+	}
+	slash = strchr(cidr, '/');
+	if (!slash) {
+		return;
+	}
+	if ((size_t)(slash - cidr) >= sizeof(address)) {
+		return;
+	}
+	memcpy(address, cidr, (size_t)(slash - cidr));
+	address[slash - cidr] = '\0';
+	prefix = (dbus_uint32_t)strtoul(slash + 1, NULL, 10);
+
+	if (!dbus_message_iter_open_container(array, DBUS_TYPE_ARRAY, "{sv}", &pairs)) {
+		return;
+	}
+	name = key;
+	if (dbus_message_iter_open_container(&pairs, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		const char *value = address;
+
+		(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &name);
+		if (dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, "s", &variant)) {
+			(void)dbus_message_iter_append_basic(&variant, DBUS_TYPE_STRING, &value);
+			(void)dbus_message_iter_close_container(&pair, &variant);
+		}
+		(void)dbus_message_iter_close_container(&pairs, &pair);
+	}
+	name = "prefix";
+	if (dbus_message_iter_open_container(&pairs, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &name);
+		if (dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, "u", &variant)) {
+			(void)dbus_message_iter_append_basic(&variant, DBUS_TYPE_UINT32, &prefix);
+			(void)dbus_message_iter_close_container(&pair, &variant);
+		}
+		(void)dbus_message_iter_close_container(&pairs, &pair);
+	}
+	(void)dbus_message_iter_close_container(array, &pairs);
+	(void)entry;
+}
+
+/* An `aa{sv}` member: the key, then one dictionary per CIDR the caller feeds. */
+static void put_cidr_list(DBusMessageIter *into, const char *member, const char *entry_key,
+    const char *const *cidrs, size_t count)
+{
+	DBusMessageIter pair;
+	DBusMessageIter variant;
+	DBusMessageIter array;
+	size_t          at;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &member);
+	if (!dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, "aa{sv}", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &pair);
+		return;
+	}
+	if (dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "a{sv}", &array)) {
+		for (at = 0u; at < count; at++) {
+			put_cidr_entry(&array, entry_key, cidrs[at]);
+		}
+		(void)dbus_message_iter_close_container(&variant, &array);
+	}
+	(void)dbus_message_iter_close_container(&pair, &variant);
+	(void)dbus_message_iter_close_container(into, &pair);
+}
+
+/*
+ * The `ipv4` group of a profile, from the document's own view of it.
+ *
+ * `method` is what the sources say: a static address is `manual`, a lease is
+ * `auto`, nothing at all is `disabled`. NM has no word for netcfgd's mixture
+ * of several sources on one interface, so the strongest one wins and a
+ * `manual` profile with a lease beside it reads as manual -- which is what a
+ * panel can edit, where `auto` would hide the address the document states.
+ */
+/*
+ * Whether this is an IPv6 address, route or next hop.
+ *
+ * A colon, which no IPv4 text contains and every IPv6 text does. The document
+ * does not label a source's family -- `config = ["10.7.7.1/24",
+ * "2001:db8:7::1/64"]` is two `static` sources and nothing else -- so the
+ * group has to tell them apart itself, and the first version did not: it put
+ * both into `ipv4`, and a panel was told its IPv4 addresses included
+ * `2001:db8:7::1/64`.
+ */
+static int is_ipv6_text(const char *text)
+{
+	return text && strchr(text, ':') != NULL;
+}
+
+static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_t *config)
+{
+	DBusMessageIter group;
+	DBusMessageIter pairs;
+	const char     *name = "ipv4";
+	const char     *method = "disabled";
+	const char     *addresses[8];
+	const char     *routes[8];
+	const char     *gateway = "";
+	size_t          address_count = 0u;
+	size_t          route_count = 0u;
+	size_t          at;
+
+	for (at = 0u; at < config->source_count; at++) {
+		const char *source = config->sources[at].source;
+
+		if (!source) {
+			continue;
+		}
+		if (strcmp(source, "static") == 0) {
+			if (is_ipv6_text(config->sources[at].address)) {
+				/* An `ipv6` group's business. A v6 address here is not a
+				 * missing answer but a wrong one, which is the
+				 * distinction `ipconfig.c` makes about the v6 gateway. */
+				continue;
+			}
+			method = "manual";
+			if (address_count < sizeof(addresses) / sizeof(addresses[0]) &&
+			    config->sources[at].address) {
+				addresses[address_count++] = config->sources[at].address;
+			}
+		} else if (strcmp(source, "dhcp4") == 0 && strcmp(method, "manual") != 0) {
+			method = "auto";
+		}
+	}
+	for (at = 0u; at < config->route_count; at++) {
+		const char *destination = config->routes[at].destination;
+
+		if (!destination) {
+			continue;
+		}
+		if (strcmp(destination, "default") == 0) {
+			/* The next hop becomes `gateway`, and the route itself is left
+			 * out of the table below: 0033's split. A v6 next hop belongs
+			 * to the group this is not. */
+			if (!is_ipv6_text(config->routes[at].via)) {
+				gateway = config->routes[at].via ? config->routes[at].via : "";
+			}
+			continue;
+		}
+		if (is_ipv6_text(destination)) {
+			continue;
+		}
+		if (route_count < sizeof(routes) / sizeof(routes[0])) {
+			routes[route_count++] = destination;
+		}
+	}
+
+	if (!dbus_message_iter_open_container(groups, DBUS_TYPE_DICT_ENTRY, NULL, &group)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&group, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&group, DBUS_TYPE_ARRAY, "{sv}", &pairs)) {
+		(void)dbus_message_iter_abandon_container_if_open(groups, &group);
+		return;
+	}
+	put_pair(&pairs, "method", method);
+	put_pair(&pairs, "gateway", gateway);
+	put_cidr_list(&pairs, "address-data", "address", addresses, address_count);
+	put_cidr_list(&pairs, "route-data", "dest", routes, route_count);
+	(void)dbus_message_iter_close_container(&group, &pairs);
+	(void)dbus_message_iter_close_container(groups, &group);
+}
+
 /* --------------------------------------------------------- `...Settings` */
 
 static int connection_paths(DBusMessageIter *into, nmc_connections_t *store)
@@ -1037,6 +1223,39 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 			(void)dbus_message_iter_close_container(&group, &pairs);
 			(void)dbus_message_iter_close_container(&groups, &group);
 		}
+	}
+	/*
+	 * **And the `ipv4` group, which was absent rather than incomplete.**
+	 *
+	 * A panel opened on a profile reads this to draw the addressing tab, and
+	 * with no group at all every field came back empty -- so it showed a
+	 * static interface as having no method, no address, no gateway and no
+	 * routes. The document has all four.
+	 *
+	 * **From the DOCUMENT and not the observation, which is the opposite of
+	 * `IP4Config`.** 0032 puts the details panel on the observation because it
+	 * answers what the machine is doing; a profile answers what was asked
+	 * for, and a client editing one must see its own request rather than the
+	 * result. `ncfg_client_interface_config` is that view and already types
+	 * the routes with destination, via and metric.
+	 *
+	 * **0033's split, which is NM's and not netcfgd's.** netcfgd keeps one
+	 * `routes` list with the default as an entry; NM keeps the default's next
+	 * hop in `gateway` and everything else in `route-data`, so the default is
+	 * deliberately absent from the list -- reporting it in both draws a
+	 * duplicate row in every panel.
+	 */
+	if (slot && slot->kind == NMC_PROFILE_INTERFACE && slot->id) {
+		ncfg_interface_config_t config;
+		char                    problem[NMC_ERROR_MAX] = "";
+		ncfg_client_t          *client = nmc_state_client(slot->state);
+
+		memset(&config, 0, sizeof(config));
+		if (client && ncfg_client_interface_config(client, slot->id, &config, problem,
+		        sizeof(problem)) && config.present) {
+			put_ipv4_group(&groups, &config);
+		}
+		ncfg_interface_config_free(&config);
 	}
 	return dbus_message_iter_close_container(&out, &groups) ? 1 : 0;
 }
