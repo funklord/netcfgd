@@ -1845,6 +1845,28 @@ typedef struct {
 	int   metric;
 	int   autoconnect; /* whether it may be joined without being asked */
 	int   hidden;      /* whether the document says it does not broadcast */
+	/*
+	 * **A network's own addressing, routes and resolution**, in the document's
+	 * order and in the same shapes `ncfg_interface_config_t` carries them --
+	 * the same three readers fill both, because they are the same keys of the
+	 * same document.
+	 *
+	 * They were absent until 2026-10-20, and the `show` response had carried
+	 * them all along: an editor could read a network's name, its security and
+	 * its ranking and nothing about what it configures, so a client that
+	 * composed a block from what it could see wrote one with the addressing
+	 * deleted. That is the fault `unmodelled` exists to prevent on an
+	 * interface, reached on a network by a shorter road -- the field was not
+	 * missing from the form, the form could not ask for it.
+	 *
+	 * `sources` is empty for a network that states no addressing, which is the
+	 * common case: a network usually leaves it to the interface it joins on.
+	 */
+	ncfg_address_source_t *sources;
+	size_t                 source_count;
+	ncfg_route_t          *routes;
+	size_t                 route_count;
+	ncfg_dns_scope_t       dns;
 } ncfg_saved_network_t;
 
 /*

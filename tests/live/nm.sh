@@ -753,15 +753,26 @@ else
 	before=$(wc -l < "$work/fake.log")
 	nmcli connection up HomeFiber ifname radio0 > "$work/up.log" 2>&1 || true
 	since_up=$(tail -n +$((before + 1)) "$work/fake.log")
+	# **What the supplicant was told, beside what nmcli said.** Both checks
+	# below count one word out of this delta, and a count of 0 says only that
+	# the word is absent -- which reads the same whether the shim forwarded
+	# nothing, netcfgd decided there was nothing to do, or the fake had stopped
+	# writing. The delta distinguishes all three and costs a file.
+	{
+		echo "--- nmcli said:"
+		cat "$work/up.log"
+		echo "--- the supplicant was told, since the activation:"
+		printf '%s\n' "$since_up"
+	} > "$work/up-delta.log"
 	check_saying "activating a profile reaches the supplicant" \
 		"$(printf '%s' "$since_up" | grep -c 'SELECT_NETWORK' || true)" "1" \
-		"$work/up.log"
+		"$work/up-delta.log"
 	# Through netcfgd's own join rather than a path of the shim's own: the
 	# network is added the way `ncfg wifi connect` adds it, which is what keeps
 	# decision 0013's boundary in one place.
 	check_saying "and it went through netcfgd's join" \
 		"$(printf '%s' "$since_up" | grep -c 'ADD_NETWORK' || true)" "1" \
-		"$work/up.log"
+		"$work/up-delta.log"
 
 	before=$(wc -l < "$work/fake.log")
 	nmcli connection down HomeFiber > "$work/down.log" 2>&1 || true
@@ -951,6 +962,29 @@ else
 		# both would draw a duplicate row in every panel.
 		check "a non-default route is in the route table, and the default is not" \
 			"$(ip4 routes)" "10.9.0.0/16"
+
+		# **The other family, from the same profile and the same group
+		# names.** probe0's block states one address of each. The shim
+		# reported only the first for a long time, so a client editing this
+		# profile was told nothing about its IPv6 -- and a client that is
+		# told nothing about a group sends its own defaults back, which is
+		# how a static address becomes a lease (project.md 10.497).
+		ip6() {
+			busctl --user --address="$address" --json=short call \
+				org.freedesktop.NetworkManager "$probe_profile" \
+				org.freedesktop.NetworkManager.Settings.Connection GetSettings 2>/dev/null |
+				python3 "$repo/tests/live/nm_setting.py" ipv6 "$1"
+		}
+		check "the same profile's ipv6 half reports its own method" \
+			"$(ip6 method)" "manual"
+		check "and the ipv6 address it states, with its prefix" \
+			"$(ip6 address)" "2001:db8:7::1/64"
+		# The discriminating one: the document does not label a source's
+		# family, so each group has to tell them apart itself. probe0's only
+		# default route is v4, and a v4 next hop appearing here would be the
+		# fault that put a v6 address in the v4 group, pointed the other way.
+		check "and no ipv6 gateway, the document stating none for that family" \
+			"$(ip6 gateway)" ""
 	fi
 
 	# And back the other way: a client creating a network with a static address
@@ -993,6 +1027,14 @@ else
 		"$(grep -c '10.0.0.0/8 via 192.0.2.9 metric 600' "$office" 2>/dev/null || true)" "1"
 	check "netcfgd accepts what was written" \
 		"$("$build/ncfg" show 2>/dev/null | grep -c '"id": "Office"' || true)" "1"
+	# **And the client is told back what it asked for**, which is the round
+	# trip rather than either half of it. A profile whose addressing a client
+	# cannot read is one it will overwrite with its own defaults the next time
+	# somebody opens it: measured, a static network came back as DHCP with its
+	# routes and nameservers gone (project.md 10.497).
+	check "and a client reading it back is told the address it wrote" \
+		"$(nmcli --terse --get-values ipv4.addresses connection show Office 2>/dev/null)" \
+		"192.0.2.5/24"
 
 	timeout 15 nmcli connection delete Office > /dev/null 2>&1 || true
 

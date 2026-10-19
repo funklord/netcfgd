@@ -1599,18 +1599,51 @@ char *ncfg_access_point_display(int named, const char *name, const char *ssid)
 	return dup_string(name);
 }
 
+/*
+ * The document's `addressing`, `routes` and `dns` readers, declared here and
+ * defined with the interface view below.
+ *
+ * Forward declarations rather than moving three functions up: they belong
+ * beside the comments explaining what a form can and cannot carry, and the
+ * saved-network parse is the second caller rather than the first.
+ */
+static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
+                        ncfg_address_source_t **into, size_t *into_count, char **unmodelled);
+static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t **into,
+                       size_t *into_count, char **unmodelled);
+static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t *dns,
+                    char **unmodelled);
+
 void ncfg_saved_networks_free(ncfg_saved_networks_t *networks)
 {
 	if (!networks) {
 		return;
 	}
 	for (size_t i = 0; i < networks->count; i++) {
-		free(networks->items[i].id);
-		free(networks->items[i].name);
-		free(networks->items[i].ssid);
-		free(networks->items[i].security);
-		free(networks->items[i].proto);
-		free(networks->items[i].credential);
+		ncfg_saved_network_t *item = &networks->items[i];
+
+		free(item->id);
+		free(item->name);
+		free(item->ssid);
+		free(item->security);
+		free(item->proto);
+		free(item->credential);
+		/* The three lists the same readers filled, freed the way
+		 * `ncfg_interface_config_free` frees its own. */
+		for (size_t at = 0; at < item->source_count; at++) {
+			free(item->sources[at].source);
+			free(item->sources[at].address);
+		}
+		free(item->sources);
+		for (size_t at = 0; at < item->route_count; at++) {
+			free(item->routes[at].destination);
+			free(item->routes[at].via);
+		}
+		free(item->routes);
+		free(item->dns.mode);
+		free(item->dns.servers);
+		free(item->dns.search);
+		free(item->dns.domains);
 	}
 	free(networks->items);
 	networks->items = NULL;
@@ -1700,6 +1733,23 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		item->autoconnect =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "autoconnect"), 0);
 		item->hidden = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "hidden"), 0);
+		/*
+		 * What the network configures, by the same readers the interface view
+		 * uses: the keys are the document's and so are their shapes. No
+		 * `unmodelled` sink, because that field exists to stop a FORM
+		 * overwriting what it cannot show, and a saved network has no form
+		 * here -- what reads this composes a whole block or refuses to.
+		 */
+		if (!read_sources(doc, ncfg_json_member(doc, entry, "addressing"),
+		        &item->sources, &item->source_count, NULL)
+		    || !read_routes(doc, ncfg_json_member(doc, entry, "routes"), &item->routes,
+		        &item->route_count, NULL)
+		    || !read_dns(doc, ncfg_json_member(doc, entry, "dns"), &item->dns, NULL)) {
+			set_error(err, err_size, "out of memory");
+			ncfg_json_free(doc);
+			ncfg_saved_networks_free(out);
+			return 0;
+		}
 	}
 	ncfg_json_free(doc);
 	return 1;
@@ -2281,6 +2331,11 @@ void ncfg_interface_config_free(ncfg_interface_config_t *config)
 /* Append a key name to the running list of what a form cannot express. */
 static void note_unmodelled(char **list, const char *key)
 {
+	/* No sink: a reader serving something that has no form to delete content
+	 * from, which is how one parser serves two kinds of block. */
+	if (!list) {
+		return;
+	}
 	if (!*list) {
 		*list = dup_string(key);
 		return;
@@ -2304,35 +2359,35 @@ static void note_unmodelled(char **list, const char *key)
  * configuration on the next save.
  */
 static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
-                        ncfg_interface_config_t *out)
+                        ncfg_address_source_t **into, size_t *into_count, char **unmodelled)
 {
 	uint32_t count = ncfg_json_count(doc, list);
 
 	if (!count) {
 		return 1;
 	}
-	out->sources = calloc(count, sizeof(*out->sources));
-	if (!out->sources) {
+	*into = calloc(count, sizeof(**into));
+	if (!*into) {
 		return 0;
 	}
-	out->source_count = count;
+	*into_count = count;
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t entry = ncfg_json_at(doc, list, i);
 
-		out->sources[i].source = member_text(doc, entry, "source");
-		out->sources[i].address = member_text(doc, entry, "address");
-		if (!out->sources[i].source || !out->sources[i].address) {
+		(*into)[i].source = member_text(doc, entry, "source");
+		(*into)[i].address = member_text(doc, entry, "address");
+		if (!(*into)[i].source || !(*into)[i].address) {
 			return 0;
 		}
 		/* A peer, a lifetime or a delegated prefix has nowhere to go on the
 		 * form, and each is content a save would drop. */
 		char *peer = member_text(doc, entry, "peer");
 		if (peer && peer[0]) {
-			note_unmodelled(&out->unmodelled, "addressing (peer)");
+			note_unmodelled(unmodelled, "addressing (peer)");
 		}
 		free(peer);
 		if (has_member(doc, entry, "from")) {
-			note_unmodelled(&out->unmodelled, "addressing (delegated)");
+			note_unmodelled(unmodelled, "addressing (delegated)");
 		}
 	}
 	return 1;
@@ -2345,26 +2400,27 @@ static int read_sources(const ncfg_json_doc_t *doc, uint32_t list,
  * onlink flag -- is named through `unmodelled`, because those are the parts a
  * three-column table would delete on save.
  */
-static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_interface_config_t *out)
+static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_route_t **into,
+                       size_t *into_count, char **unmodelled)
 {
 	uint32_t count = ncfg_json_count(doc, list);
 
 	if (!count) {
 		return 1;
 	}
-	out->routes = calloc(count, sizeof(*out->routes));
-	if (!out->routes) {
+	*into = calloc(count, sizeof(**into));
+	if (!*into) {
 		return 0;
 	}
-	out->route_count = count;
+	*into_count = count;
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t entry = ncfg_json_at(doc, list, i);
 
-		out->routes[i].destination = member_text(doc, entry, "destination");
-		out->routes[i].via = member_text(doc, entry, "via");
-		out->routes[i].metric =
+		(*into)[i].destination = member_text(doc, entry, "destination");
+		(*into)[i].via = member_text(doc, entry, "via");
+		(*into)[i].metric =
 		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "metric"), -1);
-		if (!out->routes[i].destination || !out->routes[i].via) {
+		if (!(*into)[i].destination || !(*into)[i].via) {
 			return 0;
 		}
 		static const char *const beyond[] = { "src", "table", "scope", "onlink", "proto" };
@@ -2380,7 +2436,7 @@ static int read_routes(const ncfg_json_doc_t *doc, uint32_t list, ncfg_interface
 			    && !ncfg_json_bool(doc, extra, 0)) {
 				continue;
 			}
-			note_unmodelled(&out->unmodelled, "routes (beyond destination, via, metric)");
+			note_unmodelled(unmodelled, "routes (beyond destination, via, metric)");
 			break;
 		}
 	}
@@ -2464,33 +2520,34 @@ static char *joined_field(const ncfg_json_doc_t *doc, uint32_t array, const char
  * reporting that as unrepresentable is what stopped netcfgd's own generated
  * wifi block from being editable at all.
  */
-static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_interface_config_t *out)
+static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_dns_scope_t *dns,
+                    char **unmodelled)
 {
 	if (scope == NCFG_JSON_NONE) {
-		out->dns.mode = dup_string("");
-		out->dns.servers = dup_string("");
-		out->dns.search = dup_string("");
-		out->dns.domains = dup_string("");
-		return out->dns.mode && out->dns.servers && out->dns.search && out->dns.domains;
+		dns->mode = dup_string("");
+		dns->servers = dup_string("");
+		dns->search = dup_string("");
+		dns->domains = dup_string("");
+		return dns->mode && dns->servers && dns->search && dns->domains;
 	}
-	out->dns.mode = member_text(doc, scope, "mode");
+	dns->mode = member_text(doc, scope, "mode");
 	/* **Servers and domains are objects, not strings.** A server carries an
 	 * address and optionally a port and an SNI name; a routing domain carries
 	 * a suffix and whether it is exclusive. The form takes the part it can
 	 * edit -- the address, the suffix -- and the rest is reported through
 	 * `unmodelled` below, because a save that wrote the address back alone
 	 * would drop the port somebody chose. */
-	out->dns.servers = joined_field(doc, ncfg_json_member(doc, scope, "servers"), "addr");
-	out->dns.search = joined_words(doc, ncfg_json_member(doc, scope, "search"));
-	out->dns.domains = joined_field(doc, ncfg_json_member(doc, scope, "domains"), "suffix");
-	if (!out->dns.mode || !out->dns.servers || !out->dns.search || !out->dns.domains) {
+	dns->servers = joined_field(doc, ncfg_json_member(doc, scope, "servers"), "addr");
+	dns->search = joined_words(doc, ncfg_json_member(doc, scope, "search"));
+	dns->domains = joined_field(doc, ncfg_json_member(doc, scope, "domains"), "suffix");
+	if (!dns->mode || !dns->servers || !dns->search || !dns->domains) {
 		return 0;
 	}
 	/* The parts of a scope this form has no field for. Resolver options and
 	 * DNSSEC are policy an operator sets once and would not expect a network
 	 * editor to carry -- but they are content, so a save must not drop them. */
 	if (ncfg_json_count(doc, ncfg_json_member(doc, scope, "options"))) {
-		note_unmodelled(&out->unmodelled, "dns (options)");
+		note_unmodelled(unmodelled, "dns (options)");
 	}
 	/* A server with a port or an SNI name, or an exclusive routing domain:
 	 * each is a field the form does not carry and a save would drop. */
@@ -2498,14 +2555,14 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_interface_c
 	for (uint32_t i = 0; i < ncfg_json_count(doc, servers); i++) {
 		uint32_t server = ncfg_json_at(doc, servers, i);
 		if (ncfg_json_type(doc, ncfg_json_member(doc, server, "port")) != NCFG_JSON_NULL) {
-			note_unmodelled(&out->unmodelled, "dns (a server's port)");
+			note_unmodelled(unmodelled, "dns (a server's port)");
 			break;
 		}
 		char *sni = member_text(doc, server, "sni");
 		int named = sni && sni[0];
 		free(sni);
 		if (named) {
-			note_unmodelled(&out->unmodelled, "dns (a server's sni)");
+			note_unmodelled(unmodelled, "dns (a server's sni)");
 			break;
 		}
 	}
@@ -2513,7 +2570,7 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_interface_c
 	for (uint32_t i = 0; i < ncfg_json_count(doc, domains); i++) {
 		if (ncfg_json_bool(doc, ncfg_json_member(doc, ncfg_json_at(doc, domains, i),
 		        "exclusive"), 0)) {
-			note_unmodelled(&out->unmodelled, "dns (an exclusive routing domain)");
+			note_unmodelled(unmodelled, "dns (an exclusive routing domain)");
 			break;
 		}
 	}
@@ -2524,7 +2581,7 @@ static int read_dns(const ncfg_json_doc_t *doc, uint32_t scope, ncfg_interface_c
 		    && strcmp(value, "none") != 0 && strcmp(value, "unset") != 0;
 		free(value);
 		if (stated) {
-			note_unmodelled(&out->unmodelled, "dns (dnssec or transport)");
+			note_unmodelled(unmodelled, "dns (dnssec or transport)");
 			break;
 		}
 	}
@@ -3244,9 +3301,12 @@ int ncfg_client_interface_config(ncfg_client_t *client, const char *interface,
 		out->preference = (int)ncfg_json_int(doc, preference, -1);
 	}
 
-	if (!read_sources(doc, ncfg_json_member(doc, found, "addressing"), out)
-	    || !read_routes(doc, ncfg_json_member(doc, found, "routes"), out)
-	    || !read_dns(doc, ncfg_json_member(doc, found, "dns"), out)) {
+	if (!read_sources(doc, ncfg_json_member(doc, found, "addressing"), &out->sources,
+	        &out->source_count, &out->unmodelled)
+	    || !read_routes(doc, ncfg_json_member(doc, found, "routes"), &out->routes,
+	        &out->route_count, &out->unmodelled)
+	    || !read_dns(doc, ncfg_json_member(doc, found, "dns"), &out->dns,
+	        &out->unmodelled)) {
 		set_error(err, err_size, "out of memory");
 		ncfg_json_free(doc);
 		return 0;

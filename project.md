@@ -12498,6 +12498,152 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.497 Both IP groups, and the client call that could not ask for them
+
+The ask was the symmetric `ipv6` group beside the `ipv4` one. What it needed
+was three fields in the client library, and what it fixed was silent data loss
+in the write path 10.496 had just opened.
+
+### What a client was told, and what it wrote back
+
+Measured before anything was changed, with a static wifi profile this shim had
+just written and the read-modify-write a real client makes:
+
+    network "Static" {                        network "Static" {
+        ssid = "53746174"                         wifi { open = true }
+        wifi { open = true }          ->          hidden = true
+        config = ["192.0.2.5/24", "slaac"]    }
+        routes = ["default via 192.0.2.1"]
+        dns { servers = ["1.1.1.1"] }
+    }
+
+The address, the gateway and the nameserver are gone, and the client asked for
+none of that: it changed one flag and sent back what it had been given.
+
+**And it is worse than deletion.** libnm fills in its own defaults for a group
+it was told nothing about, so what reaches the shim is not an absent `ipv4`
+group but `method = auto` -- a static network comes back as DHCP. There is no
+reading of the dictionary that recovers the address, because the client is not
+reporting what it was told; it is reporting what it believes.
+
+### The read direction could not answer, and the wire always could
+
+`get_settings` served IP groups for `interface` profiles only, which is also
+where the asymmetry the ask names comes from: one group, for one kind of
+block, and none at all for the other. `ncfg_saved_network_t` reported a
+network's name, security, ranking, autoconnect and hidden -- and nothing about
+what the network configures.
+
+**The `show` response had carried all of it the whole time.** `addressing`,
+`routes` and `dns`, in the same shapes `ncfg_interface_config_t` already
+models, from the same document. So this is a parse the client library never
+wrote rather than anything missing from the protocol: `read_sources`,
+`read_routes` and `read_dns` are decoupled from the interface struct and fill a
+saved network's own lists now.
+
+They take no `unmodelled` sink when they do. That field exists to stop a FORM
+overwriting content it cannot show, and a saved network has no form here --
+whatever reads it composes a whole block or refuses to, which is the same
+judgement by a different route.
+
+### Both groups, both kinds, and the family split made twice
+
+`put_ip_group` is the old `put_ipv4_group` with the family as an argument and
+a view of the three lists instead of one struct, so one function serves an
+interface block and a network block alike.
+
+**Both groups are reported even when a family has nothing.** That is the
+lesson above stated as a rule: a client given no group fills in its own
+defaults, so `ignore` is a fact and silence is an invitation to guess.
+
+The family split has to be made by the group rather than read off the
+document, because the document does not label a source's family --
+`config = ["10.7.7.1/24", "2001:db8:7::1/64"]` is two `static` sources and
+nothing else. That was already true of addresses, where the first version put
+both in `ipv4`; it is equally true of a gateway, a route destination and a
+nameserver, and each is filtered the same way now.
+
+Beyond the ask, because the group is either complete or it is another instance
+of the same fault: `route-data` carries the next hop and the metric it was
+dropping, and both groups carry `dns-data`, the packed `dns` and `dns-search`
+-- the packed IPv4 word in network byte order, which `ipconfig.c` already says
+is not negotiable and which `block.c` reads back the same way. The
+nameservers go only where the method allows them: libnm validates the whole
+dictionary before it will activate anything, and `dns` beside
+`method = disabled` is invalid, so a family with nameservers and no addressing
+would have made a profile no client would connect with.
+
+### The lens, and this is its third instance
+
+**A group `GetSettings` does not report is a group the next edit deletes.**
+10.496 was the security group; this is the two IP groups. The population is
+every group NM defines that this shim does not serve, and the test is neither
+direction on its own but the round trip: read, change one key, write, and
+compare the block with what it was.
+
+That is now a check rather than a lens: `nm.sh` reads back the static network
+it just wrote, through `nmcli`, and asserts the address it asked for comes
+back. A write half and a read half that each pass their own assertions can
+still lose everything between them.
+
+### What the live script asks now
+
+Three checks on probe0's `ipv6` group beside the four on its `ipv4` one, and
+the third is the discriminating one: **no IPv6 gateway**, because the
+document's only default route is v4 and a v4 next hop appearing there is the
+family filter failing in the direction the first version failed in.
+
+### The group that made a profile libnm would not activate
+
+**Two checks that had passed seven runs running failed on the eighth**, and
+both were in the activation band rather than anywhere near the groups. The
+counts said `expected 1, actual 0` about words in the fake supplicant's log,
+which reads the same whether the shim forwarded nothing, netcfgd decided there
+was nothing to do, or the fake had stopped writing.
+
+The first theory was a race -- `connection up` returns when the shim has asked
+netcfgd, netcfgd applies asynchronously, and these two checks sample the log
+at once where every comparable check in the script has a bounded wait. It was
+wrong, and the diagnostic said so in one line:
+
+    Error: device 'radio0' not compatible with connection 'HomeFiber':
+    ipv4.gateway: gateway cannot be set if there are no addresses configured.
+
+**libnm refused the profile locally and never called the shim.** The new
+`ipv4` group said `gateway = ""` for a DHCP network, and libnm's rule is that
+a gateway cannot be set without an address -- where "set" means the property
+is non-NULL, so an empty string fails it. The old group said this
+unconditionally too and got away with it, because the only profiles it served
+were interfaces with static addresses.
+
+So the key is written only when there is one, and the two empty lists beside it
+went the same way: an absent key is a profile that says nothing about
+addresses, and a present empty one says the same thing with more rope. **The
+comment warning about exactly this was ported in the same commit**, about
+nameservers beside `method = disabled` -- libnm validates the whole dictionary
+before it will activate anything -- and then the same mistake was made one key
+along.
+
+Two things worth keeping. **A count makes a good assertion and a poor
+diagnostic**, which this script says of itself and had not applied here: the
+two checks now print the supplicant delta beside nmcli's words, and that is
+what turned a wrong theory into a one-line answer. And **the failure was
+nowhere near the change**: a settings group that reads correctly can still be
+a dictionary no client will act on, so the test that matters for a read
+direction is one that makes a client *use* what it read.
+
+### The band
+
+`nm.sh` goes from 97 and 20 to **104 and 17**: three checks recovered that the
+groups fix -- a network's nameservers, their packed form and its search
+domains -- and four new ones, with nothing else moved. The diff against the
+run before this change is three removals and no additions.
+
+The four new ones are the ipv6 group's method, its address, its absent
+gateway, and the round trip through `nmcli`. The last is the one that would
+have caught the fault this entry opens with, and the third is the one that
+would have caught the family filter failing.
+
 ## 10.496 Update, and the flag that makes editing a secured network possible
 
 The last write. `Update`, `Update2` and `UpdateUnsaved` shared the read-only

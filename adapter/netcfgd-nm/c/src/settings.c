@@ -36,6 +36,8 @@
 #include "nmc/uuid.h"
 #include "nmc/authorize.h"
 
+#include <arpa/inet.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -536,14 +538,202 @@ static void put_cidr_list(DBusMessageIter *into, const char *member, const char 
 }
 
 /*
- * The `ipv4` group of a profile, from the document's own view of it.
+ * One `route-data` entry: the destination split from its prefix, and the two
+ * optional fields beside them.
  *
- * `method` is what the sources say: a static address is `manual`, a lease is
- * `auto`, nothing at all is `disabled`. NM has no word for netcfgd's mixture
- * of several sources on one interface, so the strongest one wins and a
- * `manual` profile with a lease beside it reads as manual -- which is what a
- * panel can edit, where `auto` would hide the address the document states.
+ * `put_cidr_entry` cannot serve this. It writes a key and a prefix, which is
+ * all an address needs; a route also carries a next hop and a metric, and the
+ * document states either, both or neither. Leaving them out made a panel show
+ * a route table that had lost the gateway and the ranking of every row -- which
+ * for an interface profile is a display fault and not a loss, since those are
+ * read-only here, and would be a loss the moment they were not.
  */
+static void put_route_entry(DBusMessageIter *array, const ncfg_route_t *route)
+{
+	DBusMessageIter pairs;
+	char            destination[64] = "";
+	const char     *slash;
+	dbus_uint32_t   prefix = 0u;
+
+	if (!route || !route->destination) {
+		return;
+	}
+	slash = strchr(route->destination, '/');
+	if (!slash || (size_t)(slash - route->destination) >= sizeof(destination)) {
+		return;
+	}
+	memcpy(destination, route->destination, (size_t)(slash - route->destination));
+	prefix = (dbus_uint32_t)strtoul(slash + 1, NULL, 10);
+	if (!dbus_message_iter_open_container(array, DBUS_TYPE_ARRAY, "{sv}", &pairs)) {
+		return;
+	}
+	put_pair(&pairs, "dest", destination);
+	put_number(&pairs, "prefix", prefix);
+	if (route->via && route->via[0] != '\0') {
+		put_pair(&pairs, "next-hop", route->via);
+	}
+	/* -1 is the document stating none, and NM's own absence is the key being
+	 * missing rather than a number meaning unranked -- 0 is a legal metric
+	 * and the strongest one. */
+	if (route->metric >= 0) {
+		put_number(&pairs, "metric", (dbus_uint32_t)route->metric);
+	}
+	(void)dbus_message_iter_close_container(array, &pairs);
+}
+
+/* An `aa{sv}` of routes under `member`. */
+static void put_route_list(DBusMessageIter *into, const char *member,
+    const ncfg_route_t *const *routes, size_t count)
+{
+	DBusMessageIter pair;
+	DBusMessageIter variant;
+	DBusMessageIter array;
+	size_t          at;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &member);
+	if (!dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, "aa{sv}", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &pair);
+		return;
+	}
+	if (dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "a{sv}", &array)) {
+		for (at = 0u; at < count; at++) {
+			put_route_entry(&array, routes[at]);
+		}
+		(void)dbus_message_iter_close_container(&variant, &array);
+	}
+	(void)dbus_message_iter_close_container(&pair, &variant);
+	(void)dbus_message_iter_close_container(into, &pair);
+}
+
+/* An `as` member: `dns-data` and `dns-search`. */
+static void put_text_list(DBusMessageIter *into, const char *member, const char *const *items,
+    size_t count)
+{
+	DBusMessageIter pair;
+	DBusMessageIter variant;
+	DBusMessageIter array;
+	size_t          at;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &member);
+	if (!dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, "as", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &pair);
+		return;
+	}
+	if (dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, "s", &array)) {
+		for (at = 0u; at < count; at++) {
+			(void)dbus_message_iter_append_basic(&array, DBUS_TYPE_STRING, &items[at]);
+		}
+		(void)dbus_message_iter_close_container(&variant, &array);
+	}
+	(void)dbus_message_iter_close_container(&pair, &variant);
+	(void)dbus_message_iter_close_container(into, &pair);
+}
+
+/*
+ * `dns`, the packed form an older client reads: `au` for IPv4 and `aay` for
+ * IPv6, which are different shapes for the same list.
+ *
+ * **Network byte order for the IPv4 word**, which is NM's oldest wart and is
+ * not negotiable: `ipconfig.c` says the same thing about `Addresses`, and the
+ * two must agree because one client may read both. `s_addr` is the four address
+ * bytes as they sit in memory, so a little-endian machine reports 10.7.7.1 as
+ * `0x0107070a` and a client that reads it expects exactly that. `block.c` reads
+ * the same form back when a client sends one.
+ */
+static void put_packed_dns(DBusMessageIter *into, const char *const *servers, size_t count,
+    int v6)
+{
+	DBusMessageIter pair;
+	DBusMessageIter variant;
+	DBusMessageIter array;
+	const char     *member = "dns";
+	size_t          at;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &pair)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&pair, DBUS_TYPE_STRING, &member);
+	if (!dbus_message_iter_open_container(&pair, DBUS_TYPE_VARIANT, v6 ? "aay" : "au",
+	        &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &pair);
+		return;
+	}
+	if (dbus_message_iter_open_container(&variant, DBUS_TYPE_ARRAY, v6 ? "ay" : "u", &array)) {
+		for (at = 0u; at < count; at++) {
+			if (v6) {
+				struct in6_addr parsed;
+				DBusMessageIter octets;
+				size_t          byte;
+
+				if (inet_pton(AF_INET6, servers[at], &parsed) != 1) {
+					continue;
+				}
+				if (!dbus_message_iter_open_container(&array, DBUS_TYPE_ARRAY, "y",
+				        &octets)) {
+					continue;
+				}
+				for (byte = 0u; byte < sizeof(parsed.s6_addr); byte++) {
+					(void)dbus_message_iter_append_basic(&octets,
+					    DBUS_TYPE_BYTE, &parsed.s6_addr[byte]);
+				}
+				(void)dbus_message_iter_close_container(&array, &octets);
+			} else {
+				struct in_addr parsed;
+				dbus_uint32_t  word;
+
+				if (inet_pton(AF_INET, servers[at], &parsed) != 1) {
+					continue;
+				}
+				word = (dbus_uint32_t)parsed.s_addr;
+				(void)dbus_message_iter_append_basic(&array, DBUS_TYPE_UINT32,
+				    &word);
+			}
+		}
+		(void)dbus_message_iter_close_container(&variant, &array);
+	}
+	(void)dbus_message_iter_close_container(&pair, &variant);
+	(void)dbus_message_iter_close_container(into, &pair);
+}
+
+/*
+ * Space-separated words, as the client library joins `dns.servers` and
+ * `dns.search` for a form. Answers how many were taken.
+ */
+static size_t words_of(const char *joined, char (*out)[64], size_t max)
+{
+	size_t count = 0u;
+
+	if (!joined) {
+		return 0u;
+	}
+	while (*joined != '\0' && count < max) {
+		size_t length = 0u;
+
+		while (*joined == ' ' || *joined == '\t') {
+			joined++;
+		}
+		while (joined[length] != '\0' && joined[length] != ' ' && joined[length] != '\t') {
+			length++;
+		}
+		if (length == 0u) {
+			break;
+		}
+		if (length < sizeof(out[0])) {
+			memcpy(out[count], joined, length);
+			out[count][length] = '\0';
+			count++;
+		}
+		joined += length;
+	}
+	return count;
+}
+
 /*
  * Whether this is an IPv6 address, route or next hop.
  *
@@ -559,18 +749,67 @@ static int is_ipv6_text(const char *text)
 	return text && strchr(text, ':') != NULL;
 }
 
-static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_t *config)
+/*
+ * One family's IP group of a profile, from the document's own view of it.
+ *
+ * **From the DOCUMENT and not the observation, which is the opposite of
+ * `IP4Config`** (0032): a profile answers what was asked for, and a client
+ * editing one must see its own request rather than the result.
+ *
+ * `method` is what the sources say. A static address of this family is
+ * `manual`, a lease is `auto` -- `dhcp` for IPv6, where NM spells the same idea
+ * differently -- the kernel's own addressing is `link-local`, and nothing at
+ * all is `disabled` for IPv4 and `ignore` for IPv6. NM has no word for
+ * netcfgd's mixture of several sources on one interface, so the strongest one
+ * wins: a `manual` profile with a lease beside it reads as manual, which is
+ * what a panel can edit, where `auto` would hide the address the document
+ * states.
+ *
+ * **Both groups are reported even when a family has nothing**, which is what a
+ * client needs to hear: a settings dictionary with no `ipv6` group at all is
+ * one whose client fills in its own defaults and writes them back. Saying
+ * `ignore` is a fact; saying nothing is an invitation to guess.
+ *
+ * **0033's split, which is NM's and not netcfgd's.** netcfgd keeps one `routes`
+ * list with the default as an entry; NM keeps the default's next hop in
+ * `gateway` and everything else in `route-data`, so the default is deliberately
+ * absent from the list -- reporting it in both draws a duplicate row in every
+ * panel.
+ */
+/*
+ * The three things an IP group is made of, from whichever kind of block has
+ * them: an `interface` names its own addressing, and so may a `network`.
+ *
+ * A view rather than a copy, and borrowed for the length of one dispatch --
+ * the lists belong to the window's own answer from netcfgd.
+ */
+typedef struct {
+	const ncfg_address_source_t *sources;
+	size_t                       source_count;
+	const ncfg_route_t          *routes;
+	size_t                       route_count;
+	const ncfg_dns_scope_t      *dns;
+} ip_view_t;
+
+static void put_ip_group(DBusMessageIter *groups, const ip_view_t *config, int v6)
 {
-	DBusMessageIter group;
-	DBusMessageIter pairs;
-	const char     *name = "ipv4";
-	const char     *method = "disabled";
-	const char     *addresses[8];
-	const char     *routes[8];
-	const char     *gateway = "";
-	size_t          address_count = 0u;
-	size_t          route_count = 0u;
-	size_t          at;
+	DBusMessageIter     group;
+	DBusMessageIter     pairs;
+	const char         *name = v6 ? "ipv6" : "ipv4";
+	const char         *method = v6 ? "ignore" : "disabled";
+	const char         *addresses[8];
+	const ncfg_route_t *routes[8];
+	const char         *gateway = "";
+	const char         *servers[8];
+	const char         *searches[8];
+	char                server_words[8][64];
+	char                search_words[8][64];
+	size_t              address_count = 0u;
+	size_t              route_count = 0u;
+	size_t              server_count = 0u;
+	size_t              search_count = 0u;
+	size_t              taken;
+	size_t              at;
 
 	for (at = 0u; at < config->source_count; at++) {
 		const char *source = config->sources[at].source;
@@ -579,10 +818,11 @@ static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_
 			continue;
 		}
 		if (strcmp(source, "static") == 0) {
-			if (is_ipv6_text(config->sources[at].address)) {
-				/* An `ipv6` group's business. A v6 address here is not a
-				 * missing answer but a wrong one, which is the
-				 * distinction `ipconfig.c` makes about the v6 gateway. */
+			/* The family is the address's, since the document does not say.
+			 * A source of the other family is not a missing answer here but
+			 * a wrong one, which is the distinction `ipconfig.c` makes about
+			 * the v6 gateway. */
+			if (is_ipv6_text(config->sources[at].address) != (v6 != 0)) {
 				continue;
 			}
 			method = "manual";
@@ -590,8 +830,17 @@ static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_
 			    config->sources[at].address) {
 				addresses[address_count++] = config->sources[at].address;
 			}
-		} else if (strcmp(source, "dhcp4") == 0 && strcmp(method, "manual") != 0) {
+		} else if (strcmp(method, "manual") == 0) {
+			continue;
+		} else if (!v6 && strcmp(source, "dhcp4") == 0) {
 			method = "auto";
+		} else if (v6 && strcmp(source, "slaac") == 0) {
+			method = "auto";
+		} else if (v6 && strcmp(source, "dhcp6") == 0 && strcmp(method, "auto") != 0) {
+			method = "dhcp";
+		} else if (v6 && strcmp(source, "link_local") == 0 &&
+		    strcmp(method, "ignore") == 0) {
+			method = "link-local";
 		}
 	}
 	for (at = 0u; at < config->route_count; at++) {
@@ -602,18 +851,41 @@ static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_
 		}
 		if (strcmp(destination, "default") == 0) {
 			/* The next hop becomes `gateway`, and the route itself is left
-			 * out of the table below: 0033's split. A v6 next hop belongs
-			 * to the group this is not. */
-			if (!is_ipv6_text(config->routes[at].via)) {
+			 * out of the table below. A next hop of the other family
+			 * belongs to the group this is not. */
+			if (is_ipv6_text(config->routes[at].via) == (v6 != 0)) {
 				gateway = config->routes[at].via ? config->routes[at].via : "";
 			}
 			continue;
 		}
-		if (is_ipv6_text(destination)) {
+		if (is_ipv6_text(destination) != (v6 != 0)) {
 			continue;
 		}
 		if (route_count < sizeof(routes) / sizeof(routes[0])) {
-			routes[route_count++] = destination;
+			routes[route_count++] = &config->routes[at];
+		}
+	}
+	/*
+	 * The profile's own nameservers, in both of NM's spellings, and only where
+	 * the method allows them. libnm validates the whole dictionary before it
+	 * will activate anything, and `dns` beside `method=disabled` is invalid --
+	 * so a family with nameservers and no addressing would make a profile no
+	 * client would connect with. Losing the field is much cheaper than losing
+	 * the profile, and NM has no way to say "no addressing, but these
+	 * nameservers" anyway.
+	 */
+	if (strcmp(method, "disabled") != 0 && strcmp(method, "ignore") != 0) {
+		taken = words_of(config->dns->servers, server_words,
+		    sizeof(server_words) / sizeof(server_words[0]));
+		for (at = 0u; at < taken; at++) {
+			if (is_ipv6_text(server_words[at]) == (v6 != 0)) {
+				servers[server_count++] = server_words[at];
+			}
+		}
+		taken = words_of(config->dns->search, search_words,
+		    sizeof(search_words) / sizeof(search_words[0]));
+		for (at = 0u; at < taken; at++) {
+			searches[search_count++] = search_words[at];
 		}
 	}
 
@@ -626,9 +898,39 @@ static void put_ipv4_group(DBusMessageIter *groups, const ncfg_interface_config_
 		return;
 	}
 	put_pair(&pairs, "method", method);
-	put_pair(&pairs, "gateway", gateway);
-	put_cidr_list(&pairs, "address-data", "address", addresses, address_count);
-	put_cidr_list(&pairs, "route-data", "dest", routes, route_count);
+	/*
+	 * **Only when there is one, and an empty string is not one.** libnm
+	 * validates the whole dictionary before it will activate anything, and its
+	 * rule is that a gateway cannot be set without an address -- where "set"
+	 * means the property is non-NULL, so `gateway = ""` fails it. The old
+	 * `ipv4` group said this unconditionally and got away with it, because the
+	 * only profiles it served were interfaces with static addresses; serving
+	 * a DHCP network made every such profile invalid, and `nmcli connection
+	 * up` refused it locally without ever calling the shim:
+	 *
+	 *     Error: device 'radio0' not compatible with connection 'HomeFiber':
+	 *     ipv4.gateway: gateway cannot be set if there are no addresses
+	 *
+	 * The same reasoning retires the two empty lists below. An absent key is a
+	 * profile that says nothing about addresses; a present empty one says the
+	 * same thing with more rope.
+	 */
+	if (gateway[0] != '\0') {
+		put_pair(&pairs, "gateway", gateway);
+	}
+	if (address_count > 0u) {
+		put_cidr_list(&pairs, "address-data", "address", addresses, address_count);
+	}
+	if (route_count > 0u) {
+		put_route_list(&pairs, "route-data", routes, route_count);
+	}
+	if (server_count > 0u) {
+		put_text_list(&pairs, "dns-data", servers, server_count);
+		put_packed_dns(&pairs, servers, server_count, v6);
+	}
+	if (search_count > 0u) {
+		put_text_list(&pairs, "dns-search", searches, search_count);
+	}
 	(void)dbus_message_iter_close_container(&group, &pairs);
 	(void)dbus_message_iter_close_container(groups, &group);
 }
@@ -1391,8 +1693,16 @@ static int saved_for(const nmc_connection_slot_t *slot, ncfg_saved_network_t *ou
 		if (!saved->items[at].id || strcmp(saved->items[at].id, slot->id) != 0) {
 			continue;
 		}
-		/* Only the scalars and one copied string: the list is freed below
-		 * and a borrowed pointer would dangle. */
+		/*
+		 * The scalars, two copied strings -- and the three lists borrowed.
+		 *
+		 * **The strings are cleared because a caller may hold this past the
+		 * window; the lists are kept because `get_settings` does not.** That
+		 * is the window's whole contract: its answer is valid for one
+		 * dispatch, and the addressing of a network is read inside the
+		 * dispatch that asked for it. A caller that wanted to keep them would
+		 * have to copy them, and nothing does.
+		 */
 		*out = saved->items[at];
 		out->id = NULL;
 		out->name = NULL;
@@ -1609,6 +1919,27 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 	 * deliberately absent from the list -- reporting it in both draws a
 	 * duplicate row in every panel.
 	 */
+	if (wireless) {
+		/*
+		 * **A network's own addressing, which a client could not see at all
+		 * until the client library learned to parse it.** The `show` response
+		 * had carried it the whole time; `ncfg_saved_network_t` reported the
+		 * name, the security and the ranking and nothing about what the
+		 * network configures.
+		 *
+		 * What that cost is the same fault the security group cost, measured
+		 * the same way: a client read a static network, wrote back what it
+		 * had been told, and the `config`, `routes` and `dns` of the block
+		 * were deleted -- and worse than deleted, since libnm sends its own
+		 * defaults for a group it was given none of, so a static network came
+		 * back as DHCP.
+		 */
+		ip_view_t view = { saved.sources, saved.source_count, saved.routes,
+			saved.route_count, &saved.dns };
+
+		put_ip_group(&groups, &view, 0);
+		put_ip_group(&groups, &view, 1);
+	}
 	if (slot && slot->kind == NMC_PROFILE_INTERFACE && slot->id) {
 		ncfg_interface_config_t config;
 		char                    problem[NMC_ERROR_MAX] = "";
@@ -1617,7 +1948,11 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 		memset(&config, 0, sizeof(config));
 		if (client && ncfg_client_interface_config(client, slot->id, &config, problem,
 		        sizeof(problem)) && config.present) {
-			put_ipv4_group(&groups, &config);
+			ip_view_t view = { config.sources, config.source_count, config.routes,
+				config.route_count, &config.dns };
+
+			put_ip_group(&groups, &view, 0);
+			put_ip_group(&groups, &view, 1);
 		}
 		ncfg_interface_config_free(&config);
 	}
