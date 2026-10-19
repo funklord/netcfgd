@@ -1072,6 +1072,38 @@ static int network_metric(DBusMessage *call, long *out, int *present, char *err,
 }
 
 /*
+ * A netcfgd metric as NM's `autoconnect-priority`: the inverse of
+ * `network_metric` above, and the reason that one carries half a band.
+ *
+ * **Scaled, not clamped.** NM takes 0..999 where the model's rank runs to
+ * 4096, and clamping would map every metric below about 3100 onto the same
+ * number -- which is to say it would throw the ordering away for exactly the
+ * networks an operator ranked.
+ *
+ * **And never 0, which is not a low priority but the absence of one.** The
+ * scale bottoms out five ranks early -- a rank under 4096/999 scales to
+ * nothing -- so metrics 4092 and above came out as NM's default, which this
+ * turns back into no metric at all. The worst-ranked networks are the ones an
+ * operator went furthest out of their way to rank, and they were the ones the
+ * trip discarded. A floor of 1 costs six metrics of precision there and keeps
+ * the ranking.
+ */
+int nmc_block_priority(int metric)
+{
+	long rank;
+	long scaled;
+
+	if (metric < 0) {
+		/* The document ranks this network against nothing, and NM's way of
+		 * saying that is for the key not to be there. */
+		return 0;
+	}
+	rank = metric >= NMC_RANK_CEILING ? 0l : NMC_RANK_CEILING - (long)metric;
+	scaled = rank * NMC_PRIORITY_CEILING / NMC_RANK_CEILING;
+	return scaled < 1l ? 1 : (int)scaled;
+}
+
+/*
  * The drop-in's stem: `nm-` and the label sanitised to what a filename should
  * be, because an SSID may contain a slash and a label is not a path.
  *

@@ -400,6 +400,45 @@ static void put_number(DBusMessageIter *into, const char *name, dbus_uint32_t va
 	(void)dbus_message_iter_close_container(into, &entry);
 }
 
+/* The same, for an `i`: NM's tri-states and its signed priority. */
+static void put_signed(DBusMessageIter *into, const char *name, dbus_int32_t value)
+{
+	DBusMessageIter entry;
+	DBusMessageIter variant;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "i", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&variant, DBUS_TYPE_INT32, &value);
+	(void)dbus_message_iter_close_container(&entry, &variant);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
+/* And for a `b`. */
+static void put_flag(DBusMessageIter *into, const char *name, int yes)
+{
+	DBusMessageIter entry;
+	DBusMessageIter variant;
+	dbus_bool_t     said = yes ? TRUE : FALSE;
+
+	if (!dbus_message_iter_open_container(into, DBUS_TYPE_DICT_ENTRY, NULL, &entry)) {
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&entry, DBUS_TYPE_STRING, &name);
+	if (!dbus_message_iter_open_container(&entry, DBUS_TYPE_VARIANT, "b", &variant)) {
+		(void)dbus_message_iter_abandon_container_if_open(into, &entry);
+		return;
+	}
+	(void)dbus_message_iter_append_basic(&variant, DBUS_TYPE_BOOLEAN, &said);
+	(void)dbus_message_iter_close_container(&entry, &variant);
+	(void)dbus_message_iter_close_container(into, &entry);
+}
+
 /*
  * The SSID, as NetworkManager requires it: `ay`, not a string.
  *
@@ -1880,9 +1919,50 @@ static int get_settings(DBusConnection *connection, DBusMessage *call, DBusMessa
 				if (!wireless) {
 					put_pair(&pairs, "interface-name", shown);
 				}
+				/*
+				 * **The three options a settings panel offers beside the
+				 * address**, and they are a network's rather than an
+				 * interface's: what you rank and meter is a network you
+				 * join.
+				 *
+				 * They were absent, which cost the same thing the IP
+				 * groups cost (10.497): a client that cannot read an
+				 * option writes its own default back over it, so every
+				 * edit of a ranked network unranked it and every edit of a
+				 * metered one made it unmetered.
+				 */
+				if (wireless) {
+					put_flag(&pairs, "autoconnect", saved.autoconnect);
+					/*
+					 * Absent where the document ranks this network
+					 * against nothing: 0 is NM's "no priority" rather
+					 * than the lowest one, so the key not being there is
+					 * the honest answer and `nmc_block_priority` says so
+					 * by answering 0.
+					 */
+					if (nmc_block_priority(saved.metric) > 0) {
+						put_signed(&pairs, "autoconnect-priority",
+						    (dbus_int32_t)nmc_block_priority(saved.metric));
+					}
+					/*
+					 * NM's `metered` is a tri-state and netcfgd's is a
+					 * boolean, so `false` becomes an explicit "no" rather
+					 * than "unknown": an operator who wrote it said
+					 * something, and reporting unknown would have a
+					 * desktop guess at it instead.
+					 */
+					put_signed(&pairs, "metered", saved.metered ? 1 : 2);
+				}
 			} else if (wireless) {
 				put_pair(&pairs, "mode", "infrastructure");
 				put_ssid(&pairs, shown);
+				/* Only when it is, which is NM's own shape for a flag
+				 * whose default is false -- and the key a client would
+				 * otherwise write back as false over a network the
+				 * document says does not broadcast. */
+				if (saved.hidden) {
+					put_flag(&pairs, "hidden", 1);
+				}
 				/* NM's own cross-reference: the wireless group names
 				 * the security group that goes with it, and a client
 				 * that reads this expects to find one. */

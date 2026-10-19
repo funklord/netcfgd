@@ -1733,6 +1733,7 @@ int ncfg_client_saved_networks(ncfg_client_t *client, ncfg_saved_networks_t *out
 		item->autoconnect =
 		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "autoconnect"), 0);
 		item->hidden = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "hidden"), 0);
+		item->metered = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "metered"), 0);
 		/*
 		 * What the network configures, by the same readers the interface view
 		 * uses: the keys are the document's and so are their shapes. No

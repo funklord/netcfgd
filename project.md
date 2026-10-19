@@ -12498,6 +12498,90 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.498 The connection group, and the two conversions put side by side
+
+The three per-connection options a settings panel offers beside the address --
+whether a network joins by itself, how it ranks, and whether its data costs
+money -- plus the `hidden` flag in the group next door. Same fault as 10.497 in
+a different group: a client that cannot read an option writes its own default
+back over it, so every edit of a ranked network unranked it and every edit of a
+metered one made it unmetered.
+
+### The scaling's two halves are in one file now
+
+`autoconnect-priority` is netcfgd's metric inverted and scaled into NM's
+0..999, and 0207 is the record of what happens when the two directions
+disagree: a profile a desktop client reads and writes back walked upward every
+trip -- 100, 103, 107, 111, 115, 119, 124 -- until it crossed another network's
+metric and the machine preferred a network the operator had not chosen,
+silently.
+
+The write direction was already in `block.c`, carrying the half-band that makes
+the trip a fixed point. The read direction went in beside it rather than with
+the rest of `GetSettings`, which is the point worth recording: **two
+conversions that must be inverses belong where a reader can check them against
+each other**, and the alternative is one copy of the ceiling in each of two
+files and a drift nothing announces.
+
+### The property, asserted over the band rather than at a point
+
+`nm.sh` asserts the round trip at one priority, and its own comment says why it
+does not assert the metric: a number read off the code it checks goes stale in
+silence, which is how its `metric = 3924` sat failing from 0207 until this
+session.
+
+With both directions in one file the stronger question is cheap, so the unit
+suite asks it: **every priority NM can hold, scaled up into a metric and back
+down, and none of them may move.** 999 trips in one check.
+
+**It is also the only form of the question that cannot be satisfied by two
+functions agreeing with each other instead of with the model.** Either scaling
+alone passes any test written from itself. Proved able to fail by removing the
+half-band -- the 0207 defect exactly -- which moves 997 of the 999.
+
+### `autoconnect` is a key the daemon's compiler does not lower
+
+Found by writing a profile with it: the model declares `autoconnect` in
+`network_fields`, and `lower_network.c` has no arm for it, so a block carrying
+it fails to compile --
+
+    nm-Opts.conf:10:2: unknown network key `autoconnect`
+
+-- and `AddConnection` fails whole, because the daemon compiles back and
+refuses the file. Bisected against the daemon directly rather than through the
+shim: `hidden`, `metered` and `metric` are all accepted at network level and
+`autoconnect` alone is not.
+
+**The shim is doing the right thing and the diagnostic is netcfgd's own**, so
+this is recorded rather than worked around: the renderer has written
+`autoconnect = false` since the day it was written, `nm.sh` has no profile that
+asks for it, and the round trip is unharmed because the key is only written
+when the value is false while every network's default is true.
+
+It is a gap in the C daemon's compiler rather than in the adapter, which is
+why it is a finding here and not a change: the model's field list and the
+lowering's key dispatch are two lists that have to agree, and nothing walks
+them against each other.
+
+### The band, and the lens retired
+
+`nm.sh` goes from 104 and 17 to **108 and 13**, four removals and no
+additions: the metric scaled into NM's range, whether the network is metered,
+whether it joins by itself, and the priority that went in coming back out.
+Predicted as 13 before the run from the four checks the group feeds.
+
+What is left is three groups and three strays. **Six are the secret agent and
+the activation that needs one** -- netcfgd asking a NM agent for a credential,
+which is `agent.c`'s path. **Four are the `IP4Config` pair reporting what was
+APPLIED** rather than what was asked for, which is 0032's other half and reads
+the observation rather than the document. And `Save`, `ClearSecrets` and
+`RequestScan`, each an NM operation netcfgd has no state for or no answer to
+yet.
+
+**Every group `GetSettings` serves is now complete**, which retires the lens
+three entries have been following: a group it does not report is a group the
+next edit deletes, and there are no unreported groups left for a wifi profile.
+
 ## 10.497 Both IP groups, and the client call that could not ask for them
 
 The ask was the symmetric `ipv6` group beside the `ipv4` one. What it needed

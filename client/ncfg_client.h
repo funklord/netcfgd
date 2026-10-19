@@ -1846,6 +1846,15 @@ typedef struct {
 	int   autoconnect; /* whether it may be joined without being asked */
 	int   hidden;      /* whether the document says it does not broadcast */
 	/*
+	 * Whether the document says this network's data costs money.
+	 *
+	 * A boolean here and a tri-state in NetworkManager, which is the
+	 * difference worth knowing at the boundary rather than at the screen: an
+	 * operator who wrote `metered = false` said something, and a reader that
+	 * reported it as unknown would have a desktop guess at it instead.
+	 */
+	int   metered;
+	/*
 	 * **A network's own addressing, routes and resolution**, in the document's
 	 * order and in the same shapes `ncfg_interface_config_t` carries them --
 	 * the same three readers fill both, because they are the same keys of the

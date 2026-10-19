@@ -1448,8 +1448,53 @@ int main(void)
 		                                                 : "",
 		            "\tmetric = %lu", &metric) == 1,
 		    "an autoconnect-priority becomes a network metric");
-		check((4096ul - metric) * 999ul / 4096ul == 42ul,
+		check((unsigned long)nmc_block_priority((int)metric) == 42ul,
 		    "  and reading that metric back gives the priority that went in");
+		/*
+		 * **The whole band, not one value.** 0207 is the fixed point a profile
+		 * a desktop client reads and writes back must sit on, and it was
+		 * arrived at by measuring every metric in range -- so asserting it at
+		 * one priority is asserting the shape of the arithmetic rather than
+		 * the property. Both directions are in `block.c` now, next to each
+		 * other, which is what makes this cheap to ask: scale every priority
+		 * NM can hold up into a metric and back down, and none of them may
+		 * move.
+		 *
+		 * The two together are also what makes the pair meaningful. Either
+		 * function alone passes any test written from itself; a round trip
+		 * that returns what went in cannot be satisfied by two scalings that
+		 * agree with each other and not with the model.
+		 */
+		{
+			int walked = 0;
+			int worst = 0;
+
+			for (asked.priority = 1; asked.priority <= 999; asked.priority++) {
+				unsigned long round = 0ul;
+				const char   *found;
+
+				if (rendered(&asked, &block, why, sizeof(why)) != 1) {
+					walked++;
+					continue;
+				}
+				found = strstr(block.text, "\tmetric = ");
+				if (!found || sscanf(found, "\tmetric = %lu", &round) != 1) {
+					walked++;
+					continue;
+				}
+				if (nmc_block_priority((int)round) != asked.priority) {
+					walked++;
+					worst = asked.priority;
+				}
+			}
+			check(walked == 0,
+			    "and every priority NM can hold survives the trip into a metric and back");
+			if (walked != 0) {
+				printf("       %d of 999 moved, the last at priority %d\n", walked,
+				    worst);
+			}
+		}
+		asked.priority = 42;
 		/* Zero is NM's default, and saying nothing leaves the interface's own
 		 * preference in charge, which is what an unranked network should do. */
 		asked.priority = 0;

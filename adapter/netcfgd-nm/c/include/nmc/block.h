@@ -102,4 +102,21 @@ void nmc_block_forget(nmc_block_t *block);
  */
 void nmc_block_stem(const char *id, char *out, size_t cap);
 
+/*
+ * NM's `autoconnect-priority` for a netcfgd metric, and 0 for a network the
+ * document ranks against nothing -- which is NM's own "no priority" and the
+ * key's absence rather than a value.
+ *
+ * **The read direction, declared beside the write.** It is here rather than
+ * with the rest of `GetSettings` because the two conversions have to be
+ * inverses: the renderer scales a priority up into a metric and this scales it
+ * back down, and a profile a desktop client reads and writes back has to come
+ * out where it went in (0207). Two scalings in two files are two chances for
+ * one of them to drift, and the drift is silent -- a network's ranking walks
+ * every trip and nothing says so. One file, one copy of the ceiling, and the
+ * two functions next to each other where a reader can check them against each
+ * other.
+ */
+int nmc_block_priority(int metric);
+
 #endif /* NMC_BLOCK_H */
