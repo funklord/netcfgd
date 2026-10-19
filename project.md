@@ -12498,6 +12498,62 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.491 The gateway nmcli shows is unavailable to the shim, three ways out
+
+Asked to fix it. The diagnostic settles where it is lost, and the answer is
+that the shim cannot have it:
+
+    kernel:  default via 10.7.7.254 dev probe0 proto 110
+    nmcli:   IP4.GATEWAY = [--]
+
+netcfgd installed the route -- `proto 110` is its own marker -- so this is not
+an apply that did not happen. `ipconfig.c` serves `say_no_gateway` on purpose
+and says why: **`ncfg_link_t` carries WHETHER a link holds the default route
+and not what the next hop is**, so "empty is NM's unknown and `0.0.0.0` would
+be a claim -- a client showing a gateway of `0.0.0.0` has been told something
+false, where one showing none has been told nothing."
+
+That is also why addresses project and routes do not: `facts_for` reads the
+same `ncfg_link_t`, which carries addresses and one boolean for the route.
+
+**Measured rather than assumed: the client API has no observed-routes
+accessor.** Fifty-nine `ncfg_client_*` verbs, and the only route data is
+`ncfg_client_interface_config`, which is the DOCUMENT's routes, and
+`ncfg_client_status`, which is the whole observation as JSON. 0032 settles
+which of those may feed a details panel -- the panel is the observation -- so
+the document's copy is not an answer even though it has the next hop in it.
+
+### The options, their costs, and whose each is
+
+**A. Parse `ncfg_client_status`'s JSON in the shim.** In scope without a core
+change, and semantically right since that blob is applied state -- which
+`nm.sh` itself polices one check over, "the nameservers come from what was
+applied, not from the config". The cost is architectural: it fetches the whole
+observation to answer one property, and it introduces a second access style
+beside the seven typed accessors the shim uses for everything else. The
+adapter would be hand-parsing what the core could type.
+
+**B. Give the observation the next hop** -- a field on `ncfg_link_t`, or a
+typed `ncfg_client_routes`. The natural fix and the one that makes every
+future client's answer cheap. It is also **a core change wanted by an
+adapter**, which 0271 refuses unless the concept is independently something a
+local operator wants: `ncfg status` already shows routes, so the local
+justification is weak and would have to be made rather than assumed. Whose:
+the holder's, and it is the question 0271 exists to route.
+
+**C. Leave it.** The present behaviour is principled rather than lazy, and the
+comment is the argument: an unknown gateway reported as unknown is honest. The
+cost is a settings panel with an empty gateway field, and two checks in
+`nm.sh` that cannot pass -- `and the gateway is the next hop of the default
+route`, and the route-table one beside it, since 0033's split gives NM the
+default's next hop as `gateway` and the rest as routes.
+
+**Not picked here.** A is the only one I could take without a decision, and it
+buys a property at the price of the boundary 0271 draws -- which is the kind of
+trade that should be made deliberately rather than because it was the one
+available. The recommendation, if it is wanted: B, with the local
+justification written down or the change refused on its own terms.
+
 ## 10.490 ActivateConnection is ported, authorized first, and acts
 
 10.487 worked it out and declined to land it. Asked again, so it is in, and
