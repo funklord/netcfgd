@@ -628,11 +628,101 @@ static int activate_connection(DBusConnection *connection, DBusMessage *call,
 	return 1;
 }
 
+/*
+ * `DeactivateConnection`, ported from `manager.rs`.
+ *
+ * **A write, so authorized the same way and in the same order** as
+ * `ActivateConnection` above: the bus is asked who called, before any path is
+ * resolved.
+ *
+ * **A network activation is taken down through netcfgd's own disconnect.** An
+ * `interface` one is refused, and the refusal is the useful part rather than a
+ * limitation: netcfgd brings an interface up because the configuration says
+ * it should, so a request to take it down is one the next reconcile would
+ * undo. Saying that, and naming the edit that would really do it, beats
+ * appearing to act for a second and a half.
+ *
+ * `nmc_active_profile_of` decides which, and is promoted from `active.c`
+ * rather than reimplemented here: the nuance that an `interface` block counts
+ * only where it is actually served as a profile is what a second copy would
+ * lose, and a radio that has joined nothing has no profile at all.
+ */
+static int deactivate_connection(DBusConnection *connection, DBusMessage *call,
+    DBusMessage *reply, void *object, char *err, size_t err_size)
+{
+	nmc_state_t        *state = object;
+	nmc_store_t        *store = state ? (nmc_store_t *)state->store : NULL;
+	const char         *active_path = NULL;
+	nmc_device_slot_t  *device;
+	nmc_profile_kind_t  kind = NMC_PROFILE_INTERFACE;
+	nmc_principal_t     admin;
+	unsigned long       uid = 0u;
+	char                why[NMC_ERROR_MAX] = "";
+	char                id[256] = "";
+	ncfg_client_t      *client;
+
+	(void)reply;
+	if (!dbus_message_get_args(call, NULL, DBUS_TYPE_OBJECT_PATH, &active_path,
+	        DBUS_TYPE_INVALID)) {
+		snprintf(err, err_size, "this takes one active connection");
+		return 0;
+	}
+	if (!state || !store) {
+		snprintf(err, err_size, "no state to deactivate against");
+		return 0;
+	}
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	(void)nmc_store_enumerate_for_bus(NULL, 0u, store);
+	device = nmc_store_resolve(store, path_tail(active_path));
+	/*
+	 * **`nmc_active_exists` as well as a resolving path**, because the active
+	 * subtree's own resolve asks both: a device netcfgd knows about with no
+	 * activation on it has no object at this path, and a client deactivating
+	 * one wants to be told that rather than have netcfgd disconnect a radio
+	 * that had joined nothing.
+	 */
+	if (!device || !nmc_active_exists(device)) {
+		snprintf(err, err_size, "%s is not an active connection",
+		    active_path ? active_path : "");
+		return 0;
+	}
+	if (!nmc_active_profile_of(device, &kind, id, sizeof(id))) {
+		snprintf(err, err_size,
+		    "netcfgd reports no profile for what is active on %s, so there is nothing "
+		    "named to take down",
+		    device->name ? device->name : "");
+		return 0;
+	}
+	if (kind == NMC_PROFILE_INTERFACE) {
+		snprintf(err, err_size,
+		    "`%s` is up because /etc/netcfgd says it should be. Taking it down means "
+		    "changing that -- `enabled = false` on the interface, then `ncfg apply` -- "
+		    "rather than a request that the next reconcile would undo",
+		    device->name ? device->name : id);
+		return 0;
+	}
+	client = nmc_state_client(state);
+	if (!client) {
+		snprintf(err, err_size, "netcfgd is not answering");
+		return 0;
+	}
+	return ncfg_client_wifi_disconnect(client, device->name, err, err_size) ? 1 : 0;
+}
+
 static const nmc_method_t METHODS[] = {
 	{ "GetDevices", "", "ao", get_devices },
 	{ "GetAllDevices", "", "ao", get_devices },
 	{ "GetDeviceByIpIface", "s", "o", get_device_by_name },
 	{ "ActivateConnection", "ooo", "o", activate_connection },
+	{ "DeactivateConnection", "o", "", deactivate_connection },
 	/* Lowercase, which is NM's spelling for this one and not a slip. */
 	{ "state", "", "u", state_method }
 };

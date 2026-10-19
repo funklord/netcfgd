@@ -12558,11 +12558,41 @@ updated. And `nm.sh`'s pin -- written to hold the `activation` tier OUT while
 the method was absent -- was turned by precisely the event it was written for.
 Neither depended on anybody remembering.
 
-### What this port leaves for later
+### DeactivateConnection is ported too, and is unreachable from nmcli
 
-`DeactivateConnection` is not ported, so `deactivating reaches it too` still
-fails and the pair is half here; the method count says four plus one rather
-than six for that reason.
+Ported the same way and in the same order: a write, so the bus is asked who
+called before any path is resolved. A network activation goes down through
+netcfgd's own `wifi_disconnect`; an `interface` one is refused, and the
+refusal is the useful part -- netcfgd brings an interface up because the
+configuration says it should, so a request to take it down is one the next
+reconcile would undo, and the message names the edit that would really do it.
+
+`nmc_active_profile_of` is promoted out of `active.c` rather than copied, for
+`nmc_admin_principal`'s reason: the nuance that an `interface` block counts
+only where it is actually served as a profile is what a second copy loses.
+
+**It changed nothing, and the reason is the fixture.** `nm.sh` stays at 70 and
+48, and nmcli says why:
+
+    Error: 'HomeFiber' is not an active connection.
+
+So nmcli never calls the method. `nmc_active_exists` requires a routable
+address as well as a profile -- which `active.c` states deliberately,
+"Activated means it holds an address... a link that is up with no address is
+`DEACTIVATED`", because that is NM's own state machine -- and the fixture's
+radio is `interface radio0 { }` with no `config` at all. No address, so no
+`ActiveConnection` object, so the manager lists none, so a client has nothing
+to take down and the device-state checks assert a `Connection` column the
+document cannot produce.
+
+**So a large part of that band asserts state its own fixture makes
+impossible**, and the methods are not what is failing. Which of the two moves
+is right -- give the fixture's radio an address, or reconsider what the shim
+calls active -- is a question about `nm.sh` and about NM's state machine rather
+than about this port, and `active.c` has already answered the second one on
+purpose. Worth knowing before anybody reads 48 failures as 48 defects: the
+`vm-skipped` target says this tier runs "scripts that never ran anywhere", so
+these assertions may never have passed rather than having regressed.
 
 The secret-agent question `manager.rs` asks before connecting is not ported,
 so a network whose passphrase names a missing file fails in netcfgd rather

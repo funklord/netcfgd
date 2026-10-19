@@ -73,7 +73,7 @@ static void network_of(const nmc_device_slot_t *slot, char *out, size_t out_size
  * profile -- and the four properties then say "no object" rather than naming
  * something that is not there.
  */
-static int profile_of(const nmc_device_slot_t *slot, nmc_profile_kind_t *kind, char *id,
+int nmc_active_profile_of(const nmc_device_slot_t *slot, nmc_profile_kind_t *kind, char *id,
     size_t id_size)
 {
 	char network[128] = "";
@@ -138,7 +138,7 @@ int nmc_active_exists(const nmc_device_slot_t *slot)
 	if (!nmc_device_routable(addresses)) {
 		return 0;
 	}
-	return profile_of(slot, &kind, id, sizeof(id));
+	return nmc_active_profile_of(slot, &kind, id, sizeof(id));
 }
 
 /*
@@ -163,7 +163,7 @@ static int say_id(DBusMessageIter *into, void *object, char *err, size_t err_siz
 
 	(void)err;
 	(void)err_size;
-	if (!profile_of(object, &kind, id, sizeof(id))) {
+	if (!nmc_active_profile_of(object, &kind, id, sizeof(id))) {
 		id[0] = '\0';
 	}
 	return put_string(into, id);
@@ -183,7 +183,7 @@ static int say_uuid(DBusMessageIter *into, void *object, char *err, size_t err_s
 
 	(void)err;
 	(void)err_size;
-	if (profile_of(slot, &kind, id, sizeof(id))) {
+	if (nmc_active_profile_of(slot, &kind, id, sizeof(id))) {
 		profile = nmc_connections_slot_of(
 		    (nmc_connections_t *)slot->state->connections, kind, id);
 	}
@@ -212,7 +212,7 @@ static int say_type(DBusMessageIter *into, void *object, char *err, size_t err_s
 	 * because that is what NM calls a wired profile, having no type for
 	 * "whatever this device happens to be".
 	 */
-	if (!profile_of(object, &kind, id, sizeof(id))) {
+	if (!nmc_active_profile_of(object, &kind, id, sizeof(id))) {
 		return put_string(into, "");
 	}
 	return put_string(into,
@@ -326,7 +326,7 @@ static int say_connection(DBusMessageIter *into, void *object, char *err, size_t
 
 	(void)err;
 	(void)err_size;
-	if (profile_of(slot, &kind, id, sizeof(id))) {
+	if (nmc_active_profile_of(slot, &kind, id, sizeof(id))) {
 		path = nmc_connections_path_of((nmc_connections_t *)slot->state->connections,
 		    kind, id);
 	}
