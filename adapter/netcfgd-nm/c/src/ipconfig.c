@@ -255,13 +255,37 @@ NMC_EMPTY(say_no_strings, "s")
 NMC_EMPTY(say_no_byte_arrays, "ay")
 
 /*
- * `Gateway` is empty, and that is not the same as "no gateway".
+ * `Gateway`: the next hop of this link's default route, or empty.
  *
- * `ncfg_link_t` says WHETHER a link carries the default route and not what the
- * next hop is, so the address is not available here. **Empty is NM's "unknown"
- * and `0.0.0.0` would be a claim** -- a client showing a gateway of 0.0.0.0 has
- * been told something false, where one showing none has been told nothing.
+ * **This was served empty because the answer was not available**, and the
+ * reasoning is kept because it is still the rule for the v6 case below:
+ * `ncfg_link_t` carried WHETHER a link holds the default route and not what
+ * the next hop is, and empty is NM's "unknown" while `0.0.0.0` would be a
+ * claim -- a client shown `0.0.0.0` has been told something false, where one
+ * shown nothing has been told nothing.
+ *
+ * `ncfg_link_t` carries the next hop now. It was already on the wire, since
+ * the observation sends the routes the flag is derived from, so this exposes
+ * what the client receives rather than asking the daemon for anything new --
+ * the local justification 0271 wanted is in `ncfg_client.h` beside the field.
+ *
+ * Still empty where there is no default route, and where there is one with no
+ * `via`: an on-link default has no next hop to name, and that is the absence
+ * of an answer rather than a gateway of nothing.
  */
+static int say_gateway(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	char gateway[64] = "";
+
+	(void)err;
+	(void)err_size;
+	nmc_device_gateway_of(object, gateway, sizeof(gateway));
+	return put_string(into, gateway);
+}
+
+/* The v6 half has no equivalent yet: the observation's `default_via` is the
+ * IPv4 default's next hop, and a v6 gateway read from it would be the wrong
+ * family rather than a missing one. Empty remains the honest answer there. */
 static int say_no_gateway(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
 	(void)object;
@@ -322,7 +346,7 @@ static int say_searches(DBusMessageIter *into, void *object, char *err, size_t e
 static const nmc_property_t V4_PROPERTIES[] = {
 	{ "AddressData", "aa{sv}", NMC_READ, say_v4_address_data, NULL },
 	{ "Addresses", "aau", NMC_READ, say_v4_addresses, NULL },
-	{ "Gateway", "s", NMC_READ, say_no_gateway, NULL },
+	{ "Gateway", "s", NMC_READ, say_gateway, NULL },
 	{ "RouteData", "aa{sv}", NMC_READ, say_no_route_data, NULL },
 	{ "Routes", "aau", NMC_READ, say_no_v4_routes, NULL },
 	{ "NameserverData", "aa{sv}", NMC_READ, say_nameserver_data, NULL },

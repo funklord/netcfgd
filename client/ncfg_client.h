@@ -168,6 +168,30 @@ typedef struct {
 	 */
 	int   default_route;
 	/*
+	 * The next hop of that default route, or NULL where there is none.
+	 *
+	 * **The boolean beside it answers "is this the way out" and this answers
+	 * "out through what", which is a question an operator asks of a link
+	 * directly.** Today the answer requires joining the per-link view against
+	 * the routes table by hand, and the value is already on the wire -- the
+	 * observation carries the routes this is read from, and
+	 * `link_has_default_route` has been walking them to set the flag since the
+	 * flag existed. So this exposes what the client already receives rather
+	 * than asking the daemon for anything new: no protocol change, no extra
+	 * round trip.
+	 *
+	 * That is the local justification 0271 asks for before an adapter's want
+	 * reaches the core, written down rather than assumed: the `netcfgd-nm`
+	 * shim needs it to fill NM's `Gateway`, and it is independently the answer
+	 * to "which gateway does this interface use" -- which `ncfg status` makes a
+	 * reader cross-reference two sections for. Settled by the copyright holder
+	 * 2026-10-19; project.md 10.491 priced the alternatives.
+	 *
+	 * NULL and not `0.0.0.0`: a link with no default route has no next hop, and
+	 * a zero would be a claim where NULL is the absence of one.
+	 */
+	char *default_via;
+	/*
 	 * Whether this link is a radio, so that a client can offer the wireless
 	 * screens for it.
 	 *

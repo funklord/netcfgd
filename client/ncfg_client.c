@@ -545,6 +545,7 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].kind);
 		free(links->items[i].mac);
 		free(links->items[i].addresses);
+		free(links->items[i].default_via);
 		free(links->items[i].network);
 		free(links->items[i].category);
 		free(links->items[i].master);
@@ -743,6 +744,38 @@ static int link_has_default_route(const ncfg_json_doc_t *doc, uint32_t routes, c
 	return 0;
 }
 
+/*
+ * The next hop of this link's default route, or NULL.
+ *
+ * The same walk and the same three filters as `link_has_default_route` above,
+ * answering with the gateway instead of with whether there is one. Kept beside
+ * it rather than folded into it, because the flag is asked for by callers that
+ * do not want a string and `ncfg_links_free` would then own an allocation the
+ * flag's own callers never asked for.
+ *
+ * A route with no `via` -- an on-link default -- answers NULL, which is
+ * correct: there is a default route and no next hop to name.
+ */
+static char *link_default_via(const ncfg_json_doc_t *doc, uint32_t routes, const char *name)
+{
+	uint32_t count = ncfg_json_count(doc, routes);
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, routes, i);
+		if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "interface"), name)) {
+			continue;
+		}
+		if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "destination"),
+		        "default")) {
+			continue;
+		}
+		if (ncfg_json_int(doc, ncfg_json_member(doc, entry, "table"), 0) != 254) {
+			continue;
+		}
+		return member_text(doc, entry, "via");
+	}
+	return NULL;
+}
+
 static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *err, size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
@@ -784,6 +817,7 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->addresses = item->name ? join_addresses(doc, addresses, item->name) : NULL;
 		item->default_route =
 		    item->name ? link_has_default_route(doc, routes, item->name) : 0;
+		item->default_via = item->name ? link_default_via(doc, routes, item->name) : NULL;
 		// **The daemon's answer where there is one.** netcfgd reads
 		// /sys/class/net/<name>/wireless and puts it on the wire; guessing
 		// from the name was all a client could do before, and it disagrees

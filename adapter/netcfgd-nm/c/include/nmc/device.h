@@ -32,6 +32,10 @@ void          nmc_device_addresses_of(const nmc_device_slot_t *slot, char *out, 
 void          nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 void          nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 int           nmc_device_default_route_of(const nmc_device_slot_t *slot);
+/* The next hop of that default route, empty where there is none -- NM's
+ * `Gateway`, which the observation can answer now that `ncfg_link_t` carries
+ * more than the flag. */
+void          nmc_device_gateway_of(const nmc_device_slot_t *slot, char *out, size_t out_size);
 dbus_uint32_t nmc_device_type_now(const nmc_device_slot_t *slot);
 /* The `State` property's number, so that the property, the `StateReason` pair
  * and `StateChanged` are one computation and cannot drift apart. */

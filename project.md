@@ -12548,11 +12548,44 @@ cost is a settings panel with an empty gateway field, and two checks in
 route`, and the route-table one beside it, since 0033's split gives NM the
 default's next hop as `gateway` and the rest as routes.
 
-**Not picked here.** A is the only one I could take without a decision, and it
-buys a property at the price of the boundary 0271 draws -- which is the kind of
-trade that should be made deliberately rather than because it was the one
-available. The recommendation, if it is wanted: B, with the local
-justification written down or the change refused on its own terms.
+**Settled by the copyright holder: B.** And it cost far less than this entry
+priced, which is the correction worth keeping.
+
+**B is not a protocol change at all.** `link_has_default_route` has been
+walking the observation's `routes` array client-side since the flag existed,
+to compute the boolean -- so the next hop was already on the wire and the
+client library simply did not expose it. `ncfg_link_t` carries `default_via`
+now: no daemon change, no socket change, no extra round trip, and an addition
+to netcfgd's own client library rather than to its interface.
+
+That also strengthens the 0271 justification rather than straining it, and it
+is written beside the field instead of assumed: the boolean answers "is this
+the way out" and the new field answers "out through what", which an operator
+reading one link must otherwise get by cross-referencing the routes section by
+hand.
+
+**The old reasoning is kept where it still holds**, in three places rather
+than deleted as superseded. NULL and not `0.0.0.0`, because a link with no
+default route has no next hop and a zero would be a claim. Empty for an
+on-link default, which has a route and no hop to name. And the **v6**
+`Gateway` stays stubbed, with the original argument now guarding that case:
+`default_via` is the IPv4 default's next hop, so serving it for v6 would be
+the wrong family rather than a missing value, which is worse than empty.
+
+Measured: `and the gateway is the next hop of the default route` passes, and
+`nm.sh` moves to 72 and 46.
+
+**Two checks beside it are a different layer and are still failing.** `the
+gateway is the default route's next hop` and `a non-default route is in the
+route table, and the default is not` read the CONNECTION's `ipv4` setting
+through `nm_setting.py`, not the device's `IP4Config` -- so they want
+`settings.c` to emit `gateway` and `route-data` in that group, from the
+document's routes, which `ncfg_client_interface_config` already types with
+destination, via and metric. 0033 specifies the split they assert: NM keeps
+the default's next hop in `gateway` and everything else in `route-data`,
+because reporting it in both draws a duplicate row in every panel. That needs
+no decision and no new data, and `a static profile reports its method` failing
+beside them suggests the `ipv4` group may be absent rather than incomplete.
 
 ## 10.490 ActivateConnection is ported, authorized first, and acts
 

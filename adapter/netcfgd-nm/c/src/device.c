@@ -69,6 +69,8 @@ typedef struct {
 	int  vlan_id;
 	int  listen_port;
 	int  default_route;
+	/* The next hop of it, for NM's `Gateway`. Empty where there is none. */
+	char gateway[64];
 	int  present;
 	int  configured;
 	int  managed;
@@ -147,6 +149,10 @@ static void facts_for(const nmc_device_slot_t *slot, facts_t *out)
 			out->carrier = one->carrier;
 			out->up = one->up;
 			out->default_route = one->default_route;
+			if (one->default_via && one->default_via[0] != '\0') {
+				(void)snprintf(out->gateway, sizeof(out->gateway), "%s",
+				    one->default_via);
+			}
 			if (one->mtu > 0) {
 				out->mtu = one->mtu;
 			}
@@ -792,6 +798,25 @@ void nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_
 void nmc_device_name_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
 {
 	(void)snprintf(out, out_size, "%s", slot && slot->name ? slot->name : "");
+}
+
+/*
+ * The next hop of this link's default route, empty where it has none.
+ *
+ * For NM's `Gateway`, which was served empty because `ncfg_link_t` carried
+ * only whether the route existed. It carries the next hop now -- exposed from
+ * what the observation already sent rather than asked of the daemon anew --
+ * so the honest answer has stopped being "unknown".
+ */
+void nmc_device_gateway_of(const nmc_device_slot_t *slot, char *out, size_t out_size)
+{
+	facts_t facts;
+
+	if (!out || out_size == 0) {
+		return;
+	}
+	facts_for(slot, &facts);
+	(void)snprintf(out, out_size, "%s", facts.known ? facts.gateway : "");
 }
 
 int nmc_device_default_route_of(const nmc_device_slot_t *slot)
