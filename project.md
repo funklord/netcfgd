@@ -12498,6 +12498,138 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.494 The credential half: the value to the provider, the reference to the file
+
+10.493 wrote every network a client could ask for except a secured one, and
+refused that by name. This is the other half, and the shape is the one 0030
+and 0031 set: the passphrase goes to netcfgd's secret provider, the block gets
+`psk = "@secret:<id>"`, and nothing reads one back out.
+
+`security_of` now takes the profile's id and the block it is filling, so a
+`wpa-psk` or `sae` group leaves the value in `block.secret` and the reference
+in `text`. `settings.c` writes the credential first and the file second, and
+forgets the block whichever way the write went.
+
+### Neither write replaces, and that is what makes the rollback safe
+
+`store.rs` passes `replace: true` and is right to: its one write serves
+`AddConnection` and an agent answering a request for a credential, and 0031's
+bridge needs the second to be able to say "no, this one". Here `AddConnection`
+is on its own, so both writes refuse what is already there -- which is the
+line `ncfg_client_wifi_add` draws for the same reason, refusing outright if
+either the network file or the secret exists.
+
+That is not only caution. **It settles ownership**: a secret this call stored
+is one that was not there a moment before, so removing it again when the file
+is refused cannot remove anybody else's. Without the refusal there would be no
+way to tell a credential we had just written from an operator's, and 0042
+calls a credential the one thing nobody can get back.
+
+Measured: a second `AddConnection` of the same name is refused at the
+credential step, in netcfgd's own words, with `Nothing has been written`
+appended and the first value untouched on disk.
+
+### The rollback is measured rather than reasoned about
+
+The branch that matters is the credential stored and then the file refused,
+which leaves a secret no block refers to -- inert, but enough to refuse the
+client's next attempt at the same network, because the store does not replace.
+
+Provoked rather than waited for: `AddConnection` with the id of a network the
+document already defines. The secret stores, the drop-in is written, netcfgd's
+compile-back refuses it for a duplicate label, the file is put back, and the
+rollback removes the credential. The secrets directory is the same list before
+and after and no file is left.
+
+**What proves the secret step ran is the error, not the absence.** An empty
+secrets directory on its own is equally consistent with the credential having
+been refused in the first place; the sentence that came back is `config_put`'s,
+and that is only reachable once the store has succeeded.
+
+### The passphrase is checked here, and twice rather than once
+
+`check_passphrase` in `c/src/cli/wifi_write.c` is the rule: 8 to 63 octets
+(0229), and no control characters. Both are enforced before anything is
+stored, where the Rust renderer checks only the length. Its comment is the
+argument for doing it at all -- at association time the failure is a bare
+`FAIL`, half an hour after the file was written -- and the control-character
+half is what makes the difference here: such a passphrase cannot be sent to
+the supplicant at all, so storing it buys a credential certain not to work.
+
+A fourth copy of the range, named as one: the model's `PASSPHRASE_OCTETS`, the
+CLI's check, the supplicant's own, and this. The shim links `client/` and
+nothing else, and the client library does not publish the constant.
+
+**The length is reported and the value never is.** A refusal from here crosses
+the bus and lands in a client's log, so the one asserted check in the pair is
+that the passphrase does not appear in the message.
+
+### Forgetting it is a function rather than a discipline
+
+Five paths leave the write: netcfgd away, the credential refused, the file
+refused, a network netcfgd then does not report, and success. `nmc_block_forget`
+is called once after one call that covers all five, which is why the write is
+its own function -- a wipe at each `return` is the error path somebody forgets.
+
+`explicit_bzero` and not `memset`, because memory about to go out of scope is
+exactly what a compiler is entitled to skip clearing, and the local copy in
+`security_of` goes the same way whether the passphrase was used or refused.
+
+### `refuse_write` had gone stale and nothing would have caught it
+
+Its sentence was `writing connections over the bus is not implemented`, true
+until 10.493 and false after it: a settings panel would have sent somebody
+looking for a feature that is there. The three calls it answers --
+`LoadConnections`, `ReloadConnections`, `SaveHostname` -- are not refused for
+being unbuilt but because netcfgd re-reads its own files and keeps a hostname
+policy rather than a hostname, so the message says that now.
+
+**And the comment above those refusals claimed `nm.sh` greps each of them.**
+Measured across every script in `tests/live/` on 2026-10-19: `read-only here`
+is grepped three times and the other two wordings are asserted nowhere. So one
+of the three is a contract and two are not -- which is worth knowing in both
+directions, because the reason the stale sentence sat there is that nothing
+was ever going to fail over it.
+
+### Three checks were passing on an absence, and writing the file revealed it
+
+`nm.sh` goes from 87 and 30 to **93 and 24**: the whole `Roaming` band passes,
+including the credential's own file and its mode, and the note naming what
+could not be translated.
+
+**Nine checks started passing and three stopped**, and the three are the
+finding. They are the delete band -- `deleting takes the file with it`, `and
+the credential too, rather than leaving it for nothing`, `and netcfgd no
+longer has the network` -- and each asks whether something is *gone*. Nothing
+was ever created, so each was comparing an absence with an absence and
+reporting success; `Delete` has refused throughout and still does. They are
+not regressions in the shim. They are `evidence.md`'s first rule arriving from
+the far side: a check over nothing passes exactly as loudly as a real one, and
+the way this one came to light was not review but **making the thing it
+asserts about exist.**
+
+Worth keeping because the usual advice does not cover it. A vacuous pass is
+normally found by asking what a check inspected; these were in a band whose
+other checks were failing honestly, so the suite looked like a feature that
+was half built rather than one with three assertions that could not fail.
+**The population of such checks is "every assertion about the removal of
+something this build cannot create"**, which is a lens rather than a list, and
+`Delete` is where it points next.
+
+The count was predicted before the run as 24 from this reasoning, and the run
+reported 24 -- which is the only part of the band's arithmetic that was worth
+asserting in advance, because getting it wrong would have meant the model of
+what these checks assert was wrong.
+
+### What remains
+
+Of the 24: six are the secret agent and the activation that needs one, four
+are `IP4Config` reporting what was applied, seven are `GetSettings` not
+reporting the connection options this now writes -- so each of those is a pair
+with its write half passing and its read half not, which is where 0207's fixed
+point lives -- three are the delete band above, one is `Update`, two are the
+device-to-activation join, and one is `RequestScan`.
+
 ## 10.493 AddConnection writes, for everything but a passphrase
 
 10.492 scoped this and defined the subset; this is that subset, built. The
@@ -12525,6 +12657,10 @@ redefines a network another file already defines is refused as a failed
 nothing.
 
 ### The boundary is the secret, and it refuses rather than drops
+
+**Closed by 10.494, which is the slice after this one**; what follows is what
+this commit did and why the boundary was drawn there rather than somewhere
+cheaper.
 
 A `key-mgmt` of `wpa-psk` or `sae` is refused by name, telling the caller to
 use `ncfg wifi add`. 10.492's argument, unchanged: a method that wrote the
@@ -12746,8 +12882,9 @@ specification and a known cost; the rest of the band needs the fixture to
 report an association, which is `hwsim.sh`'s territory rather than the shim's.
 The subset defined above was then built, in 10.493, and the half this entry
 was most careful about -- a method that writes the open case and drops a
-credential -- is refused there by name rather than implemented. What remains
-of the Rust renderer is the secret itself.
+credential -- was refused there by name rather than implemented. 10.494 then
+wrote it: the value to netcfgd's secret provider, the reference in the block,
+and nothing of the renderer left unported.
 
 ## 10.491 The gateway nmcli shows is unavailable to the shim, three ways out
 

@@ -1231,23 +1231,60 @@ int main(void)
 		    "a gateway that is not an address is refused, quoting it");
 		asked.gateway = "192.0.2.1";
 
-		/* **The slice's boundary.** A passphrase means a credential in the
-		 * secret provider and a `@secret:` reference in the block (0030, 0031),
-		 * and writing the open half of that would hand a client a secured
-		 * network with no credential and no error. */
+		/*
+		 * **The credential leaves by a different door from the block.** The
+		 * value goes to netcfgd's secret provider and the block gets a
+		 * reference to it (0030, 0031), so the two assertions that matter are
+		 * a pair: the reference is in the text AND the passphrase is not.
+		 * Either on its own passes for a renderer that wrote both.
+		 */
 		asked.key_mgmt = "wpa-psk";
 		asked.psk = "correcthorsebattery";
-		check(rendered(&asked, &block, why, sizeof(why)) == 0,
-		    "a network with a passphrase is refused by this build");
-		check(strstr(why, "ncfg wifi add") != NULL,
-		    "  naming the command that does write one");
+		check(rendered(&asked, &block, why, sizeof(why)) == 1,
+		    "a network with a passphrase renders");
+		check(strstr(block.text, "\twifi { psk = \"@secret:Office\"; proto = \"wpa2\" }\n") !=
+		        NULL,
+		    "  with the credential by reference and the generation pinned");
+		check(strstr(block.text, "correcthorsebattery") == NULL,
+		    "  and the value nowhere in the block");
+		check(block.has_secret == 1 && strcmp(block.secret, "correcthorsebattery") == 0,
+		    "  while the value itself comes back for the secret provider");
+		/* Wiped on every path out of a write, which is why the wipe takes a
+		 * block in any state rather than being a decision at each return. */
+		nmc_block_forget(&block);
+		check(block.has_secret == 0 && block.secret[0] == '\0' && block.text[0] == '\0',
+		    "  until the caller forgets it, which clears the block as well");
+
+		/* `sae` is WPA3 and `wpa-psk` is WPA2 (0229). netcfgd pins what is
+		 * negotiated, so guessing would downgrade a network silently. */
+		asked.key_mgmt = "sae";
+		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
+		        strstr(block.text, "proto = \"wpa3\"") != NULL,
+		    "an SAE network pins WPA3 rather than inheriting WPA2");
+
+		/* The CLI's own range, enforced where a client can still fix it: at
+		 * association the failure is a bare `FAIL` long after the write. */
+		asked.key_mgmt = "wpa-psk";
+		asked.psk = "short";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "8 to 63 octets") != NULL,
+		    "a passphrase the field cannot carry is refused, by length");
 		/* A refusal crosses the bus and lands in a client's log. 0042: a
 		 * credential is the one thing on a machine nobody can get back. */
-		check(strstr(why, "correcthorsebattery") == NULL,
-		    "  and never quoting the passphrase back");
+		check(strstr(why, "short") == NULL,
+		    "  and the refusal reports the length rather than the value");
+		asked.psk = "with\ta\ttab\there";
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "control character") != NULL,
+		    "and one the supplicant could not be sent is refused too");
+		/* A block naming a credential that was never stored is a network this
+		 * machine will try to join and cannot. */
+		asked.psk = NULL;
+		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
+		        strstr(why, "psk") != NULL,
+		    "and a psk mechanism with no passphrase is refused, not written");
 
 		asked.key_mgmt = "wpa-eap";
-		asked.psk = NULL;
 		check(rendered(&asked, &block, why, sizeof(why)) == 0 &&
 		        strstr(why, "enterprise") != NULL,
 		    "enterprise wifi is refused, which netcfgd has no block for");

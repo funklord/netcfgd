@@ -757,10 +757,17 @@ static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessa
 		(void)snprintf(err, err_size, "%s", why);
 		return 0;
 	}
+	/* **Not "writing connections is not implemented" any more**, which is what
+	 * this said while every write refused. Creating one is `AddConnection`, so
+	 * that sentence would now send a client's user looking for a feature that
+	 * is there -- and these three are not refused for being unbuilt but for
+	 * being questions netcfgd answers elsewhere or not at all. */
 	(void)snprintf(err, err_size,
-	    "you may change this machine's configuration and this build of the shim cannot: "
-	    "writing connections over the bus is not implemented. Use `ncfg wifi add` or edit "
-	    "/etc/netcfgd/conf.d");
+	    "you may change this machine's configuration and this build of the shim does not "
+	    "answer this call: netcfgd re-reads its own files when they change, so there is "
+	    "nothing here to load or reload, and its hostname is a policy in the document "
+	    "rather than a value a client sets. A network is created with AddConnection and "
+	    "edited in /etc/netcfgd/conf.d");
 	return 0;
 }
 
@@ -773,9 +780,16 @@ static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessa
  * the error in front of a person, so "not implemented" where the real answer is
  * "edit the file" sends them looking for a missing feature.
  *
- * `tests/live/nm.sh` greps each of them, which makes the wording a contract
- * between this implementation and the Rust one rather than decoration -- the
- * same arrangement as "refusing to claim" at startup.
+ * `tests/live/nm.sh` greps `read-only here` three times, which makes THAT
+ * one's wording a contract between this implementation and the Rust one rather
+ * than decoration -- the same arrangement as "refusing to claim" at startup.
+ *
+ * **The other two are asserted nowhere**, measured 2026-10-19 across every
+ * script in `tests/live/`, and this said "each of them" until then. Worth
+ * knowing in both directions: rewording `refuse_write` costs nothing and
+ * breaks nothing, and nothing would have caught it having gone stale -- which
+ * it had, for as long as it claimed writing a connection was unimplemented
+ * after `AddConnection` started working.
  */
 
 /*
@@ -912,42 +926,49 @@ static int connection_by_uuid(DBusConnection *connection, DBusMessage *call,
  *   in the saved list is reported, rather than papered over with a path that
  *   resolves to nothing.
  */
-static int created(DBusConnection *connection, DBusMessage *call, void *object, char *path,
-    size_t path_size, char *err, size_t err_size)
+/*
+ * Hand a rendered block to netcfgd: the credential first, then the file.
+ *
+ * **The order is `store.rs`'s and it matters for its reason.** A block naming a
+ * credential that is not there yet is a configuration netcfgd will try to apply
+ * and fail; a credential nothing refers to is inert. Of the two halves that can
+ * be left behind, the inert one is the one to risk.
+ *
+ * **Neither write replaces anything, and that is what makes the rollback
+ * safe.** `AddConnection` creates. A secret already on disk under that name is
+ * an operator's or another profile's, and overwriting a credential is the one
+ * thing 0042 says nobody can undo -- so a refusal is the right answer, and it
+ * also settles ownership: a secret this call stored is one that was not there a
+ * moment before, so removing it when the file is then refused cannot remove
+ * anybody else's. `ncfg_client_wifi_add` draws the same line for the same
+ * reason, refusing outright if either the network file or the secret exists.
+ *
+ * The Rust shim replaces instead, and correctly: `store.rs`'s one write serves
+ * `AddConnection` and an agent answering a request for a credential, and 0031's
+ * bridge needs the second to be able to say "no, this one". That is the update
+ * path rather than this one.
+ */
+static int installed(nmc_state_t *state, DBusConnection *connection, const nmc_block_t *block,
+    char *path, size_t path_size, char *err, size_t err_size)
 {
-	nmc_state_t                 *state = object;
 	nmc_connections_t           *store = state ? (nmc_connections_t *)state->connections : NULL;
-	nmc_principal_t              admin;
-	unsigned long                uid = 0u;
-	char                         why[NMC_ERROR_MAX] = "";
-	nmc_block_t                  block;
-	ncfg_client_t               *client;
 	const nmc_connection_slot_t *slot;
+	ncfg_client_t               *client = nmc_state_client(state);
+	char                         why[NMC_ERROR_MAX] = "";
 
-	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
-		(void)snprintf(err, err_size, "%s", why);
-		return 0;
-	}
-	nmc_admin_principal(state, &admin);
-	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
-		(void)snprintf(err, err_size, "%s", why);
-		return 0;
-	}
-	/*
-	 * **Authorized before the dictionary is read**, which is the order 0264 is
-	 * about: this shim authorizes the bus caller rather than its own socket
-	 * peer, and a method that worked out what to write first would be doing
-	 * work on behalf of somebody it had not asked about yet.
-	 */
-	if (!nmc_block_render(call, &block, err, err_size)) {
-		return 0;
-	}
-	client = nmc_state_client(state);
 	if (!client) {
 		(void)snprintf(err, err_size,
 		    "netcfgd is not answering, so there is nowhere to put `%s`: its files are "
 		    "the authority and this shim keeps no copy of them",
-		    block.label);
+		    block->label);
+		return 0;
+	}
+	if (block->has_secret &&
+	    !ncfg_client_secret_put(client, block->label, block->secret, 0, why, sizeof(why))) {
+		(void)snprintf(err, err_size,
+		    "netcfgd would not store the credential for `%s`: %s. Nothing has been "
+		    "written",
+		    block->label, why);
 		return 0;
 	}
 	/*
@@ -955,8 +976,31 @@ static int created(DBusConnection *connection, DBusMessage *call, void *object, 
 	 * a network of this name exists must not be able to overwrite it by sending
 	 * the name again -- the file it would clobber may be one an operator wrote.
 	 */
-	if (!ncfg_client_config_put(client, block.stem, block.text, 0, why, sizeof(why))) {
-		(void)snprintf(err, err_size, "netcfgd would not take `%s`: %s", block.label, why);
+	if (!ncfg_client_config_put(client, block->stem, block->text, 0, why, sizeof(why))) {
+		char undo[NMC_ERROR_MAX] = "";
+
+		(void)snprintf(err, err_size, "netcfgd would not take `%s`: %s", block->label,
+		    why);
+		/*
+		 * The credential this call stored a moment ago goes with the file
+		 * that was refused: a stored secret no block refers to is inert, but
+		 * it would also refuse the client's next attempt at the same network,
+		 * because the store above does not replace. Its failure is appended
+		 * rather than replacing the real cause -- the reason the write was
+		 * refused is what the operator needs, and the orphan is what they
+		 * need to know about second.
+		 */
+		if (block->has_secret &&
+		    !ncfg_client_secret_delete(client, block->label, undo, sizeof(undo))) {
+			size_t said = strlen(err);
+
+			if (said < err_size) {
+				(void)snprintf(err + said, err_size - said,
+				    ". The credential stored for it could not be removed again "
+				    "(%s); `ncfg secret delete %s` does it by hand",
+				    undo, block->label);
+			}
+		}
 		return 0;
 	}
 	/*
@@ -972,12 +1016,12 @@ static int created(DBusConnection *connection, DBusMessage *call, void *object, 
 	 */
 	nmc_window_end();
 	nmc_window_begin();
-	slot = nmc_connections_slot_of(store, NMC_PROFILE_NETWORK, block.label);
+	slot = nmc_connections_slot_of(store, NMC_PROFILE_NETWORK, block->label);
 	if (!slot) {
 		(void)snprintf(err, err_size,
 		    "wrote `%s` and netcfgd does not report it; another block of the same name "
 		    "may be overriding it",
-		    block.label);
+		    block->label);
 		return 0;
 	}
 	(void)snprintf(path, path_size, "%s/%u", NMC_SETTINGS_PATH, slot->number);
@@ -1010,6 +1054,51 @@ static int created(DBusConnection *connection, DBusMessage *call, void *object, 
 		    "org.freedesktop.NetworkManager.Settings", "NewConnection", path);
 	}
 	return 1;
+}
+
+/*
+ * Authorize the caller, render what they asked for, write it, and forget it.
+ *
+ * **The wipe is here and not in `installed`, which is why the two are
+ * separate.** A rendered block may hold a passphrase, and every path out of the
+ * write has to clear it -- the client being away, a refused credential, a
+ * refused file, a network netcfgd then does not report, and success. One call
+ * after one call covers all five; a wipe at each `return` is the error path
+ * somebody forgets.
+ */
+static int created(DBusConnection *connection, DBusMessage *call, void *object, char *path,
+    size_t path_size, char *err, size_t err_size)
+{
+	nmc_state_t    *state = object;
+	nmc_principal_t admin;
+	unsigned long   uid = 0u;
+	char            why[NMC_ERROR_MAX] = "";
+	nmc_block_t     block;
+	int             wrote;
+
+	if (!nmc_caller_uid(connection, call, &uid, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	nmc_admin_principal(state, &admin);
+	if (!nmc_may_write(uid, &admin, why, sizeof(why))) {
+		(void)snprintf(err, err_size, "%s", why);
+		return 0;
+	}
+	/*
+	 * **Authorized before the dictionary is read**, which is the order 0264 is
+	 * about: this shim authorizes the bus caller rather than its own socket
+	 * peer, and a method that worked out what to write first would be doing
+	 * work on behalf of somebody it had not asked about yet. It matters more
+	 * now than it did when nothing was written: what the dictionary may carry
+	 * is a credential.
+	 */
+	if (!nmc_block_render(call, &block, err, err_size)) {
+		return 0;
+	}
+	wrote = installed(state, connection, &block, path, path_size, err, err_size);
+	nmc_block_forget(&block);
+	return wrote;
 }
 
 static int add_connection(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,

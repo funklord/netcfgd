@@ -876,37 +876,122 @@ static int dns_block(DBusMessage *call, text_t *into, char *err, size_t err_size
 /* ------------------------------------------------------------- the radio */
 
 /*
- * What goes inside the `wifi` block.
+ * Whether a passphrase is one that can be sent at all.
  *
- * **A network with a passphrase is refused, and that is this slice's boundary
- * rather than an oversight.** Writing one means putting the credential in the
- * secret provider and a `@secret:` reference in the block (0030, 0031), which
- * is a second write through a second tier and its own piece of work. A renderer
- * that wrote the open case and silently dropped the `psk` would hand a client a
- * secured network with no credential and no error -- so until the secret half
- * is here, the whole network is refused and the message says where to go.
+ * **The CLI's `check_passphrase`, made where the client can still fix it.** Its
+ * comment is the argument: at association time the failure is a bare `FAIL`,
+ * half an hour after the file was written. A fourth copy of the range because
+ * this program links `client/` and nothing else -- the model's
+ * `PASSPHRASE_OCTETS`, the CLI's check and this one have to agree, and 0229
+ * says what they are counting.
+ *
+ * **The length is safe to report and the value is not**, which is the rule
+ * `secrets.h` keeps everywhere and which a refusal crossing the bus makes
+ * sharper: a message naming the passphrase would put it in every client's log.
+ *
+ * The control-character rule comes with it rather than being left out as the
+ * Rust leaves it: such a passphrase cannot be sent to the supplicant at all,
+ * so storing it would buy a credential that is certain not to work.
  */
-static int security_of(DBusMessage *call, char *out, size_t cap, char *err, size_t err_size)
+static int passphrase_fits(const char *passphrase, char *err, size_t err_size)
+{
+	size_t length = strlen(passphrase);
+	size_t at;
+
+	if (length < 8u || length > 63u) {
+		(void)snprintf(err, err_size,
+		    "a WPA passphrase is 8 to 63 octets and that one is %zu -- a character "
+		    "outside ASCII counts as more than one. A 64-digit hex key -- a "
+		    "pre-computed PMK rather than a passphrase -- is not something netcfgd "
+		    "can send",
+		    length);
+		return 0;
+	}
+	for (at = 0u; at < length; at++) {
+		unsigned char one = (unsigned char)passphrase[at];
+
+		if (one < 0x20u || one == 0x7fu) {
+			(void)snprintf(err, err_size,
+			    "that passphrase contains a control character, which cannot be sent "
+			    "to the supplicant at all");
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * What goes inside the `wifi` block, and where the credential goes.
+ *
+ * **The passphrase is taken out of the dictionary and left in `out->secret`,
+ * never in the block.** What the block carries is `@secret:<id>` -- constraint
+ * 5, and the whole reason netcfgd's document holds references rather than
+ * values. The secret's name is the profile's, which makes the reference
+ * readable in the file and the file findable in the secrets directory.
+ *
+ * **A `psk` mechanism with no passphrase is refused rather than written.** A
+ * block naming a credential that was never stored is a network netcfgd will
+ * try to join and cannot, which is worse than a refusal a client can show.
+ * The update path has an answer for this -- a client editing a profile sends
+ * back what `GetSettings` gave it, which never contains the passphrase -- and
+ * it belongs with `Update`, where there is an existing secret to leave alone.
+ */
+static int security_of(DBusMessage *call, const char *id, nmc_block_t *out, char *security,
+    size_t cap, char *err, size_t err_size)
 {
 	char mechanism[48];
+	char passphrase[128];
 
 	if (!read_text(call, "802-11-wireless-security", "key-mgmt", mechanism,
 	        sizeof(mechanism))) {
-		(void)snprintf(out, cap, "open = true");
+		(void)snprintf(security, cap, "open = true");
 		return 1;
 	}
 	if (strcmp(mechanism, "owe") == 0) {
-		(void)snprintf(out, cap, "owe = true");
+		(void)snprintf(security, cap, "owe = true");
 		return 1;
 	}
 	if (strcmp(mechanism, "wpa-psk") == 0 || strcmp(mechanism, "sae") == 0) {
-		(void)snprintf(err, err_size,
-		    "this build of the shim writes open and OWE networks over the bus and not "
-		    "ones with a passphrase: the credential has to go to netcfgd's secret "
-		    "provider and the block carry a reference to it, and writing half of that "
-		    "would leave you a secured network with no credential. Use "
-		    "`ncfg wifi add`");
-		return 0;
+		int fits;
+
+		if (!read_text(call, "802-11-wireless-security", "psk", passphrase,
+		        sizeof(passphrase))) {
+			(void)snprintf(err, err_size,
+			    "these settings ask for `%s` and carry no "
+			    "`802-11-wireless-security.psk`; netcfgd cannot store a credential "
+			    "it was not given, and a network referring to one that is not there "
+			    "is a network this machine will try to join and cannot",
+			    mechanism);
+			return 0;
+		}
+		fits = passphrase_fits(passphrase, err, err_size);
+		if (fits) {
+			size_t length = strlen(passphrase);
+
+			/* Bounded again here, although `passphrase_fits` has just
+			 * bounded it to 63 octets: a copy into a credential buffer whose
+			 * only bound lives in another function is one a later edit
+			 * breaks without anything saying so. */
+			if (length >= sizeof(out->secret)) {
+				explicit_bzero(passphrase, sizeof(passphrase));
+				(void)snprintf(err, err_size,
+				    "that passphrase is longer than this shim will carry");
+				return 0;
+			}
+			memcpy(out->secret, passphrase, length + 1u);
+			out->has_secret = 1;
+			/* 0229's generations: `sae` is WPA3 and `wpa-psk` is WPA2. A
+			 * client that asked for one must not be given the other --
+			 * netcfgd pins what is negotiated, so guessing would downgrade
+			 * a network silently. */
+			(void)snprintf(security, cap, "psk = \"@secret:%s\"; proto = \"%s\"", id,
+			    strcmp(mechanism, "sae") == 0 ? "wpa3" : "wpa2");
+		}
+		/* The local copy goes whether it was used or not: a refused
+		 * passphrase is still a passphrase, and the error path is the one
+		 * that forgets to. */
+		explicit_bzero(passphrase, sizeof(passphrase));
+		return fits;
 	}
 	if (strcmp(mechanism, "wpa-eap") == 0 || strcmp(mechanism, "wpa-eap-suite-b-192") == 0) {
 		(void)snprintf(err, err_size,
@@ -1001,6 +1086,16 @@ static void stem_of(const char *id, char *out, size_t cap)
 
 /* -------------------------------------------------------------- the block */
 
+void nmc_block_forget(nmc_block_t *block)
+{
+	if (block) {
+		/* `explicit_bzero` rather than `memset`, because memory about to go
+		 * out of scope is exactly what a compiler is entitled to skip
+		 * clearing -- which is the whole of the difference here. */
+		explicit_bzero(block, sizeof(*block));
+	}
+}
+
 int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_size)
 {
 	text_t        text;
@@ -1010,7 +1105,14 @@ int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_
 	char          route_text[1024];
 	char          kind[64];
 	char          id[256];
-	char          security[64];
+	/*
+	 * `psk = "@secret:<id>"; proto = "wpa3"`. Sized for the longest id
+	 * `read_text` can hand back rather than for the 64 the label rule allows,
+	 * so that the line cannot be a truncation of a label that was refused --
+	 * a half-written `@secret:` reference names a credential that is not
+	 * there.
+	 */
+	char          security[352];
 	unsigned char ssid[32];
 	size_t        ssid_len = 0u;
 	long          metered = 0l;
@@ -1064,7 +1166,7 @@ int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_
 		    "what a station needs to find the network");
 		return 0;
 	}
-	if (!security_of(call, security, sizeof(security), err, err_size)) {
+	if (!security_of(call, id, out, security, sizeof(security), err, err_size)) {
 		return 0;
 	}
 	/*

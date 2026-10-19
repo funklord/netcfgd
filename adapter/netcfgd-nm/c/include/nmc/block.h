@@ -16,12 +16,19 @@
  *   network -- which is written into the file as a comment: 0034's rule that
  *   what cannot be expressed is named rather than dropped.
  *
- * WHAT THIS SLICE WILL NOT DO
- *   A security group carrying a passphrase is refused, naming `ncfg wifi add`.
- *   Writing one means putting a credential in the secret provider and a
- *   `@secret:` reference in the block (0030, 0031), and a renderer that wrote
- *   the open case while silently dropping a `psk` would hand a client a secured
- *   network with no credential and no error.
+ * WHERE THE CREDENTIAL GOES, AND WHY NOT IN THE BLOCK
+ *   A passphrase never reaches `text`. What goes in the block is
+ *   `psk = "@secret:<id>"`, and the value comes back separately in `secret`
+ *   for the caller to hand to netcfgd's secret provider -- 0030 and 0031's
+ *   bridge, inbound only, with nothing reading one back out. That is why this
+ *   renders two things rather than one: a function returning a block with the
+ *   passphrase in it would have put a credential in a file that is read,
+ *   diffed and committed.
+ *
+ *   The caller forgets it with `nmc_block_forget` as soon as it has been
+ *   handed over. 0042 calls a credential the one thing on a machine nobody
+ *   can get back; the matching rule for a process is that it holds one for as
+ *   few lines as it can.
  */
 #ifndef NMC_BLOCK_H
 #define NMC_BLOCK_H
@@ -48,6 +55,15 @@ typedef struct {
 	/* The drop-in's stem under `conf.d`, which is the label sanitised. */
 	char stem[96];
 	char text[NMC_BLOCK_MAX];
+	/*
+	 * The passphrase, where the client sent one -- 1 in `has_secret`, and the
+	 * value under the profile's own name, which is what the `@secret:`
+	 * reference in `text` points at. A passphrase is at most 63 octets (0229),
+	 * so this is sized for one and not for whatever a client felt like
+	 * sending: a value that does not fit is refused rather than stored short.
+	 */
+	int  has_secret;
+	char secret[96];
 } nmc_block_t;
 
 /*
@@ -57,5 +73,14 @@ typedef struct {
  * 1 with `out` filled, or 0 with `err` carrying the sentence a client is shown.
  */
 int nmc_block_render(DBusMessage *call, nmc_block_t *out, char *err, size_t err_size);
+
+/*
+ * Forget a rendered block, credential included.
+ *
+ * Called on every path out of a write, which is why it takes a block in any
+ * state and says nothing: a caller that has to decide whether to wipe is one
+ * that will get it wrong on the error path.
+ */
+void nmc_block_forget(nmc_block_t *block);
 
 #endif /* NMC_BLOCK_H */
