@@ -12498,6 +12498,71 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.502 The device-to-activation pair: one blank column, three layers
+
+The last two failures in `nm.sh` outside `RequestScan`, and they were one
+fault: `nmcli connection down HomeFiber` printed nothing and did nothing
+because there was no active connection of that name to take down -- which is
+the same thing the other check reports as a blank `CONNECTION` column.
+
+### A blank column reads the same whichever layer is silent
+
+Three answers could produce it, and the check printed only
+`expected HomeFiber, actual ""`: netcfgd not reporting the association, the
+shim not naming an activation for it, or that object not carrying an id. So
+the check prints the chain now, at **two moments** -- after the activation and
+after the deactivation -- because a reading taken only at the end cannot tell
+"never recorded" from "cleared by the down" either, and those call for opposite
+fixes. The first version of the diagnostic made exactly that mistake and had to
+be rerun.
+
+With all three speaking it took one run:
+
+    --- after the activation
+    netcfgd on the radio: radio0 COMPLETED     HomeFiber (00:11:22:33:44:55)
+    the shim's activation: /org/freedesktop/NetworkManager/ActiveConnection/5
+    its Id: Failed to get property Id ...: no such object; it may have gone
+            since the path was handed out
+
+netcfgd records the association, before and after the down. The device names an
+activation. **That object does not resolve.**
+
+### A radio's association is in the wifi status, not on its link
+
+`ncfg_link_t.network` is empty for a radio declared over a dummy, because the
+kernel does not call that link wireless -- while `ncfg wifi status radio0` says
+`COMPLETED HomeFiber` at the same moment. The shim read only the link, so it
+reported no network for a radio plainly on one, and `nmc_active_profile_of`
+then had nothing to name: a radio's `interface` block is deliberately not
+served as a profile, so the fallback finds nothing either.
+
+It asks the wifi status now, and only for a radio whose link says nothing,
+because that answer costs a socket round trip per window -- 10.396 is this
+adapter's tick taking a second over a wifi fetch and starving the dispatch
+loop. `facts.wireless` is the test, which `facts_for` already makes with its
+own comment about why the kernel's radio list is the wrong source.
+
+### And the device handed out a path its own subtree refused
+
+`Device.ActiveConnection` named `/ActiveConnection/<n>` whenever the device was
+addressed; the subtree's resolver requires addressed **and** a profile to be an
+activation of. A radio that is addressed and has joined nothing satisfies the
+first and not the second, so a client was handed a path and then told
+`no such object; it may have gone since the path was handed out` -- the
+stale-path answer, for a path it had just been given.
+
+It calls `nmc_active_exists` now, which is the resolver's own test. **Two
+conditions that have to agree are better replaced by one that is asked twice**,
+and the `NMC_OWN` macro keeps the addressedness test it was right about for the
+two IP config objects.
+
+### The band, down to one
+
+`nm.sh` goes from 121 and 3 to **123 and 1**. The one left is
+`a client can ask for a scan`: `RequestScan` refuses, which 10.486 records
+along with why `wifi_scan` stays in the compat map anyway -- reading what a
+scan found is what that tier is about and all of it is served.
+
 ## 10.501 The IP4Config band: four faults, and a rig that had never applied
 
 0032's other half. `IP4Config` and `IP6Config` answer what the machine is

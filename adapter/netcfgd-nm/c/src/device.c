@@ -520,7 +520,34 @@ NMC_CONST(say_no_object, return put_path(into, "/");)
 
 NMC_OWN(say_ip4_config, "IP4Config", 1)
 NMC_OWN(say_ip6_config, "IP6Config", 1)
-NMC_OWN(say_active, "ActiveConnection", 1)
+/*
+ * **This device's active connection, named only where the object exists.**
+ *
+ * `NMC_OWN` tests addressedness, which is right for an IP config -- a device
+ * with no addresses has nothing to report -- and is one condition short here.
+ * An activation also needs a PROFILE to be of, and a radio that is addressed
+ * and has joined nothing has none: its `interface` block is deliberately not
+ * served as a profile. So the device handed out `/ActiveConnection/5` and the
+ * subtree refused it, which a client reads as
+ * `no such object; it may have gone since the path was handed out` -- the
+ * stale-path answer, for a path it had just been given.
+ *
+ * `nmc_active_exists` is the subtree's own test, so asking it here makes the
+ * two agree by construction rather than by two conditions being kept in step.
+ */
+static int say_active(DBusMessageIter *into, void *object, char *err, size_t err_size)
+{
+	char path[96];
+
+	(void)err;
+	(void)err_size;
+	if (!nmc_active_exists(object)) {
+		return put_path(into, "/");
+	}
+	(void)snprintf(path, sizeof(path), "/org/freedesktop/NetworkManager/ActiveConnection/%u",
+	    ((const nmc_device_slot_t *)object)->number);
+	return put_path(into, path);
+}
 NMC_CONST(say_no_paths, return put_empty(into, "o");)
 /* LLDP is a protocol netcfgd does not speak. */
 NMC_CONST(say_no_lldp, return put_empty(into, "a{sv}");)
@@ -792,6 +819,33 @@ void nmc_device_network_of(const nmc_device_slot_t *slot, char *out, size_t out_
 	facts_t facts;
 
 	facts_for(slot, &facts);
+	/*
+	 * **A radio's association is in the wifi status, not on its link.** The
+	 * link carries `network` and for a radio declared over a dummy it is
+	 * empty, because the kernel does not call that link wireless -- while
+	 * `ncfg wifi status radio0` says `COMPLETED HomeFiber` at the same
+	 * moment. Reading only the link therefore reported no network for a radio
+	 * that was plainly on one, which cost the activation its `Id`, the device
+	 * its `Connection` column, and `nmcli connection down` anything to take
+	 * down: with no active connection named `HomeFiber`, that command is a
+	 * no-op that prints nothing (project.md 10.502).
+	 *
+	 * Asked only for a radio and only when the link says nothing, because the
+	 * answer costs a socket round trip per window -- 10.396 is this adapter's
+	 * tick taking a second over a wifi fetch and starving the dispatch loop.
+	 * `facts.wireless` is the managed-and-declared test that `facts_for`
+	 * already makes, with its own comment about why the kernel's radio list
+	 * is the wrong source.
+	 */
+	if (facts.network[0] == '\0' && facts.wireless && slot) {
+		const ncfg_wifi_status_t *status =
+		    nmc_state_wifi_status(slot->state, facts.name);
+
+		if (status && status->network && status->network[0] != '\0') {
+			(void)snprintf(out, out_size, "%s", status->network);
+			return;
+		}
+	}
 	(void)snprintf(out, out_size, "%s", facts.network);
 }
 

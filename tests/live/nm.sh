@@ -774,6 +774,35 @@ else
 		"$(printf '%s' "$since_up" | grep -c 'ADD_NETWORK' || true)" "1" \
 		"$work/up-delta.log"
 
+	# **The chain, read twice: after the activation and after the
+	# deactivation.** A blank CONNECTION column reads the same whether
+	# netcfgd never recorded the association, the shim named no activation for
+	# it, or that object carries no id -- and a reading taken only at the end
+	# cannot tell "never recorded" from "cleared by the down" either, which is
+	# what the first version of this diagnostic could not say.
+	radio_chain() {
+		echo "--- $1"
+		echo "netcfgd on the radio: $("$build/ncfg" wifi status radio0 2>&1 | head -2 |
+			tr '\n' ' ')"
+		if command -v busctl >/dev/null 2>&1; then
+			radio_path=$(busctl --user --address="$address" call \
+				org.freedesktop.NetworkManager /org/freedesktop/NetworkManager \
+				org.freedesktop.NetworkManager GetDeviceByIpIface s radio0 2>&1 |
+				awk '{print $2}' | tr -d '"')
+			active=$(busctl --user --address="$address" get-property \
+				org.freedesktop.NetworkManager "$radio_path" \
+				org.freedesktop.NetworkManager.Device ActiveConnection 2>&1 |
+				awk '{print $2}' | tr -d '"')
+			echo "the shim's activation: $active"
+			if [ -n "$active" ] && [ "$active" != "/" ]; then
+				echo "its Id: $(busctl --user --address="$address" get-property \
+					org.freedesktop.NetworkManager "$active" \
+					org.freedesktop.NetworkManager.Connection.Active Id 2>&1)"
+			fi
+		fi
+	}
+	radio_chain "after the activation" > "$work/active-radio.log" 2>&1
+
 	before=$(wc -l < "$work/fake.log")
 	nmcli connection down HomeFiber > "$work/down.log" 2>&1 || true
 	check_saying "deactivating reaches it too" \
@@ -783,8 +812,16 @@ else
 	# The device's own view. This is nmcli's CONNECTION column and an applet's
 	# "you are connected to" line, and it was empty until active connections
 	# existed.
-	check "the device names what is active on it" \
-		"$(devices_full | awk -F: '$1 == "radio0" { print $4 }')" "HomeFiber"
+	#
+	# **What each layer says, because the column being blank reads the same
+	# whichever of three answers is missing**: netcfgd not reporting the
+	# association, the shim not naming an active connection for it, or that
+	# object not carrying an id. The chain is radio0's `network` in the
+	# observation, then `Device.ActiveConnection`, then its `Id`.
+	radio_chain "after the deactivation" >> "$work/active-radio.log" 2>&1
+	check_saying "the device names what is active on it" \
+		"$(devices_full | awk -F: '$1 == "radio0" { print $4 }')" "HomeFiber" \
+		"$work/active-radio.log"
 	check "and a radio with an activation is connected, not disconnected" \
 		"$(devices_full | awk -F: '$1 == "radio0" { print $3 }')" "connected"
 	check "the wired device names its own profile" \
