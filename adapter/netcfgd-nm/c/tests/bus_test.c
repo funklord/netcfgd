@@ -1577,6 +1577,32 @@ int main(void)
 		asked.ssid = NULL;
 		check(rendered(&asked, &block, why, sizeof(why)) == 0,
 		    "and a wifi profile with no ssid is refused");
+
+		/*
+		 * **An agent's reply is a settings dictionary read for the opposite
+		 * purpose**, which is why the reader for it lives beside the ones
+		 * that parse what a client sends rather than in `agent.c`. The same
+		 * fixture builds it: what `GetSecrets` answers with has the shape
+		 * `AddConnection` takes.
+		 */
+		asked = an_open_network();
+		asked.key_mgmt = "wpa-psk";
+		asked.psk = "supersecretpass";
+		{
+			DBusMessage *reply = profile_message(&asked);
+			char         passphrase[128] = "";
+
+			check(nmc_block_passphrase_in(reply, passphrase, sizeof(passphrase)) == 1 &&
+			        strcmp(passphrase, "supersecretpass") == 0,
+			    "the passphrase an agent answered with is read out of its reply");
+			dbus_message_unref(reply);
+			reply = NULL;
+			asked.psk = NULL;
+			reply = profile_message(&asked);
+			check(nmc_block_passphrase_in(reply, passphrase, sizeof(passphrase)) == 0,
+			    "  and a reply with no passphrase in it is not one");
+			dbus_message_unref(reply);
+		}
 	}
 
 	printf("\nbus_test: %d check(s)\n", checks);

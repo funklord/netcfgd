@@ -120,6 +120,48 @@ static int say_zero(DBusMessageIter *into, void *object, char *err, size_t err_s
 	return put_u32(into, 0u);
 }
 
+/*
+ * What the radio can negotiate: `NMDeviceWifiCapabilities`.
+ *
+ * **Not zero, and the difference matters more than it looks.** libnm checks
+ * this before it will even offer a profile, so a radio reporting nothing makes
+ * every secured network "not compatible with the device" and the activation
+ * never reaches netcfgd at all:
+ *
+ *     Error: device 'radio0' not compatible with connection 'Prompted':
+ *     The device is lacking WPA capabilities required by the connection.
+ *
+ * That is what `nmcli connection up` said here as soon as `GetSettings` began
+ * reporting the security group (10.496), because before that libnm had no
+ * requirement to check it against -- so the property was answering zero for as
+ * long as nothing could notice. The Rust shim carries the same answer and the
+ * same reasoning; this is the half of it that was never ported.
+ *
+ * netcfgd cannot ask the radio what it supports -- it delegates to
+ * `wpa_supplicant` and does not speak nl80211's capability dump -- so this is
+ * what any radio a supplicant will drive can do: both cipher suites, both WPA
+ * generations, access-point mode and both bands. **A card too old for RSN is
+ * described generously here and fails at association with the supplicant's own
+ * message**, which is a better failure than being invisible: the first names
+ * the card, and the second tells an operator their network is incompatible
+ * with hardware that is driving it.
+ */
+static int say_wireless_capabilities(DBusMessageIter *into, void *object, char *err,
+    size_t err_size)
+{
+	/* CIPHER_TKIP | CIPHER_CCMP | WPA | RSN | AP | FREQ_VALID | FREQ_2GHZ |
+	 * FREQ_5GHZ, which is 0x77c. Spelled out rather than written as the
+	 * number, because a reader checking this against NM's header checks
+	 * names. */
+	const dbus_uint32_t capabilities = 0x4u | 0x8u | 0x10u | 0x20u | 0x40u | 0x100u |
+	    0x200u | 0x400u;
+
+	(void)object;
+	(void)err;
+	(void)err_size;
+	return put_u32(into, capabilities);
+}
+
 static int say_no_strings(DBusMessageIter *into, void *object, char *err, size_t err_size)
 {
 	(void)object;
@@ -361,7 +403,7 @@ static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "Mode", "u", NMC_READ, say_mode, NULL },
 	/* The negotiated rate in kb/s, which netcfgd does not report. */
 	{ "Bitrate", "u", NMC_READ, say_zero, NULL },
-	{ "WirelessCapabilities", "u", NMC_READ, say_zero, NULL },
+	{ "WirelessCapabilities", "u", NMC_READ, say_wireless_capabilities, NULL },
 	{ "LastScan", "x", NMC_READ, say_last_scan, NULL },
 	{ "AccessPoints", "ao", NMC_READ, say_access_points, NULL },
 	{ "ActiveAccessPoint", "o", NMC_READ, say_active_ap, NULL }

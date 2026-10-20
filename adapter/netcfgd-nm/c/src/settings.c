@@ -42,7 +42,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NMC_SETTINGS_PATH "/org/freedesktop/NetworkManager/Settings"
 
 /* ------------------------------------------------------- the connection store */
 
@@ -2409,6 +2408,15 @@ static int updated2(DBusConnection *connection, DBusMessage *call, DBusMessage *
 		return 0;
 	}
 	return dbus_message_iter_close_container(&into, &empty) ? 1 : 0;
+}
+
+int nmc_settings_append(DBusMessage *into, nmc_connection_slot_t *slot, char *err,
+    size_t err_size)
+{
+	/* `get_settings` takes a handler's shape and uses neither the connection
+	 * nor the call, so the dictionary it appends to is the only argument that
+	 * matters here. */
+	return get_settings(NULL, NULL, into, slot, err, err_size);
 }
 
 static const nmc_property_t CONNECTION_PROPERTIES[] = {

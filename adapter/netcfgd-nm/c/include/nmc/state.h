@@ -42,6 +42,17 @@ typedef struct {
 	 * includes this, so naming its type here would be the cycle the other two
 	 * avoid, and a third `struct` tag for one pointer is noise. */
 	void                   *access_points;
+	/*
+	 * The secret agents that have offered to be asked, for the same reason
+	 * and in the same shape: `agent.h` reaches `settings.h` which reaches
+	 * this, so naming the type here is the cycle.
+	 *
+	 * `main.c` said "nothing else reads the agents yet" when it gave the
+	 * registry to the `AgentManager` object alone. `ActivateConnection` reads
+	 * them now -- a network whose credential netcfgd does not hold is one an
+	 * agent can be asked about (0030, 0031).
+	 */
+	void                   *agents;
 } nmc_state_t;
 
 void nmc_state_init(nmc_state_t *state, const char *socket_path);

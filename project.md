@@ -12498,6 +12498,133 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.500 The agent band: the shim asks, for the first time
+
+Design section 9.3's other half. `agent.c` has held the registry since it was
+written -- `Register` and `Unregister` keyed on the sender's bus name, and an
+agent dropped when its connection goes away -- and the shim had never asked
+anybody for anything. It has only ever answered calls.
+
+### What it does when a credential is missing
+
+`ActivateConnection`, for a network whose credential netcfgd does not hold:
+ask each registered agent in turn for `GetSecrets` on
+`802-11-wireless-security` with the flags that say a person is waiting, take
+the `psk` out of the reply, and store it through `secret_put`. Then the join
+proceeds, and netcfgd finds the credential where it looks for it. 0031's
+bridge, inbound only, with `GetSecrets` on a profile still refusing.
+
+### Three pieces that were already there
+
+**`GetSettings`' dictionary is `GetSecrets`' first argument.** An agent is
+handed the profile it is being asked about, and `get_settings` already appends
+into a message rather than answering one -- so `nmc_settings_append` is six
+lines and the agent sees exactly what a client sees. A second renderer for it
+would have been a second answer to one question, and the one an agent saw
+would be the one nothing checks. That argument was also incomplete until this
+week: before 10.497 it carried no IP groups and before 10.496 no security
+group.
+
+**`block.c` already reads a settings dictionary**, so the passphrase comes out
+of the agent's reply with the readers that parse what a client sends. The same
+shape read for the opposite purpose, and one set of rules about which types
+count.
+
+**The credential's name comes from netcfgd**, not from a stat:
+`ncfg_client_secrets` answers with the union of what the store holds and what
+the configuration refers to, and `stored` is the half that says which. A
+referenced name with no file is exactly the case an agent exists for -- and it
+is already named as a fault in the daemon's own listing.
+
+### The caller is never asked, and that is not an optimisation
+
+0107's finding, ported with the code: a secret is asked for from inside
+`ActivateConnection`, before it returns, so a client that registered an agent
+and then activated a profile is blocked on the very reply it would have to
+answer. `nmcli` does exactly that -- it registers an agent for
+`connection up` -- and asking it is a circular wait that unwinds at whichever
+side times out first.
+
+The live script records the Rust's version of it as intermittent, about one run
+in five, with the agent's log stopping at `registered`. The C skips the caller
+by bus name, which is why that stall should not be reachable here; the timeout
+is 90 seconds rather than libdbus's 25 so that the *agent* is the side that
+gives up, since two parties timing out at the same number is how the race got
+its coin-flip in the first place.
+
+**And the shim answers nothing while the call is outstanding**, which is the
+cost of a blocking call in a single-threaded loop. For the fake agent that is
+microseconds; for a desktop dialog it is as long as somebody takes to type. The
+honest fix is an asynchronous activation, which 0107 already anticipates --
+"until the shim's activation is asynchronous too" -- and this does not do it.
+
+### Measured on the host before the guest, all three outcomes
+
+A real `dbus-python` agent against the real daemon, through the bus:
+
+- **nobody registered**: netcfgd's own `secret `Prompted` was not found ...
+  `ncfg secret set Prompted` stores one`. A machine with no desktop gets the
+  message that names the command, not one about agents.
+- **an agent that refuses**: `the secret agent `:1.8` did not supply a
+  passphrase: the user cancelled`, and **no credential written** -- a
+  half-written one for a network nobody joined is worse than none.
+- **an agent that answers**: asked with
+  `setting=802-11-wireless-security flags=5`, the value stored at 0600, the
+  activation returning a path, and the supplicant told.
+
+**One of those nearly became a false regression.** The no-agent case printed
+nothing at all through `busctl` and exit 1, which read as the shim answering
+with an empty error -- and the same call through `gdbus` printed netcfgd's
+sentence in full. The instrument was the thing that was quiet, not the shim.
+`evidence.md`'s *never reduce a check's output before you know it passed*,
+arrived at from the reader's side: two clients disagreed about whether there
+was anything to read.
+
+### And the band still failed, for a reason the host rig cannot see
+
+All three outcomes worked on the host and the guest tier did not move: the same
+six checks, with the agent's log stopping at `registered` -- the shim was never
+asked to do anything. The diagnostic:
+
+    Error: device 'radio0' not compatible with connection 'Prompted':
+    The device is lacking WPA capabilities required by the connection.
+
+**libnm refused locally and never called the shim.** `WirelessCapabilities`
+answered zero, so a connection that needs WPA is one no device can carry; the
+Rust shim reports the real set and its comment names this exact sentence as
+what `nmcli connection up` said until it was written. The C never ported that
+half.
+
+**It was answering zero harmlessly until 10.496.** Before `GetSettings`
+reported the security group, libnm had no requirement to check the device
+against -- so the property was wrong for as long as nothing could notice, and
+the change that made it matter was two commits earlier and in another file.
+Traced through this session's runs rather than guessed: the cancel check's
+diagnostic was netcfgd's own `secret not found` in the first runs, the empty
+gateway in the run after the IP groups, and this from the run after the
+security group onward.
+
+**And the host rig is structurally blind to it.** `gdbus` and `dbus-python`
+call `ActivateConnection` directly; `nmcli` goes through libnm, which validates
+the connection and the device first. So a raw bus client tests what the shim
+SAYS and only libnm tests whether a client can USE it -- which is why both of
+this week's local refusals, the empty gateway and this one, were invisible to a
+rig that passes every outcome. The guest tier is the only place with libnm in
+it, and that is what it is for rather than merely where root is.
+
+### The band, and the seven that are left
+
+`nm.sh` goes from 111 and 13 to **117 and 7**: all six agent checks, and
+nothing else moved. A cancelled prompt is reported as such, the agent is asked
+for the right setting and told a person is waiting, the passphrase reaches
+netcfgd's provider at 0600, and the activation then reaches the supplicant.
+
+**Seven left, and none of them is a wifi profile.** Four are the `IP4Config`
+pair reporting what was APPLIED rather than what was asked for, which is 0032's
+other half and reads the observation; two are the device-to-activation join --
+`deactivating reaches it too` and `the device names what is active on it`; one
+is `RequestScan`.
+
 ## 10.499 autoconnect belongs inside `wifi`, and the compiler was right
 
 10.498 recorded `autoconnect` as a gap in the daemon's compiler: the model

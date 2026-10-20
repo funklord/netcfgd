@@ -1088,6 +1088,11 @@ static int network_metric(DBusMessage *call, long *out, int *present, char *err,
  * trip discarded. A floor of 1 costs six metrics of precision there and keeps
  * the ranking.
  */
+int nmc_block_passphrase_in(DBusMessage *reply, char *out, size_t cap)
+{
+	return read_text(reply, "802-11-wireless-security", "psk", out, cap);
+}
+
 int nmc_block_priority(int metric)
 {
 	long rank;

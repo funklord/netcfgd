@@ -1,5 +1,7 @@
 /* agent.c -- the agent registry, keyed on the connection the bus reports. */
 #include "nmc/agent.h"
+#include "nmc/block.h"
+#include "nmc/settings.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -253,6 +255,271 @@ static int unregister_agent(DBusConnection *connection, DBusMessage *call, DBusM
 	}
 	(void)nmc_agents_drop(object, sender);
 	return 1;
+}
+
+/* ------------------------------------------------- asking one of them */
+
+/*
+ * Where a secret agent answers, and the flags that say a person is waiting.
+ *
+ * `ALLOW_INTERACTION` and `USER_REQUESTED`, which is what lets an agent put a
+ * dialog on the screen instead of failing quietly -- a desktop asked without
+ * them answers only from what it has already stored.
+ */
+#define NMC_AGENT_PATH      "/org/freedesktop/NetworkManager/SecretAgent"
+#define NMC_AGENT_INTERFACE "org.freedesktop.NetworkManager.SecretAgent"
+#define NMC_SECRET_GROUP    "802-11-wireless-security"
+#define NMC_AGENT_FLAGS     0x5u
+
+/*
+ * How long to wait for an answer.
+ *
+ * **A person is being asked, so this is a dialog's lifetime rather than a
+ * round trip.** libdbus's own default is 25 seconds, which is also GDBus's --
+ * and two parties timing out at the same number is how 0107's circular wait
+ * came to depend on which one noticed first. 90 seconds is long enough that
+ * the agent is the one that gives up, and bounded so a dead agent cannot
+ * wedge the shim for ever.
+ *
+ * **The shim answers nothing while this is outstanding**, which is the cost of
+ * a blocking call in a single-threaded loop and is why the caller's own agent
+ * is never asked. It is also why the activation should become asynchronous:
+ * until it does, a dialog left open stops every other client being served.
+ */
+#define NMC_AGENT_TIMEOUT_MS 90000
+
+/* Whether the bus still has an owner for that name. */
+static int still_there(DBusConnection *connection, const char *name)
+{
+	DBusMessage *ask = dbus_message_new_method_call("org.freedesktop.DBus",
+	    "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner");
+	DBusMessage *reply;
+	DBusError    problem;
+	dbus_bool_t  owned = FALSE;
+
+	if (!ask) {
+		return 0;
+	}
+	if (!dbus_message_append_args(ask, DBUS_TYPE_STRING, &name, DBUS_TYPE_INVALID)) {
+		dbus_message_unref(ask);
+		return 0;
+	}
+	dbus_error_init(&problem);
+	reply = dbus_connection_send_with_reply_and_block(connection, ask, 5000, &problem);
+	dbus_message_unref(ask);
+	if (!reply) {
+		dbus_error_free(&problem);
+		return 0;
+	}
+	if (!dbus_message_get_args(reply, NULL, DBUS_TYPE_BOOLEAN, &owned, DBUS_TYPE_INVALID)) {
+		owned = FALSE;
+	}
+	dbus_message_unref(reply);
+	dbus_error_free(&problem);
+	return owned ? 1 : 0;
+}
+
+/*
+ * Ask one agent for the passphrase of the profile `slot` describes.
+ *
+ * Answers 1 with `out` filled, 0 where the agent could not be reached at all,
+ * and -1 where it was reached and refused -- which is a person pressing cancel
+ * and is not a fault to report as one, so the message says what happened
+ * rather than naming an internal failure.
+ */
+static int ask_one(DBusConnection *connection, const char *name,
+    nmc_connection_slot_t *slot, const char *path, char *out, size_t cap, char *err,
+    size_t err_size)
+{
+	DBusMessage    *ask;
+	DBusMessage    *reply;
+	DBusMessageIter args;
+	DBusMessageIter hints;
+	DBusError       problem;
+	const char     *group = NMC_SECRET_GROUP;
+	dbus_uint32_t   flags = NMC_AGENT_FLAGS;
+	int             answered;
+
+	ask = dbus_message_new_method_call(name, NMC_AGENT_PATH, NMC_AGENT_INTERFACE,
+	    "GetSecrets");
+	if (!ask) {
+		return 0;
+	}
+	/* `a{sa{sv}}osasu`: the profile, its path, the setting being asked about,
+	 * the hints, and the flags. The dictionary is the one `GetSettings`
+	 * answers with, appended by the same code. */
+	if (!nmc_settings_append(ask, slot, err, err_size)) {
+		dbus_message_unref(ask);
+		return 0;
+	}
+	dbus_message_iter_init_append(ask, &args);
+	if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_OBJECT_PATH, &path) ||
+	    !dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &group) ||
+	    !dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "s", &hints)) {
+		dbus_message_unref(ask);
+		return 0;
+	}
+	/* No hints. NM uses them to name the one key it wants; the group is
+	 * already that narrow here, and an invented hint would be a key this
+	 * shim does not read back. */
+	(void)dbus_message_iter_close_container(&args, &hints);
+	if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_UINT32, &flags)) {
+		dbus_message_unref(ask);
+		return 0;
+	}
+
+	dbus_error_init(&problem);
+	reply = dbus_connection_send_with_reply_and_block(connection, ask,
+	    NMC_AGENT_TIMEOUT_MS, &problem);
+	dbus_message_unref(ask);
+	if (!reply) {
+		(void)snprintf(err, err_size,
+		    "the secret agent `%s` did not supply a passphrase: %s", name,
+		    dbus_error_is_set(&problem) ? problem.message : "no answer");
+		dbus_error_free(&problem);
+		return -1;
+	}
+	dbus_error_free(&problem);
+	answered = nmc_block_passphrase_in(reply, out, cap);
+	dbus_message_unref(reply);
+	if (!answered) {
+		(void)snprintf(err, err_size,
+		    "the secret agent `%s` answered without a passphrase in it", name);
+		return -1;
+	}
+	return 1;
+}
+
+int nmc_agents_supply(nmc_agents_t *agents, DBusConnection *connection, nmc_state_t *state,
+    const char *asker, nmc_connection_slot_t *slot, const char *name, char *err,
+    size_t err_size)
+{
+	char           passphrase[128] = "";
+	char           path[96];
+	ncfg_client_t *client = nmc_state_client(state);
+	size_t         at;
+	int            asked = 0;
+
+	if (!agents || !connection || !slot || !name || !client) {
+		return 0;
+	}
+	(void)snprintf(path, sizeof(path), "%s/%u", NMC_SETTINGS_PATH, slot->number);
+	for (at = 0u; at < agents->count && asked == 0; at++) {
+		const char *who = agents->at[at].bus_name;
+
+		/*
+		 * **Never the caller, and this is not an optimisation.** A secret is
+		 * asked for from inside `ActivateConnection`, before it returns, so a
+		 * client that registered an agent of its own and then activated a
+		 * profile is sitting on a blocking call waiting for this very reply
+		 * and cannot answer a question. `nmcli` does exactly that -- it
+		 * registers an agent for `connection up` -- and asking it is a
+		 * circular wait that unwinds at whichever side times out first,
+		 * intermittently (0107).
+		 *
+		 * Real NetworkManager avoids it by returning the activation path and
+		 * asking during the asynchronous activation that follows, with the
+		 * caller free by then. Until this shim's activation is asynchronous
+		 * too, the caller is the one party that provably cannot answer, and
+		 * skipping it costs nothing: any other agent is still asked.
+		 */
+		if (asker && strcmp(asker, who) == 0) {
+			continue;
+		}
+		/*
+		 * An agent whose process has gone leaves its registration behind
+		 * until `NameOwnerChanged` arrives. Asking the bus at the moment it
+		 * matters gets the same answer with no window in which a stale entry
+		 * is believed -- and drops it, so the next activation does not ask
+		 * again.
+		 */
+		if (!still_there(connection, who)) {
+			(void)nmc_agents_drop(agents, who);
+			at--;
+			continue;
+		}
+		asked = ask_one(connection, who, slot, path, passphrase, sizeof(passphrase), err,
+		    err_size);
+	}
+	if (asked != 1) {
+		/* Nothing to ask, or an agent that refused. The refusal's sentence is
+		 * already in `err`; with nobody to ask there is no sentence, because
+		 * netcfgd's own "secret was not found" is better than one about
+		 * agents on a machine that has no desktop. */
+		explicit_bzero(passphrase, sizeof(passphrase));
+		return asked;
+	}
+	/*
+	 * **Stored through netcfgd, and never replaced.** 0031's bridge is an
+	 * agent answering a request for a credential, so a value already on disk
+	 * means the request should not have been made -- and overwriting a
+	 * credential is the one thing 0042 says nobody can undo. The caller
+	 * authorized for `admin` before this was reached, which is the same
+	 * permission storing it needs: a desktop that may not change the
+	 * configuration may not fill in its secrets either, and the second is how
+	 * you would work around the first.
+	 */
+	if (!ncfg_client_secret_put(client, name, passphrase, 0, err, err_size)) {
+		explicit_bzero(passphrase, sizeof(passphrase));
+		return -1;
+	}
+	explicit_bzero(passphrase, sizeof(passphrase));
+	return 1;
+}
+
+/*
+ * The credential this network needs and netcfgd does not hold, or "" .
+ *
+ * **Asked of netcfgd rather than of the filesystem**, which is the rule `ours`
+ * follows in `settings.c`: the daemon owns `/etc/netcfgd` and is therefore the
+ * authority on what is in it. `ncfg_client_secrets` answers with the union of
+ * what the store holds and what the configuration refers to, and `stored` is
+ * the half that says which -- a referenced name with no file is exactly this
+ * case, and it is the one the daemon's own listing already names as a fault.
+ */
+void nmc_agents_credential_wanted(nmc_state_t *state, const char *id, char *out, size_t cap)
+{
+	const ncfg_saved_networks_t *saved = nmc_state_saved(state);
+	ncfg_client_t               *client = nmc_state_client(state);
+	ncfg_secrets_t               secrets;
+	char                         problem[NMC_ERROR_MAX] = "";
+	const char                  *wanted = NULL;
+	size_t                       at;
+
+	if (cap > 0u) {
+		out[0] = '\0';
+	}
+	if (!saved || !client || !id) {
+		return;
+	}
+	for (at = 0u; at < saved->count; at++) {
+		if (saved->items[at].id && strcmp(saved->items[at].id, id) == 0) {
+			wanted = saved->items[at].credential;
+			break;
+		}
+	}
+	if (!wanted || wanted[0] == '\0') {
+		/* An open or OWE network refers to no credential, and an agent has
+		 * nothing to be asked for. */
+		return;
+	}
+	memset(&secrets, 0, sizeof(secrets));
+	if (!ncfg_client_secrets(client, &secrets, problem, sizeof(problem))) {
+		/* Cannot tell. Saying nothing is wanted leaves the activation to fail
+		 * on netcfgd's own terms, which is the better of the two wrong
+		 * answers: the other invents a prompt for a credential that may
+		 * already be there. */
+		return;
+	}
+	for (at = 0u; at < secrets.count; at++) {
+		if (secrets.items[at].name && strcmp(secrets.items[at].name, wanted) == 0 &&
+		    secrets.items[at].stored) {
+			ncfg_secrets_free(&secrets);
+			return;
+		}
+	}
+	ncfg_secrets_free(&secrets);
+	(void)snprintf(out, cap, "%s", wanted);
 }
 
 static const nmc_method_t METHODS[] = {

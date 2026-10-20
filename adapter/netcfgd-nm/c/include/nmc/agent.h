@@ -27,6 +27,7 @@
 #define NMC_AGENT_H
 
 #include "nmc/bus.h"
+#include "nmc/settings.h"
 
 #include <stddef.h>
 
@@ -53,6 +54,36 @@ int nmc_agents_add(nmc_agents_t *agents, const char *bus_name, const char *ident
 int nmc_agents_drop(nmc_agents_t *agents, const char *bus_name);
 
 size_t nmc_agents_count(const nmc_agents_t *agents);
+
+/*
+ * Ask a registered agent for a network's passphrase and store it through
+ * netcfgd.
+ *
+ * `asker` is the bus name that asked for the activation, and is never asked
+ * itself: it is blocked on the call this runs inside and cannot answer. `name`
+ * is the credential netcfgd is missing, which `nmc_agents_credential_wanted`
+ * answers.
+ *
+ * Answers 1 where a credential was stored, 0 where there was nobody to ask --
+ * the ordinary state of a machine with no desktop, and the caller then lets
+ * the activation fail on netcfgd's own terms rather than inventing a complaint
+ * about agents -- and -1 where an agent was asked and refused, with `err`
+ * carrying the sentence a person pressing cancel produces.
+ *
+ * **The caller has already authorized**, which is why no uid is passed:
+ * storing a credential is an `admin` write and `ActivateConnection` requires
+ * the same tier before it reaches this. Asking twice would be one question
+ * with two answers that can come to disagree.
+ */
+int nmc_agents_supply(nmc_agents_t *agents, DBusConnection *connection, nmc_state_t *state,
+    const char *asker, nmc_connection_slot_t *slot, const char *name, char *err,
+    size_t err_size);
+
+/*
+ * The credential a network refers to and netcfgd does not hold, or "" where
+ * there is nothing to ask for.
+ */
+void nmc_agents_credential_wanted(nmc_state_t *state, const char *id, char *out, size_t cap);
 
 /* Watch for agents whose connection goes away, and drop them. */
 int nmc_agents_watch(nmc_agents_t *agents, DBusConnection *connection, char *err,

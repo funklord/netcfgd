@@ -25,7 +25,6 @@
 #define NMC_BUS_NAME     "org.freedesktop.NetworkManager"
 #define NMC_MANAGER_PATH "/org/freedesktop/NetworkManager"
 #define NMC_DEVICES_PATH "/org/freedesktop/NetworkManager/Devices"
-#define NMC_SETTINGS_PATH "/org/freedesktop/NetworkManager/Settings"
 #define NMC_IP4_PATH      "/org/freedesktop/NetworkManager/IP4Config"
 #define NMC_IP6_PATH      "/org/freedesktop/NetworkManager/IP6Config"
 #define NMC_ACTIVE_PATH   "/org/freedesktop/NetworkManager/ActiveConnection"
@@ -339,11 +338,17 @@ int main(int argc, char **argv)
 	const nmc_object_t     objects[] = {
 		{ NMC_MANAGER_PATH, manager_interfaces, &state },
 		/* Its own path, as NM serves it, and its data is the registry
-		 * rather than the state: nothing else reads the agents yet. */
+		 * rather than the state -- `Register` and `Unregister` are about the
+		 * registry and nothing else. What reads it from elsewhere reaches it
+		 * through the state, which is `state.agents` below. */
 		{ NMC_AGENT_PATH, agent_interfaces, &agents }
 	};
 
 	nmc_state_init(&state, NULL);
+	/* Before anything serves: `ActivateConnection` reaches the registry
+	 * through the state, which is how a method on one object asks about
+	 * another's. */
+	state.agents = &agents;
 	nmc_store_init(&store, &state);
 	nmc_connections_init(&connections, &state);
 	nmc_aps_init(&aps, &state);

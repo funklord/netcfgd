@@ -20,6 +20,7 @@
  *   put a dialog on a desktop for a daemon that is restarting.
  */
 #include "nmc/manager.h"
+#include "nmc/agent.h"
 #include "nmc/store.h"
 #include "nmc/active.h"
 #include "nmc/device.h"
@@ -544,7 +545,7 @@ static int activate_connection(DBusConnection *connection, DBusMessage *call,
 	const char                  *profile_path = NULL;
 	const char                  *device_path = NULL;
 	const char                  *specific = NULL;
-	const nmc_connection_slot_t *profile;
+	nmc_connection_slot_t       *profile;
 	nmc_device_slot_t           *device;
 	nmc_principal_t              admin;
 	unsigned long                uid = 0u;
@@ -604,9 +605,37 @@ static int activate_connection(DBusConnection *connection, DBusMessage *call,
 			return 0;
 		}
 	} else {
+		char wanted[96] = "";
+
 		client = nmc_state_client(state);
 		if (!client) {
 			snprintf(err, err_size, "netcfgd is not answering");
+			return 0;
+		}
+		/*
+		 * **A credential netcfgd does not hold is one an agent can be asked
+		 * for**, which is design section 9.3's whole point and 0031's bridge:
+		 * the value goes to the secret provider and the configuration keeps
+		 * its `@secret:` reference. Asked before the join rather than after
+		 * it fails, because netcfgd's refusal is the end of the attempt --
+		 * there is no retry to hang the prompt off.
+		 *
+		 * **Nobody to ask is not a failure.** On a machine with no desktop
+		 * the activation goes ahead and fails on netcfgd's own terms, which
+		 * says `secret `X` was not found` and names the command that stores
+		 * one -- a shim that invented a complaint about missing agents would
+		 * send an operator looking for a desktop problem.
+		 */
+		nmc_agents_credential_wanted(state, profile->id, wanted, sizeof(wanted));
+		if (wanted[0] != '\0' &&
+		    nmc_agents_supply((nmc_agents_t *)state->agents, connection, state,
+		        dbus_message_get_sender(call), profile, wanted, why,
+		        sizeof(why)) < 0) {
+			/* An agent was asked and refused, which is a person pressing
+			 * cancel. Its sentence is the useful one and the activation is
+			 * not attempted: a half-written credential for a network nobody
+			 * joined is worse than no credential. */
+			snprintf(err, err_size, "%s", why);
 			return 0;
 		}
 		if (!ncfg_client_wifi_connect(client, device->name, profile->id, err, err_size)) {

@@ -119,4 +119,18 @@ void nmc_block_stem(const char *id, char *out, size_t cap);
  */
 int nmc_block_priority(int metric);
 
+/*
+ * The passphrase a secret agent returned, out of the dictionary it answered
+ * with: `802-11-wireless-security`, key `psk`.
+ *
+ * Here rather than in `agent.c` because this file already walks a settings
+ * dictionary a client sent, and an agent's reply is one -- the same shape read
+ * for the opposite purpose. A second walker would be a second set of rules
+ * about which types count.
+ *
+ * Answers 1 with `out` filled. The caller forgets it as soon as it has been
+ * handed over, the way `nmc_block_forget` does for a rendered block.
+ */
+int nmc_block_passphrase_in(DBusMessage *reply, char *out, size_t cap);
+
 #endif /* NMC_BLOCK_H */

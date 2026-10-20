@@ -8,6 +8,16 @@
 #ifndef NMC_SETTINGS_H
 #define NMC_SETTINGS_H
 
+/*
+ * Where the Settings object sits, and the root of every profile's path.
+ *
+ * One definition because three files needed it: `settings.c` serves the
+ * subtree, `main.c` announces membership on it, and `agent.c` names a
+ * profile's path when it asks an agent about one. It was spelled out in the
+ * first two, and a third copy is where three spellings of one path start.
+ */
+#define NMC_SETTINGS_PATH "/org/freedesktop/NetworkManager/Settings"
+
 #include "nmc/bus.h"
 #include "nmc/state.h"
 
@@ -97,6 +107,20 @@ size_t nmc_connections_enumerate_for_bus(const char **names, size_t max, void *c
  * what distinguishes it.
  */
 int nmc_connections_is_state(const void *data);
+
+/*
+ * Append one profile's settings dictionary to `into`.
+ *
+ * **The same code that answers `GetSettings`**, because `GetSecrets` takes that
+ * dictionary as its first argument: an agent is handed the profile it is being
+ * asked about, and a second renderer for it would be a second answer to one
+ * question -- and the one an agent saw would be the one nothing checks.
+ *
+ * `into` is a message being built, a reply or a call alike. Answers 0 with
+ * `err` filled where the profile cannot be described.
+ */
+int nmc_settings_append(DBusMessage *into, nmc_connection_slot_t *slot, char *err,
+    size_t err_size);
 
 /* Its object data is an `nmc_state_t *`; the connection's is a slot. */
 extern const nmc_interface_t nmc_settings_interface;
