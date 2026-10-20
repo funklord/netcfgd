@@ -387,12 +387,17 @@ beyond a C compiler. `libncurses-dev` is for `ncfg tui` and is the only
 library the daemon links beyond libc. `python3` runs the style gate and
 several test scripts, not the daemon.
 
-**`cargo` and `rustc` (1.85 or newer) are needed only for
-`adapter/netcfgd-nm`**, the shim that serves NetworkManager's own D-Bus API;
-0264 records that its C replacement is not written yet. `make build` and
-`make install` need neither. The Rust implementation of the daemon is still
-in the tree and still built by the gates that compare the two programs --
-`make agree` is the main one -- but nothing ships it.
+**`libdbus-1-dev` is needed for `adapter/netcfgd-nm`**, the shim that serves
+NetworkManager's own D-Bus API. It is C over `libdbus-1` since 0276, which
+retired the Rust one, so **nothing this tree builds or packages needs a Rust
+toolchain** -- `debian/control` names neither `cargo` nor `rustc`.
+
+`cargo` and `rustc` (1.85 or newer) are still wanted for `make check`: the Rust
+implementation of the daemon remains in the tree as the instrument the gates
+compare the C against, `make agree` being the main one. Nothing ships it, and
+`make build`, `make install` and `make deb` do not need it -- `make clean`
+calls `cargo clean` where cargo is there and says it is skipping where it is
+not, which is the one place a package build would have met it.
 
 **To build the Qt client**, additionally `qt6-base-dev`. Note that the Qt
 client links `libQt6DBus`, so the "no D-Bus" property above is the *core's*

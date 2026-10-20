@@ -211,9 +211,17 @@ void nmc_bus_stop(void);
 /*
  * The introspection XML for one object, rendered from its tables.
  *
- * Exposed because the policy gate reads the served interface names, and
- * asking the program what it serves beats parsing the source for attributes
- * -- which is how `tool/dbus_policy_gate.py` came to miss one (0264).
+ * Exposed for `tests/bus_test.c`, which is the whole reason it is not static:
+ * the document a client reads is a pure function of these tables, so it can be
+ * checked without a bus, a client or a daemon.
+ *
+ * **It is not what the policy gate reads, and the distinction is the gate's
+ * own.** `tool/dbus_policy_gate.py` finds a served interface by looking for an
+ * `nmc_interface_t` that names one -- the type the dispatcher routes with --
+ * rather than by running the program or matching a string that looks like an
+ * interface name. Matching the string is how it came to miss `org.netcfgd.Compat`
+ * (0264); the type cannot miss it, and stays static enough to run on a machine
+ * with no libdbus.
  *
  * `children` are the node names to advertise beneath this path, or NULL for
  * none. **Without them a client's tree walk stops here**, which is how

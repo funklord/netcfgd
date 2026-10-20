@@ -1144,8 +1144,10 @@ static int refuse_write(DBusConnection *connection, DBusMessage *call, DBusMessa
  * "edit the file" sends them looking for a missing feature.
  *
  * `tests/live/nm.sh` greps `read-only here` three times, which makes THAT
- * one's wording a contract between this implementation and the Rust one rather
- * than decoration -- the same arrangement as "refusing to claim" at startup.
+ * one's wording a contract with the acceptance test rather than decoration --
+ * the same arrangement as "refusing to claim" at startup. It was a contract
+ * between two implementations until 0276 retired the other one; the test still
+ * greps for it, so rewording it still breaks three checks.
  *
  * **The other two are asserted nowhere**, measured 2026-10-19 across every
  * script in `tests/live/`, and this said "each of them" until then. Worth

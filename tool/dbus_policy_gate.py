@@ -26,42 +26,50 @@ import sys
 import pathlib
 import xml.parsers.expat
 
-SHIM = pathlib.Path("adapter/netcfgd-nm/src")
+SHIM = pathlib.Path("adapter/netcfgd-nm/c/src")
 POLICY = pathlib.Path("packaging/dbus/netcfgd-nm.conf")
 
-# The three every D-Bus service answers. They are in the policy and are not in
-# the shim's source as string literals, because the library implements them.
+# The three every D-Bus service answers.
+#
+# **The C shim serves one of them from its own table**, because libdbus
+# generates nothing: `ObjectManager` is an `nmc_interface_t` in `bus.c` like any
+# other, so it turns up on both sides here and is subtracted from both. The
+# other two are the library's.
 STANDARD = {
 	"org.freedesktop.DBus.Introspectable",
 	"org.freedesktop.DBus.Properties",
 	"org.freedesktop.DBus.ObjectManager",
 }
 
-# **What zbus exports, which is the only thing that is served.** The first
-# version of this matched any quoted string shaped like an NM interface name,
-# anywhere in the source, and got two answers wrong in opposite directions --
-# so the count came out right and the set did not:
+# **What the dispatcher routes with, which is the only thing that is served.**
+# The first version of this matched any quoted string shaped like an NM
+# interface name, anywhere in the source, and got two answers wrong in opposite
+# directions -- so the count came out right and the set did not:
 #
-#   * `org.netcfgd.Compat` is served, from `manager.rs`, and the pattern was
-#     anchored to `org.freedesktop.NetworkManager`, so the one interface that
-#     is not NetworkManager's was the one interface this could not see. It was
-#     absent from the policy too, which is the failure this file exists to
-#     catch, and the file reported "all granted".
-#   * `org.freedesktop.NetworkManager.SecretAgent` is a `const` in `agent.rs`
-#     naming an interface the shim **calls**. Counting it as served made the
-#     policy's grant for it look justified by the wrong reason.
+#   * `org.netcfgd.Compat` is served, and the pattern was anchored to
+#     `org.freedesktop.NetworkManager`, so the one interface that is not
+#     NetworkManager's was the one interface this could not see. It was absent
+#     from the policy too, which is the failure this file exists to catch, and
+#     the file reported "all granted".
+#   * `org.freedesktop.NetworkManager.SecretAgent` names an interface the shim
+#     **calls**. Counting it as served made the policy's grant for it look
+#     justified by the wrong reason.
 #
 # Two errors that cancel in a total are exactly what a count cannot show, so
-# this reads the attribute that decides the matter instead. An interface is
-# served if and only if `#[zbus::interface(name = "...")]` says so.
-INTERFACE = re.compile(r'#\[zbus::interface\(\s*name\s*=\s*"([^"]+)"')
+# this reads the thing that decides the matter instead. **An interface is
+# served if and only if there is an `nmc_interface_t` naming it** -- the type
+# the dispatcher and the introspection renderer both walk (`nmc/bus.h`). That
+# is why the pattern is anchored on the TYPE and not on the string: both of the
+# errors above are then impossible rather than merely fixed. `Compat` is an
+# `nmc_interface_t` and cannot be missed; `SecretAgent` is a `#define` the shim
+# builds a call from and cannot be counted.
+#
+# It read the Rust shim's `#[zbus::interface(name = "...")]` until 0276 retired
+# that program. The two sets were measured against each other on the day of the
+# switch: the same 18 interfaces, plus the object manager the C declares itself.
+INTERFACE = re.compile(r"\bnmc_interface_t\s+\w+\s*=\s*\{(.*?)\n\};", re.S)
+NAMED = re.compile(r'\.name\s*=\s*"([^"]+)"')
 
-# Interfaces the shim sends to rather than answers for, which the policy must
-# still grant and which are therefore neither an unserved grant nor a missing
-# one. Listed rather than derived: the shim builds these calls by hand from a
-# `const` rather than through a proxy type, so there is no attribute to read.
-# Each is checked below for still being mentioned in the source, so an entry
-# that outlives its caller is caught rather than quietly excusing a stale rule.
 CALLED_OUT = {
 	# 0031: a credential travels inbound and is never handed back, so the
 	# shim calls `GetSecrets` on somebody else's agent and implements none.
@@ -70,16 +78,19 @@ CALLED_OUT = {
 
 
 def served():
-	"""Interfaces zbus exports for the shim, by its own attribute."""
+	"""Interfaces the shim's own tables declare."""
 	found = set()
-	for path in sorted(SHIM.rglob("*.rs")):
-		found.update(INTERFACE.findall(path.read_text()))
+	for path in sorted(SHIM.glob("*.c")):
+		for body in INTERFACE.findall(path.read_text()):
+			named = NAMED.search(body)
+			if named:
+				found.add(named.group(1))
 	return found
 
 
 def sources():
 	"""Every line of the shim, for checking that a listed name is still used."""
-	return "\n".join(path.read_text() for path in sorted(SHIM.rglob("*.rs")))
+	return "\n".join(path.read_text() for path in sorted(SHIM.glob("*.c")))
 
 
 def granted():
@@ -129,7 +140,7 @@ def main():
 	if not well_formed():
 		return 1
 
-	code = served()
+	code = served() - STANDARD
 	policy = granted() - STANDARD
 
 	# A name excused as outbound has to still be one, or the excuse is stale.
@@ -145,8 +156,8 @@ def main():
 	# pass. If the extraction breaks -- a rename, a different quoting style --
 	# both sets go empty and every comparison below succeeds, so the emptiness
 	# is the thing to refuse.
-	# A floor, not merely a non-empty check: the attribute could be renamed by
-	# a zbus upgrade and a handful would still match something.
+	# A floor, not merely a non-empty check: a struct member could be renamed
+	# and a handful would still match something.
 	if len(code) < 10:
 		print(f"dbus-policy: only {len(code)} interface(s) found in {SHIM}, so the")
 		print("dbus-policy:   extraction is broken rather than the shim being small")

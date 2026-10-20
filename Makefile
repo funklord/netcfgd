@@ -8,6 +8,9 @@
 #   make               -- build the workspace and link the `ncfg` name
 #   make gui           -- the Qt client, which nothing else builds
 #   make tde           -- the TDE control module and tray, likewise
+#   make nm            -- the NetworkManager shim, likewise. `make adapters`
+#                         built it until 0276 retired the Rust one, and the
+#                         suite that skips without it says `make nm` now
 #   make cross         -- the cross-compilation check
 #   make test          -- the test suite alone
 #   make check         -- every gate; the one to run before a commit
@@ -33,7 +36,6 @@
 #   make fuzz          -- the fuzz targets
 #   make conformance   -- the two client implementations, asked the same
 #                         questions
-#   make adapters      -- each adapter, built and checked to the core's bar
 #   make nm-containment -- assert the core's manifest has gained no entry
 #   make linkage       -- what the shipped binary is allowed to link
 #   make style         -- the shared source gate, plus project.md held to the
@@ -72,12 +74,15 @@
 
 CARGO ?= cargo
 
-# Is the optional component here? Asked in three places, so spelled once: the
-# `fmt` and `clippy` gates, and `adapters`, which holds each adapter workspace
-# to the same bar as the core and therefore runs both again. That third one is
-# the easy one to miss -- it is a `cd` into another workspace rather than a
-# gate with the tool's name on it -- and missing it leaves `make check`
-# stopping dead exactly as before, only later and after a full build.
+# Is the optional component here? Asked in two places, so spelled once: the
+# `fmt` and `clippy` gates.
+#
+# There was a third, and it is worth knowing why it was the easy one to miss:
+# `adapters` held each adapter's own cargo workspace to the same bar as the
+# core, so it ran both tools again from a `cd` rather than from a gate with the
+# tool's name on it. Forgetting it there left `make check` stopping dead exactly
+# as before, only later and after a full build. 0276 retired the one Rust
+# adapter and the target with it.
 #
 # Asking cargo whether the subcommand runs, rather than looking for a binary by
 # name: rustup and Debian put the shim in different places, and the only thing
@@ -85,12 +90,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean adapters nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage live-container tde install-tde deb-tde help
-
-# Where each adapter lives. Each is its own cargo workspace with its own
-# lockfile, so that its dependencies cannot reach the core's -- see
-# `nm-containment` below, and design section 9.2.
-ADAPTERS = adapter/netcfgd-nm
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage live-container tde install-tde deb-tde help
 
 all: build
 
@@ -134,7 +134,7 @@ ncfg-link:
 # somewhere else measures somewhere else -- see `check-ci`.
 PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
                  nm-containment packaging claims client-test conformance test \
-                 example adapters gui linkage c-test agree ledger module-order \
+                 example gui linkage c-test agree ledger module-order \
                  registry bridge-test nm-c-test
 BUDGET_GATES   = size footprint rss
 
@@ -161,29 +161,6 @@ check: $(PORTABLE_GATES) $(BUDGET_GATES)
 # finding, and the live scripts are most of the evidence this project has.
 check-ci: $(PORTABLE_GATES)
 
-# Each adapter, built and checked with the same bar as the core.
-#
-# Separately, because they are separate workspaces. That is the price of
-# dependency containment and it is a small one: a `cd` per adapter, against
-# never having to ask which binary a `cargo deny` result was about.
-#
-# The two optional checks skip here exactly as they do in the core gates, and
-# announced once rather than per adapter. `if cond; then check; fi` is doing
-# real work in the chain: it yields 0 when the tool is absent, and the check's
-# own status when it is present, so a genuine formatting failure still breaks
-# the `&&` rather than being swallowed by the skip.
-adapters:
-	@$(FMT_OK) || echo "adapters: rustfmt not installed, skipping that check"
-	@$(CLIPPY_OK) || echo "adapters: clippy not installed, skipping that check"
-	@for adapter in $(ADAPTERS); do \
-		echo "adapters: $$adapter"; \
-		( cd $$adapter && \
-			if $(FMT_OK); then $(CARGO) fmt --check; fi && \
-			if $(CLIPPY_OK); then $(CARGO) clippy --all-targets -- -D warnings; fi && \
-			$(CARGO) test && \
-			$(CARGO) build ) || exit 1; \
-	done
-
 # Design section 9.2 asks for this in as many words: "a mechanically checkable
 # CI assertion" that the core's dependency manifest has not gained an entry.
 #
@@ -193,12 +170,19 @@ adapters:
 # form of constraint 3 -- so any new core dependency fails this, whether an
 # adapter brought it or not.
 #
-# The second half is the gate checking itself. If the adapter's lockfile has no
-# heavy dependency in it, then "the core does not have the adapter's
-# dependencies" is true for the boring reason and proves nothing. So it also
-# asserts that the adapter really does carry what it is supposed to be
-# containing -- a gate that passes on an empty input set is the failure mode
-# this project keeps finding.
+# The second half is the gate checking itself. "The core does not have the
+# adapter's dependencies" is worth nothing if no adapter has any, which is the
+# vacuous pass this project keeps finding -- so it also asserts that the thing
+# being contained exists.
+#
+# **What it asserts changed when 0276 retired the Rust shim, and the claim got
+# stronger rather than weaker.** It used to count the adapter's own lockfile and
+# require at least twenty entries, on the grounds that a D-Bus stack is not
+# small. There is no lockfile to count now: the shim is C over `libdbus-1`, so
+# the stack it contains is a system library and no Rust crate for it can appear
+# in any lockfile here. The two things checked are therefore that the shim still
+# gets D-Bus from outside cargo, and that no adapter has quietly acquired a
+# lockfile again -- which is the only way the old leak could come back.
 nm-containment:
 	@allowed=$$(sed -n 's/.*{ crate = "\([^"]*\)".*/\1/p' deny.toml | sort -u); \
 	present=$$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.lock | grep -v '^netcfgd' | sort -u); \
@@ -214,21 +198,23 @@ nm-containment:
 		echo "nm-containment: dependency is a decision, not a lockfile update"; \
 		exit 1; \
 	fi; \
-	for adapter in $(ADAPTERS); do \
-		if [ ! -f $$adapter/Cargo.lock ]; then \
-			echo "nm-containment: $$adapter has no lockfile, so this proved nothing"; \
-			echo "nm-containment: run 'make adapters' first"; \
-			exit 1; \
-		fi; \
-		count=$$(sed -n 's/^name = "\(.*\)"/\1/p' $$adapter/Cargo.lock | wc -l); \
-		if [ "$$count" -lt 20 ]; then \
-			echo "nm-containment: $$adapter has $$count dependencies, which is too few"; \
-			echo "nm-containment: for this check to mean anything -- it is supposed to be"; \
-			echo "nm-containment: containing a D-Bus stack"; \
-			exit 1; \
-		fi; \
-	done; \
-	echo "nm-containment: ok, $$(echo "$$present" | wc -w) core dependencies, all allowed"
+	if ! grep -q 'pkg-config --libs dbus-1' adapter/netcfgd-nm/c/Makefile; then \
+		echo "nm-containment: the shim no longer links libdbus-1 from the system,"; \
+		echo "nm-containment: so nothing here is containing a D-Bus stack and the"; \
+		echo "nm-containment: check above proved nothing -- find where the stack went"; \
+		exit 1; \
+	fi; \
+	strays=$$(find adapter -name Cargo.lock -print 2>/dev/null); \
+	if [ -n "$$strays" ]; then \
+		echo "nm-containment: an adapter has a cargo lockfile again:"; \
+		echo "nm-containment:  $$strays"; \
+		echo "nm-containment: 0276 retired the one that existed. A new one is a"; \
+		echo "nm-containment: decision, and this gate's second half was written for"; \
+		echo "nm-containment: the arrangement it replaces -- revisit both"; \
+		exit 1; \
+	fi; \
+	echo "nm-containment: ok, $$(echo "$$present" | wc -w) core dependencies, all allowed"; \
+	echo "nm-containment:   and the shim's D-Bus stack is libdbus-1, outside cargo"
 
 # The shell netcfgd ships. A helper is a program somebody installs and runs as
 # root against their modem, so a syntax error in one is not a smaller problem
@@ -364,10 +350,12 @@ bridge-test:
 
 # The C shim's own suite, for the reason `bridge-test` gives.
 #
-# **It was reachable through nothing.** `adapters` drives `cargo test` in each
-# Rust adapter workspace and the C port is not one, so 115 checks -- the
+# **It was reachable through nothing.** `adapters` drove `cargo test` in each
+# Rust adapter workspace and the C port was not one, so 115 checks -- the
 # dispatcher's tables, the two stores' path contracts, the write authorization
-# and both signal detectors -- ran only when somebody remembered to type it. The
+# and both signal detectors -- ran only when somebody remembered to type it.
+# That target is gone with the Rust shim (0276) and this gate is what remains:
+# the C suite is now the only adapter suite there is. The
 # detectors are the part least able to afford that: each one's failure mode is
 # silence, which is also what a converged machine looks like.
 #
@@ -715,12 +703,6 @@ install-systemd:
 	@echo "install-systemd:   to make netcfgd the only network daemon:"
 	@echo "install-systemd:     netcfgd_select.sh"
 
-# The NetworkManager shim, built from its own workspace.
-#
-# Release, and separate from `make adapters`, which builds debug and runs the
-# checks. Kept out of `install` for the reason `install-gui` is: the shim is
-# eighty-odd crates of D-Bus that constraint 3 keeps off the daemon's path, and
-# a machine installing netcfgd is not thereby asking for them.
 # The TDE front end: a control centre module and a tray, TQt3, over the same
 # client/ library the Qt window uses.
 #
@@ -755,16 +737,30 @@ install-tde:
 	@echo "install-tde: installed into $(TDE_PREFIX); run tdebuildsycoca"
 	@echo "install-tde:   as the desktop user before the module appears"
 
+# The NetworkManager shim.
+#
+# **The C one is what this builds and what it installs** (0276). It was the Rust
+# one until that record retired it, and the switch is two lines here because
+# everything else about the package -- the bus policy, the unit, the name it
+# claims -- belongs to the shim rather than to the language it is written in.
+#
+# This paragraph used to say the shim is "eighty-odd crates of D-Bus that
+# constraint 3 keeps off the daemon's path", and that is the sentence the
+# retirement falsifies: it links `libdbus-1` and this tree's own
+# `libncfg_client.a`, and the crates are gone. Kept out of `install` all the
+# same, for a reason that never was about dependencies -- starting it takes
+# NetworkManager's bus name, and a machine installing netcfgd is not thereby
+# asking to impersonate NetworkManager. `install-nm` says so at the end.
 nm:
-	cd adapter/netcfgd-nm && $(CARGO) build --release
+	@$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c
 
 install-nm:
-	@[ -x adapter/netcfgd-nm/target/release/netcfgd-nm ] || { \
+	@[ -x adapter/netcfgd-nm/c/netcfgd-nm ] || { \
 		echo "install-nm: the shim is not built -- run \`make nm\` first"; \
 		exit 1; }
 	install -d $(DESTDIR)$(BINDIR) $(DESTDIR)$(DATADIR)/dbus-1/system.d \
 		$(DESTDIR)/usr/lib/systemd/system
-	install -m 0755 adapter/netcfgd-nm/target/release/netcfgd-nm \
+	install -m 0755 adapter/netcfgd-nm/c/netcfgd-nm \
 		$(DESTDIR)$(BINDIR)/netcfgd-nm
 	@# Its own, rather than relying on NetworkManager's. The right to own that
 	@# bus name is granted by NetworkManager's policy file today, so removing
@@ -2607,18 +2603,13 @@ deny:
 		echo "deny: cargo-deny not installed, skipping"
 	@command -v cargo-audit >/dev/null 2>&1 && $(CARGO) audit || \
 		echo "deny: cargo-audit not installed, skipping"
-	@# Each adapter separately, against its own deny.toml. A separate workspace
-	@# is invisible to a `cargo deny` run in the root -- which is the point, and
-	@# also the way an adapter's supply chain would go unchecked forever if this
-	@# loop were not here.
-	@for adapter in $(ADAPTERS); do \
-		echo "deny: $$adapter"; \
-		( cd $$adapter && \
-			{ command -v cargo-deny >/dev/null 2>&1 && $(CARGO) deny check || \
-				echo "deny: cargo-deny not installed, skipping"; } && \
-			{ command -v cargo-audit >/dev/null 2>&1 && $(CARGO) audit || \
-				echo "deny: cargo-audit not installed, skipping"; } ) || exit 1; \
-	done
+	@# One workspace, since 0276. There was a loop here over each adapter's own
+	@# deny.toml, because a separate workspace is invisible to a `cargo deny` run
+	@# in the root -- which was the point of the containment and also the way an
+	@# adapter's supply chain would have gone unchecked forever. The shim is C
+	@# now and has no cargo dependencies to check; `nm-containment` asserts that
+	@# no adapter has acquired a lockfile again, which is what would make this
+	@# loop necessary a second time.
 
 # `clean` removes what it names. `dist/` is the one directory cleared wholesale,
 # and only because the build creates it: `deb` and `apk-source` make it, nothing
@@ -2630,7 +2621,18 @@ deny:
 # for being non-empty and relative before anything is removed, and the packages
 # are listed rather than swept silently.
 clean:
-	$(CARGO) clean
+	@# **Skipped loudly where cargo is absent, since 0276.** The Rust core is
+	@# still in the tree and `cargo clean` is how its `target/` goes, but the
+	@# Debian build reaches this through `dh_auto_clean` -- and retiring the
+	@# Rust shim took the Rust toolchain out of `debian/control` entirely, so
+	@# the one remaining cargo call in a package build would be this line.
+	@# `if cond; then run; fi` rather than `cond && run || echo`, which would
+	@# report the skip for a cargo that IS there and failed.
+	@if command -v $(CARGO) >/dev/null 2>&1; then \
+		$(CARGO) clean; \
+	else \
+		echo "clean: cargo not installed, leaving target/ alone"; \
+	fi
 	@case "$(DIST)" in \
 	"") echo "clean: DIST is empty, refusing to remove anything"; exit 1 ;; \
 	/*) echo "clean: DIST is absolute ($(DIST)), refusing"; exit 1 ;; \

@@ -12498,6 +12498,105 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.504 The Rust shim is retired, and what went with it
+
+The copyright holder, 2026-10-21: "retire the Rust shim, <- the less code we
+have, the less bug surface to maintain." 0276 records it. `adapter/netcfgd-nm`
+has one implementation now, `make nm` and `make install-nm` build and install
+the C one, and 10,034 lines left the tree in one commit -- 8,736 of Rust across
+sixteen files, a 102-crate lockfile, a `deny.toml`, and the 174-line
+differential oracle.
+
+**The condition was 0264's and it was met the day before**: `tests/live/nm.sh`
+at 124 of 124, the guest tier at 214 of 214 (10.503). The C shim's own Makefile
+had carried the sentence "the Rust goes on shipping until this passes" since
+the port began, and the report that it passed sat beside it for one day.
+
+### The saving is not in the line count, and saying so is the point
+
+    the Rust shim     8,736 lines, 16 files, 102 crates in its lockfile
+    the C shim       12,909 lines of src and include, 1,615 of tests
+    shipped          224 KB, linking libdbus-1 and libc
+
+**The C is about 1.5 times the source for the same bus surface.** That is what C
+costs here and 0266 measured the same ratio for the daemon. What retiring the
+Rust buys is one program to fix instead of two, and a D-Bus stack of 102 crates
+replaced by a system library the distribution maintains. An entry claiming a
+line win would be a comfortable number standing in for the real one.
+
+### The package stopped needing a Rust toolchain at all
+
+This is the consequence nobody asked for and the largest one.
+`debian/control` carried `cargo (>= 1.85), rustc (>= 1.85)` with a comment
+saying they were "for `adapter/netcfgd-nm` and nothing else since 0266", and
+10.384 had already measured that one module as the sole reason the package
+needed them. Both are gone; `libdbus-1-dev` is in, because zbus was a crate
+that brought its own D-Bus and the C shim links the system's.
+
+**One cargo call was left on the package's path and it was not obvious.**
+`override_dh_auto_clean` runs `make clean`, whose first line was
+`$(CARGO) clean`, so dropping the toolchain would have failed the package build
+at the clean step rather than the build step. It skips loudly where cargo is
+absent now -- `if command -v; then ...; fi` and not `cond && run || echo`,
+which would report the skip for a cargo that is present and failed. Both arms
+were run: absent prints the skip and continues, present-and-failing fails the
+recipe.
+
+### Two gates had the Rust as their source of truth
+
+**`tool/dbus_policy_gate.py` parsed `#[zbus::interface(name = "...")]`.** It
+reads the C tables now, anchored on the type rather than on a string that looks
+like an interface name: a served interface is a value of type
+`nmc_interface_t`, which is what the dispatcher routes with and what the
+introspection renderer walks. That is what makes 0264's miss impossible rather
+than merely fixed -- `org.netcfgd.Compat` is an `nmc_interface_t` and cannot be
+overlooked, and `SecretAgent` is a `#define` the shim builds a call from and
+cannot be counted as served.
+
+**The two extractions were measured against each other on the one day both
+existed**: the same 18 interfaces, plus `org.freedesktop.DBus.ObjectManager`,
+which the C declares in its own tables because libdbus generates nothing and
+zbus did. That measurement cannot be taken again, which is why it is written
+here rather than left as a passing remark.
+
+It was kept static rather than made to ask the program. `nmc/bus.h` said
+`nmc_bus_introspect` was "exposed because the policy gate reads the served
+interface names", and nothing had ever wired that -- an intention that read as
+a fact. Running `netcfgd-nm --interfaces` would be the more decisive
+instrument, and it would add code to the shim for a gate's benefit and make the
+gate skip on a machine with no libdbus, which is exactly the machine where a
+missing grant is found by an operator with no network rather than by CI. The
+comment was corrected to say what the function is for: `tests/bus_test.c`.
+
+**`nm-containment`'s second half asserted the adapter's lockfile held at least
+twenty crates**, on the grounds that "the core does not have the adapter's
+dependencies" proves nothing if the adapter has none -- this tree's vacuous
+pass, guarded against. There is no lockfile to count. It asserts two things
+now: that the shim still takes D-Bus from the system
+(`pkg-config --libs dbus-1` in its Makefile), and that no adapter has acquired
+a `Cargo.lock` again, which is the only route by which the old leak could come
+back. Both arms were seen to fail -- the second one fired for real, before the
+Rust was deleted, which is as good a positive control as a gate gets.
+
+### What was lost, named because it is not recoverable
+
+`tool/nm-compare.sh` brought both shims up against `nm.sh`'s own fixture over a
+private bus and diffed what `nmcli` saw. Every defect it found was invisible
+from the properties: a wifi card served as an ethernet, a `Strength` formula
+its unit test agreed with because one hand wrote both, a `GROUP_CCMP` colliding
+with `KEY_MGMT_PSK` so a WPA3 network rendered as "WPA2 WPA3". **There is no
+second implementation to measure a C regression against any more.**
+
+What remains is evidence of a different kind and all of it was already running:
+`nm.sh`'s 124 checks through libnm, `bus_test`'s 178 over the tables and
+contracts -- 115 when 10.396 counted them, and the figure is re-read here
+rather than quoted -- and the guest tier's 214. The distinction worth keeping is that the
+oracle answered "where do these two differ", which is a question about an
+implementation, while these answer "can a client do this", which is a question
+about the product -- and the second is what mattered at the end. The last
+twelve defects of this port were found by libnm refusing something, not by a
+diff.
+
 ## 10.503 RequestScan, and the only honest thing a request can be
 
 The last failure in `nm.sh`. `RequestScan` was not a method at all, so
@@ -22425,6 +22524,11 @@ explicit that it is not authority to write it. What this entry does is remove
 the two reasons it was not being asked about: a record that said "stays" when
 it meant "not yet", and a schedule whose condition had quietly been satisfied.
 
+**Started that day, finished on 2026-10-21, and the Rust is gone** -- 0276,
+10.504. The measurement above is the one that aged best: one module was the
+sole reason the package needed a Rust toolchain, and retiring it took `cargo`
+and `rustc` out of `debian/control`.
+
 ## 10.383 Extracting `netcfgd-modem-at-proposal` so it can be deleted
 
 The proposal tree is **not a git repository** -- no `.git`, not a submodule,
@@ -27086,19 +27190,20 @@ comparison that had silently stopped comparing.
 
 ### What could not be retired
 
-**~~`adapter/netcfgd-nm` is Rust and stays Rust~~ -- it is Rust *for now*, and
-"stays" was this entry overstating 0264.** That record decided the answer is
-**link `libdbus-1`**, and "not yet"; it says in as many words that nothing in it
-is authority to write the module. Those are different claims, and the wrong one
-was quoted back to the copyright holder on 2026-10-02 as though they had
-instructed it. See 10.353.
+**~~`adapter/netcfgd-nm` is Rust and stays Rust~~ ~~-- it is Rust *for now*~~
+-- it is C, and both earlier versions of this sentence are overtaken.** The
+first overstated 0264, which decided the answer is **link `libdbus-1`** and "not
+yet" rather than "stays", and was quoted back to the copyright holder on
+2026-10-02 as though they had instructed it (10.353). The second was accurate
+for nineteen days: 0276 retired the Rust shim on 2026-10-21, once the C one
+passed 0264's acceptance test. See 10.504.
 
-The adapter is its own cargo workspace, built by `make nm`, shipped as
-`netcfgd-nm.service`, and the way NetworkManager's own clients reach netcfgd.
-So `cargo` and `rustc` remain Debian build dependencies while it does, and
-`debian/control` carries a comment saying they are the adapter's and not the
-daemon's -- that being exactly the line a tidying pass would delete, producing
-a package with no shim in it.
+What is left of this entry's substance is the shape of the dependency, which
+survived the language change: the adapter is built by `make nm`, shipped as
+`netcfgd-nm.service`, and is the way NetworkManager's own clients reach netcfgd.
+`cargo` and `rustc` were Debian build dependencies for exactly as long as it was
+Rust and are gone with it; `libdbus-1-dev` took their place, and the comment in
+`debian/control` still says which line a tidying pass must not delete.
 
 The Qt client is C++ and was never in question.
 
@@ -30604,6 +30709,14 @@ unprivileged clients of the control socket. `client/ncfg_client.c` already
 speaks that protocol in C. An adapter staying Rust is the arrangement, not a
 gap -- which is worth writing down because "is everything duplicated as C?" has
 been asked and the honest answer has two parts.
+
+**~~Not supposed to~~ -- it has one, and it is the only one.** Written as of
+2026-10-02 and overtaken within three weeks: the holder had the adapter ported
+to C over `libdbus-1` (10.384, 0264) and then retired the Rust (0276, 10.504).
+The reasoning above still holds for what an adapter IS -- an unprivileged
+client of the control socket, outside section 1's scope and outside the core's
+dependency graph -- and the language is no longer part of it. There is no cargo
+workspace under `adapter/` any more, which `nm-containment` now asserts.
 
 ## 10.277 The variable that exists so a test does not rewrite this machine
 

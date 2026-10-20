@@ -447,9 +447,10 @@ int main(int argc, char **argv)
 	 * not wasted either -- the device numbers exist before the first client
 	 * call rather than being assigned inside it.
 	 *
-	 * `main.rs` refuses here in the same words, and `tests/live/nm.sh` greps
-	 * for them: the wording is a contract between the two implementations and
-	 * not decoration.
+	 * `tests/live/nm.sh` greps for these words, so the wording is a contract
+	 * with the acceptance test and not decoration. The Rust shim refused here
+	 * in the same words, which is where the contract came from; 0276 retired
+	 * that program and the test is what holds it now.
 	 */
 	nmc_window_begin();
 	if (!nmc_store_refresh(&store)) {

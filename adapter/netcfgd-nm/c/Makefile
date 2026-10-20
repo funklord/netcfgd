@@ -6,17 +6,18 @@
 #   answer, written once the dependency order it named was satisfied (project.md
 #   10.384).
 #
-#   Beside the Rust rather than replacing it, which mirrors the daemon's own
-#   arrangement: `crates/` and `c/` at the top level, `netcfgd-nm/` and
-#   `netcfgd-nm/c/` here. The Rust goes on shipping until this passes
-#   `tests/live/nm.sh`, which is 0264's acceptance test and is the holder's call
-#   to act on.
+#   **This is the shim.** It was built beside the Rust one, mirroring the
+#   daemon's own arrangement -- `crates/` and `c/` at the top level,
+#   `netcfgd-nm/` and `netcfgd-nm/c/` here -- on the condition that the Rust
+#   went on shipping until this passed `tests/live/nm.sh`, 0264's acceptance
+#   test. That test passed on 2026-10-20 at 124 checks of 124, with the whole
+#   guest tier at 214 of 214 and seven scripts of seven, and the copyright
+#   holder retired the Rust the next day (0276, project.md 10.503 and 10.504).
 #
-#   **That test passes now**: 124 checks of 124, measured 2026-10-20 in the
-#   guest tier, where the whole of `make vm-skipped` is 214 of 214 and seven
-#   scripts of seven. What that unlocks is still the holder's to decide and
-#   nothing here has acted on it -- the sentence above is the condition, and
-#   this is the report that it is met (project.md 10.503).
+#   The directory is still `netcfgd-nm/c/` rather than `netcfgd-nm/`, because
+#   moving it would rewrite every path in the gates, the live scripts and the
+#   records that cite them for no gain a reader can use. The adapter has one
+#   implementation and this is it.
 #
 # TARGETS
 #   make            -- the program

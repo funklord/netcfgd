@@ -64,8 +64,11 @@ static void network_of(const nmc_device_slot_t *slot, char *out, size_t out_size
  * a network. A client cannot put that together -- `nmcli` merges an activation
  * into its profile's row by matching the uuid, so an activation whose uuid was a
  * device name appeared as a connection of its own beside the profile it was
- * actually an activation of. Seven profiles and five phantom rows, which is what
- * `tool/nm-compare.sh` shows against the Rust shim.
+ * actually an activation of. Seven profiles and five phantom rows, which is how
+ * the differential oracle showed it while both shims existed -- `nmcli` asked
+ * the same questions of each and the answers were diffed. That oracle went with
+ * the Rust (0276); what replaces it as evidence is `tests/live/nm.sh`, which
+ * asserts the four answers agree.
  *
  * The profile is the device's `network` where its link reports one, and the
  * device's own `interface` block otherwise. Answers 0 where there is neither --

@@ -64,9 +64,10 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * no branch for. Decided by the copyright holder 2026-10-17, from the finding
  * in project.md 10.486.
  *
- * It goes back in the same commit as the method, not before it. `manager.rs`
- * lists it because the Rust shim implements it, and the two lists differing is
- * the mechanism working rather than drift.
+ * It goes back in the same commit as the method, not before it. The Rust shim
+ * listed it because it implemented the method, and the two lists differing was
+ * the mechanism working rather than drift; there is one list now (0276), so the
+ * rule is simply that a key goes in with the method and not ahead of it.
  *
  * **`wifi_scan` had an asymmetry and no longer does.** It stayed in this list
  * while `RequestScan` refused, because reading what a scan found is what the

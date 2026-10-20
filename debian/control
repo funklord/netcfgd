@@ -3,12 +3,19 @@ Section: net
 Priority: optional
 Maintainer: Nabeel Sowan <nabeel@vibes.se>
 Homepage: https://github.com/netcfgd/netcfgd
-# cargo and rustc are for `adapter/netcfgd-nm` and nothing else since 0266: the
-# daemon and the client are C, and `make build` needs neither. The adapter is
-# still Rust over zbus, 0264 having decided its C replacement is "not yet", so
-# removing these would build a package with no NetworkManager shim in it.
-Build-Depends: debhelper-compat (= 13), cargo (>= 1.85), rustc (>= 1.85),
- libncurses-dev, pkgconf,
+# **No Rust toolchain.** cargo and rustc were here for `adapter/netcfgd-nm` and
+# nothing else since 0266 -- the daemon and the client are C and `make build`
+# needs neither -- and 0276 retired that Rust shim for the C one. What the
+# package builds is now C throughout, so the dependency went with it; the one
+# cargo call left on this path was `make clean`, which skips loudly where cargo
+# is absent.
+#
+# libdbus-1-dev arrived in the same change and for the same reason: zbus was a
+# crate and brought its own D-Bus, while the C shim links the system library.
+# Removing it builds a package with no NetworkManager shim in it, which is the
+# line the old comment was written to protect.
+Build-Depends: debhelper-compat (= 13),
+ libdbus-1-dev, libncurses-dev, pkgconf,
  qt6-base-dev <pkg.netcfgd.gui>,
 # TDE's CMake modules are a package of their own: tde-cmake carries
 # TDEMacros, TDEVersion and TDESetupPaths, which is what decides where a

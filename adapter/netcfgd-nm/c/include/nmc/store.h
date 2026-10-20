@@ -38,7 +38,7 @@ typedef struct {
 	 * happen inside the call -- a radio takes a second or two to sweep the
 	 * band and this shim answers nothing while a handler runs. The method
 	 * records it here and the tick performs it, which is the shape the Rust
-	 * shim reaches by posting a job to its main loop.
+	 * shim reached by posting a job to its main loop.
 	 */
 	int          scan_wanted;
 } nmc_device_slot_t;

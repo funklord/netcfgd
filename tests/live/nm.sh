@@ -39,13 +39,16 @@ if "$build/netcfgd" --help 2>&1 | grep -q -- '--try-the-c-daemon'; then
 	daemon_flags=--try-the-c-daemon
 fi
 export daemon_flags
-# **The C port, which is the thing 0264 asks this to accept.** It was pointed at
-# the Rust shim for as long as that was the only one; an oracle aimed at the
-# implementation that is being replaced says nothing about the replacement.
+# **The C port, which is the thing 0264 asks this to accept**, and since 0276
+# the only shim there is. It was pointed at the Rust one for as long as that
+# existed, because an oracle aimed at the implementation being replaced says
+# nothing about the replacement.
 #
-# `NCFG_NM_SHIM` points it back, which is what makes a failure here readable: the
-# same 115 checks against the other binary separate "the port is wrong" from
-# "the check was always wrong". Both were passing when this was switched.
+# `NCFG_NM_SHIM` is kept. It pointed at the other binary while there were two,
+# which separated "the port is wrong" from "the check was always wrong"; what it
+# is for now is pointing at a build somewhere else -- an installed
+# `/usr/bin/netcfgd-nm`, or a tree a bisect left in another directory -- which
+# is the same question asked of a different binary.
 shim="${NCFG_NM_SHIM:-$repo/adapter/netcfgd-nm/c/netcfgd-nm}"
 # **Defined, because `set -u` is on and this was used undefined.** One wait
 # loop below asks `$ncfg plan`, and with the variable unset the script died
@@ -67,7 +70,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 command -v nmcli >/dev/null 2>&1 || skip "nmcli is not installed (apt install network-manager | apk add networkmanager)"
 command -v dbus-daemon >/dev/null 2>&1 || skip "dbus-daemon is not installed"
 [ -x "$build/netcfgd" ] || skip "netcfgd is not built"
-[ -x "$shim" ] || skip "netcfgd-nm is not built (make adapters)"
+[ -x "$shim" ] || skip "netcfgd-nm is not built (make nm)"
 
 # Short, because a unix socket path has to fit in sun_path and the repo may be
 # checked out somewhere deep. The first version of this used the scratch
@@ -1182,9 +1185,7 @@ else
 	# model's JSON carries it, and netcfgd refused the whole file: `unknown
 	# network key`. So this add failed outright and nothing noticed, the band
 	# having set metered and the priority and never this (project.md 10.498).
-	# **It is still wrong in the Rust**, so this check fails when the suite is
-	# pointed at that build -- which is the comparison working rather than a
-	# problem with the check.
+	# Both were fixed; one of them has since been retired (0276).
 	nmcli connection add type wifi ifname '*' con-name Manual ssid Manual \
 		connection.autoconnect no > "$work/manual.log" 2>&1 || true
 	manual="$work/etc/conf.d/nm-Manual.conf"
