@@ -551,6 +551,11 @@ void ncfg_links_free(ncfg_links_t *links)
 		free(links->items[i].master);
 		free(links->items[i].parent);
 		free(links->items[i].public_key);
+		for (size_t at = 0; at < links->items[i].route_count; at++) {
+			free(links->items[i].routes[at].destination);
+			free(links->items[i].routes[at].via);
+		}
+		free(links->items[i].routes);
 	}
 	free(links->items);
 	memset(links, 0, sizeof(*links));
@@ -776,6 +781,58 @@ static char *link_default_via(const ncfg_json_doc_t *doc, uint32_t routes, const
 	return NULL;
 }
 
+/*
+ * The routes on one link, in the main table and in the observation's order.
+ *
+ * The same entries `link_default_via` walks, kept this time instead of reduced
+ * to one field: a client that can be told a default route exists and nothing
+ * about any other route cannot draw a route table. Table 254 for the reason
+ * that walker gives, and the default is kept in the list rather than dropped --
+ * whoever reports NM's split of it has the gateway field to put it in and can
+ * tell which entry it is, where a reader given a list with a hole in it cannot.
+ */
+static int read_link_routes(const ncfg_json_doc_t *doc, uint32_t routes, const char *name,
+                            ncfg_route_t **into, size_t *into_count)
+{
+	uint32_t count = ncfg_json_count(doc, routes);
+	size_t   kept = 0;
+
+	for (uint32_t i = 0; i < count; i++) {
+		uint32_t entry = ncfg_json_at(doc, routes, i);
+		if (ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "interface"), name) &&
+		    ncfg_json_int(doc, ncfg_json_member(doc, entry, "table"), 0) == 254) {
+			kept++;
+		}
+	}
+	if (!kept) {
+		return 1;
+	}
+	*into = calloc(kept, sizeof(**into));
+	if (!*into) {
+		return 0;
+	}
+	for (uint32_t i = 0; i < count && *into_count < kept; i++) {
+		uint32_t entry = ncfg_json_at(doc, routes, i);
+		ncfg_route_t *route;
+
+		if (!ncfg_json_string_equals(doc, ncfg_json_member(doc, entry, "interface"), name) ||
+		    ncfg_json_int(doc, ncfg_json_member(doc, entry, "table"), 0) != 254) {
+			continue;
+		}
+		route = &(*into)[(*into_count)++];
+		route->destination = member_text(doc, entry, "destination");
+		route->via = member_text(doc, entry, "via");
+		/* -1 for absent, which is this field's rule everywhere: the kernel
+		 * states no metric on a route it derived from an address. */
+		route->metric =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "metric"), -1);
+		if (!route->destination || !route->via) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *err, size_t err_size)
 {
 	uint32_t root = ncfg_json_root(doc);
@@ -818,6 +875,11 @@ static int convert_links(const ncfg_json_doc_t *doc, ncfg_links_t *out, char *er
 		item->default_route =
 		    item->name ? link_has_default_route(doc, routes, item->name) : 0;
 		item->default_via = item->name ? link_default_via(doc, routes, item->name) : NULL;
+		if (item->name &&
+		    !read_link_routes(doc, routes, item->name, &item->routes, &item->route_count)) {
+			set_error(err, err_size, "out of memory");
+			return 0;
+		}
 		// **The daemon's answer where there is one.** netcfgd reads
 		// /sys/class/net/<name>/wireless and puts it on the wire; guessing
 		// from the name was all a client could do before, and it disagrees
@@ -1933,9 +1995,19 @@ void ncfg_dns_free(ncfg_dns_t *dns)
 		free(dns->search[i]);
 	}
 	free(dns->search);
+	for (size_t i = 0; i < dns->applied_server_count; i++) {
+		free(dns->applied_servers[i]);
+	}
+	free(dns->applied_servers);
+	for (size_t i = 0; i < dns->applied_search_count; i++) {
+		free(dns->applied_search[i]);
+	}
+	free(dns->applied_search);
 	dns->mode = NULL;
 	dns->servers = NULL;
 	dns->search = NULL;
+	dns->applied_servers = NULL;
+	dns->applied_search = NULL;
 	dns->server_count = 0;
 	dns->search_count = 0;
 	dns->managing = 0;
@@ -1964,6 +2036,35 @@ static char **string_list(const ncfg_json_doc_t *doc, uint32_t array, size_t *co
 		size_t length = 0;
 		const char *text = ncfg_json_string(doc, ncfg_json_at(doc, array, i), &length);
 		items[i] = text ? dup_text(text, length) : dup_string("");
+	}
+	return items;
+}
+
+/*
+ * The same, for a list of objects carrying one named field.
+ *
+ * A nameserver in the observation is `{"addr": "10.0.0.1"}` rather than a bare
+ * string, because it may also carry a port and an SNI name -- so this takes the
+ * part a list of addresses needs and leaves the rest where it is. An entry
+ * without the field contributes an empty string rather than being skipped: a
+ * list whose length is the daemon's is one a caller can index against the
+ * daemon's own order.
+ */
+static char **field_list(const ncfg_json_doc_t *doc, uint32_t array, const char *field,
+                         size_t *count)
+{
+	*count = 0;
+	uint32_t total = ncfg_json_count(doc, array);
+	if (!total) {
+		return NULL;
+	}
+	char **items = calloc(total, sizeof(*items));
+	if (!items) {
+		return NULL;
+	}
+	*count = total;
+	for (uint32_t i = 0; i < total; i++) {
+		items[i] = member_text(doc, ncfg_json_at(doc, array, i), field);
 	}
 	return items;
 }
@@ -2000,7 +2101,37 @@ int ncfg_client_dns(ncfg_client_t *client, ncfg_dns_t *out, char *err, size_t er
 	if (doc) {
 		if (!took_refusal(doc, err, err_size)) {
 			uint32_t observed = ncfg_json_member(doc, ncfg_json_root(doc), "dns");
-			out->managing = ncfg_json_count(doc, observed) > 0;
+			uint32_t scopes = ncfg_json_count(doc, observed);
+			out->managing = scopes > 0;
+			/*
+			 * **The values, not only whether there are any.** This read the
+			 * count and threw the rest away, so a client could be told
+			 * netcfgd holds resolver state and not what it resolves with --
+			 * which is what `IP4Config.Nameservers` had to answer with an
+			 * empty list while `resolv.conf` named two servers.
+			 *
+			 * The globals scope, because that is the machine's answer and
+			 * the one a per-connection field has to stand in for. A scope
+			 * per link is what 0007 allows and what a per-interface answer
+			 * would need; nothing reads that yet.
+			 */
+			for (uint32_t i = 0; i < scopes; i++) {
+				uint32_t scope = ncfg_json_at(doc, observed, i);
+				uint32_t policy;
+
+				if (!ncfg_json_string_equals(doc,
+				        ncfg_json_member(doc, scope, "scope"), "globals")) {
+					continue;
+				}
+				policy = ncfg_json_member(doc, scope, "policy");
+				out->applied_servers = field_list(doc,
+				    ncfg_json_member(doc, policy, "servers"), "addr",
+				    &out->applied_server_count);
+				out->applied_search = string_list(doc,
+				    ncfg_json_member(doc, policy, "search"),
+				    &out->applied_search_count);
+				break;
+			}
 		}
 		ncfg_json_free(doc);
 	}

@@ -12498,6 +12498,81 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.501 The IP4Config band: four faults, and a rig that had never applied
+
+0032's other half. `IP4Config` and `IP6Config` answer what the machine is
+doing, where a profile answers what was asked for -- and four of their
+properties were wrong in four different ways.
+
+### Four properties, four different faults
+
+**An address with a space on the front.** netcfgd joins a link's addresses with
+`, `, and the splitter did not skip whitespace -- so the first address was
+clean and every one after it arrived as ` 2001:db8:7::1`, which libnm parses,
+fails, and drops. A client saw the v4 address and nothing else. It survived
+`Addresses` and its packed form agreeing with each other, because both read the
+same already-broken list, and it could only ever show on a second address of
+the other family.
+
+**Routes that were never kept.** The client library walked the observation's
+routes to set `default_route` and `default_via` and discarded the rest, so
+`RouteData` had nothing to answer with: a device whose kernel held three routes
+reported none, and the only thing a client could see was the gateway. The data
+had been on the wire the whole time, which is 10.497's finding in another
+property.
+
+**Nameservers from the document rather than the machine.** `ncfg_client_dns`
+read the `status` response's resolver observation and kept `count > 0` as a
+boolean -- so the shim could say netcfgd was managing resolution and not what
+it resolved with, while `resolv.conf` named two servers. The check that asks
+for this says so in its own name: *the nameservers come from what was applied,
+not from the config*.
+
+**And both families in both objects.** Every server went into `IP4Config` and
+`IP6Config` alike, so a client reading the v4 object was offered an IPv6
+nameserver to use as one. The wrong-family fault the address list already had,
+one property along -- which is now the third place it has appeared, after the
+`ipv4` settings group and the v6 gateway.
+
+### The rig had never applied anything
+
+Four faults in one band, and the reason they were all still here is worth more
+than any of them. **The host rig's apply had been failing wholesale since it
+was written**: netcfgd's apply is a plan, a missing `wg0` credential stops it
+at the first step, and the daemon said so every time --
+
+    [apply] Error: reconcile stopped at wg.set_device: wg0: private key:
+    secret `wg0` was not found ...; 0 done, 18 not attempted
+
+`nm.sh` writes that secret in its setup and the rig had replaced that part. So
+the rig had no addresses, no routes and no `resolv.conf`, and both IP config
+objects were `/` -- a device with nothing to report has no object at all.
+
+Everything the rig had been used for read the **document** or the **saved
+networks**: the renderer, `GetSettings`, the agent. All of that was sound, and
+none of it touches applied state. So the rig passed every check it could see
+while the machine it was testing against had no addresses on it.
+
+**Two blind spots, then, and they are different in kind.** One is that `gdbus`
+is not libnm, so a raw client cannot see a refusal a real client makes
+(10.500). The other is that a rig is only as good as its fixture, and a fixture
+missing one credential silenced an entire layer -- quietly, with the daemon
+printing the reason into a log nobody read. The first is a property of the
+instrument; the second was a property of nobody having looked at
+`daemon.log` until something forced it.
+
+### The band, and the three that are left
+
+`nm.sh` goes from 117 and 7 to **121 and 3**: the four properties, and nothing
+else moved.
+
+What remains is `RequestScan`, which 10.486 records, and a pair about the
+device-to-activation join -- `deactivating reaches it too` and `the device
+names what is active on it`. Neither of those is a settings or a config object:
+they are about what the manager reports as active on a device, which is the
+last thing in `nm.sh` the shim answers from a different place than the band it
+sits in.
+
 ## 10.500 The agent band: the shim asks, for the first time
 
 Design section 9.3's other half. `agent.c` has held the registry since it was

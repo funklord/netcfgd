@@ -136,6 +136,24 @@ const char *ncfg_client_error_message(const ncfg_json_doc_t *doc, size_t *length
  * were the reader's business rather than a screen's.
  */
 
+/*
+ * One route: where to, through what, at what rank.
+ *
+ * **Two callers and one shape.** An `interface` block's routes are what a form
+ * can carry -- anything else a route states is named through `unmodelled`
+ * rather than approximated -- and a link's observed routes are what the kernel
+ * has. The three fields mean the same thing in both; what differs is where
+ * they came from, which is a property of the thing that holds the list rather
+ * than of a route.
+ */
+typedef struct {
+	char *destination; /* `default` or a prefix */
+	char *via;         /* "" for a route with no gateway */
+	/* -1 where none is stated: 0 is a legal metric and the strongest one, so
+	 * an absent metric must not arrive as 0. */
+	int   metric;
+} ncfg_route_t;
+
 /* One interface, as `status` reports it. */
 typedef struct {
 	char *name;
@@ -166,6 +184,19 @@ typedef struct {
 	 * It is the last thing observable without asking the network, which
 	 * makes it the honest ceiling for an icon.
 	 */
+	/*
+	 * **The routes on this link in the main table**, in the observation's
+	 * order, with `metric` -1 where the kernel reports none.
+	 *
+	 * The observation has carried these all along and this library walked
+	 * them only to set the two fields below -- so a client could be told that
+	 * a default route exists and nothing about any other route, which is what
+	 * `IP4Config.RouteData` had to answer with an empty list. Table 254 only,
+	 * for the reason `default_route` gives: a route in another table belongs
+	 * to a policy nobody asked this question about.
+	 */
+	ncfg_route_t *routes;
+	size_t        route_count;
 	int   default_route;
 	/*
 	 * The next hop of that default route, or NULL where there is none.
@@ -1176,14 +1207,6 @@ typedef struct {
 	char *address;
 } ncfg_address_source_t;
 
-/* One route on an interface, as a form can carry it. */
-typedef struct {
-	char *destination; /* `default` or a prefix */
-	char *via;         /* "" for a route with no gateway */
-	/* -1 where the document states none: 0 is a legal metric and the
-	 * strongest one, so an absent metric must not arrive as 0. */
-	int   metric;
-} ncfg_route_t;
 
 /*
  * An interface's own name resolution.
@@ -1965,6 +1988,20 @@ typedef struct {
 	char **search;
 	size_t search_count;
 	int    managing;     /* netcfgd holds resolver state right now */
+	/*
+	 * **What resolution is using now**, from the observation rather than the
+	 * document -- the same split `managing` is about, carried through to the
+	 * values. A screen that shows the configured list shows what was asked
+	 * for, and 0007's whole point is that a machine's scopes can resolve to
+	 * something else: the globals policy here is what `resolv.conf` says.
+	 *
+	 * Empty where netcfgd holds no resolver state, which is what `managing`
+	 * being 0 means. The two are read from one answer.
+	 */
+	char **applied_servers;
+	size_t applied_server_count;
+	char **applied_search;
+	size_t applied_search_count;
 } ncfg_dns_t;
 
 void ncfg_dns_free(ncfg_dns_t *dns);
