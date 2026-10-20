@@ -30,6 +30,17 @@ typedef struct {
 	 * the call without allocating per listing. */
 	char         label[12];
 	nmc_state_t *state;   /* so a property getter can reach the client */
+	/*
+	 * **A scan somebody asked for and the loop has not done yet.**
+	 *
+	 * `RequestScan` is a request: NM's own method returns at once and the
+	 * results arrive as the access point list changing, so the scan cannot
+	 * happen inside the call -- a radio takes a second or two to sweep the
+	 * band and this shim answers nothing while a handler runs. The method
+	 * records it here and the tick performs it, which is the shape the Rust
+	 * shim reaches by posting a job to its main loop.
+	 */
+	int          scan_wanted;
 } nmc_device_slot_t;
 
 typedef struct {
@@ -55,6 +66,18 @@ int nmc_store_refresh(nmc_store_t *store);
 
 /* The slot for a `/Devices/<tail>` path, or NULL. */
 nmc_device_slot_t *nmc_store_resolve(nmc_store_t *store, const char *tail);
+
+/*
+ * Ask for a scan on this device, and take the request away again.
+ *
+ * Two halves of one flag, kept together so that the rule for it lives in one
+ * place: `RequestScan` asks, the tick takes. Taking clears it, so a client that
+ * asks twice before the loop comes round gets one scan -- which is what a
+ * request means, where a queue of them would have the radio sweeping the band
+ * for as long as somebody held a button down.
+ */
+void nmc_store_want_scan(nmc_device_slot_t *slot);
+int  nmc_store_take_scan(nmc_device_slot_t *slot);
 
 /* The object path for a device name, or NULL where it has no slot. */
 const char *nmc_store_path_for(nmc_store_t *store, const char *name);

@@ -68,12 +68,13 @@ static int say_claimed_version(DBusMessageIter *into, void *object, char *err, s
  * lists it because the Rust shim implements it, and the two lists differing is
  * the mechanism working rather than drift.
  *
- * **`wifi_scan` stays, and the asymmetry is deliberate.** `RequestScan`
- * refuses here too, but reading what a scan found is what this tier is about
- * in every client that uses it -- the access point list, each one's signal
- * mapped onto NM's scale -- and all of that is served and checked. Requesting
- * a fresh one is the half that is missing, and removing the key would tell a
- * client the results are unavailable when they are there.
+ * **`wifi_scan` had an asymmetry and no longer does.** It stayed in this list
+ * while `RequestScan` refused, because reading what a scan found is what the
+ * tier is about in every client that uses it -- the access point list, each
+ * one's signal mapped onto NM's scale -- and removing the key would have told
+ * a client the results were unavailable when they were there. Requesting a
+ * fresh one was the half that was missing; it is served now, so the key means
+ * the whole tier rather than most of it.
  */
 static const char *const SUPPORTED[] = {
 	"devices", "device_state", "wifi_scan", "connections", "activation",

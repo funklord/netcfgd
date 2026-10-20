@@ -242,12 +242,49 @@ static void announce_state(heartbeat_t *beat_on, const char *path, const char *i
 	    with_reason ? 3u : 1u);
 }
 
+/*
+ * One scan somebody asked for, performed where the loop can afford to wait.
+ *
+ * **`ncfg_client_wifi_scan` rather than the windowed accessor**, which would
+ * answer from this tick's cache if a property read had already filled it. The
+ * window exists so that one dispatch does not fetch the same list twice; a
+ * request is for a FRESH sweep, and serving it from a cache would make
+ * `RequestScan` a no-op exactly when a client had reason to ask.
+ *
+ * **The failure goes to stderr and no further.** By the time this runs the
+ * caller has had its reply -- that is what a request means -- so there is
+ * nobody to return a message to, and netcfgd's own sentence is the useful
+ * thing to keep. A scan that found nothing and a scan that could not run both
+ * arrive at a client as an unchanged access point list, which is the one
+ * honest cost of NM's shape here.
+ */
+static void sweep(nmc_device_slot_t *slot)
+{
+	/* The slot carries the state, which is how every getter reaches the
+	 * client: the heartbeat holds the stores rather than the state itself. */
+	ncfg_client_t *client = slot ? nmc_state_client(slot->state) : NULL;
+	ncfg_scan_t    scan;
+	char           problem[NMC_ERROR_MAX] = "";
+
+	if (!client || !slot || !slot->name) {
+		return;
+	}
+	memset(&scan, 0, sizeof(scan));
+	if (!ncfg_client_wifi_scan(client, slot->name, &scan, problem, sizeof(problem))) {
+		(void)fprintf(stderr, "netcfgd-nm: the scan asked for on %s was refused: %s\n",
+		    slot->name, problem);
+		return;
+	}
+	ncfg_scan_free(&scan);
+}
+
 static void beat(void *context)
 {
 	heartbeat_t *beat_on = context;
 	const char  *names[256];
 	size_t       count;
 	size_t       which;
+	size_t       at;
 
 	/* The poll reads the same properties a dispatch does, so it wants the
 	 * same window -- otherwise one tick would be the sixty-two fetches that
@@ -260,6 +297,20 @@ static void beat(void *context)
 		beat_on->cursor = 0u;
 	}
 	announce_membership(beat_on);
+	/*
+	 * **Every pending scan on every tick, rather than one device per tick.**
+	 * The cursor below exists because reading one device's thirty-one
+	 * properties is expensive; testing a flag is not, and a client that asked
+	 * for a scan should not wait a second for each device ahead of it in the
+	 * round-robin. Nothing happens here on a machine where nobody asked.
+	 */
+	for (at = 0u; at < count; at++) {
+		nmc_device_slot_t *slot = nmc_store_resolve(beat_on->store, names[at]);
+
+		if (nmc_store_take_scan(slot)) {
+			sweep(slot);
+		}
+	}
 	which = beat_on->cursor++;
 	if (which == 0u) {
 		(void)nmc_watch_poll(beat_on->watch, beat_on->connection, beat_on->manager);

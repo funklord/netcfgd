@@ -12,6 +12,12 @@
 #   `tests/live/nm.sh`, which is 0264's acceptance test and is the holder's call
 #   to act on.
 #
+#   **That test passes now**: 124 checks of 124, measured 2026-10-20 in the
+#   guest tier, where the whole of `make vm-skipped` is 214 of 214 and seven
+#   scripts of seven. What that unlocks is still the holder's to decide and
+#   nothing here has acted on it -- the sentence above is the condition, and
+#   this is the report that it is met (project.md 10.503).
+#
 # TARGETS
 #   make            -- the program
 #   make test       -- build and run the checks

@@ -22,6 +22,7 @@
  *   before resolving anything; see the comment there, which is the defect's.
  */
 #include "nmc/subtypes.h"
+#include "nmc/store.h"
 #include "nmc/accesspoint.h"
 
 #include <stdio.h>
@@ -409,6 +410,47 @@ static const nmc_property_t WIRELESS_PROPERTIES[] = {
 	{ "ActiveAccessPoint", "o", NMC_READ, say_active_ap, NULL }
 };
 
+/*
+ * `RequestScan`: ask the radio to sweep the band.
+ *
+ * **A request, which is what NM's own method is.** It returns at once and the
+ * results arrive as the access point list changing -- so the scan cannot
+ * happen here: a radio takes a second or two and this shim answers nothing
+ * while a handler runs. The request is recorded on the device and the tick
+ * performs it, which is the shape `state.rs` reaches by posting a job.
+ *
+ * **Not authorized, and that is the existing position rather than a new one.**
+ * A scan is not a write -- 0264's rule is about changing the operator's
+ * configuration -- and reading the access point list already asks netcfgd for
+ * a scan today, with no check, because that is how the list is built. What
+ * bounds this is the tier netcfgd grants this shim's own socket, which is
+ * where every other observation is bounded too.
+ *
+ * **The options are read and dropped.** NM carries `ssids` there for a
+ * directed scan at hidden networks; netcfgd's scan takes no hints, so the
+ * honest answer is to sweep and let the list say what was found rather than
+ * pretend a filter was applied. A client asking for one gets a full scan,
+ * which is a superset of what it asked about.
+ */
+static int request_scan(DBusConnection *connection, DBusMessage *call, DBusMessage *reply,
+    void *object, char *err, size_t err_size)
+{
+	(void)connection;
+	(void)call;
+	(void)reply;
+	if (!object) {
+		(void)snprintf(err, err_size,
+		    "there is no device at this path any more, so there is nothing to scan");
+		return 0;
+	}
+	nmc_store_want_scan(object);
+	return 1;
+}
+
+static const nmc_method_t WIRELESS_METHODS[] = {
+	{ "RequestScan", "a{sv}", "", request_scan }
+};
+
 /* The two a client watches to keep a network list up to date. */
 static const nmc_signal_t WIRELESS_SIGNALS[] = {
 	{ "AccessPointAdded", "o" },
@@ -419,6 +461,8 @@ static const nmc_interface_t WIRELESS = {
 	.name = "org.freedesktop.NetworkManager.Device.Wireless",
 	.properties = WIRELESS_PROPERTIES,
 	.property_count = sizeof(WIRELESS_PROPERTIES) / sizeof(WIRELESS_PROPERTIES[0]),
+	.methods = WIRELESS_METHODS,
+	.method_count = sizeof(WIRELESS_METHODS) / sizeof(WIRELESS_METHODS[0]),
 	.signals = WIRELESS_SIGNALS,
 	.signal_count = sizeof(WIRELESS_SIGNALS) / sizeof(WIRELESS_SIGNALS[0])
 };

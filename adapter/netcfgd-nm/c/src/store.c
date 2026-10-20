@@ -121,6 +121,23 @@ int nmc_store_refresh(nmc_store_t *store)
 	return 1;
 }
 
+void nmc_store_want_scan(nmc_device_slot_t *slot)
+{
+	if (slot) {
+		slot->scan_wanted = 1;
+	}
+}
+
+int nmc_store_take_scan(nmc_device_slot_t *slot)
+{
+	int wanted = slot ? slot->scan_wanted : 0;
+
+	if (slot) {
+		slot->scan_wanted = 0;
+	}
+	return wanted;
+}
+
 nmc_device_slot_t *nmc_store_resolve(nmc_store_t *store, const char *tail)
 {
 	unsigned number = 0u;

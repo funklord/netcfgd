@@ -12498,6 +12498,88 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.503 RequestScan, and the only honest thing a request can be
+
+The last failure in `nm.sh`. `RequestScan` was not a method at all, so
+`nmcli device wifi rescan` got the dispatcher's
+`this interface has no such method in this build` -- which is 10.486's lesson
+about a tier advertised and half served, met one method along.
+
+### A request returns, and the scan happens afterwards
+
+NM's method returns at once and the results arrive as the access point list
+changing. That is not a convention to copy for its own sake: a radio takes a
+second or two to sweep the band, and this shim answers nothing while a handler
+runs, so a scan inside the call would stop every other client for the duration.
+The Rust posts a job to its main loop; this records the request on the device
+slot and the tick performs it.
+
+**Every pending scan on every tick, rather than one device per tick.** The
+round-robin cursor exists because reading one device's thirty-one properties is
+expensive (10.396); testing a flag is not, and a client that asked should not
+wait a second for each device ahead of it. Nothing happens on a machine where
+nobody asked.
+
+**Taking the request clears it**, so a client that asks twice before the loop
+comes round gets one scan. That is what a request means, where a queue of them
+would have the radio sweeping for as long as somebody held a button down.
+
+**And the sweep asks netcfgd directly rather than through the windowed
+accessor**, which would answer from this tick's cache if a property read had
+already filled it -- serving a request for a FRESH sweep out of a cache would
+make the method a no-op exactly when a client had reason to call it.
+
+### Not authorized, which is the existing position rather than a new one
+
+A scan is not a write: 0264's rule is about changing the operator's
+configuration. And reading the access point list already asks netcfgd for a
+scan today, with no check, because that is how the list is built -- so adding
+this adds no exposure that was not already there. What bounds it is the tier
+netcfgd grants this shim's own socket, which is where every other observation
+is bounded.
+
+The options argument is read and dropped. NM carries `ssids` there for a
+directed scan at hidden networks and netcfgd's scan takes no hints, so the
+honest answer is to sweep and let the list say what was found: a client asking
+about one network gets a full scan, which is a superset of what it asked for.
+
+### What the host rig could and could not show
+
+It showed the method returning `()` in zero seconds, and a `SCAN` reaching the
+fake supplicant afterwards. **It could not show that the second was caused by
+the first.** The tick polls a radio's access point list as it comes round, and
+that read performs a scan of its own -- so a scan arriving within a tick of the
+request is consistent with either cause, and the reading says only that scans
+happen.
+
+Recorded rather than papered over, because it is the session's recurring shape:
+a control that cannot discriminate between two explanations is not evidence for
+either. Distinguishing them needs a fixture whose reads do not scan, which is
+not this one. What the live check asserts is the thing that was actually broken
+-- that a client asking produces no error -- and that is now true.
+
+### The band is closed, and what that is and is not
+
+`nm.sh` goes from 123 and 1 to **124 and 0**, and the guest tier as a whole to
+**214 of 214 with seven scripts of seven** -- the first run of `make
+vm-skipped` this session to exit 0.
+
+**That is 0264's acceptance test, passing.** The adapter's Makefile has said
+since it was written that "the Rust goes on shipping until this passes
+`tests/live/nm.sh`, which is 0264's acceptance test and is the holder's call to
+act on." The condition is met; the call is not this session's to make, and
+nothing here has acted on it. The Makefile records that the condition is met
+and leaves the sentence about whose decision it is exactly where it was.
+
+What the suite proves is what it drives: 37 interfaces reached through a real
+`nmcli`, a real `dbus-python` secret agent, and netcfgd itself, with every
+profile write, the credential bridge, both IP families in both directions, and
+the activation path. What it does not prove is anything no client in it asks
+for -- and this session found four such things by asking: a group `GetSettings`
+did not report, a key written where the language does not take it, a property
+answering zero that no client had reason to read, and a rig whose apply had
+never run.
+
 ## 10.502 The device-to-activation pair: one blank column, three layers
 
 The last two failures in `nm.sh` outside `RequestScan`, and they were one
