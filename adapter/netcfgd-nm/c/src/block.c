@@ -1273,15 +1273,35 @@ int nmc_block_render(DBusMessage *call, int stored, nmc_block_t *out, char *err,
 		hex[ssid_len * 2u] = '\0';
 		putf(&text, "\tssid = \"%s\"\n", hex);
 	}
-	/* One key today. It was a list because `autoconnect-priority` was written in
-	 * here as `priority` until 0154 moved it out to a network-level `metric`,
-	 * and nothing else has ever belonged inside `wifi`. */
-	putf(&text, "\twifi { %s }\n", security);
+	/*
+	 * **Two keys, and `autoconnect` is the second because that is where the
+	 * language takes it.** This wrote it at network level -- where the model's
+	 * JSON carries it, and where `emit.rs` writes it too -- and netcfgd
+	 * refused the whole file:
+	 *
+	 *     nm-Opts.conf:10:2: unknown network key `autoconnect`
+	 *
+	 * So `AddConnection` failed whole for any client that asked for a network
+	 * it should not join by itself, because the daemon compiles back and keeps
+	 * nothing that will not compile. Asked of the daemon rather than reasoned
+	 * about: at network level it is refused, inside `wifi` it is accepted, and
+	 * `hidden`, `metered` and `metric` are network-level in the same test.
+	 *
+	 * The JSON and the DSL differ here on purpose, which is why the model's
+	 * field list is no evidence about the language: `psk` is inside `wifi` in
+	 * the one and inside `security` in the other.
+	 *
+	 * `priority` was a third key here until 0154 moved it out to a
+	 * network-level `metric`, and the diagnostic for the old spelling still
+	 * lives in the lowering beside this one.
+	 */
+	if (read_flag(call, "connection", "autoconnect", &flag) && !flag) {
+		putf(&text, "\twifi { %s; autoconnect = false }\n", security);
+	} else {
+		putf(&text, "\twifi { %s }\n", security);
+	}
 	if (read_flag(call, "802-11-wireless", "hidden", &flag) && flag) {
 		putf(&text, "\thidden = true\n");
-	}
-	if (read_flag(call, "connection", "autoconnect", &flag) && !flag) {
-		putf(&text, "\tautoconnect = false\n");
 	}
 	if (config.count > 0u) {
 		putf(&text, "\tconfig = [%s]\n", config_text);

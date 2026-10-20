@@ -1135,6 +1135,30 @@ else
 		"$(grep -c '802-11-wireless.mtu' "$work/etc/conf.d/nm-Mtu.conf" 2>/dev/null || true)" "1"
 	timeout 15 nmcli connection delete Mtu > /dev/null 2>&1 || true
 
+	# **A network that joins only when asked, and the key goes INSIDE `wifi`.**
+	# A profile of its own rather than another option on `Opts`, because the
+	# check above it asserts that block carries only the security -- which is
+	# 0154's defect, and widening it to admit a second key would retire the
+	# thing it catches.
+	#
+	# Both shims wrote `autoconnect = false` at network level, where the
+	# model's JSON carries it, and netcfgd refused the whole file: `unknown
+	# network key`. So this add failed outright and nothing noticed, the band
+	# having set metered and the priority and never this (project.md 10.498).
+	# **It is still wrong in the Rust**, so this check fails when the suite is
+	# pointed at that build -- which is the comparison working rather than a
+	# problem with the check.
+	nmcli connection add type wifi ifname '*' con-name Manual ssid Manual \
+		connection.autoconnect no > "$work/manual.log" 2>&1 || true
+	manual="$work/etc/conf.d/nm-Manual.conf"
+	check_saying "a network told not to join by itself is written at all" \
+		"$([ -f "$manual" ] && echo yes || echo no)" "yes" "$work/manual.log"
+	check "and says so inside the wifi block, where netcfgd takes it" \
+		"$(grep -c 'wifi { open = true; autoconnect = false }' "$manual" 2>/dev/null || true)" "1"
+	check "which netcfgd accepts" \
+		"$("$build/ncfg" show 2>/dev/null | grep -c '"id": "Manual"' || true)" "1"
+	timeout 15 nmcli connection delete Manual > /dev/null 2>&1 || true
+
 	# ------------------------------------------------------- the write path
 
 	# Design section 9.4: a GUI is just another editor of config files. What

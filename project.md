@@ -12498,6 +12498,68 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.499 autoconnect belongs inside `wifi`, and the compiler was right
+
+10.498 recorded `autoconnect` as a gap in the daemon's compiler: the model
+declares it in `network_fields` and `lower_network.c` has no network-level arm,
+so a block carrying it would not compile and `AddConnection` failed whole for
+any client asking for a network it should not join by itself.
+
+**That diagnosis was wrong, and asking the daemon is what showed it.** Four
+blocks, written by hand into a work directory and put to `ncfg plan`:
+
+    plain                 accepted
+    at network level      unknown network key `autoconnect`
+    inside wifi           accepted
+    wifi, with the rest   accepted
+
+So the key is a `wifi` key, the lowering has had an arm for it all along -- in
+`ncfg_lower_wifi_key`, beside the diagnostic for the `priority` 0154 retired --
+and `hidden`, `metered` and `metric` are network-level in the same test. The
+compiler was right and **the renderer was writing the key in the wrong place.**
+
+### The model's field list is no evidence about the language
+
+What made the wrong diagnosis plausible is that `network_fields[]` does list
+`autoconnect` at network level. It is the JSON surface and not the DSL's, and
+the two differ on purpose: `psk` is inside `wifi` in the language and inside
+`security` in the JSON. A field's presence in the one says nothing about where
+the other takes it.
+
+**So 10.498's "two lists that have to agree" was the wrong shape as well.**
+They are two surfaces of one model and they are not required to agree; what
+has to agree is the renderer with the language, and the only authority on the
+language is the parser. Reading a table is not asking.
+
+### Both shims have it wrong, which is why nothing caught it
+
+`emit.rs` writes `autoconnect = false` at network level too, so the Rust
+produces the same uncompilable block. `nm.sh` never set the option -- the
+per-connection band sets `metered` and `autoconnect-priority` and stops -- so
+neither implementation was ever asked.
+
+It has a profile of its own now rather than another option on `Opts`, because
+the check above that one asserts its `wifi` block carries **only** the
+security, which is 0154's defect; widening it to admit a second key would
+retire the thing it catches. The new one asserts the add happened at all, that
+the key is inside the block, and that netcfgd accepts the file -- and it fails
+against the Rust build, which is the comparison working rather than a problem
+with the check.
+
+### What the fix is worth beyond the key
+
+`nm.sh` goes from 108 and 13 to **111 and 13** -- three checks added, none
+moved, which is what a fix to something nothing was asking for looks like in a
+suite. The three are the add happening at all, the key's placement, and
+netcfgd accepting the file.
+
+The renderer and the reader now agree about this option in both directions: a
+client asking for a network that joins only when asked gets a block that
+compiles, `GetSettings` reports `autoconnect` false, and a read-modify-write
+leaves it false. Measured through a real client rather than inferred -- the
+same loop that 10.497 and 10.498 closed for the IP groups and the options
+beside them.
+
 ## 10.498 The connection group, and the two conversions put side by side
 
 The three per-connection options a settings panel offers beside the address --
@@ -12539,29 +12601,30 @@ functions agreeing with each other instead of with the model.** Either scaling
 alone passes any test written from itself. Proved able to fail by removing the
 half-band -- the 0207 defect exactly -- which moves 997 of the 999.
 
-### `autoconnect` is a key the daemon's compiler does not lower
+### `autoconnect` is written where netcfgd will not take it
 
-Found by writing a profile with it: the model declares `autoconnect` in
-`network_fields`, and `lower_network.c` has no arm for it, so a block carrying
-it fails to compile --
+Found by writing a profile with it: a block carrying `autoconnect` at network
+level does not compile --
 
     nm-Opts.conf:10:2: unknown network key `autoconnect`
 
--- and `AddConnection` fails whole, because the daemon compiles back and
-refuses the file. Bisected against the daemon directly rather than through the
-shim: `hidden`, `metered` and `metric` are all accepted at network level and
-`autoconnect` alone is not.
+-- and `AddConnection` therefore fails whole, because the daemon compiles back
+and keeps nothing that will not compile. `hidden`, `metered` and `metric` are
+accepted at network level and `autoconnect` is not.
 
-**The shim is doing the right thing and the diagnostic is netcfgd's own**, so
-this is recorded rather than worked around: the renderer has written
-`autoconnect = false` since the day it was written, `nm.sh` has no profile that
-asks for it, and the round trip is unharmed because the key is only written
-when the value is false while every network's default is true.
+**This entry first blamed the daemon's compiler, and that was wrong.** The key
+belongs inside the `wifi` block, the lowering has always had an arm for it
+there, and the renderer was writing it in the wrong place -- measured and
+corrected in 10.499, which also says what made the wrong answer plausible: the
+model's field list does carry `autoconnect` at network level, because the JSON
+surface and the language are not the same surface and are not required to
+agree.
 
-It is a gap in the C daemon's compiler rather than in the adapter, which is
-why it is a finding here and not a change: the model's field list and the
-lowering's key dispatch are two lists that have to agree, and nothing walks
-them against each other.
+What stands from the original is the cost and the reason nothing caught it: the
+renderer has written the key since the day it was written, `nm.sh` has no
+profile that asks for it, and the round trip was unharmed in the meantime
+because the key is only written when the value is false while every network's
+default is true.
 
 ### The band, and the lens retired
 

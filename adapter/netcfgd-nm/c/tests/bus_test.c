@@ -1520,9 +1520,20 @@ int main(void)
 		asked.autoconnect = 0;
 		check(rendered(&asked, &block, why, sizeof(why)) == 1 &&
 		        strstr(block.text, "\tmetered = true\n") != NULL &&
-		        strstr(block.text, "\thidden = true\n") != NULL &&
-		        strstr(block.text, "\tautoconnect = false\n") != NULL,
-		    "metered, hidden and autoconnect reach the block as netcfgd's keys");
+		        strstr(block.text, "\thidden = true\n") != NULL,
+		    "metered and hidden reach the block as netcfgd's own keys");
+		/*
+		 * **And `autoconnect` inside the `wifi` block, which is where the
+		 * language takes it.** It was written at network level -- where the
+		 * model's JSON carries it and where `emit.rs` writes it -- and
+		 * netcfgd refused the file, so every `AddConnection` asking for a
+		 * network not to join by itself failed whole. Asked of the daemon:
+		 * network level is `unknown network key`, inside `wifi` compiles.
+		 */
+		check(strstr(block.text, "\twifi { open = true; autoconnect = false }\n") != NULL,
+		    "  with autoconnect inside the wifi block, where netcfgd takes it");
+		check(strstr(block.text, "\tautoconnect") == NULL,
+		    "  and not at network level, where it does not compile");
 		asked.metered = 0;
 		asked.hidden = 0;
 		asked.autoconnect_present = 0;
