@@ -12542,9 +12542,17 @@ It has a profile of its own now rather than another option on `Opts`, because
 the check above that one asserts its `wifi` block carries **only** the
 security, which is 0154's defect; widening it to admit a second key would
 retire the thing it catches. The new one asserts the add happened at all, that
-the key is inside the block, and that netcfgd accepts the file -- and it fails
-against the Rust build, which is the comparison working rather than a problem
-with the check.
+the key is inside the block, and that netcfgd accepts the file.
+
+**The Rust is fixed too, and that is the half worth measuring.** `emit.rs`
+writes the key inside the block now, with a test of its own that was proved
+able to fail by putting the old placement back. Then both shims were driven
+against the same daemon through the same client, and they produce the same
+block -- `wifi { open = true; autoconnect = false }` -- and the same read-back.
+An oracle and a port agreeing is worth more than either passing alone: the
+port was written FROM the oracle, so a fault they share is invisible to every
+comparison between them, and this one was. What found it was neither of them
+but the daemon, asked directly.
 
 ### What the fix is worth beyond the key
 

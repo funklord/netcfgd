@@ -632,15 +632,29 @@ pub(crate) fn network_block_keeping_secret(
 	if ssid.as_bytes() != id.as_bytes() {
 		let _ = writeln!(text, "\tssid = \"{}\"", ssid.to_hex());
 	}
-	// One key today. It was a list because `autoconnect-priority` was written
-	// in here as `priority` until 0154 moved it out to a network-level
-	// `metric`, and nothing else has ever belonged inside `wifi`.
-	let _ = writeln!(text, "\twifi {{ {security} }}");
+	// **Two keys, and `autoconnect` is the second because that is where the
+	// language takes it.** This wrote it at network level -- where the model's
+	// JSON carries it -- and netcfgd refused the whole file:
+	//
+	//     nm-Opts.conf:10:2: unknown network key `autoconnect`
+	//
+	// So `AddConnection` failed whole for any client asking for a network it
+	// should not join by itself. Asked of the daemon rather than read off the
+	// model: at network level it is refused, inside `wifi` it is accepted, and
+	// `hidden`, `metered` and `metric` are network-level in the same test
+	// (project.md 10.499). `lower_wifi_key` has always had the arm, beside the
+	// diagnostic for the `priority` 0154 retired.
+	//
+	// The JSON surface and the language are not the same surface and are not
+	// required to agree, which is what made the wrong answer plausible: `psk`
+	// is inside `wifi` in the one and inside `security` in the other.
+	if flag(settings, "connection", "autoconnect") == Some(false) {
+		let _ = writeln!(text, "\twifi {{ {security}; autoconnect = false }}");
+	} else {
+		let _ = writeln!(text, "\twifi {{ {security} }}");
+	}
 	if flag(settings, "802-11-wireless", "hidden") == Some(true) {
 		text.push_str("\thidden = true\n");
-	}
-	if flag(settings, "connection", "autoconnect") == Some(false) {
-		text.push_str("\tautoconnect = false\n");
 	}
 	let sources = addressing(settings)?;
 	if !sources.is_empty() {
@@ -952,6 +966,41 @@ mod tests {
 			emitted
 				.text
 				.contains(r#"dns { servers = ["1.1.1.1"]; search = ["example.com"] }"#),
+			"{}",
+			emitted.text
+		);
+	}
+
+	/// A network that joins only when it is asked to, and where the key goes.
+	///
+	/// **This wrote `autoconnect = false` at network level and netcfgd refused
+	/// the whole file** -- `unknown network key` -- so `AddConnection` failed
+	/// outright for every client that asked for the option. Nothing caught it:
+	/// no test here set it, no profile in `tests/live/nm.sh` set it, and the C
+	/// shim had the same fault from the day it was written. Asking the daemon
+	/// is what settled it -- at network level refused, inside `wifi` accepted,
+	/// with `hidden`, `metered` and `metric` network-level in the same test
+	/// (project.md 10.499).
+	#[test]
+	fn autoconnect_off_is_written_inside_the_wifi_block() {
+		let mut settings = wifi_settings("Office", None, None);
+		settings
+			.get_mut("connection")
+			.expect("the group")
+			.insert("autoconnect".to_owned(), value(Value::from(false)));
+
+		let emitted = network_block(&settings).expect("it renders");
+		assert!(
+			emitted
+				.text
+				.contains("wifi { open = true; autoconnect = false }"),
+			"{}",
+			emitted.text
+		);
+		// And nowhere else: a second copy at network level would be refused
+		// even with the first one in the right place.
+		assert!(
+			!emitted.text.contains("\n\tautoconnect"),
 			"{}",
 			emitted.text
 		);
