@@ -383,9 +383,11 @@ sudo apt install build-essential libncurses-dev pkgconf python3
 ```
 
 The daemon and the CLI are **C** since 0266, so there is no toolchain here
-beyond a C compiler. `libncurses-dev` is for `ncfg tui` and is the only
-library the daemon links beyond libc. `python3` runs the style gate and
-several test scripts, not the daemon.
+beyond a C compiler, and the shipped package depends on `libc6` alone --
+`ncfg tui` writes its own escape sequences rather than binding ncurses, and
+`c/src/cli/tui_term.c` says why. `libncurses-dev` is for the Rust that
+remains as a test instrument, whose `ncfg tui` does bind it. `python3` runs
+the style gate and several test scripts, not the daemon.
 
 **`libdbus-1-dev` is needed for `adapter/netcfgd-nm`**, the shim that serves
 NetworkManager's own D-Bus API. It is C over `libdbus-1` since 0276, which
