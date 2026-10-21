@@ -53,5 +53,14 @@ ascii_only = true
 # tree, so the two are equivalent here -- but the gate accepting a path that
 # silently matches nothing is worth raising against the shared tool rather
 # than working around in seven copies of it.
+# `corpus` is a fuzz corpus, and it is excluded for `schema`'s reason exactly:
+# those bytes are pinned. A seed is an input chosen because of what it reaches
+# and a reproducer is an input that made something go wrong, so neither is
+# something a style rule may edit -- a trailing newline added to a reproducer
+# is a different input, and the thing it reproduced may not survive the
+# change. The gate found this the honest way: `observed_json`'s seed is a copy
+# of `doc/schema/observed.json`, which `schema` already exempts for having no
+# final newline, and the copy was flagged the moment it arrived.
 exclude = ["attic", "third_party", "vendor", "build", "target",
-           "dist", ".pytest_cache", ".claude", "schema", "determinism"]
+           "dist", ".pytest_cache", ".claude", "schema", "determinism",
+           "corpus"]

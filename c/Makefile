@@ -283,7 +283,8 @@ tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .b
 #   `build-and-commit.md` gives about keeping a sanitized build from
 #   clobbering a plain one; `BUILD_DIR` is not reused because this is not the
 #   same build with a different destination.
-FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message
+FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message \
+		 observed_json kernel_bytes values
 FUZZ_REPLAYS   = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS  = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build

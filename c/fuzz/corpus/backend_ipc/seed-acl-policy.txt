@@ -1,1 +1,3 @@
-ACCEPT
+# netcfgd policy: allow
+macaddr_acl=1
+accept_mac_file=/run/netcfgd/hostapd/wlan0.accept

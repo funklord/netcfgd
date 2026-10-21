@@ -19,6 +19,7 @@
 #include "fuzz.h"
 
 #include "ncfg/base.h"
+#include "ncfg/apply.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/supplicant.h"
 
@@ -83,9 +84,37 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		ncfg_supplicant_entries_free(entries, count);
 	}
 
-	/* hostapd's ACL policy file, which is read from disk rather than a socket
-	 * and is a parser all the same. */
+	/*
+	 * hostapd's three. The policy file is read from disk rather than a socket
+	 * and is a parser all the same; the other two are replies off its control
+	 * socket, which `hostapd.h` names together with the supplicant's for the
+	 * same reason this target drives them together -- it is one boundary, a
+	 * process netcfgd starts and does not contain.
+	 */
 	(void)ncfg_hostapd_policy_in(text, &policy);
+	{
+		char                 **allowed = NULL;
+		size_t                 allowed_count = 0u;
+		ncfg_hostapd_station_t station;
+
+		if (ncfg_hostapd_parse_acl_show(text, &allowed, &allowed_count, err,
+		        sizeof(err))) {
+			ncfg_hostapd_stations_free(allowed, allowed_count);
+		}
+		memset(&station, 0, sizeof(station));
+		(void)ncfg_hostapd_parse_station(text, &station);
+	}
+
+	/*
+	 * And dhcpcd's control socket, which is the third process of this kind:
+	 * its payload is length-prefixed bytes rather than lines, so it is driven
+	 * from the raw input rather than from the text copy.
+	 */
+	{
+		char payload[512];
+
+		(void)ncfg_dhcpcd_control_payload(data, length, payload, sizeof(payload));
+	}
 
 	/* Line by line. The text is NUL-terminated by `ncfg_fuzz_text`, and an
 	 * embedded NUL left in place ends this walk early -- which is itself the

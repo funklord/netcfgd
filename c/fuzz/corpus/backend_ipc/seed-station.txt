@@ -1,0 +1,11 @@
+00:11:22:33:44:55
+flags=[AUTH][ASSOC][AUTHORIZED]
+aid=1
+capability=0x11
+listen_interval=10
+supported_rates=8c 12 98 24 b0 48 60 6c
+timeout_next=NULLFUNC POLL
+rx_packets=12
+tx_packets=34
+signal=-45
+connected_time=600

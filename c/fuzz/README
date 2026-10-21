@@ -23,7 +23,13 @@ What belongs in `corpus/<target>/` is an input somebody CHOSE:
   * a seed, so a run starts from real syntax rather than spending its budget
     discovering that a config file has braces in it. Each `seed-*` here is a
     fixture from the suite or a configuration that compiles today -- checked,
-    not assumed;
+    not assumed, and **checked for what it REACHES rather than for parsing**.
+    Three seeds here reached nothing when they were written and were found by
+    asking, one at a time, how far each input gets: `seed-acl-policy.txt`
+    carried the word `ACCEPT` where the reader wants a `# netcfgd policy:`
+    marker, and two nftables seeds had an eight-byte header where `nfgenmsg`
+    is four. A corpus that does not reach the function reports success exactly
+    as loudly as one that does, which project.md 10.511 paid to learn;
   * a reproducer for something that went wrong, named after what it does
     rather than after its hash. `attr-longer-than-the-area.bin` is nine bytes
     that claim more than the message holds; it reached that refusal, and it is

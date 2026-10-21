@@ -12498,6 +12498,85 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.512 The daemon's remaining readers, and three seeds that reached nothing
+
+"now fuzz the daemon's remaining readers too", the copyright holder,
+2026-10-21. Three new targets and one extended, taking the tree to twelve;
+`make check` replays all twelve corpora.
+
+### What was left, and the boundary each one is
+
+    observed_json   the observation netcfgd writes to /run and reads back.
+                    Its own schema and its own reader, not the document's --
+                    an unknown member is refused because an observation is
+                    written by one netcfgd and read by a client that may be
+                    older. The round trip is asserted, as `document_json` does
+    kernel_bytes    the kernel's other streams and the payloads inside netlink
+                    messages: inotify events, rfkill records, fib rules,
+                    nftables tables and chains, generic-netlink families.
+                    Each reads a length out of the bytes and trusts it
+    values          the leaf parsers, where a value stops being text: a
+                    WireGuard key, a MAC, a hex SSID, a principal
+    backend_ipc     extended with hostapd's ACL listing and station reply and
+                    with dhcpcd's control payload -- the same boundary it
+                    already had, a process netcfgd starts and does not contain
+
+`values` is the one worth defending. Every parser in it is reachable through
+`config_parse` or `document_json` already, and **reaching a function is not
+exercising it**: a parser three layers down sees only what the layers above
+let through, and the lexer's rules are not the key parser's. It also asserts
+the one invariant in the set -- a key that parses must re-render to bytes that
+parse back the same, because `ncfg_key_parse` and `ncfg_key_render` are
+inverses or a tunnel comes up once and never again. Eight million executions.
+
+### Three seeds reached nothing, and that is now a step rather than a hope
+
+10.511 cost 971,215 executions to learn that a corpus is part of the detector.
+So this time every seed was measured for what it gets as far as, before any
+fuzzing -- and three were dead:
+
+    seed-acl-policy.txt    carried the word `ACCEPT`; the reader wants a
+                           `# netcfgd policy:` marker at byte zero. Written in
+                           the first fuzz commit and reaching nothing since
+    seed-nft-table.bin     an eight-byte header where `struct nfgenmsg` is
+    seed-nft-chain.bin     four, so every attribute after it was misread
+
+All three parse now, and the probe that found them is the practice rather than
+a one-off: ask what each input reaches, one at a time, and keep the answer.
+
+### The controls
+
+    observed_json   the schema reads and writes 17 KB canonical, so the round
+                    trip runs rather than the reader refusing at the door
+    kernel_bytes    the inotify walk's progress check removed in a scratch
+                    copy: the zero-length event -- IN_Q_OVERFLOW, which is the
+                    one that carries no name -- spins, and the target's
+                    termination bound aborts in under a second. **No
+                    sanitizer provides that**, which is why the assertion is
+                    there; the real walk exits 0 on the same input
+    values         `free(principal.name)` was missing from the target and
+                    LeakSanitizer said so on the first run, seven bytes
+
+### A measurement error of my own, worth the line
+
+The first two runs of the walk control reported success. They did not: the
+command ended `| tail -2; echo "rc=$?"`, so the status read was `tail`'s. The
+same shape as every other instrument failure here -- **read the status of the
+thing you mean** -- and it cost two runs because the answer it gave was the
+one I expected.
+
+### And the gate had to learn what a corpus is
+
+`style_gate.py` flagged the observed seed for having no final newline. It is a
+copy of `doc/schema/observed.json`, which the gate already exempts for exactly
+that reason: those bytes are pinned, and adding a newline to one once left
+`make check` red with a difference at the end of a file nobody had edited.
+
+A corpus is the same kind of thing and `corpus` is excluded now. A seed is an
+input chosen for what it reaches and a reproducer is an input that made
+something go wrong; neither is something a style rule may edit, because an
+edited reproducer is a different input and may not reproduce anything.
+
 ## 10.511 A corpus is part of the detector, measured twice over
 
 "fuzz the client library's readers too", the copyright holder, 2026-10-21.
