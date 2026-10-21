@@ -130,6 +130,33 @@ def witnessed_events():
 	return seen
 
 
+def documented_events():
+	"""Every event kind the protocol document's table carries a row for.
+
+	**Two consumers of one authority**, which is why this lives beside the
+	witness check rather than in a gate of its own: `event_names[]` says what
+	the daemon can emit, `doc/schema/socket.json` pins the bytes of each, and
+	section 6.1 of `doc/socket-protocol.md` says what each one means. A kind
+	missing from either consumer is a kind somebody has to find by reading the
+	source.
+
+	The table's first column is the kind in backticks, which is this
+	document's own convention for a wire name -- the tier table in section 4
+	spells requests the same way, and `tier_table_gate.py` reads it the same
+	way.
+	"""
+	text = (ROOT / "doc/socket-protocol.md").read_text()
+	section = re.search(r"\n### 6\.1 The events\n(.*?)\n## ", text, re.S)
+	if not section:
+		print("ledger-gate: doc/socket-protocol.md has no `### 6.1 The events`",
+		    file=sys.stderr)
+		print("ledger-gate:   section, so this would check the table against nothing",
+		    file=sys.stderr)
+		raise SystemExit(1)
+	rows = re.findall(r"^\| `([a-z_]+)` \|", section.group(1), re.M)
+	return set(rows)
+
+
 def witnessed_requests():
 	"""Every request kind the frozen socket transcript carries."""
 	seen = set()
@@ -213,6 +240,17 @@ def main():
 		failures.append(
 			f"socket.json carries an `{name}` event and this build cannot emit one"
 		)
+	documented = documented_events()
+	for name in sorted(events - documented):
+		failures.append(
+			f"socket-protocol.md section 6.1 has no row for the `{name}` event, "
+			"which this build emits"
+		)
+	for name in sorted(documented - events):
+		failures.append(
+			f"socket-protocol.md section 6.1 describes an `{name}` event and this "
+			"build cannot emit one"
+		)
 
 	ops, link_kinds, backend_kinds = witnessed_actions()
 	asked_per_kind = {"link.create", "backend.start", "backend.stop", "backend.reload"}
@@ -250,7 +288,7 @@ def main():
 		f"ledger-gate: {len(requests)} request(s), {len(ops)} op(s), "
 		f"{len(link_kinds)} link kind(s) and {len(backend_kinds)} backend action(s) "
 		f"in the witnesses, all carried out by this build; "
-		f"{len(events)} event kind(s), each with a line"
+		f"{len(events)} event kind(s), each with a witness line and a row"
 	)
 	if refusals:
 		print(f"ledger-gate: and {len(refusals)} thing(s) refused, each saying why:")

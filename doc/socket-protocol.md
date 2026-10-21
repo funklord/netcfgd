@@ -374,6 +374,54 @@ wrapper and the payload is its own pinned shape. A client that knew only
 requests and responses would read a stream and recognise nothing — which is
 the third kind of line the C implementation found on its first run.
 
+### 6.1 The events
+
+Five kinds, and a client is told which by the tag's value. **The members are
+per kind rather than shared**, so a client reads the tag first and nothing
+else is guaranteed to be there: the struct behind this is flat, with seven
+members between five arms, and the tag says which are filled.
+
+| Event | Sent when | Members |
+|---|---|---|
+| `observed` | the observation changed and a client should redraw | `summary` |
+| `reloaded` | a `reload` finished, whether or not it compiled | `ok`, and `diagnostics` where it did not |
+| `drift` | something moved away from the configuration — one per drifting interface | `interface`, `summary`, `action` |
+| `confirm_armed` | an `apply` armed commit-confirm | `seconds` |
+| `confirm_resolved` | the window closed, by a `confirm` or by expiring | `confirmed` |
+
+Three of them are worth more than a row:
+
+- **`observed` carries a sentence and not the observation.** A client that
+  wants the state asks for it; this says that asking is worth doing now. The
+  alternative — putting the observation in the event — would make every change
+  a copy of the machine's whole state on a socket, sent to a tray that wanted
+  to know whether to change an icon.
+- **`drift` says what netcfgd is going to do about it, in `action`:**
+  `reconciling`, `reported only`, or the reason a refusal will not be acted
+  on. That member exists because "netcfgd can see this and is not going to
+  change it" is the one thing an operator has to be told without having
+  written a `drift` hook first. At most 32 are kept, for `NCFG_DIAGS_MAX`'s
+  reason: a machine fighting netcfgd over sixty interfaces produces a list
+  nobody scrolls through.
+- **`confirm_resolved` does not say who resolved it**, only whether the
+  configuration was kept. A client watching the window cares about the
+  answer; which of the two ways it arrived — somebody confirmed, or nobody did
+  and it reverted — is in the journal rather than on the wire.
+
+**`monitor` is the only request that produces these**, and it turns the
+connection into a stream that never goes back: after it the daemon writes
+events on that connection and reads no further requests. A client that wants
+both keeps two connections, which is what the Qt window does.
+
+**Every kind here has a line in the witness, and that is checked rather than
+claimed.** `tool/ledger_gate.py` reads `event_names[]` out of the C and
+asserts that `doc/schema/socket.json` carries a line for each — in either
+shape, bare or wrapped — and that the witness names no kind this build cannot
+emit. It holds this table to the same list, so a sixth event cannot arrive
+without this section gaining a row. The claim used to be prose nobody checked,
+and a fuzz corpus seeded from the witness was built on a filter that found one
+kind of five (project.md 10.514).
+
 ## 7. Compatibility rules
 
 These are the rules an implementation gets wrong quietly, so they are stated

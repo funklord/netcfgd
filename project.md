@@ -12498,6 +12498,67 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.515 The event docs, and a table a gate holds to the code
+
+"add a line per event kind to the schema's event docs", the copyright holder,
+2026-10-21, after 10.514 established that the witness already had them all.
+The docs did not: `doc/socket-protocol.md` said an event payload "appears both
+on its own and wrapped" and never said what an event IS. Five kinds, named
+nowhere a client's author would look.
+
+Section 6.1 is a row per kind now -- what it means, when the daemon sends it,
+and which of the seven members are filled, since the members are per kind
+rather than shared and a client reads the tag first. The facts came out of the
+code rather than from the witness lines: `ncfg_proto_event_t`'s comments say
+which member belongs to which arm, `reconcile_pass.c` and `confirm.c` are
+where each is emitted, and `daemon.h` is where `drift`'s `action` is
+documented as "`reconciling`, `reported only`, or what to do about a refusal".
+
+Three got prose as well as a row, on the usual test of whether a reader would
+do something differently for knowing:
+
+* **`observed` carries a sentence, not the observation** -- a client that
+  wants state asks for it, and putting the observation in the event would send
+  the machine's whole state to a tray deciding whether to change an icon;
+* **`drift`'s `action` is the one thing an operator must be told** without
+  having written a `drift` hook first: whether netcfgd is going to put this
+  back;
+* **`confirm_resolved` says whether the configuration was kept and not who
+  kept it**, which is in the journal.
+
+### The claim in it is a gate, because this week has been about exactly that
+
+The section says every kind has a witness line and a row, and **it says so
+because `tool/ledger_gate.py` now checks both** against `event_names[]` -- the
+table `word_table_gate.py` already holds to one word per enum value. One
+authority, two consumers: the bytes in `doc/schema/socket.json` and the
+meaning in section 6.1.
+
+Writing the sentence first and then making it true was deliberate. The
+alternative was a document claiming a gate exists, which is the shape 10.506
+found in a Makefile comment and 10.513 produced on its own: **prose asserting
+a property nothing enforces is how a tree comes to believe things about
+itself.**
+
+Six arms now, each seen to fail:
+
+    witness, kind missing        "socket.json has no line for the `drift`
+                                 event, which this build emits"
+    witness, kind invented       "carries an `invented` event and this build
+                                 cannot emit one"
+    witness, table renamed       "has no event_names table, so this would
+                                 check the witness against nothing"
+    document, row missing        "section 6.1 has no row for the `drift`
+                                 event, which this build emits"
+    document, row invented       "describes an `invented` event and this
+                                 build cannot emit one"
+    document, section renamed    "has no `### 6.1 The events` section, so
+                                 this would check the table against nothing"
+
+The two "would check nothing" arms are the ones worth the trouble. A gate that
+goes quiet when its input moves is the vacuous pass this tree keeps finding,
+and both of these inputs are things a tidying pass renames.
+
 ## 10.514 The schema already had every event kind; my filter did not
 
 "add a line per event kind to the schema", the copyright holder, 2026-10-21 --
