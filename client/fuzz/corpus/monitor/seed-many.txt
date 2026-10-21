@@ -1,0 +1,4 @@
+{"response":"event","event":"confirm_armed","seconds":90}
+{"response":"event","event":"confirm_armed","seconds":90}
+{"response":"event","event":"confirm_armed","seconds":90}
+{"response":"event","event":"confirm_armed","seconds":90}

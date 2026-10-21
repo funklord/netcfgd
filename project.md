@@ -12498,6 +12498,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.513 The GUI's readers are the library's, except one
+
+"now fuzz the GUI's readers too", the copyright holder, 2026-10-21. The
+answer is one target and a measurement, and the measurement is most of it.
+
+### What the window actually reads
+
+Everything it knows about the machine comes through `libncfg_client.a`, whose
+twenty-one one-request readers 10.511 covered. **The one reader it uses that
+`replies` never touches is the event stream.** `monitor` turns a connection
+into a stream and it never goes back, so `ncfg_monitor_next` is called again
+and again on one connection, keeping a partial line between calls -- and
+`gui/src/monitor_stream.cpp` is exactly that loop with a `QSocketNotifier`
+where the target's `for` is. None of that code ran in the other target.
+
+909,161 executions, 2,977 new coverage units, clean, with the corpus clean
+under the sanitizers too.
+
+### What the GUI parses itself: nothing a target can point at
+
+Measured rather than assumed, because "fuzz the GUI" sounds like it should
+mean more than one target. Its views split strings this library already
+parsed -- `settings.members.split(' ')`, `peer.allowed_ips.split(' ')`,
+`file.text.split('\n')` -- and every one of those lives in a widget class
+that needs a `QApplication`. There is no parser there to drive, and nothing a
+fuzzer could hand those splits that the library would not have passed through
+first. Three conversions of user typing exist in 65 source files; the rest is
+Qt rendering values that arrived typed.
+
+So the honest answer is that the window has two readers and both are now
+fuzzed, rather than a sweep of the GUI finding ten.
+
+### The bound, and the control for it
+
+A reader with three answers -- 1 for an event, 0 for "nothing complete yet",
+-1 for a stream that is gone -- and a buffer it keeps between calls can fail
+to make progress without failing. That is `kernel_bytes`'s hazard in a
+different costume, so the loop is counted and running out aborts.
+
+Proved: with the `memmove` that consumes a line removed in a scratch copy,
+the reader returns the same event for ever and the target aborts in under a
+second. The real reader exits 0 on the same seed. **A zero is not treated as
+a reason to stop**, because the GUI does not stop on one -- the notifier fires
+again -- so the loop goes on until the stream says it is gone.
+
+### The seed came from the schema, and there is only one event in it
+
+`doc/schema/socket.json` carries exactly one `{"response":"event"}` line, so
+the corpus is that line, four copies of it for the repeated-call path, and
+half a line for the end-of-stream-mid-event case. The probe says what it
+reaches: one event with `kind=confirm_armed`, then -1. **One event kind is
+thin** and the schema is where to fix it rather than the corpus -- a line per
+event kind there would seed this target and document the protocol in the same
+edit, which is a note for whoever adds the next kind.
+
 ## 10.512 The daemon's remaining readers, and three seeds that reached nothing
 
 "now fuzz the daemon's remaining readers too", the copyright holder,

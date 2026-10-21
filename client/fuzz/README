@@ -10,6 +10,20 @@ already fuzzed from the daemon's side; the typed walk had nothing.
               which. A reply is delivered by a listening unix socket this
               process owns -- see `replies.c` for why the bytes are queued
               before the reader is called, and why there is no fork.
+    monitor   the event STREAM, which is the other shape: one connection, the
+              reader called again and again, a partial line kept between
+              calls. None of that code runs in `replies`. It is also the
+              GUI's reader -- `gui/src/monitor_stream.cpp` is this loop with
+              a `QSocketNotifier` where the `for` is -- and the loop is
+              bounded, because a reader with three answers and a buffer it
+              keeps can fail to progress without failing.
+
+**What the GUI itself parses is not here, and that is a measurement rather
+than an omission.** Its views split strings this library already parsed --
+`settings.members.split(' ')`, `peer.allowed_ips.split(' ')` -- inside widget
+classes that need a `QApplication`, so there is no parser to point a target at
+and nothing a fuzzer could hand them that the library would have passed
+through. What the window reads from netcfgd is these two targets.
 
 `make_seeds.py` derives the corpus from `doc/schema/socket.json`, which is the
 protocol's own record of every request and response and is what

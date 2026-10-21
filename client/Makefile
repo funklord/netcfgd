@@ -95,7 +95,7 @@ test: tests/client_test fuzz-replay
 # `fuzz/replies.c` says how a reply is delivered without a daemon and why the
 # socket boundary is worth fuzzing at all when netcfgd is what answers on it.
 FUZZ_SHARED_DIR = ../c/fuzz
-FUZZ_TARGETS    = replies
+FUZZ_TARGETS    = replies monitor
 FUZZ_REPLAYS    = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS   = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build
