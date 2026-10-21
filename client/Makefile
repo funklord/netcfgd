@@ -52,7 +52,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test clean FORCE
+.PHONY: all test clean fuzz fuzz-list fuzz-replay FORCE
 
 all: $(LIB)
 
@@ -82,8 +82,75 @@ $(LIB): $(OBJS)
 tests/client_test: tests/client_test.c $(LIB) $(HEADERS) .build-flags
 	$(CC) $(CFLAGS) $< $(LIB) $(LDFLAGS) -o $@
 
-test: tests/client_test
+test: tests/client_test fuzz-replay
 	./tests/client_test ../doc/schema/socket.json
 
+# ---------------------------------------------------------------- fuzzing
+#
+# One target: what netcfgd answers, as the three programs linking this library
+# read it. 0277's arrangement, and the drivers are the daemon's rather than a
+# copy -- `../c/fuzz/` holds `fuzz.h`, the libFuzzer shim and the replay
+# walker, and this directory is self-contained for everything else.
+#
+# `fuzz/replies.c` says how a reply is delivered without a daemon and why the
+# socket boundary is worth fuzzing at all when netcfgd is what answers on it.
+FUZZ_SHARED_DIR = ../c/fuzz
+FUZZ_TARGETS    = replies
+FUZZ_REPLAYS    = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
+FUZZ_PROGRAMS   = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
+FUZZ_BUILD_DIR ?= fuzz/build
+FUZZ_CC        ?= clang
+FUZZ_CFLAGS    ?= -std=c11 -O1 -g
+FUZZ_CFLAGS    += $(WARNINGS) -D_DEFAULT_SOURCE -I. -I$(FUZZ_SHARED_DIR) \
+		  -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer
+FUZZ_OBJS       = $(patsubst %.c,$(FUZZ_BUILD_DIR)/%.o,$(SRCS))
+
+# The deterministic half, in `test` for 0277's reason: a fuzzer explores and
+# does not remember, so the corpus is what catches a regression. An empty
+# corpus directory is refused rather than skipped.
+fuzz-replay: $(FUZZ_REPLAYS)
+	@fail=0; \
+	for one in $(FUZZ_TARGETS); do \
+		files=$$(find fuzz/corpus/$$one -type f 2>/dev/null | sort); \
+		if [ -z "$$files" ]; then \
+			echo "fuzz-replay: fuzz/corpus/$$one holds no inputs, so this"; \
+			echo "fuzz-replay:   target would report success having read none"; \
+			fail=1; \
+			continue; \
+		fi; \
+		./fuzz/$${one}_replay $$files || fail=1; \
+	done; \
+	[ $$fail -eq 0 ] || { echo "fuzz-replay: some inputs failed"; exit 1; }
+
+fuzz/%_replay: fuzz/%.c $(FUZZ_SHARED_DIR)/fuzz_replay.c $(FUZZ_SHARED_DIR)/fuzz_text.c \
+		$(LIB) .build-flags
+	$(CC) $(CFLAGS) -I. -I$(FUZZ_SHARED_DIR) $(filter %.c,$^) $(LIB) $(LDFLAGS) -o $@
+
+fuzz: $(FUZZ_PROGRAMS)
+
+fuzz-list:
+	@echo $(FUZZ_TARGETS)
+
+$(FUZZ_BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+
+fuzz/%_fuzz: fuzz/%.c $(FUZZ_SHARED_DIR)/fuzz_libfuzzer.c $(FUZZ_SHARED_DIR)/fuzz_text.c \
+		$(FUZZ_OBJS)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -fsanitize=fuzzer $(filter %.c,$^) $(FUZZ_OBJS) -o $@
+
 clean:
-	rm -f $(OBJS) $(LIB) tests/client_test .build-flags
+	rm -f $(OBJS) $(LIB) tests/client_test .build-flags \
+	    $(FUZZ_REPLAYS) $(FUZZ_PROGRAMS) $(addsuffix .d,$(FUZZ_REPLAYS))
+	@# The one directory cleared wholesale, and only because this build made
+	@# it. Guarded as `build-and-commit.md` requires: non-empty, relative,
+	@# and not a path that could resolve to a source tree.
+	@case "$(FUZZ_BUILD_DIR)" in \
+	"") echo "clean: FUZZ_BUILD_DIR is empty, refusing to remove anything"; exit 1 ;; \
+	/*) echo "clean: FUZZ_BUILD_DIR is absolute ($(FUZZ_BUILD_DIR)), refusing"; exit 1 ;; \
+	*..*) echo "clean: FUZZ_BUILD_DIR escapes the tree, refusing"; exit 1 ;; \
+	esac; \
+	if [ -d "$(FUZZ_BUILD_DIR)" ]; then \
+		echo "clean: removing $(FUZZ_BUILD_DIR)"; \
+		rm -rf "$(FUZZ_BUILD_DIR)"; \
+	fi

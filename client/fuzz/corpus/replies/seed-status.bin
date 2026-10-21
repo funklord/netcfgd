@@ -1,0 +1,1 @@
+{"response":"status","links":[],"addresses":[],"routes":[],"backends":[],"dns":[],"rules":[],"bridge_vlans":[],"delegations":[],"reports":[],"qdisc_applied":[],"ingress_applied":[],"privacy_applied":[],"backend_restarts":[],"accept_ra_applied":[],"forwarding_applied":[],"nat":[],"nat_conflicts":[],"hook_state":[],"address_proto_supported":false}

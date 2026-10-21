@@ -1,0 +1,1 @@
+{"response":"modems","modems":[{"device":"wwan0","sim":["esim","socket"],"selected":"socket","apn":"im.cxn","cycle_pending":true,"cards":[{"source":"socket","iccid":"8946080023614318322"}]},{"device":"wwan1","sim":["socket"],"selected":"socket"}]}

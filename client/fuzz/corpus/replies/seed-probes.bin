@@ -1,0 +1,1 @@
+{"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}

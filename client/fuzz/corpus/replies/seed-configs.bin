@@ -1,0 +1,2 @@
+
+{"response":"configs","configs":[{"file":"netcfgd.conf","removable":false,"text":"global { }\n"},{"name":"wifi-home","file":"conf.d/wifi-home.conf","removable":true,"text":"network \"home\" { }\n"}]}

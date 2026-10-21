@@ -1,0 +1,1 @@
+{"response":"ap_stations","interface":"wlan0","access_point":"home","access_control":"deny","stations":[{"address":"00:11:22:33:44:55","authorized":true,"listed":true,"signal":-52,"connected_seconds":184,"inactive_msec":120,"rx_bytes":4096,"tx_bytes":8192}]}

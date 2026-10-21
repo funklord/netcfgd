@@ -1,0 +1,1 @@
+{"response":"hooks","hooks":[{"interface":"eth0","phase":"post_up","path":"/run/netcfgd/hooks/eth0.post_up.0","text":"#!/bin/sh\nlogger up\n","readable":true},{"interface":"eth1","phase":"drift","path":"/run/netcfgd/hooks/eth1.drift.1","text":"","readable":false}]}

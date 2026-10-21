@@ -1,0 +1,1 @@
+{"response":"wifi_status","interface":"wlan0","state":"SCANNING","blocked":"the radio is switched off at phy0 in software, which `rfkill unblock wifi` clears"}

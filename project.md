@@ -12498,6 +12498,83 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.511 A corpus is part of the detector, measured twice over
+
+"fuzz the client library's readers too", the copyright holder, 2026-10-21.
+`libncfg_client.a` is linked by `ncfg`, by the Qt client and by the
+NetworkManager shim, and every one of them learns what the machine is doing
+through a reader in it. There are twenty-one that take one request and build
+C structures from the reply -- framing, then JSON, then a typed walk -- and
+only the JSON layer had ever been fuzzed, from the daemon's side.
+
+3.9 million executions, 2,932 new coverage units, no crash and no leak. The
+corpus is clean under ASan and UBSan as well as at `-Os`.
+
+### A reply, without a daemon and without forking
+
+One listening unix socket, made once for the process. Per input: connect a
+client to it, accept the other end, **write the reply before calling the
+reader**, then shut the writing half down so the reader sees an end of stream
+rather than waiting for one.
+
+The order is the whole trick, and it is what makes this single-threaded. A
+reader writes its request and then blocks reading the answer, so a target that
+called it first would have nobody to answer. Queued first, the bytes are
+already in the socket when the reader looks, and the request it writes lands
+in a buffer nobody drains -- which is fine, because it is one short line.
+
+**Is netcfgd not trusted?** The socket is `root:netcfgd` and netcfgd is what
+answers on it, so this is not netlink and it is not a D-Bus client. It is a
+boundary all the same, for two reasons worth stating rather than assuming: the
+path is settable, so a client can be pointed at a socket somebody else owns;
+and a daemon one version ahead of the library answers with fields this build
+has never seen, which is the ordinary case on a machine mid-upgrade and is
+exactly what a typed walk gets wrong.
+
+### The finding is about the corpus, and it is the sharpest of the week
+
+The sabotage was an off-by-one: `*into_count = count + 1` in `read_routes`,
+which makes the free walk one entry past the array.
+
+    with the schema-derived seeds   971,215 executions, nothing
+    with one seed added             caught in seconds, as a
+                                    heap-buffer-overflow in
+                                    `ncfg_saved_networks_free`, with the line
+
+Nothing about the fuzzer changed between those two lines. **The corpus never
+reached the function.** `ncfg_client_saved_networks` sends `{"request":"show"}`
+and walks `networks[]` out of the document it gets back, and
+`doc/schema/socket.json` -- which is where the seeds come from, being the
+protocol's own record and what `tests/client_test` validates against -- has no
+document line with a network carrying routes. So the reader was being called
+and the function under it never ran.
+
+That is the lesson to keep from all of this week's fuzzing: **a corpus is part
+of the detector, and a target with the wrong corpus reports success exactly as
+loudly as one with the right one.** It is the vacuous pass this tree keeps
+finding, wearing a fuzzer's clothes -- and the only thing that found it was
+injecting a defect and noticing that nothing happened.
+
+The seed is `seed-document-saved-networks.bin`, made with `ncfg show --json`
+on a config whose network carries `config`, `routes` and a `dns` block. The
+reproducer the control produced is `routes-past-the-count.bin`, and both are
+committed, so `make check` runs them through `client-test`.
+
+### And the harness's own undefined behaviour
+
+The first version dispatched through a table of twenty-one `{reader, free}`
+pairs with `out` cast to `void *` -- four lines instead of eighty, and
+**undefined behaviour**: calling a function through a pointer of another type
+is UB whatever the ABI does, and `-fsanitize=function` says so. It said so
+within seconds of the first run.
+
+So the dispatch is a macro over a switch now: each case names the real type,
+calls the real function and frees with the real free, with no cast anywhere
+and the compiler checking all three against each other. **The sanitizers found
+a bug in the thing built to find bugs**, which is the argument for pointing
+them at the harness and not only at what it drives -- and for preferring
+eighty lines the compiler checks to four it cannot.
+
 ## 10.510 The shim's other readers, and what a target cannot reach
 
 "fuzz the shim's other readers too", the copyright holder, 2026-10-21. The

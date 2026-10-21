@@ -2680,6 +2680,20 @@ fuzz:
 			-artifact_prefix=fuzz/build/ -print_final_stats=1 \
 			$(FUZZ_ARGS) ); \
 	done
+	@# The client library's reader, which `ncfg`, the Qt client and the shim
+	@# all read netcfgd's answers through. No guard: it needs nothing this
+	@# tree does not already build.
+	@$(MAKE) --no-print-directory -C client fuzz FUZZ_CC=$(FUZZ_CC)
+	@for one in $$($(MAKE) --no-print-directory -C client fuzz-list); do \
+		echo "fuzz: client $$one"; \
+		mkdir -p client/fuzz/build/found/$$one; \
+		( cd client && ./fuzz/$${one}_fuzz \
+			fuzz/build/found/$$one fuzz/corpus/$$one \
+			-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_SECONDS) \
+			-max_len=$(FUZZ_MAX_LEN) -timeout=10 \
+			-artifact_prefix=fuzz/build/ -print_final_stats=1 \
+			$(FUZZ_ARGS) ) || exit 1; \
+	done
 	@# The shim's own targets, guarded the way every gate that needs it is:
 	@# they need libdbus to build at all.
 	@if pkg-config --exists dbus-1 2>/dev/null; then \

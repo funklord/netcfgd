@@ -58,6 +58,12 @@ c/fuzz/*.d
 # The shim's two targets, built the same way from the same drivers. Its seed
 # generator is a program whose OUTPUT is committed, so the binary is ignored
 # and `fuzz/corpus/` is not.
+# The client library's target, which three programs' readers live in. Its seed
+# generator is a script and its output is committed, like the shim's.
+client/fuzz/build/
+client/fuzz/*_replay
+client/fuzz/*_fuzz
+client/fuzz/*.d
 adapter/netcfgd-nm/c/fuzz/build/
 adapter/netcfgd-nm/c/fuzz/*_replay
 adapter/netcfgd-nm/c/fuzz/*_fuzz

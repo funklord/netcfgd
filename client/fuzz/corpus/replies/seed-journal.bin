@@ -1,0 +1,1 @@
+{"response":"journal","records":[{"id":1,"op":"addr.add","interface":"eth0","reason":{"interface":"eth0","field":"addressing[0]","desired":"192.0.2.1/24","observed":"<absent>"},"outcome":"done"}]}

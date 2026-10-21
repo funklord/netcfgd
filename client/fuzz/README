@@ -1,0 +1,30 @@
+A fuzz target for the readers three programs share.
+
+`libncfg_client.a` is linked by `ncfg`, by the Qt client and by the
+NetworkManager shim, and every one of them learns what the machine is doing by
+calling a reader here: framing, then JSON, then a typed walk that builds C
+structures with allocated strings and counted arrays. The JSON layer was
+already fuzzed from the daemon's side; the typed walk had nothing.
+
+    replies   twenty-one one-request readers, the first input byte choosing
+              which. A reply is delivered by a listening unix socket this
+              process owns -- see `replies.c` for why the bytes are queued
+              before the reader is called, and why there is no fork.
+
+`make_seeds.py` derives the corpus from `doc/schema/socket.json`, which is the
+protocol's own record of every request and response and is what
+`tests/client_test` validates against. Re-run it when the schema grows.
+
+**A corpus is part of the detector.** Measured 2026-10-21: with the
+schema-derived seeds alone, a deliberate off-by-one in `read_routes` survived
+971,215 executions unnoticed, because nothing in the corpus reached that
+function -- the reply that does is a document whose networks carry routes, and
+the schema has no such line. One seed later the same sabotage was caught in
+seconds, as a heap-buffer-overflow in `ncfg_saved_networks_free` with the line
+number. `seed-document-saved-networks.bin` is that seed and
+`routes-past-the-count.bin` is the reproducer it produced.
+
+    make -C client fuzz-replay   the corpus, deterministic, in `make check`
+                                 through `client-test`
+    make fuzz                    this target, the shim's three and the
+                                 daemon's five
