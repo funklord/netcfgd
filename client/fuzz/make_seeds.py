@@ -68,6 +68,37 @@ READERS = {
 # found.
 EXTRA = ()
 
+def monitor_seeds(lines, into):
+	"""The event stream, for the `monitor` target.
+
+	**Both shapes, and the first version of this took only one.** A monitor
+	delivers a bare `{"event": ...}` line; a request's answer carries
+	`{"response": "event", "event": ...}`. The schema has one of the second
+	and one of each of the five firsts, and a filter for the wrapped form
+	alone saw one event kind where there are five -- which is how this target
+	was seeded with a fifth of what the reader can meet (project.md 10.514).
+
+	Three files: every event there is, as the stream a busy minute looks like;
+	the same again four times over, for the repeated-call path a single line
+	cannot reach; and half a line, for the end of stream arriving mid-event.
+	"""
+	events = []
+	for line in lines:
+		try:
+			message = json.loads(line)
+		except json.JSONDecodeError:
+			continue
+		if isinstance(message.get("event"), str):
+			events.append(line)
+	if not events:
+		return 0
+	into.mkdir(parents=True, exist_ok=True)
+	(into / "seed-every-event.txt").write_text("\n".join(events) + "\n")
+	(into / "seed-many.txt").write_text(("\n".join(events) + "\n") * 4)
+	(into / "seed-half-a-line.txt").write_text(events[0][: len(events[0]) // 2])
+	return 3
+
+
 def main():
 	root = pathlib.Path(__file__).resolve().parents[2]
 	schema = root / "doc/schema/socket.json"
@@ -93,7 +124,14 @@ def main():
 	if not written:
 		print(f"make_seeds: no responses found in {schema}", file=sys.stderr)
 		return 1
-	print(f"make_seeds: {written} seed(s) into {into}")
+	stream = monitor_seeds(schema.read_text().splitlines(),
+	    pathlib.Path(__file__).resolve().parent / "corpus/monitor")
+	if not stream:
+		print(f"make_seeds: no events found in {schema}, so the monitor target",
+		    file=sys.stderr)
+		print("make_seeds:   would be seeded with nothing", file=sys.stderr)
+		return 1
+	print(f"make_seeds: {written} reply seed(s) and {stream} stream seed(s)")
 	return 0
 
 if __name__ == "__main__":

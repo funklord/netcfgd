@@ -1,4 +1,24 @@
 {"response":"event","event":"confirm_armed","seconds":90}
+{"event":"observed","summary":"eth0 gained an address"}
+{"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
+{"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
+{"event":"confirm_armed","seconds":90}
+{"event":"confirm_resolved","confirmed":true}
 {"response":"event","event":"confirm_armed","seconds":90}
+{"event":"observed","summary":"eth0 gained an address"}
+{"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
+{"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
+{"event":"confirm_armed","seconds":90}
+{"event":"confirm_resolved","confirmed":true}
 {"response":"event","event":"confirm_armed","seconds":90}
+{"event":"observed","summary":"eth0 gained an address"}
+{"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
+{"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
+{"event":"confirm_armed","seconds":90}
+{"event":"confirm_resolved","confirmed":true}
 {"response":"event","event":"confirm_armed","seconds":90}
+{"event":"observed","summary":"eth0 gained an address"}
+{"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
+{"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
+{"event":"confirm_armed","seconds":90}
+{"event":"confirm_resolved","confirmed":true}

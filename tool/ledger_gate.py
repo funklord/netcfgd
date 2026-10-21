@@ -55,6 +55,7 @@ WHAT THIS DOES NOT CHECK
 
 import json
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -84,6 +85,49 @@ def ledger():
 		print("ledger-gate: --supported said nothing at all", file=sys.stderr)
 		raise SystemExit(1)
 	return rows
+
+
+def emitted_events():
+	"""Every event kind this build can send, out of the table that names them.
+
+	`ncfg_proto_event_name` indexes `event_names` by the enum, and
+	`word_table_gate.py` already holds that table to one word per enum value
+	-- so the table is the authority for what the daemon can say, and reading
+	it here needs no second list.
+	"""
+	source = (ROOT / "c/src/proto/response.c").read_text()
+	table = re.search(
+		r"event_names\[NCFG_PROTO_EVENT_COUNT\]\s*=\s*\{(.*?)\};", source, re.S
+	)
+	if not table:
+		print("ledger-gate: c/src/proto/response.c has no event_names table, so",
+		    file=sys.stderr)
+		print("ledger-gate:   this would check the witness against nothing",
+		    file=sys.stderr)
+		raise SystemExit(1)
+	return set(re.findall(r'"([^"]+)"', table.group(1)))
+
+
+def witnessed_events():
+	"""Every event kind the frozen socket transcript carries.
+
+	Both shapes count. A monitor stream delivers a bare `{"event": ...}` line
+	and a request's answer carries `{"response": "event", "event": ...}`, and
+	the witness has one of the second and one of each of the first -- so a
+	filter that looked only for the wrapped form sees one event kind where
+	there are five. That is not hypothetical: it is how the monitor fuzz
+	target came to be seeded with one kind out of five (project.md 10.514).
+	"""
+	seen = set()
+	for line in (SCHEMA / "socket.json").read_text().splitlines():
+		line = line.strip()
+		if not line:
+			continue
+		message = json.loads(line)
+		kind = message.get("event")
+		if isinstance(kind, str):
+			seen.add(kind)
+	return seen
 
 
 def witnessed_requests():
@@ -154,6 +198,22 @@ def main():
 	for name in sorted(requests):
 		must_carry_out("request", name, "socket.json sends it")
 
+	# **Every event kind the build can emit has a line in the witness**, which
+	# is the one direction this gate did not check and the one a reader
+	# believes without looking. An event is the only thing netcfgd says that
+	# nobody asked for, so a kind with no witness line is a wire form nothing
+	# pins -- and a corpus seeded from the witness never sees it.
+	events = emitted_events()
+	witnessed = witnessed_events()
+	for name in sorted(events - witnessed):
+		failures.append(
+			f"socket.json has no line for the `{name}` event, which this build emits"
+		)
+	for name in sorted(witnessed - events):
+		failures.append(
+			f"socket.json carries an `{name}` event and this build cannot emit one"
+		)
+
 	ops, link_kinds, backend_kinds = witnessed_actions()
 	asked_per_kind = {"link.create", "backend.start", "backend.stop", "backend.reload"}
 	for name in sorted(ops - asked_per_kind):
@@ -189,7 +249,8 @@ def main():
 	print(
 		f"ledger-gate: {len(requests)} request(s), {len(ops)} op(s), "
 		f"{len(link_kinds)} link kind(s) and {len(backend_kinds)} backend action(s) "
-		f"in the witnesses, all carried out by this build"
+		f"in the witnesses, all carried out by this build; "
+		f"{len(events)} event kind(s), each with a line"
 	)
 	if refusals:
 		print(f"ledger-gate: and {len(refusals)} thing(s) refused, each saying why:")

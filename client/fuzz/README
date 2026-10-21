@@ -25,6 +25,13 @@ classes that need a `QApplication`, so there is no parser to point a target at
 and nothing a fuzzer could hand them that the library would have passed
 through. What the window reads from netcfgd is these two targets.
 
+**Both corpora come from the same schema and the filter is the thing to get
+right.** The monitor seeds were a fifth of what they should have been because
+the generator looked for `"response":"event"` and a stream delivers a bare
+`{"event": ...}` line; `tool/ledger_gate.py` now asserts that the witness
+carries a line per event kind the build can emit, so the next reader is told
+rather than having to grep (project.md 10.514).
+
 `make_seeds.py` derives the corpus from `doc/schema/socket.json`, which is the
 protocol's own record of every request and response and is what
 `tests/client_test` validates against. Re-run it when the schema grows.

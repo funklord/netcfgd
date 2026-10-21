@@ -1,1 +1,1 @@
-{"response":"event","event":"confirm_arm
+{"response":"event","event":

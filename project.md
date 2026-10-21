@@ -12498,6 +12498,72 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.514 The schema already had every event kind; my filter did not
+
+"add a line per event kind to the schema", the copyright holder, 2026-10-21 --
+asked for on the strength of 10.513, which was **wrong**. The lines were
+already there.
+
+    doc/schema/socket.json:53   {"response":"event","event":"confirm_armed",...}
+    doc/schema/socket.json:63   {"event":"observed",...}
+    doc/schema/socket.json:64   {"event":"reloaded",...}
+    doc/schema/socket.json:65   {"event":"drift",...}
+    doc/schema/socket.json:66   {"event":"confirm_armed",...}
+    doc/schema/socket.json:67   {"event":"confirm_resolved",...}
+
+Five kinds, in the shape a monitor stream actually delivers -- a bare
+`{"event": ...}` line -- plus one wrapped in a response. The C enumerates
+exactly those five (`NCFG_PROTO_EVENT_OBSERVED` through
+`..._CONFIRM_RESOLVED`, with `_COUNT`), and the Rust witness generator
+enumerates them through an exhaustive match that refuses to compile if a
+variant appears. Nothing was missing from anything.
+
+**What was missing was in my seed generator**, which filtered the schema for
+`"response":"event"` and found one line. So the monitor target was seeded with
+one kind out of five, and the sentence I wrote -- "the schema carries exactly
+one event line" -- was true about the string I searched for and false about
+the question I was answering.
+
+### The error is the same one this week has been about
+
+A corpus that does not reach the reader reports success as loudly as one that
+does (10.511), and this is the next layer down: **a generator that does not
+find the seeds reports a corpus as loudly as one that does.** Both were caught
+by asking what an input reaches rather than whether it parses -- and this one
+only after it had been written into an entry, a commit message and a reply to
+the holder, which is why the instruction came back as "add the lines".
+
+So the honest fix is three things and none of them is a schema edit:
+
+* the filter takes both shapes, and the generator fails rather than writing
+  nothing if it finds no events. The corpus is five kinds now, and a probe
+  says so: `confirm_armed`, `observed`, `reloaded`, `drift`,
+  `confirm_resolved`, then the stream ends;
+* **the claim is now a gate**, in `tool/ledger_gate.py`, which already reads
+  this witness for requests. Every kind `event_names[]` holds must have a line
+  and every line must name a kind this build can emit -- so the next reader
+  does not have to grep for the right string, and `make check` says
+  "5 event kind(s), each with a line" on every run;
+* 10.513's section is struck through rather than quietly amended, because a
+  wrong measurement that produced an instruction is worth leaving visible.
+
+### Both arms of the gate, and the arm that matters most
+
+    a kind with no witness line   remove `{"event":"drift"...}`: "socket.json
+                                  has no line for the `drift` event, which
+                                  this build emits"
+    a line nothing can emit       add `{"event":"invented"}`: "socket.json
+                                  carries an `invented` event and this build
+                                  cannot emit one"
+    the table gone missing        rename `event_names`: "has no event_names
+                                  table, so this would check the witness
+                                  against nothing"
+
+The third is the one worth having. `word_table_gate.py` already holds that
+table to one word per enum value, so the two gates between them say: the table
+is complete, and the witness carries all of it. Neither sentence is believed
+any more.
+
 ## 10.513 The GUI's readers are the library's, except one
 
 "now fuzz the GUI's readers too", the copyright holder, 2026-10-21. The
@@ -12543,15 +12609,16 @@ second. The real reader exits 0 on the same seed. **A zero is not treated as
 a reason to stop**, because the GUI does not stop on one -- the notifier fires
 again -- so the loop goes on until the stream says it is gone.
 
-### The seed came from the schema, and there is only one event in it
+### ~~The seed came from the schema, and there is only one event in it~~
 
-`doc/schema/socket.json` carries exactly one `{"response":"event"}` line, so
-the corpus is that line, four copies of it for the repeated-call path, and
-half a line for the end-of-stream-mid-event case. The probe says what it
-reaches: one event with `kind=confirm_armed`, then -1. **One event kind is
-thin** and the schema is where to fix it rather than the corpus -- a line per
-event kind there would seed this target and document the protocol in the same
-edit, which is a note for whoever adds the next kind.
+~~`doc/schema/socket.json` carries exactly one `{"response":"event"}` line...
+**One event kind is thin** and the schema is where to fix it rather than the
+corpus.~~ **Wrong, and the schema was never the problem.** It carries all five
+event kinds -- as bare `{"event": ...}` lines, which is the shape a monitor
+stream delivers -- plus one wrapped `{"response":"event", ...}`. What carried
+one kind was my seed filter, which looked for the wrapped form only. 10.514
+has the correction, the gate that now enforces the claim, and what the error
+cost.
 
 ## 10.512 The daemon's remaining readers, and three seeds that reached nothing
 

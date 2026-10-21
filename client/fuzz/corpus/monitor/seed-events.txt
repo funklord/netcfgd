@@ -1,1 +1,0 @@
-{"response":"event","event":"confirm_armed","seconds":90}
