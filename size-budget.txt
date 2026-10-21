@@ -80,6 +80,16 @@ tolerance_percent 3
 #
 # One name now, not two. `ncfg` is a symlink to `netcfgd` -- see the multi-call
 # note below -- so summing both would count the same file twice.
+#
+# **And the NetworkManager shim is deliberately not in this total**, which is
+# worth saying now that it is C and in this tree's own build rather than a
+# cargo workspace off to one side (0276). `make install` does not install it;
+# `make install-nm` does, into its own package, for a desktop that wants NM's
+# clients to keep working. The flash this gate is about is the flash a router
+# spends, and a router installs the daemon alone. Adding the shim's quarter
+# megabyte would change what the number means, so it is a decision rather than
+# a line to add here -- and until somebody takes it, `make linkage` is what
+# holds the shim to anything at all.
 netcfgd
 
 # 1 MB was design section 10.2's embedded budget. Superseded by 0024, which
@@ -815,4 +825,31 @@ netcfgd
 # already in the binary -- both reuse spellings the lowerer owns.
 #
 # Recorded rather than left to ride the tolerance, as every entry above says.
-total 1154776
+# sixty-five commits of ordinary work, +22,224 bytes to 1,177,000.
+#
+# No single cause, which is the honest answer and the reason this entry is three
+# measurements rather than an argument. Built at two midpoints of the range:
+#
+#     8dbe980c  1,154,776   the commit that set the figure above
+#     3e436604  1,159,216   +4,440 over the first 22 commits
+#     542c15bf  1,167,976   +8,760 over the next 22
+#     HEAD      1,177,000   +9,024 over the last 21
+#
+# About 340 bytes a commit, spread evenly: 24 fixes, 19 test commits, 12 comment
+# passes, and three features -- bluetooth settled as observed (0272), link-local
+# addressing wired through plan, apply and observe, and the IPv4LL client's
+# supervision. The features are where a reader would look and they are not where
+# most of it is; a fix that adds a refusal with a sentence in it costs a few
+# hundred bytes too, and there were twenty-four of those.
+#
+# **The base was rebuilt and came out at 1,154,776 byte-for-byte**, which is the
+# control this entry would be worthless without: it says the growth is code and
+# not a compiler that has moved under the figure. The three builds are from
+# `git archive` into a scratch directory rather than from this tree, so nothing
+# was checked out over anybody's work.
+#
+# It had been riding the tolerance at 1.9 per cent of the 3 allowed -- a passing
+# gate reporting a number larger than its limit, which is the state every entry
+# above this one exists to prevent, and which this file's own rule calls out by
+# name.
+total 1177000

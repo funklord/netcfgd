@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.507 The budget gates were already fixed, and the ratchet had gone slack
+
+"now fix the size, rss and footprint gates too", the copyright holder,
+2026-10-21, after `linkage`. **Two of the three words in that instruction were
+already done and the interesting part was somewhere else.**
+
+Measured rather than assumed, which is the whole lesson of this entry:
+
+    size        reads `c/netcfgd`, and says "the C, because the C is what
+                `make install` installs (0266)" in its first comment
+    rss         runs `./c/netcfgd` with the footprint fixture, and the band
+                carries the C's three-run measurement beside the Rust's
+    footprint   runs `./c/ncfg plan`, "for 0266's reason and the size gate's"
+
+Each was re-pointed in a pass of its own after 0266, exactly as that record
+asked. What nobody had done was the half a re-point does not cover.
+
+### The ratchet had gone slack by 22,224 bytes
+
+`size-budget.txt` said 1,154,776 and the binary was 1,177,000 -- 1.9 per cent
+into the 3 per cent tolerance, so the gate printed
+`installed 1177000 of 1154776` and exited 0. **A passing gate reporting a
+number larger than its limit** is the exact output this file's own history says
+costs a reader a detour through the recipe, and the entry above the new one says
+"recorded rather than left to ride the tolerance" about seventy-two bytes.
+
+So it is recorded, with the method rather than an argument. Sixty-five commits
+of `c/` had landed since the figure was set; two midpoints were built from
+`git archive` into a scratch directory and measured:
+
+    8dbe980c  1,154,776   the commit that set the old figure
+    3e436604  1,159,216   +4,440 over the first 22 commits
+    542c15bf  1,167,976   +8,760 over the next 22
+    HEAD      1,177,000   +9,024 over the last 21
+
+About 340 bytes a commit and no single cause: 24 fixes, 19 test commits, 12
+comment passes, and three features. **The features are where a reader would
+look and are not where most of it is** -- a fix that adds a refusal with a
+sentence in it costs a few hundred bytes too, and there were twenty-four of
+those.
+
+**The base rebuild is the control and it came out byte-for-byte**: 1,154,776,
+the recorded figure, from the same toolchain running today. Without it the entry
+would be a guess about whether 22 KB was code or a compiler that had moved under
+the number.
+
+### What each gate's failure arm does, since a budget nobody has seen fail is a number
+
+    size        limit dropped in a scratch copy: "over its 1030000 ceiling by
+                137976", naming ceiling, limit and overage
+    rss         `make rss RSS_LIMIT_KB=100`: "over limit"
+    rss         a daemon replaced by `exit 0`: "could not measure", refused
+                rather than passed
+    footprint   one line cut from `expected-run.txt`: "/run does not match",
+                with the diff
+
+`footprint`'s other arm -- `./c/ncfg` missing -- could not be reached, and that
+is correct rather than a gap: the gate builds before it checks, and the build
+makes the symlink. It is a backstop for a tree where the build did not run,
+which is the state that produced it.
+
+### The shim is not in the total, and the file now says so
+
+`make install` installs the daemon; `make install-nm` installs the shim into
+its own package. The flash this gate is about is the flash a router spends and a
+router installs the daemon alone -- but the shim is C and in this tree's own
+build since 0276, so a reader could reasonably have assumed the quarter megabyte
+was counted. Adding it would change what the number means, which makes it a
+decision rather than a line to add; `make linkage` is what holds the shim to
+anything until somebody takes it.
+
+### And the stale claim was mine, from an hour earlier
+
+10.506 ended with "`size`, `rss` and `footprint` are still pointed at the Rust.
+They are 0266's open item, not this one." That came from 0266's *What this
+leaves wrong* section, quoted rather than re-derived -- **in an entry whose
+subject is a gate that rotted because its comment was believed over its
+recipe.** The same failure, in the same hour, in the paragraph diagnosing it.
+
+Which says something the four rules in `evidence.md` say more briefly: the
+document that tells you what is broken is the one most likely to be describing a
+tree that has moved. 0266's list was true the day it was written. Three weeks
+later two thirds of it was wrong, nothing announced that, and a record cannot be
+edited -- so the correction has to live where the next reader will be, which is
+why 10.506 now carries a strike-through and that entry carries a *Closed*
+paragraph pointing here.
+
 ## 10.506 The linkage gate was about a binary nobody installs
 
 The copyright holder, 2026-10-21: "fix the linkage gate too", after it was
@@ -12576,8 +12663,16 @@ object to -- no longer has an answer for the Rust, and does not need one. For
 the C there is no graph and no build script, so an entry arrives only because
 somebody wrote `-l` or included a header pkg-config knows about.
 
-`size`, `rss` and `footprint` are still pointed at the Rust. They are 0266's
-open item, not this one.
+~~`size`, `rss` and `footprint` are still pointed at the Rust. They are 0266's
+open item, not this one.~~ **Wrong when written, and wrong by the same
+mechanism this entry is about.** All three had already been re-pointed at the C
+-- `size` reads `c/netcfgd`, `rss` runs `./c/netcfgd`, `footprint` runs
+`./c/ncfg`, and each recipe says so in its first comment. The sentence came
+from 0266's *What this leaves wrong* section, quoted rather than re-derived, in
+an entry whose whole subject is a gate that rotted because its comment was
+believed over its recipe. A record is not editable and does not have to be:
+reading the Makefile would have taken one grep. 10.507 has what was actually
+left to do.
 
 ## 10.505 The design document says C, and says what that gave up
 
@@ -27368,6 +27463,12 @@ with the budget holding. **Moving a budget in the same change that moves what it
 measures is how a ratchet stops ratcheting.** It wants a pass of its own, and
 the `footprint` half is the easy one: 10.318 measured the two programs writing
 byte-identical files under `/run`.
+
+**Closed.** All three were re-pointed at the C in the passes after this, each in
+its own change with its own re-measurement, and `size-budget.txt` carries the
+C's number with the method beside it. The ratchet was re-based on 2026-10-21
+with the base commit rebuilt as a control -- see 10.507, which also records that
+this paragraph was still being quoted as current three weeks later.
 
 `make live` and `make cross` still drive the Rust. Neither is a shipping
 question. And one stale sentence is left in Rust source -- the test above
