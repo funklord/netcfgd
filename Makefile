@@ -37,7 +37,7 @@
 #   make conformance   -- the two client implementations, asked the same
 #                         questions
 #   make nm-containment -- assert the core's manifest has gained no entry
-#   make linkage       -- what the shipped binary is allowed to link
+#   make linkage       -- what the shipped binaries are allowed to link
 #   make style         -- the shared source gate, plus project.md held to the
 #                         tree it describes
 #   make fmt           -- rustfmt, checking only; `fmt-fix` rewrites. Skips
@@ -90,15 +90,18 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
 
 all: build
 
 # **The C port is what this builds and what this ships** (0266). The Rust is
 # still here and still built by the gates that compare the two programs --
-# `agree`, `conformance`, `test`, `linkage` and the budget gates each build what
-# they need -- but it is no longer what `make` produces or what `make install`
-# installs.
+# `agree`, `conformance`, `test` and the budget gates each build what they need
+# -- but it is no longer what `make` produces or what `make install` installs.
+#
+# `linkage` was in that list and is not any more: it reads the shipped
+# binaries' NEEDED lists, so pointing it at the Rust made it a gate about an
+# artifact nobody installs.
 #
 # `make rust` is the old behaviour, for anyone who wants the other binary
 # without going through a gate.
@@ -1653,39 +1656,84 @@ live-container:
 		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
 		$(LIVE_IMAGE) sh /dist/live-container.sh
 
-# What the shipped binary is allowed to link.
+# What the shipped binaries are allowed to link.
 #
 # Section 1 constraint 3 and the README's headline both say the core needs
-# nothing beyond libc and the kernel, and nothing checked it. `deny` governs
-# the *crate* graph, which is a different question: a Rust dependency that
-# links a C library adds a NEEDED entry without adding anything `deny` objects
-# to, and a build script that finds a system library adds one with no crate at
-# all.
+# nothing beyond libc and the kernel, and nothing checked it.
 #
-# Reads the release binary `size` already built, so it costs no rebuild -- and
-# runs after it in PORTABLE_GATES for that reason.
+# **The question it answers is now a link-level one and nothing else answers
+# it.** While the shipped daemon was Rust, `deny` governed the crate graph and
+# this governed what that graph dragged in -- a dependency linking a C library
+# adds a NEEDED entry without adding anything `deny` objects to, and a build
+# script finding a system library adds one with no crate at all. In C there is
+# no graph and no build script: a NEEDED entry arrives because somebody added
+# `-l` or an `#include` of something pkg-config knows about, which no other
+# gate here reads.
 #
-# ncurses is on the list because `ncfg tui` is a default feature and design
-# section 10.2 has always listed it as removable. Measured rather than assumed:
-# `--no-default-features` leaves libgcc_s and libc alone, and that build
-# produces a byte-identical document, so the feature costs a dependency and
-# changes no behaviour.
-LINKAGE_ALLOWED = libc.so libgcc_s.so ld-linux libncursesw.so libtinfo.so
+# **It checked the Rust binary until 0276's follow-up, which is the wrong
+# artifact and had been since 0266.** That record named `size`, `rss` and
+# `footprint` as gates measuring a binary nobody ships; this is the fourth of
+# that family and nobody listed it. A gate whose own comment says "what the
+# SHIPPED binary is allowed to link" and reads `target/release/netcfgd` is
+# worse than no gate, because the sentence is exactly what stops anybody
+# looking.
+#
+# ncurses came off the core's list in the same change. It was there because
+# `ncfg tui` is a default *cargo feature* and design section 10.2 lists it as
+# removable -- and the C's TUI writes its own escape sequences, which
+# `c/src/cli/tui_term.c` argues at length, so the shipped daemon links libc
+# alone. Measured 2026-10-21: `objdump -p c/netcfgd` has one NEEDED entry.
+# libgcc_s came off for the same reason and is the sharper case, since nothing
+# chose to drop it -- the C simply does not pull it, and an allow list carrying
+# a library the binary does not link is a gate that would not notice it
+# arriving.
+#
+# **Two lists, because they are two claims.** The core's is constraint 3: libc
+# and the kernel. The shim's is 0264's answer -- the D-Bus stack the core must
+# not have, taken from the system rather than vendored -- so it is libc plus
+# `libdbus-1` and that is the whole of it. `nm-containment` asserts the shim
+# HAS that stack; this asserts the core has not acquired it and the shim has
+# acquired nothing else.
+LINKAGE_ALLOWED     = libc.so ld-linux
+LINKAGE_ALLOWED_NM  = libc.so ld-linux libdbus-1.so
+# The shim's positive control: the one library it is supposed to link.
+LINKAGE_REQUIRED_NM = libdbus-1.so
 
 linkage:
-	@# Built here rather than trusted: whatever is in target/release depends
-	@# on the last build's feature set, so a `--no-default-features` binary
-	@# left behind would pass this gate while the shipped one links more. It
-	@# is a no-op when `size` has already built it.
-	@$(CARGO) build --release --quiet
-	@bin=target/release/netcfgd; \
-	[ -x "$$bin" ] || { \
-		echo "linkage: $$bin is missing, so this would check nothing"; \
+	@# Built here rather than trusted, which is the half worth keeping from
+	@# the Rust version: what is sitting in a build directory depends on the
+	@# last build, and `make install` builds before it installs for the same
+	@# reason. Both are no-ops when the gates ahead of this have run.
+	@$(MAKE) --no-print-directory -C c
+	@$(MAKE) --no-print-directory linkage-one BIN=c/netcfgd \
+		ALLOWED="$(LINKAGE_ALLOWED)" WHOSE="constraint 3"
+	@# Guarded the way every other gate that needs the shim is guarded. A skip
+	@# is said out loud: a machine with no libdbus headers cannot build the
+	@# shim, so it cannot link anything it should not either, but a silent
+	@# skip is how a gate stops being a gate.
+	@if pkg-config --exists dbus-1 2>/dev/null; then \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c >/dev/null; \
+		$(MAKE) --no-print-directory linkage-one \
+			BIN=adapter/netcfgd-nm/c/netcfgd-nm \
+			ALLOWED="$(LINKAGE_ALLOWED_NM)" \
+			REQUIRED="$(LINKAGE_REQUIRED_NM)" WHOSE="0264's containment"; \
+	else \
+		echo "linkage: libdbus-1 is not installed, so the shim was not built"; \
+		echo "linkage:   and its link list was not checked"; \
+	fi
+
+# One binary, against one list. Its own target rather than a shell function in
+# the recipe above, so that the failure arm names which binary and which claim
+# -- the same list twice with a different verdict is how a reader ends up
+# reading the recipe to find out which half failed.
+linkage-one:
+	@[ -x "$(BIN)" ] || { \
+		echo "linkage: $(BIN) is missing, so this would check nothing"; \
 		exit 1; \
-	}; \
-	needed=$$(objdump -p "$$bin" 2>/dev/null | awk '/NEEDED/ {print $$2}'); \
+	}
+	@needed=$$(objdump -p "$(BIN)" 2>/dev/null | awk '/NEEDED/ {print $$2}'); \
 	if [ -z "$$needed" ]; then \
-		echo "linkage: no NEEDED entries were read at all -- either this is a"; \
+		echo "linkage: $(BIN) has no NEEDED entries at all -- either it is a"; \
 		echo "linkage:   static binary or objdump said nothing, and a gate that"; \
 		echo "linkage:   cannot tell those apart is not a gate"; \
 		exit 1; \
@@ -1693,18 +1741,29 @@ linkage:
 	fail=0; \
 	for lib in $$needed; do \
 		ok=0; \
-		for allowed in $(LINKAGE_ALLOWED); do \
+		for allowed in $(ALLOWED); do \
 			case "$$lib" in *"$$allowed"*) ok=1 ;; esac; \
 		done; \
 		[ "$$ok" -eq 1 ] || { \
-			echo "linkage: $$bin links $$lib, which constraint 3 does not allow"; \
+			echo "linkage: $(BIN) links $$lib, which $(WHOSE) does not allow"; \
 			echo "linkage:   if this is deliberate, it is a decision to record,"; \
-			echo "linkage:   not a line to add to LINKAGE_ALLOWED in passing"; \
+			echo "linkage:   not a line to add to an allow list in passing"; \
+			fail=1; \
+		}; \
+	done; \
+	for want in $(REQUIRED); do \
+		found=0; \
+		for lib in $$needed; do \
+			case "$$lib" in *"$$want"*) found=1 ;; esac; \
+		done; \
+		[ "$$found" -eq 1 ] || { \
+			echo "linkage: $(BIN) does not link $$want, which $(WHOSE) is about"; \
+			echo "linkage:   -- so this gate was passing for the boring reason"; \
 			fail=1; \
 		}; \
 	done; \
 	[ "$$fail" -eq 0 ] || exit 1; \
-	echo "linkage: $$(echo $$needed | wc -w) shared libraries, all allowed"
+	echo "linkage: $(BIN): $$(echo $$needed | wc -w) shared librar$$([ $$(echo $$needed | wc -w) -eq 1 ] && echo y || echo ies), all allowed"
 
 # Size, ratcheted, and measured as total installed size.
 #

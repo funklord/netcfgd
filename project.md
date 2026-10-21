@@ -612,7 +612,7 @@ the whole value of this target is telling somebody what to install.
 | RSS budget | `make rss`, `VmHWM` of the **release** daemon — what ships. It measured the debug one until [0098](doc/decision/0098-a-supplicant-that-bound-its-socket-and-stopped-answering.md), which made it sensitive to something it is not about: an *unused* dependency edge moved the debug figure ~190 KB while the release build stayed byte-for-byte identical. `size` already builds release and runs first, so this costs nothing. A **ratchet on a measurement**, not a tier target: §10.4's "< 4 MB RSS steady-state" is written *for nano*, and [0021](doc/decision/0021-no-nano-tier.md) dropped that tier — the same distinction `size-budget.txt` has carried since M5 and this gate had not ([0104](doc/decision/0104-the-four-megabytes-belonged-to-a-tier-that-was-dropped.md)). On **musl**, which is what the size posture targets and what the apk ships, the daemon peaks at **~2.9 MB** with ~205 kB of it anonymous; the glibc figure is ~4.2 MB because glibc is bigger. The gate prints all three numbers and pins VmHWM. **It is noisy in a way the size gate is not** — runs of an *identical* binary spread by hundreds of KB — so the limit carries a full noise band above the observed peak, and the measurements are in the Makefile so the next person can tell drift from spread |
 | Filesystem footprint | `find /etc/netcfgd` on a fixture install with no optional features used must match a build compiled without those features |
 | Unsafe policy | `forbid(unsafe_code)` holds everywhere except `netcfgd-sys` |
-| Linkage | `make linkage`: the shipped binary's `NEEDED` list against an allow-list. Constraint 3 and the README's headline both promise nothing beyond libc and the kernel, and until this nothing checked it — `deny` governs the *crate* graph, which is a different question, since a crate that links a C library or a build script that finds one adds a `NEEDED` entry with nothing for `deny` to object to. ncurses is on the list because `ncfg tui` is a default feature; `--no-default-features` leaves **libgcc_s and libc alone** and produces a byte-identical document, so the feature costs a dependency and changes no behaviour |
+| Linkage | `make linkage`: the shipped binaries' `NEEDED` lists against two allow-lists — the daemon's is constraint 3 (libc and the kernel, one entry as built), the shim's is 0264's containment (libc plus `libdbus-1`, with libdbus *required* so the check cannot pass for the boring reason). Constraint 3 and the README's headline both promise the core needs nothing beyond libc and the kernel, and until this nothing checked it. It read `target/release/netcfgd` until 10.506, which made it a gate about an artifact nobody installs; ncurses and libgcc_s came off the list in the same change, being the Rust's and not the C's |
 | Supply chain | `cargo-deny`, `cargo-audit`, pinned lockfile, stated MSRV |
 | Packaging | `make packaging`: every path an init script names is a path that gets installed, every maintainer script parses **and is executable** (dpkg silently skips one that is not), and every `@TOKEN@` in a package template is one a recipe substitutes. `make deb` and `make apk-container` build real packages, with dependencies derived from the ELF by `dpkg-shlibdeps` and `abuild` rather than typed out ([0099](doc/decision/0099-a-package-installs-netcfgd-and-changes-nothing.md)) |
 | Adapter containment | `make nm-containment`: every crate in the core lockfile appears in `deny.toml`'s allow list, so an adapter's dependencies cannot reach the core. Design §9.2 asks for exactly this assertion; [0027](doc/decision/0027-the-shim-is-a-separate-workspace-and-libnm-reads-interfaces.md) |
@@ -12497,6 +12497,87 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.506 The linkage gate was about a binary nobody installs
+
+The copyright holder, 2026-10-21: "fix the linkage gate too", after it was
+reported as a finding from retiring the Rust. `make linkage` built
+`target/release/netcfgd` with cargo and read that binary's `NEEDED` list, while
+its own comment said **"what the shipped binary is allowed to link"**.
+
+**It is the fourth member of a family 0266 named and did not finish naming.**
+That record lists `size`, `rss` and `footprint` as gates measuring a binary
+nobody ships, and left them pointed there on purpose -- a budget is a
+calibrated number and moving it in the same change that moves what it measures
+is how a ratchet stops ratcheting. `linkage` is not calibrated. It is an allow
+list, so re-pointing it costs nothing but naming what the C actually links, and
+there was no reason for it to be in that list except that nobody put it there.
+
+**A gate whose comment describes the right artifact is worse than no gate**,
+which is the transferable part. The sentence is what stops anybody looking:
+three sessions read "the shipped binary" in that comment while the recipe two
+lines below it said `target/release`, and the mismatch was found by asking what
+every Rust-era claim in the tree was about rather than by reading the gate.
+
+### Two binaries, two lists, because they are two claims
+
+    c/netcfgd                        libc.so ld-linux
+    adapter/netcfgd-nm/c/netcfgd-nm  libc.so ld-linux libdbus-1.so
+                                     and libdbus-1.so REQUIRED
+
+The daemon's list is constraint 3: libc and the kernel. As built it has exactly
+one `NEEDED` entry, `libc.so.6`. The shim's is 0264's answer -- the D-Bus stack
+the core must not have, taken from the system rather than vendored -- so it is
+libc plus `libdbus-1` and that is the whole of it.
+
+**The shim's list carries a positive control**, which is the half an allow list
+cannot do on its own: `libdbus-1` is *required* to be there. Without it the
+check would pass most loudly on a shim that had stopped linking D-Bus
+altogether, which is the vacuous pass this tree keeps finding. It pairs with
+`nm-containment`, which asserts the shim HAS that stack (10.504); this asserts
+the core has not acquired it and the shim has acquired nothing else.
+
+### What came off the list, and the sharper of the two cases
+
+`libncursesw` and `libtinfo` were allowed because `ncfg tui` is a default
+**cargo feature** and design section 10.2 lists it as removable. The C's TUI
+writes its own escape sequences -- `c/src/cli/tui_term.c` argues it at length
+against binding ncurses -- so the shipped daemon links neither.
+
+**`libgcc_s` is the case worth keeping.** Nothing decided to drop it; the C
+simply does not pull it, and it sat on the list because the Rust did. An allow
+list naming a library the binary does not link is a gate that would not notice
+that library arriving -- so a list is not only a statement about what is
+forbidden, it is a claim about what is present, and the two rot differently.
+
+### Five arms, each seen to fail
+
+    a library not on the list      the Rust binary against the core's list,
+                                   which names libncursesw and libtinfo
+    the positive control           the daemon against the shim's list, which
+                                   reports "passing for the boring reason"
+    a static binary                no NEEDED entries at all, which the gate
+                                   refuses rather than calling a pass
+    a binary that is not there     "so this would check nothing"
+    libdbus absent                 a stub `pkg-config` that fails: the core's
+                                   half still runs and the skip is said aloud
+
+The skip matters for the reason every guarded gate here is guarded: a machine
+with no libdbus headers cannot build the shim, so it cannot link anything it
+should not either -- but a silent skip is how a gate stops being a gate.
+
+### What it stopped covering, named rather than left
+
+Nothing now reads the Rust binary's `NEEDED` list. That is correct and it is
+still worth saying: it ships nowhere, and `deny` governs its crate graph. The
+link-level question the old gate answered -- a crate that links a C library, or
+a build script that finds one, adding an entry with nothing for `deny` to
+object to -- no longer has an answer for the Rust, and does not need one. For
+the C there is no graph and no build script, so an entry arrives only because
+somebody wrote `-l` or included a header pkg-config knows about.
+
+`size`, `rss` and `footprint` are still pointed at the Rust. They are 0266's
+open item, not this one.
 
 ## 10.505 The design document says C, and says what that gave up
 
