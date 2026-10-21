@@ -2680,6 +2680,24 @@ fuzz:
 			-artifact_prefix=fuzz/build/ -print_final_stats=1 \
 			$(FUZZ_ARGS) ); \
 	done
+	@# The shim's own targets, guarded the way every gate that needs it is:
+	@# they need libdbus to build at all.
+	@if pkg-config --exists dbus-1 2>/dev/null; then \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c fuzz FUZZ_CC=$(FUZZ_CC); \
+		for one in $$($(MAKE) --no-print-directory -C adapter/netcfgd-nm/c fuzz-list); do \
+			echo "fuzz: netcfgd-nm $$one"; \
+			mkdir -p adapter/netcfgd-nm/c/fuzz/build/found/$$one; \
+			( cd adapter/netcfgd-nm/c && ./fuzz/$${one}_fuzz \
+				fuzz/build/found/$$one fuzz/corpus/$$one \
+				-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_SECONDS) \
+				-max_len=$(FUZZ_MAX_LEN) -timeout=10 \
+				-artifact_prefix=fuzz/build/ -print_final_stats=1 \
+				$(FUZZ_ARGS) ) || exit 1; \
+		done; \
+	else \
+		echo "fuzz: libdbus-1 is not installed, so the shim's dictionary reader"; \
+		echo "fuzz:   was not fuzzed; make nm-c-test still replays its corpus"; \
+	fi
 	@echo "fuzz: anything new is in c/fuzz/build/found/, and a crash is a file"
 	@echo "fuzz:   named crash-* beside it. **An input worth keeping belongs in"
 	@echo "fuzz:   c/fuzz/corpus/<target>/ and committed**, which is what makes"

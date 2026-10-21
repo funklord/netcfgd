@@ -1,0 +1,24 @@
+Fuzz targets for the shim's one real parser: the settings dictionary a client
+sends to `AddConnection`.
+
+The arrangement is 0277's and the drivers are the daemon's, reached at
+`../../../c/fuzz/` rather than copied. Two targets, because they find
+different things and each is blind where the other is not:
+
+  dictionary   bytes off the bus, through `dbus_message_demarshal`, into the
+               renderer. The real boundary, so the corpus is real marshalled
+               calls. A one-byte flip inside a key name is cheap here, which
+               is how the configuration injection of 0278 is reachable.
+  settings     the dictionary built FROM the fuzzer's bytes: which group,
+               which key, which type, how long. A 400-byte value is one byte
+               of input, which is how a copy into a fixed buffer is reachable
+               -- the wire target could not manage it in 2.7 million runs.
+
+`make_seeds.c` built the corpus; its output is committed so a run needs no
+build step, and it is where to add the next shape. `shape.c` holds the
+invariant that matters more than any crash: whatever the renderer wrote must
+still be ONE network block.
+
+    make -C adapter/netcfgd-nm/c fuzz-replay   the corpus, deterministic, in
+                                               `make nm-c-test`
+    make fuzz                                  these two and the daemon's five

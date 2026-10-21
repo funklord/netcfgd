@@ -55,6 +55,14 @@ c/fuzz/build/
 c/fuzz/*_replay
 c/fuzz/*_fuzz
 c/fuzz/*.d
+# The shim's two targets, built the same way from the same drivers. Its seed
+# generator is a program whose OUTPUT is committed, so the binary is ignored
+# and `fuzz/corpus/` is not.
+adapter/netcfgd-nm/c/fuzz/build/
+adapter/netcfgd-nm/c/fuzz/*_replay
+adapter/netcfgd-nm/c/fuzz/*_fuzz
+adapter/netcfgd-nm/c/fuzz/make_seeds
+adapter/netcfgd-nm/c/fuzz/*.d
 # What `c/` was last built with, so a flag change rebuilds rather than relinks
 # instrumented objects against no runtime.
 c/.build-flags

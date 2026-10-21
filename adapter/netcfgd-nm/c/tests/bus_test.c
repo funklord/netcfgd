@@ -66,6 +66,21 @@ static void check(int condition, const char *what)
  * inside a container, which is what a client sends -- can be built here, and
  * the renderer that reads it is a pure function of it.
  */
+/* How many times `needle` appears in `haystack`. Here because "one network
+ * block, not two" is the assertion a configuration injection breaks, and
+ * `strstr` alone answers a weaker question. */
+static size_t count_in(const char *haystack, const char *needle)
+{
+	size_t      found = 0u;
+	const char *at = haystack;
+
+	while ((at = strstr(at, needle)) != NULL) {
+		found++;
+		at += strlen(needle);
+	}
+	return found;
+}
+
 static DBusMessage *settings_call(void)
 {
 	return dbus_message_new_method_call("org.freedesktop.NetworkManager",
@@ -1602,6 +1617,90 @@ int main(void)
 			check(nmc_block_passphrase_in(reply, passphrase, sizeof(passphrase)) == 0,
 			    "  and a reply with no passphrase in it is not one");
 			dbus_message_unref(reply);
+		}
+
+		/*
+		 * **Configuration a client wrote into the file by naming a key**, and
+		 * the two paths that let it. Found by fuzzing on 2026-10-21; the
+		 * reproduction and the reasoning are project.md 10.509.
+		 *
+		 * The shim renders a client's dictionary into netcfgd configuration
+		 * that a privileged daemon then compiles. So any client text reaching
+		 * the file has to be unable to change its structure -- and two places
+		 * wrote client text unchecked: the dropped-settings note, which names
+		 * every key netcfgd cannot express, and a `dns-search` entry, which
+		 * went into a quoted list.
+		 */
+		{
+			DBusMessage    *call = settings_call();
+			DBusMessageIter args;
+			DBusMessageIter groups;
+			DBusMessageIter entry;
+			DBusMessageIter pairs;
+			static const char *const payload =
+			    "x\"\n}\n\nnetwork \"injected\" {\n\tssid = \"anything\"\n}\n# ";
+
+			dbus_message_iter_init_append(call, &args);
+			(void)dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sa{sv}}",
+			    &groups);
+			open_group(&groups, "connection", &entry, &pairs);
+			say_string(&pairs, "id", "Victim");
+			say_string(&pairs, "type", "802-11-wireless");
+			/* The key NAME is the payload: it is what the note writes. */
+			say_string(&pairs, payload, "whatever");
+			close_group(&groups, &entry, &pairs);
+			open_group(&groups, "802-11-wireless", &entry, &pairs);
+			say_bytes(&pairs, "ssid", "Victim");
+			close_group(&groups, &entry, &pairs);
+			(void)dbus_message_iter_close_container(&args, &groups);
+
+			check(nmc_block_render(call, 0, &block, why, sizeof(why)) == 1,
+			    "a key name full of configuration still renders a profile");
+			/* The payload's CHARACTERS are still in the file and that is
+			 * correct: they are inside a comment, which is where the note
+			 * records what a client asked for. What must not survive is the
+			 * line break that would make them a block, so the assertion is
+			 * about the line rather than the phrase. */
+			check(strstr(block.text, "\nnetwork \"injected\"") == NULL,
+			    "  and nothing it wrote begins a line");
+			check(count_in(block.text, "\nnetwork \"") == 1,
+			    "  which holds one network block, not two");
+			check(strstr(block.text, "#   connection.x\"?}") != NULL,
+			    "  the name being recorded with each control byte shown as `?`");
+			dbus_message_unref(call);
+		}
+		{
+			DBusMessage    *call = settings_call();
+			DBusMessageIter args;
+			DBusMessageIter groups;
+			DBusMessageIter entry;
+			DBusMessageIter pairs;
+			static const char *const bad[] = {
+				"x\", \"y\"]\n}\nnetwork \"injected\" { ssid = \"q\" }\n#"
+			};
+
+
+			dbus_message_iter_init_append(call, &args);
+			(void)dbus_message_iter_open_container(&args, DBUS_TYPE_ARRAY, "{sa{sv}}",
+			    &groups);
+			open_group(&groups, "connection", &entry, &pairs);
+			say_string(&pairs, "id", "Victim");
+			say_string(&pairs, "type", "802-11-wireless");
+			close_group(&groups, &entry, &pairs);
+			open_group(&groups, "802-11-wireless", &entry, &pairs);
+			say_bytes(&pairs, "ssid", "Victim");
+			close_group(&groups, &entry, &pairs);
+			open_group(&groups, "ipv4", &entry, &pairs);
+			say_string(&pairs, "method", "auto");
+			say_texts(&pairs, "dns-search", bad[0]);
+			close_group(&groups, &entry, &pairs);
+			(void)dbus_message_iter_close_container(&args, &groups);
+
+			check(nmc_block_render(call, 0, &block, why, sizeof(why)) == 0 &&
+			        strstr(why, "dns-search") != NULL &&
+			        strstr(why, "control character") != NULL,
+			    "a search domain carrying a quote is refused, naming the key");
+			dbus_message_unref(call);
 		}
 	}
 

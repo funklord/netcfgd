@@ -363,6 +363,39 @@ static int is_writable_label(const char *id)
 	return 1;
 }
 
+/*
+ * Whether `text` can go inside a quoted value in the block.
+ *
+ * **The same character rule as a label, for the same reason, and the reason is
+ * not tidiness.** A quote or a backslash ends or escapes the string the
+ * renderer is writing; a newline ends the LINE. Either way the file that comes
+ * out is not the file this code meant to write, and the daemon compiles
+ * whatever is there -- so a client that can choose those bytes can choose
+ * configuration.
+ *
+ * Found by fuzzing, 2026-10-21: a `dns-search` entry went into
+ * `search = ["..."]` unchecked, and a client could close the list, close the
+ * block and open a `network` block of its own. project.md 10.509 has the
+ * reproduction.
+ */
+/* The longest group or key name the note writes before it says `...`. NM's own
+ * are well under this; the number is here to bound a client's, not theirs. */
+#define NMC_NAME_MAX 96u
+
+static int is_quotable(const char *text)
+{
+	size_t at;
+
+	for (at = 0u; text[at] != '\0'; at++) {
+		unsigned char c = (unsigned char)text[at];
+
+		if (c == '"' || c == '\\' || c < 0x20u || c == 0x7fu) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* ---------------------------------------------------- lists inside the block */
 
 /*
@@ -482,6 +515,39 @@ static int says_nothing(DBusMessageIter *value)
  * 0034: what netcfgd cannot express is named rather than dropped. The names are
  * the client's own spelling of them, so an operator can look the setting up.
  */
+/*
+ * A group or key name, written into a comment so that it cannot be anything
+ * else.
+ *
+ * **Sanitised rather than refused, which is the opposite choice from
+ * `dns-search` above and deliberate.** This note exists because 0034 says an
+ * unexpressible setting is NAMED rather than dropped -- so refusing the call
+ * over a name would throw away a profile the client can otherwise have, to
+ * protect a comment. What matters is that the comment stays a comment: a
+ * newline in a key name ended the line and let a client write a `network`
+ * block of its own into the file, which is the defect fuzzing found
+ * (project.md 10.509).
+ *
+ * Anything outside printable ASCII becomes `?`, so the reader sees that the
+ * name had bytes in it rather than seeing a name that was never sent. The
+ * length is bounded as well: a key name is an identifier, and a client sending
+ * a kilobyte of one is filling the block's budget rather than describing a
+ * setting.
+ */
+static void put_name(text_t *into, const char *name)
+{
+	size_t at;
+
+	for (at = 0u; name[at] != '\0' && at < NMC_NAME_MAX; at++) {
+		unsigned char c = (unsigned char)name[at];
+
+		putf(into, "%c", (c < 0x20u || c >= 0x7fu) ? '?' : (char)c);
+	}
+	if (name[at] != '\0') {
+		putf(into, "...");
+	}
+}
+
 static void note_dropped(DBusMessage *call, text_t *into)
 {
 	struct {
@@ -572,7 +638,11 @@ static void note_dropped(DBusMessage *call, text_t *into)
 	putf(into, "#\n# The client also asked for the settings below. netcfgd has no way to\n"
 	           "# say them, so they are recorded here rather than silently discarded:\n");
 	for (at = 0u; at < count; at++) {
-		putf(into, "#   %s.%s\n", dropped[at].group, dropped[at].key);
+		putf(into, "#   ");
+		put_name(into, dropped[at].group);
+		putf(into, ".");
+		put_name(into, dropped[at].key);
+		putf(into, "\n");
 	}
 }
 
@@ -775,6 +845,22 @@ static int read_strings(DBusMessage *call, const char *group, const char *key, l
 			if (addresses && !is_address(text)) {
 				(void)snprintf(err, err_size,
 				    "`%s` is not an address, so it cannot be a nameserver", text);
+				return -1;
+			}
+			/*
+			 * **Refused rather than rewritten**, which is the choice between
+			 * two honest answers: a client's search domain is a value
+			 * somebody typed, and quietly editing it would leave them with a
+			 * resolver configuration they did not ask for. A domain cannot
+			 * contain a quote, a backslash or a control character in the
+			 * first place, so nothing legitimate is being turned away.
+			 */
+			if (!is_quotable(text)) {
+				(void)snprintf(err, err_size,
+				    "a `%s.%s` entry has a quote, a backslash or a control "
+				    "character in it, and netcfgd configuration cannot carry "
+				    "one inside a value",
+				    group, key);
 				return -1;
 			}
 			list_add(list, text);

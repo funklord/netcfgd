@@ -12498,6 +12498,105 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.509 A client could write its own configuration, by naming a key
+
+"now fuzz the shim's dictionary reader too", the copyright holder, 2026-10-21.
+It found a configuration injection in `nmc_block_render`, which 0278 records
+and which is fixed with two regression tests and a corpus input.
+
+### What a client could do
+
+`AddConnection` takes `a{sa{sv}}`. The renderer writes a drop-in under
+`/etc/netcfgd/conf.d` and the daemon compiles it, and the dropped-settings
+note -- which 0034 requires, naming every setting netcfgd cannot express --
+wrote the client's group and key names into a comment **verbatim**. A key name
+carrying a newline therefore ended the comment:
+
+    #   connection.x"
+    }
+
+    network "injected" {
+    	ssid = "anything"
+    	wifi { open = true }
+    }
+    #
+
+    network "Victim" {
+    	wifi { open = true }
+    }
+
+Everything after the newline is configuration the client chose. The second
+site was `dns-search`, whose entries went into `search = [...]` with no check
+at all and could close the list, close the block and open another.
+
+**The permission this converted.** `AddConnection` authorizes the caller by
+uid, so the client was one allowed to add a wifi network. What it got was the
+ability to write any configuration netcfgd will compile -- a different
+permission, and a much larger one. Addresses and routes were never exposed:
+both go through `is_address`, which is why this is two sites and not twelve.
+
+### The fuzzer did not find it, and the honest version of that matters
+
+No crash. The renderer never crashed in millions of executions and still does
+not. What happened is that a target assertion fired on a NEAR MISS: the
+assertion said the credential must appear nowhere in the block text, and an
+input turned up whose passphrase was `802-11-wireless` -- a legal passphrase
+length, and a string the note lists because it is a group name. That was a
+false positive in my own assertion, and reading the output to understand it is
+what showed the note echoing client text into the file.
+
+So: **fuzzing put the output in front of somebody, and the defect was found by
+reading it.** The injection itself had to be reproduced by hand, because the
+structure-aware generator only emits printable ASCII -- it cannot produce a
+newline, by design, since libdbus refuses a string that is not valid UTF-8 and
+a generator feeding it arbitrary bytes would report its own bug every run.
+
+The assertion that was too strong is now the sound one: the credential must
+never be the VALUE of `psk`, which is what 0042 and 0229 actually require and
+which has no false positives.
+
+### What makes the class mechanical from here
+
+`fuzz/shape.c`: after every successful render, the text must be a block this
+renderer could have written -- exactly one `network "..." {` header, and every
+other line blank, a comment, tab-indented, or the closing brace. Injection
+breaks it immediately.
+
+Proved both ways, which is the only thing that makes an invariant worth having:
+against the unfixed renderer the seed aborts with `2 network blocks, not one`;
+against the fixed one the whole corpus replays clean. The seed is
+`corpus/dictionary/seed-newline-in-a-key-name.bin`, produced by the committed
+generator, so `make nm-c-test` runs it for ever.
+
+### Two targets, because each is blind where the other is not
+
+This was measured rather than assumed, and the measurement changed the design.
+
+    dictionary   the real boundary: bytes, `dbus_message_demarshal`, render.
+                 It reaches the renderer's key comparisons -- libFuzzer infers
+                 `"ipv4"`, `"gateway"`, `"owe"` as dictionary tokens, which it
+                 could not do otherwise. **And with an injected overflow in
+                 `read_text` it found nothing in 2.7 million runs**, because
+                 lengthening a string in a D-Bus body means editing four
+                 length prefixes at once and a byte mutator produces a message
+                 that fails to demarshal instead.
+    settings     the dictionary built from the bytes: which group, which key,
+                 which type, how long. The same sabotage, and it reported a
+                 stack-buffer-overflow in seconds.
+
+A target that cannot reach a bug class is not a weaker target, it is a blind
+one -- and the only way to find out which classes it is blind to is to inject
+one and watch.
+
+### And a near-miss worth keeping
+
+`read_text` is bounded twice -- the length check and a bounded copy -- so the
+sabotage above needed two edits to produce a crash. The comment above the
+second bound says why it is there: "a copy into a credential buffer whose only
+bound lives in another function is one a later edit breaks without anything
+saying so." That is defence in depth working exactly as described, found by
+trying to break it.
+
 ## 10.508 A fuzzer explores; the corpus is what remembers
 
 "now fix the fuzz gate too", the copyright holder, 2026-10-21, after the
