@@ -90,7 +90,7 @@ tests/bus_test: tests/bus_test.o $(OBJS) client
 # what it costs; `fuzz/make_seeds.c` is how the corpus was produced and is
 # where to add the next shape.
 FUZZ_SHARED_DIR = ../../../c/fuzz
-FUZZ_TARGETS    = dictionary settings
+FUZZ_TARGETS    = dictionary settings names
 FUZZ_REPLAYS    = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
 FUZZ_PROGRAMS   = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
 FUZZ_BUILD_DIR ?= fuzz/build

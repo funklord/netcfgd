@@ -2,8 +2,9 @@ Fuzz targets for the shim's one real parser: the settings dictionary a client
 sends to `AddConnection`.
 
 The arrangement is 0277's and the drivers are the daemon's, reached at
-`../../../c/fuzz/` rather than copied. Two targets, because they find
-different things and each is blind where the other is not:
+`../../../c/fuzz/` rather than copied. Three targets: two over the dictionary,
+because they find different things and each is blind where the other is not,
+and one over the names and paths a client chooses.
 
   dictionary   bytes off the bus, through `dbus_message_demarshal`, into the
                renderer. The real boundary, so the corpus is real marshalled
@@ -13,6 +14,23 @@ different things and each is blind where the other is not:
                which key, which type, how long. A 400-byte value is one byte
                of input, which is how a copy into a fixed buffer is reachable
                -- the wire target could not manage it in 2.7 million runs.
+
+  names        the tail of every object path a client can hold, and the id a
+               profile arrives with. Two of its answers leave the program --
+               a UUID libnm parses, and a FILENAME under /etc/netcfgd/conf.d
+               -- so it asserts the shape of both rather than only looking for
+               a crash. Its state points at a socket that cannot exist, so a
+               resolver's refresh fails fast instead of reaching a running
+               daemon thousands of times a second.
+
+What is NOT fuzzed here, and why, since a list of targets reads as a claim of
+coverage: the dispatcher itself needs a `DBusConnection` and libdbus has no
+in-process fake, so what a client's whole MESSAGE reaches is covered by
+`tests/bus_test.c` against the tables and by `tests/live/nm.sh` against real
+libnm. `AddConnection2`'s options dictionary is read inside a static handler
+reachable only through dispatch. And what netcfgd answers arrives through the
+client library: its JSON layer is fuzzed from the daemon's side
+(`c/fuzz/document_json`), and the typed readers above it would need a socket.
 
 `make_seeds.c` built the corpus; its output is committed so a run needs no
 build step, and it is where to add the next shape. `shape.c` holds the

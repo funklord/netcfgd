@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.510 The shim's other readers, and what a target cannot reach
+
+"fuzz the shim's other readers too", the copyright holder, 2026-10-21. The
+answer is one more target and an inventory, because **a list of targets reads
+as a claim of coverage** and this one has three honest holes in it.
+
+### What the shim actually reads
+
+    the settings dictionary   `dictionary` and `settings` (10.509, 0277)
+    an agent's reply          the same dictionary shape, driven by both
+    object path tails         NEW: `names`
+    a profile's id            NEW: `names`
+    netcfgd's answers         through the client library
+    a client's whole message  through the dispatcher
+
+The first two were done. The next two are what this adds. The last two cannot
+be reached by a target as the program is built, and saying so is the point of
+this entry.
+
+### `names`: the two answers that leave the program
+
+A client holds paths, and the tail of each came from the client --
+`/Devices/<tail>`, `/Settings/<tail>`, `/AccessPoint/<tail>`. D-Bus validates
+a path's shape and nothing validates its meaning, so the resolvers parse
+whatever is there; the access-point one parses with `sscanf("%u%c")`, which is
+the sort of thing to point a fuzzer at. The other half is a profile's id,
+which becomes a UUID a client reads back and **a filename under
+`/etc/netcfgd/conf.d`**.
+
+So the target asserts the shape of both rather than only looking for a crash:
+
+* a UUID is 36 characters, `8-4-4-4-12`, hex and dashes -- because libnm
+  parses it, and `nmcli` merges an activation into its profile's row by
+  matching it. One that does not parse makes a profile and its activation two
+  unrelated rows, which is the defect `active.c` already records;
+* a stem begins `nm-` and holds only alphanumerics, `-`, `_` and `.` --
+  because it names a file, and the prefix is what says the shim owns it, so
+  that `Delete` removing it is not removing somebody's hand-written
+  configuration.
+
+1.4 million executions, no crash, 388 new coverage units.
+
+**The state points at a socket that cannot exist**, which is not a trick but
+the condition the resolvers have to survive: they refresh from netcfgd on the
+way in by design, since the subtree stores nothing and a path for a device
+that appeared since the last message has to resolve. A target that let that
+reach a real daemon would send it thousands of requests a second. What it
+costs is the hit path -- only the parse and the miss are reachable here, and
+the hit is what `bus_test` and the live scripts cover with a daemon that
+exists.
+
+### A second over-strong assertion, caught by its own seed
+
+The stem check refused `..` as well. `../../etc/passwd` becomes
+`nm-.._.._etc_passwd`, which looks alarming and is a flat filename: the
+separators are gone, so there is nothing for `..` to climb through, and the
+`nm-` prefix means the name can never BE `.` or `..`. The character class is
+what makes that true.
+
+It fired on the seed written to test it, before any fuzzing -- so it cost
+nothing, unlike 10.509's. **The argument it makes is for seeding a target with
+the cases you are worried about rather than only with the ones that work**:
+both of my wrong assertions were found by an input somebody chose, not by a
+mutation.
+
+### The three holes, named
+
+**The dispatcher.** A client's whole message -- any interface, member,
+signature, body -- is what `bus.c` reads first, and a target cannot hand it
+one: it needs a `DBusConnection`, libdbus has no in-process fake, and every
+write handler asks the bus who is calling because the uid must not come from
+the message (`authorize.h`). What covers it is `tests/bus_test.c` against the
+tables and `tests/live/nm.sh` against real libnm, which is coverage of a
+different kind and not a substitute.
+
+**`AddConnection2`'s options dictionary**, read inside a static handler that
+only dispatch reaches. Exporting it to fuzz it would be changing the program
+for the test's sake, which is a trade worth refusing for now.
+
+**What netcfgd answers.** It arrives through the client library, whose JSON
+layer is already fuzzed from the daemon's side -- `ncfg_document_read` calls
+`ncfg_json_parse` (`c/src/model/document.c:2409`), and `c/fuzz/document_json`
+drives it. The typed readers above it (`ncfg_client_devices` and its
+relatives) do their own request, so fuzzing them needs a socket on the other
+end. That is a `client/` piece of work rather than a shim one, and it is the
+most valuable thing left on this list: three programs link that library.
+
 ## 10.509 A client could write its own configuration, by naming a key
 
 "now fuzz the shim's dictionary reader too", the copyright holder, 2026-10-21.
