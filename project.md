@@ -12498,6 +12498,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.516 The responses got the same table and the same gate
+
+"now add the same gate for response kinds", the copyright holder, 2026-10-21.
+Nineteen kinds, documented nowhere and checked by nothing.
+
+**The witness was already complete** -- 19 of 19, measured before writing
+anything, the same way 10.514 should have been measured. What was missing was
+again the half a reader goes looking for: `doc/socket-protocol.md` named the
+`response` TAG in section 6 and never said what the nineteen values of it are.
+Section 6.2 is a row each now, with what each answers and what it carries.
+
+### The pairings came from the dispatch, not from the names
+
+Fifteen of the nineteen are obvious from the name and four are not, so those
+four were read out of `c/src/main/daemon_answer.c` rather than guessed:
+
+    document   answers `show`
+    journal    answers `apply` -- and only `apply`
+    ok         answers `reload`, `confirm`, `revert` and every write
+    event      answers `monitor`, in the wrapper a stream uses
+
+**`reload` is the one worth the paragraph.** It answers `ok` or `error` by
+whether the configuration compiled, AND announces a `reloaded` event either
+way -- and the event is the only place the diagnostics reach a watcher who did
+not ask. `answer_reload` says so in a comment; the table and section 6.2 say
+it now too, because a client author reading only the response table would
+conclude that a failed reload is reported once.
+
+Three more earned prose: `secrets` carries names, `stored` and `used_by` and
+never a value, which is 0042 on the wire; `ok` has no members on purpose,
+since a write answering with what it wrote would be a second copy that can
+disagree with the next `show`; and `error` is a sentence rather than a code,
+for section 10's reason.
+
+### One gate, two tags, and it caught my own document while being written
+
+`tool/ledger_gate.py` had a reader per table after 10.515. It has one
+parameterised reader now, over `event_names[]` and `response_names[]` -- the
+same shape, indexed by their enum, both already held to one word per enum
+value by `word_table_gate.py` -- and it checks four things per tag: a witness
+line per kind, no witness line for a kind the build cannot send, a documented
+row per kind, and no row for a kind it cannot send. Eight assertions where
+there were four, from one authority each.
+
+**It failed on its first run, correctly.** The section scan stopped at the
+next `##`, so 6.1's "section" swallowed 6.2's table and the events check
+reported that the document described an `error` event. The fix is to stop at
+the next heading of any level, and the comment at that regex says why rather
+than leaving a reader to wonder -- **a gate that only works while a document
+has one subsection is a gate the next subsection breaks.**
+
+Four arms re-proved for responses: a missing witness line, a missing row, the
+name table renamed, and the section renamed. The last two report "this would
+check nothing", which is the pair worth having for the reason 10.515 gives.
+
 ## 10.515 The event docs, and a table a gate holds to the code
 
 "add a line per event kind to the schema's event docs", the copyright holder,

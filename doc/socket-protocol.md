@@ -418,9 +418,62 @@ claimed.** `tool/ledger_gate.py` reads `event_names[]` out of the C and
 asserts that `doc/schema/socket.json` carries a line for each — in either
 shape, bare or wrapped — and that the witness names no kind this build cannot
 emit. It holds this table to the same list, so a sixth event cannot arrive
-without this section gaining a row. The claim used to be prose nobody checked,
+without this section gaining a row. 6.2's table is held to `response_names[]`
+the same way, by the same reader. The claim used to be prose nobody checked,
 and a fuzz corpus seeded from the witness was built on a filter that found one
 kind of five (project.md 10.514).
+
+### 6.2 The responses
+
+Nineteen kinds. **The tag is what a client switches on**, and the members
+below are what that kind carries; nothing is shared between kinds except the
+tag itself.
+
+| Response | Answers | Carries |
+|---|---|---|
+| `hello` | `hello` | `protocol` and `schema` versions, and the `tiers` this connection holds |
+| `status` | `status` | the observation: `links`, `addresses`, `routes`, `backends`, `dns`, `rules` and twelve more |
+| `plan` | `plan` | `actions`, `warnings`, `refusals`, `stranded` |
+| `document` | `show` | the compiled desired state: `schema_version`, `globals`, `devices`, `interfaces`, `networks`, `rules`, `access_points` |
+| `journal` | `apply` | `records` — what was carried out, in order, each with the reason it was |
+| `explanation` | `explain` | `subject` and the `facts` about it |
+| `event` | `monitor` | one event (6.1), in the wrapper a stream uses |
+| `wifi_scan` | `wifi_scan` | `interface`, `access_points`, and `stale` where the supplicant could not scan |
+| `wifi_status` | `wifi_status` | `interface`, `state`, and the network's names where it has joined one, or `blocked` where the radio is |
+| `ap_stations` | `ap_stations` | `interface`, `access_point`, `access_control`, `stations` |
+| `radios` | `radios` | `radios`, each with whether it is activated and whether a supplicant is there |
+| `secrets` | `secret_list` | `secrets`: a name, whether it is `stored`, and what it is `used_by` — never a value |
+| `modems` | `modem_list` | `modems` |
+| `profiles` | `profile_list` | `profiles` and which is `chosen` |
+| `configs` | `config_list` | `configs` |
+| `probes` | `probe_list` | `probes` |
+| `hooks` | `hook_list` | `hooks` |
+| `ok` | `reload`, `confirm`, `revert`, and every request that writes | nothing: the tag is the whole answer |
+| `error` | anything refused, and anything that failed | `message`, which is a sentence for a person |
+
+Four are worth more than a row:
+
+- **`secrets` carries names and never values**, which is 0042's rule on the
+  wire: a credential travels inbound only. `stored` says whether netcfgd has
+  one, and `used_by` says which blocks would break without it — which is what
+  a client needs to show a list, and all it needs.
+- **`ok` has no members on purpose.** A write that answered with what it wrote
+  would be a second copy of the thing a client can ask for, and the two could
+  disagree. What changed is in the next `status` or `show`.
+- **`reload` answers `ok` or `error`, and announces a `reloaded` event either
+  way.** The caller learns whether the configuration compiled from its own
+  answer; a monitor stream learns it from the event, which is **the only place
+  the diagnostics reach a watcher** who did not ask.
+- **`error` is a sentence and not a code.** Section 10 says what an
+  implementation must do with it: show it. A client that mapped these to its
+  own strings would be a client that goes stale every time netcfgd learns to
+  explain something better.
+
+**Every kind here has a witness line and a row, and both are checked.**
+`tool/ledger_gate.py` reads `response_names[]` out of the C the way it reads
+`event_names[]`, and holds `doc/schema/socket.json` and this table to it in
+both directions — so a twentieth response cannot arrive without a line and a
+row, and neither file can describe one the build cannot send.
 
 ## 7. Compatibility rules
 

@@ -87,74 +87,77 @@ def ledger():
 	return rows
 
 
-def emitted_events():
-	"""Every event kind this build can send, out of the table that names them.
+def named_in_c(table, what):
+	"""The wire names a `const char *const` table in the proto module holds.
 
-	`ncfg_proto_event_name` indexes `event_names` by the enum, and
-	`word_table_gate.py` already holds that table to one word per enum value
-	-- so the table is the authority for what the daemon can say, and reading
-	it here needs no second list.
+	`event_names[]` and `response_names[]` are the same shape -- indexed by
+	their enum, sized by its `_COUNT`, and held to one word per value by
+	`word_table_gate.py`. So this reads either, and the two callers below
+	differ only in which they ask for.
 	"""
 	source = (ROOT / "c/src/proto/response.c").read_text()
-	table = re.search(
-		r"event_names\[NCFG_PROTO_EVENT_COUNT\]\s*=\s*\{(.*?)\};", source, re.S
-	)
-	if not table:
-		print("ledger-gate: c/src/proto/response.c has no event_names table, so",
+	found = re.search(table + r"\[\w+\]\s*=\s*\{(.*?)\};", source, re.S)
+	if not found:
+		print(f"ledger-gate: c/src/proto/response.c has no {table} table, so",
 		    file=sys.stderr)
-		print("ledger-gate:   this would check the witness against nothing",
+		print(f"ledger-gate:   this would check the {what} against nothing",
 		    file=sys.stderr)
 		raise SystemExit(1)
-	return set(re.findall(r'"([^"]+)"', table.group(1)))
+	return set(re.findall(r'"([^"]+)"', found.group(1)))
 
 
-def witnessed_events():
-	"""Every event kind the frozen socket transcript carries.
+def witnessed_tagged(tag):
+	"""Every value the frozen transcript gives to one tag member.
 
-	Both shapes count. A monitor stream delivers a bare `{"event": ...}` line
-	and a request's answer carries `{"response": "event", "event": ...}`, and
-	the witness has one of the second and one of each of the first -- so a
-	filter that looked only for the wrapped form sees one event kind where
-	there are five. That is not hypothetical: it is how the monitor fuzz
-	target came to be seeded with one kind out of five (project.md 10.514).
+	Both shapes count for an event. A monitor stream delivers a bare
+	`{"event": ...}` line and a request's answer carries
+	`{"response": "event", "event": ...}`, and the witness has one of the
+	second and one of each of the first -- so a filter for the wrapped form
+	alone sees one event kind where there are five. That is not hypothetical:
+	it is how the monitor fuzz target came to be seeded with one kind out of
+	five (project.md 10.514).
 	"""
 	seen = set()
 	for line in (SCHEMA / "socket.json").read_text().splitlines():
 		line = line.strip()
 		if not line:
 			continue
-		message = json.loads(line)
-		kind = message.get("event")
-		if isinstance(kind, str):
-			seen.add(kind)
+		value = json.loads(line).get(tag)
+		if isinstance(value, str):
+			seen.add(value)
 	return seen
 
 
-def documented_events():
-	"""Every event kind the protocol document's table carries a row for.
+def documented_rows(heading, what):
+	"""Every wire name a table under one heading of the protocol document has
+	a row for.
 
-	**Two consumers of one authority**, which is why this lives beside the
-	witness check rather than in a gate of its own: `event_names[]` says what
-	the daemon can emit, `doc/schema/socket.json` pins the bytes of each, and
-	section 6.1 of `doc/socket-protocol.md` says what each one means. A kind
-	missing from either consumer is a kind somebody has to find by reading the
-	source.
+	**Two consumers of one authority**, which is why these live beside the
+	witness check rather than in a gate of their own: the name table says what
+	the daemon can send, `doc/schema/socket.json` pins the bytes of each, and
+	`doc/socket-protocol.md` says what each one means. A kind missing from
+	either consumer is a kind somebody has to find by reading the source.
 
-	The table's first column is the kind in backticks, which is this
-	document's own convention for a wire name -- the tier table in section 4
-	spells requests the same way, and `tier_table_gate.py` reads it the same
-	way.
+	The first column is the name in backticks, which is this document's own
+	convention -- the tier table in section 4 spells requests that way and
+	`tier_table_gate.py` reads it that way.
 	"""
 	text = (ROOT / "doc/socket-protocol.md").read_text()
-	section = re.search(r"\n### 6\.1 The events\n(.*?)\n## ", text, re.S)
+	# **Up to the next heading of ANY level.** Stopping at `\n## ` alone made
+	# section 6.1 swallow 6.2's table, so the events check reported that the
+	# document described an `error` event -- which the gate caught on the run
+	# that introduced the second table, and is the reason this is a comment
+	# rather than a fixed regex nobody questions.
+	section = re.search(
+		r"\n### " + re.escape(heading) + r"\n(.*?)\n#{2,4} ", text, re.S
+	)
 	if not section:
-		print("ledger-gate: doc/socket-protocol.md has no `### 6.1 The events`",
+		print(f"ledger-gate: doc/socket-protocol.md has no `### {heading}` section,",
 		    file=sys.stderr)
-		print("ledger-gate:   section, so this would check the table against nothing",
+		print(f"ledger-gate:   so this would check the {what} table against nothing",
 		    file=sys.stderr)
 		raise SystemExit(1)
-	rows = re.findall(r"^\| `([a-z_]+)` \|", section.group(1), re.M)
-	return set(rows)
+	return set(re.findall(r"^\| `([a-z_]+)` \|", section.group(1), re.M))
 
 
 def witnessed_requests():
@@ -230,27 +233,41 @@ def main():
 	# believes without looking. An event is the only thing netcfgd says that
 	# nobody asked for, so a kind with no witness line is a wire form nothing
 	# pins -- and a corpus seeded from the witness never sees it.
-	events = emitted_events()
-	witnessed = witnessed_events()
-	for name in sorted(events - witnessed):
-		failures.append(
-			f"socket.json has no line for the `{name}` event, which this build emits"
-		)
-	for name in sorted(witnessed - events):
-		failures.append(
-			f"socket.json carries an `{name}` event and this build cannot emit one"
-		)
-	documented = documented_events()
-	for name in sorted(events - documented):
-		failures.append(
-			f"socket-protocol.md section 6.1 has no row for the `{name}` event, "
-			"which this build emits"
-		)
-	for name in sorted(documented - events):
-		failures.append(
-			f"socket-protocol.md section 6.1 describes an `{name}` event and this "
-			"build cannot emit one"
-		)
+	# **Every kind the build can send has a witness line and a documented
+	# row**, in both directions, for the two tags that are not requests. A
+	# request is covered above by the ledger; these two are covered by nothing
+	# else, and an event in particular is the only thing netcfgd says that
+	# nobody asked for -- so a kind with no witness line is a wire form nothing
+	# pins, and one with no row is a wire form nobody can look up.
+	kinds = {}
+	for tag, table, heading in (
+		("event", "event_names", "6.1 The events"),
+		("response", "response_names", "6.2 The responses"),
+	):
+		sends = named_in_c(table, tag + "s")
+		kinds[tag] = sends
+		witnessed_kinds = witnessed_tagged(tag)
+		documented = documented_rows(heading, tag)
+		for name in sorted(sends - witnessed_kinds):
+			failures.append(
+				f"socket.json has no line for the `{name}` {tag}, "
+				"which this build sends"
+			)
+		for name in sorted(witnessed_kinds - sends):
+			failures.append(
+				f"socket.json carries an `{name}` {tag} and this build cannot "
+				"send one"
+			)
+		for name in sorted(sends - documented):
+			failures.append(
+				f"socket-protocol.md {heading.split()[0]} has no row for the "
+				f"`{name}` {tag}, which this build sends"
+			)
+		for name in sorted(documented - sends):
+			failures.append(
+				f"socket-protocol.md {heading.split()[0]} describes an `{name}` "
+				f"{tag} and this build cannot send one"
+			)
 
 	ops, link_kinds, backend_kinds = witnessed_actions()
 	asked_per_kind = {"link.create", "backend.start", "backend.stop", "backend.reload"}
@@ -288,7 +305,8 @@ def main():
 		f"ledger-gate: {len(requests)} request(s), {len(ops)} op(s), "
 		f"{len(link_kinds)} link kind(s) and {len(backend_kinds)} backend action(s) "
 		f"in the witnesses, all carried out by this build; "
-		f"{len(events)} event kind(s), each with a witness line and a row"
+		f"{len(kinds['event'])} event and {len(kinds['response'])} response "
+		f"kind(s), each with a witness line and a row"
 	)
 	if refusals:
 		print(f"ledger-gate: and {len(refusals)} thing(s) refused, each saying why:")
