@@ -1,0 +1,2 @@
+{"response":"status","ok":true}
+{"response":"error","message":"no such interface"}

@@ -1,0 +1,96 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 1
+  },
+  "globals": {
+    "dns": {
+      "mode": "none",
+      "servers": [],
+      "search": [],
+      "domains": [],
+      "options": []
+    },
+    "on_drift_default": "report",
+    "confirm_default": null,
+    "networking": "on",
+    "hostname_policy": "none",
+    "control": {
+      "observe": "root",
+      "wifi": "root",
+      "admin": "root"
+    },
+    "remote": {
+      "observe": false,
+      "wifi": false,
+      "admin": false,
+      "agent": "root"
+    }
+  },
+  "devices": [
+    {
+      "name": "wlan0",
+      "managed": true,
+      "on_unmanage": "leave",
+      "kind": {
+        "kind": "physical"
+      },
+      "bridge_vlans": [],
+      "declared": true
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "wlan0",
+      "enabled": true,
+      "addressing": [
+        {
+          "source": "dhcp4",
+          "hostname_mode": "none",
+          "request_options": [],
+          "backend": "auto"
+        }
+      ],
+      "routes": [],
+      "hooks": [],
+      "preference": 200
+    }
+  ],
+  "networks": [
+    {
+      "id": "Office",
+      "ssid": "4f6666696365",
+      "hidden": false,
+      "security": {
+        "type": "psk",
+        "passphrase": {
+          "provider": "file",
+          "name": "office"
+        },
+        "proto": "wpa2_wpa3"
+      },
+      "metric": 50,
+      "autoconnect": true,
+      "metered": false,
+      "addressing": [],
+      "routes": [],
+      "hooks": []
+    },
+    {
+      "id": "Open",
+      "ssid": "4f70656e",
+      "hidden": false,
+      "security": {
+        "type": "open"
+      },
+      "metric": 600,
+      "autoconnect": false,
+      "metered": false,
+      "addressing": [],
+      "routes": [],
+      "hooks": []
+    }
+  ],
+  "rules": [],
+  "access_points": []
+}

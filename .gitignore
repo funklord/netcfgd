@@ -42,6 +42,19 @@ c/ncfg_json.d
 # than beside the source in `client/` -- one file, two builds, two objects, so
 # that a sanitized build here cannot poison the archive `client/` links.
 c/ncfg_json.o
+# The C fuzz targets' two builds. **The targets and the corpus are tracked and
+# these are not**, which is the same split the Rust block at the top of this
+# file makes: a target is source, an input somebody chose to keep is source,
+# and a binary or a found input is neither.
+#
+# `c/fuzz/build/` holds the instrumented objects, the archive, libFuzzer's
+# crash artifacts and the `found/` corpus a run grows. An input in there worth
+# keeping is moved to `c/fuzz/corpus/<target>/` and committed, which is what
+# makes it replay for everybody; the rest is this run's and nobody else's.
+c/fuzz/build/
+c/fuzz/*_replay
+c/fuzz/*_fuzz
+c/fuzz/*.d
 # What `c/` was last built with, so a flag change rebuilds rather than relinks
 # instrumented objects against no runtime.
 c/.build-flags

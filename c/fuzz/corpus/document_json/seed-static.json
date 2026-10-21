@@ -1,0 +1,89 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 1
+  },
+  "globals": {
+    "dns": {
+      "mode": "none",
+      "servers": [],
+      "search": [],
+      "domains": [],
+      "options": []
+    },
+    "on_drift_default": "reconcile",
+    "confirm_default": null,
+    "networking": "on",
+    "hostname_policy": "none",
+    "control": {
+      "observe": "root",
+      "wifi": "root",
+      "admin": "root"
+    },
+    "remote": {
+      "observe": false,
+      "wifi": false,
+      "admin": false,
+      "agent": "root"
+    }
+  },
+  "devices": [
+    {
+      "name": "eth0",
+      "managed": true,
+      "on_unmanage": "leave",
+      "mtu": 1492,
+      "mac": "02:00:5e:10:00:01",
+      "kind": {
+        "kind": "physical"
+      },
+      "bridge_vlans": [],
+      "declared": true
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "eth0",
+      "enabled": true,
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.5/24"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "198.51.100.0/24",
+          "via": "192.0.2.9",
+          "onlink": false
+        },
+        {
+          "destination": "default",
+          "via": "192.0.2.1",
+          "onlink": false
+        }
+      ],
+      "dns": {
+        "mode": "resolvconf",
+        "servers": [
+          {
+            "addr": "192.0.2.1"
+          },
+          {
+            "addr": "2001:db8::1"
+          }
+        ],
+        "search": [
+          "example.invalid"
+        ],
+        "domains": [],
+        "options": []
+      },
+      "hooks": [],
+      "preference": 100
+    }
+  ],
+  "networks": [],
+  "rules": [],
+  "access_points": []
+}

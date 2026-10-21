@@ -1,0 +1,77 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 1
+  },
+  "globals": {
+    "dns": {
+      "mode": "none",
+      "servers": [],
+      "search": [],
+      "domains": [],
+      "options": []
+    },
+    "on_drift_default": "reconcile",
+    "confirm_default": null,
+    "networking": "on",
+    "hostname_policy": "none",
+    "control": {
+      "observe": "root",
+      "wifi": "root",
+      "admin": "root"
+    },
+    "remote": {
+      "observe": false,
+      "wifi": false,
+      "admin": false,
+      "agent": "root"
+    }
+  },
+  "devices": [
+    {
+      "name": "wg0",
+      "managed": true,
+      "on_unmanage": "leave",
+      "kind": {
+        "kind": "wire_guard",
+        "private_key": {
+          "provider": "file",
+          "name": "wg0"
+        },
+        "listen_port": 51820,
+        "fwmark": 51820,
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+            "endpoint": "vpn.example.invalid:51820",
+            "allowed_ips": [
+              "10.9.0.0/24",
+              "192.168.50.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      },
+      "bridge_vlans": [],
+      "declared": true
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "wg0",
+      "enabled": true,
+      "addressing": [
+        {
+          "source": "static",
+          "address": "10.9.0.2/24"
+        }
+      ],
+      "routes": [],
+      "hooks": []
+    }
+  ],
+  "networks": [],
+  "rules": [],
+  "access_points": []
+}

@@ -1,0 +1,8 @@
+bssid=a0:a4:7f:23:9a:cf
+freq=2412
+ssid=home
+id=0
+mode=station
+wpa_state=COMPLETED
+ip_address=192.0.2.5
+address=02:00:5e:10:00:01

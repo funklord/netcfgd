@@ -1,0 +1,4 @@
+network id / ssid / bssid / flags
+0	home	any	[CURRENT]
+1	cafe wifi	any	
+2	corp	any	[DISABLED]

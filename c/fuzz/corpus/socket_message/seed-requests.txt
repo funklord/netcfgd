@@ -1,0 +1,3 @@
+{"request":"status"}
+{"request":"plan"}
+{"request":"apply","dry_run":false}

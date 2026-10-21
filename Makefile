@@ -33,7 +33,9 @@
 #                         Under systemd's sysv-generator, not under sysvinit,
 #                         and the payload says what that does not prove
 #   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
-#   make fuzz          -- the fuzz targets
+#   make fuzz          -- the C parsers, fuzzed; `fuzz-rust` for the other
+#                         implementation's targets. The committed corpus is
+#                         replayed by `make c-test` with no clang needed
 #   make conformance   -- the two client implementations, asked the same
 #                         questions
 #   make nm-containment -- assert the core's manifest has gained no entry
@@ -90,7 +92,7 @@ CARGO ?= cargo
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
+.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
 
 all: build
 
@@ -1992,17 +1994,18 @@ rss:
 		"$${anon:-?}" "$${pss:-?}"; \
 	if [ "$$peak" -gt "$(RSS_LIMIT_KB)" ]; then echo "rss: over limit"; exit 1; fi
 
-# section 6 wants a cargo-fuzz target per parser, and there are three:
-# netlink messages, the config language, and the document JSON. They need
-# nightly and a sanitizer, so they are not part of `make check` -- the
-# randomised tests in crates/*/tests/random.rs cover the same entry points on
-# stable and do run there. A target nobody can run on the machine they commit
-# from is a target that rots; a randomised test that runs every time is not a
-# substitute for coverage-guided fuzzing. Both, deliberately.
+# Section 6 wants a target per parser. **The variables that drive them live
+# beside the `fuzz` target itself now**, because there were two sets: this
+# block defaulted `FUZZ_TARGET` to `netlink_wire` for the cargo-fuzz recipe,
+# and a second `?=` further down could not override it -- so a loop over every
+# target would silently have fuzzed one.
 #
-#   make fuzz TARGET=netlink_wire FUZZ_ARGS='-max_total_time=300'
-FUZZ_TARGET ?= netlink_wire
-FUZZ_ARGS   ?=
+# The argument this block made is still the right one and is kept: a target
+# nobody can run on the machine they commit from is a target that rots, and a
+# randomised test that runs every time is not a substitute for coverage-guided
+# fuzzing. Both, deliberately. What changed is which half runs every time --
+# the C corpus replay, in `make c-test`, rather than the Rust's
+# `crates/*/tests/random.rs`.
 
 # The supplicant tests that need a real wpa_supplicant. Not part of `check`:
 # they need a privileged network namespace, and a machine without one should
@@ -2625,14 +2628,76 @@ live:
 	@# refusal is the last thing a run reports rather than the only thing.
 	@NCFG_LIVE=1 timeout -k 30 $(LIVE_TIMEOUT) sh tests/live/sandbox_writes.sh
 
+# **`fuzz` is the C now, and that is the point rather than a rename** (0277).
+# Section 12 asked for a target per parser, continuously fuzzed "as part of CI,
+# not as an occasional exercise". It had that through cargo-fuzz, and the day
+# the C became what runs it had a fuzzer pointed at parsers nobody executes.
+# `fuzz-rust` is the old target, kept because the Rust is still the instrument
+# `make agree` compares against.
+#
+# **The deterministic half is in `make check` and is not here.** Every target's
+# committed corpus is replayed by `make -C c test` with the ordinary compiler,
+# which is what makes a crash stay fixed rather than stay findable. This target
+# is the exploring half: it needs clang, it goes somewhere different every run,
+# and a gate whose verdict depends on where its seed took it is not a gate.
+#
+# HOW IT STOPS, which `running-code.md` asks to be able to say before starting
+# anything: each target runs until `-runs` or `-max_total_time`, whichever
+# comes first, with `-timeout` on a single input and libFuzzer's own 2 GB RSS
+# ceiling. Five targets, so the wall clock is five times FUZZ_SECONDS at worst.
+# Raise them for a real session -- `make fuzz FUZZ_SECONDS=600` -- and the
+# defaults stay short enough that somebody who typed this to see what it does
+# gets their shell back.
+# Named here as well as in `c/Makefile`, and passed down, so the two cannot
+# disagree about which compiler was asked for.
+FUZZ_CC      ?= clang
+FUZZ_RUNS    ?= 50000
+FUZZ_SECONDS ?= 30
+FUZZ_MAX_LEN ?= 65536
+# One target by name, or empty for all of them.
+FUZZ_TARGET  ?=
+FUZZ_ARGS    ?=
+
 fuzz:
-	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
-		echo "fuzz: cargo-fuzz is not installed"; \
-		echo "fuzz:   cargo install cargo-fuzz   (needs a nightly toolchain)"; \
-		echo "fuzz: targets are in fuzz/fuzz_targets/, and the randomised"; \
-		echo "fuzz: tests in crates/*/tests/random.rs run on stable meanwhile"; \
+	@if ! command -v $(FUZZ_CC) >/dev/null 2>&1; then \
+		echo "fuzz: $(FUZZ_CC) is not installed, and libFuzzer comes with it"; \
+		echo "fuzz:   apt install clang"; \
+		echo "fuzz: the corpus still replays without it: make c-test runs"; \
+		echo "fuzz:   every committed input through the same targets"; \
 		exit 1; \
 	fi
+	@$(MAKE) --no-print-directory -C c fuzz FUZZ_CC=$(FUZZ_CC)
+	@set -e; \
+	targets="$(FUZZ_TARGET)"; \
+	[ -n "$$targets" ] || targets=$$($(MAKE) --no-print-directory -C c fuzz-list); \
+	for one in $$targets; do \
+		echo "fuzz: $$one"; \
+		mkdir -p c/fuzz/build/found/$$one; \
+		( cd c && ./fuzz/$${one}_fuzz \
+			fuzz/build/found/$$one fuzz/corpus/$$one \
+			-runs=$(FUZZ_RUNS) -max_total_time=$(FUZZ_SECONDS) \
+			-max_len=$(FUZZ_MAX_LEN) -timeout=10 \
+			-artifact_prefix=fuzz/build/ -print_final_stats=1 \
+			$(FUZZ_ARGS) ); \
+	done
+	@echo "fuzz: anything new is in c/fuzz/build/found/, and a crash is a file"
+	@echo "fuzz:   named crash-* beside it. **An input worth keeping belongs in"
+	@echo "fuzz:   c/fuzz/corpus/<target>/ and committed**, which is what makes"
+	@echo "fuzz:   it replay for everybody afterwards"
+
+fuzz-rust:
+	@if ! command -v cargo-fuzz >/dev/null 2>&1; then \
+		echo "fuzz-rust: cargo-fuzz is not installed"; \
+		echo "fuzz-rust:   cargo install cargo-fuzz   (needs a nightly toolchain)"; \
+		echo "fuzz-rust: targets are in fuzz/fuzz_targets/, and the randomised"; \
+		echo "fuzz-rust: tests in crates/*/tests/random.rs run on stable meanwhile"; \
+		exit 1; \
+	fi
+	@[ -n "$(FUZZ_TARGET)" ] || { \
+		echo "fuzz-rust: name one with FUZZ_TARGET=<name>. They are:"; \
+		ls fuzz/fuzz_targets | sed 's/\.rs$$//' | sed 's/^/fuzz-rust:   /'; \
+		exit 2; \
+	}
 	$(CARGO) fuzz run $(FUZZ_TARGET) -- $(FUZZ_ARGS)
 
 # The Qt client, which nothing else builds.

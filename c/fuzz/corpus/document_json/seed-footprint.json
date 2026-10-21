@@ -1,0 +1,65 @@
+{
+  "schema_version": {
+    "major": 1,
+    "minor": 1
+  },
+  "globals": {
+    "dns": {
+      "mode": "none",
+      "servers": [],
+      "search": [],
+      "domains": [],
+      "options": []
+    },
+    "on_drift_default": "report",
+    "confirm_default": null,
+    "networking": "on",
+    "hostname_policy": "none",
+    "control": {
+      "observe": "root",
+      "wifi": "root",
+      "admin": "root"
+    },
+    "remote": {
+      "observe": false,
+      "wifi": false,
+      "admin": false,
+      "agent": "root"
+    }
+  },
+  "devices": [
+    {
+      "name": "eth0",
+      "managed": true,
+      "on_unmanage": "leave",
+      "kind": {
+        "kind": "physical"
+      },
+      "bridge_vlans": [],
+      "declared": false
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "eth0",
+      "enabled": true,
+      "addressing": [
+        {
+          "source": "static",
+          "address": "192.0.2.10/24"
+        }
+      ],
+      "routes": [
+        {
+          "destination": "default",
+          "via": "192.0.2.1",
+          "onlink": false
+        }
+      ],
+      "hooks": []
+    }
+  ],
+  "networks": [],
+  "rules": [],
+  "access_points": []
+}

@@ -394,6 +394,11 @@ NetworkManager's own D-Bus API. It is C over `libdbus-1` since 0276, which
 retired the Rust one, so **nothing this tree builds or packages needs a Rust
 toolchain** -- `debian/control` names neither `cargo` nor `rustc`.
 
+**`clang` is optional and is what `make fuzz` needs**, libFuzzer coming with
+it. Without clang the fuzz targets' committed corpus still runs: `make check`
+replays every input through the same target functions with the ordinary
+compiler, which is the half that catches a regression (0277).
+
 `cargo` and `rustc` (1.85 or newer) are still wanted for `make check`: the Rust
 implementation of the daemon remains in the tree as the instrument the gates
 compare the C against, `make agree` being the main one. Nothing ships it, and

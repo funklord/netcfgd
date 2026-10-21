@@ -12498,6 +12498,107 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.508 A fuzzer explores; the corpus is what remembers
+
+"now fix the fuzz gate too", the copyright holder, 2026-10-21, after the
+budget gates. 0277 records the arrangement. `make fuzz` fuzzes the C parsers,
+`make fuzz-rust` is the old cargo-fuzz path, and **the half that runs every
+time is a replay rather than a fuzzer.**
+
+### What was actually wrong, which was not "the gate points at Rust"
+
+It did point at Rust -- five targets under `fuzz/fuzz_targets/` fuzzing five
+Rust parsers that stopped being what runs when 0266 shipped the C -- and
+pointing them at the C would have fixed the smaller half of the problem.
+
+**A fuzzer explores and does not remember.** Run it again with another seed, or
+on another machine, and it goes somewhere else; so "that crash is fixed" is a
+claim nothing re-checks, and a defect found on a laptop in October gets
+rediscovered by somebody else in March or never. Design section 12 asked for
+fuzzing "as part of CI, not as an occasional exercise", and a fuzz target on
+its own cannot answer the second clause however good the first is.
+
+So there are two drivers over one function. A target is a plain
+`ncfg_fuzz_one()` over bytes; `fuzz/fuzz_libfuzzer.c` hands it to clang and
+`fuzz/fuzz_replay.c` walks a committed corpus with the ordinary compiler. The
+second is in `make -C c test`, so in `make check`, on a machine with no clang
+and no nightly -- **which is the machine a regression actually arrives on.**
+
+### Five targets, parser for parser with the Rust's
+
+    config_parse     the DSL through to a canonicalised document
+    document_json    the document /run holds, round trip asserted
+    netlink_wire     the kernel's messages: a privileged reader of lengths
+                     it must not trust
+    backend_ipc      wpa_supplicant and hostapd replies -- a lower-trust
+                     boundary than the kernel's
+    socket_message   the control protocol's framing and its messages
+
+`netlink_wire` asserts **termination** as well as safety, which is the half no
+sanitizer can see: a length that makes no progress is an infinite loop that
+looks like a slow input from outside. Every walk is counted and the bound
+aborts, which is what the Rust target's `take(10_000)` was for.
+
+### What was proved, because a detector is the thing most worth distrusting
+
+**A fuzzer that finds nothing looks exactly like a broken one.** So:
+
+    finds coverage      50,000 runs per target added 1,145 new units for
+                        config_parse, 1,104 backend_ipc, 688 document_json,
+                        255 netlink_wire. A target that returned early
+                        would add none
+    finds a defect      one bounds check removed in a scratch copy -- the
+                        `len > remaining` refusal in `ncfg_wire_attrs_next`
+                        -- and it reported a heap-buffer-overflow in
+                        `ncfg_wire_attr_string` in about 220 executions,
+                        with the line and a nine-byte reproducer
+    keeps it            that reproducer is corpus/netlink_wire/attr-longer-
+                        than-the-area.bin, it replays clean against the real
+                        code, and it runs on every `make check` from now on
+    clean under ASan    `make -C c SANITIZE=1 fuzz-replay` passes over every
+                        committed input, not just the -Os build
+    refuses emptiness   a corpus directory with no files fails by name; the
+                        replay binary refuses zero arguments with rc 2
+
+The second and third together are the loop this exists for, demonstrated
+rather than described -- sabotage, find, keep, replay.
+
+### Two target bugs, and the first is the instructive one
+
+**`ncfg_config_sources_free` aborted in `free()` on the first corpus file.**
+The target had built its source set the way the unit tests do -- a
+`ncfg_config_file_t` on the stack, `at` pointed at it, never freed -- and then
+called the real free function, which walks the array and frees the array
+itself. A test that never frees can do that; a fuzz target that runs a million
+times cannot, because it would leak. The set is on the heap now and the free
+path is fuzzed with everything else.
+
+That is worth writing down because the stack version LOOKS like the
+established pattern: five call sites in `c/tests/` do exactly that, correctly.
+**A pattern copied across a boundary where its precondition changed** is the
+shape, and the precondition here was "nobody frees this".
+
+The second was ordinary: `NCFG_ERROR_MAX` and the hook sink live in headers the
+targets had not included, which the compiler said plainly.
+
+### What clang sees that gcc does not
+
+The instrumented build is clang's, and it emitted five `-Wsign-conversion`
+warnings the gcc build never has -- `src/plan/link.c:440`,
+`src/plan/model_json.c:207`, `:215`, `:240`, `src/plan/write.c:268`, each an
+`int` assigned to an enum. Not crashes and not fixed here; recorded because
+**a second compiler is a second opinion about the same source**, and this tree
+had only ever heard one.
+
+### What this does not claim
+
+Nothing runs a fuzzer on a schedule -- CI is declined for cost -- so the
+*corpus* is continuous and the *fuzzing* is a person typing `make fuzz`.
+Section 12 now says that in those words instead of claiming the stronger
+thing. The sanitizers are still not gated. And the NetworkManager shim's
+dictionary reader, which takes `a{sa{sv}}` from any client on the system bus,
+is not fuzzed: it needs libdbus to build and is its own piece of work.
+
 ## 10.507 The budget gates were already fixed, and the ratchet had gone slack
 
 "now fix the size, rss and footprint gates too", the copyright holder,

@@ -1,0 +1,5 @@
+<3>CTRL-EVENT-CONNECTED - Connection to a0:a4:7f:23:9a:cf completed [id=7 id_str=]
+<3>CTRL-EVENT-DISCONNECTED bssid=00:11:22:33:44:55 reason=3
+<3>CTRL-EVENT-SCAN-RESULTS 
+<3>CTRL-EVENT-SSID-TEMP-DISABLED id=1 ssid="home" auth_failures=1 duration=10 reason=WRONG_KEY
+<4>CTRL-EVENT-BSS-ADDED 3 aa:bb:cc:dd:ee:01

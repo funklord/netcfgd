@@ -1,0 +1,30 @@
+Fuzz targets for the C parsers, and the corpus that is replayed on every
+`make test`.
+
+A target is one `ncfg_fuzz_one()` over a byte string. `make fuzz` builds them
+with clang's libFuzzer and explores; `fuzz_replay`, built by `c/Makefile` with
+the ordinary compiler, runs the committed corpus through the same function and
+is deterministic. The second is what keeps a crash fixed: the input goes in
+`corpus/<target>/`, and from then on it runs everywhere, with no clang and no
+nightly.
+
+Design note in `c/fuzz/fuzz.h`. The gap this closes is named in
+`netcfgd-design.md` section 12 and project.md 10.508.
+
+WHAT GOES IN THE CORPUS, AND WHAT DOES NOT
+
+A run grows `build/found/<target>/` with every input that increased coverage.
+Those are this machine's and stay there: one run added 1,145 of them for
+`config_parse`, and a tree carrying thousands of two-line files is a tree
+nobody can read a diff of.
+
+What belongs in `corpus/<target>/` is an input somebody CHOSE:
+
+  * a seed, so a run starts from real syntax rather than spending its budget
+    discovering that a config file has braces in it. Each `seed-*` here is a
+    fixture from the suite or a configuration that compiles today -- checked,
+    not assumed;
+  * a reproducer for something that went wrong, named after what it does
+    rather than after its hash. `attr-longer-than-the-area.bin` is nine bytes
+    that claim more than the message holds; it reached that refusal, and it is
+    kept so the refusal cannot quietly go away.

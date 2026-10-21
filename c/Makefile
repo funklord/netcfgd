@@ -155,7 +155,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test examples clean FORCE
+.PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE
 
 all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
 
@@ -217,7 +217,7 @@ $(SHARED_OBJS): $(SHARED_SRCS) .build-flags
 # green through a program that no longer links. Every object it needs is in
 # the library the tests already build, so the only thing this catches is the
 # link itself, which is exactly the thing nothing else looks at.
-test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK)
+test: $(TESTS) $(PROGRAM) $(PROGRAM_LINK) fuzz-replay
 	@fail=0; \
 	for one in $(TESTS); do \
 		echo "== $$one"; \
@@ -255,13 +255,118 @@ tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .bui
 tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
+# ---------------------------------------------------------------- fuzzing
+#
+# WHAT IS HERE AND WHY IT IS TWO THINGS
+#   `fuzz/` holds one target per parser, each a plain `ncfg_fuzz_one()`, and
+#   two drivers over them (`fuzz/fuzz.h` argues the indirection). This file
+#   builds both:
+#
+#     fuzz/<target>_replay   the ordinary compiler, over the committed corpus.
+#                            Deterministic, needs no clang, and runs as part
+#                            of `test` -- which is what makes a crash stay
+#                            fixed rather than stay findable.
+#     fuzz/<target>_fuzz     clang's libFuzzer, coverage-guided, exploring.
+#                            `make fuzz` at the top level drives these.
+#
+#   Design section 12 asked for "continuous fuzzing of every parser as part of
+#   CI, not an occasional exercise", had it for the Rust through cargo-fuzz,
+#   and lost it when the Rust stopped being what runs. The replay half is the
+#   part that answers the second clause.
+#
+# WHY A SEPARATE OBJECT TREE
+#   An instrumented object and an `-Os` one cannot share a name, and the
+#   library is where every parser lives -- linking the plain archive would
+#   give libFuzzer no coverage to steer by, which is a fuzzer in name only.
+#   So the library sources are compiled again, with `-fsanitize=fuzzer-no-link`
+#   and the sanitizers, into `$(FUZZ_BUILD_DIR)`. Settable, for the reason
+#   `build-and-commit.md` gives about keeping a sanitized build from
+#   clobbering a plain one; `BUILD_DIR` is not reused because this is not the
+#   same build with a different destination.
+FUZZ_TARGETS   = config_parse document_json netlink_wire backend_ipc socket_message
+FUZZ_REPLAYS   = $(addprefix fuzz/,$(addsuffix _replay,$(FUZZ_TARGETS)))
+FUZZ_PROGRAMS  = $(addprefix fuzz/,$(addsuffix _fuzz,$(FUZZ_TARGETS)))
+FUZZ_BUILD_DIR ?= fuzz/build
+FUZZ_CC        ?= clang
+# `-O1 -g`, not `-Os`: a fuzzer's output is a stack trace somebody has to read,
+# and the instrumentation is most of the cost anyway.
+FUZZ_CFLAGS    ?= -std=c11 -O1 -g
+FUZZ_CFLAGS    += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I../client -Ifuzz \
+		  -fsanitize=fuzzer-no-link,address,undefined -fno-omit-frame-pointer
+FUZZ_SHARED    = $(patsubst ../client/%.c,$(FUZZ_BUILD_DIR)/client/%.o,$(SHARED_SRCS))
+FUZZ_OBJS      = $(patsubst %.c,$(FUZZ_BUILD_DIR)/%.o,$(SRCS)) $(FUZZ_SHARED)
+FUZZ_LIB       = $(FUZZ_BUILD_DIR)/libncfg_fuzz.a
+
+# The deterministic half, and the reason `test` depends on it.
+#
+# An empty corpus is refused rather than skipped. A replay over no files is a
+# pass that inspected nothing, which is the failure this tree keeps finding --
+# and a corpus directory is exactly the thing somebody deletes while tidying.
+fuzz-replay: $(FUZZ_REPLAYS)
+	@fail=0; \
+	for one in $(FUZZ_TARGETS); do \
+		files=$$(find fuzz/corpus/$$one -type f 2>/dev/null | sort); \
+		if [ -z "$$files" ]; then \
+			echo "fuzz-replay: fuzz/corpus/$$one holds no inputs, so this"; \
+			echo "fuzz-replay:   target would report success having read none"; \
+			fail=1; \
+			continue; \
+		fi; \
+		./fuzz/$${one}_replay $$files || fail=1; \
+	done; \
+	[ $$fail -eq 0 ] || { echo "fuzz-replay: some inputs failed"; exit 1; }
+
+# One call, so `$(filter %.c,$^)` rather than `$^`: the archive and the stamp
+# are prerequisites that must not reach the compiler, which is the hazard
+# `build-and-commit.md` names about a compile-and-link rule.
+fuzz/%_replay: fuzz/%.c fuzz/fuzz_replay.c fuzz/fuzz_text.c $(SHARED_OBJS) $(LIB) .build-flags
+	$(CC) $(CFLAGS) -Ifuzz $(filter %.c,$^) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
+
+# The exploring half. Not reached by `all` or `test`: it needs clang, and a
+# fuzzer in a gate is a gate whose verdict depends on where its seed took it.
+fuzz: $(FUZZ_PROGRAMS)
+
+# The names, for the top-level target's loop. One list, rather than the same
+# five words written out in two Makefiles -- which is how the second one comes
+# to be missing a target somebody added.
+fuzz-list:
+	@echo $(FUZZ_TARGETS)
+
+$(FUZZ_BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+
+$(FUZZ_BUILD_DIR)/client/%.o: ../client/%.c
+	@mkdir -p $(dir $@)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+
+$(FUZZ_LIB): $(FUZZ_OBJS)
+	$(AR) rcs $@ $(FUZZ_OBJS)
+
+fuzz/%_fuzz: fuzz/%.c fuzz/fuzz_libfuzzer.c fuzz/fuzz_text.c $(FUZZ_LIB)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -fsanitize=fuzzer $(filter %.c,$^) $(FUZZ_LIB) -o $@
+
 # What this build made, by the same wildcard that made it -- and nothing by
 # pattern that this directory does not own. The program and its second name are
 # two literal names rather than a wildcard, because this directory is not one
 # whose contents a build produced.
 clean:
 	rm -f $(OBJS) $(PROGRAM_OBJS) $(LIB) $(PROGRAM) $(PROGRAM_LINK) $(TESTS) $(EXAMPLES) \
-	    $(DEPS) .build-flags
+	    $(DEPS) $(FUZZ_REPLAYS) $(addsuffix .d,$(FUZZ_REPLAYS)) $(FUZZ_PROGRAMS) \
+	    .build-flags
+	@# The one directory cleared wholesale, and only because this build made
+	@# it: every object under it is one of ours, and the guard is the one
+	@# `build-and-commit.md` asks for -- non-empty, relative, and not a path
+	@# that could resolve to a source tree.
+	@case "$(FUZZ_BUILD_DIR)" in \
+	"") echo "clean: FUZZ_BUILD_DIR is empty, refusing to remove anything"; exit 1 ;; \
+	/*) echo "clean: FUZZ_BUILD_DIR is absolute ($(FUZZ_BUILD_DIR)), refusing"; exit 1 ;; \
+	*..*) echo "clean: FUZZ_BUILD_DIR escapes the tree, refusing"; exit 1 ;; \
+	esac; \
+	if [ -d "$(FUZZ_BUILD_DIR)" ]; then \
+		echo "clean: removing $(FUZZ_BUILD_DIR)"; \
+		rm -rf "$(FUZZ_BUILD_DIR)"; \
+	fi
 
 # Read back what the compiler wrote. A `.d` that is generated and never
 # included is the whole mechanism switched off with the flags still on, which
