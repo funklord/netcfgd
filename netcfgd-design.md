@@ -1,8 +1,10 @@
 # netcfgd — a network configuration tool that doesn't fight you
 
-**Design specification & architecture — v0.6 (draft for discussion)**
+**Design specification & architecture — v0.7 (draft for discussion)**
 
 > **Names.** Project and daemon: `netcfgd`. CLI: `ncfg` (short, because it is typed constantly — the `nmcli` pattern). TUI: `ncfg tui`, a subcommand rather than a separate binary. Adapters: `netcfgd-nm`, `netcfgd-restconf`. Build tiers: `netcfgd-nano`, `netcfgd-embedded`, `netcfgd-full`. Hook environment prefix: `NCFG_`.
+>
+> **Changes in v0.7:** the implementation language is **C** (§12), the one decision in this document that has been reversed rather than refined. v0.4 decided Rust and this entry does not pretend the argument for it was wrong: the threat §12 describes is unchanged, and what C gives up is named there rather than explained away. The daemon and the client went first ([0266](doc/decision/0266-the-c-port-is-what-ships.md)), the NetworkManager shim followed ([0276](doc/decision/0276-the-rust-networkmanager-shim-is-retired.md)), and the contract the modules were written against is [0263](doc/decision/0263-the-c-port.md). The consequences reach §17's gate list and §20's comparison row, both corrected here. The crates.io note below is kept as a dated verification and no longer implies anything to do: nothing in this tree will be published as a crate.
 >
 > **Changes in v0.6:** renamed from the `weft` placeholder throughout. `netcfg` and `netconfig` were unavailable (Debian source package and Solaris `netcfg(1M)`; openSUSE `netconfig(8)`), and `netconfd` is taken by the Yuma NETCONF server — `netcfgd` avoids all three and, unlike `netconfigd`, does not contain the string "netconf", which matters now that §9.6 ships a real NETCONF adapter.
 >
@@ -16,7 +18,7 @@
 
 ## 0. One-paragraph pitch
 
-`netcfgd` is a network configuration tool whose **plain-text config is the single source of truth**, whose **runtime state is greppable files in `/run`**, and whose behaviour is a **visible reconciliation loop** (like `terraform plan/apply`, but for interfaces). It keeps the ergonomics people liked about NetworkManager — scan, remember, auto-connect, roam on wifi — while inheriting the **syntax and feature model of netifrc**. It has **no mandatory D-Bus, polkit, or systemd dependency**, delegates hard radio work to `iwd`/`wpa_supplicant`, and treats **hooks as a first-class API**. It runs from a **sub-megabyte build on a 16 MB-flash router** up to a desktop, and grows optional northbound adapters at the edge: NetworkManager's D-Bus interface so existing applets keep working, and **RESTCONF/NETCONF** so standard automation tooling can drive it. Written in Rust, because a daemon holding `CAP_NET_ADMIN` is security-critical. Above all it is a **single-host tool**: your config directory contains your config and nothing else, forever.
+`netcfgd` is a network configuration tool whose **plain-text config is the single source of truth**, whose **runtime state is greppable files in `/run`**, and whose behaviour is a **visible reconciliation loop** (like `terraform plan/apply`, but for interfaces). It keeps the ergonomics people liked about NetworkManager — scan, remember, auto-connect, roam on wifi — while inheriting the **syntax and feature model of netifrc**. It has **no mandatory D-Bus, polkit, or systemd dependency**, delegates hard radio work to `iwd`/`wpa_supplicant`, and treats **hooks as a first-class API**. It runs from a **sub-megabyte build on a 16 MB-flash router** up to a desktop, and grows optional northbound adapters at the edge: NetworkManager's D-Bus interface so existing applets keep working, and **RESTCONF/NETCONF** so standard automation tooling can drive it. Written in C, in a tree where the memory-safety argument that first chose Rust is answered by conventions, gates and bounded buffers rather than by the compiler (§12). Above all it is a **single-host tool**: your config directory contains your config and nothing else, forever.
 
 ---
 
@@ -640,21 +642,24 @@ v0.3 agonised over fitting a TLS stack into a 400 KB budget for a bespoke agent.
 
 ---
 
-## 12. Implementation: Rust
+## 12. Implementation: C
 
-**Decided.** The daemon holds `CAP_NET_ADMIN`, parses kernel netlink messages, and would eventually parse input arriving from off-box — the historical shape of remote-exploit CVEs in network daemons. Memory safety is not a stylistic preference here.
+**Rust was decided in v0.4 and retired in v0.7.** This section keeps the argument that chose it, because the threat has not changed and because whatever replaces a safety property has to answer the same argument rather than quietly drop it. The records are [0263](doc/decision/0263-the-c-port.md) (the contract every module was written against), [0266](doc/decision/0266-the-c-port-is-what-ships.md) (the daemon and the client) and [0276](doc/decision/0276-the-rust-networkmanager-shim-is-retired.md) (the NetworkManager shim). The language is the copyright holder's call and is not a question this document reopens.
 
-C would reach a smaller binary (netifd-class, low hundreds of KB) but puts an unsafe parser on privileged and potentially network-adjacent paths. Rust gives safety with clean static linking; the cost is that binary size depends heavily on dependency discipline, which becomes a design constraint rather than an afterthought.
+**The threat, unchanged and quoted rather than softened.** The daemon holds `CAP_NET_ADMIN`, parses kernel netlink messages, and would eventually parse input arriving from off-box — the historical shape of remote-exploit CVEs in network daemons. v0.4 concluded that memory safety was not a stylistic preference here, and said that C "puts an unsafe parser on privileged and potentially network-adjacent paths". **That sentence is true of this implementation.** It is the cost that was accepted, and what was bought for it is a daemon that links `libc` and nothing else, builds with a C compiler on a machine with no toolchain to install, and is less than half the size — 1.25 MiB in the package built on 2026-10-21, against the 2.83 MiB 0266 measured for the Rust daemon.
 
-**Size posture.** `opt-level = "z"`, LTO, `codegen-units = 1`, `panic = "abort"`, static musl, symbols stripped. The dependency budget is severe: `serde_json` alone can consume a large fraction of the nano budget, so the nano tier uses a hand-rolled minimal codec while full builds may use the ergonomic path. Every added dependency is a size review as well as a supply-chain one, and both are CI-gated (§17).
+**What the compiler used to prove, the gates and the conventions now carry**, and 0263 states the trade in as many words: the Rust confined `unsafe` to one crate and `make unsafe-policy` proved it, where in C every module is that crate; ownership stops being checked and becomes a written rule; the compiler stops noticing an unhandled case. Those are the things the tests and the gates have to carry now.
 
-**Security posture.**
+**Size posture.** `-Os` everywhere, symbols stripped by the packaging, no link-time dependency the distribution does not already ship. The dependency budget that was the severe part of this section has become structural rather than disciplinary: there is no dependency graph. `serde_json` could consume a large fraction of the nano budget because it was a crate; the C's JSON reader and writer are two files in the tree and the nano tier is a build of the same sources. Budgets are still CI-gated (§17, §10.2).
 
-- `#![forbid(unsafe_code)]` crate-wide, with unsafe permitted only inside a small, separately-audited netlink syscall wrapper that has its own review bar and its own fuzz targets.
-- All parsers — netlink messages, config DSL, backend IPC, and any future wire format — are continuously fuzzed (`cargo-fuzz`) as part of CI, not as an occasional exercise.
-- No dynamic allocation proportional to attacker-controlled length; bounded buffers with explicit limits at every parse boundary.
-- Supply chain: `cargo-deny` and `cargo-audit` in CI, a pinned lockfile, a stated MSRV, vendored dependencies for reproducible builds, and a written policy that new dependencies require justification against both size and audit surface.
-- Privilege separation is enforced in the design, not just the language: only the core holds `CAP_NET_ADMIN`; backends, adapters and hooks hold the minimum they need.
+**Security posture, as implemented rather than as hoped.** Four of these are in place, the fifth is a promise v0.4 made that this implementation does not yet keep, and the sixth was never the language's to keep in the first place.
+
+- **Bounded buffers with explicit limits at every parse boundary**, which survived the change and is more explicit for it. `ncfg_buf_t` carries a ceiling and a *sticky* failure, and a failed buffer hands out the empty string rather than the part that fitted — half a configuration block that looks whole being the failure mode it refuses. The parser keeps 64 diagnostics and counts the rest, so a malformed file cannot buy a file-sized allocation. Narrowing is checked rather than cast wherever the model's `int64_t` meets a kernel field, with the field named in the refusal.
+- **A library never exits, never asserts and never prints**; the one place in this project that ends a process on its own does it for a closed pipe ([0261](doc/decision/0261-a-reader-that-goes-away-is-not-a-crash.md)).
+- **The warning set is a floor, not advice:** `-Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla -Wpointer-arith -Wwrite-strings -Wstrict-prototypes`, and the two sign and conversion warnings are the ones that earn their place in a program this full of kernel fields.
+- **Supply chain: there is no graph to audit.** The shipped package depends on `libc6`; the shim's own package adds `libdbus-1-3`, the daemon it fronts, and the bus's policy directory (§9.3, [0264](doc/decision/0264-the-library-the-bus-already-brought.md)). `cargo-deny` and `cargo-audit` still run, against the Rust that remains in the tree as the instrument the C is compared with, and that Rust ships nowhere.
+- **Continuous fuzzing of every parser is not ported, and this bullet is the gap rather than the claim.** `make fuzz` drives `cargo-fuzz` against the Rust parsers, which are no longer the parsers that run. What covers the C is 97 test binaries, every public header reached by one of them, with the wire layer's adversarial cases written as part of its port — which is coverage, not fuzzing. Sanitizer builds exist (`make SANITIZE=1`, ASan and UBSan) and **no gate runs them**. Naming this is cheaper than discovering later that the strongest sentence in v0.4's security posture quietly stopped being true.
+- **Privilege separation is enforced in the design, not the language**, so it is untouched by the change: only the core holds `CAP_NET_ADMIN`; backends, adapters and hooks hold the minimum they need (§13).
 
 ---
 
@@ -696,7 +701,7 @@ C would reach a smaller binary (netifd-class, low hundreds of KB) but puts an un
 | Init system | assumes systemd | systemd only | procd | **any / none** |
 | Hooks | coarse `dispatcher.d` | minimal | limited | **phased, typed env, exit codes, veto** |
 | Embedded viability | no | no | **yes** | **yes** — ≤ 400 KB budget, CI-gated |
-| Memory safety | C | C | C | **Rust**, `forbid(unsafe)` outside audited netlink |
+| Memory safety | C | C | C | C — this row used to read **Rust**, `forbid(unsafe)` outside audited netlink, and v0.7 retired that advantage rather than restating it. What is left is the discipline in §12 and a daemon with no dependency graph, which is a narrower claim than the one this table made |
 | Existing GUI clients | native | none | none | **optional NM shim**; GUI edits land as readable files |
 | Standards-based management | no | no | no | **optional RESTCONF/NETCONF adapter** (RFC 8040/6241) |
 | Config dir footprint | scattered | `.network` files | UCI | **one file + one drop-in dir**, on every host including a controller |
@@ -727,7 +732,7 @@ Every importer emits a report of anything it couldn't represent. Migration is ne
 
 **Testing.** The planner is fully unit-testable with no hardware, since desired state is a pure function of files and plan is `diff(desired, observed)` — feed fixture configs and fake observed snapshots, assert on the action list. Integration tests run in network namespaces with veth pairs; wifi against `mac80211_hwsim`. Shim conformance drives real `nmcli` and, under Xvfb, real applets.
 
-**CI gates, all failing the build on regression:** binary size and RSS budgets per tier (§10.2); the §4.6 filesystem-footprint fixture; `cargo-deny`/`cargo-audit`; continuous fuzzing of every parser (§12).
+**CI gates, all failing the build on regression:** binary size and RSS budgets per tier (§10.2); the §4.6 filesystem-footprint fixture; the style and indentation gate; the bus policy against the interfaces the shim serves; `cargo-deny`/`cargo-audit` against the Rust that remains as a test instrument. **Continuous fuzzing of every parser is not among them** — §12 says why, and records it as a gap rather than a gate.
 
 ---
 
@@ -758,7 +763,7 @@ The model freeze at v0.4 precedes every adapter, so none of them can shape it. E
 ## 19. Open questions for you
 
 ### 19.1 Decided
-Language is Rust (§12). Multi-host leads with RESTCONF rather than a bespoke protocol (§11.1). Bespoke controller remains unscheduled and now needs a specific justification (the dashboard experience) rather than being the default plan.
+Language is C (§12) — Rust until v0.7, and the one decision here that was reversed rather than refined. Multi-host leads with RESTCONF rather than a bespoke protocol (§11.1). Bespoke controller remains unscheduled and now needs a specific justification (the dashboard experience) rather than being the default plan.
 
 ### 19.2 Still open
 
@@ -776,3 +781,5 @@ Language is Rust (§12). Multi-host leads with RESTCONF rather than a bespoke pr
 ---
 
 *Draft v0.4 — structure and semantics are the proposal; names, key spellings and exact flags are negotiable. Next step, if the direction holds: a concrete config grammar (EBNF), the reconciler action taxonomy, and the desired-state document schema. Then a walking skeleton — rtnetlink watcher, planner, oneshot apply for wired static/DHCP — in Rust, with the size and footprint CI gates in place from the first commit, since budgets adopted later are budgets already blown.*
+
+*That skeleton was built and the gates went in with it; the language is C since v0.7 (§12). This paragraph is left as it was written, being a note about what to do next from a document two drafts ago.*

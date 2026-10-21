@@ -7640,7 +7640,7 @@ a refusal from a failure.
 
 The control socket's contract is **[doc/socket-protocol.md](doc/socket-protocol.md)** — what a client sends, what the daemon answers, and the ten things an implementation has to get right. It is the prose half of `doc/schema/socket.json`, and 0116's prerequisite for anyone writing a third client.
 
-Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.6). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.
+Full rationale, principles, comparisons, security model, migration paths and the northbound-adapter discipline are in **`netcfgd-design.md`** (v0.7). Read §2 (principles), §4 (architecture and the compiler/reconciler seam), §9.2 (the one-way rule) and §10 (embedded tiers) before making structural decisions.
 
 ## Signal: this document's own claims of missing coverage, 2026-09-03
 
@@ -12497,6 +12497,73 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.505 The design document says C, and says what that gave up
+
+The copyright holder, 2026-10-21, straight after 0276: "now retire the design
+doc's rust claims too." `netcfgd-design.md` is at v0.7 and §12 is
+*Implementation: C*.
+
+**It is the only decision in that document that has been reversed rather than
+refined**, which is why the entry says so in those words. v0.4 decided Rust
+with an argument about the threat -- `CAP_NET_ADMIN`, netlink parsing, input
+that will eventually arrive from off-box -- and that argument is not wrong now.
+So §12 keeps it, quotes the sentence that counts against the present
+implementation -- C "puts an unsafe parser on privileged and potentially
+network-adjacent paths", which is v0.4's own wording and is true of this
+implementation -- and names what was bought for it: a daemon linking `libc` alone, 1.25 MiB shipped against the
+Rust's 2.83, and a build needing no toolchain anybody has to install.
+
+### The temptation was to rewrite the security posture as though it held
+
+That section had five bullets. Four survive the language change and one does
+not, and **the one that does not is the strongest sentence in it**: "all
+parsers are continuously fuzzed (`cargo-fuzz`) as part of CI, not as an
+occasional exercise." `make fuzz` still drives cargo-fuzz, against the Rust
+parsers, which are not the parsers that run any more. What covers the C is 97
+test binaries with every public header reached by one, and the wire layer's
+adversarial cases -- coverage, not fuzzing -- plus `make SANITIZE=1`, which no
+gate runs.
+
+So §12 carries that bullet as the gap rather than dropping it. A security
+posture that quietly loses its sharpest claim during a language change is worse
+than one that never made it, because the next reader inherits the sentence
+without the retraction. The four that survived are stated as implemented rather
+than as hoped: the buffer's ceiling and sticky failure, the 64-diagnostic cap,
+narrowing checked rather than cast, the warning set, no library that exits or
+prints, and a supply chain that is `libc6` plus `libdbus-1-3` for the shim --
+no graph to audit, which is the one place the change made a claim stronger.
+
+### Three consequences elsewhere in the document, found by looking for them
+
+**§20's comparison table had a `Memory safety` row reading "**Rust**,
+`forbid(unsafe)` outside audited netlink" against C for NetworkManager,
+networkd and netifd.** That differentiator is gone outright. The row says so
+rather than being deleted, because a comparison table that quietly loses a row
+reads as a feature nobody thought to compare.
+
+**§17's gate list promised the fuzzing**, so it names the real gates and points
+at §12 for the gap.
+
+**§19.1 "Decided" said "Language is Rust (§12)"**, which is the sentence a
+reader checks first.
+
+The crates.io name-availability note from 2026-07-28 is kept as a dated
+verification with the v0.7 entry saying it no longer implies anything to do:
+nothing here will be published as a crate. The v0.4 footer about building a
+walking skeleton "in Rust" is left as written, with one line saying the skeleton
+was built and the language has moved -- it is a note about what to do next from
+a document two drafts ago, and rewriting it would be rewriting history rather
+than correcting a claim.
+
+### What this did not touch
+
+The design document still wins for *why* and project.md for *what to build*,
+which is section 0's rule and is unchanged. Nothing in §10's budgets, §13's
+privilege model or §9's adapter discipline is a language claim, and none of it
+was edited -- the privilege separation bullet says in as many words that it is
+enforced in the design rather than the language, which is exactly why it
+survived the change untouched.
 
 ## 10.504 The Rust shim is retired, and what went with it
 
