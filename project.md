@@ -12498,6 +12498,69 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.528 What this session left open, 2026-10-22
+
+A fold rather than a finding: the entries above hold the reasoning and this
+holds what is unfinished, so that the next session reads one list instead of
+nine. Each item names where it is argued.
+
+**Decisions waiting on the copyright holder**
+
+- **Ten `_name` functions take their enum and sixteen take an `int`** (10.525).
+  `value.h` states the convention for every set -- a `_name` returns NULL
+  outside its set -- and an enum parameter cannot honour it. The count says
+  sweeping toward `int` is the wrong direction: it took the library from 5
+  clang warnings to 30. So what is wanted is a decision about which form the
+  convention means, not a sweep, and nothing in the build currently sees it.
+- **Whether a clang gate should hold the zero** (10.525). `src/` and `client/`
+  report no warnings under clang today, and nothing keeps them there: the
+  warnings showed in `make fuzz`, which is not part of `check`. ossacli's
+  `check-clang` is the shape; adding a gate is a convention change and that
+  one is another tree's.
+
+**Measured and unexplained**
+
+- **`link_local.sh` failed four checks in one container run and nothing
+  explains it** (10.523). The `--group-add users` story is disproved -- the
+  flag cannot reach a script wrapped in `unshare -rn`, which denies
+  `setgroups` -- and so is load, the host passing that script at load 172. The
+  next experiment is named at the target: run it in the container under quiet
+  load with the flag, keeping `$work`, because the apply's own failure text
+  says neither "error" nor "failed" and `apply.txt` is the file that would name
+  the refusal.
+
+**Work with a clear next step**
+
+- **`make live-container` reaches 75 of 81 invocations** and stops at
+  `sandbox_writes.sh`, which needs systemd as PID 1 (10.523). A container
+  cannot be talked out of that. hull's init hand-over is the route, and it is
+  the next thing after their segments work.
+- **The hull rig has no Makefile target** (10.527), because the guest image is
+  baked by docker today and hull's spec may change before 1.0. When
+  `hull build` can install a package set -- its one-uid question is what stops
+  `dnsmasq-base` -- the bake script says what to replace it with, and the
+  machine file does not change.
+- **Alpine: the C and the apk build, and nothing runs the live scripts there**
+  (10.526). `make apk-container` is in no gate either, which is how it came to
+  be broken for as long as the C port has existed.
+- **netcfgd tells an operator to install what they have.** Found in the hull
+  guest: with no `/usr/sbin` on `PATH`, `backend.start` says "dhcpcd, udhcpc
+  and busybox are not installed" about a machine where `/usr/sbin/dhcpcd` is
+  installed. The `PATH`-only search is deliberate (`dhcp.c`: an operator's own
+  client in front of the packaged one is a choice netcfgd honours), so the
+  behaviour is right and the sentence is wrong -- 0182 is the audit that asked
+  for messages naming which fault, and `exec_refused.sh` is what holds them.
+  Saying "not on `PATH`" and naming what is in the sbins would be the same
+  class of fix.
+
+**Not this tree's, and tracked elsewhere**
+
+Three of the five hull findings are theirs to close: the silent truncation of
+an apt install in an overlay vm, the one-uid limit a maintainer script meets
+in a build step, and `(mutable direct)` writing through 9p as the host user.
+Two are already fixed on their side -- the missing root `PATH`, which was also
+the cause of gcc losing `cc1`. A fourth was mine and is withdrawn (10.527).
+
 ## 10.527 hull runs the test this workspace never could
 
 "Hull doesn't need to be FULLY usable, it needs to be useful for you and not
