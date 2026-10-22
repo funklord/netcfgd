@@ -12553,27 +12553,57 @@ socket replies are parsed -- so there is no encoder to call with a value, and
 the fakes answered `HomeFiber` at -53 dBm where the file said `home` at -40.
 The holder's instruction was to re-author the lines.
 
-Three shapes left the file and each is still checked where the values are a
-test's own: an empty `access_points` beside `stale`, which **the daemon never
-writes** -- a failed scan answers with what it last saw, so the old line
-described behaviour no code here produces -- and `json_write_test` pins that
-spelling directly; `"owe":true` and `mobility_domain`, covered by
-`supplicant_test` and three renderer fixtures; and a `SCANNING` status with no
-association, where the new line carries `blocked` beside a full status, which
-is the harder case.
+Three shapes left the file when it was re-authored. One stays gone and is a correction rather than a
+cost: an empty `access_points` beside `stale`, which **the daemon never
+writes** -- a failed scan answers with what it last saw -- so that line
+described behaviour no code here produces, and `json_write_test` pins the
+spelling where the values are a test's own. A `SCANNING` status with no
+association went too; the new line carries `blocked` beside a full status,
+which is the harder case because the member that matters sits next to
+everything that might hide it.
 
-Three arrived: four access points sorted strongest first with `configured` on
-the one a `network` block names, a station hostapd reports no statistics for
-beside two it does, and `not_trying` with both flags named.
+**The other two came back the same day** (0282). Told what the re-authoring
+had cost, the holder's answer was to add the OWE and hidden-name networks to
+the fake, so the witness carries `"owe":true` and `"ssid":"","name":""` again
+-- produced this time rather than written by hand, which is the first time
+either shape has been driven by a supplicant at all: `scan_row` has a comment
+about the empty name and no fake had ever sent one. `mobility_domain` is the
+one that stays with `supplicant_test` and the renderer fixtures, the flags
+having no way to spell it.
+
+Three shapes arrived with the re-author: access points sorted strongest first
+with `configured` on the one a `network` block names, a station hostapd reports
+no statistics for beside two it does, and `not_trying` with both flags named.
 
 ### What it cost outside the witness, which is the half to expect
 
-Two tests read the file by a prefix that two lines now share, and both are
-better tests for the fix. `cli_test`'s finder takes a mark as well as a head,
-so each pair is told apart by the member that differs -- at the end of the
-line, where a prefix cannot reach. `tui_test` asserted two literals from the
-old sample, `home` and `-40`, and asks the decoded scan for the strongest
-access point's name and signal now: assert the relationship, not either value.
+**Every test that had copied a fixture's contents into an assertion failed,
+and each is a better test for the fix.** That is the whole bill, and it is one
+shape repeated: `cli_test` found two lines by a prefix that two lines now
+share, and takes a mark as well as a head so each pair is told apart by the
+member that differs -- at the end of the line, where a prefix cannot reach.
+`tui_test` asserted the literals `home` and `-40`, and asks the decoded scan
+for the strongest access point's name and signal. `daemon_wifi_test` asserted
+the scan by position -- four rows, four named signals, `access_points[1]` for
+HomeFiber -- and six of its checks failed when the fake gained two networks,
+over positions rather than over anything netcfgd does; it asks by address
+through a `scan_at` helper now, and checks sortedness rather than a copy of
+the fake's table.
+
+**And one of the rewritten checks was wrong in the instructive direction.**
+The hidden row's first version asserted the name was *absent* where the daemon
+writes it *empty*, which is the distinction `ncfg_proto_str_t` exists to carry:
+a client reading a missing `ssid` as absent could not tell a hidden network
+from a row of a kind it does not know. A fixture that moves is how a test that
+asserts the wrong thing gets read again.
+
+`tests/live/nm.sh` held the last two literals, four access points and the
+sorted name list. **It could not be run here -- this machine has no `nmcli`**
+-- so its new expectations are derived from the shim's own code rather than
+observed: `accesspoint.c` keys a slot by bssid and skips only a row whose
+bssid is empty, so a nameless access point is listed with an empty name. Both
+checks ask about named rows only, which keeps what the shim does with a
+nameless one out of a file nobody here can run.
 
 The rig is `c/tests/fakewifi.h`, extracted from `daemon_wifi_test.c` rather
 than copied -- a forked `timeout 60 python3`, a socket waited for rather than

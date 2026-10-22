@@ -627,13 +627,17 @@ else
 
 	wifi() { nmcli --terse --fields "$1" device wifi list --rescan no 2>/dev/null; }
 
-	# Four since `fake_supplicant.py` learned an enterprise network (project.md
-	# 10.366). The count is the assertion and the names are what make a wrong
-	# count readable, so both move together.
-	check "every access point the scan found is listed" \
-		"$(wifi SSID | grep -c .)" "4"
+	# Six rows and five names since `fake_supplicant.py` learned an OWE network
+	# and one hiding its name (0282): a hidden access point arrives with
+	# nothing after the fourth tab, so it is a row with an empty SSID and is
+	# counted where rows are counted rather than where names are. The count is
+	# the assertion and the names are what make a wrong count readable, so both
+	# move together -- and both ask only about named rows, because what the
+	# shim exports for a nameless one is a question the C suite asks.
+	check "every named access point the scan found is listed" \
+		"$(wifi SSID | grep -c .)" "5"
 	check "and the names came through" \
-		"$(wifi SSID | sort | tr '\n' ' ')" "Cafe Distant Enterprise HomeFiber "
+		"$(wifi SSID | grep . | sort | tr '\n' ' ')" "Cafe Distant Enterprise Guest HomeFiber "
 
 	# The conversion NM clients draw signal bars from. -40 dBm is the top of
 	# NM's scale, -100 the bottom, and -53 is the level that produces the 79 a

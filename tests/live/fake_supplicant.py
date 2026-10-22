@@ -12,7 +12,10 @@ three bitfields, hex becomes octets. Those are the conversions a client
 actually renders, and they are untestable against an empty list.
 
 So this answers the four commands netcfgd sends, with results chosen to have
-known answers on the other side. It is a fake radio, not a fake supplicant
+known answers on the other side -- including, since 0282, one network whose
+name is hidden and one secured by OWE, because a scan row is where netcfgd
+decides both and a shape no fake produces is a shape only a hand-written
+fixture covers. It is a fake radio, not a fake supplicant
 protocol: the wire format here is the real one, and if netcfgd's parser changes
 its mind about it, wifi.sh is what notices.
 
@@ -47,14 +50,30 @@ import sys
 # real NetworkManager reported as 79 while the shim was written, and is the one
 # cross-check available for the conversion.
 #
-# **The enterprise entry is appended, never inserted.** `network_id` is the
-# index into this list and tests assert `id=0` and `id=1`; putting an entry in
-# the middle would renumber networks nobody touched.
+# **Entries are appended, never inserted.** `network_id` is the index into this
+# list and tests assert `id=0` and `id=1`; putting an entry in the middle would
+# renumber networks nobody touched.
+#
+# The last two were added by 0282, for shapes the frozen witness carried by
+# hand and lost when 0281 re-authored those lines to what this file answers:
+#
+#   * `Guest` is OWE, which netcfgd reads off the flags and nothing else --
+#     there is an access point called `OWNIT_24GHz_8A41A0` in range of the
+#     machine that classifier was written on, so a check over the whole row
+#     would call it OWE. Reporting no `WPA`, it is also the one network here
+#     that is encrypted without being `secured`, which is the pair a client
+#     has to render as "open, and private";
+#   * the last hides its name, which really does arrive as a row with nothing
+#     after the fourth tab. netcfgd's row parser was written for that and no
+#     fake had ever sent one, so the empty-ssid branch was reached only by a
+#     hand-written fixture.
 NETWORKS = [
     ("00:11:22:33:44:55", 2412, -53, "[WPA2-PSK-CCMP][ESS]", "HomeFiber"),
     ("66:77:88:99:aa:bb", 5180, -40, "[ESS]", "Cafe"),
     ("cc:dd:ee:ff:00:11", 2437, -100, "[WPA2-PSK-CCMP][WPS][ESS]", "Distant"),
     ("22:33:44:55:66:77", 5200, -60, "[WPA2-EAP-CCMP][ESS]", "Enterprise"),
+    ("44:55:66:77:88:99", 5220, -47, "[RSN-OWE-CCMP][ESS]", "Guest"),
+    ("88:99:aa:bb:cc:dd", 2462, -66, "[WPA2-PSK-CCMP][ESS]", ""),
 ]
 
 # The one this fake radio claims to be associated with.

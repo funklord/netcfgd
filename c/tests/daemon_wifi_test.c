@@ -809,6 +809,28 @@ static void taking_a_radio_on_and_handing_it_back(void)
 	ncfg_observed_free(observed);
 }
 
+/*
+ * One scan row by its address.
+ *
+ * **Not by index**, which is what every assertion below used until the fake
+ * learned two more networks (0282) and six checks failed over positions rather
+ * than over anything netcfgd does. A row's position is decided by its signal,
+ * which is the fake's data; what each check means is "this access point", and
+ * the address is how the scan names one.
+ */
+static const ncfg_proto_scan_entry_t *scan_at(const ncfg_proto_scan_t *scan,
+    const char *bssid)
+{
+	size_t at;
+
+	for (at = 0; at < scan->access_point_count; at++) {
+		if (says(scan->access_points[at].bssid, bssid)) {
+			return &scan->access_points[at];
+		}
+	}
+	return NULL;
+}
+
 static void the_scan_and_why_it_may_be_stale(void)
 {
 	ncfg_document_t     *document = compiled("known.conf",
@@ -828,30 +850,60 @@ static void the_scan_and_why_it_may_be_stale(void)
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
 
+		const ncfg_proto_scan_entry_t *home = scan_at(scan, "00:11:22:33:44:55");
+		const ncfg_proto_scan_entry_t *cafe = scan_at(scan, "66:77:88:99:aa:bb");
+		const ncfg_proto_scan_entry_t *owe = scan_at(scan, "44:55:66:77:88:99");
+		const ncfg_proto_scan_entry_t *hidden = scan_at(scan, "88:99:aa:bb:cc:dd");
+		size_t                           at;
+		int                              sorted = 1;
+
 		check(message.u.response.kind == NCFG_PROTO_RESP_WIFI_SCAN &&
-		    says(scan->interface, "wlan0") && scan->access_point_count == 4u,
+		    says(scan->interface, "wlan0") && scan->access_point_count == 6u,
 		    "  with every access point the radio saw");
-		/* **Four since the fake learned an enterprise network** (10.366), and
-		 * the ordering is what this asserts rather than the membership: -60
-		 * arrived in the middle, so a sort that had quietly stopped sorting
-		 * would now put it at the end where it used to be able to hide. */
-		check(scan->access_point_count == 4u && scan->access_points[0].signal == -40 &&
-		    scan->access_points[1].signal == -53 &&
-		    scan->access_points[2].signal == -60 &&
-		    scan->access_points[3].signal == -100,
+		/* **The ordering rather than the positions**, which is what this has
+		 * always meant: a sort that quietly stopped sorting is the fault, and
+		 * naming the signal each row should hold made the check a copy of the
+		 * fake's table instead. */
+		for (at = 1u; at < scan->access_point_count; at++) {
+			if (scan->access_points[at].signal > scan->access_points[at - 1u].signal) {
+				sorted = 0;
+			}
+		}
+		check(sorted && scan->access_point_count > 1u,
 		    "  strongest first, because that is the order the question is asked in");
-		check(scan->access_point_count == 4u &&
-		    says(scan->access_points[1].ssid, HOMEFIBER_HEX) &&
-		    says(scan->access_points[1].name, "HomeFiber"),
+		check(home && says(home->ssid, HOMEFIBER_HEX) && says(home->name, "HomeFiber"),
 		    "  the name as hex and as text, which is what makes it identifiable");
-		check(scan->access_point_count == 4u &&
-		    says(scan->access_points[1].configured, "home") &&
-		    !ncfg_proto_str_present(scan->access_points[0].configured),
+		check(home && says(home->configured, "home") && cafe &&
+		    !ncfg_proto_str_present(cafe->configured),
 		    "  0013's boundary is visible: only a configured network is labelled");
-		check(scan->access_point_count == 4u && scan->access_points[1].secured == 1 &&
-		    scan->access_points[0].secured == 0 &&
-		    scan->access_points[1].enterprise == 0 && scan->access_points[0].owe == 0,
+		check(home && home->secured == 1 && home->enterprise == 0 && cafe &&
+		    cafe->secured == 0 && cafe->owe == 0,
 		    "  and what joining each one would need");
+		/*
+		 * The two the fake gained in 0282, and the reason it gained them: both
+		 * shapes were in the frozen witness by hand and in nothing a program
+		 * here produced.
+		 *
+		 * OWE is read off the flags alone, and this row reports no `WPA` --
+		 * so it is the one access point that is encrypted and not `secured`,
+		 * which is the pair a client has to render as "open, and private".
+		 */
+		check(owe && owe->owe == 1 && owe->secured == 0 && owe->enterprise == 0,
+		    "  an OWE network is encrypted without being secured");
+		/*
+		 * And a hidden one arrives with nothing after the fourth tab, which is
+		 * what hiding is: an address, a signal, and no name to show.
+		 *
+		 * **Written as empty and not omitted**, which is the distinction
+		 * `ncfg_proto_str_t` exists for: a client that read a missing `ssid`
+		 * as absent could not tell a hidden network from a row of some kind it
+		 * does not know. This check asserted absence first and failed for
+		 * saying the opposite of what the daemon does.
+		 */
+		check(hidden && ncfg_proto_str_present(hidden->ssid) &&
+		    hidden->ssid.length == 0u && ncfg_proto_str_present(hidden->name) &&
+		    hidden->name.length == 0u,
+		    "  and one hiding its name carries the name as empty, not as absent");
 		check(!ncfg_proto_str_present(scan->stale),
 		    "  a fresh scan says nothing about being stale, because it is not");
 		ncfg_proto_message_free(&message);
@@ -869,7 +921,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 	if (decoded(&out, &message)) {
 		const ncfg_proto_scan_t *scan = &message.u.response.u.wifi_scan;
 
-		check(ncfg_proto_str_present(scan->stale) && scan->access_point_count == 4u,
+		check(ncfg_proto_str_present(scan->stale) && scan->access_point_count == 6u,
 		    "  with the previous results and the reason they are the previous ones");
 		ncfg_proto_message_free(&message);
 	}
@@ -891,7 +943,7 @@ static void the_scan_and_why_it_may_be_stale(void)
 		check(ncfg_proto_str_present(scan->stale) &&
 		    memmem(scan->stale.bytes, scan->stale.length, "rfkill unblock", 14u) != NULL,
 		    "  and says which switch is holding it off and what clears that one");
-		check(scan->access_point_count == 4u, "  the cached results are worth more than none");
+		check(scan->access_point_count == 6u, "  the cached results are worth more than none");
 		ncfg_proto_message_free(&message);
 	}
 	heard = log_since(mark);
