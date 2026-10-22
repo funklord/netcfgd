@@ -12539,13 +12539,31 @@ what found the rest:
   written to was gone with the default. The optimisation level is a packager's
   to choose and the language is not, so `-Os` stays a default and `-std=c11`
   moved to the appended half, in `c/`, `client/` and the shim.
-- **Two files do not compile on musl, and that is where this stops.**
-  `src/sys/dump.c` and `src/sys/ops.c`, three errors, one cause:
-  `linux/if_tunnel.h` wants `IFNAMSIZ` and a complete `struct iphdr`, which
-  musl's headers do not hand it the way glibc's do -- and `ops.c` already
-  includes `linux/if.h` first, so this is the kernel-and-libc header minefield
-  rather than a missing line. 204 objects build and two do not. Making the C
-  compile on musl is its own piece of work, scoped here rather than started.
+- **Two files did not compile there, and it was not musl.** `src/sys/dump.c`
+  and `src/sys/ops.c`, three errors, one cause: `linux/if_tunnel.h` needs
+  `IFNAMSIZ` and a complete `struct iphdr` for the `struct ip_tunnel_parm` it
+  declares, and it included `linux/if.h` and `linux/ip.h` for itself until the
+  uapi headers were cleaned up -- Debian's 6.12 set includes both and Alpine's
+  7.0.0 includes neither. **A kernel-headers version difference wearing a libc
+  difference's clothes**, and the first reading of it here said "the
+  kernel-and-libc header minefield", which was wrong and was written before
+  anybody read either header.
+
+  Both files ask for what they need now, out of alphabetical order with the
+  reason at the include block, and they ask the kernel's `linux/if.h` rather
+  than libc's `net/if.h` for the reason `ops.c` already gives: the two redefine
+  each other's structures, so a .c file may include the first and a public
+  header may not. On Alpine from clean: 206 objects, no errors, the daemon
+  linking at 1,213,824 bytes, where it was 204 objects and three errors.
+
+  **So `make apk-container` works, for the first time since the C port**:
+  `dist/netcfgd-0.1_git1404-r0.apk`, 514,567 bytes, built by abuild in Alpine
+  with `depends=""` and `makedepends="make linux-headers"`.
+
+  What found it was reading the two headers rather than theorising about libcs
+  -- `grep '#include' /usr/include/linux/if_tunnel.h` on each side, which is
+  the whole diagnosis and took one command. `evidence.md`'s read the input
+  before theorising about the mechanism, met in a packaging target.
 
 ### And the measurement that was wrong first, which is the part to keep
 
