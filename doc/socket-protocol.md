@@ -360,14 +360,14 @@ Every message is a JSON object carrying exactly one tag member:
 | `response` | daemon to client | the answer |
 | `event` | daemon to client | something happened, on a monitor stream |
 
-**Where each tag's values are listed**, because this document has them in
-three places and a reader should not have to find that out: the requests are
-in section 4, under the tier each one needs, since who may ask is the first
-thing an implementer needs about a verb; the events are in 6.1 and the
-responses in 6.2. All three lists are held to the C's own name tables by
-`tool/ledger_gate.py`, and section 4's additionally to the tier each request
-is given by `tool/tier_table_gate.py` -- so none of the three can gain a
-member without this document gaining a row.
+**Where each list is**, because this document has four of them and a reader
+should not have to find that out: the requests are in section 4, under the
+tier each one needs, since who may ask is the first thing an implementer
+needs about a verb; the events are in 6.1, the responses in 6.2, and the
+actions a `plan` or a `journal` carries in 6.3. All four are held to the
+build's own answers by `tool/ledger_gate.py`, and section 4's additionally to
+the tier each request is given by `tool/tier_table_gate.py` — so none of them
+can gain a member without this document gaining a row.
 
 The tag's value names the message; the rest of the object is that message's
 members, **flattened beside the tag rather than nested under it**:
@@ -483,6 +483,99 @@ Four are worth more than a row:
 `event_names[]`, and holds `doc/schema/socket.json` and this table to it in
 both directions — so a twentieth response cannot arrive without a line and a
 row, and neither file can describe one the build cannot send.
+
+### 6.3 The plan's actions
+
+A `plan` response and a `journal` response carry `actions` and `records`, and
+each one names an **op**. Forty-eight names, in `<subject>.<verb>` form, and
+an operator reading `ncfg plan` sees them verbatim — so they are listed here.
+
+**The two columns are what a name cannot say.** Most of these spell themselves
+out: `addr.add` adds an address and `route.del` removes a route. What is not
+in the name is whether the action can interrupt traffic on the interface it
+touches, and whether it is about the host rather than an interface — which is
+the difference between an `apply` somebody can run over the connection they
+are using and one that will cut them off.
+
+| Action | Cuts traffic | Host-wide |
+|---|---|---|
+| `access_control.add` | yes |  |
+| `access_control.del` |  |  |
+| `addr.add` |  |  |
+| `addr.del` | yes |  |
+| `bridge.vlan.add` |  |  |
+| `bridge.vlan.del` | yes |  |
+| `commit.arm` |  |  |
+| `commit.confirm` |  |  |
+| `commit.revert` |  |  |
+| `dns.apply` |  | yes |
+| `hook.run` |  |  |
+| `hostname.set` |  | yes |
+| `ingress.redirect` |  |  |
+| `ingress.redirect.clear` | yes |  |
+| `link.delete` | yes |  |
+| `link.down` | yes |  |
+| `link.set_bond` | yes |  |
+| `link.set_bridge` | yes |  |
+| `link.set_ipv6_token` |  |  |
+| `link.set_mac` | yes |  |
+| `link.set_macvlan` | yes |  |
+| `link.set_master` | yes |  |
+| `link.set_mtu` | yes |  |
+| `link.set_offloads` |  |  |
+| `link.set_tunnel` | yes |  |
+| `link.set_vxlan` | yes |  |
+| `link.unset_master` | yes |  |
+| `link.up` |  |  |
+| `nat.replace` |  |  |
+| `qdisc.reset` |  |  |
+| `qdisc.set` |  |  |
+| `route.add` |  |  |
+| `route.del` | yes |  |
+| `rule.add` |  |  |
+| `rule.del` | yes |  |
+| `sysctl.set_accept_ra` |  |  |
+| `sysctl.set_forwarding` | yes |  |
+| `sysctl.set_privacy` |  |  |
+| `wg.set_device` | yes |  |
+| `wg.set_peers` | yes |  |
+| `wifi.associate` | yes |  |
+| `wifi.disassociate` | yes |  |
+| `wifi.set_profiles` |  |  |
+| `wifi.set_regdom` |  |  |
+| `backend.reload` | yes |  |
+| `backend.start` |  |  |
+| `backend.stop` | yes |  |
+| `link.create` |  |  |
+
+**Four of them are asked once per kind rather than once**, because the answer
+is a function of the kind: `link.create` for each of the fifteen interface
+kinds, and `backend.start`, `backend.stop` and `backend.reload` for each of
+the ten backends. `netcfgd --supported` has a row per pairing; the row above
+is the op itself.
+
+**`link.set_mtu` cuts traffic deliberately**, which is the one row worth
+arguing about: lowering an MTU interrupts what is in flight and raising it can
+black-hole a path until PMTU discovery catches up. A guard that allowed it for
+convenience would be a guard nobody could rely on. `link.set_offloads` goes
+the other way and is not disruptive: toggling an offload re-initialises a
+driver's transmit path on some hardware and drops what is queued, which is a
+packet or two rather than a lost session — and a guard that blocked it would
+block the change most often made to fix a NIC that is already corrupting
+traffic.
+
+**The taxonomy is whole even where this build emits only part of it.**
+`ncfg/plan.h` says so in as many words: it is the vocabulary the socket
+speaks, and a reader comparing it against the Rust's `Op` should find the same
+list rather than the subset the port has reached. `doc/schema/plan.json`
+carries one sample of each.
+
+**Every row here is the program's own answer.** `netcfgd --supported` prints a
+line per op with `disruptive` and `host_wide` beside it, from the two switches
+in `c/src/plan/action.c` that have no `default` arm — and
+`tool/ledger_gate.py` holds this table to that dump, in both directions and in
+all three columns. A forty-ninth action cannot arrive without a row, and a row
+cannot claim something the build does not.
 
 ## 7. Compatibility rules
 

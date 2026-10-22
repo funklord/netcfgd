@@ -117,7 +117,8 @@ static const char usage_text[] =
  * stdout, because it is the answer to a question rather than a diagnostic
  * (0261).
  */
-static void say_one(const char *subject, const char *name, int supported, const char *why)
+static void say_one(const char *subject, const char *name, int supported, const char *why,
+    const ncfg_op_t *op)
 {
 	ncfg_buf_t        buf;
 	ncfg_json_writer_t writer;
@@ -128,6 +129,22 @@ static void say_one(const char *subject, const char *name, int supported, const 
 	ncfg_json_write_member_string(&writer, "subject", subject);
 	ncfg_json_write_member_string(&writer, "name", name ? name : "?");
 	ncfg_json_write_member_bool(&writer, "supported", supported);
+	/*
+	 * **The two things about an action that a name cannot say**, for the rows
+	 * that are about an op. `action.c` answers both out of a switch with no
+	 * `default`, so this is the program saying what it decides rather than a
+	 * document asserting it: `tool/ledger_gate.py` holds section 6.3 of
+	 * `doc/socket-protocol.md` to these two columns, and an operator reading
+	 * `ncfg plan` is told which actions can cut them off.
+	 *
+	 * A request row passes NULL and carries neither, because neither means
+	 * anything about a verb somebody sent.
+	 */
+	if (op) {
+		ncfg_json_write_member_bool(&writer, "disruptive", ncfg_op_is_disruptive(op));
+		ncfg_json_write_member_bool(&writer, "host_wide",
+		    ncfg_op_is_host_wide_config(op));
+	}
 	if (!supported && why && why[0]) {
 		ncfg_json_write_member_string(&writer, "refusal", why);
 	}
@@ -148,7 +165,7 @@ void ncfg_main_netcfgd_supported(void)
 		 * that reaches the dispatcher without an arm. A warning rather than a
 		 * build failure; `apply.c` carries why. */
 		say_one("request", ncfg_proto_request_name((ncfg_proto_request_kind_t)kind), 1,
-		    NULL);
+		    NULL, NULL);
 	}
 	/*
 	 * Bounded by the name table rather than by the last member of the enum,
@@ -178,7 +195,7 @@ void ncfg_main_netcfgd_supported(void)
 		}
 		why[0] = '\0';
 		ok = ncfg_apply_supported(&op, why, sizeof(why));
-		say_one("op", ncfg_op_name(&op), ok, why);
+		say_one("op", ncfg_op_name(&op), ok, why, &op);
 	}
 	for (kind = 0; ncfg_interface_kind_name(kind) != NULL; kind++) {
 		ncfg_interface_kind_t created;
@@ -194,7 +211,7 @@ void ncfg_main_netcfgd_supported(void)
 		op.u.link_create.kind = &created;
 		why[0] = '\0';
 		ok = ncfg_apply_supported(&op, why, sizeof(why));
-		say_one("link.create", ncfg_interface_kind_name(kind), ok, why);
+		say_one("link.create", ncfg_interface_kind_name(kind), ok, why, &op);
 	}
 	for (kind = 0; ncfg_backend_kind_name(kind) != NULL; kind++) {
 		static const int verbs[] = { NCFG_OP_BACKEND_START, NCFG_OP_BACKEND_STOP,
@@ -214,7 +231,7 @@ void ncfg_main_netcfgd_supported(void)
 			why[0] = '\0';
 			ok = ncfg_apply_supported(&op, why, sizeof(why));
 			(void)snprintf(subject, sizeof(subject), "%s", ncfg_op_name(&op));
-			say_one(subject, ncfg_backend_kind_name(kind), ok, why);
+			say_one(subject, ncfg_backend_kind_name(kind), ok, why, &op);
 		}
 	}
 }

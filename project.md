@@ -12498,6 +12498,87 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.518 The ops got a table whose columns a name cannot say
+
+"now add the same gate for op kinds", the copyright holder, 2026-10-22. The
+fourth and last tag, and the one where the obvious table would have been
+worthless.
+
+### What was missing, measured first
+
+    witness -> build   `ledger_gate.py` already asked that every op in
+                       `plan.json` is one the build carries out
+    build -> witness   NOTHING, and `daemon_main.c`'s own comment is the
+                       warning: "a kind the C has and the witness does not is
+                       a kind no gate is looking at"
+    documented         no table anywhere. `netcfgd-design.md` names
+                       `add_addr`, `del_route`, `assoc_ssid` and `start_dhcp`
+                       illustratively, in a list that trails off in an
+                       ellipsis -- and **not one of those four is a real op
+                       name**; the taxonomy settled on `<subject>.<verb>`
+                       after that draft and the prose never caught up
+
+Both witness directions hold today -- 44 plain ops and four asked per kind,
+all 48 in `plan.json` -- so the new check is a ratchet rather than a repair.
+
+### A table of names would have restated the names
+
+This is the first of the four where I nearly produced something useless.
+`addr.add` adds an address; `route.del` removes a route; a "meaning" column
+would have been forty-eight rows of the name again, which fails the test
+`working-practice.md` sets for a finding: would a reader do anything
+differently for having read it.
+
+**What a reader cannot get from the name is in `action.c`**, which exists
+because every op has to answer four questions, and two of them are facts an
+operator wants before pressing apply: can this cut traffic on the interface it
+touches, and is it about the host rather than an interface. So the table is
+three columns, and the other two are the ones worth having.
+
+`link.set_mtu` is the row worth arguing about and the reason that column earns
+its place: it cuts traffic deliberately, because lowering an MTU interrupts
+what is in flight and raising it can black-hole a path until PMTU discovery
+catches up. `link.set_offloads` goes the other way, and `action.c` says why in
+a comment this section now quotes.
+
+### The program answers, rather than the document asserting
+
+`netcfgd --supported` prints `disruptive` and `host_wide` beside each op now,
+from the two switches that have no `default` arm. That is the dump's stated
+purpose -- "a program that decides and prints what it answers" -- and it makes
+the gate a comparison between two things rather than a check of prose against
+a parse.
+
+**The table was generated from that dump and then committed**, which is the
+same arrangement as the fuzz corpora: the generator is how the choosing was
+done, the output is what is read, and the gate is what keeps them equal.
+
+### The gate caught its own reader on the first run
+
+`socket-protocol.md 6.3 has no row for the `link.set_ipv6_token` action`. The
+row was there; my regex for a wire name was `[a-z_.]+`, and that name has a
+digit in it. **The cheapest place for a reader's bug to surface is the run
+that introduces it**, and this is the third time this week a gate has found a
+fault in itself rather than in the tree -- the others being the section scan
+that swallowed 6.2 and the harness whose function-pointer casts were
+undefined behaviour.
+
+Six arms seen to fail: a row missing, a row for an action the build does not
+have, each of the two flags disagreeing, the section renamed, and -- built
+from HEAD to prove it -- a `netcfgd` whose dump has no `disruptive` member at
+all, which reports that the table "would be checked against nothing".
+
+### The four lists, and what holds each
+
+    section 4   requests   ledger_gate (witness, both ways)
+                           tier_table_gate (document, both ways, with tiers)
+    section 6.1 events     ledger_gate (witness and document, both ways)
+    section 6.2 responses  ledger_gate (witness and document, both ways)
+    section 6.3 actions    ledger_gate (witness and document, three columns)
+
+Section 6 says where each list is, because there are four of them and a reader
+who found one should not have to guess at the rest.
+
 ## 10.517 The requests completed the set, and one gate had the wrong authority
 
 "now add the same gate for request kinds", the copyright holder, 2026-10-22.

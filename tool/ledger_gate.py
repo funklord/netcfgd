@@ -128,6 +128,34 @@ def witnessed_tagged(tag):
 	return seen
 
 
+def documented_ops(heading="6.3 The plan's actions"):
+	"""Op name to its two flags, from the document's table.
+
+	Three columns rather than one, which is what makes this table worth
+	checking at all: the names spell themselves out and the flags do not.
+	"""
+	text = (ROOT / "doc/socket-protocol.md").read_text()
+	section = re.search(
+		r"\n### " + re.escape(heading) + r"\n(.*?)\n#{2,4} ", text, re.S
+	)
+	if not section:
+		print(f"ledger-gate: doc/socket-protocol.md has no `### {heading}` section,",
+		    file=sys.stderr)
+		print("ledger-gate:   so this would check the op table against nothing",
+		    file=sys.stderr)
+		raise SystemExit(1)
+	out = {}
+	for name, cuts, host in re.findall(
+		# **Digits belong in a wire name** -- `link.set_ipv6_token` has one, and
+		# a charset without them read the table as short by a row on the first
+		# run of this check. The gate caught its own reader, which is the
+		# cheapest place for that to happen.
+		r"^\| `([a-z0-9_.]+)` \| *(yes)? *\| *(yes)? *\|$", section.group(1), re.M
+	):
+		out[name] = (cuts == "yes", host == "yes")
+	return out
+
+
 def documented_rows(heading, what):
 	"""Every wire name a table under one heading of the protocol document has
 	a row for.
@@ -157,7 +185,7 @@ def documented_rows(heading, what):
 		print(f"ledger-gate:   so this would check the {what} table against nothing",
 		    file=sys.stderr)
 		raise SystemExit(1)
-	return set(re.findall(r"^\| `([a-z_]+)` \|", section.group(1), re.M))
+	return set(re.findall(r"^\| `([a-z0-9_]+)` \|", section.group(1), re.M))
 
 
 def witnessed_requests():
@@ -287,10 +315,62 @@ def main():
 				f"{tag} and this build cannot send one"
 			)
 
+	# **Every op the build knows has a witness line and a documented row**,
+	# which is the pair requests and the two message tags already have. The
+	# witness direction is the one `daemon_main.c`'s own comment warns about:
+	# "a kind the C has and the witness does not is a kind no gate is looking
+	# at". The document direction checks three columns, because an op's name
+	# says what it does and says nothing about whether it can cut somebody
+	# off.
+	build_ops = {}
+	for row in rows:
+		if row["subject"] == "op" or row["subject"] in (
+			"link.create",
+			"backend.start",
+			"backend.stop",
+			"backend.reload",
+		):
+			name = row["subject"] if row["subject"] != "op" else row["name"]
+			build_ops[name] = (row.get("disruptive"), row.get("host_wide"))
+	if any(flags[0] is None for flags in build_ops.values()):
+		print("ledger-gate: --supported prints no `disruptive` member, so the op",
+		    file=sys.stderr)
+		print("ledger-gate:   table would be checked against nothing", file=sys.stderr)
+		raise SystemExit(1)
+	documented = documented_ops()
+	for name in sorted(set(build_ops) - set(documented)):
+		failures.append(
+			f"socket-protocol.md 6.3 has no row for the `{name}` action, which "
+			"this build has"
+		)
+	for name in sorted(set(documented) - set(build_ops)):
+		failures.append(
+			f"socket-protocol.md 6.3 has a row for `{name}`, which is not an action "
+			"this build has"
+		)
+	for name in sorted(set(build_ops) & set(documented)):
+		if build_ops[name] != documented[name]:
+			said = "cuts traffic" if documented[name][0] else "does not cut traffic"
+			answers = "does" if build_ops[name][0] else "does not"
+			if build_ops[name][0] != documented[name][0]:
+				failures.append(
+					f"socket-protocol.md 6.3 says `{name}` {said} and the build "
+					f"answers that it {answers}"
+				)
+			else:
+				failures.append(
+					f"socket-protocol.md 6.3 and the build disagree about whether "
+					f"`{name}` is host-wide"
+				)
+
 	ops, link_kinds, backend_kinds = witnessed_actions()
 	asked_per_kind = {"link.create", "backend.start", "backend.stop", "backend.reload"}
 	for name in sorted(ops - asked_per_kind):
 		must_carry_out("op", name, "plan.json contains it")
+	for name in sorted(set(build_ops) - ops):
+		failures.append(
+			f"plan.json has no action named `{name}`, which this build has"
+		)
 	# And the four whose answer is a function of the kind: the vocabulary has
 	# to be whole, and which pairings are carried out is the live suite's
 	# question rather than this one's.
@@ -321,7 +401,7 @@ def main():
 	# because the sentence is the useful part.
 	print(
 		f"ledger-gate: {len(requests)} request(s), each with a witness line, "
-		f"{len(ops)} op(s), "
+		f"{len(ops)} op(s), each with a line and a row, "
 		f"{len(link_kinds)} link kind(s) and {len(backend_kinds)} backend action(s) "
 		f"in the witnesses, all carried out by this build; "
 		f"{len(kinds['event'])} event and {len(kinds['response'])} response "
