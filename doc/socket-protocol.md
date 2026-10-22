@@ -360,6 +360,15 @@ Every message is a JSON object carrying exactly one tag member:
 | `response` | daemon to client | the answer |
 | `event` | daemon to client | something happened, on a monitor stream |
 
+**Where each tag's values are listed**, because this document has them in
+three places and a reader should not have to find that out: the requests are
+in section 4, under the tier each one needs, since who may ask is the first
+thing an implementer needs about a verb; the events are in 6.1 and the
+responses in 6.2. All three lists are held to the C's own name tables by
+`tool/ledger_gate.py`, and section 4's additionally to the tier each request
+is given by `tool/tier_table_gate.py` -- so none of the three can gain a
+member without this document gaining a row.
+
 The tag's value names the message; the rest of the object is that message's
 members, **flattened beside the tag rather than nested under it**:
 

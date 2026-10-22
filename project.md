@@ -12498,6 +12498,73 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.517 The requests completed the set, and one gate had the wrong authority
+
+"now add the same gate for request kinds", the copyright holder, 2026-10-22.
+Requests turned out to be the half-covered tag: two of the four checks existed
+in two different gates, one was missing, and the gate that had the document
+half was reading the wrong program.
+
+    witness -> build   `ledger_gate.py` already asked that everything the
+                       witness sends is carried out
+    build -> witness   NOTHING. A request with no witness line was a wire
+                       form nothing pinned
+    build -> document  `tier_table_gate.py`, both directions, with the tier
+                       as well as the membership -- against `authorize.rs`
+
+### The missing direction, and why its authority differs
+
+A request with no line in `doc/schema/socket.json` is a wire form nothing
+holds still, which is how `ap_stations` came to be absent from three
+witnesses at once -- `crates/netcfgd-proto/tests/frozen.rs` records that in
+its own header. `ledger_gate.py` checks it now.
+
+**Its authority is the program, not a parsed table.** Requests are what
+`netcfgd --supported` enumerates, and the gate already runs it, so asking
+beats reading the source for something the program will say. Events and
+responses are parsed from their name tables for the opposite reason:
+`--supported` says nothing about either, so there is nothing to ask.
+
+### `tier_table_gate.py` was pointed at the retired implementation
+
+It read `crates/netcfgd-daemon/src/authorize.rs` -- correct when the Rust was
+what answered a socket, wrong from the day it stopped. **A gate about who may
+ask, with its authority in a program nobody runs.** The same fault as
+`dbus_policy_gate.py` parsing the retired shim and `linkage` reading a binary
+nobody installs (10.506), and it survived this long because it kept printing
+32 and the number was right.
+
+It reads the C's `tier_table[]` now, and **the switch was measured rather
+than asserted**: both tables were read on the day -- the Rust's arms through
+this gate's own reader, the C's through the new one -- and they agreed on all
+thirty-two. A re-pointing is only worth doing silently when it cannot change
+the verdict; a disagreement would have been a finding.
+
+**The C's table is designated**, which is what makes it readable:
+`[NCFG_PROTO_REQ_HELLO] = NCFG_TIER_OBSERVE` names both halves on one line.
+The enum member becomes a wire name through `request_names[]`, indexed by the
+same enum -- and because that is an assumption about order, the reader derives
+the name a second way (the member's suffix, lowercased) and refuses when the
+two disagree. Verified before relying on it: all thirty-two agree, so the
+check costs nothing and would catch a table that had been reordered.
+
+Five arms seen to fail: a row missing, a tier moved, a row naming something
+that is not a request, the names table reordered, and the tier table renamed
+-- the last two being the self-checks, which report a disagreement and an
+empty reading rather than a verdict.
+
+### What the three lists are, and the sentence a reader needed
+
+Requests are in section 4 under their tier, events in 6.1, responses in 6.2.
+That is three places, and section 6 now says so: a reader who found 6.1 and
+6.2 would otherwise look for a 6.3 that is not there, and the reason requests
+are elsewhere is that who may ask is the first thing an implementer needs
+about a verb.
+
+**All three lists are now held to the C's own name tables**, which is the end
+of this sequence of instructions: twelve assertions across two gates, over
+three tags, from authorities that ship.
+
 ## 10.516 The responses got the same table and the same gate
 
 "now add the same gate for response kinds", the copyright holder, 2026-10-21.

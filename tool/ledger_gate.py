@@ -228,6 +228,24 @@ def main():
 	for name in sorted(requests):
 		must_carry_out("request", name, "socket.json sends it")
 
+	# **And the other direction, which nothing checked.** The line above asks
+	# that everything the witness sends is carried out; this asks that
+	# everything the build can be sent has a line to be pinned by. A request
+	# with no witness line is a wire form nothing holds still -- which is how
+	# `ap_stations` came to be absent from three witnesses at once, recorded in
+	# `crates/netcfgd-proto/tests/frozen.rs`'s own header.
+	#
+	# The authority here is the program rather than a parsed table: requests
+	# are what `netcfgd --supported` enumerates, and asking it beats reading
+	# the source for something it will tell you. Events and responses are
+	# below with a table each, because `--supported` says nothing about either.
+	for subject, name in sorted(known):
+		if subject == "request" and name not in requests:
+			failures.append(
+				f"socket.json has no line for the `{name}` request, which this "
+				"build answers"
+			)
+
 	# **Every event kind the build can emit has a line in the witness**, which
 	# is the one direction this gate did not check and the one a reader
 	# believes without looking. An event is the only thing netcfgd says that
@@ -302,7 +320,8 @@ def main():
 	# "what does the C side not do yet", and it is printed rather than counted
 	# because the sentence is the useful part.
 	print(
-		f"ledger-gate: {len(requests)} request(s), {len(ops)} op(s), "
+		f"ledger-gate: {len(requests)} request(s), each with a witness line, "
+		f"{len(ops)} op(s), "
 		f"{len(link_kinds)} link kind(s) and {len(backend_kinds)} backend action(s) "
 		f"in the witnesses, all carried out by this build; "
 		f"{len(kinds['event'])} event and {len(kinds['response'])} response "
