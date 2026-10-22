@@ -12498,14 +12498,13 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.522 The socket witness has a builder, and the six lines that stopped it
+## 10.522 The socket witness is generated, and the wifi lines say what the fakes answer
 
-"now build socket.json from the C too", the copyright holder, 2026-10-22, after
-10.520 moved the other three. 0280 is the record.
-
-`c/tests/socket_witness_test.c` produces **61 of the file's 67 lines** through
-the encoders the daemon answers with, byte for byte, and refuses to write the
-file until it can produce every line. The committed witness is unchanged.
+"now build socket.json from the C too", then "re-author the six lines to what
+the fakes answer", the copyright holder, 2026-10-22. 0280 is the builder's
+record and 0281 the re-authoring's. `make schema-bless` writes all four
+witnesses now, and `make check` holds every one of socket.json's 67 lines byte
+for byte.
 
 ### What the file is, which decided what the work could be
 
@@ -12536,38 +12535,59 @@ about a shape nobody writes hides whether anybody can write it, and a round
 trip through the reader cannot see it. Asking the other direction -- what can
 this program EMIT -- is what the builder does that `proto_test` never did.
 
-### The six, and the decision that is the holder's
+### A builder that matched the file could never have written it
 
-Two `wifi_scan`, two `wifi_status`, `radios` and `ap_stations`. Blocked twice:
-their encoders write members as they parse a live supplicant's replies, so
-there is no encoder to call with a value; and the fakes that stand a supplicant
-up answer with other values than these lines carry -- `HomeFiber` at -53 dBm
-where the witness says `home` at -40, `rx_bytes=100000` and
-`connected_time=3600` where it says 4096 and 184. They were authored by hand in
-the Rust era and nothing in this tree reproduces them.
+The first version claimed each produced line against whatever line of the file
+was still unclaimed. That reads as a comparison and cannot be a generator: the
+only file it could write is the one it just read, so a line whose bytes had
+changed was refused rather than replaced -- `evidence.md`'s gate that compares
+an artifact to itself, with a bless arm that was never going to fire. **The
+order is the builder's now**, written as a sequence of producers, and the
+requests are emitted by position with an assertion that no request line sits
+below the first 41.
 
-So either those six lines are re-authored to what the fakes answer, which
-rewrites part of a frozen witness and keeps every shape it pins, or the fakes
-gain canned answers that reproduce them and the builder stands the rig up,
-which keeps the file and costs a forked python process in `make schema-bless`.
-**Whose decision: the copyright holder's**, because it is what the frozen
-surface contains either way.
+### The six wifi lines, and what re-authoring them moved
 
-### The refusal is loud and is not red
+They are written as a live supplicant is read -- members emitted while control
+socket replies are parsed -- so there is no encoder to call with a value, and
+the fakes answered `HomeFiber` at -53 dBm where the file said `home` at -40.
+The holder's instruction was to re-author the lines.
 
-A gate red while a decision is open is one a reader learns to walk past, so the
-builder prints the six and the reason and does not fail for them. What is
-enforced is that the number cannot move by itself: `SHORTFALL` is 6, asserted
-in both directions -- one more is an encoder that has drifted away from the
-file, one fewer and the constant is the stale thing.
+Three shapes left the file and each is still checked where the values are a
+test's own: an empty `access_points` beside `stale`, which **the daemon never
+writes** -- a failed scan answers with what it last saw, so the old line
+described behaviour no code here produces -- and `json_write_test` pins that
+spelling directly; `"owe":true` and `mobility_domain`, covered by
+`supplicant_test` and three renderer fixtures; and a `SCANNING` status with no
+association, where the new line carries `blocked` beside a full status, which
+is the harder case.
+
+Three arrived: four access points sorted strongest first with `configured` on
+the one a `network` block names, a station hostapd reports no statistics for
+beside two it does, and `not_trying` with both flags named.
+
+### What it cost outside the witness, which is the half to expect
+
+Two tests read the file by a prefix that two lines now share, and both are
+better tests for the fix. `cli_test`'s finder takes a mark as well as a head,
+so each pair is told apart by the member that differs -- at the end of the
+line, where a prefix cannot reach. `tui_test` asserted two literals from the
+old sample, `home` and `-40`, and asks the decoded scan for the strongest
+access point's name and signal now: assert the relationship, not either value.
+
+The rig is `c/tests/fakewifi.h`, extracted from `daemon_wifi_test.c` rather
+than copied -- a forked `timeout 60 python3`, a socket waited for rather than
+slept on, and a kill that reaches the process group. The second copy is where
+the kill gets forgotten.
 
 ### What was seen to fail
 
-A byte changed in a witness line: that producer claims nothing, the shortfall
-check fires, and nothing is written. A copy holding only the 61 producible
-lines: the write arm runs and the result is byte-identical to what it read --
-so the writer is proved and what is missing is six encoders rather than any
-machinery. And `SHORTFALL` against both 0 and 1 unproduced.
+The five changed lines before the bless, each reported with both spellings.
+The fakes absent: exit 1, nothing written, the witness's hash unchanged -- a
+builder that carried on would have written six lines of `[]` over six real
+answers and reported success. One producer removed: `66 produced, 67 in the
+file`. And a second bless giving the same five-line diff rather than a growing
+one.
 
 ## 10.521 The fmake exclusion is still needed, and 10.421's last line is answered
 

@@ -619,11 +619,31 @@ static void the_wifi_pane_reads_the_field_the_daemon_sends(void)
 	 * so every scan rendered as "(no scan)" from the day the TUI was written.
 	 * This is the witness, so the pane is checked against what the socket pins
 	 * rather than against somebody's second reading of the type.
+	 *
+	 * **Against the decoded witness rather than against two literals.** It
+	 * read `home` and `-40` until 0281 re-authored that line to what the fake
+	 * radios answer, and then failed for naming a network the file no longer
+	 * carries -- a test of the pane broken by a change to the sample. What it
+	 * means is that the first row is the strongest access point, so it asks
+	 * the decoded scan for that name and that number: `evidence.md`'s assert
+	 * the relationship rather than either value.
 	 */
-	check(body.count > 0 && strstr(ncfg_tui_line(&body, 0), "home") != NULL,
-	    "the first row is the access point the witness names");
-	check(any_line_has("-40"), "its signal is the witness's own number");
-	detail("the first row", ncfg_tui_line(&body, 0));
+	if (body.count > 0 && tui.scan.message.u.response.u.wifi_scan.access_point_count > 0) {
+		const ncfg_proto_scan_t *scan = &tui.scan.message.u.response.u.wifi_scan;
+		const char              *first = ncfg_tui_line(&body, 0);
+		char                     name[128];
+		char                     level[32];
+
+		(void)proto_text(scan->access_points[0].name, name, sizeof(name));
+		(void)snprintf(level, sizeof(level), "%lld",
+		    (long long)scan->access_points[0].signal);
+		check(strstr(first, name) != NULL,
+		    "the first row is the strongest access point the witness carries");
+		check(any_line_has(level), "with that access point's own signal");
+		detail("the first row", first);
+	} else {
+		check(0, "the pinned scan draws a row and carries an access point");
+	}
 	free(pinned);
 }
 

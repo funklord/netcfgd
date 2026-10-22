@@ -64,7 +64,7 @@
 #   make apk           -- the Alpine package. Alpine's `apk`, not Android's
 #   make apk-container -- the same, built by `abuild` inside Alpine
 #   make apk-source    -- the tarball an APKBUILD builds from
-#   make schema-bless  -- re-bless the frozen document and socket witnesses
+#   make schema-bless  -- re-bless the four frozen witnesses
 #   make version-check -- VERSION is the source; debian/changelog and
 #                         Cargo.toml are held to it
 #   make hooks         -- install the git hooks from tool/hooks/
@@ -1056,22 +1056,24 @@ apk-source:
 # the property that made this a move rather than a reformatting. `plan.json`
 # is the one built from values in a test, as it was in the Rust.
 #
-# `socket.json` has a builder now, `c/tests/socket_witness_test.c`, and it is
-# the one that cannot yet finish: it produces 61 of the file's 67 lines through
-# the encoders the daemon answers with, proves each byte for byte, and refuses
-# to write a file it cannot produce whole. The six it cannot are the wifi
-# answers, which are written as a live supplicant is read and whose values no
-# fixture in this tree produces -- so finishing it is a decision about either
-# those lines or those fakes, and 10.522 states it. Meanwhile the refusal is
-# printed by this target and the 61 are held on every `make check`.
+# `socket.json` is a generator, `c/tests/socket_witness_test.c`, and it is the
+# only one of the four that is a message set rather than one value: 67 lines,
+# each written by the encoder the daemon answers with, in an order the builder
+# owns rather than reads. Six of them are the wifi answers and are produced by
+# asking the repository's fake supplicant and fake hostapd, which is why this
+# target forks three python processes; 0281 re-authored those six lines to what
+# the fakes answer, since no fixture here could produce what they used to say.
+#
+# It compares as well as writes, so `make check` holds all 67 lines byte for
+# byte and this target is the deliberate way to move them.
 schema-bless:
 	@$(MAKE) --no-print-directory -C c tests/observed_test tests/document_test \
 		tests/plan_test tests/socket_witness_test
 	@cd c && NCFG_BLESS=1 ./tests/observed_test >/dev/null
 	@cd c && NCFG_BLESS=1 ./tests/document_test >/dev/null
 	@cd c && NCFG_BLESS=1 ./tests/plan_test >/dev/null
-	@echo "schema-bless: three witnesses rewritten; `git diff --stat doc/schema | tail -1`"
-	@cd c && NCFG_BLESS=1 ./tests/socket_witness_test | grep socket_witness_test:
+	@cd c && NCFG_BLESS=1 ./tests/socket_witness_test >/dev/null
+	@echo "schema-bless: four witnesses rewritten; `git diff --stat doc/schema | tail -1`"
 	@echo "schema-bless: say in the commit whether this is a minor or a major bump"
 
 # The init glue is data, so nothing compiles it and a typo would be found by

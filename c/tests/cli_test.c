@@ -1845,7 +1845,23 @@ static void the_wait_default_is_written_down_once(void)
  */
 
 /* The witness line beginning with `head`, copied out whole. */
-static int witness_line(const char *text, const char *head, char *out, size_t out_size)
+/*
+ * The witness line beginning with `head`, and -- where two of them do --
+ * carrying `mark` as well.
+ *
+ * **The mark is new because 0281 made two pairs of lines share a prefix.** The
+ * stale scan used to be recognisable by `"access_points":[]` and the blocked
+ * status by `"state":"SCANNING"`, and neither is true now that both are
+ * produced by asking the fake radios: a scan that failed answers with what it
+ * last saw, and a radio with its switch pressed is still associated. What
+ * separates each pair is a member at the END of the line, which a prefix
+ * cannot reach.
+ *
+ * A NULL mark takes the first line with that head, which for both pairs is
+ * the plainer of the two.
+ */
+static int witness_line_marked(const char *text, const char *head, const char *mark, char *out,
+    size_t out_size)
 {
 	size_t      wanted = strlen(head);
 	const char *at = text;
@@ -1854,7 +1870,8 @@ static int witness_line(const char *text, const char *head, char *out, size_t ou
 		const char *end = strchr(at, '\n');
 		size_t      run = end ? (size_t)(end - at) : strlen(at);
 
-		if (run >= wanted && memcmp(at, head, wanted) == 0) {
+		if (run >= wanted && memcmp(at, head, wanted) == 0 &&
+		    (!mark || memmem(at, run, mark, strlen(mark)) != NULL)) {
 			if (run >= out_size) {
 				return 0;
 			}
@@ -1868,6 +1885,12 @@ static int witness_line(const char *text, const char *head, char *out, size_t ou
 		at = end + 1;
 	}
 	return 0;
+}
+
+/* The common case: the first line with that head. */
+static int witness_line(const char *text, const char *head, char *out, size_t out_size)
+{
+	return witness_line_marked(text, head, NULL, out, out_size);
 }
 
 /*
@@ -1901,7 +1924,8 @@ static int payload_of(const char *line, char *out, size_t out_size)
 }
 
 /* One witness response, decoded and written back through the CLI's writers. */
-static void json_is_the_witness(const char *socket_text, const char *head, const char *what)
+static void json_is_the_witness(const char *socket_text, const char *head, const char *mark,
+    const char *what)
 {
 	char                 line[8192];
 	char                 wanted[8192];
@@ -1911,7 +1935,7 @@ static void json_is_the_witness(const char *socket_text, const char *head, const
 	int                  wrote = 0;
 	int                  same;
 
-	if (!witness_line(socket_text, head, line, sizeof(line)) ||
+	if (!witness_line_marked(socket_text, head, mark, line, sizeof(line)) ||
 	    !payload_of(line, wanted, sizeof(wanted))) {
 		/* A head that matches nothing would otherwise be a vacuous pass: the
 		 * comparison would simply not happen and the suite would be green. */
@@ -1965,29 +1989,31 @@ static void json_is_the_witness(const char *socket_text, const char *head, const
  * Every answer `--json` renders is the witness with its tag cut off.
  *
  * Seven lines rather than five: the two `wifi_scan` shapes differ by `stale`
- * and the two `wifi_status` shapes differ by `blocked` and by having no
- * `not_trying` at all, and an optional member that is written when it should
- * be absent is the way a writer of a skip-when-empty format goes wrong.
+ * and the two `wifi_status` shapes by `blocked`, and an optional member that
+ * is written when it should be absent is the way a writer of a
+ * skip-when-empty format goes wrong. Each pair is picked apart by the member
+ * that differs rather than by a prefix, since 0281 gave both pairs the same
+ * opening.
  */
 static void the_json_form_is_the_witness_with_its_tag_removed(const char *socket_text)
 {
 	json_is_the_witness(socket_text,
-	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[{",
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[{", NULL,
 	    "a scan as JSON is the wire's scan without its tag");
 	json_is_the_witness(socket_text,
-	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[]",
-	    "  and a stale scan still says why it is the previous one");
+	    "{\"response\":\"wifi_scan\",\"interface\":\"wlan0\",\"access_points\":[{",
+	    "\"stale\":", "  and a stale scan still says why it is the previous one");
 	json_is_the_witness(socket_text,
-	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"COMPLETED\"",
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"COMPLETED\"", NULL,
 	    "a radio status carries what it has stopped trying");
 	json_is_the_witness(socket_text,
-	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"SCANNING\"",
-	    "  and one with nothing to say omits those members rather than nulling them");
-	json_is_the_witness(socket_text, "{\"response\":\"radios\"",
+	    "{\"response\":\"wifi_status\",\"interface\":\"wlan0\",\"state\":\"COMPLETED\"",
+	    "\"blocked\":", "  and one held off by a switch says which switch, in the same shape");
+	json_is_the_witness(socket_text, "{\"response\":\"radios\"", NULL,
 	    "the radios keep the object the socket wraps them in");
-	json_is_the_witness(socket_text, "{\"response\":\"ap_stations\"",
+	json_is_the_witness(socket_text, "{\"response\":\"ap_stations\"", NULL,
 	    "a station list carries the policy its `listed` column is read under");
-	json_is_the_witness(socket_text, "{\"response\":\"modems\"",
+	json_is_the_witness(socket_text, "{\"response\":\"modems\"", NULL,
 	    "and a modem that is not switching says nothing about switching");
 }
 
