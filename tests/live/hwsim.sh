@@ -767,7 +767,19 @@ CONF
 				failures=$((failures + 1))
 			fi
 			# And a packet actually crosses the simulated air.
-			if inns ping -c 1 -W 2 10.55.0.1 >/dev/null 2>&1; then
+			#
+			# **A missing `ping` is said as a missing `ping`.** Without this
+			# the check reported "cannot reach the access point" on a guest
+			# whose image simply had no `iputils-ping`, which is the
+			# false-negative this file's own preflight comments are about:
+			# a tool that is not there is not a network that does not work.
+			# Met in a hull vm, where the image is a package list somebody
+			# wrote and `ping` was not on it.
+			if ! command -v ping >/dev/null 2>&1 &&
+			    ! [ -x /bin/ping ] && ! [ -x /usr/bin/ping ]; then
+				echo "note: no ping, so the packet across the air is not \
+checked (apt install iputils-ping | apk add iputils-ping)"
+			elif inns ping -c 1 -W 2 10.55.0.1 >/dev/null 2>&1; then
 				echo "ok   and reaches the access point over the air"
 			else
 				echo "FAIL cannot reach the access point at 10.55.0.1"

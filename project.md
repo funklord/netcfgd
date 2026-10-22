@@ -12498,6 +12498,66 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.527 hull runs the test this workspace never could
+
+"Hull doesn't need to be FULLY usable, it needs to be useful for you and not
+broken. You judge.", the copyright holder, 2026-10-22, lifting the deferral in
+10.524 and handing over the judgement.
+
+**The judgement: yes, for `hwsim.sh`, and that is the whole of what was
+tried.** 27 checks, no failures, exit 0, in a vm on hull `4161c8a` -- the first
+time this workspace has run that script at all. `make live` skips it for want
+of real root, and `make live-container` cannot answer it in principle: a
+container shares the host's kernel and this host has no `mac80211_hwsim`, which
+the target's own comment has said since it was written. A vm loads the module
+into a kernel of its own, and `iw dev` then shows the radios.
+
+The rig is kept, at `tests/hull/hwsim/`: a machine file, the payload, and the
+script that bakes the guest image. No Makefile target yet, and that is
+deliberate -- the image has to be baked by docker today (below), and hull's
+spec and CLI may still change before 1.0, which hull says itself.
+
+### What it took, which is the part worth knowing
+
+- **Build nothing in the guest.** `hwsim.sh` takes `NCFG_LIVE_BUILD`, so it
+  runs the host-built binaries out of the read-only share: one architecture,
+  one libc, and what is under test is the radio. The first attempts compiled in
+  the guest and that is a finding of its own -- gcc's driver cannot find `cc1`
+  on an overlay over the share, `cc -print-prog-name=cc1` printing the bare
+  name where it prints a path, while `ls` and a direct exec of the same
+  absolute path both work.
+- **A root-shaped `PATH`.** The agent runs the command without `/usr/sbin`, and
+  netcfgd looks for a DHCP client on `PATH` alone -- deliberately, `dhcp.c`
+  saying an operator's own client in front of the packaged one is a choice it
+  honours. So an installed `dhcpcd` read as "not installed" and the address
+  half of the test failed. Any init gives root the sbins; the payload does it
+  instead.
+- **The packages come from docker, not from hull.** Three roads and each has a
+  snag, measured: into a `(mutable overlay)` vm the install truncates silently
+  -- it left a gcc with no `cc1`, which is worse than failing; with `(mutable
+  direct)` the guest writes through 9p as the host user, so dpkg's `chown`
+  fails and apt dies; and `hull build`'s step runs in a chroot machine where,
+  even with the `-o APT::Sandbox::User=root` hull's own notes prescribe,
+  `apt-get install` called four of seven packages "unable to locate" after an
+  update that had just succeeded. All five findings went to hull's session,
+  which is where they belong.
+
+### And it found one thing in this tree
+
+`hwsim.sh` reported "cannot reach the access point" on a guest whose image
+simply had no `iputils-ping`. That is the false-negative class the file's own
+preflight comments are about -- a tool that is not there is not a network that
+does not work -- and it is the one check in the file that had no skip. It says
+so now.
+
+### What is not claimed
+
+Nothing else was tried. The other 80 live invocations still run under `make
+live` and `make live-container`, which reaches 75 of 81 (10.523); this is one
+script that neither tier can run, not a move of the tier. The systemd and
+OpenRC payloads wait on hull's init hand-over, and several machines on a wire
+on segments, which landed the same day and nothing here has used.
+
 ## 10.526 An unused build dependency, and the three findings under it
 
 "remove libncurses-dev then", the copyright holder, 2026-10-22, after 10.525
