@@ -10,10 +10,18 @@
 #   `(mutable overlay)` vm the install truncates silently (it left a gcc whose
 #   `cc1` was missing, which then read as a netcfgd fault two steps later);
 #   with `(mutable direct)` the guest writes through 9p as the host user, so
-#   dpkg's `chown` fails and apt dies; and `hull build`'s own step runs in a
-#   chroot machine where, even with `-o APT::Sandbox::User=root`, `apt-get
-#   install` reported four of seven packages as "unable to locate" after an
-#   update that had just succeeded.
+#   dpkg's `chown` fails and apt dies; and in a `hull build` step the packages
+#   resolve and install, and then `dnsmasq-base`'s postinst fails -- a build
+#   step maps one uid, so a maintainer script giving a file to its own system
+#   user cannot, which is hull's own "many uids" question.
+#
+#   **A fourth snag was claimed here and was mine.** The step first reported
+#   four of seven packages "unable to locate", which read as hull's. A build
+#   step is offline unless it says `(network true)`, which that one did not,
+#   and `apt-get update` exits 0 when it cannot fetch -- so the update
+#   "succeeded" against nothing and only cached names resolved. hull's session
+#   measured it and said so; the line above is what is left once the network
+#   is declared.
 #
 #   So the packages come from the one tool here that can already install them,
 #   and hull gets what it is good at: a kernel of its own, real root, and the

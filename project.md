@@ -12536,11 +12536,25 @@ spec and CLI may still change before 1.0, which hull says itself.
   snag, measured: into a `(mutable overlay)` vm the install truncates silently
   -- it left a gcc with no `cc1`, which is worse than failing; with `(mutable
   direct)` the guest writes through 9p as the host user, so dpkg's `chown`
-  fails and apt dies; and `hull build`'s step runs in a chroot machine where,
-  even with the `-o APT::Sandbox::User=root` hull's own notes prescribe,
-  `apt-get install` called four of seven packages "unable to locate" after an
-  update that had just succeeded. All five findings went to hull's session,
-  which is where they belong.
+  fails and apt dies; and in a `hull build` step the packages install and then
+  `dnsmasq-base`'s postinst fails, a build step mapping one uid so that a
+  maintainer script cannot give a file to its own system user. The findings
+  went to hull's session, which is where they belong.
+
+  **And a fourth claim was wrong and was mine.** That step was first reported
+  as calling four of seven packages "unable to locate" after a successful
+  update -- offered as hull's snag. hull measured it and it does not
+  reproduce: a build step is offline unless it says `(network true)`, mine did
+  not say it, and `apt-get update` exits 0 when it cannot fetch. So the update
+  "succeeded" against nothing and only cached names resolved. Re-run with the
+  network declared, all seven install.
+
+  **The shape is one this tree keeps meeting from the inside**: a command that
+  exits 0 having done nothing, and a reading taken from its status rather than
+  from its effect. `apt-get update` with no network joins `make` with the
+  host's mtimes (10.526) and the gate over an empty file list -- and this time
+  the cost was a wrong finding in somebody else's queue, which is worse than a
+  wrong one in my own.
 
 ### And it found one thing in this tree
 
