@@ -384,6 +384,12 @@ wrapper and the payload is its own pinned shape. A client that knew only
 requests and responses would read a stream and recognise nothing — which is
 the third kind of line the C implementation found on its first run.
 
+**One function writes both**, `ncfg_proto_event_encode`, which takes the
+wrapper as an argument so that two shapes of one event cannot acquire two
+orders of members. What netcfgd itself sends on a monitor stream is always the
+wrapped form; the bare payload is a shape a client must accept, and until 0280
+it was one this implementation could read and could not produce.
+
 ### 6.1 The events
 
 Five kinds, and a client is told which by the tag's value. **The members are

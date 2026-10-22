@@ -9,6 +9,8 @@
  */
 #include "internal.h"
 
+#include "ncfg/json_write.h"
+
 #include <string.h>
 
 static const char *const response_names[NCFG_PROTO_RESP_COUNT] = {
@@ -675,4 +677,104 @@ int ncfg_proto_decode_response(ncfg_proto_dec_t *dec, uint32_t object, ncfg_prot
 		return ncfg_proto_get_str(dec, object, "message", 1, "an `error` response",
 		    &out->u.error.message);
 	}
+}
+
+/* ------------------------------------------------------------------------ *
+ * Writing one, which is the shape above read backwards
+ * ------------------------------------------------------------------------ */
+
+/*
+ * One counted string as a member, or nothing where it is absent.
+ *
+ * `ncfg_proto_str_t` carries bytes and a length rather than a NUL, so the
+ * writer's counted call is the one that can take it -- a summary the kernel
+ * put a NUL in the middle of would otherwise be written as the part before it.
+ * `required` writes an empty string rather than omitting the member, because
+ * the decoder refuses an event missing one of those and a client reading a
+ * missing `summary` as absent could not tell it from an event of another kind.
+ */
+static void write_str(ncfg_json_writer_t *writer, const char *name, ncfg_proto_str_t text,
+    int required)
+{
+	if (!ncfg_proto_str_present(text)) {
+		if (!required) {
+			return;
+		}
+		ncfg_json_write_member_string(writer, name, "");
+		return;
+	}
+	ncfg_json_write_key(writer, name);
+	ncfg_json_write_string_bytes(writer, text.bytes, text.length);
+}
+
+int ncfg_proto_event_encode(const ncfg_proto_event_t *event, int wrapped, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	const char        *name;
+
+	if (!event || !out) {
+		ncfg_error_set(err, err_size, "there is no event to write");
+		return 0;
+	}
+	name = ncfg_proto_event_name(event->kind);
+	if (!name) {
+		/* An event outside the enum is a bug here rather than a client's
+		 * doing, and writing `"event":null` would put a line on every monitor
+		 * stream that no client can decode. */
+		ncfg_error_set(err, err_size, "there is no event spelled %d", (int)event->kind);
+		return 0;
+	}
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	/*
+	 * The wrapper, where the caller is writing to a monitor stream. A
+	 * client reading one wants to know it is reading an event before it
+	 * looks at the kind, and `"response":"event"` is how the three tags
+	 * stay one question -- while the payload on its own is the shape the
+	 * decoder also accepts, and the one the frozen witness pins.
+	 */
+	if (wrapped) {
+		ncfg_json_write_member_string(&writer, "response", "event");
+	}
+	ncfg_json_write_member_string(&writer, "event", name);
+	switch (event->kind) {
+	case NCFG_PROTO_EVENT_OBSERVED:
+		write_str(&writer, "summary", event->summary, 1);
+		break;
+	case NCFG_PROTO_EVENT_RELOADED:
+		ncfg_json_write_member_bool(&writer, "ok", event->ok ? 1 : 0);
+		/* Omitted where it compiled, which is what the decoder reads as
+		 * absent -- an empty string there would say the compiler had
+		 * something to report and nothing to say. */
+		write_str(&writer, "diagnostics", event->diagnostics, 0);
+		break;
+	case NCFG_PROTO_EVENT_DRIFT:
+		write_str(&writer, "interface", event->interface, 1);
+		write_str(&writer, "summary", event->summary, 1);
+		write_str(&writer, "action", event->action, 1);
+		break;
+	case NCFG_PROTO_EVENT_CONFIRM_ARMED:
+		ncfg_json_write_member_int(&writer, "seconds", event->seconds);
+		break;
+	case NCFG_PROTO_EVENT_CONFIRM_RESOLVED:
+	case NCFG_PROTO_EVENT_COUNT:
+	default:
+		ncfg_json_write_member_bool(&writer, "confirmed", event->confirmed ? 1 : 0);
+		break;
+	}
+	ncfg_json_write_object_end(&writer);
+	if (!ncfg_json_write_done(&writer)) {
+		const char *why = ncfg_json_write_failure(&writer);
+
+		/* Failed rather than merely reported on, which is `answer.c`'s rule:
+		 * `ncfg_buf_text` hands out the empty string for a failed buffer, so
+		 * a writer that trusted it would send nothing and say it had sent an
+		 * event. */
+		out->failed = 1;
+		ncfg_error_set(err, err_size, "the %s event could not be written: %s", name,
+		    why ? why : "it was left unfinished");
+		return 0;
+	}
+	return 1;
 }

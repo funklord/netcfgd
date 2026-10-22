@@ -1056,20 +1056,22 @@ apk-source:
 # the property that made this a move rather than a reformatting. `plan.json`
 # is the one built from values in a test, as it was in the Rust.
 #
-# `socket.json` has no blesser and is edited by hand. `c/tests/proto_test.c`
-# reads every line, decodes it and re-encodes every request, with coverage
-# counters asserting that every request, response and event kind was seen --
-# so what the file may contain is held, while what it does contain is a diff
-# somebody reviews. That is the one of the four where the Rust did more than
-# the C does now, and it is named here rather than left to be discovered.
+# `socket.json` has a builder now, `c/tests/socket_witness_test.c`, and it is
+# the one that cannot yet finish: it produces 61 of the file's 67 lines through
+# the encoders the daemon answers with, proves each byte for byte, and refuses
+# to write a file it cannot produce whole. The six it cannot are the wifi
+# answers, which are written as a live supplicant is read and whose values no
+# fixture in this tree produces -- so finishing it is a decision about either
+# those lines or those fakes, and 10.522 states it. Meanwhile the refusal is
+# printed by this target and the 61 are held on every `make check`.
 schema-bless:
 	@$(MAKE) --no-print-directory -C c tests/observed_test tests/document_test \
-		tests/plan_test
+		tests/plan_test tests/socket_witness_test
 	@cd c && NCFG_BLESS=1 ./tests/observed_test >/dev/null
 	@cd c && NCFG_BLESS=1 ./tests/document_test >/dev/null
 	@cd c && NCFG_BLESS=1 ./tests/plan_test >/dev/null
 	@echo "schema-bless: three witnesses rewritten; `git diff --stat doc/schema | tail -1`"
-	@echo "schema-bless:   socket.json is edited by hand -- see the comment above"
+	@cd c && NCFG_BLESS=1 ./tests/socket_witness_test | grep socket_witness_test:
 	@echo "schema-bless: say in the commit whether this is a minor or a major bump"
 
 # The init glue is data, so nothing compiles it and a typo would be found by

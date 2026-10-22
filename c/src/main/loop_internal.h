@@ -979,17 +979,6 @@ size_t ncfg_main_subscribers_prune(ncfg_main_subscribers_t *subscribers);
 void ncfg_main_subscribers_tell(ncfg_main_subscribers_t *subscribers,
     const ncfg_proto_event_t *event);
 
-/*
- * One event as the JSON object a monitor stream carries, appended to `out`.
- *
- * `{"response":"event","event":"<kind>",...}` with the members that kind
- * carries, which is `proto.h`'s decoder read backwards -- it decodes every
- * response and encodes none, so an encoder belongs beside whatever produces
- * the thing. This one produces events, so it is here. No newline: the caller
- * frames it.
- */
-int ncfg_main_event_encode(const ncfg_proto_event_t *event, ncfg_buf_t *out, char *err,
-    size_t err_size);
 
 /* ------------------------------------------------------------------------ *
  * The world the pass reaches through -- daemon_world.c

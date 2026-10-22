@@ -12498,6 +12498,77 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.522 The socket witness has a builder, and the six lines that stopped it
+
+"now build socket.json from the C too", the copyright holder, 2026-10-22, after
+10.520 moved the other three. 0280 is the record.
+
+`c/tests/socket_witness_test.c` produces **61 of the file's 67 lines** through
+the encoders the daemon answers with, byte for byte, and refuses to write the
+file until it can produce every line. The committed witness is unchanged.
+
+### What the file is, which decided what the work could be
+
+The other three witnesses are one value each, read and written back. This one
+is 67 sample messages whose values somebody chose -- an ICCID, a BSSID, a
+signal in dBm -- and no program derives those. So the builder owns the bytes
+and the test owns the values, which is the half that goes stale when an encoder
+changes and the half a hand-edited file cannot check. The 41 request lines are
+decoded from the file and re-encoded, which is the path `proto_test` already
+proves; constructing them again here would be a second copy of the samples with
+nothing holding the two in step.
+
+### The asymmetry the witness had been hiding
+
+**Five of the file's lines were a shape this build could read and never
+write.** The witness carries every event twice -- wrapped as a monitor stream
+delivers it, and as the payload on its own -- and `ncfg_main_event_encode`
+wrote `"response":"event"` unconditionally. The decoder accepts both, which is
+exactly what made it invisible: nothing in the program or the tests asks
+whether a shape it accepts is one it can produce.
+
+It is `ncfg_proto_event_encode(event, wrapped, ...)` in `src/proto/response.c`
+now, below the reader, and 87 lines left `src/main/`. The wrapped bytes are
+unchanged, which `world_test` and `proto_test` both assert.
+
+**The general shape is worth more than the fix**: a reader that is lenient
+about a shape nobody writes hides whether anybody can write it, and a round
+trip through the reader cannot see it. Asking the other direction -- what can
+this program EMIT -- is what the builder does that `proto_test` never did.
+
+### The six, and the decision that is the holder's
+
+Two `wifi_scan`, two `wifi_status`, `radios` and `ap_stations`. Blocked twice:
+their encoders write members as they parse a live supplicant's replies, so
+there is no encoder to call with a value; and the fakes that stand a supplicant
+up answer with other values than these lines carry -- `HomeFiber` at -53 dBm
+where the witness says `home` at -40, `rx_bytes=100000` and
+`connected_time=3600` where it says 4096 and 184. They were authored by hand in
+the Rust era and nothing in this tree reproduces them.
+
+So either those six lines are re-authored to what the fakes answer, which
+rewrites part of a frozen witness and keeps every shape it pins, or the fakes
+gain canned answers that reproduce them and the builder stands the rig up,
+which keeps the file and costs a forked python process in `make schema-bless`.
+**Whose decision: the copyright holder's**, because it is what the frozen
+surface contains either way.
+
+### The refusal is loud and is not red
+
+A gate red while a decision is open is one a reader learns to walk past, so the
+builder prints the six and the reason and does not fail for them. What is
+enforced is that the number cannot move by itself: `SHORTFALL` is 6, asserted
+in both directions -- one more is an encoder that has drifted away from the
+file, one fewer and the constant is the stale thing.
+
+### What was seen to fail
+
+A byte changed in a witness line: that producer claims nothing, the shortfall
+check fires, and nothing is written. A copy holding only the 61 producible
+lines: the write arm runs and the result is byte-identical to what it read --
+so the writer is proved and what is missing is six encoders rather than any
+machinery. And `SHORTFALL` against both 0 and 1 unproduced.
+
 ## 10.521 The fmake exclusion is still needed, and 10.421's last line is answered
 
 Reported through `.git/cc-inbox/` on 2026-10-22, from fmake, which measured it
@@ -12557,7 +12628,9 @@ That is the whole reason this took an afternoon rather than a week.
     document.json   likewise
     plan.json       built from values in `plan_test.c`, exactly as the Rust
                     built it -- a real generator, and it always was
-    socket.json     no blesser; edited by hand
+    socket.json     built by `socket_witness_test.c`, 61 of its 67 lines
+                    (10.522); the file is still the hand-edited one until the
+                    other six can be produced
 
 The Rust built all four from code, so a field added to a struct appeared in the
 witness on the next bless. A round trip does not do that: the witness IS the
@@ -12616,13 +12689,14 @@ before theorising about the mechanism, met in my own code.
 
 ### What is left, named
 
-`socket.json` has no blesser. `proto_test.c` reads every line, decodes it and
-re-encodes every request with coverage counters over all three tags, so what
-the file MAY contain is held by the C and what it DOES contain is a reviewed
-diff. Reproducing the Rust's 67 generated lines means building every message
-in the protocol by hand in C -- a piece of work, not a line in this one.
-`ledger_gate.py` is what makes the gap safe meanwhile: every request, response
-and event kind the build names must have a line in that file.
+**~~`socket.json` has no blesser.~~ It has one as of 10.522**, the same day:
+building every message in the protocol was the piece of work this entry said
+it was, and it was asked for next. It produces 61 of the 67 lines and refuses
+to write a file it cannot produce whole, so the sentence that still holds is
+the one about the committed file -- what it DOES contain is a reviewed diff,
+and what it MAY contain is held by `proto_test.c`'s decode of every line and
+by `ledger_gate.py`'s insistence that every request, response and event kind
+the build names has a line in it.
 
 ## 10.519 The last two vocabularies, and a witness that cannot carry one
 

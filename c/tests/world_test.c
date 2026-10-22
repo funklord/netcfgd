@@ -235,7 +235,7 @@ static int decodes(const ncfg_proto_event_t *event, ncfg_proto_event_t *out, cha
 	why[0] = '\0';
 	ncfg_buf_init(&line, NCFG_PROTO_MAX_LINE);
 	err[0] = '\0';
-	if (!ncfg_main_event_encode(event, &line, err, sizeof(err))) {
+	if (!ncfg_proto_event_encode(event, 1, &line, err, sizeof(err))) {
 		(void)snprintf(why, why_size, "%s", err);
 		ncfg_buf_free(&line);
 		return 0;
@@ -342,7 +342,7 @@ static void an_event_is_written_the_way_a_client_reads_it(void)
 	event.kind = (ncfg_proto_event_kind_t)NCFG_PROTO_EVENT_COUNT;
 	ncfg_buf_init(&buffer, NCFG_PROTO_MAX_LINE);
 	err[0] = '\0';
-	check(!ncfg_main_event_encode(&event, &buffer, err, sizeof(err)),
+	check(!ncfg_proto_event_encode(&event, 1, &buffer, err, sizeof(err)),
 	    "an event kind outside the enum is refused rather than written");
 	check(strstr(err, "no event spelled") != NULL, "and says so rather than failing quietly");
 	ncfg_buf_free(&buffer);

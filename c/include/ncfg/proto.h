@@ -779,6 +779,24 @@ typedef struct {
 const char *ncfg_proto_response_name(ncfg_proto_response_kind_t kind);
 const char *ncfg_proto_event_name(ncfg_proto_event_kind_t kind);
 
+/*
+ * One event, appended to `out` with no newline.
+ *
+ * `wrapped` picks which of the two shapes the decoder above accepts: the
+ * monitor stream's `{"response":"event","event":"drift",...}`, or the payload
+ * on its own, which is its own pinned shape and what `doc/schema/socket.json`
+ * freezes. One writer for both, because two would be two orders of members
+ * for one event -- and the frozen file is a byte comparison, so a second
+ * writer is a second thing to keep in step with it.
+ *
+ * **It lives here rather than in the daemon**, where it was until the witness
+ * builder needed the payload form: an encoder belongs beside the decoder whose
+ * accepted shape it has to produce, and nothing in `src/main/` was reachable
+ * from a test of the protocol.
+ */
+int ncfg_proto_event_encode(const ncfg_proto_event_t *event, int wrapped, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------- a message */
 
 typedef enum {
