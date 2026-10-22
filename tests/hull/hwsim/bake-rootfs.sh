@@ -28,12 +28,18 @@
 #   radios. Replace this script with a `(build ...)` form the day that path
 #   works; the machine file does not change when it does.
 #
-# WHAT IT DOES NOT INSTALL
-#   No compiler. `payload.sh` runs the binaries the host built, through the
-#   read-only share, because the guest and the host are one architecture and
-#   one libc and what is under test is the radio. gcc in a guest is also its
-#   own open question -- the driver could not find `cc1` on an overlay over
-#   the share, printing a bare name where it prints a path.
+# WHAT IT INSTALLS AND WHY A COMPILER IS AMONG IT
+#   `build-essential`, so the payload builds netcfgd in the guest rather than
+#   running what the host built: `build-and-commit.md`'s argument is that a
+#   build in the runner's own image catches what a developer machine hides, and
+#   a test running the host's binary tests the host's toolchain. It costs about
+#   300 MB of image and a couple of minutes a run, which a by-hand test can
+#   afford.
+#
+#   **A guest could not build anything before hull `7b47668`**: with no PATH
+#   exported, gcc could not resolve its own argv[0] and printed a bare `cc1`
+#   where it prints a path. That was one of this rig's five findings, and the
+#   payload falls back to the share -- loudly -- on an image with no compiler.
 set -eu
 dir=${1:-dist/hull-hwsim-rootfs}
 name=netcfgd-hwsim-rootfs-$$
@@ -48,10 +54,10 @@ docker run --name "$name" debian:trixie-slim sh -c '
 	set -eu
 	apt-get -qq update >/dev/null
 	apt-get -qq install -y --no-install-recommends \
-		kmod iw wpasupplicant iproute2 dnsmasq-base dhcpcd-base \
-		iputils-ping >/dev/null 2>&1
+		build-essential kmod iw wpasupplicant iproute2 dnsmasq-base \
+		dhcpcd-base iputils-ping >/dev/null 2>&1
 	apt-get clean
-	for t in modprobe iw wpa_supplicant ip dnsmasq dhcpcd ping; do
+	for t in cc make modprobe iw wpa_supplicant ip dnsmasq dhcpcd ping; do
 		command -v "$t" >/dev/null || { echo "missing: $t" >&2; exit 1; }
 	done
 	echo "bake: every tool the test asks for is in"

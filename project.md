@@ -12605,13 +12605,24 @@ spec and CLI may still change before 1.0, which hull says itself.
 
 ### What it took, which is the part worth knowing
 
-- **Build nothing in the guest.** `hwsim.sh` takes `NCFG_LIVE_BUILD`, so it
-  runs the host-built binaries out of the read-only share: one architecture,
-  one libc, and what is under test is the radio. The first attempts compiled in
-  the guest and that is a finding of its own -- gcc's driver cannot find `cc1`
-  on an overlay over the share, `cc -print-prog-name=cc1` printing the bare
-  name where it prints a path, while `ls` and a direct exec of the same
-  absolute path both work.
+- ~~**Build nothing in the guest.**~~ **It builds in the guest now**, since
+  hull `7b47668`. The first attempts could not: gcc's driver printed a bare
+  `cc1` where it prints a path, which turned out to be hull giving the workload
+  no PATH at all, so the driver could not resolve its own argv[0]. With the
+  PATH exported, the guest compiles the C -- `cc (Debian 14.2.0-19)`, a binary
+  of 1177000 bytes against the share's 1177000 -- and `hwsim.sh` passes its 27
+  checks against the guest's own build rather than the host's.
+
+  That is the shape `build-and-commit.md` argues for and the reason the rig
+  changed: a build in the runner's image catches what a developer machine
+  hides, and a test running the host's binary is a test of the host's
+  toolchain. The payload falls back to the share where an image has no
+  compiler, and says so out loud. The bake script installs one, which costs
+  about 300 MB of image.
+
+  **The measurement is of the committed rig, not of a scratch copy**: baked by
+  `tests/hull/hwsim/bake-rootfs.sh` as it stands and run by its own
+  `hull.conf`, both at the commit this entry is in.
 - **A root-shaped `PATH`.** The agent runs the command without `/usr/sbin`, and
   netcfgd looks for a DHCP client on `PATH` alone -- deliberately, `dhcp.c`
   saying an operator's own client in front of the packaged one is a choice it
