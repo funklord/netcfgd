@@ -14,8 +14,16 @@ Homepage: https://github.com/netcfgd/netcfgd
 # crate and brought its own D-Bus, while the C shim links the system library.
 # Removing it builds a package with no NetworkManager shim in it, which is the
 # line the old comment was written to protect.
+#
+# **libncurses-dev was left behind by that change and is gone now.** It was
+# here because the Rust `ncfg tui` binds ncurses as a default-on cargo feature;
+# the C writes its own escape sequences and `c/src/cli/tui_term.c` says why, so
+# nothing this package builds has linked it since 0266. Measured rather than
+# reasoned: no build file under `c/`, `client/`, the shim or `gui/` names
+# ncurses or `-ltinfo`, the shipped daemon's only NEEDED entry is `libc.so.6`,
+# and this package builds in a container that has never had the library.
 Build-Depends: debhelper-compat (= 13),
- libdbus-1-dev, libncurses-dev, pkgconf,
+ libdbus-1-dev, pkgconf,
  qt6-base-dev <pkg.netcfgd.gui>,
 # TDE's CMake modules are a package of their own: tde-cmake carries
 # TDEMacros, TDEVersion and TDESetupPaths, which is what decides where a

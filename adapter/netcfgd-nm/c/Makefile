@@ -38,11 +38,18 @@ DEPS    = $(SRCS:.c=.d) src/main.d tests/bus_test.d
 # nothing.
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
-CFLAGS  ?= -std=c11 -Os
+# **The standard is not a default, because a packaging environment replaces
+# `CFLAGS` whole.** `?=` is skipped when one arrives from the environment --
+# abuild exports its own hardening set -- and `-std=c11` went with it, so
+# Alpine compiled this with gcc's `gnu17` and `linux/if_tunnel.h` failed for
+# want of `IFNAMSIZ`. The optimisation level is a packager's to choose and the
+# language this code is written in is not, so one is a default and the other is
+# appended.
+CFLAGS  ?= -Os
 # The client library netcfgd already has in C, which is why there is no
 # `client.c` here: `state.c` links what `ncfg` links.
 CLIENT  = ../../../client
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I$(CLIENT) \
+CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE -Iinclude -I$(CLIENT) \
 	   $(shell pkg-config --cflags dbus-1)
 LDLIBS  += $(CLIENT)/libncfg_client.a $(shell pkg-config --libs dbus-1)
 

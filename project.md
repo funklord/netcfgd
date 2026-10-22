@@ -12498,6 +12498,71 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.526 An unused build dependency, and the three findings under it
+
+"remove libncurses-dev then", the copyright holder, 2026-10-22, after 10.525
+left it as the next small item.
+
+**It is out of `debian/control` and proved out.** The package builds in a
+`debian:trixie-slim` container that has never had the library: `dpkg-l` counts
+zero ncurses dev packages, `dpkg-checkbuilddeps` passes, all five `.deb`s are
+produced, the build log mentions curses zero times, and the daemon's only
+`NEEDED` entry is `libc.so.6`. A local `make deb` would have proved none of
+that, this host having the library installed -- which is the whole reason the
+line survived 0276, where cargo and rustc came off the same list.
+
+It was there for the Rust `ncfg tui`, which binds ncurses as a default-on cargo
+feature. The C writes its own escape sequences and `c/src/cli/tui_term.c` says
+why, so nothing the package builds has linked it since 0266. The README keeps
+it, correctly: the Rust is still in the tree as a test instrument and still
+needs it.
+
+### Alpine had the same stale line, and three further things under it
+
+`packaging/alpine/APKBUILD.in` declared `depends="ncurses-libs"` and
+`makedepends="make ncurses-dev"` for the same retired reason. Both are gone --
+`depends` is empty now, since apk derives runtime dependencies from what a
+binary links.
+
+**And `make apk-container` has not worked since the C port.** Running it is
+what found the rest:
+
+- **`linux-headers` was never declared.** Alpine does not ship kernel headers
+  with its libc, where glibc distributions carry `linux/if_addr.h` and friends
+  in `libc6-dev`, so the build failed at the first such include. Added, and the
+  control run proves it was not the ncurses entry doing that job: with
+  `ncurses-dev` restored the build fails identically.
+- **A packaging environment could drop the language standard.** Every one of
+  these Makefiles wrote `CFLAGS ?= -std=c11 -Os`, and `?=` is skipped when
+  `CFLAGS` arrives from the environment -- abuild exports its own hardening set
+  -- so Alpine compiled this with gcc's `gnu17` and the standard the code is
+  written to was gone with the default. The optimisation level is a packager's
+  to choose and the language is not, so `-Os` stays a default and `-std=c11`
+  moved to the appended half, in `c/`, `client/` and the shim.
+- **Two files do not compile on musl, and that is where this stops.**
+  `src/sys/dump.c` and `src/sys/ops.c`, three errors, one cause:
+  `linux/if_tunnel.h` wants `IFNAMSIZ` and a complete `struct iphdr`, which
+  musl's headers do not hand it the way glibc's do -- and `ops.c` already
+  includes `linux/if.h` first, so this is the kernel-and-libc header minefield
+  rather than a missing line. 204 objects build and two do not. Making the C
+  compile on musl is its own piece of work, scoped here rather than started.
+
+### And the measurement that was wrong first, which is the part to keep
+
+The first reading of the musl question was "the C builds cleanly on musl, 401
+objects, zero errors". **It compiled nothing.** The probe copied the tree with
+`tar`, which preserves mtimes, so make found the host's objects current -- the
+same trap that made this tree's own container build a step that looked like one
+and was not, found and recorded in 10.523 **the same afternoon**, by the same
+session, and then walked into from the other side.
+
+What makes it embarrassing rather than unlucky is that the probe reported a
+number -- 401 objects -- that was evidence of the trap rather than of a build:
+the glibc tree has 401 because its tests are built, and a default build makes
+204. A count that agrees with the wrong thing reads exactly like a count that
+agrees. So the clean version deletes every `.o` and `.d` first and says how
+many it made, which is the form any later probe here should take.
+
 ## 10.525 Five clang warnings, and the count that overruled the convention
 
 Noted as open earlier on 2026-10-22 and closed here: `clang

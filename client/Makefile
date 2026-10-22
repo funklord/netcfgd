@@ -40,8 +40,15 @@ HEADERS = ncfg_json.h ncfg_client.h
 # caught something in code shaped like this before it ran.
 WARNINGS = -Wall -Wextra -Wshadow -Wconversion -Wsign-conversion -Wvla \
 	   -Wpointer-arith -Wwrite-strings -Wstrict-prototypes
-CFLAGS  ?= -std=c11 -Os
-CFLAGS  += $(WARNINGS) -D_DEFAULT_SOURCE
+# **The standard is not a default, because a packaging environment replaces
+# `CFLAGS` whole.** `?=` is skipped when one arrives from the environment --
+# abuild exports its own hardening set -- and `-std=c11` went with it, so
+# Alpine compiled this with gcc's `gnu17` and `linux/if_tunnel.h` failed for
+# want of `IFNAMSIZ`. The optimisation level is a packager's to choose and the
+# language this code is written in is not, so one is a default and the other is
+# appended.
+CFLAGS  ?= -Os
+CFLAGS  += -std=c11 $(WARNINGS) -D_DEFAULT_SOURCE
 
 ifdef DEBUG
 CFLAGS := $(filter-out -Os,$(CFLAGS)) -Og -g

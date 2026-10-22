@@ -16,9 +16,19 @@ pkgdesc="Network configuration daemon that states what it will do"
 url="https://github.com/netcfgd/netcfgd"
 arch="all"
 license="MIT OR Apache-2.0"
-# ncurses for the TUI, which is a default-on feature of the one binary.
-depends="ncurses-libs"
-makedepends="make ncurses-dev"
+# **No ncurses, either to build against or at run time.** Both were here
+# because the Rust `ncfg tui` binds it as a default-on cargo feature; the C
+# writes its own escape sequences and `c/src/cli/tui_term.c` says why, so since
+# 0266 nothing this package builds has linked it. `depends` is left empty
+# rather than guessed at: the daemon needs the C library and nothing else, and
+# Alpine's own tooling adds what a binary actually links.
+depends=""
+# **`linux-headers`, because Alpine does not ship them with its libc.** glibc
+# distributions carry `linux/if_addr.h` and friends in libc6-dev, so this list
+# never named them and `make apk-container` had not been run since the C port:
+# it fails at the first `#include <linux/ethtool.h>` with or without the
+# ncurses entry above, which is how that was measured rather than assumed.
+makedepends="make linux-headers"
 # No -doc and no -openrc subpackage: the init script is four lines of shell and
 # splitting it out would mean a machine that installed netcfgd and got no way
 # to run it. The default subpackages that would apply here are empty anyway.
