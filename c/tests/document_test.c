@@ -34,6 +34,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/json_write.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -204,6 +205,44 @@ static int refused_saying(const char *text, const char *expected)
 	return 1;
 }
 
+/*
+ * Write the witness back, under `NCFG_BLESS`. See `observed_test.c`'s copy for
+ * the argument; 0279 moved these four files to the C and this is the half that
+ * writes one.
+ */
+static int bless_witness(const char *path, const char *compact)
+{
+	ncfg_buf_t pretty;
+	FILE      *file;
+	size_t     wanted;
+	size_t     written;
+
+	ncfg_buf_init(&pretty, 0);
+	if (!ncfg_json_pretty(compact, &pretty)) {
+		printf("  cannot lay the witness out\n");
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	file = fopen(path, "wb");
+	if (!file) {
+		printf("  cannot write %s\n", path);
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	/* **The length is read before the buffer goes.** `ncfg_buf_free` zeroes
+	 * it, so comparing against `pretty.length` afterwards compares against 0
+	 * and reports a short write on every success -- which it did, once. */
+	wanted = pretty.length;
+	written = fwrite(ncfg_buf_text(&pretty), 1u, wanted, file);
+	(void)fclose(file);
+	ncfg_buf_free(&pretty);
+	if (written != wanted) {
+		printf("  short write on %s\n", path);
+		return 0;
+	}
+	return 1;
+}
+
 static char *write_document(ncfg_document_t *document, size_t *length_out)
 {
 	ncfg_buf_t buf;
@@ -250,6 +289,18 @@ int main(int argc, char **argv)
 			}
 			check(document != NULL, "the witness is read, and validates");
 		}
+		if (document && raw && getenv("NCFG_BLESS")) {
+			size_t written_length = 0;
+			char  *written = write_document(document, &written_length);
+
+			check(written && bless_witness(path, written),
+			    "the witness is written back from this build's own writer");
+			free(written);
+			ncfg_document_free(document);
+			free(raw);
+			printf("document_test: blessed %s\n", path);
+			return failures == 0 ? 0 : 1;
+		}
 		if (document && raw) {
 			size_t written_length = 0;
 			char  *written = write_document(document, &written_length);
@@ -262,6 +313,29 @@ int main(int argc, char **argv)
 				report_difference(wanted, wanted_length, written, written_length);
 			}
 			check(same, "and is written back byte for byte, member for member");
+
+			/* **And the layout**, which the comparison above cannot see: it
+			 * minifies both sides. `observed_test.c` carries the argument. */
+			if (written) {
+				ncfg_buf_t pretty;
+
+				ncfg_buf_init(&pretty, 0);
+				if (ncfg_json_pretty(written, &pretty)) {
+					int laid_out = pretty.length == raw_length &&
+					    memcmp(pretty.data, raw, raw_length) == 0;
+
+					if (!laid_out) {
+						report_difference(raw, raw_length, pretty.data,
+						    pretty.length);
+					}
+					check(laid_out,
+					    "and the witness on disk is laid out as this build "
+					    "lays one out");
+				} else {
+					check(0, "the written document can be laid out");
+				}
+				ncfg_buf_free(&pretty);
+			}
 
 			/* Canonical already: the witness is what the Rust's own
 			 * `to_json_canonical` produced, so sorting it must move nothing. */

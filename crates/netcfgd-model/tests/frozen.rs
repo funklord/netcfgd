@@ -48,13 +48,6 @@ use netcfgd_model::{
 	HostnamePolicy, Interface, InterfaceKind, Key, Principal, QdiscPolicy, RemotePolicy,
 	SecretProvider, SecretRef, Ssid, WifiNetwork,
 };
-use std::path::PathBuf;
-
-fn witness_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-		.join("../..")
-		.join("doc/schema/document.json")
-}
 
 fn secret(name: &str, provider: SecretProvider) -> SecretRef {
 	SecretRef {
@@ -830,71 +823,19 @@ fn witness() -> Document {
 	document
 }
 
-/// The frozen surface, byte for byte.
-///
-/// If this fails and the change was intended, `make schema-bless` rewrites the
-/// witness and the commit says why. Nothing reads the format yet, so that is
-/// the whole cost -- the gate exists to make the change visible, not to make
-/// it expensive.
-#[test]
-fn the_schema_matches_its_witness() {
-	let document = witness();
-	let rendered = document
-		.to_json_canonical()
-		.expect("the witness serialises");
-
-	if std::env::var_os("NCFG_BLESS").is_some() {
-		let path = witness_path();
-		std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
-		std::fs::write(&path, &rendered).expect("write the witness");
-		println!("blessed {}", path.display());
-		return;
-	}
-
-	let expected = std::fs::read_to_string(witness_path()).unwrap_or_else(|error| {
-		panic!(
-			"cannot read the schema witness ({error}). If this is a new checkout \
-			 something is missing; otherwise run `make schema-bless`."
-		)
-	});
-
-	if rendered != expected {
-		// The diff itself is left to git: printing two thousand lines here
-		// would bury the one that changed.
-		let (line, before, after) = first_difference(&expected, &rendered);
-		panic!(
-			"the document schema has changed.\n\
-			 \n\
-			 first difference at line {line}:\n\
-			 \x20 was: {before}\n\
-			 \x20 now: {after}\n\
-			 \n\
-			 Nothing reads this format yet, so the change breaks nothing and is\n\
-			 cheap. The gate is here to make it visible: run `make schema-bless`\n\
-			 and say in the commit what moved and why.\n\
-			 \n\
-			 The one thing to weigh is whose idea the change was. M4 froze the\n\
-			 model so that a later adapter -- the NM shim, the TUI -- cannot\n\
-			 quietly reshape it to suit itself (project.md section 8). A change\n\
-			 that comes from the network is ordinary; one that comes from a\n\
-			 consumer's convenience is the thing the freeze is for."
-		);
-	}
-}
-
-fn first_difference(expected: &str, actual: &str) -> (usize, String, String) {
-	for (index, (left, right)) in expected.lines().zip(actual.lines()).enumerate() {
-		if left != right {
-			return (index + 1, left.trim().to_owned(), right.trim().to_owned());
-		}
-	}
-	let line = expected.lines().count().min(actual.lines().count()) + 1;
-	(
-		line,
-		expected.lines().nth(line - 1).unwrap_or("<end>").to_owned(),
-		actual.lines().nth(line - 1).unwrap_or("<end>").to_owned(),
-	)
-}
+// The frozen surface is the C's now.
+//
+// **This file compared the Rust's serialisation against {witness} byte for
+// byte and wrote it under `NCFG_BLESS`.** It cannot any more, and not because
+// of a formatting drift: the C has values the Rust has no word for --
+// `ncfg_backend_kind_name` answers for ten backends where this workspace's
+// enum has nine, the tenth being an IPv4LL client -- so a witness carrying one
+// can be neither generated nor read here.
+//
+// 0279 moved it. The C's own tests write these files, through the same readers
+// and writers the daemon uses, and what is left here is what this file can
+// still honestly claim: every variant built and round-tripped through serde in
+// memory, which is coverage of these types rather than of the wire form.
 
 /// The witness has to survive a round trip, or it is pinning a format nothing
 /// can read.

@@ -12498,6 +12498,101 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.520 The witnesses moved to the C, and one byte decided whether it was cheap
+
+"now move the witness generation to the C", the copyright holder, 2026-10-22,
+after 10.519 reported it as the last place 0266's shape survived. 0279 is the
+record. `make schema-bless` runs the C now.
+
+### The measurement that decided the shape of the work
+
+Before changing anything: **can the C reproduce a witness byte for byte,
+layout included?** `ncfg_json_pretty` against the committed file, through the
+C's own reader and writer:
+
+    observed.json    17,024 bytes    IDENTICAL
+    document.json   118,079 bytes    IDENTICAL
+
+So the C's pretty writer already reproduces what `serde_json::to_string_pretty`
+wrote, and the move is a change of authorship rather than a reformatting of
+every schema in the tree. **Had those two layouts differed by one space, this
+would have been a different and much worse change** -- four files rewritten
+wholesale, with the content's sameness provable only by parsing both sides.
+That is the whole reason this took an afternoon rather than a week.
+
+### Three round trips and one generator, which is what this gives up
+
+    observed.json   read through the C's reader, written through its writer
+    document.json   likewise
+    plan.json       built from values in `plan_test.c`, exactly as the Rust
+                    built it -- a real generator, and it always was
+    socket.json     no blesser; edited by hand
+
+The Rust built all four from code, so a field added to a struct appeared in the
+witness on the next bless. A round trip does not do that: the witness IS the
+sample set and adding a sample is an edit somebody reviews. What catches a
+field that should have appeared is the round trip itself -- a writer that always
+emits a new member fails the comparison and names the byte -- and the
+completeness gates, which is where this week's other work went.
+
+**`plan.json` was already this.** Its own header says the plan "is built here
+by hand exactly as `crates/netcfgd-plan/tests/frozen.rs` builds it", and the
+ledger gate's header has said for months that the file is "populated by hand".
+So one of the four had made this move already and nobody had noticed it was a
+precedent.
+
+### The check the move would have quietly removed
+
+The C's witness tests compared **with whitespace removed**, because the Rust
+wrote pretty and the C writes compact. That was right while the Rust owned the
+layout. Under this decision it is not: a witness whose indentation drifted
+would pass.
+
+Proved rather than reasoned about -- one line of `observed.json` re-indented,
+and the test said "all checks passed". So each of the three now asserts the
+layout too, `ncfg_json_pretty` of what it wrote against the file, and the same
+drift now says **"the witness on disk is laid out as this build lays one out:
+FAILED"** with `make schema-bless` putting it back.
+
+**A move that quietly weakens a check is worse than not moving**, and the only
+way to find out was to make the move and then try to break what it replaced.
+
+### The exception expired on schedule, which is the part I would keep
+
+10.519 gave `ledger_gate.py` a named exception for the one backend kind the
+witness could not carry, with two self-checks: fail if the witness gains the
+kind, fail if the build loses it. One commit later the witness gained it and
+**the gate said so in those words** -- "the exception for it is stale, the
+witness generator has moved" -- before I had got round to removing it by hand.
+
+That is what an excuse with an expiry buys: the removal was not something to
+remember, it was a failing check with the reason in it.
+
+### My own bug, found by reading the output rather than the code
+
+The blesser reported "short write" on every success. The file was intact,
+17,114 bytes, correct to the last byte -- and the check said it was short. The
+numbers: `17114 of 0`.
+
+    count = fwrite(ncfg_buf_text(&pretty), 1u, pretty.length, file);
+    ncfg_buf_free(&pretty);          /* zeroes length */
+    if (count != pretty.length) {    /* compares against 0 */
+
+The write was right and the verification was nonsense, in all three copies.
+**It took one print of both numbers**, after two wrong theories about buffer
+semantics -- `evidence.md`'s rule that a surprise means reading the input
+before theorising about the mechanism, met in my own code.
+
+### What is left, named
+
+`socket.json` has no blesser. `proto_test.c` reads every line, decodes it and
+re-encodes every request with coverage counters over all three tags, so what
+the file MAY contain is held by the C and what it DOES contain is a reviewed
+diff. Reproducing the Rust's 67 generated lines means building every message
+in the protocol by hand in C -- a piece of work, not a line in this one.
+`ledger_gate.py` is what makes the gap safe meanwhile: every request, response
+and event kind the build names must have a line in that file.
+
 ## 10.519 The last two vocabularies, and a witness that cannot carry one
 
 "now add the same gate for link and backend kinds", the copyright holder,

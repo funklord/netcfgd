@@ -583,6 +583,11 @@
       "running": true
     },
     {
+      "kind": "link_local",
+      "interface": "eth1",
+      "running": true
+    },
+    {
       "kind": "access_point",
       "interface": "wlan0",
       "running": true,

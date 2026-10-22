@@ -22,13 +22,6 @@ use netcfgd_model::{
 	RoutingRule, RuleAction, RuleFamily, WgPeer,
 };
 use netcfgd_plan::{Action, Op, Plan, Reason, Refusal, Stranded, Warning};
-use std::path::PathBuf;
-
-fn witness_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-		.join("../..")
-		.join("doc/schema/plan.json")
-}
 
 fn route() -> Route {
 	Route {
@@ -465,57 +458,19 @@ fn witness() -> Plan {
 	}
 }
 
-/// The frozen surface, byte for byte.
-#[test]
-fn the_plan_schema_matches_its_witness() {
-	let plan = witness();
-	let rendered = serde_json::to_string_pretty(&plan).expect("the witness serialises");
-
-	if std::env::var_os("NCFG_BLESS").is_some() {
-		let path = witness_path();
-		std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
-		std::fs::write(&path, &rendered).expect("write the witness");
-		println!("blessed {}", path.display());
-		return;
-	}
-
-	let expected = std::fs::read_to_string(witness_path()).unwrap_or_else(|error| {
-		panic!(
-			"cannot read the plan witness ({error}). If this is a new checkout \
-			 something is missing; otherwise run `make schema-bless`."
-		)
-	});
-
-	if rendered != expected {
-		let (line, before, after) = first_difference(&expected, &rendered);
-		panic!(
-			"the plan schema has changed.\n\
-			 \n\
-			 first difference at line {line}:\n\
-			 \x20 was: {before}\n\
-			 \x20 now: {after}\n\
-			 \n\
-			 A plan goes over the control socket, into /run/netcfgd/plan.last.json\n\
-			 and out of `ncfg plan --json`, so an op renamed here is renamed under\n\
-			 whatever reads those. Run `make schema-bless` and say in the commit\n\
-			 what moved and why."
-		);
-	}
-}
-
-fn first_difference(expected: &str, actual: &str) -> (usize, String, String) {
-	for (index, (left, right)) in expected.lines().zip(actual.lines()).enumerate() {
-		if left != right {
-			return (index + 1, left.trim().to_owned(), right.trim().to_owned());
-		}
-	}
-	let line = expected.lines().count().min(actual.lines().count()) + 1;
-	(
-		line,
-		expected.lines().nth(line - 1).unwrap_or("<end>").to_owned(),
-		actual.lines().nth(line - 1).unwrap_or("<end>").to_owned(),
-	)
-}
+// The frozen surface is the C's now.
+//
+// **This file compared the Rust's serialisation against {witness} byte for
+// byte and wrote it under `NCFG_BLESS`.** It cannot any more, and not because
+// of a formatting drift: the C has values the Rust has no word for --
+// `ncfg_backend_kind_name` answers for ten backends where this workspace's
+// enum has nine, the tenth being an IPv4LL client -- so a witness carrying one
+// can be neither generated nor read here.
+//
+// 0279 moved it. The C's own tests write these files, through the same readers
+// and writers the daemon uses, and what is left here is what this file can
+// still honestly claim: every variant built and round-tripped through serde in
+// memory, which is coverage of these types rather than of the wire form.
 
 /// The witness has to survive a round trip, or it is pinning a format nothing
 /// can read.

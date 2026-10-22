@@ -50,13 +50,6 @@ use netcfgd_proto::{
 	Event, Explanation, Fact, Request, Response, ScanEntry, ScanReport, StationEntry,
 	StationReport, Subject, WifiState,
 };
-use std::path::PathBuf;
-
-fn witness_path() -> PathBuf {
-	PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-		.join("../..")
-		.join("doc/schema/socket.json")
-}
 
 /// Every request, so none can be added or renamed unnoticed.
 ///
@@ -899,52 +892,19 @@ fn witness() -> String {
 	out
 }
 
-/// The frozen socket contract, byte for byte.
-#[test]
-fn the_socket_api_matches_its_witness() {
-	let rendered = witness();
-
-	if std::env::var_os("NCFG_BLESS").is_some() {
-		let path = witness_path();
-		std::fs::create_dir_all(path.parent().expect("a parent")).expect("mkdir");
-		std::fs::write(&path, &rendered).expect("write the witness");
-		println!("blessed {}", path.display());
-		return;
-	}
-
-	let expected = std::fs::read_to_string(witness_path())
-		.unwrap_or_else(|error| panic!("cannot read the socket witness ({error})"));
-
-	if rendered != expected {
-		let mismatch = expected
-			.lines()
-			.zip(rendered.lines())
-			.enumerate()
-			.find(|(_, (left, right))| left != right);
-		let detail = mismatch.map_or_else(
-			|| {
-				format!(
-					"a message was added or removed ({} lines, was {})",
-					rendered.lines().count(),
-					expected.lines().count()
-				)
-			},
-			|(index, (left, right))| format!("line {}:\n  was: {left}\n  now: {right}", index + 1),
-		);
-		panic!(
-			"the socket API has changed.\n\
-			 \n\
-			 {detail}\n\
-			 \n\
-			 Nothing speaks this protocol yet, so the change is cheap. Run\n\
-			 `make schema-bless` and say in the commit what moved.\n\
-			 \n\
-			 Worth a moment's thought all the same: this is the surface a client\n\
-			 is written against, and the first one written will fix its shape\n\
-			 harder than any version number would."
-		);
-	}
-}
+// The frozen surface is the C's now.
+//
+// **This file compared the Rust's serialisation against {witness} byte for
+// byte and wrote it under `NCFG_BLESS`.** It cannot any more, and not because
+// of a formatting drift: the C has values the Rust has no word for --
+// `ncfg_backend_kind_name` answers for ten backends where this workspace's
+// enum has nine, the tenth being an IPv4LL client -- so a witness carrying one
+// can be neither generated nor read here.
+//
+// 0279 moved it. The C's own tests write these files, through the same readers
+// and writers the daemon uses, and what is left here is what this file can
+// still honestly claim: every variant built and round-tripped through serde in
+// memory, which is coverage of these types rather than of the wire form.
 
 /// The exact bytes the C client emits are bytes this decoder accepts.
 ///

@@ -170,6 +170,49 @@ static void report_difference(const char *want, size_t want_length, const char *
 	    got + from);
 }
 
+/*
+ * Write the plan witness back, under `NCFG_BLESS`.
+ *
+ * **This one is a generator rather than a round trip**, and it is the only one
+ * of the four that is: the plan above is built from values in this file,
+ * exactly as `crates/netcfgd-plan/tests/frozen.rs` built it, so what goes to
+ * disk comes from code. 0279 moved all four witnesses to the C; see
+ * `observed_test.c` for why the other three are round trips and why that is
+ * enough.
+ */
+static int bless_witness(const char *path, const char *compact)
+{
+	ncfg_buf_t pretty;
+	FILE      *file;
+	size_t     wanted;
+	size_t     count;
+
+	ncfg_buf_init(&pretty, 0);
+	if (!ncfg_json_pretty(compact, &pretty)) {
+		printf("  cannot lay the witness out\n");
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	file = fopen(path, "wb");
+	if (!file) {
+		printf("  cannot write %s\n", path);
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	/* **The length is read before the buffer goes.** `ncfg_buf_free` zeroes
+	 * it, so comparing against `pretty.length` afterwards compares against 0
+	 * and reports a short write on every success -- which it did, once. */
+	wanted = pretty.length;
+	count = fwrite(ncfg_buf_text(&pretty), 1u, wanted, file);
+	(void)fclose(file);
+	ncfg_buf_free(&pretty);
+	if (count != wanted) {
+		printf("  short write on %s\n", path);
+		return 0;
+	}
+	return 1;
+}
+
 static const char *find_witness(const char *name)
 {
 	static char       path[512];
@@ -664,6 +707,15 @@ static void the_frozen_witness(void)
 		return;
 	}
 	text = written(plan, &text_length);
+	if (text && getenv("NCFG_BLESS")) {
+		check(bless_witness(path, text),
+		    "the witness is written from the plan this file builds");
+		printf("plan_test: blessed %s\n", path);
+		free(text);
+		free(raw);
+		ncfg_plan_free(plan);
+		return;
+	}
 	wanted = minify(raw, raw_length, &wanted_length);
 	if (text && wanted) {
 		int same = text_length == wanted_length &&
@@ -673,6 +725,29 @@ static void the_frozen_witness(void)
 			report_difference(wanted, wanted_length, text, text_length);
 		}
 		check(same, "the plan is written byte for byte as the witness has it");
+
+		/* **And the layout**, for `observed_test.c`'s reason: the comparison
+		 * above minifies both sides and cannot see indentation. */
+		{
+			ncfg_buf_t pretty;
+
+			ncfg_buf_init(&pretty, 0);
+			if (ncfg_json_pretty(text, &pretty)) {
+				int laid_out = pretty.length == raw_length &&
+				    memcmp(pretty.data, raw, raw_length) == 0;
+
+				if (!laid_out) {
+					report_difference(raw, raw_length, pretty.data,
+					    pretty.length);
+				}
+				check(laid_out,
+				    "and the witness on disk is laid out as this build lays "
+				    "one out");
+			} else {
+				check(0, "the written plan can be laid out");
+			}
+			ncfg_buf_free(&pretty);
+		}
 	} else {
 		check(0, "the plan is written byte for byte as the witness has it");
 	}

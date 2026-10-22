@@ -41,6 +41,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/json_write.h"
 #include "ncfg/observed.h"
 
 #include <stdio.h>
@@ -229,6 +230,56 @@ static int refused_saying(const char *text, const char *expected)
 	return 1;
 }
 
+/*
+ * Write the witness back, under `NCFG_BLESS`.
+ *
+ * **The C owns these four files since 0279**, and this is how one is rewritten:
+ * the witness is read through this module's own reader, written through its own
+ * writer, and laid out by `ncfg_json_pretty` -- which reproduces the form
+ * `serde_json::to_string_pretty` produced, byte for byte, which is what made
+ * the move possible at all rather than a reformatting of every schema.
+ *
+ * It is a round trip and not a generator, deliberately. What a sample set
+ * CONTAINS is an edit to the file, reviewed as a diff; what this blesses is a
+ * change in how this build serialises what is already there. `plan.json` is the
+ * one built from values in a test, and it was hand-populated before that too --
+ * its own header says so.
+ *
+ * Silent on success, because `make schema-bless` prints what moved.
+ */
+static int bless_witness(const char *path, const char *compact)
+{
+	ncfg_buf_t pretty;
+	FILE      *file;
+	size_t     wanted;
+	size_t     written;
+
+	ncfg_buf_init(&pretty, 0);
+	if (!ncfg_json_pretty(compact, &pretty)) {
+		printf("  cannot lay the witness out\n");
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	file = fopen(path, "wb");
+	if (!file) {
+		printf("  cannot write %s\n", path);
+		ncfg_buf_free(&pretty);
+		return 0;
+	}
+	/* **The length is read before the buffer goes.** `ncfg_buf_free` zeroes
+	 * it, so comparing against `pretty.length` afterwards compares against 0
+	 * and reports a short write on every success -- which it did, once. */
+	wanted = pretty.length;
+	written = fwrite(ncfg_buf_text(&pretty), 1u, wanted, file);
+	(void)fclose(file);
+	ncfg_buf_free(&pretty);
+	if (written != wanted) {
+		printf("  short write on %s\n", path);
+		return 0;
+	}
+	return 1;
+}
+
 static char *write_observed(const ncfg_observed_t *observed, size_t *length_out)
 {
 	ncfg_buf_t buf;
@@ -290,6 +341,18 @@ int main(int argc, char **argv)
 			}
 			check(observed != NULL, "the witness is read");
 		}
+		if (observed && raw && getenv("NCFG_BLESS")) {
+			size_t written_length = 0;
+			char  *written = write_observed(observed, &written_length);
+
+			check(written && bless_witness(path, written),
+			    "the witness is written back from this build's own writer");
+			free(written);
+			ncfg_observed_free(observed);
+			free(raw);
+			printf("observed_test: blessed %s\n", path);
+			return failures == 0 ? 0 : 1;
+		}
 		if (observed && raw) {
 			size_t written_length = 0;
 			char  *written = write_observed(observed, &written_length);
@@ -297,6 +360,36 @@ int main(int argc, char **argv)
 			char  *wanted = minify(raw, raw_length, &wanted_length);
 			int    same = written && wanted && written_length == wanted_length &&
 			    memcmp(written, wanted, written_length) == 0;
+
+			/*
+			 * **And the layout, byte for byte**, which the comparison above
+			 * cannot see: it minifies both sides, so a witness whose
+			 * indentation had drifted passed it. The Rust's byte comparison
+			 * did see that, and 0279 would have been a weakening of this file
+			 * without this check -- `ncfg_json_pretty` reproduces what
+			 * `serde_json::to_string_pretty` wrote, which is the property that
+			 * let the C take the witness over in the first place.
+			 */
+			if (written) {
+				ncfg_buf_t pretty;
+
+				ncfg_buf_init(&pretty, 0);
+				if (ncfg_json_pretty(written, &pretty)) {
+					int laid_out = pretty.length == raw_length &&
+					    memcmp(pretty.data, raw, raw_length) == 0;
+
+					if (!laid_out) {
+						report_difference(raw, raw_length, pretty.data,
+						    pretty.length);
+					}
+					check(laid_out,
+					    "and the witness on disk is laid out as this build "
+					    "lays one out");
+				} else {
+					check(0, "the written observation can be laid out");
+				}
+				ncfg_buf_free(&pretty);
+			}
 
 			if (!same && written && wanted) {
 				report_difference(wanted, wanted_length, written, written_length);
