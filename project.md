@@ -12570,11 +12570,19 @@ nine. Each item names where it is argued.
 
 **Not this tree's, and tracked elsewhere**
 
-Three of the five hull findings are theirs to close: the silent truncation of
-an apt install in an overlay vm, the one-uid limit a maintainer script meets
-in a build step, and `(mutable direct)` writing through 9p as the host user.
-Two are already fixed on their side -- the missing root `PATH`, which was also
-the cause of gcc losing `cc1`. A fourth was mine and is withdrawn (10.527).
+Of the five hull findings, **two are fixed and verified here**: hull `7b47668`
+exports the conventional root PATH where a spec and image name none, which was
+finding 5 and also the cause of finding 2, gcc losing `cc1` -- a machine of
+mine printing `/usr/local/sbin:...:/bin` and finding `/usr/sbin/dhcpcd`
+confirms it rather than taking the report. The rig's own `export PATH` stays
+until nothing here runs an older hull, and its comment says so.
+
+Three remain theirs: the silent truncation of an apt install in an overlay vm,
+which they test when the host is quiet; `(mutable direct)` writing through 9p
+as the host user, which is inherent and being recorded rather than changed;
+and the one-uid limit a maintainer script meets in a build step -- decided
+since, their holder choosing many uids with owners kept, after the init
+hand-over. A fourth finding was mine and is withdrawn (10.527).
 
 ## 10.527 hull runs the test this workspace never could
 

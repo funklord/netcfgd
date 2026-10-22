@@ -16,12 +16,22 @@ for t in modprobe iw wpa_supplicant ip dnsmasq dhcpcd; do
 	command -v "$t" >/dev/null && printf ' %s' "$t"
 done
 echo
-# **A root-shaped PATH, which the agent does not give.** netcfgd looks for a
-# DHCP client on PATH alone and deliberately so -- `dhcp.c` says an operator's
-# own client in front of the packaged one is a choice it honours -- and this
-# guest's PATH has no `/usr/sbin`, so a `dhcpcd` that is installed read as
-# "not installed" and the address half of the test failed. Any init gives root
-# the sbins; the agent runs the command without them.
+# **A root-shaped PATH, and hull gives one as of `7b47668`.** This line is
+# older than that fix: the agent used to run the command with no PATH at all,
+# so libc's `/bin:/usr/bin` applied, a `dhcpcd` in `/usr/sbin` read as "not
+# installed", and the address half of the test failed. hull exports the
+# conventional root PATH now where the spec and image name none -- measured
+# here, a machine printing
+# `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin` and finding
+# `/usr/sbin/dhcpcd` -- and a PATH the spec names is kept as given, so this
+# line is harmless and redundant against that hull.
+#
+# It stays until nothing here runs an older one, which is the only reason it
+# is still here: the rig pins no hull version, and a rig that silently needs a
+# newer one is a rig that fails on somebody's machine for a reason it does not
+# say. netcfgd's own half of that finding is fixed too (90982d6c): a client in
+# the sbins and not on PATH is now said to be exactly that, rather than
+# reported as absent.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:$PATH
 export PATH
 echo "=== PATH: $PATH"
