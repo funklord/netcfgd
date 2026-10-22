@@ -209,7 +209,7 @@ typedef enum {
 } ncfg_tier_t;
 
 /* `observe`, `wifi`, `admin`. NULL outside the enum. */
-const char *ncfg_tier_name(ncfg_tier_t tier);
+const char *ncfg_tier_name(int tier);
 
 /*
  * Which tier a request belongs to.

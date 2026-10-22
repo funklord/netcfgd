@@ -63,7 +63,7 @@ const char *ncfg_log_label(ncfg_severity_t severity)
 	}
 }
 
-const char *ncfg_log_name(ncfg_severity_t severity)
+const char *ncfg_log_name(int severity)
 {
 	switch (severity) {
 	case NCFG_LOG_CRITICAL:
@@ -96,7 +96,7 @@ int ncfg_log_from_name(const char *text, ncfg_severity_t *severity)
 		return 0;
 	}
 	for (i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
-		if (strcmp(ncfg_log_name(levels[i]), text) == 0) {
+		if (strcmp(ncfg_log_name((int)levels[i]), text) == 0) {
 			if (severity) {
 				*severity = levels[i];
 			}
@@ -179,7 +179,7 @@ void ncfg_log_accept_from_env(void)
 	ncfg_log_emitf("log", NCFG_LOG_WARNING,
 	    "NCFG_LOG=`%s` is not a level, so `%s` still applies. Levels: "
 	    "critical, error, warning, note, info, verbose, debug",
-	    word, ncfg_log_name(ncfg_log_accepted()));
+	    word, ncfg_log_name((int)ncfg_log_accepted()));
 }
 
 int ncfg_log_subsystem_matches(const char *subsystem, const char *filter)

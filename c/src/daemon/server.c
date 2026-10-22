@@ -478,7 +478,7 @@ static int serve_one(ncfg_daemon_server_t *server, int fd, const ncfg_peer_t *pe
 		 * told no -- a name that is not a name, a tier it does not hold --
 		 * which is the control socket working, not the daemon failing.
 		 */
-		const char *what = ncfg_proto_request_name(request->kind);
+		const char *what = ncfg_proto_request_name((int)request->kind);
 
 		ncfg_log_emitf("control", NCFG_LOG_NOTE, "`%s` was refused: %s",
 		    what ? what : "a request", err[0] ? err : "no reason given");

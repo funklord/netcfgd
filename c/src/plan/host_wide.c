@@ -150,12 +150,12 @@ static const char *dns_difference(ncfg_plan_t *plan, const ncfg_dns_policy_t *wa
 		return "dns";
 	}
 	if (!have) {
-		*desired = ncfg_dns_mode_name((ncfg_dns_mode_t)want->mode.mode);
+		*desired = ncfg_dns_mode_name(want->mode.mode);
 		return "dns";
 	}
 	if (want->mode.mode != have->mode.mode) {
-		*desired = ncfg_dns_mode_name((ncfg_dns_mode_t)want->mode.mode);
-		*observed = ncfg_dns_mode_name((ncfg_dns_mode_t)have->mode.mode);
+		*desired = ncfg_dns_mode_name(want->mode.mode);
+		*observed = ncfg_dns_mode_name(have->mode.mode);
 		return "dns.mode";
 	}
 	if (want->server_count != have->server_count) {

@@ -37,7 +37,7 @@ _Static_assert(offsetof(struct ifreq, ifr_flags) == NCFG_TUN_NAME_MAX,
 _Static_assert(IFNAMSIZ == NCFG_TUN_NAME_MAX,
     "an interface name is sixteen bytes and this libc says otherwise");
 
-const char *ncfg_tun_mode_name(ncfg_tun_mode_t mode)
+const char *ncfg_tun_mode_name(int mode)
 {
 	switch (mode) {
 	case NCFG_TUN_MODE_TUN:

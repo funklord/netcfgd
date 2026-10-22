@@ -106,7 +106,7 @@ typedef enum {
 const char *ncfg_log_label(ncfg_severity_t severity);
 
 /* The name `NCFG_LOG` takes, and the one a diagnostic prints back. */
-const char *ncfg_log_name(ncfg_severity_t severity);
+const char *ncfg_log_name(int severity);
 
 /* The level a name asks for. 0 for a word this does not know. */
 int ncfg_log_from_name(const char *text, ncfg_severity_t *severity);

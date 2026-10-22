@@ -803,7 +803,7 @@ int ncfg_dns_record(const ncfg_dns_scope_t *scopes, size_t count, const char *ru
 		}
 		ncfg_buf_init(&buf, 0u);
 		ncfg_buf_addf(&buf, "# scope: %s\n# mode:  %s\n", scopes[at].name,
-		    ncfg_dns_mode_name((ncfg_dns_mode_t)(policy ? policy->mode.mode
+		    ncfg_dns_mode_name((policy ? policy->mode.mode
 		                           : NCFG_DNS_MODE_NONE)));
 		ncfg_buf_add_text(&buf, blob);
 		free(blob);
@@ -910,9 +910,9 @@ int ncfg_dns_deliver(const ncfg_dns_scope_t *scopes, size_t count,
 		if (scopes[at].policy->mode.mode != mode) {
 			ncfg_error_set(err, err_size,
 			    "scopes disagree about the dns mode: %s wants %s and %s wants %s",
-			    scopes[0].name, ncfg_dns_mode_name((ncfg_dns_mode_t)mode),
+			    scopes[0].name, ncfg_dns_mode_name(mode),
 			    scopes[at].name,
-			    ncfg_dns_mode_name((ncfg_dns_mode_t)scopes[at].policy->mode.mode));
+			    ncfg_dns_mode_name(scopes[at].policy->mode.mode));
 			return 0;
 		}
 	}

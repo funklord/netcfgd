@@ -103,7 +103,7 @@
 /* The mode as the configuration language spells it -- which is the block's own
  * name, since `tun` and `tap` are two kinds to whoever writes one. NULL for a
  * mode this build does not know. */
-const char *ncfg_tun_mode_name(ncfg_tun_mode_t mode);
+const char *ncfg_tun_mode_name(int mode);
 
 /* The mode a block name asks for. 0 where the name is neither, which is a
  * caller's refusal to write rather than a default to pick: a `tap` block opened

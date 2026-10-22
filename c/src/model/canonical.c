@@ -199,8 +199,8 @@ static int compare_rule(const void *left, const void *right)
 		return one->priority < other->priority ? -1 : 1;
 	}
 	{
-		const char *first = ncfg_rule_family_name((ncfg_rule_family_t)one->family);
-		const char *second = ncfg_rule_family_name((ncfg_rule_family_t)other->family);
+		const char *first = ncfg_rule_family_name(one->family);
+		const char *second = ncfg_rule_family_name(other->family);
 		int         difference = compare_text(first, second);
 
 		if (difference != 0) {
@@ -548,7 +548,7 @@ static int check_dns_capability(const char *scope, const ncfg_dns_policy_t *dns,
 	if (ncfg_dns_policy_needs_routing(dns) && !ncfg_dns_mode_can_route(effective)) {
 		ncfg_error_set(err, err_size,
 		    "dns scope %s uses routing domains, which mode %s cannot express", scope,
-		    ncfg_dns_mode_name((ncfg_dns_mode_t)effective));
+		    ncfg_dns_mode_name(effective));
 		return 0;
 	}
 	return 1;

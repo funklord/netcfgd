@@ -162,7 +162,7 @@ static const char *const subject_names[NCFG_PROTO_SUBJECT_COUNT] = {
 	"route",
 };
 
-const char *ncfg_proto_request_name(ncfg_proto_request_kind_t kind)
+const char *ncfg_proto_request_name(int kind)
 {
 	if (!kind_in_range((int)kind, NCFG_PROTO_REQ_COUNT)) {
 		return NULL;

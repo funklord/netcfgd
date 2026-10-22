@@ -187,7 +187,7 @@ typedef enum {
 
 /* A name for logs and for `ncfg status`, because an operator debugging a reload
  * that did not happen needs to know which one is in play. */
-const char *ncfg_watch_mechanism_name(ncfg_watch_mechanism_t mechanism);
+const char *ncfg_watch_mechanism_name(int mechanism);
 
 /*
  * One path and when it last changed, or that it is not there.

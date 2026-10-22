@@ -281,7 +281,7 @@ static char **environment(const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *en
 		made[at++] = entry("NCFG_IFACE=", env->iface);
 	}
 	{
-		const char *phase = ncfg_hook_phase_name((ncfg_hook_phase_t)hook->phase);
+		const char *phase = ncfg_hook_phase_name(hook->phase);
 
 		if (phase) {
 			made[at++] = entry("NCFG_PHASE=", phase);

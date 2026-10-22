@@ -438,7 +438,7 @@ static void plan_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interfac
 		op.u.hook.value = NULL;
 		reason = ncfg_plan_reason_absent(interface->name,
 		    ncfg_plan_internf(builder->plan, "hooks[%s]",
-		        ncfg_hook_phase_name((ncfg_hook_phase_t)phase)),
+		        ncfg_hook_phase_name(phase)),
 		    interface->hooks[i].path);
 		/* No inverse: netcfgd cannot know what a script did, so commit-confirm
 		 * cannot undo it. The warning `ncfg_plan_add` emits says so. */
@@ -517,7 +517,7 @@ static void plan_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *in
 		op.u.hook.path = interface->hooks[at].path;
 		op.u.hook.value = now;
 		reason = ncfg_plan_reason_differs(interface->name,
-		    ncfg_hook_phase_name((ncfg_hook_phase_t)phase), now,
+		    ncfg_hook_phase_name(phase), now,
 		    before ? before : "<absent>");
 		/* No inverse, as every hook: netcfgd cannot know what a script did. */
 		(void)ncfg_builder_push(builder, &op, &reason, deps ? deps->ids : NULL,

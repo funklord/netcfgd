@@ -461,7 +461,7 @@ int ncfg_render_dns(const ncfg_dns_policy_t *dns, const char *indent, ncfg_buf_t
 		 * the wrong one for a fact that is true of both. */
 		ncfg_render_refuse(missing, scope, name, "dns mode exec");
 	} else {
-		mode = ncfg_dns_mode_name((ncfg_dns_mode_t)dns->mode.mode);
+		mode = ncfg_dns_mode_name(dns->mode.mode);
 	}
 	mode_differs = dns->mode.mode != NCFG_DNS_MODE_NONE;
 
@@ -662,7 +662,7 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	}
 	if (globals->on_drift_default != NCFG_DRIFT_POLICY_RECONCILE) {
 		ncfg_buf_addf(&body, "\ton_drift = \"%s\"\n", ncfg_render_word_or_gap(
-		    ncfg_drift_policy_name((ncfg_drift_policy_t)globals->on_drift_default)));
+		    ncfg_drift_policy_name(globals->on_drift_default)));
 	}
 	if (globals->networking != NCFG_NETWORKING_ON) {
 		ncfg_buf_add_text(&body, "\tnetworking = \"off\"\n");
@@ -763,7 +763,7 @@ static void render_rule(const ncfg_routing_rule_t *rule, const ncfg_overrides_t 
 	ncfg_buf_addf(&body, "\tpriority = %lld\n", (long long)rule->priority);
 	if (rule->family != NCFG_RULE_FAMILY_INET) {
 		ncfg_buf_addf(&body, "\tfamily = \"%s\"\n",
-		    ncfg_render_word_or_gap(ncfg_rule_family_name((ncfg_rule_family_t)rule->family)));
+		    ncfg_render_word_or_gap(ncfg_rule_family_name(rule->family)));
 	}
 	if (rule->from) {
 		ncfg_buf_add_text(&body, "\tfrom = ");
@@ -806,7 +806,7 @@ static void render_rule(const ncfg_routing_rule_t *rule, const ncfg_overrides_t 
 	}
 	if (rule->action != NCFG_RULE_ACTION_LOOKUP) {
 		ncfg_buf_addf(&body, "\taction = \"%s\"\n",
-		    ncfg_render_word_or_gap(ncfg_rule_action_name((ncfg_rule_action_t)rule->action)));
+		    ncfg_render_word_or_gap(ncfg_rule_action_name(rule->action)));
 	}
 	ncfg_render_opening(text, "rule", rule->id, overrides);
 	ncfg_render_quote(text, rule->id);

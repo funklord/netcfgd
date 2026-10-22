@@ -472,7 +472,7 @@ typedef struct {
 } ncfg_proto_request_t;
 
 /* The tag's value, or NULL for a kind outside the enum. */
-const char *ncfg_proto_request_name(ncfg_proto_request_kind_t kind);
+const char *ncfg_proto_request_name(int kind);
 
 /* The kind a tag names. 0 where no request is spelled that way. */
 int ncfg_proto_request_kind_from(const char *name, size_t length,
@@ -776,8 +776,8 @@ typedef struct {
 	} u;
 } ncfg_proto_response_t;
 
-const char *ncfg_proto_response_name(ncfg_proto_response_kind_t kind);
-const char *ncfg_proto_event_name(ncfg_proto_event_kind_t kind);
+const char *ncfg_proto_response_name(int kind);
+const char *ncfg_proto_event_name(int kind);
 
 /*
  * One event, appended to `out` with no newline.

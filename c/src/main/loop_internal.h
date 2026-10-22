@@ -201,7 +201,7 @@ typedef enum {
 } ncfg_main_source_kind_t;
 
 /* A word for the log. Never NULL. */
-const char *ncfg_main_source_name(ncfg_main_source_kind_t kind);
+const char *ncfg_main_source_name(int kind);
 
 /* One station that moved, with the text this round owns. */
 typedef struct {
@@ -270,7 +270,7 @@ typedef enum {
 } ncfg_main_ready_t;
 
 ncfg_main_ready_t ncfg_main_readiness(short revents);
-const char       *ncfg_main_readiness_name(ncfg_main_ready_t ready);
+const char       *ncfg_main_readiness_name(int ready);
 
 /*
  * Whether a source keeps its place in the set.

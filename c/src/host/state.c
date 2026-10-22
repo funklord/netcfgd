@@ -730,7 +730,7 @@ int ncfg_owned_write(const char *run_dir, const ncfg_owned_state_t *owned, char 
 	ncfg_json_write_key(&writer, "hook_state");
 	ncfg_json_write_array_begin(&writer);
 	for (i = 0; i < owned->hook_state_count; i++) {
-		const char *word = ncfg_hook_phase_name((ncfg_hook_phase_t)owned->hook_state[i].phase);
+		const char *word = ncfg_hook_phase_name(owned->hook_state[i].phase);
 
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "interface",

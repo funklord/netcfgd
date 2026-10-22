@@ -259,7 +259,7 @@ static void remember(const char *run_dir, tellings_t *told)
 		ncfg_log_emitf("apply", NCFG_LOG_NOTE,
 		    "what the %s hooks were told could not be recorded (%s), so they may "
 		    "fire again",
-		    ncfg_hook_phase_name((ncfg_hook_phase_t)told->phase), message);
+		    ncfg_hook_phase_name(told->phase), message);
 	}
 }
 

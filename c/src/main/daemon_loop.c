@@ -570,7 +570,7 @@ static void take_from(ncfg_main_source_t *source, ncfg_main_harvest_t *harvest)
 	if (!source->drain(source->context, harvest, message, sizeof(message))) {
 		source->failures++;
 		ncfg_log_emitf("loop", NCFG_LOG_WARNING, "the %s watch could not be read: %s",
-		    ncfg_main_source_name(source->kind), message);
+		    ncfg_main_source_name((int)source->kind), message);
 		return;
 	}
 	source->failures = 0;
@@ -584,8 +584,8 @@ static void say_dropped(const ncfg_main_source_t *source, ncfg_main_ready_t read
 	ncfg_log_emitf("loop", NCFG_LOG_WARNING,
 	    "the %s watch%s%s is no longer being read (%s); what it reports will be noticed "
 	    "only on the loop's own tick from now on",
-	    ncfg_main_source_name(source->kind), source->what ? " on " : "",
-	    source->what ? source->what : "", ncfg_main_readiness_name(ready));
+	    ncfg_main_source_name((int)source->kind), source->what ? " on " : "",
+	    source->what ? source->what : "", ncfg_main_readiness_name((int)ready));
 }
 
 /* Ask the sources that have no descriptor to wait on. `--poll-config` is the

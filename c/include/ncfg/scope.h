@@ -82,7 +82,7 @@ typedef enum {
 int ncfg_block_from_name(const char *name, ncfg_block_t *out);
 
 /* Its spelling in the language. */
-const char *ncfg_block_name(ncfg_block_t block);
+const char *ncfg_block_name(int block);
 
 /*
  * HOW FAR A KEY TRAVELS

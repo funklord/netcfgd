@@ -131,7 +131,7 @@ static int pending_record(void *state, int phase, const char *owner, const char 
     size_t body_length, ncfg_hook_ref_t *out, char *err, size_t err_size)
 {
 	struct ncfg_pending_hooks *pending = state;
-	const char *phase_name = ncfg_hook_phase_name((ncfg_hook_phase_t)phase);
+	const char *phase_name = ncfg_hook_phase_name(phase);
 	char leaf[256];
 	char *path;
 	char *script;
@@ -345,7 +345,7 @@ static int unwritten_record(void *state, int phase, const char *owner, const cha
 		ncfg_error_set(err, err_size, "a hook was recorded into nothing");
 		return 0;
 	}
-	if (!ncfg_hook_phase_name((ncfg_hook_phase_t)phase)) {
+	if (!ncfg_hook_phase_name(phase)) {
 		ncfg_error_set(err, err_size, "%d is not a hook phase", phase);
 		return 0;
 	}

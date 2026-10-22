@@ -96,7 +96,7 @@ static const ncfg_routing_rule_t *to_desired(ncfg_plan_t *plan,
 
 	memset(&rule, 0, sizeof(rule));
 	rule.id = (char *)(uintptr_t)ncfg_plan_internf(plan, "observed-%s-%lld",
-	    ncfg_rule_family_name((ncfg_rule_family_t)observed->family),
+	    ncfg_rule_family_name(observed->family),
 	    (long long)observed->priority);
 	rule.priority = observed->priority;
 	rule.family = observed->family;
@@ -144,7 +144,7 @@ static const char *describe(ncfg_plan_t *plan, const ncfg_routing_rule_t *rule)
 	if (rule->fwmark.has) {
 		ncfg_buf_addf(&buf, "fwmark %#llx ", (unsigned long long)rule->fwmark.value);
 	}
-	ncfg_buf_add_text(&buf, ncfg_rule_action_name((ncfg_rule_action_t)rule->action));
+	ncfg_buf_add_text(&buf, ncfg_rule_action_name(rule->action));
 	if (rule->table.has) {
 		ncfg_buf_addf(&buf, " %lld", (long long)rule->table.value);
 	}
@@ -203,7 +203,7 @@ void ncfg_plan_rules(ncfg_builder_t *builder)
 			    "rule `%s` wants priority %lld in %s, and a rule netcfgd does not own "
 			    "is already there. Renumber it, or remove the other by hand.",
 			    rule->id, (long long)rule->priority,
-			    ncfg_rule_family_name((ncfg_rule_family_t)rule->family));
+			    ncfg_rule_family_name(rule->family));
 			continue;
 		}
 		if (current) {

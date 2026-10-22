@@ -12506,12 +12506,13 @@ nine. Each item names where it is argued.
 
 **Decisions waiting on the copyright holder**
 
-- **Ten `_name` functions take their enum and sixteen take an `int`** (10.525).
-  `value.h` states the convention for every set -- a `_name` returns NULL
-  outside its set -- and an enum parameter cannot honour it. The count says
-  sweeping toward `int` is the wrong direction: it took the library from 5
-  clang warnings to 30. So what is wanted is a decision about which form the
-  convention means, not a sweep, and nothing in the build currently sees it.
+- ~~**Ten `_name` functions take their enum and sixteen take an `int`.**~~
+  **Settled 2026-10-23: they take `int`** (10.525), the holder deciding it
+  against the count this entry argued from -- which had measured warnings under
+  a half-done conversion rather than casts after a whole one. Fourteen public
+  functions converted, not ten: that figure was wrong here too, and the
+  re-measurement is in 10.525. The tree lost 33 casts and 10 shim functions and
+  gained 16 casts; clang still reports 0.
 - **Whether a clang gate should hold the zero** (10.525). `src/` and `client/`
   report no warnings under clang today, and nothing keeps them there: the
   warnings showed in `make fuzz`, which is not part of `check`. ossacli's
@@ -12805,18 +12806,22 @@ of these functions take an `int` and `ncfg_outcome_name` says why in its own
 comment. So the four the warnings named were changed to take an `int`, which is
 what the convention argues for.
 
-**That took the library from 5 clang warnings to 30.** The value is held as an
-enum in far more places than as an `int`, so an `int` parameter moved the
-conversion to twenty-five other call sites and added twenty more. Neither
-signature is clean, because the kind genuinely lives in both types here: a
-struct carries it as `int` with the enum in a comment, and a local or a
-parameter carries the enum.
+**That took the library from 5 clang warnings to 30**, which is what the entry
+first concluded from: the kind is held as an enum in more places than as an
+`int`, so an `int` parameter moved the conversion to other call sites.
 
-**The number is the whole of the argument and it was taken second.** Had the
-scope count come first -- clang over `src/` and `client/`, both ways -- the
-reasoning from the convention would never have been written. `evidence.md` says
-to re-derive the scope number because nothing downstream will; this is that,
-with the convention standing in for the number until somebody counted.
+**And that conclusion was drawn from a half-done change, which is the lesson
+here.** The holder settled it on 2026-10-23 -- take `int` -- and done
+completely it goes the other way: 33 casts come OUT of the tree and 16 go in,
+because `(ncfg_x_t)` casts existed all over it for no reason but the old
+signature, and `document.c` and `observed.c` each carried a `VALUE_SHIM` whose
+naming half was a function per set doing nothing but `_name((type)value)`.
+Those are gone; the sets name `_name` directly. 41 files, 89 insertions, 97
+deletions, and clang reports 0 over `src/` and `client/` as it did before.
+
+So the count I argued from was real and measured the wrong thing: warnings
+under a partial conversion, where the question was casts after a complete one.
+A number is only an argument about what it counted.
 
 So the signatures are unchanged and the five int-holding call sites carry an
 explicit cast. Clang over `src/` and `client/` reports **0**, a fuzz target

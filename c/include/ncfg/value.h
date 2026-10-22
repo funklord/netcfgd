@@ -289,7 +289,7 @@ typedef enum {
 	NCFG_HOOK_PHASE_DRIFT
 } ncfg_hook_phase_t;
 
-const char *ncfg_hook_phase_name(ncfg_hook_phase_t phase);
+const char *ncfg_hook_phase_name(int phase);
 int ncfg_hook_phase_from_name(const char *name, ncfg_hook_phase_t *out, char *err,
     size_t err_size);
 
@@ -308,7 +308,7 @@ typedef enum {
 	NCFG_RULE_ACTION_PROHIBIT
 } ncfg_rule_action_t;
 
-const char *ncfg_rule_action_name(ncfg_rule_action_t action);
+const char *ncfg_rule_action_name(int action);
 int ncfg_rule_action_from_name(const char *name, ncfg_rule_action_t *out, char *err,
     size_t err_size);
 
@@ -325,7 +325,7 @@ typedef enum {
 	NCFG_RULE_FAMILY_INET6
 } ncfg_rule_family_t;
 
-const char *ncfg_rule_family_name(ncfg_rule_family_t family);
+const char *ncfg_rule_family_name(int family);
 int ncfg_rule_family_from_name(const char *name, ncfg_rule_family_t *out, char *err,
     size_t err_size);
 
@@ -350,7 +350,7 @@ typedef enum {
 	NCFG_BLUETOOTH_PROFILE_NAP
 } ncfg_bluetooth_profile_t;
 
-const char *ncfg_bluetooth_profile_name(ncfg_bluetooth_profile_t profile);
+const char *ncfg_bluetooth_profile_name(int profile);
 int ncfg_bluetooth_profile_from_name(const char *name, ncfg_bluetooth_profile_t *out, char *err,
     size_t err_size);
 
@@ -374,7 +374,7 @@ typedef enum {
 	NCFG_DRIFT_POLICY_IGNORE
 } ncfg_drift_policy_t;
 
-const char *ncfg_drift_policy_name(ncfg_drift_policy_t policy);
+const char *ncfg_drift_policy_name(int policy);
 int ncfg_drift_policy_from_name(const char *name, ncfg_drift_policy_t *out, char *err,
     size_t err_size);
 
@@ -408,7 +408,7 @@ typedef enum {
 	NCFG_DNS_MODE_EXEC
 } ncfg_dns_mode_t;
 
-const char *ncfg_dns_mode_name(ncfg_dns_mode_t mode);
+const char *ncfg_dns_mode_name(int mode);
 int ncfg_dns_mode_from_name(const char *name, ncfg_dns_mode_t *out, char *err, size_t err_size);
 
 #endif /* NCFG_VALUE_H */

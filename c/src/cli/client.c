@@ -74,7 +74,7 @@ const char *ncfg_cli_describe_answer(const ncfg_proto_response_t *response, char
 		 * whole document in a diagnostic is not a diagnostic either way.
 		 */
 		(void)snprintf(out, out_size, "an unexpected answer: %s",
-		    ncfg_proto_response_name(response->kind));
+		    ncfg_proto_response_name((int)response->kind));
 		return out;
 	}
 }

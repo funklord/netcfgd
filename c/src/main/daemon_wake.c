@@ -35,7 +35,7 @@
 #include <stdio.h>
 #include <string.h>
 
-const char *ncfg_main_source_name(ncfg_main_source_kind_t kind)
+const char *ncfg_main_source_name(int kind)
 {
 	switch (kind) {
 	case NCFG_MAIN_SOURCE_KERNEL:
@@ -98,7 +98,7 @@ ncfg_main_ready_t ncfg_main_readiness(short revents)
 	return NCFG_MAIN_READY_NOTHING;
 }
 
-const char *ncfg_main_readiness_name(ncfg_main_ready_t ready)
+const char *ncfg_main_readiness_name(int ready)
 {
 	switch (ready) {
 	case NCFG_MAIN_READY_NOTHING:
@@ -527,7 +527,7 @@ int ncfg_main_sources_add(ncfg_main_sources_t *sources, const ncfg_main_source_t
 		ncfg_error_set(err, err_size,
 		    "this daemon watches at most %zu descriptors and already has that many, so "
 		    "the %s source was not added", (size_t)NCFG_MAIN_SOURCES_MAX,
-		    ncfg_main_source_name(source->kind));
+		    ncfg_main_source_name((int)source->kind));
 		return 0;
 	}
 	sources->at[sources->count] = *source;

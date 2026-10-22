@@ -164,7 +164,7 @@ void ncfg_main_netcfgd_supported(void)
 		 * over the same enum with no `default`, so `-Wswitch` names a kind
 		 * that reaches the dispatcher without an arm. A warning rather than a
 		 * build failure; `apply.c` carries why. */
-		say_one("request", ncfg_proto_request_name((ncfg_proto_request_kind_t)kind), 1,
+		say_one("request", ncfg_proto_request_name(kind), 1,
 		    NULL, NULL);
 	}
 	/*
@@ -1106,7 +1106,7 @@ static int start(const options_t *options)
 	 * because what is being watched is true either way. */
 	ncfg_log_emitf("config", NCFG_LOG_INFO, "watching %s via %s, socket %s", where.config,
 	    watchers.has_watch
-	        ? ncfg_watch_mechanism_name(ncfg_watch_mechanism(&watchers.watch))
+	        ? ncfg_watch_mechanism_name((int)ncfg_watch_mechanism(&watchers.watch))
 	        : "nothing",
 	    ncfg_daemon_server_path(local));
 

@@ -310,7 +310,7 @@ int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, nc
 	ncfg_json_write_key(&writer, "hooks");
 	ncfg_json_write_array_begin(&writer);
 	for (at = 0u; at < count; at++) {
-		const char *phase = ncfg_hook_phase_name((ncfg_hook_phase_t)scripts[at].phase);
+		const char *phase = ncfg_hook_phase_name(scripts[at].phase);
 
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "interface",

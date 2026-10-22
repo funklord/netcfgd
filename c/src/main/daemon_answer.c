@@ -1282,7 +1282,7 @@ int ncfg_main_answer(void *context, const ncfg_proto_request_t *request,
 
 	unported = ncfg_main_answer_unported(request->kind);
 	if (unported) {
-		const char *name = ncfg_proto_request_name(request->kind);
+		const char *name = ncfg_proto_request_name((int)request->kind);
 
 		/* The request is named in the refusal, always. A sentence that says
 		 * only what is missing reads as a complaint about something else, and

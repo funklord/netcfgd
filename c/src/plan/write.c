@@ -265,7 +265,7 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 	case NCFG_OP_HOOK_RUN:
 		member_text(writer, "iface", op->u.hook.iface);
 		ncfg_json_write_member_string(writer, "phase",
-		    ncfg_hook_phase_name((ncfg_hook_phase_t)op->u.hook.phase));
+		    ncfg_hook_phase_name(op->u.hook.phase));
 		member_text(writer, "path", op->u.hook.path);
 		/* One of the three members in this surface that is omitted rather
 		 * than written null: a lifecycle phase has no value, and `null`

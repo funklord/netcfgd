@@ -748,7 +748,7 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	}
 	if (interface->on_drift.has) {
 		ncfg_buf_addf(&body, "\ton_drift = \"%s\"\n", ncfg_render_word_or_gap(
-		    ncfg_drift_policy_name((ncfg_drift_policy_t)interface->on_drift.value)));
+		    ncfg_drift_policy_name((int)interface->on_drift.value)));
 	}
 	/*
 	 * **The most expensive line in this file to lose.** A guard is why an

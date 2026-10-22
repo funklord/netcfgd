@@ -16,7 +16,7 @@
 #include <sys/types.h>
 #include <time.h>
 
-const char *ncfg_watch_mechanism_name(ncfg_watch_mechanism_t mechanism)
+const char *ncfg_watch_mechanism_name(int mechanism)
 {
 	switch (mechanism) {
 	case NCFG_WATCH_INOTIFY:

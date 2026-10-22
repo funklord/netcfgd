@@ -205,7 +205,7 @@ void ncfg_plan_write_rule(ncfg_json_writer_t *writer, const ncfg_routing_rule_t 
 	member_text(writer, "id", rule->id);
 	ncfg_json_write_member_int(writer, "priority", rule->priority);
 	ncfg_json_write_member_string(writer, "family",
-	    ncfg_rule_family_name((ncfg_rule_family_t)rule->family));
+	    ncfg_rule_family_name(rule->family));
 	member_text(writer, "from", rule->from);
 	member_text(writer, "to", rule->to);
 	member_text(writer, "iif", rule->iif);
@@ -214,7 +214,7 @@ void ncfg_plan_write_rule(ncfg_json_writer_t *writer, const ncfg_routing_rule_t 
 	member_optint(writer, "fwmask", rule->fwmask);
 	member_optint(writer, "table", rule->table);
 	ncfg_json_write_member_string(writer, "action",
-	    ncfg_rule_action_name((ncfg_rule_action_t)rule->action));
+	    ncfg_rule_action_name(rule->action));
 	member_optint(writer, "suppress_prefixlength", rule->suppress_prefixlength);
 	ncfg_json_write_member_bool(writer, "l3mdev", rule->l3mdev);
 	ncfg_json_write_member_bool(writer, "invert", rule->invert);
@@ -239,7 +239,7 @@ static void write_dns_mode(ncfg_json_writer_t *writer, const ncfg_dns_mode_value
 		ncfg_json_write_object_end(writer);
 		return;
 	}
-	word = ncfg_dns_mode_name((ncfg_dns_mode_t)mode->mode);
+	word = ncfg_dns_mode_name(mode->mode);
 	if (word) {
 		ncfg_json_write_string(writer, word);
 	}

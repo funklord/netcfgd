@@ -96,7 +96,7 @@ static int value_of(const char *const *names, size_t count, const char *kind, co
 	return 0;
 }
 
-const char *ncfg_hook_phase_name(ncfg_hook_phase_t phase)
+const char *ncfg_hook_phase_name(int phase)
 {
 	return name_of(hook_phase_names, COUNT_OF(hook_phase_names), (unsigned int)phase);
 }
@@ -117,7 +117,7 @@ int ncfg_hook_phase_from_name(const char *name, ncfg_hook_phase_t *out, char *er
 	return 1;
 }
 
-const char *ncfg_rule_action_name(ncfg_rule_action_t action)
+const char *ncfg_rule_action_name(int action)
 {
 	return name_of(rule_action_names, COUNT_OF(rule_action_names), (unsigned int)action);
 }
@@ -139,7 +139,7 @@ int ncfg_rule_action_from_name(const char *name, ncfg_rule_action_t *out, char *
 	return 1;
 }
 
-const char *ncfg_rule_family_name(ncfg_rule_family_t family)
+const char *ncfg_rule_family_name(int family)
 {
 	return name_of(rule_family_names, COUNT_OF(rule_family_names), (unsigned int)family);
 }
@@ -161,7 +161,7 @@ int ncfg_rule_family_from_name(const char *name, ncfg_rule_family_t *out, char *
 	return 1;
 }
 
-const char *ncfg_bluetooth_profile_name(ncfg_bluetooth_profile_t profile)
+const char *ncfg_bluetooth_profile_name(int profile)
 {
 	return name_of(bluetooth_profile_names, COUNT_OF(bluetooth_profile_names),
 	    (unsigned int)profile);
@@ -185,7 +185,7 @@ int ncfg_bluetooth_profile_from_name(const char *name, ncfg_bluetooth_profile_t 
 	return 1;
 }
 
-const char *ncfg_drift_policy_name(ncfg_drift_policy_t policy)
+const char *ncfg_drift_policy_name(int policy)
 {
 	return name_of(drift_policy_names, COUNT_OF(drift_policy_names), (unsigned int)policy);
 }
@@ -207,7 +207,7 @@ int ncfg_drift_policy_from_name(const char *name, ncfg_drift_policy_t *out, char
 	return 1;
 }
 
-const char *ncfg_dns_mode_name(ncfg_dns_mode_t mode)
+const char *ncfg_dns_mode_name(int mode)
 {
 	return name_of(dns_mode_names, COUNT_OF(dns_mode_names), (unsigned int)mode);
 }

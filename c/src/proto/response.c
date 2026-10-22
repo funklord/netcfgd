@@ -43,7 +43,7 @@ static const char *const event_names[NCFG_PROTO_EVENT_COUNT] = {
 	"confirm_resolved",
 };
 
-const char *ncfg_proto_response_name(ncfg_proto_response_kind_t kind)
+const char *ncfg_proto_response_name(int kind)
 {
 	int at = (int)kind;
 
@@ -53,7 +53,7 @@ const char *ncfg_proto_response_name(ncfg_proto_response_kind_t kind)
 	return response_names[at];
 }
 
-const char *ncfg_proto_event_name(ncfg_proto_event_kind_t kind)
+const char *ncfg_proto_event_name(int kind)
 {
 	int at = (int)kind;
 
@@ -717,7 +717,7 @@ int ncfg_proto_event_encode(const ncfg_proto_event_t *event, int wrapped, ncfg_b
 		ncfg_error_set(err, err_size, "there is no event to write");
 		return 0;
 	}
-	name = ncfg_proto_event_name(event->kind);
+	name = ncfg_proto_event_name((int)event->kind);
 	if (!name) {
 		/* An event outside the enum is a bug here rather than a client's
 		 * doing, and writing `"event":null` would put a line on every monitor

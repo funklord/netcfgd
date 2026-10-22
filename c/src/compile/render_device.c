@@ -1123,7 +1123,7 @@ void ncfg_render_bluetooth(const ncfg_bluetooth_device_t *device,
 	ncfg_buf_add_text(text, " {\n\taddress = ");
 	ncfg_render_quote(text, device->address);
 	ncfg_buf_addf(text, "\n\tprofile = \"%s\"\n", ncfg_render_word_or_gap(
-	    ncfg_bluetooth_profile_name((ncfg_bluetooth_profile_t)device->profile)));
+	    ncfg_bluetooth_profile_name(device->profile)));
 	if (!device->autoconnect) {
 		ncfg_buf_add_text(text, "\tautoconnect = false\n");
 	}

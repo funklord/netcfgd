@@ -506,10 +506,10 @@ static void declared(builder_t *builder, const char *name, const ncfg_interface_
 		    interface->guard->reason ? interface->guard->reason : "");
 	}
 	if (interface->on_drift.has) {
-		policy = ncfg_drift_policy_name((ncfg_drift_policy_t)interface->on_drift.value);
+		policy = ncfg_drift_policy_name((int)interface->on_drift.value);
 		add(builder, "drift", NULL, "on_drift is %s", policy ? policy : "unknown");
 	} else {
-		policy = ncfg_drift_policy_name((ncfg_drift_policy_t)document->globals.on_drift_default);
+		policy = ncfg_drift_policy_name(document->globals.on_drift_default);
 		add(builder, "drift", NULL, "on_drift is %s (from globals)",
 		    policy ? policy : "unknown");
 	}

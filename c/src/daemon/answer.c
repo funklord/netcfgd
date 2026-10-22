@@ -110,7 +110,7 @@ int ncfg_daemon_hello_encode(const ncfg_tier_t *tiers, size_t tier_count, ncfg_b
 	ncfg_json_write_key(&writer, "tiers");
 	ncfg_json_write_array_begin(&writer);
 	for (at = 0; at < tier_count; at++) {
-		const char *name = ncfg_tier_name(tiers[at]);
+		const char *name = ncfg_tier_name((int)tiers[at]);
 
 		if (name) {
 			ncfg_json_write_string(&writer, name);

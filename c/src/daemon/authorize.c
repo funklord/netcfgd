@@ -12,7 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 
-const char *ncfg_tier_name(ncfg_tier_t tier)
+const char *ncfg_tier_name(int tier)
 {
 	switch (tier) {
 	case NCFG_TIER_OBSERVE:
@@ -252,7 +252,7 @@ void ncfg_authz_refusal(ncfg_tier_t tier, const ncfg_principal_t *principal, cha
     size_t err_size)
 {
 	char        rendered[128];
-	const char *name = ncfg_tier_name(tier);
+	const char *name = ncfg_tier_name((int)tier);
 
 	render_principal(principal, rendered, sizeof(rendered));
 	ncfg_error_set(err, err_size,
@@ -314,7 +314,7 @@ static int check_remote(const ncfg_remote_policy_t *remote, const ncfg_proto_req
 	if (remote_allows(remote, tier)) {
 		return 1;
 	}
-	name = ncfg_tier_name(tier);
+	name = ncfg_tier_name((int)tier);
 	ncfg_error_set(err, err_size,
 	    "not permitted from off this machine: this needs the `%s` tier, which the "
 	    "configuration does not open remotely. Change it in the `remote` block of "

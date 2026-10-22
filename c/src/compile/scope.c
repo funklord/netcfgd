@@ -17,7 +17,7 @@
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
 	"network", "access_point", "bluetooth", "rule", "linkset" };
 
-const char *ncfg_block_name(ncfg_block_t block)
+const char *ncfg_block_name(int block)
 {
 	if ((int)block < 0 || (int)block >= (int)NCFG_BLOCK_COUNT) {
 		return "";

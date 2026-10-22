@@ -75,10 +75,6 @@
  * ------------------------------------------------------------------------ */
 
 #define VALUE_SHIM(prefix, type)                                                            \
-	static const char *prefix##_word(int value)                                             \
-	{                                                                                       \
-		return prefix##_name((type)value);                                                  \
-	}                                                                                       \
 	static int prefix##_read(const char *name, int *out, char *err, size_t err_size)         \
 	{                                                                                       \
 		type value = (type)0;                                                               \
@@ -95,13 +91,13 @@ VALUE_SHIM(ncfg_rule_family, ncfg_rule_family_t)
 VALUE_SHIM(ncfg_dns_mode, ncfg_dns_mode_t)
 
 static const ncfg_enum_t hook_phase_set =
-    VALUE_SET("hook phase", ncfg_hook_phase_word, ncfg_hook_phase_read);
+    VALUE_SET("hook phase", ncfg_hook_phase_name, ncfg_hook_phase_read);
 static const ncfg_enum_t rule_action_set =
-    VALUE_SET("rule action", ncfg_rule_action_word, ncfg_rule_action_read);
+    VALUE_SET("rule action", ncfg_rule_action_name, ncfg_rule_action_read);
 static const ncfg_enum_t rule_family_set =
-    VALUE_SET("rule family", ncfg_rule_family_word, ncfg_rule_family_read);
+    VALUE_SET("rule family", ncfg_rule_family_name, ncfg_rule_family_read);
 static const ncfg_enum_t dns_mode_set =
-    VALUE_SET("dns mode", ncfg_dns_mode_word, ncfg_dns_mode_read);
+    VALUE_SET("dns mode", ncfg_dns_mode_name, ncfg_dns_mode_read);
 
 /* ------------------------------------------------------------------------ *
  * The sets this module owns
