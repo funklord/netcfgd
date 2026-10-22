@@ -40,6 +40,25 @@
 #   exported, gcc could not resolve its own argv[0] and printed a bare `cc1`
 #   where it prints a path. That was one of this rig's five findings, and the
 #   payload falls back to the share -- loudly -- on an image with no compiler.
+# WHAT THIS IMAGE IS NOT, AND IT MATTERS BEYOND THIS TEST
+#   `docker export` piped through `tar -x` as an ordinary user **drops every
+#   setuid bit and every owner**. Measured 2026-10-22: the `debian:trixie-slim`
+#   image has eight setuid-root programs -- `mount`, `umount`, `su`, `passwd`,
+#   `newgrp`, `chsh`, `chfn`, `gpasswd` -- and this tree has none, every file
+#   being `funk:users` mode 0755. `hull materialize` of the same image keeps
+#   all eight, so hull's own path is the faithful one and this is a convenience
+#   until it can install a package set.
+#
+#   `hwsim.sh` does not care: it runs as root in the guest and calls no setuid
+#   program. A payload that needs one -- anything calling `sudo`, or `mount` as
+#   a user -- must not use this image, and would want `hull materialize` plus a
+#   package step instead.
+#
+#   It also masked a hull bug rather than meeting it: 9p shows a guest every
+#   file as the host user's, so a setuid-root program becomes setuid-1000 and
+#   root running it is refused. An image with no setuid bits cannot show that,
+#   which is two faults cancelling into an appearance of health -- and the
+#   reason this note is here rather than nowhere.
 set -eu
 dir=${1:-dist/hull-hwsim-rootfs}
 name=netcfgd-hwsim-rootfs-$$

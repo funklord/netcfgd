@@ -12623,6 +12623,21 @@ spec and CLI may still change before 1.0, which hull says itself.
   **The measurement is of the committed rig, not of a scratch copy**: baked by
   `tests/hull/hwsim/bake-rootfs.sh` as it stands and run by its own
   `hull.conf`, both at the commit this entry is in.
+
+- **And the baked image is not the image it looks like**, which is this rig's
+  own caveat rather than hull's. `docker export` through `tar -x` as an
+  ordinary user drops every setuid bit and every owner: the
+  `debian:trixie-slim` image has eight setuid-root programs and the exported
+  tree has none, all of it `funk:users` 0755. `hull materialize` of the same
+  image keeps all eight, so hull's path is the faithful one.
+
+  `hwsim.sh` does not care -- it is root in the guest and calls no setuid
+  program -- but a payload that calls `sudo`, or `mount` as a user, must not
+  use this image. **And it masked a hull bug rather than meeting it**: 9p shows
+  a guest every file as the host user's, so a setuid-root program becomes
+  setuid-1000 and root running it is refused, which an image with no setuid
+  bits cannot show. Two faults cancelling into an appearance of health, which
+  is the reason the bake script now says so at length.
 - **A root-shaped `PATH`.** The agent runs the command without `/usr/sbin`, and
   netcfgd looks for a DHCP client on `PATH` alone -- deliberately, `dhcp.c`
   saying an operator's own client in front of the packaged one is a choice it
