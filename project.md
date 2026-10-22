@@ -12543,15 +12543,30 @@ nine. Each item names where it is argued.
 - **Alpine: the C and the apk build, and nothing runs the live scripts there**
   (10.526). `make apk-container` is in no gate either, which is how it came to
   be broken for as long as the C port has existed.
-- **netcfgd tells an operator to install what they have.** Found in the hull
-  guest: with no `/usr/sbin` on `PATH`, `backend.start` says "dhcpcd, udhcpc
-  and busybox are not installed" about a machine where `/usr/sbin/dhcpcd` is
-  installed. The `PATH`-only search is deliberate (`dhcp.c`: an operator's own
-  client in front of the packaged one is a choice netcfgd honours), so the
-  behaviour is right and the sentence is wrong -- 0182 is the audit that asked
-  for messages naming which fault, and `exec_refused.sh` is what holds them.
-  Saying "not on `PATH`" and naming what is in the sbins would be the same
-  class of fix.
+- ~~**netcfgd tells an operator to install what they have.**~~ **Fixed the
+  same day.** Found in the hull guest: with no `/usr/sbin` on `PATH`,
+  `backend.start` said "dhcpcd, udhcpc and busybox are not installed" about a
+  machine where `/usr/sbin/dhcpcd` is. The `PATH`-only search is deliberate
+  (`dhcp.c`: an operator's own client in front of the packaged one is a choice
+  netcfgd honours), so the behaviour was right and the sentence was wrong --
+  0182's fourth fault, where it had three.
+
+  A candidate that `PATH` does not have is now asked of the sbins-first search
+  every daemon here uses, and where that answers, the message says so and
+  names the file: "dhcpcd is installed at /usr/sbin/dhcpcd and is not on PATH
+  ... a netcfgd whose PATH carries the sbins, as an init gives it, would use
+  this one". The install line is suppressed, because the action is not an
+  installation. Nothing about which client is chosen changes.
+
+  **And `exec_refused.sh` was pinning the defect.** Its first check asserted
+  the install line with `PATH` pointed at an empty directory -- on this
+  desktop, which has `/sbin/dhcpcd` and `/usr/bin/busybox` -- so it passed
+  because the message was wrong in the same direction as the assertion. It
+  branches on what the machine has now, read from the sbins rather than from
+  `$PATH`, which is the thing under test. A second check pinned `udhcpc and
+  busybox are not installed` for the same reason and asserts what it meant
+  instead: that every candidate is accounted for, whichever fault each one
+  has. 19 checks pass.
 
 **Not this tree's, and tracked elsewhere**
 

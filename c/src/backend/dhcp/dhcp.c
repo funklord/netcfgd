@@ -1128,7 +1128,40 @@ int ncfg_dhcp_start(const char *run, const char *iface, const ncfg_optint_t *met
 			continue;
 		}
 		if (!program) {
-			absent[absent_count++] = name;
+			/*
+			 * **Installed and not on `PATH` is a fourth fault, and it was
+			 * being reported as the first.** The search above is `PATH`
+			 * alone and deliberately so -- `backend_internal.h` has the
+			 * reason -- so a machine whose `/usr/sbin/dhcpcd` is not on the
+			 * `PATH` netcfgd inherited was told "dhcpcd is not installed",
+			 * and an operator reading that goes to `apt` for a package they
+			 * have. Met in a guest whose PATH had no sbins at all (10.527),
+			 * which is any init-less environment.
+			 *
+			 * Asked with the sbins-first search, which is the one every
+			 * daemon here uses: `PATH` has already answered no, so an answer
+			 * now is an sbin's. The choice is unchanged -- this does not run
+			 * it -- and `found_any` suppresses the install line, because the
+			 * action is not an installation.
+			 *
+			 * Only where no explicit path was given: a path that is not there
+			 * is a machine without that client, which is `program_for`'s rule
+			 * and what lets a test say so.
+			 */
+			char *elsewhere = named ? NULL : ncfg_backend_find_program(name);
+
+			if (elsewhere) {
+				why_not(why, sizeof(why),
+				    "%s is installed at %s and is not on PATH, which is where "
+				    "netcfgd looks for a client so that one an operator puts in "
+				    "front of the packaged one wins; a netcfgd whose PATH carries "
+				    "the sbins, as an init gives it, would use this one", name,
+				    elsewhere);
+				found_any = 1;
+				free(elsewhere);
+			} else {
+				absent[absent_count++] = name;
+			}
 			continue;
 		}
 		found_any = 1;

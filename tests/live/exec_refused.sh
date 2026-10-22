@@ -123,9 +123,34 @@ apply_with_path() {
 
 # ------------------------------------------------------ not installed at all
 
+# **Which sentence is right depends on the machine, and this check used to
+# assert the wrong one everywhere.** netcfgd looks for a client on `PATH`
+# alone, so with `PATH` pointed at an empty directory a machine that HAS
+# `/usr/sbin/dhcpcd` has one it cannot see -- and being told to install it is
+# being sent to `apt` for a package one already has. That is what it said here,
+# on this repository's own desktop, and this check pinned it: the assertion
+# passed because the message was wrong in the same direction.
+#
+# So the expectation branches on the machine, read the way `hwsim.sh` reads it
+# rather than from `$PATH`, which is the thing under test.
+sbin_client=
+for dir in /usr/sbin /sbin /usr/local/sbin; do
+	for name in dhcpcd udhcpc busybox; do
+		[ -x "$dir/$name" ] && [ -z "$sbin_client" ] && sbin_client="$dir/$name"
+	done
+done
+
 said=$(apply_with_path "$work/bin")
-contains "no client on PATH says which packages would provide one" \
-	"$said" "install dhcpcd, udhcpc or busybox"
+if [ -n "$sbin_client" ]; then
+	contains "a client in the sbins and not on PATH is said to be exactly that" \
+		"$said" "and is not on PATH"
+	contains "  naming where it is" "$said" "$sbin_client"
+	missing "  and not telling the operator to install what they have" \
+		"$said" "install dhcpcd, udhcpc or busybox"
+else
+	contains "no client anywhere says which packages would provide one" \
+		"$said" "install dhcpcd, udhcpc or busybox"
+fi
 
 # **And the same with no dhcpcd hook, which is a different sentence.** The hook
 # is dhcpcd's alone, so netcfgd offers the other two clients without it rather
@@ -136,7 +161,16 @@ contains "no client on PATH says which packages would provide one" \
 said=$(NCFG_DHCPCD_HOOK="$work/no-such-hook" apply_with_path "$work/bin")
 contains "with no hook either, it says the hook is why dhcpcd was not used" \
 	"$said" "the dhcpcd hook is not installed"
-contains "and still says what to install" "$said" "udhcpc and busybox are not installed"
+# **Each of the three is accounted for, whatever this machine has.** The check
+# here was `udhcpc and busybox are not installed`, which is only one of the
+# answers: on a machine with `/usr/bin/busybox` the right sentence says it is
+# not on PATH instead, and pinning the other made this fail for being correct.
+# What the message must do -- the comment above is the whole of it -- is carry
+# every candidate's reason rather than dropping the ones that are not the
+# fault, so that is what is asserted.
+for name in dhcpcd udhcpc busybox; do
+	contains "  and accounts for $name" "$said" "$name"
+done
 
 # ------------------------------------------------- there, with no exec bit
 
