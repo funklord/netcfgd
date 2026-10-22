@@ -12498,6 +12498,142 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.524 hull is where the emulator, container and VM testing is heading
+
+"once hull becomes useful maybe you should start using it for the
+emu/container/vm testing", the copyright holder, 2026-10-22, said while asking
+for nm.sh to be run in a container.
+
+Not an instruction to adopt it and not a date. It is the direction, and it is
+written here because this tree has grown three separate ways to start a guest
+and a fourth is always the easy thing to add: the `vm-*` targets (0265),
+`make live-container`'s own `docker run`, and whatever one-off a session writes
+when it needs a package the host does not have -- 10.523 is one of those, and
+it existed for an hour.
+
+**So the rule to apply is about adding, not about replacing.** A session about
+to write a fourth should read hull first and raise the question rather than
+build another one; what exists keeps working until there is a reason to move
+it. `hull` is a private project in its own tree and its readiness is its own
+to report.
+
+## 10.523 nm.sh in a container, and the two reasons it had never run in one
+
+"run nm.sh in the live container", the copyright holder, 2026-10-22, after
+10.522 recorded that this machine has no `nmcli` and that 0282's two
+expectations in that file were therefore derived from the shim's source rather
+than observed.
+
+**It passes: 124 checks, nothing skipped**, with `NCFG_LIVE=1` so that a
+missing tool would have been a failure rather than a pass -- which is the
+setting that matters here, since the whole question was whether the script runs
+at all. Both lines 0282 changed are in it: `every named access point the scan
+found is listed` and `and the names came through`, and the three signal
+conversions beside them (-40 to 100, -100 to 0, -53 to 79) are unmoved by the
+two networks the fake gained.
+
+### `make live-container` could not have run it, for two reasons
+
+Neither is a defect in the script and both are the same shape as the
+`dhcpcd-base` finding that target's own comment records -- a container run
+covering less than the host while looking like more.
+
+- **`nmcli` is not in `LIVE_PACKAGES`**, and only `network-manager` ships it.
+  So nm.sh skipped, and its skip read exactly like the two that the comment
+  above the target explains as expected.
+- **The shim was never built in there.** The container script built the Rust
+  workspace and the `ncfg` symlink; the live scripts drive `c/netcfgd` and
+  `adapter/netcfgd-nm/c/netcfgd-nm` **by path**, and those arrived only as
+  whatever binaries `cp -a /src /work` happened to copy out of the host tree.
+  Where the host had not built them the script skipped; where it had, the
+  container was running the host's binary rather than one built in it.
+
+Both are fixed: the package list gains `network-manager`, `libdbus-1-dev`,
+`pkg-config` and `python3-dbus`, and the container script cleans and then
+builds the C and the shim before `make live`. `libdbus-1-dev` is what the
+shim's build needs and is how the first attempt failed -- `#include
+<dbus/dbus.h>` not found, which is a better error than a skip and is the only
+reason this was found in one go.
+
+**The clean is the half that makes the build real, and without it the fix was
+hollow.** `cp -a` preserves mtimes and `c/Makefile`'s `.build-flags` stamp
+records the flag string rather than the compiler, so a build in the container
+inherits the verdict the host left -- nothing to be done -- and compiles not
+one file. That is a build step that looks like one and is not, and it was found
+by reading the mechanism rather than by watching it: the recipe sends both
+builds to `/dev/null`, so there is nothing in the log either way. The whole
+value of building in the image the runner uses is that its toolchain is not the
+one here, which an inherited binary gives up entirely.
+
+**The way to notice this class is to run a script in there and read its
+output.** Nothing about the package list looks wrong until a script says
+`skipping` in a container built to stop it skipping, and a suite that reports
+every skip as expected is one where a new skip is invisible.
+
+### And running the target found two more of the same thing, one of them loud
+
+**`bc` is not in the image, and `apply_race.sh` pipes a count through it.** The
+script exited 127, `make live` stopped there, and the 66 script invocations at
+or after it -- of 81 -- never ran at all. So the target had been covering a
+third of the suite while printing 362 passing checks on the way, which reads
+exactly like a full run to anybody not counting. The host has `/usr/bin/bc`,
+which is why nobody met it here.
+
+**`dhcpcd_orphan.sh` then stopped it at 35 scripts, and the cause was not
+namespaces.** Its guard is `unshare --map-root-user --map-auto --mount --uts
+--net`, and `--map-auto` reads `/etc/subuid` and `/etc/subgid`, which an image
+does not ship for root -- `no line matching user "root" in /etc/subuid`.
+Probed directly in the image rather than inferred: with a `root:100000:65536`
+line in both files the call succeeds, and nested inside another user namespace
+it cannot, which is why the container script writes the files and the Makefile
+runs that script without an outer `unshare`. A developer machine has the
+equivalent line for its own user.
+
+**Both are the same shape as `nmcli`**, and the shape is the finding: an image
+is not a machine, and every tool a script reaches for is a thing the host
+happens to have. The guard against it is not a longer list, it is running the
+suite in there and reading where it stops.
+
+**Where it stops now: 53 of the 81 invocations, at `control_exposure.sh`**,
+with no failures on the way -- from 15 before `bc`. That script wants a
+secondary group to watch a chown onto, and root in an image has one group.
+
+**The flag for that was tried and reverted, because it moved the stopping
+point backwards.** `docker run --group-add users` gets past
+`control_exposure.sh` and makes `link_local.sh` fail four checks about the pid
+of the client netcfgd started. Isolated rather than assumed: that one script,
+run twice in this image with nothing else changed, passes 19 checks with one
+group and 15 with two.
+
+**And the comfortable explanation was the one to refuse.** The first reading
+was load -- another project was building in a second container at the time --
+which would have left the flag in and the failure unexplained. The experiment
+that would have confirmed it is the one that disproved it, which is
+`running-code.md`'s rule: a refusal leaves the question open and a disproof
+removes a branch. Why a supplementary group reaches that code is unknown, and
+the next step is named in the Makefile rather than guessed at -- run it with
+the group and read the `apply.txt` that script keeps and does not print. The
+apply's own failure text says neither "error" nor "failed", so the check above
+reports no failure either way, which is why this presented as a missing pid
+file rather than as a refused start.
+
+### The container also found an intermittent that is not the container's
+
+`network_arrives.sh` failed its second check -- "and told the supplicant about
+it" -- on a run where every later check passed, while this machine was also
+building another project in a second container. The check reads
+`grep -c "ssid <hex>" daemon.log` with no wait, and **the check above it cannot
+be the synchronisation point**: `associated()` reads netcfgd's view of
+`STATUS`, and the fake supplicant reports the station as already on `HomeFiber`
+before anybody has configured anything -- which that script states in as many
+words about the `JOIN` checks forty lines further down.
+
+The two `told_about` checks below it have always been wrapped in `awaits`; this
+one was not. It is now. **Non-reproduction is not what justifies the fix** --
+the script passes here either way, and it passed in the container run before
+this one -- the mechanism is: an unsynchronised read of a log another process
+writes, on the one check in the file that lacked the wait its siblings have.
+
 ## 10.522 The socket witness is generated, and the wifi lines say what the fakes answer
 
 "now build socket.json from the C too", then "re-author the six lines to what
@@ -12598,12 +12734,16 @@ from a row of a kind it does not know. A fixture that moves is how a test that
 asserts the wrong thing gets read again.
 
 `tests/live/nm.sh` held the last two literals, four access points and the
-sorted name list. **It could not be run here -- this machine has no `nmcli`**
--- so its new expectations are derived from the shim's own code rather than
-observed: `accesspoint.c` keys a slot by bssid and skips only a row whose
-bssid is empty, so a nameless access point is listed with an empty name. Both
-checks ask about named rows only, which keeps what the shim does with a
-nameless one out of a file nobody here can run.
+sorted name list. This machine has no `nmcli`, so when they were written their
+new values were derived from the shim's own code rather than observed:
+`accesspoint.c` keys a slot by bssid and skips only a row whose bssid is empty,
+so a nameless access point is listed with an empty name. Both checks ask about
+named rows only, which keeps what the shim does with a nameless one out of an
+assertion.
+
+**They are observed now**, in a container with NetworkManager installed:
+10.523 has the run, what it took to make it possible, and the two reasons that
+file had never run in a container before.
 
 The rig is `c/tests/fakewifi.h`, extracted from `daemon_wifi_test.c` rather
 than copied -- a forked `timeout 60 python3`, a socket waited for rather than

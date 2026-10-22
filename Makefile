@@ -1636,9 +1636,25 @@ LIVE_IMAGE ?= rust:1-slim-trixie
 # version, so `dhcpcd.sh` skipped inside the container while passing on the
 # host -- a container run that covers *less* than the host is worse than none,
 # because it looks like more.
+# `network-manager`, `libdbus-1-dev`, `pkg-config` and `python3-dbus` arrived
+# together and for one reason: `nm.sh` could not run in here at all. It needs
+# `nmcli`, which only `network-manager` ships, and it needs the shim, which
+# needs libdbus to build -- so the container skipped the whole script and the
+# skip read like the two the comment above explains. That is the `dhcpcd-base`
+# lesson a second time, and the way to notice it is to run a script in here and
+# watch it say `skipping` rather than to read the list.
+#
+# **`bc` is the same lesson with teeth, and it had stopped this target a third
+# of the way in.** `apply_race.sh` pipes a count through `bc`; the host has it
+# and this image does not, so the script exited 127, `make live` stopped there,
+# and the 66 invocations at or after it -- of 81 -- never ran at all. A skip is
+# quiet and an abort is loud, but both end with a container that covered less
+# than the host, and the run above it printed 362 passing checks on the way to
+# covering a third of the suite.
 LIVE_PACKAGES = build-essential libncurses-dev iproute2 iputils-ping dnsmasq \
                 dhcpcd-base hostapd wpasupplicant openvpn wireguard-tools \
-                ppp pppoe iw kmod python3 socat unbound
+                ppp pppoe iw kmod python3 python3-dbus socat unbound \
+                network-manager libdbus-1-dev pkg-config bc uidmap
 
 live-container:
 	@command -v docker >/dev/null 2>&1 || { \
@@ -1656,9 +1672,39 @@ live-container:
 		'apt-get -qq install -y $(LIVE_PACKAGES) >/dev/null' \
 		'# Copied, not built in place: /src is read-only so the host tree' \
 		'# cannot be left holding root-owned build output.' \
+		'# A subordinate id range for root, which `dhcpcd_orphan.sh` needs' \
+		'# and an image does not ship. That script makes its own user,' \
+		'# mount and network namespaces with `unshare --map-auto`, which' \
+		'# reads these two files; without them it refuses, and because' \
+		'# `make live` runs that one with NCFG_LIVE=1 the refusal is a' \
+		'# failure that stops the suite. A developer machine has the' \
+		'# equivalent line for its own user, which is why nobody here' \
+		'# meets this.' \
+		'printf "root:100000:65536\\n" > /etc/subuid' \
+		'printf "root:100000:65536\\n" > /etc/subgid' \
 		'cp -a /src /work && cd /work' \
 		'cargo build --workspace --quiet' \
 		'make ncfg-link PROFILE=debug >/dev/null' \
+		'# **Built in here, not inherited, and cleaned first or it is' \
+		'# neither.** The copy above brings the host tree with whatever' \
+		'# binaries were sitting in it, and the live scripts drive' \
+		'# `c/netcfgd` and the shim by path -- so without this the' \
+		'# container runs whatever binaries the host had, where they' \
+		'# exist, and skips the rest, which is the one thing a container' \
+		'# run must not do: cover less than the host while looking like' \
+		'# more.' \
+		'#' \
+		'# The clean is not tidiness. `cp -a` preserves mtimes and' \
+		'# `.build-flags` records the flag string rather than the' \
+		'# compiler, so an unclean build here inherits the verdict the' \
+		'# host left -- nothing to be done -- and compiles not one file,' \
+		'# which is a build step that looks like one and is not. The' \
+		'# whole value of building in the image the runner uses is that' \
+		'# its toolchain is not the one on this machine.' \
+		'make -C c clean >/dev/null' \
+		'make -C adapter/netcfgd-nm/c clean >/dev/null' \
+		'make -C c >/dev/null' \
+		'make nm >/dev/null' \
 		'exec make live' \
 		> $(DIST)/live-container.sh
 	@# **Named, because the name is the only handle on it.** An outer
@@ -1672,6 +1718,23 @@ live-container:
 	@# The inner `make live` carries `LIVE_TIMEOUT` with it, so the
 	@# per-script bound applies in here as well; this is the bound on the
 	@# thing that bound cannot reach.
+	@# **No `--group-add`, and that is measured rather than an omission.**
+	@# `control_exposure.sh` wants a secondary group to watch a chown onto
+	@# and stops the suite without one, so the flag was added -- and it
+	@# moved the stopping point BACKWARDS: with `--group-add users`,
+	@# `link_local.sh` fails four checks about the pid of the client
+	@# netcfgd started, and without it that script passes. Isolated by
+	@# running that one script in this image twice with nothing else
+	@# changed: 19 checks pass with one group and 15 pass with two.
+	@#
+	@# Why a supplementary group reaches that code is not known, and the
+	@# next step is written here rather than guessed at: run it with the
+	@# group and read `$$work/apply.txt`, which that script keeps and does
+	@# not print. The apply's own failure text says neither "error" nor
+	@# "failed", so the check above it reports no failure either way --
+	@# which is why this looked like a missing pid file rather than a
+	@# refused start.
+	@#
 	@# One recipe line, because each one is its own shell: announcing the
 	@# name from a line of its own printed a different `$$$$` from the one
 	@# the container got, so the message named a container that did not

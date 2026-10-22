@@ -251,6 +251,17 @@ check "the daemon joined the one network it was started with, unasked" \
 # At least once rather than exactly once: netcfgd re-sends the set on a pass
 # that rebuilds the supplicant's configuration, and how many times it does that
 # is not what this script is about.
+#
+# **Waited for, which the two `told_about` checks below always did and this one
+# did not.** The check above cannot be the synchronisation point: `associated()`
+# reads netcfgd's view of `STATUS`, and the fake reports the station as already
+# on `HomeFiber` before anybody configures anything -- which this script says
+# in as many words forty lines down about the `JOIN` checks. So this read the
+# log at whatever moment the association check happened to return, and under
+# load it read it too early: seen failing once in a container run on a machine
+# that was also building another project, with every later check in the script
+# passing.
+awaits '[ "$(told_about HomeFiber)" -ge 1 ]' || true
 check "and told the supplicant about it" \
 	"$([ "$(told_about HomeFiber)" -ge 1 ] && echo yes || echo no)" yes
 check "and knows nothing of a network nobody has configured" \
