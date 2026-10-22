@@ -30,7 +30,19 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * **`linux/if.h` and `linux/ip.h` before the tunnel header, out of
+ * alphabetical order on purpose.** `linux/if_tunnel.h` is here for the
+ * `IFLA_GRE_*` attribute numbers, and it needs `IFNAMSIZ` and a complete
+ * `struct iphdr` that it included for itself until the uapi headers were
+ * cleaned up: Debian's 6.12 set includes both and Alpine's 7.0.0 includes
+ * neither, so this compiled here and failed there. `ops.c` says why these are
+ * the kernel's `linux/if.h` rather than libc's `net/if.h` -- the two redefine
+ * each other's structures, and a .c file decides it for nobody else.
+ */
+#include <linux/if.h>
 #include <linux/if_bridge.h>
+#include <linux/ip.h>
 #include <linux/if_tunnel.h>
 
 /*

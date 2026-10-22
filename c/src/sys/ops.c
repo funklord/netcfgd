@@ -35,9 +35,18 @@
  * public header would decide that for them. wire.h refuses the same include
  * for the same reason and writes `ALTIFNAMSIZ` out instead. In a .c file
  * nothing is being decided for anybody.
+ *
+ * **`linux/ip.h` is out of alphabetical order on purpose.** It has to precede
+ * `linux/if_tunnel.h`, whose `struct ip_tunnel_parm` has a `struct iphdr` in
+ * it: that header included its own prerequisites until the uapi set was
+ * cleaned up, and Debian's 6.12 headers do while Alpine's 7.0.0 do not -- so
+ * this compiled here and failed there with `field 'iph' has incomplete type`.
+ * A header asked for what it needs cannot be taken away by somebody else's
+ * tidying.
  */
 #include <linux/if.h>
 #include <linux/if_bridge.h>
+#include <linux/ip.h>
 #include <linux/if_tunnel.h>
 #include <linux/veth.h>
 
