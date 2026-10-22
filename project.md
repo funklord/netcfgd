@@ -12498,6 +12498,62 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.525 Five clang warnings, and the count that overruled the convention
+
+Noted as open earlier on 2026-10-22 and closed here: `clang
+-Wsign-conversion` reported five implicit conversions in `src/plan/` that gcc
+never reports, all the same shape -- a kind held as an `int` passed to a
+`_name()` function that takes its enum.
+
+**They are not cosmetic, because `make fuzz` compiles these sources with
+clang.** `FUZZ_CFLAGS` carries the project's whole warning set and `FUZZ_OBJS`
+covers every library source, so those five printed on every fuzz build. That
+is what makes this code in the way of a tool this project runs rather than a
+tidier spelling.
+
+### The wrong turn, which the measurement caught
+
+`value.h` states the convention plainly -- "`_name` returns NULL for a value
+outside its set" -- and **an enum parameter cannot honour that**: a value
+outside the set has been converted by the time the body could check it. Sixteen
+of these functions take an `int` and `ncfg_outcome_name` says why in its own
+comment. So the four the warnings named were changed to take an `int`, which is
+what the convention argues for.
+
+**That took the library from 5 clang warnings to 30.** The value is held as an
+enum in far more places than as an `int`, so an `int` parameter moved the
+conversion to twenty-five other call sites and added twenty more. Neither
+signature is clean, because the kind genuinely lives in both types here: a
+struct carries it as `int` with the enum in a comment, and a local or a
+parameter carries the enum.
+
+**The number is the whole of the argument and it was taken second.** Had the
+scope count come first -- clang over `src/` and `client/`, both ways -- the
+reasoning from the convention would never have been written. `evidence.md` says
+to re-derive the scope number because nothing downstream will; this is that,
+with the convention standing in for the number until somebody counted.
+
+So the signatures are unchanged and the five int-holding call sites carry an
+explicit cast. Clang over `src/` and `client/` reports **0**, a fuzz target
+builds with none, gcc builds unchanged, and the C suite passes -- the casts
+change no behaviour, which is what makes this a readable diff rather than a
+risk.
+
+### What is left, named rather than swept
+
+Ten `_name` functions still take their enum and sixteen take an `int`, which is
+a real inconsistency against a convention `value.h` states for every set. A
+signature change across the tree is its own piece of work and the count above
+says it would be the wrong direction anyway for the ten -- so what is wanted is
+a decision about which form the convention means, not a sweep. Nothing in the
+build currently sees it: at zero warnings both forms compile silently.
+
+**And nothing keeps the count at zero.** There is no clang gate here; `make
+fuzz` is where the warnings showed and it is not part of `check`. A gate that
+compiled the library with clang for warnings alone would hold it, which is the
+shape ossacli's `check-clang` has -- raised here rather than built, since a new
+gate is a convention change and the one that exists is another tree's.
+
 ## 10.524 hull is where the emulator, container and VM testing is heading
 
 "once hull becomes useful maybe you should start using it for the
@@ -12516,6 +12572,29 @@ to write a fourth should read hull first and raise the question rather than
 build another one; what exists keeps working until there is a reason to move
 it. `hull` is a private project in its own tree and its readiness is its own
 to report.
+
+**The trial is deferred, by the holder, on 2026-10-22: hull is reaching full
+usability rapidly and this tree is to carry on with other work until it is
+done.** So nothing here has been tried against it, and the paragraph below is
+hull's account rather than a measurement of this tree's.
+
+**What hull reports, asked the two questions this suite would decide on**
+(their words, their measurement, 2026-10-22): a package set like
+`network-manager` and `bc` arrives through a hull build step rather than a
+machine spec, and groups and `/etc/subuid` are the image's -- on a vm the
+guest's own in full, because its root is the real root of its kernel. The 81
+live scripts' `unshare -rn` works inside a vm guest and is refused inside a
+chroot one, so the vm engine is the one that would apply here. They echo the
+mtime finding in 10.523 unprompted: a tree shared into a machine keeps the
+host's mtimes, so a build inside has to clean first.
+
+**And the line that would make it materially better rather than tidier**: they
+say a vm guest loaded `mac80211_hwsim` and got `phy0` and `phy1`. That is the
+one thing `make live-container` structurally cannot do -- its own comment says
+so, because a container shares the host's kernel and this host has no such
+module -- and `hwsim.sh` is a script this workspace has never been able to
+run. Several machines on one wire, which `delegation.sh` would want, waits on
+their segments work.
 
 ## 10.523 nm.sh in a container, and the two reasons it had never run in one
 
@@ -12594,12 +12673,21 @@ is not a machine, and every tool a script reaches for is a thing the host
 happens to have. The guard against it is not a longer list, it is running the
 suite in there and reading where it stops.
 
-**Where it stops now: 53 of the 81 invocations, at `control_exposure.sh`**,
-with no failures on the way -- from 15 before `bc`. That script wants a
-secondary group to watch a chown onto, and root in an image has one group.
+**Where it stops now: 75 of the 81 invocations, and `nm.sh` is one of them** --
+`nm.sh: all checks passed` inside `make live-container`, which is the whole
+point of this entry reached through the target rather than through a one-off.
+Zero failures on the way, from 15 invocations before `bc`.
 
-**`docker run --group-add users` gets past it, and the first version of this
-entry blamed that flag for something it cannot do.** The claim was that the
+It stops at `sandbox_writes.sh`, which says why: no systemd in a container, so
+the unit's real sandbox cannot be checked. That is a third member of the family
+the target's own comment already keeps -- `hwsim.sh` wants a module the host
+does not have and `delegation.sh` wants a package Debian does not ship -- and
+it is the kind of limit a container cannot be talked out of. A guest with its
+own init is on hull's roadmap (10.524).
+
+**`docker run --group-add users` is what gets past `control_exposure.sh`, the
+invocation that used to be the end, and the first version of this entry blamed
+that flag for something it cannot do.** The claim was that the
 flag moved the stopping point backwards, because `link_local.sh` failed four
 checks about the pid of the client netcfgd started on a run with it and passed
 on a run without -- "isolated with nothing else changed", which is the sentence
