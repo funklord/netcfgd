@@ -12498,6 +12498,60 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.530 The systemd payload on hull: 30 of 31, and the 31st is a mount option
+
+"do the systemd payloads then", the copyright holder, 2026-10-23, after hull
+`bfeb65f` fixed the setuid bug and `0681fb3` gave a machine the image's own
+init. The rig is `tests/hull/sandbox/` and it runs
+`tool/vm/payload/sandbox_writes.sh` **unchanged** -- the same file
+`make vm-sandbox` runs on this tree's own VM tier (0265), which is what makes
+the two comparable.
+
+**It works, and the comparison is 30 of 31 against 31 of 31.** In the hull
+guest: PID 1 is systemd 257, `/run/systemd/private` appears 1.3 seconds in,
+`systemctl is-system-running --wait` says `running`, and `systemd-run` imposes
+the unit's properties. The native tier, run the same afternoon for the
+comparison, passes all 31.
+
+### The one that differs, and it is not the script
+
+The failing check is one of the script's own controls: with `ExecPaths=`
+dropped, executing from netcfgd's runtime directory must be **denied**, or the
+check above it measured the machine rather than the unit's declaration. Under
+hull it is allowed, so the control fires -- correctly, which is the whole
+reason that control exists.
+
+Measured on both guests, same systemd 257.13-1~deb13u1, same Debian 13:
+
+    native   /run tmpfs rw,nosuid,nodev,noexec,relatime,size=99028k,mode=755
+    hull     /run tmpfs rw,nosuid,nodev,size=404248k,mode=755,inode64
+    native   a script in /run: Permission denied
+    hull     a script in /run: RAN
+
+So `/run` carries no `noexec` in a hull guest, and a unit property that relies
+on it is silently unenforced there. **What is established** is the difference
+and its consequence; **what is not** is who mounts it that way -- with the init
+hand-over removed, `/run` is not a mount point at all, so it is systemd's own
+mount in both cases and the flags differ for a reason not yet named. The ratio
+differs too, 10 per cent of RAM on the native guest and 20 in the hull one,
+which is another hint that the mount is not made the same way.
+
+**The finding went to hull with both lines.** It is their fifth from this tree
+and the first that only a tier comparison could produce: one guest passing a
+control and another failing it, with the script, the distribution and the init
+identical.
+
+### What this says about the move
+
+For this payload hull is one mount option short of equivalent, and the gap is
+visible rather than silent because the script carries a control for exactly
+this. That is the argument for controls restated by somebody else's
+environment: a suite without them would have reported 30 passes and no
+failure, and the missing enforcement would have been invisible.
+
+The rig stays. It is the cheapest reproduction of the difference, and when
+hull's `/run` carries `noexec` it is also the check that the move is complete.
+
 ## 10.529 The clang gate, and two vacuous passes on the way to it
 
 "add the clang gate", the copyright holder, 2026-10-23, settling 10.528's
@@ -12603,15 +12657,16 @@ nine. Each item names where it is argued.
   user drops all eight setuid bits that `hull materialize` keeps, so a payload
   calling `sudo`, or `mount` as a user, must not use it. `hwsim.sh` does not,
   which is the only reason the rig stands on it.
-- **netcfgd's systemd and OpenRC payloads cannot move to hull yet**, and the
-  blocker is one fault rather than the two it looks like. `(init "/sbin/init")`
-  landed on 2026-10-22, so PID 1 can be the image's own; but qemu's 9p shows a
-  guest every file as the host user's, so a setuid-root program is setuid-1000
-  inside and root running it is refused -- and systemd's API-filesystem mount
-  units fail. virtiofs is hull's fix and is next in that engine. When it
-  lands, the thing to run first is a **materialised** image rather than this
-  rig's exported one: the exported tree has no setuid bits to break, so it
-  would report health it has not earned.
+- ~~**netcfgd's systemd and OpenRC payloads cannot move to hull yet.**~~ **The
+  systemd one runs: 30 of 31** (10.530), hull `bfeb65f` and `0681fb3` having
+  fixed the setuid bug and given a machine the image's own init. The 31st is a
+  control that needs `/run` to carry `noexec`, which a hull guest does not,
+  and which the native tier does. The OpenRC payload is still untried.
+
+  The image is baked by docker with its setuid and setgid bits **put back from
+  the image's own listing**, which the hwsim rig does not bother with and this
+  one must: systemd wants them, and hull since `bfeb65f` shows a guest the
+  user's files as root's, so a restored bit is a real setuid-root program.
 - **Alpine: the C and the apk build, and nothing runs the live scripts there**
   (10.526). `make apk-container` is in no gate either, which is how it came to
   be broken for as long as the C port has existed.
