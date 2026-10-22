@@ -12598,24 +12598,37 @@ suite in there and reading where it stops.
 with no failures on the way -- from 15 before `bc`. That script wants a
 secondary group to watch a chown onto, and root in an image has one group.
 
-**The flag for that was tried and reverted, because it moved the stopping
-point backwards.** `docker run --group-add users` gets past
-`control_exposure.sh` and makes `link_local.sh` fail four checks about the pid
-of the client netcfgd started. Isolated rather than assumed: that one script,
-run twice in this image with nothing else changed, passes 19 checks with one
-group and 15 with two.
+**`docker run --group-add users` gets past it, and the first version of this
+entry blamed that flag for something it cannot do.** The claim was that the
+flag moved the stopping point backwards, because `link_local.sh` failed four
+checks about the pid of the client netcfgd started on a run with it and passed
+on a run without -- "isolated with nothing else changed", which is the sentence
+to distrust.
 
-**And the comfortable explanation was the one to refuse.** The first reading
-was load -- another project was building in a second container at the time --
-which would have left the flag in and the failure unexplained. The experiment
-that would have confirmed it is the one that disproved it, which is
-`running-code.md`'s rule: a refusal leaves the question open and a disproof
-removes a branch. Why a supplementary group reaches that code is unknown, and
-the next step is named in the Makefile rather than guessed at -- run it with
-the group and read the `apply.txt` that script keeps and does not print. The
-apply's own failure text says neither "error" nor "failed", so the check above
-reports no failure either way, which is why this presented as a missing pid
-file rather than as a refused start.
+**The flag is inert inside the namespaces every other script runs in.**
+Measured after the claim was committed: `unshare -rn` denies `setgroups`, so
+the groups inside are `0 65534` whether the flag is passed or not -- and `0
+65534` is also what they are on the host, from a user that has eighteen. The
+one script the flag reaches is the one invoked WITHOUT `unshare`, which is
+`control_exposure.sh`, which is what it was added for. So it is back in, and
+this is what "nothing else changed" is worth without checking that the thing
+changed can reach the thing measured.
+
+**The load story is out too, which leaves the failure unexplained.** It was
+the first reading -- another project was building in a second container -- and
+the test is cheap: `link_local.sh` on the host at load 172 passes all 19
+checks. Two explanations, both measured, both gone. One failing observation
+stands with no account of it, which `running-code.md` says is the state to
+leave visible rather than close: non-reproduction is not evidence against an
+intermittent, and the two reproductions since (the host under load, and the
+container without the flag) are not evidence either.
+
+**The next experiment is named rather than guessed at**: run that script in
+the container under quiet load with the flag, and keep `$work` -- the apply's
+own failure text says neither "error" nor "failed", so the check above reports
+no failure either way, which is why this presented as a missing pid file
+rather than as a refused start, and `apply.txt` is the file that would say
+which.
 
 ### The container also found an intermittent that is not the container's
 

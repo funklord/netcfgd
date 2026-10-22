@@ -1718,22 +1718,21 @@ live-container:
 	@# The inner `make live` carries `LIVE_TIMEOUT` with it, so the
 	@# per-script bound applies in here as well; this is the bound on the
 	@# thing that bound cannot reach.
-	@# **No `--group-add`, and that is measured rather than an omission.**
-	@# `control_exposure.sh` wants a secondary group to watch a chown onto
-	@# and stops the suite without one, so the flag was added -- and it
-	@# moved the stopping point BACKWARDS: with `--group-add users`,
-	@# `link_local.sh` fails four checks about the pid of the client
-	@# netcfgd started, and without it that script passes. Isolated by
-	@# running that one script in this image twice with nothing else
-	@# changed: 19 checks pass with one group and 15 pass with two.
+	@# **`--group-add users`, because root in an image has one group.**
+	@# `control_exposure.sh` observes a chown onto a secondary group and
+	@# skips without one, and `make live` runs that one with NCFG_LIVE=1,
+	@# so the skip stops the suite at invocation 57 of 81. Docker's own
+	@# flag rather than a `usermod` in the script: membership added to a
+	@# passwd file does not reach a process that is already running, and
+	@# the suite runs in that process.
 	@#
-	@# Why a supplementary group reaches that code is not known, and the
-	@# next step is written here rather than guessed at: run it with the
-	@# group and read `$$work/apply.txt`, which that script keeps and does
-	@# not print. The apply's own failure text says neither "error" nor
-	@# "failed", so the check above it reports no failure either way --
-	@# which is why this looked like a missing pid file rather than a
-	@# refused start.
+	@# **And it is inert everywhere else, which had to be measured because
+	@# a run with it looked like it had broken `link_local.sh`.** Every
+	@# other script is wrapped in `unshare -rn`, which denies `setgroups`:
+	@# inside it the groups are `0 65534` whether this flag is passed or
+	@# not, and on the host they are `0 65534` too, from a user with
+	@# eighteen. So the flag cannot reach the scripts that run in there.
+	@# That failure is unexplained rather than explained -- see 10.523.
 	@#
 	@# One recipe line, because each one is its own shell: announcing the
 	@# name from a line of its own printed a different `$$$$` from the one
@@ -1742,7 +1741,7 @@ live-container:
 	@# network access and worth seeing.
 	name=netcfgd-live-$$$$; \
 	echo "live-container: $$name; stop it with 'docker kill $$name'"; \
-	docker run --rm --privileged --name "$$name" \
+	docker run --rm --privileged --name "$$name" --group-add users \
 		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
 		$(LIVE_IMAGE) sh /dist/live-container.sh
 
