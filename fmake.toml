@@ -22,8 +22,10 @@
 # if it defines a `main`.
 #
 # So the naming refusal is not a reason for the exclusion any more. The
-# workspace reasons above are, and they stand on their own. Whether the
-# exclusion is still needed at all has not been measured here (10.421).
+# workspace reasons above are, and they stand on their own -- and they are
+# enough: `netcfgd-sys` declares `libc` and `serde_json` arrives through the
+# workspace, so the dependency graph leaves a tree with no vendored registry
+# in it, and fmake resolves nothing from one (10.521).
 [project]
 exclude = ["crates", "backend", "adapter", "fuzz"]
 

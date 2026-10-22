@@ -12498,6 +12498,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.521 The fmake exclusion is still needed, and 10.421's last line is answered
+
+Reported through `.git/cc-inbox/` on 2026-10-22, from fmake, which measured it
+from the end where the answer is cheaper.
+
+**`fmake.toml`'s exclusion of `crates/` stands, on the first of its two reasons
+only.** `crates/netcfgd-sys/Cargo.toml` declares `libc = "0.2"`, `serde_json`
+arrives through the workspace, and there is no vendored registry in the tree --
+so the dependency graph leaves the tree and fmake resolves nothing from a
+registry. That is the reason the comment gives first. The naming refusal it
+also cited is gone, as 10.424 already recorded.
+
+So the question that comment left open is answered rather than open, and its
+last sentence says so now. Nothing else in the entry changes.
+
+**Asking it found a fault on their side, which is the part worth keeping.** The
+sentence that orients a reader who has met this -- "`mod` draws a file into
+this crate; `use othercrate::` needs Cargo" -- sat behind a test for a SECOND
+crate root in the tree, so a single-crate tree using a registry crate got
+rustc's `unresolved import` and nothing of fmake's. This tree is exactly that
+shape. The gate is keyed on what rustc said (`E0432`, `E0433`, `E0463`) rather
+than on the layout now, which also fixes it in the other direction: a parse
+error in a tree with a `lib.rs` beside a `main.rs` had been answered with
+advice about dependency graphs. Their `f5c7eb5`.
+
+**The shape, because this tree keeps meeting it.** A guard keyed on a LAYOUT
+when it meant a CAPABILITY fires on the wrong population twice -- silent where
+it is needed, wrong where it is not. 10.511's seeds that parsed without
+reaching the parser are the same error in a corpus, and `evidence.md` names it
+for guards directly: ask the thing you mean, not something correlated with it.
+
 ## 10.520 The witnesses moved to the C, and one byte decided whether it was cheap
 
 "now move the witness generation to the C", the copyright holder, 2026-10-22,
