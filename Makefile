@@ -91,8 +91,11 @@ CARGO ?= cargo
 # being asked is whether the next line will work.
 FMT_OK    = $(CARGO) fmt --version >/dev/null 2>&1
 CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
+# And the second C compiler, for the `clang` gate. A program rather than a
+# subcommand, so the question is whether it is on PATH.
+CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
+.PHONY: clang ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
 
 all: build
 
@@ -137,10 +140,10 @@ ncfg-link:
 # on**. Everything in PORTABLE_GATES gives the same answer on any machine that
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
-PORTABLE_GATES = style fmt ascii shell clippy unsafe-policy executor-policy \
-                 nm-containment packaging claims client-test conformance test \
-                 example gui linkage c-test agree ledger module-order \
-                 registry bridge-test nm-c-test
+PORTABLE_GATES = style fmt ascii shell clippy clang unsafe-policy \
+                 executor-policy nm-containment packaging claims client-test \
+                 conformance test example gui linkage c-test agree ledger \
+                 module-order registry bridge-test nm-c-test
 BUDGET_GATES   = size footprint rss
 
 check: $(PORTABLE_GATES) $(BUDGET_GATES)
@@ -304,6 +307,41 @@ clippy:
 	else \
 		echo "clippy: not installed, skipping"; \
 		echo "clippy:   apt install rust-clippy, or rustup component add clippy"; \
+	fi
+
+# What a second C compiler sees, and gcc does not.
+#
+# **This exists because five real findings were sitting where nothing looked.**
+# `-Wsign-conversion` in `src/plan/` reported conversions gcc passes over
+# silently, and they printed only on `make fuzz`, which builds with clang and
+# is not part of `check` -- so the one place they appeared was a target nobody
+# runs in the ordinary course of work (10.525). A gate that reads them is the
+# difference between a warning and a warning somebody sees.
+#
+# It compiles nothing: each component's `syntax` target is `-fsyntax-only` with
+# that component's own `$(CFLAGS)`, so clang reads exactly what gcc reads,
+# writes no object into gcc's paths, and cannot drift from the build the way a
+# second copy of the flags would.
+#
+# **The test sources are not in it, and the gap is a number rather than a
+# silence**: clang reports 40 over `c/tests/` as of 2026-10-23, 36 signedness
+# conversions and 4 string concatenations, which is its own piece of work.
+# `make -C c syntax-tests CC=clang` counts them. It was 41 until the first look
+# found a real one -- a `ncfg_block_t` an `&&` could leave unwritten in
+# `scope_test.c`, which gcc does not report.
+#
+# Skipped loudly where clang is absent, which is `clippy`'s shape and the same
+# bargain: a machine without the tool still runs the rest of `check`, and the
+# skip says what to install. `harmonization.md`'s `make -n` hazard does not
+# apply -- this recurses, but nothing harvests what the sub-make prints.
+clang:
+	@if $(CLANG_OK); then \
+		$(MAKE) --no-print-directory -C c syntax CC=clang && \
+		$(MAKE) --no-print-directory -C client syntax CC=clang && \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c syntax CC=clang; \
+	else \
+		echo "clang: not installed, skipping"; \
+		echo "clang:   apt install clang"; \
 	fi
 
 # The C client's test binary, which `conformance` and `test` both need.

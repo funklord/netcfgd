@@ -262,6 +262,52 @@ tests/world_test: tests/world_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .bui
 tests/answer_test: tests/answer_test.c $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) .build-flags
 	$(CC) $(CFLAGS) $< $(PROGRAM_PARTS) $(SHARED_OBJS) $(LIB) $(LDFLAGS) -o $@
 
+# A parse and a check of every source, writing nothing.
+#
+# **This exists so that a second compiler can be run over the tree without
+# building with it.** `make syntax CC=clang` is the root `clang` gate: clang
+# reads what gcc reads, with the same flags, and reports what it alone sees --
+# 0183's `-Wsign-conversion` findings in `src/plan/` were gcc-invisible and
+# printed only on a `make fuzz`, which is not part of `check`.
+#
+# Two things it must not do, and both are the reason it is a target here rather
+# than a loop in the root Makefile. It must not write objects: a clang `.o` in
+# the same path as gcc's is the mixing `.build-flags` exists to prevent, and
+# `-fsyntax-only` writes nothing at all. And its flags must not be a second
+# copy: they are `$(CFLAGS)`, so a warning added to `WARNINGS` reaches this
+# without anybody remembering, which is the whole value of a second compiler.
+#
+# `-MMD -MP` are filtered out because they write dependency files even under
+# `-fsyntax-only`, and a `.d` written by a compiler that did not build the
+# object is a prerequisite list for something that does not exist.
+#
+# **`-Werror`, because a warning does not fail a compiler.** The first version
+# of this had `-fsyntax-only` and nothing else, and clang exits 0 having
+# printed every finding -- so the gate passed with the warnings it exists to
+# catch on screen above it. All four controls failed to fail, which is the only
+# reason it was noticed.
+SYNTAX_CFLAGS = $(filter-out -MMD -MP,$(CFLAGS))
+
+syntax:
+	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(SRCS) $(PROGRAM_SRCS) $(SHARED_SRCS)
+	@printf 'syntax: %s read %s source(s) with no warning\n' "$(CC)" \
+		"$(words $(SRCS) $(PROGRAM_SRCS) $(SHARED_SRCS))"
+
+# The test sources, which are NOT in the gate and are counted here so that the
+# gap is a number rather than a silence: clang reports 40 over them
+# (2026-10-23) -- 36 signedness conversions, 4 string concatenations -- and
+# fixing them is its own piece of work. Run as `make syntax-tests CC=clang`.
+#
+# It was 41, and the one that went was not stylistic: `scope_test.c` used a
+# `ncfg_block_t` that an `&&` could leave unwritten, since `_from_name` leaves
+# `*out` untouched when it refuses. gcc reports nothing there. One real defect
+# in the first look at a corner nothing was watching is the argument for the
+# gate beside it.
+syntax-tests:
+	-@$(CC) $(SYNTAX_CFLAGS) -Itests -fsyntax-only $(TEST_SRCS) 2>&1 | \
+		grep -c 'warning:' | \
+		xargs printf 'syntax-tests: %s finding(s) over the test sources\n'
+
 # ---------------------------------------------------------------- fuzzing
 #
 # WHAT IS HERE AND WHY IT IS TWO THINGS

@@ -64,6 +64,19 @@ endif
 
 .PHONY: all test clean fuzz fuzz-list fuzz-replay
 
+
+# A parse and a check of every source, writing nothing: `make syntax CC=clang`
+# is what the root `clang` gate runs here. `c/Makefile`'s copy carries the
+# reasoning; the short of it is that the flags are `$(CFLAGS)` so they cannot
+# be a second copy, `-fsyntax-only` writes no object into gcc's paths, and
+# `-MMD -MP` go because they write a `.d` for an object nobody built.
+SYNTAX_CFLAGS = $(filter-out -MMD -MP,$(CFLAGS))
+
+syntax:
+	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(SRCS)
+	@printf 'syntax: %s read %s source(s) with no warning\n' "$(CC)" \
+		"$(words $(SRCS))"
+
 all: $(PROGRAM)
 
 %.o: %.c

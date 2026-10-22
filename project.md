@@ -12498,6 +12498,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.529 The clang gate, and two vacuous passes on the way to it
+
+"add the clang gate", the copyright holder, 2026-10-23, settling 10.528's
+second open decision. `make clang` is in `PORTABLE_GATES`, so it is in `check`
+and `check-ci` by construction, and it reads 224 sources: 206 of `c/`, 2 of
+`client/` and 16 of the shim, with no finding.
+
+### What it is, and what it refuses to be
+
+Each component gained a `syntax` target -- its own `$(CFLAGS)`, plus
+`-Werror -fsyntax-only`, over its own sources -- and the gate is
+`make syntax CC=clang` in each. Three properties were worth the care:
+
+- **It compiles nothing.** A clang `.o` in gcc's path is the mixing that
+  `.build-flags` exists to prevent; `-fsyntax-only` writes no file at all.
+  `-MMD -MP` are filtered out, since they write a `.d` even then, and a
+  dependency file for an object nobody built is a list of prerequisites for a
+  thing that does not exist.
+- **Its flags are not a second copy.** A warning added to `WARNINGS` reaches
+  clang without anybody remembering, which is the whole value of a second
+  compiler and the first thing a hand-written gate loses.
+- **It skips loudly where clang is absent**, which is `clippy`'s bargain here,
+  and names what to install.
+
+### Both vacuous passes, because they are the lesson
+
+**The gate passed with the warnings it exists to catch printed above it.** The
+first version had `-fsyntax-only` and nothing else, and **clang exits 0 having
+printed every finding**. All four controls failed to fail, which is the only
+reason anybody looked. `-Werror` is what makes a warning a failure, and a gate
+whose tool reports by printing rather than by exiting is the shape to suspect:
+the check and the diagnosis are not the same channel.
+
+**And one of the controls was itself vacuous.** The client arm's control
+patched an anchor that did not exist in the file, the edit silently did
+nothing, and the gate's pass was reported as evidence that the arm was blind.
+A control is a check and is untested until it has been seen to fail: the
+anchor assertion now aborts rather than skipping, and with a real edit that arm
+fails as it must. Three arms needed separate controls anyway, the gate's `&&`
+chain meaning a failure in `c/` would never reach the other two.
+
+### What it found on its first look
+
+`c/tests/` is not in the gate and its gap is a number: 40 findings, 36
+signedness conversions and 4 string concatenations, counted by
+`make -C c syntax-tests CC=clang` so that nobody has to take 40 on trust.
+
+It was 41. The one that went was not stylistic: `scope_test.c` declared two
+`ncfg_block_t` and set them in one `check(a && b)`, where `_from_name` leaves
+`*out` untouched on refusal -- so a first lookup that failed would leave the
+second variable holding whatever was on the stack, and three checks after it
+would read that. gcc reports nothing there. One real defect in the first look
+at a corner nothing was watching is the argument for the gate, made by the
+gate.
+
 ## 10.528 What this session left open, 2026-10-22
 
 A fold rather than a finding: the entries above hold the reasoning and this
@@ -12513,11 +12568,11 @@ nine. Each item names where it is argued.
   functions converted, not ten: that figure was wrong here too, and the
   re-measurement is in 10.525. The tree lost 33 casts and 10 shim functions and
   gained 16 casts; clang still reports 0.
-- **Whether a clang gate should hold the zero** (10.525). `src/` and `client/`
-  report no warnings under clang today, and nothing keeps them there: the
-  warnings showed in `make fuzz`, which is not part of `check`. ossacli's
-  `check-clang` is the shape; adding a gate is a convention change and that
-  one is another tree's.
+- ~~**Whether a clang gate should hold the zero.**~~ **Added 2026-10-23 on the
+  holder's instruction** (10.529): `make clang` is in `PORTABLE_GATES`, reads
+  224 sources through each component's own flags, and found a real
+  uninitialised use in `scope_test.c` on its first look. The test sources are
+  not in it and their 40 findings are counted rather than ignored.
 
 **Measured and unexplained**
 

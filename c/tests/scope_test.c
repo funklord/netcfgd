@@ -190,8 +190,16 @@ static void a_sub_block_settles_what_is_under_it(void)
  */
 static void a_second_spelling_is_the_same_key(void)
 {
-	ncfg_block_t rule;
-	ncfg_block_t global;
+	/*
+	 * **Both set first, because `_from_name` leaves `*out` untouched when it
+	 * refuses** -- `value.h` says so as a convention -- and the `&&` below
+	 * short-circuits, so a first lookup that failed would leave `global`
+	 * uninitialised and the checks after it reading whatever was on the
+	 * stack. Found by clang's `-Wsometimes-uninitialized` on the day the
+	 * `clang` gate went in; gcc reports nothing here.
+	 */
+	ncfg_block_t rule = NCFG_BLOCK_GLOBAL;
+	ncfg_block_t global = NCFG_BLOCK_GLOBAL;
 
 	check(ncfg_block_from_name("rule", &rule) && ncfg_block_from_name("global", &global),
 	    "the rule and global blocks resolve");
