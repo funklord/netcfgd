@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.519 The last two vocabularies, and a witness that cannot carry one
+
+"now add the same gate for link and backend kinds", the copyright holder,
+2026-10-22. Fifteen interface kinds and ten backends, in section 6.4 with a
+row each, held to `netcfgd --supported` in both directions. And the
+measurement that had to come first found something the other four tags did
+not.
+
+### `observed.json` names nine backends and the build has ten
+
+`ncfg_backend_kind_name` answers for ten. `doc/schema/observed.json` carries
+nine. The tenth is `link_local`, an IPv4LL client for
+`config = "link-local"`, and **the witness structurally cannot carry it**:
+`make schema-bless` regenerates these four files by running the RUST's tests,
+the Rust has no word for an IPv4LL backend, and
+`c/include/ncfg/observed.h` says so where the value is appended -- "the tenth
+is the C's own: the Rust has no word for it, which `ncfg status` shows on a
+machine that configures one and nowhere else."
+
+So this is not drift and blessing would not fix it. It is 0266's shape in the
+last place nobody had looked: **the frozen witnesses are produced by the
+implementation that was retired.** The gates that read them have been
+re-pointed one at a time this week -- `dbus_policy_gate`, `linkage`,
+`tier_table_gate` -- and the witnesses themselves are the remaining instance.
+Moving their generation to the C is a cross-cutting change to four files and
+`make schema-bless`, so it is reported rather than done.
+
+**The exception is named and self-checking**, which is the part worth copying.
+`WITNESSLESS_BACKEND = "link_local"` excuses exactly one kind, and two
+assertions keep it honest: if the witness ever carries that kind the gate
+fails, because the generator has moved and the entry is stale; and if the
+build loses the kind it fails too, because then the exception is about
+nothing. A second kind going missing is an ordinary failure. That is
+`dbus_policy_gate.py`'s `CALLED_OUT` pattern -- an excuse that expires.
+
+### What the two tables say that a list of names would not
+
+Same test as 6.3 and the same answer: the names are self-describing, so the
+columns are what the program decides.
+
+**Interface kinds carry whether `link.create` can make one, and the refusal
+where it cannot.** Three of fifteen cannot: `physical` is what netcfgd
+configures and cannot manufacture, and a `pppoe` or an `open_vpn` interface is
+made by the helper that connects it -- so `backend.start` brings one up and a
+netlink message never would. A client showing a plan can print all fifteen;
+only twelve can appear as a `link.create`.
+
+**Backends carry which of start, stop and reload each supports.** One reload
+in ten: only a router advertisement daemon re-reads its configuration, an
+access point's reload would be a restart, and a DHCP client's is the client's
+own business. `dns` and `wire_guard` are started by nothing -- the first is a
+file netcfgd writes, the second is netlink rather than a daemon -- and both
+are in the vocabulary because an observation can report either.
+
+### Six arms, and the one that matters is new
+
+    an interface kind with no row        "6.4 has no row for the `macvlan`
+                                        interface kind, which this build knows"
+    a row for an unknown kind           the mirror of it
+    a backend with no row               the same for the second table
+    a backend missing from the witness  "observed.json names no `dhcp6`
+                                        backend, which this build reports"
+    the exception gone stale            "observed.json now carries the
+                                        `link_local` backend, so the exception
+                                        for it is stale -- the witness
+                                        generator has moved"
+    a table renamed                     "section 6.4 ... has no `#### backends`
+                                        table"
+
+The fifth is the new shape. Every gate in this sequence has had a "this would
+check nothing" arm; this is the first with a "this check is no longer needed"
+arm, and an exception without one is how a workaround becomes permanent.
+
+### The five lists, and what this sequence came to
+
+    section 4    requests           ledger_gate, tier_table_gate
+    section 6.1  events             ledger_gate
+    section 6.2  responses          ledger_gate
+    section 6.3  actions            ledger_gate, three columns
+    section 6.4  kinds              ledger_gate, two tables, one exception
+
+Every wire vocabulary netcfgd has is now listed in one document and held to
+the program's own answers. Nothing in that sentence was true a week ago, and
+the thing that made it possible was not the gates: it was `--supported`
+existing at all, which is a program that prints what it decides rather than a
+document asserting it.
+
 ## 10.518 The ops got a table whose columns a name cannot say
 
 "now add the same gate for op kinds", the copyright holder, 2026-10-22. The
