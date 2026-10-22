@@ -25,7 +25,7 @@
 #
 #   So the packages come from the one tool here that can already install them,
 #   and hull gets what it is good at: a kernel of its own, real root, and the
-#   radios. Replace this script with a `(build …)` form the day that path
+#   radios. Replace this script with a `(build ...)` form the day that path
 #   works; the machine file does not change when it does.
 #
 # WHAT IT DOES NOT INSTALL
