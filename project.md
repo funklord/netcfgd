@@ -12535,11 +12535,27 @@ nine. Each item names where it is argued.
   `sandbox_writes.sh`, which needs systemd as PID 1 (10.523). A container
   cannot be talked out of that. hull's init hand-over is the route, and it is
   the next thing after their segments work.
-- **The hull rig has no Makefile target** (10.527), because the guest image is
-  baked by docker today and hull's spec may change before 1.0. When
-  `hull build` can install a package set -- its one-uid question is what stops
-  `dnsmasq-base` -- the bake script says what to replace it with, and the
-  machine file does not change.
+- **The hull rig has no Makefile target** (10.527), and one reason for that
+  went this evening: the guest builds netcfgd itself now, hull `7b47668`
+  having given the workload a PATH, so the rig no longer borrows the host's
+  binaries. What is left is the image. It is baked by docker, because hull
+  cannot install a package set yet -- its one-uid question is what stops
+  `dnsmasq-base`, decided since as many uids with owners kept, after the init
+  hand-over -- and hull's spec may still change before 1.0.
+
+  **And the baked image is not faithful**: `docker export` through `tar` as a
+  user drops all eight setuid bits that `hull materialize` keeps, so a payload
+  calling `sudo`, or `mount` as a user, must not use it. `hwsim.sh` does not,
+  which is the only reason the rig stands on it.
+- **netcfgd's systemd and OpenRC payloads cannot move to hull yet**, and the
+  blocker is one fault rather than the two it looks like. `(init "/sbin/init")`
+  landed on 2026-10-22, so PID 1 can be the image's own; but qemu's 9p shows a
+  guest every file as the host user's, so a setuid-root program is setuid-1000
+  inside and root running it is refused -- and systemd's API-filesystem mount
+  units fail. virtiofs is hull's fix and is next in that engine. When it
+  lands, the thing to run first is a **materialised** image rather than this
+  rig's exported one: the exported tree has no setuid bits to break, so it
+  would report health it has not earned.
 - **Alpine: the C and the apk build, and nothing runs the live scripts there**
   (10.526). `make apk-container` is in no gate either, which is how it came to
   be broken for as long as the C port has existed.
