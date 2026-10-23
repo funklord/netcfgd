@@ -12498,6 +12498,128 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.533 The link-local failure had a mechanism, and the start now waits
+
+"fix the link_local failure then", the copyright holder, 2026-10-23, on the one
+item 10.528 listed as measured and unexplained: `link_local.sh` failed four
+checks about the pid of the client netcfgd started, in one container run, and
+two explanations had already been disproved.
+
+### Three more disproofs before the code
+
+**`noexec` is out.** The stand-in client is written into `$work` under `/tmp`
+and executed, so a container that mounts `/tmp` `noexec` would produce exactly
+this signature. Measured in the live image: `/tmp` is the overlay root,
+`findmnt` reports no `noexec`, and a script there runs both plainly and inside
+`unshare -rn`.
+
+**The reduced container is out.** The script itself, run in that image against
+this tree, passes all 18 checks.
+
+**Load inside the container is out too**, which is the second time load has
+been tested and the first inside a container: `--cpuset-cpus 0` with four
+spinners, three runs, all checks passed.
+
+**And one of those runs was my own instrument failing.** To keep `$work` the
+probe disabled the script's `trap cleanup EXIT`, and then every run failed one
+check -- the previous run's stand-in outliving the run it belonged to, because
+cleanup is what stops it. The unmodified script under the same load passes. A
+probe that reports a failure of its own making is worse than no probe, and the
+tell was that the failure count was stable at one where the thing being hunted
+was four.
+
+### The mechanism, which is in the code rather than the environment
+
+`ncfg_autoip_start` confirms a start by searching `/proc` for a process
+carrying netcfgd's two markers, **once, at the instant the client has
+detached**:
+
+    pid = ncfg_process_pid_by_markers(marker, 2u);
+    if (pid <= 0) { ... "no client of netcfgd's is running there" ... }
+
+That refusal says neither "error" nor "failed" -- which is what 10.523
+predicted `apply.txt` would say, from reading the script rather than the
+source. So the signature is accounted for: `backend.start` is reported, the
+check for failure text passes, and four checks about the pid fail.
+
+**The question is asked at the one moment it can be answered wrongly.** This
+client writes no pid file and `-D` means the process netcfgd waited for is not
+the one still running, so the answer depends on a second process being in place
+at that instant. With `-w` a real `avahi-autoipd` holds its detach until an
+address has been acquired, so its child is long since there; nothing requires
+that of a client, and a `cmdline` is briefly empty while a child is in `execve`
+regardless.
+
+**The consequence is the worst answer available here**, which is why this is
+worth fixing whatever caused that run: the client is running, netcfgd reports
+the start as failed, and with no pid recorded nothing will ever stop it --
+`--force-bind` means it keeps its 169.254 address alongside whatever replaced
+it. The error message says as much in its own last clause.
+
+So the start waits: `wait_for_client`, 1000 ms of patience in 25 ms steps, both
+named constants with the argument written at them. The shape is `dhcp.c`'s
+`confirm_stopped` -- look, sleep a named step, give up at a named patience --
+kept rather than re-decided. The common case returns on the first look and pays
+nothing; the case the wait cannot help, a client that really started nothing,
+still fails and now says how long it waited.
+
+### The control, and the suite's own missing half
+
+The new case is a stand-in that detaches at once and whose marker-carrying
+process arrives about 400 ms later. **The markers sit inside a `-c` string
+until the `exec`, and a `-c` string is one argument**, so
+`cmdline_has_argument` cannot match it -- which is what makes the window real
+rather than described: for those 400 ms no process on the machine carries both
+markers as whole arguments.
+
+Against the single look, restored deliberately, it fails:
+
+    a client that appears after its starter has exited is a successful start FAILED
+      said: `avahi-autoipd` reported success on lan1 and no client of
+            netcfgd's was running there, so netcfgd has nothing it could
+            stop later
+      and the start waited for it rather than finding it at once         FAILED
+      waited: 81 ms
+      and the pid recorded is the process that arrived late              FAILED
+
+So the failure is reproducible on demand in the unit suite, which is what the
+container run could not give. The elapsed time is asserted as well as the
+verdict, because a success that arrived instantly would mean the stand-in had
+not reproduced the case.
+
+**And the suite had been testing the easy half of its own claim.**
+`a_recorded_client_is_recognised_and_stopped` has its stand-in `sleep 0.3`
+before exiting, which quietly closed the window the module's own documentation
+describes. The fixture had absorbed the defect.
+
+### A third finding, from the control's own leftovers
+
+With the sabotage reverted, the next run failed one check -- the elapsed-time
+one -- because the sabotaged run had left its late client alive for twenty
+seconds and the new run found it instantly. The marker search reads the whole
+machine's `/proc`, so a fixed interface name makes a test depend on every
+other run of itself. `link_local.sh` already solved this by putting the run's
+pid in the interface name, and both unit cases do now. Proved by running two
+copies of the test at once: both pass, where fixed names could not.
+
+### What is established and what is not
+
+**Established:** the code can produce exactly the observed signature, it does
+so on demand, and that path is closed. **Not established:** that this is what
+happened in that container run. The original `apply.txt` is gone, and
+non-reproduction was never evidence either way -- so this closes the item by
+removing a defect that fits the evidence, not by explaining a run nobody can
+re-examine.
+
+Verified: 19 checks on the host, five runs of five in the container under load
+on one CPU, `make check` green, and clang clean over 224 sources.
+
+**The lens, pointed at the other backends.** autoip is the only one that
+confirms a start by searching for a process; radvd, hostapd, openvpn, pppoe and
+dhcp read a pid file their program writes, and none of them reads it inside the
+start -- radvd's start returns on the exit status alone. So the class has one
+member and it is fixed.
+
 ## 10.532 The hull rigs got targets, and `clean` would have eaten the images
 
 "add the hull targets then", the copyright holder, 2026-10-23, closing the item
@@ -12818,14 +12940,15 @@ nine. Each item names where it is argued.
 
 **Measured and unexplained**
 
-- **`link_local.sh` failed four checks in one container run and nothing
-  explains it** (10.523). The `--group-add users` story is disproved -- the
-  flag cannot reach a script wrapped in `unshare -rn`, which denies
-  `setgroups` -- and so is load, the host passing that script at load 172. The
-  next experiment is named at the target: run it in the container under quiet
-  load with the flag, keeping `$work`, because the apply's own failure text
-  says neither "error" nor "failed" and `apply.txt` is the file that would name
-  the refusal.
+- ~~**`link_local.sh` failed four checks in one container run and nothing
+  explains it**~~ (10.523). **A mechanism was found and fixed 2026-10-23**
+  (10.533): the start confirmed a detached client with a single look at
+  `/proc`, which reports a failed start for a client that is running and
+  leaves nothing able to stop it. It now waits, the case is deterministic in
+  the unit suite, and four environmental explanations are disproved -- the
+  `--group-add users` flag, host load, container load and a `noexec` `/tmp`.
+  What is still not known is what that particular run did, since its
+  `apply.txt` is gone.
 
 **Work with a clear next step**
 
@@ -13306,12 +13429,21 @@ leave visible rather than close: non-reproduction is not evidence against an
 intermittent, and the two reproductions since (the host under load, and the
 container without the flag) are not evidence either.
 
-**The next experiment is named rather than guessed at**: run that script in
+**The next experiment was named rather than guessed at**: run that script in
 the container under quiet load with the flag, and keep `$work` -- the apply's
 own failure text says neither "error" nor "failed", so the check above reports
 no failure either way, which is why this presented as a missing pid file
 rather than as a refused start, and `apply.txt` is the file that would say
 which.
+
+**Run on 2026-10-23, and it was the source rather than the container that
+answered** (10.533). That prediction about the failure text was right and it
+names the exact branch: `ncfg_autoip_start` confirmed a detached client with a
+single look at `/proc`, so a client whose own process was not yet in place was
+reported as a failed start while it ran on unmanaged. The start waits now. Four
+environmental explanations have been disproved in all -- the flag, host load,
+container load and a `noexec` `/tmp` -- and the defect that fits the evidence
+is gone, which is not the same as knowing what that one run did.
 
 ### The container also found an intermittent that is not the container's
 

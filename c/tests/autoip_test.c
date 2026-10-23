@@ -20,6 +20,10 @@
  *     detaches, so "it exited 0" is not evidence that link-local addressing is
  *     happening -- and reporting success there would leave netcfgd with
  *     nothing it could ever stop.
+ *   * **And a client that appears a moment later is not nothing running.**
+ *     The same question asked at the one moment it can be answered wrongly:
+ *     the process netcfgd waited for is not the one still running, so a start
+ *     confirmed by a single look reports a failure while the client runs on.
  *
  *   Never the real `avahi-autoipd`: every case runs a stand-in, which is
  *   `backend_internal.h`'s rule and the reason the program is a parameter.
@@ -34,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static int failures;
@@ -187,33 +192,119 @@ static void a_recorded_client_is_recognised_and_stopped(const char *run)
 {
 	char  fake[512];
 	char  body[1024];
+	char  iface[32];
 	char  message[NCFG_ERROR_MAX];
 	pid_t pid;
 
+	/* Per-run, for the reason the late case below gives at length: a 60-second
+	 * holder left by a suite that was killed is found by the next run, which
+	 * then stops a stranger's and reports the live one as still there. */
+	(void)snprintf(iface, sizeof(iface), "lan%ld", (long)getpid());
 	(void)testdir_in(run, "fake-detaching", fake, sizeof(fake));
 	(void)snprintf(body, sizeof(body),
 	    "#!/bin/sh\n"
 	    "# Leave a process whose cmdline carries what netcfgd passed, the way a\n"
 	    "# detached client would, and exit 0 as `-w` says a successful one does.\n"
-	    "setsid sh -c 'sleep 60' holder --force-bind lan0 >/dev/null 2>&1 &\n"
+	    "setsid sh -c 'sleep 60' holder --force-bind %s >/dev/null 2>&1 &\n"
 	    "sleep 0.3\n"
-	    "exit 0\n");
+	    "exit 0\n",
+	    iface);
 	write_fake(fake, body);
 
 	message[0] = '\0';
-	check(ncfg_autoip_start(run, "lan0", fake, message, sizeof(message)),
+	check(ncfg_autoip_start(run, iface, fake, message, sizeof(message)),
 	    "a client that detaches and keeps running is a successful start");
 	if (message[0] != '\0') {
 		printf("  said: %s\n", message);
 	}
-	pid = ncfg_autoip_running_pid(run, "lan0");
+	pid = ncfg_autoip_running_pid(run, iface);
 	check(pid > 0, "  and netcfgd can say which process is its own");
 
 	message[0] = '\0';
-	check(ncfg_autoip_stop(run, "lan0", message, sizeof(message)),
+	check(ncfg_autoip_stop(run, iface, message, sizeof(message)),
 	    "  and the stop signals that one");
-	check(ncfg_autoip_running_pid(run, "lan0") == 0,
+	check(ncfg_autoip_running_pid(run, iface) == 0,
 	    "  after which netcfgd has no client on that interface");
+}
+
+
+/*
+ * A client whose own process arrives after the one netcfgd waited for is gone.
+ *
+ * **This is the case a single look could not see, and it is why the start
+ * waits.** `a_recorded_client_is_recognised_and_stopped` above has its
+ * stand-in `sleep 0.3` before exiting, which quietly made the window go away
+ * -- so the suite was testing the easy half of its own claim. Here the parent
+ * exits at once and the marker-carrying process appears about four hundred
+ * milliseconds later, which is what a client that detaches before its child
+ * has settled does, and what a child caught in `execve` looks like on a loaded
+ * machine.
+ *
+ * **The markers are inside a `-c` string until the `exec`**, and a `-c` string
+ * is one argument, so `cmdline_has_argument` cannot match it. That is what
+ * makes the window real rather than merely described: for those four hundred
+ * milliseconds no process on the machine carries both markers as whole
+ * arguments.
+ *
+ * The elapsed time is asserted as well as the verdict, because a success that
+ * arrived instantly would mean the stand-in had not reproduced the case.
+ */
+static void a_client_that_appears_late_is_waited_for(const char *run)
+{
+	char            fake[512];
+	char            body[1024];
+	char            iface[32];
+	char            message[NCFG_ERROR_MAX];
+	struct timespec before;
+	struct timespec after;
+	long            elapsed_ms;
+	pid_t           pid;
+
+	/*
+	 * **The interface name carries this run's pid**, which is
+	 * `link_local.sh`'s reasoning and is load-bearing here for the same
+	 * reason: the marker search reads the whole machine's `/proc`, so a
+	 * client left behind by another run -- or by this suite killed part way
+	 * through -- would be found instantly and this case would never be
+	 * reached. Measured rather than reasoned: with a fixed name, the run
+	 * after a deliberately sabotaged one found the previous run's client and
+	 * the elapsed-time check failed.
+	 */
+	(void)snprintf(iface, sizeof(iface), "ll%ld", (long)getpid());
+	(void)testdir_in(run, "fake-late", fake, sizeof(fake));
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "# Detach at once, and let the process carrying netcfgd's markers\n"
+	    "# arrive later. See autoip_test.c for why the `-c` string matters.\n"
+	    "sh -c \"sleep 0.4; exec sh -c 'sleep 5' late --force-bind %s\" \\\n"
+	    "\t>/dev/null 2>&1 &\n"
+	    "exit 0\n",
+	    iface);
+	write_fake(fake, body);
+
+	message[0] = '\0';
+	(void)clock_gettime(CLOCK_MONOTONIC, &before);
+	check(ncfg_autoip_start(run, iface, fake, message, sizeof(message)),
+	    "a client that appears after its starter has exited is a successful start");
+	(void)clock_gettime(CLOCK_MONOTONIC, &after);
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	elapsed_ms = (long)(after.tv_sec - before.tv_sec) * 1000L +
+	    (after.tv_nsec - before.tv_nsec) / 1000000L;
+	check(elapsed_ms >= 300L, "  and the start waited for it rather than finding it at once");
+	if (elapsed_ms < 300L) {
+		printf("  waited: %ld ms\n", elapsed_ms);
+	}
+
+	pid = ncfg_autoip_running_pid(run, iface);
+	check(pid > 0, "  and the pid recorded is the process that arrived late");
+
+	message[0] = '\0';
+	check(ncfg_autoip_stop(run, iface, message, sizeof(message)),
+	    "  which the stop then signals");
+	check(ncfg_autoip_running_pid(run, iface) == 0,
+	    "  leaving no client on that interface");
 }
 
 /*
@@ -255,6 +346,7 @@ int main(void)
 	the_client_is_given_force_bind_and_the_interface(run);
 	a_client_that_refuses_is_quoted(run);
 	a_recorded_client_is_recognised_and_stopped(run);
+	a_client_that_appears_late_is_waited_for(run);
 	a_pid_that_is_not_ours_any_more_is_not_signalled(run);
 
 	testdir_remove(run);

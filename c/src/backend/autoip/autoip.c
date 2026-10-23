@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /*
  * What the client says when it will not do it.
@@ -31,6 +32,31 @@ static const char *const AUTOIP_MARKERS[] = { "error", "cannot", "could not", "f
 /* How many of those lines a refusal quotes. One is the shape of this tree's
  * other backends and is what fits a journal record. */
 #define AUTOIP_COMPLAINT_LINES 1
+
+/*
+ * How long a start waits for the client it has just detached to appear, and
+ * how often it looks.
+ *
+ * **The wait exists because the question is asked at the one moment it can be
+ * answered wrongly.** This client writes no pid file, so a start that has
+ * succeeded is confirmed by finding a process carrying netcfgd's two markers
+ * -- and the process netcfgd waited for is not that process. With `-w` a real
+ * `avahi-autoipd` holds its detach until an address has been acquired, so its
+ * child is long since in place; nothing requires that of a client, and a
+ * `cmdline` is briefly empty while a child is in `execve` regardless. Looking
+ * once turns either into a start reported as failed while the client runs on,
+ * which is the worst answer available here: `--force-bind` means it keeps the
+ * address alongside whatever replaced it, and with no pid recorded netcfgd
+ * will never stop it. The error says as much in as many words.
+ *
+ * A second, which is long enough for a child to be scheduled on a loaded
+ * machine and short enough that the case this cannot help -- a client that
+ * really started nothing, which is what a wrong flag looks like -- still fails
+ * promptly. The step is small because the common case returns on the first
+ * look and pays nothing.
+ */
+#define AUTOIP_APPEAR_PATIENCE_MILLISECONDS 1000
+#define AUTOIP_APPEAR_STEP_MILLISECONDS 25
 
 int ncfg_autoip_run_dir(const char *run, char *out, size_t out_size, char *err, size_t err_size)
 {
@@ -69,6 +95,34 @@ static void marker_for(const char *iface, const char *out[2])
 {
 	out[0] = NCFG_AUTOIP_FORCE_BIND;
 	out[1] = iface;
+}
+
+/*
+ * Wait for a client carrying `marker` to appear, and say which pid it is.
+ *
+ * `dhcp.c`'s `confirm_stopped` is the same shape pointed the other way -- look,
+ * sleep a named step, give up at a named patience -- and is kept rather than
+ * re-decided.
+ */
+static pid_t wait_for_client(const char *const *marker, int patience_ms)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+		pid_t           pid = ncfg_process_pid_by_markers(marker, 2u);
+
+		if (pid > 0) {
+			return pid;
+		}
+		if (waited >= patience_ms) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)AUTOIP_APPEAR_STEP_MILLISECONDS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += AUTOIP_APPEAR_STEP_MILLISECONDS;
+	}
 }
 
 pid_t ncfg_autoip_running_pid(const char *run, const char *iface)
@@ -264,12 +318,15 @@ int ncfg_autoip_start(const char *run, const char *iface, const char *program, c
 	 * writes no pid file and `-D` means the process netcfgd waited for is not
 	 * the one still running. The marker is what makes the search safe: it is
 	 * the argument netcfgd passed, on the interface netcfgd named.
+	 *
+	 * Waited for rather than looked for once, which the constant above argues.
 	 */
-	pid = ncfg_process_pid_by_markers(marker, 2u);
+	pid = wait_for_client(marker, AUTOIP_APPEAR_PATIENCE_MILLISECONDS);
 	if (pid <= 0) {
 		ncfg_error_set(err, err_size,
-		    "`%s` reported success on %s and no client of netcfgd's is running there, "
-		    "so netcfgd has nothing it could stop later", NCFG_AUTOIP_PROGRAM, iface);
+		    "`%s` reported success on %s and no client of netcfgd's was running there "
+		    "%d ms later, so netcfgd has nothing it could stop later",
+		    NCFG_AUTOIP_PROGRAM, iface, AUTOIP_APPEAR_PATIENCE_MILLISECONDS);
 		return 0;
 	}
 	return record_pid(run, iface, pid, err, err_size);
