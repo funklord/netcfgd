@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.547 Guard generalises its subject, and the predicate is what keeps it defined
+
+The copyright holder, 2026-10-23, four messages across one turn: a concept of
+locking config so that protecting a vital link needs confirmation or other hoop
+jumping; "we already have a feature like this for interfaces, but it is
+stronger, maybe better?"; "let's generalize guard to be available for other
+subsystems too"; and then the risk -- "problem is defining it if becomes too
+general". `0289` is all four.
+
+### What exists, measured rather than recalled
+
+An interface or device carries `guard { reason = ... }` in the document.
+`prepare()` collects them before any pass runs; `refused()` is one chokepoint
+every action passes through, "so there is one place that decides and no planner
+path can route around it"; a refusal records the interface, the op, the guard's
+reason and `override_with = "ncfg apply --allow-disruption <iface>"`, consent
+being per interface and per apply rather than a switch (0088).
+
+**And the predicate is already narrow.** `ncfg_op_is_disruptive` is a closed
+switch: **22 disruptive, 26 explicitly not**, each side carrying a sentence.
+The criterion is not "important" -- it is **cuts a connection that is already
+up**, and the `return 0` comments are where that is visible: the hostname "is
+not traffic... nothing in flight is cut, and a guard exists to protect a
+connection"; an offload toggle drops what is queued, "a packet or two, not a
+lost session".
+
+I got that count wrong twice before getting it right -- 48 case labels against
+47 op kinds, which is a switch with two groups and a regex that could not see
+the `return 1` between them. The published number is from splitting on that
+return.
+
+### The answer to "too general to define"
+
+**Widening what a guard attaches to cannot widen what a guard blocks**, because
+the two are separate mechanisms and only one is open. An op is disruptive
+because a case names it and a comment justifies its side; nothing is disruptive
+by inference, by subsystem, or by a pattern over names. So a subsystem nobody
+has classified is one a guard visibly does not stop, and the fix is one case
+and one sentence.
+
+That is structural rather than a review habit, which is what the holder's worry
+asks for.
+
+### What widening the subject actually costs
+
+A subject key that is not a string guess: today the guard compares
+`guards[i].interface` against `ncfg_op_interface(op)`, and all 22 disruptive
+kinds resolve an interface -- measured. A route, a rule, a zone or the host has
+no such name, which is **the same stable-identity requirement 0287 raised for
+rule standing**. Two of the holder's requests converge on one piece of work:
+name the things netcfgd configures, stably, across re-plans.
+
+Then a per-subsystem answer to the predicate, written per op; and a strength
+declared per guard rather than globally, so one machine can protect its uplink
+harder than its lab bridge without a global mode.
+
+### A prediction that is the mechanism working, not a flaw
+
+`NAT_REPLACE`, `RULE_ADD`, `QDISC_SET` and `DNS_APPLY` sit among the 26 today,
+correctly for what those ops can currently do: replacing a table that only
+masquerades does not cut an established flow. **A full filter ruleset can** --
+accept to drop cuts exactly what is up -- so 0283's firewall will move some of
+those cases, with a new sentence each. The predicate is about effect, the ops
+are gaining effects, and the classification follows the effect rather than the
+subsystem's name.
+
+### Two gaps "hoop jumping" names that the current guard does not close
+
+**The guard itself is unguarded**: removing `guard { reason = ... }` is an
+ordinary edit and the next apply is unprotected, so a lock a careless config
+change removes is a speed bump. Changing or removing a guard should need the
+ceremony -- while staying possible, since a guard that cannot be removed makes
+a bad configuration permanent.
+
+**And a guard is not enforced against the network.** Nothing yet says a
+directive cannot carry its own override, and it must not: the node's guard
+wins, and consent has to be granted to the node rather than asserted by the
+message -- the narrower-than-admin authority 0284 already needs for another
+reason.
+
+### The limit, so the lock is not oversold
+
+A guard protects a subject from **netcfgd's own actions**. It does not protect
+it from a change elsewhere that breaks it anyway, which is 0288's argument and
+does not weaken with more guards. A guard makes netcfgd refuse to be the one
+that cut the link, and says who may tell it otherwise.
+
 ## 10.546 The control path is part of the configuration, and survivability is the target
 
 The copyright holder, 2026-10-23, widening 0285 and then narrowing what can be
