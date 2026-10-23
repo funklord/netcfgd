@@ -172,7 +172,7 @@ static void the_witness_round_trips(const char *path)
 		if (!seen_request[at]) {
 			complete = 0;
 			detail("no witness line for request", ncfg_proto_request_name(
-			    (ncfg_proto_request_kind_t)at));
+			    (int)at));
 		}
 	}
 	check(complete, "the witness exercises every request this module names");
@@ -182,7 +182,7 @@ static void the_witness_round_trips(const char *path)
 		if (!seen_response[at]) {
 			complete = 0;
 			detail("no witness line for response", ncfg_proto_response_name(
-			    (ncfg_proto_response_kind_t)at));
+			    (int)at));
 		}
 	}
 	check(complete, "and every response");
@@ -192,7 +192,7 @@ static void the_witness_round_trips(const char *path)
 		if (!seen_event[at]) {
 			complete = 0;
 			detail("no witness line for event", ncfg_proto_event_name(
-			    (ncfg_proto_event_kind_t)at));
+			    (int)at));
 		}
 	}
 	check(complete, "and every event");
@@ -338,13 +338,13 @@ static void the_member_table_matches_the_encoder(void)
 		size_t count = 0;
 		size_t which;
 
-		if (!ncfg_proto_request_name(kind)) {
+		if (!ncfg_proto_request_name((int)kind)) {
 			named_ok = 0;
 			continue;
 		}
 		if (!fully_populated(kind, &request)) {
 			fixture_ok = 0;
-			detail("no fully-populated fixture for", ncfg_proto_request_name(kind));
+			detail("no fully-populated fixture for", ncfg_proto_request_name((int)kind));
 			continue;
 		}
 		ncfg_buf_init(&out, 0);
@@ -379,7 +379,7 @@ static void the_member_table_matches_the_encoder(void)
 		if ((size_t)ncfg_json_count(doc, ncfg_json_root(doc)) != count + 1u) {
 			table_ok = 0;
 			detail("the encoder emits a different number of members than the "
-			    "table declares, for", ncfg_proto_request_name(kind));
+			    "table declares, for", ncfg_proto_request_name((int)kind));
 		}
 		ncfg_json_free(doc);
 		ncfg_buf_free(&out);

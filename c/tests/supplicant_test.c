@@ -711,8 +711,8 @@ static void a_connected_event_names_the_network_as_well(void)
 		/* `-1` is what the supplicant writes when the association has no
 		 * configured network behind it. Not a number this returns, and not a
 		 * separate case in the code either: it is simply not unsigned. */
-		"<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed "
-		"[id=-1 id_str=]",
+		("<3>CTRL-EVENT-CONNECTED - Connection to aa:bb:cc:dd:ee:ff completed "
+		 "[id=-1 id_str=]"),
 		/* Every other event, including the disconnect that carries an `id=`
 		 * of its own -- a reader that took any id it found would compare the
 		 * wrong networks. */

@@ -100,7 +100,7 @@ static void every_verb_has_the_class_the_criterion_gives_it(void)
 	for (at = 0u; at < EXPECTED_COUNT; at++) {
 		if (ncfg_order_class_of(expected[at].kind) != expected[at].class_) {
 			printf("       %s: expected %s (%s)\n",
-			    ncfg_proto_request_name(expected[at].kind),
+			    ncfg_proto_request_name((int)expected[at].kind),
 			    expected[at].class_ == NCFG_ORDER_IDEMPOTENT ? "idempotent"
 			                                                 : "at-most-once",
 			    expected[at].why);
@@ -134,7 +134,7 @@ static void every_kind_is_classified_exactly_once(void)
 	for (kind = 0; kind < (int)NCFG_PROTO_REQ_COUNT; kind++) {
 		if (seen[kind] == 0) {
 			printf("       %s is in no row: a verb was added and not classified\n",
-			    ncfg_proto_request_name((ncfg_proto_request_kind_t)kind));
+			    ncfg_proto_request_name((int)kind));
 			missing++;
 		} else if (seen[kind] > 1) {
 			twice++;

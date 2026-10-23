@@ -12498,6 +12498,90 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.536 The 40 test findings, and the gate now reads 324 sources
+
+"fix the clang findings in c/tests then", the copyright holder, 2026-10-23,
+closing the item 10.529 left open when the `clang` gate went in reading the
+library and counting the tests.
+
+### 36 of the 40 were the enum decision arriving at the call sites
+
+Every sign-conversion finding was one shape: an enum passed to a function
+taking `int`. That is the cost of 10.525, where the holder settled that a
+`_name` takes `int` -- clang treats an enum with no negative enumerator as
+unsigned, so every call converts. The library's own sites were fixed that day
+with an explicit cast, `ncfg_tier_name((int)tier)`, and the tests were not.
+
+**Two sub-shapes, one rule.** 21 sites passed a plain enum lvalue and 15 cast
+*to* the enum type first -- `ncfg_proto_request_name((ncfg_proto_request_kind_t)kind)`,
+which was right when the callee took the enum and is pointless now. So the rule
+is the same at both: the converted expression is narrowed at the call,
+replacing an enum cast where there is one. Uniformly correct, because the
+underlying expression is either an enum field or a small loop index, and
+`(int)` is value-preserving for every enumerator here -- where dropping the
+cast instead would have left a `size_t` conversion at the loop-index sites.
+
+**Clang gave the edit its coordinates.** This tree has already paid for a
+column-based cast insertion that landed inside other expressions (10.525), so
+the sites came from `-fdiagnostics-print-source-range-info`, which brackets the
+converted expression, and the rewrite went bottom-up and right-to-left so no
+edit moved a column still to be used.
+
+**Three proofs, none of them the tool's own word.** Each edit asserted at the
+time that the new line equalled the old but for the cast; then the diff was
+re-checked independently afterwards, symmetrically -- the first version of that
+check stripped `(int)` from the new line only and reported two false
+differences on a line that already had one, which is a checker bug wearing a
+finding's clothes. Then clang: 40 findings to 4. Then the suite: 82 suites, 0
+failures, including `socket_witness_test`, which regenerates
+`doc/schema/socket.json` and compares, so the witness is byte-identical.
+
+### The other four were clang telling the truth about a real ambiguity
+
+`-Wstring-concatenation` fired on four two-part string literals inside array
+initializers -- "did you mean to separate the elements with a comma?" All four
+are deliberate continuations of one long string, and a comma would have changed
+what the test asserts. clang names its own remedy in the note: parenthesise the
+literal. Tested on a fixture first, then applied, which is the honest fix
+because it states in the source what the reader has to work out otherwise.
+
+### Two more in the shim's tests, and they were a different thing
+
+`client/tests` was already clean; `adapter/netcfgd-nm/c/tests` had two
+`-Wmissing-field-initializers` on `nmc_device_slot_t` initializers written
+before the struct gained `scan_wanted`. Zero is the right value -- no scan
+pending is what the chooser should see -- but it was zero by C's rules rather
+than by anyone saying so, and an initializer that stops short of a field says
+nothing about which. Named, with the reason.
+
+### So the gate holds the zero rather than counting it
+
+`syntax-tests` was a tally: it piped clang's output through `grep -c` and could
+not fail. It is a gate now, in the same shape as `syntax` -- `-Werror`,
+`-fsyntax-only`, print the count on success -- and `client/` and
+`adapter/netcfgd-nm/c/` have one too. The root `clang` gate runs all six, so it
+reads **324 sources**: 206 library and 98 test in `c/`, 2 and 1 in `client/`,
+16 and 1 in the shim.
+
+**Seen to fail.** One cast removed from `value_test.c` and the gate stopped at
+`syntax-tests` with `Error 1`, which is the defect it exists to catch.
+
+### And the restore was the mistake, not the control
+
+Putting that cast back, I ran `git checkout -- c/tests/value_test.c` on a file
+whose 36-site sweep was **uncommitted** -- so it reverted all six of that
+file's casts, not the one-line sabotage. `CLAUDE.md` singles out exactly this
+command for exactly this reason: a bad commit has a reflog and discarded
+uncommitted work has nothing. Nothing was lost in the end, because the sweep is
+reproducible from clang's own ranges and re-running it found the same six sites
+and produced an identical diff -- but that is luck in the shape of
+determinism, and it would not have held for a change derived by hand.
+
+The lesson is the one the earlier sabotage in this session already followed
+and this one did not: **copy the file aside before breaking it on purpose**, the
+way `autoip.c` was copied an hour earlier. The cheaper lesson is to commit the
+sweep before testing the gate that guards it.
+
 ## 10.535 A gate became a build's default goal, and `make nm` built nothing
 
 "run make live-container one more time", the copyright holder, 2026-10-23. The
@@ -13098,10 +13182,10 @@ nine. Each item names where it is argued.
   re-measurement is in 10.525. The tree lost 33 casts and 10 shim functions and
   gained 16 casts; clang still reports 0.
 - ~~**Whether a clang gate should hold the zero.**~~ **Added 2026-10-23 on the
-  holder's instruction** (10.529): `make clang` is in `PORTABLE_GATES`, reads
-  224 sources through each component's own flags, and found a real
-  uninitialised use in `scope_test.c` on its first look. The test sources are
-  not in it and their 40 findings are counted rather than ignored.
+  holder's instruction** (10.529): `make clang` is in `PORTABLE_GATES` and
+  found a real uninitialised use in `scope_test.c` on its first look. It read
+  224 sources and counted 40 findings over the test sources it would not
+  gate; **those are fixed and it gates them now, 324 sources** (10.536).
 
 **Measured and unexplained**
 

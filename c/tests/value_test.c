@@ -108,7 +108,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
-			const char *word = ncfg_hook_phase_name(phases[i].value);
+			const char *word = ncfg_hook_phase_name((int)phases[i].value);
 			ncfg_hook_phase_t got = NCFG_HOOK_PHASE_DRIFT;
 
 			if (!word || strcmp(word, phases[i].word) != 0) {
@@ -151,7 +151,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(actions) / sizeof(actions[0]); i++) {
-			const char *word = ncfg_rule_action_name(actions[i].value);
+			const char *word = ncfg_rule_action_name((int)actions[i].value);
 			ncfg_rule_action_t got = NCFG_RULE_ACTION_PROHIBIT;
 
 			if (!word || strcmp(word, actions[i].word) != 0) {
@@ -188,7 +188,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(families) / sizeof(families[0]); i++) {
-			const char *word = ncfg_rule_family_name(families[i].value);
+			const char *word = ncfg_rule_family_name((int)families[i].value);
 			ncfg_rule_family_t got = NCFG_RULE_FAMILY_INET6;
 
 			if (!word || strcmp(word, families[i].word) != 0) {
@@ -228,7 +228,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(profiles) / sizeof(profiles[0]); i++) {
-			const char *word = ncfg_bluetooth_profile_name(profiles[i].value);
+			const char *word = ncfg_bluetooth_profile_name((int)profiles[i].value);
 			ncfg_bluetooth_profile_t got = NCFG_BLUETOOTH_PROFILE_NAP;
 
 			if (!word || strcmp(word, profiles[i].word) != 0) {
@@ -267,7 +267,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(policies) / sizeof(policies[0]); i++) {
-			const char *word = ncfg_drift_policy_name(policies[i].value);
+			const char *word = ncfg_drift_policy_name((int)policies[i].value);
 			ncfg_drift_policy_t got = NCFG_DRIFT_POLICY_IGNORE;
 
 			if (!word || strcmp(word, policies[i].word) != 0) {
@@ -309,7 +309,7 @@ int main(void)
 		int round_trip = 1;
 
 		for (i = 0; i < sizeof(modes) / sizeof(modes[0]); i++) {
-			const char *word = ncfg_dns_mode_name(modes[i].value);
+			const char *word = ncfg_dns_mode_name((int)modes[i].value);
 			ncfg_dns_mode_t got = NCFG_DNS_MODE_EXEC;
 
 			if (!word || strcmp(word, modes[i].word) != 0) {

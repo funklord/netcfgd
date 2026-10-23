@@ -1379,8 +1379,8 @@ static void an_event_renders_as_one_line(void)
 	static const char *const lines[] = {
 		"{\"event\":\"observed\",\"summary\":\"eth0 up\"}",
 		"{\"event\":\"reloaded\",\"ok\":true}",
-		"{\"event\":\"drift\",\"interface\":\"eth0\",\"summary\":\"mtu\","
-		    "\"action\":\"link_set\"}",
+		("{\"event\":\"drift\",\"interface\":\"eth0\",\"summary\":\"mtu\","
+		     "\"action\":\"link_set\"}"),
 		"{\"event\":\"confirm_armed\",\"seconds\":60}",
 		"{\"event\":\"confirm_resolved\",\"confirmed\":true}"
 	};

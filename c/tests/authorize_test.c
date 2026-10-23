@@ -213,8 +213,8 @@ static void every_request_has_the_tier_the_document_gives_it(void)
 			if (!complaint[0]) {
 				(void)snprintf(complaint, sizeof(complaint),
 				    "%s is `%s` and should be `%s`",
-				    ncfg_proto_request_name(expected[at].kind),
-				    ncfg_tier_name(found), ncfg_tier_name(expected[at].tier));
+				    ncfg_proto_request_name((int)expected[at].kind),
+				    ncfg_tier_name((int)found), ncfg_tier_name((int)expected[at].tier));
 			}
 		}
 	}
@@ -228,7 +228,7 @@ static void every_request_has_the_tier_the_document_gives_it(void)
 			if (!complaint[0]) {
 				(void)snprintf(complaint, sizeof(complaint),
 				    "%s is classified nowhere",
-				    ncfg_proto_request_name((ncfg_proto_request_kind_t)at));
+				    ncfg_proto_request_name((int)at));
 			}
 		}
 	}
@@ -314,7 +314,7 @@ static void the_wifi_tier_adds_a_network_and_nothing_else(void)
 
 		if (check_local(&control, &member, &one, err, sizeof(err))) {
 			denied = 0;
-			detail("reached", ncfg_proto_request_name(admins[at]));
+			detail("reached", ncfg_proto_request_name((int)admins[at]));
 		}
 	}
 	check(denied, "and nothing else moved into the wifi tier");
@@ -386,7 +386,7 @@ static void every_tier_against_every_principal(void)
 				if (!complaint[0]) {
 					(void)snprintf(complaint, sizeof(complaint),
 					    "alice at `%s` under principal %d/%s: got %d",
-					    ncfg_tier_name((ncfg_tier_t)tier), (int)cases[one].kind,
+					    ncfg_tier_name((int)tier), (int)cases[one].kind,
 					    cases[one].name ? cases[one].name : "-", got);
 				}
 			}
@@ -396,7 +396,7 @@ static void every_tier_against_every_principal(void)
 				if (!complaint[0]) {
 					(void)snprintf(complaint, sizeof(complaint),
 					    "bob at `%s` under principal %d/%s: got %d",
-					    ncfg_tier_name((ncfg_tier_t)tier), (int)cases[one].kind,
+					    ncfg_tier_name((int)tier), (int)cases[one].kind,
 					    cases[one].name ? cases[one].name : "-", got);
 				}
 			}
@@ -586,7 +586,7 @@ static void what_a_peer_is_told_it_may_do_is_what_check_allows(void)
 			if (listed != (check_local(&control, &who[person], &request, err,
 			        sizeof(err)) ? 1 : 0)) {
 				agreed = 0;
-				detail("disagreed about", ncfg_tier_name((ncfg_tier_t)tier));
+				detail("disagreed about", ncfg_tier_name((int)tier));
 			}
 		}
 	}
@@ -670,7 +670,7 @@ static void an_open_local_policy_opens_nothing_remotely(void)
 		if (ncfg_authz_check(&roots, &control, &remote, NCFG_ARRIVED_REMOTE, &caller,
 		        &request, err, sizeof(err))) {
 			remote_shut = 0;
-			detail("reached the machine from off it", ncfg_proto_request_name(both[at]));
+			detail("reached the machine from off it", ncfg_proto_request_name((int)both[at]));
 		}
 	}
 	check(local_open, "local is wide open here");
@@ -887,8 +887,8 @@ static void the_content_gate_refuses_each_privileged_production(void)
 static void an_ordinary_configuration_is_not_privileged(void)
 {
 	static const char *const ordinary[] = {
-		"interface eth0 {\n\tconfig = [\"dhcp\", \"192.0.2.10/24\"]\n\t"
-		"routes = \"default via 192.0.2.1\"\n}\n",
+		("interface eth0 {\n\tconfig = [\"dhcp\", \"192.0.2.10/24\"]\n\t"
+		 "routes = \"default via 192.0.2.1\"\n}\n"),
 		"network \"Cafe\" {\n\twifi {\n\t\tpsk = \"@secret:cafe\"\n\t}\n}\n",
 		/* A `file` provider is not an `exec` one, in the same position. */
 		"network \"Corp\" {\n\twifi {\n\t\tpsk = \"@secret:file:home\"\n\t}\n}\n",

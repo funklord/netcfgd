@@ -312,9 +312,9 @@ syntax:
 # in the first look at a corner nothing was watching is the argument for the
 # gate beside it.
 syntax-tests:
-	-@$(CC) $(SYNTAX_CFLAGS) -Itests -fsyntax-only $(TEST_SRCS) 2>&1 | \
-		grep -c 'warning:' | \
-		xargs printf 'syntax-tests: %s finding(s) over the test sources\n'
+	@$(CC) $(SYNTAX_CFLAGS) -Itests -Werror -fsyntax-only $(TEST_SRCS)
+	@printf 'syntax-tests: %s read %s test source(s) with no warning\n' "$(CC)" \
+		"$(words $(TEST_SRCS))"
 
 # ---------------------------------------------------------------- fuzzing
 #

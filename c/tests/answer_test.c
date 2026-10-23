@@ -175,7 +175,7 @@ static void every_request_is_answered_or_refused_by_name(void)
 
 	for (kind = 0; kind < NCFG_PROTO_REQ_COUNT; kind++) {
 		const char *why = ncfg_main_answer_unported((ncfg_proto_request_kind_t)kind);
-		const char *name = ncfg_proto_request_name((ncfg_proto_request_kind_t)kind);
+		const char *name = ncfg_proto_request_name((int)kind);
 
 		if (!name) {
 			detail("a request kind with no tag", NULL);
@@ -219,7 +219,7 @@ static void a_refusal_names_the_request_it_refused(void)
 		if (!ncfg_main_answer_unported((ncfg_proto_request_kind_t)kind)) {
 			continue;
 		}
-		name = ncfg_proto_request_name((ncfg_proto_request_kind_t)kind);
+		name = ncfg_proto_request_name((int)kind);
 		memset(&request, 0, sizeof(request));
 		request.kind = (ncfg_proto_request_kind_t)kind;
 		if (ask(&request, &out, err, sizeof(err))) {
@@ -288,7 +288,7 @@ static void a_kind_the_table_answers_has_an_arm(void)
 		ncfg_buf_free(&out);
 		if (strstr(err, "bug rather than a refusal") != NULL) {
 			detail("the table says this is answered and nothing answers it",
-			    ncfg_proto_request_name((ncfg_proto_request_kind_t)kind));
+			    ncfg_proto_request_name((int)kind));
 			check(0, "a kind the table answers has an arm");
 			continue;
 		}

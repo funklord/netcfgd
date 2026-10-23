@@ -382,8 +382,11 @@ default-goal:
 clang:
 	@if $(CLANG_OK); then \
 		$(MAKE) --no-print-directory -C c syntax CC=clang && \
+		$(MAKE) --no-print-directory -C c syntax-tests CC=clang && \
 		$(MAKE) --no-print-directory -C client syntax CC=clang && \
-		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c syntax CC=clang; \
+		$(MAKE) --no-print-directory -C client syntax-tests CC=clang && \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c syntax CC=clang && \
+		$(MAKE) --no-print-directory -C adapter/netcfgd-nm/c syntax-tests CC=clang; \
 	else \
 		echo "clang: not installed, skipping"; \
 		echo "clang:   apt install clang"; \

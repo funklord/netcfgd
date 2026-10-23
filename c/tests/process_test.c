@@ -789,7 +789,7 @@ int main(void)
 		for (i = 0; i < sizeof(levels) / sizeof(levels[0]); i++) {
 			ncfg_severity_t back = NCFG_LOG_DEBUG;
 
-			if (strcmp(ncfg_log_name(levels[i]), words[i]) != 0 ||
+			if (strcmp(ncfg_log_name((int)levels[i]), words[i]) != 0 ||
 			    !ncfg_log_from_name(words[i], &back) || back != levels[i]) {
 				round_trip = 0;
 			}

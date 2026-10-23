@@ -873,7 +873,7 @@ static void the_bare_events(void)
 		ncfg_buf_init(&out, 0);
 		if (!ncfg_proto_event_encode(&event, 0, &out, err, sizeof(err))) {
 			printf("  the %s event does not encode: %s\n",
-			    ncfg_proto_event_name(event.kind), err);
+			    ncfg_proto_event_name((int)event.kind), err);
 			failures++;
 		} else {
 			emit("an event payload", ncfg_buf_text(&out));
@@ -887,11 +887,11 @@ static void the_bare_events(void)
 		ncfg_buf_init(&out, 0);
 		if (!ncfg_proto_event_encode(&event, 1, &out, err, sizeof(err))) {
 			printf("  the wrapped %s event does not encode: %s\n",
-			    ncfg_proto_event_name(event.kind), err);
+			    ncfg_proto_event_name((int)event.kind), err);
 			failures++;
 		} else if (strstr(ncfg_buf_text(&out), "\"response\":\"event\"") == NULL) {
 			printf("  the wrapped %s event carries no response tag\n",
-			    ncfg_proto_event_name(event.kind));
+			    ncfg_proto_event_name((int)event.kind));
 			failures++;
 		}
 		ncfg_buf_free(&out);

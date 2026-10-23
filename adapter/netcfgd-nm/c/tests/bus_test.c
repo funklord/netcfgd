@@ -547,8 +547,12 @@ int main(void)
 		 * radio is ETHERNET, and the name `lo` is LOOPBACK. Those are the
 		 * two arms reachable without a daemon, and reaching them is the
 		 * point -- the chooser is being exercised, not mocked. */
-		nmc_device_slot_t             wired = { (char *)"eth-test", 1u, 1, "1", NULL };
-		nmc_device_slot_t             loop = { (char *)"lo", 2u, 1, "2", NULL };
+		/* The trailing 0 is `scan_wanted`, and it is named rather than
+		 * left to C: these two slots start with no scan pending, which is
+		 * what the chooser should see, and an initializer that stops short
+		 * of a field the struct has gained says nothing about which. */
+		nmc_device_slot_t             wired = { (char *)"eth-test", 1u, 1, "1", NULL, 0 };
+		nmc_device_slot_t             loop = { (char *)"lo", 2u, 1, "2", NULL, 0 };
 		const nmc_interface_t *const *list;
 		size_t                        count;
 

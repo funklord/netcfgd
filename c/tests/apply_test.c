@@ -111,7 +111,7 @@ static void describe(const ncfg_op_t *op, char *out, size_t out_size)
 	switch ((ncfg_op_kind_t)op->kind) {
 	case NCFG_OP_HOOK_RUN:
 		(void)snprintf(out, out_size, "hook.run(%s)",
-		    ncfg_hook_phase_name((ncfg_hook_phase_t)op->u.hook.phase));
+		    ncfg_hook_phase_name((int)op->u.hook.phase));
 		return;
 	case NCFG_OP_ADDR_ADD:
 		(void)snprintf(out, out_size, "addr.add %s %s", op->u.addr_add.iface,
@@ -1410,7 +1410,7 @@ static void a_failure_vetoes_only_in_the_phases_that_can_veto(void)
 	for (i = 0; i < sizeof(phases) / sizeof(phases[0]); i++) {
 		if (ncfg_hook_is_veto_phase((int)phases[i].phase) != phases[i].vetoes) {
 			printf("  %s answers the wrong way\n",
-			    ncfg_hook_phase_name(phases[i].phase));
+			    ncfg_hook_phase_name((int)phases[i].phase));
 			correct = 0;
 		}
 	}

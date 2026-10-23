@@ -62,7 +62,7 @@ CFLAGS  += -fsanitize=address,undefined -fno-omit-frame-pointer
 LDFLAGS += -fsanitize=address,undefined
 endif
 
-.PHONY: all test clean fuzz fuzz-list fuzz-replay
+.PHONY: all test syntax syntax-tests clean fuzz fuzz-list fuzz-replay
 
 
 # **The default goal is pinned, and it is not decoration.** A target added
@@ -85,6 +85,16 @@ syntax:
 	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(SRCS)
 	@printf 'syntax: %s read %s source(s) with no warning\n' "$(CC)" \
 		"$(words $(SRCS))"
+
+# The same, over this directory's own test source. Separate from `syntax`
+# because the tests need `-Itests` and are their own count, and a gate rather
+# than a tally since 10.536 took all three directories to zero.
+TEST_SRCS = tests/bus_test.c
+
+syntax-tests:
+	@$(CC) $(SYNTAX_CFLAGS) -Itests -Werror -fsyntax-only $(TEST_SRCS)
+	@printf 'syntax-tests: %s read %s test source(s) with no warning\n' "$(CC)" \
+		"$(words $(TEST_SRCS))"
 
 %.o: %.c
 	$(CC) $(CFLAGS) -MMD -MP -c $< -o $@

@@ -458,8 +458,8 @@ static void render_the_witness(int argc, char **argv)
 		 * makes, and named where it is not. Every device in the witness
 		 * redirects to `ifb-eth0` and the witness has no such device, so each
 		 * is refused -- correctly, and saying why. */
-		"an ingress redirect to `ifb-eth0`, which is not a device this build "
-		"would have made for it",
+		("an ingress redirect to `ifb-eth0`, which is not a device this build "
+		 "would have made for it"),
 		"global: dns options", "global: dnssec",
 		"global: dns transport", "global: a dns server with a port or sni",
 		/* `interface d-0: advertise` was here and renders now. */
@@ -1967,7 +1967,7 @@ static int record_hook(void *state, int phase, const char *owner, const char *bo
 	(void)err;
 	(void)err_size;
 	snprintf(path, sizeof(path), "/run/netcfgd/hooks/%s.%s", owner ? owner : "x",
-	    ncfg_hook_phase_name((ncfg_hook_phase_t)phase));
+	    ncfg_hook_phase_name((int)phase));
 	out->phase = phase;
 	out->path = strdup(path);
 	out->sha256 = strdup("0000000000000000000000000000000000000000000000000000000000000000");

@@ -983,7 +983,7 @@ static void world_executor_close(void *context, ncfg_executor_t *executor)
 static void world_announce(void *context, const ncfg_proto_event_t *event)
 {
 	world_t    *world = context;
-	const char *name = ncfg_proto_event_name(event->kind);
+	const char *name = ncfg_proto_event_name((int)event->kind);
 
 	if (event->kind == NCFG_PROTO_EVENT_DRIFT && event->interface.bytes) {
 		step(world, "event:%s:%.*s", name, (int)event->interface.length,
@@ -996,7 +996,7 @@ static void world_announce(void *context, const ncfg_proto_event_t *event)
 static void world_hook(void *context, const ncfg_hook_ref_t *hook, const ncfg_hook_env_t *env,
     const char *variable, const char *value)
 {
-	step(context, "hook:%s:%s:%s=%s", ncfg_hook_phase_name((ncfg_hook_phase_t)hook->phase),
+	step(context, "hook:%s:%s:%s=%s", ncfg_hook_phase_name((int)hook->phase),
 	    env->iface ? env->iface : "?", variable ? variable : "?", value ? value : "?");
 }
 

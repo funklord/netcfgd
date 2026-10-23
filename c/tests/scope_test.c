@@ -114,7 +114,7 @@ static void every_block_is_classified_exactly_once(void)
 	for (which = 0; which < (int)NCFG_BLOCK_COUNT; which++) {
 		if (seen[which] == 0) {
 			printf("       %s is in no row: a block was added and not scoped\n",
-			    ncfg_block_name((ncfg_block_t)which));
+			    ncfg_block_name((int)which));
 			missing++;
 		} else if (seen[which] > 1) {
 			twice++;
