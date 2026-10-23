@@ -1806,6 +1806,14 @@ live-alpine:
 		'make nm' \
 		'make -C bridge' \
 		'make -C c examples' \
+		'# **Every script\x27s output is kept while it runs and a passing one is' \
+		'# then thrown away**, so the directory holds exactly the failures. Three' \
+		'# scripts here fail one check each intermittently -- 335 runs without a' \
+		'# reproduction against one failure (10.538) -- and the first attempt to' \
+		'# catch one by looping the suite four times caught nothing. A tier that' \
+		'# prints only the last line of a failing script cannot be diagnosed' \
+		'# after the fact, which is what made that hunt necessary at all.' \
+		'rm -rf /dist/live-alpine-log; mkdir -p /dist/live-alpine-log' \
 		'list=$$(sed -n "/^live:/,/^$$/p" Makefile |' \
 		'	grep -oE "sh tests/live/[a-z_0-9]+\.sh" |' \
 		'	sed "s|sh tests/live/||" | awk "!seen[\$$0]++")' \
@@ -1813,17 +1821,28 @@ live-alpine:
 		'for name in $$list; do' \
 		'	line=$$(sed -n "/^live:/,/^$$/p" Makefile | grep -F "tests/live/$$name" | head -1)' \
 		'	case "$$line" in *unshare*) run="unshare -rn sh" ;; *) run="sh" ;; esac' \
-		'	out=$$(timeout -k 10 $(LIVE_TIMEOUT) $$run "tests/live/$$name" 2>&1) && rc=0 || rc=$$?' \
+		'	log=/dist/live-alpine-log/$$name.log' \
+		'	timeout -k 10 $(LIVE_TIMEOUT) $$run "tests/live/$$name" >"$$log" 2>&1 && rc=0 || rc=$$?' \
+		'	out=$$(cat "$$log")' \
 		'	last=$$(printf "%s\n" "$$out" | tail -1)' \
 		'	case "$$rc:$$last" in' \
-		'	0:*skipping*) skip=$$((skip+1)); printf "SKIP %-26s %s\n" "$$name" "$${last#*skipping: }" ;;' \
-		'	0:*)          pass=$$((pass+1)); printf "PASS %-26s\n" "$$name" ;;' \
+		'	0:*skipping*) skip=$$((skip+1)); rm -f "$$log";' \
+		'	              printf "SKIP %-26s %s\n" "$$name" "$${last#*skipping: }" ;;' \
+		'	0:*)          pass=$$((pass+1)); rm -f "$$log"; printf "PASS %-26s\n" "$$name" ;;' \
 		'	124:*|137:*)  slow=$$((slow+1)); printf "SLOW %-26s bound at $(LIVE_TIMEOUT)s\n" "$$name" ;;' \
-		'	*)            fail=$$((fail+1)); printf "FAIL %-26s rc=%s  %s\n" "$$name" "$$rc" "$$last" ;;' \
+		'	*)            fail=$$((fail+1)); printf "FAIL %-26s rc=%s  %s\n" "$$name" "$$rc" "$$last";' \
+		'	              grep -A3 "^FAIL" "$$log" | sed "s|^|     ||" || true ;;' \
 		'	esac' \
 		'done' \
+		'# **Handed back to whoever owns /dist**, because a container writing' \
+		'# into the host tree otherwise leaves root-owned files the user cannot' \
+		'# remove -- which this target did on its first run with logging, and' \
+		'# which `live-container` above warns about for build output.' \
+		'chown -R "$$(stat -c %u:%g /dist)" /dist/live-alpine-log 2>/dev/null || true' \
 		'printf "\nlive-alpine: %s passed, %s skipped, %s failed, %s hit the bound\n" \' \
 		'	"$$pass" "$$skip" "$$fail" "$$slow"' \
+		'[ "$$fail" -eq 0 ] && [ "$$slow" -eq 0 ] ||' \
+		'	echo "live-alpine: the output of each is in $(DIST)/live-alpine-log/"' \
 		'[ "$$fail" -eq 0 ] && [ "$$slow" -eq 0 ]' \
 		> $(DIST)/live-alpine.sh
 	@# Named for the reason `live-container` gives: an outer `timeout` would

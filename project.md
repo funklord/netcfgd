@@ -12573,12 +12573,41 @@ intermittently. **Non-reproduction is not evidence** -- `running-code.md` is
 explicit, and the three runs above do not weigh against the two that failed.
 No cause is claimed and no fix is guessed at.
 
-**The next experiment is cheap and named**: loop the full suite with
-per-script logs kept -- `alp-suite.sh`'s shape, which already writes one log
-per script -- until a run fails, then read the one that did. A flake caught
-once with its output is worth more than any amount of reasoning about which
-check it was, and this tree has the precedent: 10.523's `network_arrives.sh`
-was a check with no wait, found exactly that way.
+**That experiment was run and it caught nothing**, which is worth recording as
+carefully as a reproduction would have been. The suite was looped in one
+container -- bounded at four attempts, a wall-clock ceiling and the usual
+per-script timeout, with the attempts sharing `/run` and `/tmp` because
+isolated runs had already failed to reproduce it:
+
+    attempt 1: every script exited 0, after 986s
+    attempt 2: every script exited 0, after 1727s
+    attempt 3: every script exited 0, after 2475s
+    attempt 4: every script exited 0, after 3209s
+
+320 script runs in 53 minutes, no failure. Then `make live-alpine` itself ran
+clean for the first time: **71 passed, 9 skipped, 0 failed**. So the count is
+335 isolated runs plus 5 clean whole-suite runs against one failure that
+happened -- and the three scripts stay recorded as intermittent rather than
+fixed, because four clean runs do not outweigh a failure anybody saw.
+
+**The real defect was in the tier, not in the hunt.** `live-alpine` printed
+only a failing script's last line and kept nothing, so the one failure that
+did occur left no evidence and no amount of looping could recover it. It keeps
+every script's output while it runs now, deletes a passing or skipping one's
+immediately, and prints a failure's own `FAIL` lines -- expected and actual --
+under the summary, with the files left in `dist/live-alpine-log/`.
+The next occurrence is readable without ceremony, which is what the looping
+was a substitute for.
+
+Two faults of mine on the way there, both the sort this file exists to
+record. The logging first left **root-owned files in the host tree** that the
+user could not remove, which is what `live-container`'s own comment warns
+about for build output; the container hands `/dist` back to its owner now, and
+the files already written were removed by another container rather than by
+reaching for `sudo`. And inspecting the generated script, I started the target
+and killed the make client with `kill %1`, which leaves the container running
+-- the hazard this workspace has measured twice and which I had cited twice in
+the same session. Killed by name, and confirmed gone.
 
 ## 10.537 The live scripts on musl, and `-x` is not "can this machine run it"
 
