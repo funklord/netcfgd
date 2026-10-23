@@ -40,8 +40,12 @@ Two things, and neither is inside the daemon:
 - **`wire/`** — the framed, authenticated datagram protocol: envelope,
   capabilities, signing, verification, chunking and reassembly.
 
-  **Everything in that list is built, in `../fuzznet`** (reported 2026-08-19
-  and checked here file by file): `wire/frame.situ` with its `.wire` and
+  **Everything in that list was built, in `../fuzznet`** (reported 2026-08-19
+  and checked here file by file) -- **and fuzznet is not complete, on its
+  holder's word 2026-10-23**, so that sentence is a dated reading of another
+  tree rather than a standing claim: what is listed existed in those files on
+  that day, and the library as a whole is still being written. Decision 0285
+  carries the consequence for netcfgd's own plans: `wire/frame.situ` with its `.wire` and
   `.map` beside it and `wire/seal.c` to open and seal a frame, `chain/` for
   minting, delegation and verification against a pinned root, `chunk/split.c`
   and `chunk/reassembly.c` with a chunk cap and a per-sender quota, and

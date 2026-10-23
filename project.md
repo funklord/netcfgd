@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.542 The network is the same loop, and all the config is meant to live in fuzznet
+
+The copyright holder, 2026-10-23, describing the distributed half:
+
+> We have our netcfgd fuzznet layer with config that is attempted to be kept
+> atomic across the whole network via fuzznet, and occasionally fixed when
+> changes need to occur (can be driven from kernel updates). From that data then
+> we have the process of planning and provisioning it out to the nodes and
+> monitoring for changes and possibly repairing.
+
+and, when this record cited the protocol brief as though the dependency were
+finished:
+
+> fuzznet is not complete yet, but we really want to use its distributed model
+> to store all of our config.
+
+`0285` is both. **The network loop is netcfgd's own loop with a node where an
+interface stands** -- observe, plan, apply, confirm, repair -- so design
+section 4's taxonomy, the drift reporting and the word "repair" keep their
+meanings at the larger scale and a reader who knows one knows the other.
+
+### Three scales, one mechanism, which is the week's accident worth keeping
+
+| scale | handle | question |
+|---|---|---|
+| ruleset | the kernel's nftables generation | did this ruleset move while I read it |
+| host | observed against desired | is this machine what the document asks |
+| network | the version a node holds | is this node on the truth everyone else is on |
+
+The generation check written this week for one ruleset (10.541) is the same
+device the network layer needs for a config version. That symmetry was not
+designed -- it fell out of two unrelated requests on the same day -- and it is
+written down so the network layer does not invent a fourth vocabulary for
+"what you are looking at has moved".
+
+### Atomic is the intention and visibility is the obligation
+
+The holder's word is "attempted", which is exact. Versioned, signed, ordered
+distribution is achievable; atomic *application* across nodes is not -- nodes
+apply at different instants, some are asleep, a partition splits a rollout.
+**So the obligation is that the window where nodes differ is visible rather
+than absent**: which node holds which version, and for how long, is state the
+loop reports, exactly as a host reports an interface whose observed state does
+not match its document.
+
+### What I got wrong, and it is this file's own standing hazard
+
+The first draft of 0285 said fuzznet "already carries what that needs", citing
+the brief's section 2. That section does say everything is built -- **as a
+reading taken 2026-08-19 of a tree that is not this one**, which `evidence.md`
+calls a measurement nobody here took. The holder corrected it the same hour.
+Both documents now carry the date and the correction, and the brief's sentence
+is in the past tense where a reader meets it rather than qualified 180 lines
+later -- which is the exact failure that section already records having
+committed once, against this same dependency.
+
+### All the config, which is larger than the firewall question that started it
+
+"all of our config" moves the desired state itself: a host's document becomes a
+projection of a distributed store rather than the original. Two consequences,
+and the second is a requirement rather than a preference.
+
+The store becomes the subject of the reconcile loop at both scales, which is
+why this stays one design instead of two.
+
+**And a host still has to come up alone.** A node boots before the network
+exists, a read-only root cannot write a cache, and a machine whose uplink is
+the thing being configured cannot fetch its configuration over that uplink --
+`doc/first-run.md` and `doc/read-only-root.md` are this tree's existing
+statements of it. So a local document stays authoritative for a node in
+isolation and the store is what a node converges *to*. A design where a node
+cannot configure its own link without the network cannot bring up the network.
+
+### Open, and one of them is sequencing
+
+Who holds the authoritative config; how a version is agreed when two writers
+amend at once; what a node does when it cannot comply; how a partition is
+reported and what heals when it closes; how a local document and the store are
+reconciled when both have moved. Plus: the dependency is unfinished, so netcfgd
+either waits or designs against the model and implements behind a seam it can
+test without a network -- which is what `ncfg_observe_kernel_t` already is for
+every kernel-facing thing here. Which, and how much is built before fuzznet can
+carry it, is the holder's.
+
+0284's requirement still governs all of it: a node keeps enforcing when the
+controller is unreachable, and must not fail open.
+
 ## 10.541 The generation check, and a queue-shaped fixture that broke six checks
 
 "do the generation check then, let's try to grow into this, we are never going
