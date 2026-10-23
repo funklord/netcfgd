@@ -12575,7 +12575,7 @@ init is busybox with openrc underneath rather than `openrc-init`, so it would
 be a third image proving the same 28 lines. `apk-container` already builds the
 C against musl, which is the half of that worth having.
 
-## 10.530 The systemd payload on hull: 30 of 31, and the 31st is a mount option
+## 10.530 The systemd payload on hull: 30 of 31, then 31 of 31
 
 "do the systemd payloads then", the copyright holder, 2026-10-23, after hull
 `bfeb65f` fixed the setuid bug and `0681fb3` gave a machine the image's own
@@ -12584,8 +12584,9 @@ init. The rig is `tests/hull/sandbox/` and it runs
 `make vm-sandbox` runs on this tree's own VM tier (0265), which is what makes
 the two comparable.
 
-**It works, and the comparison is 30 of 31 against 31 of 31.** In the hull
-guest: PID 1 is systemd 257, `/run/systemd/private` appears 1.3 seconds in,
+**It works, and the comparison was 30 of 31 against 31 of 31 -- it is 31 of 31
+now**, hull having fixed the one difference the same night; the measurement
+that closed it is at the end of this entry. In the hull guest: PID 1 is systemd 257, `/run/systemd/private` appears 1.3 seconds in,
 `systemctl is-system-running --wait` says `running`, and `systemd-run` imposes
 the unit's properties. The native tier, run the same afternoon for the
 comparison, passes all 31.
@@ -12606,12 +12607,23 @@ Measured on both guests, same systemd 257.13-1~deb13u1, same Debian 13:
     hull     a script in /run: RAN
 
 So `/run` carries no `noexec` in a hull guest, and a unit property that relies
-on it is silently unenforced there. **What is established** is the difference
-and its consequence; **what is not** is who mounts it that way -- with the init
-hand-over removed, `/run` is not a mount point at all, so it is systemd's own
-mount in both cases and the flags differ for a reason not yet named. The ratio
-differs too, 10 per cent of RAM on the native guest and 20 in the hull one,
-which is another hint that the mount is not made the same way.
+on it is silently unenforced there. **What was established** was the difference
+and its consequence; what was not, at the time, was who mounts it that way --
+with the init hand-over removed, `/run` is not a mount point at all, so it
+looked like systemd's own mount in both cases, with the flags differing for a
+reason not yet named. The ratio differed too, 10 per cent of RAM on the native
+guest and 20 in the hull one, which was the hint that the mount was not made
+the same way.
+
+**hull answered it, and the answer is the initramfs.** From their `828f72d`:
+on this tree's native tier `initramfs-tools` mounts `/run` before systemd
+starts and systemd keeps that mount; a hull guest has no initramfs, so systemd
+made `/run` itself, and its own defaults carry no `noexec`. That accounts for
+all three differences measured here -- `noexec`, `relatime`, and 20 per cent
+against 10 -- which is more than the finding asked for and is why it is worth
+recording in their words. Under `(init ...)` a hull guest now mounts `/run` as
+a distribution's initramfs leaves it: `nosuid,nodev,noexec`, mode 0755, 10 per
+cent of memory.
 
 **The finding went to hull with both lines.** It is their fifth from this tree
 and the first that only a tier comparison could produce: one guest passing a
@@ -12626,8 +12638,24 @@ this. That is the argument for controls restated by somebody else's
 environment: a suite without them would have reported 30 passes and no
 failure, and the missing enforcement would have been invisible.
 
-The rig stays. It is the cheapest reproduction of the difference, and when
-hull's `/run` carries `noexec` it is also the check that the move is complete.
+The rig stays. It was the cheapest reproduction of the difference, and it is
+now the check that the move is complete -- hull asked for exactly that, and it
+is what the re-run gives.
+
+### 31 of 31, against hull 828f72d
+
+Re-run the same night, same rig, same rootfs, only the hull binary newer:
+`sandbox_writes.sh: all checks passed`, and the line that had been the one
+failure reads `ok   and cannot without the unit's ExecPaths=, so that line is
+load-bearing`. So the control is back to discriminating: executing from
+netcfgd's runtime directory is allowed with `ExecPaths=` and denied without
+it, which is the property the unit declares and the only thing that makes the
+check above it mean anything.
+
+hull reports their own suite caught two sabotages of the new mount, and that
+the same fix closed a second bug of theirs -- a machine with secrets had a
+1 MiB `/run`, which would have been systemd's whole `/run`. Their measurement,
+in their voice; what this tree measured is the line above.
 
 ## 10.529 The clang gate, and two vacuous passes on the way to it
 
@@ -12734,11 +12762,15 @@ nine. Each item names where it is argued.
   user drops all eight setuid bits that `hull materialize` keeps, so a payload
   calling `sudo`, or `mount` as a user, must not use it. `hwsim.sh` does not,
   which is the only reason the rig stands on it.
-- ~~**netcfgd's systemd and OpenRC payloads cannot move to hull yet.**~~ **The
-  systemd one runs: 30 of 31** (10.530), hull `bfeb65f` and `0681fb3` having
-  fixed the setuid bug and given a machine the image's own init. The 31st is a
-  control that needs `/run` to carry `noexec`, which a hull guest does not,
-  and which the native tier does. The OpenRC payload is still untried.
+- ~~**netcfgd's systemd and OpenRC payloads cannot move to hull yet.**~~
+  **Both run, and both pass.** The systemd one was 30 of 31 (10.530) and is
+  31 of 31 since hull `828f72d` mounted a guest's `/run` as an initramfs
+  leaves it; before that the 31st was a control needing `noexec`, which the
+  native tier has and a hull guest did not. The OpenRC payload runs in
+  `tests/hull/openrc/` under `openrc-init`, 13 checks (10.531), which is the
+  first execution of `packaging/openrc/netcfgd` anywhere. hull `bfeb65f` and
+  `0681fb3` had already fixed the setuid bug and given a machine the image's
+  own init.
 
   The image is baked by docker with its setuid and setgid bits **put back from
   the image's own listing**, which the hwsim rig does not bother with and this
