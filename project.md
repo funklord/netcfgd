@@ -12498,6 +12498,61 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.534 hull answered the bake's two conditions, and one of them was unaskable
+
+Reported by hull's session, 2026-10-23, after this tree said what would move
+the rigs off their docker bake (10.532). Their facts, in their voice:
+
+  * **`hull build` keeps file owners** as of `a2448d1`, so a step can install
+    a package set: `dnsmasq-base` installs with exit 0, the stored manifest
+    keeps `run/dnsmasq` as 999 and apt's partial directory as 42, and a later
+    step on that image sees those owners again. No file of another owner
+    touches the disk -- the step's tree leaves the namespace as a tar and is
+    committed from it.
+  * **`hull push` keeps owners** as of `d93fc08`, with a pushed tree of 101's
+    and 102's read back apart from hull.
+  * **`hull pull` keeping a layer's tar owners is next**, and until then a
+    pulled base starts with none.
+  * **`hull commit --tar FILE REF`** takes a docker export and keeps its
+    owners and setuid bits.
+
+### The condition this tree set that cannot be met
+
+netcfgd's reply named two things that would move the switch up, and one of
+them was not a thing hull could choose: that a package-installing step work
+without host subid configuration. **A user namespace with more than one id
+mapped needs the subuid and subgid ranges plus `newuidmap`'s setuid bit, which
+is the kernel's rule rather than hull's** -- their correction, and the useful
+half of this exchange, because a condition nobody can satisfy reads like a
+reasonable ask and quietly blocks a decision for ever.
+
+Measured here rather than taken, since it decides whether the question even
+arises on this machine:
+
+    /etc/subuid:funk:100000:65536
+    /etc/subgid:funk:100000:65536
+    -rwsr-xr-x root root /usr/bin/newuidmap
+    -rwsr-xr-x root root /usr/bin/newgidmap
+    unshare -rn sh -c 'cat /proc/self/uid_map'   ->   0  1000  1
+
+The last line is the control for the claim: without the helpers a namespace
+maps exactly one id, which is the condition that stopped `dnsmasq-base`. The
+ranges and both setuid helpers are present, so **the precondition is already
+satisfied on this machine** and a build step would work here today.
+
+### So the bake stays, for one reason rather than three
+
+What remains is `hull pull`: a store that drops owners on the way out cannot
+hold these images, and netcfgd's rigs would be one `pull` away from a guest
+with no setuid bits -- which is the bug hull `bfeb65f` fixed on the other side
+and which two of the three bakes still work around by restoring the bits from
+the image's own listing. When pull keeps them, `hull commit --tar` is the small
+change rather than the new mechanism: every bake already pipes a `docker
+export` through `tar`, so the tar is in hand and the setuid-restoring step goes
+away with it.
+
+Nothing is asked of hull for that, and nothing here changes today.
+
 ## 10.533 The link-local failure had a mechanism, and the start now waits
 
 "fix the link_local failure then", the copyright holder, 2026-10-23, on the one
@@ -12962,10 +13017,11 @@ nine. Each item names where it is argued.
   `hull-clean` beside it. The reason for waiting had already gone -- the guest
   builds netcfgd itself since hull `7b47668` gave the workload a PATH, so the
   rig no longer borrows the host's binaries. What is still true is the image.
-  It is baked by docker, because hull
-  cannot install a package set yet -- its one-uid question is what stops
-  `dnsmasq-base`, decided since as many uids with owners kept, after the init
-  hand-over -- and hull's spec may still change before 1.0.
+  It is baked by docker. ~~because hull cannot
+  install a package set yet~~ -- **hull can, since `a2448d1`**, and one reason
+  is left rather than three (10.534): a `hull pull` still drops a layer's
+  owners, so a store cannot hold these images yet, and hull's spec may change
+  before 1.0.
 
   **And the baked image is not faithful**: `docker export` through `tar` as a
   user drops all eight setuid bits that `hull materialize` keeps, so a payload
