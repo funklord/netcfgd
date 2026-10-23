@@ -12498,6 +12498,89 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.543 Simultaneous apply is the requirement, and the clock is the primitive
+
+Two corrections from the copyright holder, 2026-10-23, after 0285's first draft
+offered eventual convergence with a visible window:
+
+> the think about atomicity is that some changes need to be applied that way,
+> or else the system goes down
+
+> by system I mean a distributed system, so they all need to apply after
+> receiving directives simultaneously
+
+**The first framing was true about a medium and useless about a renumbering.**
+If half the nodes move to a new subnet and half do not, the halves cannot talk,
+and the window being *visible* does not make the network work while it is open.
+0285's atomicity section is rewritten rather than appended to, because a record
+that offers both readings lets the weaker one go on being read.
+
+### What the model has to carry
+
+**Two classes of change, and classifying one is part of planning it.**
+Independently safe -- a local qdisc, a one-sided filter -- degrades under
+partial application and rolls forward per node. Jointly dependent -- a subnet
+or VLAN renumber, a rotated key, a policy both ends must agree on, a routing or
+MTU change along a path -- does not degrade; it partitions.
+
+**Make before break removes the need for agreement where it applies**, and is
+the route to prefer: add the new before withdrawing the old -- both addresses,
+both keys accepted, both VLANs trunked -- then withdraw the old as a second
+change that is itself safe piecemeal. Two passes and a transient double
+configuration, against a commit protocol.
+
+**Where it cannot be split, the directive carries its own effective instant.**
+Distribute first, then apply together: every node holds the directive and plans
+against it, and applies at the named time by its own clock. **The clock is the
+synchronisation primitive and that is the design choice** -- a "go" broadcast
+makes simultaneity depend on one message arriving everywhere at once, so losing
+it to one node creates exactly the partition the mechanism exists to prevent,
+while an absolute instant distributed in advance survives message loss.
+
+### The prerequisite that does not exist here yet
+
+**netcfgd asks the kernel nothing about clock discipline.** It reads
+`CLOCK_MONOTONIC` in four places and `adjtimex`, `ntp_adjtime` and
+`ntp_gettime` appear nowhere in `c/src`. A node whose clock is minutes out
+applies minutes early or late, which is the half-applied renumbering this
+whole mechanism is for -- so a timed apply needs a readable answer to "how far
+out might I be" and a refusal when the answer is "unknown". The kernel gives
+both the maximum error and a synchronised flag.
+
+Two more properties follow. **Planning happens before the instant and
+committing happens at it** -- which this daemon's shape already allows, since a
+plan is built and then applied and an nftables transaction is assembled and
+then sent, so the apply at T is a commit of prepared work rather than a run of
+unpredictable length that desynchronises by itself. And **a node that missed
+the window does not apply late**: for a jointly-dependent change that is a
+second partition where there was one stale node, so it reports stale and the
+repair loop brings it current by the ordinary path.
+
+### The safety net was already built, on one host
+
+A simultaneous apply can still be wrong, so the timed commit is wrapped in
+netcfgd's existing commit-confirm: each node arms its own revert timer at T
+(`confirm.c`, the window `global { confirm = N }` sets, `ncfg_apply_revert`
+replaying the inverses), the coordinator confirms once every node reports the
+version live, and a node that does not hear the confirm reverts itself.
+
+**The node's own timer is what makes it partition-safe** -- no message is
+needed to roll back -- and two properties it needs are already decided here:
+the revert record survives the process because `confirm.c` keeps its files in a
+sibling of the run directory rather than inside it (0163), and rollback must
+restore the path the coordinator uses, which is what makes the timer a safety
+net rather than a way to lose a node twice.
+
+### And one class must be refused rather than staged
+
+A change whose rollback cannot restore reachability -- re-keying the control
+plane with no second channel, renumbering the network the coordinator is
+reached over -- has no safe automatic form, because staging it arms a timer
+that cannot be confirmed. Those need a second channel or an explicit operator
+override, and netcfgd should say so rather than discover it: a tool that
+refuses and a tool that applies on an explicit override both beat one that
+stages it and hopes.
+
 ## 10.542 The network is the same loop, and all the config is meant to live in fuzznet
 
 The copyright holder, 2026-10-23, describing the distributed half:
