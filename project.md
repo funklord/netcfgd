@@ -12498,6 +12498,83 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.545 A rule's standing, and the red row is the capability report
+
+The copyright holder, 2026-10-23: a concept of "this rule was not applied
+fully", with a settled status for when enough nodes know about a value -- so a
+long list of netfilter rules can show one row red because that machine has no
+kernel support for it and it was never applied. `0287` records it.
+
+**Status is per rule and it is standing state rather than a log line**, and the
+distinction is the whole design: a list of two hundred rules with one red row
+answers "what is true now", where `/run/netcfgd/plan.last.json` answers "what
+did the last run do". Both are wanted and they are not the same artifact.
+
+### The precedent was already in the tree, and it is the same argument
+
+`ncfg_outcome_t` gives every action `DONE`, `FAILED`, `SKIPPED` or `REVERTED`
+with its reason. **`REVERTED` exists because the Rust recorded a revert as log
+lines and an operator reading the journal after a window closed unconfirmed
+could not tell which listed actions were still in effect** -- "the one question
+that file exists to answer, and the one moment it is read". A rule list without
+standing has that defect at a larger scale: it reports what was attempted and
+leaves the operator to derive what holds.
+
+So the journal stays what it is, and a rule gains a standing computed from the
+last run's outcome, the observation and the acknowledgements -- computed rather
+than stored, so it cannot drift from reality the way a cached field would.
+
+### Seven standings, each distinguished by what an operator would do
+
+`live`, `pending`, `unsupported`, `refused`, `stale`, `drifted`, `unsettled`.
+The test for whether a vocabulary has the right number of words is whether two
+of them would lead to the same action; these do not.
+
+**Green is the only one that needs no sentence.** The holder's example is the
+argument: a row saying `failed` sends somebody to a log, and a row saying
+"nftables rejected `flowtable`; this kernel is 5.4 and it arrived in 5.13" ends
+the question. **That text does not exist yet** -- netcfgd hands over the
+kernel's errno, and translating `EOPNOTSUPP` from a construct into a named
+capability is exactly the half 0283 recorded as missing. So **the red row is
+the capability report**, and the two are one piece of work rather than two.
+
+### Settled, defined narrowly enough to compute
+
+A rule is settled when every node whose rules reference the value holds the
+version carrying it, acknowledged, within a freshness bound. Three decisions
+sit in that sentence: **the consumers rather than every node**, since a quorum
+over the whole network makes an unrelated node's absence into this rule's
+problem; **acknowledged rather than sent**, which is 0285's argument that
+distribution is not application; and **within a bound**, because a node that
+confirmed ten minutes ago and is now unreachable is not settled now -- calling
+it settled is the stale-measurement fault this tree keeps finding.
+
+**Unsettled is a transient, not an error**, and the reason it must be visible
+is that for the first seconds it looks identical to a node that will never
+settle.
+
+### The rollup must not turn one red into green
+
+A rule can be `live` on nine nodes and `unsupported` on the tenth, and that is
+one rule in one list -- so the rollup is **the worst standing among the nodes,
+with the count beside it**: `unsupported on 1 of 10`, the node named on the
+row. A list that showed green because most nodes applied it is the vacuous pass
+this tree keeps meeting in other clothes.
+
+### What it asks of the model
+
+A rule needs an identity that survives re-planning or a list cannot show the
+same row twice -- which netcfgd has met before, in 0137, where tc filters took
+handles because a planner that cannot name what it installed cannot read it
+back. An authored rule gets a stable id in the config and the kernel object's
+handle is recorded beside it.
+
+Open: the wire form of an acknowledgement, the freshness bound's value, whether
+`pending` distinguishes waiting-for-a-value from waiting-for-an-instant in the
+row or only in its detail, and whether an operator can pin a rule as
+expected-unsupported on a node so its red stops being news -- which is the
+difference between a list that is read and a list that is dismissed.
+
 ## 10.544 Two apply modes, and a cross-host value is a report with a wider scope
 
 The copyright holder, 2026-10-23, asking the three questions that follow from
