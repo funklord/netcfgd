@@ -12498,6 +12498,79 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.549 One subject key, asked for from three directions
+
+"go ahead", the copyright holder, 2026-10-23, on the identity work that 0287,
+0289 and 0290 each named independently: a rule's standing must attach to the
+same row after a re-plan, a guard needs a subject better than a string compared
+against an interface name, and a lock needs to name the value it will not let
+netcfgd set.
+
+`ncfg_op_subject(op, out, size)` is that, in `plan/action.c` beside
+`ncfg_op_name` and `ncfg_op_interface`, with `subject_test.c` holding it to
+five properties.
+
+### The shape, and why the class is the object rather than the action
+
+`class:scope` or `class:scope/detail`, scope being the interface or `host`.
+
+**Two actions against one object share a subject**: `link.up` and `link.down`
+are both `link:eth0`, because a standing must survive one becoming the other
+and a lock must cover both directions of a change rather than one. **A value
+that can be owned separately gets its own class**: `link.set_mtu` is
+`mtu:eth0`, not `link:eth0`, or locking an MTU would stop the link coming up.
+**And distinct objects of one class differ**: `addr:eth0/192.0.2.10/24`, so a
+list shows two rows and a lock covers one address.
+
+Eight kinds need a detail to be unambiguous -- an address, a route by its
+destination, a routing rule by the priority `document.h` already calls the
+thing it is "selected by across the whole system", a backend by its kind, a
+VLAN by its id, an ACL entry by its station, a hook by its phase. The rest are
+named by class and interface, and where that is coarser than a lock might
+eventually want, the absent detail says so rather than a number being invented.
+
+**Truncation is a refusal**, not a short key: a key cut short can collide with
+another object's and then names the wrong thing.
+
+### The check that matters is completeness, and it caught my own count
+
+The test walks every op kind rather than the ones somebody remembered: 45 are
+classified, 3 are deliberately excluded -- the commit family, because arming
+and confirming a window is how a change is made safely rather than
+configuration, and a lock over them would cover the mechanism that rescues a
+locked-out machine.
+
+**The excluded count is what found the bug, and the completeness check did
+not.** The loop first read `<= NCFG_OP_COMMIT_CONFIRM` and reported 45
+classified with 2 excluded of 47 -- one short of `NCFG_OP_COMMIT_REVERT`, which
+my earlier enum extraction had also missed. The completeness assertion passed
+in that state, because a kind outside the loop is a kind not asked about. So
+the pair of assertions is the point: a count that must add up catches what a
+pass-or-fail cannot.
+
+### What it cost, which is the part to argue with
+
+**4136 bytes**: 1176752 to 1180888, recorded at 1181000 rather than left to
+ride the 3 per cent tolerance, which is `size-budget.txt`'s own rule -- the
+tolerance is for compiler noise, and spending it on a feature makes the next
+feature fail for the wrong reason.
+
+**And nothing calls it yet.** Four kilobytes of foundation is defensible in a
+file that has carried model code for unimplemented features, and it is still
+four kilobytes. The leaner form is written down beside the figure: most classes
+are the op name's prefix before the dot, since 0082 gives every op one name, so
+a dozen overrides for the link attributes that deserve their own class would
+replace the forty-five-arm switch. Not taken, because the switch is where a new
+op kind announces that nothing can lock or guard it -- which is the property
+`subject_test` asserts -- but the trade is recorded rather than assumed settled.
+
+### What it unblocks, and in which order
+
+A guard keyed on a subject rather than an interface (0289), a lock that names
+a value (0290), and a standing attached to a row that survives a re-plan
+(0287). None of those is built; all three now have the key they each asked for,
+and the next of them is the holder's to pick.
+
 ## 10.548 A lock says a value is not netcfgd's to set, and that question was never asked
 
 The copyright holder, 2026-10-23, unifying three threads:

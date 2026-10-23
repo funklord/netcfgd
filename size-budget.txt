@@ -852,4 +852,22 @@ netcfgd
 # gate reporting a number larger than its limit, which is the state every entry
 # above this one exists to prevent, and which this file's own rule calls out by
 # name.
-total 1177000
+# Then the generation check and the subject key, 2026-10-23. The nftables
+# generation (0283's torn-read half) cost 128 bytes, which rode inside the
+# previous figure. `ncfg_op_subject` is the larger half at about 4 KB: a class
+# per op kind and the detail rendering for the eight kinds whose object needs
+# more than an interface to name, asked for from three directions -- a rule's
+# standing (0287), a guard's subject (0289) and a lock's value (0290).
+#
+# **Recorded although nothing calls it yet, and that is the criticism to keep
+# in view.** Four kilobytes of a feature's foundation is defensible where this
+# file has carried model code for features not yet implemented, but a leaner
+# form exists if the number matters more than the shape: most classes are the
+# op name's prefix before the dot (0082 gives every op one name), so a dozen
+# overrides for the link attributes that deserve their own class would replace
+# the forty-five-arm switch. Not taken now because the switch is where a new op
+# kind announces itself, and `subject_test` asserts exactly that.
+#
+# Measured 1180888 and recorded at 1181000 rather than left to ride the
+# tolerance, for this file's own reason.
+total 1181000

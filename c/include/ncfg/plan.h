@@ -329,6 +329,37 @@ int ncfg_op_is_host_wide_config(const ncfg_op_t *op);
 /* Which interface this acts on, where it acts on one, and NULL otherwise. */
 const char *ncfg_op_interface(const ncfg_op_t *op);
 
+/*
+ * The object this action acts on, as a key that is the same across re-plans.
+ *
+ * **Three records asked for this from three directions**, which is why it is
+ * one function rather than three: 0287 needs a rule's standing to attach to
+ * the same row in a list after a re-plan, 0289 needs a guard's subject to be
+ * something better than a string compared against an interface name, and 0290
+ * needs a lock to name the value it refuses to let netcfgd set.
+ *
+ * `class:scope` or `class:scope/detail`, where the class is the **object**
+ * rather than the action -- `link.up` and `link.down` share `link:eth0`,
+ * because they are two things done to one object, while `link.set_mtu` is
+ * `mtu:eth0`, because an MTU is a value somebody may own separately from the
+ * link that carries it. The scope is the interface, or `host` for the things
+ * that belong to the machine.
+ *
+ * **The detail is only as fine as netcfgd can name today**, and where it is
+ * absent the subject is coarser than a lock might eventually want: a backend
+ * is named by its kind, a route by its destination, a routing rule by its
+ * priority -- which `document.h` already calls the thing it is "selected by
+ * across the whole system" -- and a hook by its phase. An op whose object
+ * netcfgd cannot name finer than its interface says so by having no detail,
+ * rather than by inventing a number nothing else uses.
+ *
+ * 1 with `out` filled. 0 for a kind with no subject, or a buffer too small --
+ * and the buffer is checked rather than truncated, because a truncated key
+ * that happens to match another is worse than a refusal.
+ */
+#define NCFG_OP_SUBJECT_MAX 192u
+int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size);
+
 /* ------------------------------------------------------------------------ *
  * What an action carries besides the op
  * ------------------------------------------------------------------------ */

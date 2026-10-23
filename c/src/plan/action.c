@@ -268,6 +268,181 @@ int ncfg_op_is_host_wide_config(const ncfg_op_t *op)
 	return op->kind == NCFG_OP_DNS_APPLY || op->kind == NCFG_OP_HOSTNAME_SET;
 }
 
+/*
+ * The class of object an op acts on, which is deliberately not the op's name.
+ *
+ * `plan.h` has the argument: two actions against one object share a subject,
+ * and a value somebody may own separately from its link gets a class of its
+ * own. A kind missing from here has no subject and `ncfg_op_subject` says so,
+ * which is how a new op kind announces that nothing can lock or guard it yet.
+ */
+static const char *subject_class(int kind)
+{
+	switch ((ncfg_op_kind_t)kind) {
+	case NCFG_OP_LINK_CREATE:
+	case NCFG_OP_LINK_DELETE:
+	case NCFG_OP_LINK_UP:
+	case NCFG_OP_LINK_DOWN:
+		return "link";
+	case NCFG_OP_LINK_SET_MTU:
+		return "mtu";
+	case NCFG_OP_LINK_SET_MAC:
+		return "mac";
+	case NCFG_OP_LINK_SET_MASTER:
+	case NCFG_OP_LINK_UNSET_MASTER:
+		return "master";
+	case NCFG_OP_LINK_SET_BOND:
+		return "bond";
+	case NCFG_OP_LINK_SET_BRIDGE:
+		return "bridge";
+	case NCFG_OP_LINK_SET_MACVLAN:
+		return "macvlan";
+	case NCFG_OP_LINK_SET_TUNNEL:
+		return "tunnel";
+	case NCFG_OP_LINK_SET_VXLAN:
+		return "vxlan";
+	case NCFG_OP_LINK_SET_OFFLOADS:
+		return "offloads";
+	case NCFG_OP_LINK_SET_IPV6_TOKEN:
+		return "token";
+	case NCFG_OP_ADDR_ADD:
+	case NCFG_OP_ADDR_DEL:
+		return "addr";
+	case NCFG_OP_ROUTE_ADD:
+	case NCFG_OP_ROUTE_DEL:
+		return "route";
+	case NCFG_OP_RULE_ADD:
+	case NCFG_OP_RULE_DEL:
+		return "iprule";
+	case NCFG_OP_BACKEND_START:
+	case NCFG_OP_BACKEND_STOP:
+	case NCFG_OP_BACKEND_RELOAD:
+		return "backend";
+	case NCFG_OP_BRIDGE_VLAN_ADD:
+	case NCFG_OP_BRIDGE_VLAN_DEL:
+		return "vlan";
+	case NCFG_OP_WIFI_SET_PROFILES:
+	case NCFG_OP_WIFI_ASSOCIATE:
+	case NCFG_OP_WIFI_DISASSOCIATE:
+		return "wifi";
+	case NCFG_OP_WIFI_SET_REGDOM:
+		return "regdom";
+	case NCFG_OP_ACCESS_CONTROL_ADD:
+	case NCFG_OP_ACCESS_CONTROL_DEL:
+		return "acl";
+	case NCFG_OP_WG_SET_DEVICE:
+	case NCFG_OP_WG_SET_PEERS:
+		return "wireguard";
+	case NCFG_OP_QDISC_SET:
+	case NCFG_OP_QDISC_RESET:
+		return "qdisc";
+	case NCFG_OP_INGRESS_REDIRECT:
+	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
+		return "ingress";
+	case NCFG_OP_SYSCTL_SET_FORWARDING:
+		return "forwarding";
+	case NCFG_OP_SYSCTL_SET_PRIVACY:
+		return "privacy";
+	case NCFG_OP_SYSCTL_SET_ACCEPT_RA:
+		return "accept_ra";
+	case NCFG_OP_DNS_APPLY:
+		return "dns";
+	case NCFG_OP_NAT_REPLACE:
+		return "nat";
+	case NCFG_OP_HOSTNAME_SET:
+		return "hostname";
+	case NCFG_OP_HOOK_RUN:
+		return "hook";
+	/*
+	 * **The commit family has no subject, deliberately.** Arming and
+	 * confirming a window are not configuration -- they are how a change is
+	 * made safely -- and a lock over them would be a lock over the mechanism
+	 * that rescues a locked-out machine. 0290's refusal path uses them.
+	 */
+	case NCFG_OP_COMMIT_ARM:
+	case NCFG_OP_COMMIT_CONFIRM:
+	case NCFG_OP_COMMIT_REVERT:
+		return NULL;
+	}
+	return NULL;
+}
+
+int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size)
+{
+	const char *class_name;
+	const char *scope;
+	char        detail[96];
+	int         written;
+
+	if (!op || !out || out_size == 0u) {
+		return 0;
+	}
+	out[0] = '\0';
+	class_name = subject_class(op->kind);
+	if (!class_name) {
+		return 0;
+	}
+	scope = ncfg_op_interface(op);
+	detail[0] = '\0';
+	switch ((ncfg_op_kind_t)op->kind) {
+	case NCFG_OP_ADDR_ADD:
+		(void)snprintf(detail, sizeof(detail), "%s", op->u.addr_add.addr ?
+		    op->u.addr_add.addr : "");
+		break;
+	case NCFG_OP_ADDR_DEL:
+		(void)snprintf(detail, sizeof(detail), "%s", op->u.addr_del.addr ?
+		    op->u.addr_del.addr : "");
+		break;
+	case NCFG_OP_ROUTE_ADD:
+	case NCFG_OP_ROUTE_DEL:
+		if (op->u.route.route && op->u.route.route->destination) {
+			(void)snprintf(detail, sizeof(detail), "%s", op->u.route.route->destination);
+		}
+		break;
+	case NCFG_OP_RULE_ADD:
+	case NCFG_OP_RULE_DEL:
+		if (op->u.rule.rule) {
+			(void)snprintf(detail, sizeof(detail), "%lld",
+			    (long long)op->u.rule.rule->priority);
+		}
+		break;
+	case NCFG_OP_BACKEND_START:
+	case NCFG_OP_BACKEND_STOP:
+	case NCFG_OP_BACKEND_RELOAD:
+		(void)snprintf(detail, sizeof(detail), "%s",
+		    ncfg_backend_kind_name(op->u.backend.kind));
+		break;
+	case NCFG_OP_BRIDGE_VLAN_ADD:
+	case NCFG_OP_BRIDGE_VLAN_DEL:
+		(void)snprintf(detail, sizeof(detail), "%lld", (long long)op->u.bridge_vlan.vid);
+		break;
+	case NCFG_OP_ACCESS_CONTROL_ADD:
+	case NCFG_OP_ACCESS_CONTROL_DEL:
+		(void)snprintf(detail, sizeof(detail), "%s", op->u.access_control.station ?
+		    op->u.access_control.station : "");
+		break;
+	case NCFG_OP_HOOK_RUN:
+		(void)snprintf(detail, sizeof(detail), "%s",
+		    ncfg_hook_phase_name(op->u.hook.phase));
+		break;
+	default:
+		break;
+	}
+	/* **`host` rather than an empty scope**, so that every subject has two
+	 * parts and a reader never has to know which classes are host-wide to
+	 * parse one. */
+	written = snprintf(out, out_size, "%s:%s%s%s", class_name, scope ? scope : "host",
+	    detail[0] ? "/" : "", detail);
+	if (written < 0 || (size_t)written >= out_size) {
+		/* Refused rather than truncated: a key cut short can collide with
+		 * another, and a subject that silently names the wrong object is
+		 * worse than one that could not be built. */
+		out[0] = '\0';
+		return 0;
+	}
+	return 1;
+}
+
 const char *ncfg_op_interface(const ncfg_op_t *op)
 {
 	switch ((ncfg_op_kind_t)op->kind) {
