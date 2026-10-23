@@ -12498,6 +12498,93 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.535 A gate became a build's default goal, and `make nm` built nothing
+
+"run make live-container one more time", the copyright holder, 2026-10-23. The
+first run failed where no run had failed before:
+
+    nm.sh: skipping: netcfgd-nm is not built (make nm)
+    c_nm_signals.sh: NCFG_LIVE is set but this cannot run: the C shim is not built
+
+Reproduced with the step's output visible rather than guessed at. `make nm`
+printed `syntax: cc read 16 source(s) with no warning`, exited 0, and produced
+no program.
+
+**The clang gate's own target had become the default goal.** 10.529 added
+`syntax` to three builds that morning, and in two of them it went in ABOVE
+`all` -- which is what a bare `make` in that directory then does. Asked of make
+rather than read out of the file:
+
+    c                        all
+    client                   syntax
+    adapter/netcfgd-nm/c     syntax
+
+So `make -C client` and `make nm` had been building nothing for four hours.
+
+### Why nothing noticed, which is the part worth keeping
+
+`make check` reaches every artifact through an explicit target, so it was
+unaffected and green the whole time -- the gate that would notice is not the
+gate that runs. On this host the shim binary from 00:22 simply stayed where it
+was, so a bare `make nm` was a silent no-op over a stale file: exactly the
+hazard `build-and-commit.md` names, a verdict read off a binary the build step
+did not rebuild. **The container is the one place it was loud**, because it
+cleans first and `c_nm_signals.sh` turns its own skip into a failure under
+`NCFG_LIVE` -- the suite's refusal to tolerate a skip is what made a silent
+build failure visible at all.
+
+### The fix, and the gate it earned
+
+The `syntax` targets moved below `all`; `.DEFAULT_GOAL := all` pinned in all
+four hand-written builds -- `c`, `client`, `adapter/netcfgd-nm/c`, `bridge` --
+so an insertion cannot repeat it; and `default-goal` added to
+`PORTABLE_GATES`, which is in `check` and `check-ci` by construction.
+
+**The gate asks make, rather than reading the makefile.** `tool/say-goal.mk`
+is loaded as a second `-f` after a directory's own makefile, so that
+makefile's first target still decides `.DEFAULT_GOAL` and the extra one only
+prints it; naming its target on the command line is what keeps it side-effect
+free. A grep for `all:` would have agreed with both broken makefiles, which is
+`evidence.md`'s rule about asking the thing itself.
+
+**Seen to fail before it was trusted**: with the pin removed and `syntax` put
+back on top, `default-goal: client builds `syntax`, not `all`` and the gate
+exits 2. `gui/` is excluded because qmake writes it and `fuzznet/` because it
+is a vendored submodule; both answer `all` today and neither is this tree's to
+pin.
+
+### The second run: 80 of 81, which is where a container can get to
+
+72 scripts report `all checks passed` in that wording, four more pass in
+wordings of their own -- `c_daemon_watch.sh: 26 checks, 0 failed`,
+`config_arrives.sh` twice, `network_arrives.sh`, `control_helper.sh: ok` -- so
+**76 invocations pass, 4 skip, and all 80 before the last one run.** The 81st
+and last is `sandbox_writes.sh`, which needs systemd as pid 1: a container
+cannot be talked into that, and its coverage is `make hull-sandbox` at 31 of 31
+(10.530). The previous measurement was 75 of 81.
+
+`link_local.sh: all checks passed` there, which is 10.533's fix in the tier
+where its four checks failed. `nm.sh` and `c_nm_signals.sh` pass again.
+
+### The four skips, and one of them was lying about how to fix it
+
+  * `hwsim.sh` -- no `mac80211_hwsim`; `make hull-hwsim` runs it, 27 of 27.
+  * `delegation.sh` -- no `odhcp6c`, which Debian does not package;
+    `make vm-delegation` builds it.
+  * `gui_wifi.sh` -- no `qmake6`, which the container's package list does not
+    install.
+  * `association.sh` -- the probe was not built. **Measured rather than
+    assumed**, because adding `make -C c examples` to the container script
+    looked like a one-line coverage gain: with the probe built the script gets
+    one step further and then says "no netcfgd is running to compare against".
+    So that line buys a different skip rather than a run, and is not added.
+
+Its skip message named `cargo build -p netcfgd-host --example live_association`
+-- a real target, since the Rust core is still in the tree, and the one thing
+that cannot satisfy the path it checks, because `$build` is `c/`. **A skip
+message that sends a reader to build the other implementation is worse than
+one that says nothing**, so it names `make -C c examples` now.
+
 ## 10.534 hull answered the bake's two conditions, and one of them was unaskable
 
 Reported by hull's session, 2026-10-23, after this tree said what would move
@@ -13007,10 +13094,12 @@ nine. Each item names where it is argued.
 
 **Work with a clear next step**
 
-- **`make live-container` reaches 75 of 81 invocations** and stops at
-  `sandbox_writes.sh`, which needs systemd as PID 1 (10.523). A container
-  cannot be talked out of that. hull's init hand-over is the route, and it is
-  the next thing after their segments work.
+- ~~**`make live-container` reaches 75 of 81 invocations**~~ **It reaches 80
+  of 81** (10.535), 76 passing and 4 skipping for reasons a container cannot
+  change, and stops at the 81st -- `sandbox_writes.sh`, which needs systemd as
+  PID 1 (10.523). A container cannot be talked out of that, and that one is
+  covered: `make hull-sandbox` runs it at 31 of 31 (10.530). So this item is
+  as closed as it can be from the container side.
 - ~~**The hull rig has no Makefile target**~~ (10.527). **Added 2026-10-23**
   on the holder's instruction (10.532): `make hull` runs all three rigs, 71
   checks, with `hull-hwsim`, `hull-sandbox`, `hull-openrc`, `hull-image` and

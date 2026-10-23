@@ -62,6 +62,15 @@ endif
 .PHONY: all test clean fuzz fuzz-list fuzz-replay FORCE
 
 
+# **The default goal is pinned, and it is not decoration.** A target added
+# above `all` becomes what a bare `make` here does -- which is how `syntax`,
+# added for the root `clang` gate on 2026-10-23, silently became this
+# directory's whole build: `make nm` printed a clean syntax check, exited 0 and
+# produced no program, and the live suite reported the shim "not built" an hour
+# later. `make default-goal` at the root asks make itself, for all four builds.
+.DEFAULT_GOAL := all
+
+all: $(LIB)
 # A parse and a check of every source, writing nothing: `make syntax CC=clang`
 # is what the root `clang` gate runs here. `c/Makefile`'s copy carries the
 # reasoning; the short of it is that the flags are `$(CFLAGS)` so they cannot
@@ -73,8 +82,6 @@ syntax:
 	@$(CC) $(SYNTAX_CFLAGS) -Werror -fsyntax-only $(SRCS)
 	@printf 'syntax: %s read %s source(s) with no warning\n' "$(CC)" \
 		"$(words $(SRCS))"
-
-all: $(LIB)
 
 # The flags this was last built with, as a file the objects depend on.
 #

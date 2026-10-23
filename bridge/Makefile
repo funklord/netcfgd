@@ -92,6 +92,14 @@ FUZZNET_DEFS = -DFZN_PERSIST_FILE_ON -DFZN_CLI_ON -DFZN_RECORD_STORE_FILE_ON \
 
 .PHONY: all fuzznet client test clean
 
+# **The default goal is pinned, and it is not decoration.** A target added
+# above `all` becomes what a bare `make` here does -- which is how `syntax`,
+# added for the root `clang` gate on 2026-10-23, silently became this
+# directory's whole build: `make nm` printed a clean syntax check, exited 0 and
+# produced no program, and the live suite reported the shim "not built" an hour
+# later. `make default-goal` at the root asks make itself, for all four builds.
+.DEFAULT_GOAL := all
+
 all: $(PROGRAM)
 
 # **Ask git, and report git's absence as its own thing.** `test -d .git` is

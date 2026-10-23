@@ -102,7 +102,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # subcommand, so the question is whether it is on PATH.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
+.PHONY: clang default-goal ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
 
 all: build
 
@@ -147,7 +147,7 @@ ncfg-link:
 # on**. Everything in PORTABLE_GATES gives the same answer on any machine that
 # can build the tree. BUDGET_GATES measure *this* machine, and running them
 # somewhere else measures somewhere else -- see `check-ci`.
-PORTABLE_GATES = style fmt ascii shell clippy clang unsafe-policy \
+PORTABLE_GATES = style fmt ascii shell clippy clang default-goal unsafe-policy \
                  executor-policy nm-containment packaging claims client-test \
                  conformance test example gui linkage c-test agree ledger \
                  module-order registry bridge-test nm-c-test
@@ -341,6 +341,44 @@ clippy:
 # bargain: a machine without the tool still runs the rest of `check`, and the
 # skip says what to install. `harmonization.md`'s `make -n` hazard does not
 # apply -- this recurses, but nothing harvests what the sub-make prints.
+# **A bare `make` in each hand-written build must build that build's program**,
+# which is `.DEFAULT_GOAL` and is not something a reader checks.
+#
+# Paid for the same day the `clang` gate landed: its `syntax` target went in
+# ABOVE `all` in `client/` and in `adapter/netcfgd-nm/c/`, so `make -C client`
+# and `make nm` ran a syntax check, printed a clean line, exited 0 and built
+# nothing. Nothing noticed until a container run an hour later reported the
+# shim "not built" -- the one place a missing binary is loud, because
+# `c_nm_signals.sh` turns its own skip into a failure under NCFG_LIVE.
+#
+# Asked of make rather than read out of the file, because the default goal is
+# what make computes from the first target it meets and a grep for `all:` would
+# agree with a broken makefile. `tool/say-goal.mk` says how that is done
+# without running the build.
+#
+# `gui/` is excluded because qmake writes it, and `fuzznet/` because it is a
+# vendored submodule; both answer `all` today and neither is this tree's to
+# pin.
+#
+# **A sub-make harvested in a recipe**, so `make -n default-goal` runs these
+# four and prints their answers rather than the recipe -- the hazard
+# `harmonization.md` records. They write nothing, which is why it is safe here.
+default-goal:
+	@fail=0; \
+	for dir in c client adapter/netcfgd-nm/c bridge; do \
+		goal=$$($(MAKE) -C $$dir --no-print-directory -f Makefile \
+			-f $(CURDIR)/tool/say-goal.mk ncfg-say-goal 2>/dev/null | tail -1); \
+		if [ "$$goal" = "all" ]; then \
+			printf 'default-goal: %s builds `all`\n' "$$dir"; \
+		else \
+			printf 'default-goal: %s builds `%s`, not `all`, so a bare make there\n' \
+				"$$dir" "$$goal" >&2; \
+			printf 'default-goal:   builds something other than its program\n' >&2; \
+			fail=1; \
+		fi; \
+	done; \
+	[ "$$fail" -eq 0 ]
+
 clang:
 	@if $(CLANG_OK); then \
 		$(MAKE) --no-print-directory -C c syntax CC=clang && \

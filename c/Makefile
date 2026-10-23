@@ -164,6 +164,14 @@ endif
 
 .PHONY: all test examples clean fuzz fuzz-list fuzz-replay FORCE
 
+# **The default goal is pinned, and it is not decoration.** A target added
+# above `all` becomes what a bare `make` here does -- which is how `syntax`,
+# added for the root `clang` gate on 2026-10-23, silently became this
+# directory's whole build: `make nm` printed a clean syntax check, exited 0 and
+# produced no program, and the live suite reported the shim "not built" an hour
+# later. `make default-goal` at the root asks make itself, for all four builds.
+.DEFAULT_GOAL := all
+
 all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
 
 # Probes a live test drives, which are programs rather than tests: they take a

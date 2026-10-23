@@ -49,7 +49,13 @@ fail() {
 	exit 1
 }
 
-[ -x "$probe" ] || skip "the probe is not built (cargo build -p netcfgd-host --example live_association)"
+# **The C probe, and the message says so.** It named
+# `cargo build -p netcfgd-host --example live_association` until 2026-10-23,
+# which builds the Rust example of the same name -- a real target in a tree
+# that still carries the Rust core, and the one thing that cannot satisfy the
+# path above, since `$build` is `c/`. A skip message that sends a reader to
+# build the other implementation is worse than one that says nothing.
+[ -x "$probe" ] || skip "the probe is not built (make -C c examples)"
 # **The build's `ncfg`, not an installed one.** This was the only one of the
 # live scripts to ask `command -v`; the other 68 resolve it from
 # `target/debug`. So on a machine with the tree built and netcfgd not
