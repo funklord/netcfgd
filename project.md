@@ -12498,6 +12498,73 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.540 Five layers, one ruleset, and where each one already has a foothold
+
+The copyright holder, 2026-10-23, asked for the ownership model and the rule
+language and answered both at once: **netcfgd owns the whole ruleset**, with
+exceptions for software that clobbers netfilter rules, and "zone" in netcfgd
+means the distributed purpose-driven layer rather than a firewalld or `fw4`
+per-interface zone. Five layers were named, the fifth being the ones nobody has
+thought of yet, and Unifi was named as the yardstick. `0284` records it.
+
+**The layers differ in who writes them, how abstract they are, and how long
+they live** -- which is what makes them layers and not competing models. A host
+rule lasts until somebody edits it; a membership pushed by an authentication
+subsystem may last seconds. That difference decides the mechanism: zones and
+presets compile to per-host rules, and the real-time layer must not recompile
+anything, because a failover cannot wait for a ruleset rebuild and rebuilding
+on every membership change churns the ruleset under traffic.
+
+So the real-time layer wants nftables **sets and maps**, not rules: elements
+change atomically with per-element timeouts while the rules referring to them
+stand, and clearing a set revokes an authorisation without touching policy.
+
+### Three footholds that already exist, which is more than the design assumed
+
+  * **The distributed layers need no new listener**, which 0269 and design
+    11.3 already fix: the daemon never grows one, `bridge/netcfgd-remote`
+    links `fuzznet` and holds an ordinary local socket, and netcfgd's own
+    authorisation does the security-critical work. A controller pushing zones
+    and a subsystem pushing memberships both arrive that way, and the fault
+    isolation is already argued.
+  * **An authorisation model is there**: tiers (0175) with `observe`, `wifi`
+    and `admin`, local and remote, exercised by `remote_tiers.sh`. What layer 4
+    needs is a *narrower* authority than `admin` -- "may add an element to this
+    set and nothing else" -- which is a tier question rather than a new
+    mechanism.
+  * **0022's nftables mechanism carries over unchanged**: netlink rather than
+    `nft`, tag what you own, replace atomically, tolerate a vocabulary that
+    moves.
+
+### The observation worth keeping from reading Unifi
+
+**Identity is where the firewall and the queue meet.** A per-client rate limit
+and a per-client filter name the same subject, so one identity model serves
+both -- which is the strongest argument for doing the queuing half together
+with the firewall rather than after it, and it is an argument neither 0022 nor
+0023 could reach while each was refusing half the problem separately.
+
+And the requirement with teeth: **a Unifi device keeps enforcing when its
+controller is unreachable**, so layer 3 and 4 state has to persist on the host,
+and the absent-controller behaviour must be stated rather than emergent. It
+must not fail open: a firewall that forgets its rules when a controller reboots
+is worse than no firewall, because nobody is watching.
+
+### Whole-ruleset ownership makes coexistence the hard half
+
+Docker, podman and libvirt add tables while netcfgd runs. The carve-out has to
+be **named rather than inferred** -- a pattern that guesses will one day keep
+the wrong table -- and the case 0022 feared most is a runtime adding a table
+between netcfgd's dump and its transaction, which is 0283's generation race
+again and is detectable by the same means.
+
+Nothing is implemented from this. What is written down is the ownership
+decision, the layering, the mechanism each layer points at, and the eight
+questions that stay open -- the grammar, the precedence between layers, the
+carve-out syntax, layer 4's tier, how a zone names a host, whether a controller
+is netcfgd on another host or a separate program, how time enters a rule, and
+size.
+
 ## 10.539 The scope was never the holder's, and 0283 says so
 
 "We have not chosen such a narrow scope, that is your invention. We want full
