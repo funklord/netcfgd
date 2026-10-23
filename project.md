@@ -12498,6 +12498,95 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.550 `global { locked = [...] }`, which refuses at plan time
+
+"go ahead", the copyright holder, 2026-10-23. 0290's lock, built on the subject
+key from 10.549: a list of subject keys netcfgd may not set, refused by the
+planner, with no per-apply waiver.
+
+    global {
+        locked = ["mtu:eth0", "addr:eth0/192.0.2.5/24"]
+    }
+
+`plan_lock_test` holds it to eleven checks, and the refusal reads:
+
+    locked:  `mtu:eth0` is locked
+    lift it: remove `mtu:eth0` from `global { locked = [...] }`
+
+**The `override_with` field names an edit rather than an invocation**, which is
+0290's rule rather than a wording choice: a guard's refusal carries `ncfg apply
+--allow-disruption <iface>` and a lock has no waiver at all, so naming a flag
+there would be a lie in the one field an operator acts on. The test asserts the
+absence of `--allow-disruption` for that reason.
+
+### Three things the tree gave for free, and one it refused to
+
+**The model is table-driven**, so one `ncfg_field_t` entry carried the
+freeing, copying, comparison and JSON. The hand-written work was the lowering,
+the rendering and the refusal.
+
+**No scope entry was needed, and that is the right answer rather than an
+omission.** `global` defaults to host-private and the scope table lists only
+the keys that travel -- so a lock stays on the machine that declared it, which
+is exactly 0290's point: a lock that travelled would let one node's declaration
+be distributed to others.
+
+**And the `agree` gate refused the first version.** It compiles the same
+configuration with the C and the Rust and compares the documents as values, so
+a key the C writes and the Rust does not know makes them differ -- four
+fixtures went red. The fix is `NCFG_FF_OMIT_EMPTY`, which is also independently
+right: an empty `locked` and no `locked` mean the same thing, unlike
+`connectivity.ignore`, where an empty list clears a default and has to be told
+apart from silence. With the flag the witnesses are byte-identical and
+`answer_test`'s embedded copy of the document response needed no change either
+-- both of which I had already edited before finding the flag, and both of
+which were reverted.
+
+### The report I wrote and removed
+
+A lock that refused nothing was going to be reported, with a flag per entry
+set when it refused something. **It is gone, because a plan contains only
+changes**: on a converged machine no lock matches anything, so the line would
+fire on every plan -- which is the noise that teaches people to skip the line
+that matters.
+
+The hazard it was aimed at is real and stays open: these keys are strings, so
+`mut:eth0` locks nothing and reads like protection. The cheap form is named in
+the code -- check the subject's class against the classes that exist, rather
+than counting what a plan happened to touch.
+
+### Two fixture faults, because both were mine
+
+**The MTU is a device's, not an interface's.** The first fixture put `mtu` on
+an interface and the document reader refused it: "an interface carries `mtu`,
+which this build does not know; a document is refused rather than half read" --
+which is the reader doing its job.
+
+**And `link.up` was not planned for that fixture at all**, with or without a
+lock, so the assertion "the link still comes up, which a guard would have
+stopped" proved nothing in either direction. Replaced with an address beside
+the MTU: the lock refuses `mtu:eth0` and the `addr.add` on the same interface
+is planned, which is what per-value means and is provable here.
+
+### Measured
+
+`make check` rc=0, every suite passing, the agree gate at 4 configurations
+compiled by both programs to the same document, and **the installed size
+unchanged at 1180888** -- the lock's code landed inside existing section
+padding, which is the likely explanation rather than a measured one.
+
+Schema: a **minor** addition. With `OMIT_EMPTY` a document that locks nothing
+renders byte for byte as before, so nothing already written changes; a document
+that does lock something carries a key older builds refuse, since this reader
+refuses keys it does not know rather than half-reading a document.
+
+### What is still open, in the order it is cheapest
+
+The typo check above; the guard keyed on subjects rather than on interface
+names (0289), which is now a small change at the same chokepoint; and a rule's
+standing (0287), which needs the capability translation to make its red row say
+anything.
+
 ## 10.549 One subject key, asked for from three directions
 
 "go ahead", the copyright holder, 2026-10-23, on the identity work that 0287,

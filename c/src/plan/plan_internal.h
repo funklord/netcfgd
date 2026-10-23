@@ -136,6 +136,7 @@ typedef struct {
 	ncfg_plan_guard_t *guards;
 	size_t             guard_count;
 
+
 	/* Ids every later action on an interface must wait for: its creation. */
 	ncfg_plan_mark_t *gates;
 	size_t            gate_count;

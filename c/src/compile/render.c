@@ -667,6 +667,22 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	if (globals->networking != NCFG_NETWORKING_ON) {
 		ncfg_buf_add_text(&body, "\tnetworking = \"off\"\n");
 	}
+	/* The locked subject keys (0290), rendered whenever there are any: an empty
+	 * list is the absence of the key rather than `locked = []`, because the
+	 * two mean the same thing here -- unlike `connectivity.ignore` above,
+	 * where an empty list clears a default and has to be told apart from
+	 * silence. */
+	if (globals->locked_count != 0u) {
+		ncfg_render_list_t locked;
+		size_t             at;
+
+		ncfg_render_list_init(&locked);
+		for (at = 0; at < globals->locked_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&locked), globals->locked[at]);
+		}
+		ncfg_render_list_emit(&body, "\t", "locked", &locked, 0);
+		ncfg_render_list_free(&locked);
+	}
 	switch (globals->hostname_policy.kind) {
 	case NCFG_HOSTNAME_POLICY_FROM_DHCP:
 		/* **`dhcp`, which is the only spelling the language takes.**

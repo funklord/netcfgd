@@ -200,6 +200,65 @@ ncfg_reason_t ncfg_plan_reason_unwanted(const char *interface, const char *field
  * planner path can route around it -- the same reasoning that puts
  * `ncfg_ownership_may_remove` in one function. Decision 0010.
  */
+/*
+ * Whether a lock forbids this action (0290), recording the refusal if it does.
+ *
+ * **A different question from the guard below it.** A guard asks "may I
+ * disrupt this interface" and is waived for one apply by
+ * `--allow-disruption`; a lock asks "may I set this value" and has no
+ * per-apply waiver at all -- the only route is removing the entry, which is a
+ * second deliberate change to the document, and that is what stops a document
+ * written elsewhere from stomping a locked value in one sweep.
+ *
+ * So the refusal's `override_with` names an edit rather than an invocation.
+ * Naming a flag there would be a lie in the one field an operator acts on.
+ *
+ * **There is deliberately no "this lock refused nothing" report.** It was
+ * written and removed: a plan contains only changes, so on a converged machine
+ * no lock matches anything and the line would fire on every plan -- which is
+ * the noise that teaches people to skip the line that matters. The real
+ * hazard is narrower and still open: these keys are strings, so `mut:eth0`
+ * locks nothing and reads like protection. Catching that wants the subject's
+ * class checked against the classes that exist, not a count of what a plan
+ * happened to touch.
+ *
+ * Every action passes through here for the same reason the guard does: one
+ * place decides and no pass can route around it.
+ */
+static int locked(ncfg_builder_t *builder, const ncfg_op_t *op, const ncfg_reason_t *reason)
+{
+	char           subject[NCFG_OP_SUBJECT_MAX];
+	ncfg_refusal_t refusal;
+	size_t         at;
+
+	if (!builder->desired || builder->desired->globals.locked_count == 0u) {
+		return 0;
+	}
+	/* An op with no subject cannot be locked, which is the commit family and
+	 * is deliberate: a lock over the window that rescues a locked-out machine
+	 * would be a lock on the rescue. */
+	if (!ncfg_op_subject(op, subject, sizeof(subject))) {
+		return 0;
+	}
+	for (at = 0; at < builder->desired->globals.locked_count; at++) {
+		const char *entry = builder->desired->globals.locked[at];
+
+		if (!entry || strcmp(entry, subject) != 0) {
+			continue;
+		}
+		memset(&refusal, 0, sizeof(refusal));
+		refusal.interface = ncfg_op_interface(op);
+		refusal.op = ncfg_op_name(op);
+		refusal.guard = ncfg_plan_internf(builder->plan, "`%s` is locked", subject);
+		refusal.reason = *reason;
+		refusal.override_with = ncfg_plan_internf(builder->plan,
+		    "remove `%s` from `global { locked = [...] }`", subject);
+		ncfg_plan_refuse(builder->plan, &refusal);
+		return 1;
+	}
+	return 0;
+}
+
 static int refused(ncfg_builder_t *builder, const ncfg_op_t *op, const ncfg_reason_t *reason)
 {
 	const char      *interface;
@@ -286,6 +345,13 @@ uint32_t ncfg_builder_push(ncfg_builder_t *builder, const ncfg_op_t *op,
 	 * has already said why, once, naming the device.
 	 */
 	if (interface && ncfg_plan_names(builder->declined, builder->declined_count, interface)) {
+		return NCFG_PLAN_NO_ACTION;
+	}
+	/* Before the guard, because the two ask different questions and a locked
+	 * value is not netcfgd's to set whether or not the action would disrupt
+	 * anything. A guard would miss `mtu:eth0` on an interface nobody guarded,
+	 * and would catch `link.up` on a guarded one, which a lock should not. */
+	if (locked(builder, op, reason)) {
 		return NCFG_PLAN_NO_ACTION;
 	}
 	if (refused(builder, op, reason)) {

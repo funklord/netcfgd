@@ -427,6 +427,30 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 		}
 		return;
 	}
+	/*
+	 * `locked = ["mtu:eth0", "nat:host"]` -- the subject keys netcfgd may not
+	 * set (0290). Lowered as written and not validated against anything here:
+	 * a key is checked when a plan is built, where the subjects that exist are
+	 * known, and a lock naming nothing is reported there rather than refused
+	 * at compile time. A document that locks a subject this build has no op
+	 * for is a document for a newer netcfgd, which is a thing to say and not a
+	 * thing to reject.
+	 */
+	if (strcmp(key, "locked") == 0) {
+		ncfg_words_t words;
+		size_t       i;
+
+		if (!ncfg_as_words(ctx, assignment->value, &words)) {
+			ncfg_words_free(&words);
+			return;
+		}
+		for (i = 0; i < words.count; i++) {
+			(void)ncfg_push_string(ctx, &globals->locked, &globals->locked_count,
+			    words.at[i].text);
+		}
+		ncfg_words_free(&words);
+		return;
+	}
 	if (strcmp(key, "networking") == 0) {
 		char *word = ncfg_as_string(ctx, assignment->value);
 

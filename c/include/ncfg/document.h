@@ -1850,6 +1850,27 @@ typedef struct {
 	 * machine: a tray icon says whether *this computer* is on the network, and
 	 * an answer assembled per interface is the thing four clients were each
 	 * assembling differently. */
+	/*
+	 * **Values netcfgd may not set, by subject key** (0290).
+	 *
+	 * Each entry is an `ncfg_op_subject` key -- `mtu:eth0`,
+	 * `addr:eth0/192.0.2.10/24`, `nat:host` -- naming a value something
+	 * outside netcfgd configured. The planner refuses any action against a
+	 * listed subject and says so in the plan, which is 0010's rule that a
+	 * plan must not lie, applied to a value rather than to a link.
+	 *
+	 * **There is no per-apply override**, unlike a guard's
+	 * `--allow-disruption`: the only route is to remove the entry, which is a
+	 * second deliberate change. That is what stops a document written
+	 * elsewhere from stomping a locked value in one sweep (0285, 0289).
+	 *
+	 * **Keys are strings and a typo names nothing**, which is the cost of
+	 * reusing the subject vocabulary rather than inventing a typed one. A lock
+	 * that matched no action in a plan is reported for that reason -- the
+	 * alternative is a lock an operator believes in and that protects nothing.
+	 */
+	char                     **locked;
+	size_t                     locked_count;
 	ncfg_connectivity_policy_t connectivity;
 } ncfg_globals_t;
 

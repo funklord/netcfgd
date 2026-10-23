@@ -2319,7 +2319,19 @@ static const ncfg_field_t globals_fields[] = {
 	{ .name = "remote", .kind = NCFG_F_STRUCT, .type = &remote_type,
 	    .offset = offsetof(ncfg_globals_t, remote) },
 	{ .name = "connectivity", .kind = NCFG_F_CUSTOM, .custom = &connectivity_custom,
-	    .offset = offsetof(ncfg_globals_t, connectivity) }
+	    .offset = offsetof(ncfg_globals_t, connectivity) },
+	/* The subject keys netcfgd may not set (0290). A plain string list, which
+	 * is what makes the table carry its freeing, copying, comparison and JSON
+	 * without a line written anywhere else. */
+	/* **Omitted when empty, unlike `connectivity.ignore` above**, and the
+	 * difference is not style: an empty `ignore` clears a default and has to
+	 * be told apart from silence, while an empty `locked` and no `locked` mean
+	 * the same thing. Writing it would also put a key in every document this
+	 * build renders that the Rust half does not know, which the `agree` gate
+	 * compares and which cost four fixtures before this flag was found. */
+	{ .name = "locked", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_globals_t, locked),
+	    .count_offset = offsetof(ncfg_globals_t, locked_count) }
 };
 static const ncfg_type_t globals_type = TYPE("globals block", globals_fields);
 
