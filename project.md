@@ -12498,6 +12498,95 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.546 The control path is part of the configuration, and survivability is the target
+
+The copyright holder, 2026-10-23, widening 0285 and then narrowing what can be
+promised:
+
+> note that for networking the atomicity may also need to cover interface
+> configuration or any other subsystem and applied in a sensible order... It is
+> very common in networking that the connection goes down until all parts of a
+> configuration are in place, and for us this is bad, because control and
+> decisions come over network.
+
+> I am hoping you can prove me wrong, but I find it unlikely netcfgd will
+> become smart enough to never hose its necessary connections. This will
+> probably remain an operator responsibility.
+
+`0288` is both, and the second is not a caveat on the first -- it decides what
+the first is for.
+
+### The holder is right, and the attempt to prove otherwise is the trap
+
+Three structural reasons, not effort:
+
+  * **The topology is outside the machine.** Whether the uplink's VLAN is
+    carried by a switch two hops away, whether the operator's session comes
+    through a jump host, whether a route being replaced is in somebody else's
+    path -- none of it is visible from a node.
+  * **A correct change can break connectivity anyway**, through a switch's MAC
+    table, an upstream conntrack, an ISP's lease.
+  * **Intent is not derivable.** "This cuts the path my instructions arrive on"
+    and "this *moves* my instructions to a new path, which is the job" are
+    identical from inside. A tool that refuses the second to prevent the first
+    cannot perform a migration.
+
+**So the target is that an operator's mistake is survivable rather than
+prevented** -- and most of that is already built: detect and declare, which
+needs no topology knowledge; the local revert timer, which needs netcfgd to be
+able to undo rather than to be clever; make-before-break, which `plan/build.c`
+already does and argues; and exactly one refusal netcfgd can justify on its own
+evidence.
+
+**That one is: a revert that would not restore what it came from.** Local
+knowledge -- the pre-change state was reachable by construction -- and arming a
+timer whose expiry lands somewhere unreachable turns a recoverable mistake into
+two. What netcfgd cannot do is prove a change safe, and it must not imply it.
+
+### What the tree already had, which is more than I expected
+
+`plan/build.c` sequences its passes with a reason at each step and ends with
+teardown, and its comment is this decision made once already:
+
+> Teardown comes last, so a change to an address is make-before-break: the new
+> address is in place before the old one goes. On a machine being reconfigured
+> over the network that ordering is the difference between a brief overlap and
+> a lockout.
+
+So make-before-break and an argued order exist per host. What is missing is the
+same discipline **across** nodes -- add the new subnet on every node before
+withdrawing the old from any -- which is inherited rather than invented.
+
+### Three things the record settles beyond that
+
+**Atomicity is a property of a change, not of a subsystem.** 0285's two classes
+were written with rules in view and are not about rules: a jointly dependent
+change is usually an address, a link, a route, an MTU and a rule at once, which
+is the normal shape of moving a network to a new subnet.
+
+**Where no gap-free order exists, the gap is declared and bounded -- and the
+confirm window must exceed it.** A node that applies a correct change, loses
+its control path for the length of that change, and reverts because nothing
+confirmed has used the safety net to undo something that was working. So the
+window is derived from the declared gap, and a gap longer than the window is a
+change to refuse or re-stage rather than attempt.
+
+**A directive must be executable to completion offline.** No step may need a
+round trip, because the control path is precisely what a node may lose in the
+middle; a node that stalls waiting for an instruction sits in the half-applied
+state the design exists to avoid. So it carries the resolved plan, its instant,
+its window and its revert, and a node cut off part way **finishes, then
+decides** -- locally.
+
+### And netcfgd does not know its own control path today
+
+`SO_PEERCRED` identifies the local peer process, a uid and a pid; the bridge
+holds the network connection and reports nothing about which interface, address
+or route it arrives over. So the planner cannot tell that the address it is
+replacing is the one the instruction came in on -- which is the cheapest of the
+three uses (order it last, say so, choose the window) and the precondition for
+the other two.
+
 ## 10.545 A rule's standing, and the red row is the capability report
 
 The copyright holder, 2026-10-23: a concept of "this rule was not applied
