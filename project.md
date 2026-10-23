@@ -12498,6 +12498,99 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.548 A lock says a value is not netcfgd's to set, and that question was never asked
+
+The copyright holder, 2026-10-23, unifying three threads:
+
+> why we want these locks is basically the same thing, something external has
+> been configured, and we need a mechanism to stop netcfgd from changing those
+> values.
+
+> so this is at the configuration stage. netcfgd refuses to change this setting
+> until the lock is removed.
+
+`0290`. One reason behind the operator's vital link, the daemon's claim, the
+rc-script's setting and the NFS root: **something outside netcfgd put a value
+there and netcfgd must not change it.**
+
+### netcfgd answers a different question thoroughly and this one not at all
+
+| question | answered by | how |
+|---|---|---|
+| may I **remove** this object? | ownership, 0002 | discovered from a tag |
+| may I **set** this value? | nothing | -- |
+
+0002 tags routes with protocol 110, links by altname, addresses by recorded
+prior state, and `ownership.c` holds "the three judgements that decide what
+netcfgd may delete" with the asymmetry written at the top: "under-claiming
+costs a little convenience, over-claiming deletes somebody's manual change".
+What netcfgd does not own is **reported, never reconciled away**.
+
+**The second row is the hole, and it is the cost of being a desired-state
+system rather than an oversight.** A document naming `mtu = 1500` is an
+instruction, whoever set 9000 and why -- and there is no protocol field on an
+MTU, a MAC, a sysctl, an offload flag or a qdisc parameter, so netcfgd cannot
+tell "9000 because an rc-script set it" from "9000 because nobody touched it".
+The tag answers for objects that can carry one and is silent about scalars.
+
+So **a lock is the declared form of what a tag discovers**: this value is
+foreign. 0010 already has that shape for guards -- declared, discovered,
+delegated -- so the lock is the declaration where discovery has no instrument.
+
+### Most of the behaviour exists already
+
+A value declared foreign takes the path an untagged object already takes:
+report the difference, act on nothing. Drift is shown and the plan says what it
+would have done and why it did not. **The lock needs no new reporting -- only a
+way to route a value onto a side that already exists.**
+
+Three decisions rather than details: a locked value **does not make the
+document wrong**, since the document still records intent and the lock says
+netcfgd may not be the one to apply it -- deleting the value instead would lose
+the record; a lock is **per value** where a guard is per subject, so locking an
+MTU must not stop an address being added; and the two **compose** rather than
+one replacing the other -- a guard answers "may I take this link down", a lock
+answers "may I write this field".
+
+### Two sharp rules from the second message
+
+**The planner refuses, not the executor.** 0010's reason, repeated because it
+is the one that matters: a veto at apply time means `ncfg plan` said "will set
+mtu 1500" and then nothing changed, and "a plan that lies is worse than no
+plan". A locked value appears in the plan as a refusal carrying its reason,
+which is also what makes it reviewable before anything runs and legible to a
+coordinator reading a node's plan.
+
+**And a lock has no per-apply consent, which is what makes it stronger than a
+guard.** A guard can be waived for one apply -- `--allow-disruption <iface>`, a
+tick per refusal (0088) -- granted in the same breath as the change. A lock
+cannot: the only route is to remove it, a separate change, so altering a locked
+value takes two deliberate acts.
+
+**That property is worth more distributed than local.** A document written
+elsewhere cannot stomp a locked value in one sweep: it would have to carry the
+lock's removal too, which is a visible change the node can refuse by 0289's
+rule. A per-apply override would have handed a coordinator a way to tick the
+box on the node's behalf.
+
+### And "too general" is answered a second way, more cheaply
+
+0289 kept the predicate closed. This one keeps the subject closed without a new
+vocabulary: **the lockable set is the comparable set.** The reconcile loop
+already enumerates every value it compares between desired and observed, a
+value netcfgd cannot compare is one it cannot change, and a value it can
+compare is already named in the model. So locking needs the stable identity
+0287 and 0289 both ask for, and nothing else.
+
+### Why the sequence arrived here right after distribution
+
+While a document is written on the machine it configures, whoever writes
+`mtu = 1500` is whoever would know about the rc-script. **0285 removes that**,
+and the holder reached locks immediately after describing distribution. A lock
+is the node's defence against a document written elsewhere, which is the same
+sentence 0289 ends on: the node's declaration wins, and consent is granted to
+the node rather than asserted by the message.
+
 ## 10.547 Guard generalises its subject, and the predicate is what keeps it defined
 
 The copyright holder, 2026-10-23, four messages across one turn: a concept of
