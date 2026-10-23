@@ -2345,14 +2345,29 @@ HULL_IMAGE_DIR ?= $(DIST)/hull
 
 # Refuse early with something actionable, then say what we are standing on.
 # `command -v` so that `HULL=hull` off a PATH works as well as a path does.
+#
+# **The commit comes from `hull --version`, not from the checkout the binary
+# sits in**, since hull `f48d7c2` puts it on a line of its own. The first
+# version of this asked git for the HEAD of that directory, and the difference
+# is not theoretical: measured 2026-10-23, the binary answered
+# `f48d7c28516b-dirty` while that checkout's HEAD was `48139be` -- two commits
+# on, because a binary is as old as the last build and a tree is as new as the
+# last pull. The git lookup stays as the fall-back for a hull too old to say,
+# marked as derived so a reader is not told the binary claimed it.
 hull_says = command -v $(HULL) >/dev/null 2>&1 || \
 		{ echo "hull: $(HULL) is not runnable. hull is a sibling project," >&2; \
 		  echo "hull:   not vendored here -- build it there and set HULL=<path>." >&2; \
 		  exit 1; }; \
+	said=$$($(HULL) --version 2>/dev/null); \
+	commit=$$(printf '%s\n' "$$said" | sed -n 's/^commit //p' | head -1); \
+	if [ -z "$$commit" ]; then \
+		derived=$$(git -C "$$(dirname "$$(command -v $(HULL))")" rev-parse --short HEAD \
+			2>/dev/null); \
+		commit=$${derived:+$$derived, derived from its checkout}; \
+	fi; \
 	printf 'hull: %s (%s), image %s\n' \
-		"$$($(HULL) --version 2>/dev/null | head -1)" \
-		"$$(git -C "$$(dirname "$$(command -v $(HULL))")" rev-parse --short HEAD \
-			2>/dev/null || echo 'commit unknown')" "$<"
+		"$$(printf '%s\n' "$$said" | head -1)" \
+		"$${commit:-commit unknown}" "$<"
 
 # **`timeout` is the right bound here and would not be for a container.** A
 # `(backend vm)` machine is qemu, a child of this shell, so a signal reaches

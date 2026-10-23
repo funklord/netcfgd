@@ -12640,6 +12640,16 @@ away with it.
 
 Nothing is asked of hull for that, and nothing here changes today.
 
+**And an image will be able to say which hull made it**, which netcfgd asked
+for and hull added in `48139be`: every manifest records
+`(provenance (builder "hull 0.1 (<commit>)"))`, with `-dirty` where the tree
+had changes and `unknown` from a build that does not write a commit. In their
+words, the cost is that one tree committed by two hulls gives two manifest ids
+differing in provenance alone, and build cache keys exclude provenance so
+caching is unaffected. It matters here for the reason the question was asked:
+a store image outlives the session that baked it, and `hull manifest show` is
+then the only thing that can say what baked it.
+
 ## 10.533 The link-local failure had a mechanism, and the start now waits
 
 "fix the link_local failure then", the copyright holder, 2026-10-23, on the one
@@ -12841,6 +12851,19 @@ that session left there -- so every run prints the version and the commit it
 rested on instead of leaving a report to claim one. It earned that immediately:
 the commit read `6c685a4` where the sandbox run two hours earlier rested on
 `828f72d`.
+
+**And the commit comes from `hull --version` since hull `f48d7c2` put it on a
+line of its own**, rather than from `git rev-parse` in the directory the binary
+sits in, which is what this did first and what netcfgd told hull was a guess
+worth removing. The difference is not theoretical: measured the same day, the
+binary answered `f48d7c28516b-dirty` while that checkout's HEAD was `48139be`,
+because a binary is as old as its last build and a tree is as new as its last
+pull -- so the derivation named a commit whose code was not running. The git
+lookup stays only as the fall-back for a hull too old to say, and labels itself
+`derived from its checkout` so a reader is not told the binary claimed it.
+Three arms, all exercised: the binary's own answer, the derived one against a
+stub that prints no commit line, and `commit unknown` for a stub outside any
+checkout.
 
 `.PHONY` gained `vm-delegation` and `vm-init`, which the vm tier's own line had
 never listed.
