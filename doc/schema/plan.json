@@ -2,6 +2,7 @@
   "actions": [
     {
       "id": 0,
+      "subject": "link:br0",
       "op": {
         "op": "link.create",
         "name": "br0",
@@ -28,6 +29,7 @@
     },
     {
       "id": 1,
+      "subject": "link:br0",
       "op": {
         "op": "link.delete",
         "name": "br0"
@@ -48,6 +50,7 @@
     },
     {
       "id": 2,
+      "subject": "mtu:eth0",
       "op": {
         "op": "link.set_mtu",
         "name": "eth0",
@@ -70,6 +73,7 @@
     },
     {
       "id": 3,
+      "subject": "mac:eth0",
       "op": {
         "op": "link.set_mac",
         "name": "eth0",
@@ -92,6 +96,7 @@
     },
     {
       "id": 4,
+      "subject": "master:eth0",
       "op": {
         "op": "link.set_master",
         "name": "eth0",
@@ -114,6 +119,7 @@
     },
     {
       "id": 5,
+      "subject": "master:eth0",
       "op": {
         "op": "link.unset_master",
         "name": "eth0"
@@ -134,6 +140,7 @@
     },
     {
       "id": 6,
+      "subject": "link:eth0",
       "op": {
         "op": "link.up",
         "name": "eth0"
@@ -154,6 +161,7 @@
     },
     {
       "id": 7,
+      "subject": "link:eth0",
       "op": {
         "op": "link.down",
         "name": "eth0"
@@ -174,6 +182,7 @@
     },
     {
       "id": 8,
+      "subject": "addr:eth0/192.168.1.10/24",
       "op": {
         "op": "addr.add",
         "iface": "eth0",
@@ -200,6 +209,7 @@
     },
     {
       "id": 9,
+      "subject": "addr:eth0/192.168.1.10/24",
       "op": {
         "op": "addr.del",
         "iface": "eth0",
@@ -222,6 +232,7 @@
     },
     {
       "id": 10,
+      "subject": "route:eth0/10.0.0.0/8",
       "op": {
         "op": "route.add",
         "iface": "eth0",
@@ -262,6 +273,7 @@
     },
     {
       "id": 11,
+      "subject": "route:eth0/10.0.0.0/8",
       "op": {
         "op": "route.del",
         "iface": "eth0",
@@ -302,6 +314,7 @@
     },
     {
       "id": 12,
+      "subject": "backend:eth0/dhcp4",
       "op": {
         "op": "backend.start",
         "kind": "dhcp4",
@@ -324,6 +337,7 @@
     },
     {
       "id": 13,
+      "subject": "backend:vpn0/open_vpn",
       "op": {
         "op": "backend.stop",
         "kind": "open_vpn",
@@ -346,6 +360,7 @@
     },
     {
       "id": 14,
+      "subject": "backend:wlan0/supplicant",
       "op": {
         "op": "backend.reload",
         "kind": "supplicant",
@@ -368,6 +383,7 @@
     },
     {
       "id": 15,
+      "subject": "vlan:eth0/10",
       "op": {
         "op": "bridge.vlan.add",
         "iface": "eth0",
@@ -396,6 +412,7 @@
     },
     {
       "id": 16,
+      "subject": "vlan:eth0/10",
       "op": {
         "op": "bridge.vlan.del",
         "iface": "eth0",
@@ -420,6 +437,7 @@
     },
     {
       "id": 17,
+      "subject": "wifi:wlan0",
       "op": {
         "op": "wifi.set_profiles",
         "device": "wlan0",
@@ -446,6 +464,7 @@
     },
     {
       "id": 18,
+      "subject": "wifi:wlan0",
       "op": {
         "op": "wifi.associate",
         "device": "wlan0",
@@ -468,6 +487,7 @@
     },
     {
       "id": 19,
+      "subject": "wifi:wlan0",
       "op": {
         "op": "wifi.disassociate",
         "device": "wlan0"
@@ -488,6 +508,7 @@
     },
     {
       "id": 20,
+      "subject": "regdom:wlan0",
       "op": {
         "op": "wifi.set_regdom",
         "device": "wlan0",
@@ -510,6 +531,7 @@
     },
     {
       "id": 21,
+      "subject": "acl:wlan0/02:00:00:00:00:aa",
       "op": {
         "op": "access_control.add",
         "iface": "wlan0",
@@ -534,6 +556,7 @@
     },
     {
       "id": 22,
+      "subject": "acl:wlan0/02:00:00:00:00:bb",
       "op": {
         "op": "access_control.del",
         "iface": "wlan0",
@@ -558,6 +581,7 @@
     },
     {
       "id": 23,
+      "subject": "bond:bond0",
       "op": {
         "op": "link.set_bond",
         "name": "bond0",
@@ -580,6 +604,7 @@
     },
     {
       "id": 24,
+      "subject": "bridge:br0",
       "op": {
         "op": "link.set_bridge",
         "name": "br0"
@@ -600,6 +625,7 @@
     },
     {
       "id": 25,
+      "subject": "macvlan:mv0",
       "op": {
         "op": "link.set_macvlan",
         "name": "mv0"
@@ -620,6 +646,7 @@
     },
     {
       "id": 26,
+      "subject": "tunnel:tun-office",
       "op": {
         "op": "link.set_tunnel",
         "name": "tun-office"
@@ -640,6 +667,7 @@
     },
     {
       "id": 27,
+      "subject": "vxlan:vx0",
       "op": {
         "op": "link.set_vxlan",
         "name": "vx0"
@@ -660,6 +688,7 @@
     },
     {
       "id": 28,
+      "subject": "wireguard:wg0",
       "op": {
         "op": "wg.set_device",
         "iface": "wg0",
@@ -686,6 +715,7 @@
     },
     {
       "id": 29,
+      "subject": "wireguard:wg0",
       "op": {
         "op": "wg.set_peers",
         "iface": "wg0",
@@ -728,6 +758,7 @@
     },
     {
       "id": 30,
+      "subject": "dns:host",
       "op": {
         "op": "dns.apply",
         "scope": "globals",
@@ -774,6 +805,7 @@
     },
     {
       "id": 31,
+      "subject": "offloads:eth0",
       "op": {
         "op": "link.set_offloads",
         "name": "eth0",
@@ -806,6 +838,7 @@
     },
     {
       "id": 32,
+      "subject": "token:eth0",
       "op": {
         "op": "link.set_ipv6_token",
         "name": "eth0",
@@ -828,6 +861,7 @@
     },
     {
       "id": 33,
+      "subject": "iprule:host/100",
       "op": {
         "op": "rule.add",
         "rule": {
@@ -878,6 +912,7 @@
     },
     {
       "id": 34,
+      "subject": "iprule:host/100",
       "op": {
         "op": "rule.del",
         "rule": {
@@ -928,6 +963,7 @@
     },
     {
       "id": 35,
+      "subject": "qdisc:eth0",
       "op": {
         "op": "qdisc.set",
         "iface": "eth0",
@@ -954,6 +990,7 @@
     },
     {
       "id": 36,
+      "subject": "qdisc:eth0",
       "op": {
         "op": "qdisc.reset",
         "iface": "eth0"
@@ -974,6 +1011,7 @@
     },
     {
       "id": 37,
+      "subject": "ingress:eth0",
       "op": {
         "op": "ingress.redirect",
         "iface": "eth0",
@@ -996,6 +1034,7 @@
     },
     {
       "id": 38,
+      "subject": "ingress:eth0",
       "op": {
         "op": "ingress.redirect.clear",
         "iface": "eth0"
@@ -1016,6 +1055,7 @@
     },
     {
       "id": 39,
+      "subject": "forwarding:eth0",
       "op": {
         "op": "sysctl.set_forwarding",
         "iface": "eth0",
@@ -1038,6 +1078,7 @@
     },
     {
       "id": 40,
+      "subject": "privacy:eth0",
       "op": {
         "op": "sysctl.set_privacy",
         "iface": "eth0",
@@ -1060,6 +1101,7 @@
     },
     {
       "id": 41,
+      "subject": "accept_ra:eth0",
       "op": {
         "op": "sysctl.set_accept_ra",
         "iface": "eth0",
@@ -1082,6 +1124,7 @@
     },
     {
       "id": 42,
+      "subject": "hostname:host",
       "op": {
         "op": "hostname.set",
         "name": "host.example"
@@ -1102,6 +1145,7 @@
     },
     {
       "id": 43,
+      "subject": "nat:host",
       "op": {
         "op": "nat.replace",
         "uplinks": [
@@ -1126,6 +1170,7 @@
     },
     {
       "id": 44,
+      "subject": "hook:eth0/post_up",
       "op": {
         "op": "hook.run",
         "iface": "eth0",

@@ -304,6 +304,25 @@ static void write_action(ncfg_json_writer_t *writer, const ncfg_action_t *action
 
 	ncfg_json_write_object_begin(writer);
 	ncfg_json_write_member_int(writer, "id", (int64_t)action->id);
+	/*
+	 * **The object this action acts on, so a reader does not have to derive
+	 * it.** It is what `global { locked = [...] }` takes, what a guard will
+	 * take once its subject generalises (0289), and what a standing attaches
+	 * to in a list (0287) -- so an operator locking a value copies the key
+	 * from here rather than guessing at its spelling.
+	 *
+	 * On the action and not inside `write_op`, because the inverse is written
+	 * with the same function and a second subject on one action would be two
+	 * answers to one question. Absent for the commit family, which has no
+	 * subject by design.
+	 */
+	{
+		char subject[NCFG_OP_SUBJECT_MAX];
+
+		if (ncfg_op_subject(&action->op, subject, sizeof(subject))) {
+			ncfg_json_write_member_string(writer, "subject", subject);
+		}
+	}
 	ncfg_json_write_key(writer, "op");
 	write_op(writer, &action->op);
 	ncfg_json_write_key(writer, "reason");

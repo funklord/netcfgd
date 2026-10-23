@@ -660,8 +660,8 @@ static void prepare(ncfg_builder_t *builder)
 		if (!colon || colon == entry) {
 			ncfg_plan_warnf(builder->plan, NULL,
 			    "`locked` entry `%s` is not a subject key: they read "
-			    "`class:scope`, as `ncfg plan` writes them -- so this locks "
-			    "nothing",
+			    "`class:scope`, as `ncfg plan --json` writes them on each "
+			    "action -- so this locks nothing",
 			    entry);
 			continue;
 		}

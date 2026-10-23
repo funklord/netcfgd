@@ -12590,12 +12590,37 @@ renders byte for byte as before, so nothing already written changes; a document
 that does lock something carries a key older builds refuse, since this reader
 refuses keys it does not know rather than half-reading a document.
 
+### And the plan prints the subject, because the warning promised it
+
+The typo warning says a subject key reads `class:scope` "as `ncfg plan --json`
+writes them on each action" -- which was not true when it was written, and is
+now. Each action in the plan's JSON carries its `subject`, so **an operator
+locking a value copies the key rather than guessing its spelling**. On the
+action rather than inside the op writer, because the inverse is written by the
+same function and two subjects on one action would be two answers to one
+question.
+
+**Blessing the plan witness validated the subject design better than the unit
+test did.** 45 actions over a real fixture produced 45 keys, every changed line
+in the witness a `"subject"` and nothing else, and they read as intended:
+`accept_ra:eth0`, `acl:wlan0/02:00:00:00:00:aa`, `addr:eth0/192.168.1.10/24`,
+`backend:eth0/dhcp4`, `bond:bond0`, `dns:host`, `hook:eth0/post_up`,
+`iprule:host/100`.
+
+33 of those 45 are distinct, and **every key shared by two actions is one
+object with two sides** -- `addr.add` with `addr.del`, `link.up` with
+`link.down`, `qdisc.set` with `qdisc.reset`, `link.set_master` with
+`link.unset_master`, `ingress.redirect` with its clear. No two different
+objects share a key, which is the property the whole design rests on and which
+a hand-built fixture could not have shown.
+
 ### What is still open, in the order it is cheapest
 
-The typo check above; the guard keyed on subjects rather than on interface
-names (0289), which is now a small change at the same chokepoint; and a rule's
-standing (0287), which needs the capability translation to make its red row say
-anything.
+The guard keyed on subjects rather than on interface names (0289), which needs
+a declaration surface for a guard on a subject -- today a guard lives in an
+interface block and there is nowhere to write `route:eth0/default`; and a
+rule's standing (0287), which needs the capability translation to make its red
+row say anything.
 
 ## 10.549 One subject key, asked for from three directions
 
