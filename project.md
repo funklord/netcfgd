@@ -12498,6 +12498,82 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.544 Two apply modes, and a cross-host value is a report with a wider scope
+
+The copyright holder, 2026-10-23, asking the three questions that follow from
+0285: both best-effort and atomic apply; whether the mode is chosen at the
+apply button; ad-hoc against collate-then-run; and "What about rules that
+depend on a value from another host?" `0286` answers them, and the third
+constrains the other two.
+
+### The modes, and who picks
+
+**Best-effort** is each node applying as it receives, doing what it can and
+reporting the rest -- which is what the host loop already does. **Atomic** is
+nothing applied until every node holds a resolved plan, then all at the named
+instant with each node's own revert timer armed.
+
+**The mode is a property of the change, not of the operator's mood**, and
+0285's two classes are derivable from the plan -- so the planner classifies,
+proposes, and says what the other mode would cost. At the bottom of that
+button the useful sentence is not "atomic or best-effort?" but "this renumbers
+four nodes; applied best-effort they cannot reach each other until the last one
+lands". A bare question pushes a correctness decision onto a dropdown, and the
+operator answering usually knows less than the planner that drew it. The
+override stays, because a maintenance window and a lab are things netcfgd
+cannot see.
+
+### One detail decides collate against ad-hoc
+
+Atomic requires collate, and **what is distributed is the resolved plan rather
+than the config template**. A template still carrying "the address node B got"
+resolves differently on each node, or not at all on one that has not heard from
+B -- so distributing the template and applying simultaneously applies
+*different things* at the same instant, which is worse than applying the same
+thing at different instants.
+
+### The third question had an answer already in the tree
+
+Some values are authored and some discovered -- a lease, a generated key, a
+delegated prefix. A rule naming a discovered value cannot resolve until the
+node that discovers it publishes.
+
+**netcfgd already does exactly this at host scale and the contract is
+written**: `reported.c` and `doc/interface-report.md`, where a bearer or tunnel
+daemon knows what it negotiated, netcfgd does not, the value arrives through
+`/run/netcfgd/reported/` and netcfgd installs it tagged as its own. A
+cross-host dependency is that with the node as reporter and the store as the
+file.
+
+**And the pass's gate is the part worth copying.** `ncfg_plan_takes_reports` is
+deliberately not "there is a file": a report for an interface the document says
+nothing about is an observation with no instruction behind it. One level up
+that is what stops a published value from being an instruction -- a node
+publishing what nobody referenced changes nothing, which is the property that
+keeps a confused or compromised node from configuring its neighbours.
+
+What each mode does with an unresolved dependency: best-effort leaves the rule
+**pending and reported**, naming the value and the node it waits on, because a
+rule that vanishes for want of a dependency is read as a successful apply;
+atomic treats it as a precondition and does not start, because a timed commit
+over a plan with a hole in it is a timed partition.
+
+### Two things that fall out
+
+**A resolved plan is a snapshot**, so dependencies carry versions: B's lease
+changes, the rule naming it is stale, and a dependency version is what
+re-triggers resolution so repair carries the new value out. That is the
+generation idea at a fourth scale -- a ruleset's, a host's, a node's, and now a
+dependency's. Four places, one question: has what I acted on moved.
+
+**Cycles must be refused at resolution time, and the common case that looks
+like one is not.** Two nodes peering with each other's public keys resolve
+fine, because discovery does not depend on the rule: both discover
+independently, both publish, both resolve. A true cycle is A's address computed
+from B's and B's from A's, which has no fixed point -- refuse it naming both
+ends, since a planner that iterates for ever is worse than one that says
+"circular".
+
 ## 10.543 Simultaneous apply is the requirement, and the clock is the primitive
 
 Two corrections from the copyright holder, 2026-10-23, after 0285's first draft
