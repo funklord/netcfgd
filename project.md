@@ -12498,6 +12498,63 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.551 The capability hint for NAT, and why it names two errnos
+
+"continue", the copyright holder, 2026-10-23. 0287's red row has to say
+something, and 10.545 named the translation that makes it say it: a kernel
+refusal is an errno, and what an operator can act on is a module name.
+`ncfg_kernel_hint` already did this for four op kinds; `nat.replace` is the
+first of the ruleset kinds to get one.
+
+    this kernel has no nftables NAT: `nft_chain_nat` provides the chain type
+    and `nft_masq` the masquerade, and netcfgd asks for both -- the modules
+    may be absent, unbuildable or blocked
+
+### The errno could not be measured here, so the hint does not guess one
+
+The obvious way to write this is to find out what a kernel without
+`nft_chain_nat` returns and key on that. **That measurement cannot be taken on
+this machine**, which has the modules, and building a kernel without them is
+not a thing this tree can do. What was measured instead, in a privileged
+`debian:trixie-slim` with `nftables`, is that **`nft` refuses these constructs
+before the kernel sees them**:
+
+    Error: unknown chain type
+    Error: The arp family does not support this hook
+    Error: Chain of type "nat" is not supported, perhaps kernel support is
+    missing?
+
+The third is the case in question, and the interesting part is its last four
+words. **The tool that owns the vocabulary hedges too** -- between a wrong hook
+and an absent module -- because from where it stands those are the same lookup
+failing. So the hint keys on `ENOENT` and `EOPNOTSUPP` together, and
+`apply_kernel_test` asserts that both read the same sentence, that it names
+both modules, and that `EPERM` gets nothing (the socket already said that one).
+
+**A sentence naming one cause with certainty would have claimed more than nft
+does**, which is the reason to prefer the pair over the tidier single arm.
+`set_offloads` above it keys on a pair for the same reason, so this is the
+file's existing shape rather than a new hedge.
+
+### What is still missing, named so it is not mistaken for done
+
+This is one op kind of the ruleset family. The red row 0287 describes wants
+the same treatment for the rest, and the piece that cannot be written from
+here at all is the **probe**: a hint explains a refusal that has already
+happened, where a red row before apply would need netcfgd to ask the kernel
+what it supports. 10.541's generation read is the only nftables capability
+question the daemon currently asks.
+
+### The size, which is a page rather than a sentence
+
+`make size` went from 1,180,976 to 1,185,072 -- +4,096, one page, for a
+sentence. `size` says the code grew by 279 bytes and that `data` and `bss` are
+byte-identical, so the page is section alignment being crossed rather than the
+hint costing four kilobytes. Recorded in `size-budget.txt` with that
+measurement, because the next reader will otherwise divide 4,096 by one
+sentence; the before figure comes from building HEAD with the two files
+stashed, not checked out over.
+
 ## 10.550 `global { locked = [...] }`, which refuses at plan time
 
 "go ahead", the copyright holder, 2026-10-23. 0290's lock, built on the subject

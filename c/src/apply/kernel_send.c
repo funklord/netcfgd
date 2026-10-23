@@ -120,6 +120,35 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "so nothing changed";
 		}
 		return NULL;
+	case NCFG_OP_NAT_REPLACE:
+		/*
+		 * **Two codes, because which one a kernel gives was not measured and
+		 * cannot be here.** netcfgd asks for a `nat`-type chain and a `masq`
+		 * expression, and a kernel built without `nft_chain_nat` or
+		 * `nft_masq` fails the same lookup an unknown construct name would --
+		 * which is `-ENOENT` or `-EOPNOTSUPP` depending on the path and the
+		 * version. Producing a kernel without those modules is not something
+		 * this machine can do, so the hint covers both rather than claiming
+		 * the one that was guessed; `set_offloads` above keys on a pair for
+		 * the same reason.
+		 *
+		 * Measured 2026-10-23 instead: `nft` refuses these before the kernel
+		 * sees them, and its own message for the case is "Chain of type
+		 * `nat` is not supported, perhaps kernel support is missing?" -- so
+		 * even the tool that owns the vocabulary hedges between a wrong hook
+		 * and an absent module. A sentence here that named one cause with
+		 * certainty would be claiming more than nft does.
+		 *
+		 * What the operator can act on is the module names, which is the one
+		 * part that is certain: those are what provide what netcfgd asked
+		 * for. 0283 and 0287 -- a red row in a rule list is this sentence.
+		 */
+		if (code == ENOENT || code == EOPNOTSUPP) {
+			return "this kernel has no nftables NAT: `nft_chain_nat` provides the "
+			       "chain type and `nft_masq` the masquerade, and netcfgd asks for "
+			       "both -- the modules may be absent, unbuildable or blocked";
+		}
+		return NULL;
 	default:
 		return NULL;
 	}

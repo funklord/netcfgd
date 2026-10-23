@@ -870,4 +870,23 @@ netcfgd
 #
 # Measured 1180888 and recorded at 1181000 rather than left to ride the
 # tolerance, for this file's own reason.
-total 1181000
+# Then the NAT capability hint, 2026-10-23, +4,096 bytes to 1,185,072.
+#
+# **One page, and the page is the measurement rather than the cost.** The hint
+# is a sentence naming `nft_chain_nat` and `nft_masq` plus one `case` arm, and
+# `size` says the code grew by 279 bytes -- text 986,974 to 987,253, with
+# `data` and `bss` byte-identical -- while the file went 1,180,976 to
+# 1,185,072. It grew by a full page because the sections round up to one,
+# which is why the two entries above could record 128 bytes and 72 bytes as
+# riding inside a figure and this one cannot: a change that crosses a page
+# boundary pays for the whole page whatever its size. Measured by building
+# HEAD without the two files and again with them, in this tree, with the
+# change stashed rather than checked out over.
+#
+# Worth stating because the next reader will divide 4,096 by one sentence and
+# conclude the hint is extravagant. It is not; the page was always going to be
+# bought by whichever change crossed it.
+#
+# Recorded at 1185100 rather than left to ride the tolerance, for this file's
+# own reason.
+total 1185100
