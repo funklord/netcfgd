@@ -60,7 +60,7 @@
 #   which is two faults cancelling into an appearance of health -- and the
 #   reason this note is here rather than nowhere.
 set -eu
-dir=${1:-dist/hull-hwsim-rootfs}
+dir=${1:-dist/hull/hwsim-rootfs}
 name=netcfgd-hwsim-rootfs-$$
 command -v docker >/dev/null 2>&1 || {
 	echo "bake-rootfs.sh: docker is what bakes this; see the header" >&2

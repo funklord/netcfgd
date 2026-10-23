@@ -24,7 +24,7 @@
 # never reaches `running` -- measured by hull, 2026-10-22, and the cheapest fix
 # is the package rather than masking the unit.
 set -eu
-dir=${1:-dist/hull-sandbox-rootfs}
+dir=${1:-dist/hull/sandbox-rootfs}
 name=netcfgd-sandbox-rootfs-$$
 command -v docker >/dev/null 2>&1 || {
 	echo "bake-rootfs.sh: docker is what bakes this; see the header" >&2

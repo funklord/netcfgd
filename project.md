@@ -12498,6 +12498,89 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.532 The hull rigs got targets, and `clean` would have eaten the images
+
+"add the hull targets then", the copyright holder, 2026-10-23, closing the item
+10.528 called the smallest useful thing left. Three rigs under `tests/hull/`
+were run by hand, so nothing could notice them rotting -- and each is the only
+place one of netcfgd's payloads runs at all.
+
+    make hull           every rig, which is 71 checks
+    make hull-hwsim     27, mac80211_hwsim radios a namespace cannot load
+    make hull-sandbox   31, the systemd unit's sandbox under systemd as pid 1
+    make hull-openrc    13, both init scripts, one under the init it is for
+    make hull-image     bakes all three guests, the only part needing docker
+    make hull-clean     removes them, which `clean` deliberately does not
+
+Measured through the targets on the day they were written: `rc=0`, 71 `ok`
+lines, no image re-baked, and each run opening with
+`hull: hull 0.1 (6c685a4), image dist/hull/<name>-rootfs`.
+
+### `make clean` would have printed 14,975 lines and deleted 696M
+
+The first thing the work found was a defect put there the same morning. The
+baked images went to `dist/hull-<name>-rootfs`, and `clean` ends with
+
+    find "$(DIST)" -type f -print | sed 's/^/clean: removing /'
+    rm -rf "$(DIST)"
+
+Three rootfs trees are 14,975 files and 696M, so `make clean` -- the one thing
+everybody runs without reading -- would have listed every file in them and
+then removed guest images that cost docker, a network and minutes each to
+rebuild. Everything else under `$(DIST)` costs a recompile. **The images are
+not build output**, which is why this tree's other guests live outside the tree
+at `~/vm` (0265).
+
+Fixed by giving them one directory, `$(HULL_IMAGE_DIR)`, defaulting to
+`$(DIST)/hull`, so a single pruned path answers both halves: `clean` lists what
+it removes without descending into an image, removes the rest of `$(DIST)` by
+depth rather than wholesale, and prints one line saying what it kept and which
+target removes it. The existing guards on `$(DIST)` -- non-empty, relative, no
+`..` -- are untouched and still fire; an absolute `DIST` refused the fixture
+this was tested against, which is the guard working.
+
+**Tested in both arms before it went near the real `dist/`**, on fixtures: with
+images present it lists three files and keeps `dist/hull`; with none it removes
+everything and `rmdir`s `dist` exactly as before. Then re-tested by executing
+`make -n clean`'s own expansion against a relative fixture, because a fragment
+that works in a shell is not evidence about what make expands. `hull-clean` was
+proved the same way, on a fixture rather than on 696M.
+
+### Two things that were assumptions and are now measured
+
+**hull resolves a spec's relative paths against the spec's own directory**, so
+the recipes run `hull run -f tests/hull/<name>/hull.conf` from the tree root
+with no `cd`. The rigs' headers had claimed it; the targets depend on it, so it
+was run.
+
+**An existing image does not re-bake and a missing one does.** The image is a
+pattern rule over the directory, which is the rigs' own "once, and after a
+package change" written as a dependency. Controlled both ways: `make -n
+hull-sandbox` names no bake, and asking for an image that does not exist prints
+`sh tests/hull/probe/bake-rootfs.sh dist/hull/probe-rootfs`.
+
+### Why `timeout` is the right bound here and would not be for a container
+
+`running-code.md` measures the trap: an outer `timeout` around a container
+runner kills the supervisor and leaves the container compiling, because the
+container belongs to the daemon rather than to the shell. A `(backend vm)`
+machine is qemu, a child of this shell, so the signal reaches it -- and all
+three specs say `(backend vm)`. A spec that changes that needs its own bound,
+which the comment at the targets says.
+
+### The sibling, named rather than assumed
+
+`HULL` is a variable defaulting to `$(HOME)/src/hull/build/hull`, and nothing
+hard-codes a path. hull is a live sibling checkout rather than vendored, which
+`harmonization.md` names as a real cost -- what these targets run is whatever
+that session left there -- so every run prints the version and the commit it
+rested on instead of leaving a report to claim one. It earned that immediately:
+the commit read `6c685a4` where the sandbox run two hours earlier rested on
+`828f72d`.
+
+`.PHONY` gained `vm-delegation` and `vm-init`, which the vm tier's own line had
+never listed.
+
 ## 10.531 The openrc script ran, and `need localmount` is a Gentoo name
 
 `packaging/openrc/netcfgd` -- 28 lines of `openrc-run` -- had never been
@@ -12750,10 +12833,13 @@ nine. Each item names where it is argued.
   `sandbox_writes.sh`, which needs systemd as PID 1 (10.523). A container
   cannot be talked out of that. hull's init hand-over is the route, and it is
   the next thing after their segments work.
-- **The hull rig has no Makefile target** (10.527), and one reason for that
-  went this evening: the guest builds netcfgd itself now, hull `7b47668`
-  having given the workload a PATH, so the rig no longer borrows the host's
-  binaries. What is left is the image. It is baked by docker, because hull
+- ~~**The hull rig has no Makefile target**~~ (10.527). **Added 2026-10-23**
+  on the holder's instruction (10.532): `make hull` runs all three rigs, 71
+  checks, with `hull-hwsim`, `hull-sandbox`, `hull-openrc`, `hull-image` and
+  `hull-clean` beside it. The reason for waiting had already gone -- the guest
+  builds netcfgd itself since hull `7b47668` gave the workload a PATH, so the
+  rig no longer borrows the host's binaries. What is still true is the image.
+  It is baked by docker, because hull
   cannot install a package set yet -- its one-uid question is what stops
   `dnsmasq-base`, decided since as many uids with owners kept, after the init
   hand-over -- and hull's spec may still change before 1.0.

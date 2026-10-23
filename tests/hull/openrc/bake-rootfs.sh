@@ -45,7 +45,7 @@
 # reason `tests/hull/sandbox/bake-rootfs.sh` gives; `start-stop-daemon` and
 # `su` are the ones that matter here.
 set -eu
-dir=${1:-dist/hull-openrc-rootfs}
+dir=${1:-dist/hull/openrc-rootfs}
 name=netcfgd-openrc-rootfs-$$
 command -v docker >/dev/null 2>&1 || {
 	echo "bake-rootfs.sh: docker is what bakes this; see the header" >&2

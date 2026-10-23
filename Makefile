@@ -33,6 +33,13 @@
 #                         Under systemd's sysv-generator, not under sysvinit,
 #                         and the payload says what that does not prove
 #   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
+#   make hull          -- the three payloads a namespace or a container
+#                         cannot host, in machines `hull` runs: hwsim radios,
+#                         the systemd sandbox, and the OpenRC init script.
+#                         `hull-hwsim`, `hull-sandbox`, `hull-openrc` one at
+#                         a time; `hull-image` bakes the guests, which is the
+#                         only part needing docker and the internet, and
+#                         `hull-clean` removes them -- `clean` does not
 #   make fuzz          -- the C parsers, fuzzed; `fuzz-rust` for the other
 #                         implementation's targets. The committed corpus is
 #                         replayed by `make c-test` with no clang needed
@@ -2272,7 +2279,102 @@ vm-init: vm-image
 vm-image:
 	sh tool/vm/fetch.sh
 
-.PHONY: vm vm-cluster vm-debian vm-image vm-sandbox vm-skipped
+.PHONY: vm vm-cluster vm-debian vm-delegation vm-image vm-init vm-sandbox \
+	vm-skipped
+
+# The hull tier: the same payloads, in a machine `hull` runs.
+#
+# WHY THESE TARGETS EXIST, WHICH IS NOT CONVENIENCE
+#   Three rigs under `tests/hull/` had no target and were run by hand, so
+#   nothing could notice them rotting -- and each is the only place one of
+#   netcfgd's payloads runs at all. `hwsim.sh` needs `mac80211_hwsim`, which a
+#   namespace cannot load; `sandbox_writes.sh` needs systemd as pid 1, which a
+#   container cannot be talked into; `packaging/openrc/netcfgd` needs an
+#   OpenRC-booted guest, which this tree's own VM tier cannot build because
+#   `openrc` depends on `insserv` and `systemd-sysv` conflicts with it.
+#
+# NOT IN `check` AND NOT IN `live`, for the VM tier's reasons (0275) plus one
+# of its own: each wants `/dev/kvm`, minutes, and a sibling project's binary.
+#
+# **`hull` is a sibling checkout, not vendored**, so `HULL` is a variable and
+# nothing here hard-codes a path. That is the live-sibling cost
+# `harmonization.md` names -- what it builds against is whatever that session
+# left it as -- which is why every run prints the version and commit it rested
+# on rather than leaving a report to claim one.
+HULL           ?= $(HOME)/src/hull/build/hull
+HULL_TIMEOUT   ?= 900
+HULL_IMAGE_DIR ?= $(DIST)/hull
+
+# Refuse early with something actionable, then say what we are standing on.
+# `command -v` so that `HULL=hull` off a PATH works as well as a path does.
+hull_says = command -v $(HULL) >/dev/null 2>&1 || \
+		{ echo "hull: $(HULL) is not runnable. hull is a sibling project," >&2; \
+		  echo "hull:   not vendored here -- build it there and set HULL=<path>." >&2; \
+		  exit 1; }; \
+	printf 'hull: %s (%s), image %s\n' \
+		"$$($(HULL) --version 2>/dev/null | head -1)" \
+		"$$(git -C "$$(dirname "$$(command -v $(HULL))")" rev-parse --short HEAD \
+			2>/dev/null || echo 'commit unknown')" "$<"
+
+# **`timeout` is the right bound here and would not be for a container.** A
+# `(backend vm)` machine is qemu, a child of this shell, so a signal reaches
+# it; hull's docker engine would leave the container running with the
+# supervisor dead, which `running-code.md` measures. These three specs all say
+# `(backend vm)`, and a spec that changes that wants its own bound.
+hull: hull-hwsim hull-sandbox hull-openrc
+
+# 27 checks. The guest builds netcfgd itself, so no host build is needed:
+# hull `7b47668` gave the workload a PATH, and the payload falls back to the
+# read-only share loudly if it cannot.
+hull-hwsim: $(HULL_IMAGE_DIR)/hwsim-rootfs
+	@$(hull_says)
+	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/hwsim/hull.conf
+
+# 31 checks, which is every one the native tier gets (10.530) since hull
+# `828f72d` mounted the guest's `/run` as an initramfs leaves it.
+#
+# The C is built first because the payload runs the binary off the read-only
+# share: `build-and-commit.md` forbids reading a verdict off a binary the
+# build step did not rebuild, and a twenty-minute guest cycle is exactly where
+# that costs.
+hull-sandbox: $(HULL_IMAGE_DIR)/sandbox-rootfs
+	@$(hull_says)
+	@$(MAKE) --no-print-directory -C c
+	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/sandbox/hull.conf
+
+# 13 checks: the LSB script under a non-systemd init, and the `openrc-run`
+# script under the one it is written for (10.531).
+hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
+	@$(hull_says)
+	@$(MAKE) --no-print-directory -C c
+	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openrc/hull.conf
+
+# **Baked when absent and never on a whim.** Each bake is a docker run, an apt
+# install and a `docker export`, so it wants a network and a few minutes; the
+# directory existing is the signal that it is done, which is what the rigs'
+# own headers already tell a reader ("once, and after a package change").
+# `make hull-image` is how you ask for it again on purpose.
+$(HULL_IMAGE_DIR)/%-rootfs:
+	sh tests/hull/$*/bake-rootfs.sh $@
+
+hull-image:
+	@for r in hwsim sandbox openrc; do \
+		sh tests/hull/$$r/bake-rootfs.sh $(HULL_IMAGE_DIR)/$$r-rootfs || exit 1; \
+	done
+
+# Named, printed, and only the three this tree baked -- not a sweep of
+# whatever matches. `clean` deliberately leaves these alone.
+hull-clean:
+	@for d in $(HULL_IMAGE_DIR)/hwsim-rootfs $(HULL_IMAGE_DIR)/sandbox-rootfs \
+	          $(HULL_IMAGE_DIR)/openrc-rootfs; do \
+		if [ -d "$$d" ]; then \
+			printf 'hull-clean: removing %s (%s)\n' "$$d" "$$(du -sh "$$d" | cut -f1)"; \
+			rm -rf "$$d"; \
+		fi; \
+	done
+	@rmdir $(HULL_IMAGE_DIR) 2>/dev/null || true
+
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
@@ -2914,14 +3016,31 @@ clean:
 	else \
 		echo "clean: cargo not installed, leaving target/ alone"; \
 	fi
+# **The hull guest images are kept, and the reason is both halves of what
+# `clean` is for.** They are not build output: each is a `docker export` of an
+# apt install, so removing one costs docker, a network and minutes, where
+# everything else under `$(DIST)` costs a recompile. And `find -type f` over
+# three of them prints 14,975 lines, which is a clean target nobody can read.
+# One pruned path answers both, and `make hull-clean` is the deliberate act
+# that names them.
 	@case "$(DIST)" in \
 	"") echo "clean: DIST is empty, refusing to remove anything"; exit 1 ;; \
 	/*) echo "clean: DIST is absolute ($(DIST)), refusing"; exit 1 ;; \
 	*..*) echo "clean: DIST escapes the tree ($(DIST)), refusing"; exit 1 ;; \
 	esac; \
 	if [ -d "$(DIST)" ]; then \
-		find "$(DIST)" -type f -print | sed 's/^/clean: removing /'; \
-		rm -rf "$(DIST)"; \
+		find "$(DIST)" -path "$(HULL_IMAGE_DIR)" -prune -o -type f -print | \
+			sed 's/^/clean: removing /'; \
+		find "$(DIST)" -mindepth 1 -maxdepth 1 ! -path "$(HULL_IMAGE_DIR)" \
+			-exec rm -rf {} +; \
+		if [ -d "$(HULL_IMAGE_DIR)" ]; then \
+			printf 'clean: keeping %s (%s guest image(s), %s); make hull-clean removes them\n' \
+				"$(HULL_IMAGE_DIR)" \
+				"$$(find "$(HULL_IMAGE_DIR)" -mindepth 1 -maxdepth 1 -type d | wc -l)" \
+				"$$(du -sh "$(HULL_IMAGE_DIR)" | cut -f1)"; \
+		else \
+			rmdir "$(DIST)" 2>/dev/null || true; \
+		fi; \
 	fi
 
 # The shared style gate: one tool, copied verbatim from
