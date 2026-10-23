@@ -12498,6 +12498,79 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.541 The generation check, and a queue-shaped fixture that broke six checks
+
+"do the generation check then, let's try to grow into this, we are never going
+to get everything perfect straight away... Approximately right is better than
+very detailed/specific and completely wrong." -- the copyright holder,
+2026-10-23, after 0283 and 0284 named it as the first thing that does not wait
+on a design answer.
+
+**What it closes is the report, not the write.** A transaction is atomic, so
+netcfgd's own table is never half-applied; but the conflict list comes from two
+dumps taken one after another, and docker, podman, libvirt and `firewalld`
+commit tables between them on a real machine. The dumps cannot tell -- each is
+well-formed -- so the list names a table that has gone or misses one that
+arrived, silently and only sometimes.
+
+nftables offers no compare-and-swap. What it does offer is a counter the kernel
+bumps on every commit, so: read it, take the dumps, read it again. Equal means
+they describe one ruleset.
+
+`ncfg_nft_build_gen_request` and `ncfg_nft_gen_read` are 40 lines in `nft.c`,
+and `observe/netfilter.c` brackets its two dumps with them, **three attempts**
+and then a warning. Bounded on purpose: a container host starting a compose
+file is a machine whose ruleset changes faster than two dumps take, and the
+honest answer there is the last reading plus a sentence saying it may be torn,
+not an unbounded retry inside a pass that has a deadline.
+
+### Three details that are the whole correctness of it
+
+**A kernel that will not say is not a kernel that moved.** No generation -- an
+older kernel, a netlink this process may not ask -- means no check, and the
+observation stands exactly as it did before this existed. The alternative is
+three readings and a warning on every pass on such a machine.
+
+**Absent is not zero.** A reply with no `NFTA_GEN_ID` is refused rather than
+read as a generation of 0, because a counter can hold 0 and two unrelated
+replies would then compare equal -- which is the one way this check could
+report a ruleset as settled when it had moved.
+
+**No `NLM_F_DUMP`.** There is one generation, not a list of them, and asking
+for a dump of it is answered differently by different kernels -- the sort of
+difference that appears on one machine and not another. Asserted in
+`nft_test`, flags and all.
+
+### The test says which reading was kept, and the fixture had to change to let it
+
+The retry case answers **different uplinks in its two rounds**: `wan0` in the
+torn one, `wan1` in the settled one, plus a conflicting table that only the
+second round can see. So the assertion distinguishes a retry from a reader that
+noticed nothing and got lucky, which an identical second round could not.
+Controlled by making the mismatch unnoticed, where both checks fail.
+
+**And adding a third request to the fixture broke six checks that had nothing
+to do with it.** `current_test`'s nftables seam is a *queue*: replies are
+served in request order, so the generation request ate the answer meant for the
+rule dump and everything shifted by one. The fixture now answers four requests
+-- generation, rules, chains, generation -- and the comment at it says why,
+because the next request added here will do the same thing again. A fake that
+serves a sequence is a fake that encodes the caller's order as a fact.
+
+### What it cost, and what is still open
+
+**128 bytes**: the installed total went from 1176624 to 1176752 of a 1177000
+ratchet, which leaves 248. Two extra netlink round trips per observation, both
+tiny. 0283's size question is now a near-term one rather than a design-time
+one: the next feature of any size raises the ratchet deliberately or lands
+outside the default build.
+
+**What no mechanism can close**: a change landing between the second generation
+read and the transaction. The write is safe regardless -- atomic, and only
+netcfgd's table -- so what remains is a report computed moments before a
+change, which is a property of a ruleset with several writers rather than a
+defect to fix.
+
 ## 10.540 Five layers, one ruleset, and where each one already has a foothold
 
 The copyright holder, 2026-10-23, asked for the ownership model and the rule

@@ -330,6 +330,46 @@ int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t er
 }
 
 /*
+ * `NFT_MSG_GETGEN`, which answers with the ruleset's generation counter.
+ *
+ * `NLM_F_DUMP` is deliberately absent: the kernel answers this one with a
+ * single `NFT_MSG_NEWGEN` message, and asking for a dump of a thing there is
+ * one of gets `EINVAL` on some kernels and a one-element dump on others. The
+ * family is `NFPROTO_UNSPEC` because a generation is the ruleset's rather than
+ * a family's.
+ */
+int ncfg_nft_build_gen_request(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size)
+{
+	return build(out, NFT_MSG_GETGEN, 0, seq, NFPROTO_UNSPEC, NULL, err, err_size);
+}
+
+int ncfg_nft_gen_read(const void *payload, size_t length, uint32_t *out, char *err,
+    size_t err_size)
+{
+	ncfg_wire_attrs_t area;
+	ncfg_wire_attr_t  attr;
+
+	if (!out) {
+		ncfg_error_set(err, err_size, "a generation needs somewhere to go");
+		return 0;
+	}
+	*out = 0;
+	if (!payload_attrs(payload, length, &area, err, err_size)) {
+		return 0;
+	}
+	if (ncfg_wire_attrs_find(&area, NFTA_GEN_ID, &attr, NULL, 0) != NCFG_WIRE_OK) {
+		/* **Absent is not zero.** A counter can hold zero, so a reply with no
+		 * `NFTA_GEN_ID` is an answer to a question netcfgd did not ask --
+		 * reported rather than read as a generation, which is what would make
+		 * two unrelated replies compare equal. */
+		ncfg_error_set(err, err_size,
+		    "an nftables generation reply with no NFTA_GEN_ID, so this is not one");
+		return 0;
+	}
+	return attr_be32(&attr, out, err, err_size);
+}
+
+/*
  * Whether this is a name a device could have.
  *
  * The kernel's own `dev_valid_name`: not empty, no slash, no whitespace or

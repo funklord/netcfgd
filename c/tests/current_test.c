@@ -99,6 +99,7 @@ static void append_done(ncfg_buf_t *out)
 	append_message(out, NLMSG_DONE, NULL, NULL);
 }
 
+
 static void append_link(ncfg_buf_t *out, int32_t index, const char *name)
 {
 	ncfg_buf_t         body;
@@ -211,6 +212,27 @@ static void put_nfgenmsg(ncfg_buf_t *out, uint8_t family)
 	ncfg_buf_add(out, &family, sizeof(family));
 	ncfg_buf_add_char(out, 0);
 	ncfg_buf_add(out, &res_id, sizeof(res_id));
+}
+
+/*
+ * An `NFT_MSG_NEWGEN` answer carrying one generation.
+ *
+ * The observation reads this before its dumps and again after them, so that a
+ * ruleset which changed underneath is noticed rather than reported as one
+ * consistent view. The fixture therefore has to answer three kinds of request
+ * and not two -- which is why `nft_ready` queues four replies, and why adding
+ * the check broke six checks here before the fixture caught up: this seam is a
+ * queue in request order, so an unrepresented request eats the next answer.
+ */
+static void append_generation(ncfg_buf_t *out, uint32_t id)
+{
+	ncfg_buf_t payload;
+
+	ncfg_buf_init(&payload, 0);
+	put_nfgenmsg(&payload, NFPROTO_UNSPEC);
+	put_be32(&payload, NFTA_GEN_ID, id);
+	append_payload(out, nft_type(NFT_MSG_NEWGEN), payload.data, payload.length);
+	ncfg_buf_free(&payload);
 }
 
 /*
@@ -952,35 +974,54 @@ static void the_live_check(void)
  * The nftables round
  * ------------------------------------------------------------------------ */
 
-/* A queue of nftables answers, and the seam over it. Two questions are asked
- * in a fixed order -- the rules first, then the chains -- so what is queued
- * first is what the uplinks are read from. */
+/* A queue of nftables answers, and the seam over it. Four questions are asked
+ * in a fixed order -- the generation, the rules, the chains, the generation
+ * again -- so what is queued second is what the uplinks are read from. The
+ * two generations bracket the dumps so that a ruleset changing underneath is
+ * noticed; `before` and `after` are separate fields because a case that makes
+ * them differ is how the retry is tested. */
 typedef struct {
 	script_t              script;
 	ncfg_observe_replay_t replay;
 	ncfg_observe_kernel_t kernel;
+	ncfg_buf_t            before;
 	ncfg_buf_t            rules;
 	ncfg_buf_t            chains;
+	ncfg_buf_t            after;
 } nft_t;
 
 static void nft_init(nft_t *nft)
 {
 	memset(nft, 0, sizeof(*nft));
+	ncfg_buf_init(&nft->before, 0);
 	ncfg_buf_init(&nft->rules, 0);
 	ncfg_buf_init(&nft->chains, 0);
+	ncfg_buf_init(&nft->after, 0);
 }
 
+/* The same generation on both sides unless a case says otherwise, which is a
+ * machine whose ruleset held still for the length of one observation. */
 static void nft_ready(nft_t *nft)
 {
+	if (nft->before.length == 0u) {
+		append_generation(&nft->before, 7u);
+	}
+	if (nft->after.length == 0u) {
+		append_generation(&nft->after, 7u);
+	}
+	queue(&nft->script, &nft->before);
 	queue(&nft->script, &nft->rules);
 	queue(&nft->script, &nft->chains);
+	queue(&nft->script, &nft->after);
 	kernel_of(&nft->kernel, &nft->replay, &nft->script);
 }
 
 static void nft_free(nft_t *nft)
 {
+	ncfg_buf_free(&nft->before);
 	ncfg_buf_free(&nft->rules);
 	ncfg_buf_free(&nft->chains);
+	ncfg_buf_free(&nft->after);
 }
 
 /* What the observation says about NAT, given one machine and one ruleset. */
@@ -1028,6 +1069,82 @@ static int names_are(char *const *names, size_t count, const char *joined)
  * already right -- and `nat.replace` would be planned on every pass for ever,
  * which is exactly what an empty list did before this pass existed.
  */
+/*
+ * A ruleset that changed while it was being read, and an observation taken
+ * again rather than reported.
+ *
+ * **This is what the generation is for.** The rules and the chains are two
+ * requests, and docker, podman, libvirt and `firewalld` commit tables between
+ * them on a real machine. The dumps cannot tell -- each is well-formed -- so
+ * the conflict list would name a table that has gone or miss one that
+ * arrived, silently and only sometimes.
+ *
+ * The two rounds answer *different* uplinks on purpose. If the observation
+ * kept the first round, the answer would be `wan0`; it is `wan1`, which is the
+ * only way from outside to tell a retry from a reader that ignored the
+ * mismatch and got lucky.
+ */
+static void a_ruleset_that_moved_is_read_again(void)
+{
+	machine_t        machine;
+	script_t         script;
+	nft_t            nft;
+	ncfg_buf_t       rules_again;
+	ncfg_buf_t       chains_again;
+	ncfg_buf_t       settled;
+	ncfg_observed_t *observed;
+
+	machine_init(&machine);
+	nft_init(&nft);
+	ncfg_buf_init(&rules_again, 0);
+	ncfg_buf_init(&chains_again, 0);
+	ncfg_buf_init(&settled, 0);
+
+	/* The first round, torn: generation 7 before the dumps and 8 after. */
+	append_generation(&nft.before, 7u);
+	append_uplink_rule(&nft.rules, "wan0");
+	append_done(&nft.rules);
+	append_chain(&nft.chains, NCFG_NFT_TABLE, NCFG_NFT_CHAIN, "nat", NF_INET_POST_ROUTING);
+	append_done(&nft.chains);
+	append_generation(&nft.after, 8u);
+
+	/* The second, settled at 8, with a different uplink and a conflict that
+	 * was not there before -- which is what the first round missed. */
+	append_uplink_rule(&rules_again, "wan1");
+	append_done(&rules_again);
+	append_chain(&chains_again, NCFG_NFT_TABLE, NCFG_NFT_CHAIN, "nat", NF_INET_POST_ROUTING);
+	append_chain(&chains_again, "fw4", "srcnat", "nat", NF_INET_POST_ROUTING);
+	append_done(&chains_again);
+	append_generation(&settled, 8u);
+
+	queue(&nft.script, &nft.before);
+	queue(&nft.script, &nft.rules);
+	queue(&nft.script, &nft.chains);
+	queue(&nft.script, &nft.after);
+	queue(&nft.script, &settled);
+	queue(&nft.script, &rules_again);
+	queue(&nft.script, &chains_again);
+	queue(&nft.script, &settled);
+	kernel_of(&nft.kernel, &nft.replay, &nft.script);
+
+	observed = observed_with(&script, &machine, &nft,
+	    "an observation over a ruleset that moved still succeeds");
+	if (observed) {
+		check(observed->nat_count == 1u &&
+		    names_are(observed->nat, observed->nat_count, "wan1"),
+		    "  and reports the second reading, not the torn first one");
+		check(observed->nat_conflict_count == 1u &&
+		    names_are(observed->nat_conflicts, observed->nat_conflict_count, "fw4"),
+		    "  including the conflicting table the first reading could not see");
+	}
+	ncfg_observed_free(observed);
+	ncfg_buf_free(&settled);
+	ncfg_buf_free(&chains_again);
+	ncfg_buf_free(&rules_again);
+	nft_free(&nft);
+	machine_free(&machine);
+}
+
 static void the_nat_the_kernel_holds(void)
 {
 	machine_t        machine;
@@ -1369,6 +1486,7 @@ int main(void)
 
 	the_whole_of_an_observation();
 	the_nat_the_kernel_holds();
+	a_ruleset_that_moved_is_read_again();
 	the_offloads_the_kernel_reports();
 	the_chains_that_are_not_a_conflict();
 	a_kernel_that_will_not_answer();

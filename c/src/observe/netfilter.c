@@ -110,6 +110,52 @@ static int dump(const ncfg_observe_kernel_t *kernel,
 	return 1;
 }
 
+/*
+ * The ruleset's generation, through the same exchange the dumps use.
+ *
+ * 1 with `*out` set, or 1 with `*have` cleared where the kernel would not
+ * answer -- a generation netcfgd cannot read is not a reason to report no NAT,
+ * it is a reason to stop claiming the two dumps describe one ruleset. 0 is a
+ * request this port could not build, as everywhere else in this file.
+ */
+static int generation(const ncfg_observe_kernel_t *kernel, uint32_t *out, int *have, char *err,
+    size_t err_size)
+{
+	ncfg_netlink_reply_t reply;
+	ncfg_buf_t           message;
+	ncfg_buf_t           body;
+	uint16_t             kind = 0;
+	uint16_t             flags = 0;
+	char                 why[NCFG_ERROR_MAX];
+	int                  parts;
+
+	*have = 0;
+	*out = 0;
+	ncfg_buf_init(&message, 0);
+	ncfg_buf_init(&body, 0);
+	if (!ncfg_nft_build_gen_request(&message, 0, err, err_size)) {
+		ncfg_buf_free(&message);
+		ncfg_buf_free(&body);
+		return 0;
+	}
+	parts = ncfg_wire_request_parts(&message, "nftables", &kind, &flags, &body, err, err_size);
+	ncfg_buf_free(&message);
+	if (!parts) {
+		ncfg_buf_free(&body);
+		return 0;
+	}
+	memset(&reply, 0, sizeof(reply));
+	why[0] = '\0';
+	if (kernel->exchange(kernel->context, kind, flags, &body, NULL, &reply, why, sizeof(why)) &&
+	    reply.count != 0u &&
+	    ncfg_nft_gen_read(reply.items[0].bytes, reply.items[0].length, out, NULL, 0)) {
+		*have = 1;
+	}
+	ncfg_buf_free(&body);
+	ncfg_netlink_reply_free(&reply);
+	return 1;
+}
+
 /* Sorted already, so a repeat is the one before it. */
 static size_t dedup(char **names, size_t count)
 {
@@ -298,13 +344,73 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 		observed->nat_conflict_count = 0;
 		return 1;
 	}
-	/* The uplinks first, because they are the half a planner acts on: a
-	 * conflict list that could not be built must not cost the observation the
-	 * answer it reconciles against. */
-	if (!read_uplinks(kernel, observed, err, err_size)) {
-		return 0;
+	/*
+	 * **Taken between two readings of the generation, and taken again when it
+	 * moved.**
+	 *
+	 * The two dumps below are separate requests, and docker, podman, libvirt
+	 * and `firewalld` add and remove tables while netcfgd runs. A table that
+	 * appears or vanishes between them makes the conflict report wrong in
+	 * both directions -- naming one that has gone, or missing one that
+	 * arrived -- and nothing in the dumps themselves can tell. The kernel's
+	 * generation counter can: equal before and after means they describe one
+	 * ruleset. nft.h has the argument, 0283 and 0284 the direction.
+	 *
+	 * **Bounded, and a bound that is reached is reported rather than hidden.**
+	 * A machine whose ruleset changes faster than two dumps take is a real
+	 * machine -- a container host starting a compose file is exactly that --
+	 * and the honest answer there is the last observation plus a sentence
+	 * saying it may be torn, not an unbounded retry inside a reconcile pass
+	 * that has a deadline.
+	 *
+	 * Three attempts because the second catches the ordinary case of one
+	 * change landing mid-observation, and a third that still disagrees is a
+	 * machine busy enough that a fourth would not help.
+	 */
+	{
+		int attempt;
+
+		for (attempt = 0; attempt < 3; attempt++) {
+			uint32_t before = 0;
+			uint32_t after = 0;
+			int      had_before = 0;
+			int      had_after = 0;
+
+			if (!generation(kernel, &before, &had_before, err, err_size)) {
+				return 0;
+			}
+			/* The uplinks first, because they are the half a planner acts on:
+			 * a conflict list that could not be built must not cost the
+			 * observation the answer it reconciles against. */
+			if (!read_uplinks(kernel, observed, err, err_size)) {
+				return 0;
+			}
+			if (!read_conflicts(kernel, observed, err, err_size)) {
+				return 0;
+			}
+			if (!generation(kernel, &after, &had_after, err, err_size)) {
+				return 0;
+			}
+			/*
+			 * **A kernel that will not say is not a kernel that moved.** No
+			 * generation means no check -- an older kernel, or a netlink this
+			 * process may not ask -- and the observation stands as it did
+			 * before this check existed rather than being retried three times
+			 * for nothing.
+			 */
+			if (!had_before || !had_after || before == after) {
+				return 1;
+			}
+			ncfg_log_emitf("observe", NCFG_LOG_NOTE,
+			    "the nftables ruleset changed while it was being read (generation %u "
+			    "to %u), so this observation is being taken again",
+			    (unsigned)before, (unsigned)after);
+		}
+		ncfg_log_emit("observe", NCFG_LOG_WARNING,
+		    "the nftables ruleset is changing faster than it can be read, so the NAT "
+		    "conflict list may name a table that has gone or miss one that arrived");
 	}
-	return read_conflicts(kernel, observed, err, err_size);
+	return 1;
 }
 
 int observe_netfilter_open(ncfg_netlink_t *socket, ncfg_observe_kernel_t *out)

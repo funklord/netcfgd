@@ -908,6 +908,72 @@ int main(void)
 		ncfg_buf_free(&hook);
 	}
 
+	/*
+	 * **The generation request and the answer to it.**
+	 *
+	 * `NFT_MSG_GETGEN` asks for the ruleset's generation counter, which is
+	 * the only synchronisation nftables offers: there is no
+	 * compare-and-swap, so the way to know that two dumps describe one
+	 * ruleset is to read this before and after them. 0283, and
+	 * `observe/netfilter.c` is where it is used.
+	 *
+	 * The flags matter as much as the type. `NLM_F_DUMP` is wrong here --
+	 * there is one generation, not a list of them -- and asking for a dump of
+	 * it is answered differently by different kernels, which is the sort of
+	 * difference that shows up on one machine and not another.
+	 */
+	{
+		ncfg_buf_t message;
+		ncfg_buf_t body;
+		ncfg_buf_t payload;
+		ncfg_buf_t attrs;
+		uint16_t   kind = 0;
+		uint16_t   flags = 0;
+		uint32_t   generation = 0;
+
+		ncfg_buf_init(&message, 0);
+		ncfg_buf_init(&body, 0);
+		check(ncfg_nft_build_gen_request(&message, 11u, err, sizeof(err)),
+		    "a generation request builds");
+		check(ncfg_wire_request_parts(&message, "nftables", &kind, &flags, &body, err,
+		          sizeof(err)) &&
+		    kind == nft_type(NFT_MSG_GETGEN),
+		    "  and asks for NFT_MSG_GETGEN in the nftables subsystem");
+		check((flags & NLM_F_REQUEST) != 0 && (flags & NLM_F_DUMP) == 0,
+		    "  as a request and not as a dump, which kernels answer differently");
+		ncfg_buf_free(&body);
+		ncfg_buf_free(&message);
+
+		ncfg_buf_init(&attrs, 0);
+		put_be32(&attrs, NFTA_GEN_ID, 4242u);
+		ncfg_buf_init(&payload, 0);
+		nft_payload(&payload, NFPROTO_UNSPEC, &attrs);
+		check(ncfg_nft_gen_read(payload.data, payload.length, &generation, err,
+		          sizeof(err)) &&
+		    generation == 4242u,
+		    "and the answer's generation is read big-endian, as nftables writes it");
+		ncfg_buf_free(&payload);
+		ncfg_buf_free(&attrs);
+
+		/* **Absent is not zero.** A reply with no generation in it is an
+		 * answer to another question, and reading it as 0 would make two
+		 * unrelated replies compare equal -- which is the one way this check
+		 * could report a ruleset as settled when it had moved. */
+		generation = 99u;
+		ncfg_buf_init(&attrs, 0);
+		put_be32(&attrs, 0x7fffu, 1u);
+		ncfg_buf_init(&payload, 0);
+		nft_payload(&payload, NFPROTO_UNSPEC, &attrs);
+		check(!ncfg_nft_gen_read(payload.data, payload.length, &generation, err,
+		    sizeof(err)),
+		    "  a reply carrying no generation is refused rather than read as zero");
+		ncfg_buf_free(&payload);
+		ncfg_buf_free(&attrs);
+
+		check(!ncfg_nft_gen_read(NULL, 0, &generation, err, sizeof(err)),
+		    "  and so is a payload too short to be one");
+	}
+
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);
 		return 1;

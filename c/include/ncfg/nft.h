@@ -171,6 +171,40 @@ int ncfg_nft_build_chain_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t e
 int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size);
 
 /*
+ * The ruleset's generation, which is how netcfgd tells a torn read from a
+ * quiet machine.
+ *
+ * **nftables has no compare-and-swap.** A transaction is atomic, so what
+ * netcfgd *writes* is never half-applied -- but the conflict report in
+ * `observe/netfilter.c` is computed from dumps taken one after another, and
+ * docker, podman, libvirt and `firewalld` all add and remove tables while
+ * netcfgd runs. A table that appears or vanishes between two dumps makes that
+ * report wrong in both directions: a conflict named that has gone, or one
+ * missed that arrived.
+ *
+ * The kernel bumps a counter on every committed change and will hand it over,
+ * which is the only synchronisation nftables offers. Read it, take the dumps,
+ * read it again: equal means the dumps describe one ruleset, and different
+ * means they describe two and the observation should be taken again. 0283 and
+ * 0284.
+ *
+ * `NFT_MSG_GETGEN` answers with one message rather than a dump, so the reply
+ * carries exactly one payload for `ncfg_nft_gen_read`.
+ */
+int ncfg_nft_build_gen_request(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size);
+
+/*
+ * The generation out of that answer.
+ *
+ * 1 with `out` set. 0 for a payload that is not one, which includes the reply
+ * from a kernel that answered something else -- the attribute is required and
+ * its absence is a message netcfgd did not ask for rather than a generation of
+ * zero, because zero is a value a counter can hold.
+ */
+int ncfg_nft_gen_read(const void *payload, size_t length, uint32_t *out, char *err,
+    size_t err_size);
+
+/*
  * Replace netcfgd's table with one masquerading each named interface.
  *
  * The whole table goes and comes back inside one transaction, so there is no
