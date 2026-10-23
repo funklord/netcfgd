@@ -1,32 +1,39 @@
-# The two init integrations nothing has ever executed.
+# The two init integrations that had never been executed.
 #
 # netcfgd ships four: systemd, sysvinit (LSB, which also serves OpenRC on
 # Debian), `packaging/openrc` (an `openrc-run` script for Gentoo and Alpine)
 # and procd. `sandbox_writes.sh` exercises the systemd unit; procd needs
-# OpenWrt and is named in 0275 as deliberately out of reach. **The other two
-# have never run anywhere** -- 124 lines of LSB script and 28 of `openrc-run`,
-# shipped in the deb, read by nobody.
+# OpenWrt and is named in 0275 as deliberately out of reach. The other two --
+# 124 lines of LSB script and 28 of `openrc-run` -- were shipped in the deb and
+# read by nobody until this payload ran.
 #
-# **One of them is reachable here and the other is not, and that was measured
-# rather than assumed.** This file first claimed a Debian guest could run both,
-# on the grounds that Debian packages `openrc`. It does -- 0.56-1 in trixie,
-# candidate confirmed in the guest -- and it still cannot be installed, because
-# `openrc` *depends on* `insserv` and `systemd-sysv` *conflicts with* it:
+# **Where each half can run is measured, and the two guests differ.** This file
+# first claimed a Debian guest could run both, on the grounds that Debian
+# packages `openrc`. It does -- 0.56-1 in trixie, candidate confirmed in the
+# guest -- and it still cannot be installed beside systemd, because `openrc`
+# *depends on* `insserv` and `systemd-sysv` *conflicts with* it:
 #
 #     systemd-sysv : Conflicts: insserv but 1.26.0-1 is to be installed
 #     openrc:amd64 Depends insserv
 #
 # So installing openrc on a systemd Debian means removing systemd as init, which
 # apt will not do on the way to a dependency. That is structural and not
-# transient. Alpine is the other OpenRC guest in the tier and is musl, while the
-# binary is glibc -- and the musl target was retired deliberately rather than
-# pollute the host to serve a guest.
+# transient. So:
 #
-# What would close it: a Debian guest with `sysvinit-core` as pid 1 instead of
-# `systemd-sysv`, where openrc installs and would also let the LSB script be
-# tested under the init it is written for. That is a second image, which is the
-# holder's call, so this says so rather than quietly testing one thing and
-# naming two.
+#   * `make vm-init`, the tier's Debian systemd guest, runs the LSB half only,
+#     and runs it through `systemd-sysv-generator` rather than under sysvinit.
+#     The openrc half reports itself untested there and is not counted.
+#   * `tests/hull/openrc/` runs **both**, in a guest whose pid 1 is
+#     `/sbin/openrc-init` -- which is what the paragraph that stood here called
+#     "a second image, the holder's call". On hull that image is a bake and a
+#     spec rather than a qcow2, so the call cost an afternoon: 2026-10-23, 13
+#     checks, and the first execution of the `openrc-run` script anywhere.
+#   * `tests/hull/sandbox/` runs the sysvinit half under `/sbin/init`, which is
+#     the init the LSB script is actually written for.
+#
+# Alpine is the other OpenRC world and is still out of reach as a guest here:
+# it is musl, and its init is busybox rather than `openrc-init`, so it would be
+# a third image proving the same 28 lines.
 #
 # ## What this proves and what it does not
 #
@@ -100,8 +107,14 @@ echo
 # The daemon where both scripts look for it. Copied rather than symlinked from
 # the read-only mount, because `start-stop-daemon --exec` resolves the path and
 # compares it against `/proc/<pid>/exe`, which would be the mount path.
-install -m 0755 target/debug/netcfgd /usr/sbin/netcfgd ||
-	{ echo "no netcfgd binary at target/debug/netcfgd"; exit 1; }
+# **The C, because the C is what ships** (0266). This installed
+# `target/debug/netcfgd` -- the Rust -- so the two init integrations were being
+# exercised against the program that was retired, which is the one thing a
+# packaging test must not do. `NCFG_LIVE_BUILD` is honoured for the same reason
+# every script under `tests/live/` honours it.
+build=${NCFG_LIVE_BUILD:-/mnt/repo/c}
+install -m 0755 "$build/netcfgd" /usr/sbin/netcfgd ||
+	{ echo "no netcfgd binary at $build/netcfgd"; exit 1; }
 mkdir -p /etc/netcfgd
 : > /etc/netcfgd/netcfgd.conf
 echo "netcfgd: $(/usr/sbin/netcfgd --version 2>&1 | head -1)"
@@ -194,14 +207,69 @@ echo "=== packaging/openrc/netcfgd"
 # line below is what stops a green `vm-init` from reading as "both integrations
 # work" -- which is the vacuous pass this tree keeps finding.
 if [ -x /sbin/openrc-run ] || [ -x /usr/sbin/openrc-run ]; then
-	echo "    note: openrc-run is unexpectedly present -- the header's"
-	echo "    note:   measurement has gone stale, and this section should"
-	echo "    note:   become real checks again rather than this note"
+	# **Real checks since 2026-10-23**, which is what the note that stood here
+	# asked its successor to do if openrc ever appeared. It appears in a guest
+	# booted by `openrc-init`, which `tests/hull/openrc/` makes: on hull a
+	# second image is a bake and a spec rather than a qcow2, so the "holder's
+	# call" the header names cost an afternoon.
+	#
+	# **Two conditions, not one.** openrc installed is not openrc booted, and
+	# the difference is not cosmetic: on a sysvinit-booted guest with openrc
+	# merely installed, `start` answers " * WARNING: netcfgd is already
+	# starting" and does nothing, `status` says "you are attempting to run an
+	# openrc service on a system which openrc did not boot", and every check
+	# below would fail for the environment rather than for the script.
+	# Measured in that guest before this was written.
+	if [ ! -f /run/openrc/softlevel ]; then
+		echo "    not tested here: openrc is installed and did not boot this"
+		echo "      system, so it refuses to manage services -- the script is"
+		echo "      unexercised and this is not counted either way."
+		echo "      \`tests/hull/openrc/\` boots a guest with openrc-init."
+	else
+	# **`need localmount` is a Gentoo and Alpine name, and a Debian guest has
+	# nothing of it.** Measured here on the first run, which cost three checks:
+	# openrc answered "Service 'netcfgd' needs non existent service
+	# 'localmount'" and refused to start it, because Debian's openrc keeps
+	# sysvinit's `mountall.sh` and nothing provides the name. The dependency is
+	# correct for the two distributions the script names, so the image supplies
+	# a stand-in -- `tests/hull/openrc/bake-rootfs.sh` bakes an inert
+	# `localmount` service and says why there. Nothing here depends on it being
+	# present: if it is absent, openrc refuses and the checks below fail
+	# loudly, which is the honest outcome for a guest that cannot host the
+	# script.
+	cleanup
+	rm -rf /run/netcfgd
+	install -m 0755 packaging/openrc/netcfgd /etc/init.d/netcfgd
+	sh -n /etc/init.d/netcfgd && ok "the script parses" || bad "the script parses"
+	/etc/init.d/netcfgd start > /tmp/rc.start 2>&1
+	sed 's/^/      /' /tmp/rc.start
+	if wait_for running; then
+		ok "start brought the daemon up, with a pidfile pointing at it"
+	else
+		bad "start brought the daemon up, with a pidfile pointing at it"
+		echo "      pidfile: $(cat /run/netcfgd.pid 2>/dev/null || echo absent)"
+	fi
+	# `start_pre` calls `checkpath --directory`, which is the openrc idiom for
+	# what the LSB script does with `mkdir`: the same promise by another route.
+	check "and \`start_pre\` made the runtime directory" \
+		"$([ -d /run/netcfgd ] && echo yes || echo no)" "yes"
+	check "status agrees it is running" \
+		"$(/etc/init.d/netcfgd status 2>&1 | grep -c 'status: started')" "1"
+	/etc/init.d/netcfgd stop > /tmp/rc.stop 2>&1
+	sed 's/^/      /' /tmp/rc.stop
+	if wait_gone; then
+		ok "stop took it down"
+	else
+		bad "stop took it down"
+	fi
+	check "and status now reports it stopped" \
+		"$(/etc/init.d/netcfgd status 2>&1 | grep -c 'status: stopped')" "1"
+	fi
 else
 	echo "    not tested here: openrc depends on insserv and systemd-sysv"
 	echo "      conflicts with it, so a systemd guest cannot install it."
-	echo "      28 lines of openrc-run script remain unexecuted anywhere."
-	echo "      Closing it needs a sysvinit-core guest; see the header."
+	echo "      Those 28 lines are exercised by \`tests/hull/openrc/\`, in a"
+	echo "      guest booted by openrc-init; see the header."
 fi
 echo
 

@@ -43,7 +43,12 @@ docker run --name "$name" debian:trixie-slim sh -c '
 	echo "bake: systemd $(systemctl --version | head -1 | cut -d" " -f2), every tool in"
 	# The modes this image carries, for the extraction to put back.
 	find / -xdev \( -perm -4000 -o -perm -2000 \) -type f -printf "%m %p\n"
-' | tee /tmp/ncfg-sandbox-modes.$$ | tail -1
+' > /tmp/ncfg-sandbox-modes.$$
+# The file in full, then the line worth showing. `tail -1` read the whole
+# stream and so worked, but printed a mode line where the interesting one is
+# the first; piping into `head` instead would have truncated the file, which
+# the openrc script's comment records paying for.
+head -1 /tmp/ncfg-sandbox-modes.$$
 rm -rf "$dir"
 mkdir -p "$dir"
 docker export "$name" | tar -C "$dir" -xf -

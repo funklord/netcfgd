@@ -12498,6 +12498,83 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.531 The openrc script ran, and `need localmount` is a Gentoo name
+
+`packaging/openrc/netcfgd` -- 28 lines of `openrc-run` -- had never been
+executed anywhere, and `tool/vm/payload/init.sh` said so in its own header
+along with the reason: openrc depends on `insserv`, `systemd-sysv` conflicts
+with it, so the tier's Debian guest cannot install openrc at all. The header
+named the remedy and called it a second image and the holder's call.
+
+`tests/hull/openrc/` is that image: a `debian:trixie-slim` with
+`sysvinit-core openrc lsb-base` and no `systemd-sysv`, exported to a rootfs
+directory, booted by hull with `(init "/sbin/openrc-init")`. 114M, sysvinit
+3.14-4, openrc 0.56-1, eleven setuid or setgid bits put back by the bake the
+way `tests/hull/sandbox/` does it.
+
+**Both halves of the payload now pass there, 13 checks**, and both are firsts:
+the LSB script under a non-systemd init, and the `openrc-run` script anywhere.
+
+### The first run failed three, and the reason is a real portability fact
+
+    Service 'netcfgd' needs non existent service 'localmount'
+     * ERROR: netcfgd needs service(s) localmount
+    FAIL start brought the daemon up, with a pidfile pointing at it
+      pidfile: absent
+    FAIL and `start_pre` made the runtime directory
+    FAIL status agrees it is running
+
+`depend()` says `need localmount`. Gentoo and Alpine ship that service;
+**Debian's openrc does not** -- it keeps sysvinit's `mountall.sh`, and nothing
+in `/etc/init.d` provides the name, measured by reading the baked image. So
+openrc refuses the service outright before `start_pre` ever runs.
+
+It is not a defect in the script. Its second line says who it is for, and for
+Gentoo and Alpine the dependency is correct -- `localmount` is where a
+writable `/run` and `/var` come from, and `checkpath --directory /run/netcfgd`
+has nothing to write into before it. **The guest was wrong, not the
+packaging.**
+
+So the image supplies the name: `bake-rootfs.sh` bakes an inert
+`/etc/init.d/localmount` with `provide localmount` and a `start()` that
+returns 0, and says in its own header why. The rejected alternative was
+editing `packaging/openrc/netcfgd` to suit the one distribution it is not
+written for, which is weakening a correct dependency to make a rig pass --
+the rig testing itself. The stand-in is deliberately inert, because what is
+under test is netcfgd's script and not whether a mount ran; anything more
+would be this image pretending to be Gentoo.
+
+**The A/B is the two runs**, one variable between them: without the stand-in,
+three checks fail with the pidfile absent; with it, `* /run/netcfgd: creating
+directory`, `* Starting netcfgd ... [ ok ]`, `status: started`, and 0 failed.
+Which also settles the control question for this half -- these six checks have
+been seen to fail, for the reason claimed, before they were seen to pass.
+
+An earlier hand-probe in the same guest had succeeded, which is why the
+failure was a surprise: the probe ran before openrc cached dependencies for a
+service it had never seen. A dependency openrc has not resolved yet is not a
+dependency it will accept.
+
+### What each guest proves now, and what still nothing does
+
+  * `make vm-init`, the Debian systemd guest: the LSB half only, through
+    `systemd-sysv-generator`. Re-run after this change and still 0 failed.
+    The openrc half reports itself untested there and is counted neither way,
+    and its message no longer claims those 28 lines are unexecuted anywhere.
+  * `tests/hull/openrc/`: both halves, pid 1 `openrc-init`, softlevel
+    `sysinit` after 600 ms.
+  * `tests/hull/sandbox/`: the LSB half under `/sbin/init`, and the systemd
+    unit (10.530).
+
+Still nothing proves either script integrates with a real boot -- ordering,
+`provide net`, what waits on what -- because all three guests start the
+service by hand. The payload has said so from the start and still does.
+
+Alpine is the other OpenRC world and stays out of reach: it is musl, and its
+init is busybox with openrc underneath rather than `openrc-init`, so it would
+be a third image proving the same 28 lines. `apk-container` already builds the
+C against musl, which is the half of that worth having.
+
 ## 10.530 The systemd payload on hull: 30 of 31, and the 31st is a mount option
 
 "do the systemd payloads then", the copyright holder, 2026-10-23, after hull
