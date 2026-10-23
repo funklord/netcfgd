@@ -93,21 +93,41 @@ chmod +x "$work/bin/systemctl" "$work/bin/deb-systemd-invoke" "$work/bin/dhcpcd"
 # the kernel takes from the executable file -- so they are two copies under that
 # name in different directories. A `#!` wrapper would be `sh` and never match.
 #
-#   theirs  a copy of `sleep`, plain argv -- stands in for NetworkManager's
-#   ours    a copy of `sh`, with `/run/netcfgd/` in its argv -- stands in for a
-#           backend netcfgd started and `KillMode=process` left behind (0140)
+#   theirs  plain argv -- stands in for NetworkManager's
+#   ours    with `/run/netcfgd/` in its argv -- stands in for a backend
+#           netcfgd started and `KillMode=process` left behind (0140)
 #
-# `sh -c 'sleep 120' <marker>` puts the marker in argv as $0 while the shell
-# sleeps, which is what `is_netcfgds` reads.
+# The trailing path puts the marker in argv while the process sleeps, which is
+# what `is_netcfgds` reads.
+#
+# **Copies of `python3`, because busybox dispatches on argv[0].** These were
+# copies of `sleep` and `sh` until 2026-10-23, which works only where those are
+# real programs: on Alpine both are symlinks to busybox and `cp` follows them,
+# so each decoy was a busybox looking for an applet named `wpa_supplicant`,
+# printing `applet not found` and exiting at once. All three ownership checks
+# here then read 0 where they wanted 1, about a sweep that was behaving
+# correctly.
+#
+# **And passing the applet as argv[1] does not fix it**, which was this
+# session's first attempt: busybox falls back to argv[1] only when argv[0] is
+# itself named `busybox`, so `wpa_supplicant sleep 120` fails exactly as
+# before. Measured, after the fix was written and before it was believed.
+#
+# `python3` ignores its own name, and a copy of it elsewhere still finds its
+# standard library -- measured on both glibc and musl, where `comm` reads
+# `wpa_supplicant` in each case. The suite already needs python3 for the fake
+# supplicant, so this adds no dependency.
 mkdir -p "$work/theirs" "$work/ours"
-cp "$(command -v sleep)" "$work/theirs/wpa_supplicant" 2>/dev/null || true
-cp "$(command -v sh)" "$work/ours/wpa_supplicant" 2>/dev/null || true
+[ -n "$(command -v python3)" ] || skip "no python3, which the decoys are copies of"
+cp "$(command -v python3)" "$work/theirs/wpa_supplicant" 2>/dev/null || true
+cp "$(command -v python3)" "$work/ours/wpa_supplicant" 2>/dev/null || true
 # **A dhcpcd process too, or the check that dhcpcd is never argv-swept passes by
 # finding nothing.** Measured: putting `dhcpcd` back into `children_of` fails no
 # check at all without this, because the sweep runs `pgrep -x dhcpcd` in a
 # namespace that has none. Not the `$work/bin/dhcpcd` stub, which is a script
 # and whose `comm` is `sh`.
-cp "$(command -v sleep)" "$work/theirs/dhcpcd" 2>/dev/null || true
+cp "$(command -v python3)" "$work/theirs/dhcpcd" 2>/dev/null || true
+
 
 # One namespace per target, with fresh decoys each time. The three targets used
 # to share one, so a decoy killed by the first was already gone for the third
@@ -132,16 +152,16 @@ for target in netcfgd networkmanager none; do
 		# whether or not the switcher reached it.
 		theirs= ours=
 		if [ -x "$work/theirs/wpa_supplicant" ]; then
-			"$work/theirs/wpa_supplicant" 120 &
+			"$work/theirs/wpa_supplicant" -c "import time; time.sleep(120)" &
 			theirs=$!
 		fi
 		theirdh=
 		if [ -x "$work/theirs/dhcpcd" ]; then
-			"$work/theirs/dhcpcd" 120 &
+			"$work/theirs/dhcpcd" -c "import time; time.sleep(120)" &
 			theirdh=$!
 		fi
 		if [ -x "$work/ours/wpa_supplicant" ]; then
-			"$work/ours/wpa_supplicant" -c "sleep 120" \
+			"$work/ours/wpa_supplicant" -c "import time; time.sleep(120)" \
 				/run/netcfgd/supplicant/decoy.pid &
 			ours=$!
 		fi

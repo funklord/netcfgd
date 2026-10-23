@@ -349,6 +349,28 @@ claims_of() {
 	esac
 }
 
+# Pids whose `comm` is exactly NAME, read from `/proc` rather than asked of
+# `pgrep`.
+#
+# **`pgrep -x` is procps', and busybox's `-x` is a different thing.** Measured
+# on Alpine 2026-10-23 with busybox 1.37: against a process whose `comm` is
+# `wpa_supplicant`, `pgrep -x wpa_supplicant` matches nothing while bare
+# `pgrep wpa_supplicant` matches it -- so every sweep below found nothing on a
+# musl machine and this script reported having looked. netcfgd's audience is
+# precisely the machines with no systemd, which are frequently the machines
+# with busybox, so the dependency goes rather than being special-cased.
+#
+# `/proc/<pid>/comm` is what `-x` was asking for, it needs no package, and the
+# kernel's 15-character truncation applies to both equally -- which the lists
+# in `children_of` already account for.
+pids_by_comm() {
+	for sweep_entry in /proc/[0-9]*; do
+		read -r sweep_comm < "$sweep_entry/comm" 2>/dev/null || continue
+		[ "$sweep_comm" = "$1" ] || continue
+		printf '%s\n' "${sweep_entry#/proc/}"
+	done
+}
+
 # Programs a manager starts and does not stop. `comm` names, which the kernel
 # truncates to 15 characters -- a name one character too long never matches
 # and the sweep would report nothing while looking as though it had looked.
@@ -578,7 +600,7 @@ sweep_children() {
 		stop_netcfgd_dhcpcd "${netcfgd_clients:-}"
 	fi
 	for program in $(children_of "$manager"); do
-		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
+		for pid in $(pids_by_comm "$program"); do
 			# Written as one comparison rather than two `&&`/`||` guards.
 			# Under `set -eu` a trailing `[ ... ] && continue` returns 1 when
 			# the test is false, and if it ever becomes the last command in
@@ -860,7 +882,7 @@ none)
 	# NetworkManager down then finding it again under ifupdown is not
 	# persistence, it is two owners.
 	for program in $divertible; do
-		for pid in $(pgrep -x "$program" 2>/dev/null || true); do
+		for pid in $(pids_by_comm "$program"); do
 			is_netcfgds "$pid" && continue
 			in_our_netns "$pid" || continue
 			divert "$program"

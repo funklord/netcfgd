@@ -105,10 +105,19 @@ cat > "$work/bin/ping" <<'STUB'
 [ "$(cat "$NCFG_WATCH_WORK/net")" = up ]
 STUB
 
-cat > "$work/bin/getent" <<'STUB'
+# **Every probe the tryout might choose, not just `getent`.** The tryout picks
+# the first resolver probe that exists -- `getent`, then `nslookup`, then
+# `host` -- because musl has no `getent` at all. Stubbing only `getent` left
+# the real busybox `nslookup` in the path on Alpine, which cannot resolve
+# inside `unshare -rn`, so the network read as down for every look and nine of
+# this script's checks failed about a network that was up. A stub per name, so
+# the fixture covers the choice rather than one branch of it.
+for probe in getent nslookup host; do
+	cat > "$work/bin/$probe" <<'STUB'
 #!/bin/sh
 [ "$(cat "$NCFG_WATCH_WORK/net")" = up ]
 STUB
+done
 
 cat > "$work/bin/systemctl" <<'STUB'
 #!/bin/sh

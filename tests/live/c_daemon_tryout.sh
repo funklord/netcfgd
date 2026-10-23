@@ -96,7 +96,28 @@ gateway=$(ip route show default 2>/dev/null | awk '/default/ {print $3; exit}')
 resolve=${NCFG_TRYOUT_NAME:-deb.debian.org}
 device=$(ip route show default 2>/dev/null | awk '/default/ {print $5; exit}')
 
-say "watching $gateway via ${device:-?}, resolving $resolve"
+# **`getent` is glibc's, and this script's audience is not.** musl has none --
+# Alpine ships one only in `musl-utils` -- so the resolver probe below returned
+# non-zero for every look on a musl machine and the tryout never saw the
+# network come back. Measured 2026-10-23: nine of `c_daemon_watch.sh`'s checks
+# failed on Alpine because of this one line, every one of them about a network
+# that was up. netcfgd is written for machines that have no systemd, and those
+# are frequently the machines that have no glibc either.
+#
+# The first probe that EXISTS is the one used, and a machine with none stops
+# rather than quietly dropping the name check: an absent probe must never read
+# as a resolution failure, which is the shape that cost the nine checks.
+resolve_probe=
+for candidate in getent nslookup host; do
+	if command -v "$candidate" >/dev/null 2>&1; then
+		resolve_probe=$candidate
+		break
+	fi
+done
+[ -n "$resolve_probe" ] ||
+	die "no getent, nslookup or host, so a name cannot be resolved to test with"
+
+say "watching $gateway via ${device:-?}, resolving $resolve with $resolve_probe"
 say "checks every ${interval}s, handing back after $failures misses, for $minutes minutes"
 
 # ------------------------------------------------------------------- the net
@@ -105,7 +126,11 @@ reachable() {
 	ping -c 1 -W 2 -n "$gateway" >/dev/null 2>&1 || return 1
 	# A name, because a gateway that answers on a link carrying nothing else
 	# is exactly the half-up state a ping alone calls healthy.
-	getent hosts "$resolve" >/dev/null 2>&1 || return 1
+	case "$resolve_probe" in
+	getent)   getent hosts "$resolve" >/dev/null 2>&1 || return 1 ;;
+	nslookup) nslookup "$resolve" >/dev/null 2>&1 || return 1 ;;
+	host)     host "$resolve" >/dev/null 2>&1 || return 1 ;;
+	esac
 	return 0
 }
 
@@ -211,7 +236,14 @@ systemctl stop netcfgd
 # drives this script with a *fake* daemon, so the evidence from a real run came
 # back with fifteen lines of stub output above it. A log somebody reads to find
 # out what the C daemon did must not be a log anything else has written to.
-log=$(mktemp "${TMPDIR:-/tmp}/netcfgd-c-tryout.XXXXXX.log")
+# **The X's go last, because busybox `mktemp` takes no suffix.** This read
+# `...XXXXXX.log` until 2026-10-23, which GNU coreutils accepts and places the
+# suffix for; busybox answers `mktemp: : Invalid argument` and writes nothing,
+# so `$log` was empty, the redirect below failed, the daemon never started and
+# nine of `c_daemon_watch.sh`'s checks failed on Alpine -- about a supervisor
+# that was working. The `.log` is gone rather than moved, since nothing reads
+# the name.
+log=$(mktemp "${TMPDIR:-/tmp}/netcfgd-c-tryout-XXXXXX")
 say "starting the C daemon, log in $log"
 "$daemon" --no-apply-on-start >>"$log" 2>&1 &
 c_pid=$!

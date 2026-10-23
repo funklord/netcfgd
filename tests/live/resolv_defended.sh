@@ -101,11 +101,23 @@ CONF
 printf 'nameserver 127.0.0.53\n' > "$work/resolv.conf"
 
 # `comm` is what the sweep matches, and `comm` is the executable's name -- so a
-# copy of /bin/sh called `dhclient` is a process the sweep sees as dhclient.
-# This is why the list is matched against comm rather than argv: a shell
-# pretending by argv would not have fooled it, and a real daemon renamed by a
-# wrapper would not have been found.
-cp /bin/sh "$work/bin/dhclient"
+# copy of an interpreter called `dhclient` is a process the sweep sees as
+# dhclient. This is why the list is matched against comm rather than argv: a
+# shell pretending by argv would not have fooled it, and a real daemon renamed
+# by a wrapper would not have been found.
+#
+# **A copy of `python3`, not of `/bin/sh`, because busybox dispatches on
+# argv[0].** On Alpine `/bin/sh` is a symlink to busybox and `cp` follows it,
+# so this decoy was a busybox looking for an applet called `dhclient`, printing
+# `applet not found` and exiting at once -- and five checks here then reported
+# `gone` where they wanted `alive`, about processes that had never started.
+# Passing the applet as argv[1] does not help: busybox falls back to argv[1]
+# only when argv[0] is itself named `busybox`. `python3` ignores its own name
+# and a copy of it still finds its standard library, measured on glibc and on
+# musl. `select.sh` carries the same note for the same reason.
+[ -n "$(command -v python3)" ] || skip "no python3, which the decoy is a copy of"
+cp "$(command -v python3)" "$work/bin/dhclient"
+
 started=
 
 export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run" NCFG_RESOLV_CONF="$work/resolv.conf"
@@ -132,7 +144,7 @@ check "netcfgd owns the file to begin with" \
 	"$(grep -c '^nameserver 192.0.2.53' "$work/resolv.conf" || true)" "1"
 
 # 1. Patience. One foreign write must not get anybody killed.
-"$work/bin/dhclient" -c 'sleep 3600' &
+"$work/bin/dhclient" -c 'import time; time.sleep(3600)' &
 bystander=$!
 started="$bystander"
 printf 'nameserver 203.0.113.99\n' > "$work/resolv.conf"
@@ -144,7 +156,7 @@ check "and nobody is terminated for one write" \
 
 # 2. A process netcfgd started is off limits, even by the same name. Recorded
 #    the way the backends record theirs: <run>/<kind>/<iface>.pid
-"$work/bin/dhclient" -c 'sleep 3600' &
+"$work/bin/dhclient" -c 'import time; time.sleep(3600)' &
 protected=$!
 started="$started $protected"
 echo "$protected" > "$work/run/dhcp/probe0.pid"
@@ -168,7 +180,10 @@ echo "$protected" > "$work/run/dhcp/probe0.pid"
 #     is the renamed shell itself and keeps comm `dhclient`. Taking its child
 #     instead finds the `sleep` it spawns, whose comm is `sleep` -- which is
 #     how the first version of this managed to assert nothing at all.
-unshare -n "$work/bin/dhclient" -c 'while true; do sleep 1; done' &
+#     With a copied `python3` there is no child at all -- it sleeps in the
+#     process `$!` names -- which is what that paragraph asks for rather than
+#     a shell with a `sleep` beneath it.
+unshare -n "$work/bin/dhclient" -c 'import time; time.sleep(3600)' &
 outsider=$!
 started="$started $outsider"
 sleep 1
@@ -179,8 +194,10 @@ check "and the sweep would otherwise match it, or this proves nothing" \
 	"$(cat /proc/$outsider/comm 2>/dev/null)" "dhclient"
 
 # 3. The interference: takes the file back over and over.
-"$work/bin/dhclient" -c 'while true; do printf "nameserver 203.0.113.99\n" > "$0"; sleep 1; done' \
-	"$work/resolv.conf" &
+"$work/bin/dhclient" -c 'import sys, time
+while True:
+	open(sys.argv[1], "w").write("nameserver 203.0.113.99\n")
+	time.sleep(1)' "$work/resolv.conf" &
 pest=$!
 started="$started $pest"
 

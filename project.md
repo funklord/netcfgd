@@ -12498,6 +12498,88 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.538 Three of the six, and the switcher swept nothing on busybox
+
+"fix the six alpine failures then", the copyright holder, 2026-10-23, after
+10.537 named them. Three are fixed and verified on both libcs; three are
+intermittent and are now characterised rather than explained. `make
+live-alpine` reads **68 passed, 9 skipped, 3 failed** where it read 64, 9 and 7.
+
+### The one that is netcfgd's rather than a test's
+
+**`packaging/netcfgd_select.sh` swept nothing on any busybox machine**, which
+is a shipped script and netcfgd's own audience. `sweep_children` enumerated
+with `pgrep -x "$program"` at two sites, and busybox's `-x` is not procps':
+measured on Alpine with busybox 1.37, against a process whose `comm` is exactly
+`wpa_supplicant`,
+
+    pgrep -x wpa_supplicant   ->  nothing, rc=1
+    pgrep    wpa_supplicant   ->  the pid
+
+So `stand_down` found no orphaned `wpa_supplicant`, `dhclient`, `udhcpc`,
+`hostapd`, `pppd` or `openvpn` and reported having looked -- the same symptom
+the script's own comments quote a user reporting from a different cause: "I
+STILL had to kill orphaned dhcpcd and wpa_supplicant."
+
+It reads `/proc/<pid>/comm` now, in a `pids_by_comm` helper. That is what `-x`
+was asking for, it needs no package on any machine, and the kernel's
+15-character truncation applies identically -- which the `children_of` lists
+already account for and say so.
+
+### Three glibc assumptions a second libc exposed
+
+  * **BusyBox dispatches on `argv[0]`, so a renamed copy of `sleep` or
+    `/bin/sh` is not a program.** `select.sh` and `resolv_defended.sh` build
+    decoys that way -- a process whose `comm` the sweep must match -- and on
+    Alpine each was a busybox printing `applet not found`. The decoys are
+    copies of `python3` now, which ignores its own name and still finds its
+    standard library; measured on glibc and musl, `comm` reading the new name
+    on both. The suite already needs python3, so nothing was added.
+
+    **The first fix for this was wrong and measuring caught it.** Busybox falls
+    back to `argv[1]` only when `argv[0]` is itself named `busybox`, so
+    `wpa_supplicant sleep 120` fails exactly as before -- written, tested,
+    found wrong, replaced, all before it was believed.
+  * **`getent` is glibc's and musl has none.** `c_daemon_tryout.sh` probed DNS
+    with it, so on Alpine every look failed and the tryout never saw the
+    network return: nine of `c_daemon_watch.sh`'s checks failed about a network
+    that was up. It now takes the first of `getent`, `nslookup` or `host` that
+    exists and stops when none does, because an absent probe must never read as
+    a resolution failure. `c_daemon_watch.sh` stubs all three -- stubbing only
+    `getent` left the real busybox `nslookup` in the path and changed nothing.
+  * **BusyBox `mktemp` takes no suffix.** `mktemp ...XXXXXX.log` answers
+    `mktemp: : Invalid argument` where GNU coreutils places the suffix, so
+    `$log` was empty, the redirect failed and the C daemon never started. The
+    X's go last. One site in the tree, found by sweeping for the shape rather
+    than for the file.
+
+All three verified both ways: `select.sh` 28 of 28 on Alpine and passing here,
+`resolv_defended.sh` 11 of 11, `c_daemon_watch.sh` 26 of 26 on Alpine *and* 26
+of 26 here.
+
+### The three that remain are intermittent, and that is all that is known
+
+`displace.sh`, `revive.sh` and `link_local.sh` fail **one check each** in some
+full-suite runs. What has been measured:
+
+  * each passes run on its own, repeatedly: **15 runs, 0 failures**, five of
+    each, with four spinners loading the container;
+  * all 80 scripts exited 0 in one full-suite run taken immediately
+    afterwards;
+  * they failed one check each in two other full-suite runs.
+
+So it is neither load nor isolation: it is something the suite leaves behind,
+intermittently. **Non-reproduction is not evidence** -- `running-code.md` is
+explicit, and the three runs above do not weigh against the two that failed.
+No cause is claimed and no fix is guessed at.
+
+**The next experiment is cheap and named**: loop the full suite with
+per-script logs kept -- `alp-suite.sh`'s shape, which already writes one log
+per script -- until a run fails, then read the one that did. A flake caught
+once with its output is worth more than any amount of reasoning about which
+check it was, and this tree has the precedent: 10.523's `network_arrives.sh`
+was a check with no wait, found exactly that way.
+
 ## 10.537 The live scripts on musl, and `-x` is not "can this machine run it"
 
 "do the alpine live scripts then", the copyright holder, 2026-10-23, on the
@@ -12593,7 +12675,7 @@ against NetworkManager 1.44.0, because the probe image installed the daemon
 and the client against two different index snapshots. The target installs them
 in one `apk add`.
 
-### The six that remain, and what is known about each
+### The six that remained, three of which are now fixed (10.538)
 
   * **`c_daemon_watch.sh`**, 9 of 26 checks. Its first symptom was its own work
     directory vanishing mid-run -- `can't create /tmp/ncfg-watch.XXXX/active:
@@ -12611,7 +12693,13 @@ in one `apk add`.
     explanation. Recorded as such: "it passed when I ran it alone" explains
     nothing.
 
-None is a netcfgd defect that has been established, and none is dismissed.
+**Three were fixed the same day and one of them was netcfgd's own**: the
+shipped `netcfgd_select.sh` swept nothing on any busybox machine, because
+`pgrep -x` is procps'. `select.sh`, `resolv_defended.sh` and
+`c_daemon_watch.sh` pass on both libcs now, and `make live-alpine` reads 68, 9
+and 3. The three that remain are intermittent rather than order-dependent --
+15 isolated runs under load passed, and so did a whole-suite run taken
+straight after. 10.538 has the measurements and the next experiment.
 
 ## 10.536 The 40 test findings, and the gate now reads 324 sources
 
@@ -13354,10 +13442,11 @@ nine. Each item names where it is argued.
   user's files as root's, so a restored bit is a real setuid-root program.
 - ~~**Alpine: the C and the apk build, and nothing runs the live scripts
   there**~~ (10.526). **`make live-alpine` runs them, 2026-10-23**: 64 passed,
-  10 skipped, 6 failed of 80 on its first run, the shim builds on musl too, and
-  six scripts guarding a comparison binary on `[ -x ]` rather than on whether
-  it runs are fixed (10.537). The six failures are named there with what is
-  known about each. `make apk-container` is still in no gate, which is how it
+  10 skipped, 6 failed of 80 on its first run and **68, 9 and 3 after the
+  fixes** (10.538), the shim builds on musl too, and six scripts guarding a
+  comparison binary on `[ -x ]` rather than on whether it runs are fixed
+  (10.537). What is left is three scripts failing one check each
+  intermittently, measured in 10.538. `make apk-container` is still in no gate, which is how it
   came to be broken for as long as the C port has existed.
 - ~~**netcfgd tells an operator to install what they have.**~~ **Fixed the
   same day.** Found in the hull guest: with no `/usr/sbin` on `PATH`,
