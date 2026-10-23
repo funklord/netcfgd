@@ -60,7 +60,16 @@ skip() {
 
 [ -x "$repo/c/netcfgd" ] || skip "the C daemon is not built (make -C c)"
 [ -x "$repo/c/ncfg" ] || skip "the C ncfg is not built, and it is the client"
-[ -x "$repo/target/debug/netcfgd" ] || skip "the Rust daemon is not built"
+# **Runnable, not merely present.** `[ -x ]` answers "is there an executable
+# file", which is not "can this machine run it" -- and the two differ wherever
+# the libc the binary was linked against is not the one installed. Measured on
+# Alpine 2026-10-23: this tree's glibc `netcfgd` is `-x` there, and running it gets
+# `not found` from the shell, because the ELF interpreter it names is absent.
+# So the skip never fired, and a comparison binary that could not run reported
+# as a missing file several checks later.
+if ! [ -x "$repo/target/debug/netcfgd" ] || ! "$repo/target/debug/netcfgd" --version >/dev/null 2>&1; then
+	skip "the Rust daemon is not built here, or will not run (a glibc build on musl)"
+fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-c-daemon-answers.XXXXXX")
 rust_pid=""

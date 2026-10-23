@@ -12498,6 +12498,121 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.537 The live scripts on musl, and `-x` is not "can this machine run it"
+
+"do the alpine live scripts then", the copyright holder, 2026-10-23, on the
+item 10.526 left open: the C and the apk build on Alpine and no live script had
+ever run there. `make live-alpine` runs them now.
+
+**It runs the scripts rather than `make live`**, because that target begins
+`$(CARGO) build --workspace` and Alpine has no cargo: what was asked for is the
+suite against musl and busybox, not the Rust core.
+
+### What a second libc found, which is one sentence
+
+**`[ -x binary ]` answers "is there an executable file", not "can this machine
+run it".** Six scripts guard on a comparison binary -- five on the Rust `ncfg`
+or daemon, one on `bridge/netcfgd-remote` -- and the container copies the tree
+in, glibc binaries included. On Alpine each is `-x` and each gets `not found`
+from the shell when it runs, because the ELF interpreter it names,
+`/lib64/ld-linux-x86-64.so.2`, is absent. So the skip never fired and the
+shell's message arrived as a test's *actual value* several checks later:
+
+    FAIL a local connection gets the local policy
+           expected: observe 1  wifi 1  admin 1
+           actual:   tests/live/remote_tiers.sh: line 127:
+                     /work/bridge/netcfgd-remote: not found
+
+All six ask the binary now -- `--version`, or `--help` for the bridge -- and
+skip saying "not built here, or will not run (a glibc build on musl)". The
+control is on this machine, where those binaries do run: `c_warnings`,
+`c_link_settings`, `c_wireguard`, `c_daemon_answers` and `remote_tiers` all
+still pass here, and `c_dns_delivery` still skips for its own unrelated reason.
+
+**`file` is how the diagnosis was settled** rather than by reading the scripts:
+the binary is `ELF 64-bit LSB pie executable ... interpreter
+/lib64/ld-linux-x86`, which does not exist on Alpine. A missing interpreter and
+a missing file are the same errno, and the shell prints the same word for both.
+
+### Alpine ships no kernel headers with its libc, and this tree knew
+
+The first run never reached a script: `linux/ethtool.h: No such file or
+directory`. `packaging/alpine/APKBUILD.in` has said why since the apk existed
+-- `makedepends="make linux-headers"`, with a comment that Alpine does not ship
+them with its libc -- and the probe image was built from the Debian package
+list instead of from this tree's own Alpine recipe. A run spent rediscovering a
+fact the tree had written down.
+
+### Three quarters of the first survey's failures were the instrument
+
+17 failures became 6 without a single fix to a live script, because the survey
+was wrong in four ways and each is worth naming:
+
+  * **It looped over `tests/live/*.sh`**, which holds helpers other scripts
+    drive -- `fake_umbim.sh`, `fake_mbimcli.sh`, and `c_daemon_tryout.sh`,
+    which `die`s without systemd by design because `c_daemon_watch.sh` drives
+    it. Three failures, none of them a test.
+  * **It built only the C**, so `c_nm_signals.sh` reported the shim missing.
+    The target builds `c`, the shim, `bridge` and the examples -- and that is
+    how the shim was first shown to build on musl at all, 237824 bytes beside
+    netcfgd's 1213448.
+  * **It wrapped every script in `unshare -rn`**, including
+    `control_exposure.sh`, which `live` deliberately runs bare: inside that
+    namespace gid 65534 is unmapped, so the chown it checks cannot take and
+    the socket's group stays `root`.
+  * **Its bound was 90 seconds**, which `confirm.sh` exceeds on Alpine without
+    hanging; at `LIVE_TIMEOUT` it passes.
+
+So the target derives both the list and each script's wrapper from `live`'s own
+recipe, read out of the Makefile at run time. A copied list is a list that
+drifts, and three of those four mistakes were a copy of something the Makefile
+already said.
+
+### 64 of 80, and why the tier does not set NCFG_LIVE
+
+**64 passed, 10 skipped, 6 failed of 80** on the first real run and **64, 9
+and 7** on the second, and the target fails on a real failure while listing the
+skips with their reasons. **NCFG_LIVE is deliberately unset**: many skips here
+are honest -- no `mac80211_hwsim`, no `qmake6`, no systemd, no `odhcp6c` -- and
+`make live` turns a skip into a failure, which would make this tier
+permanently red and therefore unread, the thing this Makefile says about
+`vm-skipped`.
+
+**Two packages, and finding the first turned a skip into a failure**, which is
+the tier working. `nm.sh` skipped for `nmcli`, which Alpine keeps in
+`networkmanager-cli` rather than in `networkmanager`; with that installed it
+ran and failed two checks, both on `fake_agent.py` importing
+`gi.repository`, which is `py3-gobject3` there. With both in the list the
+script passes on Alpine: **85 checks, 0 failures**, measured on its own rather
+than as part of a sweep. So the tally is 65, 9 and 6 by arithmetic and 64, 9
+and 7 by measurement; the next full run is what makes the first of those a
+fact.
+
+One warning in that output is this session's and not the tier's: nmcli 1.52.2
+against NetworkManager 1.44.0, because the probe image installed the daemon
+and the client against two different index snapshots. The target installs them
+in one `apk add`.
+
+### The six that remain, and what is known about each
+
+  * **`c_daemon_watch.sh`**, 9 of 26 checks. Its first symptom was its own work
+    directory vanishing mid-run -- `can't create /tmp/ncfg-watch.XXXX/active:
+    nonexistent directory` -- which is a busybox or musl difference in
+    something the script does to its own scratch, not a netcfgd fault that has
+    been shown.
+  * **`resolv_defended.sh`**, failing at `dns.apply`.
+  * **`select.sh`**, 3 checks.
+  * **`nm.sh`** is no longer among them -- see above -- so the six are the
+    five below plus `c_daemon_watch.sh`.
+  * **`revive.sh`** 2, **`displace.sh`** 1 and **`link_local.sh`** 1 -- and
+    these three **pass when run one at a time** with a longer bound, in the
+    same image. So they are order- or load-sensitive under the suite rather
+    than broken on musl, which is a statement about the suite and not an
+    explanation. Recorded as such: "it passed when I ran it alone" explains
+    nothing.
+
+None is a netcfgd defect that has been established, and none is dismissed.
+
 ## 10.536 The 40 test findings, and the gate now reads 324 sources
 
 "fix the clang findings in c/tests then", the copyright holder, 2026-10-23,
@@ -13237,9 +13352,13 @@ nine. Each item names where it is argued.
   the image's own listing**, which the hwsim rig does not bother with and this
   one must: systemd wants them, and hull since `bfeb65f` shows a guest the
   user's files as root's, so a restored bit is a real setuid-root program.
-- **Alpine: the C and the apk build, and nothing runs the live scripts there**
-  (10.526). `make apk-container` is in no gate either, which is how it came to
-  be broken for as long as the C port has existed.
+- ~~**Alpine: the C and the apk build, and nothing runs the live scripts
+  there**~~ (10.526). **`make live-alpine` runs them, 2026-10-23**: 64 passed,
+  10 skipped, 6 failed of 80 on its first run, the shim builds on musl too, and
+  six scripts guarding a comparison binary on `[ -x ]` rather than on whether
+  it runs are fixed (10.537). The six failures are named there with what is
+  known about each. `make apk-container` is still in no gate, which is how it
+  came to be broken for as long as the C port has existed.
 - ~~**netcfgd tells an operator to install what they have.**~~ **Fixed the
   same day.** Found in the hull guest: with no `/usr/sbin` on `PATH`,
   `backend.start` said "dhcpcd, udhcpc and busybox are not installed" about a

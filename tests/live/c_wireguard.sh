@@ -46,7 +46,16 @@ skip() {
 
 command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 [ -x "$repo/c/ncfg" ] || skip "the C ncfg is not built (make -C c)"
-[ -x "$repo/target/debug/ncfg" ] || skip "the Rust ncfg is not built, and it is the reader"
+# **Runnable, not merely present.** `[ -x ]` answers "is there an executable
+# file", which is not "can this machine run it" -- and the two differ wherever
+# the libc the binary was linked against is not the one installed. Measured on
+# Alpine 2026-10-23: this tree's glibc `ncfg` is `-x` there, and running it gets
+# `not found` from the shell, because the ELF interpreter it names is absent.
+# So the skip never fired, and a comparison binary that could not run reported
+# as a missing file several checks later.
+if ! [ -x "$repo/target/debug/ncfg" ] || ! "$repo/target/debug/ncfg" --version >/dev/null 2>&1; then
+	skip "the Rust ncfg is not built here, or will not run, and it is the reader (a glibc build on musl)"
+fi
 # A kernel without the module has no device to configure, and that is a skip
 # rather than a failure -- the call `wireguard.sh` and `strand.sh` both make.
 ip link add wgprobe type wireguard 2>/dev/null || skip "this kernel has no wireguard support"

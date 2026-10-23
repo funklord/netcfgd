@@ -46,7 +46,15 @@ skip() {
 # **Built rather than skipped over.** The bridge links fuzznet and its vendored
 # Monocypher, so a tree whose submodules are not initialised has no program to
 # ask with -- and a skip there would hide exactly the integration this checks.
-[ -x "$bridge" ] || skip "the bridge is not built (make -C bridge)"
+# **Runnable, not merely present**, which is the same reason the five C-against-
+# Rust scripts changed on 2026-10-23: `[ -x ]` answers "is there an executable
+# file" and not "can this machine run it". On Alpine a glibc `netcfgd-remote`
+# left in the tree is `-x` and `sh` reports `not found` when it runs, because
+# the ELF interpreter it names is absent -- so this skipped nothing and two
+# checks reported that message as their actual value.
+if ! [ -x "$bridge" ] || ! "$bridge" --help >/dev/null 2>&1; then
+	skip "the bridge is not built here, or will not run (make -C bridge)"
+fi
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-rtier.XXXXXX")
 daemon=

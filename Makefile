@@ -102,7 +102,7 @@ CLIPPY_OK = $(CARGO) clippy --version >/dev/null 2>&1
 # subcommand, so the question is whether it is on PATH.
 CLANG_OK  = command -v clang >/dev/null 2>&1
 
-.PHONY: clang default-goal ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
+.PHONY: clang default-goal live-alpine ledger example deb apk apk-source apk-container all check check-ci build rust test gui c-test conformance claims installed-diff icons icon-check install-icons uninstall-icons FORCE fmt fmt-fix shell clippy unsafe-policy executor-policy packaging ascii size footprint rss live schema-bless install install-gui install-modem install-systemd install-openrc install-procd fuzz fuzz-rust deny clean nm-containment veryclean distclean uninstall style style-source style-docs registry bridge-test nm-c-test hooks cross linkage linkage-one live-container tde install-tde deb-tde help
 
 all: build
 
@@ -1741,6 +1741,98 @@ LIVE_PACKAGES = build-essential libncurses-dev iproute2 iputils-ping dnsmasq \
                 dhcpcd-base hostapd wpasupplicant openvpn wireguard-tools \
                 ppp pppoe iw kmod python3 python3-dbus socat unbound \
                 network-manager libdbus-1-dev pkg-config bc uidmap
+
+# The live scripts on Alpine: musl, busybox and no systemd.
+#
+# WHY THIS TIER EXISTS
+#   netcfgd's stated audience is a machine with no systemd (0001, 0007), and
+#   until 2026-10-23 not one live script had ever run against musl or against
+#   busybox's userland -- `make live` runs on the developer's glibc machine and
+#   `live-container` in Debian. `apk-container` proved the package builds
+#   there, which is a different claim: a package that builds is not a daemon
+#   that works.
+#
+#   It found what a second libc always finds. `[ -x binary ]` answers "is there
+#   an executable file" rather than "can this machine run it", so six scripts
+#   that guard on a comparison binary skipped nothing and reported `not found`
+#   as a test failure several checks later; they ask the binary now. And Alpine
+#   ships no kernel headers with its libc, which `packaging/alpine/APKBUILD.in`
+#   has said since the apk existed -- `linux-headers` is in the list below for
+#   that reason and the build fails without it.
+#
+# WHAT IT IS NOT
+#   **A survey rather than a gate, deliberately, and NCFG_LIVE is unset.**
+#   `make live` sets it so that a skip is a failure; here many skips are
+#   honest -- no `mac80211_hwsim`, no `qmake6`, no systemd, no openssl -- and a
+#   tier that is permanently red is one people learn to read past, which this
+#   Makefile says about `vm-skipped` too. It fails on a real failure and lists
+#   the skips with their reasons.
+#
+#   **The list and the wrappers come from `live` itself**, read out of this
+#   Makefile at run time rather than copied: a loop over `tests/live/*.sh`
+#   reported three helpers as failures -- `fake_umbim.sh`, `fake_mbimcli.sh`
+#   and `c_daemon_tryout.sh`, which other scripts drive and which `die` when
+#   run alone -- and wrapping `control_exposure.sh` in `unshare -rn`, which
+#   `live` deliberately does not, failed it on a chown to an unmapped gid.
+ALPINE_IMAGE ?= alpine:latest
+ALPINE_PACKAGES = make build-base linux-headers iproute2 iputils dnsmasq \
+                  dhcpcd hostapd wpa_supplicant openvpn wireguard-tools ppp \
+                  ppp-pppoe iw kmod python3 py3-dbus socat unbound \
+                  networkmanager networkmanager-cli py3-gobject3 dbus-dev \
+                  pkgconf bc shadow-uidmap util-linux openssl
+
+live-alpine:
+	@command -v docker >/dev/null 2>&1 || { \
+		echo "live-alpine: docker is not installed, and this target is docker"; \
+		exit 1; \
+	}
+	@mkdir -p $(DIST)
+	@printf '%s\n' \
+		'set -eu' \
+		'apk add --quiet --no-progress $(ALPINE_PACKAGES)' \
+		'# `dhcpcd_orphan.sh` reads these; an image ships neither.' \
+		'printf "root:100000:65536\n" > /etc/subuid' \
+		'printf "root:100000:65536\n" > /etc/subgid' \
+		'# Copied, because /src is read-only and the build must not leave' \
+		'# root-owned output in the host tree.' \
+		'cp -a /src /work && cd /work' \
+		'# Cleaned first, or the glibc objects copied in are reused and the' \
+		'# run measures this machine rather than musl -- which is the same' \
+		'# trap `live-container` records at length.' \
+		'make -C c clean >/dev/null 2>&1 || true' \
+		'make -C adapter/netcfgd-nm/c clean >/dev/null 2>&1 || true' \
+		'make -C bridge clean >/dev/null 2>&1 || true' \
+		'make -C c' \
+		'make nm' \
+		'make -C bridge' \
+		'make -C c examples' \
+		'list=$$(sed -n "/^live:/,/^$$/p" Makefile |' \
+		'	grep -oE "sh tests/live/[a-z_0-9]+\.sh" |' \
+		'	sed "s|sh tests/live/||" | awk "!seen[\$$0]++")' \
+		'pass=0; skip=0; fail=0; slow=0' \
+		'for name in $$list; do' \
+		'	line=$$(sed -n "/^live:/,/^$$/p" Makefile | grep -F "tests/live/$$name" | head -1)' \
+		'	case "$$line" in *unshare*) run="unshare -rn sh" ;; *) run="sh" ;; esac' \
+		'	out=$$(timeout -k 10 $(LIVE_TIMEOUT) $$run "tests/live/$$name" 2>&1) && rc=0 || rc=$$?' \
+		'	last=$$(printf "%s\n" "$$out" | tail -1)' \
+		'	case "$$rc:$$last" in' \
+		'	0:*skipping*) skip=$$((skip+1)); printf "SKIP %-26s %s\n" "$$name" "$${last#*skipping: }" ;;' \
+		'	0:*)          pass=$$((pass+1)); printf "PASS %-26s\n" "$$name" ;;' \
+		'	124:*|137:*)  slow=$$((slow+1)); printf "SLOW %-26s bound at $(LIVE_TIMEOUT)s\n" "$$name" ;;' \
+		'	*)            fail=$$((fail+1)); printf "FAIL %-26s rc=%s  %s\n" "$$name" "$$rc" "$$last" ;;' \
+		'	esac' \
+		'done' \
+		'printf "\nlive-alpine: %s passed, %s skipped, %s failed, %s hit the bound\n" \' \
+		'	"$$pass" "$$skip" "$$fail" "$$slow"' \
+		'[ "$$fail" -eq 0 ] && [ "$$slow" -eq 0 ]' \
+		> $(DIST)/live-alpine.sh
+	@# Named for the reason `live-container` gives: an outer `timeout` would
+	@# bound this client and leave the container running.
+	name=netcfgd-alpine-$$$$; \
+	echo "live-alpine: $$name; stop it with 'docker kill $$name'"; \
+	docker run --rm --privileged --name "$$name" \
+		-v "$$PWD":/src:ro -v "$$PWD/$(DIST)":/dist \
+		$(ALPINE_IMAGE) sh /dist/live-alpine.sh
 
 live-container:
 	@command -v docker >/dev/null 2>&1 || { \
