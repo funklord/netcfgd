@@ -1,6 +1,6 @@
 # 0023: netcfgd owns the root qdisc, and nothing below it
 
-Status: accepted
+Status: accepted, amended by [0283](0283-firewall-and-queuing-are-in-scope.md)
 Date: 2026-07-30
 Milestone: M5
 

@@ -1,6 +1,6 @@
 # 0022: netcfgd may own one nftables table, for NAT and nothing else
 
-Status: accepted
+Status: superseded by [0283](0283-firewall-and-queuing-are-in-scope.md)
 Date: 2026-07-30
 Milestone: M5
 Amends: [0009](0009-router-side-addressing.md)

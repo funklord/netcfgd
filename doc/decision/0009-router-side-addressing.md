@@ -1,6 +1,6 @@
 # 0009: netcfgd configures, it does not serve
 
-Status: accepted
+Status: accepted, amended by [0022](0022-netcfgd-may-own-one-nftables-table.md) and [0283](0283-firewall-and-queuing-are-in-scope.md)
 Date: 2026-07-28
 Milestone: model in M1, prefix delegation and PPPoE in M4, RA handoff in M4
 

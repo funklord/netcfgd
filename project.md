@@ -216,7 +216,7 @@ Interface {                           // what runs over a Device of the same
   guard       : Guard?                // something depends on this; see 0010
   dot1x       : EapConfig?            // wired 802.1X; see 0008
   advertise   : RaPolicy?             // RA handoff to odhcpd/radvd; see 0009
-  forwarding  : bool?                 // sysctl only, never a firewall rule
+  forwarding  : bool?                 // a sysctl; the firewall model is 0283's
   nat         : bool?                 // masquerade what leaves here; see 0022
 }
 
@@ -12497,6 +12497,88 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.539 The scope was never the holder's, and 0283 says so
+
+"We have not chosen such a narrow scope, that is your invention. We want full
+firewall and queuing support. netcfgd is a network configurator software. Those
+are basic networking. And later we want distributed rules to be integrated with
+higher level subsystems like guest network, auth etc." -- the copyright holder,
+2026-10-23, on being told that netfilter support was complete.
+
+**It was complete against a scope sessions wrote and the holder had not
+chosen**, and the answer that said so cited the tree correctly, which is the
+part worth recording: the narrow scope was load-bearing in five places and each
+cited the others.
+
+  * `0022` -- "netcfgd translates addresses because address translation is
+    addressing. It does not filter packets, because filtering is security
+    policy", accepted 2026-07-30.
+  * `0023` -- the root qdisc and at most a rate, "no classes, filters or
+    actions", quoting 0022 as precedent for refusing a general model.
+  * `0009` -- the original exclusion of masquerade, which 0022 amended.
+  * `c/src/plan/nat.c` -- "security policy, which this project has no model of
+    and will not grow one by accident".
+  * the design document's own type table -- `forwarding : bool? // sysctl
+    only, never a firewall rule`.
+
+So a session asking "is this complete?" reads five independent-looking
+statements of the same invented boundary and reports a narrow thing as
+finished. **That is the cost of a scope decision nobody ratified**: it does not
+read as a decision any more, it reads as the shape of the problem.
+
+`0283` supersedes 0022, amends 0023 and 0009, and states the direction
+including the later half -- distributed rules integrated with guest network and
+authentication, which is a constraint on the design from its first line rather
+than a feature to add afterwards, because a rule whose subject is "a guest
+device" cannot be a static ruleset written at apply time.
+
+### What the old records got right, and keeps
+
+They did not argue that filtering belongs elsewhere. They argued that a
+configuration language covering it is larger than the one netcfgd has for
+addressing, and that writing into a ruleset netcfgd does not own means fighting
+another tool. Both are true; neither is a scope argument. **Cost is a reason to
+stage work and ownership is a coexistence problem** -- and 0022's mechanism
+work stands unchanged: netlink rather than shelling out to `nft`, tag what you
+own, replace atomically.
+
+### The vocabulary moves, which the holder named the same day
+
+"The netfilter landscape keeps changing all the time, so we need to be able to
+handle the syntax changing a bit while rules are being applied." Three halves,
+one of which already held:
+
+  * **Reading tolerantly holds**, because attributes are looked up by number
+    and `wire.h` separates absent from malformed. It is now asserted rather
+    than assumed: `nft_test` feeds a rule carrying an unknown attribute and an
+    unknown expression between the two netcfgd reads, plus a chain record with
+    unknown attributes inside the hook nest, and requires both to be
+    recognised. **Controlled** by making the reader refuse an unfamiliar
+    expression, where the case fails -- and that is the failure that matters
+    most, because netcfgd's claim on a rule is what the expressions say, so an
+    intolerant reader stops recognising its own rules.
+  * **Noticing the ruleset moved mid-apply does not hold.** The write is safe
+    -- atomic, and only netcfgd's table -- but the conflict report is computed
+    from a dump taken earlier, so a table that appeared or vanished in the gap
+    makes it wrong in both directions. nftables publishes a generation
+    (`NFT_MSG_GETGEN`, `NFTA_GEN_ID`) for exactly this.
+  * **Refusing legibly on a feature difference does not hold either**:
+    `EOPNOTSUPP` from a statement is a kernel too old for that construct, and
+    saying which construct is the only form an operator can act on.
+
+### What is unresolved, and it is design rather than drift
+
+0283 lists six questions and none is decided: ownership beside another
+firewall and beside container runtimes, zones against flat rules, the default
+policy a bare `firewall {}` implies, how far queuing goes and whether netcfgd
+creates the `ifb` device 0255 refused, how identity enters a rule and over
+which interface, and size -- the ratchet stands at 1176624 bytes of 1177000,
+which is 376 bytes of headroom, so this either raises it deliberately or lands
+as separately installable backends.
+
+**None of those is answered by writing code first**, which is why this entry
+ends at the record rather than at an implementation.
 
 ## 10.538 Three of the six, and the switcher swept nothing on busybox
 

@@ -6,9 +6,13 @@
  *   it: these interfaces are uplinks and traffic leaving them is
  *   masqueraded. So the comparison is between two sorted lists of interface
  *   names, and that is the entire diff -- there is no per-rule
- *   reconciliation because there is no per-rule change. Deciding which
- *   packets may *pass* is security policy, which this project has no model
- *   of and will not grow one by accident.
+ *   reconciliation because there is no per-rule change.
+ *
+ *   **That is the floor and not the scope.** 0022 also said netcfgd would
+ *   never model which packets may pass; 0283 supersedes it on the holder's
+ *   instruction -- filtering and queuing are netcfgd's, in full -- so this
+ *   file's one-boolean diff is what exists today rather than what is
+ *   intended, and a per-rule reconciliation is coming.
  *
  * THE TWO WARNINGS, AND WHY NEITHER IS A REFUSAL
  *   A second source-NAT chain translates the same packets twice, which breaks

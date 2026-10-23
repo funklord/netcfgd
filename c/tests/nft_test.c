@@ -786,6 +786,128 @@ int main(void)
 		ncfg_buf_free(&payload);
 	}
 
+	/*
+	 * **A kernel whose nftables vocabulary is newer than this build's.**
+	 *
+	 * The netfilter landscape moves: expressions, attributes and chain types
+	 * are added, and a dump from a newer kernel carries numbers this binary
+	 * was never compiled against. netcfgd has to read what it came for and
+	 * ignore the rest. A reader that refuses an unfamiliar attribute turns
+	 * every kernel upgrade into an outage, and one that refuses an unfamiliar
+	 * *expression* stops recognising its own rules -- which is worse, because
+	 * the ownership claim is what those expressions say.
+	 *
+	 * The property holds by construction: `ncfg_wire_attrs_find` looks up by
+	 * number and `wire.h` separates "well-formed and absent" from
+	 * "malformed". It is asserted here because construction is not a test,
+	 * and because 0283 makes tolerating a moving vocabulary a standing
+	 * requirement rather than a happy accident.
+	 */
+	{
+		ncfg_buf_t   payload;
+		ncfg_buf_t   attrs;
+		ncfg_buf_t   expressions;
+		ncfg_buf_t   meta;
+		ncfg_buf_t   cmp;
+		ncfg_buf_t   value;
+		ncfg_buf_t   empty;
+		ncfg_buf_t   future;
+		rule_shape_t shape = good_rule();
+
+		ncfg_buf_init(&meta, 0);
+		put_be32(&meta, NFTA_META_KEY, shape.meta_key);
+		put_be32(&meta, NFTA_META_DREG, shape.dreg);
+		/* An attribute number no kernel defines today. */
+		put_be32(&meta, 0x7ffeu, 1u);
+
+		ncfg_buf_init(&value, 0);
+		ncfg_wire_attr_put(&value, NFTA_DATA_VALUE, shape.name, strlen(shape.name) + 1u);
+		ncfg_buf_init(&cmp, 0);
+		put_be32(&cmp, NFTA_CMP_SREG, shape.sreg);
+		put_be32(&cmp, NFTA_CMP_OP, shape.op);
+		ncfg_wire_attr_put_nested(&cmp, NFTA_CMP_DATA, &value);
+
+		/* An expression this build has never heard of, between the two it
+		 * reads: a kernel that grew a new statement, seen from here. */
+		ncfg_buf_init(&future, 0);
+		put_be32(&future, 1u, 7u);
+
+		ncfg_buf_init(&empty, 0);
+		ncfg_buf_init(&expressions, 0);
+		put_expression(&expressions, "meta", &meta);
+		put_expression(&expressions, "something-new", &future);
+		put_expression(&expressions, "cmp", &cmp);
+		put_expression(&expressions, "masq", &empty);
+
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_RULE_TABLE, shape.table);
+		ncfg_wire_attr_put_str(&attrs, NFTA_RULE_CHAIN, shape.chain);
+		put_be32(&attrs, 0x7fffu, 99u);
+		ncfg_wire_attr_put_nested(&attrs, NFTA_RULE_EXPRESSIONS, &expressions);
+		ncfg_buf_init(&payload, 0);
+		nft_payload(&payload, shape.family, &attrs);
+
+		uplink[0] = '\0';
+		err[0] = '\0';
+		check(ncfg_nft_rule_uplink(payload.data, payload.length, uplink, sizeof(uplink),
+		          err, sizeof(err)) &&
+		    strcmp(uplink, "wan0") == 0,
+		    "a rule carrying an unknown attribute and an unknown expression still reads "
+		    "as netcfgd's masquerade on wan0");
+		if (err[0] != '\0') {
+			printf("  said: %s\n", err);
+		}
+
+		ncfg_buf_free(&payload);
+		ncfg_buf_free(&attrs);
+		ncfg_buf_free(&expressions);
+		ncfg_buf_free(&future);
+		ncfg_buf_free(&empty);
+		ncfg_buf_free(&cmp);
+		ncfg_buf_free(&value);
+		ncfg_buf_free(&meta);
+	}
+
+	/* The same question of a table and of a chain: unknown attributes beside
+	 * the ones netcfgd reads, including inside the hook nest. */
+	{
+		ncfg_buf_t       payload;
+		ncfg_buf_t       attrs;
+		ncfg_buf_t       hook;
+		ncfg_nft_table_t table;
+		ncfg_nft_chain_t chain;
+
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_TABLE);
+		put_be32(&attrs, 0x7fffu, 1u);
+		ncfg_buf_init(&payload, 0);
+		nft_payload(&payload, NFPROTO_INET, &attrs);
+		check(ncfg_nft_table_read(payload.data, payload.length, &table, err, sizeof(err)) &&
+		    ncfg_nft_table_is_ours(&table),
+		    "  and a table record with an unknown attribute is still netcfgd's");
+		ncfg_buf_free(&payload);
+		ncfg_buf_free(&attrs);
+
+		ncfg_buf_init(&hook, 0);
+		put_be32(&hook, NFTA_HOOK_HOOKNUM, NF_INET_POST_ROUTING);
+		put_be32(&hook, 0x7ffdu, 4u);
+		ncfg_buf_init(&attrs, 0);
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, "fw4");
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "srcnat");
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TYPE, "nat");
+		ncfg_wire_attr_put_nested(&attrs, NFTA_CHAIN_HOOK, &hook);
+		put_be32(&attrs, 0x7fffu, 2u);
+		ncfg_buf_init(&payload, 0);
+		nft_payload(&payload, NFPROTO_INET, &attrs);
+		check(ncfg_nft_chain_read(payload.data, payload.length, &chain, err, sizeof(err)) &&
+		    ncfg_nft_chain_is_source_nat(&chain),
+		    "  and somebody else's nat chain is recognised through them, which is the "
+		    "conflict report's input");
+		ncfg_buf_free(&payload);
+		ncfg_buf_free(&attrs);
+		ncfg_buf_free(&hook);
+	}
+
 	if (failures) {
 		printf("nft: %d check(s) failed\n", failures);
 		return 1;
