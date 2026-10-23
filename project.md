@@ -12578,6 +12578,42 @@ wins, and consent has to be granted to the node rather than asserted by the
 message -- the narrower-than-admin authority 0284 already needs for another
 reason.
 
+### Who writes a guard, which is where I had it wrong
+
+The holder, after the record was written: the reason for the guard "was
+different, but applies equally, it was so a daemon could tell netcfgd not to
+mess with its link, this could be driven by rc-script etc."
+
+**0010 reads that way once looked at rather than remembered.** Its cases are an
+NFS root, a database replicating, a container's veth enslaved to the link; its
+consequence opens "netcfgd will happily take that interface down because a
+config file changed, and the first anyone knows is that the machine stopped";
+it names three layers -- declared by an operator, discovered by netcfgd from
+`/proc/mounts` and the routing table, delegated to a `pre_down` veto -- and the
+record is titled "netcfgd refuses; it does not orchestrate". I had written the
+whole thing as though the operator were the only writer, which is the lock the
+holder asked about and not the mechanism's origin.
+
+**What differs between the two uses is provenance and lifetime, and it is a
+hard constraint.** An operator's guard ends when the document says so and must
+never expire -- a protection that lapsed because nothing refreshed it is the
+machine stopping. A runtime claim by a daemon or an rc-script must end when the
+thing it protects stops, **and that cannot depend on the claimant asking
+politely**: a daemon that asserts a guard and crashes has otherwise taken an
+interface out of netcfgd's reach until somebody finds the file, with no process
+left to explain it. So a runtime guard needs a release that works without a
+live claimant -- a liveness tie, a lease that expires unless refreshed, or both
+-- which is also what lets an rc-script hold one with no daemon in the picture.
+
+**And it belongs to a family this tree already has**, so generalising it should
+not invent a fourth convention: `reported` (0047) is a program telling netcfgd
+what it negotiated, contention is netcfgd noticing another manager and saying
+so, and a guard is somebody telling netcfgd to keep off. All three are "another
+party has a stake in this object". A report's own gate transfers too --
+`ncfg_plan_takes_reports` refuses to read a file as an instruction where the
+document says nothing about the interface, and a guard asserted over something
+netcfgd does not configure is the same kind of nothing.
+
 ### The limit, so the lock is not oversold
 
 A guard protects a subject from **netcfgd's own actions**. It does not protect

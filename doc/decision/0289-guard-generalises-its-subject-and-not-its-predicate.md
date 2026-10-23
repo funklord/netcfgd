@@ -105,6 +105,71 @@ of the subsystem's name.
   message -- which is the narrower-than-admin authority 0284 already needs for
   another reason.
 
+## Who writes a guard, which is where this record first had it wrong
+
+The holder, after the above was written:
+
+> The reason for the guard was different, but applies equally, it was so a
+> daemon could tell netcfgd not to mess with its link, this could be driven by
+> rc-script etc.
+
+0010 is that, and reads that way once looked at rather than remembered: its
+cases are an NFS root, a database replicating, a container's veth enslaved to
+the link, and the first sentence of its consequence is "netcfgd will happily
+take that interface down because a config file changed, and the first anyone
+knows is that the machine stopped". It names three layers -- **declared** by an
+operator in their own words, **discovered** by netcfgd from `/proc/mounts` and
+the routing table, and **delegated** to a `pre_down` veto -- and the whole
+record is called "netcfgd refuses; it does not orchestrate".
+
+**So a guard is a claim, and the claimant need not be a person.** This record
+was written as though the operator were the only writer, which is the operator
+lock the holder asked about and not the mechanism's origin. Both uses are real
+and they want the same refusal; what differs is **provenance and lifetime**,
+and that difference is a hard constraint rather than a note.
+
+### Lifetime follows provenance, and getting it wrong locks the machine out
+
+| written by | how it arrives | when it ends |
+|---|---|---|
+| an operator | the document | when the document says so, and not before |
+| netcfgd | discovery, 0010's layer 2 | when the condition it found goes |
+| a daemon or an rc-script | at runtime, while the thing it protects runs | when that thing stops -- **and that must not depend on it asking politely** |
+
+**A runtime claim that outlives its claimant is a permanent lockout nobody
+chose.** A daemon that asserts a guard and then crashes has, under a naive
+design, taken an interface out of netcfgd's reach until somebody finds the
+file; and the failure arrives later, as "netcfgd will not reconfigure this
+link" with no process left to explain it. So a runtime guard needs a release
+path that does not require the claimant to be alive or well-behaved: a
+liveness tie, or a lease that expires unless refreshed, or both -- which is
+also what lets an rc-script hold one with no daemon in the picture at all,
+since a script writes before starting and removes after stopping.
+
+**And a declared guard must not expire for the same reason reversed.** An
+operator's "this carries the NFS root" is not a lease; a guard that quietly
+lapsed because nothing refreshed it would be the lockout's mirror image, where
+the protection disappears and the machine stops.
+
+### The family this belongs to, so generalising does not duplicate it
+
+netcfgd already has three mechanisms for "another program is involved", and a
+runtime guard is the third member rather than a new idea:
+
+- **reported** (0047): a program tells netcfgd what it negotiated, and netcfgd
+  installs it tagged as its own.
+- **contention**: netcfgd notices another manager on an interface and reports
+  it, without acting.
+- **guard**: a program -- or an operator, or netcfgd's own discovery -- tells
+  netcfgd to keep off.
+
+All three are "somebody else has a stake in this object", which is why a
+runtime guard should arrive the way a report does rather than through a fourth
+convention invented for it. What a report's gate already teaches applies here
+too: `ncfg_plan_takes_reports` refuses to treat a file as an instruction where
+the document says nothing about the interface, and a guard asserted for
+something netcfgd does not configure is the same kind of nothing.
+
 ## The limit, restated so the lock is not oversold
 
 A guard protects a subject **from netcfgd's own actions**. It does not protect
