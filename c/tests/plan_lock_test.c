@@ -177,6 +177,41 @@ int main(void)
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);
 
+	/*
+	 * A key that can never match is said so once, and a key that can is not.
+	 *
+	 * **This is the check the removed report could not be.** A lock that
+	 * refused nothing fires on every converged plan, because a plan holds only
+	 * changes; a lock whose class does not exist can be known useless without
+	 * looking at the machine at all.
+	 */
+	plan = plan_of("\"locked\":[\"mut:eth0\"]", MTU_DEVICE, PLAIN_IFACE, LINK,
+	    &document, &observed);
+	check(plan && planfix_warned(plan, "`mut:eth0` names no kind of object"),
+	    "a locked entry whose class does not exist is named as locking nothing");
+	check(plan && planned(plan, "link.set_mtu"),
+	    "  and it stops nothing, since it matches nothing");
+	ncfg_plan_free(plan);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+
+	plan = plan_of("\"locked\":[\"eth0\"]", MTU_DEVICE, PLAIN_IFACE, LINK,
+	    &document, &observed);
+	check(plan && planfix_warned(plan, "is not a subject key"),
+	    "an entry with no class at all is named too, since `eth0` locks nothing");
+	ncfg_plan_free(plan);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+
+	/* The control: a key that does match is not warned about. */
+	plan = plan_of("\"locked\":[\"mtu:eth0\"]", MTU_DEVICE, PLAIN_IFACE, LINK,
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "locks nothing"),
+	    "and a key that names a real class is not warned about");
+	ncfg_plan_free(plan);
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+
 	if (failures > 0) {
 		printf("plan_lock: %d check(s) failed\n", failures);
 		return 1;

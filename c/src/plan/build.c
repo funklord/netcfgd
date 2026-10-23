@@ -634,6 +634,47 @@ static void prepare(ncfg_builder_t *builder)
 	size_t                 i;
 
 	/*
+	 * **A locked entry whose class does not exist locks nothing, and is said
+	 * so once.** The keys are strings (0290), so `mut:eth0` reads like
+	 * protection and matches no action ever.
+	 *
+	 * The class is the only half worth checking here. An interface that does
+	 * not exist yet is a reasonable thing to lock in advance -- an operator
+	 * protecting an MTU before the link is created -- so the scope is left
+	 * alone; and a class this build does not know is either a typo or a
+	 * document written for a newer netcfgd, which is a thing to say rather
+	 * than to refuse.
+	 *
+	 * A warning rather than the removed "this lock refused nothing" note, and
+	 * the difference is when it fires: that one fired on every converged
+	 * plan, because a plan holds only changes. This one fires only on an
+	 * entry that can never match.
+	 */
+	for (i = 0; i < desired->globals.locked_count; i++) {
+		const char *entry = desired->globals.locked[i];
+		const char *colon = entry ? strchr(entry, ':') : NULL;
+
+		if (!entry) {
+			continue;
+		}
+		if (!colon || colon == entry) {
+			ncfg_plan_warnf(builder->plan, NULL,
+			    "`locked` entry `%s` is not a subject key: they read "
+			    "`class:scope`, as `ncfg plan` writes them -- so this locks "
+			    "nothing",
+			    entry);
+			continue;
+		}
+		if (!ncfg_op_subject_class_known(entry, (size_t)(colon - entry))) {
+			ncfg_plan_warnf(builder->plan, NULL,
+			    "`locked` entry `%s` names no kind of object this build knows, so "
+			    "it locks nothing -- either the class is misspelled or this "
+			    "document was written for a newer netcfgd",
+			    entry);
+		}
+	}
+
+	/*
 	 * Collected before anything is planned, because a guard on one interface
 	 * has to be known when an action against it is considered, whatever order
 	 * the interfaces sort in.

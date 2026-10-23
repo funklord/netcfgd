@@ -12550,10 +12550,20 @@ changes**: on a converged machine no lock matches anything, so the line would
 fire on every plan -- which is the noise that teaches people to skip the line
 that matters.
 
-The hazard it was aimed at is real and stays open: these keys are strings, so
-`mut:eth0` locks nothing and reads like protection. The cheap form is named in
-the code -- check the subject's class against the classes that exist, rather
-than counting what a plan happened to touch.
+The hazard it was aimed at is real, and **it is closed in the same session by
+the check the report could not be**: a lock whose *class* does not exist can be
+known useless without looking at the machine at all. `mut:eth0` and a bare
+`eth0` are each warned about once, naming the entry, while `mtu:eth0` is not --
+and the warning fires on an entry that can never match rather than on every
+converged plan, which is the whole difference.
+
+`ncfg_op_subject_class_known` answers it by **walking the op kinds rather than
+from a second list**, so the classes it accepts are exactly the classes
+`ncfg_op_subject` can produce and the two cannot drift. The scope half is
+deliberately not checked: an interface that does not exist yet is a reasonable
+thing to lock in advance, and a class this build does not know is either a typo
+or a document written for a newer netcfgd -- which is a thing to say and not a
+thing to refuse. 88 bytes, so the installed total is 1180976 of 1181000.
 
 ### Two fixture faults, because both were mine
 

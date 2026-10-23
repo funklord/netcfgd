@@ -360,6 +360,23 @@ const char *ncfg_op_interface(const ncfg_op_t *op);
 #define NCFG_OP_SUBJECT_MAX 192u
 int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size);
 
+/*
+ * Whether `length` bytes at `name` are a subject class this build knows.
+ *
+ * **For catching a lock that protects nothing.** `global { locked = [...] }`
+ * takes subject keys as strings, so `mut:eth0` is a plausible-looking entry
+ * that matches no action ever -- protection an operator believes in. The
+ * class is the half that can be checked without knowing the machine: an
+ * interface that does not exist yet is a reasonable thing to lock in advance,
+ * and a class that does not exist is a typo or a document from a newer
+ * netcfgd.
+ *
+ * Answered by walking the op kinds rather than from a second list, so the
+ * classes this knows are exactly the classes `ncfg_op_subject` can produce
+ * and the two cannot drift.
+ */
+int ncfg_op_subject_class_known(const char *name, size_t length);
+
 /* ------------------------------------------------------------------------ *
  * What an action carries besides the op
  * ------------------------------------------------------------------------ */

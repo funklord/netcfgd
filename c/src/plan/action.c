@@ -11,6 +11,7 @@
  * only thing here that can notice. Every switch lists every op.
  */
 #include "ncfg/plan.h"
+#include <string.h>
 
 #include <stdio.h>
 #include <stddef.h>
@@ -365,6 +366,26 @@ static const char *subject_class(int kind)
 		return NULL;
 	}
 	return NULL;
+}
+
+int ncfg_op_subject_class_known(const char *name, size_t length)
+{
+	int kind;
+
+	if (!name || length == 0u) {
+		return 0;
+	}
+	for (kind = 0; kind <= NCFG_OP_COMMIT_REVERT; kind++) {
+		const char *class_name = subject_class(kind);
+
+		if (!class_name) {
+			continue;
+		}
+		if (strlen(class_name) == length && memcmp(class_name, name, length) == 0) {
+			return 1;
+		}
+	}
+	return 0;
 }
 
 int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size)
