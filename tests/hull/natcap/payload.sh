@@ -158,6 +158,12 @@ check "  the refused message is named, which is what says which step" \
 check "  the sentence names the module that provides the chain type" \
 	"$(said 'nft_chain_nat')" yes
 check "  and the one that provides the masquerade" "$(said 'nft_masq')" yes
+# **The config symbol as well as the module.** `nft_chain_nat.o` is built by
+# `CONFIG_NFT_NAT` and no `CONFIG_NFT_CHAIN_NAT` exists, so a sentence naming
+# only the module sends a kernel builder looking for a symbol that is not
+# there. `tests/kernel/` is where that was found, by making the mistake.
+check "  the config symbol too, which is not the module's name" \
+	"$(said 'CONFIG_NFT_NAT')" yes
 
 # --- the chain type, but no masquerade -----------------------------------
 echo

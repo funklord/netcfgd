@@ -2524,7 +2524,7 @@ hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openrc/hull.conf
 
-# 22 checks: what a kernel answers when it cannot do NAT, which is the one
+# 23 checks: what a kernel answers when it cannot do NAT, which is the one
 # thing no gate here could ask. The host has `nft_chain_nat` and `nft_masq`, a
 # container shares that kernel, and a namespace shares it too -- so the states
 # netcfgd's capability sentence is *about* were unreachable, and the sentence
@@ -2537,6 +2537,51 @@ hull-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
 	@$(hull_says)
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/natcap/hull.conf
+
+# The kernel tier: netcfgd against kernels built without what it asks for.
+#
+# WHY IT IS NOT PART OF `hull` ABOVE
+#   hull boots the host's kernel -- its spec declares `(kernel "path:...")`
+#   and the qemu engine has not built it (hull's project.md 1188) -- so the
+#   one thing this tier needs is the one thing hull cannot do yet. It drives
+#   qemu directly instead, and moves under hull the day that key works.
+#
+# WHY IT EXISTS AT ALL, GIVEN `hull-natcap` MEASURES THE SAME STATES
+#   That rig blocks module autoload on the host's kernel, which is the same
+#   lookup failing -- an argument. This is the experiment that argument
+#   predicts, with `CONFIG_MODULES` off so there is no loader to blame, and
+#   the two agreed exactly (10.553). Keep both: the rig runs in minutes and
+#   guards the sentences, and this answers "but is a blocked loader really
+#   the same as a kernel without it".
+#
+# BY HAND, ALWAYS. It wants a 1.6 GB source tree this repository does not
+# ship, three kernel builds, and `KERNEL_SRC` naming the tree:
+#
+#   apt-get download linux-source-6.12 && dpkg-deb -x linux-source-6.12_*_all.deb x
+#   tar -xf x/usr/src/linux-source-6.12.tar.xz
+#   make kernel-natcap KERNEL_SRC=linux-source-6.12
+KERNEL_SRC ?=
+KERNEL_OUT ?= $(DIST)/kernel
+
+kernel-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
+	@$(MAKE) --no-print-directory -C c
+	sh tests/kernel/run.sh "$(KERNEL_SRC)" $(KERNEL_OUT)
+
+# Named and printed, like `hull-clean`: three bzImages and an initramfs, about
+# 95 MB, which `clean` leaves alone for the reason it leaves the guest images.
+kernel-clean:
+	@for f in $(KERNEL_OUT)/bzImage-k0 $(KERNEL_OUT)/bzImage-k1 \
+	          $(KERNEL_OUT)/bzImage-k2 $(KERNEL_OUT)/initramfs.cpio.gz \
+	          $(KERNEL_OUT)/initramfs.spec $(KERNEL_OUT)/gen_init_cpio; do \
+		if [ -f "$$f" ]; then \
+			printf 'kernel-clean: removing %s (%s)\n' "$$f" "$$(du -h "$$f" | cut -f1)"; \
+			rm -f "$$f"; \
+		fi; \
+	done
+	@rm -f $(KERNEL_OUT)/build-k[012].log $(KERNEL_OUT)/run-k[012].log
+	@rmdir $(KERNEL_OUT) 2>/dev/null || true
+
+.PHONY: kernel-natcap kernel-clean
 
 # **Baked when absent and never on a whim.** Each bake is a docker run, an apt
 # install and a `docker export`, so it wants a network and a few minutes; the
@@ -3212,24 +3257,41 @@ clean:
 # three of them prints 14,975 lines, which is a clean target nobody can read.
 # One pruned path answers both, and `make hull-clean` is the deliberate act
 # that names them.
+#
+# **`$(KERNEL_OUT)` is kept for the first half of that and not the second.**
+# Three bzImages are six files, so they would not drown the listing -- but
+# rebuilding them is three kernel builds rather than a recompile, which is the
+# reason the images are spared. `make kernel-clean` names them.
+#
+# **The two pruned paths are parenthesised**, which `build-and-commit.md`
+# requires by name: in `find`, `-a` binds tighter than `-o`, so
+# `-path A -o -path B -prune` means "A, or (B and prune)" and the first path
+# would be printed and then swept. Both arms are fixture-tested, as the
+# single-path version was.
 	@case "$(DIST)" in \
 	"") echo "clean: DIST is empty, refusing to remove anything"; exit 1 ;; \
 	/*) echo "clean: DIST is absolute ($(DIST)), refusing"; exit 1 ;; \
 	*..*) echo "clean: DIST escapes the tree ($(DIST)), refusing"; exit 1 ;; \
 	esac; \
 	if [ -d "$(DIST)" ]; then \
-		find "$(DIST)" -path "$(HULL_IMAGE_DIR)" -prune -o -type f -print | \
-			sed 's/^/clean: removing /'; \
+		find "$(DIST)" \( -path "$(HULL_IMAGE_DIR)" -o -path "$(KERNEL_OUT)" \) \
+			-prune -o -type f -print | sed 's/^/clean: removing /'; \
 		find "$(DIST)" -mindepth 1 -maxdepth 1 ! -path "$(HULL_IMAGE_DIR)" \
-			-exec rm -rf {} +; \
+			! -path "$(KERNEL_OUT)" -exec rm -rf {} +; \
+		kept=0; \
 		if [ -d "$(HULL_IMAGE_DIR)" ]; then \
+			kept=1; \
 			printf 'clean: keeping %s (%s guest image(s), %s); make hull-clean removes them\n' \
 				"$(HULL_IMAGE_DIR)" \
 				"$$(find "$(HULL_IMAGE_DIR)" -mindepth 1 -maxdepth 1 -type d | wc -l)" \
 				"$$(du -sh "$(HULL_IMAGE_DIR)" | cut -f1)"; \
-		else \
-			rmdir "$(DIST)" 2>/dev/null || true; \
 		fi; \
+		if [ -d "$(KERNEL_OUT)" ]; then \
+			kept=1; \
+			printf 'clean: keeping %s (%s, three kernel build(s)); make kernel-clean removes them\n' \
+				"$(KERNEL_OUT)" "$$(du -sh "$(KERNEL_OUT)" | cut -f1)"; \
+		fi; \
+		[ "$$kept" -eq 1 ] || rmdir "$(DIST)" 2>/dev/null || true; \
 	fi
 
 # The shared style gate: one tool, copied verbatim from

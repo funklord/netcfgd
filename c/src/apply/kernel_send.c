@@ -141,7 +141,14 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 		 *
 		 * `EOPNOTSUPP` arrived in none of them, so it is gone from here: a
 		 * second code nothing can produce is an untested arm wearing
-		 * caution's clothes. The third state never reaches this function --
+		 * caution's clothes.
+		 *
+		 * **Confirmed on kernels built without the constructs**, 2026-10-24,
+		 * `tests/kernel/` -- 6.12.113 with `CONFIG_MODULES` off entirely, so
+		 * there is no loader to blame and "absent" means compiled out. Same
+		 * `ENOENT`, same two messages, and a third kernel with both
+		 * constructs built in applies NAT, which is what keeps the refusals
+		 * from being a property of a small kernel. The third state never reaches this function --
 		 * `kernel_nat.c` refuses at the socket and says `nf_tables` itself
 		 * is missing -- which is why nothing here mentions it.
 		 *
@@ -155,8 +162,21 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 		 * hint points at it rather than asserting the likelier half.
 		 */
 		if (code == ENOENT) {
+			/*
+			 * **Both spellings, because they are not the same word and one
+			 * of them does not exist.** The module is `nft_chain_nat` and
+			 * the option that builds it is `CONFIG_NFT_NAT`: there is no
+			 * `CONFIG_NFT_CHAIN_NAT`, as `net/netfilter/Makefile` shows --
+			 * `obj-$(CONFIG_NFT_NAT) += nft_chain_nat.o`. An operator sent
+			 * to their kernel config by a sentence naming only the module
+			 * searches for a symbol that is not there, which is a thing
+			 * that happened while the kernels for this measurement were
+			 * being configured. The masquerade's two names agree, and are
+			 * given anyway so the pair reads the same way.
+			 */
 			return "the refused message above says which step: a `nat` chain "
-			       "type (`nft_chain_nat`) or a masquerade (`nft_masq`) this "
+			       "type (module `nft_chain_nat`, CONFIG_NFT_NAT) or a "
+			       "masquerade (module `nft_masq`, CONFIG_NFT_MASQ) this "
 			       "kernel does not provide fails exactly here, and so does a "
 			       "`netcfgd` table that went away between the dump and this "
 			       "transaction";

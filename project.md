@@ -12498,6 +12498,76 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.553 The kernel built without it, the experiment 10.552 only argued
+
+"do the custom kernel then" -- the copyright holder, 2026-10-24. 10.552
+measured the errno by blocking module autoload and **argued** that this is the
+same state as a kernel compiled without the construct. `running-code.md` is
+exact about that gap: name the experiment that would confirm the comfortable
+story and run it, because a refusal leaves the question open and a disproof
+removes a branch. Decision 0292 has the result; `make kernel-natcap
+KERNEL_SRC=<tree>` is the tier.
+
+### Three kernels, two options, no module support at all
+
+Debian's `linux-source-6.12` (6.12.113) with `CONFIG_MODULES` **off**, so
+there is no loader to blame and absent means compiled out:
+
+| kernel | config | the apply |
+|---|---|---|
+| k0 | `NFT_NAT=y`, `NFT_MASQ=y` | **applies NAT**, `ok nat.replace` |
+| k1 | neither | `NFT_MSG_NEWCHAIN` refused, **ENOENT** |
+| k2 | `NFT_NAT=y`, no `NFT_MASQ` | `NFT_MSG_NEWRULE` refused, **ENOENT** |
+
+**Identical to the blocked-autoload rig, state for state and message for
+message**, and `EOPNOTSUPP` nowhere again. So the argument holds and the
+cheap rig is evidence rather than an approximation of it.
+
+**k0 is why the other two mean anything.** A kernel this small refusing NAT is
+consistent with any of the things `x86_64_defconfig` minus modules leaves out;
+the same kernel with the two constructs restored applying NAT is what narrows
+it to the constructs. And the guest derives its own expectation from
+`/proc/config.gz` -- `CONFIG_IKCONFIG_PROC` is in the config for that reason
+alone -- so a run against the wrong bzImage fails instead of passing quietly.
+
+### `CONFIG_NFT_CHAIN_NAT` does not exist
+
+`net/netfilter/Makefile` has `obj-$(CONFIG_NFT_NAT) += nft_chain_nat.o`. The
+module an operator loads and the option a kernel builder selects **are spelled
+differently**, and netcfgd's sentence named only the module -- so anyone taking
+it to a kernel config searches for a symbol that is not there.
+
+Found by making that exact mistake: `config-kernel.sh` was written with
+`-e NFT_CHAIN_NAT`, and its own readback check refused the build, which is the
+one way this could have been caught cheaply. The sentence carries both
+spellings for both constructs now, and `apply_kernel_test` and the rig both
+hold it to that. It matters for netcfgd's actual audience: on an embedded
+router a kernel is built rather than modprobed, so the config symbol is the
+half that can be acted on.
+
+### What the tier is, and why it is not under hull
+
+`tests/kernel/` drives qemu directly: `config-kernel.sh` (configure and read
+the config back), `make-initramfs.py` (a `gen_init_cpio` spec from the natcap
+rootfs), `kinit.sh` (PID 1, the measurement, a sysrq power-off), and `run.sh`
+tying them together. **hull cannot boot a kernel it is given** --
+`engine/qemu.c:1029` is `/boot/vmlinuz-<release>` and the spec's
+`vm.kernel` `path:` form is declared but unbuilt (hull's section 1188) -- so
+this tier exists outside the hull family and collapses into another rig the
+day that key lands. Signalled to hull's inbox as `20261024T2008Z`, with the
+two things an unprivileged runner needs: `/dev/console` declared in the
+initramfs spec (a user cannot `mknod` one, and without it PID 1 is silent and
+looks hung) and `CONFIG_IKCONFIG_PROC` so a guest can say which kernel it is.
+
+### The division of labour between the two tiers
+
+`make hull-natcap` is the standing test: minutes, no source tree, 23 checks,
+and it guards the sentences. `make kernel-natcap` is the occasional control:
+a 1.6 GB tree, three builds, and it answers the one question the rig cannot
+ask about itself. 0292 settles that both stay, and closes 10.552's open
+question about pinning a kernel -- not because pinning is unwanted but
+because hull cannot express it yet.
+
 ## 10.552 The errno was measurable after all, in a vm, and it was the wrong one
 
 "If you need to thoroughly test this kind of stuff you can use a hull VM with a

@@ -437,6 +437,17 @@ static void check_hints(void)
 		check(absent && strstr(absent, "nft_chain_nat") != NULL &&
 		    strstr(absent, "nft_masq") != NULL,
 		    "  naming both modules, which is what an operator can act on");
+		/*
+		 * **And both config symbols, because one of them is spelled
+		 * differently from its module.** `nft_chain_nat.o` is built by
+		 * `CONFIG_NFT_NAT` and there is no `CONFIG_NFT_CHAIN_NAT` -- an
+		 * operator who goes from the module name to a kernel config finds
+		 * nothing, which is what happened to the session building the
+		 * kernels in `tests/kernel/`.
+		 */
+		check(absent && strstr(absent, "CONFIG_NFT_NAT") != NULL &&
+		    strstr(absent, "CONFIG_NFT_MASQ") != NULL,
+		    "  and both config symbols, which is what a kernel build needs");
 		check(absent && strstr(absent, "between the dump") != NULL,
 		    "  and the other fault that lands on this errno, which it cannot "
 		    "rule out");
