@@ -194,6 +194,19 @@ int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t er
 int ncfg_nft_build_gen_request(ncfg_buf_t *out, uint32_t seq, char *err, size_t err_size);
 
 /*
+ * The kernel's own name for an nftables message type, or NULL where this port
+ * has none.
+ *
+ * It is what makes one errno legible. Three unrelated faults refuse a NAT
+ * transaction with `ENOENT` -- no `nat` chain type, no `masq` expression, and
+ * a table that vanished between the dump and the send -- and the message the
+ * kernel echoes back is the only thing that says which. `socket.c` reaches for
+ * this when `ncfg_netlink_kind_text` has no name, and nft.c says why no
+ * protocol is passed and which single message type is ambiguous.
+ */
+const char *ncfg_nft_message_text(uint16_t kind);
+
+/*
  * The generation out of that answer.
  *
  * 1 with `out` set. 0 for a payload that is not one, which includes the reply

@@ -330,6 +330,77 @@ int ncfg_nft_build_rule_dump(ncfg_buf_t *out, uint32_t seq, char *err, size_t er
 }
 
 /*
+ * The kernel's own name for one of these messages, or NULL.
+ *
+ * WHY THIS EXISTS AT ALL
+ *   A refused transaction gives one errno, and the three ways NAT fails all
+ *   give the same one. Measured 2026-10-24 in a hull vm whose module autoload
+ *   was blocked (`tests/hull/natcap/`): a kernel with no `nft_chain_nat`
+ *   refuses `NFT_MSG_NEWCHAIN` with `ENOENT`, one with no `nft_masq` refuses
+ *   `NFT_MSG_NEWRULE` with `ENOENT`, and `kernel_nat.c`'s own header notes
+ *   that deleting a table which is not there is `ENOENT` as well. So the
+ *   number cannot say which, and the operator's next action differs in each
+ *   case -- install a module, build a kernel, or ignore a race.
+ *
+ *   What does say which is the message the kernel named in its error: netlink
+ *   echoes the offending header back, and `socket.c` already decodes it to
+ *   spell `RTM_NEWLINK`. It had no name for anything here, so every nftables
+ *   refusal read "a netlink request was refused" -- the discriminator arrived
+ *   with the error and was thrown away for want of a table.
+ *
+ * NO PROTOCOL IS PASSED IN, AND THAT IS A MEASUREMENT RATHER THAN A HOPE
+ *   `socket.c` consults this after `ncfg_netlink_kind_text`, with no idea
+ *   which protocol the socket speaks, which is only safe because the numbers
+ *   cannot collide: an nftables message is `(NFNL_SUBSYS_NFTABLES << 8) |
+ *   kind`, so 2560 and up, while the largest `RTM_*` this kernel's headers
+ *   define is 108.
+ *
+ *   **The one collision is the batch markers and it is left alone.**
+ *   `NFNL_MSG_BATCH_BEGIN` is subsystem 0, type 16, which is `RTM_NEWLINK`
+ *   exactly -- so a refused marker would be named as a link message. Nothing
+ *   here can tell them apart without the protocol, and a marker asks for no
+ *   acknowledgement: in all four states measured the kernel refused an inner
+ *   message and never a marker. Said rather than guarded, because a reader
+ *   who meets it needs to know it is known.
+ */
+const char *ncfg_nft_message_text(uint16_t kind)
+{
+	switch (kind) {
+	case NFT_MESSAGE(NFT_MSG_NEWTABLE):
+		return "NFT_MSG_NEWTABLE";
+	case NFT_MESSAGE(NFT_MSG_GETTABLE):
+		return "NFT_MSG_GETTABLE";
+	case NFT_MESSAGE(NFT_MSG_DELTABLE):
+		return "NFT_MSG_DELTABLE";
+	case NFT_MESSAGE(NFT_MSG_NEWCHAIN):
+		return "NFT_MSG_NEWCHAIN";
+	case NFT_MESSAGE(NFT_MSG_GETCHAIN):
+		return "NFT_MSG_GETCHAIN";
+	case NFT_MESSAGE(NFT_MSG_DELCHAIN):
+		return "NFT_MSG_DELCHAIN";
+	case NFT_MESSAGE(NFT_MSG_NEWRULE):
+		return "NFT_MSG_NEWRULE";
+	case NFT_MESSAGE(NFT_MSG_GETRULE):
+		return "NFT_MSG_GETRULE";
+	case NFT_MESSAGE(NFT_MSG_DELRULE):
+		return "NFT_MSG_DELRULE";
+	case NFT_MESSAGE(NFT_MSG_GETGEN):
+		return "NFT_MSG_GETGEN";
+	case NFT_MESSAGE(NFT_MSG_NEWGEN):
+		return "NFT_MSG_NEWGEN";
+	default:
+		/*
+		 * Deliberately not every message nftables defines. These are the
+		 * ones netcfgd sends and the two the kernel answers with, which is
+		 * the closed set `writes_only_our_table` above holds it to; a name
+		 * for a set-element or a flowtable message would be a name for
+		 * something that cannot appear unless 0022's line has moved.
+		 */
+		return NULL;
+	}
+}
+
+/*
  * `NFT_MSG_GETGEN`, which answers with the ruleset's generation counter.
  *
  * `NLM_F_DUMP` is deliberately absent: the kernel answers this one with a

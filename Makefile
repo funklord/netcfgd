@@ -33,10 +33,11 @@
 #                         Under systemd's sysv-generator, not under sysvinit,
 #                         and the payload says what that does not prove
 #   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
-#   make hull          -- the three payloads a namespace or a container
+#   make hull          -- the four payloads a namespace or a container
 #                         cannot host, in machines `hull` runs: hwsim radios,
-#                         the systemd sandbox, and the OpenRC init script.
-#                         `hull-hwsim`, `hull-sandbox`, `hull-openrc` one at
+#                         the systemd sandbox, the OpenRC init script, and a
+#                         kernel that cannot do NAT. `hull-hwsim`,
+#                         `hull-sandbox`, `hull-openrc`, `hull-natcap` one at
 #                         a time; `hull-image` bakes the guests, which is the
 #                         only part needing docker and the internet, and
 #                         `hull-clean` removes them -- `clean` does not
@@ -2445,6 +2446,13 @@ vm-image:
 #   OpenRC-booted guest, which this tree's own VM tier cannot build because
 #   `openrc` depends on `insserv` and `systemd-sysv` conflicts with it.
 #
+#   **The fourth is there for the opposite reason: it needs a kernel that
+#   cannot do something.** `natcap` measures what the kernel answers when
+#   `nft_chain_nat` or `nft_masq` is unreachable, which no tier here could ask
+#   -- this host has both, and a container and a namespace share this host's
+#   kernel, where a chain type is registered globally. A guest's module
+#   autoload is the rig's to block, and that is the whole of why it exists.
+#
 # NOT IN `check` AND NOT IN `live`, for the VM tier's reasons (0275) plus one
 # of its own: each wants `/dev/kvm`, minutes, and a sibling project's binary.
 #
@@ -2486,9 +2494,9 @@ hull_says = command -v $(HULL) >/dev/null 2>&1 || \
 # **`timeout` is the right bound here and would not be for a container.** A
 # `(backend vm)` machine is qemu, a child of this shell, so a signal reaches
 # it; hull's docker engine would leave the container running with the
-# supervisor dead, which `running-code.md` measures. These three specs all say
+# supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
-hull: hull-hwsim hull-sandbox hull-openrc
+hull: hull-hwsim hull-sandbox hull-openrc hull-natcap
 
 # 27 checks. The guest builds netcfgd itself, so no host build is needed:
 # hull `7b47668` gave the workload a PATH, and the payload falls back to the
@@ -2516,6 +2524,20 @@ hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openrc/hull.conf
 
+# 22 checks: what a kernel answers when it cannot do NAT, which is the one
+# thing no gate here could ask. The host has `nft_chain_nat` and `nft_masq`, a
+# container shares that kernel, and a namespace shares it too -- so the states
+# netcfgd's capability sentence is *about* were unreachable, and the sentence
+# was keyed on a guessed errno until this rig measured it (10.552).
+#
+# The C is built first, as `hull-sandbox` is and for the same reason: the
+# payload runs the binary off the read-only share, and a verdict read off a
+# binary the build step did not rebuild is what `build-and-commit.md` forbids.
+hull-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
+	@$(hull_says)
+	@$(MAKE) --no-print-directory -C c
+	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/natcap/hull.conf
+
 # **Baked when absent and never on a whim.** Each bake is a docker run, an apt
 # install and a `docker export`, so it wants a network and a few minutes; the
 # directory existing is the signal that it is done, which is what the rigs'
@@ -2525,15 +2547,15 @@ $(HULL_IMAGE_DIR)/%-rootfs:
 	sh tests/hull/$*/bake-rootfs.sh $@
 
 hull-image:
-	@for r in hwsim sandbox openrc; do \
+	@for r in hwsim sandbox openrc natcap; do \
 		sh tests/hull/$$r/bake-rootfs.sh $(HULL_IMAGE_DIR)/$$r-rootfs || exit 1; \
 	done
 
-# Named, printed, and only the three this tree baked -- not a sweep of
+# Named, printed, and only the four this tree baked -- not a sweep of
 # whatever matches. `clean` deliberately leaves these alone.
 hull-clean:
 	@for d in $(HULL_IMAGE_DIR)/hwsim-rootfs $(HULL_IMAGE_DIR)/sandbox-rootfs \
-	          $(HULL_IMAGE_DIR)/openrc-rootfs; do \
+	          $(HULL_IMAGE_DIR)/openrc-rootfs $(HULL_IMAGE_DIR)/natcap-rootfs; do \
 		if [ -d "$$d" ]; then \
 			printf 'hull-clean: removing %s (%s)\n' "$$d" "$$(du -sh "$$d" | cut -f1)"; \
 			rm -rf "$$d"; \
@@ -2541,7 +2563,7 @@ hull-clean:
 	done
 	@rmdir $(HULL_IMAGE_DIR) 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

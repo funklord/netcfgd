@@ -13,6 +13,8 @@
  */
 #include "ncfg/netlink.h"
 
+#include "ncfg/nft.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -392,6 +394,22 @@ static const char *refused_request(const ncfg_wire_message_t *message)
 		return "a netlink request";
 	}
 	name = ncfg_netlink_kind_text(original.kind);
+	if (!name) {
+		/*
+		 * **The nftables names, because one errno covers three faults.**
+		 * A NAT transaction refused for want of `nft_chain_nat`, for want
+		 * of `nft_masq`, or because the table vanished between the dump
+		 * and the send is `ENOENT` in all three cases -- measured
+		 * 2026-10-24, `tests/hull/natcap/` -- and the message named here
+		 * is what tells them apart. Before this, every one of them read
+		 * "a netlink request failed".
+		 *
+		 * No protocol is passed in and none is needed: `nft.h` has the
+		 * numbers, which cannot collide, and names the one message type
+		 * that is ambiguous.
+		 */
+		name = ncfg_nft_message_text(original.kind);
+	}
 	return name ? name : "a netlink request";
 }
 

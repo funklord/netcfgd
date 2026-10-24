@@ -889,4 +889,17 @@ netcfgd
 #
 # Recorded at 1185100 rather than left to ride the tolerance, for this file's
 # own reason.
-total 1185100
+# Then the refused message's name, 2026-10-24, +48 bytes to 1,185,120.
+#
+# `ncfg_nft_message_text` -- eleven names and a switch -- plus a longer
+# capability sentence, minus the `EOPNOTSUPP` arm the vm measurement retired.
+# text 987,253 to 987,722, `data` and `bss` byte-identical again, and the file
+# moves by 48 because the page the entry above bought had the room. So this is
+# the ordinary case and that one was the exception: a change crossing a
+# boundary pays for a page, and the next several pay nothing.
+#
+# Recorded at 1185200 rather than left to ride the tolerance by 20 bytes. The
+# figure is small enough to feel silly and that is this file's whole argument:
+# the entry four above exists because 22,224 bytes arrived in steps each too
+# small to bother with.
+total 1185200

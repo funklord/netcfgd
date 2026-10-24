@@ -37,6 +37,7 @@
 #include <linux/netfilter/nf_tables.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/rtnetlink.h>
 
 static int failures;
 
@@ -972,6 +973,49 @@ int main(void)
 
 		check(!ncfg_nft_gen_read(NULL, 0, &generation, err, sizeof(err)),
 		    "  and so is a payload too short to be one");
+	}
+
+	/*
+	 * **The names a refused transaction is read by.** One errno covers three
+	 * faults here -- no `nat` chain type, no `masq` expression, and a table
+	 * that vanished between the dump and the send, all `ENOENT`, measured in
+	 * `tests/hull/natcap/` -- so the message the kernel echoes back is the
+	 * only discriminator, and it is useless unnamed.
+	 */
+	{
+		const char *chain = ncfg_nft_message_text(
+		    (uint16_t)(((unsigned)NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_NEWCHAIN));
+		const char *rule = ncfg_nft_message_text(
+		    (uint16_t)(((unsigned)NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_NEWRULE));
+		const char *del = ncfg_nft_message_text(
+		    (uint16_t)(((unsigned)NFNL_SUBSYS_NFTABLES << 8) | NFT_MSG_DELTABLE));
+
+		check(chain && strcmp(chain, "NFT_MSG_NEWCHAIN") == 0,
+		    "the chain message is named, which is the no-nft_chain_nat case");
+		check(rule && strcmp(rule, "NFT_MSG_NEWRULE") == 0,
+		    "  the rule message too, which is the no-nft_masq case");
+		check(del && strcmp(del, "NFT_MSG_DELTABLE") == 0,
+		    "  and the delete, which is the table-vanished case");
+		/*
+		 * The three must be *distinct*, which is the property that makes the
+		 * discrimination work: a table mapping all three to one string would
+		 * pass every check above and tell an operator nothing.
+		 */
+		check(chain && rule && del && strcmp(chain, rule) != 0 &&
+		    strcmp(chain, del) != 0 && strcmp(rule, del) != 0,
+		    "  and no two of them read the same, or they separate nothing");
+
+		/*
+		 * **Not a name for everything**, because `socket.c` consults this
+		 * with no idea which protocol the socket speaks and relies on the
+		 * ranges not colliding. A message outside nftables' subsystem gets
+		 * NULL here and keeps whatever rtnetlink called it.
+		 */
+		check(ncfg_nft_message_text((uint16_t)RTM_NEWADDR) == NULL,
+		    "  an rtnetlink type is not claimed by the nftables table");
+		check(ncfg_nft_message_text((uint16_t)(((unsigned)NFNL_SUBSYS_NFTABLES << 8) |
+		    NFT_MSG_NEWSET)) == NULL,
+		    "  nor a set message, which 0022 says cannot reach this port");
 	}
 
 	if (failures) {

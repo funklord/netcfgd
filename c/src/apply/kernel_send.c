@@ -122,31 +122,44 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 		return NULL;
 	case NCFG_OP_NAT_REPLACE:
 		/*
-		 * **Two codes, because which one a kernel gives was not measured and
-		 * cannot be here.** netcfgd asks for a `nat`-type chain and a `masq`
-		 * expression, and a kernel built without `nft_chain_nat` or
-		 * `nft_masq` fails the same lookup an unknown construct name would --
-		 * which is `-ENOENT` or `-EOPNOTSUPP` depending on the path and the
-		 * version. Producing a kernel without those modules is not something
-		 * this machine can do, so the hint covers both rather than claiming
-		 * the one that was guessed; `set_offloads` above keys on a pair for
-		 * the same reason.
+		 * **ENOENT, measured, where this arm first hedged over two codes.**
+		 * 0283 and 0287 both reasoned about `EOPNOTSUPP` from a construct a
+		 * kernel does not support, and this arm was written keyed on
+		 * `ENOENT` and `EOPNOTSUPP` together because the kernel that would
+		 * say which could not be produced on a developer machine.
 		 *
-		 * Measured 2026-10-23 instead: `nft` refuses these before the kernel
-		 * sees them, and its own message for the case is "Chain of type
-		 * `nat` is not supported, perhaps kernel support is missing?" -- so
-		 * even the tool that owns the vocabulary hedges between a wrong hook
-		 * and an absent module. A sentence here that named one cause with
-		 * certainty would be claiming more than nft does.
+		 * It can be produced in a vm, which is what `tests/hull/natcap/`
+		 * does: a guest boots with an empty module table and its own
+		 * `/proc/sys/kernel/modprobe`, so blocking autoload makes a
+		 * construct unreachable exactly as a kernel built without it would.
+		 * Measured there 2026-10-24, kernel 6.12, three states and two
+		 * controls:
 		 *
-		 * What the operator can act on is the module names, which is the one
-		 * part that is certain: those are what provide what netcfgd asked
-		 * for. 0283 and 0287 -- a red row in a rule list is this sentence.
+		 *     no nft_chain_nat    NFT_MSG_NEWCHAIN refused, ENOENT
+		 *     no nft_masq         NFT_MSG_NEWRULE refused, ENOENT
+		 *     no nf_tables        the socket will not open, EPROTONOSUPPORT
+		 *
+		 * `EOPNOTSUPP` arrived in none of them, so it is gone from here: a
+		 * second code nothing can produce is an untested arm wearing
+		 * caution's clothes. The third state never reaches this function --
+		 * `kernel_nat.c` refuses at the socket and says `nf_tables` itself
+		 * is missing -- which is why nothing here mentions it.
+		 *
+		 * **And the sentence stops claiming a cause the number cannot
+		 * carry.** `kernel_nat.c`'s header notes that deleting a table
+		 * which is not there is `ENOENT` too, and that delete is in this
+		 * transaction whenever the dump saw the table -- so a table that
+		 * vanished in the gap lands on the same errno as a missing module.
+		 * Naming the refused message is what separates them, which nftables
+		 * messages now have names for (`ncfg_nft_message_text`), and the
+		 * hint points at it rather than asserting the likelier half.
 		 */
-		if (code == ENOENT || code == EOPNOTSUPP) {
-			return "this kernel has no nftables NAT: `nft_chain_nat` provides the "
-			       "chain type and `nft_masq` the masquerade, and netcfgd asks for "
-			       "both -- the modules may be absent, unbuildable or blocked";
+		if (code == ENOENT) {
+			return "the refused message above says which step: a `nat` chain "
+			       "type (`nft_chain_nat`) or a masquerade (`nft_masq`) this "
+			       "kernel does not provide fails exactly here, and so does a "
+			       "`netcfgd` table that went away between the dump and this "
+			       "transaction";
 		}
 		return NULL;
 	default:

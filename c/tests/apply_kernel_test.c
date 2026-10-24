@@ -417,31 +417,33 @@ static void check_hints(void)
 	    "a code with nothing to add gets nothing added");
 
 	/*
-	 * **The NAT one keys on two codes on purpose**, and the test says so
-	 * because the pair looks like indecision otherwise. netcfgd asks for a
-	 * `nat` chain type and a `masq` expression, and a kernel without
-	 * `nft_chain_nat` or `nft_masq` fails the same lookup an unknown
-	 * construct name would -- `ENOENT` or `EOPNOTSUPP` depending on the path.
-	 * Which one a given kernel gives was not measured and cannot be on a
-	 * machine that has the modules, so both carry the sentence rather than
-	 * one carrying it and the other leaving an operator with a bare errno.
+	 * **The NAT arm keys on ENOENT alone, and the measurement is why.**
+	 * This first asserted that `ENOENT` and `EOPNOTSUPP` read the same,
+	 * because which one a kernel without `nft_chain_nat` returns could not be
+	 * measured on a machine that has it. `tests/hull/natcap/` measures it in
+	 * a vm with module autoload blocked: `NFT_MSG_NEWCHAIN` and
+	 * `NFT_MSG_NEWRULE` are both refused with `ENOENT`, and `EOPNOTSUPP`
+	 * arrives in no reachable state. So the second code is gone, and this
+	 * check holds it gone -- an arm for a code nothing produces is an
+	 * untested arm, and its presence made the sentence hedge.
 	 *
-	 * This is the sentence a red row in a rule list shows (0283, 0287), so
-	 * what it must contain is the module names: they are the part an operator
-	 * can act on, and the only part that is certain.
+	 * What the sentence must carry is the two module names and the second
+	 * cause of this same errno, since the number cannot tell them apart.
 	 */
 	{
 		const char *absent = ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, ENOENT);
-		const char *unsupported = ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, EOPNOTSUPP);
 
-		check(absent && unsupported && strcmp(absent, unsupported) == 0,
-		    "ENOENT and EOPNOTSUPP on nat.replace read the same, since both are "
-		    "the same lookup failing");
+		check(absent != NULL, "nat.replace on ENOENT has something to say");
 		check(absent && strstr(absent, "nft_chain_nat") != NULL &&
 		    strstr(absent, "nft_masq") != NULL,
-		    "  and it names both modules, which is what an operator can act on");
+		    "  naming both modules, which is what an operator can act on");
+		check(absent && strstr(absent, "between the dump") != NULL,
+		    "  and the other fault that lands on this errno, which it cannot "
+		    "rule out");
+		check(ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, EOPNOTSUPP) == NULL,
+		    "  while EOPNOTSUPP gets nothing: measured in no state, so no arm");
 		check(ncfg_kernel_hint(NCFG_OP_NAT_REPLACE, EPERM) == NULL,
-		    "  while EPERM gets nothing, because the socket already said that one");
+		    "  and EPERM nothing, because the socket already said that one");
 	}
 }
 

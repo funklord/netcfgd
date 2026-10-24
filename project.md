@@ -12498,7 +12498,111 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.551 The capability hint for NAT, and why it names two errnos
+## 10.552 The errno was measurable after all, in a vm, and it was the wrong one
+
+"If you need to thoroughly test this kind of stuff you can use a hull VM with a
+custom kernel" -- the copyright holder, 2026-10-24, on 10.551's claim that the
+kernel's answer could not be measured here. **No kernel had to be built, and
+the claim was wrong within the day.** Decision 0291 has the measurement; this
+is what it cost and what it changed.
+
+### What made the state reachable
+
+A hull `(backend vm)` guest boots the host's kernel with an **empty module
+table** and its own `/proc/sys/kernel/modprobe`. Blocking autoload there leaves
+a construct unreachable by the same lookup that fails when it was never
+compiled: `nf_tables` asks for the chain type, asks the module loader, asks
+again, and returns its own error without regard for why the module never
+appeared. So "the modules may be absent, unbuildable or blocked" -- the
+sentence 10.551 shipped -- names three states that are one state to the kernel,
+and the cheapest of them is a one-line write in a guest.
+
+Neither of the other tiers can do it, which is why this was never measured:
+`make live-container` and `make live` share the host's kernel, where both
+modules are loaded and a chain type is registered globally.
+
+### What the kernel says, 22 checks in `tests/hull/natcap/`
+
+| state | the answer |
+|---|---|
+| `nf_tables`, no `nft_chain_nat` | `NFT_MSG_NEWCHAIN` refused, **ENOENT** |
+| plus `nft_chain_nat`, no `nft_masq` | `NFT_MSG_NEWRULE` refused, **ENOENT** |
+| no nftables module at all | the socket will not open, EPROTONOSUPPORT (93) |
+
+**`EOPNOTSUPP` arrived in no state**, and it is what 0283 and 0287 both
+reasoned about and what 10.551's arm hedged on. It is gone from the hint, and
+`apply_kernel_test` now asserts it gets nothing: an arm for a code nothing
+produces is an untested arm, and its presence is what made the sentence hedge.
+
+Two controls, because three refusals prove nothing on their own: a guest with
+the modules loadable applies NAT with all four actions `ok`, and with autoload
+blocked a module nothing loaded cannot arrive (`ip link add type dummy` is
+refused). Each failing state also asserts its plan held the `nat.replace`,
+since a converged machine plans nothing and reports an empty success -- which
+is exactly how the first draft of this measured nothing four times over.
+
+### The finding the measurement produced, which is bigger than the errno
+
+**ENOENT cannot carry the diagnosis.** `kernel_nat.c` has always said that
+deleting a table which is not there is ENOENT, and that delete is in the
+transaction whenever the dump saw the table -- so a table that vanished in the
+gap lands on the identical code as a missing module. One errno, three faults,
+three different remedies.
+
+The discriminator was arriving with every error and being discarded: an
+`NLMSG_ERROR` carries the header of the message that caused it, and
+`socket.c:382` already decoded it to spell `RTM_NEWLINK`. It had no name for
+anything on the netfilter protocol, so **every nftables refusal in this port's
+history read "a netlink request failed"**. `ncfg_nft_message_text` names the
+eleven messages netcfgd sends or reads, and the refusal now reads
+`NFT_MSG_NEWCHAIN failed` -- which is the difference between "no chain type"
+and "no masquerade" stated in the kernel's own vocabulary.
+
+No protocol is threaded to do that, and that is measured rather than assumed:
+an nftables message is `(NFNL_SUBSYS_NFTABLES << 8) | kind`, so 2560 or more,
+against a largest `RTM_*` of 108. The one collision is `NFNL_MSG_BATCH_BEGIN`,
+subsystem 0 type 16, which is `RTM_NEWLINK` exactly; a marker asks for no
+acknowledgement and was refused in none of the four states, so it is written
+down in `nft.c` rather than guarded.
+
+### Three instrument faults, all of which reported success
+
+The rig's own history is the useful part, because each fault produced a clean
+run that measured nothing:
+
+- **`modprobe -r` never unloaded**, netcfgd's table and dummy device holding
+  the references, so three states ran with every module loaded. Visible only
+  in a state line nobody had asked to be printed.
+- **`modprobe dummy nf_tables` loads neither.** The second word is a
+  *parameter* of the first module, and the complaint went to a `2>/dev/null`.
+  Two states ran with no `nf_tables` while their labels said otherwise.
+- **The control on the block tested `sed`'s exit status**, through a pipe, and
+  announced "the block is not blocking" directly above the output proving it
+  was. A pipeline's status is its last command's.
+
+None of the three would have failed a check, because at that point the script
+had no checks -- which is the argument for the rig over a session's one-off
+probe, and for the vacuity assertions inside it.
+
+### What is still open
+
+**A probe rather than a refusal.** A hint explains a failure that has already
+happened; 0287's red row *before* an apply needs netcfgd to ask what a kernel
+supports, and nftables publishes no "list your expression types" request.
+Asking by attempting -- a transaction into a throwaway table, rolled back --
+is the obvious shape and writes to the kernel to answer a question about it,
+so 0291 leaves it to the holder.
+
+**The other ruleset op kinds.** `nat.replace` is one op with one sentence. The
+rest of 0283's layers each want one, and each wants a state in the rig rather
+than a guess.
+
+**A pinned kernel.** hull declares `(kernel "path:...")` and has not built it,
+so the guest runs the host's kernel: the rig can say what 6.12 answers and not
+what 5.4 does. The module-blocked state is the same lookup either way, so this
+would buy version evidence rather than correctness.
+
+## 10.551 The capability hint for NAT, keyed on a guessed errno (superseded by 10.552)
 
 "continue", the copyright holder, 2026-10-23. 0287's red row has to say
 something, and 10.545 named the translation that makes it say it: a kernel
@@ -12510,14 +12614,23 @@ first of the ruleset kinds to get one.
     and `nft_masq` the masquerade, and netcfgd asks for both -- the modules
     may be absent, unbuildable or blocked
 
-### The errno could not be measured here, so the hint does not guess one
+### The errno "could not be measured here", which was wrong -- see 10.552
 
-The obvious way to write this is to find out what a kernel without
-`nft_chain_nat` returns and key on that. **That measurement cannot be taken on
-this machine**, which has the modules, and building a kernel without them is
-not a thing this tree can do. What was measured instead, in a privileged
-`debian:trixie-slim` with `nftables`, is that **`nft` refuses these constructs
-before the kernel sees them**:
+**This section's claim did not survive a day and the entry is kept as written
+so the error is legible.** It said the kernel's answer could not be measured on
+this machine, keyed the arm on `ENOENT` and `EOPNOTSUPP` together for that
+reason, and argued for the pair as caution. The holder's one-line reply --
+use a vm -- produced the measurement in an afternoon: it is `ENOENT`, for both
+the chain type and the masquerade, and `EOPNOTSUPP` in no reachable state. The
+hedge was an untested arm, and the sentence quoted above has been replaced.
+
+What the scope of the claim should have been is the transferable part: the
+measurement was impossible **on this host**, and this tree has four tiers, one
+of which boots a kernel whose module table it owns. A capability is absent
+somewhere by arrangement, and "cannot be measured" needed the words "with the
+tier I was standing in".
+
+The rest of this section still holds, and is what the measurement agreed with:
 
     Error: unknown chain type
     Error: The arp family does not support this hook
@@ -12527,14 +12640,11 @@ before the kernel sees them**:
 The third is the case in question, and the interesting part is its last four
 words. **The tool that owns the vocabulary hedges too** -- between a wrong hook
 and an absent module -- because from where it stands those are the same lookup
-failing. So the hint keys on `ENOENT` and `EOPNOTSUPP` together, and
-`apply_kernel_test` asserts that both read the same sentence, that it names
-both modules, and that `EPERM` gets nothing (the socket already said that one).
-
-**A sentence naming one cause with certainty would have claimed more than nft
-does**, which is the reason to prefer the pair over the tidier single arm.
-`set_offloads` above it keys on a pair for the same reason, so this is the
-file's existing shape rather than a new hedge.
+failing. That reading was right and is why the replacement sentence still
+refuses to name one cause: the kernel's single `ENOENT` covers a missing
+module, a missing expression and a table that vanished mid-apply. What was
+wrong was hedging in the **errno** rather than in the sentence, where a guess
+cannot be tested.
 
 ### What is still missing, named so it is not mistaken for done
 
