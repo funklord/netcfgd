@@ -12563,6 +12563,12 @@ more**, two blockers measured gone on a named hull commit, and what remains is
 a tier-wide pass plus the two boot tests that would prove it. Still the
 holder's call, now with the risk named rather than guessed.
 
+**Where the report landed, named so the claim is checkable**: hull carries both
+measurements in its own section 7 at `1d2da2e`, with the boot half recorded as
+untested and netcfgd's. "Reported to hull" asserts an act and leaves no
+artifact; a commit in their tree is one, and `harmonization.md` asks for the
+second rather than the first.
+
 ## 10.556 The bake blocker is gone, measured, and moving is a pass not an edit
 
 hull closed the run-path gap (their `a1b6dd2`, 2026-10-25) and pointed out that
