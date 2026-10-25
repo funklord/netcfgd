@@ -12498,6 +12498,79 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.567 Asked whether the coordination half belongs to fuzznet, and signalled
+
+The copyright holder, 2026-10-25: *"should parts of the network planning and
+running of deployment tasks become a generic part of fuzznet? As other projects
+may need to distribute and propagate internal/external settings and commands in
+very much the same way?"*
+
+**The answer is written up in `doc/shared-protocol-brief.md` section 9**, since
+that is the document the question is about: it had two columns -- netcfgd's
+semantics and the library's wire -- and this names a third. What follows is the
+short form and where the decision sits, because this entry is the one a session
+in *this* tree will find.
+
+**Yes for the coordination half, and the line is not where the question puts
+it.** The brief's section 8 splits the world into what a field means (netcfgd's)
+and encoding, framing, authentication and encryption (the library's). Between
+"these bytes are authentic" and "this value means an MTU" sits a layer neither
+column holds: who may see a value, how a node reports that it has it, how
+several nodes apply at one instant, and how a node that locked itself out gets
+back. That layer is generic; the planner is not.
+
+So the proposed line, which is a proposal and not a decision: **fuzznet owns
+how a value reaches a node and how nodes agree that it did; netcfgd owns what
+the value means and what to do about it.**
+
+### The four pieces netcfgd has built that are not netcfgd's
+
+Each is already load-bearing here and none is about networks: **scope
+classification** (`scope.h`/`scope.c`, the narrowest tag as the zero value so
+an unclassified key is never replicated, with a registry gate that fails on
+one); **commit-confirm with a revert window** (`confirm.c`, which exists
+because netcfgd configures the path its own instructions arrive over -- the
+situation of any program pushing settings to a remote node); **standing per
+item, computed rather than stored** (0287 and 0293, an item red on its own
+while its neighbours apply); and **"settled" as a definition** (0287: every
+node whose rules reference the value holds it).
+
+The question adds one netcfgd does not have: task and command propagation.
+This tree's hooks are local, and nothing here dispatches work to another
+machine.
+
+### Why nothing is being extracted
+
+**fuzznet is being written**, on its holder's word of 2026-10-23, so the
+generic shape would be designed while its first consumer is also unbuilt --
+which is the failure `harmonization.md` names: somebody inside one project
+*"cannot see whether a thing should be shared, only that they needed it"*.
+
+**And netcfgd is one consumer wearing two hats.** 0284's layers three and four
+will consume this machinery again, inside this tree. That is a second *use*,
+not a second *opinion*: both would be shaped by netcfgd's habits. The
+candidates that would give a real second opinion are visible from here --
+raidcfgd pushing array policy to several hosts, hull distributing machine
+specs -- and what they need is theirs to say.
+
+### What this tree will do meanwhile
+
+Keep the four pieces **separable rather than extracted**: no netcfgd type in
+their interfaces where a string or an integer will do, the scope vocabulary as
+its own header, and the confirm window keyed on an opaque token rather than on
+a document. That costs nothing today and is the difference between a later
+extraction and a later rewrite. It is a constraint on new code in those files,
+not a refactor to schedule.
+
+**Whose decision it is, and where it was sent.** The holder's, as a deliberate
+cross-project pass. Signalled to `claude-guidelines`' *Signals from the
+projects* list, which is a list rather than numbered sections -- the entry
+leads *"four projects are likely to need the same coordination machinery"*,
+dated 2026-10-25 -- rather than asked from inside the tree that noticed, per
+`harmonization.md`. And fuzznet's own tree was told through its
+`.git/cc-inbox/`, since it is the candidate owner and the only party who can
+say whether these four fit its model.
+
 ## 10.566 radvd had the same stop bug with a worse ending, and openvpn is next
 
 Named as a candidate at the end of 10.565 and measured rather than patched on
