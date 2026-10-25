@@ -1,7 +1,19 @@
 #!/bin/sh
-# What the kernel answers when it cannot do NAT, and what netcfgd says about it.
+# What the kernel answers when it cannot do what netcfgd asks, and what netcfgd
+# says about it.
 #
-# Four states and two controls. Each state loads exactly the modules it is
+# **The directory is named for NAT and the subject is the capability layer.**
+# NAT came first and decisions 0291 and 0292 cite this path, which is why the
+# name stayed when the queuing states arrived: a renamed rig would leave two
+# accepted records pointing at nothing. Everything here is one question --
+# netcfgd asks a kernel for a construct it does not have, and an operator has
+# to be able to act on the sentence that comes back.
+#
+# Six measuring states and four controls: no `nat` chain type, no masquerade,
+# no nftables at all, no `cake`, ingress shaping with no `ifb`, and ingress
+# shaping with the `ifb` there and the filter path gone -- against a kernel
+# that can do NAT, one that can do `cake`, a check that autoload is really
+# blocked, and a check that it can be unblocked again. Each state loads exactly the modules it is
 # named for and then blocks autoload, so the construct netcfgd asks for is
 # unreachable; the apply that follows is the measurement, and the checks hold
 # netcfgd's sentence to what the kernel actually said.
@@ -69,6 +81,36 @@ interface wan0 {
 }
 CONF
 
+# The queuing half of the same question (0283's other layer). `cake` is a
+# module here where `fq_codel` and `pfifo_fast` are built in, so it is the
+# scheduler this rig can take away; ingress shaping adds an `ifb-` device with
+# `cls_matchall` and `act_mirred` behind it, all three of them modules.
+cat > "$work/with-qdisc.conf" <<'CONF'
+device wan0 {
+	kind   = "dummy"
+	qdisc {
+		kind      = "cake"
+		bandwidth = "100mbit"
+	}
+}
+interface wan0 {
+	config = "10.9.9.2/24"
+}
+CONF
+cat > "$work/with-ingress.conf" <<'CONF'
+device wan0 {
+	kind   = "dummy"
+	qdisc {
+		kind              = "cake"
+		bandwidth         = "40mbit"
+		ingress_bandwidth = "90mbit"
+	}
+}
+interface wan0 {
+	config = "10.9.9.2/24"
+}
+CONF
+
 loaded() { lsmod | awk -v m="$1" '$1 == m { f = 1 } END { print (f ? "yes" : "no") }'; }
 allow() { echo /sbin/modprobe > /proc/sys/kernel/modprobe; }
 block() { echo /nonexistent/modprobe > /proc/sys/kernel/modprobe; }
@@ -114,7 +156,12 @@ teardown() {
 	allow
 	apply_now "$work/no-nat.conf" >/dev/null 2>&1 || true
 	ip link del wan0 2>/dev/null
-	out=$(modprobe -r nft_masq nft_chain_nat nft_nat nf_tables nfnetlink 2>&1) ||
+	# The ifb device an ingress state leaves behind holds `ifb` and, through
+	# its filter, `act_mirred` -- so an unload before this fails and the next
+	# state runs with the module it was told to do without.
+	ip link del ifb-wan0 2>/dev/null
+	out=$(modprobe -r nft_masq nft_chain_nat nft_nat nf_tables nfnetlink \
+		sch_cake sch_ingress cls_matchall act_mirred ifb 2>&1) ||
 		printf '    note: modprobe -r said: %s\n' "$out"
 }
 
@@ -198,6 +245,92 @@ check "  with the socket's own errno rather than a transaction's" \
 	"$(said 'Protocol not supported')" yes
 check "  and no module-level hint, which would be the wrong advice here" \
 	"$(said 'nft_chain_nat')" no
+
+# --- the queuing half: a scheduler this kernel does not have --------------
+echo
+echo "--- a kernel that can do cake, which is the control for the two below"
+teardown
+load dummy sch_cake
+allow
+state_q() {
+	printf '     state: sch_cake=%s cls_matchall=%s act_mirred=%s ifb=%s autoload=%s\n' \
+		"$(loaded sch_cake)" "$(loaded cls_matchall)" "$(loaded act_mirred)" \
+		"$(loaded ifb)" "$(cat /proc/sys/kernel/modprobe)"
+}
+state_q
+if apply_now "$work/with-qdisc.conf"; then rc=0; else rc=$?; fi
+sed 's/^/     /' "$work/apply.log"
+check "a kernel with the scheduler sets the qdisc" "$rc" 0
+check "  and the plan carried the op" "$(said 'qdisc.set')" yes
+
+echo
+echo "--- cake asked for, with sch_cake unreachable"
+teardown
+load dummy
+block
+state_q
+if apply_now "$work/with-qdisc.conf"; then rc=0; else rc=$?; fi
+sed 's/^/     /' "$work/apply.log"
+check "a kernel without the scheduler refuses the qdisc" \
+	"$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
+check "  with the qdisc.set in the plan, so this measured something" \
+	"$(said 'qdisc.set')" yes
+check "  and the sentence names the scheduler asked for" "$(said 'cake')" yes
+check "  with the module it comes from" "$(said 'sch_<kind>')" yes
+check "  and the option that selects it" "$(said 'CONFIG_NET_SCH_CAKE')" yes
+check "  on the message the kernel refused" "$(said 'RTM_NEWQDISC')" yes
+
+# --- ingress shaping, whose three modules are separate from the scheduler -
+echo
+echo "--- ingress shaping with cake present and the filter path unreachable"
+teardown
+load dummy sch_cake
+block
+state_q
+if apply_now "$work/with-ingress.conf"; then rc=0; else rc=$?; fi
+sed 's/^/     /' "$work/apply.log"
+check "a kernel with no filter path refuses ingress shaping" \
+	"$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
+# Which op fails first is the measurement, not an assumption: the `ifb-`
+# device, the ingress qdisc on it, the matchall filter and the mirred action
+# are four separate kernel objects and any of them can be the one missing.
+printf '     first failure: %s\n' \
+	"$(awk '/^(FAIL|netcfgd: .*Error)/ { print; exit }' "$work/apply.log")"
+check "  the ifb device is what it stops at, before any filter" \
+	"$(said 'could not create ifb-wan0')" yes
+check "  and the sentence names the kind's module rather than the errno alone" \
+	"$(said 'ifb` for ingress shaping')" yes
+# **The cost, recorded as a check so it cannot drift quietly.** The plan dies
+# at action 0, so the address on wan0 -- which has nothing to do with shaping
+# -- is never applied. That is apply's documented first-failure behaviour
+# meeting an optional feature, and it is the case 0287's per-rule standing
+# exists for; see project.md 10.554.
+check "  the address is skipped with it, which is the finding worth keeping" \
+	"$(said 'skip addr.add wan0')" yes
+
+echo
+echo "--- ingress shaping with the ifb device available and the filter path not"
+teardown
+# The device and both qdiscs reachable, so the plan gets as far as the filter:
+# `clsact` and `ingress` are `sch_ingress`, the shaper is `sch_cake`, and the
+# mirror needs `cls_matchall` plus `act_mirred`, which stay unreachable.
+load dummy sch_cake ifb sch_ingress
+block
+state_q
+if apply_now "$work/with-ingress.conf"; then rc=0; else rc=$?; fi
+sed 's/^/     /' "$work/apply.log"
+check "a kernel with no filter or action refuses the redirect" \
+	"$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
+check "  on RTM_NEWTFILTER, which is the step that needs them" \
+	"$(said 'RTM_NEWTFILTER')" yes
+check "  naming both modules" \
+	"$([ "$(said 'cls_matchall')" = yes ] && [ "$(said 'act_mirred')" = yes ] && echo yes || echo no)" yes
+check "  and both options, which a kernel builder needs" \
+	"$([ "$(said 'CONFIG_NET_CLS_MATCHALL')" = yes ] && [ "$(said 'CONFIG_NET_ACT_MIRRED')" = yes ] && echo yes || echo no)" yes
+check "  with everything before it applied, which is what makes this the state \
+the sentence is about" "$(said 'ok   qdisc.set ifb-wan0')" yes
+printf '     first failure: %s\n' \
+	"$(awk '/^(FAIL|netcfgd: .*Error)/ { print; exit }' "$work/apply.log")"
 
 # --- the control on the instrument ---------------------------------------
 echo

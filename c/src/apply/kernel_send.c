@@ -89,15 +89,69 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "per-port vlans";
 		}
 		return NULL;
+	case NCFG_OP_LINK_CREATE:
+		/*
+		 * **Measured, and it is the first thing ingress shaping hits.**
+		 * `tests/hull/natcap/` asks for `ingress_bandwidth` on a kernel
+		 * whose `ifb` is unreachable: the plan dies at action 0 creating
+		 * `ifb-<device>`, with `RTM_NEWLINK` refused `EOPNOTSUPP` and
+		 * nothing but the generic errno sentence to go on -- so the hint
+		 * that names `cls_matchall` and `act_mirred` below was for a state
+		 * an operator reaches only once `ifb` is there.
+		 *
+		 * The kind is in the action's own line rather than in this
+		 * sentence, which is why this points at it instead of repeating it:
+		 * `ncfg_kernel_hint` is given an op kind and an errno, and the
+		 * device kind is the op's payload.
+		 */
+		if (code == EOPNOTSUPP || code == ENOENT) {
+			return "a link kind this kernel does not know is refused like this: "
+			       "the kind in the line above comes from a module of its own -- "
+			       "`ifb` for ingress shaping, and `dummy`, `veth`, `vxlan`, "
+			       "`macvlan` or `wireguard` for the rest -- and `ip link add "
+			       "type <kind>` fails the same way outside netcfgd, which is the "
+			       "quickest confirmation";
+		}
+		return NULL;
 	case NCFG_OP_QDISC_SET:
+		/*
+		 * `ENOENT`, measured in `tests/hull/natcap/` with `sch_cake`
+		 * unreachable: `RTM_NEWQDISC` refused, which is what this arm
+		 * already assumed and is now evidence rather than a guess.
+		 *
+		 * **What it said about the module was both unnameable and wrong.**
+		 * "The module could not be loaded" asserts a cause this errno
+		 * cannot carry -- a kernel built without the scheduler never had
+		 * one to load -- and it named neither the module nor the option, so
+		 * an operator had nothing to act on. Both are mechanical from the
+		 * kind, which is in the action's own line: `cake` is `sch_cake` and
+		 * `CONFIG_NET_SCH_CAKE`.
+		 */
 		if (code == ENOENT) {
-			return "this kernel has no such scheduler, and the module could not be "
-			       "loaded";
+			return "the scheduler in the line above is `sch_<kind>`, selected by "
+			       "`CONFIG_NET_SCH_<KIND>` -- `cake` is `sch_cake` and "
+			       "`CONFIG_NET_SCH_CAKE` -- and this errno does not say whether it "
+			       "is absent or merely unloadable; `tc qdisc add dev <device> root "
+			       "<kind>` fails the same way outside netcfgd";
 		}
 		return NULL;
 	case NCFG_OP_INGRESS_REDIRECT:
+		/*
+		 * `ENOENT` again and `RTM_NEWTFILTER` refused, measured with `ifb`
+		 * and `sch_ingress` present and the filter path away -- the state
+		 * this sentence was always about, which takes four modules to reach
+		 * and was never checked until the rig had them.
+		 *
+		 * The module names were right; the options are added because a
+		 * kernel builder cannot act on a module name alone (`nft_chain_nat`
+		 * taught this: its option is `CONFIG_NFT_NAT`, and these two are
+		 * not spelled after their modules either).
+		 */
 		if (code == ENOENT) {
-			return "this kernel is missing `cls_matchall` or `act_mirred`";
+			return "the mirror needs `cls_matchall` (CONFIG_NET_CLS_MATCHALL) and "
+			       "`act_mirred` (CONFIG_NET_ACT_MIRRED); the `ifb` device and the "
+			       "`clsact` qdisc are already in place by the time this is "
+			       "attempted, so those two are what is left to look for";
 		}
 		return NULL;
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:

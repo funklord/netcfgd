@@ -2447,11 +2447,13 @@ vm-image:
 #   `openrc` depends on `insserv` and `systemd-sysv` conflicts with it.
 #
 #   **The fourth is there for the opposite reason: it needs a kernel that
-#   cannot do something.** `natcap` measures what the kernel answers when
-#   `nft_chain_nat` or `nft_masq` is unreachable, which no tier here could ask
-#   -- this host has both, and a container and a namespace share this host's
-#   kernel, where a chain type is registered globally. A guest's module
-#   autoload is the rig's to block, and that is the whole of why it exists.
+#   cannot do something.** `natcap` measures what the kernel answers when a
+#   construct netcfgd asks for is unreachable -- the `nat` chain type, the
+#   masquerade, a scheduler, the `ifb` device, the mirror's filter and its
+#   action -- which no tier here could ask: this host has all of them, and a
+#   container and a namespace share this host's kernel, where a chain type and
+#   a qdisc kind are registered globally. A guest's module autoload is the
+#   rig's to block, and that is the whole of why it exists.
 #
 # NOT IN `check` AND NOT IN `live`, for the VM tier's reasons (0275) plus one
 # of its own: each wants `/dev/kvm`, minutes, and a sibling project's binary.
@@ -2524,8 +2526,8 @@ hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openrc/hull.conf
 
-# 23 checks: what a kernel answers when it cannot do NAT, which is the one
-# thing no gate here could ask. The host has `nft_chain_nat` and `nft_masq`, a
+# 37 checks: what a kernel answers when it cannot do what netcfgd asks, which
+# is the one thing no gate here could ask. The host has `nft_chain_nat` and `nft_masq`, a
 # container shares that kernel, and a namespace shares it too -- so the states
 # netcfgd's capability sentence is *about* were unreachable, and the sentence
 # was keyed on a guessed errno until this rig measured it (10.552).

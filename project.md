@@ -12498,6 +12498,70 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.554 The queuing half, and a send that could not explain
+
+"continue", the copyright holder, 2026-10-25. 0283 puts firewall **and
+queuing** in scope, and the capability work so far was all NAT. The three
+queuing sentences netcfgd already shipped were written the same way the NAT one
+was -- from reasoning, against a host that has everything -- so the rig now
+measures them.
+
+### Two guesses right, and neither sentence usable
+
+| op, in the state it was measured | measured | the sentence it had |
+|---|---|---|
+| `qdisc.set`, no `sch_cake` | `RTM_NEWQDISC`, ENOENT | "could not be loaded" |
+| `ingress.redirect`, no filter | `RTM_NEWTFILTER`, ENOENT | two module names |
+| `link.create`, kind absent | `RTM_NEWLINK`, **EOPNOTSUPP** | nothing at all |
+
+**The errnos were right this time**, which is worth saying plainly after
+10.552: a guess is not wrong because it is a guess, it is unknown. What the
+first two lacked is the half an operator acts on. `qdisc.set` named neither the
+module nor the option and asserted a cause the errno cannot carry -- a kernel
+built without `cake` never had a module to fail to load -- so it now gives the
+rule, `sch_<kind>` and `CONFIG_NET_SCH_<KIND>`, with `cake` spelled out as the
+instance. `ingress.redirect` gains `CONFIG_NET_CLS_MATCHALL` and
+`CONFIG_NET_ACT_MIRRED`, for the reason `nft_chain_nat` taught: a module name
+is not an option name, and neither of these two is spelled after its module
+either.
+
+### The third had no sentence because the mechanism was not wired to it
+
+A config asking for `ingress_bandwidth` on a kernel with no `ifb` does not
+reach the mirror at all. It dies at **action 0**, creating `ifb-wan0`, and the
+sentence an operator got was the generic errno text: "this kernel does not have
+what the request needs; a module may not be loaded".
+
+**`send_built` was a second send path.** `c/src/apply/kernel.c` had its own
+send-and-report helper, used by six ops -- link create, the link setters, the
+master, addresses and routes -- that never called `ncfg_kernel_hint`. So
+however much netcfgd knew about those failures, it could not say it. The helper
+takes the op kind now and delegates to `ncfg_kernel_send_bytes`, which reports,
+tolerates and explains; the tolerate table was checked first and has no arm for
+any of the six, so this is a sentence gained and no behaviour changed.
+
+**The order the two faults were found in is the lesson.** The `link.create` arm
+was written, unit-tested and passing while the daemon still printed the bare
+errno -- `evidence.md`'s correct function that is not a working feature, and
+`an interface is only as wired as its least-used method`. The unit test could
+not see it because it calls the hint directly. The rig saw it because it reads
+what the daemon printed.
+
+### What a capability gap costs, which is a question rather than a finding
+
+In that state the plan stops at action 0 and **seven actions are skipped,
+including `addr.add wan0`** -- so asking for ingress shaping on a kernel that
+cannot do it leaves the interface with no address. That is apply's documented
+first-failure behaviour meeting an optional feature, not a bug, and the rig
+asserts it so it cannot drift quietly.
+
+It is also exactly what 0287's per-rule standing is for: a construct the kernel
+cannot provide should be able to be red while everything around it applies.
+Whether that generalises from rules to ops -- an optional op failing without
+taking the basic configuration with it, and which ops are optional -- is a
+design question and the holder's, not one to settle while wiring a sentence.
+Raised rather than recorded as settled.
+
 ## 10.553 The kernel built without it, the experiment 10.552 only argued
 
 "do the custom kernel then" -- the copyright holder, 2026-10-24. 10.552

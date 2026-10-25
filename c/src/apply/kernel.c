@@ -158,31 +158,35 @@ static uint32_t resolve_index(void *context, const char *name, char *err, size_t
  * `ncfg_ops_*` builders produce the whole request -- header and all -- and the
  * request call builds its own. Waiting on the sequence number the builder was
  * given is what turns "sent" into "the kernel took it".
+ *
+ * **It takes the op kind so that a refusal can be explained.** This used to
+ * send and report by itself, which made it a second send path that could not
+ * reach `ncfg_kernel_hint` -- so the six ops that come through here got the
+ * bare errno sentence however much netcfgd knew about their failure. Measured
+ * 2026-10-25: a config asking for ingress shaping on a kernel with no `ifb`
+ * died at `link.create` with "this kernel does not have what the request
+ * needs; a module may not be loaded", while the hint naming `ifb` sat
+ * unreachable one function away. The arm had a unit test and passed it, which
+ * is what `evidence.md` means by a correct function that is not a working
+ * feature; `tests/hull/natcap/` is what caught it.
+ *
+ * Delegating also hands these ops `ncfg_kernel_tolerates`, which today has no
+ * arm for any of them -- checked rather than assumed, so this is a sentence
+ * gained and no behaviour changed.
  */
 static int send_built(ncfg_kernel_t *kernel, const ncfg_buf_t *message, uint32_t seq,
-    const char *doing, char *err, size_t err_size)
+    int op_kind, const char *doing, char *err, size_t err_size)
 {
-	ncfg_netlink_reply_t reply;
-	char                 detail[NCFG_ERROR_MAX];
-	int                  sent;
-
 	if (ncfg_buf_failed(message)) {
+		/* Said here rather than left to the reporting send, which sees a
+		 * failed buffer as an empty one: `buf.h`'s sticky failure hands out
+		 * the empty string, and "there is no message" is a worse sentence
+		 * than "could not build it". */
 		ncfg_error_set(err, err_size, "could not build the message to %s", doing);
 		return 0;
 	}
-	detail[0] = '\0';
-	memset(&reply, 0, sizeof(reply));
-	sent = ncfg_netlink_send_batch(&kernel->socket, message->data, message->length, seq,
-	    &reply, detail, sizeof(detail));
-	ncfg_netlink_reply_free(&reply);
-	if (!sent) {
-		/* The builder's own sentence says which field; this one says which
-		 * action, because a journal entry reading only "Invalid argument" is
-		 * an operator's dead end. */
-		ncfg_error_set(err, err_size, "could not %s: %s", doing, detail);
-		return 0;
-	}
-	return 1;
+	return ncfg_kernel_send_bytes(&kernel->socket, message->data, message->length, seq,
+	    op_kind, doing, err, err_size);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -212,7 +216,7 @@ static int send_built(ncfg_kernel_t *kernel, const ncfg_buf_t *message, uint32_t
  *
  * Said rather than swallowed, through `log.h`, which a library may call.
  */
-static void mark_as_ours(ncfg_kernel_t *kernel, const char *name)
+static void mark_as_ours(ncfg_kernel_t *kernel, const char *name, int op_kind)
 {
 	ncfg_buf_t message;
 	char       err[NCFG_ERROR_MAX];
@@ -233,7 +237,7 @@ static void mark_as_ours(ncfg_kernel_t *kernel, const char *name)
 		ok = ncfg_kernel_build_altname(&message, seq, index, name, err, sizeof(err));
 		if (ok) {
 			(void)snprintf(doing, sizeof(doing), "mark %s as netcfgd's", name);
-			ok = send_built(kernel, &message, seq, doing, err, sizeof(err));
+			ok = send_built(kernel, &message, seq, op_kind, doing, err, sizeof(err));
 		}
 		ncfg_buf_free(&message);
 		if (ok) {
@@ -282,7 +286,7 @@ static int create_tun(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, siz
 	if (!ncfg_tun_create(NCFG_TUN_CLONE_DEVICE, &spec, err, err_size)) {
 		return 0;
 	}
-	mark_as_ours(kernel, op->u.link_create.name);
+	mark_as_ours(kernel, op->u.link_create.name, op->kind);
 	return 1;
 }
 
@@ -314,14 +318,14 @@ static int create_link(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, si
 		char doing[NCFG_ERROR_MAX];
 
 		(void)snprintf(doing, sizeof(doing), "create %s", op->u.link_create.name);
-		built = send_built(kernel, &message, seq, doing, err, err_size);
+		built = send_built(kernel, &message, seq, op->kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	if (built) {
 		/* After the acknowledgement and never before it: a mark on a link the
 		 * kernel refused to create would be aimed at whatever else holds that
 		 * name. */
-		mark_as_ours(kernel, op->u.link_create.name);
+		mark_as_ours(kernel, op->u.link_create.name, op->kind);
 	}
 	return built;
 }
@@ -352,7 +356,7 @@ static int on_link(ncfg_kernel_t *kernel, const char *name, const ncfg_op_t *op,
 	ncfg_buf_init(&message, 0);
 	ok = build(&message, seq, index, op, err, err_size);
 	if (ok) {
-		ok = send_built(kernel, &message, seq, doing, err, err_size);
+		ok = send_built(kernel, &message, seq, op->kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	return ok;
@@ -439,7 +443,7 @@ static int set_master(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, siz
 
 		(void)snprintf(doing, sizeof(doing), "enslave %s to %s", op->u.set_master.name,
 		    op->u.set_master.master);
-		ok = send_built(kernel, &message, seq, doing, err, err_size);
+		ok = send_built(kernel, &message, seq, op->kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	return ok;
@@ -450,7 +454,7 @@ static int set_master(ncfg_kernel_t *kernel, const ncfg_op_t *op, char *err, siz
  * ------------------------------------------------------------------------ */
 
 static int address(ncfg_kernel_t *kernel, const char *iface, const char *cidr, int adding,
-    char *err, size_t err_size)
+    int op_kind, char *err, size_t err_size)
 {
 	ncfg_address_t parsed;
 	ncfg_wire_ip_t ip;
@@ -495,7 +499,7 @@ static int address(ncfg_kernel_t *kernel, const char *iface, const char *cidr, i
 	if (ok) {
 		(void)snprintf(doing, sizeof(doing), "%s %s %s %s", adding ? "add" : "remove", cidr,
 		    adding ? "to" : "from", iface);
-		ok = send_built(kernel, &message, seq, doing, err, err_size);
+		ok = send_built(kernel, &message, seq, op_kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	return ok;
@@ -576,7 +580,7 @@ static int route(ncfg_kernel_t *kernel, const ncfg_op_t *op, int adding, char *e
 		(void)snprintf(doing, sizeof(doing), "%s route %s on %s",
 		    adding ? "add" : "remove",
 		    wanted->destination ? wanted->destination : "default", op->u.route.iface);
-		ok = send_built(kernel, &message, seq, doing, err, err_size);
+		ok = send_built(kernel, &message, seq, op->kind, doing, err, err_size);
 	}
 	ncfg_buf_free(&message);
 	return ok;
@@ -773,9 +777,11 @@ static int execute(void *state, const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_LINK_SET_MASTER:
 		return set_master(kernel, op, err, err_size);
 	case NCFG_OP_ADDR_ADD:
-		return address(kernel, op->u.addr_add.iface, op->u.addr_add.addr, 1, err, err_size);
+		return address(kernel, op->u.addr_add.iface, op->u.addr_add.addr, 1, op->kind,
+		    err, err_size);
 	case NCFG_OP_ADDR_DEL:
-		return address(kernel, op->u.addr_del.iface, op->u.addr_del.addr, 0, err, err_size);
+		return address(kernel, op->u.addr_del.iface, op->u.addr_del.addr, 0, op->kind,
+		    err, err_size);
 	case NCFG_OP_ROUTE_ADD:
 		return route(kernel, op, 1, err, err_size);
 	case NCFG_OP_ROUTE_DEL:

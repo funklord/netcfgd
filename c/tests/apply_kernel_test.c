@@ -417,6 +417,40 @@ static void check_hints(void)
 	    "a code with nothing to add gets nothing added");
 
 	/*
+	 * **The queuing arms, each against the state it was measured in**
+	 * (`tests/hull/natcap/`, 2026-10-25). All three errnos were guesses when
+	 * they were written and two of them turned out right; what none of them
+	 * had was the half an operator acts on.
+	 */
+	{
+		const char *scheduler = ncfg_kernel_hint(NCFG_OP_QDISC_SET, ENOENT);
+		const char *mirror = ncfg_kernel_hint(NCFG_OP_INGRESS_REDIRECT, ENOENT);
+		const char *kind = ncfg_kernel_hint(NCFG_OP_LINK_CREATE, EOPNOTSUPP);
+
+		check(scheduler && strstr(scheduler, "sch_<kind>") != NULL &&
+		    strstr(scheduler, "CONFIG_NET_SCH_") != NULL,
+		    "a missing scheduler names the module and the option, not just itself");
+		check(scheduler && strstr(scheduler, "could not be loaded") == NULL,
+		    "  and no longer asserts a load failure the errno cannot establish");
+		check(mirror && strstr(mirror, "cls_matchall") != NULL &&
+		    strstr(mirror, "CONFIG_NET_ACT_MIRRED") != NULL,
+		    "the mirror names both modules and both options");
+		/*
+		 * **The one that had no arm at all**, and is the first failure a
+		 * real ingress config meets: the `ifb-` device cannot be created,
+		 * seven actions are skipped, and before this there was only
+		 * "this kernel does not have what the request needs".
+		 */
+		check(kind && strstr(kind, "ifb") != NULL,
+		    "a link kind the kernel does not know says so, naming ifb first");
+		check(kind && strstr(kind, "ip link add") != NULL,
+		    "  with the command that confirms it outside netcfgd");
+		check(ncfg_kernel_hint(NCFG_OP_LINK_CREATE, EEXIST) == NULL,
+		    "  while EEXIST gets nothing: a link that is already there is not "
+		    "a capability");
+	}
+
+	/*
 	 * **The NAT arm keys on ENOENT alone, and the measurement is why.**
 	 * This first asserted that `ENOENT` and `EOPNOTSUPP` read the same,
 	 * because which one a kernel without `nft_chain_nat` returns could not be
