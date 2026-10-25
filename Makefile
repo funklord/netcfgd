@@ -248,8 +248,9 @@ nm-containment:
 # is in neither its `indent_suffixes` nor its `text_suffixes`, so a shell script
 # with four-space indentation and trailing whitespace passes it silently.
 # Verified by doing exactly that to `tests/live/rules.sh` and watching the gate
-# report a clean pass. That half is the shared tool's and is already signalled
-# in `claude-guidelines`; this half is this Makefile's.
+# report a clean pass. Fixing the shared tool is not this tree's to do and is
+# raised where those tools are kept; what belongs here is the check below, and
+# it stands on its own -- nothing outside this repository is needed to run it.
 SHELL_SCRIPTS = helper/* tests/live/*.sh tool/*.sh tool/vm/*.sh \
                 tool/vm/payload/*.sh packaging/probe/* packaging/hook/*
 
@@ -3336,9 +3337,12 @@ clean:
 		[ "$$kept" -eq 1 ] || rmdir "$(DIST)" 2>/dev/null || true; \
 	fi
 
-# The shared style gate: one tool, copied verbatim from
-# ~/.claude/tool/style_gate.py into every private project. It refuses to
-# run against a collapsed file list, so a pass means it actually looked.
+# The shared style gate: `tool/style_gate.py`, a copy committed in this
+# repository and the one this build runs. It is kept byte-identical to the
+# copies these projects share, so **fix drift rather than editing it here** --
+# a local change is lost the next time the copies are reconciled, and the
+# divergence is invisible until then. It refuses to run against a collapsed
+# file list, so a pass means it actually looked.
 style: style-source style-docs
 
 style-source:
