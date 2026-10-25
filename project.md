@@ -12498,6 +12498,83 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.572 What identifies an installed rule: asked, costed, not decided
+
+10.564 left the firewall's next slice as *"the planner, the transaction and the
+observer"*. Starting it found that the three are not three independent pieces:
+**the planner cannot be written at all until the observer's identity question
+is answered**, and 0294 did not answer it. Recorded as 0295, status `proposed`
+rather than `accepted`, which is the first such record in this tree.
+
+### Why it blocks rather than merely precedes
+
+A planner with no observation emits its op every pass, so the machine never
+converges: `ncfg plan` would say "replace the firewall" for ever and each apply
+would replace an identical ruleset. The plan is what an operator reads before
+consenting, so that is not an inefficiency, it is the plan lying about there
+being work to do.
+
+`nat.c` already carries the proof at one-boolean scale. Its comment says an
+unsorted observation would differ from a machine that is already right and
+replace the table on every pass -- so this property was paid for once at the
+smallest possible size, and the firewall needs it over a much larger object.
+
+### The two answers, and the trap in the cheap-looking third
+
+**A, decode the rules back into the model**: the renderer written backwards.
+The shape exists at one-rule scale in `ncfg_nft_rule_uplink`, which walks
+nested attribute areas accumulating what it recognises and refusing the rest.
+Generalising it means every expression layer one emits -- `meta` and `cmp`,
+`payload` and `cmp`, `ct`, `immediate` -- and every refusal the lowerer can
+name gains a counterpart. It is the whole renderer again, and its benefit is
+that the observation **is** the model, so `ncfg status` could show the
+installed ruleset.
+
+**B, identity in `NFTA_RULE_USERDATA`**: each rule carries its name and a
+digest of what netcfgd rendered, and the comparison is the ordered list of
+`(name, digest)`. Small, and it hands 0294's per-rule naming to the refusal
+path for free. Its honest limit is that netcfgd learns a rule *is not what it
+wrote* rather than what it now is, so a hand-edited rule is replaced -- the
+right action -- under a worse sentence than A could write. Bounded by
+`NFT_USERDATA_MAXLEN`, which is 256 bytes.
+
+**The third answer looks cheapest and cannot work.** Comparing the rule payload
+the kernel returns byte-for-byte against what was sent fails because the kernel
+normalises: the bytes that come back are not the bytes that went in, and the
+difference is a property of the kernel version rather than of the
+configuration. That is a false difference, which is a table replaced on every
+pass -- the exact failure the observer exists to prevent, arriving through the
+mechanism meant to prevent it. **A digest over netcfgd's own rendered form has
+no such exposure**, which is the argument for B rather than its convenience.
+
+### The fact this machine cannot establish, and the experiment for it
+
+**Whether netcfgd's userdata keeps `nft list ruleset` readable is unverified
+here.** nft(8) keeps its own `comment` in that attribute under a TLV of its
+own, so bytes written naively may print as nothing, print as garbage, or make
+nft refuse the rule -- and an operator running `nft list ruleset` on their own
+router is a first-class reader of netcfgd's output.
+
+Neither libnftnl's headers nor an `nft` binary is installed on this machine, so
+nothing here answers it and 0295 does not guess. **The experiment is named so
+it gets run rather than reasoned about**: `tests/hull/natcap/` already boots a
+machine with nftables, so write one rule with userdata through netcfgd's own
+builder in that guest and read what `nft list ruleset` prints. If nft garbles
+it, the answer is to adopt nft's own comment TLV -- which is the better outcome
+anyway, since the name then appears as a comment an operator can read.
+
+### What is the holder's, and why the record stops there
+
+**Whether `ncfg status` must show the installed firewall as rules.** If it
+must, A is not optional and wants doing *with* B rather than after it, because
+a decoder written later has to be reconciled with a digest scheme already in
+the field. If names and standing are enough, B alone carries the whole of layer
+one.
+
+That is a product question about what an operator sees, which is not a thing to
+settle while implementing a planner -- the reason 0294 gives for its own
+existence. So the slice stops at the record, and nothing of A or B is built.
+
 ## 10.571 openvpn's stop, the third of the class, and the one with a worse ending
 
 Named at the end of 10.566 as the remaining candidate and measured rather than
@@ -13234,6 +13311,11 @@ round-trips and reaches the document today, and `ncfg plan` says "nothing to
 do" about it -- correctly, since nothing yet turns chains into ops. That is
 the next slice, and 0294's all-or-nothing transaction and per-rule naming are
 what it has to deliver.
+
+**And the three are not independent: the planner cannot be written until the
+observer's identity question is answered.** Found on starting it -- see 10.572
+and 0295, which is `proposed` rather than accepted because half of it is the
+holder's.
 
 ## 10.563 The firewall model, and a gate that would not let it be half a slice
 
