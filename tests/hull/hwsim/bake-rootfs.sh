@@ -54,11 +54,28 @@
 #   a user -- must not use this image, and would want `hull materialize` plus a
 #   package step instead.
 #
-#   It also masked a hull bug rather than meeting it: 9p shows a guest every
-#   file as the host user's, so a setuid-root program becomes setuid-1000 and
-#   root running it is refused. An image with no setuid bits cannot show that,
-#   which is two faults cancelling into an appearance of health -- and the
-#   reason this note is here rather than nowhere.
+#   **The hull bug this was once said to mask is not the one described, and
+#   the correction is measured.** The sentence here used to say that 9p shows
+#   a guest every file as the host user's, so a setuid-root program becomes
+#   setuid-1000 and root running it is refused. Measured 2026-10-25 in a
+#   `dir:`-sourced vm on hull `a5c1f58-dirty`, booting this family of images:
+#   the guest sees owner **0**, group **65534**, and every mode bit intact --
+#   `4755 /usr/bin/su`, `2755 /var/lib/apt`, eight setuid files. The host
+#   user maps to root rather than to 1000, so that hazard does not arise in
+#   this form; what does not map is the GROUP, which arrives as the overflow
+#   gid because `users` means nothing in the guest.
+#
+#   So the reason to keep this note is narrower and still real: the bits here
+#   are restored by `chmod` from the image's own listing rather than carried,
+#   and a payload that needs a file's OWNER or GROUP to be anything in
+#   particular -- not just its mode -- is not served by a `docker export` at
+#   all. hull reported on 2026-10-25 (its `f82403d`) that a *stored* tree now
+#   gets its non-root owners back inside a vm as well as on chroot, by mapping
+#   a subuid range and chowning the manifest's owners before boot. These
+#   images are `dir:` sources with no manifest, so that does not reach them --
+#   it removes one objection to `hull materialize` plus a package step, which
+#   is what this header has recommended from the start and which is still
+#   blocked on the package install rather than on ownership.
 set -eu
 dir=${1:-dist/hull/hwsim-rootfs}
 name=netcfgd-hwsim-rootfs-$$

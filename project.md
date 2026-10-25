@@ -12498,6 +12498,52 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.555 What a guest sees of ownership, and a claim here that was wrong
+
+hull reported on 2026-10-25 (its `f82403d`) that a **stored** tree now gets
+its non-root owners back inside a vm as well as on its chroot engine: the qemu
+engine maps a subuid range and chowns the manifest's owners in the host-side
+overlay before boot, where a vm's 9p share used to flatten them. Their note
+says no change is needed here, and that is right for a reason worth writing
+down rather than assuming.
+
+**netcfgd's four rigs are `dir:` sources, not stored trees.** Each
+`hull.conf` names `dir:../../../dist/hull/<rig>-rootfs`, baked by `docker
+export`; there is no manifest, so there are no owners to give back and the fix
+does not reach them. Told to hull, since their note assumed otherwise.
+
+### The measurement, because a claim in this tree was stale
+
+`tests/hull/hwsim/bake-rootfs.sh` said 9p shows a guest every file as the host
+user's, so a setuid-root program becomes setuid-1000 and root running it is
+refused. Measured in a `dir:`-sourced vm on hull `a5c1f58-dirty`:
+
+    0 65534 0644 /etc/passwd      0 65534 4755 /usr/bin/su
+    0 65534 0640 /etc/shadow      0 65534 2755 /var/lib/apt
+    eight setuid files, one non-root path: hull's module share, owned by nobody
+
+So the **owner maps to root, not to 1000**, and every mode bit the bake
+restored is intact in the guest -- that hazard does not arise in this form.
+What does not map is the **group**, which arrives as the overflow gid because
+`users` means nothing in the guest. The header carries the correction and the
+date; the narrower reason it exists is unchanged, that a `docker export` plus
+`chmod` carries modes and not ownership, so a payload needing a file's owner
+or group to be anything in particular wants `hull materialize` instead.
+
+**Which is still blocked on the package install and not on ownership** -- the
+bakes' standing recommendation. hull's change removes one objection to that
+road without unblocking it.
+
+### The instrument check that made this worth doing at all
+
+The hull binary this workspace runs reports `commit a5c1f58ef2e8-dirty`, which
+is the commit *before* the two in their message -- so nothing measured here
+can confirm their fix, only describe what netcfgd's own guests see today. Said
+to them as well, since a consumer running their build directory does not have
+`f82403d`. It is also why the figures above name the hull commit: every rig
+run prints it (`hull_says` in the Makefile) precisely because a result from a
+machine runtime is a result about a version of it.
+
 ## 10.554 The queuing half, and a send that could not explain
 
 "continue", the copyright holder, 2026-10-25. 0283 puts firewall **and
