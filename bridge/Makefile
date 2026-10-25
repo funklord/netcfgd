@@ -154,6 +154,30 @@ FUZZNET_OBJS = $(shell find $(FUZZNET)/$(FUZZNET_BLD) -name '*.o' 2>/dev/null | 
 	               nm "$$o" 2>/dev/null | grep -qE ' [TtWw] main$$' || echo "$$o"; \
 	       done)
 
+# The system libraries fuzznet's own build decided it needs, asked of the
+# objects this link is about to take rather than re-derived from its probes.
+#
+# **Why not `-lzstd`, which is what the link wanted when the pin moved.**
+# fuzznet gained log packing (its sec 459) and probes for libzstd, so whether
+# its objects reference `ZSTD_*` is a property of the machine it was built on
+# -- naming the library unconditionally here would fail to link on a machine
+# where that probe said no, and omitting it fails on one where it said yes.
+# Both are the same error: a claim about another tree's configuration, which
+# this build is not entitled to make.
+#
+# So it asks `nm`, exactly as the list above asks which object holds `main`,
+# and for the same reason -- the objects know what they need and nothing else
+# has to. A dependency fuzznet adds later arrives here as an undefined
+# reference naming its symbol, which is a better failure than a stale list.
+#
+# **`FZN_LOG_PACK=0` would be the other answer and does not build**: fuzznet
+# includes `node/heard.h` inside `#ifdef FZN_LOG_PACK_ON` and calls
+# `fzn_heard_when` outside it, so its own daemon does not compile with packing
+# off. Signalled to fuzznet rather than worked around; see `project.md`
+# 10.568.
+FUZZNET_LIBS = $(shell nm $(FUZZNET_OBJS) 2>/dev/null | \
+	       grep -q ' U ZSTD_' && echo -lzstd)
+
 # The client library is netcfgd's own local hop, which the brief says netcfgd
 # already has: the agent speaks fuzznet outward and this inward, and linking
 # both in one program is the seam 0128 describes.
@@ -162,7 +186,7 @@ client:
 
 $(PROGRAM): $(SRCS) $(CORE_SRCS) fuzznet client
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $(SRCS) $(CORE_SRCS) $(FUZZNET_OBJS) $(CLIENT_LIB) \
-		$(LDFLAGS) -o $@
+		$(LDFLAGS) $(FUZZNET_LIBS) -o $@
 
 # The read path against a frame the library builds, which is the control the
 # program itself cannot show: every answer `--peek` gives by hand is a refusal,
@@ -173,13 +197,13 @@ test: tests/peek_test tests/record_encode_test tests/record_emit_test $(PROGRAM)
 	./tests/record_emit_test
 
 tests/peek_test: tests/peek_test.c fuzznet
-	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< $(FUZZNET_OBJS) $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< $(FUZZNET_OBJS) $(LDFLAGS) $(FUZZNET_LIBS) -o $@
 
 # The encoder against fuzznet itself, which is the half the tables cannot
 # check: every other assertion in that file asks netcfgd about netcfgd.
 tests/record_encode_test: tests/record_encode_test.c record_encode.c $(CORE_SRCS) fuzznet
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< record_encode.c $(CORE_SRCS) $(FUZZNET_OBJS) \
-		$(LDFLAGS) -o $@
+		$(LDFLAGS) $(FUZZNET_LIBS) -o $@
 
 # The join between the two: a document in, the records it would put on the wire
 # out, and the tally of what it would not. Needs the front end, which the
@@ -187,7 +211,7 @@ tests/record_encode_test: tests/record_encode_test.c record_encode.c $(CORE_SRCS
 tests/record_emit_test: tests/record_emit_test.c record_emit.c record_encode.c \
 		$(CORE_SRCS) $(CORE_FRONT) fuzznet
 	$(CC) $(CFLAGS) $(FUZZNET_DEFS) $< record_emit.c record_encode.c $(CORE_SRCS) \
-		$(CORE_FRONT) $(FUZZNET_OBJS) $(LDFLAGS) -o $@
+		$(CORE_FRONT) $(FUZZNET_OBJS) $(LDFLAGS) $(FUZZNET_LIBS) -o $@
 
 # By name, and nothing by pattern this directory does not own. fuzznet's build
 # output is fuzznet's to remove, through its own clean.

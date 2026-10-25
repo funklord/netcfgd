@@ -422,6 +422,15 @@ static void the_fields_make_a_record_fuzznet_accepts(void)
 	size_t                len = 0u;
 	fzn_record_t          opened;
 	uint8_t               expected[FZN_SUBJECT_LEN];
+	/* **All-zero, because this signs at seq 1.** `prev` is the id of the
+	 * previous record in this (issuer, stream) and fuzznet's contract
+	 * (`record.h`, its sec 500) is all-zero at the first. netcfgd does not
+	 * chain yet -- `record_encode.h` fills fields for one statement at a
+	 * time and nothing here keeps a stream's tail -- so a zeroed value is
+	 * the honest one rather than a placeholder, and the check below reads it
+	 * back out of the signed bytes to say so. */
+	static const uint8_t  no_prev[FZN_RECORD_ID_LEN] = { 0 };
+	uint8_t               bad_prev[FZN_RECORD_ID_LEN] = { 0 };
 	static const char     value[] = "\"office\"";
 	size_t                at;
 
@@ -436,7 +445,7 @@ static void the_fields_make_a_record_fuzznet_accepts(void)
 	          value, sizeof(value) - 1u, &fields) == NCFG_RECORD_OK,
 	    "an SSID on the estate's `home` network encodes");
 
-	check(fzn_record_sign(issuer, fields.subject, fields.stream, fields.kind, 1u,
+	check(fzn_record_sign(issuer, fields.subject, fields.stream, fields.kind, 1u, no_prev,
 	          1759000000u, fields.body, fields.body_len, &sign, bytes, sizeof(bytes),
 	          &len) == FZN_RECORD_OK,
 	    "the fields sign into a record");
@@ -444,6 +453,25 @@ static void the_fields_make_a_record_fuzznet_accepts(void)
 	    "which fuzznet opens: the shape is one it knows");
 	check(fzn_record_verify(opened, &sign) == FZN_RECORD_OK,
 	    "and verifies against the issuer that signed it");
+	/* **The field the pin bump added, read back rather than assumed.** It
+	 * arrived in fuzznet's sec 500 and this is netcfgd's only call to
+	 * `fzn_record_sign`, so without this the new parameter would be covered
+	 * by nothing but the compiler accepting it. */
+	check(memcmp(fzn_record_prev(opened), no_prev, sizeof(no_prev)) == 0,
+	    "whose `prev` is all-zero, this being the first record of its stream");
+	/* **And the contract that lets netcfgd always pass zeros, asserted
+	 * rather than assumed.** Measured when the check above was sabotaged:
+	 * the sabotage failed at the SIGN rather than at the comparison, because
+	 * fuzznet refuses a non-zero `prev` at seq 1 outright
+	 * (`record.c`: MALFORMED from `fzn_record_sign`, SHAPE from
+	 * `fzn_record_open`). That refusal is what makes "netcfgd does not
+	 * chain" safe to express as a zeroed field, so it is a property this
+	 * tree depends on and should learn about if it is ever relaxed. */
+	bad_prev[0] = 1u;
+	check(fzn_record_sign(issuer, fields.subject, fields.stream, fields.kind, 1u, bad_prev,
+	          1759000000u, fields.body, fields.body_len, &sign, bytes, sizeof(bytes),
+	          &len) == FZN_RECORD_ERR_MALFORMED,
+	    "and a non-zero `prev` at seq 1 is refused, which is why zeros are honest");
 
 	/* **Against the registry, the constant and an independently derived
 	 * subject -- not against `fields`.** A comparison with the struct this

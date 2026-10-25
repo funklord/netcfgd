@@ -12498,6 +12498,129 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.568 The fuzznet pin moved 403 commits, and what it cost to absorb
+
+10.567's finding was that this tree's vendored fuzznet was pinned at
+`97719d9`, 2026-09-28, five days before `state/scope.h` landed -- so the
+scope vocabulary the holder settled as fuzznet's was not in this tree's build
+and nothing said so. The holder's word, 2026-10-25, was to do it. Bumped to
+`0f33b17`, 2026-10-25: **403 commits**.
+
+**The bump and its absorption are one commit and have to be**, because the
+pin alone does not build. `build-and-commit.md`'s rule that a build never
+moves a pin is unaffected -- it forbids a *build* advancing it, which is why
+`bridge/Makefile` fetches the gitlink and nothing else, and this is the
+reviewed commit that rule exists to require.
+
+### What moved, and what the bridge had to learn
+
+**Only two things, which is the headline.** `record_encode.c`,
+`record_emit.c` and `netcfgd-remote.c` compiled unchanged through 403
+commits, and the three suites' 92 checks pass. For a seam this tree does not
+exercise daily, that is a better result than expected.
+
+**One: fuzznet grew a system dependency, and the bridge links objects rather
+than a library.** fuzznet gained log packing (its section 459), probes for
+libzstd, and links `-lzstd` itself. `FUZZNET_OBJS` takes every fuzznet object
+without a `main`, so it took `log/pack.o` and `log/gather.o` with it and the
+link failed on eight `ZSTD_*` symbols.
+
+**The fix asks `nm`, and the reason it is not `-lzstd`.** Whether those
+objects reference zstd is a property of the machine fuzznet was built on,
+because its probe decides. Naming the library unconditionally fails to link
+where the probe said no; omitting it fails where it said yes. **Both are the
+same error -- a claim about another tree's configuration** -- so
+`FUZZNET_LIBS` asks the objects the link is about to take, exactly as the
+list above it asks which object holds `main`, and for the reason that
+comment already gives: the objects know what they need and nothing else has
+to. A dependency fuzznet adds later arrives as an undefined reference naming
+its symbol, which beats a stale list.
+
+**Both arms measured**, since a detector that always says the same thing is
+not one: over the 200 linked objects it yields `-lzstd`, and over the same
+list with `log/` removed it yields nothing.
+
+**Two: `fzn_record_sign` gained a parameter** -- `prev`, the id of the
+previous record in an (issuer, stream), fuzznet's section 500. **One call
+site in this tree, and it is in a test**: `record_encode.c` fills the fields
+and does not sign. netcfgd does not chain -- nothing here keeps a stream's
+tail -- so it passes a zeroed `prev`, which fuzznet's contract makes the
+honest value at seq 1 rather than a placeholder.
+
+### A control that failed in the wrong place, and what it taught
+
+Sabotaging the new round-trip check -- a `prev` of `{1}` -- did not fail the
+comparison. **It failed the sign**, two checks earlier. fuzznet refuses a
+non-zero `prev` at seq 1 outright: `FZN_RECORD_ERR_MALFORMED` from
+`fzn_record_sign`, `FZN_RECORD_ERR_SHAPE` from `fzn_record_open`, both
+deliberate in its `record.c`.
+
+So the control tested fuzznet's validation rather than netcfgd's assertion,
+which is `evidence.md`'s trap about a sabotage moving something other than
+the thing under test. What came out of it is better than the check it failed
+to control: **that refusal is the property that makes "netcfgd does not
+chain" safe to express as a zeroed field**, so it is now asserted here
+rather than relied on silently. If fuzznet ever relaxes it, this tree finds
+out.
+
+### A fault in fuzznet, signalled rather than worked around
+
+**`FZN_LOG_PACK=0` does not build fuzznet.** It was the first route tried --
+the bridge has no business packing logs, and a program the Makefile says must
+stay small should not carry the code -- and fuzznet's own `node/daemon.c`
+includes `node/heard.h` inside `#ifdef FZN_LOG_PACK_ON` while calling
+`fzn_heard_when` outside it, at three sites. So the daemon does not compile
+with packing off:
+
+    node/daemon.c:5596: error: 'FZN_HEARD_OK' undeclared
+
+A dependency's fault is signalled and not fixed from the consumer
+(`harmonization.md`), so it went to fuzznet with the reproduction and this
+tree took the other route. It is also why `FUZZNET_LIBS` is the better fix
+on its own merits: it needs nothing of fuzznet to change.
+
+### What was checked and found sound, so nobody re-checks it
+
+**`FUZZNET_DEFS` is a hand-maintained list of fuzznet's feature flags**, and
+its comment says why -- a header compiled under different flags from the
+object it calls is the quietest kind of wrong. A 403-commit bump is exactly
+where such a list goes stale, so it was checked rather than assumed: no
+fuzznet *header* gates its contents on `FZN_LOG_PACK_ON`, only that one `.c`,
+and the four headers the bridge includes are `wire/seal.h` and its own. The
+list survived intact.
+
+### What the bump buys, and the fork it exposes
+
+`fzn_scope_t` is now in this tree's build, so the placeholder enum
+`c/include/ncfg/scope.h` has promised to delete since 2026-09-29 can go. **And
+the obvious way to do it contradicts a decision this tree holds**, which is a
+contradiction to flag rather than resolve in passing:
+
+- `scope.h`'s own plan is that "this enum goes and the table in
+  `compile/scope.c` is retyped onto it".
+- `compile/scope.c` is in `c/`, whose `SRCS` wildcards every `src/*/*.c` into
+  the daemon's library. Retyping it onto `fzn_scope_t` puts fuzznet's headers
+  on the daemon's include path and makes `make -C c` require the submodule.
+- **0269 and the brief's section 3 keep fuzznet away from the process holding
+  `CAP_NET_ADMIN`**, and `bridge/Makefile` states the same argument in both
+  directions: it compiles one source out of `c/` rather than linking
+  `libncfg.a` precisely so the small program stays small.
+
+**The reach, measured rather than estimated: 109 mentions of `ncfg_scope_t`
+or `NCFG_SCOPE_*` across nine files** -- four in `c/` (the header, the table,
+`compile/walk.c`'s one call at line 181, `walk.h`) with two of its tests, and
+three in `bridge/`. Structurally it is one enum, one table and one call site;
+textually it is a rename touching both sides of the seam, which is why the
+branch chosen decides whether the daemon's build gains a dependency or the
+bridge gains a check. The third answer neither branch states may be the right
+one: the vocabulary is
+fuzznet's and the **agreement** between the two spellings is checkable at the
+one place both are visible, which is the bridge. A `_Static_assert` there
+costs nothing, fails the build the day they diverge, and leaves the daemon's
+build as 0269 wants it. **Not taken, because it is not a decision to make
+while doing something else**: it is the holder's, and it is the one thing
+10.567's work left open.
+
 ## 10.567 The coordination half is fuzznet's, decided a month ago, and this tree is still holding the placeholder
 
 The copyright holder, 2026-10-25: *"should parts of the network planning and
