@@ -54,6 +54,7 @@
 #include "ncfg/base.h"
 #include "ncfg/dhcp.h"
 #include "ncfg/document.h"
+#include "ncfg/process.h"
 
 #include "testdir.h"
 
@@ -125,7 +126,7 @@ static void write_recorder(const char *path, const char *record, int status)
  * lifetime of twenty seconds so that a binary that died before its teardown
  * leaves nothing behind either.
  */
-static pid_t spawn_marked(const char *marker)
+static pid_t spawn_marked_running(const char *marker, const char *body)
 {
 	pid_t child = fork();
 
@@ -138,7 +139,7 @@ static pid_t spawn_marked(const char *marker)
 		(void)setpgid(0, 0);
 		argv[0] = "/bin/sh";
 		argv[1] = "-c";
-		argv[2] = "sleep 20";
+		argv[2] = body;
 		argv[3] = marker;
 		argv[4] = NULL;
 		execv("/bin/sh", (char *const *)(const void *)argv);
@@ -182,6 +183,39 @@ static pid_t spawn_marked(const char *marker)
 		}
 	}
 	return child;
+}
+
+static pid_t spawn_marked(const char *marker)
+{
+	return spawn_marked_running(marker, "sleep 20");
+}
+
+/*
+ * The same, but slow to die: it traps `TERM` and takes half a second over it.
+ *
+ * **`sleep 20` cannot stand in for a client that is slow to exit**, because
+ * `sleep` has no handler and dies on the signal at once -- which is exactly
+ * the case a stop that does not wait appears to handle correctly. The window
+ * has to be in the stand-in or there is nothing for the wait to wait for.
+ */
+static pid_t spawn_marked_slow(const char *marker)
+{
+	return spawn_marked_running(marker,
+	    "trap 'sleep 0.5; exit 0' TERM; while :; do sleep 0.05; done");
+}
+
+/* Whether a pid is a live process rather than a zombie: `/proc/<pid>/cmdline`
+ * is empty for one nothing has reaped, where `kill(pid, 0)` calls it alive. */
+static int marked_alive(pid_t child)
+{
+	char   path[64];
+	char  *bytes;
+	size_t length = 0;
+
+	(void)snprintf(path, sizeof(path), "/proc/%d/cmdline", (int)child);
+	bytes = testdir_read(path, &length);
+	free(bytes);
+	return bytes != NULL && length > 0u;
 }
 
 /* Kill exactly what `spawn_marked` started, by the pid it answered. */
@@ -1683,6 +1717,71 @@ static void a_stop_that_did_not_take_says_so(const char *base)
 	reap(running, socket_path);
 }
 
+/*
+ * A RECORDED CLIENT SLOW TO EXIT IS WAITED FOR.
+ *
+ * `stop_recorded` signalled udhcpc or odhcp6c and unlinked the pid file at
+ * once, so a client still exiting read as gone -- the fourth instance of the
+ * defect `autoip`, the RA daemon and openvpn carried (10.565, 10.566, 10.571).
+ *
+ * **`confirm_stopped` is not the cover it looks like**, which is why this test
+ * exists beside `a_stop_that_did_not_take_says_so`. That one drives the dhcpcd
+ * branch, where the control socket answers whether the stop took. These two
+ * clients have no control socket, `ncfg_dhcp_stop` reaches `stop_recorded`
+ * unconditionally after that branch, and the confirmer deliberately reads
+ * silence as success -- correctly, since a udhcpc machine has no dhcpcd socket
+ * and never did. So the two clients with nothing to confirm them were exactly
+ * the two going through the unconfirmed path.
+ *
+ * **odhcp6c is the one with teeth**: it answers `SIGTERM` by sending a RELEASE
+ * and calling its script one last time with no prefixes, which is what empties
+ * the report. Return before that and the emptying lands after netcfgd has
+ * recorded the stop as done.
+ */
+static void a_recorded_client_slow_to_exit_is_waited_for(const char *base)
+{
+	ncfg_dhcp_machine_t machine;
+	char                fake[256];
+	char                record[256];
+	char                pid_path[NCFG_DHCP_PATH_MAX];
+	char                dir[NCFG_DHCP_PATH_MAX];
+	char                mine[64];
+	char                message[NCFG_ERROR_MAX];
+	pid_t               held;
+
+	(void)testdir_in(base, "fake-slow6", fake, sizeof(fake));
+	(void)testdir_in(base, "slow6.args", record, sizeof(record));
+	write_recorder(fake, record, 0);
+	a_machine(&machine, fake, fake, fake);
+
+	check(ncfg_dhcp_pid_path(run_dir, "odhcp6c", "ethS", pid_path, sizeof(pid_path), NULL, 0) &&
+	    ncfg_dhcp_client_dir(run_dir, "odhcp6c", dir, sizeof(dir), NULL, 0) &&
+	    (mkdir(dir, 0755) == 0 || errno == EEXIST),
+	    "a run directory with an odhcp6c recorded in it");
+	held = spawn_marked_slow(pid_path);
+	(void)snprintf(mine, sizeof(mine), "%d\n", (int)held);
+	check(held > 0 && testdir_write(pid_path, mine, strlen(mine)),
+	    "  and a client that takes half a second over SIGTERM");
+	/* Not vacuous: netcfgd has to be able to find it before the stop means
+	 * anything, since a stop that finds nothing succeeds trivially. */
+	check(ncfg_process_pid_of(pid_path, pid_path) == held,
+	    "  which netcfgd finds by the mark in its command line");
+
+	message[0] = '\0';
+	check(ncfg_dhcp_stop(run_dir, "ethS", "6", &machine, message, sizeof(message)),
+	    "a stop of a client slow to exit succeeds");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	/* The relationship, not a duration: false exactly when the wait is
+	 * missing, where a timing assertion would pass or fail with the machine. */
+	check(!marked_alive(held),
+	    "and it has gone by the time the stop returns, so a start that follows "
+	    "cannot meet the client it replaced");
+	check(!testdir_exists(pid_path), "the pid file is removed only after that");
+	stop_marked(held);
+}
+
 /* ------------------------------------------------------------------------ *
  * The whole of it
  * ------------------------------------------------------------------------ */
@@ -1737,6 +1836,7 @@ int main(void)
 	the_interface_name_is_not_a_marker(base);
 	a_stop_asks_whose_the_client_is_before_it_signals(base);
 	a_stop_that_did_not_take_says_so(base);
+	a_recorded_client_slow_to_exit_is_waited_for(base);
 
 	/* Nothing here has a default, so an executor told nothing refuses rather
 	 * than reaching for `/run/dhcpcd` and `/usr/libexec` on the machine this

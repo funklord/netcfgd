@@ -12498,6 +12498,147 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.571 openvpn's stop, the third of the class, and the one with a worse ending
+
+Named at the end of 10.566 as the remaining candidate and measured rather than
+patched on suspicion. It is the same defect as `autoip`'s (10.565) and the RA
+daemon's (10.566): the stop signalled and then removed the record immediately,
+so a daemon still exiting read as absent and a restart's start met the daemon
+it was replacing.
+
+**`ncfg_process_terminate` is a bare `kill` and nothing above it waited**, so
+both of openvpn's stop paths carried it:
+
+- **The pid path**, `stop_by_pid`, signals and unlinks the pid file.
+- **The management path**, which sends `signal SIGTERM` over the management
+  socket. That call returns as soon as openvpn has read the line, not when it
+  has gone.
+
+### The management path's extra hazard, which the file already knew about
+
+That path also unlinks the **management socket**, and the comment directly
+below the unlink says why that is dangerous without noticing that it was:
+*"The daemon removes its own socket on the way out."*
+
+So the sequence was: netcfgd removes the socket path, a restart's openvpn binds
+a new socket at the same path, and the daemon that was still leaving unlinks
+that path as it exits -- **deleting the live tunnel's socket.** After which
+`ncfg_openvpn_connect` fails for a tunnel that is running perfectly well, every
+later stop falls back to the pid path, and nothing in the symptom points at a
+stop that happened minutes earlier.
+
+**The knowledge was in the file and the conclusion was not drawn.** A comment
+explaining that something else owns a path is an argument for not racing it,
+and it sat one line below the race.
+
+### The fix, and the patience
+
+The same shape as the other two: wait for the process to go, then remove the
+record, and fail with a sentence naming the interface when it will not. The
+waiter asks `ncfg_openvpn_running_pid`'s own question -- which matches the pid
+file against this tunnel's socket path -- rather than repeating its care about
+a recycled pid.
+
+**3000 ms, which is dhcp's `NCFG_DHCP_STOP_PATIENCE_MS` rather than autoip's
+1000**, and the difference is not arbitrary: openvpn runs its `--down` script,
+drops routes and takes the tun device away on the way out, where an autoip
+client only has to let go of an address. A patience that is too short turns a
+working stop into a refusal.
+
+### The fixture, and what it asserts
+
+A stand-in that **recites the socket path**, because `running_pid` deliberately
+will not match on the interface name alone -- `vpn0` is a short string an
+unrelated command line could contain. It writes its pid where openvpn writes
+its own, traps `TERM` and takes half a second over it, which is the window the
+old code returned inside.
+
+**The assertion is the relationship rather than a duration**: *after the stop
+returns, the daemon is gone*. A timing check would pass or fail with the
+machine; this is false exactly when the wait is missing. It reads
+`/proc/<pid>/cmdline` rather than calling `kill(pid, 0)`, a process nothing has
+reaped being a zombie that `kill -0` reports as alive.
+
+It also waits for the stand-in to have written its pid before stopping, and
+asserts `running_pid` finds it. **Without that the test could pass by the stop
+finding nothing at all**, which is the vacuous version of the thing being
+checked.
+
+Sabotaged both ways: with the wait removed from the pid path the check fails,
+restored the suite is green.
+
+### What is covered and what is not
+
+The fixture exercises the **pid path**. The management path shares the same
+waiter and its command is covered by `the_greeting_is_not_mistaken_for_an_answer`,
+but **the two together -- a management stop against a daemon slow to exit --
+are not exercised**, and that is the path with the socket hazard. Driving it
+needs a listener answering `SUCCESS` and a separate holder keeping the pid
+alive, which the test file has the pieces for. Named rather than left as an
+assumption that the shared waiter is enough.
+
+### The class is not closed at three, and the sweep that said so was wrong
+
+This entry first ended *"the class is closed at three -- `pppoe` already
+waited, `dhcp` has `confirm_stopped`"*. **`dhcp` has a fourth instance**, found
+by checking the claim instead of asserting it, which is the only reason it was
+found at all: the sentence was about to be committed as a closing statement.
+
+Every signalling site in `c/src/backend/` is one of five --
+`dhcp.c:1307`, `pppoe.c:542`, `openvpn.c:637`, `ra.c:356`, `autoip.c:241` --
+and reading each one's next lines rather than trusting the module's reputation:
+
+- `pppoe`, `ra` and `autoip` wait. `openvpn` does now.
+- **`dhcp`'s `stop_recorded` signals and unlinks the pid file**, with no wait.
+
+**So the tally is four of five**, and it is worth stating because it says what
+kind of defect this is. Five sites signal a process in `c/src/backend/`; one
+was right and four were not. `pppoe` is the one that was already fixed, and
+its comment carries the incident that paid for it -- measured in the guest
+tier, netcfgd printed `ok backend.stop ppp0` while pppd was still holding
+`ppp0` ten seconds later, with its options file already removed, so
+`ncfg_pppoe_running_pid` answered 0 from then on and **every later stop
+reported success**. One surviving signal made the session permanently
+unidentifiable and the failure permanently silent.
+
+That is the shape in all five: the fix is three lines and the symptom appears
+somewhere else entirely, hours later, as a start that will not take or a
+backend that cannot be identified. A rule learned once in `pppoe` was not
+carried to the four siblings doing the same thing, which is what makes
+"derive the next lens from the last bug" worth more than a checklist --
+`autoip` was found by looking for the shape rather than by anything failing.
+
+**`confirm_stopped` is not the cover it looks like.** It reads dhcpcd's control
+socket, and `ncfg_dhcp_stop` calls it only in the dhcpcd branch;
+`stop_recorded` then runs unconditionally for **udhcpc and odhcp6c**, which
+have no control socket -- and `confirm_stopped`'s own comment says that a
+machine with no dhcpcd socket must not be read as a client that would not die.
+So the two clients with nothing to confirm them are exactly the two that go
+through the unconfirmed path. A module having a confirmer says nothing about
+whether a given path calls it.
+
+**The odhcp6c case is the one with teeth**, and `stop_recorded`'s own comment
+supplies the reason: odhcp6c answers `SIGTERM` by sending a RELEASE and calling
+its script one last time with no prefixes, *which is what empties the report*.
+Stop it, forget it immediately, and that emptying lands after netcfgd has
+recorded the stop as done -- so the report can be rewritten under a plan that
+has moved on, and a restart can meet a client still mid-release while an ISP
+still believes the prefix is ours.
+
+Fixed in its own commit rather than folded into this one, so each change is
+reviewable on its own.
+
+### A note for whoever grows the binary next: 60 bytes of headroom
+
+The two waiters cost 40 bytes between them, and `make size` now reads
+**1194240 of 1194300**. `size-budget.txt` is left alone deliberately: its rule
+is to record at the measured size rather than let a real feature ride the 3%
+tolerance, and 40 bytes is noise beside a figure the recorded number already
+covers. But the margin is 60 bytes now, so **the next change of any substance
+fails that gate**, and the edit it needs is the deliberate, reviewable one the
+file asks for rather than a nudge. Said here because the gate failing is how
+somebody finds out otherwise, and they will be mid-change when they do.
+
 ## 10.570 The delegation rig is not waiting on hull any more, and the handles are measured
 
 10.527 parked `several machines on one wire` on hull's segments work, and

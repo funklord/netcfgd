@@ -1309,6 +1309,47 @@ static int stop_recorded(const char *run, const char *program, const char *iface
 		    (int)pid, detail);
 		return 0;
 	}
+	/*
+	 * **Wait for it to go before forgetting it, which `confirm_stopped` does
+	 * not do for these two clients.** That function reads dhcpcd's control
+	 * socket and `ncfg_dhcp_stop` calls it only in the dhcpcd branch, so
+	 * udhcpc and odhcp6c -- the two with no control socket -- reach here
+	 * unconfirmed. Its own comment says a machine with no dhcpcd socket must
+	 * not be read as a client that would not die, which is correct there and
+	 * is exactly why it cannot answer for this path.
+	 *
+	 * **odhcp6c is why it matters most**, as the comment above this function
+	 * already says without drawing the conclusion: it answers `SIGTERM` by
+	 * sending a RELEASE and calling its script one last time with no prefixes,
+	 * which is what empties the report. Return before that happens and the
+	 * emptying lands after netcfgd has recorded the stop as done -- so the
+	 * report is rewritten under a plan that has moved on, and a start that
+	 * follows can meet a client still releasing while an ISP still believes
+	 * the prefix is ours.
+	 *
+	 * Same shape as `autoip`, the RA daemon and openvpn (10.565, 10.566,
+	 * 10.571), and the same patience as the dhcpcd path above.
+	 */
+	{
+		int waited = 0;
+
+		while (ncfg_process_pid_of(pid_path, pid_path) > 0) {
+			struct timespec step;
+
+			if (waited >= NCFG_DHCP_STOP_PATIENCE_MS) {
+				ncfg_error_set(err, err_size,
+				    "%s on %s was signalled (pid %d) and is still running after %d ms, "
+				    "so its pid file is kept: a start that follows cannot meet the "
+				    "client it replaced",
+				    program, iface, (int)pid, NCFG_DHCP_STOP_PATIENCE_MS);
+				return 0;
+			}
+			step.tv_sec = 0;
+			step.tv_nsec = (long)CONFIRM_STEP_MILLISECONDS * 1000000L;
+			(void)nanosleep(&step, NULL);
+			waited += CONFIRM_STEP_MILLISECONDS;
+		}
+	}
 	(void)unlink(pid_path);
 	return 1;
 }
