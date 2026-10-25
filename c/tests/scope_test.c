@@ -63,7 +63,11 @@ static const struct {
 	{ "linkset", NCFG_SCOPE_HOST },
 	{ "rule", NCFG_SCOPE_GROUP },
 	{ "network", NCFG_SCOPE_ESTATE },
-	{ "access_point", NCFG_SCOPE_ESTATE }
+	{ "access_point", NCFG_SCOPE_ESTATE },
+	/* Layer one's firewall: the narrowest, deliberately. An operator's rules
+	 * for the host in front of them are not estate business until a layer
+	 * exists that says they are (0294, and 0284's layers two and three). */
+	{ "firewall", NCFG_SCOPE_HOST_PRIVATE }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

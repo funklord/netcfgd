@@ -58,6 +58,26 @@ static const char *const AUTOIP_MARKERS[] = { "error", "cannot", "could not", "f
 #define AUTOIP_APPEAR_PATIENCE_MILLISECONDS 1000
 #define AUTOIP_APPEAR_STEP_MILLISECONDS 25
 
+/*
+ * And the same patience pointed the other way, for the stop.
+ *
+ * **Without it the stop had a window in which netcfgd adopted the client it
+ * had just killed.** `ncfg_autoip_stop` sent `SIGTERM`, removed the pid
+ * record and returned; `ncfg_autoip_running_pid` then found no record, fell
+ * through to the adoption path below -- which exists for `KillMode=process`
+ * leaving a client across a netcfgd stop -- scanned `/proc` by marker, and
+ * found the process that had the signal but had not yet exited. So a stop
+ * reported success while the next look said a client was running, and a
+ * reconcile reading that does nothing: link-local addressing silently absent
+ * after a restart.
+ *
+ * Found as an intermittent in `autoip_test` -- "after which netcfgd has no
+ * client on that interface", failing about one run in five -- which is what
+ * the race looks like from outside. `dhcp.c`'s `confirm_stopped` is the same
+ * shape and the same answer, and is kept rather than re-decided.
+ */
+#define AUTOIP_EXIT_PATIENCE_MILLISECONDS 1000
+
 int ncfg_autoip_run_dir(const char *run, char *out, size_t out_size, char *err, size_t err_size)
 {
 	return ncfg_backend_join(out, out_size, run, "autoip", err, err_size);
@@ -125,6 +145,36 @@ static pid_t wait_for_client(const char *const *marker, int patience_ms)
 	}
 }
 
+/*
+ * Wait for a signalled client to go, and say whether it did.
+ *
+ * Asks `/proc` for the pid's own arguments rather than `kill -0`, which
+ * `running-code.md` records as a false pass: a reparented process that nothing
+ * reaps is a zombie, and `kill -0` calls one alive. The check is the same
+ * question `ncfg_process_pid_by_markers` answers -- is a process reciting
+ * these arguments still there -- narrowed to the one pid that was signalled,
+ * so another client of netcfgd's on another interface cannot hold this open.
+ */
+static int wait_for_exit(const char *const *marker, pid_t pid, int patience_ms)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+
+		if (ncfg_process_pid_by_markers(marker, 2u) != pid) {
+			return 1;
+		}
+		if (waited >= patience_ms) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)AUTOIP_APPEAR_STEP_MILLISECONDS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += AUTOIP_APPEAR_STEP_MILLISECONDS;
+	}
+}
+
 pid_t ncfg_autoip_running_pid(const char *run, const char *iface)
 {
 	char        pid_path[NCFG_AUTOIP_PATH_MAX];
@@ -165,14 +215,16 @@ pid_t ncfg_autoip_running_pid(const char *run, const char *iface)
 
 int ncfg_autoip_stop(const char *run, const char *iface, char *err, size_t err_size)
 {
-	char  pid_path[NCFG_AUTOIP_PATH_MAX];
-	pid_t pid;
+	char        pid_path[NCFG_AUTOIP_PATH_MAX];
+	const char *marker[2];
+	pid_t       pid;
 
 	if (!run || !iface) {
 		ncfg_error_set(err, err_size,
 		    "stopping link-local addressing needs a run directory and an interface");
 		return 0;
 	}
+	marker_for(iface, marker);
 	pid = ncfg_autoip_running_pid(run, iface);
 	if (pid <= 0) {
 		/*
@@ -187,6 +239,21 @@ int ncfg_autoip_stop(const char *run, const char *iface, char *err, size_t err_s
 		return 1;
 	}
 	if (!ncfg_process_terminate(pid, err, err_size)) {
+		return 0;
+	}
+	/*
+	 * **Waited for, and the record kept until it is gone.** The order is the
+	 * fix: removing the record first is what let the adoption path below see
+	 * the dying client as one to keep, and a stop that returns before the
+	 * process has exited is a stop whose next reconcile reads "already
+	 * running".
+	 */
+	if (!wait_for_exit(marker, pid, AUTOIP_EXIT_PATIENCE_MILLISECONDS)) {
+		ncfg_error_set(err, err_size,
+		    "the link-local client on %s is still running %d ms after SIGTERM, still "
+		    "reciting the arguments netcfgd gave it. Its pid record is left in place, so "
+		    "the next pass sees the same process rather than adopting it",
+		    iface, AUTOIP_EXIT_PATIENCE_MILLISECONDS);
 		return 0;
 	}
 	if (ncfg_autoip_pid_path(run, iface, pid_path, sizeof(pid_path), err, err_size)) {

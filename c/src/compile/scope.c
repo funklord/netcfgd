@@ -15,7 +15,7 @@
 #include <string.h>
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
-	"network", "access_point", "bluetooth", "rule", "linkset" };
+	"network", "access_point", "bluetooth", "rule", "linkset", "firewall" };
 
 const char *ncfg_block_name(int block)
 {
@@ -63,6 +63,16 @@ int ncfg_block_from_name(const char *name, ncfg_block_t *out)
  *                 one machine, and rarely of every machine at once.
  *   linkset       host. Which of this machine's links are bonded is about this
  *                 machine, and an estate managing it wants to see it.
+ *   firewall      host-private, and deliberately the narrowest for now. Layer
+ *                 one is the operator's own rules for the host in front of
+ *                 them (0294), and this header's rule decides it: widening a
+ *                 scope publishes configuration the author never offered to
+ *                 anyone, and narrowing one only fails to share something. A
+ *                 host's security posture is the last thing to publish by
+ *                 default. Layers two and three -- presets from a library,
+ *                 zones from a controller -- are where group and estate
+ *                 scopes belong, and 0284 has not decided their shape, so
+ *                 nothing here pre-empts them.
  */
 static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_GLOBAL] = NCFG_SCOPE_HOST_PRIVATE,
@@ -72,7 +82,8 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_ACCESS_POINT] = NCFG_SCOPE_ESTATE,
 	[NCFG_BLOCK_BLUETOOTH] = NCFG_SCOPE_HOST_PRIVATE,
 	[NCFG_BLOCK_RULE] = NCFG_SCOPE_GROUP,
-	[NCFG_BLOCK_LINKSET] = NCFG_SCOPE_HOST
+	[NCFG_BLOCK_LINKSET] = NCFG_SCOPE_HOST,
+	[NCFG_BLOCK_FIREWALL] = NCFG_SCOPE_HOST_PRIVATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)

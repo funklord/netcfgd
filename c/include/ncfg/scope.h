@@ -75,6 +75,15 @@ typedef enum {
 	NCFG_BLOCK_BLUETOOTH,
 	NCFG_BLOCK_RULE,
 	NCFG_BLOCK_LINKSET,
+	/*
+	 * Layer one's firewall (0294), and **last on purpose**: `BLOCK_NAMES` in
+	 * `scope.c` is a positional initialiser, so a value inserted in the
+	 * middle takes the name of the one after it. Added between `RULE` and
+	 * `LINKSET` first, and `scope_test` caught it as "linkset: default is not
+	 * what the rule gives it" -- a misordered enum wearing a wrong scope's
+	 * clothes.
+	 */
+	NCFG_BLOCK_FIREWALL,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

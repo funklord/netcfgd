@@ -178,6 +178,74 @@ static void a_client_that_refuses_is_quoted(const char *run)
 	    "a client that refuses is quoted rather than summarised by its status");
 }
 
+/*
+ * A client that takes its time to exit, which is the race made deterministic.
+ *
+ * **The intermittent this was written for.** `ncfg_autoip_stop` sent `SIGTERM`,
+ * removed the pid record and returned -- and `kill()` returning says only that
+ * the signal was queued, not that the target has run. `ncfg_autoip_running_pid`
+ * then found no record, fell through to its adoption path, scanned `/proc` by
+ * marker and found the dying client: a stop that reported success while the
+ * next look said a client was running, which a reconcile reads as "nothing to
+ * do". On this machine it failed about one run in five, and which run depended
+ * on how loaded the box was.
+ *
+ * The holder here traps `TERM` and exits half a second later, with its command
+ * line intact throughout, so the window is always open rather than sometimes.
+ * It is a positive control in `evidence.md`'s sense: it fails the way the real
+ * thing failed, and it fails every time.
+ */
+static void a_client_slow_to_exit_is_waited_for(const char *run)
+{
+	char  fake[512];
+	char  body[1024];
+	char  iface[32];
+	char  message[NCFG_ERROR_MAX];
+	pid_t pid;
+
+	(void)snprintf(iface, sizeof(iface), "slow%ld", (long)getpid());
+	(void)testdir_in(run, "fake-slow-exit", fake, sizeof(fake));
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "# A holder that answers SIGTERM and takes half a second over it, which\n"
+	    "# is what any client doing something on the way out looks like -- a\n"
+	    "# release, a script, a last write.\n"
+	    "#\n"
+	    "# **The loop of short sleeps is the point**, and the first version got\n"
+	    "# it wrong: a trap does not interrupt a foreground child, so a holder\n"
+	    "# sleeping 60 seconds never runs its handler and stays for the whole\n"
+	    "# minute. The fix under test then waited its full patience and\n"
+	    "# reported honestly that the client would not go -- which is the right\n"
+	    "# behaviour for a client that will not go, and the wrong fixture for a\n"
+	    "# client that is merely slow.\n"
+	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; while :; do sleep 0.1; done' "
+	    "holder --force-bind %s >/dev/null 2>&1 &\n"
+	    "sleep 0.3\n"
+	    "exit 0\n",
+	    iface);
+	write_fake(fake, body);
+
+	message[0] = '\0';
+	check(ncfg_autoip_start(run, iface, fake, message, sizeof(message)),
+	    "a client that is slow to exit starts like any other");
+	pid = ncfg_autoip_running_pid(run, iface);
+	check(pid > 0, "  and is netcfgd's while it runs");
+
+	message[0] = '\0';
+	check(ncfg_autoip_stop(run, iface, message, sizeof(message)),
+	    "  the stop waits for it rather than returning when the signal is queued");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	/*
+	 * **The check the intermittent was**, now deterministic: without the wait
+	 * this finds the half-second holder every time, because the record is
+	 * gone and the adoption path answers for the process that is still there.
+	 */
+	check(ncfg_autoip_running_pid(run, iface) == 0,
+	    "  so nothing is left for the next pass to adopt");
+}
+
 /* ----------------------------------------------- the ownership claim */
 
 /*
@@ -346,6 +414,7 @@ int main(void)
 	the_client_is_given_force_bind_and_the_interface(run);
 	a_client_that_refuses_is_quoted(run);
 	a_recorded_client_is_recognised_and_stopped(run);
+	a_client_slow_to_exit_is_waited_for(run);
 	a_client_that_appears_late_is_waited_for(run);
 	a_pid_that_is_not_ours_any_more_is_not_signalled(run);
 

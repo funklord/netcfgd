@@ -12498,6 +12498,81 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.565 The autoip stop adopted the client it had just killed
+
+"continue with outstanding features or bugfixes", the copyright holder,
+2026-10-25. The outstanding bug worth taking first was the one making the gate
+lie: `autoip_test`'s "after which netcfgd has no client on that interface" had
+failed in two of the day's `make check` runs and passed on every direct re-run.
+
+### The defect, which is production's and not the test's
+
+`ncfg_autoip_stop` sent `SIGTERM`, removed the pid record, and returned.
+`ncfg_autoip_running_pid` then found no record, **fell through to its adoption
+path** -- which exists because `KillMode=process` leaves a client across a
+netcfgd stop (0134, 0142) -- scanned `/proc` by command-line marker, and found
+the process that had the signal but had not yet exited.
+
+So a stop reported success while the next look said a client was running. A
+reconcile reading that does nothing, which means **link-local addressing
+silently absent after a restart**: netcfgd thinks the client it just stopped is
+one it should keep.
+
+`kill()` returning says the signal was queued, not that the target has run.
+That is the whole race, and on a machine busy with kernel builds and vms it
+opened about one run in five.
+
+### The fix is the sibling backend's, and the order is the fix
+
+`dhcp.c`'s `confirm_stopped` is the same shape pointed the other way -- look,
+sleep a named step, give up at a named patience -- so `autoip` gets
+`wait_for_exit` beside its existing `wait_for_client`, and **the record is
+removed only once the process is gone**. Removing it first is what opened the
+adoption window. If the client is still there at the end of the patience the
+stop fails and says so, leaving the record in place so the next pass sees the
+same pid rather than adopting it.
+
+It asks `/proc` for the pid's arguments rather than `kill -0`, which
+`running-code.md` records as a false pass: a reparented process nothing reaps
+is a zombie, and `kill -0` calls one alive.
+
+### Made deterministic, because six green runs prove nothing
+
+Non-reproduction is what "intermittent" means. So the suite gained a client
+that is slow to exit: a holder trapping `TERM` and taking half a second over
+it, which holds the window open on every run rather than on one in five. With
+the fix reverted that check fails every time; with it, the suite is green.
+
+**The fixture was wrong twice before it was right**, and the first mistake is
+worth keeping: a holder that slept sixty seconds never ran its handler at all,
+because **a trap does not interrupt a foreground child**. The fix under test
+then waited its full patience and reported honestly that the client would not
+go -- correct behaviour for a client that will not go, and the wrong fixture
+for one that is merely slow. It is a loop of short sleeps now.
+
+### What the flake was hiding, which is worth more than the fix
+
+`make check` stops at the first failing target, so a failure in `c-test` meant
+**two later gates never ran at all** -- and the firewall commit before this one
+went out with both of them red:
+
+- `registry-gate`: `lower_firewall.c` had no block attribution. A new
+  top-level block has to be registered in `scope.h` with a replication scope,
+  which is a decision rather than a formality: layer one's firewall is
+  `HOST_PRIVATE`, the narrowest, because that header's own rule says widening
+  a scope publishes what the author never offered and narrowing one only fails
+  to share. An operator's rules for the host in front of them are not estate
+  business until a layer exists that says they are.
+- `scope_test`: the block went into the enum between `RULE` and `LINKSET`
+  while its name was appended to a **positional** initialiser, so
+  `NCFG_BLOCK_FIREWALL` read as "linkset". The test caught it as "linkset:
+  default is not what the rule gives it" -- a misordered enum wearing a wrong
+  scope's clothes. It is last in the enum now, with a comment saying why.
+
+So the intermittent cost more than its own red: it was a lens cap over
+everything behind it. `make check` is clean end to end now, which it had not
+been all day.
+
 ## 10.564 The firewall's lowerer and renderer, and three checks that paid
 
 0294's grammar is a configuration surface now: `lower_firewall.c` reads it and
