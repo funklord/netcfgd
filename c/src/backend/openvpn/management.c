@@ -168,10 +168,30 @@ int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *comm
 		ncfg_error_set(err, err_size, "a management command was sent with nothing to send");
 		return 0;
 	}
+	/*
+	 * **`send` with `MSG_NOSIGNAL` rather than `write`, for the reason
+	 * `answer.c` already gives about the control socket**: a peer that has
+	 * closed between the connect and the write would otherwise raise
+	 * `SIGPIPE`, whose default action ends the process -- and the process
+	 * here is the daemon holding `CAP_NET_ADMIN`.
+	 *
+	 * **This socket is more exposed than the control socket, not less**, and
+	 * that is what makes it worth the sentence. The peer is openvpn, and the
+	 * command netcfgd most often sends is `signal SIGTERM`: netcfgd is writing
+	 * to a process it is in the act of telling to die. A daemon that exits
+	 * between the two writes below -- the command, then its newline -- takes
+	 * netcfgd with it. So **telling openvpn to stop could kill netcfgd**, by
+	 * the one path where the peer's death is not merely possible but intended.
+	 *
+	 * Found by a test failing under load, not by reading: the fixture's
+	 * stand-in closed its socket after a short read, the newline landed on a
+	 * closed peer, and the suite died with no output because its stderr was
+	 * redirected at the time. 10.573 has the sequence.
+	 */
 	at = command;
 	left = strlen(command);
 	while (left > 0u) {
-		ssize_t put = write(management->fd, at, left);
+		ssize_t put = send(management->fd, at, left, MSG_NOSIGNAL);
 
 		if (put < 0) {
 			if (errno == EINTR) {
@@ -184,7 +204,7 @@ int ncfg_openvpn_command(ncfg_openvpn_management_t *management, const char *comm
 		at += put;
 		left -= (size_t)put;
 	}
-	if (write(management->fd, "\n", 1u) != 1) {
+	if (send(management->fd, "\n", 1u, MSG_NOSIGNAL) != 1) {
 		ncfg_error_set(err, err_size, "could not send `%s`: %s", command, strerror(errno));
 		return 0;
 	}

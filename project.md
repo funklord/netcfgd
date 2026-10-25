@@ -12498,6 +12498,117 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.573 Telling openvpn to stop could kill netcfgd, found by a test failing under load
+
+`make check` went red after the management-path fixture landed, with
+`c: some checks failed` and **no failing check named anywhere in ten thousand
+lines of log**. The same target had passed standalone minutes earlier. What it
+turned out to be is a real defect in netcfgd, and the way it hid is worth as
+much as the defect.
+
+### The defect
+
+`management.c` sent a command as two plain `write()` calls -- the command, then
+its newline -- to a unix socket whose peer is openvpn. **The command netcfgd
+most often sends is `signal SIGTERM`**, so netcfgd was writing to a process it
+was in the act of telling to die. A peer that closes between the two writes
+makes the second raise `SIGPIPE`, whose default action ends the process -- and
+that process is the daemon holding `CAP_NET_ADMIN`.
+
+**The rule was already written down in this tree, for the other direction.**
+`answer.c` uses `send` with `MSG_NOSIGNAL` and says why: *"a client that hung
+up between the accept and the answer would otherwise raise `SIGPIPE` and end
+the daemon. That is not hypothetical... A daemon holding `CAP_NET_ADMIN` must
+not be killable by a client disconnecting."* `deliver.c` guards the same hazard
+with `sigaction` around a write. The management client was written with `write`
+anyway.
+
+So this is not a hazard nobody had considered. It is **a rule learned on one
+socket and not carried to the socket where the peer's death is intended rather
+than merely possible** -- the same shape as 10.571's four-of-five stop bugs,
+where `pppoe`'s lesson had not reached its siblings.
+
+Both writes use `send(..., MSG_NOSIGNAL)` now. `EPIPE` comes back as an error
+with a sentence, which is what a refusal has to be here.
+
+### How it hid, which is the transferable half
+
+Three things stacked, and each alone would have been survivable:
+
+1. **A process killed by `SIGPIPE` prints nothing and fails no check.** It
+   stops. There is no `FAILED` line to grep for, because nothing got as far as
+   deciding anything was wrong.
+2. **Its buffered stdout dies with it.** Measured in the control below: the
+   output ends mid-sentence at `rather than the tail, whi`, several tests
+   *before* the one that died, because everything after the last flush was in
+   a buffer nobody wrote. So the log points at the wrong place, which is worse
+   than pointing nowhere.
+3. **The suite redirects its own stderr** for a later test, and the redirect
+   spans the calls that died. Anything the kernel or the shell might have said
+   went into a file the suite then deleted.
+
+The visible result was a gate that said `c: some checks failed` and an
+openvpn suite whose early checks appeared and whose summary never did. **Seven
+of its check texts were in the log and none of the new ones**, which is what
+located it: not a failure message, but the absence of output after a known
+point.
+
+### Why it was intermittent, and why that was the clue rather than the excuse
+
+The peer has to close before netcfgd writes, which needs an interleaving.
+Standalone the test won the race every time; under `make check` -- with three
+other sessions' builds running, and `Resource temporarily unavailable` from a
+thread spawn elsewhere in the same log -- it lost it.
+
+**The comfortable explanation was available and wrong**: the machine was
+loaded, the new fixture is timing-dependent, re-run it. `running-code.md` names
+that trap -- *a comfortable explanation that ends an investigation is more
+expensive than no explanation at all* -- and the fixture really was
+timing-dependent, so the comfortable story was even true as far as it went. It
+was not the whole of it: load did not cause the bug, it only made the window
+wide enough to fall into.
+
+### What the fixture needed to become a test, in three wrong versions
+
+The first draft read one byte then closed, and reported `no answer to
+\`signal SIGTERM\``: both writes had succeeded and the READ had failed, so it
+was exercising the reply path while claiming the write path. The second closed
+without reading and reported the same thing, netcfgd being quicker than the
+child. The third waited on a marker the child never wrote -- an edit that had
+aborted before saving -- so a two-second timeout did the synchronising, the
+marker check failed, and **the test passed for the wrong reason**.
+
+What works is a handshake: the child closes, writes a marker, and the parent
+waits for the marker before sending. Now the message is
+`could not send \`signal SIGTERM\`: Broken pipe` every time, which is the write
+path and nothing else.
+
+**And a check of mine was vacuous on the way through** -- `message[0] != '\0'
+|| 1`, which cannot fail -- replaced with `!sent && message[0] != '\0'`. A
+check that cannot fail reads as coverage, which is worse than an absent one.
+
+### The control
+
+With `MSG_NOSIGNAL` removed, `./c/tests/openvpn_test` exits **141** -- 128 plus
+`SIGPIPE` -- with its output truncated mid-line. With it, the command returns
+an error carrying a sentence and the suite passes. So the fix is proved against
+the failure it prevents, and the test is proved against the fix.
+
+### What is not fixed, and is a question rather than an oversight
+
+**An `EPIPE` mid-command now reports a failed stop for a tunnel that may be
+gone.** If openvpn closed the management socket because it was already exiting,
+netcfgd says `could not stop the openvpn tunnel`, where the honest answer is
+that the tunnel is stopping. The existing code falls back to the pid path only
+when the *connect* fails, not when a command does.
+
+The fix would be to ask `ncfg_openvpn_running_pid` after a command failure and
+treat "nothing running" as the stop having taken -- which is what the file
+already says in its own words, *stopping one that is already stopped is not an
+error*. That changes stop semantics, where this entry changes a signal
+disposition, so it wants its own commit and its own test rather than riding
+along.
+
 ## 10.572 What identifies an installed rule: asked, costed, not decided
 
 10.564 left the firewall's next slice as *"the planner, the transaction and the
@@ -12644,15 +12755,31 @@ checked.
 Sabotaged both ways: with the wait removed from the pid path the check fails,
 restored the suite is green.
 
-### What is covered and what is not
+### The management path is covered too, and the hazard is reproduced
 
-The fixture exercises the **pid path**. The management path shares the same
-waiter and its command is covered by `the_greeting_is_not_mistaken_for_an_answer`,
-but **the two together -- a management stop against a daemon slow to exit --
-are not exercised**, and that is the path with the socket hazard. Driving it
-needs a listener answering `SUCCESS` and a separate holder keeping the pid
-alive, which the test file has the pieces for. Named rather than left as an
-assumption that the shared waiter is enough.
+This section first said the management path was *not* exercised -- a listener
+answering `SUCCESS` and a holder keeping the pid alive being what it would take
+-- and named it rather than assuming the shared waiter was enough. **It is
+written now**, and it turned out to be the better of the two tests, because the
+socket hazard can be reproduced rather than merely argued.
+
+The stand-in does what openvpn does: it answers the management command, lives
+on, and **unlinks the socket path as it exits**. After the stop returns the
+test writes a file where the next start's socket would be, waits past the
+stand-in's remaining life, and asserts the file is still there. Nothing may
+delete it but a daemon that has already gone.
+
+**Sabotaged, both assertions fail** -- the liveness one and, the one that
+matters, *"and it survives, so the stop did not leave the old daemon to delete
+the new tunnel's socket"*. So the race is not a reading of the code: with the
+wait removed, the departing daemon really does delete the live tunnel's
+management socket, and the test says so in the words an operator would need.
+
+What is still not exercised is narrower and worth keeping honest: a daemon that
+**refuses** to go, which is the arm that returns the refusal sentence. Both
+paths' waiters share that arm and neither test drives it, since a stand-in that
+never exits would cost the suite the full patience of 3000 ms twice over. Named
+rather than claimed.
 
 ### The class is not closed at three, and the sweep that said so was wrong
 

@@ -746,6 +746,310 @@ static void a_daemon_slow_to_exit_is_waited_for(const char *base)
 	(void)wait_for(held);
 }
 
+/*
+ * A MANAGEMENT STOP AGAINST A DAEMON SLOW TO EXIT, AND THE SOCKET IT MUST NOT
+ * PULL AWAY.
+ *
+ * 10.571 named this gap rather than leaving it as an assumption that the
+ * shared waiter was enough: the test above drives the pid path, and **the
+ * management path is the one with the hazard**. It sends `signal SIGTERM` over
+ * the management socket -- which returns when openvpn has read the line, not
+ * when it has gone -- and then unlinks that socket, which openvpn removes
+ * itself on the way out.
+ *
+ * **So this reproduces the hazard rather than asserting a duration.** The
+ * stand-in does what openvpn does: it lives on after the command, then unlinks
+ * the socket path as it exits. After the stop returns, the test puts a file
+ * where the next start's socket would be. If the stop waited, the stand-in is
+ * already gone and that file survives; if it did not, the stand-in is still
+ * alive and deletes it -- which is precisely a restart losing the live
+ * tunnel's management socket to the daemon it replaced.
+ */
+static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const char *base)
+{
+	char               run[512];
+	char               dir[640];
+	char               socket_path[1024];
+	char               pid_file[1024];
+	char               holder[1024];
+	char               body[4096];
+	char               message[NCFG_ERROR_MAX];
+	struct sockaddr_un address;
+	int                listener;
+	pid_t              server;
+	pid_t              held;
+	char              *written;
+
+	(void)testdir_in(base, "mgmtslow", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a run directory for the management stop");
+	(void)snprintf(dir, sizeof(dir), "%s/openvpn", run);
+	check(mkdir(dir, 0755) == 0, "and the openvpn directory inside it");
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/vpn0.sock", dir);
+	(void)snprintf(pid_file, sizeof(pid_file), "%s/vpn0.pid", dir);
+	(void)testdir_in(run, "holder", holder, sizeof(holder));
+
+	listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	if (strlen(socket_path) + 1u > sizeof(address.sun_path)) {
+		check(0, "the temporary directory leaves room for a unix socket path");
+		(void)close(listener);
+		return;
+	}
+	memcpy(address.sun_path, socket_path, strlen(socket_path) + 1u);
+	check(listener >= 0 &&
+	    bind(listener, (const struct sockaddr *)&address, sizeof(address)) == 0 &&
+	    listen(listener, 1) == 0,
+	    "a stand-in daemon is listening on the management socket");
+
+	/* The management half: greet, take the command, answer as openvpn does. */
+	server = fork();
+	if (server == 0) {
+		int     served = accept(listener, NULL, NULL);
+		char    asked[256];
+		ssize_t got;
+
+		(void)setpgid(0, 0);
+		if (served < 0) {
+			_exit(1);
+		}
+		(void)write(served, ">INFO:OpenVPN Management Interface Version 5\n", 45u);
+		/*
+		 * **Read to the newline, not just once.** netcfgd sends the command
+		 * and its newline as two writes, so a single `read` can return the
+		 * command without its terminator -- and a stand-in that answers and
+		 * closes at that point leaves the newline landing on a closed peer.
+		 * That is how this fixture killed the suite under load before
+		 * `MSG_NOSIGNAL` (10.573), and a fixture whose timing decides whether
+		 * the run survives is not a fixture.
+		 */
+		{
+			size_t taken = 0u;
+
+			for (;;) {
+				got = read(served, asked + taken, sizeof(asked) - taken);
+				if (got <= 0) {
+					_exit(1);
+				}
+				taken += (size_t)got;
+				if (memchr(asked, '\n', taken) || taken == sizeof(asked)) {
+					break;
+				}
+			}
+		}
+		(void)write(served, "SUCCESS: signal SIGTERM thrown\n", 31u);
+		(void)close(served);
+		_exit(0);
+	}
+	check(server > 0, "the management stand-in is running");
+
+	/*
+	 * The process half, which is what `ncfg_openvpn_running_pid` sees: it
+	 * recites the socket path, writes its pid where openvpn writes its own,
+	 * and **removes the socket as it goes**, which is the behaviour that makes
+	 * the race dangerous rather than merely untidy.
+	 */
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "echo $$ > '%s'\n"
+	    "sleep 0.6\n"
+	    "rm -f '%s'\n"
+	    "exit 0\n",
+	    pid_file, socket_path);
+	check(write_program(holder, body), "a stand-in that outlives the command is written");
+	held = fork();
+	if (held == 0) {
+		(void)setpgid(0, 0);
+		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
+		_exit(127);
+	}
+	check(held > 0, "and is running");
+	{
+		int waited = 0;
+
+		while (waited < 100) {
+			struct timespec step = { 0, 20L * 1000000L };
+
+			if (ncfg_openvpn_running_pid(run, "vpn0") > 0) {
+				break;
+			}
+			(void)nanosleep(&step, NULL);
+			waited++;
+		}
+	}
+	check(ncfg_openvpn_running_pid(run, "vpn0") > 0,
+	    "  and netcfgd finds it, so this stop is not measuring an empty run directory");
+
+	message[0] = '\0';
+	check(ncfg_openvpn_stop(run, "vpn0", NULL, message, sizeof(message)),
+	    "a management stop against a daemon slow to exit succeeds");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", kept(message));
+	}
+	check(!still_alive(held),
+	    "and the daemon has gone by the time it returns, which is what the socket "
+	    "below depends on");
+	written = testdir_read(pid_file, NULL);
+	check(written == NULL, "the pid file is removed only after that");
+	free(written);
+
+	/*
+	 * **The next start's socket, and the assertion the whole test exists
+	 * for.** Nothing may delete this but the daemon that has already gone.
+	 */
+	check(testdir_write(socket_path, "next\n", 5u), "the next start binds its own socket");
+	{
+		struct timespec settle = { 1, 0 };
+
+		(void)nanosleep(&settle, NULL);
+	}
+	check(testdir_exists(socket_path),
+	    "and it survives, so the stop did not leave the old daemon to delete the new "
+	    "tunnel's socket");
+	(void)unlink(socket_path);
+
+	(void)wait_for(server);
+	(void)wait_for(held);
+	(void)close(listener);
+}
+
+/*
+ * A PEER THAT CLOSES MID-COMMAND IS AN ERROR, NOT A DEAD DAEMON.
+ *
+ * netcfgd sends a management command as two writes -- the command, then its
+ * newline -- and the peer is openvpn, which the command usually tells to
+ * terminate. So netcfgd writes to a process it is in the act of killing, and a
+ * plain `write` to a closed peer raises `SIGPIPE`, whose default action ends
+ * the process holding `CAP_NET_ADMIN`.
+ *
+ * `answer.c` already records this rule for the control socket -- "a daemon
+ * holding CAP_NET_ADMIN must not be killable by a client disconnecting" -- and
+ * the management client was written with `write` anyway. **This is that rule's
+ * control, on the socket where the peer's death is intended rather than
+ * merely possible.**
+ *
+ * The stand-in reads one byte and closes, which puts the newline on a dead
+ * socket every time rather than when the scheduler happens to allow it. With
+ * `MSG_NOSIGNAL` the call returns an error naming the command; without it this
+ * process dies here and the suite reports nothing at all, which is exactly how
+ * the bug was found.
+ */
+static void a_peer_that_closes_mid_command_is_an_error(const char *base)
+{
+	char                       run[512];
+	char                       path[1024];
+	struct sockaddr_un         address;
+	int                        listener;
+	pid_t                      child;
+	ncfg_openvpn_management_t *management;
+	char                       message[NCFG_ERROR_MAX];
+	char                       closed[1024];
+
+	(void)testdir_in(base, "halfclose", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a directory for the half-closing stand-in");
+	(void)testdir_in(run, "vpn0.sock", path, sizeof(path));
+	(void)testdir_in(run, "closed", closed, sizeof(closed));
+
+	listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	if (strlen(path) + 1u > sizeof(address.sun_path)) {
+		check(0, "the temporary directory leaves room for a unix socket path");
+		(void)close(listener);
+		return;
+	}
+	memcpy(address.sun_path, path, strlen(path) + 1u);
+	check(listener >= 0 &&
+	    bind(listener, (const struct sockaddr *)&address, sizeof(address)) == 0 &&
+	    listen(listener, 1) == 0,
+	    "a stand-in that will hang up mid-command is listening");
+
+	child = fork();
+	if (child == 0) {
+		int  served = accept(listener, NULL, NULL);
+		char one[1];
+
+		(void)setpgid(0, 0);
+		if (served < 0) {
+			_exit(1);
+		}
+		/*
+		 * **Greet, then close at once, and do not read.** The first draft read
+		 * a byte first and the run reported `no answer to \`signal SIGTERM\``
+		 * -- the writes had both succeeded and the READ had failed, so the test
+		 * was exercising the reply path and not the write path at all. A peer
+		 * that is already closed when netcfgd writes is the only version of
+		 * this that tests what it claims to.
+		 *
+		 * The greeting still goes, so `ncfg_openvpn_connect` has its
+		 * connection; closing the write side afterwards is what makes
+		 * netcfgd's `send` meet a dead peer.
+		 */
+		(void)write(served, ">INFO:OpenVPN Management Interface Version 5\n", 45u);
+		(void)close(served);
+		/*
+		 * **The marker is the synchronisation, and the first version of this
+		 * test did not have it.** Two drafts reported `no answer to \`signal
+		 * SIGTERM\``: netcfgd had written before the peer managed to close, so
+		 * both writes landed in the socket buffer and the READ was what
+		 * failed -- the test was exercising the reply path while claiming the
+		 * write path. A third draft waited on a marker the child never wrote,
+		 * so a two-second timeout did the synchronising and the check for the
+		 * marker failed while the test passed. The write path is reached only
+		 * if the close has definitely happened, and only a handshake makes
+		 * that true rather than likely.
+		 */
+		(void)testdir_write(closed, "gone\n", 5u);
+		(void)one;
+		_exit(0);
+	}
+	check(child > 0, "the stand-in is running");
+
+	message[0] = '\0';
+	management = ncfg_openvpn_connect(path, message, sizeof(message));
+	check(management != NULL, "the client connects");
+	if (management) {
+		int waited = 0;
+
+		/* Wait for the stand-in to have closed, so the command below is written
+		 * to a peer that is certainly gone. */
+		while (!testdir_exists(closed) && waited < 200) {
+			struct timespec step = { 0, 10L * 1000000L };
+
+			(void)nanosleep(&step, NULL);
+			waited++;
+		}
+		check(testdir_exists(closed),
+		    "  and has closed its end before netcfgd writes, which is the point");
+		message[0] = '\0';
+		/*
+		 * **Reaching the next line at all is the assertion.** A process killed
+		 * by SIGPIPE prints nothing and fails no check; it simply stops, and
+		 * the suite exits non-zero with its output ending mid-file.
+		 */
+		int sent = ncfg_openvpn_command(management, "signal SIGTERM", NULL, 0u, message,
+		    sizeof(message));
+
+		check(1, "and netcfgd is still alive after writing to a peer that hung up");
+		/*
+		 * **Not `|| 1`, which the first draft of this line had.** A check that
+		 * cannot fail is worse than no check: it reads as coverage. The command
+		 * must fail here -- either the write meets the closed peer or the reply
+		 * never comes -- and a failure has to carry a sentence, which is this
+		 * tree's rule for every refusal an operator may meet.
+		 */
+		check(!sent && message[0] != '\0',
+		    "  reporting the failure with a sentence rather than being signalled");
+		if (message[0] != '\0') {
+			printf("  said: %s\n", kept(message));
+		}
+		ncfg_openvpn_disconnect(management);
+	}
+	(void)wait_for(child);
+	(void)close(listener);
+	(void)unlink(path);
+}
+
 static void stopping_a_tunnel_that_is_not_there_is_success(const char *base)
 {
 	char run[512];
@@ -831,6 +1135,8 @@ int main(void)
 	a_daemon_that_will_not_start_is_quoted(base);
 	the_greeting_is_not_mistaken_for_an_answer(base);
 	a_daemon_slow_to_exit_is_waited_for(base);
+	a_management_stop_does_not_pull_the_socket_from_the_next_start(base);
+	a_peer_that_closes_mid_command_is_an_error(base);
 	stopping_a_tunnel_that_is_not_there_is_success(base);
 	the_credential_reaches_no_diagnostic(stderr_path);
 
