@@ -4,11 +4,16 @@
 #     sh tests/hull/sandbox/bake-rootfs.sh [DIR]
 #
 # `tests/hull/hwsim/bake-rootfs.sh` carries the argument for baking with docker
-# rather than with `hull build`, and it holds here unchanged: a build step maps
-# one uid, so a maintainer script that gives a file to its own system user
-# cannot, and `systemd-sysv` has several. hull `1b12294` fixed that for an
-# overlay chroot MACHINE and not for a build step, and a machine's overlay is a
-# tmpfs that goes with it, so there is still nowhere to keep the result.
+# rather than with `hull build`, and the part of it this script leaned on has
+# expired: a build step used to map one uid, so a maintainer script that gives
+# a file to its own system user could not, and `systemd-sysv` has several.
+# hull `1b12294` fixed that for an overlay chroot MACHINE and not for a build
+# step -- and hull mapped many uids in a build step from 2026-10-23, measured
+# from here on 2026-10-25 with hwsim's package list installing in one, postinst
+# scripts and all. **This image's own set is not what was measured**, so
+# whether `systemd-sysv` installs in a step is still untested; it is the
+# obvious first thing to try when the rigs move onto built images, which is a
+# pass across all four and not an edit here.
 #
 # **The setuid and setgid bits are put back, which the hwsim image does not
 # need and this one does.** `docker export` through `tar` as an ordinary user

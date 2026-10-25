@@ -23,12 +23,17 @@
 #   host's kernel, where the modules are loaded and registration is global.
 #
 # WHY DOCKER BAKES IT AND NOT HULL
-#   The same reason `tests/hull/hwsim/bake-rootfs.sh` gives at length, and it
-#   is unchanged: packages do not install into a `(mutable overlay)` guest,
+#   The same reason `tests/hull/hwsim/bake-rootfs.sh` gives at length:
+#   packages do not install into a `(mutable overlay)` guest, and
 #   `(mutable direct)` writes through 9p as the host user so dpkg's chown
-#   fails, and a `hull build` step trips over a maintainer script that wants
-#   more than one uid. Replace this with a `(build ...)` form the day that
-#   path works; the machine file does not change when it does.
+#   fails.
+#
+#   **The third reason it gave -- a build step trips over a maintainer script
+#   wanting more than one uid -- is gone, measured 2026-10-25**: that header
+#   has the run. So "replace this with a `(build ...)` form the day that path
+#   works" is now a thing somebody can do, and it is a pass across all four
+#   rigs rather than an edit to one; this script's own package set (`kmod`,
+#   `iproute2`) is the least of what it would move.
 #
 # WHAT IT INSTALLS, AND WHAT IT DELIBERATELY DOES NOT
 #   `kmod` for modprobe, `iproute2` for the control that proves autoload is

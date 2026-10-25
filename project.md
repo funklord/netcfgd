@@ -12498,6 +12498,58 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.556 The bake blocker is gone, measured, and moving is a pass not an edit
+
+hull closed the run-path gap (their `a1b6dd2`, 2026-10-25) and pointed out that
+the thing this tree had named as what would actually move it -- a `hull build`
+step whose maintainer script wants more than one uid -- has worked on their
+chroot engine since 2026-10-23. **That half is testable here, so it was tested
+rather than relayed**, which is 10.555's lesson applied the same day it was
+learned.
+
+### What was measured
+
+netcfgd's exact hwsim package list in a `(build ...)` step with
+`(network true)`, on hull `a5c1f58-dirty` -- the stale local binary, which
+matters because the multi-uid work predates it and `a1b6dd2` does not:
+
+    build-essential kmod iw wpasupplicant iproute2 dnsmasq-base
+    dhcpcd-base iputils-ping
+
+Exit 0, `PACKAGES-OK`, every binary the bake's own loop checks present, and
+**`dnsmasq-base`'s postinst among the ones that ran**. So the snag recorded in
+`hwsim/bake-rootfs.sh` since 2026-10-22 is gone.
+
+The stored manifest then carries what a `docker export` cannot: **eight files
+at mode 04755** (`2541` as the manifest writes it) and the non-root owners
+`uid 42`, `999` and `65534`. The bake restores modes with `chmod` from the
+image's own listing and cannot restore an owner at all, which is the gap
+10.555 measured from the guest's side.
+
+One warning came with it: apt says its download sandbox is disabled because
+`_apt` cannot reach the partial directory, so fetching runs as root.
+Immaterial for a test image, not for anything shipped, and told to hull since
+it is about their id mapping.
+
+### What is still not measured, and whose claim it is
+
+**Owners appearing inside a vm.** That is `a1b6dd2`, hull's report of
+2026-10-25, and the local binary predates it -- so the payoff of moving is
+hull's claim and not this tree's measurement. The three bake headers now say
+which half is which.
+
+### Why nothing moved yet
+
+A bare source names a stored ref (`(source "netcfgd/hwsim")`), so the
+conversion is mechanical in shape and tier-wide in reach: four `hull.conf`
+sources, four bake scripts deleted, `hull-image` and `hull-clean` rewritten
+around `hull build`, the docker dependency dropped from the test tier, and all
+four rigs re-run to prove it. That is a deliberate pass, not an edit to make
+while correcting a comment in one of them -- and the ownership half of its
+payoff waits on a hull nobody here has rebuilt. Raised with the holder
+2026-10-25 with that cost attached; the headers carry the measurement either
+way, so the next session does not re-derive it.
+
 ## 10.555 What a guest sees of ownership, and a claim here that was wrong
 
 hull reported on 2026-10-25 (its `f82403d`) that a **stored** tree now gets

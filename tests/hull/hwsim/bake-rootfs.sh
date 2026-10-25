@@ -15,6 +15,28 @@
 #   step maps one uid, so a maintainer script giving a file to its own system
 #   user cannot, which is hull's own "many uids" question.
 #
+#   **That third snag is gone, measured 2026-10-25 on hull `a5c1f58-dirty`.**
+#   hull mapped many uids on its chroot engine from 2026-10-23, and this exact
+#   package list -- `build-essential kmod iw wpasupplicant iproute2
+#   dnsmasq-base dhcpcd-base iputils-ping` -- installs in a `(build ...)` step
+#   with `(network true)`: exit 0, every binary the loop below checks present,
+#   `dnsmasq-base`'s postinst among the ones that ran. The stored manifest
+#   carries what this script cannot: eight files at mode 04755 and the non-root
+#   owners (`uid 42`, `999`, `65534`), where a `docker export` through `tar -x`
+#   as a user drops both and the chmod below puts only the modes back.
+#
+#   One warning came with it and is worth knowing rather than chasing: apt
+#   reports its download sandbox disabled because `_apt` cannot reach the
+#   partial directory, so fetching happens as root. For a test image that is
+#   immaterial; for anything shipped it would not be.
+#
+#   **So this script stays for now by inertia rather than by argument**, and
+#   moving the four rigs onto built images is a deliberate pass rather than a
+#   change to make while editing one of them: every rig's source changes, the
+#   bake scripts go, the Makefile's image targets change, and the ownership
+#   half only pays off on a hull carrying `a1b6dd2` (hull's own report of
+#   2026-10-25, not measured here). Raised with the holder on that date.
+#
 #   **A fourth snag was claimed here and was mine.** The step first reported
 #   four of seven packages "unable to locate", which read as hull's. A build
 #   step is offline unless it says `(network true)`, which that one did not,
