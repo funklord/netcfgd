@@ -161,4 +161,9 @@ if [ "$failures" -gt 0 ]; then
 	echo "run.sh: $failures state(s) failed"
 	exit 1
 fi
-echo "run.sh: all three states behaved as the autoload-blocked rig predicts"
+# **Not "all three", and not all about the rig.** k0, k1 and k2 are the
+# comparison with `tests/hull/natcap/`; k3 asks a different question -- what a
+# kernel that can make a bridge and cannot filter it tells an operator -- and
+# saying otherwise would file its result under a claim it does not support.
+echo "run.sh: four states as expected: three agreeing with the autoload-blocked"
+echo "run.sh:   rig on NAT, and the bridge naming the option it was built without"
