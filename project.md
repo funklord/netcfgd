@@ -12557,6 +12557,34 @@ and that `ncfg_apply_optional(NULL)` is required rather than optional.
 that had to be **inverted**: it used to assert `skip addr.add wan0` as the
 cost worth recording, and now asserts that the address applies, that nothing
 is skipped behind the shaping, and that the failed action is marked `red`.
+Measured there, 40 checks, on a kernel whose `ifb` is unreachable:
+
+    red  link.create ifb-wan0        ok   link.create wan0
+    red  link.up ifb-wan0            ok   link.up wan0
+    red  qdisc.set ifb-wan0          ok   addr.add wan0
+    ncfg: 3 done, 1 unmet: the rest of the plan applied and what failed is
+    listed above, red
+
+**`link.up ifb-wan0` being red is the part that justifies reading the
+prefix.** It carries a name and no kind, so without that arm it would have
+been a required failure one action after the create -- the same stop, moved
+along by one, which is what 0293 says and this is it happening.
+
+### And hull's overlay fix landed, so 10.558's figure is history
+
+hull's `6c0242c`, the same day: a stored source with owners gets a guest
+overlay over the host-side merged tree rather than a plain 9p root. Re-probed
+with the same 200 MB write:
+
+    before, 9p root        3655 ms
+    after, overlay root     373 ms
+
+So the asymmetry is closed upstream and both of 10.558's findings -- the slow
+writes and the missing module place -- go with it, having been one cause. The
+payloads keep their tmpfs and the specs keep naming the module volume: a rig
+that owns the filesystem it writes to does not depend on which runtime version
+it meets, and the volume names a dependency that was invisible before. Neither
+is load-bearing now, and both are cheap.
 
 ### What the holder has not been asked to decide, and is not being asked
 
