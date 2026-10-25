@@ -128,6 +128,16 @@ void ncfg_cli_print_journal(const ncfg_journal_t *journal)
 		case NCFG_OUTCOME_FAILED:
 			mark = "FAIL";
 			break;
+		case NCFG_OUTCOME_UNMET:
+			/*
+			 * **`red ` rather than a second `FAIL`**, which is 0287's own
+			 * word for it: this part of the configuration is not in effect
+			 * and everything around it applied. A reader scanning the column
+			 * needs the two to differ, because one of them means the plan
+			 * stopped and the other does not.
+			 */
+			mark = "red ";
+			break;
 		case NCFG_OUTCOME_REVERTED:
 			/*
 			 * Not reachable from `ncfg apply`, which never reverts -- the

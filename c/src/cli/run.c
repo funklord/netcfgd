@@ -1914,10 +1914,29 @@ static int command_apply(const ncfg_cli_options_t *options)
 		const ncfg_record_t *failure = ncfg_journal_failure(&journal);
 
 		if (!options->json) {
-			(void)failf("stopped at action %u (%s); %zu done, %zu not attempted",
+			(void)failf("stopped at action %u (%s); %zu done, %zu unmet, "
+			    "%zu not attempted",
 			    (unsigned)failure->id, failure->op ? failure->op : "an action",
-			    ncfg_journal_done(&journal), ncfg_journal_skipped(&journal));
+			    ncfg_journal_done(&journal), ncfg_journal_unmet(&journal),
+			    ncfg_journal_skipped(&journal));
 			(void)fail("re-run `ncfg apply` to resume from current state");
+		}
+		code = NCFG_CLI_EXIT_FAILED;
+	} else if (ncfg_journal_unmet(&journal) > 0) {
+		/*
+		 * **An apply that finished with something red is not a success**,
+		 * and without this arm it would have exited 0: `ncfg_journal_failure`
+		 * answers for the action that *stopped* the plan, and an unmet one
+		 * by definition did not stop it (0293). The journal's own
+		 * `succeeded` already counts unmet as a failure, so this is the
+		 * caller catching up with it rather than a second opinion.
+		 */
+		if (!options->json) {
+			(void)failf("%zu done, %zu unmet: the rest of the plan applied and "
+			    "what failed is listed above, red",
+			    ncfg_journal_done(&journal), ncfg_journal_unmet(&journal));
+			(void)fail("the machine is configured apart from those; re-run "
+			    "`ncfg apply` once the kernel or the hardware can carry them");
 		}
 		code = NCFG_CLI_EXIT_FAILED;
 	}

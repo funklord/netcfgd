@@ -583,7 +583,12 @@ static void a_failing_action_stops_the_apply(void)
 	    "and prints the sentence the executor gave for it");
 	line_starting(said, "skip hostname.set  globals.hostname: netcfgd-c-port-fixture (was ",
 	    "and marks what it did not attempt");
-	line(complaint, "ncfg: stopped at action 0 (dns.apply); 0 done, 1 not attempted",
+	/* **Three counts since 0293**, the middle one being the actions that
+	 * failed and let the plan carry on: a summary that reported only `done`
+	 * and `not attempted` would call a plan with two red actions a clean
+	 * stop at one. */
+	line(complaint,
+	    "ncfg: stopped at action 0 (dns.apply); 0 done, 0 unmet, 1 not attempted",
 	    "the diagnostic counts what happened");
 	line(complaint, "ncfg: re-run `ncfg apply` to resume from current state",
 	    "and says what to do about it");

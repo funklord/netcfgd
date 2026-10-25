@@ -627,6 +627,14 @@ static void replan_onto_last_good(ncfg_daemon_state_t *state, const ncfg_executo
 		ncfg_log_emitf("confirm", NCFG_LOG_ERROR, "revert incomplete: %s failed: %s",
 		    failure->op ? failure->op : "an action",
 		    failure->error ? failure->error : "no detail");
+	} else if (ncfg_journal_unmet(&journal) > 0) {
+		/* A revert is the one apply nobody is watching -- the window closed
+		 * unconfirmed and this is the way back -- so an action the way back
+		 * could not carry out is said rather than counted silently (0293). */
+		ncfg_log_emitf("confirm", NCFG_LOG_WARNING,
+		    "revert left %zu action(s) unmet; the control path is back and that "
+		    "part of the last-good configuration is not",
+		    ncfg_journal_unmet(&journal));
 	}
 	ncfg_journal_free(&journal);
 	ncfg_plan_free(plan);

@@ -183,6 +183,78 @@ static int creatable(const ncfg_interface_kind_t *kind, const char *name, char *
  * above buys is a named omission in the build log, which is worth having and
  * is not a gate.
  */
+/*
+ * **The `ifb-` prefix is netcfgd's own, and this is the one place it is read
+ * as a fact about why a device exists.**
+ *
+ * `lower.c` names an ingress shaper's device `ifb-<interface>` and nothing
+ * else in this port creates an `ifb` at all, so a link op on such a name is
+ * an op that exists to carry shaping. `render_device.c`'s `our_ifb_name`
+ * already reads the prefix the same way.
+ *
+ * It is needed because the ops that follow the create carry a name and no
+ * kind: `link.up ifb-wan0` is a `named` op like any other, and classifying
+ * only the create would leave the plan stopping one action later for the same
+ * missing module -- which is the failure 0292 measured, moved along by one.
+ */
+static int ifb_device(const char *name)
+{
+	return name != NULL && strncmp(name, "ifb-", 4u) == 0;
+}
+
+int ncfg_apply_optional(const ncfg_op_t *op)
+{
+	if (!op) {
+		return 0;
+	}
+	switch ((ncfg_op_kind_t)op->kind) {
+	/*
+	 * **Queuing and translation: the interface works without them.** A
+	 * kernel with no `sch_cake` carries traffic unshaped, and one with no
+	 * `nft_chain_nat` carries the host's own traffic exactly as before -- so
+	 * a plan that cannot do these should still address the interface and
+	 * install its routes, which is what 0288 cares about. Each of these also
+	 * has a capability sentence measured in `tests/hull/natcap/`, which is
+	 * what makes a red row say something.
+	 */
+	case NCFG_OP_QDISC_SET:
+	case NCFG_OP_QDISC_RESET:
+	case NCFG_OP_INGRESS_REDIRECT:
+	case NCFG_OP_INGRESS_REDIRECT_CLEAR:
+	case NCFG_OP_NAT_REPLACE:
+		return 1;
+	/*
+	 * **Offload tuning changes how fast, not whether.** A driver that
+	 * refuses a feature refuses the whole request and nothing changes
+	 * (`ncfg_kernel_hint`), which is a performance difference and never a
+	 * reachability one.
+	 */
+	case NCFG_OP_LINK_SET_OFFLOADS:
+		return 1;
+	/*
+	 * The `ifb` device and its state, which exist only for ingress shaping.
+	 * A create carries its kind; the rest carry a name, so both are read.
+	 */
+	case NCFG_OP_LINK_CREATE:
+		return op->u.link_create.kind != NULL &&
+		    op->u.link_create.kind->kind == NCFG_KIND_IFB;
+	case NCFG_OP_LINK_DELETE:
+	case NCFG_OP_LINK_UP:
+	case NCFG_OP_LINK_DOWN:
+		return ifb_device(op->u.named.name);
+	default:
+		/*
+		 * **Required, which is where everything else stays until somebody
+		 * decides otherwise.** Addresses, routes, links, policy rules,
+		 * bridge vlans, sysctls, the backends and the wireless ops are all
+		 * things an operator may be reaching netcfgd over. 0293 has the
+		 * argument for the line being here rather than further out, and
+		 * what it would take to move it.
+		 */
+		return 0;
+	}
+}
+
 int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 {
 	if (!op) {
@@ -396,8 +468,22 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 			}
 			message[0] = '\0';
 		} else {
-			stopped = 1;
-			record.outcome = NCFG_OUTCOME_FAILED;
+			/*
+			 * **An optional action's failure is its own, and the plan goes
+			 * on.** 0293, after 0292 measured what the alternative costs:
+			 * ingress shaping on a kernel with no `ifb` failed at action 0
+			 * and took the interface's address with it, seven actions
+			 * skipped behind a feature nothing else depended on.
+			 *
+			 * `stopped` stays clear, so the next iteration runs rather
+			 * than journaling a skip -- and an action that genuinely
+			 * depended on this one fails on its own account, with the
+			 * kernel's own reason, rather than being guessed at here.
+			 */
+			int optional = ncfg_apply_optional(&action->op);
+
+			stopped = optional ? stopped : 1;
+			record.outcome = optional ? NCFG_OUTCOME_UNMET : NCFG_OUTCOME_FAILED;
 			/* An executor that failed without saying why is a defect in that
 			 * executor, and a journal entry reading `"error":null` beside
 			 * `"outcome":"failed"` is what makes it visible instead of
@@ -405,13 +491,17 @@ static int run_plan(const ncfg_plan_t *plan, const ncfg_executor_t *executor,
 			record.error = message[0] ? message : "the executor failed and said nothing";
 			/*
 			 * At `ERROR`, carrying the executor's own words -- and saying
-			 * that the rest of the plan stops here, which is the part an
-			 * operator cannot infer from a single failed line.
+			 * what became of the rest of the plan, which is the part an
+			 * operator cannot infer from a single failed line. Both arms say
+			 * it, because "the rest continues" is as much news as "the rest
+			 * is skipped" and the difference is the whole of this change.
 			 */
 			if (narrates) {
 				ncfg_log_aboutf("apply", record.interface, NCFG_LOG_ERROR,
-				    "%s failed: %s -- the rest of this plan is skipped",
-				    record.op, record.error);
+				    "%s failed: %s -- %s", record.op, record.error,
+				    optional ? "this part of the configuration is not in "
+				    "effect and the rest of the plan continues"
+				    : "the rest of this plan is skipped");
 			}
 		}
 		ncfg_journal_push(journal, &record);

@@ -156,6 +156,8 @@ const char *ncfg_outcome_name(int outcome)
 		return "failed";
 	case NCFG_OUTCOME_SKIPPED:
 		return "skipped";
+	case NCFG_OUTCOME_UNMET:
+		return "unmet";
 	case NCFG_OUTCOME_REVERTED:
 		return "reverted";
 	}
@@ -221,6 +223,11 @@ const ncfg_record_t *ncfg_journal_failure(const ncfg_journal_t *journal)
 size_t ncfg_journal_done(const ncfg_journal_t *journal)
 {
 	return counted(journal, NCFG_OUTCOME_DONE);
+}
+
+size_t ncfg_journal_unmet(const ncfg_journal_t *journal)
+{
+	return counted(journal, NCFG_OUTCOME_UNMET);
 }
 
 size_t ncfg_journal_skipped(const ncfg_journal_t *journal)

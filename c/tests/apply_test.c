@@ -855,6 +855,171 @@ static void journal_of(ncfg_journal_t *journal, const ncfg_plan_t *plan, const i
  * netcfgd taking back a change it never made -- on a machine that is already in
  * the state a revert exists to rescue.
  */
+/*
+ * **The standing of an optional action, 0293.** A `qdisc.set` the kernel
+ * cannot carry out leaves the rest of the plan running, where a `link.set_mtu`
+ * that fails stops it -- so these two tests are the same plan twice with the
+ * first action swapped, which is the only way to show that the continuing is
+ * the op's property and not the loop having stopped failing.
+ */
+static void qdisc_op(ncfg_op_t *op)
+{
+	memset(op, 0, sizeof(*op));
+	op->kind = NCFG_OP_QDISC_SET;
+	op->u.qdisc.iface = "e0";
+	op->u.qdisc.kind = "cake";
+	op->u.qdisc.ingress = 0;
+}
+
+/* A two-action plan: `first`, then an MTU change that must or must not run. */
+static ncfg_plan_t *two_actions(const ncfg_op_t *first)
+{
+	char          message[NCFG_ERROR_MAX];
+	ncfg_plan_t  *plan = ncfg_plan_new(message, sizeof(message));
+	ncfg_reason_t reason;
+	ncfg_op_t     second;
+
+	if (!plan) {
+		return NULL;
+	}
+	memset(&reason, 0, sizeof(reason));
+	reason.interface = "e0";
+	reason.field = "qdisc";
+	(void)ncfg_plan_add(plan, first, &reason, NULL, 0, NULL);
+	mtu_op(&second, 1400);
+	reason.field = "mtu";
+	(void)ncfg_plan_add(plan, &second, &reason, NULL, 0, NULL);
+	return plan;
+}
+
+static void an_optional_failure_leaves_the_rest_of_the_plan_running(void)
+{
+	ncfg_executor_t executor;
+	recorder_t      recorder;
+	ncfg_journal_t  journal;
+	ncfg_op_t       optional;
+	char            message[NCFG_ERROR_MAX];
+	ncfg_plan_t    *plan;
+
+	qdisc_op(&optional);
+	plan = two_actions(&optional);
+	recorder_init(&recorder, &executor);
+	recorder.fail_at = 0;
+	recorder.failure = "this kernel has no such scheduler";
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	check(plan && ncfg_apply(plan, &executor, &journal, message, sizeof(message)),
+	    "a plan whose optional first action fails still produces a journal");
+	/*
+	 * **The point of the whole change**: the second action was asked for. The
+	 * measured cost of the old behaviour was an interface losing its address
+	 * because ingress shaping could not be set up (0292).
+	 */
+	sequence_is(&recorder, "qdisc.set e0,link.set_mtu e0 1400",
+	    "and the action after it is still asked for");
+	check(ncfg_journal_unmet(&journal) == 1u, "the failure is recorded as unmet");
+	check(ncfg_journal_done(&journal) == 1u, "the action that followed is done");
+	check(ncfg_journal_skipped(&journal) == 0u, "and nothing is skipped");
+	check(!ncfg_journal_succeeded(&journal),
+	    "the journal does not claim success: unmet is a failure the plan outlived");
+	check(ncfg_journal_failure(&journal) == NULL,
+	    "and `journal_failure` answers for what STOPPED the plan, which is nothing");
+	check(journal.records[0].error &&
+	    strcmp(journal.records[0].error, "this kernel has no such scheduler") == 0,
+	    "the executor's own sentence is kept, since that is what names the remedy");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+static void a_required_failure_still_stops_the_plan(void)
+{
+	ncfg_executor_t executor;
+	recorder_t      recorder;
+	ncfg_journal_t  journal;
+	ncfg_op_t       required;
+	char            message[NCFG_ERROR_MAX];
+	ncfg_plan_t    *plan;
+
+	/* The same plan with a required op first -- the control without which the
+	 * test above shows only that the loop no longer stops at all. */
+	mtu_op(&required, 9000);
+	plan = two_actions(&required);
+	recorder_init(&recorder, &executor);
+	recorder.fail_at = 0;
+	recorder.failure = "Invalid argument";
+	ncfg_journal_init(&journal);
+	message[0] = '\0';
+	check(plan && ncfg_apply(plan, &executor, &journal, message, sizeof(message)),
+	    "a plan whose required first action fails produces a journal too");
+	sequence_is(&recorder, "link.set_mtu e0 9000",
+	    "  and nothing after it is asked for, as before");
+	check(ncfg_journal_unmet(&journal) == 0u, "nothing is unmet");
+	check(ncfg_journal_skipped(&journal) == 1u, "the action behind it is skipped");
+	check(ncfg_journal_failure(&journal) != NULL, "and the failure is the stopping kind");
+	ncfg_journal_free(&journal);
+	ncfg_plan_free(plan);
+}
+
+static void which_ops_may_be_left_unmet(void)
+{
+	ncfg_op_t             op;
+	ncfg_interface_kind_t ifb;
+	ncfg_interface_kind_t dummy;
+
+	memset(&ifb, 0, sizeof(ifb));
+	ifb.kind = NCFG_KIND_IFB;
+	memset(&dummy, 0, sizeof(dummy));
+	dummy.kind = NCFG_KIND_DUMMY;
+
+	qdisc_op(&op);
+	check(ncfg_apply_optional(&op) == 1, "a qdisc is optional: traffic flows unshaped");
+	op.kind = NCFG_OP_INGRESS_REDIRECT;
+	check(ncfg_apply_optional(&op) == 1, "  so is the ingress redirect behind it");
+	op.kind = NCFG_OP_NAT_REPLACE;
+	check(ncfg_apply_optional(&op) == 1,
+	    "  and NAT, which the host's own traffic does not need");
+	op.kind = NCFG_OP_LINK_SET_OFFLOADS;
+	check(ncfg_apply_optional(&op) == 1, "  and offload tuning, which is how fast");
+
+	mtu_op(&op, 1400);
+	check(ncfg_apply_optional(&op) == 0, "an MTU is not: it is the interface itself");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_ADDR_ADD;
+	check(ncfg_apply_optional(&op) == 0,
+	    "nor an address, which is what an operator reaches netcfgd over (0288)");
+	op.kind = NCFG_OP_ROUTE_ADD;
+	check(ncfg_apply_optional(&op) == 0, "nor a route");
+	op.kind = NCFG_OP_RULE_ADD;
+	check(ncfg_apply_optional(&op) == 0,
+	    "nor a policy rule, which may be what carries the management path");
+
+	/*
+	 * **The `ifb` device, which is the case 0292 measured.** The create
+	 * carries its kind and the rest carry a name, so both are read -- and
+	 * classifying only the create would move the stop along by one action
+	 * rather than removing it.
+	 */
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_CREATE;
+	op.u.link_create.name = "ifb-wan0";
+	op.u.link_create.kind = &ifb;
+	check(ncfg_apply_optional(&op) == 1, "creating an ifb is optional: it carries shaping");
+	op.u.link_create.kind = &dummy;
+	op.u.link_create.name = "wan0";
+	check(ncfg_apply_optional(&op) == 0, "creating anything else is not");
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_LINK_UP;
+	op.u.named.name = "ifb-wan0";
+	check(ncfg_apply_optional(&op) == 1, "bringing an ifb up is optional as well");
+	op.u.named.name = "wan0";
+	check(ncfg_apply_optional(&op) == 0, "  and bringing a real interface up is not");
+	check(ncfg_apply_optional(NULL) == 0, "and nothing at all is required, not optional");
+
+	check(ncfg_outcome_name(NCFG_OUTCOME_UNMET) &&
+	    strcmp(ncfg_outcome_name(NCFG_OUTCOME_UNMET), "unmet") == 0,
+	    "the word the journal and `plan.last.json` carry is `unmet`");
+}
+
 static void only_done_actions_with_an_inverse_are_undone(void)
 {
 	static const int64_t inverses[] = { 1500, 1200, 1100, 0 };
@@ -2894,6 +3059,9 @@ int main(void)
 	a_failure_is_on_the_log_as_one();
 
 	only_done_actions_with_an_inverse_are_undone();
+	an_optional_failure_leaves_the_rest_of_the_plan_running();
+	a_required_failure_still_stops_the_plan();
+	which_ops_may_be_left_unmet();
 	the_inverses_run_newest_first();
 	an_inverse_that_fails_does_not_stop_the_revert();
 	a_hook_is_not_undone_and_a_revert_is_not_repeated();

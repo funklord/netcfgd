@@ -12498,6 +12498,78 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.560 An optional action is red on its own, and the rest of the plan runs
+
+"do the standing thing for optional ops then", the copyright holder,
+2026-10-25, closing the question 10.554 raised. Decision 0293 has the
+reasoning; this is what changed and what it is worth.
+
+### What it cost before
+
+    FAIL link.create ifb-wan0   kind: ifb
+    skip link.create wan0       kind: dummy
+    skip addr.add wan0          addressing[0]: 10.9.9.2/24
+    ... four more skipped
+    ncfg: stopped at action 0 (link.create); 0 done, 7 not attempted
+
+**An interface lost its address because the kernel could not shape its
+ingress.** Nothing in the plan depended on the shaping; the plan stopped at
+its first failure and the shaping happened to be first.
+
+### What it does now
+
+`ncfg_apply_optional` classifies an action, and the default is required. The
+list is short and every member has a measured capability sentence behind it:
+`qdisc.set`, `qdisc.reset`, `ingress.redirect`, `ingress.redirect.clear`,
+`nat.replace`, `link.set_offloads`, and link ops on an `ifb` device -- the
+device netcfgd creates only to carry ingress shaping, read by its `ifb-`
+prefix as `render_device.c` already reads it.
+
+An optional action's failure is journaled `NCFG_OUTCOME_UNMET`, the executor
+carries on, and anything that genuinely depended on it fails on its own
+account with the kernel's own reason rather than being guessed at. The same
+plan now reports:
+
+    ok   link.create wan0,  ok  link.up wan0,  ok  addr.add wan0
+    red  link.create ifb-wan0
+    ncfg: 3 done, 1 unmet: the rest of the plan applied and what failed is
+    listed above, red
+
+**Unmet is a failure and not a success with a note**, which is where a change
+like this goes wrong: `ncfg apply` exits non-zero, `ncfg_journal_succeeded`
+is false by construction (it admits only `done` and `reverted`), and the
+summary counts it. Three reporting sites had to catch up, because
+`ncfg_journal_failure` answers for the action that *stopped* the plan and an
+unmet one by definition did not -- the CLI would have exited 0, and a
+reconcile pass or a revert that left something red said nothing at all.
+
+### What the tests hold, and the one that is the control
+
+`apply_test` runs the same two-action plan twice with the first action
+swapped: a `qdisc.set` that fails lets the `link.set_mtu` behind it run, and a
+`link.set_mtu` that fails still stops it. **The second is the control** --
+without it the first shows only that the loop has stopped stopping. The
+classification is checked member by member, including that an `ifb` create and
+an `ifb` link-up are optional while the same ops on a real interface are not,
+and that `ncfg_apply_optional(NULL)` is required rather than optional.
+
+`tests/hull/natcap/` carries the end-to-end proof, and the check there is one
+that had to be **inverted**: it used to assert `skip addr.add wan0` as the
+cost worth recording, and now asserts that the address applies, that nothing
+is skipped behind the shaping, and that the failed action is marked `red`.
+
+### What the holder has not been asked to decide, and is not being asked
+
+0287 wants an operator able to pin a rule as expected-unsupported so its red
+stops being noise, and the mirror want is marking something netcfgd thinks
+optional as required-for-me. Neither is built: the classification is
+netcfgd's own, which is defensible precisely because the list is short. A
+reconcile retries a red action every pass and logs one line each time, which
+is correct -- the state is idempotent and a kernel upgrade fixes it -- but
+whether it should go quiet needs standing remembered across passes, which is
+0287's own open question. Ordering is untouched: an optional action can still
+run before a required one, and nothing now depends on it not doing so.
+
 ## 10.559 The kernel tier drives hull, and a stale daemon cost a day
 
 hull built `(kernel "path:FILE")` for its qemu engine (`0a7b73d`), which is

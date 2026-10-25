@@ -902,4 +902,15 @@ netcfgd
 # figure is small enough to feel silly and that is this file's whole argument:
 # the entry four above exists because 22,224 bytes arrived in steps each too
 # small to bother with.
-total 1185200
+# Then an optional action's own standing, 2026-10-25, +88 bytes to 1,185,208.
+#
+# `ncfg_apply_optional`'s switch, a fifth outcome word, a counter for it, and
+# four reporting sites that had to learn the difference between an action that
+# stopped the plan and one the plan outlived (0293). Eighty-eight bytes for a
+# behavioural change that keeps an interface's address when its shaping cannot
+# be set up, which is the cheapest thing in this file by a distance.
+#
+# Recorded at 1185300 rather than left to ride the tolerance by 8 bytes. The
+# figure is absurd and the rule is not: the entry six above exists because
+# 22,224 bytes arrived in steps each too small to bother with.
+total 1185300

@@ -999,14 +999,33 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 		const ncfg_record_t *failure = ncfg_journal_failure(&journal);
 
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR,
-		    "reconcile stopped at %s: %s; %zu done, %zu not attempted", failure->op,
-		    failure->error ? failure->error : "no detail", ncfg_journal_done(&journal),
+		    "reconcile stopped at %s: %s; %zu done, %zu unmet, %zu not attempted",
+		    failure->op, failure->error ? failure->error : "no detail",
+		    ncfg_journal_done(&journal), ncfg_journal_unmet(&journal),
 		    ncfg_journal_skipped(&journal));
+	} else if (ncfg_journal_unmet(&journal) > 0) {
+		/*
+		 * **A pass that left something red said nothing at all without
+		 * this**, which is the same gap the sentence above was written for
+		 * one case earlier: `ncfg_journal_failure` answers for the action
+		 * that stopped the pass, and an unmet one did not stop it (0293).
+		 * One line rather than one per action, since the per-action detail
+		 * is already in the journal and in `plan.last.json`.
+		 */
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "reconcile left %zu action(s) unmet; %zu done. This part of the "
+		    "configuration is not in effect and the rest of the pass applied",
+		    ncfg_journal_unmet(&journal), ncfg_journal_done(&journal));
 	}
 	report->reconciled = 1;
 	report->actions_done = ncfg_journal_done(&journal);
-	(void)snprintf(summary, sizeof(summary), "reconciled %zu actions",
-	    ncfg_journal_done(&journal));
+	if (ncfg_journal_unmet(&journal) > 0) {
+		(void)snprintf(summary, sizeof(summary), "reconciled %zu actions, %zu unmet",
+		    ncfg_journal_done(&journal), ncfg_journal_unmet(&journal));
+	} else {
+		(void)snprintf(summary, sizeof(summary), "reconciled %zu actions",
+		    ncfg_journal_done(&journal));
+	}
 	announce_summary(&loop->world, summary);
 
 	ncfg_journal_free(&journal);
@@ -1301,6 +1320,12 @@ int ncfg_reconcile_converge(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *rep
 
 		ncfg_log_emitf("apply", NCFG_LOG_ERROR, "%s failed: %s", failure->op,
 		    failure->error ? failure->error : "no detail");
+	} else if (ncfg_journal_unmet(&journal) > 0) {
+		/* The same catching-up as above: an unmet action is a failure the
+		 * plan outlived, and `journal_failure` does not answer for it. */
+		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
+		    "%zu action(s) unmet; the rest of this apply went through",
+		    ncfg_journal_unmet(&journal));
 	}
 	for (at = 0; at < plan->refusal_count; at++) {
 		ncfg_log_emitf("apply", NCFG_LOG_WARNING, "refused %s on %s -- %s depends on it",

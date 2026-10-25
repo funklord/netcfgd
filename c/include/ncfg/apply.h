@@ -107,6 +107,28 @@ typedef enum {
 	/* It never ran, because something before it failed. */
 	NCFG_OUTCOME_SKIPPED,
 	/*
+	 * It ran and failed, and the plan went on without it.
+	 *
+	 * **The standing of a part of the configuration that is not in effect**,
+	 * where `FAILED` is that plus "and everything after it stopped". 0287
+	 * asks for a rule that can be red while its neighbours apply, and 0292
+	 * measured what makes that necessary: asking for ingress shaping on a
+	 * kernel with no `ifb` used to cost the interface its address, because
+	 * the shaping failed at action 0 and seven actions including `addr.add`
+	 * were skipped behind it.
+	 *
+	 * An action is eligible by `ncfg_apply_optional`, which is a short and
+	 * deliberately conservative list: the interface has to be usable without
+	 * the thing that failed. The outcome says nothing about the cause -- a
+	 * missing kernel construct and a typo in a rate produce the same word --
+	 * because what an operator acts on is the hint beside it.
+	 *
+	 * It is not a success: the apply's exit status is a failure and the
+	 * journal counts it, for the reason `evidence.md` gives about a check
+	 * whose pass includes the failure.
+	 */
+	NCFG_OUTCOME_UNMET,
+	/*
 	 * It ran, and a revert has since put it back.
 	 *
 	 * **A divergence from the Rust**, which has three outcomes and records a
@@ -122,6 +144,22 @@ typedef enum {
  * convention: a plausible word for an outcome that is not one is worse than
  * no word. */
 const char *ncfg_outcome_name(int outcome);
+
+/*
+ * Whether this action's failure may leave the rest of the plan running.
+ *
+ * 1 for an op the interface is usable without -- shaping, NAT, offload
+ * tuning, and the `ifb` device that exists only to carry ingress shaping --
+ * and 0 for everything else, which includes every op the control path rests
+ * on: links, addresses, routes, rules, the backends.
+ *
+ * **The list is short on purpose and the default is required.** 0288 settled
+ * that netcfgd cannot be trusted to know which link keeps an operator
+ * connected, so the question this answers is the narrow one it can: is the
+ * interface still usable with this op's work absent. Widening it is a
+ * decision rather than a tidy-up, and 0293 records why each member is in it.
+ */
+int ncfg_apply_optional(const ncfg_op_t *op);
 
 /*
  * One line of the journal.
@@ -197,6 +235,10 @@ const ncfg_record_t *ncfg_journal_failure(const ncfg_journal_t *journal);
 /* How many ran and succeeded, never ran, and have since been put back. */
 size_t ncfg_journal_done(const ncfg_journal_t *journal);
 size_t ncfg_journal_skipped(const ncfg_journal_t *journal);
+/* How many ran, failed, and let the plan go on -- `NCFG_OUTCOME_UNMET`. A
+ * caller that reports only `done` and `skipped` would call a plan with three
+ * of these a complete success, which is the shape `evidence.md` warns about. */
+size_t ncfg_journal_unmet(const ncfg_journal_t *journal);
 size_t ncfg_journal_reverted(const ncfg_journal_t *journal);
 
 /*

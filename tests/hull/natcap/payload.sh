@@ -300,13 +300,17 @@ check "  the ifb device is what it stops at, before any filter" \
 	"$(said 'could not create ifb-wan0')" yes
 check "  and the sentence names the kind's module rather than the errno alone" \
 	"$(said 'ifb` for ingress shaping')" yes
-# **The cost, recorded as a check so it cannot drift quietly.** The plan dies
-# at action 0, so the address on wan0 -- which has nothing to do with shaping
-# -- is never applied. That is apply's documented first-failure behaviour
-# meeting an optional feature, and it is the case 0287's per-rule standing
-# exists for; see project.md 10.554.
-check "  the address is skipped with it, which is the finding worth keeping" \
-	"$(said 'skip addr.add wan0')" yes
+# **The thing 0293 changed, asserted from the outside.** This check used to
+# say the opposite: the plan died at action 0 and the address on wan0 -- which
+# has nothing to do with shaping -- was never applied, seven actions skipped
+# behind a feature nothing else depended on. An optional action's failure is
+# its own now, so the address applies and the shaping is red.
+check "  the address applies anyway, which is what 0293 changed" \
+	"$(said 'ok   addr.add wan0')" yes
+check "  nothing is skipped behind the shaping" "$(said 'skip ')" no
+check "  and the failed action is marked red rather than FAIL" \
+	"$(said 'red  link.create ifb-wan0')" yes
+check "  with the summary saying how many went unmet" "$(said 'unmet')" yes
 
 echo
 echo "--- ingress shaping with the ifb device available and the filter path not"
