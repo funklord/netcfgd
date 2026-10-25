@@ -12498,6 +12498,74 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.562 Layer one has a grammar, and it is the only thing 0294 decides
+
+"go ahead", the copyright holder, 2026-10-25, on starting 0283's five layers
+with the design record and the first layer. Decision 0294 is that record.
+
+**0284 deliberately decided none of the grammar** -- it exists so that the rule
+language, the precedence between layers and the carve-out syntax are not
+"answered by accident while something else is being implemented". So 0294
+answers layer one only, and says which of those it is not touching.
+
+### What it settles
+
+    firewall {
+        input {
+            policy = "drop"
+            accept "ssh"         { protocol = "tcp"; port = [22] }
+            accept "established" { state = ["established", "related"] }
+            drop   "netbios"     { protocol = "udp"; port = [137, 138] }
+        }
+        forward { policy = "drop" }
+        output  { policy = "accept" }
+    }
+
+**The action is the keyword and the name is the identity.** `rule` is already
+policy routing's word in this language (`interface eth0 { rules = "..." }`),
+and `code-style.md` asks for one word per concept; and 0287 needs a rule to
+carry its own standing, which a position in a list cannot be -- inserting a
+rule above it renames everything below. The name renders as the subject key
+`firewall:input/ssh`.
+
+The match vocabulary is enumerated and small -- `protocol`, `port`, `from`,
+`to`, `interface`, `state`, with `accept`, `drop` and `reject` -- and widening
+it is a decision each time, which is 0293's discipline for the same reason.
+
+**It widens 0022 and nothing else.** That record allowed one table containing
+"NAT and nothing else"; the three filter chains go in the same table, in the
+same family, and `nft.h`'s guarantee that no call takes a table or chain name
+is extended rather than relaxed. The whole table is still replaced in one
+transaction, with the generation read before and after (10.541).
+
+### The two things it is honest about rather than optimistic
+
+**A refused rule costs the whole ruleset.** An nftables transaction lands or
+rolls back, so a rule the kernel will not take means none of them apply --
+which is not 0287's per-rule red however much the vocabulary suggests it. What
+netcfgd does is name the rule, keep the previous ruleset (the rollback is the
+safe failure), and not treat the action as optional in 0293's sense: a
+firewall whose rules did not apply is not a slower host but a differently
+protected one, which is the bridge-filtering argument from 10.561 again.
+Per-rule exclusion needs the probe 0283 left to the holder.
+
+**A `forward { policy = "drop" }` on a host running docker drops what docker
+forwards.** nftables is additive, both chains see the packet, and the strictest
+verdict wins. Layer one reports the foreign table as a plan note on the same
+surface as 0022's NAT conflict report; whether it should *refuse* instead is
+the holder's, and 0294 gives both arguments rather than picking.
+
+### What is not started
+
+Nothing is implemented. The record is the work at this point --
+`working-practice.md`'s "a living design document edited ahead of the code,
+where the decision is the work and the implementation follows later" -- and the
+implementation is a document block, a lowerer, a renderer, a planner, a
+transaction builder and an observer, in a tree whose model is table-driven and
+whose witnesses are generated. The order it wants is model and round-trip
+first, since that is what a config has to survive before anything reaches a
+kernel.
+
 ## 10.561 The rest of the capability layer, and two sentences the states found
 
 "do the remaining ruleset kinds then", the copyright holder, 2026-10-25. The
