@@ -540,6 +540,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		ctx.source = block->source;
 		if (strcmp(head, "global") == 0) {
 			ncfg_lower_global_block(&ctx, block);
+		} else if (strcmp(head, "firewall") == 0) {
+			ncfg_lower_firewall(&ctx, block);
 		} else if (strcmp(head, "device") == 0) {
 			ncfg_device_t device;
 
@@ -687,7 +689,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
-			    "device, rule, linkset, access_point and global", head);
+			    "device, rule, linkset, access_point, firewall and global", head);
 		}
 	}
 

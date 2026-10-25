@@ -345,6 +345,11 @@ char *ncfg_normalize_station(ncfg_lower_ctx_t *ctx, const char *text, char *why,
 
 void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *assignment);
 void ncfg_lower_global_block(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block);
+
+/* Layer one's `firewall` block (0294), into `ctx->document->firewall`. A
+ * second one is refused and the first stands: there is one ruleset, and two
+ * merged would interleave their rules in an order nobody wrote. */
+void ncfg_lower_firewall(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block);
 /* A `dns` scope, wherever one is written: in `global`, on an interface, or on
  * a network. One reader, because three spellings of one scope is how they come
  * to accept different words. */

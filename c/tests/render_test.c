@@ -1688,6 +1688,47 @@ static void the_enterprise_networks_round_trip(void)
 	free(pwd);
 }
 
+/*
+ * Layer one's firewall (0294): text in, text out, through the parser.
+ *
+ * **A round trip rather than a string check**, for this module's own stated
+ * reason: it proves the renderer against what the parser actually accepts, so
+ * a block written in a shape the language does not have fails here instead of
+ * at somebody's next `ncfg apply`. The two halves landed together precisely
+ * so that this test could exist (10.564).
+ */
+static void a_firewall_round_trips(void)
+{
+	round_trips("firewall {\n"
+	    "\tinput {\n"
+	    "\t\tpolicy = \"drop\"\n"
+	    "\t\taccept \"ssh\" {\n"
+	    "\t\t\tprotocol = \"tcp\"\n"
+	    "\t\t\tport     = 22\n"
+	    "\t\t\tfrom     = [\"10.0.0.0/8\", \"192.168.0.0/16\"]\n"
+	    "\t\t\tinterface = \"eth0\"\n"
+	    "\t\t}\n"
+	    "\t\taccept \"established\" {\n"
+	    "\t\t\tstate = [\"established\", \"related\"]\n"
+	    "\t\t}\n"
+	    "\t\tdrop \"netbios\" {\n"
+	    "\t\t\tprotocol = \"udp\"\n"
+	    "\t\t\tport     = [137, 138]\n"
+	    "\t\t}\n"
+	    "\t\treject \"the rest of it\" {\n"
+	    "\t\t\tto = [\"203.0.113.0/24\"]\n"
+	    "\t\t}\n"
+	    "\t}\n"
+	    "\tforward {\n"
+	    "\t\tpolicy = \"drop\"\n"
+	    "\t}\n"
+	    "\toutput {\n"
+	    "\t\tpolicy = \"accept\"\n"
+	    "\t}\n"
+	    "}\n",
+	    "a firewall with every match and all three actions round trips");
+}
+
 /* A name that is not a bare word, and one with a quote in it. The escape is
  * what stops a rendered profile ending a string early and taking every other
  * block in the file with it -- the loader compiles the directory as one
@@ -3732,6 +3773,7 @@ int main(int argc, char **argv)
 	a_wired_dot1x_port_round_trips();
 	a_stored_certificate_stays_stored();
 	the_enterprise_networks_round_trip();
+	a_firewall_round_trips();
 	a_name_needing_escapes_round_trips();
 	the_link_kinds_round_trip();
 	a_bond_at_its_default_mode_still_writes_the_key();

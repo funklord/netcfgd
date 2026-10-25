@@ -932,4 +932,21 @@ netcfgd
 # own reason. The implementation this is the floor of will move it again --
 # a lowerer and a renderer are code rather than tables -- and that entry will
 # say how much.
-total 1189900
+# Then its lowerer and its renderer, 2026-10-25, +4,376 bytes to 1,194,200.
+#
+# text 991,657 to 998,107, which is +6,450 of code against the model entry's
+# +1,778 -- and that is the shape worth keeping from this pair of entries. A
+# table-driven model charges once for four operations; a grammar charges for
+# every refusal it can name and every key it can write. Of the two, the
+# refusals are the larger half: thirteen diagnostics in the lowerer, each
+# carrying the sentence that says what to write instead.
+#
+# Which is the trade this tree makes on purpose. `lower_firewall.c` refuses a
+# policy of `reject`, a rule with no name, two rules with one name, a port on a
+# protocol that has none, a misspelled connection state, a chain netcfgd does
+# not own, and a key at the wrong depth -- and every one of those sentences is
+# bytes in the binary that buy a config file somebody can fix without reading
+# the source.
+#
+# Recorded at 1194300 rather than left riding the tolerance.
+total 1194300

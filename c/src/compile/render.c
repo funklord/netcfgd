@@ -1153,6 +1153,161 @@ static void refuse_nameless_secrets(const ncfg_document_t *document,
  * them enums changes the document's wire form and so the frozen witness, which
  * is a decision with 0020 attached and not one to take while guarding.
  */
+/*
+ * Layer one's firewall (0294), written back as the operator wrote it.
+ *
+ * **Paired with the lowerer on purpose.** Either alone is a trap: a writer
+ * with no parser emits a config netcfgd cannot read, and a parser with no
+ * writer drops the block the first time anything rewrites the file. The
+ * refusal this replaces was what made the gap between them safe to stand in
+ * (10.563).
+ *
+ * The order is the document's, which is the chain's: nftables evaluates in
+ * order, so sorting here would change what the ruleset does.
+ */
+static const char *firewall_action_word(int action)
+{
+	switch (action) {
+	case NCFG_FIREWALL_ACCEPT:
+		return "accept";
+	case NCFG_FIREWALL_DROP:
+		return "drop";
+	case NCFG_FIREWALL_REJECT:
+		return "reject";
+	default:
+		/* `value.h`'s convention: no plausible word for a value that is not
+		 * one. A rule this build cannot name is refused by the caller rather
+		 * than written as something else. */
+		return NULL;
+	}
+}
+
+static const char *firewall_protocol_word(int protocol)
+{
+	switch (protocol) {
+	case NCFG_FIREWALL_PROTO_ANY:
+		return "any";
+	case NCFG_FIREWALL_PROTO_TCP:
+		return "tcp";
+	case NCFG_FIREWALL_PROTO_UDP:
+		return "udp";
+	case NCFG_FIREWALL_PROTO_ICMP:
+		return "icmp";
+	case NCFG_FIREWALL_PROTO_ICMPV6:
+		return "icmpv6";
+	default:
+		return NULL;
+	}
+}
+
+static void render_firewall_rule(const ncfg_firewall_rule_t *rule, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing, const char *chain)
+{
+	const char *action = firewall_action_word(rule->action);
+	const char *protocol = firewall_protocol_word(rule->protocol);
+	size_t      at;
+
+	if (!action || !protocol) {
+		ncfg_render_refuse(missing, "firewall", chain,
+		    "rule `%s` carries an action or a protocol this build has no word for",
+		    rule->name ? rule->name : "(unnamed)");
+		return;
+	}
+	ncfg_buf_addf(body, "\t\t%s ", action);
+	ncfg_render_quote(body, rule->name);
+	ncfg_buf_add_text(body, " {\n");
+	/* `any` is the default and is left out, which keeps a rule that matches
+	 * every protocol as short as it reads. */
+	if (rule->protocol != NCFG_FIREWALL_PROTO_ANY) {
+		ncfg_buf_addf(body, "\t\t\tprotocol = \"%s\"\n", protocol);
+	}
+	if (rule->port_count == 1u) {
+		/* One port as a number rather than a list of one, because that is
+		 * what somebody writes and the lowerer takes either. */
+		ncfg_buf_addf(body, "\t\t\tport     = %lld\n", (long long)rule->ports[0]);
+	} else if (rule->port_count > 1u) {
+		ncfg_buf_add_text(body, "\t\t\tport     = [");
+		for (at = 0; at < rule->port_count; at++) {
+			ncfg_buf_addf(body, "%s%lld", at ? ", " : "", (long long)rule->ports[at]);
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
+	if (rule->from_count != 0u) {
+		ncfg_render_list_t list;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < rule->from_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), rule->from[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t\t", "from", &list, 0);
+		ncfg_render_list_free(&list);
+	}
+	if (rule->to_count != 0u) {
+		ncfg_render_list_t list;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < rule->to_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), rule->to[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t\t", "to", &list, 0);
+		ncfg_render_list_free(&list);
+	}
+	if (rule->interface) {
+		ncfg_buf_add_text(body, "\t\t\tinterface = ");
+		ncfg_render_quote(body, rule->interface);
+		ncfg_buf_add_text(body, "\n");
+	}
+	if (rule->state_count != 0u) {
+		ncfg_render_list_t list;
+
+		ncfg_render_list_init(&list);
+		for (at = 0; at < rule->state_count; at++) {
+			ncfg_render_quote(ncfg_render_list_next(&list), rule->states[at]);
+		}
+		ncfg_render_list_emit(body, "\t\t\t", "state", &list, 0);
+		ncfg_render_list_free(&list);
+	}
+	ncfg_buf_add_text(body, "\t\t}\n");
+}
+
+static void render_firewall_chain(const ncfg_firewall_chain_t *chain, const char *name,
+    ncfg_buf_t *body, ncfg_unrenderable_t *missing)
+{
+	size_t at;
+
+	/* **The policy is always written**, where most keys here are written only
+	 * when they are not the default: a chain with no policy is refused by the
+	 * lowerer, so a rendered chain that omitted it would be a file this
+	 * program wrote and would then refuse to read. */
+	ncfg_buf_addf(body, "\t%s {\n\t\tpolicy = \"%s\"\n", name,
+	    chain->policy == NCFG_FIREWALL_POLICY_DROP ? "drop" : "accept");
+	for (at = 0; at < chain->rule_count; at++) {
+		render_firewall_rule(&chain->rules[at], body, missing, name);
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
+static void render_firewall(const ncfg_document_t *document, ncfg_buf_t *text,
+    ncfg_unrenderable_t *missing)
+{
+	ncfg_buf_t body;
+
+	if (!document->firewall) {
+		/* **Absent rather than empty**, which is the pointer's whole purpose:
+		 * a document with no `firewall` block writes none, and that is not
+		 * the same as three chains that accept everything. */
+		return;
+	}
+	ncfg_buf_init(&body, 0);
+	render_firewall_chain(&document->firewall->input, "input", &body, missing);
+	render_firewall_chain(&document->firewall->forward, "forward", &body, missing);
+	render_firewall_chain(&document->firewall->output, "output", &body, missing);
+	ncfg_buf_add_text(text, "\nfirewall {\n");
+	ncfg_buf_add_text(text, ncfg_buf_text(&body));
+	ncfg_buf_add_text(text, "}\n");
+	ncfg_buf_free(&body);
+}
+
 static void refuse_unwritable_strings(const ncfg_document_t *document,
     ncfg_unrenderable_t *missing)
 {
@@ -1284,27 +1439,7 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	 * regenerates both. */
 	ncfg_buf_add_text(text, header);
 	render_globals(document, text, missing);
-	/*
-	 * **Layer one's firewall is refused rather than written, deliberately,
-	 * until its lowerer exists** (0294, 10.562). The model can hold a
-	 * firewall today and nothing can produce one from a config file, so a
-	 * document carrying one reached here from JSON -- the daemon's state, or
-	 * a hand-written document.
-	 *
-	 * Writing it would be worse than refusing. The renderer's output is a
-	 * config file netcfgd reads back, and a `firewall { ... }` block the
-	 * parser does not know yet would be a file this program wrote and cannot
-	 * read: `ncfg wifi add` on such a host would rewrite the config and lose
-	 * the firewall, or refuse on the next load with a parse error pointing at
-	 * netcfgd's own output. The field-coverage gate exists to make exactly
-	 * this choice explicit rather than silent, and this is the choice.
-	 */
-	if (document->firewall) {
-		ncfg_render_refuse(missing, "firewall", NULL,
-		    "this build models a firewall and cannot write one back: its "
-		    "configuration syntax is not implemented yet (0294), so a config "
-		    "written here would be one netcfgd could not read");
-	}
+	render_firewall(document, text, missing);
 	for (i = 0; i < document->interface_count; i++) {
 		ncfg_render_interface(&document->interfaces[i], overrides, text, missing);
 	}

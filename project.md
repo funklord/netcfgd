@@ -12498,6 +12498,76 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.564 The firewall's lowerer and renderer, and three checks that paid
+
+0294's grammar is a configuration surface now: `lower_firewall.c` reads it and
+`render.c` writes it back. The two landed together on purpose -- a writer with
+no parser emits a config netcfgd cannot read, and a parser with no writer drops
+the block the first time anything rewrites the file -- and the refusal from
+10.563 is what made the gap between them safe to stand in meanwhile.
+
+`render_test` holds the round trip: every match, all three actions, two chains
+with policies and one with rules, text in and text out through the parser.
+That form rather than a string check, for the module's own stated reason: it
+proves the renderer against **what the parser actually accepts**, so a block
+written in a shape the language does not have fails there instead of at
+somebody's next apply.
+
+### What the grammar refuses, and why each one is a refusal
+
+Thirteen diagnostics, each naming what to write instead. The ones that are
+judgements rather than typos:
+
+- **`policy = "reject"`** -- nftables has no such policy, and rendering it as
+  `drop` would be the compiler choosing somebody's security posture. The
+  sentence says to write a `reject` rule at the end of the chain.
+- **A chain with no `policy`** -- the two answers are opposite for every packet
+  no rule matched, and a firewall whose author did not say which is not one.
+  Refused rather than defaulted either way.
+- **A port on a protocol that has none** -- the kernel would refuse the
+  transaction and name a netlink message, which reads as netcfgd's fault. A
+  rule with ports and no protocol is refused for the same reason: its author
+  has not decided between tcp and udp.
+- **Two rules with one name in a chain** -- the name is the rule's identity
+  (0287), so the second would take the first's standing and a red row would
+  name a rule nobody can find.
+
+### Three checks that found defects in the hour they were written
+
+**A state list is validated whole before any of it is kept.** Written the
+other way first: a list with one typo in it left the rule matching the words
+before the typo, which is a rule nobody asked for.
+
+**"A second chain" was keyed on `rule_count`.** A second
+`input { policy = "accept" }` with no rules walked straight past the check and
+silently replaced the first chain's policy. `lower_test` caught it. A chain
+that was written is a chain that was written, rules or not -- it tracks three
+flags now.
+
+**And the lowerer's own duplicate-`firewall` check was dead.** The merge pass
+already refuses a second top-level block of one head, with a better sentence
+than mine: it names the first block's line and offers `override firewall`. The
+test asserts the merge pass's wording now, and what is left in the lowerer is
+an assertion that says so -- reaching it would mean the merge pass had changed
+underneath, and silently overwriting the first ruleset is the one outcome worth
+refusing outright.
+
+### The size, which is the other half of 10.563's measurement
+
++4,376 bytes, of which text is **+6,450** against the model's +1,778 (the file
+shrank elsewhere). A table-driven model charges once for four operations; a
+grammar charges for every refusal it can name. The refusals are the larger
+half, and that is the trade this tree makes on purpose: those bytes buy a
+config file somebody can fix without reading the source.
+
+### What is still not built
+
+The planner, the transaction and the observer. A `firewall` block compiles,
+round-trips and reaches the document today, and `ncfg plan` says "nothing to
+do" about it -- correctly, since nothing yet turns chains into ops. That is
+the next slice, and 0294's all-or-nothing transaction and per-rule naming are
+what it has to deliver.
+
 ## 10.563 The firewall model, and a gate that would not let it be half a slice
 
 0294's implementation order was "the model and the round-trip first". The

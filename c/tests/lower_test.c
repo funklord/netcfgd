@@ -1781,6 +1781,98 @@ static void rule_cases(void)
 	    "a rule with no label is refused");
 }
 
+/*
+ * Layer one's firewall, 0294: what the grammar refuses.
+ *
+ * The acceptances are `render_test`'s, which proves them through the parser
+ * and the writer together. These are the refusals -- each one a thing that
+ * would otherwise compile into a ruleset nobody asked for, or into a
+ * transaction the kernel refuses for a reason that reads as netcfgd's fault.
+ */
+static void firewall_cases(void)
+{
+	ncfg_document_t *document;
+
+	/* The shape works, and the model holds what the text said. */
+	document = compiles("firewall {\n"
+	    "\tinput { policy = \"drop\"; accept \"ssh\" { protocol = \"tcp\"; port = 22 } }\n"
+	    "\tforward { policy = \"drop\" }\n"
+	    "\toutput { policy = \"accept\" }\n"
+	    "}\n", "a firewall block compiles");
+	check(document && document->firewall, "a firewall block reaches the document");
+	check(document && document->firewall &&
+	    document->firewall->input.policy == NCFG_FIREWALL_POLICY_DROP &&
+	    document->firewall->input.rule_count == 1u,
+	    "  with its chain's policy and its one rule");
+	check(document && document->firewall && document->firewall->input.rule_count == 1u &&
+	    document->firewall->input.rules[0].port_count == 1u &&
+	    document->firewall->input.rules[0].ports[0] == 22,
+	    "  and `port = 22` taken as one port rather than refused for not being a list");
+	ncfg_document_free(document);
+
+	/* **A policy of `reject`**, which the kernel has no word for: rendering
+	 * it as `drop` would be the compiler choosing somebody's posture. */
+	refuses("firewall { input { policy = \"reject\" } }\n", "not a chain policy",
+	    "a chain policy of reject is refused, the kernel having none");
+	/* **No policy at all.** The two answers are opposite for every packet no
+	 * rule matched, and a firewall whose author did not say which is not one. */
+	refuses("firewall { input { accept \"ssh\" { protocol = \"tcp\"; port = 22 } } }\n",
+	    "has no `policy`", "a chain with no policy is refused rather than defaulted");
+	/* The name is the rule's identity (0287), so it is required... */
+	refuses("firewall { input { policy = \"drop\"; accept { protocol = \"tcp\" } } }\n",
+	    "needs a name", "a rule with no name is refused");
+	/* ...and unique, or a red row would name a rule nobody can find. */
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"ssh\" { protocol = \"tcp\"; port = 22 }\n"
+	    "\tdrop \"ssh\" { protocol = \"udp\"; port = 22 } } }\n",
+	    "named `ssh`", "two rules with one name in a chain are refused");
+	/* A port with a protocol that has none: the kernel would refuse the
+	 * transaction and name a netlink message rather than this line. */
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"ping\" { protocol = \"icmp\"; port = 22 } } }\n",
+	    "no protocol that has them",
+	    "a port on a protocol without ports is refused at compile time");
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"anything\" { port = 22 } } }\n",
+	    "no protocol that has them",
+	    "  and so is one with no protocol named at all");
+	/* The four words `ct state` takes, and nothing else. */
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"back\" { state = [\"established\", \"releated\"] } } }\n",
+	    "not a connection state", "a misspelled connection state is refused");
+	/* The three hooks netcfgd owns, named so a typo does not become silence. */
+	refuses("firewall { prerouting { policy = \"drop\" } }\n", "not a firewall chain",
+	    "a chain netcfgd does not own is refused");
+	refuses("firewall { input { policy = \"drop\"; mangle \"x\" { } } }\n",
+	    "not a firewall action", "an action that is not one of the three is refused");
+	refuses("firewall { policy = \"drop\" }\n", "not valid directly inside `firewall`",
+	    "a key at the top of `firewall` is refused, the chains being where they go");
+	/*
+	 * **One ruleset, and the merge pass is what enforces it** -- measured,
+	 * not assumed: the lowerer's own check for this turned out unreachable,
+	 * and the sentence a reader gets is the language's, which names the first
+	 * block's line and offers `override`. Asserted here so that a change to
+	 * the merge pass shows up as this case rather than as two interleaved
+	 * rulesets.
+	 */
+	refuses("firewall { input { policy = \"drop\" } }\n"
+	    "firewall { input { policy = \"accept\" } }\n",
+	    "already defined",
+	    "a second firewall block is refused by the merge pass, before lowering");
+	refuses("firewall {\n"
+	    "\tinput { policy = \"drop\" }\n"
+	    "\tinput { policy = \"accept\" }\n"
+	    "}\n",
+	    "a second `input` chain",
+	    "and a second chain of one name is refused by the lowerer");
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"ssh\" { protocol = \"tcp\"; port = 70000 } } }\n",
+	    "is not a port", "a port outside the kernel's range is refused");
+	refuses("firewall { input { policy = \"drop\";\n"
+	    "\taccept \"ssh\" { wombat = 1 } } }\n",
+	    "not a firewall rule key", "an unknown rule key is refused, and named");
+}
+
 static void linkset_cases(void)
 {
 	ncfg_document_t *document;
@@ -3123,6 +3215,7 @@ int main(void)
 	vlan_id_cases();
 	qdisc_cases();
 	rule_cases();
+	firewall_cases();
 	linkset_cases();
 	bluetooth_cases();
 	interface_cases();
