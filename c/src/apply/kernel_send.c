@@ -105,12 +105,29 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 		 * device kind is the op's payload.
 		 */
 		if (code == EOPNOTSUPP || code == ENOENT) {
+			/*
+			 * **The kind names its module, except where it does not**, and
+			 * the exceptions are measured rather than remembered: on this
+			 * kernel `dummy`, `veth`, `vxlan`, `macvlan`, `wireguard`, `ifb`,
+			 * `tun` and `bridge` each have `CONFIG_<KIND>` and a module of
+			 * that name, while a `vlan` is `8021q` and `CONFIG_VLAN_8021Q`, a
+			 * `bond` is `bonding` and `CONFIG_BONDING`, and a tunnel's module
+			 * depends on its type. A sentence that gave the rule without the
+			 * exceptions would send somebody looking for `vlan.ko`.
+			 *
+			 * It is the sentence a missing WireGuard reaches, which is worth
+			 * knowing: `wg.set_device` has no capability arm of its own and
+			 * needs none, because a kernel with no `wireguard` fails here
+			 * first and the device never exists for the setter to configure.
+			 * Measured in `tests/hull/natcap/`.
+			 */
 			return "a link kind this kernel does not know is refused like this: "
-			       "the kind in the line above comes from a module of its own -- "
-			       "`ifb` for ingress shaping, and `dummy`, `veth`, `vxlan`, "
-			       "`macvlan` or `wireguard` for the rest -- and `ip link add "
-			       "type <kind>` fails the same way outside netcfgd, which is the "
-			       "quickest confirmation";
+			       "the kind in the line above comes from a module of its own, "
+			       "usually of that name and selected by `CONFIG_<KIND>` -- but a "
+			       "`vlan` is `8021q` (CONFIG_VLAN_8021Q), a `bond` is `bonding` "
+			       "(CONFIG_BONDING), and a tunnel's depends on its type; `ip link "
+			       "add type <kind>` fails the same way outside netcfgd, which is "
+			       "the quickest confirmation";
 		}
 		return NULL;
 	case NCFG_OP_QDISC_SET:
@@ -152,6 +169,41 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			       "`act_mirred` (CONFIG_NET_ACT_MIRRED); the `ifb` device and the "
 			       "`clsact` qdisc are already in place by the time this is "
 			       "attempted, so those two are what is left to look for";
+		}
+		return NULL;
+	case NCFG_OP_LINK_SET_BRIDGE:
+	case NCFG_OP_LINK_SET_BOND:
+	case NCFG_OP_LINK_SET_MACVLAN:
+	case NCFG_OP_LINK_SET_TUNNEL:
+	case NCFG_OP_LINK_SET_VXLAN:
+		/*
+		 * **Measured on a kernel built for it**, `tests/kernel/` state k3:
+		 * `CONFIG_BRIDGE=y` with `CONFIG_BRIDGE_VLAN_FILTERING` off, where a
+		 * bridge whose document asks for `vlan_filtering = true` is refused
+		 * `EOPNOTSUPP` with nothing but the generic errno sentence -- "this
+		 * kernel does not have what the request needs; a module may not be
+		 * loaded", which is wrong in the one way that matters: the module is
+		 * loaded and the option is not built.
+		 *
+		 * **And the action's own line says `link.create`**, because
+		 * `finish_create` carries the settings out under a synthetic
+		 * `link.set_bridge` op while the journal names the action that asked
+		 * for the device. The `doing` text ("could not set the settings of
+		 * br0") is what tells them apart, so this sentence does not repeat
+		 * it.
+		 *
+		 * The per-port vlan sentence below was the suspect before this was
+		 * measured -- the guess being that it would misname the cause on
+		 * such a kernel. It never appears: the vlans are skipped behind this
+		 * refusal, so the sentence that needed writing was the one that was
+		 * missing rather than the one that was wrong.
+		 */
+		if (code == EOPNOTSUPP) {
+			return "a kind's settings are refused whole, so nothing changed -- and "
+			       "a module being loaded does not mean every option of it was "
+			       "built: a bridge's `vlan_filtering` needs "
+			       "`CONFIG_BRIDGE_VLAN_FILTERING`, which the bridge module's "
+			       "presence does not imply";
 		}
 		return NULL;
 	case NCFG_OP_LINK_SET_IPV6_TOKEN:

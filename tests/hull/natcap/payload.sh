@@ -111,6 +111,26 @@ interface wan0 {
 }
 CONF
 
+# **WireGuard, which is a capability with no sentence at all today.** It is a
+# module here (`CONFIG_WIREGUARD=m`), netcfgd reaches it by resolving a generic
+# netlink family, and an absent module means an absent family -- so this state
+# measures what an operator is told when a kernel cannot do WireGuard.
+cat > "$work/with-wg.conf" <<'CONF'
+device wg0 {
+	wireguard {
+		private_key = "@secret:wgtest"
+		listen_port = 51820
+		peer "far" {
+			public_key  = "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg="
+			allowed_ips = ["10.9.0.0/24"]
+		}
+	}
+}
+interface wg0 {
+	config = "10.9.0.2/24"
+}
+CONF
+
 loaded() { lsmod | awk -v m="$1" '$1 == m { f = 1 } END { print (f ? "yes" : "no") }'; }
 allow() { echo /sbin/modprobe > /proc/sys/kernel/modprobe; }
 block() { echo /nonexistent/modprobe > /proc/sys/kernel/modprobe; }
@@ -335,6 +355,26 @@ check "  with everything before it applied, which is what makes this the state \
 the sentence is about" "$(said 'ok   qdisc.set ifb-wan0')" yes
 printf '     first failure: %s\n' \
 	"$(awk '/^(FAIL|netcfgd: .*Error)/ { print; exit }' "$work/apply.log")"
+
+# --- wireguard, whose module this kernel can also be made to lack ---------
+echo
+echo "--- a wireguard device with the module unreachable"
+teardown
+load dummy
+block
+printf '     state: wireguard=%s autoload=%s\n' "$(loaded wireguard)" \
+	"$(cat /proc/sys/kernel/modprobe)"
+# The secret the config names, so the refusal is the kernel's and not a
+# missing-key refusal from the compiler.
+mkdir -p "$work/etc/secrets"
+printf '%s\n' "4GEnJDaZ0/Ie7VCXCbCJ2ZoFhIRNiZH4ZHTPDKrFVVM=" > "$work/etc/secrets/wgtest"
+chmod 0600 "$work/etc/secrets/wgtest"
+if apply_now "$work/with-wg.conf"; then rc=0; else rc=$?; fi
+sed 's/^/     /' "$work/apply.log"
+check "a kernel with no wireguard refuses the device" \
+	"$([ "$rc" -ne 0 ] && echo refused || echo applied)" refused
+printf '     first failure: %s\n' \
+	"$(awk '/^(FAIL|red |netcfgd: .*Error)/ { print; exit }' "$work/apply.log")"
 
 # --- the control on the instrument ---------------------------------------
 echo

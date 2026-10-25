@@ -12498,6 +12498,85 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.561 The rest of the capability layer, and two sentences the states found
+
+"do the remaining ruleset kinds then", the copyright holder, 2026-10-25. The
+enumeration first, because "remaining" needed defining: of the forty-odd op
+kinds, the ones that reach the kernel and can fail for a capability reason are
+the link kinds and their settings, the queuing family, NAT, the bridge vlans,
+offloads, the IPv6 token, the policy rules and the sysctls. Seven had
+sentences. **Netfilter rules beyond NAT do not exist as ops at all** -- 0283's
+five layers are not built -- so the remaining work was the kinds that do
+exist, and two of them turned out to matter.
+
+### WireGuard needs no sentence, measured rather than assumed
+
+It looked like the obvious gap: `wg.set_device` and `wg.set_peers` have no
+capability arm, and WireGuard is a module (`CONFIG_WIREGUARD=m`) on exactly
+the machines netcfgd targets. Measured in `tests/hull/natcap/` with the module
+unreachable:
+
+    FAIL link.create wg0  kind: wireguard
+         could not create wg0: RTM_NEWLINK failed: EOPNOTSUPP ... a link kind
+         this kernel does not know is refused like this ...
+    skip link.up wg0,  skip addr.add wg0
+
+**The device never exists, so the setter never runs.** The sentence an
+operator gets is the link-kind one written yesterday, and a `wg.set_device`
+arm would be an arm for a state that cannot occur -- which is the mistake the
+NAT hint made with `EOPNOTSUPP` and this is the same mistake declined.
+
+What the state did earn is a sharper link-kind sentence. It gave the rule
+"a module of its own" and no mapping, so a reader would look for `vlan.ko`.
+Measured on this kernel: `dummy`, `veth`, `vxlan`, `macvlan`, `wireguard`,
+`ifb`, `tun` and `bridge` each have `CONFIG_<KIND>` and a module of that name,
+while a **`vlan` is `8021q` (CONFIG_VLAN_8021Q)**, a **`bond` is `bonding`
+(CONFIG_BONDING)**, and a tunnel's module depends on its type. The sentence
+says the rule and the three exceptions.
+
+### A bridge that cannot filter: the suspect sentence was innocent
+
+The other candidate was a sentence that looked *wrong*: a refused per-port
+vlan is explained as "the bridge does not have `vlan_filtering = true`", a
+configuration cause, and a kernel built without `CONFIG_BRIDGE_VLAN_FILTERING`
+cannot filter whatever the config says. So the kernel tier gained a fourth
+state, k3: `CONFIG_BRIDGE=y` with filtering off.
+
+**The hypothesis was wrong and the state found something better.** The vlan
+sentence never appears:
+
+    FAIL link.create br0  kind: bridge
+         could not set the settings of br0: RTM_NEWLINK failed: EOPNOTSUPP --
+         this kernel does not have what the request needs; a module may not be
+         loaded
+    skip bridge.vlan.del br0,  skip bridge.vlan.add br0,  skip link.up br0,
+    skip addr.add br0
+
+The vlans are skipped behind an earlier refusal -- and **that refusal had no
+sentence at all**, only the generic errno text, which on this kernel is wrong
+in the one way that matters: the module is loaded and the option was never
+built. So the sentence that needed writing was the missing one rather than the
+suspect one.
+
+**Two things about that line are worth knowing.** The action reads
+`link.create br0` while the failure is the settings step, because
+`finish_create` carries the settings out under a synthetic `link.set_bridge`
+op and the journal names the action that asked for the device; the `doing`
+text is what tells them apart. And the arm now covers all five kind setters,
+since a kind's settings go to the kernel as one request that is refused whole.
+
+### Why these stay required, which is 0293's line being held rather than moved
+
+A bridge whose `vlan_filtering` could not be set still carries traffic, so
+0293's test -- is the interface usable without this action's work -- would
+make it optional. It is not, and the reason is that the test is about
+reachability and this is about **isolation**: a bridge that forwards between
+vlans because the kernel cannot separate them is not a slower bridge, it is a
+different one. Applying the address and the routes on top of that would be
+netcfgd completing a configuration whose security property is absent. 0293
+says widening the optional list is a decision rather than a tidy-up; this is
+that decision, declined, with its reason.
+
 ## 10.560 An optional action is red on its own, and the rest of the plan runs
 
 "do the standing thing for optional ops then", the copyright holder,

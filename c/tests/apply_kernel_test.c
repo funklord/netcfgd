@@ -417,6 +417,27 @@ static void check_hints(void)
 	    "a code with nothing to add gets nothing added");
 
 	/*
+	 * **A kind's settings, measured on a kernel built to refuse them**
+	 * (`tests/kernel/` k3: `CONFIG_BRIDGE=y`, `CONFIG_BRIDGE_VLAN_FILTERING`
+	 * off). The generic errno text for `EOPNOTSUPP` says "a module may not be
+	 * loaded", which on that kernel is wrong in the way that matters -- the
+	 * module is loaded and the option was never built -- so the arm names the
+	 * option instead.
+	 */
+	{
+		const char *settings = ncfg_kernel_hint(NCFG_OP_LINK_SET_BRIDGE, EOPNOTSUPP);
+
+		check(settings && strstr(settings, "CONFIG_BRIDGE_VLAN_FILTERING") != NULL,
+		    "a refused bridge setting names the kernel option it needs");
+		check(settings && strstr(settings, "refused whole") != NULL,
+		    "  and says the settings go together, so nothing changed");
+		check(ncfg_kernel_hint(NCFG_OP_LINK_SET_VXLAN, EOPNOTSUPP) == settings,
+		    "the other kind setters share it: the same whole-request refusal");
+		check(ncfg_kernel_hint(NCFG_OP_LINK_SET_BRIDGE, EINVAL) == NULL,
+		    "  while EINVAL gets nothing: a bad value is not a missing option");
+	}
+
+	/*
 	 * **The queuing arms, each against the state it was measured in**
 	 * (`tests/hull/natcap/`, 2026-10-25). All three errnos were guesses when
 	 * they were written and two of them turned out right; what none of them
@@ -441,10 +462,33 @@ static void check_hints(void)
 		 * seven actions are skipped, and before this there was only
 		 * "this kernel does not have what the request needs".
 		 */
-		check(kind && strstr(kind, "ifb") != NULL,
-		    "a link kind the kernel does not know says so, naming ifb first");
+		/*
+		 * **The rule rather than a list of kinds.** This asked for `ifb` by
+		 * name when the arm was written for the ingress case; the sentence
+		 * gives the mapping instead now, which covers `ifb` (`CONFIG_IFB`,
+		 * module `ifb`) along with every other kind that follows it. The
+		 * kind itself is in the action's own line, which is why the sentence
+		 * does not repeat it.
+		 */
+		check(kind && strstr(kind, "CONFIG_<KIND>") != NULL,
+		    "a link kind the kernel does not know says which option selects it");
 		check(kind && strstr(kind, "ip link add") != NULL,
 		    "  with the command that confirms it outside netcfgd");
+		/*
+		 * **The exceptions, which are the reason this sentence is not just
+		 * "CONFIG_<KIND>".** Measured on this kernel: `dummy`, `veth`,
+		 * `vxlan`, `macvlan`, `wireguard`, `ifb`, `tun` and `bridge` each
+		 * have a symbol and a module of their own name, while a `vlan` is
+		 * `8021q` and a `bond` is `bonding`. A reader given only the rule
+		 * would look for `vlan.ko` and conclude their kernel had it.
+		 */
+		check(kind && strstr(kind, "8021q") != NULL &&
+		    strstr(kind, "CONFIG_VLAN_8021Q") != NULL,
+		    "  and names the vlan exception, whose module is not its kind");
+		check(kind && strstr(kind, "bonding") != NULL,
+		    "  and the bond's, which is not either");
+		check(kind && strstr(kind, "tunnel") != NULL,
+		    "  and says a tunnel's depends on its type rather than guessing");
 		check(ncfg_kernel_hint(NCFG_OP_LINK_CREATE, EEXIST) == NULL,
 		    "  while EEXIST gets nothing: a link that is already there is not "
 		    "a capability");

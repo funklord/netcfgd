@@ -1,13 +1,20 @@
 #!/bin/sh
 # Configure a kernel that genuinely cannot do nftables NAT.
 #
-#     sh config-kernel.sh <source-dir> k0|k1|k2
+#     sh config-kernel.sh <source-dir> k0|k1|k2|k3
 #
 # k0: everything NAT needs, built in -- the control. Without it a refusal
 #     could be an artifact of a stripped kernel rather than of the construct
 #     that was left out, and every "refused" below would prove nothing.
 # k1: nf_tables built in, no `nat` chain type and no masquerade.
 # k2: the `nat` chain type built in, no masquerade.
+# k3: a bridge with no VLAN filtering, which is a different question: netcfgd
+#     tells an operator that a refused per-port vlan means the bridge lacks
+#     `vlan_filtering = true`, and that sentence is a configuration cause. A
+#     kernel built without `CONFIG_BRIDGE_VLAN_FILTERING` cannot do it at all,
+#     and nothing here knew which errno that gives -- so this state exists to
+#     find out whether the sentence is right in both cases or misleading in
+#     one of them.
 #
 # **CONFIG_MODULES is off**, which is the whole point of doing this at all:
 # with no module support there is no loader, no autoload, and nothing that
@@ -50,6 +57,12 @@ if [ "$state" = k0 ]; then
 	# The control: the chain type and the masquerade both built in.
 	scripts/config -e NF_NAT -e NF_NAT_MASQUERADE -e NFT_NAT -e NFT_MASQ
 fi
+if [ "$state" = k3 ]; then
+	# A bridge that exists and cannot filter: everything NAT needs stays in,
+	# so a refusal here is about the bridge and not about a stripped kernel.
+	scripts/config -e NF_NAT -e NFT_NAT -e NFT_MASQ -e NF_NAT_MASQUERADE \
+		-e BRIDGE -d BRIDGE_VLAN_FILTERING -e VLAN_8021Q
+fi
 if [ "$state" = k2 ]; then
 	# The chain type present and the masquerade absent, which is the second
 	# state the autoload-blocked rig measures.
@@ -77,9 +90,15 @@ want_y="CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NETFILTER_NETLINK CONFIG_D
 want_y="$want_y CONFIG_VIRTIO_PCI CONFIG_VIRTIO_NET CONFIG_VIRTIO_CONSOLE"
 want_y="$want_y CONFIG_NET_9P_VIRTIO CONFIG_9P_FS CONFIG_VIRTIO_VSOCKETS"
 want_n="CONFIG_MODULES"
-[ "$state" != k0 ] && want_n="$want_n CONFIG_NFT_MASQ"
+case "$state" in
+k1|k2) want_n="$want_n CONFIG_NFT_MASQ" ;;
+esac
 [ "$state" = k2 ] && want_y="$want_y CONFIG_NFT_NAT CONFIG_NF_NAT"
 [ "$state" = k0 ] && want_y="$want_y CONFIG_NFT_NAT CONFIG_NF_NAT CONFIG_NFT_MASQ"
+if [ "$state" = k3 ]; then
+	want_y="$want_y CONFIG_BRIDGE CONFIG_NFT_MASQ"
+	want_n="CONFIG_MODULES CONFIG_BRIDGE_VLAN_FILTERING"
+fi
 [ "$state" = k1 ] && want_n="$want_n CONFIG_NFT_CHAIN_NAT CONFIG_NF_NAT CONFIG_NFT_NAT"
 for sym in $want_y; do
 	if ! grep -qx "$sym=y" .config; then

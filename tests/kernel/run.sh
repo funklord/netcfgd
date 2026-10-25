@@ -17,6 +17,14 @@
 #   `NFT_MSG_NEWCHAIN` refused where the chain type is missing, `ENOENT` with
 #   `NFT_MSG_NEWRULE` where the masquerade is, and `EOPNOTSUPP` nowhere.
 #
+#   **k3 is a different question in the same shape**, added 2026-10-25: a
+#   bridge the kernel can make and cannot filter. It exists because netcfgd
+#   told an operator that a refused per-port vlan means the bridge lacks
+#   `vlan_filtering = true` -- a configuration cause -- and nothing knew what
+#   a kernel built without `CONFIG_BRIDGE_VLAN_FILTERING` would say. The
+#   answer is that the vlan sentence never appears: the settings step is
+#   refused first, and that refusal had no sentence at all.
+#
 #   It also earned its keep on the way: there is no `CONFIG_NFT_CHAIN_NAT`.
 #   `net/netfilter/Makefile` builds `nft_chain_nat.o` from `CONFIG_NFT_NAT`,
 #   so netcfgd's capability sentence names both spellings -- found by this
@@ -107,7 +115,7 @@ printf 'run.sh: %s, %s, %s job(s), image %s\n' \
 
 mkdir -p "$out"
 failures=0
-for state in k0 k1 k2; do
+for state in k0 k1 k2 k3; do
 	echo
 	echo "########## $state"
 	sh "$here/config-kernel.sh" "$src" "$state"

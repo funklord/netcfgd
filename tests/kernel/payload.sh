@@ -35,7 +35,72 @@ if zcat /proc/config.gz | grep -qx CONFIG_MODULES=y; then
 	echo "     !! this kernel has module support, so it is not one of this tier's"
 fi
 
-# The three states, in the order a reader meets them in `config-kernel.sh`.
+# **The bridge state comes first, being told apart by a different symbol.**
+# k0, k1 and k2 have no bridge at all (`CONFIG_BRIDGE` is a module in
+# `x86_64_defconfig` and modules are off), so `BRIDGE=y` with filtering unset
+# is k3 and nothing else.
+if zcat /proc/config.gz | grep -qx CONFIG_BRIDGE=y &&
+    ! zcat /proc/config.gz | grep -qx CONFIG_BRIDGE_VLAN_FILTERING=y; then
+	echo "=== a bridge that cannot filter: what netcfgd tells an operator"
+	mount -t tmpfs tmpfs /tmp 2>/dev/null || true
+	work=$(mktemp -d /tmp/kstate.XXXXXX)
+	export NCFG_CONFIG_DIR="$work/etc" NCFG_RUN_DIR="$work/run"
+	mkdir -p "$work/etc" "$work/run"
+	cat > "$work/etc/netcfgd.conf" <<'CONF'
+device br0 {
+	bridge {
+		vlan_filtering = true
+	}
+	vlans = "10"
+}
+interface br0 {
+	config = "10.9.8.1/24"
+}
+CONF
+	"$build/netcfgd" --no-apply-on-start > "$work/daemon.log" 2>&1 &
+	pid=$!
+	waited=0
+	while [ ! -e "$work/run/netcfgd.sock" ] && [ "$waited" -lt 100 ]; do
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	if [ ! -e "$work/run/netcfgd.sock" ]; then
+		echo "the daemon never started:"
+		sed 's/^/     /' "$work/daemon.log"
+		echo "VERDICT bad: no daemon"
+		exit 1
+	fi
+	"$build/ncfg" apply > "$work/apply.log" 2>&1
+	rc=$?
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	echo "=== ncfg apply rc=$rc"
+	sed 's/^/     /' "$work/apply.log"
+	# **What this state found, now asserted.** It was added to see whether
+	# netcfgd's per-port vlan sentence -- which names `vlan_filtering = true`,
+	# a configuration cause -- would misname things on a kernel that cannot
+	# filter at all. It does not: the vlans are skipped behind an earlier
+	# refusal, and that refusal had no sentence of its own. So what is checked
+	# is the sentence that was missing: the settings step names the kernel
+	# option, where the generic errno text said "a module may not be loaded"
+	# about a module that was loaded.
+	if ! grep -q 'EOPNOTSUPP' "$work/apply.log"; then
+		echo "VERDICT bad: expected the settings to be refused EOPNOTSUPP"
+		exit 1
+	fi
+	if ! grep -q 'CONFIG_BRIDGE_VLAN_FILTERING' "$work/apply.log"; then
+		echo "VERDICT bad: the refusal does not name the option that is missing"
+		exit 1
+	fi
+	if grep -q 'vlan_filtering = true' "$work/apply.log"; then
+		echo "VERDICT bad: it blames the config key, which cannot be the remedy"
+		exit 1
+	fi
+	echo "VERDICT ok: the settings refusal names the kernel option, not the key"
+	exit 0
+fi
+
+# The three NAT states, in the order a reader meets them in `config-kernel.sh`.
 if zcat /proc/config.gz | grep -qx CONFIG_NFT_MASQ=y; then
 	expect=applied
 	state="everything NAT needs, which is the control"
