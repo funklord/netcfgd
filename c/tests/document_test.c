@@ -381,6 +381,135 @@ int main(int argc, char **argv)
 		free(raw);
 	}
 
+	/* ---- layer one's firewall, 0294 ---- */
+	{
+		/*
+		 * **Its own fixture rather than the witness**, and the reason is the
+		 * witness's own contract: it is compared byte for byte with what the
+		 * Rust writes, and the Rust has no `firewall`. The field is
+		 * `OMIT_EMPTY`, so a document without one is byte-identical to the
+		 * documents written before layer one existed -- which is what keeps
+		 * that comparison and the `agree` gate green, and is the trap
+		 * `locked` fell into (10.550).
+		 */
+		static const char *const text = DOCUMENT_HEAD
+		    "\"devices\":[],\"interfaces\":[],\"networks\":[],"
+		    "\"firewall\":{"
+		    "\"input\":{\"policy\":\"drop\",\"rules\":["
+		    "{\"name\":\"ssh\",\"action\":\"accept\",\"protocol\":\"tcp\","
+		    "\"ports\":[22],\"from\":[\"10.0.0.0/8\"],\"interface\":\"eth0\"},"
+		    "{\"name\":\"established\",\"action\":\"accept\",\"protocol\":\"any\","
+		    "\"states\":[\"established\",\"related\"]},"
+		    "{\"name\":\"netbios\",\"action\":\"drop\",\"protocol\":\"udp\","
+		    "\"ports\":[137,138]}]},"
+		    "\"forward\":{\"policy\":\"drop\"},"
+		    "\"output\":{\"policy\":\"accept\"}}}";
+		char             message[NCFG_ERROR_MAX];
+		ncfg_document_t *document;
+
+		message[0] = '\0';
+		document = read_text(text, message, sizeof(message));
+		if (!document) {
+			printf("  refused a document with a firewall: %s\n", message);
+		}
+		check(document != NULL, "a document carrying layer one's firewall is read");
+		if (document) {
+			const ncfg_firewall_chain_t *input = document->firewall ?
+			    &document->firewall->input : NULL;
+
+			check(document->firewall != NULL,
+			    "  and the pointer tells an empty block from an absent one");
+			check(input && input->policy == NCFG_FIREWALL_POLICY_DROP,
+			    "  the input chain's policy is what the document said");
+			check(input && input->rule_count == 3u, "  with its three rules");
+			/*
+			 * **The order, which is the one list in this document that is
+			 * never sorted.** nftables evaluates a chain in order, so the
+			 * order is the policy: `ssh` before `netbios` accepts what the
+			 * later rule would drop, and sorting by name would reverse the
+			 * meaning of the pair.
+			 */
+			check(input && input->rule_count == 3u && input->rules[0].name &&
+			    strcmp(input->rules[0].name, "ssh") == 0 &&
+			    strcmp(input->rules[2].name, "netbios") == 0,
+			    "  in the document's order, which is the chain's order");
+			check(input && input->rule_count > 0 &&
+			    input->rules[0].action == NCFG_FIREWALL_ACCEPT &&
+			    input->rules[0].protocol == NCFG_FIREWALL_PROTO_TCP &&
+			    input->rules[0].port_count == 1u && input->rules[0].ports[0] == 22,
+			    "  the first rule's action, protocol and port");
+			check(input && input->rule_count > 1 && input->rules[1].state_count == 2u &&
+			    input->rules[1].states[0] &&
+			    strcmp(input->rules[1].states[0], "established") == 0,
+			    "  and the states of the one that matches conntrack");
+			check(document->firewall->forward.policy == NCFG_FIREWALL_POLICY_DROP &&
+			    document->firewall->output.policy == NCFG_FIREWALL_POLICY_ACCEPT,
+			    "  the other two chains carry their policies and no rules");
+			check(document->firewall->forward.rule_count == 0u &&
+			    document->firewall->output.rule_count == 0u,
+			    "  which is a chain that exists and permits or refuses everything");
+
+			/*
+			 * **The round trip, compared as bytes rather than as models**,
+			 * which is what the witness case above does and for the same
+			 * reason: there is no public document equality, and two writes
+			 * that agree byte for byte prove the stronger thing anyway --
+			 * same members, same order, same values, same escaping.
+			 */
+			{
+				ncfg_buf_t       first;
+				ncfg_buf_t       second;
+				ncfg_document_t *again;
+
+				ncfg_buf_init(&first, 0);
+				ncfg_buf_init(&second, 0);
+				check(ncfg_document_write(document, &first, message, sizeof(message)),
+				    "  the document is written back out");
+				message[0] = '\0';
+				again = first.length ? ncfg_document_read(first.data, first.length,
+				    message, sizeof(message)) : NULL;
+				if (!again) {
+					printf("  refused its own output: %s\n", message);
+				}
+				check(again != NULL, "  and read again from what it wrote");
+				if (again) {
+					check(ncfg_document_write(again, &second, message,
+					    sizeof(message)) && second.length == first.length &&
+					    memcmp(second.data, first.data, first.length) == 0,
+					    "  and writing it twice gives the same bytes");
+					ncfg_document_free(again);
+				}
+				/* And the firewall is IN those bytes: a round trip that
+				 * dropped the whole block would compare equal to itself. */
+				check(first.length && strstr(first.data, "\"firewall\"") != NULL &&
+				    strstr(first.data, "\"netbios\"") != NULL,
+				    "  with the firewall and its rules among them");
+				ncfg_buf_free(&first);
+				ncfg_buf_free(&second);
+			}
+			ncfg_document_free(document);
+		}
+
+		/* A chain policy nftables has no word for is refused rather than
+		 * rendered as one of the two it has. */
+		check(refused_saying(DOCUMENT_HEAD
+		    "\"devices\":[],\"interfaces\":[],\"networks\":[],"
+		    "\"firewall\":{"
+		    "\"input\":{\"policy\":\"reject\"},"
+		    "\"forward\":{\"policy\":\"drop\"},"
+		    "\"output\":{\"policy\":\"accept\"}}}", "reject"),
+		    "a policy of `reject` is refused, the kernel having no such policy");
+		/* And a rule with no name is refused, the name being its identity
+		 * rather than a label: 0287's red row has nothing to say without it. */
+		check(refused_saying(DOCUMENT_HEAD
+		    "\"devices\":[],\"interfaces\":[],\"networks\":[],"
+		    "\"firewall\":{"
+		    "\"input\":{\"policy\":\"drop\",\"rules\":[{\"action\":\"accept\"}]},"
+		    "\"forward\":{\"policy\":\"drop\"},"
+		    "\"output\":{\"policy\":\"accept\"}}}", "name"),
+		    "and a rule with no name is refused, the name being its identity");
+	}
+
 	/* ---- deny_unknown_fields, and the member named ---- */
 	{
 		check(refused_saying(DOCUMENT_HEAD

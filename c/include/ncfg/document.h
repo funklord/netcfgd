@@ -1879,6 +1879,114 @@ typedef struct {
  * ------------------------------------------------------------------------ */
 
 /*
+ * Layer one's firewall: named rules in netcfgd's own table (0294).
+ *
+ * **The action is the keyword and the name is the identity**, which is 0294's
+ * grammar and both halves are deliberate. `rule` is already policy routing's
+ * word in this language -- `ncfg_routing_rule_t` above -- and `code-style.md`
+ * asks for one word per concept; and 0287 needs a rule to carry its own
+ * standing, which a position in a list cannot be, because inserting a rule
+ * above it renames everything below.
+ *
+ * **The vocabulary is enumerated and small, and widening it is a decision**,
+ * which is the discipline 0293 puts on the optional-action list for the same
+ * reason: a match that goes in cannot come out. Absent from version one and
+ * listed there rather than here: rate limits, marks, logging, sets and maps
+ * (layer four's), and raw nftables text.
+ */
+typedef enum {
+	NCFG_FIREWALL_ACCEPT,
+	NCFG_FIREWALL_DROP,
+	NCFG_FIREWALL_REJECT
+} ncfg_firewall_action_t;
+
+/* A chain's policy, which is what happens to a packet no rule matched. Only
+ * two of the actions make sense here: a policy cannot reject, nftables having
+ * no `policy reject`, and a document that asks for one is refused by the
+ * lowerer rather than rendered into something else. */
+typedef enum {
+	NCFG_FIREWALL_POLICY_ACCEPT,
+	NCFG_FIREWALL_POLICY_DROP
+} ncfg_firewall_policy_t;
+
+typedef enum {
+	NCFG_FIREWALL_PROTO_ANY,
+	NCFG_FIREWALL_PROTO_TCP,
+	NCFG_FIREWALL_PROTO_UDP,
+	NCFG_FIREWALL_PROTO_ICMP,
+	NCFG_FIREWALL_PROTO_ICMPV6
+} ncfg_firewall_protocol_t;
+
+typedef enum {
+	NCFG_FIREWALL_STATE_NEW,
+	NCFG_FIREWALL_STATE_ESTABLISHED,
+	NCFG_FIREWALL_STATE_RELATED,
+	NCFG_FIREWALL_STATE_INVALID
+} ncfg_firewall_state_t;
+
+typedef struct {
+	/* Unique within its chain, and what a red row names (0287). */
+	char    *name;
+	int      action;   /* ncfg_firewall_action_t */
+	int      protocol; /* ncfg_firewall_protocol_t */
+	/* Ports, which only a protocol that has them may carry -- the lowerer
+	 * refuses `port` with `icmp`, since a document that compiles and cannot
+	 * be rendered is worse than one that is refused. */
+	int64_t *ports;
+	size_t   port_count;
+	/* Addresses or CIDRs as the document spells them, either family. Held as
+	 * written rather than parsed, for the reason `addressing` is: the renderer
+	 * has to put back what the operator wrote. */
+	char   **from;
+	size_t   from_count;
+	char   **to;
+	size_t   to_count;
+	/* The device, which hook decides the meaning of: an input or forward
+	 * chain reads it as the arriving interface and an output chain as the
+	 * leaving one. */
+	char    *interface;
+	/*
+	 * Conntrack states as the document spells them -- `new`, `established`,
+	 * `related`, `invalid` -- and **the lowerer refuses any other word**, so
+	 * a reader may treat this as `ncfg_firewall_state_t` spelled out.
+	 *
+	 * Words rather than a list of the enum, for two reasons that are the
+	 * model's rather than the table's: `ct state` is a SET in nftables, so
+	 * the order carries no meaning and canonicalising it would make a
+	 * document render differently from how it was written; and the field
+	 * table has no list-of-enum kind, so the alternative was four booleans
+	 * whose JSON says four things where the operator wrote one.
+	 */
+	char   **states;
+	size_t   state_count;
+} ncfg_firewall_rule_t;
+
+typedef struct {
+	int                   policy; /* ncfg_firewall_policy_t */
+	ncfg_firewall_rule_t *rules;  /* in the document's order, never sorted */
+	size_t                rule_count;
+} ncfg_firewall_chain_t;
+
+/*
+ * The three base chains, hooked at filter priority 0 in the one table 0022
+ * allows netcfgd -- which 0294 widens from "NAT and nothing else" to these
+ * chains beside the NAT one, and widens in no other way.
+ *
+ * **Absent is not empty, and the pointer is what says so.** A document with
+ * no `firewall` block has none of this and netcfgd writes no filter chains at
+ * all; one with `firewall { input { policy = "accept" } }` writes an input
+ * chain that accepts everything, which is a different machine. A flag beside
+ * a zeroed struct was the first attempt and the witness caught it: an
+ * `OMIT_EMPTY` struct is still written, so every document grew an empty
+ * firewall and the frozen witness stopped matching itself byte for byte.
+ */
+typedef struct {
+	ncfg_firewall_chain_t input;
+	ncfg_firewall_chain_t forward;
+	ncfg_firewall_chain_t output;
+} ncfg_firewall_t;
+
+/*
  * The whole-host desired state.
  *
  * This is the canonical form; the per-interface files under
@@ -1914,6 +2022,12 @@ typedef struct {
 	size_t                   access_point_count;
 	ncfg_linkset_t          *linksets; /* sorted by name */
 	size_t                   linkset_count;
+	/* Layer one's rules, last for the reason `bridge_vlans` is last on a
+	 * device: the witness compares members in order, and a field appended
+	 * leaves every document written before it unchanged. NULL where the
+	 * document has no `firewall` block, which is not the same as one whose
+	 * chains are empty. */
+	ncfg_firewall_t         *firewall;
 } ncfg_document_t;
 
 /*

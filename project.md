@@ -12498,6 +12498,62 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.563 The firewall model, and a gate that would not let it be half a slice
+
+0294's implementation order was "the model and the round-trip first". The
+model is in: `ncfg_firewall_t` with three chains, each a policy and an ordered
+list of `ncfg_firewall_rule_t`, declared in three field tables so the freeing,
+copying, comparison and JSON come from the declaration rather than from code.
+`document_test` reads a document carrying one, checks the rules are in the
+document's order rather than sorted, and writes it twice to compare the bytes.
+
+### Two things the tree refused to let me do
+
+**An `OMIT_EMPTY` struct is still written.** The field went in as
+`NCFG_F_STRUCT` with that flag, on the theory that a zeroed firewall would
+vanish the way an empty list does. The frozen witness caught it immediately --
+it is compared byte for byte with what the Rust writes, and it parted from
+itself at byte 118,077 with `"firewall":{"input":{"policy":"accept"},...}`
+written into every document that has no firewall at all. It is
+`NCFG_F_OPT_STRUCT` now, a pointer, so absent is NULL and **absent is
+structurally not the same as empty** -- which the model wanted anyway: a
+document with `firewall { input { policy = "accept" } }` writes a chain that
+accepts everything, and one with no block writes no chains.
+
+**And a model field may not exist without the renderer answering for it.**
+`tool/field_coverage_gate.py` holds every document field to being either
+written or refused by the config renderer, and named six of mine. That is the
+gate telling me "model only" is not a state this tree allows, and it is right:
+the renderer's output is a config file netcfgd reads back, so a field the
+writer ignores is a field `ncfg wifi add` would silently drop from somebody's
+configuration.
+
+So `render.c` **refuses** a document carrying a firewall, with a sentence
+saying the syntax is not implemented yet. Writing the block would be worse
+than refusing: the parser does not know `firewall { ... }`, so netcfgd would
+produce a file it could not read -- and the choice between losing the block
+and emitting an unreadable file is exactly the one the gate exists to force
+somebody to make out loud. The six fields are waived in
+`tool/renderer-unread-fields.txt` with that reason, and **the waivers retire
+themselves**: the gate faults on a waiver the renderer has started reading, so
+landing the writer will name them.
+
+### What the size says, which is the useful thing about this slice
+
++4,616 bytes to 1,189,824, of which text is +1,778 and `data` +1,664: **the
+tables are const data rather than code**, and that is the whole of what four
+operations cost for eleven fields across three types. No more code will be
+written for freeing, copying, comparing or serialising this model however the
+feature grows; what grows is the lowerer, the renderer, the planner and the
+transaction, which are code.
+
+### What comes next, and why it is one commit rather than two
+
+The lowerer and the renderer land together. Separately, either one is a trap:
+a renderer without a parser writes files netcfgd cannot read, and a parser
+without a renderer silently drops the block on the first rewrite. The refusal
+above is what makes the gap safe to stand in meanwhile.
+
 ## 10.562 Layer one has a grammar, and it is the only thing 0294 decides
 
 "go ahead", the copyright holder, 2026-10-25, on starting 0283's five layers

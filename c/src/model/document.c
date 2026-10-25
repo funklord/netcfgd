@@ -2335,6 +2335,77 @@ static const ncfg_field_t globals_fields[] = {
 };
 static const ncfg_type_t globals_type = TYPE("globals block", globals_fields);
 
+/* ------------------------------------------------------------------------ *
+ * The firewall, layer one (0294)
+ * ------------------------------------------------------------------------ */
+
+static const char *const firewall_action_words[] = { "accept", "drop", "reject" };
+static const ncfg_enum_t firewall_action_set = WORD_SET("firewall action", firewall_action_words);
+
+/* **No `reject`**, nftables having no `policy reject`: a chain's policy is what
+ * happens to a packet no rule matched, and the kernel offers two. A document
+ * asking for a third is refused rather than rendered as one of these. */
+static const char *const firewall_policy_words[] = { "accept", "drop" };
+static const ncfg_enum_t firewall_policy_set = WORD_SET("firewall policy", firewall_policy_words);
+
+/* `proto` rather than `protocol` in the identifier, which keeps the line
+ * inside the column limit and matches `NCFG_FIREWALL_PROTO_*`; the word an
+ * operator reads is still "firewall protocol". */
+static const char *const firewall_proto_words[] = { "any", "tcp", "udp", "icmp", "icmpv6" };
+static const ncfg_enum_t firewall_proto_set = WORD_SET("firewall protocol", firewall_proto_words);
+
+static const ncfg_field_t firewall_rule_fields[] = {
+	/* Required, because it is the rule's identity rather than a label on it:
+	 * 0287's red row names it, and the subject key renders it. */
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_firewall_rule_t, name) },
+	{ .name = "action", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &firewall_action_set, .offset = offsetof(ncfg_firewall_rule_t, action) },
+	/* `any` is a word rather than an absence, so that a rule matching every
+	 * protocol says so in the document instead of saying nothing. */
+	{ .name = "protocol", .kind = NCFG_F_ENUM, .choices = &firewall_proto_set,
+	    .offset = offsetof(ncfg_firewall_rule_t, protocol) },
+	{ .name = "ports", .kind = NCFG_F_INT_LIST, R_U16, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, ports),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, port_count) },
+	{ .name = "from", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, from),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, from_count) },
+	{ .name = "to", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, to),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, to_count) },
+	{ .name = "interface", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_firewall_rule_t, interface) },
+	{ .name = "states", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_firewall_rule_t, states),
+	    .count_offset = offsetof(ncfg_firewall_rule_t, state_count) }
+};
+static const ncfg_type_t firewall_rule_type = TYPE("firewall rule", firewall_rule_fields);
+
+static const ncfg_field_t firewall_chain_fields[] = {
+	{ .name = "policy", .kind = NCFG_F_ENUM, .flags = NCFG_FF_REQUIRED,
+	    .choices = &firewall_policy_set, .offset = offsetof(ncfg_firewall_chain_t, policy) },
+	/* **Never sorted**, unlike every other list in this document: nftables
+	 * evaluates a chain in order, so the order IS the policy. The comparison
+	 * the table generates is therefore order-sensitive, which is what makes a
+	 * reordered chain a change the planner sees. */
+	{ .name = "rules", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &firewall_rule_type, .element_size = sizeof(ncfg_firewall_rule_t),
+	    .offset = offsetof(ncfg_firewall_chain_t, rules),
+	    .count_offset = offsetof(ncfg_firewall_chain_t, rule_count) }
+};
+static const ncfg_type_t firewall_chain_type = TYPE("firewall chain", firewall_chain_fields);
+
+static const ncfg_field_t firewall_fields[] = {
+	{ .name = "input", .kind = NCFG_F_STRUCT, .type = &firewall_chain_type,
+	    .offset = offsetof(ncfg_firewall_t, input) },
+	{ .name = "forward", .kind = NCFG_F_STRUCT, .type = &firewall_chain_type,
+	    .offset = offsetof(ncfg_firewall_t, forward) },
+	{ .name = "output", .kind = NCFG_F_STRUCT, .type = &firewall_chain_type,
+	    .offset = offsetof(ncfg_firewall_t, output) }
+};
+static const ncfg_type_t firewall_type = TYPE("firewall", firewall_fields);
+
 static const ncfg_field_t document_fields[] = {
 	{ .name = "schema_version", .kind = NCFG_F_STRUCT, .flags = NCFG_FF_REQUIRED,
 	    .type = &version_type, .offset = offsetof(ncfg_document_t, schema_version) },
@@ -2366,7 +2437,19 @@ static const ncfg_field_t document_fields[] = {
 	    .count_offset = offsetof(ncfg_document_t, access_point_count) },
 	{ .name = "linksets", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY, .type = &linkset_type,
 	    .element_size = sizeof(ncfg_linkset_t), .offset = offsetof(ncfg_document_t, linksets),
-	    .count_offset = offsetof(ncfg_document_t, linkset_count) }
+	    .count_offset = offsetof(ncfg_document_t, linkset_count) },
+	/*
+	 * Last, and **an optional struct rather than an omitted one**: a
+	 * document with no `firewall` block must be byte-identical to the same
+	 * document written before layer one existed, which is what keeps the
+	 * frozen witness and the `agree` gate's fixtures green. `OMIT_EMPTY` on
+	 * an `NCFG_F_STRUCT` does not do that -- it was tried, and the witness
+	 * parted from itself at byte 118,077 with an empty firewall written into
+	 * every document. `locked` learned the same lesson for a list (10.550).
+	 */
+	{ .name = "firewall", .kind = NCFG_F_OPT_STRUCT, .type = &firewall_type,
+	    .element_size = sizeof(ncfg_firewall_t),
+	    .offset = offsetof(ncfg_document_t, firewall) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 

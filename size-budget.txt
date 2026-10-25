@@ -913,4 +913,23 @@ netcfgd
 # Recorded at 1185300 rather than left to ride the tolerance by 8 bytes. The
 # figure is absurd and the rule is not: the entry six above exists because
 # 22,224 bytes arrived in steps each too small to bother with.
-total 1185300
+# Then layer one's firewall model, 2026-10-25, +4,616 bytes to 1,189,824.
+#
+# The model only: three field tables (rule, chain, firewall), three word sets,
+# and the document field -- no lowerer, no renderer, no planner, no
+# transaction. Which is the interesting part of the figure: a table-driven
+# model charges for the TABLE, and 0294's grammar has eight rule fields, two
+# chain fields and three chains, so the freeing, copying, comparison and JSON
+# for all of it is this and no more code will be written for those four
+# operations however the feature grows.
+#
+# Measured: text 989,879 to 991,657 (+1,778) and `data` 58,793 to 60,457
+# (+1,664) -- the tables themselves, which are const data rather than code --
+# with the rest of the file's +4,616 being section alignment, as the entry
+# about the page above describes.
+#
+# Recorded at 1189900 rather than left riding the tolerance, for this file's
+# own reason. The implementation this is the floor of will move it again --
+# a lowerer and a renderer are code rather than tables -- and that entry will
+# say how much.
+total 1189900

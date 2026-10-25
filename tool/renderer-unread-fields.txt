@@ -28,3 +28,15 @@ ncfg_hook_ref_t.sha256        inside `hooks`, which render_link.c refuses whole
 ncfg_hook_ref_t.run_as        inside `hooks`, which render_link.c refuses whole
 ncfg_device_match_t.driver    inside a `match` block, which render_device.c refuses whole
 ncfg_device_match_t.name_glob  inside a `match` block, which render_device.c refuses whole
+
+# LAYER ONE'S FIREWALL, until its configuration syntax exists (0294, 10.562).
+# `render.c` refuses a document carrying a `firewall` whole, rather than
+# writing a block the parser cannot read back -- so it reads none of these
+# members. Every line here retires itself: this gate faults on a waiver the
+# renderer has started reading, so landing the writer will name them.
+ncfg_firewall_t.input          inside `firewall`, which render.c refuses whole
+ncfg_firewall_t.forward        inside `firewall`, which render.c refuses whole
+ncfg_firewall_t.output         inside `firewall`, which render.c refuses whole
+ncfg_firewall_rule_t.ports     inside `firewall`, which render.c refuses whole
+ncfg_firewall_rule_t.interface  inside `firewall`, which render.c refuses whole
+ncfg_firewall_rule_t.states    inside `firewall`, which render.c refuses whole

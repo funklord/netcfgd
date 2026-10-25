@@ -1284,6 +1284,27 @@ int ncfg_render(const ncfg_document_t *document, const ncfg_overrides_t *overrid
 	 * regenerates both. */
 	ncfg_buf_add_text(text, header);
 	render_globals(document, text, missing);
+	/*
+	 * **Layer one's firewall is refused rather than written, deliberately,
+	 * until its lowerer exists** (0294, 10.562). The model can hold a
+	 * firewall today and nothing can produce one from a config file, so a
+	 * document carrying one reached here from JSON -- the daemon's state, or
+	 * a hand-written document.
+	 *
+	 * Writing it would be worse than refusing. The renderer's output is a
+	 * config file netcfgd reads back, and a `firewall { ... }` block the
+	 * parser does not know yet would be a file this program wrote and cannot
+	 * read: `ncfg wifi add` on such a host would rewrite the config and lose
+	 * the firewall, or refuse on the next load with a parse error pointing at
+	 * netcfgd's own output. The field-coverage gate exists to make exactly
+	 * this choice explicit rather than silent, and this is the choice.
+	 */
+	if (document->firewall) {
+		ncfg_render_refuse(missing, "firewall", NULL,
+		    "this build models a firewall and cannot write one back: its "
+		    "configuration syntax is not implemented yet (0294), so a config "
+		    "written here would be one netcfgd could not read");
+	}
 	for (i = 0; i < document->interface_count; i++) {
 		ncfg_render_interface(&document->interfaces[i], overrides, text, missing);
 	}
