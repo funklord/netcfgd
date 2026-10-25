@@ -2566,10 +2566,9 @@ hull-natcap:
 # The kernel tier: netcfgd against kernels built without what it asks for.
 #
 # WHY IT IS NOT PART OF `hull` ABOVE
-#   hull boots the host's kernel -- its spec declares `(kernel "path:...")`
-#   and the qemu engine has not built it (hull's project.md 1188) -- so the
-#   one thing this tier needs is the one thing hull cannot do yet. It drives
-#   qemu directly instead, and moves under hull the day that key works.
+#   It is a hull tier now -- the kernel key works -- but not a `hull` target:
+#   three kernel builds and a source tree are not something `make hull` should
+#   reach for, and nothing here can supply the tree.
 #
 # WHY IT EXISTS AT ALL, GIVEN `hull-natcap` MEASURES THE SAME STATES
 #   That rig blocks module autoload on the host's kernel, which is the same
@@ -2578,6 +2577,12 @@ hull-natcap:
 #   the two agreed exactly (10.553). Keep both: the rig runs in minutes and
 #   guards the sentences, and this answers "but is a blocked loader really
 #   the same as a kernel without it".
+#
+# **It drives hull since 2026-10-25**, hull's `(kernel "path:FILE")` having
+# landed -- so the tier lost its initramfs packing and its qemu command line,
+# and its userland is the natcap image rather than a cpio. A rebuilt hull
+# needs its `hull core` restarted or the old engine serves the new plan, which
+# `run.sh` records at length.
 #
 # BY HAND, ALWAYS. It wants a 1.6 GB source tree this repository does not
 # ship, three kernel builds, and `KERNEL_SRC` naming the tree:

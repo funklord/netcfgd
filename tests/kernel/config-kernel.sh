@@ -35,6 +35,17 @@ scripts/config -e NET -e INET -e IPV6 -e UNIX \
 	-e TMPFS -e PROC_FS -e SYSFS -e INOTIFY_USER -e EPOLL -e SIGNALFD \
 	-e TIMERFD -e EVENTFD -e MULTIUSER -e SERIAL_8250 -e SERIAL_8250_CONSOLE \
 	-e IKCONFIG -e IKCONFIG_PROC
+# **What a hull guest needs built in**, added 2026-10-25 when hull gained
+# `(kernel "path:FILE")` and these kernels would not come up under it: "the
+# guest agent never answered". A hull vm reaches its guest over virtio -- a 9p
+# root share, a vsock control channel and `console=hvc0` on a virtio console --
+# and with `CONFIG_MODULES` off there is no module for any of it to load, which
+# is the case hull says this form is for. A kernel for hand-driven qemu needed
+# none of them: the rootfs was the initramfs and the console was ttyS0.
+scripts/config -e VIRTIO -e VIRTIO_PCI -e VIRTIO_MENU -e VIRTIO_NET \
+	-e VIRTIO_CONSOLE -e VIRTIO_BLK -e HVC_DRIVER \
+	-e NET_9P -e NET_9P_VIRTIO -e 9P_FS -e 9P_FS_POSIX_ACL \
+	-e VSOCKETS -e VIRTIO_VSOCKETS -e OVERLAY_FS
 if [ "$state" = k0 ]; then
 	# The control: the chain type and the masquerade both built in.
 	scripts/config -e NF_NAT -e NF_NAT_MASQUERADE -e NFT_NAT -e NFT_MASQ
@@ -60,6 +71,11 @@ fail=0
 # `/proc/config.gz` is the instrument's own account of itself, and without it
 # a run in the wrong machine looks exactly like a run in the right one.
 want_y="CONFIG_NF_TABLES CONFIG_NF_TABLES_INET CONFIG_NETFILTER_NETLINK CONFIG_DUMMY CONFIG_IKCONFIG_PROC"
+# The virtio set is checked too: with MODULES off a tristate that cannot be
+# built in is simply dropped, and the symptom is a guest that boots and says
+# nothing anybody can hear.
+want_y="$want_y CONFIG_VIRTIO_PCI CONFIG_VIRTIO_NET CONFIG_VIRTIO_CONSOLE"
+want_y="$want_y CONFIG_NET_9P_VIRTIO CONFIG_9P_FS CONFIG_VIRTIO_VSOCKETS"
 want_n="CONFIG_MODULES"
 [ "$state" != k0 ] && want_n="$want_n CONFIG_NFT_MASQ"
 [ "$state" = k2 ] && want_y="$want_y CONFIG_NFT_NAT CONFIG_NF_NAT"

@@ -12498,6 +12498,73 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.559 The kernel tier drives hull, and a stale daemon cost a day
+
+hull built `(kernel "path:FILE")` for its qemu engine (`0a7b73d`), which is
+the one thing `tests/kernel/` existed outside the hull family for. It drives
+hull now: no initramfs to pack, no `/dev/console` to declare, no `-append` to
+get right, and about two hundred lines of plumbing gone -- `make-initramfs.py`
+deleted, `kinit.sh` demoted from pid 1 to `payload.sh`, and the userland is
+the natcap image the sibling rig already builds.
+
+    make kernel-natcap KERNEL_SRC=<tree>
+    k0  everything built in       applies NAT
+    k1  no nat chain type         NFT_MSG_NEWCHAIN refused, ENOENT
+    k2  chain type, no masquerade NFT_MSG_NEWRULE refused, ENOENT
+
+Same three answers as the hand-driven qemu gave, on kernels reporting
+`6.12.113` with `CONFIG_MODULES` unset, read from `/proc/config.gz` inside the
+guest.
+
+### What a hull guest needs that a hand-driven one did not
+
+virtio-9p for the root share, vsock for the agent, and `console=hvc0` on a
+virtio console -- **built in, there being no modules at all**. The first
+attempt booted and hull said only "the guest agent never answered", which is
+what an unreachable agent looks like from outside. `config-kernel.sh` sets
+those symbols and checks them in its readback, because with `CONFIG_MODULES`
+off a tristate that cannot be built in is silently dropped and the symptom is
+a machine nobody can hear.
+
+### The day it cost, which is the part worth keeping
+
+The feature did not work when first tried: the planner declared
+`vm.kernel.path: native` for the spec and qemu was handed
+`-kernel /boot/vmlinuz-<host release>`. The guest booted the host's 6.12.107
+with no `/proc/config.gz`, absolute and relative paths alike.
+
+**The cause was a stale daemon, not the feature.** hull's engine runs in a
+`hull core` process, one per user, and `hull run` dials one that is already
+running. A core from a build before the feature serves the old engine, which
+has no such key, while a freshly built frontend plans the vector and declares
+it native. Old engine, new plan, host kernel. hull confirmed it by running the
+new frontend against a core built from the parent commit, and has flagged the
+absent version-skew warning for its holder.
+
+**hull's own control could not have caught it, and that is the transferable
+part.** They tested the path with a copy of the host's kernel. If the engine
+ignores the path and falls back to `/boot/vmlinuz-<host release>`, the file at
+the other path is byte-identical to the fallback -- so the boot, the release
+and the release-keyed module share all look right whichever file qemu was
+handed. **A control whose two branches produce the same observation is not a
+control.** What separated them here was a kernel with a different release,
+which is why the payload prints `uname -sr` and derives its expectation from
+`/proc/config.gz` rather than from an argument.
+
+### And the write asymmetry survived re-measurement
+
+hull reasonably asked whether 10.558's 14x was the same stale core talking,
+since `store_sources` rewrites a stored source into a `dir:` checkout plus an
+overlay and should reach the same path. Re-measured on a restarted core,
+200 MB to the guest's root:
+
+    (source "netcfgd/hwsim")  root is 9p       3655 ms
+    (source "dir:...")        root is overlay   183 ms
+
+So it is a real asymmetry on the current build rather than an artifact, and
+the tmpfs the hwsim payload mounts stays earning its place. Told to hull as a
+separate finding, which is what they asked for if it survived.
+
 ## 10.558 The rigs run from built images, and hwsim lost two checks
 
 "do the migration then", the copyright holder, 2026-10-25, after 10.557
