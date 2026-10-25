@@ -12553,26 +12553,71 @@ and the dependency is visible in the spec rather than implicit in the runtime.
 | natcap | 37 of 37 |
 | sandbox | 31 of 31, **systemd as pid 1** |
 | openrc | 13 of 13, `openrc-init` as pid 1, service started and stopped |
-| hwsim | **25 of 27** |
+| hwsim | 25 of 27, and **27 of 27** once the payload mounts its own tmpfs |
 
 The two init rigs are the half 10.557 listed as untested, and they pass: a
 built image boots its own init. natcap passes once the modules volume is named.
 
-**hwsim lost its two roam checks**, and this entry does not get to call that
-anything yet. Both failures are the `on roam` hook not firing after the station
-moved -- `and that is a roam`, `named by the access point it moved to` -- where
-the rig's last recorded run was 27 of 27 (10.529, hull `4161c8a`,
-2026-10-22). So it is a regression against that record, and three things have
-changed since: this image, a fortnight of netcfgd's own commits, and hull from
-`4161c8a` to `b7126fe`.
+**hwsim lost its two roam checks on the first attempt**, which is the half of
+this entry worth reading. Both failures were the `on roam` hook not firing
+after the station moved -- `and that is a roam`, `named by the access point it
+moved to` -- against a last recorded run of 27 of 27 (10.529, hull `4161c8a`,
+2026-10-22). Three things had changed since: this image, a fortnight of
+netcfgd's own commits, and hull from `4161c8a` to `b7126fe`.
 
 The package versions are not it: `wpasupplicant 2:2.10-24`, `iw 6.9-1` and
 `dnsmasq-base 2.91-1+deb13u2` are what the old exported tree carried and what
-the step installed. **The control is the same rig against the old `dir:`
-source**, which is still on disk, and it is not run yet: hull's session asked
-for a window with no vm of mine starting while it finishes a sabotage sweep,
-and a passt collision has already failed one of their runs today. So the
-measurement waits on their word rather than on anything here.
+the step installed.
+
+### It was the write path, and `(mutable overlay)` is not one thing
+
+**The control ran once hull's session was clear: the same rig against the old
+`dir:` source, with today's netcfgd and today's hull, passes 27 of 27.** So the
+image source is the variable -- not a fortnight of commits and not hull's
+version.
+
+What differs is where a guest's writes go. Timed in a 4G guest, 200 MB:
+
+| source, both `(mutable overlay)` | the root | 200 MB to root | to `/tmp` |
+|---|---|---|---|
+| `dir:` | overlay, tmpfs upper | 234 ms | 155 ms |
+| stored ref | **plain 9p to the host** | 3165 ms | 3263 ms |
+
+`/tmp` goes with it, being on the root. So a stored-source machine writes 14
+times slower, and **this payload is the write-heavy one**: it untars the tree
+and builds netcfgd in the guest, which is hundreds of small files. The run took
+27 minutes against the control's 5.
+
+**The failure was not the slowness, it was what the slowness did.** The daemon
+log the rig prints on a failed roam says it:
+
+    [drift] Warning: wlan2: backend.restart refused: the backend is running
+    and silent, and netcfgd will not kill a daemon that may only be busy
+
+netcfgd read its own supplicant as wedged, so no roam event arrived and the
+hook never fired. Nothing about netcfgd changed; the guest got slow enough that
+a liveness judgement went the other way.
+
+**The fix is netcfgd's rather than hull's**, because a rig should not depend on
+where a runtime puts its writes: the hwsim payload mounts its own tmpfs on
+`/tmp` and `/work` before it builds, and says loudly when it cannot -- a silent
+fall back to 9p is a slow run that looks like a fault in netcfgd, which is
+exactly what this was. Reported to hull as well, since the capability line for
+the stored case reads "an overlayfs in the guest; writes are held in the
+machine's memory and go with it" and for a stored source neither half holds.
+
+With that, **hwsim is 27 of 27 from its built image** and the run is back to
+about seven minutes. The other three rigs write little and passed as they
+were; they are left alone rather than given a tmpfs they have not been
+measured to need.
+
+**The shape, because it is not about wireless.** A test that passes on one
+runtime and fails on another, with identical packages and identical code, was
+measuring the runtime's write path through a liveness timeout. Nothing in the
+rig said it depended on write speed -- and the failure surfaced three layers
+away, as netcfgd apparently mishandling a roam. The lesson for the next rig is
+the one the payload now carries in a comment: own the filesystem you write to,
+or inherit whatever the machine runtime decided this week.
 
 ## 10.557 Both bake blockers are gone, on a hull built for the purpose
 

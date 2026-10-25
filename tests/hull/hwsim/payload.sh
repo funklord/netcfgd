@@ -45,6 +45,33 @@ echo
 PATH=/usr/sbin:/sbin:/usr/local/sbin:$PATH
 export PATH
 echo "=== PATH: $PATH"
+# **A tmpfs for everything this payload writes, measured 2026-10-25.**
+# `(mutable overlay)` is not one thing: with a `dir:` source the guest lays an
+# overlay whose upper layer is its own tmpfs, and with a stored source -- which
+# this rig has used since the images became `hull build` ones -- the guest's
+# root is plain 9p and every write crosses to the host. Timed in a 4G guest,
+# 200 MB to the root: 234 ms on the first, 3165 ms on the second, and `/tmp`
+# the same both ways because it is on the root.
+#
+# That is 14 times slower on the path this payload uses most: it untars the
+# tree and builds netcfgd, which is hundreds of small writes. The run took 27
+# minutes instead of 5, and the cost was not only time -- netcfgd read its own
+# supplicant as "running and silent", the roam never arrived, and the two roam
+# checks failed on an image whose packages are identical to the old one's.
+#
+# So the payload stops depending on where hull puts the writes. It is also
+# loud about failing to: a silent fall back to 9p would be a slow run that
+# looks like a fault in netcfgd, which is exactly what happened.
+for d in /tmp /work; do
+	mkdir -p "$d"
+	if ! mount -t tmpfs -o size=3g tmpfs "$d"; then
+		echo "note: no tmpfs on $d, so this run writes through the root; if that"
+		echo "note:   root is 9p a build here takes minutes and timing checks fail"
+	fi
+done
+echo "=== /work and /tmp:"
+grep -E ' (/work|/tmp) ' /proc/mounts | sed 's/^/     /'
+
 if command -v cc >/dev/null 2>&1 && command -v make >/dev/null 2>&1; then
 	echo "=== building in the guest, with $(cc --version | head -1)"
 	mkdir -p /work
