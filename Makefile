@@ -2523,10 +2523,31 @@ hull: hull-hwsim hull-sandbox hull-openrc hull-natcap
 # 27 checks. The guest builds netcfgd itself, so no host build is needed:
 # hull `7b47668` gave the workload a PATH, and the payload falls back to the
 # read-only share loudly if it cannot.
+#
+# **A failed run says whether the guest was alive**, which it could not before.
+# `tool/hull-guest-cpu.sh` samples the machine's guest-side cpu while this runs
+# and leaves one line behind; it is printed only when the run fails, because a
+# diagnosis belongs beside a failure and a passing run does not need one. The
+# sampler cannot end the run and cannot fail it -- every unhappy path it has
+# writes a sentence and exits 0 -- so the worst it does is say nothing useful.
+#
+# It needs hull `d0582b6` for `stats --guest`; an older one answers nothing and
+# the line says so rather than failing.
 hull-hwsim:
 	@$(call hull_says,netcfgd/hwsim)
 	@$(call hull_image,hwsim)
-	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/hwsim/hull.conf
+	@verdict=$$(mktemp -t netcfgd-hwsim-guest.XXXXXX); \
+	sh tool/hull-guest-cpu.sh hwsim "$$verdict" & watcher=$$!; \
+	rc=0; \
+	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/hwsim/hull.conf || rc=$$?; \
+	kill $$watcher 2>/dev/null; \
+	wait $$watcher 2>/dev/null; \
+	if [ "$$rc" -ne 0 ]; then \
+		echo "hull-hwsim: the run failed (rc=$$rc). From outside the guest:"; \
+		sed 's/^/hull-hwsim:   /' "$$verdict"; \
+	fi; \
+	rm -f "$$verdict"; \
+	exit $$rc
 
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.

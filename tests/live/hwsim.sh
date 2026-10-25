@@ -1018,6 +1018,91 @@ state_now() {
 		sed -n 's/^wpa_state=//p'
 }
 
+# Busy time of a process in jiffies: utime plus stime.
+#
+# **Parsed after the last `)`, not by field number from the start.** Field 2 of
+# `/proc/<pid>/stat` is the command in parentheses, and a command containing a
+# space or a bracket shifts every positional field after it -- so counting from
+# the beginning reads the wrong two numbers for exactly the processes whose
+# names are unusual. After the last `)` the remainder starts at the state
+# field, which puts utime at 12 and stime at 13.
+cpu_jiffies() {
+	stat=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+	set -- ${stat##*') '}
+	[ "$#" -ge 13 ] || return 1
+	echo $((${12} + ${13}))
+}
+
+# The pid of a process in the test namespace, by its `comm`.
+pid_in_ns() {
+	for p in $("$ip" netns pids "$ns" 2>/dev/null); do
+		if [ "$(cat "/proc/$p/comm" 2>/dev/null)" = "$1" ]; then
+			echo "$p"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# **Was it working?** Said of a named process, over two reads a second apart,
+# and printed where a timing check has just given up.
+#
+# **One direction only, and the control is why.** Tested against a busy loop
+# (112 to 208 jiffies over a second) and an idle `sleep` (0 to 0): rising cpu
+# proves a process was working, and a flat figure proves nothing at all,
+# because an event-driven daemon waiting on a socket is indistinguishable from
+# a wedged one by cpu. The first version of this said a flat figure meant
+# wedged. That is the trap of a control that separates the two cases you
+# thought of -- busy against stopped -- while the case that matters,
+# healthy-and-idle against wedged, is not separated by the instrument at all.
+#
+# So this claims the positive and refuses the negative. `hull stats --guest` is
+# the mirror image and the two are complementary in the opposite directions to
+# the obvious one: guest-WIDE cpu always rises on a live machine, so flat means
+# wedged and rising says little; a single process is the other way round.
+#
+# This exists because of a run that cost a day. After this rig's images became
+# `hull build` ones its guest root became plain 9p, every write crossed to the
+# host, and the payload measured a build path 14 times slower than before. The
+# two roam checks below then failed on an image whose packages were identical
+# to the working one's: the supplicant was alive and the window was simply too
+# short for that machine. Nothing in the failure said so, so the fault looked
+# like netcfgd's.
+#
+# The window is still the bound -- a check has to end -- but it is no longer
+# the whole verdict. A failure beside a rising figure is this machine being too
+# slow, which is a different report from the same failure with nothing beside
+# it.
+#
+# It prints and judges nothing: a diagnosis belongs beside a failure, and a
+# check that passed because a process was busy would be a check that cannot
+# fail.
+say_if_busy() {
+	marker=$1
+	pid=$(pid_in_ns "$marker") || {
+		echo "       $marker is not in the namespace at all, so it is not slow -- it is gone"
+		return 0
+	}
+	first=$(cpu_jiffies "$pid") || {
+		echo "       $marker[$pid] has no readable /proc entry, so it exited between the two reads"
+		return 0
+	}
+	sleep 1
+	second=$(cpu_jiffies "$pid") || {
+		echo "       $marker[$pid] exited while being measured"
+		return 0
+	}
+	if [ "$second" -gt "$first" ]; then
+		echo "       $marker[$pid] used $((second - first)) more jiffies over one second,"
+		echo "       so it was working: suspect this machine being too slow for the"
+		echo "       window rather than the supplicant being stuck"
+	else
+		echo "       $marker[$pid] used no cpu over one second, which says nothing on"
+		echo "       its own -- a daemon waiting on a socket is idle, not stuck. It is"
+		echo "       alive, and why it did not act is the question"
+	fi
+}
+
 if [ "${chosen:-}" = netcfgd-better ]; then
 	before_roams=$(roams)
 	left_bssid=$(bssid_now)
@@ -1144,6 +1229,8 @@ CONF
 			else
 				echo "FAIL never moved to the other access point \
 (was ${was_on:-none}, now ${landed:-none})"
+				echo "       the window was $((waited / 10))s, and what the supplicant was doing in it:"
+				say_if_busy wpa_supplicant
 				failures=$((failures + 1))
 			fi
 		fi

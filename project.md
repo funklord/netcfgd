@@ -12498,6 +12498,125 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.569 Two cpu instruments, read in opposite directions, and the control that corrected one
+
+hull landed `hull stats --guest` (its master `d0582b6`) and offered it for the
+case this tree had got wrong: 10.558's run where the rigs' images became `hull
+build` ones, the guest root became plain 9p, a build path measured 14 times
+slower, and the two roam checks failed on an image whose packages were
+identical to the working one's. The failure looked like netcfgd's and cost a
+day.
+
+**What was wrong was not the timeout. It was that a timing failure said
+nothing about whether the thing it was waiting for was alive.**
+
+### The asymmetry, which is the finding and was nearly inverted
+
+Both instruments read cpu across two moments. **They are read in opposite
+directions, and it is not the obvious way round:**
+
+| | rising | flat |
+|---|---|---|
+| **guest-wide** (`hull stats --guest`) | says little; a live kernel is usually busy | **wedged** -- a live kernel always accrues some busy time |
+| **one process** (`/proc/<pid>/stat`) | **was working** | says nothing; a daemon blocked on a socket is flat and healthy |
+
+So the two answer different questions -- *is the machine alive* and *was this
+daemon working* -- and neither substitutes for the other.
+
+**The first version of the in-guest half had it backwards**, and the control
+is what caught it: measured against a busy loop (112 to 208 jiffies in a
+second) and an idle `sleep` (0 to 0), a flat figure is exactly what a healthy
+idle process looks like. The draft said flat meant wedged, which would have
+accused a working supplicant. That is `evidence.md`'s trap in its sharpest
+form: **the control separated the two cases the author thought of** -- busy
+against stopped -- **while the case that matters, healthy-and-idle against
+wedged, is not separated by the instrument at all.** A control that passes
+does not establish that the instrument can answer the question actually being
+asked.
+
+### What was built
+
+- **`tests/live/hwsim.sh`'s `say_if_busy`**, printed beside the roam timeout
+  that failed before. It names the process rather than the machine, claims
+  only the positive direction, and says plainly that a flat figure means the
+  daemon is alive and the question is why it did not act.
+- **`tool/hull-guest-cpu.sh`**, sampling hull's guest-side figure alongside a
+  rig run on the host, with its line printed only when the run fails.
+- **`tests/hull/hwsim/no-tmpfs`**, a switch that puts the payload back on the
+  9p root deliberately, so the slow case can be reproduced without editing the
+  payload -- which is how a control stops being run.
+
+**The jiffie parse is read after the last `)`, not counted from the start.**
+Field 2 of `/proc/<pid>/stat` is the command in parentheses, so a command
+containing a space or a bracket shifts every field after it. Verified against
+a process deliberately named `weird (name) here` and cross-checked with an
+independent awk implementation: both say the same number, and counting from
+the beginning would not.
+
+### Two faults in the sampler, both from reading hull's source rather than its summary
+
+**`--over S` already does the arithmetic, and the first version reimplemented
+it worse.** hull's `stats --guest --over 2 ID` takes two readings two seconds
+apart on the *monotonic* clock and prints cpu as a percentage of one cpu. The
+draft took two one-shot readings and compared them itself -- untimed, against
+a clock that can step. It asks hull now.
+
+**And the output is column-padded, which nearly manufactured a wedged
+machine.** hull prints `cpu     3.4 %`. The parse had been written from a
+summary as a single space, so it matched nothing -- and the sampler's
+no-match branch reads as "the guest did not answer", so **every sample of a
+perfectly live guest would have reported a refusal.** Found by reading
+`stats_of` in hull's `cli/hull.c`. Neither fault was in hull's code and both
+were in what a recap can carry: a consumer that writes a parser from prose has
+written a parser for the prose.
+
+### The control hull asked for, and what it actually yielded
+
+Run deliberately on the 9p root with the switch set, `HULL_TIMEOUT=2100`:
+**27 checks, all passed.** The guest build was visibly slow -- minutes of it,
+unmeasured, so no figure is claimed here -- and the roam checks landed inside
+their 180-second window anyway.
+
+**So the failure of 10.558 does not reproduce by slowness alone**, and
+`say_if_busy` was never printed: the branch that calls it was not reached. That
+is worth stating rather than glossing, because the obvious reading -- the
+instruments are vindicated -- is not available. **Non-reproduction is what
+"intermittent" means**, and what the run establishes is narrower: on this
+machine, today, the 9p path is not by itself enough to miss the window. What
+tipped it over in 10.558 is therefore still unexplained, and the honest
+position is that the slow path was a contributor rather than the cause.
+
+**What the control did yield is a fault in the instrument, which is the better
+outcome of the two available.** The sampler's last line, at the end of a
+passing run, was
+
+    guest cpu: hwsim did not answer: hull: the machine is not running
+
+The loop asks `hull ps` before each reading, and the machine exited between
+the two -- so a state read a moment earlier was reported as a guest refusing to
+answer. Every successful run would have ended by accusing a healthy guest of
+silence, and nobody would have looked, because the line is printed only when
+the run fails. **A stale state read is the same hazard as a stale pid**, which
+`running-code.md` records about signalling a recycled one; the ordinary end has
+two spellings and the sampler now knows both.
+
+### What is and is not exercised, stated so nobody assumes otherwise
+
+- **`tool/hull-guest-cpu.sh`'s happy path: measured against a live machine** --
+  `hwsim is ALIVE -- guest cpu 21.0% of one cpu over 2s`, and real figures
+  through a whole slow run (26.4%, 16.0%). Its machine-gone and exit-race
+  endings are measured too, the second by the run above.
+- **`say_if_busy`'s three reachable branches: exercised** -- absent from the
+  namespace, busy (58 jiffies in a second), and idle (none) -- by a harness
+  that stubs `ip netns pids`. **That covers the branching and the arithmetic
+  and not the namespace lookup**, a stub reproducing only the half of a tool
+  its author has seen.
+- **Its two mid-measurement exit branches: not exercised.** They need a process
+  that dies between two reads a second apart, and nothing here arranges that.
+- **`say_if_busy` printing in situ: not exercised**, for the reason above. The
+  first rig failure after this will be the first real test of it, which is the
+  honest state to leave it in rather than a claim it has been proved.
+
 ## 10.568 The fuzznet pin moved 403 commits, and what it cost to absorb
 
 10.567's finding was that this tree's vendored fuzznet was pinned at

@@ -62,8 +62,26 @@ echo "=== PATH: $PATH"
 # So the payload stops depending on where hull puts the writes. It is also
 # loud about failing to: a silent fall back to 9p would be a slow run that
 # looks like a fault in netcfgd, which is exactly what happened.
+#
+# **The switch exists so the slow case can be reproduced deliberately.**
+# `touch tests/hull/hwsim/no-tmpfs` on the host and this run writes through the
+# 9p root again, which is the configuration the two roam checks failed under.
+# That is worth being able to ask for: the instruments that now diagnose it --
+# `say_if_busy` in `tests/live/hwsim.sh`, and `tool/hull-guest-cpu.sh` on the
+# host -- can only be trusted if they have been seen against the case they were
+# written for, and recreating it by editing this file is how a control stops
+# being run.
+skip_tmpfs=
+if [ -e /repo/tests/hull/hwsim/no-tmpfs ]; then
+	skip_tmpfs=1
+	echo "=== no-tmpfs is set: writing through the machine's root on purpose."
+	echo "===   On a stored source that root is 9p, which is the slow case."
+fi
 for d in /tmp /work; do
 	mkdir -p "$d"
+	if [ -n "$skip_tmpfs" ]; then
+		continue
+	fi
 	if ! mount -t tmpfs -o size=3g tmpfs "$d"; then
 		echo "note: no tmpfs on $d, so this run writes through the root; if that"
 		echo "note:   root is 9p a build here takes minutes and timing checks fail"
