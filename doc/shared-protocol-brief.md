@@ -385,7 +385,7 @@ Two requests, both about keeping the seam visible rather than about ownership:
 
 ---
 
-## 9. A third column, which the holder asked about and nobody has decided
+## 9. The third column, which is fuzznet's and was never ours to offer
 
 Asked by the copyright holder, 2026-10-25:
 
@@ -393,95 +393,75 @@ Asked by the copyright holder, 2026-10-25:
 > a generic part of fuzznet? As other projects may need to distribute and
 > propagate internal/external settings and commands in very much the same way?
 
-**This document has had two columns and the question names a third.** Section
-8 splits the world into netcfgd's semantics -- what a field means, what a
-device must reject -- and the library's wire: encoding, framing,
-authentication, encryption. Neither column holds what the question is about.
-Between "these bytes are authentic" and "this value means an MTU" sits a layer
-of **coordination**: who may see a value, how a node reports that it has it,
-how several nodes apply at one instant, and how a node that locked itself out
-gets back. That layer is not wire and it is not netcfgd's domain, and it is
-where the genuinely generic machinery lives.
+**This section was written twice on the same day, and the first version is
+not kept.** It said that the document's two columns -- netcfgd's semantics and
+the library's wire -- left a third unheld, that netcfgd had built four pieces
+of it, and that nothing should move until a second consumer spoke. Then the
+holder said to do the cross-project pass, which meant reading fuzznet instead
+of reasoning about it. The correction is worth more than the original answer.
 
-### What netcfgd has built that is not netcfgd's
+### The two columns were this document's reading, not the library's boundary
 
-Four pieces, each already load-bearing here and none of them about networks:
+Section 8 says encoding, framing, authentication and encryption are the
+library's and the semantics are netcfgd's. That is true and it is not a
+boundary. fuzznet's own section 2 carries the holder's words -- *every project
+using fuzznet uses fuzznet's high-level abstractions rather than extending the
+protocol with its own concepts, so that network code and dependencies leave
+the consuming project* -- and its section 298 goes further: fuzznet is to
+contain what its consumers need in order to use its features, and a consumer
+whose shape fuzznet does not yet offer bypasses it with its own **until
+fuzznet grows that shape**.
 
-- **Scope classification.** `c/include/ncfg/scope.h` and `scope.c` (556 lines)
-  tag every configuration key `host-private`, `host`, `group` or `estate`,
-  with the narrowest as the zero value so an unclassified key is never
-  replicated, a registry gate that fails when a key is unclassified, and a
-  test holding the code's table against the documented one. Nothing in that
-  mechanism is about networking: it answers "who may see this value", which is
-  the first question any replicated setting has.
-- **Commit-confirm with a revert window.** `c/src/daemon/confirm.c` (787
-  lines): arm a window, record the last-good configuration, confirm within N
-  seconds or be reverted. It exists because netcfgd configures the path its
-  own instructions arrive over -- which is exactly the situation of *any*
-  program pushing settings to a remote node, and the reason routers have had
-  this feature for thirty years.
-- **Standing per item, computed rather than stored.** 0287 and 0293: an item
-  that could not be applied is red and says why, while its neighbours apply.
-  A distributed setting needs the same vocabulary one axis out -- applied
-  here, unmet there, and which node is which.
-- **Settled, as a definition rather than a feeling.** 0287: "a rule is settled
-  when every node whose rules reference the value holds it." That is a
-  propagation-reporting rule, and the hard part of it -- which nodes *need* a
-  value -- is the same shape for a firewall rule, a package list or a
-  credential.
+So a piece of machinery sitting in netcfgd is not evidence that it belongs to
+netcfgd. It is, by that rule, a bypass with a shelf life.
 
-To those, the question adds one netcfgd does **not** have: **task and command
-propagation**, run-this-there-and-collect-the-result. netcfgd's hooks are
-local; nothing here dispatches work to another machine.
+fuzznet's section 2 names this exact mistake about this exact document:
+*"reading a consumer's constraint as the library's boundary is the specific
+error"*. The brief's table is an accurate record of what two consumers built.
+It was never a statement of what the library may own.
 
-### What must not move, and why the line is where it is
+### The third row, as it actually stands
 
-The planner. `plan/build.c` diffs desired against observed and emits ordered,
-reversible ops; `apply/` carries them out against netlink and says what the
-kernel refused in words an operator can act on. The *shape* -- diff, order,
-reverse, report -- is a pattern other projects would recognise, and the
-content is domain knowledge that only has meaning here: that an address
-precedes a route, that an `ifb` device exists only for shaping, that `ENOENT`
-from `NFT_MSG_NEWCHAIN` means a module. A library holding that would be
-netcfgd with the name filed off.
+| | the local socket | fuzznet's wire | coordination |
+|---|---|---|---|
+| carries | whatever this project chose | a binary framed message | a scoped value, and who may set it |
+| reaches | this machine | across a trust boundary | every node the scope admits |
+| whose | netcfgd's, for stated reasons | the library's | **the library's, by the holder's decision** |
+| where | `doc/socket-protocol.md` | fuzznet's `wire/`, `frame/` | fuzznet's `state/`, `record/`, `node/` |
 
-So the proposed line, and it is a proposal rather than a decision:
+### What netcfgd owns, narrowed by measurement rather than by argument
 
-> **fuzznet owns how a value reaches a node and how nodes agree that it did.
-> netcfgd owns what the value means and what to do about it.**
+**The scope vocabulary is not ours and never was.** fuzznet's
+`state/scope.h` has the four names, the narrowest at zero, and a header that
+names this tree's enum as a placeholder to be deleted. `c/include/ncfg/scope.h`
+has said the same since 2026-09-29. What stays netcfgd's is the **table** --
+which key has which scope -- and the gate that refuses an unclassified one.
 
-The interface that line implies is small, which is the argument for it: a
-scoped key with a version, a per-node delivery-and-settle report, a
-staged-commit token for "apply at this instant", and a standing per item. Four
-types, none of them networking.
+**"Applied here, unmet there, and why" is ours**; "may this setter set this,
+and does it still stand" is fuzznet's and exists. That is the split the pass
+found in a concept this document had treated as one thing.
 
-### The two reasons not to start now
+**"Settled" is fuzznet's and is costed rather than open** -- its section 724,
+asked first by fuzzypickles. netcfgd is the second asker, so the answer is to
+consume it rather than to define it.
 
-**fuzznet is being written, on its holder's word of 2026-10-23.** Extracting
-into a library that is itself unfinished means designing the generic shape
-while its first consumer is also unbuilt, and `harmonization.md` names that
-failure directly: somebody working inside a single project "cannot see whether
-a thing should be shared, only that they needed it."
+**Commit-confirm with a revert window, and command propagation, are
+unbuilt anywhere.** netcfgd has the first and did not write it for export.
+Whether fuzznet grows them is the holder's, and the line fuzznet accepts
+covers both.
 
-**And netcfgd is one consumer wearing two hats.** 0284's layers three and four
--- zones from a controller, memberships in real time -- will consume this
-machinery again, inside this tree. That is a second *use* and not a second
-*opinion*: both would be shaped by netcfgd's habits. The shape becomes
-knowable when a different project needs it, and the candidates are visible
-from here -- raidcfgd pushing array policy to several hosts, hull distributing
-machine specs, hembygd replicating anything at all -- but what they need is
-theirs to say, not netcfgd's to assume.
+**The planner stays here** under any version of the line: that an address
+precedes a route, that `ENOENT` from `NFT_MSG_NEWCHAIN` means a missing
+module. A library holding that is netcfgd with the name filed off, and
+fuzznet's reply agrees.
 
-### What netcfgd will do meanwhile, so the extraction stays possible
+### What this costs netcfgd today
 
-Keep the four pieces above **separable rather than extracted**: no netcfgd type
-in their interfaces where a string or an integer will do, the scope vocabulary
-as its own header, and the confirm window keyed on an opaque token rather than
-on a document. That costs nothing today and is the difference between a later
-extraction and a later rewrite.
-
-**Whose decision this is:** the copyright holder's, as a deliberate
-cross-project pass. It is signalled to `claude-guidelines`' signal list so
-that six trees do not ask it six times, and fuzznet's own tree has been told,
-since it is the candidate owner and the only one who can say whether these
-four fit its model.
+`bridge/` links fuzznet and `make check` reaches it, and
+`ncfg_record_stream_of(ncfg_scope_t)` passes the placeholder at the one seam
+where `fzn_scope_t` is available. The submodule is pinned at `97719d9`,
+2026-09-28 -- **five days before `state/scope.h` landed** -- so the real type
+is not in this tree's build and nothing says so. The remedy is a reviewable
+pin bump and then the retyping, measured against fuzznet's section 728, which
+is a breaking change to the setting object. `project.md` 10.567 has the
+measurement and the cost.

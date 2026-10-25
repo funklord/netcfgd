@@ -12498,78 +12498,119 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
-## 10.567 Asked whether the coordination half belongs to fuzznet, and signalled
+## 10.567 The coordination half is fuzznet's, decided a month ago, and this tree is still holding the placeholder
 
 The copyright holder, 2026-10-25: *"should parts of the network planning and
 running of deployment tasks become a generic part of fuzznet? As other projects
 may need to distribute and propagate internal/external settings and commands in
-very much the same way?"*
+very much the same way?"* -- and then, having been told it was signalled for a
+cross-project pass: *"do the cross project pass?"*
 
-**The answer is written up in `doc/shared-protocol-brief.md` section 9**, since
-that is the document the question is about: it had two columns -- netcfgd's
-semantics and the library's wire -- and this names a third. What follows is the
-short form and where the decision sits, because this entry is the one a session
-in *this* tree will find.
+**The pass's answer is not the one this entry first carried**, and the first
+version is not kept, because an open question that has been answered reads as
+diligence and is the error that is caught by nothing. What it said: that the
+question names a third column neither netcfgd nor fuzznet holds, that four
+pieces of it exist here and are candidates for extraction, and that nothing
+should move until a second consumer speaks. Three of those four claims are
+wrong, and the measurement that shows it took one afternoon of reading a
+sibling tree.
 
-**Yes for the coordination half, and the line is not where the question puts
-it.** The brief's section 8 splits the world into what a field means (netcfgd's)
-and encoding, framing, authentication and encryption (the library's). Between
-"these bytes are authentic" and "this value means an MTU" sits a layer neither
-column holds: who may see a value, how a node reports that it has it, how
-several nodes apply at one instant, and how a node that locked itself out gets
-back. That layer is generic; the planner is not.
+### What the pass measured
 
-So the proposed line, which is a proposal and not a decision: **fuzznet owns
-how a value reaches a node and how nodes agree that it did; netcfgd owns what
-the value means and what to do about it.**
+fuzznet's own tree at `87df072`, its `project.md` sections 420, 540, 615, 700,
+724 and 728, `state/scope.h` as committed, and its reply in this tree's inbox
+(`20261025T1455Z`, recorded below). fuzznet had already written the answer as
+its own section 729 before the pass asked.
 
-### The four pieces netcfgd has built that are not netcfgd's
+**The third column is not unheld. It is fuzznet's, by the holder's own scope
+decision**, which fuzznet's section 2 states in the holder's words: *"every
+project using fuzznet uses fuzznet's high-level abstractions rather than
+extending the protocol with its own concepts, so that network code and
+dependencies leave the consuming project"*, superseded further by its section
+298 -- *fuzznet is to contain what its consumers need in order to use its
+features*. The brief's two columns were netcfgd's reading of a seam, and
+`evidence.md`'s rule applies to the reading: a claim about another tree is a
+measurement nobody took. fuzznet's section 2 says so itself about this very
+tree -- *"reading a consumer's constraint as the library's boundary is the
+specific error"*.
 
-Each is already load-bearing here and none is about networks: **scope
-classification** (`scope.h`/`scope.c`, the narrowest tag as the zero value so
-an unclassified key is never replicated, with a registry gate that fails on
-one); **commit-confirm with a revert window** (`confirm.c`, which exists
-because netcfgd configures the path its own instructions arrive over -- the
-situation of any program pushing settings to a remote node); **standing per
-item, computed rather than stored** (0287 and 0293, an item red on its own
-while its neighbours apply); and **"settled" as a definition** (0287: every
-node whose rules reference the value holds it).
+### The four pieces, measured rather than proposed
 
-The question adds one netcfgd does not have: task and command propagation.
-This tree's hooks are local, and nothing here dispatches work to another
-machine.
+1. **The scope vocabulary is fuzznet's and already built.** `state/scope.h`,
+   fuzznet's `d2f5de3`, 2026-10-03: the same four names, `HOST_PRIVATE = 0`,
+   an unknown byte read as host-private, and host-private refused a subject by
+   a code of its own. Its header names this tree: *"netcfgd's holder set the
+   scopes as a general feature of this library rather than of any consumer,
+   and netcfgd holds a placeholder enum to be deleted when this lands."*
+   **This was never an open question** -- `c/include/ncfg/scope.h` has said
+   since 2026-09-29 that the holder settled it and that the enum exists only
+   until fuzznet carries it, and `08f8cbe8` recorded fuzznet's signal on the
+   day the file landed. What stays netcfgd's is the table: which key has which
+   scope, and the registry gate that fails on an unclassified one.
+2. **Commit-confirm with a revert window is genuinely absent from fuzznet**,
+   measured as zero occurrences of the concept in its headers and confirmed by
+   its own reply. This tree's `confirm.c` is the only implementation in the
+   workspace, and fuzznet's reply accepts that it would fall on its side of
+   the line if the holder wants a staged-commit token.
+3. **Standing splits, and the split is the useful part.** fuzznet computes
+   standing for its own settings at read -- who set a value, at what rank, and
+   whether that act still counts under a revocation's or removal's cut
+   (`fzn_node_apply_act_stands`, its sections 540, 700, 728). That is the "may
+   this setter set this, and does it still stand" half. **"Applied here, unmet
+   there, and why" is about what a consumer did with a value, and is
+   netcfgd's.** 0287 and 0293 keep it.
+4. **"Settled" is defined for messages and costed for settings.** A message
+   line is settled once every device of the user holds it (its section 615).
+   For settings it is its section 724, `list setting-holders`, asked the same
+   day by fuzzypickles, costed and not built behind its section 689 freeze. So
+   netcfgd is the **second** asker rather than the originator, and the answer
+   is to wait for 724 rather than to build a second one. The hard half --
+   which nodes need a value -- is answered in fuzznet by the scope itself,
+   and the place it meets netcfgd's "every node whose rules reference it" is
+   group membership, which fuzznet has no settings for yet.
 
-### Why nothing is being extracted
+The fifth, command propagation, neither tree has.
 
-**fuzznet is being written**, on its holder's word of 2026-10-23, so the
-generic shape would be designed while its first consumer is also unbuilt --
-which is the failure `harmonization.md` names: somebody inside one project
-*"cannot see whether a thing should be shared, only that they needed it"*.
+### The finding that is actually netcfgd's, and it is a stale pin
 
-**And netcfgd is one consumer wearing two hats.** 0284's layers three and four
-will consume this machinery again, inside this tree. That is a second *use*,
-not a second *opinion*: both would be shaped by netcfgd's habits. The
-candidates that would give a real second opinion are visible from here --
-raidcfgd pushing array policy to several hosts, hull distributing machine
-specs -- and what they need is theirs to say.
+**The placeholder is in use at the one seam where the real type is
+available.** `bridge/` links fuzznet, is fetched by `bridge/Makefile` and
+reached by `make check` through `bridge-test`, and
+`ncfg_record_stream_of(ncfg_scope_t)` maps a scope to a journal stream right
+beside the `fzn_record_*` calls it was written for.
 
-### What this tree will do meanwhile
+**Why it has not retired: the submodule is pinned at `97719d9`, 2026-09-28,
+five days before `state/scope.h` landed.** So the real enum is not in this
+tree's build, and nothing said so -- the placeholder compiles, the gate is
+green, and the only visible symptom is a header promising a deletion that
+cannot happen. A pin that is five days stale is indistinguishable from a
+current one until somebody asks what is on the other side of it.
 
-Keep the four pieces **separable rather than extracted**: no netcfgd type in
-their interfaces where a string or an integer will do, the scope vocabulary as
-its own header, and the confirm window keyed on an opaque token rather than on
-a document. That costs nothing today and is the difference between a later
-extraction and a later rewrite. It is a constraint on new code in those files,
-not a refactor to schedule.
+**The remedy is a reviewable pin bump and then the retyping**, in that order
+and not as a side effect of anything: advancing a submodule is a change to
+what this tree builds against, and 22 days of fuzznet history includes its
+section 728 -- a **breaking** wire change to the setting object, landed
+2026-10-25, which situ classes breaking and which a node built before it
+refuses. So the bump has to be measured against the bridge rather than
+assumed, and it is its own piece of work. What it buys is one vocabulary
+instead of two for the concept both trees agree is one.
 
-**Whose decision it is, and where it was sent.** The holder's, as a deliberate
-cross-project pass. Signalled to `claude-guidelines`' *Signals from the
-projects* list, which is a list rather than numbered sections -- the entry
-leads *"four projects are likely to need the same coordination machinery"*,
-dated 2026-10-25 -- rather than asked from inside the tree that noticed, per
-`harmonization.md`. And fuzznet's own tree was told through its
-`.git/cc-inbox/`, since it is the candidate owner and the only party who can
-say whether these four fit its model.
+### What is left for the holder, and it is two things rather than a column
+
+**Whether fuzznet grows a staged-commit token and command propagation.**
+Those are the two pieces of the coordination layer nobody has built, the line
+fuzznet accepts covers both, and netcfgd holds a working implementation of the
+first that it did not write for export. Everything else in this entry is
+either already decided, already built, or already costed somewhere else.
+
+**And the pass's own lesson, which cost more than the answer.** This tree
+deferred a question its own header had recorded as settled a month earlier,
+and wrote the deferral up carefully enough to look like care. `harmonization.md`
+is right that an extraction is not made from inside one project -- and it does
+not follow that the *question* is open, because the holder may have answered it
+somewhere a session in this tree never reads. The cheaper instrument was the
+sibling's code: `state/scope.h` explains itself in its own header, and reading
+it would have replaced the whole deliberation.
 
 ## 10.566 radvd had the same stop bug with a worse ending, and openvpn is next
 
