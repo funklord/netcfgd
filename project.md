@@ -12538,6 +12538,54 @@ it is about their id mapping.
 hull's claim and not this tree's measurement. The three bake headers now say
 which half is which.
 
+### The apt warning's cause, which is one directory's mode
+
+hull's read of the warning above, offered as a hypothesis and not written into
+their record as fact: the slim image ships no
+`/var/cache/apt/archives/partial`, apt creates it as root during the step, and
+the sandbox then cannot drop to `_apt` to read a root-owned directory -- so
+the remedy would be the image's (ship the directory `_apt`-owned, or set
+`APT::Sandbox::User`). They asked to be shown a step if the cause looked
+different. **It is different, and the step shows it.**
+
+    before any apt command:  /var/cache/apt/archives/partial  does not exist
+    after apt-get update:    drwx------ 42 0  /var/lib/apt/lists/partial
+    ... and apt warned about a file inside that _apt-owned directory
+
+So ownership is not the cause: apt's own `lists/partial` was already `_apt`'s
+and the warning came anyway. Pre-creating `archives/partial` as `_apt:root`
+mode 0700 changed nothing either -- the identical warning, same package.
+
+What a second step found is much wider than apt. **A non-root uid cannot
+execute anything at all in a build step:**
+
+    su -s /bin/sh _apt    su: failed to execute /bin/sh: Permission denied
+    su -s /bin/cat _apt   su: failed to execute /bin/cat: Permission denied
+    setpriv --reuid 12345  libc.so.6: cannot open shared object file
+
+Which is a path problem rather than a file problem, and the third step says
+which path:
+
+    0700 0:0 /          <- the step tree's root
+    0755 0:0 /usr       0755 0:0 /usr/bin       0777 0:0 /usr/bin/sh
+
+**`/` is 0700, so no uid but root can traverse the tree at all.** Everything
+below it has its mode. apt's sandbox is one casualty; any maintainer script
+that drops privileges is another, which bears directly on the one package set
+not tested above -- `systemd-sysv`, the sandbox rig's, whose users are the
+reason that header gave for not using a build step in the first place.
+
+**A machine is unaffected**, measured in a `dir:`-sourced vm: `2775 0:65534 /`,
+`2755` on `/usr` and `/usr/bin`. So this is the build tree's root and not
+hull's materialize in general, which is worth stating because netcfgd's rigs
+are machines and have never met it.
+
+`APT::Sandbox::User=root` does silence it -- zero warnings on update and on
+download, measured -- by declining the sandbox rather than fixing anything.
+Reported to hull with the three steps; the fix or the verdict is theirs, and
+netcfgd's interest is that the migration below now has a named risk rather
+than an unexplained warning.
+
 ### Why nothing moved yet
 
 A bare source names a stored ref (`(source "netcfgd/hwsim")`), so the
