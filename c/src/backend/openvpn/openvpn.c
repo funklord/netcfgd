@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /* An operator's `.ovpn` with inline certificates. Generous, and a ceiling all
@@ -27,6 +28,18 @@
 /* The generated script. Fixed text plus two paths, so this is a ceiling that
  * cannot be reached rather than a budget. */
 #define SCRIPT_MAX (64u * 1024u)
+
+/*
+ * How long a stop waits for the daemon to actually go, and how often it looks.
+ *
+ * **The same patience dhcp's stop uses (`NCFG_DHCP_STOP_PATIENCE_MS`), for the
+ * same reason**: openvpn does teardown work on the way out -- it runs the
+ * `--down` script, drops routes and takes the tun device away -- so a tenth of
+ * a second is not a fair test of whether it is going, and `autoip`'s 1000 ms
+ * was chosen for a client that only has to let go of an address.
+ */
+#define OPENVPN_STOP_PATIENCE_MILLISECONDS 3000
+#define OPENVPN_STOP_STEP_MILLISECONDS 100
 
 /*
  * OpenVPN's own vocabulary for a start that failed.
@@ -569,6 +582,37 @@ pid_t ncfg_openvpn_running_pid(const char *run, const char *iface)
 }
 
 /*
+ * Wait for the daemon to go, before anything that records it as gone.
+ *
+ * **It asks `ncfg_openvpn_running_pid`'s own question** rather than repeating
+ * its care about which process a pid belongs to: that function already matches
+ * the pid file against this tunnel's socket path, so a pid recycled between
+ * two looks cannot be read as the daemon still running.
+ *
+ * The common case returns on the first look, openvpn removing its own pid file
+ * as it exits.
+ */
+static int wait_for_exit(const char *run, const char *iface)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+
+		if (ncfg_openvpn_running_pid(run, iface) <= 0) {
+			return 1;
+		}
+		if (waited >= OPENVPN_STOP_PATIENCE_MILLISECONDS) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)OPENVPN_STOP_STEP_MILLISECONDS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += OPENVPN_STOP_STEP_MILLISECONDS;
+	}
+}
+
+/*
  * Stop a daemon that is not answering its socket, by the pid it wrote.
  *
  * A pid file naming nothing, or naming something that is not this tunnel, is
@@ -596,6 +640,20 @@ static int stop_by_pid(const char *run, const char *iface, char *err, size_t err
 		(void)snprintf(why, sizeof(why), "%s", err);
 		ncfg_error_set(err, err_size,
 		    "could not stop the openvpn tunnel on %s (pid %ld): %s", iface, (long)pid, why);
+		return 0;
+	}
+	/* **Wait before forgetting it.** `ncfg_openvpn_running_pid` reads the pid
+	 * file, so removing the file is what makes the tunnel read as absent --
+	 * and a signalled daemon is still running for as long as its teardown
+	 * takes. A restart is a stop and then a start, so the start would meet the
+	 * daemon it was replacing: the same defect `autoip` and the RA daemon
+	 * carried (10.565, 10.566). */
+	if (!wait_for_exit(run, iface)) {
+		ncfg_error_set(err, err_size,
+		    "the openvpn tunnel on %s was signalled (pid %ld) and is still running after "
+		    "%d ms, so its pid file is kept: a start that follows cannot meet the daemon it "
+		    "replaced",
+		    iface, (long)pid, OPENVPN_STOP_PATIENCE_MILLISECONDS);
 		return 0;
 	}
 	if (pid_file[0] != '\0') {
@@ -668,6 +726,30 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		return 0;
 	}
 	ncfg_openvpn_disconnect(management);
+
+	/*
+	 * **Wait before removing anything, and this path needs it more than the pid
+	 * one does.** `signal SIGTERM` over the management socket returns as soon as
+	 * openvpn has read the line, not when it has gone, so everything below used
+	 * to run while the daemon was still tearing the tunnel down.
+	 *
+	 * Removing the pid file is what makes the tunnel read as absent, which is
+	 * the defect `autoip` and the RA daemon carried (10.565, 10.566). **The
+	 * socket is worse, because the old daemon removes that path itself.** This
+	 * comment already said so a line below: openvpn unlinks its management
+	 * socket as it exits. So unlink it early, let a restart bind a new socket at
+	 * the same path, and the daemon that was leaving deletes the live tunnel's
+	 * socket on its way out -- after which netcfgd cannot reach a tunnel that is
+	 * running perfectly well, and every later stop falls back to the pid path.
+	 */
+	if (!wait_for_exit(run, iface)) {
+		ncfg_error_set(err, err_size,
+		    "the openvpn tunnel on %s took the stop and is still running after %d ms, so its "
+		    "pid file and management socket are kept: removing them now would hand the next "
+		    "start a socket this daemon still intends to delete",
+		    iface, OPENVPN_STOP_PATIENCE_MILLISECONDS);
+		return 0;
+	}
 
 	if (ncfg_openvpn_pid_path(run, iface, pid, sizeof(pid), NULL, 0)) {
 		(void)unlink(pid);

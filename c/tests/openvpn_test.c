@@ -618,6 +618,134 @@ static void the_greeting_is_not_mistaken_for_an_answer(const char *base)
  * And the report goes first, outside that question: a daemon that already died
  * is exactly the case where nobody comes back to tidy up.
  */
+/*
+ * A DAEMON SLOW TO EXIT IS WAITED FOR, ON BOTH STOP PATHS.
+ *
+ * `ncfg_openvpn_stop` used to signal and then remove the pid file immediately,
+ * on both the management path and the pid one. `ncfg_openvpn_running_pid` reads
+ * that file, so a daemon still tearing its tunnel down read as *absent* -- and
+ * a restart is a stop followed by a start, so the start met the daemon it was
+ * replacing. The same defect `autoip` and the RA daemon carried.
+ *
+ * **The management path is the worse of the two and is why this test covers
+ * both.** That path also unlinked the management socket, which openvpn removes
+ * itself on the way out. Unlink it early, let a restart bind a new socket at
+ * the same path, and the daemon that was leaving deletes the live tunnel's
+ * socket -- after which netcfgd cannot reach a tunnel that is running
+ * perfectly well.
+ *
+ * **The assertion is the relationship, not a duration.** A timing check would
+ * pass or fail with the machine; "after the stop returns, the daemon is gone"
+ * is false exactly when the wait is missing. Read through
+ * `/proc/<pid>/cmdline` rather than `kill(pid, 0)`, because a process nothing
+ * has reaped is a zombie and `kill -0` calls it alive.
+ */
+static int still_alive(pid_t pid)
+{
+	char  path[64];
+	char  buffer[64];
+	int   fd;
+	ssize_t got;
+
+	(void)snprintf(path, sizeof(path), "/proc/%ld/cmdline", (long)pid);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0) {
+		return 0;
+	}
+	got = read(fd, buffer, sizeof(buffer));
+	(void)close(fd);
+	/* Empty is a zombie: the entry is there and the process is not. */
+	return got > 0;
+}
+
+static void a_daemon_slow_to_exit_is_waited_for(const char *base)
+{
+	char  run[512];
+	char  dir[640];
+	char  holder[1024];
+	char  pid_file[1024];
+	char  socket_path[1024];
+	char  body[4096];
+	char  message[NCFG_ERROR_MAX];
+	char *written;
+	pid_t held;
+
+	(void)testdir_in(base, "slowstop", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a run directory for the slow stop");
+	(void)snprintf(dir, sizeof(dir), "%s/openvpn", run);
+	check(mkdir(dir, 0755) == 0, "and the openvpn directory inside it");
+	(void)snprintf(pid_file, sizeof(pid_file), "%s/vpn0.pid", dir);
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/vpn0.sock", dir);
+	(void)testdir_in(run, "holder", holder, sizeof(holder));
+
+	/*
+	 * **The stand-in has to be matchable, which is what shapes it.**
+	 * `ncfg_openvpn_running_pid` reads the pid file and then checks that
+	 * process's command line for this tunnel's socket path, so the holder has
+	 * to recite the path -- the interface name alone is what that function
+	 * deliberately refuses to match on. It traps TERM and takes half a second
+	 * over it, which is the window the old code returned inside.
+	 */
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "trap 'sleep 0.5; exit 0' TERM\n"
+	    "echo $$ > '%s'\n"
+	    "while :; do sleep 0.05; done\n",
+	    pid_file);
+	check(write_program(holder, body), "a stand-in daemon that is slow to exit is written");
+
+	held = fork();
+	if (held == 0) {
+		(void)setpgid(0, 0);
+		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
+		_exit(127);
+	}
+	check(held > 0, "the stand-in is running");
+
+	/* Wait for it to have written its pid, so the stop has something to find.
+	 * Without this the test could pass by the stop finding nothing at all,
+	 * which is the vacuous version of the thing being checked. */
+	{
+		int waited = 0;
+
+		while (waited < 100) {
+			struct timespec step = { 0, 50L * 1000000L };
+
+			written = testdir_read(pid_file, NULL);
+			if (written && written[0] != '\0') {
+				free(written);
+				break;
+			}
+			free(written);
+			(void)nanosleep(&step, NULL);
+			waited++;
+		}
+	}
+	check(ncfg_openvpn_running_pid(run, "vpn0") > 0,
+	    "and netcfgd finds it by its pid file and this tunnel's socket path");
+
+	/*
+	 * Nothing is listening on the management socket, so this takes the pid
+	 * path -- the one that signals directly. The management path shares the
+	 * same waiter, and `the_greeting_is_not_mistaken_for_an_answer` covers the
+	 * command it sends.
+	 */
+	message[0] = '\0';
+	check(ncfg_openvpn_stop(run, "vpn0", NULL, message, sizeof(message)),
+	    "a stop of a daemon that is slow to exit succeeds");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", kept(message));
+	}
+	check(!still_alive(held),
+	    "and it has gone by the time the stop returns, so a start that follows "
+	    "cannot meet the daemon it replaced");
+	written = testdir_read(pid_file, NULL);
+	check(written == NULL, "the pid file is removed only after that");
+	free(written);
+
+	(void)wait_for(held);
+}
+
 static void stopping_a_tunnel_that_is_not_there_is_success(const char *base)
 {
 	char run[512];
@@ -702,6 +830,7 @@ int main(void)
 	the_credentials_go_in_a_file_and_never_on_the_command_line(base);
 	a_daemon_that_will_not_start_is_quoted(base);
 	the_greeting_is_not_mistaken_for_an_answer(base);
+	a_daemon_slow_to_exit_is_waited_for(base);
 	stopping_a_tunnel_that_is_not_there_is_success(base);
 	the_credential_reaches_no_diagnostic(stderr_path);
 
