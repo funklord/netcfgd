@@ -12524,15 +12524,32 @@ refused. Measured in a `dir:`-sourced vm on hull `a5c1f58-dirty`:
 
 So the **owner maps to root, not to 1000**, and every mode bit the bake
 restored is intact in the guest -- that hazard does not arise in this form.
-What does not map is the **group**, which arrives as the overflow gid because
-`users` means nothing in the guest. The header carries the correction and the
-date; the narrower reason it exists is unchanged, that a `docker export` plus
-`chmod` carries modes and not ownership, so a payload needing a file's owner
-or group to be anything in particular wants `hull materialize` instead.
+
+**The group is the half that does not map, and the rule is which gid rather
+than which name.** hull's own account, 2026-10-25: a machine maps the user's
+uid and primary gid, and for a stored tree the subuid and subgid ranges
+besides. Measured here: `funk`'s primary group is `funk`, gid 1000, while
+`docker export` through `tar -x` leaves every file `funk:users`, gid **100** --
+a supplementary group, outside the map, so it arrives as the overflow gid.
+Nothing about the name; a file group-owned by gid 1000 would come through. The
+header carries the correction and the date; the narrower reason it exists is
+unchanged, that a `docker export` plus `chmod` carries modes and not ownership,
+so a payload needing a file's owner or group to be anything in particular
+wants `hull materialize` instead.
 
 **Which is still blocked on the package install and not on ownership** -- the
-bakes' standing recommendation. hull's change removes one objection to that
-road without unblocking it.
+bakes' standing recommendation.
+
+**And the ownership objection is not removed yet either, which this entry had
+wrong for an hour.** It said hull's change removes one objection to that road.
+hull reported next (2026-10-25, prompted by bbq-predictor) that `hull run` of
+a stored image **does not yet emit the owners list at all**, so the engine half
+they had just built has nothing to act on and a manifest-bearing image is still
+flattened; the store side is being fixed. So the road is blocked on two things
+rather than one, and the ownership half is in flight rather than done. Their
+`f82403d` is necessary and not sufficient, which is exactly the shape a
+forward-looking claim about somebody else's tree takes when it is written from
+one commit message.
 
 ### The instrument check that made this worth doing at all
 

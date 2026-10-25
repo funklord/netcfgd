@@ -62,8 +62,10 @@
 #   the guest sees owner **0**, group **65534**, and every mode bit intact --
 #   `4755 /usr/bin/su`, `2755 /var/lib/apt`, eight setuid files. The host
 #   user maps to root rather than to 1000, so that hazard does not arise in
-#   this form; what does not map is the GROUP, which arrives as the overflow
-#   gid because `users` means nothing in the guest.
+#   this form; what does not map is the GROUP, and the rule is which gid
+#   rather than which name: a machine maps the user's uid and primary gid,
+#   `funk`'s primary gid is 1000, and `tar -x` leaves these files gid 100
+#   (`users`), which is outside the map and so arrives as the overflow gid.
 #
 #   So the reason to keep this note is narrower and still real: the bits here
 #   are restored by `chmod` from the image's own listing rather than carried,
@@ -71,11 +73,13 @@
 #   particular -- not just its mode -- is not served by a `docker export` at
 #   all. hull reported on 2026-10-25 (its `f82403d`) that a *stored* tree now
 #   gets its non-root owners back inside a vm as well as on chroot, by mapping
-#   a subuid range and chowning the manifest's owners before boot. These
-#   images are `dir:` sources with no manifest, so that does not reach them --
-#   it removes one objection to `hull materialize` plus a package step, which
-#   is what this header has recommended from the start and which is still
-#   blocked on the package install rather than on ownership.
+#   a subuid range and chowning the manifest's owners before boot -- uid and
+#   gid both, by their account. These images are `dir:` sources with no
+#   manifest, so that does not reach them; and hull reported next that `hull
+#   run` of a stored image does not yet emit the owners list for that engine
+#   half to act on, so `hull materialize` plus a package step -- what this
+#   header has recommended from the start -- is for now blocked on the package
+#   install AND on the store side of ownership, the second in flight.
 set -eu
 dir=${1:-dist/hull/hwsim-rootfs}
 name=netcfgd-hwsim-rootfs-$$
