@@ -12562,8 +12562,34 @@ overlay and should reach the same path. Re-measured on a restarted core,
     (source "dir:...")        root is overlay   183 ms
 
 So it is a real asymmetry on the current build rather than an artifact, and
-the tmpfs the hwsim payload mounts stays earning its place. Told to hull as a
-separate finding, which is what they asked for if it survived.
+the tmpfs the hwsim payload mounts stays earning its place.
+
+### One cause for both findings, and netcfgd's own images select it
+
+hull's answer the same day (their `da2c5f9`), recorded there as confirmed
+rather than to-re-measure: **the missing module place and the 9p root are the
+same path, not two findings.** A stored source with non-root owners gets
+`(owners ...)` from `store_sources`, which forces the engine's host-side
+overlay; qemu lays the overlay on the host and the guest mounts the merged
+tree as a plain 9p root instead of laying its own. So the writes are 9p round
+trips -- to a host tmpfs upper, memory but 9p-slow -- `/tmp` goes with them
+because it is on the root, and the agent never makes the module place because
+it never lays the overlay. The `root / 9p` against `overlay / overlay
+lowerdir=/hull/lower` in 10.558's measurement is exactly that.
+
+**The trigger is the thing netcfgd gained by migrating.** It is non-root
+owners that force the host-side overlay -- and carrying real owners instead of
+`chmod`-restored modes is what the move to built images was *for* (10.558). So
+these four rigs take the slow write path precisely because their images are
+now faithful, which is worth knowing before anybody treats the tmpfs mounts as
+a workaround for a bug rather than the cost of a trade.
+
+hull's fix direction is to have the agent lay a guest overlay over the
+host-side merged share as well -- fast tmpfs writes and the module place back,
+owners kept from the host-side lower -- and they have flagged it for their
+holder rather than building it inside the kernel work, since it is an engine
+and agent change. Until then the payloads own their filesystem, which they
+should anyway.
 
 ## 10.558 The rigs run from built images, and hwsim lost two checks
 
