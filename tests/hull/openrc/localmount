@@ -1,0 +1,42 @@
+#!/sbin/openrc-run
+# A stand-in for the `localmount` service of Gentoo and Alpine.
+#
+# WHY THE IMAGE CARRIES THIS AND NETCFGD DOES NOT DROP THE DEPENDENCY
+#   `packaging/openrc/netcfgd` says `need localmount`, and its second line says
+#   who it is for: Gentoo and Alpine. Both ship `localmount`. Debian's `openrc`
+#   does not -- it keeps sysvinit's `mountall.sh` instead, and nothing in
+#   `/etc/init.d` provides the name -- so openrc refuses the service outright:
+#
+#       Service 'netcfgd' needs non existent service 'localmount'
+#        * ERROR: netcfgd needs service(s) localmount
+#
+#   Measured 2026-10-23, and it cost three of this rig's checks on its first
+#   run. The dependency is right for the audience the script names, so the
+#   IMAGE supplies the name a stand-in distribution would have. The
+#   alternative -- editing `packaging/openrc/netcfgd` to suit the one
+#   distribution it is not written for -- would weaken a correct dependency to
+#   make a rig pass, which is the rig testing itself.
+#
+#   It is deliberately inert. What is under test is netcfgd's script, not
+#   whether a mount ran: `start()` returning 0 is enough for `need` to be
+#   satisfiable, and anything more would be this image pretending to be Gentoo.
+#
+# It was written inline by `bake-rootfs.sh` until 2026-10-25, when the rig
+# moved to a `hull build` image and the step copies this file in instead --
+# a service script is easier to read as a file than as a heredoc inside an
+# s-expression, and `inputs` keys the build cache on its contents.
+description="stand-in for the localmount of Gentoo and Alpine"
+
+depend() {
+	# Named `provide` as well as being called `localmount`, so a reader of
+	# either half finds the other.
+	provide localmount
+}
+
+start() {
+	return 0
+}
+
+stop() {
+	return 0
+}

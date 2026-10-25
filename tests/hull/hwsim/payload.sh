@@ -12,7 +12,8 @@
 #
 # It falls back to the share, through `NCFG_LIVE_BUILD`, where the image has no
 # compiler -- loudly, because a fallback nobody is told about is how a run
-# covers less than it looks like it does. `bake-rootfs.sh` installs one.
+# covers less than it looks like it does. The build form in `hull.conf`
+# installs one.
 #
 # **A guest could not build anything before `7b47668`.** hull gave the workload
 # no PATH at all, so gcc could not resolve its own argv[0] and

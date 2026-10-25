@@ -12498,6 +12498,82 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.558 The rigs run from built images, and hwsim lost two checks
+
+"do the migration then", the copyright holder, 2026-10-25, after 10.557
+measured both of the blockers gone. All four rigs now take their userland from
+a `hull build` image instead of a `docker export` directory.
+
+### What each rig takes its userland from now
+
+Each rig's `hull.conf` carries a `(build ...)` form beside its machine, so one
+file holds both the image and the guest, and the source is a stored ref --
+`netcfgd/hwsim`, `netcfgd/sandbox`, `netcfgd/openrc`, `netcfgd/natcap`. The
+four `bake-rootfs.sh` scripts are gone, `hull-image` builds the four refs,
+`hull-clean` untags them, and `$(DIST)/hull` is not produced at all any more:
+docker is out of the test tier. `tests/kernel/` materializes the natcap image
+when it needs a directory to pack into its initramfs.
+
+Three things the bakes did that the store does for free: the setuid and setgid
+bits (restored by `chmod` from the image's own listing before, carried now),
+the non-root owners (impossible before, carried now), and the "once, and after
+a package change" rule -- a step's cache key is the hash of its own form, so
+asking again when nothing changed costs a lookup.
+
+**Two things had to be carried forward by hand.** The openrc rig's `localmount`
+stand-in is a file now, `tests/hull/openrc/localmount`, copied in by the step
+and keyed into the cache by `inputs` -- a service script is easier to read as a
+file than as a heredoc inside an s-expression. And each build step opens by
+refusing a hull that leaves a materialized tree root 0700, which is the
+property 10.557 needed `b7126fe` for; it checks the property rather than the
+version, because that is what the step actually needs.
+
+### The module share, which is hull's to decide
+
+**A stored-source machine does not get hull's implicit module share.** Measured
+on `b7126fe`: `/usr/lib/modules` empty, no mount for the release, the only 9p
+mount the root -- so `modprobe dummy` failed and natcap lost 19 checks on its
+first run from a built image. hull's own account, same day: the agent makes
+that place only when it lays the overlay itself, which a `dir:` source above an
+overlay does and a stored source does not, reaching the engine's host-side
+overlay instead. Recorded there as a finding; whether the implicit share should
+extend to stored sources is their holder's call.
+
+Every rig names the mount itself now, which is better regardless:
+
+    (volume (host "/lib/modules") (guest "/usr/lib/modules") (mode ro))
+
+The whole tree rather than one release, so nothing here pins a kernel version,
+and the dependency is visible in the spec rather than implicit in the runtime.
+
+### Where it stands, including the part that is worse
+
+| rig | from a built image |
+|---|---|
+| natcap | 37 of 37 |
+| sandbox | 31 of 31, **systemd as pid 1** |
+| openrc | 13 of 13, `openrc-init` as pid 1, service started and stopped |
+| hwsim | **25 of 27** |
+
+The two init rigs are the half 10.557 listed as untested, and they pass: a
+built image boots its own init. natcap passes once the modules volume is named.
+
+**hwsim lost its two roam checks**, and this entry does not get to call that
+anything yet. Both failures are the `on roam` hook not firing after the station
+moved -- `and that is a roam`, `named by the access point it moved to` -- where
+the rig's last recorded run was 27 of 27 (10.529, hull `4161c8a`,
+2026-10-22). So it is a regression against that record, and three things have
+changed since: this image, a fortnight of netcfgd's own commits, and hull from
+`4161c8a` to `b7126fe`.
+
+The package versions are not it: `wpasupplicant 2:2.10-24`, `iw 6.9-1` and
+`dnsmasq-base 2.91-1+deb13u2` are what the old exported tree carried and what
+the step installed. **The control is the same rig against the old `dir:`
+source**, which is still on disk, and it is not run yet: hull's session asked
+for a window with no vm of mine starting while it finishes a sabotage sweep,
+and a passt collision has already failed one of their runs today. So the
+measurement waits on their word rather than on anything here.
+
 ## 10.557 Both bake blockers are gone, on a hull built for the purpose
 
 hull fixed the root mode at their `b7126fe` -- `materialize_locked` sets the

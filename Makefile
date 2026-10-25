@@ -38,9 +38,9 @@
 #                         the systemd sandbox, the OpenRC init script, and a
 #                         kernel that cannot do NAT. `hull-hwsim`,
 #                         `hull-sandbox`, `hull-openrc`, `hull-natcap` one at
-#                         a time; `hull-image` bakes the guests, which is the
-#                         only part needing docker and the internet, and
-#                         `hull-clean` removes them -- `clean` does not
+#                         a time; `hull-image` builds the four images, which
+#                         is the only part needing the internet, and
+#                         `hull-clean` untags them
 #   make fuzz          -- the C parsers, fuzzed; `fuzz-rust` for the other
 #                         implementation's targets. The committed corpus is
 #                         replayed by `make c-test` with no clang needed
@@ -2465,7 +2465,18 @@ vm-image:
 # on rather than leaving a report to claim one.
 HULL           ?= $(HOME)/src/hull/build/hull
 HULL_TIMEOUT   ?= 900
-HULL_IMAGE_DIR ?= $(DIST)/hull
+
+# **The images are hull's, not this tree's, since 2026-10-25** (project.md
+# 10.558). Each rig's `hull.conf` carries a `(build ...)` form beside its
+# machine, and the image is a stored ref -- `netcfgd/hwsim` and the rest --
+# rather than a directory under `dist/`. `$(DIST)/hull` is therefore no longer
+# produced; `hull-clean` removes a stale one if an older checkout left it.
+#
+# They need a hull carrying `b7126fe`, which made a materialized tree root
+# traversable; before it no non-root uid could run anything during a step, so
+# apt's sandbox fell back to root and a maintainer script could not act as its
+# own system user. Each build step checks that property rather than a version,
+# and says what it needs when it fails.
 
 # Refuse early with something actionable, then say what we are standing on.
 # `command -v` so that `HULL=hull` off a PATH works as well as a path does.
@@ -2491,7 +2502,15 @@ hull_says = command -v $(HULL) >/dev/null 2>&1 || \
 	fi; \
 	printf 'hull: %s (%s), image %s\n' \
 		"$$(printf '%s\n' "$$said" | head -1)" \
-		"$${commit:-commit unknown}" "$<"
+		"$${commit:-commit unknown}" "$(1)"
+
+# Build a rig's image when the store has no ref for it. `hull build` is itself
+# cached per step, so asking again is cheap -- but asking only when the ref is
+# absent keeps a rig run from reaching the network at all on the common path.
+hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || \
+	{ echo "hull: netcfgd/$(1) is not in the store, building it from its spec"; \
+	  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$(1)/hull.conf \
+		netcfgd/$(1); }
 
 # **`timeout` is the right bound here and would not be for a container.** A
 # `(backend vm)` machine is qemu, a child of this shell, so a signal reaches
@@ -2503,8 +2522,9 @@ hull: hull-hwsim hull-sandbox hull-openrc hull-natcap
 # 27 checks. The guest builds netcfgd itself, so no host build is needed:
 # hull `7b47668` gave the workload a PATH, and the payload falls back to the
 # read-only share loudly if it cannot.
-hull-hwsim: $(HULL_IMAGE_DIR)/hwsim-rootfs
-	@$(hull_says)
+hull-hwsim:
+	@$(call hull_says,netcfgd/hwsim)
+	@$(call hull_image,hwsim)
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/hwsim/hull.conf
 
 # 31 checks, which is every one the native tier gets (10.530) since hull
@@ -2514,15 +2534,17 @@ hull-hwsim: $(HULL_IMAGE_DIR)/hwsim-rootfs
 # share: `build-and-commit.md` forbids reading a verdict off a binary the
 # build step did not rebuild, and a twenty-minute guest cycle is exactly where
 # that costs.
-hull-sandbox: $(HULL_IMAGE_DIR)/sandbox-rootfs
-	@$(hull_says)
+hull-sandbox:
+	@$(call hull_says,netcfgd/sandbox)
+	@$(call hull_image,sandbox)
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/sandbox/hull.conf
 
 # 13 checks: the LSB script under a non-systemd init, and the `openrc-run`
 # script under the one it is written for (10.531).
-hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
-	@$(hull_says)
+hull-openrc:
+	@$(call hull_says,netcfgd/openrc)
+	@$(call hull_image,openrc)
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/openrc/hull.conf
 
@@ -2535,8 +2557,9 @@ hull-openrc: $(HULL_IMAGE_DIR)/openrc-rootfs
 # The C is built first, as `hull-sandbox` is and for the same reason: the
 # payload runs the binary off the read-only share, and a verdict read off a
 # binary the build step did not rebuild is what `build-and-commit.md` forbids.
-hull-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
-	@$(hull_says)
+hull-natcap:
+	@$(call hull_says,netcfgd/natcap)
+	@$(call hull_image,natcap)
 	@$(MAKE) --no-print-directory -C c
 	timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/natcap/hull.conf
 
@@ -2565,7 +2588,11 @@ hull-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
 KERNEL_SRC ?=
 KERNEL_OUT ?= $(DIST)/kernel
 
-kernel-natcap: $(HULL_IMAGE_DIR)/natcap-rootfs
+# The natcap image is its userland, materialized by `run.sh` when no
+# NATCAP_ROOTFS is given -- so the image must exist, and the rig target's own
+# builder is what makes it.
+kernel-natcap:
+	@$(call hull_image,natcap)
 	@$(MAKE) --no-print-directory -C c
 	sh tests/kernel/run.sh "$(KERNEL_SRC)" $(KERNEL_OUT)
 
@@ -2585,30 +2612,45 @@ kernel-clean:
 
 .PHONY: kernel-natcap kernel-clean
 
-# **Baked when absent and never on a whim.** Each bake is a docker run, an apt
-# install and a `docker export`, so it wants a network and a few minutes; the
-# directory existing is the signal that it is done, which is what the rigs'
-# own headers already tell a reader ("once, and after a package change").
-# `make hull-image` is how you ask for it again on purpose.
-$(HULL_IMAGE_DIR)/%-rootfs:
-	sh tests/hull/$*/bake-rootfs.sh $@
-
+# **Built when absent and never on a whim.** A build pulls a base and runs an
+# apt install, so it wants a network and a few minutes; the ref being in the
+# store is the signal that it is done, and `hull build` caches each step by
+# the hash of its own form, so asking again when nothing changed costs a
+# lookup. `make hull-image` is how you ask for all four on purpose.
 hull-image:
+	@$(call hull_says,all four)
 	@for r in hwsim sandbox openrc natcap; do \
-		sh tests/hull/$$r/bake-rootfs.sh $(HULL_IMAGE_DIR)/$$r-rootfs || exit 1; \
+		timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$$r/hull.conf \
+			netcfgd/$$r || exit 1; \
 	done
 
-# Named, printed, and only the four this tree baked -- not a sweep of
-# whatever matches. `clean` deliberately leaves these alone.
+# Named, printed, and only the four refs this tree builds.
+#
+# **It untags rather than collecting.** The store is one per account and other
+# projects keep images in it, so `hull gc` is the holder's call and not a side
+# effect of cleaning netcfgd -- untagging leaves this tree's objects
+# collectable whenever they choose to run it.
+#
+# It also removes a `$(DIST)/hull/*-rootfs` left by a checkout from before
+# 2026-10-25, when the images were `docker export` directories. Named, not
+# swept: a glob there would take whatever else somebody had put under it.
 hull-clean:
-	@for d in $(HULL_IMAGE_DIR)/hwsim-rootfs $(HULL_IMAGE_DIR)/sandbox-rootfs \
-	          $(HULL_IMAGE_DIR)/openrc-rootfs $(HULL_IMAGE_DIR)/natcap-rootfs; do \
+	@for r in hwsim sandbox openrc natcap; do \
+		if $(HULL) images 2>/dev/null | grep -q "^netcfgd/$$r[[:space:]]"; then \
+			printf 'hull-clean: untagging netcfgd/%s\n' "$$r"; \
+			$(HULL) tag -d netcfgd/$$r || exit 1; \
+		fi; \
+	done
+	@echo "hull-clean: the store itself is shared; \`$(HULL) gc\` is yours to run"
+	@for d in $(DIST)/hull/hwsim-rootfs $(DIST)/hull/sandbox-rootfs \
+	          $(DIST)/hull/openrc-rootfs $(DIST)/hull/natcap-rootfs; do \
 		if [ -d "$$d" ]; then \
-			printf 'hull-clean: removing %s (%s)\n' "$$d" "$$(du -sh "$$d" | cut -f1)"; \
+			printf 'hull-clean: removing %s (%s), which predates the built images\n' \
+				"$$d" "$$(du -sh "$$d" | cut -f1)"; \
 			rm -rf "$$d"; \
 		fi; \
 	done
-	@rmdir $(HULL_IMAGE_DIR) 2>/dev/null || true
+	@rmdir $(DIST)/hull 2>/dev/null || true
 
 .PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-image hull-clean
 
@@ -3252,42 +3294,35 @@ clean:
 	else \
 		echo "clean: cargo not installed, leaving target/ alone"; \
 	fi
-# **The hull guest images are kept, and the reason is both halves of what
-# `clean` is for.** They are not build output: each is a `docker export` of an
-# apt install, so removing one costs docker, a network and minutes, where
-# everything else under `$(DIST)` costs a recompile. And `find -type f` over
-# three of them prints 14,975 lines, which is a clean target nobody can read.
-# One pruned path answers both, and `make hull-clean` is the deliberate act
-# that names them.
+# **`$(KERNEL_OUT)` is kept, and the guest images are no longer here to keep.**
+# Until 2026-10-25 `$(DIST)/hull` held four `docker export` trees, spared
+# because rebuilding one cost docker, a network and minutes where everything
+# else under `$(DIST)` costs a recompile -- and because `find -type f` over
+# three of them printed 14,975 lines, which is a clean target nobody can read.
+# The images are hull's store refs now (10.558), so nothing of theirs is under
+# `$(DIST)` at all; `make hull-clean` untags them.
 #
-# **`$(KERNEL_OUT)` is kept for the first half of that and not the second.**
-# Three bzImages are six files, so they would not drown the listing -- but
-# rebuilding them is three kernel builds rather than a recompile, which is the
-# reason the images are spared. `make kernel-clean` names them.
+# The kernel tier's output stays spared for the first of those reasons: six
+# files, but rebuilding them is three kernel builds. `make kernel-clean` names
+# them.
 #
-# **The two pruned paths are parenthesised**, which `build-and-commit.md`
-# requires by name: in `find`, `-a` binds tighter than `-o`, so
-# `-path A -o -path B -prune` means "A, or (B and prune)" and the first path
-# would be printed and then swept. Both arms are fixture-tested, as the
-# single-path version was.
+# **The pruned path is parenthesised** although only one remains, which
+# `build-and-commit.md` requires by name: in `find`, `-a` binds tighter than
+# `-o`, so `-path A -o -path B -prune` means "A, or (B and prune)" and the
+# first path would be printed and then swept. Both arms were fixture-tested
+# when there were two, and the grouping stays so that adding a second path
+# back cannot reintroduce it.
 	@case "$(DIST)" in \
 	"") echo "clean: DIST is empty, refusing to remove anything"; exit 1 ;; \
 	/*) echo "clean: DIST is absolute ($(DIST)), refusing"; exit 1 ;; \
 	*..*) echo "clean: DIST escapes the tree ($(DIST)), refusing"; exit 1 ;; \
 	esac; \
 	if [ -d "$(DIST)" ]; then \
-		find "$(DIST)" \( -path "$(HULL_IMAGE_DIR)" -o -path "$(KERNEL_OUT)" \) \
+		find "$(DIST)" \( -path "$(KERNEL_OUT)" \) \
 			-prune -o -type f -print | sed 's/^/clean: removing /'; \
-		find "$(DIST)" -mindepth 1 -maxdepth 1 ! -path "$(HULL_IMAGE_DIR)" \
+		find "$(DIST)" -mindepth 1 -maxdepth 1 \
 			! -path "$(KERNEL_OUT)" -exec rm -rf {} +; \
 		kept=0; \
-		if [ -d "$(HULL_IMAGE_DIR)" ]; then \
-			kept=1; \
-			printf 'clean: keeping %s (%s guest image(s), %s); make hull-clean removes them\n' \
-				"$(HULL_IMAGE_DIR)" \
-				"$$(find "$(HULL_IMAGE_DIR)" -mindepth 1 -maxdepth 1 -type d | wc -l)" \
-				"$$(du -sh "$(HULL_IMAGE_DIR)" | cut -f1)"; \
-		fi; \
 		if [ -d "$(KERNEL_OUT)" ]; then \
 			kept=1; \
 			printf 'clean: keeping %s (%s, three kernel build(s)); make kernel-clean removes them\n' \

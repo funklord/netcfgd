@@ -50,7 +50,7 @@ set -eu
 
 src=${1:-}
 out=${2:-dist/kernel}
-rootfs=${NATCAP_ROOTFS:-dist/hull/natcap-rootfs}
+rootfs=${NATCAP_ROOTFS:-}
 build=${NCFG_BUILD:-c}
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 jobs=${KERNEL_JOBS:-$(nproc 2>/dev/null || echo 4)}
@@ -71,9 +71,32 @@ command -v qemu-system-x86_64 >/dev/null 2>&1 || {
 	echo "run.sh: qemu-system-x86_64 is what boots these" >&2
 	exit 1
 }
+# **The userland comes from the natcap image, materialized.** It was a
+# `docker export` directory under `dist/` until 2026-10-25, when the rigs moved
+# to `hull build` images (project.md 10.558) and that directory stopped
+# existing. A stored ref is not a directory, and this tier needs one to pack
+# into a cpio -- so materialize it, which is also the faithful direction:
+# `hull materialize` keeps the modes a `tar -x` as a user would have dropped.
+mkdir -p "$out"
+if [ -z "$rootfs" ]; then
+	rootfs=$out/natcap-rootfs
+	if [ ! -d "$rootfs" ]; then
+		hull=${HULL:-$HOME/src/hull/build/hull}
+		command -v "$hull" >/dev/null 2>&1 || {
+			echo "run.sh: need \`hull\` to materialize the image; set HULL=<path>" >&2
+			exit 1
+		}
+		"$hull" images 2>/dev/null | grep -q '^netcfgd/natcap[[:space:]]' || {
+			echo "run.sh: netcfgd/natcap is not in the store; \`make hull-image\`" >&2
+			echo "run.sh:   builds it, or set NATCAP_ROOTFS to a directory instead" >&2
+			exit 1
+		}
+		echo "run.sh: materializing netcfgd/natcap into $rootfs"
+		"$hull" materialize netcfgd/natcap "$rootfs"
+	fi
+fi
 [ -d "$rootfs" ] || {
-	echo "run.sh: $rootfs is not there; \`make hull-image\` bakes it, or set" >&2
-	echo "run.sh:   NATCAP_ROOTFS to another directory with a shell and gzip in it" >&2
+	echo "run.sh: $rootfs is not there, and nothing could make it" >&2
 	exit 1
 }
 for program in netcfgd ncfg; do
@@ -89,7 +112,6 @@ accel=tcg
 [ -r /dev/kvm ] && [ -w /dev/kvm ] && accel=kvm
 echo "run.sh: $jobs job(s), acceleration $accel, source $src"
 
-mkdir -p "$out"
 # The initramfs is built once and carries no kernel: the same userland meets
 # all three, which is what makes the three results comparable.
 python3 "$here/make-initramfs.py" "$rootfs" "$here/kinit.sh" \

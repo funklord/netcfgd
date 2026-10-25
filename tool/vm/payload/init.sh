@@ -232,8 +232,8 @@ if [ -x /sbin/openrc-run ] || [ -x /usr/sbin/openrc-run ]; then
 	# 'localmount'" and refused to start it, because Debian's openrc keeps
 	# sysvinit's `mountall.sh` and nothing provides the name. The dependency is
 	# correct for the two distributions the script names, so the image supplies
-	# a stand-in -- `tests/hull/openrc/bake-rootfs.sh` bakes an inert
-	# `localmount` service and says why there. Nothing here depends on it being
+	# a stand-in -- `tests/hull/openrc/localmount` is an inert `localmount`
+	# service, copied into that rig's image, and says why in its own header. Nothing here depends on it being
 	# present: if it is absent, openrc refuses and the checks below fail
 	# loudly, which is the honest outcome for a guest that cannot host the
 	# script.
