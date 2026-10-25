@@ -387,6 +387,104 @@ static void a_reload_with_no_daemon_is_not_success(const char *run)
  * signalled: the check is `/proc/<pid>/cmdline` against the configuration path
  * netcfgd chose, which an operator's own radvd cannot match.
  */
+/*
+ * Is the pid still a process reciting what netcfgd gave it?
+ *
+ * `/proc/<pid>/cmdline` rather than `kill(pid, 0)`, which `running-code.md`
+ * records as a false pass: a process nothing has reaped is a zombie and
+ * `kill -0` calls it alive, while its command line is empty. The same
+ * question production asks, asked here about one pid.
+ */
+static int still_reciting(pid_t pid, const char *needle)
+{
+	char   path[64];
+	char   buffer[4096];
+	FILE  *file;
+	size_t got;
+	size_t at;
+
+	(void)snprintf(path, sizeof(path), "/proc/%ld/cmdline", (long)pid);
+	file = fopen(path, "rb");
+	if (!file) {
+		return 0;
+	}
+	got = fread(buffer, 1u, sizeof(buffer) - 1u, file);
+	fclose(file);
+	buffer[got] = '\0';
+	/* The arguments are NUL-separated, so the needle is looked for in each
+	 * rather than across the whole buffer. */
+	for (at = 0; at < got; at += strlen(buffer + at) + 1u) {
+		if (strstr(buffer + at, needle) != NULL) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * A daemon slow to exit is waited for, and the record outlives it.
+ *
+ * **The defect this was written against**, the same class as `autoip`'s
+ * (10.565) with a different ending: `ncfg_ra_stop` signalled, unlinked the pid
+ * file and returned, and `ncfg_ra_running_pid` reads only that file -- so a
+ * radvd still exiting read as *absent*. A restart, which is a stop and then a
+ * start, would therefore launch a second radvd while the first still held the
+ * interface, and two daemons sending conflicting advertisements on one link is
+ * a fault nobody would trace back to a stop that said it had succeeded.
+ *
+ * The holder traps `TERM` and takes half a second over it, so the window is
+ * open on every run rather than on the loaded ones.
+ */
+static void a_daemon_slow_to_exit_is_waited_for(const char *run)
+{
+	static const char *const prefixes[] = { "2001:db8:1234::/64" };
+	char                     fake[512];
+	char                     config[NCFG_RA_PATH_MAX];
+	char                     message[NCFG_ERROR_MAX];
+	char                     body[1024];
+	ncfg_ra_policy_t         policy = plain();
+	pid_t                    pid;
+
+	(void)testdir_in(run, "fake-slow-radvd", fake, sizeof(fake));
+	(void)ncfg_ra_config_path(run, "lan0", config, sizeof(config), NULL, 0);
+	/*
+	 * The fake leaves a holder whose command line carries the config path --
+	 * which is what `ncfg_ra_running_pid` matches on -- and writes that
+	 * holder's pid where radvd would write its own.
+	 */
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "# A radvd that answers SIGTERM and takes half a second over it. The\n"
+	    "# loop of short sleeps is deliberate: a trap does not interrupt a\n"
+	    "# foreground child, so a single long sleep would never run it.\n"
+	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; while :; do sleep 0.1; done' "
+	    "radvd --config %s >/dev/null 2>&1 &\n"
+	    "# `$4` is the pidfile: the argument list is `--config X --pidfile Y\n"
+	    "# --logmethod stderr`, which the start test above asserts in full, so\n"
+	    "# a change to the order fails there loudly rather than here subtly.\n"
+	    "echo $! > \"$4\"\n"
+	    "sleep 0.3\n"
+	    "exit 0\n",
+	    config);
+	write_fake(fake, body);
+
+	message[0] = '\0';
+	check(ncfg_ra_start(run, "lan0", &policy, prefixes, 1u, NULL, 0u, fake, message,
+	      sizeof(message)),
+	    "a radvd that is slow to exit starts like any other");
+	pid = ncfg_ra_running_pid(run, "lan0");
+	check(pid > 0, "  and is netcfgd's while it runs");
+
+	message[0] = '\0';
+	check(ncfg_ra_stop(run, "lan0", message, sizeof(message)),
+	    "  the stop waits for it rather than returning when the signal is queued");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	check(pid <= 0 || !still_reciting(pid, config),
+	    "  so a start that follows cannot meet the daemon it replaced");
+}
+
 static void stopping_nothing_is_success(const char *run)
 {
 	char message[NCFG_ERROR_MAX];
@@ -431,6 +529,7 @@ int main(void)
 	a_start_writes_the_configuration_and_runs_the_daemon(run);
 	a_daemon_that_will_not_start_is_quoted(run);
 	a_reload_with_no_daemon_is_not_success(run);
+	a_daemon_slow_to_exit_is_waited_for(run);
 	stopping_nothing_is_success(run);
 
 	testdir_remove(run);

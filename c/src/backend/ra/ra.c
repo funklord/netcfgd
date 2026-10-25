@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 /*
@@ -305,6 +306,45 @@ int ncfg_ra_reload(const char *run, const char *iface, const ncfg_ra_policy_t *p
 	return 1;
 }
 
+/*
+ * Wait for a signalled radvd to go, and say whether it did.
+ *
+ * **The defect this exists for is the same class as `autoip`'s (10.565) with
+ * a different ending.** This stop signalled, unlinked the pid file and
+ * returned -- and `ncfg_ra_running_pid` reads only that file, so a radvd still
+ * exiting read as *absent*. A restart is a stop and then a start, so the
+ * start met an interface the old daemon still held: two radvds sending
+ * conflicting advertisements on one link, from a stop that reported success.
+ *
+ * `kill()` returning says the signal was queued, not that the target has run,
+ * which is the whole of the window. The check is `ncfg_ra_running_pid`'s own
+ * question -- the pid file plus `/proc/<pid>/cmdline` -- asked until it
+ * answers 0, so it inherits that function's care about recycled pids rather
+ * than repeating it.
+ */
+#define RA_STOP_PATIENCE_MILLISECONDS 1000
+#define RA_STOP_STEP_MILLISECONDS 25
+
+static int wait_for_exit(const char *run, const char *iface)
+{
+	int waited = 0;
+
+	for (;;) {
+		struct timespec step;
+
+		if (ncfg_ra_running_pid(run, iface) <= 0) {
+			return 1;
+		}
+		if (waited >= RA_STOP_PATIENCE_MILLISECONDS) {
+			return 0;
+		}
+		step.tv_sec = 0;
+		step.tv_nsec = (long)RA_STOP_STEP_MILLISECONDS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		waited += RA_STOP_STEP_MILLISECONDS;
+	}
+}
+
 int ncfg_ra_stop(const char *run, const char *iface, char *err, size_t err_size)
 {
 	char  pid_file[NCFG_RA_PATH_MAX];
@@ -314,6 +354,20 @@ int ncfg_ra_stop(const char *run, const char *iface, char *err, size_t err_size)
 		return 1;
 	}
 	if (!ncfg_process_terminate(pid, err, err_size)) {
+		return 0;
+	}
+	/*
+	 * **Waited for before the record goes, which is the order that matters.**
+	 * radvd removes its own pid file on the way out, so the common case
+	 * returns on the first look and the unlink below is a tidy-up for a
+	 * daemon that was killed rather than asked.
+	 */
+	if (!wait_for_exit(run, iface)) {
+		ncfg_error_set(err, err_size,
+		    "radvd on %s is still running %d ms after SIGTERM, still reciting the "
+		    "configuration netcfgd gave it. Its pid file is left in place, so a start "
+		    "that follows will see it rather than beginning a second daemon on the "
+		    "same link", iface, RA_STOP_PATIENCE_MILLISECONDS);
 		return 0;
 	}
 	/* The generated configuration stays: it is rewritten on every start, it

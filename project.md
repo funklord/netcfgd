@@ -12498,6 +12498,56 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.566 radvd had the same stop bug with a worse ending, and openvpn is next
+
+Named as a candidate at the end of 10.565 and measured rather than patched on
+suspicion: `ncfg_ra_stop` signalled, unlinked the pid file and returned, and
+`ncfg_ra_running_pid` reads **only** that file -- so a radvd still exiting read
+as *absent*.
+
+**Which is worse than autoip's ending.** There, a dying client was adopted and
+nothing happened; here a restart is a stop and then a start, so the start met
+an interface the old daemon still held. Two radvds sending conflicting router
+advertisements on one link, from a stop that reported success -- and nobody
+would trace that back to a stop.
+
+The fix is the same as autoip's and `pppoe`'s: wait for the process to go,
+then remove the record, and fail with a sentence if it will not. The waiter
+asks `ncfg_ra_running_pid`'s own question rather than repeating its care about
+recycled pids, and the common case returns on the first look because radvd
+removes its own pid file on the way out.
+
+### The fixture, and what it has to carry
+
+A fake radvd that leaves a holder reciting the config path -- which is what
+`running_pid` matches on -- writing that holder's pid where radvd writes its
+own, and trapping `TERM` to take half a second over it. The check is "a start
+that follows cannot meet the daemon it replaced", and it reads
+`/proc/<pid>/cmdline` rather than `kill(pid, 0)`, for `running-code.md`'s
+reason: a process nothing has reaped is a zombie and `kill -0` calls it alive.
+
+Sabotaged both ways: with the wait removed the check fails every run, with it
+in the suite is green.
+
+### The class, counted
+
+Four backends signal a process and then forget it, and they are not all the
+same:
+
+| backend | waits? | what the early return costs |
+|---|---|---|
+| `pppoe` | **yes**, and its comment says so | -- |
+| `autoip` | now | the dying client is adopted (10.565) |
+| `ra` | now | a restart starts a second radvd |
+| `openvpn` | **no** | unmeasured; its `running_pid` is pid-file-only |
+
+**openvpn is the one left**, and it is named rather than fixed because the
+measurement has not been taken: its `running_pid` reads the pid file plus the
+tunnel's own socket path, so the shape matches `ra`'s and the expected ending
+is a second openvpn on one interface -- but "expected" is the word this week
+has been about. Its test has a fake-daemon harness already, so the fixture is
+the same half-hour as this one was.
+
 ## 10.565 The autoip stop adopted the client it had just killed
 
 "continue with outstanding features or bugfixes", the copyright holder,
