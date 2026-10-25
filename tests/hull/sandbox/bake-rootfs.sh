@@ -8,12 +8,19 @@
 # expired: a build step used to map one uid, so a maintainer script that gives
 # a file to its own system user could not, and `systemd-sysv` has several.
 # hull `1b12294` fixed that for an overlay chroot MACHINE and not for a build
-# step -- and hull mapped many uids in a build step from 2026-10-23, measured
-# from here on 2026-10-25 with hwsim's package list installing in one, postinst
-# scripts and all. **This image's own set is not what was measured**, so
-# whether `systemd-sysv` installs in a step is still untested; it is the
-# obvious first thing to try when the rigs move onto built images, which is a
-# pass across all four and not an edit here.
+# step -- and hull mapped many uids in a build step from 2026-10-23.
+#
+# **This image's own set has now been measured in a step and installs**, on a
+# hull built from `b7126fe`: `systemd systemd-sysv udev dbus util-linux
+# iproute2`, exit 0, every binary the loop below checks present, `/sbin/init`
+# in place, `systemd-network:998` and `messagebus:997` created, and files
+# actually owned by them -- which is the thing this paragraph said could not
+# happen. The stored manifest keeps those owners (10.557).
+#
+# So nothing technical requires docker here any more. What is untested is the
+# half that matters for this rig: that an image built that way boots systemd
+# as pid 1 and passes the 31 checks. Moving is a pass across all four rigs
+# plus those boot tests, and is not an edit to make here.
 #
 # **The setuid and setgid bits are put back, which the hwsim image does not
 # need and this one does.** `docker export` through `tar` as an ordinary user

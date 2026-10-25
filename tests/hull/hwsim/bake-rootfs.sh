@@ -25,10 +25,12 @@
 #   owners (`uid 42`, `999`, `65534`), where a `docker export` through `tar -x`
 #   as a user drops both and the chmod below puts only the modes back.
 #
-#   One warning came with it and is worth knowing rather than chasing: apt
-#   reports its download sandbox disabled because `_apt` cannot reach the
-#   partial directory, so fetching happens as root. For a test image that is
-#   immaterial; for anything shipped it would not be.
+#   One warning came with it and was chased, because it turned out to be a
+#   hull fault rather than apt's: the step tree's root was 0700, so no uid but
+#   root could traverse it and apt's sandbox fell back to fetching as root.
+#   hull fixed it at `b7126fe`; on a binary built from that commit the root is
+#   0755, both apt runs report zero unsandboxed warnings, and `_apt` owns and
+#   writes its own partial directories (10.556, 10.557).
 #
 #   **So this script stays for now by inertia rather than by argument**, and
 #   moving the four rigs onto built images is a deliberate pass rather than a

@@ -12498,6 +12498,71 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.557 Both bake blockers are gone, on a hull built for the purpose
+
+hull fixed the root mode at their `b7126fe` -- `materialize_locked` sets the
+tree root 0755 last, where `hull_store_checkout` already did for a run and
+materialize did not -- and said plainly that the measurement that matters is
+netcfgd's: whether apt's sandbox then engages, and whether `systemd-sysv`
+installs where the 0700 root stopped it. Both now measured here.
+
+### How, which is two deliberate choices
+
+**hull was built in a scratch clone, not in its own tree.** `git clone` of
+their checkout into the session's scratch, `git checkout b7126fe`, the `situ`
+submodule initialised, `make -j12` -- so nothing was written into a tree
+whose session is live, and a concurrent `make` could not delete a binary
+under their test run. The binary reports `commit b7126feb21ef` rather than
+`-dirty`, which is the point of doing it this way rather than rebuilding
+theirs.
+
+**Both step forms were changed on purpose.** A step whose key the store holds
+is not run, and the key is the parent manifest plus the step's form -- so
+re-running yesterday's line would have replayed yesterday's result and
+reported a pass without executing anything. Each new step opens by printing
+`stat -c '%04a %u:%g' /`, which both defeats the cache and makes the fix
+visible from inside.
+
+### What the two steps said
+
+    the tree root: 0755 0:0                 (it was 0700)
+    su -s /bin/sh _apt -c 'id -u; cat'     42, and the file read
+    apt-get update, unsandboxed warnings:   0
+    the hwsim set, unsandboxed warnings:    0
+    partial afterwards: 0700 42:0 archives/partial, 0700 42:0 lists/partial
+
+So **apt's sandbox fully engages** -- it drops to `_apt`, which now owns and
+writes its own partial directories -- and the root mode was the whole of it,
+as suspected.
+
+**And the sandbox rig's own blocker is gone with it.** Its header's reason for
+baking with docker was that "a build step maps one uid, so a maintainer script
+that gives a file to its own system user cannot, and `systemd-sysv` has
+several". That set -- `systemd systemd-sysv udev dbus util-linux iproute2` --
+installs in a step with exit 0, every binary the bake checks present,
+`/sbin/init` in place, `systemd-network:998` and `messagebus:997` created, and
+files actually owned by them:
+
+    systemd-network  /var/lib/systemd/network, /run/systemd/netif/*
+
+The stored manifest keeps them, four entries at `(owner (gid 998) (uid 998))`
+beside `_apt`'s three and eleven setuid or setgid files -- which is the whole
+of what a `docker export` through `tar -x` as a user drops.
+
+### What is still untested, and it is not small
+
+**That a built image boots systemd as pid 1 in a vm.** Installing the packages
+is not the sandbox rig's subject; running 31 checks under real systemd is.
+Likewise the openrc image's `/sbin/openrc-init` path. Both should be *more*
+faithful from a stored image than from an export -- owners and setuid bits
+carried rather than reconstructed -- but "should" is the word this week has
+been about, and neither has been run.
+
+So the position is: **nothing technical requires docker for these images any
+more**, two blockers measured gone on a named hull commit, and what remains is
+a tier-wide pass plus the two boot tests that would prove it. Still the
+holder's call, now with the risk named rather than guessed.
+
 ## 10.556 The bake blocker is gone, measured, and moving is a pass not an edit
 
 hull closed the run-path gap (their `a1b6dd2`, 2026-10-25) and pointed out that
