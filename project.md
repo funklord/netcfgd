@@ -12498,6 +12498,51 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.570 The delegation rig is not waiting on hull any more, and the handles are measured
+
+10.527 parked `several machines on one wire` on hull's segments work, and
+10.524 said it waited on it. **Both are stale, and the second was stale in a
+way that would have kept the item parked indefinitely**: a reader meeting
+"waits on another project" does not go and check, which is how a deferral
+outlives its reason. Corrected in place rather than appended to, because an
+entry recording a non-decision decays like one recording a fix and more
+quietly.
+
+Measured in the hull binary this workspace has, 2026-10-25, rather than taken
+from the message that prompted the look:
+
+    hull exec [-t] ID [--] CMD [ARG...]
+    hull segment NAME [impair MACHINE|all in|out|both [KEY=VALUE|down]...]
+    hull segment NAME tamper MACHINE|all in|out|both [KEY=VALUE]...
+    hull segment NAME inject MACHINE|all frame=HEX|size=N [count=N] [every=MS]
+
+So two things netcfgd had no handle for now have one. **`hull exec` returns a
+status per named machine**, which is the verdict collector a multi-machine rig
+needs; and **segments carry impairment, tampering and frame injection**, which
+is more than "several machines on a wire" and reaches tests this tree has
+never been able to write -- delegation under loss, an RA or an autoip exchange
+against a tampered or injected frame.
+
+**What remains is netcfgd's own work, and the hard part is not the wiring.**
+A single-machine rig reads `VERDICT ok` out of one payload's stdout and that
+works because there is one stream and one exit. A delegation test's
+assertions are **relational** -- this host handed out a prefix, that host
+configured from it -- so a collector has to gather a verdict per machine and
+**fail the run when a machine never produced one.** A machine that never
+reached its payload must not read as a machine that passed, which is the
+vacuity trap the kernel tier already guards on one machine (`run.sh`: a boot
+that never reached the payload leaves no line, and an absent line must fail
+rather than be silence). On several machines there are as many ways to be
+vacuous as there are machines.
+
+**Not started, and deliberately not designed from here.** Which handle serves
+the collector -- `hull exec` per machine, or each machine writing a verdict to
+a shared volume the host reads after -- is a choice to make while writing it,
+with hull's own view in hand: reading a consumer's convenience as a library's
+design is the error fuzznet's section 2 names about this tree's brief
+(10.567), and it applies to hull equally. The want is recorded, the blocker
+is gone, and the next session to pick up the live tier should start here.
+
 ## 10.569 Two cpu instruments, read in opposite directions, and the control that corrected one
 
 hull landed `hull stats --guest` (its master `d0582b6`) and offered it for the
@@ -16450,8 +16495,8 @@ say a vm guest loaded `mac80211_hwsim` and got `phy0` and `phy1`. That is the
 one thing `make live-container` structurally cannot do -- its own comment says
 so, because a container shares the host's kernel and this host has no such
 module -- and `hwsim.sh` is a script this workspace has never been able to
-run. Several machines on one wire, which `delegation.sh` would want, waits on
-their segments work.
+run. Several machines on one wire, which `delegation.sh` would want, waited on
+their segments work, and **no longer does** -- see 10.570.
 
 ## 10.523 nm.sh in a container, and the two reasons it had never run in one
 
