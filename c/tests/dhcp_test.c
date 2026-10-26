@@ -1093,7 +1093,12 @@ static void a_machine(ncfg_dhcp_machine_t *machine, const char *dhcpcd, const ch
 	machine->dhcpcd_run_dir = dhcpcd_dir;
 	machine->dhcpcd_config = "/etc/dhcpcd.conf";
 	/* Short, because two cases here deliberately drive a client that will not
-	 * stop and the thing waiting behind a real one is the reconcile loop. */
+	 * stop and the thing waiting behind a real one is the reconcile loop.
+	 *
+	 * **It reaches both stop paths since 2026-10-26**, the dhcpcd confirm and
+	 * the recorded-client wait, so a test whose stand-in takes longer than
+	 * this has to say so for itself -- `a_recorded_client_slow_to_exit_is_
+	 * waited_for` does. */
 	machine->patience_ms = 200;
 }
 
@@ -1753,6 +1758,16 @@ static void a_recorded_client_slow_to_exit_is_waited_for(const char *base)
 	(void)testdir_in(base, "slow6.args", record, sizeof(record));
 	write_recorder(fake, record, 0);
 	a_machine(&machine, fake, fake, fake);
+	/*
+	 * **Longer than the stand-in takes, and said here rather than inherited.**
+	 * `a_machine` sets 200 ms because two tests drive a client that will not
+	 * stop at all; this one drives a client that takes about 500 ms and must
+	 * be waited for, so the two figures have to be stated together or the
+	 * fixture is a race against a default it does not mention. Found when the
+	 * patience was threaded into this stop path and the 200 turned this test's
+	 * success into a refusal.
+	 */
+	machine.patience_ms = 1500;
 
 	check(ncfg_dhcp_pid_path(run_dir, "odhcp6c", "ethS", pid_path, sizeof(pid_path), NULL, 0) &&
 	    ncfg_dhcp_client_dir(run_dir, "odhcp6c", dir, sizeof(dir), NULL, 0) &&
@@ -1780,6 +1795,74 @@ static void a_recorded_client_slow_to_exit_is_waited_for(const char *base)
 	    "cannot meet the client it replaced");
 	check(!testdir_exists(pid_path), "the pid file is removed only after that");
 	stop_marked(held);
+}
+
+/*
+ * A CLIENT THAT WILL NOT GO IS A REFUSAL, AND THE REFUSAL SAYS WHOSE.
+ *
+ * The other arm of 10.571's wait. A client that goes is covered by
+ * `a_recorded_client_slow_to_exit_is_waited_for`; this is the one that does
+ * not, where the stop must fail rather than remove the pid file -- because the
+ * file is what lets the next pass find the client at all, and a stop that
+ * forgot an unkillable client would make it permanently unidentifiable. That
+ * is `pppoe`'s measured incident (10.476) in the other backend.
+ *
+ * **It costs a tenth of a second rather than three, which is why it exists.**
+ * 10.574 named this arm as unexercised and priced it at the full 3000 ms;
+ * `machine->patience_ms` makes it cheap, and threading that figure into
+ * `stop_recorded` -- where `confirm_stopped` had it already -- is what this
+ * test is paid for by.
+ */
+static void a_client_that_will_not_go_is_a_refusal(const char *base)
+{
+	ncfg_dhcp_machine_t machine;
+	char                fake[256];
+	char                record[256];
+	char                pid_path[NCFG_DHCP_PATH_MAX];
+	char                dir[NCFG_DHCP_PATH_MAX];
+	char                mine[64];
+	char                message[NCFG_ERROR_MAX];
+	pid_t               stubborn;
+
+	(void)testdir_in(base, "fake-stubborn", fake, sizeof(fake));
+	(void)testdir_in(base, "stubborn.args", record, sizeof(record));
+	write_recorder(fake, record, 0);
+	a_machine(&machine, fake, fake, fake);
+	/* A tenth of a second: long enough that the loop runs, short enough that
+	 * the suite does not wait on a client built never to answer. */
+	machine.patience_ms = 100;
+
+	check(ncfg_dhcp_pid_path(run_dir, "udhcpc", "ethR", pid_path, sizeof(pid_path), NULL, 0) &&
+	    ncfg_dhcp_client_dir(run_dir, "udhcpc", dir, sizeof(dir), NULL, 0) &&
+	    (mkdir(dir, 0755) == 0 || errno == EEXIST),
+	    "a run directory with a udhcpc recorded in it");
+	/* **Ignoring `TERM` outright, not merely slow.** `trap ''` makes the
+	 * signal a no-op for the life of the shell, which is the only way to be
+	 * sure the loop reaches its patience rather than racing a process that was
+	 * going to exit anyway. */
+	stubborn = spawn_marked_running(pid_path, "trap '' TERM; while :; do sleep 0.05; done");
+	(void)snprintf(mine, sizeof(mine), "%d\n", (int)stubborn);
+	check(stubborn > 0 && testdir_write(pid_path, mine, strlen(mine)),
+	    "  and a client that ignores SIGTERM entirely");
+	check(ncfg_process_pid_of(pid_path, pid_path) == stubborn,
+	    "  which netcfgd finds, so the refusal below is about a real client");
+
+	message[0] = '\0';
+	check(!ncfg_dhcp_stop(run_dir, "ethR", "4", &machine, message, sizeof(message)),
+	    "a stop of a client that will not go is a failure rather than a silent success");
+	check(strstr(message, "ethR") != NULL && strstr(message, "udhcpc") != NULL,
+	    "  naming the client and the interface, since an operator may run several");
+	check(strstr(message, "pid file is kept") != NULL,
+	    "  and saying the record was kept, which is what lets the next pass find it");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", message);
+	}
+	/* The point of the refusal: the pid file is still there. */
+	check(testdir_exists(pid_path),
+	    "and the pid file survives, so the client has not been made unidentifiable");
+
+	stop_marked(stubborn);
+	(void)unlink(pid_path);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -1837,6 +1920,7 @@ int main(void)
 	a_stop_asks_whose_the_client_is_before_it_signals(base);
 	a_stop_that_did_not_take_says_so(base);
 	a_recorded_client_slow_to_exit_is_waited_for(base);
+	a_client_that_will_not_go_is_a_refusal(base);
 
 	/* Nothing here has a default, so an executor told nothing refuses rather
 	 * than reaching for `/run/dhcpcd` and `/usr/libexec` on the machine this

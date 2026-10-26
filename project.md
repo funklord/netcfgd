@@ -12498,6 +12498,59 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.578 The refusal arm, made cheap by one knob the other path already had
+
+10.574 named this arm unexercised and priced it at the full 3000 ms. The price
+was wrong, and the reason it was wrong is the finding: **`confirm_stopped`
+already took `machine->patience_ms` and the waiter added to `stop_recorded` did
+not.** One question -- how long to wait for a client to go -- had a knob on one
+path and a constant on the other.
+
+Threaded through, so both paths read the same figure. The field's own comment
+said *"How long a stop waits for `dhcpcd -k`"*, which was true when only the
+dhcpcd branch consulted it; it says both paths now, because a machine wanting a
+different patience wants it for whichever client it runs rather than for one of
+three.
+
+### The test the knob paid for
+
+A client that **ignores `TERM` outright** -- `trap '' TERM`, not merely slow,
+since anything slow races a process that was going to exit anyway -- with
+`patience_ms` at 100. The stop must refuse, and the refusal must name the
+client and the interface and say the pid file was kept.
+
+**The pid file surviving is the point rather than a detail.** It is what lets
+the next pass find the client at all, so a stop that forgot an unkillable one
+would make it permanently unidentifiable -- which is `pppoe`'s measured
+incident (10.476) arriving in another backend, and the thing 10.571's four
+fixes were all about.
+
+### The control hung rather than failing, which is a better answer
+
+With the refusal arm disabled the test did not fail -- **it hung**, and the
+runner killed it at 120 seconds. Of course it did: the client ignores the
+signal, so without a patience the loop has no exit at all. So the arm is not
+merely a better error message, it is **the bound on an unbounded wait**, and a
+daemon without it would spin in a reconcile pass forever on one stubborn
+client.
+
+`running-code.md` asks what makes a loop stop before it is run. This is that
+question answered from the other end: the thing that makes it stop is the
+thing a test had never exercised.
+
+### What it broke, and why that was the useful part
+
+Threading the figure through turned an older test's success into a refusal:
+`a_recorded_client_slow_to_exit_is_waited_for` drives a stand-in that takes
+about 500 ms, and `a_machine` sets 200 ms because two other tests drive clients
+that never stop. The fixture had been **passing on a default it did not
+mention**, and only became a race when that default started reaching it.
+
+Both figures are stated together now -- the slow test sets 1500 ms for itself
+and says why, and `a_machine`'s comment says its 200 reaches both paths. A
+fixture whose correctness depends on a number declared in another function is
+one nobody can read.
+
 ## 10.577 The lens from today's bugs found one more, and taught what a SIGPIPE guard can be tested for
 
 Four defects in one day shared a shape: **a guard applied in one place and
@@ -12767,11 +12820,12 @@ the management path rather than the pid one. The assertions are that the stop
 succeeds and that the socket is gone afterwards, the second being the one that
 matters for the next start. Sabotaged by removing the arm: both fail.
 
-**The refusal arm is not exercised**, and this entry says so rather than
-leaving the pair looking covered. Driving it means holding a stand-in alive for
-the full 3000 ms while it refuses, which is a real second of suite time for an
-arm whose content is a formatted sentence the compiler already checks. Named,
-with the cost, so the next person decides rather than discovers.
+**~~The refusal arm is not exercised~~ -- it is now, as 10.578**, and the cost
+quoted here was wrong: `machine->patience_ms` makes it a tenth of a second
+rather than three, and `confirm_stopped` had that knob all along while the
+waiter here used a constant. The arm also turned out to be more than a
+formatted sentence -- with it disabled the test hangs rather than failing,
+because a client that ignores `TERM` gives the loop no other exit.
 
 ## 10.573 Telling openvpn to stop could kill netcfgd, found by a test failing under load
 

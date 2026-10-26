@@ -216,8 +216,17 @@ typedef struct {
 	 * and a target that is not there is not a failure.
 	 */
 	const char *dhcpcd_config;
-	/* How long a stop waits for `dhcpcd -k`. 0 is
-	 * `NCFG_DHCP_STOP_PATIENCE_MS`. */
+	/*
+	 * How long a stop waits for a client to actually go. 0 is
+	 * `NCFG_DHCP_STOP_PATIENCE_MS`.
+	 *
+	 * **It covers both stop paths, and said `dhcpcd -k` alone until
+	 * 2026-10-26.** `confirm_stopped` reads dhcpcd's control socket and
+	 * `stop_recorded` waits on the pid udhcpc or odhcp6c wrote; the question
+	 * is the same one for both, and a machine that wants a different patience
+	 * -- a test, or hardware where a client is slow to let an address go --
+	 * wants it for whichever client it runs rather than for one of the three.
+	 */
 	int patience_ms;
 } ncfg_dhcp_machine_t;
 

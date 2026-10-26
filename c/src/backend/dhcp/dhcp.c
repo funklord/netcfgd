@@ -1288,8 +1288,8 @@ static int confirm_stopped(const char *run, const char *iface, const char *famil
  * of its `odhcp6c.c` rather than assumed, because "does it release?" decides
  * whether an ISP still believes the prefix is ours.
  */
-static int stop_recorded(const char *run, const char *program, const char *iface, char *err,
-    size_t err_size)
+static int stop_recorded(const char *run, const char *program, const char *iface, int patience,
+    char *err, size_t err_size)
 {
 	char  pid_path[NCFG_DHCP_PATH_MAX];
 	char  detail[NCFG_ERROR_MAX];
@@ -1336,12 +1336,12 @@ static int stop_recorded(const char *run, const char *program, const char *iface
 		while (ncfg_process_pid_of(pid_path, pid_path) > 0) {
 			struct timespec step;
 
-			if (waited >= NCFG_DHCP_STOP_PATIENCE_MS) {
+			if (waited >= patience) {
 				ncfg_error_set(err, err_size,
 				    "%s on %s was signalled (pid %d) and is still running after %d ms, "
 				    "so its pid file is kept: a start that follows cannot meet the "
 				    "client it replaced",
-				    program, iface, (int)pid, NCFG_DHCP_STOP_PATIENCE_MS);
+				    program, iface, (int)pid, patience);
 				return 0;
 			}
 			step.tv_sec = 0;
@@ -1437,7 +1437,11 @@ int ncfg_dhcp_stop(const char *run, const char *iface, const char *family,
 		}
 	}
 
-	if (!stop_recorded(run, is_v4 ? "udhcpc" : "odhcp6c", iface, err, err_size)) {
+	/* The machine's patience where it sets one, which is the same figure the
+	 * dhcpcd branch above uses -- one question, one knob. */
+	if (!stop_recorded(run, is_v4 ? "udhcpc" : "odhcp6c", iface,
+	    machine->patience_ms > 0 ? machine->patience_ms : NCFG_DHCP_STOP_PATIENCE_MS,
+	    err, err_size)) {
 		return 0;
 	}
 	/*
