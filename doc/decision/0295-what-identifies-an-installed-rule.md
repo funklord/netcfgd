@@ -13,8 +13,9 @@ reads the installed ruleset back**, and that is the question the planner cannot
 be written without.
 
 **Status is `proposed` and not `accepted`**, unlike 0294: one half of it is a
-product question that belongs to the copyright holder, and one fact in it is
-unverified on this machine. Both are named below rather than resolved.
+product question that belongs to the copyright holder. The other half -- a fact
+this machine could not establish -- **was measured on 2026-10-26** and is below;
+only the product question is left.
 
 ## Why an observation is not optional
 
@@ -78,28 +79,45 @@ would produce.
   it wrote*, not what it now is. A hand-edited rule inside netcfgd's table is
   replaced -- the right action -- but reported only as differing, which is a
   worse sentence than A could write.
-- **Bound: 256 bytes.** `NFT_USERDATA_MAXLEN` is 256, which a bounded name and
-  a fixed-width digest fit inside with room to spare. Worth stating because it
-  is a hard limit on this scheme ever carrying more.
+- **Bound: 128 characters, not the kernel's 256.** `NFT_USERDATA_MAXLEN` is
+  256, but nft refuses a comment longer than 128, and keeping `nft list
+  ruleset` readable is the point of using its TLV at all -- so 128 is the real
+  budget for a name plus a digest. Measured, not read off a header; see below.
 
-## The fact this record cannot establish here
+## The fact this record could not establish, now measured
 
-**Whether netcfgd's userdata keeps `nft list ruleset` readable is unverified.**
-nft(8) stores its own `comment` in that attribute under a TLV of its own, so
-bytes written naively may print as nothing, as garbage, or make nft refuse the
-rule -- and an operator running `nft list ruleset` on their own router is a
-first-class reader of netcfgd's output, not an afterthought.
+**Measured 2026-10-26** in the `netcfgd/natcap` guest, which gained the
+`nftables` tool for this -- netcfgd speaks netlink itself and does not need it,
+and a rig whose subject is nftables is the one place a human debugging it wants
+`nft` to hand. Reproduce with, in that guest:
 
-Neither libnftnl's headers nor an `nft` binary is installed on this machine, so
-nothing here can answer it, and this record does not guess.
+    nft add table inet probe
+    nft add chain inet probe c '{ type filter hook input priority 0; policy accept; }'
+    nft --debug=netlink add rule inet probe c drop comment '"name=block"'
 
-**The experiment that settles it, named so it is run rather than reasoned
-about:** `tests/hull/natcap/` already boots a machine with nftables for the NAT
-capability work. Write one rule with userdata through netcfgd's own transaction
-builder in that guest, run `nft list ruleset`, and read what it prints. If nft
-refuses or garbles it, the answer is to adopt nft's TLV -- type 0, the comment
--- so the name appears as a comment an operator can read, which is a better
-outcome than netcfgd's private encoding would have been anyway.
+**The TLV, as nft 1.1.3 emits it:**
+
+    userdata = { \x00\x0bname=block\x00 }
+
+So it is `u8 type`, `u8 length`, value -- type **0** is the comment, the string
+is NUL-terminated, and the NUL is counted in the length (`name=block` is ten
+characters and the length byte is eleven). A rule written that way lists back
+as `accept comment "name=ssh"` and appears in `nft -j list ruleset` as
+`"comment": "name=ssh"`.
+
+**So netcfgd writes nft's own TLV**, and the question this section was opened
+for answers itself: an operator running `nft list ruleset` sees the rule's name
+as its comment, which is better than netcfgd's private encoding would have
+been. There is no tolerance question left to ask, because there is no foreign
+encoding to tolerate.
+
+**And a limit this record had wrong: 128, not 256.**
+`NFT_USERDATA_MAXLEN` is 256 and this record said a name and a digest fit
+inside it comfortably. **nft refuses a comment over 128 characters** --
+*"comment too long, 128 characters maximum allowed"* -- so a scheme that wants
+to stay readable through nft has half the room, and a name plus a hex digest
+has to be budgeted against 128. Measured by asking for 300 and reading the
+refusal.
 
 ## What is proposed, and what is the holder's
 

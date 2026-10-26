@@ -12498,6 +12498,39 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.579 A message change broke a rig for a day, and `make check` cannot see the rigs
+
+0295's unverified fact is measured: the `netcfgd/natcap` image gained the
+`nftables` tool, and `nft --debug=netlink` prints
+`userdata = { \x00\x0bname=block\x00 }` -- `u8 type`, `u8 length`,
+NUL-terminated value with the NUL counted, type 0 being the comment. **netcfgd
+will write nft's own TLV**, so the tolerance question disappears and an
+operator reading `nft list ruleset` sees a rule's name as its comment. The cap
+is **128 characters, not `NFT_USERDATA_MAXLEN`'s 256**: nft refuses longer, and
+0295 had that wrong. Only its product half is open now.
+
+### What running the rig turned up, which is the larger finding
+
+The rig failed, and not because of the image. `ca517c6b` rewrote the
+`LINK_CREATE` capability sentence yesterday, replacing a list of kinds with the
+general `CONFIG_<KIND>` rule -- better, and it dropped the one kind an operator
+never asked for. **An `ifb` is netcfgd's own device, synthesised for ingress
+shaping**, so "this kernel does not know `ifb`" is about something absent from
+the document, and without the clause a reader cannot connect it to the shaping
+they did write. `tests/hull/natcap/` asserts that clause and had been red since.
+
+The clause is back, as a clause rather than a revert: the general rule stays
+and the `ifb` connection is named. 40 checks pass again.
+
+**The gap is reach, not care.** `make check` runs 97 suites and cannot run the
+hull rigs -- they need `/dev/kvm` and minutes each -- so a contract between a C
+string and a rig's `grep` is checked only when somebody runs the rig by hand. A
+unit test does assert `CONFIG_<KIND>` is present, which is why the rewrite
+looked safe; nothing asserted what the rewrite removed. **A test that checks
+what a sentence says cannot catch what it stopped saying**, and that is the
+fifth instance in two days of a rule or a fact being present in one place and
+unreached from another.
+
 ## 10.578 The refusal arm, made cheap by one knob the other path already had
 
 10.574 named this arm unexercised and priced it at the full 3000 ms. The price
@@ -12998,19 +13031,30 @@ no such exposure**, which is the argument for B rather than its convenience.
 
 ### The fact this machine cannot establish, and the experiment for it
 
-**Whether netcfgd's userdata keeps `nft list ruleset` readable is unverified
-here.** nft(8) keeps its own `comment` in that attribute under a TLV of its
-own, so bytes written naively may print as nothing, print as garbage, or make
-nft refuse the rule -- and an operator running `nft list ruleset` on their own
-router is a first-class reader of netcfgd's output.
+**~~Unverified here~~ -- measured the same day, and the experiment this entry
+named is the one that ran.** Neither libnftnl's headers nor an `nft` binary was
+installed on this machine, so the `netcfgd/natcap` image gained the `nftables`
+tool and the probe ran in that guest. The result is in the section below and in
+0295: the encoding is nft's own TLV, netcfgd will write that rather than a
+private one, and the cap is 128 characters rather than the 256 the record
+assumed.
 
-Neither libnftnl's headers nor an `nft` binary is installed on this machine, so
-nothing here answers it and 0295 does not guess. **The experiment is named so
-it gets run rather than reasoned about**: `tests/hull/natcap/` already boots a
-machine with nftables, so write one rule with userdata through netcfgd's own
-builder in that guest and read what `nft list ruleset` prints. If nft garbles
-it, the answer is to adopt nft's own comment TLV -- which is the better outcome
-anyway, since the name then appears as a comment an operator can read.
+### Measured since: the TLV, and a limit of 128 rather than 256
+
+The `netcfgd/natcap` image gained the `nftables` tool and the experiment ran:
+`nft --debug=netlink` prints `userdata = { \x00\x0bname=block\x00 }`, so the
+encoding is `u8 type`, `u8 length`, NUL-terminated value with the NUL counted,
+and type 0 is the comment. A rule written that way lists back as
+`accept comment "name=ssh"`.
+
+**So netcfgd writes nft's own TLV and the tolerance question disappears** --
+there is no foreign encoding for nft to tolerate, and an operator running
+`nft list ruleset` reads the rule's name as its comment.
+
+**And 0295 had a limit wrong: nft refuses a comment over 128 characters**,
+where the record said `NFT_USERDATA_MAXLEN`'s 256 left room to spare. Half the
+budget, measured by asking for 300 and reading the refusal. Only the product
+question is left open now.
 
 ### What is the holder's, and why the record stops there
 

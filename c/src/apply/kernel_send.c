@@ -121,13 +121,28 @@ const char *ncfg_kernel_hint(int op_kind, int code)
 			 * first and the device never exists for the setter to configure.
 			 * Measured in `tests/hull/natcap/`.
 			 */
+			/*
+			 * **The `ifb` clause is not an example, and it was lost once.**
+			 * `ca517c6b` replaced a list of kinds with the general rule, which
+			 * is the better sentence -- and dropped the one kind an operator
+			 * never asked for: an `ifb` is synthesised by netcfgd for ingress
+			 * shaping, so "this kernel does not know `ifb`" is about a device
+			 * absent from the document, and without the clause the reader has
+			 * no way to connect it to the shaping they did write.
+			 *
+			 * `tests/hull/natcap/` asserts the clause and caught its loss --
+			 * a day later, because the hull rigs need `/dev/kvm` and minutes
+			 * and `make check` does not run them.
+			 */
 			return "a link kind this kernel does not know is refused like this: "
 			       "the kind in the line above comes from a module of its own, "
 			       "usually of that name and selected by `CONFIG_<KIND>` -- but a "
 			       "`vlan` is `8021q` (CONFIG_VLAN_8021Q), a `bond` is `bonding` "
-			       "(CONFIG_BONDING), and a tunnel's depends on its type; `ip link "
-			       "add type <kind>` fails the same way outside netcfgd, which is "
-			       "the quickest confirmation";
+			       "(CONFIG_BONDING), and a tunnel's depends on its type. An "
+			       "`ifb` for ingress shaping is netcfgd's own device rather "
+			       "than one the document names, so a kernel without it refuses "
+			       "the shaping. `ip link add type <kind>` fails the same way "
+			       "outside netcfgd, which is the quickest confirmation";
 		}
 		return NULL;
 	case NCFG_OP_QDISC_SET:
