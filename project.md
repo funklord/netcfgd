@@ -12498,6 +12498,74 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.577 The lens from today's bugs found one more, and taught what a SIGPIPE guard can be tested for
+
+Four defects in one day shared a shape: **a guard applied in one place and
+absent in a sibling doing the same thing** -- `pppoe`'s stop wait missing from
+four backends, `answer.c`'s `MSG_NOSIGNAL` missing from `management.c`,
+`c_nm_signals.sh`'s kill-by-pid missing from two live scripts.
+`working-practice.md` says to derive the next lens from the last bug, so the
+sweep asked the question that shape implies: **which other socket writes lack
+`MSG_NOSIGNAL`?**
+
+### One real instance
+
+**`apply/dhcpcd_control.c` wrote to dhcpcd's control socket with a plain
+`write`**, in a loop, over `AF_UNIX`/`SOCK_STREAM`. In production that code
+runs inside the daemon holding `CAP_NET_ADMIN`.
+
+**And the peer is one netcfgd may have just asked to die**, which is what puts
+it in the same class rather than merely near it: `confirm_stopped` reads this
+socket in a loop *after* the stop has sent `-k`, so the window where dhcpcd is
+closing is a window netcfgd deliberately stands in. `send(..., MSG_NOSIGNAL)`
+now, as `answer.c` and `management.c` do.
+
+### Two candidates cleared, and the reasons are worth keeping
+
+So the next sweep does not re-examine them:
+
+- **`backend/supplicant/client.c` is `SOCK_DGRAM`.** A datagram socket whose
+  peer is gone gives `ECONNREFUSED`, not `SIGPIPE`. Exempt by protocol rather
+  than by care.
+- **`host/portal.c`'s HTTP write runs in a privilege-shed child with a death
+  timer.** `ncfg_portal_fetch` is called after `ncfg_privilege_shed` and
+  `ncfg_privilege_die_after`, so a `SIGPIPE` there kills a process designed to
+  be disposable and the parent reads a failed probe. Worth a better message
+  some day; not a daemon death.
+- The remaining `write` calls are to pipes in forked children whose reader is
+  the parent that forked them, so the peer is alive by construction.
+
+### What the control taught, which is more useful than the fix
+
+A fixture was written, and **it passed with the guard removed** -- so it never
+reached the write at all. Which is the trap this tree had just written up about
+openvpn (10.573), walked into again within the hour.
+
+The diagnosis is the finding: **whether a SIGPIPE guard is testable from
+outside depends on whether the protocol reads before it writes.**
+
+- openvpn's management client connects, **reads the greeting**, then writes.
+  That read is a window a stand-in can close in, and a marker file makes the
+  ordering deterministic.
+- `dhcpcd_control.c` connects and writes immediately. There is no window, so
+  nothing outside the process can place a close between the two. A stand-in
+  that closes early is simply not listening when netcfgd connects, and the
+  connect fails before any write.
+
+**So the fixture was removed rather than kept.** It asserted that the call
+returned, which it does either way: a check that cannot fail reads as
+coverage, which is the thing this tree says is worse than an absent check --
+and keeping it would have been that sentence written one hour earlier and
+ignored one hour later.
+
+**The guard therefore rests on inspection and on the two siblings that are
+tested.** Stated plainly rather than implied: `management.c`'s equivalent has a
+deterministic control that exits 141 without it, `answer.c` carries the rule
+with its own incident, and this third site is the same call on the same kind of
+socket for the same reason. Reaching it under test would need a delay injected
+into netcfgd between connect and write, which is a production seam added for a
+test and not worth it for a one-word change.
+
 ## 10.576 Two live scripts killed by name, and one of the names was netcfgd's own client
 
 hull's reply to 10.575 added the property that matters beyond self-matching:

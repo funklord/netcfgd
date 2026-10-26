@@ -152,8 +152,27 @@ static char *ask(const char *path)
 		(void)close(fd);
 		return NULL;
 	}
+	/*
+	 * **`send` with `MSG_NOSIGNAL`, for the reason `answer.c` gives and
+	 * `management.c` was corrected for (10.573).** A peer that closed between
+	 * the connect and the write would otherwise raise `SIGPIPE`, which ends
+	 * this process -- and this one runs in `apply/`, inside the daemon holding
+	 * `CAP_NET_ADMIN`.
+	 *
+	 * **The peer is a dhcpcd netcfgd may have just asked to die**, which is
+	 * what puts this in the same class rather than merely near it:
+	 * `confirm_stopped` in `dhcp.c` reads this socket in a loop *after* the
+	 * stop has sent `-k`, so the window where dhcpcd is closing is a window
+	 * netcfgd deliberately stands in.
+	 *
+	 * Found by pointing the lens at the guard rather than at the file: four
+	 * defects in one day were a rule applied in one place and absent in a
+	 * sibling doing the same thing, so the sweep asked which other socket
+	 * writes lacked this one. 10.577 has the sweep and what it cleared.
+	 */
 	while (sent < GET_CONFIG_FILE_BYTES) {
-		ssize_t put = write(fd, get_config_file + sent, GET_CONFIG_FILE_BYTES - sent);
+		ssize_t put = send(fd, get_config_file + sent, GET_CONFIG_FILE_BYTES - sent,
+		    MSG_NOSIGNAL);
 
 		if (put < 0 && errno == EINTR) {
 			continue;
