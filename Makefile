@@ -2518,7 +2518,8 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # it; hull's docker engine would leave the container running with the
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
-hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation
+hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
+      hull-delegation-lossy
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2556,6 +2557,41 @@ hull-delegation:
 		exit 1; \
 	fi; \
 	echo "delegation: a prefix crossed the wire and netcfgd configured from it"
+
+# The same rig with the wire losing three frames in ten each way, which is the
+# test netcfgd has never been able to write.
+#
+# **It shares the delegation rig's payloads and verdict collector**, differing
+# only in the spec's impairment, so a pass here and a failure there is about
+# loss rather than about two rigs drifting apart.
+hull-delegation-lossy:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/delegation)
+	@$(HULL) images 2>/dev/null | grep -q "^netcfgd/delegation[[:space:]]" || \
+		{ echo "hull: netcfgd/delegation is not in the store, building it"; \
+		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
+			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
+	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
+	@mkdir -p tests/hull/delegation/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/lossy.conf || true
+	@missing=0; \
+	for name in isp cpe; do \
+		file=tests/hull/delegation/verdict/$$name; \
+		if [ ! -f "$$file" ]; then \
+			echo "lossy: $$name left no verdict, so it never reached its payload"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/lossy: $$name: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "lossy: $$missing of 2 machine(s) did not pass under the spec's loss"; \
+		exit 1; \
+	fi; \
+	echo "lossy: a prefix crossed the wire under the impairment lossy.conf sets"; \
+	grep -o '(loss [0-9.]*)' tests/hull/delegation/lossy.conf | sort -u | \
+		sed 's/^/lossy:   /'
 
 # Two machines on one wire, and the verdict collector 10.570 says the
 # delegation rig turns on.

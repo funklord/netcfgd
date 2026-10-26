@@ -101,7 +101,10 @@ sed 's/^/  apply: /' "$work/apply.log" >> "$out"
 # asked to compute, which is what this one did on its first run.
 prefixes="$work/run/prefixes/eth1"
 waited=0
-while [ ! -s "$prefixes" ] && [ "$waited" -lt 200 ]; do
+# **600, not 200.** The same payload serves the lossy rig, where a solicit
+# may be dropped several times and odhcp6c backs off between tries. A wait that
+# suited a clean wire would make loss look like a failure to delegate.
+while [ ! -s "$prefixes" ] && [ "$waited" -lt 600 ]; do
 	waited=$((waited + 1))
 	sleep 0.1
 done

@@ -12498,6 +12498,37 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.582 Delegation under loss, and the control that stopped it being a vacuous pass
+
+`make hull-delegation-lossy`: the delegation rig with hull's impairment on the
+segment, three frames in ten dropped each way. The prefix still arrives and
+netcfgd still derives from it, which is the test 10.570 named and netcfgd has
+never been able to write.
+
+**Two independent draws, not thirty per cent end to end.** hull applies `out`
+where a frame enters the switch from its machine and `in` where it leaves
+towards one, so a solicit crosses the CPE's out and the ISP's in.
+
+**The relational assertion earned its design here.** Under loss kea delegated
+`2001:db8:1234:100::/56` rather than the clean run's `2001:db8:1234::/56` --
+a different /56 from the same pool, its lease database being fresh. A check
+written against the address the first run happened to produce would have failed
+for a reason that has nothing to do with loss.
+
+### The control, because a pass under loss proves nothing by itself
+
+hull prints no notice that an impairment was applied and the timings were
+indistinguishable, so "passed under loss" and "the impairment was silently
+ignored" looked the same from outside. Raising it to `(loss 1.0)` makes the
+prefix never arrive and the rig fail, which is what shows the knob reaches the
+wire at all. Restored to 0.3 afterwards.
+
+**And the failure message no longer quotes a figure.** It said *"did not pass
+under 30% loss"*, which is a number in a Makefile describing a spec it does not
+read -- stale the moment the spec changes, which is the fault this tree has
+spent two days finding. It names the spec and prints what the spec says
+instead.
+
 ## 10.581 Prefix delegation across a wire, and four instruments that were not there
 
 `make hull-delegation`: kea on one machine, netcfgd on the other, one segment,
