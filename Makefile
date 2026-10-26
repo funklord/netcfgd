@@ -2518,7 +2518,46 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # it; hull's docker engine would leave the container running with the
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
-hull: hull-hwsim hull-sandbox hull-openrc hull-natcap
+hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire
+
+# Two machines on one wire, and the verdict collector 10.570 says the
+# delegation rig turns on.
+#
+# **The collector is the point and the payload is not.** A single-machine rig
+# reads one `VERDICT` line from one stdout with one exit; several machines need
+# a verdict each, and a machine that never reached its payload must not read as
+# one that passed. So each machine writes `verdict/<name>` and this target
+# refuses unless **every** expected name is there and says ok -- an absent file
+# being the case that cannot be faked by a payload going wrong.
+#
+# The directory is cleared first, by name, for the reason `evidence.md` gives
+# about a stale artifact: a verdict left by the previous run would make a
+# machine that never booted look like one that passed, which is this target's
+# own failure mode arriving through its own evidence.
+hull-wire:
+	@$(call hull_says,netcfgd/natcap)
+	@$(call hull_image,natcap)
+	@rm -f tests/hull/wire/verdict/isp tests/hull/wire/verdict/cpe
+	@mkdir -p tests/hull/wire/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/wire/hull.conf || true
+	@missing=0; \
+	for name in isp cpe; do \
+		file=tests/hull/wire/verdict/$$name; \
+		if [ ! -f "$$file" ]; then \
+			echo "wire: $$name left no verdict at all, so it never reached its payload"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/wire: $$name: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "wire: $$missing of 2 machine(s) did not pass"; \
+		exit 1; \
+	fi; \
+	echo "wire: both machines reported, each with the segment NIC up and carrying"; \
+	echo "wire:   the address it set itself. Frames across a segment are hull's own"; \
+	echo "wire:   tested property; what this proves is the verdict collector"
 
 # 27 checks. The guest builds netcfgd itself, so no host build is needed:
 # hull `7b47668` gave the workload a PATH, and the payload falls back to the

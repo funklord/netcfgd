@@ -12498,6 +12498,60 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.580 The multi-machine harness, built before the delegation logic it is for
+
+10.570 said the delegation rig's hard part is not the wiring: a single-machine
+rig reads one `VERDICT` from one stdout with one exit, while a delegation test's
+assertions are relational and **a machine that never reached its payload must
+not read as one that passed.** So the harness was built and proved first, with
+a payload that does nothing interesting -- `tests/hull/wire/`, two machines on
+one segment, `make hull-wire`.
+
+**The collector reads a file per machine rather than `hull exec`'s status.** A
+file carries what the machine *said* as well as whether it passed, and a
+machine that never ran leaves an absence -- which is the one case a payload
+going wrong cannot fake. `hull exec` would have turned that absence into a
+connection error, harder to tell from a machine that is merely slow.
+
+### Three things the first runs taught, none of them about netcfgd
+
+- **`eth1` is the segment; `eth0` is passt's.** The first payload read
+  `eth0`'s `10.0.2.15` and concluded it was on a wire it was not on. hull gives
+  the segment NIC **no address** -- Appendix D's *"as a test of network
+  software sets its own"* -- which for netcfgd is the point rather than an
+  inconvenience.
+- **A payload must exit 0 and let its verdict file carry the failure.** `hull
+  run` plans a `(machines ...)` file together and the first failure stops the
+  rest, so `isp` exiting non-zero meant `cpe` never started -- and the
+  collector then reported `cpe` as the machine that never reached its payload.
+  True, and useless: the cause was the other machine.
+- **DNS by sibling name is not asserted.** Appendix D describes it; hull's own
+  suite tests frames rather than names, so this rig claims neither. The
+  success message said "resolve each other by name" for one run before being
+  corrected to say what was actually checked.
+
+### Both arms of the collector are measured
+
+Absent: the first run, where `cpe` left no file -- *"left no verdict at all, so
+it never reached its payload"*, run failed. Present and bad: one machine given
+`not-an-address`, which reported `VERDICT bad` while its sibling passed --
+*"1 of 2 machine(s) did not pass"*. Both ok: passes. **The middle case also
+shows the exit-0 rule working**, since the failing machine no longer takes its
+sibling down.
+
+### And a dead branch of my own, caught by the control
+
+The payload had `if ! ip addr add ... | sed ...`, which tests **sed's** status
+rather than `ip`'s, so that arm could never fire. What caught the refused
+address was the read-back beside it. Removed rather than fixed: asserting the
+state is stronger than asserting the call, and it is the same instrument fault
+10.551 records three of.
+
+**What is not built is the delegation itself** -- kea on one machine, netcfgd
+with odhcp6c on the other, and the relational assertion that the prefix handed
+out is the prefix configured. That lands on a harness now shown to work,
+which is the whole reason this slice came first.
+
 ## 10.579 A message change broke a rig for a day, and `make check` cannot see the rigs
 
 0295's unverified fact is measured: the `netcfgd/natcap` image gained the
