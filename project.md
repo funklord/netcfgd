@@ -12820,12 +12820,18 @@ the management path rather than the pid one. The assertions are that the stop
 succeeds and that the socket is gone afterwards, the second being the one that
 matters for the next start. Sabotaged by removing the arm: both fail.
 
-**~~The refusal arm is not exercised~~ -- it is now, as 10.578**, and the cost
-quoted here was wrong: `machine->patience_ms` makes it a tenth of a second
-rather than three, and `confirm_stopped` had that knob all along while the
-waiter here used a constant. The arm also turned out to be more than a
-formatted sentence -- with it disabled the test hangs rather than failing,
-because a client that ignores `TERM` gives the loop no other exit.
+**~~The refusal arm is not exercised~~ -- both are now.** dhcp's is 10.578,
+and the cost quoted here was wrong: `machine->patience_ms` makes it a tenth of
+a second, and `confirm_stopped` had that knob all along while the waiter here
+used a constant. With it disabled that test hangs rather than failing, a
+client ignoring `TERM` giving the loop no other exit.
+
+**openvpn's is bought at the full 3000 ms**, its patience being a `#define`
+rather than a field, and adding a parameter to a public stop for a test is the
+production seam 10.578 declined. It asserts the keeping rather than the
+sentence: the pid file must survive, because removing it while the daemon
+lives is the socket collision proved earlier in that file. Sabotaged, four
+checks fail and the pid file is deleted.
 
 ## 10.573 Telling openvpn to stop could kill netcfgd, found by a test failing under load
 

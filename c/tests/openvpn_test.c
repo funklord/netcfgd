@@ -1135,6 +1135,93 @@ static void a_daemon_that_left_under_the_command_is_a_stop_that_took(const char 
 	(void)close(listener);
 }
 
+/*
+ * A TUNNEL THAT WILL NOT GO IS A REFUSAL, AND IT KEEPS WHAT THE NEXT START
+ * WOULD COLLIDE WITH.
+ *
+ * The other arm of this file's wait, and the last gap 10.571 named. A daemon
+ * that goes is covered above; this is the one that does not.
+ *
+ * **What it asserts is the keeping, not the sentence.** The pid file and the
+ * management socket are what the refusal holds on to, and holding them is the
+ * whole reason the arm exists: removing them while the daemon is alive is
+ * exactly the collision proved earlier in this file, where the departing
+ * daemon deletes the next start's socket. A refusal that tidied up anyway
+ * would reintroduce it by the one path that reports failure.
+ *
+ * **It costs the full patience, 3000 ms, and that is why it is one test and
+ * not two.** openvpn's figure is a `#define` rather than a field, unlike
+ * `dhcp`'s `machine->patience_ms`, and adding a parameter to a public stop
+ * for a test's benefit is a production seam this tree declined (10.578). So
+ * the arm is bought once, here, at three seconds.
+ */
+static void a_tunnel_that_will_not_go_is_a_refusal(const char *base)
+{
+	char  run[512];
+	char  dir[640];
+	char  socket_path[1024];
+	char  pid_file[1024];
+	char  holder[1024];
+	char  body[4096];
+	char  message[NCFG_ERROR_MAX];
+	pid_t held;
+	int   waited = 0;
+
+	(void)testdir_in(base, "stubborn", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a run directory for the stubborn tunnel");
+	(void)snprintf(dir, sizeof(dir), "%s/openvpn", run);
+	check(mkdir(dir, 0755) == 0, "and the openvpn directory inside it");
+	(void)snprintf(pid_file, sizeof(pid_file), "%s/vpn0.pid", dir);
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/vpn0.sock", dir);
+	(void)testdir_in(run, "holder", holder, sizeof(holder));
+
+	/* **Ignoring `TERM` outright rather than being slow**, so the wait reaches
+	 * its patience instead of racing a process that was going to exit. */
+	(void)snprintf(body, sizeof(body),
+	    "#!/bin/sh\n"
+	    "trap '' TERM\n"
+	    "echo $$ > '%s'\n"
+	    "while :; do sleep 0.05; done\n",
+	    pid_file);
+	check(write_program(holder, body), "a stand-in that ignores SIGTERM is written");
+	held = fork();
+	if (held == 0) {
+		(void)setpgid(0, 0);
+		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
+		_exit(127);
+	}
+	check(held > 0, "and is running");
+	while (waited < 100) {
+		struct timespec step = { 0, 20L * 1000000L };
+
+		if (ncfg_openvpn_running_pid(run, "vpn0") > 0) {
+			break;
+		}
+		(void)nanosleep(&step, NULL);
+		waited++;
+	}
+	check(ncfg_openvpn_running_pid(run, "vpn0") > 0,
+	    "  which netcfgd finds, so the refusal is about a real daemon");
+
+	/* No listener, so this takes the pid path; the management path shares the
+	 * same waiter and the same arm. */
+	message[0] = '\0';
+	check(!ncfg_openvpn_stop(run, "vpn0", NULL, message, sizeof(message)),
+	    "a stop of a tunnel that will not go is a failure rather than a silent success");
+	check(strstr(message, "vpn0") != NULL,
+	    "  naming the interface, since an operator may have several tunnels");
+	check(strstr(message, "pid file is kept") != NULL,
+	    "  and saying the record was kept");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", kept(message));
+	}
+	check(testdir_exists(pid_file),
+	    "and the pid file survives, so the next start meets a tunnel rather than a gap");
+
+	(void)kill(held, SIGKILL);
+	(void)wait_for(held);
+}
+
 static void stopping_a_tunnel_that_is_not_there_is_success(const char *base)
 {
 	char run[512];
@@ -1223,6 +1310,7 @@ int main(void)
 	a_management_stop_does_not_pull_the_socket_from_the_next_start(base);
 	a_peer_that_closes_mid_command_is_an_error(base);
 	a_daemon_that_left_under_the_command_is_a_stop_that_took(base);
+	a_tunnel_that_will_not_go_is_a_refusal(base);
 	stopping_a_tunnel_that_is_not_there_is_success(base);
 	the_credential_reaches_no_diagnostic(stderr_path);
 
