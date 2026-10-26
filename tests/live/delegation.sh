@@ -87,9 +87,40 @@ done
 [ -x "$build/ncfg" ] || skip "ncfg is not built"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pd.XXXXXX")
+# The ISP's pid, recorded when it is started.
+kea_pid=
 cleanup() {
-	pkill -f 'kea-dhcp6 -c' 2>/dev/null || true
-	pkill -f 'odhcp6c' 2>/dev/null || true
+	# **By pid and by this run's own paths, never by a bare name.** These two
+	# lines were `pkill -f 'kea-dhcp6 -c'` and `pkill -f 'odhcp6c'`, and the
+	# second is the one that mattered: `odhcp6c` is the DHCPv6 client netcfgd
+	# manages, so that pattern reached every one on the machine -- another
+	# session's test, or a client a developer has running on a real interface
+	# for a real prefix. The radvd line below already said this in as many
+	# words, two lines further down and for a third daemon, which is how the
+	# rule was present and unapplied in one function.
+	#
+	# `c_nm_signals.sh` has the idiom and the reason: "Each by its own pid,
+	# recorded when it was started. Nothing here matches a pattern: a `pkill`
+	# for any of these three names on a developer's machine reaches the
+	# NetworkManager running it."
+	[ -n "$kea_pid" ] && kill "$kea_pid" 2>/dev/null
+	# netcfgd starts odhcp6c, so this script never holds its pid -- but netcfgd
+	# writes one, under this run's directory, which is as scoped as a pid gets.
+	# A client belonging to any other run has its pid file somewhere else.
+	# `<run>/<program>/<iface>.pid`, which is what `ncfg_backend_path` builds
+	# from `NCFG_RUN_DIR` -- read out of `backend_run.c` rather than guessed.
+	# The first spelling of this glob had a `dhcp/` component that does not
+	# exist, so it would have matched nothing and the cleanup would have been
+	# silent about doing nothing, which is the failure this whole change is
+	# about.
+	for pidfile in "$work"/run/odhcp6c/*.pid; do
+		[ -f "$pidfile" ] || continue
+		client=$(cat "$pidfile" 2>/dev/null) || continue
+		case "$client" in
+		''|*[!0-9]*) continue ;;
+		esac
+		kill "$client" 2>/dev/null || true
+	done
 	# Scoped to this run's directory: netcfgd starts radvd, and a run that
 	# failed before the teardown would otherwise leave one advertising on a
 	# namespace that no longer exists. Killing every radvd on the machine is
@@ -178,6 +209,7 @@ cat > "$work/kea.json" <<'JSON'
 } }
 JSON
 kea-dhcp6 -c "$work/kea.json" > "$work/kea.log" 2>&1 &
+kea_pid=$!
 sleep 2
 
 # The router shape from decision 0009: the WAN asks for a prefix, and the LAN
@@ -311,7 +343,7 @@ check "and radvd's own parser accepts what netcfgd wrote" "$parsed" "yes"
 # kea is restarted with a different pool and an empty lease database, and
 # odhcp6c is told to rebind: SIGUSR2 is its "ask anybody", which is what a
 # client does when the server it knew is gone.
-pkill -f 'kea-dhcp6 -c' 2>/dev/null || true
+[ -n "$kea_pid" ] && kill "$kea_pid" 2>/dev/null || true
 sed -i 's/2001:db8:1234::/2001:db8:5678::/' "$work/kea.json"
 kea-dhcp6 -c "$work/kea.json" > "$work/kea2.log" 2>&1 &
 sleep 2

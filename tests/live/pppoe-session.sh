@@ -94,8 +94,31 @@ done
 [ -c /dev/ppp ] || skip "no /dev/ppp (modprobe ppp_generic)"
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-pppoe.XXXXXX")
+# The concentrator this run started, killed by pid rather than by name.
+#
+# **A name reaches another session's run and a pid cannot.** This was
+# `pkill -f 'pppoe-server -I isp0'`, and `isp0` is a fixed interface name, so
+# the pattern matches any run's concentrator rather than this one's. The trap
+# is armed above the `ip link add`, and several `skip`s sit between the two --
+# a missing `rp-pppoe.so`, no `/dev/ppp` -- so a run that skips for want of a
+# package would reach into a working run and kill its server. The damage lands
+# on the OTHER session, which sees its concentrator vanish mid-test and nothing
+# to explain it.
+#
+# `running-code.md` has the rule this now follows: watch a pid, not a pattern.
+# An empty `ac_pid` means this run never started one, which is exactly when
+# nothing should be killed.
+#
+# **A stale concentrator from a crashed earlier run is deliberately not swept
+# up.** That was the pattern form's one real use, and it cannot tell a dead
+# run's leftovers from a live run's server. `ip link add isp0` fails for the
+# same reason under `set -e`, which is the honest signal: something else is
+# using the wire, so stop rather than tidy.
+ac_pid=
 cleanup() {
-	pkill -f 'pppoe-server -I isp0' 2>/dev/null || true
+	if [ -n "$ac_pid" ]; then
+		kill "$ac_pid" 2>/dev/null || true
+	fi
 	pkill -f "$work/run/ppp" 2>/dev/null || true
 	# Retry: a signalled daemon writes on its way out, so a single `rm -rf`
 	# races the process the lines above have just asked to stop. A trap that
@@ -169,6 +192,7 @@ plugin=$(ls /usr/lib/pppd/*/rp-pppoe.so 2>/dev/null | head -1)
 }
 pppoe-server -I isp0 -L 10.99.0.1 -R 10.99.0.100 -N 1 -O "$work/ac.options" \
 	-g "$plugin" -k > "$work/ac.log" 2>&1 &
+ac_pid=$!
 # The concentrator has to be listening before the first PADI, or the client
 # spends a discovery timeout getting there. pppd would retry -- `persist` and
 # `maxfail 0` are in the options file -- but a test that waits on a retry is a

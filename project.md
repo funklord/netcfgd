@@ -12498,6 +12498,84 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.576 Two live scripts killed by name, and one of the names was netcfgd's own client
+
+hull's reply to 10.575 added the property that matters beyond self-matching:
+their sweep is **anchored to this run's `$XDG_RUNTIME_DIR`**, so it cannot
+count another session's machine. Asked of this tree, four sites could not say
+the same.
+
+### What they were
+
+- `pppoe-session.sh`: `pkill -f 'pppoe-server -I isp0'`. `isp0` is a **fixed**
+  interface name, so the pattern matches any run's concentrator. The trap is
+  armed above the `ip link add`, and several `skip`s sit between them -- a
+  missing `rp-pppoe.so`, no `/dev/ppp` -- so **a run that skipped for want of a
+  package would kill a working run's server.** The damage lands on the other
+  session, which sees its concentrator vanish with nothing to explain it.
+- `delegation.sh`: `pkill -f 'kea-dhcp6 -c'`, twice, and `pkill -f 'odhcp6c'`.
+
+**The second of those is the one that matters.** `odhcp6c` is the DHCPv6 client
+netcfgd manages, so that pattern reached every one on the machine: another
+test's, or one a developer has running on a real interface holding a real
+prefix. A live test that takes somebody's delegated prefix away is not a
+flaky test, it is an outage.
+
+### The rule was in the same function, two lines below
+
+`delegation.sh`'s cleanup says, immediately under those lines:
+
+> Scoped to this run's directory: netcfgd starts radvd, and a run that failed
+> before the teardown would otherwise leave one advertising on a namespace that
+> no longer exists. **Killing every radvd on the machine is not this script's
+> business.**
+
+So the principle was stated, for a third daemon, in the same cleanup that
+violated it for two others. And `c_nm_signals.sh` carries the idiom in full --
+*"Each by its own pid, recorded when it was started. Nothing here matches a
+pattern: a `pkill` for any of these three names on a developer's machine
+reaches the NetworkManager running it."*
+
+That is the fourth instance today of the knowledge being present and
+unapplied, and the shortest reach yet: not another file, not another function
+-- **two lines.**
+
+### What they are now
+
+Both scripts kill by pid, recorded when the thing was started: `ac_pid` for the
+concentrator, `kea_pid` for the ISP. An empty variable means this run started
+nothing, which is exactly when nothing should be killed.
+
+**odhcp6c is netcfgd's to start, so the script never holds its pid** -- but
+netcfgd writes one, under this run's `NCFG_RUN_DIR`, which is as scoped as a
+pid gets: a client of any other run has its pid file somewhere else. The
+cleanup reads `<run>/odhcp6c/<iface>.pid` and kills what it names.
+
+**A stale concentrator from a crashed earlier run is deliberately not swept
+up.** That was the pattern's one real use and it cannot tell a dead run's
+leftovers from a live run's server. `ip link add isp0` fails for the same
+reason under `set -e`, which is the honest signal: something else is using the
+wire, so stop rather than tidy.
+
+### The glob was wrong first, and the code was asked rather than guessed
+
+The first spelling was `<run>/dhcp/odhcp6c/*.pid`. There is no `dhcp/`
+component: `ncfg_backend_path` builds `<run>/<program>/<iface>.pid`, which a
+three-line program linked against `libncfg.a` printed as
+`/tmp/w/run/odhcp6c/cpe0.pid`. **A glob that matches nothing makes a cleanup
+silent about doing nothing**, which is the failure this whole entry is about,
+and it was one commit away from being written into the fix for it.
+
+### What is not verified, and cannot be here
+
+**Neither script was run.** Both need real root, `/dev/ppp`, `kea-dhcp6` and a
+hand-built `odhcp6c`; this machine has none of that, and 0050 records why the
+client is not packaged. What was checked: both parse under `sh -n`, `make
+shell`'s gate passes over all 105 scripts, and the pid-file path is proved
+against the builder netcfgd uses. The kills themselves are unexercised, so the
+first real run of either script is the first test of this change -- stated
+rather than implied.
+
 ## 10.575 This tree already knew how to count processes, and a session rediscovered it the expensive way
 
 Three process sweeps were run badly in one afternoon, each reported, each
