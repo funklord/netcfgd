@@ -12498,6 +12498,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.584 fuzznet fixed the packing build, and netcfgd should still not rely on it
+
+The fault 10.568 signalled -- `FZN_LOG_PACK=0` not building, `node/heard.h`
+included inside `#ifdef FZN_LOG_PACK_ON` while `fzn_heard_when` was called
+outside it -- is fixed in fuzznet `fd5a85b`, its sec 732, reported in this
+tree's inbox (`20261025T1720Z`). The header moves under
+`FZN_RECORD_STORE_FILE_ON`, `archive_where` is guarded for a build without
+packing, and both builds are warning-free there. Their note: netcfgd's
+`nm`-driven `-lzstd` needs nothing from them.
+
+**So the route netcfgd preferred is open again, and it should still not be
+taken.** `bridge/Makefile` wanted `FZN_LOG_PACK=0` -- a program that must stay
+small has no business carrying log packing -- and took the `nm` route because
+packing-off did not build. The reason to keep the `nm` route is in fuzznet's
+own answer: **no fuzznet gate builds without packing**, which they record as
+open. A consumer that depends on a configuration nobody tests is a consumer
+that will meet its next regression alone, and asking the objects what they
+need costs nothing and cannot go stale.
+
+**Not acted on, and why that is not deferral:** switching would mean bumping
+the pin again, which is a reviewable change (10.568) and needs the bridge
+rebuilt and gated. The judgement above says the switch should not happen at
+all, so the pin moves when there is a reason of its own.
+
+**And the inbox was read late.** This message arrived yesterday and was found
+today while fetching, after an earlier check had shown the inbox empty. That
+is the middle trigger in `build-and-commit.md` doing its job -- a resident
+session gets neither the arrival hook nor the "before finishing" one -- and the
+reason to read it on every fetch rather than on arriving.
+
 ## 10.583 Three stale lists, found by looking where a new rig should appear
 
 Two rigs landed today and three places that enumerate rigs did not know:
