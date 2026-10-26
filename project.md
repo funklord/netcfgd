@@ -12498,6 +12498,90 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.575 This tree already knew how to count processes, and a session rediscovered it the expensive way
+
+Three process sweeps were run badly in one afternoon, each reported, each
+corrected. **All three failures were already documented in this repository**,
+in files this session did not read before reaching for the command.
+
+### What was already here
+
+`tool/vm/run.sh`, in its own termination notes:
+
+> Verified afterwards with `ps -C qemu-system-x86_64`: `pgrep -f qemu-system`
+> matches its own command line, and `pgrep -x` cannot match a name longer than
+> fifteen characters and says so.
+
+`packaging/netcfgd_select.sh`, which paid more for its version:
+
+> **`pgrep -x` is procps', and busybox's `-x` is a different thing.** Measured
+> on Alpine 2026-10-23 with busybox 1.37 ... `pgrep -x wpa_supplicant` matches
+> nothing while bare `pgrep wpa_supplicant` matches it -- so every sweep below
+> found nothing on a musl machine and this script reported having looked.
+
+So the tree held the self-match, the fifteen-character ceiling **and** a third
+fact nobody had asked for: that the same flag means different things on the
+machines netcfgd exists to serve.
+
+### What was run instead, and what each cost
+
+- `ps ... | grep -c qemu` returned **3**, all three the grep's own command
+  line. Reported as three orphans before being re-read.
+- `pgrep -x qemu-system-x86_64` returned **0** -- not because nothing was
+  running but because the pattern is 21 characters, which pgrep refuses with a
+  warning that was not read. Two "no strays" reports rest on it, and both were
+  vacuous passes.
+- `pgrep -f 'qemu-system'` returned **2** against one real process, the second
+  being the invoking `bash -c` whose argv held the pattern. This was the form
+  recommended to another project as the safe one.
+
+**What found all three was three instruments disagreeing** -- 2, 1 and 0 for
+the same question. No single count would have been questioned; the
+disagreement is what forced the look, which is `evidence.md`'s rule about a
+model that disagrees being the witness working.
+
+### The distinction worth keeping, which came from hull
+
+The exposure is not a property of the tool. **It is whether the pattern is
+literal in the invoking process's argv.** hull's committed sweep passes its
+regex in a shell variable, so the script's own argv never contains it and no
+caller-shell can self-match; the same is true of every sweep in this tree --
+`pkill -f "$work/bin/fake-netcfgd"`, `pkill -f "$work/run/ppp"` and the rest
+hold their patterns in variables. Checked rather than assumed, across every
+`pgrep`, `pkill` and `ps | grep` site in netcfgd's scripts and Makefiles.
+
+**So the committed code was never exposed, and the ad-hoc commands were.** A
+rule that lives only in a comment protects the file it is written in.
+
+### The instruments, measured here rather than inherited
+
+| asked | answer |
+|---|---|
+| `pgrep -x <name longer than 15>` | refuses, matches nothing, warns |
+| `ps -C <full name>` | matches |
+| `ps -eo comm= \| grep '^<first 15>'` | matches |
+| `ps -eo ... \| awk '$2==1 && $3=="user"'` | no name filter, so nothing to self-match |
+
+`ps -C` is what `tool/vm/run.sh` already named, and it is the answer for "is
+this binary running". For "is anything of mine orphaned", the intersecting
+`awk` with no pattern at all remains the only form that cannot lie about
+itself.
+
+### Why it is worth an entry rather than a shrug
+
+This is the **third** time today that the knowledge was in the file and the
+conclusion was not drawn: openvpn's management path unlinked a socket one line
+below a comment saying the daemon removes that socket itself; `pppoe`'s stop
+carried the lesson its four siblings needed; and now three process-counting
+traps sat in two files while being met again from scratch.
+
+The pattern is not forgetfulness, it is **reach**: a comment protects the code
+beside it and nothing else. `running-code.md` has the self-match rule, which is
+why these commands are written down there -- and this session read that file at
+the start of the day and still typed `ps | grep` from habit. Whatever fixes
+this is not another comment, so none is added here; what is recorded is the
+count, three in one day, as evidence for whoever decides what would.
+
 ## 10.574 A daemon that left under the command is a stop that took
 
 10.573 recorded this as deliberately unfixed and said it wanted its own commit
