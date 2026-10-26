@@ -12498,6 +12498,67 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.581 Prefix delegation across a wire, and four instruments that were not there
+
+`make hull-delegation`: kea on one machine, netcfgd on the other, one segment,
+and the relational assertion 10.570 asked for -- kea delegates
+`2001:db8:1234::/56`, netcfgd's odhcp6c solicits it, and a second apply derives
+`2001:db8:1234::1/64` on the LAN side. **The check is derived from what
+arrived**, not from kea's configuration, which the client's guest never sees.
+
+The image builds odhcp6c from source, Debian not packaging it (0050), using
+`tests/live/delegation.sh`'s own recipe. Two things that recipe does not need on
+a full system and a slim image does: **`ca-certificates`**, without which `git
+clone` fails complaining about the SSL CA path, and **`kmod`**, without which
+the kernel cannot autoload `dummy` for the LAN side. Build deps are purged in
+the step that uses them, so the image keeps a binary rather than a toolchain.
+
+### The sequence is two applies, which the live script already knew
+
+The first apply starts odhcp6c; the hook writes what the ISP delegated; only
+then does `@pd:eth1=::1/64` refer to anything. A rig that applied once waited
+for an address nothing had been asked to compute. `tests/live/delegation.sh`
+says this in as many words -- *"The second apply is the one that derives the
+address, because the reference had nothing behind it until now"* -- and it was
+read after the first run failed rather than before it.
+
+### Four instruments that were not there, in one afternoon
+
+Each one produced a confident wrong conclusion:
+
+- **`ps` is not in the image.** `ps -eo pid=,args= | grep '[o]dhcp6c'` printed
+  nothing, and because the missing tool's output went through a pipe the
+  pipeline still succeeded, so the `|| say none` never fired. That read as
+  *odhcp6c is not running* and was evidence of nothing. `/proc` showed it
+  running all along.
+- **The log glob named two paths and netcfgd uses a third.** The client's log
+  is `run/dhcp/<iface>-<family>.log`, so the one file that would have said why
+  was the one the failure path did not print. `find -name '*.log'` now.
+- **`|| true` on `ip link add`** hid a dummy device that was never created, and
+  the run reported netcfgd unable to open a `/proc/sys` path instead -- the
+  symptom two steps from the cause.
+- **A start-order handshake fixed nothing**, which is the useful negative: the
+  CPE now waits for the ISP's verdict before soliciting, and the failures
+  continued. Testing the hypothesis was what ruled it out.
+
+### What the fault was, with the control
+
+**The wire was never the problem.** An all-nodes ping from the CPE drew replies
+from both link-locals, so hull's segment carries IPv6 multicast and a solicit
+has somewhere to go.
+
+kea opens its sockets and joins the DHCPv6 groups **at config time**, and the
+ISP started it immediately after `ip link set eth1 up`, while its own
+link-local was still `tentative` under DAD -- which is not a usable source. So
+the server configured cleanly, reported itself healthy, and answered nothing.
+
+The ISP disables DAD on the segment and waits for its link-local to settle
+before starting kea. **Measured rather than asserted: 2 passes in 9 runs
+without that wait, 3 of 3 with it, and a control run with the wait removed
+failed again.** Three passes are not proof for an intermittent fault; what
+raises this above non-reproduction is that the mechanism predicts the tally and
+the control reproduced the failure on demand.
+
 ## 10.580 The multi-machine harness, built before the delegation logic it is for
 
 10.570 said the delegation rig's hard part is not the wiring: a single-machine

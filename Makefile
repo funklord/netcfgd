@@ -2518,7 +2518,44 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # it; hull's docker engine would leave the container running with the
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
-hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire
+hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation
+
+# DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
+#
+# **The assertion is relational and lives in the guest that can make it.** The
+# prefix kea delegates is known to the ISP's config and the address drawn from
+# it is known to the CPE, so `cpe.sh` compares them and the host compares
+# verdicts -- which is the division `hull-wire` was built to establish.
+#
+# The C is built first because `cpe.sh` runs the binary off the read-only
+# share: `build-and-commit.md` forbids reading a verdict off a binary the build
+# step did not rebuild, and a guest cycle is exactly where that costs.
+hull-delegation:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/delegation)
+	@$(HULL) images 2>/dev/null | grep -q "^netcfgd/delegation[[:space:]]" || \
+		{ echo "hull: netcfgd/delegation is not in the store, building it"; \
+		  timeout -k 30 $(HULL_TIMEOUT) $(HULL) build \
+			-f tests/hull/delegation/hull.conf netcfgd/delegation; }
+	@rm -f tests/hull/delegation/verdict/isp tests/hull/delegation/verdict/cpe
+	@mkdir -p tests/hull/delegation/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/delegation/hull.conf || true
+	@missing=0; \
+	for name in isp cpe; do \
+		file=tests/hull/delegation/verdict/$$name; \
+		if [ ! -f "$$file" ]; then \
+			echo "delegation: $$name left no verdict, so it never reached its payload"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/delegation: $$name: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "delegation: $$missing of 2 machine(s) did not pass"; \
+		exit 1; \
+	fi; \
+	echo "delegation: a prefix crossed the wire and netcfgd configured from it"
 
 # Two machines on one wire, and the verdict collector 10.570 says the
 # delegation rig turns on.
