@@ -33,14 +33,19 @@
 #                         Under systemd's sysv-generator, not under sysvinit,
 #                         and the payload says what that does not prove
 #   make vm-sandbox    -- the systemd unit's sandbox, against real systemd
-#   make hull          -- the four payloads a namespace or a container
-#                         cannot host, in machines `hull` runs: hwsim radios,
-#                         the systemd sandbox, the OpenRC init script, and a
-#                         kernel that cannot do NAT. `hull-hwsim`,
-#                         `hull-sandbox`, `hull-openrc`, `hull-natcap` one at
-#                         a time; `hull-image` builds the four images, which
-#                         is the only part needing the internet, and
-#                         `hull-clean` untags them
+#   make hull          -- the payloads a namespace or a container cannot host,
+#                         in machines `hull` runs. Four need a kernel of their
+#                         own: hwsim radios, the systemd sandbox, the OpenRC
+#                         init script, and a kernel that cannot do NAT. Two
+#                         need a second machine: `hull-wire`, the verdict
+#                         collector on a trivial payload, and
+#                         `hull-delegation`, an ISP delegating a prefix that
+#                         netcfgd configures from -- with
+#                         `hull-delegation-lossy` for the same across a wire
+#                         dropping frames. Each runs alone by name;
+#                         `hull-image` builds the images, which is the only
+#                         part needing the internet, and `hull-clean` untags
+#                         them
 #   make fuzz          -- the C parsers, fuzzed; `fuzz-rust` for the other
 #                         implementation's targets. The committed corpus is
 #                         replayed by `make c-test` with no clang needed
@@ -2755,10 +2760,14 @@ kernel-clean:
 # apt install, so it wants a network and a few minutes; the ref being in the
 # store is the signal that it is done, and `hull build` caches each step by
 # the hash of its own form, so asking again when nothing changed costs a
-# lookup. `make hull-image` is how you ask for all four on purpose.
+# lookup. `make hull-image` is how you ask for all of them on purpose.
 hull-image:
-	@$(call hull_says,all four)
-	@for r in hwsim sandbox openrc natcap; do \
+	@$(call hull_says,all five)
+	@# `delegation` joined on 2026-10-26 and `wire` has no image of its own,
+	@# running on `natcap`'s. A rig missing from this list still builds its
+	@# image lazily on first run -- which is the quiet way the claim above,
+	@# that this is the only part needing the internet, stops being true.
+	@for r in hwsim sandbox openrc natcap delegation; do \
 		timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$$r/hull.conf \
 			netcfgd/$$r || exit 1; \
 	done
@@ -2774,7 +2783,10 @@ hull-image:
 # 2026-10-25, when the images were `docker export` directories. Named, not
 # swept: a glob there would take whatever else somebody had put under it.
 hull-clean:
-	@for r in hwsim sandbox openrc natcap; do \
+	@# The same list as `hull-image`, and it has to stay the same list: a rig
+	@# added to one and not the other leaves an image tagged that nobody
+	@# believes is there.
+	@for r in hwsim sandbox openrc natcap delegation; do \
 		if $(HULL) images 2>/dev/null | grep -q "^netcfgd/$$r[[:space:]]"; then \
 			printf 'hull-clean: untagging netcfgd/%s\n' "$$r"; \
 			$(HULL) tag -d netcfgd/$$r || exit 1; \

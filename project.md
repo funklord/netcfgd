@@ -12498,6 +12498,23 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.583 Three stale lists, found by looking where a new rig should appear
+
+Two rigs landed today and three places that enumerate rigs did not know:
+
+- The Makefile's help said **"the four payloads"** and named four targets.
+- `hull-image` built four images, so `delegation`'s was built lazily on first
+  run -- which quietly falsifies the help's own claim that `hull-image` is the
+  only part needing the internet.
+- `hull-clean` untagged four, leaving an image tagged that nobody believes is
+  there.
+
+All three now name every rig, and the two shell lists carry a comment saying
+they have to stay the same list. **Found by asking where a new thing should be
+mentioned rather than by anything failing** -- the same reach problem as
+10.575's process facts and 10.579's message contract, and the cheapest of the
+three to look for.
+
 ## 10.582 Delegation under loss, and the control that stopped it being a vacuous pass
 
 `make hull-delegation-lossy`: the delegation rig with hull's impairment on the
