@@ -12498,6 +12498,51 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.574 A daemon that left under the command is a stop that took
+
+10.573 recorded this as deliberately unfixed and said it wanted its own commit
+and test. Done here, and the change is to stop semantics rather than to a
+signal disposition, which is why it is separate.
+
+**`Broken pipe` from `signal SIGTERM` is the ordinary way openvpn says it is
+going**: the socket closes under netcfgd's write. The stop reported that as a
+failure, which asks an operator to fix a tunnel that is gone -- and this file
+already held the rule in its own words a few lines above, *stopping one that
+is already stopped is not an error*.
+
+**It asks by waiting rather than by reading the errno.** `EPIPE` is the shape
+that was measured; a daemon can also close before the write and give `no answer
+to \`signal SIGTERM\`` from the read, which is what the new fixture actually
+produces. Keying on an errno would have covered the instance and missed the
+class, so the arm calls the same `wait_for_exit` the rest of the stop uses: if
+the daemon has gone, the stop took.
+
+**The refusal arm is unchanged, and that was the thing to be careful about.** A
+daemon genuinely alive and refusing still costs the patience and still gets the
+named refusal 10.571 describes -- the sentence exists because a complaint about
+neither of two tunnels is useless to an operator, and nothing here weakens it.
+
+### A tidy-up that now has two callers, so it has one place
+
+Arriving at "the tunnel is gone" by two routes meant two tidy-ups, and a
+tidy-up that differs between them is how one of them leaves a management
+socket that takes the bind on the next start. `forget_tunnel` is that one
+place: pid file, socket, credentials.
+
+### The fixture, and what it is not
+
+A listener that greets and hangs up, and **no pid file at all** -- which is the
+state a daemon that has finished leaving is in, and is what makes netcfgd take
+the management path rather than the pid one. The assertions are that the stop
+succeeds and that the socket is gone afterwards, the second being the one that
+matters for the next start. Sabotaged by removing the arm: both fail.
+
+**The refusal arm is not exercised**, and this entry says so rather than
+leaving the pair looking covered. Driving it means holding a stand-in alive for
+the full 3000 ms while it refuses, which is a real second of suite time for an
+arm whose content is a formatted sentence the compiler already checks. Named,
+with the cost, so the next person decides rather than discovers.
+
 ## 10.573 Telling openvpn to stop could kill netcfgd, found by a test failing under load
 
 `make check` went red after the management-path fixture landed, with
@@ -12607,7 +12652,10 @@ treat "nothing running" as the stop having taken -- which is what the file
 already says in its own words, *stopping one that is already stopped is not an
 error*. That changes stop semantics, where this entry changes a signal
 disposition, so it wants its own commit and its own test rather than riding
-along.
+along. **Done, as 10.574**, and by waiting rather than by reading the errno:
+`EPIPE` was the measured shape and a read that meets a closed peer is the same
+condition, so keying on the errno would have covered the instance and missed
+the class.
 
 ## 10.572 What identifies an installed rule: asked, costed, not decided
 
@@ -12832,16 +12880,26 @@ still believes the prefix is ours.
 Fixed in its own commit rather than folded into this one, so each change is
 reviewable on its own.
 
-### A note for whoever grows the binary next: 60 bytes of headroom
+### A note about the size, and a number this entry first got wrong
 
-The two waiters cost 40 bytes between them, and `make size` now reads
-**1194240 of 1194300**. `size-budget.txt` is left alone deliberately: its rule
-is to record at the measured size rather than let a real feature ride the 3%
-tolerance, and 40 bytes is noise beside a figure the recorded number already
-covers. But the margin is 60 bytes now, so **the next change of any substance
-fails that gate**, and the edit it needs is the deliberate, reviewable one the
-file asks for rather than a nudge. Said here because the gate failing is how
-somebody finds out otherwise, and they will be mid-change when they do.
+The two waiters cost 40 bytes between them, and `make size` read **1194240 of
+1194300**. `size-budget.txt` is left alone: its rule is to record at the
+measured size rather than let a real feature ride the 3% tolerance, and 40
+bytes is noise beside a figure the recorded number already covers.
+
+**This section first said the margin was 60 bytes and that the next change of
+any substance would fail the gate. That is wrong.** The figure `make size`
+prints after "of" is the recorded limit, and the gate fails at
+`limit + limit * tol / 100` -- 3% on top -- so the ceiling is about 1230129 and
+the headroom is some 35,800 bytes rather than 60.
+
+The mistake is worth keeping because of its shape: **the printed number was
+read as the threshold without reading the recipe that enforces it.** A gate
+that reports `X of Y` invites exactly that, and `evidence.md`'s rule about a
+number justifying the work applies to a number justifying a *warning* just as
+much -- this one would have sent the next person to make a deliberate,
+reviewable edit to a limit that had plenty of room, which is work created out
+of a misread.
 
 ## 10.570 The delegation rig is not waiting on hull any more, and the handles are measured
 

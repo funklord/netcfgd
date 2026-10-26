@@ -1050,6 +1050,91 @@ static void a_peer_that_closes_mid_command_is_an_error(const char *base)
 	(void)unlink(path);
 }
 
+/*
+ * A DAEMON THAT LEFT UNDER THE COMMAND IS A STOP THAT TOOK.
+ *
+ * `Broken pipe` from `signal SIGTERM` is the ordinary way openvpn says it is
+ * going: the socket closes under netcfgd's write. Reporting that as a failed
+ * stop asks an operator to fix a tunnel that is gone, and this file already
+ * holds the rule in its own words -- stopping one that is already stopped is
+ * not an error.
+ *
+ * So the stop asks by waiting rather than by reading the errno, which covers
+ * every way a command can fail against a departing daemon rather than only the
+ * one that was measured. Here nothing is running at all, which is the state a
+ * daemon that has finished leaving is in.
+ *
+ * **The refusal arm is unchanged and is what the sentence was written for**: a
+ * daemon that is genuinely alive and refusing still costs the patience and
+ * still gets the named refusal (10.571). That arm is not exercised here --
+ * driving it would hold a stand-in alive for the full 3000 ms -- and 10.574
+ * says so rather than implying the pair is covered.
+ */
+static void a_daemon_that_left_under_the_command_is_a_stop_that_took(const char *base)
+{
+	char               run[512];
+	char               dir[640];
+	char               socket_path[1024];
+	struct sockaddr_un address;
+	int                listener;
+	pid_t              child;
+	char               message[NCFG_ERROR_MAX];
+
+	(void)testdir_in(base, "leftunder", run, sizeof(run));
+	check(mkdir(run, 0755) == 0, "a run directory for the departing daemon");
+	(void)snprintf(dir, sizeof(dir), "%s/openvpn", run);
+	check(mkdir(dir, 0755) == 0, "and the openvpn directory inside it");
+	(void)snprintf(socket_path, sizeof(socket_path), "%s/vpn0.sock", dir);
+
+	listener = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	if (strlen(socket_path) + 1u > sizeof(address.sun_path)) {
+		check(0, "the temporary directory leaves room for a unix socket path");
+		(void)close(listener);
+		return;
+	}
+	memcpy(address.sun_path, socket_path, strlen(socket_path) + 1u);
+	check(listener >= 0 &&
+	    bind(listener, (const struct sockaddr *)&address, sizeof(address)) == 0 &&
+	    listen(listener, 1) == 0,
+	    "a socket is listening, as a daemon on its way out still has one");
+
+	/*
+	 * **No pid file, which is the whole setup.** A daemon that has gone leaves
+	 * none, so `ncfg_openvpn_running_pid` answers 0 -- and the management
+	 * socket is still bound because nothing has unlinked it yet, which is why
+	 * netcfgd takes the management path rather than the pid one.
+	 */
+	child = fork();
+	if (child == 0) {
+		int served = accept(listener, NULL, NULL);
+
+		(void)setpgid(0, 0);
+		if (served < 0) {
+			_exit(1);
+		}
+		(void)write(served, ">INFO:OpenVPN Management Interface Version 5\n", 45u);
+		(void)close(served);
+		_exit(0);
+	}
+	check(child > 0, "a stand-in that hangs up is running");
+
+	message[0] = '\0';
+	check(ncfg_openvpn_stop(run, "vpn0", NULL, message, sizeof(message)),
+	    "a stop whose command failed against a daemon that has gone is success");
+	if (message[0] != '\0') {
+		printf("  said: %s\n", kept(message));
+	}
+	/* And it tidied: the socket a departing daemon may not have removed is the
+	 * one that would take the bind on the next start. */
+	check(!testdir_exists(socket_path),
+	    "  and the management socket is gone, so the next start can bind its own");
+
+	(void)wait_for(child);
+	(void)close(listener);
+}
+
 static void stopping_a_tunnel_that_is_not_there_is_success(const char *base)
 {
 	char run[512];
@@ -1137,6 +1222,7 @@ int main(void)
 	a_daemon_slow_to_exit_is_waited_for(base);
 	a_management_stop_does_not_pull_the_socket_from_the_next_start(base);
 	a_peer_that_closes_mid_command_is_an_error(base);
+	a_daemon_that_left_under_the_command_is_a_stop_that_took(base);
 	stopping_a_tunnel_that_is_not_there_is_success(base);
 	the_credential_reaches_no_diagnostic(stderr_path);
 

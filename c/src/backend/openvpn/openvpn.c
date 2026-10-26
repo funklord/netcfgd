@@ -582,6 +582,35 @@ pid_t ncfg_openvpn_running_pid(const char *run, const char *iface)
 }
 
 /*
+ * Forget a tunnel that has gone: its pid file, its management socket and its
+ * credentials.
+ *
+ * **One place rather than two**, because there are now two ways to arrive here
+ * -- a command that was answered, and a command that failed because the daemon
+ * had already left -- and a tidy-up that differs between them is how one of
+ * them leaves a file that takes the bind on the next start.
+ */
+static void forget_tunnel(const char *run, const char *iface, const char *socket_path)
+{
+	char pid[NCFG_OPENVPN_PATH_MAX];
+	char auth[NCFG_OPENVPN_PATH_MAX];
+
+	if (ncfg_openvpn_pid_path(run, iface, pid, sizeof(pid), NULL, 0)) {
+		(void)unlink(pid);
+	}
+	/* The daemon removes its own socket on the way out, but only if it got far
+	 * enough to install the handler. Left behind, it would take the bind on the
+	 * next start. */
+	if (socket_path) {
+		(void)unlink(socket_path);
+	}
+	/* And the credentials, which have nothing left to authenticate. */
+	if (ncfg_openvpn_auth_path(run, iface, auth, sizeof(auth), NULL, 0)) {
+		(void)unlink(auth);
+	}
+}
+
+/*
  * Wait for the daemon to go, before anything that records it as gone.
  *
  * **It asks `ncfg_openvpn_running_pid`'s own question** rather than repeating
@@ -670,8 +699,6 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 {
 	char                       socket_path[NCFG_OPENVPN_PATH_MAX];
 	char                       hash[NCFG_OPENVPN_PATH_MAX];
-	char                       pid[NCFG_OPENVPN_PATH_MAX];
-	char                       auth[NCFG_OPENVPN_PATH_MAX];
 	ncfg_openvpn_management_t *management;
 
 	/* **Before the signal, and outside the "is anything listening" question.** A
@@ -720,9 +747,29 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		 * return any line and the plan would record the tunnel as stopped.
 		 */
 		(void)snprintf(why, sizeof(why), "%s", err);
+		ncfg_openvpn_disconnect(management);
+		/*
+		 * **A command that failed because the daemon had already left is a
+		 * stop that took.** The socket closing under the write is how openvpn
+		 * says it is going -- `Broken pipe` from `signal SIGTERM` is the
+		 * ordinary shape of it -- and reporting that as a failed stop asks an
+		 * operator to fix a tunnel that is gone. This file already holds the
+		 * rule in its own words a few lines up: stopping one that is already
+		 * stopped is not an error.
+		 *
+		 * **Asked by waiting rather than by reading the errno**, so it covers
+		 * every way a command can fail against a departing daemon rather than
+		 * the one that was measured. A daemon that is genuinely alive and
+		 * refusing costs the patience and then gets the refusal below, with
+		 * the sentence the management reply supplied -- which is the case the
+		 * named refusal was written for (10.571) and is unchanged.
+		 */
+		if (wait_for_exit(run, iface)) {
+			forget_tunnel(run, iface, socket_path);
+			return 1;
+		}
 		ncfg_error_set(err, err_size, "could not stop the openvpn tunnel on %s: %s", iface,
 		    why);
-		ncfg_openvpn_disconnect(management);
 		return 0;
 	}
 	ncfg_openvpn_disconnect(management);
@@ -751,16 +798,6 @@ int ncfg_openvpn_stop(const char *run, const char *iface, const char *report, ch
 		return 0;
 	}
 
-	if (ncfg_openvpn_pid_path(run, iface, pid, sizeof(pid), NULL, 0)) {
-		(void)unlink(pid);
-	}
-	/* The daemon removes its own socket on the way out, but only if it got far
-	 * enough to install the handler. Left behind, it would take the bind on the
-	 * next start. */
-	(void)unlink(socket_path);
-	/* And the credentials, which have nothing left to authenticate. */
-	if (ncfg_openvpn_auth_path(run, iface, auth, sizeof(auth), NULL, 0)) {
-		(void)unlink(auth);
-	}
+	forget_tunnel(run, iface, socket_path);
 	return 1;
 }
