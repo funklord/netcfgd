@@ -583,9 +583,15 @@
 # belonging to the hardware is the inert one, and a machine whose two blocks
 # disagree gets the access point's. `ncfg plan` warns on both cases.
 #
-# **What the radio is actually permitted to do is the kernel's answer, and
-# netcfgd does not observe it.** `iw reg get` is where to look, and it has two
-# halves that can differ:
+# **And the access point's sets it for the whole machine, not for its radio.**
+# The kernel keeps one domain, and hostapd sets it at once -- measured, and
+# hostapd will not start at all if it cannot. Every other radio on the machine
+# is held to that country too, until a network it joins advertises another.
+#
+# **What the radio is actually permitted to do is the kernel's answer.**
+# `ncfg status` names the global domain, under the listing, wherever there is
+# a radio. `iw reg get` is where to look for the rest, and it has two halves
+# that can differ:
 #
 #   global
 #   country 00: DFS-UNSET          <- the world domain, the default
@@ -599,7 +605,9 @@
 # that matters was decided before the machine booted. On everything else, the
 # world domain is what a machine gets when nothing sets one, and it marks much
 # of 5 GHz "no IR": the radio may not initiate radiation, which is what a
-# beacon is, so an access point there will not start.
+# beacon is, so an access point there will not start. The world domain has no
+# 6 GHz at all, and the regulatory database marks all of US 6 GHz passive-scan,
+# so a 6 GHz access point will not start in US either.
 #
 # `ncfg plan` deliberately does not predict which of those you have. It says
 # which `regdom` netcfgd writes and which it drops, because that is the part
