@@ -9079,20 +9079,28 @@ runs even under it. There is no lock, no marker in `/run`, and no `Command`
 variant expressing a hold -- by design, since the daemon is single-threaded
 over its state and coordinates only through its `mpsc` channel.
 
-**One measured behaviour is still unexplained and is written down rather than
-guessed at.** Whether the watcher auto-applies a later change depends on
-whether the *first* apply carried a window:
+**A measured behaviour that stood here as unexplained is the hold above, and
+not the window.** Whether the watcher auto-applied a later change depended on
+whether the *first* apply carried a window -- three runs each way, recorded on
+2026-09-05 as an open thread. The variable was never the window. A plain `ncfg
+apply` applies in the client's own process and never reaches the daemon
+(10.41.4 found that for a different rig), so on a daemon started with
+`--no-apply-on-start` nothing ever releases the hold; `--confirm-within` is a
+request over the socket, and releasing the hold is what any apply request does.
 
-    first apply `ncfg apply`                    later change NOT applied
-    first apply `ncfg apply --confirm-within 60`
-      followed by `ncfg confirm`                later change applied
+Confirmed 2026-10-27 against the C build, which routes both the same way
+(`c/src/cli/run.c`'s `command_apply`; `c/src/main/daemon_loop.c` step 4), with
+the hold as the control variable -- three runs, identical each time:
 
-Isolated to that one variable, three runs each way. The plain case also logs
-"no previous configuration recorded, so a revert would undo everything netcfgd
-does from here" and the windowed case does not. Both paths write a last-good
-by the code as read, so the difference is not yet accounted for, and it is
-recorded here as an open thread rather than folded into a design as though it
-were understood.
+    --no-apply-on-start, plain apply              later edit NOT applied
+    --no-apply-on-start, windowed apply + confirm later edit applied
+    no hold, plain apply (control)                later edit applied
+
+The log line the first record leaned on -- "no previous configuration
+recorded" on one side only -- does not discriminate in the C: all three cases
+print it once. `c_daemon_tryout.sh` already states the mechanism in passing.
+Whether a local apply *ought* to release a daemon's hold is a question nobody
+has asked; as built, "change nothing until asked" means asked over the socket.
 
 ### 10.41.3 The watcher defers to a window -- the half that needs no clock
 
