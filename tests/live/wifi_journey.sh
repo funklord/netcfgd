@@ -76,7 +76,7 @@ daemon=
 failures=0
 
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	# Whatever netcfgd started, by the pid it recorded -- not by name, so a
 	# supplicant belonging to something else on the machine is never touched.

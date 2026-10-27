@@ -81,9 +81,9 @@ bus=
 shim_pid=
 cleanup() {
 	[ -n "${fake:-}" ] && kill "$fake" 2>/dev/null
-	[ -n "$shim_pid" ] && kill "$shim_pid" 2>/dev/null
-	[ -n "$bus" ] && kill "$bus" 2>/dev/null
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$shim_pid" ] && kill "$shim_pid" 2>/dev/null || true
+	[ -n "$bus" ] && kill "$bus" 2>/dev/null || true
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
 	# stopped writing, and the `rm` below then races it (project.md 10.476).
 	wait "$fake" 2>/dev/null || true

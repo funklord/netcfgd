@@ -66,7 +66,7 @@ daemon=
 failures=0
 
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	rm -rf "$work"
 }

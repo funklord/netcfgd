@@ -72,7 +72,7 @@ daemon=
 failures=0
 
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	# **Every client netcfgd started, not only the supplicants.** netcfgd
 	# records a pid at `$work/run/<program>/<iface>.pid` for udhcpc, odhcp6c,

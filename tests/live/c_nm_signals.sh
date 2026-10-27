@@ -67,10 +67,10 @@ cleanup() {
 	# Each by its own pid, recorded when it was started. Nothing here matches
 	# a pattern: a `pkill` for any of these three names on a developer's
 	# machine reaches the NetworkManager running it.
-	[ -n "$monitor" ] && kill "$monitor" 2>/dev/null
-	[ -n "$shim_pid" ] && kill "$shim_pid" 2>/dev/null
-	[ -n "$bus" ] && kill "$bus" 2>/dev/null
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$monitor" ] && kill "$monitor" 2>/dev/null || true
+	[ -n "$shim_pid" ] && kill "$shim_pid" 2>/dev/null || true
+	[ -n "$bus" ] && kill "$bus" 2>/dev/null || true
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
 	# stopped writing, and the `rm` below then races it (project.md 10.476).
 	wait "$monitor" 2>/dev/null || true

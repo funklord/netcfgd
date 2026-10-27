@@ -65,7 +65,7 @@ fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-defend.XXXXXX")
 daemon=
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# Anything the test started that netcfgd did not remove. Killed by pid,
 	# never by pattern -- the rule this project keeps paying for.
 	for p in ${started:-}; do kill -9 "$p" 2>/dev/null || true; done

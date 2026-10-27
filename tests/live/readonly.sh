@@ -46,7 +46,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-ro.XXXXXX")
 daemon=
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
 	# stopped writing, and the `rm` below then races it (project.md 10.476).
 	wait "$daemon" 2>/dev/null || true

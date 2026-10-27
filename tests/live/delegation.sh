@@ -103,7 +103,7 @@ cleanup() {
 	# recorded when it was started. Nothing here matches a pattern: a `pkill`
 	# for any of these three names on a developer's machine reaches the
 	# NetworkManager running it."
-	[ -n "$kea_pid" ] && kill "$kea_pid" 2>/dev/null
+	[ -n "$kea_pid" ] && kill "$kea_pid" 2>/dev/null || true
 	# netcfgd starts odhcp6c, so this script never holds its pid -- but netcfgd
 	# writes one, under this run's directory, which is as scoped as a pid gets.
 	# A client belonging to any other run has its pid file somewhere else.

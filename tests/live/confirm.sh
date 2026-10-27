@@ -45,7 +45,7 @@ command -v ip >/dev/null 2>&1 || skip "no ip(8)"
 work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-confirm.XXXXXX")
 daemon=
 cleanup() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	# **Waited for, not just signalled**: `kill` returns before the child has
 	# stopped writing, and the `rm` below then races it (project.md 10.476).
 	wait "$daemon" 2>/dev/null || true
@@ -132,7 +132,7 @@ start_daemon() {
 }
 
 stop_daemon() {
-	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	daemon=
 	ip link del probe0 2>/dev/null || true
@@ -147,7 +147,7 @@ stop_daemon() {
 # tidy up -- one that exits cleanly could have resolved the window on the way
 # out and the test would prove nothing about the startup path.
 crash_daemon() {
-	[ -n "$daemon" ] && kill -9 "$daemon" 2>/dev/null
+	[ -n "$daemon" ] && kill -9 "$daemon" 2>/dev/null || true
 	wait "$daemon" 2>/dev/null || true
 	daemon=
 	rm -f "$work/run/netcfgd.sock"
