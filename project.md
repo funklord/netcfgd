@@ -12886,6 +12886,12 @@ ignored" looked the same from outside. Raising it to `(loss 1.0)` makes the
 prefix never arrive and the rig fail, which is what shows the knob reaches the
 wire at all. Restored to 0.3 afterwards.
 
+**hull says it now, since 9745108 (2026-10-27):** `hull run` prints, on stderr,
+one line per link a spec impairs. stdout is unchanged, so the collector here,
+which reads verdict files, is unaffected; the `(loss 1.0)` control stays,
+because a notice says the impairment was configured and only the failure says
+it reached the wire.
+
 **And the failure message no longer quotes a figure.** It said *"did not pass
 under 30% loss"*, which is a number in a Makefile describing a spec it does not
 read -- stale the moment the spec changes, which is the fault this tree has
@@ -12995,8 +13001,14 @@ connection error, harder to tell from a machine that is merely slow.
   giving that up means a second, addressed segment beside the bare one; hull
   tests the mix. Its other change -- a `(network none)` vm no longer gets
   passt's address and default route on its first NIC -- touches nothing here,
-  as every rig sets `(network true)`. Not built in hull: docker, reverse
-  lookups, IPv6. Detail in hull's Appendix D, *Sibling names on a segment*.
+  as every rig sets `(network true)`. Detail in hull's Appendix D, *Sibling
+  names on a segment*. Since then, the same day: two files run at once on one
+  addressed segment are refused an address already held (a2f99fe), and hull
+  answers ARP and DNS -- A and PTR -- at the segment's `.1` (cbcd38c), but only
+  a machine whose sole network is its segments is pointed at it; these vms
+  have passt and keep its resolver. Not built in hull: docker, IPv6.
+  **And if this tree's images are ever collected with `hull gc`**, take hull
+  0f96d36 first: a store with no refs left passed NULL to qsort and bsearch.
 
 ### Both arms of the collector are measured
 
