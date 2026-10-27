@@ -15,6 +15,7 @@
  *     fib rule  a routing-rule dump record
  *     genl      a family's groups, which is how every generic-netlink family
  *               gets found
+ *     nl80211   the regulatory domain's country, which `ncfg status` prints
  *
  *   All of them read a length from the bytes and trust it to bound a read,
  *   which is the one sentence this target exists for.
@@ -27,6 +28,7 @@
  */
 #include "fuzz.h"
 
+#include "ncfg/regdom.h"
 #include "ncfg/base.h"
 #include "ncfg/rule.h"
 #include "ncfg/genl.h"
@@ -90,5 +92,13 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 		(void)ncfg_genl_family_group(&family, "mlme", &group, err, sizeof(err));
 	}
 	ncfg_genl_family_free(&family);
+
+	/* nl80211's answer about the regulatory domain, which `ncfg status`
+	 * prints as a sentence about where the machine is. */
+	{
+		char code[NCFG_REGDOM_TEXT_MAX];
+
+		(void)ncfg_regdom_parse(data, length, code, sizeof(code), err, sizeof(err));
+	}
 	return 0;
 }

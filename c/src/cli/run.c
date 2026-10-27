@@ -42,6 +42,7 @@
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/plan.h"
+#include "ncfg/regdom.h"
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
 
@@ -1069,6 +1070,58 @@ static void warn_about_disabled_networks(const ncfg_document_t *document,
 	}
 }
 
+/*
+ * Say which wireless regulatory domain the kernel is holding the radios to.
+ *
+ * WHY, AND WHY HERE
+ *   0296: what the domain is gets reported, because the failure it decides
+ *   about is invisible. project.md 10.585 measured it -- a country set by
+ *   hand strands a machine in that country's gaps, and the world domain has
+ *   no 6 GHz at all -- and in both cases the network is simply not there. One
+ *   line naming the domain is what turns "the access point is missing" into
+ *   something to act on. It is a note after the listing rather than a member
+ *   of it, for `warn_about_disabled_networks`' reason: the observed model is a
+ *   witness the Rust shares, and a field one program lacks is a disagreement.
+ *
+ * ONLY WHERE THERE IS A RADIO
+ *   A wired machine has a domain too, and saying so would be a line about
+ *   nothing it uses. The observation already knows which links are radios.
+ *
+ * NOT SILENT WHERE IT CANNOT ASK
+ *   `GET_REG` needs no privilege, so unlike the supplicant's socket an
+ *   unanswered question is a fact about the machine rather than the caller,
+ *   and it is said.
+ */
+static void note_regulatory_domain(const ncfg_observed_t *observed)
+{
+	char   code[NCFG_REGDOM_TEXT_MAX];
+	char   err[NCFG_ERROR_MAX];
+	size_t at;
+	int    radio = 0;
+
+	for (at = 0; observed && at < observed->link_count; at++) {
+		if (observed->links[at].wireless) {
+			radio = 1;
+			break;
+		}
+	}
+	if (!radio) {
+		return;
+	}
+	ncfg_out_line("");
+	if (!ncfg_regdom_read(code, sizeof(code), err, sizeof(err))) {
+		ncfg_out_writef("the wireless regulatory domain could not be read: %s\n", err);
+		return;
+	}
+	if (strcmp(code, "00") == 0) {
+		ncfg_out_line("wireless regulatory domain: 00, the world domain. No country is set,");
+		ncfg_out_line("so 6 GHz is off and some channels only listen until a network says");
+		ncfg_out_line("where this machine is.");
+		return;
+	}
+	ncfg_out_writef("wireless regulatory domain: %s\n", code);
+}
+
 static int command_status(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
@@ -1105,6 +1158,7 @@ static int command_status(const ncfg_cli_options_t *options)
 		/* After the listing, like the two notes under `plan`: it is a fact
 		 * about the machine rather than a member of the answer. */
 		warn_about_disabled_networks(document, observed);
+		note_regulatory_domain(observed);
 	}
 	ncfg_observed_free(observed);
 	ncfg_document_free(document);

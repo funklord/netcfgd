@@ -41,6 +41,7 @@
 #include "kernel_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/genl_socket.h"
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/state.h"
@@ -57,84 +58,10 @@
 #include <unistd.h>
 
 /* ------------------------------------------------------------------------ *
- * A socket, and a family on it
+ * A socket, and a family on it: `ncfg_genl_family_open`, in genl_socket.c
+ * since a second caller -- `ncfg status` asking for the regulatory domain --
+ * needed the same lookup.
  * ------------------------------------------------------------------------ */
-
-/* The same five seconds `kernel.c` gives an rtnetlink request, and for its
- * reason: a daemon holding CAP_NET_ADMIN wedged on a lost message is worse
- * than one that reports an error. */
-#define REQUEST_SECONDS 5
-
-/*
- * The kind, the flags and the payload of a message this port built.
- *
- * `collect.c` has the same three lines for the same reason and says why: the
- * alternative is spelling the request again, which is how a request comes to
- * be aimed at the wrong thing in the one module that does not own it.
- */
-
-/*
- * Open a generic netlink socket and resolve one family on it.
- *
- * On success the caller owns both and closes the socket with
- * `ncfg_netlink_close` and the family with `ncfg_genl_family_free`. On failure
- * neither is left open.
- */
-static int family_open(const char *name, ncfg_netlink_t *socket, ncfg_genl_family_t *family,
-    char *err, size_t err_size)
-{
-	ncfg_buf_t           message;
-	ncfg_buf_t           body;
-	ncfg_netlink_reply_t reply;
-	uint16_t             kind = 0;
-	uint16_t             flags = 0;
-	uint32_t             seq;
-	int                  ok;
-
-	memset(family, 0, sizeof(*family));
-	ncfg_netlink_init(socket);
-	if (!ncfg_netlink_open_protocol(socket, NETLINK_GENERIC, 0, err, err_size)) {
-		return 0;
-	}
-	if (!ncfg_netlink_set_timeout(socket, REQUEST_SECONDS, err, err_size)) {
-		ncfg_netlink_close(socket);
-		return 0;
-	}
-	seq = ncfg_netlink_take_seq(socket);
-	ncfg_buf_init(&message, 0);
-	ncfg_buf_init(&body, 0);
-	memset(&reply, 0, sizeof(reply));
-	ok = ncfg_genl_getfamily_request(&message, name, seq, err, err_size) &&
-	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, err, err_size);
-	if (ok) {
-		ok = ncfg_netlink_request(socket, kind, flags, &body, NULL, &reply, err, err_size);
-	}
-	ncfg_buf_free(&message);
-	ncfg_buf_free(&body);
-	if (ok && reply.count == 0) {
-		/*
-		 * The controller answered and named no family. `ncfg_genl_lookup_
-		 * failed` is for a kernel that refused; this is a reply that arrived
-		 * and said nothing, which reads downstream as a family with id zero
-		 * -- and `ncfg_genl_build_request` refuses that, five seconds later
-		 * and about the wrong thing.
-		 */
-		ncfg_error_set(err, err_size,
-		    "the generic netlink controller answered about `%s` without naming a "
-		    "family", name);
-		ok = 0;
-	}
-	if (ok) {
-		ok = ncfg_genl_family_parse(name, reply.items[0].bytes, reply.items[0].length,
-		    family, err, err_size);
-	}
-	ncfg_netlink_reply_free(&reply);
-	if (!ok) {
-		ncfg_netlink_close(socket);
-	}
-	return ok;
-}
-
 /* ------------------------------------------------------------------------ *
  * Endpoints
  * ------------------------------------------------------------------------ */
@@ -726,7 +653,7 @@ int ncfg_kernel_wg_op(const ncfg_kernel_world_t *world, const ncfg_op_t *op, cha
 	int                ok;
 
 	iface = op->kind == NCFG_OP_WG_SET_DEVICE ? op->u.wg_device.iface : op->u.wg_peers.iface;
-	if (!family_open(NCFG_WG_FAMILY, &socket, &family, err, err_size)) {
+	if (!ncfg_genl_family_open(NCFG_WG_FAMILY, &socket, &family, err, err_size)) {
 		return 0;
 	}
 	/*
@@ -796,9 +723,9 @@ int ncfg_kernel_offloads_op(const ncfg_kernel_world_t *world, const ncfg_op_t *o
 	int                ok;
 
 	(void)world;
-	if (!family_open(NCFG_ETHTOOL_FAMILY, &socket, &family, err, err_size)) {
+	if (!ncfg_genl_family_open(NCFG_ETHTOOL_FAMILY, &socket, &family, err, err_size)) {
 		/* `ENOENT` from the lookup is a kernel older than 5.6, which
-		 * `ncfg_genl_lookup_failed` already says in the sentence `family_open`
+		 * `ncfg_genl_lookup_failed` already says in the sentence `ncfg_genl_family_open`
 		 * carried up. */
 		return 0;
 	}

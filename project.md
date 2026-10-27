@@ -12787,6 +12787,20 @@ finished before its first reading, so anything before US was invisible. It
 now waits for two readings before the roam, and a sequence that does not
 begin with the country before the move is "not measured".
 
+**The first piece of 0296 is built: `ncfg status` names the domain**
+(2026-10-27). Where the observation found a radio, a note after the listing
+reads the kernel's global domain through nl80211 `GET_REG` --
+`wireless regulatory domain: DE`, or for `00` that no country is set, so
+6 GHz is off and some channels only listen. It is a note and not a field:
+`observed.json` is a witness the Rust shares. What it cannot say is *who* set
+the domain -- `GET_REG` does not carry the initiator, which only the
+`REG_CHANGE` notification does, so "and from what" waits for a daemon that
+listens. Checked by `regdom_test.c` (the request, and a reply refused unless
+it names two letters or digits), the `kernel_bytes` fuzz target, and a vm
+running the built `ncfg status`: no radio, no line; world, the note; DE set,
+DE. `family_open` moved out of `kernel_genl.c` unchanged into
+`genl_socket.c` for the second caller.
+
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
 prints a disabled channel as `(disabled)` and the parser matched
