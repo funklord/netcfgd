@@ -1574,6 +1574,15 @@ static void interface_kind_release(void *field)
 static const ncfg_custom_t interface_kind_custom = { interface_kind_read, interface_kind_write,
 	NULL, interface_kind_release, NULL };
 
+void ncfg_interface_kind_release(ncfg_interface_kind_t *kind)
+{
+	if (!kind) {
+		return;
+	}
+	interface_kind_release(kind);
+	memset(kind, 0, sizeof(*kind));
+}
+
 /* ------------------------------------------------------------------------ *
  * Devices
  * ------------------------------------------------------------------------ */

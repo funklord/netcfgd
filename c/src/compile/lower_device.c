@@ -985,6 +985,9 @@ int ncfg_lower_device(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
 
 				memset(&kind, 0, sizeof(kind));
 				if (ncfg_lower_kind_block(ctx, inner, &kind)) {
+					/* A second kind block replaces the first, as the
+					 * Rust's assignment does, and the first goes whole. */
+					ncfg_interface_kind_release(&device.kind);
 					device.kind = kind;
 				}
 			} else if (strcmp(head, "qdisc") == 0) {

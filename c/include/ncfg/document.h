@@ -2062,6 +2062,13 @@ ncfg_document_t *ncfg_document_read(const char *text, size_t length, char *err, 
 void ncfg_document_free(ncfg_document_t *document);
 
 /*
+ * Release what one kind owns -- every arm, as the document's own free does --
+ * and leave it zeroed. For the compiler, where a second kind block replaces
+ * the first: assigning over it leaked a bridge's member list.
+ */
+void ncfg_interface_kind_release(ncfg_interface_kind_t *kind);
+
+/*
  * The device block of that name, or NULL where the document has none.
  *
  * A linear scan, and here rather than in whichever module wanted it first:

@@ -1427,6 +1427,19 @@ static void kind_cases(void)
 		    "  and the bridge parameters survive");
 		ncfg_document_free(document);
 	}
+	/* A second kind block replaces the first, as the Rust's assignment does,
+	 * and the first's member list has to go with it: `make SANITIZE=1 test`
+	 * is what sees it if it does not. */
+	document = compiles("device br0 {\n\tbridge { members = [\"eth0\"] }\n"
+	    "\tbridge { members = [\"eth1\"] }\n}\n", "a second kind block compiles");
+	if (document) {
+		device = device_named(document, "br0");
+		check(device && device->kind.kind == NCFG_KIND_BRIDGE &&
+		    device->kind.bridge.member_count == 1u &&
+		    strcmp(device->kind.bridge.members[0], "eth1") == 0,
+		    "  and the second is the one kept");
+		ncfg_document_free(document);
+	}
 	/* Said twice, differently. One of them is wrong and guessing which would
 	 * put an interface in the wrong bridge. */
 	refuses("device br0 { bridge { members = \"eth0\" } }\n"
