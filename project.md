@@ -12640,7 +12640,7 @@ one it computed (`42:00:00:00:<idx>:00`, hwsim's permanent address with the
 0x40 bit), or a relay injecting to the wrong radio would drop everything
 silently. "Refused" in its counts is the kernel declining frames for a
 channel the radio was not on -- some during any scan, all of them under US.
-Not built: a roam, channel widths beyond 20 MHz, and 6 GHz discovery through a 2.4 or 5 GHz access point's reduced neighbour report.
+Not built: a roam, channel widths beyond 20 MHz, and scanning 6 GHz while associated on another band, which this rig cannot do.
 
 **5 GHz and radar channels, the same relay, the same answer** (`wire5.conf`,
 two runs). Four access points in a US kernel -- 36, radar channels 52 and
@@ -12720,6 +12720,40 @@ does.
 6 GHz admits no open network, so these access points are WPA3 -- SAE with
 hash-to-element and protected management frames -- and the station joins
 through `wpa_supplicant`, not `iw connect`.
+
+**RNR, measured: the report does not make 6 GHz visible to an unset machine,
+and whether it can move there afterwards is not something this rig can
+answer** (`wire_rnr.conf`). One hostapd process runs `home` twice in a CA
+kernel -- 5 GHz channel 36 with `rnr=1`, and 6 GHz at 5975 MHz, both WPA3 --
+and the 5 GHz beacon carries element 201 naming the other (`83 05`: operating
+class 131, channel 5). The station joins through wpa_supplicant:
+
+    station's domain   plain scan sees       joins first   domain after
+    CA (control)       5 GHz, 6 GHz, report  5975 MHz      CA
+    nothing set (00)   5 GHz, report         5180 MHz      CA
+    DE, US             5 GHz, 6 GHz, report  5975 MHz      CA
+    CN                 5 GHz, report         5180 MHz      CA
+
+The unset machine hears the report naming the 6 GHz BSS and cannot list the
+BSS itself -- its 6 GHz is off -- so it joins 5 GHz and adopts CA, after
+which 5975 reads `ok`. **It then never reaches 6 GHz, and that reading is the
+rig's, not the regulation's**: with CA set by hand and the join pinned to
+5 GHz, a scan of 5975 while associated finds nothing either. Scanning 6 GHz
+while associated on 5 GHz does not work here, for reasons in hwsim or the
+relay that were not chased.
+
+**What follows by deduction, not measurement**: an unset machine can reach
+6 GHz only by a move that never goes idle, since idle returns it to the world
+domain (E16), where 6 GHz is off again. A supplicant that disconnects to
+change band undoes the country that made the band reachable.
+
+**Two instrument faults, both caught by the run's own check.** The first
+three runs read "no report" because `iw scan` prints no element it does not
+parse unless given `-u`; the element was in the beacon throughout, and was
+misattributed first to hostapd building the beacon too early -- the
+`update_beacon` added for that stays, harmless. And hull refuses a machine
+name with an underscore (`ap_rnr`), which is a DNS label rule; the machines
+are `ap-rnr` and `station-rnr`, the files keep theirs.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
