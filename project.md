@@ -12536,19 +12536,89 @@ check exists for, and has stopped asserting the one thing it could not know.
 
 ## 10.585 What the kernel lets a moving machine do with its regulatory domain
 
-**Started 2026-10-27, for [0296](doc/decision/0296-the-regulatory-domain-follows-the-machine.md):
-nothing is measured yet.** The decision is that the domain follows the
-machine; what it does not say is how, because that depends on what cfg80211
-accepts from a running system. A `regdom` hull rig is being built to measure
-it with `mac80211_hwsim` radios and a `hostapd` advertising a country.
+**Measured 2026-10-27 for [0296](doc/decision/0296-the-regulatory-domain-follows-the-machine.md),
+by `make hull-regdom`** (`tests/hull/regdom/`): three `mac80211_hwsim` radios
+in a vm on the host's kernel (6.12, cfg80211 a module, signed regdb
+required), cfg80211 reloaded between experiments for a fresh domain, and the
+global country read from `iw reg get` after each step. Four runs; the
+readings were the same in every run that took them.
 
-**Two things about the rig itself, before it measures anything.** The domain
-is one setting per kernel, and stock hostapd's `country_code` is expected to
-*set* it as well as advertise it -- which would contaminate every reading
-with the access point and the station in one kernel. So the rig's first check
-is of its own setup. And the image needs `wireless-regdb`: without the
-database the kernel can apply no country but the world domain, and every
-reading would say `00` for that reason alone.
+**The kernel already follows a moving machine, one association at a time,
+provided the machine goes idle between countries.**
+
+    associated to DE's access point             00 -> DE at once        E4
+    disconnected, nothing else running          DE -> 00 at once        E16
+    associated to US's access point             00 -> US at once        E17
+    SE set by hand, then associated to DE       SE -> DE at once        E10, E20
+    the same through the supplicant's country=  SE -> DE at once        E13
+    SE by hand, DE heard, then idle             DE -> SE at once        E21
+    a scan that hears DE, never associating     stays 00                E3
+
+So a country heard from the associated access point wins over one set by
+hand or by `wpa_supplicant`'s `country=` -- which is what `wifi.set_regdom`
+sends -- and on idle the domain returns to the hand-set country, or to the
+world domain where there is none. A scan alone moves nothing.
+
+**And it sticks while anything else on the machine is not idle.** With an
+access point running in the same kernel, a disconnect left DE in place for
+the full ten seconds, and associating to US afterwards still read DE:
+
+    disconnected from DE, an access point up    stays DE                E5, E7, E11, E14
+    then associated to US                       stays DE                E8
+
+E7 and E8 read at first as "the first country heard sticks", which is the
+holder's complaint exactly. **They were the rig**: its own access points kept
+the machine from being idle. E15 to E17 are the same move with the access
+point stopped after the disconnect, and the domain follows. Kept because a
+real machine can be in the same state -- a laptop sharing its connection as
+a hotspot will not follow, by the same mechanism.
+
+**hostapd's `country_code` sets the whole machine's domain** (E1, at once),
+and **hostapd will not run if it cannot**: in a user namespace of its own it
+waits for the change it asked for and disables the interface
+(`COUNTRY_UPDATE->DISABLED`). For netcfgd that means an `access_point` with
+a `regdom` is a machine-wide setting today, which the example file does not
+say. For the rig it meant no access point configured with `country_code` can
+be a clean instrument; the access points advertise the Country element as
+raw bytes through `vendor_elements` instead, with `country_code` unset, and
+E2 checks the domain stays at 00 while the station hears DE.
+
+**What this does not show, and where the holder's failure most likely is.**
+Every access point here is on channel 1, which every domain allows. The case
+a moving laptop actually fails in is the other one: the domain only changes
+on *association*, and association needs a channel the *current* domain
+allows. A machine still on the world domain, or on a country set by hand for
+the region it left, may scan passively or not at all on the channels the new
+country's networks are on, and never associate to the access point that
+would have told it where it is. That is the next measurement -- an access
+point on 12 or 13, or on 5 GHz, with the station in the wrong domain -- and
+it is the gap a location source closes, because it knows the country before
+any association.
+
+**Also not measured**: two access points disagreeing (the kernel takes the
+associated one's country, so 0296's "agreement across several" is netcfgd's
+to do from scans, not the kernel's); a roam between countries without a
+disconnect (`iw connect` over a live association was refused, E19); drivers
+that manage their own domain in firmware, which hwsim cannot stand in for.
+
+**The holder's direction, given while this ran: fuzznet's location subsystem
+should be the main source.** It is the source that knows the country *before*
+association, which is what the gap above needs, and on a laptop with no GPS
+it can carry a fix from another of the owner's machines. Two things stand
+between it and a regulatory domain, and neither is designed:
+
+- **fuzznet has no country.** Its `location/` holds fixes -- latitude,
+  longitude, accuracy, from gpsd -- and nothing in its code or `project.md`
+  maps one to a country or names ISO 3166. A fix-to-country lookup has to
+  live somewhere, with boundary data and a size cost, and whether it is
+  fuzznet's or netcfgd's is a cross-project question for the holder.
+- **netcfgd's fuzznet edge is design, not build** (decision 0133), so reading
+  a fix means netcfgd talking to a fuzznet node, which nothing does today.
+
+This amends 0296's first bullet -- the country inferred from what the radio
+hears -- to a second source behind a primary one; it is recorded here rather
+than in 0296, which is accepted, and wants a record of its own once the
+mechanism is designed.
 
 ## 10.584 fuzznet fixed the packing build, and netcfgd should still not rely on it
 

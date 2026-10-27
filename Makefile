@@ -42,7 +42,10 @@
 #                         `hull-delegation`, an ISP delegating a prefix that
 #                         netcfgd configures from -- with
 #                         `hull-delegation-lossy` for the same across a wire
-#                         dropping frames. Each runs alone by name;
+#                         dropping frames. `hull-regdom` measures the kernel
+#                         rather than netcfgd: what a running machine may do
+#                         with its regulatory domain (0296). Each runs alone
+#                         by name;
 #                         `hull-image` builds the images, which is the only
 #                         part needing the internet, and `hull-clean` untags
 #                         them
@@ -2524,7 +2527,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
-      hull-delegation-lossy
+      hull-delegation-lossy hull-regdom
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2666,6 +2669,16 @@ hull-hwsim:
 	rm -f "$$verdict"; \
 	exit $$rc
 
+# What cfg80211 lets a running machine do with its regulatory domain, for
+# 0296 (project.md 10.585). It measures the kernel, not netcfgd, so nothing is
+# built first. It fails only when one of its own instruments did not work --
+# no database, no access point, a country nobody heard -- and otherwise prints
+# what the kernel did, whatever that was.
+hull-regdom:
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/hull.conf
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2762,17 +2775,17 @@ kernel-clean:
 # the hash of its own form, so asking again when nothing changed costs a
 # lookup. `make hull-image` is how you ask for all of them on purpose.
 hull-image:
-	@$(call hull_says,all five)
-	@# `delegation` joined on 2026-10-26 and `wire` has no image of its own,
-	@# running on `natcap`'s. A rig missing from this list still builds its
+	@$(call hull_says,all six)
+	@# `delegation` joined on 2026-10-26, `regdom` on 2026-10-27, and `wire`
+	@# has no image of its own, running on `natcap`'s. A rig missing from this list still builds its
 	@# image lazily on first run -- which is the quiet way the claim above,
 	@# that this is the only part needing the internet, stops being true.
-	@for r in hwsim sandbox openrc natcap delegation; do \
+	@for r in hwsim sandbox openrc natcap delegation regdom; do \
 		timeout -k 30 $(HULL_TIMEOUT) $(HULL) build -f tests/hull/$$r/hull.conf \
 			netcfgd/$$r || exit 1; \
 	done
 
-# Named, printed, and only the four refs this tree builds.
+# Named, printed, and only the refs this tree builds.
 #
 # **It untags rather than collecting.** The store is one per account and other
 # projects keep images in it, so `hull gc` is the holder's call and not a side
@@ -2786,7 +2799,7 @@ hull-clean:
 	@# The same list as `hull-image`, and it has to stay the same list: a rig
 	@# added to one and not the other leaves an image tagged that nobody
 	@# believes is there.
-	@for r in hwsim sandbox openrc natcap delegation; do \
+	@for r in hwsim sandbox openrc natcap delegation regdom; do \
 		if $(HULL) images 2>/dev/null | grep -q "^netcfgd/$$r[[:space:]]"; then \
 			printf 'hull-clean: untagging netcfgd/%s\n' "$$r"; \
 			$(HULL) tag -d netcfgd/$$r || exit 1; \
@@ -2803,7 +2816,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one
