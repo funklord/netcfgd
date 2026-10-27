@@ -12583,17 +12583,43 @@ be a clean instrument; the access points advertise the Country element as
 raw bytes through `vendor_elements` instead, with `country_code` unset, and
 E2 checks the domain stays at 00 while the station hears DE.
 
-**What this does not show, and where the holder's failure most likely is.**
-Every access point here is on channel 1, which every domain allows. The case
-a moving laptop actually fails in is the other one: the domain only changes
-on *association*, and association needs a channel the *current* domain
-allows. A machine still on the world domain, or on a country set by hand for
-the region it left, may scan passively or not at all on the channels the new
-country's networks are on, and never associate to the access point that
-would have told it where it is. That is the next measurement -- an access
-point on 12 or 13, or on 5 GHz, with the station in the wrong domain -- and
-it is the gap a location source closes, because it knows the country before
-any association.
+**Channels 12 and 13, measured the same day: US disables them, the world
+domain allows them only passively, and joining any ordinary network opens
+them.** On a radio following the global domain, with channel 14 as the
+control (Japan's alone), the rig's table reads:
+
+    00 (world)   12 noIR   13 noIR   14 noIR
+    US           12 off    13 off    14 off
+    DE, GB       12 ok     13 ok     14 off
+    JP           12 ok     13 ok     14 ok
+
+Of twelve countries checked by the probe, US was the only one without 12 and
+13. So a laptop set to US and carried to Europe cannot see a network on 13 at
+all -- and the moment it joins any network on 1 to 11 there, association
+adopts that access point's country (E4, E10, E17) and 12 and 13 open. That is
+a conclusion composed from two measurements, not one run: a plain radio's
+channels were the global domain's in every reading, which is what lets them
+compose. **So the stuck case is narrower than first written**: a machine in
+the wrong domain somewhere every network it could join is on a channel that
+domain forbids.
+
+**The world domain's case is not measured, and one kernel cannot measure it.**
+With 13 passive-only, whether a station can hear a beacon there and still
+join -- cfg80211's beacon hints may lift the restriction -- needs an access
+point transmitting on a channel the station's domain forbids. In one kernel
+there is none to be had: the first attempt gave the access point hwsim's
+`regtest=7`, a radio with a driver hint of its own, and a country set by hand
+reached it like every other radio (13 `off` under US, `noIR` under the
+world), and hwsim's custom domains stop at channel 11. It needs the access
+point in a second kernel -- two vms, with something carrying hwsim's frames
+between them, which is what `wmediumd` does within one. Not built.
+
+**And one instrument fault, caught by the control.** The first table read
+channel 14 as usable under US, which it is not anywhere but Japan: `iw`
+prints a disabled channel as `(disabled)` and the parser matched
+`Disabled`, so every disabled channel read as usable, and a `grep -A3`
+window read some channels' flags off their neighbours. Channel 14 is in the
+table so that fault cannot recur unseen.
 
 **Also not measured**: two access points disagreeing (the kernel takes the
 associated one's country, so 0296's "agreement across several" is netcfgd's
@@ -12609,9 +12635,12 @@ between it and a regulatory domain, and neither is designed:
 
 - **fuzznet has no country.** Its `location/` holds fixes -- latitude,
   longitude, accuracy, from gpsd -- and nothing in its code or `project.md`
-  maps one to a country or names ISO 3166. A fix-to-country lookup has to
-  live somewhere, with boundary data and a size cost, and whether it is
-  fuzznet's or netcfgd's is a cross-project question for the holder.
+  maps one to a country or names ISO 3166. **The holder placed the lookup in
+  fuzznet, 2026-10-27, possibly using an online service.** That is fuzznet's
+  to design; netcfgd left the need in its inbox (20261027T1557Z): an ISO
+  3166-1 alpha-2 code with its age and provenance, and an explicit unknown --
+  and, since an online lookup sends the machine's position to a third party,
+  a pointer to fuzznet's open per-recipient precision question.
 - **netcfgd's fuzznet edge is design, not build** (decision 0133), so reading
   a fix means netcfgd talking to a fuzznet node, which nothing does today.
 

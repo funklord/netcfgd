@@ -368,6 +368,45 @@ else
 fi
 
 echo
+echo "=== channels 12 and 13 under each domain, on a radio that follows it"
+# **What a laptop carried from the US to Europe meets, and why it is not an
+# experiment with an access point in it.** The first version put an access
+# point on channel 13 on radio 0 under hwsim's regtest=7, which gives it a
+# driver hint of its own -- and it followed the country set by hand like every
+# other radio, so its channel 13 went `off` under US and `noIR` under the world
+# domain and it could not beacon there. A plain radio's channels are the global
+# domain's, and a country set by hand reaches every radio, so one kernel cannot
+# hold an access point on a channel its station is forbidden. Measuring the
+# station against one needs a second kernel (project.md 10.585).
+#
+# So this is the table those readings rest on, with channel 14 as its control:
+# it is Japan's alone, and a parser that read it as usable elsewhere would be
+# reading every disabled channel as usable -- which is the fault the first
+# version of this table had, `iw` printing "(disabled)" in lower case.
+
+# The flag cfg80211 gives a channel on one phy: ok, noIR, off or absent.
+flag_of() {
+	iw phy "$1" channels 2>/dev/null | awk -v mhz="$2" '
+		$1 == "*" { inside = ($2 == mhz); if (inside) seen = 1 }
+		inside && tolower($0) ~ /disabled/ { off = 1 }
+		inside && /No IR/ { noir = 1 }
+		END { if (!seen) print "absent"; else if (off) print "off";
+		      else if (noir) print "noIR"; else print "ok" }'
+}
+fresh
+phy=$(cat /sys/class/net/wlan1/phy80211/name)
+for domain in 00 US DE GB JP; do
+	iw reg set "$domain"
+	observe 5 "$(country)" >/dev/null
+	row "G $domain (global $(country))" \
+	    "12: $(flag_of "$phy" 2467)  13: $(flag_of "$phy" 2472)  14: $(flag_of "$phy" 2484)"
+done
+[ "$(flag_of "$phy" 2484)" = ok ] && iw reg set US && observe 5 JP >/dev/null &&
+	[ "$(flag_of "$phy" 2484)" = off ] &&
+	ok "channel 14 is usable under JP and not under US, so the table reads flags" ||
+	fail "channel 14 did not separate JP from US, so the table above cannot be read"
+
+echo
 echo "=== roaming straight from DE's access point to US's, never disconnected"
 fresh
 if ap_up wlan0 de DE advertised && ap_up wlan2 us US advertised && connect de; then
