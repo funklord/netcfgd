@@ -183,6 +183,44 @@ static void the_live_check(void)
 	 * rtnetlink, and the request path named the failure by type. */
 	check(strstr(err, "not loaded") != NULL && strstr(err, "RTM_") == NULL,
 	    "and the sentence says the module is probably not loaded");
+
+	/* **A request the family refuses, named without rtnetlink's words.** A
+	 * `GET_REG` for a radio that does not exist is refused by nl80211; its
+	 * message type is the family id, which the reply reader would otherwise
+	 * name as whichever `RTM_` message shares the number -- 38 was
+	 * `RTM_GETQDISC` on the machine this was written on. */
+	if (ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, sizeof(err))) {
+		ncfg_genl_header_t   header = { NL80211_CMD_GET_REG, 0 };
+		ncfg_buf_t           attrs;
+		ncfg_buf_t           message;
+		ncfg_buf_t           body;
+		ncfg_netlink_reply_t answer;
+		uint16_t             kind = 0;
+		uint16_t             flags = 0;
+		int                  refused;
+
+		memset(&answer, 0, sizeof(answer));
+		ncfg_buf_init(&attrs, 0);
+		ncfg_buf_init(&message, 0);
+		ncfg_buf_init(&body, 0);
+		ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, 99999u);
+		refused = ncfg_genl_build_request(&message, family.id, &header, 0,
+		              ncfg_netlink_take_seq(&socket), &attrs, err, sizeof(err)) &&
+		    ncfg_wire_request_parts(&message, "nl80211", &kind, &flags, &body, err,
+		        sizeof(err)) &&
+		    !ncfg_netlink_request(&socket, kind, flags, &body, NULL, &answer, err,
+		        sizeof(err));
+		check(refused, "a GET_REG for a radio that does not exist is refused");
+		detail("said", err);
+		check(strstr(err, "RTM_") == NULL && strstr(err, "generic netlink") != NULL,
+		    "and the refusal is not named after an rtnetlink message");
+		ncfg_netlink_reply_free(&answer);
+		ncfg_buf_free(&attrs);
+		ncfg_buf_free(&message);
+		ncfg_buf_free(&body);
+		ncfg_genl_family_free(&family);
+		ncfg_netlink_close(&socket);
+	}
 }
 
 int main(void)

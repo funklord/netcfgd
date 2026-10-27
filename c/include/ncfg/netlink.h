@@ -135,6 +135,18 @@ typedef struct {
 	 * come from the kernel. Nonzero means somebody local is writing to it,
 	 * which is worth a line in a log even though nothing went wrong. */
 	uint32_t dropped;
+	/*
+	 * `NETLINK_ROUTE` unless `ncfg_netlink_open_protocol` said otherwise.
+	 *
+	 * **A refusal is named by its message type, and the type means something
+	 * only in rtnetlink.** A generic netlink family's type is an id handed
+	 * out at runtime, and on the machine this was written on WireGuard was
+	 * 37, ethtool 22 and nl80211 38 -- `RTM_DELQDISC`, `RTM_GETADDR` and
+	 * `RTM_GETQDISC` -- so a refused WireGuard device was logged as a qdisc
+	 * deletion failing. The request path reads this to say "a generic
+	 * netlink request" there instead.
+	 */
+	int      protocol;
 } ncfg_netlink_t;
 
 /* One reply message's payload: everything after the netlink header. */

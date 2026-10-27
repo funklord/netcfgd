@@ -187,6 +187,7 @@ void ncfg_netlink_init(ncfg_netlink_t *netlink)
 	 * request numbered 0 could not be told from an unsolicited message. */
 	netlink->seq = 1;
 	netlink->dropped = 0;
+	netlink->protocol = NETLINK_ROUTE;
 }
 
 int ncfg_netlink_open_protocol(ncfg_netlink_t *netlink, int protocol, uint32_t groups,
@@ -224,6 +225,7 @@ int ncfg_netlink_open_protocol(ncfg_netlink_t *netlink, int protocol, uint32_t g
 		return ncfg_netlink_fail(err, err_size, "binding a netlink socket", saved);
 	}
 	netlink->fd = fd;
+	netlink->protocol = protocol;
 	return 1;
 }
 
@@ -838,6 +840,12 @@ int ncfg_netlink_request_from(ncfg_netlink_t *netlink, uint16_t kind, uint16_t f
 	}
 	collected = ncfg_netlink_collect(socket_recv, netlink, seq, flags, initial, out, err,
 	    err_size);
+	/* The reader named the refusal by message type, which on this socket is a
+	 * family id and not a request -- see `protocol` in netlink.h. Said again
+	 * without a name rather than with somebody else's. */
+	if (!collected && out->refused != 0 && netlink->protocol == NETLINK_GENERIC) {
+		(void)ncfg_netlink_fail(err, err_size, "a generic netlink request", out->refused);
+	}
 	/* Carried up to the socket whether the request succeeded or not, since
 	 * the count survives a refusal for exactly the case where the forgery is
 	 * what went wrong. */
