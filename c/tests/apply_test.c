@@ -1731,6 +1731,7 @@ static void the_phase_s_own_variable_reaches_the_hook(const char *dir)
 	check(said && strncmp(said, "unset|", 6u) == 0,
 	    "  and a name with no value sets nothing rather than an empty string");
 	free(said);
+	free(hook.sha256);
 
 	/*
 	 * **The filter on the phase's own name is not asserted here, and that is

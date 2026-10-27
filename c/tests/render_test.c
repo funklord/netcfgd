@@ -3615,9 +3615,16 @@ static void the_refusals_no_corpus_reaches(void)
 		check(refusal_names(document, "br0", "backend of exec"),
 		    "  and an advertise backend of exec is refused");
 		policy->backend.kind = NCFG_RA_BACKEND_AUTO;
-		policy->prefix_count = 0u;
-		check(refusal_names(document, "br0", "no prefix"),
-		    "  and an advertise block with no prefix is refused");
+		{
+			/* Put back before the document is freed, which frees as many
+			 * prefixes as the count says -- zero would orphan the one there. */
+			size_t kept = policy->prefix_count;
+
+			policy->prefix_count = 0u;
+			check(refusal_names(document, "br0", "no prefix"),
+			    "  and an advertise block with no prefix is refused");
+			policy->prefix_count = kept;
+		}
 	}
 	ncfg_document_free(document);
 
