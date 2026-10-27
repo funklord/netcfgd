@@ -2680,7 +2680,8 @@ hull-hwsim:
 # for the case one kernel cannot hold: an access point on a channel the
 # station's domain forbids. `wire5.conf` is the same at 5 GHz, with radar
 # channels, `wire6.conf` at 6 GHz, and `wire_rnr.conf` a 5 GHz access point
-# naming its 6 GHz twin in a Reduced Neighbour Report. Their payloads report
+# naming its 6 GHz twin in a Reduced Neighbour Report, and `wire_roam.conf` a
+# station roaming within a country and across a border. Their payloads report
 # through ./verdict, read here.
 hull-regdom:
 	@$(call hull_says,netcfgd/regdom)
@@ -2689,14 +2690,16 @@ hull-regdom:
 	@rm -f tests/hull/regdom/verdict/ap tests/hull/regdom/verdict/station \
 		tests/hull/regdom/verdict/ap5 tests/hull/regdom/verdict/station5 \
 		tests/hull/regdom/verdict/ap6 tests/hull/regdom/verdict/station6 \
-		tests/hull/regdom/verdict/ap_rnr tests/hull/regdom/verdict/station_rnr
+		tests/hull/regdom/verdict/ap_rnr tests/hull/regdom/verdict/station_rnr \
+		tests/hull/regdom/verdict/ap_roam tests/hull/regdom/verdict/station_roam
 	@mkdir -p tests/hull/regdom/verdict
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire5.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire6.conf || true
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire_rnr.conf || true
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire_roam.conf || true
 	@missing=0; \
-	for name in ap station ap5 station5 ap6 station6 ap_rnr station_rnr; do \
+	for name in ap station ap5 station5 ap6 station6 ap_rnr station_rnr ap_roam station_roam; do \
 		file=tests/hull/regdom/verdict/$$name; \
 		if [ ! -f "$$file" ]; then \
 			echo "regdom: $$name left no verdict, so it never reached its payload"; \
@@ -2707,7 +2710,7 @@ hull-regdom:
 		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
 	done; \
 	if [ "$$missing" -ne 0 ]; then \
-		echo "regdom: $$missing of 8 machine(s) did not pass"; \
+		echo "regdom: $$missing of 10 machine(s) did not pass"; \
 		exit 1; \
 	fi
 

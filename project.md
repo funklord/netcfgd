@@ -12640,7 +12640,7 @@ one it computed (`42:00:00:00:<idx>:00`, hwsim's permanent address with the
 0x40 bit), or a relay injecting to the wrong radio would drop everything
 silently. "Refused" in its counts is the kernel declining frames for a
 channel the radio was not on -- some during any scan, all of them under US.
-Not built: a roam, channel widths beyond 20 MHz, and scanning 6 GHz while associated on another band, which this rig cannot do.
+Not built: channel widths beyond 20 MHz, and scanning 6 GHz while associated on another band, which this rig cannot do.
 
 **5 GHz and radar channels, the same relay, the same answer** (`wire5.conf`,
 two runs). Four access points in a US kernel -- 36, radar channels 52 and
@@ -12754,6 +12754,30 @@ misattributed first to hostapd building the beacon too early -- the
 `update_beacon` added for that stays, harmless. And hull refuses a machine
 name with an underscore (`ap_rnr`), which is a DNS label rule; the machines
 are `ap-rnr` and `station-rnr`, the files keep theirs.
+
+**A roam keeps the country, and takes up the next one; only a disconnect
+passes through the world domain** (`wire_roam.conf`). Four open access points
+on 2.4 GHz channel 1 -- one network advertising DE twice, one spanning a
+border, DE and US -- and a station with no country set that joins the first
+by BSSID, scans while connected (same channel, which this rig can do) and
+roams with `wpa_cli roam`, the domain sampled every 50 ms throughout:
+
+    within a country, DE to DE          DE, throughout
+    across a border, DE to US (roam)    DE, then US -- no world domain between
+    the same move by disconnecting      DE, 00, then US
+
+So the move that never goes idle is a roam, and it is enough: cfg80211 takes
+the new access point's country on the reassociation. The trap the RNR half
+deduced is real in the third row -- a supplicant that changes access point
+by disconnecting spends a moment in the world domain, which at 6 GHz is the
+band switched off. **Not measured is whether a 5-to-6 GHz move is a roam**,
+since this rig cannot scan 6 GHz while associated.
+
+**And a sampler fault, caught by its own check.** The first cross-border run
+read "US" alone: the sampler started in the background and the roam
+finished before its first reading, so anything before US was invisible. It
+now waits for two readings before the roam, and a sequence that does not
+begin with the country before the move is "not measured".
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
