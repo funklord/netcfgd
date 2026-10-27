@@ -432,6 +432,7 @@
       }
     }
   ],
+  "regdom": "DE",
   "addresses": [
     {
       "interface": "eth0",

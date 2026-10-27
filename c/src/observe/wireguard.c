@@ -210,39 +210,6 @@ static char *trim(char *text)
  * the discarded header, which is why the callers below build with zero.
  */
 
-/*
- * Send what `build` produced and collect the replies.
- *
- * 1 with a reply, which the caller frees; 0 with a sentence in `why`, which
- * covers both a request this port could not build and a kernel that would not
- * answer. The two are told apart by the caller only where it matters, which is
- * nowhere here: a family that will not resolve and a device that will not
- * answer are both "this observation does not describe that device".
- */
-static int ask(const ncfg_observe_kernel_t *kernel, const ncfg_buf_t *message,
-    ncfg_netlink_reply_t *reply, char *why, size_t why_size)
-{
-	ncfg_buf_t body;
-	uint16_t   kind = 0;
-	uint16_t   flags = 0;
-	int        answered;
-
-	memset(reply, 0, sizeof(*reply));
-	ncfg_buf_init(&body, 0);
-	if (!ncfg_wire_request_parts(message, "generic netlink", &kind, &flags, &body, why, why_size)) {
-		ncfg_buf_free(&body);
-		return 0;
-	}
-	answered = kernel->exchange(kernel->context, kind, flags, &body, NULL, reply, why,
-	    why_size);
-	ncfg_buf_free(&body);
-	if (!answered) {
-		ncfg_netlink_reply_free(reply);
-		memset(reply, 0, sizeof(*reply));
-		return 0;
-	}
-	return 1;
-}
 
 /*
  * The `wireguard` family's runtime id.
@@ -254,36 +221,7 @@ static int ask(const ncfg_observe_kernel_t *kernel, const ncfg_buf_t *message,
 static int family_of(const ncfg_observe_kernel_t *kernel, ncfg_genl_family_t *family,
     char *why, size_t why_size)
 {
-	ncfg_buf_t           message;
-	ncfg_netlink_reply_t reply;
-	int                  ok;
-
-	memset(family, 0, sizeof(*family));
-	ncfg_buf_init(&message, 0);
-	why[0] = '\0';
-	ok = ncfg_genl_getfamily_request(&message, NCFG_WG_FAMILY, 0, why, why_size) &&
-	    ask(kernel, &message, &reply, why, why_size);
-	ncfg_buf_free(&message);
-	if (!ok) {
-		return 0;
-	}
-	if (reply.count == 0) {
-		/*
-		 * The controller answered and named no family, which reads
-		 * downstream as a family with id zero -- and a request built with one
-		 * is refused five seconds later and about the wrong thing.
-		 * `apply/kernel_genl.c` refuses the same reply for the same reason.
-		 */
-		ncfg_error_set(why, why_size,
-		    "the generic netlink controller answered about `%s` without naming a "
-		    "family", NCFG_WG_FAMILY);
-		ncfg_netlink_reply_free(&reply);
-		return 0;
-	}
-	ok = ncfg_genl_family_parse(NCFG_WG_FAMILY, reply.items[0].bytes, reply.items[0].length,
-	    family, why, why_size);
-	ncfg_netlink_reply_free(&reply);
-	return ok;
+	return observe_genl_family(kernel, NCFG_WG_FAMILY, family, why, why_size);
 }
 
 /* ------------------------------------------------------------------------ *
@@ -533,7 +471,7 @@ static int read_device(const ncfg_observe_kernel_t *kernel, const ncfg_genl_fami
 	memset(&state, 0, sizeof(state));
 	why[0] = '\0';
 	ok = ncfg_wg_get_device_request(&message, family, 0, link->name, why, sizeof(why)) &&
-	    ask(kernel, &message, &reply, why, sizeof(why));
+	    observe_genl_ask(kernel, &message, &reply, why, sizeof(why));
 	ncfg_buf_free(&message);
 	if (!ok) {
 		/*

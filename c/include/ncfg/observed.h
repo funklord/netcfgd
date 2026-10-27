@@ -1188,6 +1188,21 @@ typedef struct {
 	 * entirely rather than shown as an empty list nobody asked about. */
 	ncfg_observed_bluetooth_t *bluetooth;
 	size_t                     bluetooth_count;
+	/*
+	 * The wireless regulatory domain the kernel holds every radio to that has
+	 * no private one: a country code, or the kernel's `00` for the world
+	 * domain. NULL where the machine has no radio, or where nl80211 would not
+	 * say -- and left out of the output then, rather than written as a domain
+	 * nobody asked about.
+	 *
+	 * **Why it is observed** is decision 0296: what the domain is gets
+	 * reported, because the failure it is about is invisible -- project.md
+	 * 10.585 measured a country set by hand stranding a machine in that
+	 * country's gaps, and the world domain having no 6 GHz. Here rather than
+	 * in a client, because the daemon takes this observation on every tick and
+	 * every client is answered from it.
+	 */
+	char *regdom;
 	ncfg_observed_address_t *addresses; /* sorted by interface then address */
 	size_t                   address_count;
 	ncfg_observed_route_t *routes; /* sorted canonically */

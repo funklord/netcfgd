@@ -13,6 +13,7 @@
 #include <stdint.h>
 
 #include "ncfg/base.h"
+#include "ncfg/genl.h"
 #include "ncfg/netlink.h"
 #include "ncfg/observe.h"
 
@@ -26,6 +27,15 @@ char *observe_dup(const char *text);
  * an interface name list is the length of the machine's link table. */
 int observe_list_add(char ***list, size_t *count, const char *text);
 
+/* Send a generic netlink message `ncfg_genl_*` built through the round's
+ * exchange and collect the replies; 1 with a reply the caller frees, 0 with a
+ * sentence in `why`. */
+int observe_genl_ask(const ncfg_observe_kernel_t *kernel, const ncfg_buf_t *message,
+    ncfg_netlink_reply_t *reply, char *why, size_t why_size);
+/* A family's runtime id over the same exchange. 0 with a sentence where it
+ * cannot be resolved -- a note for the caller, not a refusal. */
+int observe_genl_family(const ncfg_observe_kernel_t *kernel, const char *name,
+    ncfg_genl_family_t *family, char *why, size_t why_size);
 /* Every string of `in`, copied. */
 int observe_list_copy(char ***out, size_t *out_count, char *const *in, size_t count);
 

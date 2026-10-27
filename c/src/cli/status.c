@@ -243,6 +243,34 @@ static void print_report(const ncfg_observed_t *observed, const char *name)
 	}
 }
 
+/*
+ * The wireless regulatory domain the observation read.
+ *
+ * Decision 0296 is why it is said: project.md 10.585 measured that a country
+ * set by hand strands a machine in that country's gaps and that the world
+ * domain has no 6 GHz, and either way the network is simply not there. This
+ * line is what makes that something to act on. The world domain gets the
+ * consequence spelled out, since `00` alone says nothing to most people.
+ *
+ * Nothing where the observation has none -- no radio, or a kernel that would
+ * not say -- by `print_bluetooth`'s rule; the observer has already left a note
+ * where it could not ask.
+ */
+static void print_regdom(const ncfg_observed_t *observed)
+{
+	if (!observed->regdom) {
+		return;
+	}
+	ncfg_out_line("");
+	if (strcmp(observed->regdom, "00") == 0) {
+		ncfg_out_line("wireless regulatory domain: 00, the world domain. No country is set,");
+		ncfg_out_line("so 6 GHz is off and some channels only listen until a network says");
+		ncfg_out_line("where this machine is.");
+		return;
+	}
+	ncfg_out_writef("wireless regulatory domain: %s\n", observed->regdom);
+}
+
 void ncfg_cli_print_status(const ncfg_observed_t *observed)
 {
 	size_t at;
@@ -303,6 +331,7 @@ void ncfg_cli_print_status(const ncfg_observed_t *observed)
 		}
 	}
 	print_bluetooth(observed);
+	print_regdom(observed);
 	print_linksets(observed);
 	/*
 	 * Printed once rather than per interface: the conflict is with a table,

@@ -126,44 +126,7 @@ static int managed(const char *name)
 static int family_of(const ncfg_observe_kernel_t *genl, ncfg_genl_family_t *family, char *why,
     size_t why_size)
 {
-	ncfg_buf_t           message;
-	ncfg_buf_t           body;
-	ncfg_netlink_reply_t reply;
-	uint16_t             kind = 0;
-	uint16_t             flags = 0;
-	int                  ok;
-
-	memset(family, 0, sizeof(*family));
-	memset(&reply, 0, sizeof(reply));
-	ncfg_buf_init(&message, 0);
-	ncfg_buf_init(&body, 0);
-	ok = ncfg_genl_getfamily_request(&message, NCFG_ETHTOOL_FAMILY, 0, why, why_size) &&
-	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, why, why_size);
-	ncfg_buf_free(&message);
-	if (ok) {
-		ok = genl->exchange(genl->context, kind, flags, &body, NULL, &reply, why,
-		    why_size);
-	}
-	ncfg_buf_free(&body);
-	if (ok && reply.count == 0) {
-		/*
-		 * The controller answered and named no family. `kernel_genl.c`
-		 * refuses this for the same reason and says it: a reply that
-		 * arrived and said nothing reads downstream as a family with id
-		 * zero, and the refusal then arrives from the wrong call and is
-		 * about the wrong thing.
-		 */
-		ncfg_error_set(why, why_size,
-		    "the generic netlink controller answered about `%s` without naming a "
-		    "family", NCFG_ETHTOOL_FAMILY);
-		ok = 0;
-	}
-	if (ok) {
-		ok = ncfg_genl_family_parse(NCFG_ETHTOOL_FAMILY, reply.items[0].bytes,
-		    reply.items[0].length, family, why, why_size);
-	}
-	ncfg_netlink_reply_free(&reply);
-	return ok;
+	return observe_genl_family(genl, NCFG_ETHTOOL_FAMILY, family, why, why_size);
 }
 
 /*

@@ -1,6 +1,5 @@
 /*
- * regdom.c -- the request and reply described in regdom.h, and the one round
- * trip that sends one.
+ * regdom.c -- the request and reply described in regdom.h.
  *
  * The reply is the kernel's, which is the more trustworthy end of netcfgd's
  * boundaries, and it is still read as hostile for `wire.c`'s reason: it came
@@ -8,8 +7,6 @@
  */
 #include "ncfg/regdom.h"
 
-#include "ncfg/genl_socket.h"
-#include "ncfg/netlink.h"
 #include "ncfg/wire.h"
 
 #include <ctype.h>
@@ -78,47 +75,4 @@ int ncfg_regdom_parse(const void *payload, size_t length, char *out, size_t out_
 	out[1] = code[1];
 	out[2] = '\0';
 	return 1;
-}
-
-int ncfg_regdom_read(char *out, size_t out_size, char *err, size_t err_size)
-{
-	ncfg_netlink_t       socket;
-	ncfg_genl_family_t   family;
-	ncfg_netlink_reply_t reply;
-	ncfg_buf_t           message;
-	ncfg_buf_t           body;
-	uint16_t             kind = 0;
-	uint16_t             flags = 0;
-	int                  ok;
-
-	if (!ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, err_size)) {
-		return 0;
-	}
-	memset(&reply, 0, sizeof(reply));
-	ncfg_buf_init(&message, 0);
-	ncfg_buf_init(&body, 0);
-	/* Taken apart and handed to `ncfg_netlink_request`, for the reason
-	 * `kernel_genl.c` gives: the request is spelled once, by the module that
-	 * owns it. */
-	ok = ncfg_regdom_request(&message, &family, ncfg_netlink_take_seq(&socket), err,
-	         err_size) &&
-	    ncfg_wire_request_parts(&message, "nl80211", &kind, &flags, &body, err, err_size);
-	ncfg_buf_free(&message);
-	if (ok) {
-		ok = ncfg_netlink_request(&socket, kind, flags, &body, NULL, &reply, err, err_size);
-	}
-	ncfg_buf_free(&body);
-	if (ok && reply.count == 0) {
-		ncfg_error_set(err, err_size,
-		    "the kernel answered the regulatory domain request with nothing");
-		ok = 0;
-	}
-	if (ok) {
-		ok = ncfg_regdom_parse(reply.items[0].bytes, reply.items[0].length, out, out_size,
-		    err, err_size);
-	}
-	ncfg_netlink_reply_free(&reply);
-	ncfg_genl_family_free(&family);
-	ncfg_netlink_close(&socket);
-	return ok;
 }

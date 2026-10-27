@@ -1229,6 +1229,7 @@ static const ncfg_field_t observed_fields[] = {
 	    .type = &observed_bluetooth_type, .element_size = sizeof(ncfg_observed_bluetooth_t),
 	    .offset = offsetof(ncfg_observed_t, bluetooth),
 	    .count_offset = offsetof(ncfg_observed_t, bluetooth_count) },
+	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, regdom) },
 	{ .name = "addresses", .kind = NCFG_F_LIST, .type = &observed_address_type,
 	    .element_size = sizeof(ncfg_observed_address_t),
 	    .offset = offsetof(ncfg_observed_t, addresses),

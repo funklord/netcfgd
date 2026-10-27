@@ -41,6 +41,7 @@
 #include "ncfg/netlink.h"
 #include "ncfg/nft.h"
 #include "ncfg/observed.h"
+#include "ncfg/regdom.h"
 #include "ncfg/state.h"
 #include "ncfg/wire.h"
 
@@ -56,6 +57,7 @@
 /* The kernel headers `nft.h` deliberately does not pull in: this file builds
  * the bytes an nftables kernel would send. */
 #include <linux/genetlink.h>
+#include <linux/nl80211.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter/nf_tables.h>
 #include <linux/netfilter/nfnetlink.h>
@@ -1480,6 +1482,121 @@ static void the_offloads_the_kernel_reports(void)
 	machine_free(&machine);
 }
 
+/* ------------------------------------------------------------------------ *
+ * The regulatory domain
+ * ------------------------------------------------------------------------ */
+
+#define NL80211_FAMILY_ID 38u
+
+static void append_nl80211_family(ncfg_buf_t *out)
+{
+	ncfg_genl_header_t header;
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	uint16_t           id = NL80211_FAMILY_ID;
+
+	header.cmd = CTRL_CMD_NEWFAMILY;
+	header.version = 2;
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put(&attrs, CTRL_ATTR_FAMILY_ID, &id, sizeof(id));
+	ncfg_wire_attr_put_str(&attrs, CTRL_ATTR_FAMILY_NAME, NL80211_GENL_NAME);
+	append_message(out, GENL_ID_CTRL, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/* A `GET_REG` reply naming `code`, or no country at all where it is NULL. */
+static void append_regdom(ncfg_buf_t *out, const char *code)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_GET_REG, 1 };
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_u8(&attrs, NL80211_ATTR_DFS_REGION, 1);
+	if (code) {
+		ncfg_wire_attr_put_str(&attrs, NL80211_ATTR_REG_ALPHA2, code);
+	}
+	append_message(out, NL80211_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/* An observation of one link, a radio or not -- which is all the round reads. */
+static ncfg_observed_t *one_link(int wireless)
+{
+	ncfg_observed_t *observed = calloc(1, sizeof(*observed));
+
+	if (!observed) {
+		return NULL;
+	}
+	observed->links = calloc(1, sizeof(*observed->links));
+	if (!observed->links) {
+		free(observed);
+		return NULL;
+	}
+	observed->links[0].name = strdup("wlan0");
+	observed->links[0].wireless = wireless;
+	observed->link_count = 1;
+	return observed;
+}
+
+static void the_regulatory_domain_the_kernel_reports(void)
+{
+	script_t               asked;
+	ncfg_observe_replay_t  replay;
+	ncfg_observe_kernel_t  genl;
+	ncfg_buf_t             family;
+	ncfg_buf_t             answer;
+	ncfg_buf_t             nothing;
+	ncfg_observed_t       *observed;
+	char                   err[NCFG_ERROR_MAX];
+
+	ncfg_buf_init(&family, 0);
+	ncfg_buf_init(&answer, 0);
+	ncfg_buf_init(&nothing, 0);
+	append_nl80211_family(&family);
+	append_regdom(&answer, "DE");
+	append_regdom(&nothing, NULL);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &answer);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(1);
+	check(observed && ncfg_observe_regdom_from(&genl, observed, err, sizeof(err)) &&
+	    observed->regdom && strcmp(observed->regdom, "DE") == 0,
+	    "a machine with a radio observes the domain the kernel names");
+	ncfg_observed_free(observed);
+
+	/* Nothing is queued: a round that asked would find the script empty. */
+	memset(&asked, 0, sizeof(asked));
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(0);
+	check(observed && ncfg_observe_regdom_from(&genl, observed, err, sizeof(err)) &&
+	    observed->regdom == NULL,
+	    "a machine with no radio asks nothing and observes no domain");
+	ncfg_observed_free(observed);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &nothing);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(1);
+	check(observed && ncfg_observe_regdom_from(&genl, observed, err, sizeof(err)) &&
+	    observed->regdom == NULL,
+	    "a reply naming no country leaves the field empty, and the observation stands");
+	ncfg_observed_free(observed);
+
+	ncfg_buf_free(&family);
+	ncfg_buf_free(&answer);
+	ncfg_buf_free(&nothing);
+}
+
 int main(void)
 {
 	make_fixture();
@@ -1488,6 +1605,7 @@ int main(void)
 	the_nat_the_kernel_holds();
 	a_ruleset_that_moved_is_read_again();
 	the_offloads_the_kernel_reports();
+	the_regulatory_domain_the_kernel_reports();
 	the_chains_that_are_not_a_conflict();
 	a_kernel_that_will_not_answer();
 	a_payload_that_will_not_read_and_an_answer_too_large();

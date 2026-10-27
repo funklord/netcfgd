@@ -181,3 +181,79 @@ int observe_config_value(const char *text, const char *key, char *out, size_t ou
 	}
 	return 0;
 }
+
+/*
+ * Send what `build` produced and collect the replies.
+ *
+ * 1 with a reply, which the caller frees; 0 with a sentence in `why`, which
+ * covers both a request this port could not build and a kernel that would not
+ * answer. The two are told apart by the caller only where it matters, which is
+ * nowhere here: a family that will not resolve and a device that will not
+ * answer are both "this observation does not describe that device".
+ */
+int observe_genl_ask(const ncfg_observe_kernel_t *kernel, const ncfg_buf_t *message,
+    ncfg_netlink_reply_t *reply, char *why, size_t why_size)
+{
+	ncfg_buf_t body;
+	uint16_t   kind = 0;
+	uint16_t   flags = 0;
+	int        answered;
+
+	memset(reply, 0, sizeof(*reply));
+	ncfg_buf_init(&body, 0);
+	if (!ncfg_wire_request_parts(message, "generic netlink", &kind, &flags, &body, why, why_size)) {
+		ncfg_buf_free(&body);
+		return 0;
+	}
+	answered = kernel->exchange(kernel->context, kind, flags, &body, NULL, reply, why,
+	    why_size);
+	ncfg_buf_free(&body);
+	if (!answered) {
+		ncfg_netlink_reply_free(reply);
+		memset(reply, 0, sizeof(*reply));
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * A generic netlink family's runtime id, resolved over the caller's exchange.
+ *
+ * One lookup for every round that asks a family something -- WireGuard,
+ * ethtool, nl80211 -- since each had its own copy and a third was about to be
+ * written.
+ */
+int observe_genl_family(const ncfg_observe_kernel_t *kernel, const char *name,
+    ncfg_genl_family_t *family, char *why, size_t why_size)
+{
+	ncfg_buf_t           message;
+	ncfg_netlink_reply_t reply;
+	int                  ok;
+
+	memset(family, 0, sizeof(*family));
+	ncfg_buf_init(&message, 0);
+	why[0] = '\0';
+	ok = ncfg_genl_getfamily_request(&message, name, 0, why, why_size) &&
+	    observe_genl_ask(kernel, &message, &reply, why, why_size);
+	ncfg_buf_free(&message);
+	if (!ok) {
+		return 0;
+	}
+	if (reply.count == 0) {
+		/*
+		 * The controller answered and named no family, which reads
+		 * downstream as a family with id zero -- and a request built with one
+		 * is refused five seconds later and about the wrong thing.
+		 * `apply/kernel_genl.c` refuses the same reply for the same reason.
+		 */
+		ncfg_error_set(why, why_size,
+		    "the generic netlink controller answered about `%s` without naming a "
+		    "family", name);
+		ncfg_netlink_reply_free(&reply);
+		return 0;
+	}
+	ok = ncfg_genl_family_parse(name, reply.items[0].bytes, reply.items[0].length,
+	    family, why, why_size);
+	ncfg_netlink_reply_free(&reply);
+	return ok;
+}

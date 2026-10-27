@@ -166,13 +166,38 @@ static void the_live_check(void)
 		    "skipped");
 		return;
 	}
-	if (ncfg_regdom_read(code, sizeof(code), err, sizeof(err))) {
-		check(strlen(code) == 2u, "the kernel names a two-character domain");
-		detail("domain", code);
+	/* The request and the parse against the real kernel, through the same
+	 * socket helper the executor uses. No nl80211 is a machine with no
+	 * wireless, and the check is then that the answer is a sentence. */
+	if (ncfg_genl_family_open(NL80211_GENL_NAME, &socket, &family, err, sizeof(err))) {
+		ncfg_buf_t           message;
+		ncfg_buf_t           body;
+		ncfg_netlink_reply_t answer;
+		uint16_t             kind = 0;
+		uint16_t             flags = 0;
+		int                  read;
+
+		memset(&answer, 0, sizeof(answer));
+		ncfg_buf_init(&message, 0);
+		ncfg_buf_init(&body, 0);
+		read = ncfg_regdom_request(&message, &family, ncfg_netlink_take_seq(&socket), err,
+		           sizeof(err)) &&
+		    ncfg_wire_request_parts(&message, "nl80211", &kind, &flags, &body, err,
+		        sizeof(err)) &&
+		    ncfg_netlink_request(&socket, kind, flags, &body, NULL, &answer, err,
+		        sizeof(err)) &&
+		    answer.count > 0 &&
+		    ncfg_regdom_parse(answer.items[0].bytes, answer.items[0].length, code,
+		        sizeof(code), err, sizeof(err));
+		check(read && strlen(code) == 2u, "the kernel names a two-character domain");
+		detail("domain", read ? code : err);
+		ncfg_netlink_reply_free(&answer);
+		ncfg_buf_free(&message);
+		ncfg_buf_free(&body);
+		ncfg_genl_family_free(&family);
+		ncfg_netlink_close(&socket);
 	} else {
-		/* No nl80211 is a machine with no wireless; the check is that the
-		 * answer is a sentence, not that there is a radio. */
-		check(err[0] != '\0', "a machine that cannot answer says why");
+		check(err[0] != '\0', "a machine with no nl80211 says why");
 		detail("said", err);
 	}
 	check(!ncfg_genl_family_open("ncfg-nofamily", &socket, &family, err, sizeof(err)),

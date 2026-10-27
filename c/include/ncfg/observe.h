@@ -902,6 +902,18 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 int ncfg_observe_offloads_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
+/*
+ * The wireless regulatory domain, into `observed->regdom`, over the same
+ * generic netlink seam -- asked only where the observation has a radio.
+ *
+ * A kernel with no nl80211, or a reply that names no country, leaves the field
+ * empty with a note, as the offloads round does. `genl` may be NULL, which is
+ * the seam left out. 0 with a sentence is an allocation that failed, and
+ * nothing else.
+ */
+int ncfg_observe_regdom_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * What each WireGuard device is running, and whether it is current
  * ------------------------------------------------------------------------ */

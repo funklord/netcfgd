@@ -12787,19 +12787,21 @@ finished before its first reading, so anything before US was invisible. It
 now waits for two readings before the roam, and a sequence that does not
 begin with the country before the move is "not measured".
 
-**The first piece of 0296 is built: `ncfg status` names the domain**
-(2026-10-27). Where the observation found a radio, a note after the listing
-reads the kernel's global domain through nl80211 `GET_REG` --
-`wireless regulatory domain: DE`, or for `00` that no country is set, so
-6 GHz is off and some channels only listen. It is a note and not a field:
-`observed.json` is a witness the Rust shares. What it cannot say is *who* set
-the domain -- `GET_REG` does not carry the initiator, which only the
-`REG_CHANGE` notification does, so "and from what" waits for a daemon that
-listens. Checked by `regdom_test.c` (the request, and a reply refused unless
-it names two letters or digits), the `kernel_bytes` fuzz target, and a vm
-running the built `ncfg status`: no radio, no line; world, the note; DE set,
-DE. `family_open` moved out of `kernel_genl.c` unchanged into
-`genl_socket.c` for the second caller.
+**The first piece of 0296 is built: the observation carries the domain**
+(2026-10-27, moved into the observation 2026-10-28). Where the observation
+has a radio, a round beside the offloads and WireGuard asks nl80211 `GET_REG`
+over the same generic netlink seam and stores the country in
+`observed.regdom` -- so the daemon has it on every tick, a client reads it in
+the `status` answer, `observed.json` carries it, and `ncfg status` prints it
+under the listing (for `00`, that no country is set and 6 GHz is off). It was
+first a note only the command line printed, on the reasoning that the
+observed witness is shared with the Rust; it is not -- the C writes the
+witnesses since 0279 -- and a fact clients need belongs where the daemon
+answers from. What it cannot say is *who* set the domain: `GET_REG` does not
+carry the initiator, only the `REG_CHANGE` notification does, so "and from
+what" waits for a daemon that listens. The family lookup the offloads and
+WireGuard rounds each carried is one `observe_genl_family` now, and
+`family_open` moved out of `kernel_genl.c` unchanged into `genl_socket.c`.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
