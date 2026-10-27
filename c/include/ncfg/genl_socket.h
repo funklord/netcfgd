@@ -19,7 +19,9 @@
  *
  * On success the caller owns both and closes the socket with
  * `ncfg_netlink_close` and the family with `ncfg_genl_family_free`. On failure
- * neither is left open.
+ * neither is left open, and the sentence is `ncfg_genl_lookup_failed`'s where
+ * the kernel refused the lookup -- for a missing family, that the module
+ * providing it is probably not loaded.
  */
 int ncfg_genl_family_open(const char *name, ncfg_netlink_t *socket, ncfg_genl_family_t *family,
     char *err, size_t err_size);

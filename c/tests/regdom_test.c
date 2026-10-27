@@ -178,6 +178,11 @@ static void the_live_check(void)
 	check(!ncfg_genl_family_open("ncfg-nofamily", &socket, &family, err, sizeof(err)),
 	    "a family the kernel does not have is refused, and nothing is left open");
 	detail("said", err);
+	/* **As a lookup, naming the module.** It used to read "RTM_NEWLINK
+	 * failed": the controller's message type is 16, which is that number in
+	 * rtnetlink, and the request path named the failure by type. */
+	check(strstr(err, "not loaded") != NULL && strstr(err, "RTM_") == NULL,
+	    "and the sentence says the module is probably not loaded");
 }
 
 int main(void)

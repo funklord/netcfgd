@@ -46,6 +46,13 @@ int ncfg_genl_family_open(const char *name, ncfg_netlink_t *socket, ncfg_genl_fa
 	    ncfg_wire_request_parts(&message, "generic netlink", &kind, &flags, &body, err, err_size);
 	if (ok) {
 		ok = ncfg_netlink_request(socket, kind, flags, &body, NULL, &reply, err, err_size);
+		/* The kernel refused the lookup: say it as a lookup. The sentence
+		 * `ncfg_netlink_request` wrote names the controller's message type,
+		 * 16, as `RTM_NEWLINK`, so a missing WireGuard module read as a link
+		 * that could not be created. */
+		if (!ok && reply.refused != 0) {
+			(void)ncfg_genl_lookup_failed(name, reply.refused, err, err_size);
+		}
 	}
 	ncfg_buf_free(&message);
 	ncfg_buf_free(&body);

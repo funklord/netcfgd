@@ -459,6 +459,7 @@ static absorb_t absorb_reply(ncfg_netlink_reply_t *reply, const uint8_t *bytes, 
 			int32_t code = reply_error_code(&message);
 
 			if (code != 0) {
+				reply->refused = (int)code;
 				(void)ncfg_netlink_fail(err, err_size,
 				    refused_request(&message), (int)code);
 				return ABSORB_BAD;

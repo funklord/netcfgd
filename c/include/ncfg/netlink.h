@@ -171,8 +171,12 @@ typedef struct {
 	/*
 	 * The errno the kernel refused this request with, or 0 where it did not.
 	 *
-	 * **Set by `ncfg_netlink_collect_batch` and by nothing else**, because it
-	 * is the batch path an executor sends through. A caller that has to tell
+	 * **Set by `ncfg_netlink_collect_batch`, the batch path an executor
+	 * sends through, and by `ncfg_netlink_request`** since a family lookup
+	 * needed it: the generic netlink controller's message type is 16, which
+	 * is `RTM_NEWLINK`'s number, so the sentence for a family the kernel does
+	 * not have read "RTM_NEWLINK failed" -- and `ncfg_genl_lookup_failed`, the
+	 * function written to say it properly, needs the number. A caller that has to tell
 	 * `EEXIST` from `EPERM` cannot do it from the sentence: `ncfg_netlink_fail`
 	 * renders one string, and reading a decision back out of the words of a
 	 * message is what `config.h` forbids by name. So the number survives
