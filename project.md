@@ -12601,18 +12601,46 @@ a conclusion composed from two measurements, not one run: a plain radio's
 channels were the global domain's in every reading, which is what lets them
 compose. **So the stuck case is narrower than first written**: a machine in
 the wrong domain somewhere every network it could join is on a channel that
-domain forbids.
+domain forbids -- and, measured below, only when that domain was set by hand.
 
-**The world domain's case is not measured, and one kernel cannot measure it.**
-With 13 passive-only, whether a station can hear a beacon there and still
-join -- cfg80211's beacon hints may lift the restriction -- needs an access
-point transmitting on a channel the station's domain forbids. In one kernel
-there is none to be had: the first attempt gave the access point hwsim's
-`regtest=7`, a radio with a driver hint of its own, and a country set by hand
-reached it like every other radio (13 `off` under US, `noIR` under the
-world), and hwsim's custom domains stop at channel 11. It needs the access
-point in a second kernel -- two vms, with something carrying hwsim's frames
-between them, which is what `wmediumd` does within one. Not built.
+**Measured across two kernels the same day, and the stuck case is a country
+set by hand, never an unset one.** One kernel could not hold an access point
+on a channel its station is forbidden: hwsim's `regtest=7` gives radio 0 a
+driver hint of its own, and a country set by hand still reached it (13 `off`
+under US, `noIR` under the world), and hwsim's custom domains stop at
+channel 11. So `wire.conf` runs two vms on a segment -- the access point's in
+DE with a real hostapd, `country_code` and all, on channel 13 -- and
+`relay.py` in each registers with hwsim over generic netlink and carries
+every frame across over UDP, which is what `wmediumd` does within one kernel.
+Two runs, identical:
+
+    station's domain      ch 13 before   hears it   ch 13 after scan   joins   domain after
+    DE (the control)      ok             DE         ok                 yes     DE
+    nothing set (00)      noIR           DE         ok                 yes     DE, at once
+    US, set by hand       off            nothing    off                no      US
+
+**The world domain heals itself**: the beacon is heard passively, cfg80211's
+beacon hint lifts `noIR` on that channel, the station joins and adopts the
+country. **A country set by hand that forbids the channel is stuck**: the
+access point is invisible, nothing is joined, nothing tells the kernel where
+it is -- and E21 says idle returns to that country rather than to the world.
+
+**That is the design constraint 0296's mechanism has to meet.** Setting a
+country by hand is the one act that can strand a machine, and it outlives
+every move until it is set again. So a location source that sets the domain
+must be right or stay silent: a stale fix carried across a border is exactly
+how a laptop gets US in Europe. Leaving the domain unset and letting
+association and beacon hints work is safe everywhere this rig has looked; a
+country set from location is an improvement only where the source is
+current.
+
+The relay is an instrument and is checked as one: the control has to join
+through it or the run fails, and every transmitter address it sees must be
+one it computed (`42:00:00:00:<idx>:00`, hwsim's permanent address with the
+0x40 bit), or a relay injecting to the wrong radio would drop everything
+silently. "Refused" in its counts is the kernel declining frames for a
+channel the radio was not on -- some during any scan, all of them under US.
+Not built: 5 GHz and DFS, more than one access point, a roam.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`

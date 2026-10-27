@@ -2674,10 +2674,33 @@ hull-hwsim:
 # built first. It fails only when one of its own instruments did not work --
 # no database, no access point, a country nobody heard -- and otherwise prints
 # what the kernel did, whatever that was.
+#
+# Two halves. `hull.conf` is one vm, three radios in one kernel. `wire.conf` is
+# two vms on a segment with `relay.py` carrying hwsim's frames between them,
+# for the case one kernel cannot hold: an access point on a channel the
+# station's domain forbids. Its payloads report through ./verdict, read here.
 hull-regdom:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/hull.conf
+	@rm -f tests/hull/regdom/verdict/ap tests/hull/regdom/verdict/station
+	@mkdir -p tests/hull/regdom/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire.conf || true
+	@missing=0; \
+	for name in ap station; do \
+		file=tests/hull/regdom/verdict/$$name; \
+		if [ ! -f "$$file" ]; then \
+			echo "regdom: $$name left no verdict, so it never reached its payload"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/regdom: $$name: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "regdom: $$missing of 2 machine(s) did not pass"; \
+		exit 1; \
+	fi
 
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
