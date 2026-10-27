@@ -8609,6 +8609,14 @@ script fails the phase. That list is built from `document.interfaces`, which
 is complete for as long as only interface hooks are ever run -- and is the
 same list that would need to grow if network hooks ever do.
 
+**Still open in the C port, re-read 2026-10-27.** No pass emits a `hook.run`
+for a network; `c/src/plan/wifi.c` warns instead, and the script mode goes on
+the open in `c/src/host/hooks.c`. One reader had it wrong:
+`c/src/daemon/patience.c` said a network's hooks "run when it is joined" and
+adds their timeouts to an apply's deadline. The count is kept -- generous by
+one timeout per network hook, and right the day they run -- and the comment
+now says they do not run yet. The phase question is still the holder's.
+
 ## 10.35 cli and gui: a probe that blocked itself, and a menu nobody told
 
 Swept on 2026-09-04. 10.20 had already swept GUI behaviour for the
