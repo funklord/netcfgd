@@ -7063,7 +7063,7 @@ to try first.
 
 ---
 
-## 10.15 Open: `make live` is broken at HEAD by the restructure's own success
+## 10.15 Fixed: `make live` was broken by the restructure's own success
 
 **2026-09-03.** Passes 1a and 1b of [0155](doc/decision/0155-a-link-is-the-unit-of-configuration.md)
 moved `mtu`, `mac`, `link_settings`, `kind`, `master`, `qdisc`,
@@ -7081,12 +7081,23 @@ Measured by re-running each script against a freshly built binary:
   happens exactly once.
 - `stations.sh` had `kind = "dummy"` in an `interface`. **Fixed.**
 - `profile.sh` had `mtu` in an `interface`. **Fixed**, onto the device.
-- **Fifteen more are stale and are not fixed**: `privacy`, `nat`, `qdisc`,
-  `links`, `nm`, `ingress`, `rules`, `ap`, `report`, `hooks`, `acl`,
-  `unmanage`, `readonly`, `portal`, `helper`, `drift`, `confirm` and
-  `altname` carry roughly 79 moved keys between them, counted by an `awk`
-  range over `interface` blocks — crude, so treat it as a scale rather than a
-  tally. `links.sh` is the largest and the one `make live` hits first.
+- **The rest were fixed the same afternoon, in `39a49883`**: `privacy`,
+  `nat`, `qdisc`, `links`, `nm`, `ingress`, `rules`, `ap`, `report`, `hooks`,
+  `acl`, `unmanage`, `readonly`, `portal`, `helper`, `drift`, `confirm` and
+  `altname`, plus three inline `printf` configs in `openvpn.sh`. It took
+  `make live` from one suite passing of thirty-seven to thirty-six, and the
+  one left was behaviour rather than a fixture -- 10.16.
+
+**This entry stayed headed *Open* for eight weeks after that**, because the
+fix rewrote the paragraph below and not the heading or this list; found
+2026-10-27. Re-measured then with an `awk` pass that tracks brace depth
+through every `interface` block in `tests/live/*.sh` and counts the eight
+moved keys, whether on their own line or inline after `;`: **69 at
+`39a49883^`**, which is the control (this entry's first, line-anchored count
+said about 79; an earlier draft of the re-measurement missed inline keys and
+read 0 for `links.sh`), and **1 at HEAD** -- `config_arrives.sh`'s
+`mtu = "this is not a number"`, a drop-in broken on purpose to check the
+daemon says so.
 
 The fix per file is mechanical and the diagnostic does most of it: the
 compiler names the line, the key and the block to move it to, because the
