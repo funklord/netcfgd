@@ -6592,6 +6592,14 @@ nothing at all for the hour. The daemon was `active` throughout with
 `NRestarts=0` and `Result=success`, and the run-state under `/run/netcfgd` had
 been written normally at startup.
 
+**Its likely mechanism has since been found and fixed, and that is not the
+same as this being explained** (re-read 2026-10-27). 10.13 found netcfgd
+starting a second supplicant beside its own unreachable orphan, which
+produces exactly this; 10.67 fixed it on 2026-09-08. But the orphans 10.13
+measured date from the day after this outage, so whether two were live in
+this window is not recorded anywhere -- which is why this stays open until a
+recurrence, or a stretch of daily use without one, settles it.
+
 **Two mechanisms in that day's change were ruled out with evidence**, not with
 reasoning:
 
@@ -6946,7 +6954,7 @@ message against a wrapper. None was caught by being careful.
 
 ---
 
-## 10.13 Open: netcfgd starts a second supplicant on its own orphan
+## 10.13 Fixed: netcfgd started a second supplicant on its own orphan
 
 **2026-09-03, measured on this machine**, and it is very likely 10.9's
 mechanism. The service was `inactive (dead)` and its cgroup still held **two
