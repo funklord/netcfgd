@@ -12640,7 +12640,7 @@ one it computed (`42:00:00:00:<idx>:00`, hwsim's permanent address with the
 0x40 bit), or a relay injecting to the wrong radio would drop everything
 silently. "Refused" in its counts is the kernel declining frames for a
 channel the radio was not on -- some during any scan, all of them under US.
-Not built: 6 GHz, a roam, and channel widths beyond 20 MHz.
+Not built: a roam, channel widths beyond 20 MHz, and 6 GHz discovery through a 2.4 or 5 GHz access point's reduced neighbour report.
 
 **5 GHz and radar channels, the same relay, the same answer** (`wire5.conf`,
 two runs). Four access points in a US kernel -- 36, radar channels 52 and
@@ -12678,6 +12678,48 @@ interface for all four access points, 36 and 149 included, which the US
 table does not mark radar, and all four came up together after about 60
 seconds. It changes nothing the station reads, and the logs went with the
 vm; recorded rather than guessed at.
+
+**6 GHz breaks the pattern: there, an unset machine does not heal**
+(`wire6.conf`). The world domain has no 6 GHz at all, so a machine with no
+country set cannot see a 6 GHz access point, cannot join one, and nothing
+on that band will ever tell it where it is:
+
+    station's domain   ca5 (5975 MHz)              ca101 (6455 MHz)
+    CA (control)       joins                       joins
+    nothing set (00)   invisible, stays 00         invisible, stays 00
+    US                 joins, adopts CA            joins, adopts CA
+    DE                 joins, adopts CA            invisible, stays DE
+    CN                 invisible                   invisible
+
+    00         5975 off   6135 off   6455 off   6615 off   6875 off
+    US         all five noIR (the database says PASSIVE-SCAN)
+    CA         all five ok
+    DE, GB, JP 5975 ok    6135 ok    6455 off   6615 off   6875 off
+    CN         all five off
+
+So the conclusion drawn from 2.4 and 5 GHz -- leaving the domain unset is
+safe everywhere -- **does not hold at 6 GHz**: unset means no 6 GHz until
+something else sets a country, which in practice is joining a 2.4 or 5 GHz
+network first. A 6 GHz-only network is unreachable to it. That is the one
+place measured where a location source does not merely avoid harm but
+supplies something nothing else can, and it is worth weighing in 0296's
+mechanism: the cost of a wrong country (stranded in its gaps) against the
+cost of none (no 6 GHz at all).
+
+**And US cannot run a 6 GHz access point from Linux with this database.** It
+marks US 5925-7125 MHz `PASSIVE-SCAN`, every channel is `NO_IR`, and hostapd
+refuses: "Frequency 5975 (primary) not allowed for AP mode". The first 6 GHz
+run put the access points in US and both refused to start; a probe read the
+rule for twelve countries, and CA, BR and SA allow the whole band without
+it, so the access points are in CA. A US station still joins them -- like the
+world domain on 5 GHz radar channels, `noIR` stays set and association works
+anyway. For netcfgd that means an `access_point` on 6 GHz in a US-domain
+machine cannot work, which `ncfg plan` should be able to say before hostapd
+does.
+
+6 GHz admits no open network, so these access points are WPA3 -- SAE with
+hash-to-element and protected management frames -- and the station joins
+through `wpa_supplicant`, not `iw connect`.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
