@@ -2678,16 +2678,19 @@ hull-hwsim:
 # Two halves. `hull.conf` is one vm, three radios in one kernel. `wire.conf` is
 # two vms on a segment with `relay.py` carrying hwsim's frames between them,
 # for the case one kernel cannot hold: an access point on a channel the
-# station's domain forbids. Its payloads report through ./verdict, read here.
+# station's domain forbids. `wire5.conf` is the same at 5 GHz, with radar
+# channels. Their payloads report through ./verdict, read here.
 hull-regdom:
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/hull.conf
-	@rm -f tests/hull/regdom/verdict/ap tests/hull/regdom/verdict/station
+	@rm -f tests/hull/regdom/verdict/ap tests/hull/regdom/verdict/station \
+		tests/hull/regdom/verdict/ap5 tests/hull/regdom/verdict/station5
 	@mkdir -p tests/hull/regdom/verdict
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire.conf || true
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire5.conf || true
 	@missing=0; \
-	for name in ap station; do \
+	for name in ap station ap5 station5; do \
 		file=tests/hull/regdom/verdict/$$name; \
 		if [ ! -f "$$file" ]; then \
 			echo "regdom: $$name left no verdict, so it never reached its payload"; \
@@ -2698,7 +2701,7 @@ hull-regdom:
 		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
 	done; \
 	if [ "$$missing" -ne 0 ]; then \
-		echo "regdom: $$missing of 2 machine(s) did not pass"; \
+		echo "regdom: $$missing of 4 machine(s) did not pass"; \
 		exit 1; \
 	fi
 

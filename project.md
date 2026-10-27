@@ -12640,7 +12640,44 @@ one it computed (`42:00:00:00:<idx>:00`, hwsim's permanent address with the
 0x40 bit), or a relay injecting to the wrong radio would drop everything
 silently. "Refused" in its counts is the kernel declining frames for a
 channel the radio was not on -- some during any scan, all of them under US.
-Not built: 5 GHz and DFS, more than one access point, a roam.
+Not built: 6 GHz, a roam, and channel widths beyond 20 MHz.
+
+**5 GHz and radar channels, the same relay, the same answer** (`wire5.conf`,
+two runs). Four access points in a US kernel -- 36, radar channels 52 and
+100, and 149 -- and the station in each domain in turn, a fresh kernel per
+access point since joining one adopts a country:
+
+    station's domain   36       52 (radar)   100 (radar)   149
+    US (control)       joins    joins        joins         joins
+    nothing set (00)   joins    joins        joins         joins
+    JP, set by hand    joins    joins        joins         invisible, stays JP
+    CN, set by hand    joins    joins        invisible     joins
+
+Every join adopted US at once. **The world domain joins radar channels too**,
+and there the beacon does not lift `noIR` -- the flag reads the same after
+the scan -- yet association works; on 36 and 149 it is lifted as at 2.4 GHz.
+**A country set by hand strands the machine exactly in that country's
+gaps**: JP has no band at 149, CN none at 100 to 140, and an access point
+there is invisible to it.
+
+**And no gap between Europe and the US on these channels**, which was the
+case this half was first written to find. The table:
+
+    00        36 noIR   52 noIR,radar   100 noIR,radar   149 noIR   165 noIR
+    US, DE, GB 36 ok    52 radar        100 radar        149 ok     165 ok
+    JP        36 ok     52 radar        100 radar        149 off    165 off
+    CN        36 ok     52 radar        100 off          149 ok     165 ok
+
+The first run's control assumed channel 165 is unusable in Europe and failed
+on DE; the parser was right and the premise was not -- this regulatory
+database allows 5725-5875 MHz in DE and GB. The control is CN's channel 100
+now, which China has no band for.
+
+**One thing unexplained.** hostapd logged a completed radar check on its own
+interface for all four access points, 36 and 149 included, which the US
+table does not mark radar, and all four came up together after about 60
+seconds. It changes nothing the station reads, and the logs went with the
+vm; recorded rather than guessed at.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
