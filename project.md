@@ -10632,6 +10632,15 @@ a reason rather than a list of names:
   would carry the radio's. **Wiring it would change behaviour the example file
   documents and `ncfg plan` warns about**, so it is the holder's call and not a
   gap to close in passing.
+
+  **Answered 2026-10-27, and not with this key:**
+  [0296](doc/decision/0296-the-regulatory-domain-follows-the-machine.md). The
+  regulatory domain follows the machine's location, inferred from what the
+  radio hears, with a configured country as an override -- because the case
+  that matters is a laptop carried into another region, and a per-radio key
+  cannot serve it. The C has since gained the executor arm the Rust lacked
+  (`c/src/apply/wifi_ops.c`), so what is missing is the producer. How it is
+  built waits on what the kernel allows, measured in 10.585.
 - **`CommitConfirm` is never planned on purpose.** The daemon owns the commit
   window and `confirm.rs` has its own machinery; the executor's arm is
   defensive and says so.
@@ -12524,6 +12533,22 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.585 What the kernel lets a moving machine do with its regulatory domain
+
+**Started 2026-10-27, for [0296](doc/decision/0296-the-regulatory-domain-follows-the-machine.md):
+nothing is measured yet.** The decision is that the domain follows the
+machine; what it does not say is how, because that depends on what cfg80211
+accepts from a running system. A `regdom` hull rig is being built to measure
+it with `mac80211_hwsim` radios and a `hostapd` advertising a country.
+
+**Two things about the rig itself, before it measures anything.** The domain
+is one setting per kernel, and stock hostapd's `country_code` is expected to
+*set* it as well as advertise it -- which would contaminate every reading
+with the access point and the station in one kernel. So the rig's first check
+is of its own setup. And the image needs `wireless-regdb`: without the
+database the kernel can apply no country but the world domain, and every
+reading would say `00` for that reason alone.
 
 ## 10.584 fuzznet fixed the packing build, and netcfgd should still not rely on it
 
