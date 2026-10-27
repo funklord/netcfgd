@@ -12669,6 +12669,19 @@ connection error, harder to tell from a machine that is merely slow.
   success message said "resolve each other by name" for one run before being
   corrected to say what was actually checked.
 
+  **hull has since built names, as c41b890 (2026-10-27), and this rig still
+  does not use them.** A segment given a subnet -- `(segments (wire (subnet
+  "10.99.0.0/24")))` -- gets per-machine addresses drawn from id and segment
+  name, and a read-only `/etc/hosts` naming every sibling as `ID` and
+  `ID.hull`: a hosts file, not DNS, so `getaddrinfo` resolves it and a resolver
+  query does not. A bare `(segments "wire")` is unchanged, which is what every
+  rig here uses, since setting its own addresses is the point. Names without
+  giving that up means a second, addressed segment beside the bare one; hull
+  tests the mix. Its other change -- a `(network none)` vm no longer gets
+  passt's address and default route on its first NIC -- touches nothing here,
+  as every rig sets `(network true)`. Not built in hull: docker, reverse
+  lookups, IPv6. Detail in hull's Appendix D, *Sibling names on a segment*.
+
 ### Both arms of the collector are measured
 
 Absent: the first run, where `cpe` left no file -- *"left no verdict at all, so
