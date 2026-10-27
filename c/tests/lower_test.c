@@ -2069,6 +2069,20 @@ static void interface_cases(void)
 		    "  and `dns` defaults to true rather than false");
 		ncfg_document_free(document);
 	}
+	/* A second block replaces the first, as the Rust's assignment does. The
+	 * first used to be freed as a struct and its prefixes leaked with their
+	 * names: `make SANITIZE=1 test` is what sees that. */
+	document = compiles("interface lan0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tadvertise { prefixes = [\"@pd:wan0\"]; backend = \"radvd\" }\n"
+	    "\tadvertise { prefixes = [\"@pd:wan1\"] }\n}\n",
+	    "a second advertise block compiles");
+	if (document) {
+		interface = interface_named(document, "lan0");
+		check(interface && interface->advertise && interface->advertise->prefix_count == 1u &&
+		    strcmp(interface->advertise->prefixes[0].source, "wan1") == 0,
+		    "  and the second is the one kept");
+		ncfg_document_free(document);
+	}
 	refuses("interface lan0 { advertise { prefixes = [\"2001:db8::/64\"] } }\n",
 	    "is not a prefix reference", "an advertised prefix must be a reference");
 	refuses("interface lan0 { advertise { managed = true } }\n",

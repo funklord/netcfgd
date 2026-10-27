@@ -205,6 +205,20 @@ drop:
  *
  * netcfgd does not send the advertisement; 0009 hands that to radvd or odhcpd.
  */
+/* What one policy owns: its prefixes, their names, and an `exec` command.
+ * Shared by the refusal below and by a second `advertise` block replacing the
+ * first, which freed the struct and leaked all three. */
+static void release_advertise(ncfg_ra_policy_t *policy)
+{
+	size_t i;
+
+	for (i = 0; i < policy->prefix_count; i++) {
+		free(policy->prefixes[i].source);
+	}
+	free(policy->prefixes);
+	free(policy->backend.command);
+}
+
 static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_ra_policy_t *out)
 {
@@ -347,11 +361,7 @@ static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
 	return 1;
 
 drop:
-	for (i = 0; i < policy.prefix_count; i++) {
-		free(policy.prefixes[i].source);
-	}
-	free(policy.prefixes);
-	free(policy.backend.command);
+	release_advertise(&policy);
 	return 0;
 }
 
@@ -664,6 +674,12 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 
 				if (!lower_advertise(ctx, inner, &advertise)) {
 					break;
+				}
+				/* A second block replaces the first, as the Rust's assignment
+				 * does -- and the first is released whole, not just its
+				 * struct. */
+				if (interface.advertise) {
+					release_advertise(interface.advertise);
 				}
 				free(interface.advertise);
 				interface.advertise = calloc(1, sizeof(*interface.advertise));
