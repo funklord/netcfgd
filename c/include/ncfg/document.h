@@ -1840,6 +1840,23 @@ typedef struct {
 	 * a profile, and spelling that state as one would make it permanently
 	 * confusable with the shipped `offline` profile in every diagnostic. */
 	char                      *profile;
+	/*
+	 * `global { regdom = "DE" }`: the wireless regulatory domain this machine
+	 * is held to when no access point says otherwise, uppercased. NULL where
+	 * the configuration leaves it to the kernel.
+	 *
+	 * **In `global` because the domain is one setting per kernel** (0296,
+	 * project.md 10.585): a radio's own `regdom` was a per-device key for a
+	 * per-machine fact. Measured there too, and it decides how this is set:
+	 * while a radio is associated the kernel follows the access point's
+	 * country, and on going idle it returns to the one set here by itself.
+	 * So the planner sets it only with no radio associated, and never fights
+	 * an access point. The cost is the one 10.585 measured: a country set
+	 * here strands the machine in that country's gaps elsewhere -- and the
+	 * gain is 6 GHz on a machine that stays put, which the world domain
+	 * switches off.
+	 */
+	char                      *regdom;
 	ncfg_hostname_policy_t     hostname_policy;
 	ncfg_control_t             control;
 	/* Separate from `control` because the two cannot be one sentence: the

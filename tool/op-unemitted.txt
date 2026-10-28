@@ -7,5 +7,5 @@
 
 WifiAssociate Superseded. Associating is imperative and transient rather than desired state, so the daemon drives it straight at the supplicant with SELECT_NETWORK (netcfgd-daemon/src/wifi.rs) instead of planning it.
 WifiDisassociate Superseded, with WifiAssociate and for the same reason.
-WifiSetRegdom The unwired half of an inertness doc/netcfgd.conf.example documents: "the radio's is kept in the document and reaches nothing". Only an access point's regdom reaches anything, as hostapd's country_code. Wiring this would change documented behaviour, so it is the holder's call rather than a gap to close.
+WifiSetRegdom Never planned by the Rust, which is the retired implementation. The C plans it from `global { regdom }` since 2026-10-28 (0296, project.md 10.585); a radio's own regdom stays inert in both.
 CommitConfirm Never planned on purpose: the daemon owns the commit window and confirm.rs has its own machinery for it. The executor's arm is deliberately defensive, and says so.

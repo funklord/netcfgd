@@ -2326,6 +2326,63 @@ static void a_carrier_hook_fires_when_the_cable_moves(void)
 }
 
 /*
+ * `global { regdom }` is set while no radio is associated, and only then.
+ *
+ * project.md 10.585 measured why that is the rule: an associated radio holds
+ * the access point's country over one set by hand, and goes back to the one
+ * set by hand when it is idle -- so setting it while associated would fight
+ * the access point on every pass. The control cases are the two in which
+ * nothing is planned: the domain already is that country, and a radio is on
+ * a network.
+ */
+static void the_machine_s_country_is_set_while_no_radio_is_associated(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define RADIO_IDLE(carrier) \
+	"\"links\":[{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":true,\"carrier\":" carrier \
+	",\"wireless\":true,\"ownership\":\"unknown\"}]"
+#define SUPPLICANT ",\"backends\":[{\"kind\":\"supplicant\",\"interface\":\"wlan0\",\"running\":true}]"
+#define BODY "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]"
+
+	plan = plan_of("{\"regdom\":\"DE\"}", BODY,
+	    RADIO_IDLE("false") SUPPLICANT ",\"regdom\":\"00\"", NULL, &document, &observed);
+	check(plan && has_name(plan, "wifi.set_regdom"),
+	    "an idle radio in the world domain is given the configured country");
+	release(plan, document, observed);
+
+	plan = plan_of("{\"regdom\":\"DE\"}", BODY,
+	    RADIO_IDLE("true") SUPPLICANT ",\"regdom\":\"US\"", NULL, &document, &observed);
+	check(plan && !has_name(plan, "wifi.set_regdom"),
+	    "and an associated radio keeps its access point's country");
+	release(plan, document, observed);
+
+	plan = plan_of("{\"regdom\":\"DE\"}", BODY,
+	    RADIO_IDLE("false") SUPPLICANT ",\"regdom\":\"DE\"", NULL, &document, &observed);
+	check(plan && !has_name(plan, "wifi.set_regdom"),
+	    "and a domain that is already the country is left alone");
+	release(plan, document, observed);
+
+	plan = plan_of("{\"regdom\":\"DE\"}", BODY, RADIO_IDLE("false") ",\"regdom\":\"00\"", NULL,
+	    &document, &observed);
+	check(plan && !has_name(plan, "wifi.set_regdom") &&
+	    warned_about(plan, "not set yet"),
+	    "and with no supplicant to say it through, the plan says so instead");
+	release(plan, document, observed);
+
+	plan = plan_of("{}", BODY, RADIO_IDLE("false") SUPPLICANT ",\"regdom\":\"00\"", NULL,
+	    &document, &observed);
+	check(plan && !has_name(plan, "wifi.set_regdom"),
+	    "and a configuration that names no country leaves the kernel's alone");
+	release(plan, document, observed);
+#undef RADIO_IDLE
+#undef SUPPLICANT
+#undef BODY
+}
+
+/*
  * A network's event hooks fire on the interface associated to it.
  *
  * **"While this machine is on this network"** (the holder, 2026-10-28;
@@ -2521,6 +2578,7 @@ int main(void)
 	a_radio_that_is_switched_off_is_said();
 	a_carrier_hook_fires_when_the_cable_moves();
 	a_network_s_hooks_fire_on_the_interface_associated_to_it();
+	the_machine_s_country_is_set_while_no_radio_is_associated();
 	a_lease_hook_fires_on_an_address_netcfgd_did_not_install();
 
 	printf("\nplan: %d checks, %d failed\n", checks, failures);

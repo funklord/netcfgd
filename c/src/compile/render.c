@@ -703,6 +703,11 @@ static void render_globals(const ncfg_document_t *document, ncfg_buf_t *text,
 	default:
 		break;
 	}
+	if (globals->regdom) {
+		ncfg_buf_add_text(&body, "\tregdom = ");
+		ncfg_render_quote(&body, globals->regdom);
+		ncfg_buf_add_char(&body, '\n');
+	}
 	(void)ncfg_render_dns(&globals->dns, "\t", &body, missing, "global", NULL);
 	render_control(&globals->control, &body);
 	render_remote(&globals->remote, &body);

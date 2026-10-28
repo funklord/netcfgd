@@ -974,6 +974,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	ncfg_plan_forwarding(&builder);
 	ncfg_plan_privacy(&builder);
 	ncfg_plan_hostname(&builder);
+	ncfg_plan_regdom(&builder);
 	/* The one nftables table, after the forwarding sysctls it depends on for
 	 * its effect and before the teardown, which is where the Rust puts it. The
 	 * dependency is on the machine rather than in the plan -- translating

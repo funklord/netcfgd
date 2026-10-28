@@ -53,6 +53,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 /* ------------------------------------------------------------------------ *
  * Comparing a policy against what was last delivered
@@ -432,6 +433,75 @@ void ncfg_plan_dns(ncfg_builder_t *builder)
 /* ------------------------------------------------------------------------ *
  * The hostname
  * ------------------------------------------------------------------------ */
+
+/*
+ * `global { regdom }`: the country this machine is held to.
+ *
+ * **Set only with no radio associated, and so never against an access
+ * point** (project.md 10.585, measured). While a radio is associated the
+ * kernel takes the access point's country over one set by hand -- E10 -- and
+ * on going idle it returns to the one set here by itself -- E21. So a
+ * difference while associated is the kernel doing what it should, and
+ * setting the country then would fight the access point on every pass; a
+ * difference while idle is a country nobody has set yet.
+ *
+ * **Through a radio's supplicant**, which is the executor `wifi.set_regdom`
+ * has: `SET country`, which is a hint for the whole machine whichever radio
+ * carries it. With no supplicant of netcfgd's running there is nothing to say
+ * it through, and the plan says so rather than leaving it silently unset.
+ *
+ * The inverse is the country it replaced, `00` included -- which as a hint
+ * puts the machine back on the world domain, the state it was found in.
+ */
+void ncfg_plan_regdom(ncfg_builder_t *builder)
+{
+	const char   *wanted = builder->desired->globals.regdom;
+	const char   *current = builder->observed->regdom;
+	const char   *radio = NULL;
+	ncfg_op_t     op;
+	ncfg_op_t     inverse;
+	ncfg_reason_t reason;
+	size_t        at;
+
+	/* No country asked for, or no radio to hold to one -- the observation
+	 * reads the domain only where there is a radio. */
+	if (!wanted || !current || strcasecmp(current, wanted) == 0) {
+		return;
+	}
+	for (at = 0; at < builder->observed->link_count; at++) {
+		const ncfg_observed_link_t *link = &builder->observed->links[at];
+
+		if (link->wireless && link->carrier) {
+			return;
+		}
+	}
+	for (at = 0; at < builder->observed->backend_count; at++) {
+		const ncfg_observed_backend_t *backend = &builder->observed->backends[at];
+
+		if (backend->kind == NCFG_BACKEND_SUPPLICANT && backend->running &&
+		    backend->interface) {
+			radio = backend->interface;
+			break;
+		}
+	}
+	if (!radio) {
+		ncfg_plan_warnf(builder->plan, NULL,
+		    "`regdom = \"%s\"` is not set yet: the domain is %s, and it is set through a "
+		    "radio's supplicant, which netcfgd is not running on any radio here", wanted,
+		    current);
+		return;
+	}
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_WIFI_SET_REGDOM;
+	op.u.regdom.device = radio;
+	op.u.regdom.country = wanted;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = NCFG_OP_WIFI_SET_REGDOM;
+	inverse.u.regdom.device = radio;
+	inverse.u.regdom.country = current;
+	reason = ncfg_plan_reason_differs(NULL, "globals.regdom", wanted, current);
+	(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
+}
 
 /*
  * The running hostname, where the document names one.

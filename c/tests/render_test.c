@@ -921,6 +921,8 @@ static void the_hostname_policy_round_trips(void)
 
 	round_trips("global { hostname = \"router\" }\n",
 	    "and a stated hostname survives one too");
+	/* The machine's country (0296), which a saved profile must not drop. */
+	round_trips("global { regdom = \"DE\" }\n", "a machine's regdom survives a round trip");
 	stated = rendering_of("global { hostname = \"router\" }\n");
 	check(stated && strstr(stated, "hostname = \"router\"") != NULL,
 	    "written as itself, not as the policy");

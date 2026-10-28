@@ -148,8 +148,8 @@ static void the_radio_settings_that_reach_nothing_are_named(void)
 	check(planfix_whole(planfix_warning_with(plan, "are read and acted on by nothing"),
 	    PLANFIX_UNBUILT_TAIL),
 	    "and the whole of it arrives, marked as nobody's gap rather than this port's");
-	check(plan && planfix_warned(plan, "an access point's is the only one netcfgd carries"),
-	    "and the spelling that does reach hostapd is named in the same breath");
+	check(plan && planfix_warned(plan, "the country is `global { regdom }`"),
+	    "and the spelling that sets the machine's country is named in the same breath");
 	check(plan && !planfix_warned(plan, "not acted on by this build"),
 	    "and no longer as a release this port owes anybody");
 	planfix_release(plan, document, observed);

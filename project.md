@@ -12843,6 +12843,22 @@ what" waits for a daemon that listens. The family lookup the offloads and
 WireGuard rounds each carried is one `observe_genl_family` now, and
 `family_open` moved out of `kernel_genl.c` unchanged into `genl_socket.c`.
 
+**The override is built: `global { regdom = "XX" }`** (2026-10-28). It is
+`global` because the kernel keeps one domain; a radio's own key stays inert and
+its warning now points here. The planner sets it through a radio's supplicant
+(`wifi.set_regdom`, whose executor already existed) **only when the domain
+differs and no radio is associated**, which is what the measurements above
+decide: associated, the kernel follows the access point and should; idle, it
+returns to a country set by hand by itself, so once set it stays set without
+netcfgd fighting anybody. With no supplicant of netcfgd's on a radio, the plan
+says it is not set yet. Verified end to end in a vm: the built daemon with
+`regdom = "DE"` took a fresh kernel from `00` to `DE` in about a second,
+`ncfg status` read `DE`. **Who set the domain is not built**: a `GET_REG`
+reply carries the country and its rules and no initiator (attributes 33 and 34,
+read off a real kernel), so it needs a daemon on nl80211's regulatory
+multicast group -- and one started after the change, which is the boot case,
+would still answer "unknown". Parked on that cost against that answer.
+
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
 prints a disabled channel as `(disabled)` and the parser matched

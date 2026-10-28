@@ -306,6 +306,8 @@ void ncfg_plan_privacy(ncfg_builder_t *builder);
 void ncfg_plan_forwarding(ncfg_builder_t *builder);
 void ncfg_plan_dns(ncfg_builder_t *builder);
 void ncfg_plan_hostname(ncfg_builder_t *builder);
+/* `global { regdom }`, set only with no radio associated. */
+void ncfg_plan_regdom(ncfg_builder_t *builder);
 
 /*
  * What a device's `kind` says about itself, corrected on one that exists.

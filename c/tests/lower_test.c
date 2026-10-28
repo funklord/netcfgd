@@ -2082,6 +2082,17 @@ static void interface_cases(void)
 		    "  and `dns` defaults to true rather than false");
 		ncfg_document_free(document);
 	}
+	/* The machine's country, which is `global` because the domain is one per
+	 * kernel (0296). Uppercased as an access point's is. */
+	document = compiles("global { regdom = \"de\" }\n", "a machine's country compiles");
+	if (document) {
+		check(document->globals.regdom && strcmp(document->globals.regdom, "DE") == 0,
+		    "  and is held uppercased");
+		ncfg_document_free(document);
+	}
+	refuses("global { regdom = \"Deutschland\" }\n", "is not a regulatory domain",
+	    "a country that is not two letters is refused");
+
 	/* A second block replaces the first, as the Rust's assignment does. The
 	 * first used to be freed as a struct and its prefixes leaked with their
 	 * names: `make SANITIZE=1 test` is what sees that. */

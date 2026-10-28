@@ -572,16 +572,24 @@
 # reason is worth knowing before measuring throughput and blaming the radio.
 
 # **`regdom` here is not the one that does anything, and that is a trap worth
-# knowing about.** The language spells `regdom` in two places:
+# knowing about.** The language spells `regdom` in three places:
 #
+#   global { regdom = "SE" }                   the machine's country, set
 #   device wlan0 { wifi { regdom = "SE" } }    stored, and not acted on
 #   access_point "Home" { regdom = "SE" }      written, as hostapd's country_code
 #
+# **The machine's is `global`, because the kernel keeps one domain for every
+# radio.** netcfgd sets it through a radio's supplicant, and only while no
+# radio is associated: an associated radio follows the access point's country,
+# and goes back to this one by itself when it leaves. Leave it unset on a
+# machine that moves -- an unset machine adopts each network's country as it
+# joins, while a wrong country makes every network on a channel it lacks
+# invisible. Set it on one that stays put, which is the only way to 6 GHz with
+# nothing else telling the kernel where it is: the world domain has none.
+#
 # The radio's is kept in the document and reaches nothing. The access point's
 # becomes `country_code` in the generated hostapd configuration, which hostapd
-# documents as "used to set regulatory domain". So the setting that reads as
-# belonging to the hardware is the inert one, and a machine whose two blocks
-# disagree gets the access point's. `ncfg plan` warns on both cases.
+# documents as "used to set regulatory domain". `ncfg plan` warns on both.
 #
 # **And the access point's sets it for the whole machine, not for its radio.**
 # The kernel keeps one domain, and hostapd sets it at once -- measured, and

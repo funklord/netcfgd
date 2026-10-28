@@ -394,6 +394,12 @@ void ncfg_lower_global_key(ncfg_lower_ctx_t *ctx, const ncfg_ast_assignment_t *a
 		free(name);
 		return;
 	}
+	/* The machine's country; `ncfg_lower_regdom` checks and uppercases it, as
+	 * it does an access point's. */
+	if (strcmp(key, "regdom") == 0) {
+		ncfg_lower_regdom(ctx, &globals->regdom, assignment);
+		return;
+	}
 	if (strcmp(key, "confirm") == 0) {
 		ncfg_as_u32_opt(ctx, assignment->value, &globals->confirm_default);
 		return;

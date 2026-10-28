@@ -2321,6 +2321,7 @@ static const ncfg_field_t globals_fields[] = {
 	{ .name = "networking", .kind = NCFG_F_ENUM, .choices = &networking_set,
 	    .fallback = NCFG_NETWORKING_ON, .offset = offsetof(ncfg_globals_t, networking) },
 	{ .name = "profile", .kind = NCFG_F_STR, .offset = offsetof(ncfg_globals_t, profile) },
+	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_globals_t, regdom) },
 	{ .name = "hostname_policy", .kind = NCFG_F_CUSTOM, .custom = &hostname_policy_custom,
 	    .offset = offsetof(ncfg_globals_t, hostname_policy) },
 	{ .name = "control", .kind = NCFG_F_STRUCT, .type = &control_type,

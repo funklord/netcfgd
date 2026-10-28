@@ -136,8 +136,8 @@ static void warn_device_policy(ncfg_builder_t *builder, const ncfg_device_t *dev
 
 	if (wifi->regdom) {
 		stated[count] = "`regdom`";
-		because[count] = "a radio's `regdom` is read by no pass, and an access "
-		    "point's is the only one netcfgd carries -- as hostapd's `country_code`";
+		because[count] = "the domain is one per machine, so the country is "
+		    "`global { regdom }` and a radio's own is read by no pass";
 		count++;
 	}
 	if (wifi->powersave != NCFG_POWERSAVE_DEFAULT) {

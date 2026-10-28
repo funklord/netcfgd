@@ -33,6 +33,7 @@
     "confirm_default": 90,
     "networking": "off",
     "profile": "office",
+    "regdom": "SE",
     "hostname_policy": {
       "static": "host.example"
     },
