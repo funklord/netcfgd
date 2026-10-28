@@ -49,6 +49,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -1404,6 +1405,18 @@ static void a_modem_says_what_it_is_on_and_whether_it_got_there(void)
  * ------------------------------------------------------------------------ */
 
 /*
+ * How long a fake daemon waits to be asked before it gives up.
+ *
+ * **Without it a program that never asks hangs the suite** rather than failing
+ * it: the child sits in `accept` and the caller in `waitpid` for ever. That is
+ * what a regression in a route to the daemon looks like -- a verb that stopped
+ * asking -- so it was exactly the change this suite could not report; a
+ * sabotage of `ncfg status`'s route proved it on 2026-10-28. Generous, since
+ * a sanitizer build is slow and nothing here waits for it on a passing run.
+ */
+#define FAKE_DAEMON_SECONDS 10u
+
+/*
  * A daemon that answers one line and goes away.
  *
  * On a real `AF_UNIX` socket in this test's own directory, the way
@@ -1411,6 +1424,9 @@ static void a_modem_says_what_it_is_on_and_whether_it_got_there(void)
  * on this machine is configuring somebody's actual network. `answer` of NULL is
  * the case that has to be told from a refusal: a peer that closes without
  * saying anything.
+ *
+ * Bounded by `FAKE_DAEMON_SECONDS`, and a fake that ran out is killed by the
+ * alarm rather than exiting, which `fake_daemon_asked` tells apart.
  */
 static pid_t fake_daemon(const char *path, const char *answer, int *listener_out)
 {
@@ -1434,7 +1450,10 @@ static pid_t fake_daemon(const char *path, const char *answer, int *listener_out
 	}
 	child = fork();
 	if (child == 0) {
-		int fd = accept(listener, NULL, NULL);
+		int fd;
+
+		(void)alarm(FAKE_DAEMON_SECONDS);
+		fd = accept(listener, NULL, NULL);
 
 		if (fd >= 0) {
 			char    ignored[4096];
@@ -1455,6 +1474,17 @@ static pid_t fake_daemon(const char *path, const char *answer, int *listener_out
 	}
 	*listener_out = listener;
 	return child;
+}
+
+/* Reap a fake daemon, and say whether anybody asked it anything. */
+static int fake_daemon_asked(pid_t child)
+{
+	int status = 0;
+
+	if (waitpid(child, &status, 0) != child) {
+		return 0;
+	}
+	return !(WIFSIGNALED(status) && WTERMSIG(status) == SIGALRM);
 }
 
 static void the_conversation_is_one_request_and_one_answer(void)
@@ -2197,7 +2227,10 @@ static const char *answered(const char *answer, char **argv, int argc, int *code
 		return "";
 	}
 	printed = ran_printing(argv, argc, code);
-	(void)waitpid(child, NULL, 0);
+	if (!fake_daemon_asked(child)) {
+		check(0, "the program asked the daemon it was given");
+		detail("program", argv[1]);
+	}
 	(void)close(listener);
 	(void)unlink(path);
 	return printed;

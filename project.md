@@ -12920,10 +12920,12 @@ running daemon.** The family is re-registered with a new id and the old
 subscription is gone without a word, and a radio attaching retries only
 where nothing is subscribed. Rare outside a rig; noticing it would mean
 watching the genl controller's own notifications, and it has not earned that.
-**One test-harness fault found on the way**: a `cli_test` fake daemon that
-is never connected to waits for ever, so sabotaging a route to the daemon
-hangs the suite rather than failing it. It predates this; the bound belongs
-in the harness.
+**One test-harness fault found on the way, and fixed after it**: a
+`cli_test` fake daemon that was never connected to waited for ever, so
+sabotaging a route to the daemon hung the suite rather than failing it. The
+fake now gives up after ten seconds by `alarm`, and `answered` reports a fake
+nobody asked as a failure naming the verb -- a route reporting nobody there
+fails 24 checks in under two minutes instead of hanging.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`
