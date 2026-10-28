@@ -1124,7 +1124,12 @@ void ncfg_client_hooks_free(ncfg_hooks_t *hooks);
  * empty body over somebody's script.
  */
 typedef struct {
+	/* "" for a network's hook, which `network` then names. */
 	char *interface;
+	/* "" for an interface's hook. A network's hooks are listed since
+	 * project.md 10.34 made them run; an editor matching rows to its
+	 * interface by name never takes one for its own. */
+	char *network;
 	char *phase;
 	char *path;
 	char *text;

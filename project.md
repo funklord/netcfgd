@@ -8646,9 +8646,12 @@ planned, and its `roam`, `portal` and `drift` hooks run, on the interface
 associated to it -- one lookup, `ncfg_observed_joined_network`, serving the
 planner and the daemon. **Its `pre_up` to `post_down` hooks still do not run**:
 up and down would have to be mapped onto association and disassociation, and
-the planner warns about exactly those now rather than about every hook. Also
-open: `ncfg hooks` lists interface hooks only, since its entry names an
-interface and the protocol's hook list has no member for a network.
+the planner warns about exactly those now rather than about every hook. The
+hook list answered over the socket carried interface hooks only; since the same
+day it lists a network's too, each named by a `network` member with
+`interface` empty -- the GUI's interface dialog matches rows to its interface
+by name, so it never takes one for its own -- and an interface's entry is
+written exactly as before.
 
 **Up and down built the same day.** The daemon compares which network each
 radio was on in the observation it replaces with the one it takes: a radio

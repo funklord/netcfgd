@@ -383,6 +383,7 @@ void ncfg_hook_scripts_free(ncfg_hook_script_t *scripts, size_t count)
 	}
 	for (at = 0u; at < count; at++) {
 		free(scripts[at].interface);
+		free(scripts[at].network);
 		free(scripts[at].path);
 		free(scripts[at].text);
 	}
@@ -406,6 +407,29 @@ static char *hook_dup(const char *text)
 	return copy;
 }
 
+/* One entry: the hook, the block it belongs to, and the file read back. 0
+ * where memory ran out, with the entry left for the caller to free. */
+static int list_one(ncfg_hook_script_t *entry, const char *interface, const char *network,
+    const ncfg_hook_ref_t *hook)
+{
+	size_t length = 0;
+	char  *text = hook->path ? ncfg_host_read_file(hook->path, &length, NCFG_HOOK_SCRIPT_MAX)
+	                         : NULL;
+
+	/* `interface` is "" for a network's hook: the protocol has always carried
+	 * the member, and an editor that matches rows to its interface by name
+	 * then never takes a network's hook for one of its own. */
+	entry->interface = hook_dup(interface ? interface : "");
+	entry->network = network ? hook_dup(network) : NULL;
+	entry->path = hook_dup(hook->path);
+	entry->phase = hook->phase;
+	entry->readable = text != NULL;
+	/* Empty where it could not be read, which `hooks.h` keeps distinct from an
+	 * empty script through `readable`. */
+	entry->text = text ? text : hook_dup("");
+	return entry->interface && entry->path && entry->text && (!network || entry->network);
+}
+
 int ncfg_hooks_list(const ncfg_document_t *desired, ncfg_hook_script_t **out,
     size_t *count_out, char *err, size_t err_size)
 {
@@ -427,6 +451,9 @@ int ncfg_hooks_list(const ncfg_document_t *desired, ncfg_hook_script_t **out,
 	for (at = 0u; at < desired->interface_count; at++) {
 		room += desired->interfaces[at].hook_count;
 	}
+	for (at = 0u; at < desired->network_count; at++) {
+		room += desired->networks[at].hook_count;
+	}
 	if (room == 0u) {
 		return 1;
 	}
@@ -439,19 +466,23 @@ int ncfg_hooks_list(const ncfg_document_t *desired, ncfg_hook_script_t **out,
 		const ncfg_interface_t *interface = &desired->interfaces[at];
 
 		for (which = 0u; which < interface->hook_count; which++) {
-			const ncfg_hook_ref_t *hook = &interface->hooks[which];
-			size_t                 length = 0;
-			char                  *text = hook->path ?
-			    ncfg_host_read_file(hook->path, &length, NCFG_HOOK_SCRIPT_MAX) : NULL;
+			if (!list_one(&found[taken], interface->name, NULL, &interface->hooks[which])) {
+				ncfg_hook_scripts_free(found, taken + 1u);
+				ncfg_error_set(err, err_size, "out of memory listing the hooks");
+				return 0;
+			}
+			taken++;
+		}
+	}
+	/* A network's hooks run -- on the interface associated to it, and at its
+	 * association and disassociation (project.md 10.34) -- so they are listed
+	 * as what they are, named by their network. */
+	for (at = 0u; at < desired->network_count; at++) {
+		const ncfg_wifi_network_t *network = &desired->networks[at];
 
-			found[taken].interface = hook_dup(interface->name);
-			found[taken].path = hook_dup(hook->path);
-			found[taken].phase = hook->phase;
-			found[taken].readable = text != NULL;
-			/* Empty where it could not be read, which `hooks.h` keeps
-			 * distinct from an empty script through `readable`. */
-			found[taken].text = text ? text : hook_dup("");
-			if (!found[taken].interface || !found[taken].path || !found[taken].text) {
+		for (which = 0u; which < network->hook_count; which++) {
+			if (!list_one(&found[taken], NULL, network->id ? network->id : "",
+			        &network->hooks[which])) {
 				ncfg_hook_scripts_free(found, taken + 1u);
 				ncfg_error_set(err, err_size, "out of memory listing the hooks");
 				return 0;

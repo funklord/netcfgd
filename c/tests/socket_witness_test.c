@@ -775,7 +775,7 @@ static void the_file_listings(void)
 {
 	ncfg_config_entry_t configs[2];
 	ncfg_probe_entry_t  probes[2];
-	ncfg_hook_script_t  scripts[2];
+	ncfg_hook_script_t  scripts[3];
 	ncfg_buf_t          out;
 	char                err[NCFG_ERROR_MAX] = "";
 
@@ -821,8 +821,16 @@ static void the_file_listings(void)
 	scripts[1].path = (char *)(uintptr_t)"/run/netcfgd/hooks/eth1.drift.1";
 	scripts[1].readable = 0;
 	scripts[1].text = (char *)(uintptr_t)"";
+	/* A network's, which names its network and leaves `interface` empty
+	 * (project.md 10.34): the one entry with a `network` member. */
+	scripts[2].interface = (char *)(uintptr_t)"";
+	scripts[2].network = (char *)(uintptr_t)"home";
+	scripts[2].phase = NCFG_HOOK_PHASE_UP;
+	scripts[2].path = (char *)(uintptr_t)"/run/netcfgd/hooks/home.up.0";
+	scripts[2].readable = 1;
+	scripts[2].text = (char *)(uintptr_t)"#!/bin/sh\nlogger home\n";
 	ncfg_buf_init(&out, 0);
-	one("hooks", ncfg_daemon_hooks_encode(scripts, 2u, &out, err, sizeof(err)), &out, err);
+	one("hooks", ncfg_daemon_hooks_encode(scripts, 3u, &out, err, sizeof(err)), &out, err);
 	ncfg_buf_free(&out);
 }
 

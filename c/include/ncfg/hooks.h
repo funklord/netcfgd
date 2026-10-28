@@ -180,7 +180,10 @@ const ncfg_hook_sink_t *ncfg_hook_sink_unwritten(void);
  * netcfgd could not open.
  */
 typedef struct {
+	/* "" for a network's hook, which `network` names instead. */
 	char *interface;
+	/* NULL for an interface's hook. */
+	char *network;
 	int   phase; /* ncfg_hook_phase_t, from value.h */
 	char *path;
 	int   readable;
@@ -207,11 +210,9 @@ void ncfg_hook_scripts_free(ncfg_hook_script_t *scripts, size_t count);
  * listing *is* the file, and here the listing is the document's claim about a
  * file.
  *
- * **Interface hooks only, and that is now a gap.** A `network` block's hooks
- * all run since project.md 10.34 was answered, on the interface associated to
- * it -- but an entry here names its `interface`, and the protocol's hook
- * list has no member for a network, so listing them would label each with the
- * wrong kind of name. Left out until the list can say which network.
+ * **A network's hooks are listed too**, named by `network` with `interface`
+ * empty: they all run since project.md 10.34 was answered, and an editor that
+ * matches rows to an interface by name never mistakes one for its own.
  *
  * A NULL document lists nothing and is not an error: a machine whose
  * configuration does not compile declares no hooks.

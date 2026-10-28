@@ -3784,6 +3784,7 @@ void ncfg_client_hook_scripts_free(ncfg_hook_scripts_t *scripts)
 	}
 	for (size_t i = 0; i < scripts->count; i++) {
 		free(scripts->items[i].interface);
+		free(scripts->items[i].network);
 		free(scripts->items[i].phase);
 		free(scripts->items[i].path);
 		free(scripts->items[i].text);
@@ -3833,6 +3834,7 @@ int ncfg_client_hook_scripts(ncfg_client_t *client, ncfg_hook_scripts_t *out, ch
 	for (uint32_t i = 0; i < count; i++) {
 		uint32_t entry = ncfg_json_at(doc, hooks, i);
 		out->items[i].interface = member_text(doc, entry, "interface");
+		out->items[i].network = member_text(doc, entry, "network");
 		out->items[i].phase = member_text(doc, entry, "phase");
 		out->items[i].path = member_text(doc, entry, "path");
 		out->items[i].text = member_text(doc, entry, "text");

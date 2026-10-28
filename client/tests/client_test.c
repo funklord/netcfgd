@@ -1443,6 +1443,43 @@ static void an_apply_becomes_a_journal(void)
 	staged_close(&staged);
 }
 
+/*
+ * A network's hook is listed as one, and is not an interface's.
+ *
+ * The daemon names it by `network` and leaves `interface` empty (project.md
+ * 10.34), and an editor matching rows to its interface by name relies on
+ * exactly that: an interface's entry has no network, a network's no interface.
+ */
+static void a_network_s_hook_is_listed_as_the_network_s(void)
+{
+	struct staged staged;
+	char err[NCFG_ERROR_MAX];
+	ncfg_hook_scripts_t scripts;
+
+	if (!staged_open(&staged, "a hook list can be staged",
+	        "{\"response\":\"hooks\",\"hooks\":["
+	        "{\"interface\":\"eth0\",\"phase\":\"up\",\"path\":\"/run/a\",\"text\":\"x\","
+	        "\"readable\":true},"
+	        "{\"interface\":\"\",\"network\":\"home\",\"phase\":\"up\",\"path\":\"/run/b\","
+	        "\"text\":\"y\",\"readable\":true}]}\n")) {
+		return;
+	}
+	if (!ncfg_client_hook_scripts(staged.client, &scripts, err, sizeof(err))) {
+		ok("a hook list is read", 0, err);
+		staged_close(&staged);
+		return;
+	}
+	ok("both entries are read", scripts.count == 2u, NULL);
+	if (scripts.count == 2u) {
+		equals("an interface's hook names its interface", scripts.items[0].interface, "eth0");
+		equals("  and no network", scripts.items[0].network, "");
+		equals("a network's hook names its network", scripts.items[1].network, "home");
+		equals("  and no interface", scripts.items[1].interface, "");
+	}
+	ncfg_client_hook_scripts_free(&scripts);
+	staged_close(&staged);
+}
+
 static void a_daemon_refusal_is_a_zero_and_its_own_message(void)
 {
 	struct staged staged;
@@ -2259,6 +2296,7 @@ int main(int argc, char **argv)
 	dns_reports_that_it_is_not_managing_resolution();
 	a_link_knows_whether_a_default_route_leaves_through_it();
 	an_apply_becomes_a_journal();
+	a_network_s_hook_is_listed_as_the_network_s();
 	a_daemon_refusal_is_a_zero_and_its_own_message();
 	the_handshake_says_what_this_connection_may_do();
 	consent_goes_out_the_way_the_daemon_spells_it();

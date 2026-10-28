@@ -37,6 +37,7 @@
  *   removed at the end; see `testdir.h`.
  */
 #include "ncfg/base.h"
+#include "ncfg/document.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
 #include "ncfg/value.h"
@@ -456,9 +457,49 @@ static void a_file_an_older_build_left_wide_is_tightened(const char *run_dir)
 	ncfg_pending_hooks_free(pending);
 }
 
+/*
+ * A network's hooks are listed, named by their network.
+ *
+ * They all run since project.md 10.34 was answered, and an editor that never
+ * saw the row would write the network back without them. `interface` is empty
+ * on a network's entry so that one matching rows to an interface by name never
+ * takes it for its own.
+ */
+static void a_network_s_hooks_are_listed_as_the_network_s(void)
+{
+	static const char text[] =
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{},\"devices\":[],"
+	    "\"interfaces\":[{\"name\":\"eth0\",\"hooks\":[{\"phase\":\"up\","
+	    "\"path\":\"/nonexistent/eth0.up\",\"sha256\":\"ab\"}]}],"
+	    "\"networks\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"security\":{\"type\":\"open\"},"
+	    "\"hooks\":[{\"phase\":\"roam\",\"path\":\"/nonexistent/home.roam\",\"sha256\":\"ab\"}]}]}";
+	char                message[NCFG_ERROR_MAX];
+	ncfg_document_t    *document = ncfg_document_read(text, strlen(text), message,
+	    sizeof(message));
+	ncfg_hook_script_t *scripts = NULL;
+	size_t              count = 0;
+
+	if (!document) {
+		check(0, "the listing fixture reads");
+		return;
+	}
+	check(ncfg_hooks_list(document, &scripts, &count, message, sizeof(message)) && count == 2u,
+	    "an interface's hook and a network's are both listed");
+	if (count == 2u) {
+		check(strcmp(scripts[0].interface, "eth0") == 0 && scripts[0].network == NULL,
+		    "the interface's names its interface and no network");
+		check(scripts[1].network && strcmp(scripts[1].network, "home") == 0 &&
+		    strcmp(scripts[1].interface, "") == 0,
+		    "and the network's names its network, with no interface");
+	}
+	ncfg_hook_scripts_free(scripts, count);
+	ncfg_document_free(document);
+}
+
 int main(void)
 {
 	const char *run_dir = testdir_make("hooks");
+	a_network_s_hooks_are_listed_as_the_network_s();
 
 	printf("== hooks_test in %s\n", run_dir);
 	the_digest_matches_the_published_vectors();

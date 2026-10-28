@@ -315,6 +315,11 @@ int ncfg_daemon_hooks_encode(const ncfg_hook_script_t *scripts, size_t count, nc
 		ncfg_json_write_object_begin(&writer);
 		ncfg_json_write_member_string(&writer, "interface",
 		    scripts[at].interface ? scripts[at].interface : "");
+		/* Only where it is a network's, so an interface's entry is written
+		 * exactly as it always was. */
+		if (scripts[at].network) {
+			ncfg_json_write_member_string(&writer, "network", scripts[at].network);
+		}
 		ncfg_json_write_member_string(&writer, "phase", phase ? phase : "");
 		ncfg_json_write_member_string(&writer, "path",
 		    scripts[at].path ? scripts[at].path : "");

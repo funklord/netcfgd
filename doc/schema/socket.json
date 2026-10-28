@@ -59,7 +59,7 @@
 {"response":"profiles","profiles":[{"name":"offline","shipped":true},{"name":"office","shipped":false}],"chosen":"office"}
 {"response":"configs","configs":[{"file":"netcfgd.conf","removable":false,"text":"global { }\n"},{"name":"wifi-home","file":"conf.d/wifi-home.conf","removable":true,"text":"network \"home\" { }\n"}]}
 {"response":"probes","probes":[{"name":"default","directory":"/usr/share/netcfgd/probe","text":"#!/bin/sh\nexit 0\n","editable":false},{"name":"office","directory":"/etc/netcfgd/probe","text":"#!/bin/sh\nexit 1\n","editable":true}]}
-{"response":"hooks","hooks":[{"interface":"eth0","phase":"post_up","path":"/run/netcfgd/hooks/eth0.post_up.0","text":"#!/bin/sh\nlogger up\n","readable":true},{"interface":"eth1","phase":"drift","path":"/run/netcfgd/hooks/eth1.drift.1","text":"","readable":false}]}
+{"response":"hooks","hooks":[{"interface":"eth0","phase":"post_up","path":"/run/netcfgd/hooks/eth0.post_up.0","text":"#!/bin/sh\nlogger up\n","readable":true},{"interface":"eth1","phase":"drift","path":"/run/netcfgd/hooks/eth1.drift.1","text":"","readable":false},{"interface":"","network":"home","phase":"up","path":"/run/netcfgd/hooks/home.up.0","text":"#!/bin/sh\nlogger home\n","readable":true}]}
 {"event":"observed","summary":"eth0 gained an address"}
 {"event":"reloaded","ok":false,"diagnostics":"netcfgd.conf:3: unknown key"}
 {"event":"drift","interface":"eth0","summary":"an address we installed is gone","action":"reconciled"}
