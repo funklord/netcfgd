@@ -200,7 +200,7 @@ access_point "two" {
 # A network block's own addressing is applied by neither implementation and
 # only this one says so: they round-trip through `ncfg profile save` and
 # nothing else reads them. `plan/wifi.c` has the reasoning.
-extra='warning: the `network` block `n1` states addressing, and nothing applies it: netcfgd plans addressing, routes, `dns` and hooks from an `interface` block, and a network'"'"'s own only round-trip through `ncfg profile save`. That is not this port catching up: nothing acts on it in the Rust either, so there is nothing to wait for. The block is kept so a configuration written now still means this when the code arrives'
+extra='warning: the `network` block `n1` states addressing, and nothing applies it: netcfgd plans addressing, routes and `dns` from an `interface` block, and a network'"'"'s own only round-trip via `ncfg profile save`. That is not this port catching up: nothing acts on it in the Rust either, so there is nothing to wait for. The block is kept so a configuration written now still means this when the code arrives'
 compare "a network block carrying addressing nothing will apply" 0 '
 device h0 { kind = "dummy" }
 interface h0 {
