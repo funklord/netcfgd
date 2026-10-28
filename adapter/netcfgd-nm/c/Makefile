@@ -168,9 +168,12 @@ fuzz-list:
 fuzz/make_seeds: fuzz/make_seeds.c
 	$(CC) $(CFLAGS) $< $(shell pkg-config --libs dbus-1) -o $@
 
+# `-MMD -MP` as the plain objects have them: without them a header change --
+# here or in the client library -- left these with the old layout, which
+# `../../../c/Makefile` found the expensive way.
 $(FUZZ_BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -MMD -MP -c $< -o $@
 
 fuzz/%_fuzz: fuzz/%.c fuzz/shape.c $(FUZZ_SHARED_DIR)/fuzz_libfuzzer.c \
 		$(FUZZ_SHARED_DIR)/fuzz_text.c $(FUZZ_OBJS) client
@@ -194,4 +197,4 @@ clean:
 		rm -rf "$(FUZZ_BUILD_DIR)"; \
 	fi
 
--include $(DEPS)
+-include $(DEPS) $(FUZZ_OBJS:.o=.d)

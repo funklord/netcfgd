@@ -168,7 +168,9 @@ fuzz: $(FUZZ_PROGRAMS)
 fuzz-list:
 	@echo $(FUZZ_TARGETS)
 
-$(FUZZ_BUILD_DIR)/%.o: %.c
+# `$(HEADERS)` as the plain objects have it: without them a header change left
+# these with the old layout, which `../c/Makefile` found the expensive way.
+$(FUZZ_BUILD_DIR)/%.o: %.c $(HEADERS)
 	@mkdir -p $(dir $@)
 	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
 
