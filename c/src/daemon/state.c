@@ -342,6 +342,25 @@ static int links_moved(const ncfg_observed_t *before, const ncfg_observed_t *aft
 	return 0;
 }
 
+/*
+ * Who set the domain, onto an observation that has just been taken.
+ *
+ * **Only where the country heard is the country observed.** The notification
+ * and the question are two messages, and the domain can move between them --
+ * or a notification can be lost without a gap anybody saw. A setter put on a
+ * country it was not heard setting is a wrong answer, and none is the honest
+ * one. Out of memory leaves it off for the same reason: the observation
+ * stands without it.
+ */
+static void stamp_regdom(const ncfg_daemon_state_t *state, ncfg_observed_t *observed)
+{
+	if (!state->has_regdom_heard || !observed->regdom || observed->regdom_set_by ||
+	    strcmp(observed->regdom, state->regdom_heard.code) != 0) {
+		return;
+	}
+	observed->regdom_set_by = duplicate(ncfg_regdom_setter_name(state->regdom_heard.set_by));
+}
+
 int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *err,
     size_t err_size)
 {
@@ -370,9 +389,26 @@ int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *er
 	if (moved) {
 		*moved = links_moved(state->observed, fresh);
 	}
+	stamp_regdom(state, fresh);
 	ncfg_observed_free(state->observed);
 	state->observed = fresh;
 	return 1;
+}
+
+void ncfg_daemon_state_heard_regdom(ncfg_daemon_state_t *state,
+    const ncfg_regdom_change_t *change)
+{
+	if (!state) {
+		return;
+	}
+	if (!change) {
+		memset(&state->regdom_heard, 0, sizeof(state->regdom_heard));
+		state->has_regdom_heard = 0;
+		return;
+	}
+	state->regdom_heard = *change;
+	state->regdom_heard.code[NCFG_REGDOM_TEXT_MAX - 1u] = '\0';
+	state->has_regdom_heard = 1;
 }
 
 /*

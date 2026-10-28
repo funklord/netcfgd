@@ -953,3 +953,60 @@ int ncfg_netlink_wait_for_change(ncfg_netlink_t *netlink, int *changed, char *er
 	}
 	return ncfg_netlink_change_from(read, saved, changed, err, err_size);
 }
+
+int ncfg_netlink_join(ncfg_netlink_t *netlink, uint32_t group, char *err, size_t err_size)
+{
+	unsigned int number = (unsigned int)group;
+
+	if (!netlink || netlink->fd < 0) {
+		ncfg_error_set(err, err_size, "a group can only be joined on an open socket");
+		return 0;
+	}
+	if (setsockopt(netlink->fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &number,
+	    (socklen_t)sizeof(number)) < 0) {
+		return ncfg_netlink_fail(err, err_size, "joining a netlink multicast group", errno);
+	}
+	return 1;
+}
+
+int ncfg_netlink_next_event(ncfg_netlink_t *netlink, void *bytes, size_t capacity,
+    size_t *length, int *gap, char *err, size_t err_size)
+{
+	ssize_t  read;
+	uint32_t from = UINT32_MAX;
+	int      saved;
+
+	if (!netlink || netlink->fd < 0 || !bytes || !length || !gap) {
+		ncfg_error_set(err, err_size, "an event needs an open socket and somewhere to go");
+		return 0;
+	}
+	*length = 0;
+	*gap = 0;
+	read = socket_recv(netlink, bytes, capacity, 0, &from);
+	saved = errno;
+	if (read >= 0 && from != 0) {
+		/* Local, and dropped: `ncfg_netlink_wait_for_change` says why. Here
+		 * it matters more, because these bytes are read -- a forged one would
+		 * be a forged answer to who set the regulatory domain. */
+		netlink->dropped++;
+		return 1;
+	}
+	if (read >= 0) {
+		/* `MSG_TRUNC` makes the answer the datagram's real length, so a cut
+		 * one is told apart here rather than read as a short message. */
+		if ((size_t)read > capacity) {
+			*gap = 1;
+			return 1;
+		}
+		*length = (size_t)read;
+		return 1;
+	}
+	if (saved == ENOBUFS) {
+		*gap = 1;
+		return 1;
+	}
+	if (saved == EAGAIN || saved == EWOULDBLOCK || saved == ETIMEDOUT || saved == EINTR) {
+		return 1;
+	}
+	return ncfg_netlink_fail(err, err_size, "reading a netlink event", saved);
+}

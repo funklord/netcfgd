@@ -1230,6 +1230,8 @@ static const ncfg_field_t observed_fields[] = {
 	    .offset = offsetof(ncfg_observed_t, bluetooth),
 	    .count_offset = offsetof(ncfg_observed_t, bluetooth_count) },
 	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, regdom) },
+	{ .name = "regdom_set_by", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_t, regdom_set_by) },
 	{ .name = "addresses", .kind = NCFG_F_LIST, .type = &observed_address_type,
 	    .element_size = sizeof(ncfg_observed_address_t),
 	    .offset = offsetof(ncfg_observed_t, addresses),
@@ -1293,6 +1295,10 @@ static const ncfg_field_t observed_fields[] = {
 	    .offset = offsetof(ncfg_observed_t, address_proto_supported) }
 };
 static const ncfg_type_t observed_type = TYPE("observation", observed_fields);
+/* The same members under a status answer's envelope, whose `response` the
+ * decoder has already read. */
+static const ncfg_type_t status_type = { "status answer", observed_fields,
+	COUNT_OF(observed_fields), "response" };
 
 /* ------------------------------------------------------------------------ *
  * The operations
@@ -1317,6 +1323,32 @@ void ncfg_observed_free(ncfg_observed_t *observed)
 	}
 	ncfg_type_free(&observed_type, observed);
 	free(observed);
+}
+
+ncfg_observed_t *ncfg_observed_from_status(const ncfg_json_doc_t *doc, uint32_t object,
+    char *err, size_t err_size)
+{
+	ncfg_observed_t *observed;
+
+	if (!doc || object == NCFG_JSON_NONE) {
+		ncfg_error_set(err, err_size, "there is no status answer to read an observation from");
+		return NULL;
+	}
+	observed = calloc(1, sizeof(*observed));
+	if (!observed) {
+		ncfg_error_set(err, err_size, "out of memory reading an observation");
+		return NULL;
+	}
+	if (!ncfg_type_init(&status_type, observed)) {
+		ncfg_observed_free(observed);
+		ncfg_error_set(err, err_size, "out of memory reading an observation");
+		return NULL;
+	}
+	if (!ncfg_type_read(&status_type, doc, object, observed, err, err_size)) {
+		ncfg_observed_free(observed);
+		return NULL;
+	}
+	return observed;
 }
 
 ncfg_observed_t *ncfg_observed_read(const char *text, size_t length, char *err, size_t err_size)

@@ -75,6 +75,7 @@
 #include "ncfg/portal.h"
 #include "ncfg/process.h"
 #include "ncfg/proto.h"
+#include "ncfg/regdom.h"
 
 /* ------------------------------------------------------------- the peer */
 
@@ -955,6 +956,15 @@ typedef struct {
 	ncfg_observed_t        *observed;
 	ncfg_daemon_observe_fn  observe;
 	void                   *observe_context;
+	/*
+	 * The last `REG_CHANGE` the daemon heard, which is the only place who set
+	 * the regulatory domain can come from (`regdom.h`). A field rather than a
+	 * module beside the state: it is two bytes and an enum, it has no
+	 * lifetime, and a reload must not touch it -- the kernel's domain did not
+	 * move because a configuration did.
+	 */
+	ncfg_regdom_change_t    regdom_heard;
+	int                     has_regdom_heard;
 } ncfg_daemon_state_t;
 
 /*
@@ -1019,6 +1029,20 @@ void ncfg_daemon_state_publish(const ncfg_daemon_state_t *state);
 
 int ncfg_daemon_state_reobserve(ncfg_daemon_state_t *state, int *moved, char *err,
     size_t err_size);
+
+/*
+ * Record a `REG_CHANGE`, or forget the last one.
+ *
+ * NULL forgets: the caller lost a notification -- `ENOBUFS`, or one that would
+ * not read -- and cannot know who set the domain since. Keeping the previous
+ * answer would name the wrong setter for a domain somebody else has set.
+ *
+ * Stamped on in `ncfg_daemon_state_reobserve`, which every observation the
+ * daemon takes passes through, and only where the country heard is the
+ * country observed; see `ncfg_observed_t::regdom_set_by`.
+ */
+void ncfg_daemon_state_heard_regdom(ncfg_daemon_state_t *state,
+    const ncfg_regdom_change_t *change);
 
 /*
  * The identity of a document, as 64 hex digits plus a NUL.

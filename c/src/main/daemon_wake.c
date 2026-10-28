@@ -44,6 +44,8 @@ const char *ncfg_main_source_name(int kind)
 		return "config";
 	case NCFG_MAIN_SOURCE_RFKILL:
 		return "rfkill";
+	case NCFG_MAIN_SOURCE_REGULATORY:
+		return "regulatory";
 	case NCFG_MAIN_SOURCE_RADIO_DIR:
 		return "supplicant directory";
 	case NCFG_MAIN_SOURCE_RADIO:
@@ -58,8 +60,8 @@ const char *ncfg_main_source_name(int kind)
 		break;
 	}
 	/* A kind outside the enum, which is a caller that built a source by hand.
-	 * Named rather than answered with one of the seven, so a log line about it
-	 * does not read as a real source misbehaving. */
+	 * Named rather than answered with one of the real ones, so a log line
+	 * about it does not read as a real source misbehaving. */
 	return "unknown";
 }
 
@@ -241,6 +243,7 @@ int ncfg_main_woke_for(ncfg_main_source_kind_t kind, ncfg_woke_t *out)
 	switch (kind) {
 	case NCFG_MAIN_SOURCE_KERNEL:
 	case NCFG_MAIN_SOURCE_RFKILL:
+	case NCFG_MAIN_SOURCE_REGULATORY:
 		/*
 		 * The kill switch folds into the kernel's wake, which is the Rust's
 		 * arrangement and is right because the *answer* is the same: look

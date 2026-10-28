@@ -256,6 +256,11 @@ static void which_wake_a_descriptor_folds_into(void)
 	check(ncfg_main_woke_for(NCFG_MAIN_SOURCE_RFKILL, &woke) && woke == NCFG_WOKE_KERNEL,
 	    "and a kill switch is the same wake, because the answer is the same");
 	woke = NCFG_WOKE_TICK;
+	check(ncfg_main_woke_for(NCFG_MAIN_SOURCE_REGULATORY, &woke) && woke == NCFG_WOKE_KERNEL,
+	    "and so is the regulatory domain moving: look again at a domain that changed");
+	check(strcmp(ncfg_main_source_name(NCFG_MAIN_SOURCE_REGULATORY), "regulatory") == 0,
+	    "which the log names as itself rather than as netlink");
+	woke = NCFG_WOKE_TICK;
 	check(ncfg_main_woke_for(NCFG_MAIN_SOURCE_CONFIG, &woke) && woke == NCFG_WOKE_CONFIG,
 	    "the configuration directory is its own");
 	woke = NCFG_WOKE_TICK;

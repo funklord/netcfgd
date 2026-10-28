@@ -11,9 +11,14 @@
 #
 # HOW IT STOPS: it waits for the station's verdict, bounded at 400 seconds,
 # then stops hostapd and the relay. The vm goes with it in any case.
+#
+# The two arguments name its verdict and the station's it waits for, `ap` and
+# `station` where absent: the same access point serves `wire_heard.conf`,
+# whose station is netcfgd's rather than the kernel's.
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
 export PATH
-out=/verdict/ap
+out=/verdict/${1:-ap}
+station=/verdict/${2:-station}
 : > "$out"
 say() { echo "$*" >> "$out"; echo "ap: $*"; }
 mount -t tmpfs -o size=64m tmpfs /tmp 2>/dev/null
@@ -69,7 +74,7 @@ done
 say "UP: access point de13 on channel 13, advertising DE"
 
 waited=0
-until grep -q '^VERDICT' /verdict/station 2>/dev/null; do
+until grep -q '^VERDICT' "$station" 2>/dev/null; do
 	waited=$((waited + 1))
 	[ "$waited" -gt 400 ] && { say "the station never reported; stopping after 400s"; break; }
 	sleep 1

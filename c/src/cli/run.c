@@ -974,6 +974,9 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
  * This prints them and then answers anyway, which is `explain`'s arrangement in
  * the Rust already -- and the exit status stays 0, because the question asked
  * was about the kernel and the kernel answered.
+ *
+ * **Its own observation, and from a running daemon only who set the
+ * regulatory domain** -- `take_regdom_setter` says why each half.
  */
 /*
  * Say so if a network the document wants joined has been left disabled.
@@ -1079,6 +1082,52 @@ static void warn_about_disabled_networks(const ncfg_document_t *document,
 	}
 }
 
+/*
+ * Who set the regulatory domain, from a daemon that heard it.
+ *
+ * **Only that, and not the daemon's whole observation**, which is what this
+ * first did and what `tests/live/qdisc.sh` refused: the daemon re-observes on
+ * the netlink groups it watches and on its tick, so a qdisc set by `tc`, a
+ * sysctl or an ethtool setting is not in its observation for up to a pass,
+ * and `ncfg status` is run to see the machine now. Making a status request
+ * cost the daemon an observation is the other way to get both, and the loop
+ * declines it on purpose -- a client polling once a second would hold it at
+ * an observation per second (`ncfg_main_woke_for`).
+ *
+ * So this program observes for itself, as it always has, and asks the daemon
+ * for the one thing only a process subscribed at the time can know (0296).
+ * Quietly: a daemon that is not there, refuses this caller's tier or answers
+ * something unreadable costs the listing that one fact and nothing else.
+ */
+static void take_regdom_setter(const ncfg_cli_options_t *options, ncfg_observed_t *observed)
+{
+	ncfg_proto_request_t request;
+	ncfg_proto_message_t message;
+	ncfg_observed_t     *theirs;
+	char                 path[NCFG_CLI_TEXT_MAX];
+	char                 ignored[NCFG_ERROR_MAX];
+	int                  absent = 0;
+
+	if (!observed->regdom || !socket_for(options, path, sizeof(path))) {
+		return;
+	}
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_STATUS;
+	if (!ncfg_cli_ask_if_there(path, &request, &message, &absent, ignored, sizeof(ignored))) {
+		return;
+	}
+	if (message.kind == NCFG_PROTO_MESSAGE_RESPONSE &&
+	    message.u.response.kind == NCFG_PROTO_RESP_STATUS) {
+		theirs = ncfg_observed_from_status(message.u.response.u.payload.doc,
+		    message.u.response.u.payload.object, ignored, sizeof(ignored));
+		if (theirs) {
+			ncfg_cli_take_regdom_setter(observed, theirs);
+			ncfg_observed_free(theirs);
+		}
+	}
+	ncfg_proto_message_free(&message);
+}
+
 static int command_status(const ncfg_cli_options_t *options)
 {
 	char             run_dir[NCFG_CLI_TEXT_MAX];
@@ -1092,6 +1141,7 @@ static int command_status(const ncfg_cli_options_t *options)
 		ncfg_document_free(document);
 		return fail(err);
 	}
+	take_regdom_setter(options, observed);
 	/* As every path that observes does: answering "why is it like this?" from
 	 * a file is the product. A `/run` that will not take it is not a failure
 	 * of the command -- the listing the operator asked for is on stdout. */

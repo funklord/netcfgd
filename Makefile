@@ -44,8 +44,9 @@
 #                         `hull-delegation-lossy` for the same across a wire
 #                         dropping frames. `hull-regdom` measures the kernel
 #                         rather than netcfgd: what a running machine may do
-#                         with its regulatory domain (0296). Each runs alone
-#                         by name;
+#                         with its regulatory domain (0296);
+#                         `hull-regdom-heard` measures netcfgd on the same
+#                         rig, saying who set it. Each runs alone by name;
 #                         `hull-image` builds the images, which is the only
 #                         part needing the internet, and `hull-clean` untags
 #                         them
@@ -2527,7 +2528,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
-      hull-delegation-lossy hull-regdom
+      hull-delegation-lossy hull-regdom hull-regdom-heard
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2714,6 +2715,33 @@ hull-regdom:
 		exit 1; \
 	fi
 
+# netcfgd saying who set the regulatory domain (0296): the daemon built on the
+# host, in a station whose domain is moved three ways by an access point in
+# another kernel and once by hand. The C is built first for `hull-delegation`'s
+# reason -- the payload runs the binary off the read-only share.
+hull-regdom-heard:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/regdom/verdict/ap_heard tests/hull/regdom/verdict/station_heard
+	@mkdir -p tests/hull/regdom/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/regdom/wire_heard.conf || true
+	@missing=0; \
+	for name in ap_heard station_heard; do \
+		file=tests/hull/regdom/verdict/$$name; \
+		if [ ! -f "$$file" ]; then \
+			echo "regdom: $$name left no verdict, so it never reached its payload"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/regdom: $$name: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "regdom: $$missing of 2 machine(s) did not pass"; \
+		exit 1; \
+	fi
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2851,7 +2879,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

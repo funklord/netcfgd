@@ -820,6 +820,21 @@ int ncfg_main_round(const ncfg_main_run_t *run, ncfg_main_round_report_t *report
 		    harvest.roams_missed);
 	}
 
+	/*
+	 * Who set the regulatory domain, before the pass that observes it. Here
+	 * rather than in the drain, because the drain holds the watchers and not
+	 * the state, and the loss first: a change heard after one was lost in the
+	 * same round is the current answer.
+	 */
+	if (run->loop && run->loop->state) {
+		if (harvest.lost_regdom) {
+			ncfg_daemon_state_heard_regdom(run->loop->state, NULL);
+		}
+		if (harvest.heard_regdom) {
+			ncfg_daemon_state_heard_regdom(run->loop->state, &harvest.regdom);
+		}
+	}
+
 	if (run->loop && ncfg_main_passes(&harvest.wake, harvest.roam_count, request_count)) {
 		char   message[NCFG_ERROR_MAX];
 		size_t at;

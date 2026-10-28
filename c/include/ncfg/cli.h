@@ -351,6 +351,18 @@ void ncfg_cli_print_version(void);
 void ncfg_cli_print_status(const ncfg_observed_t *observed);
 
 /*
+ * Put the daemon's answer to who set the regulatory domain on an observation
+ * this program took itself.
+ *
+ * **Only where the two name the same domain** -- the rule the daemon stamps
+ * by, for its reason: a setter heard for one country printed beside another is
+ * a wrong answer, and the domain can move between the daemon's observation
+ * and this one. Nothing where `mine` already has a setter or `theirs` has
+ * none, and out of memory leaves it off; the listing stands without it.
+ */
+void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *theirs);
+
+/*
  * `ncfg plan`: the actions, then everything that is not an action.
  *
  * An empty plan says `nothing to do` and still prints its warnings, refusals

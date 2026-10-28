@@ -1,5 +1,5 @@
 /*
- * daemon_watchers.c -- the five things a daemon watches, and the two pipes.
+ * daemon_watchers.c -- the six things a daemon watches, and the two pipes.
  *
  * THIS IS THE ONLY FILE HERE THAT OPENS ANYTHING
  *   `daemon_wake.c` decides and `daemon_loop.c` sequences; neither has a
@@ -12,6 +12,12 @@
  *   **Netlink**, in the observed multicast groups, which is the machine
  *   moving. It misses a kill switch being unblocked, which produces no link
  *   event until something else happens (rfkill.h).
+ *
+ *   **nl80211's `regulatory` group**, which is the one stream whose content
+ *   is kept rather than taken as "look again": a `REG_CHANGE` says who set the
+ *   wireless regulatory domain, and no question asked afterwards can (0296).
+ *   A machine with no wireless driver loaded has no nl80211, and the
+ *   subscription is tried again when a radio attaches.
  *
  *   **The configuration directory**, by inotify where the kernel allows it and
  *   by mtime otherwise. `watch.h` says why the fall-back is not defensive
@@ -41,14 +47,16 @@
  *   flag can.
  *
  * WHAT A MISSING ONE COSTS, SAID RATHER THAN REFUSED
- *   None of the five is required and each says in the log what is lost by its
+ *   None of the six is required and each says in the log what is lost by its
  *   absence, which is `ncfg_reconcile_world_t`'s bargain: a daemon that would
- *   not start because one of five watches was unavailable is a daemon
- *   refusing to watch the four that are.
+ *   not start because one of six watches was unavailable is a daemon
+ *   refusing to watch the five that are.
  */
 #include "loop_internal.h"
 
+#include "ncfg/genl_socket.h"
 #include "ncfg/log.h"
+#include "ncfg/regdom.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -61,6 +69,8 @@
 #include <sys/timerfd.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#include <linux/nl80211.h>
 
 /* ------------------------------------------------------------------------ *
  * Reading only what is there
@@ -220,6 +230,74 @@ static int drain_rfkill(void *context, ncfg_main_harvest_t *harvest, char *err, 
 			return 0;
 		}
 		if (ncfg_main_woke_for(NCFG_MAIN_SOURCE_RFKILL, &woke)) {
+			ncfg_reconcile_collapse(&harvest->wake, woke);
+		}
+	}
+	return 1;
+}
+
+/*
+ * nl80211's `regulatory` group: who set the domain, kept, and a wake.
+ *
+ * **The one drain here that reads what it is sent.** Every other event is
+ * "look again", because the observation that follows reads the answer out of
+ * the kernel; who set the regulatory domain is not in the kernel to be read
+ * afterwards, so a `REG_CHANGE` thrown away is an answer lost.
+ *
+ * A message that will not read is a loss rather than a failure of the source:
+ * one malformed notification says nothing about the next, and stopping the
+ * watch would lose every later answer for one bad one. What it does cost is
+ * the answer already held, since the unread one may have changed it.
+ */
+static int drain_regulatory(void *context, ncfg_main_harvest_t *harvest, char *err,
+    size_t err_size)
+{
+	ncfg_main_watchers_t *watchers = context;
+	unsigned              round;
+
+	for (round = 0u; round < (unsigned)NCFG_MAIN_EVENT_BURST; round++) {
+		uint8_t              bytes[8192];
+		size_t               length = 0;
+		int                  gap = 0;
+		int                  found = 0;
+		ncfg_regdom_change_t change;
+		char                 why[NCFG_ERROR_MAX];
+		ncfg_woke_t          woke;
+
+		if (!readable(ncfg_netlink_descriptor(&watchers->regulatory))) {
+			break;
+		}
+		if (!ncfg_netlink_next_event(&watchers->regulatory, bytes, sizeof(bytes), &length,
+		    &gap, err, err_size)) {
+			return 0;
+		}
+		if (gap) {
+			harvest->lost_regdom = 1;
+			harvest->heard_regdom = 0;
+			ncfg_log_emitf("regulatory", NCFG_LOG_NOTE,
+			    "a regulatory domain notification was lost, so who set the domain is not "
+			    "known until it next changes");
+		} else if (length == 0u) {
+			break;
+		} else {
+			why[0] = '\0';
+			memset(&change, 0, sizeof(change));
+			if (!ncfg_regdom_change_parse(bytes, length, watchers->nl80211, &found, &change,
+			    why, sizeof(why))) {
+				harvest->lost_regdom = 1;
+				harvest->heard_regdom = 0;
+				ncfg_log_emitf("regulatory", NCFG_LOG_NOTE,
+				    "a regulatory domain notification did not read (%s), so who set the "
+				    "domain is not known until it next changes", why);
+			} else if (found) {
+				harvest->regdom = change;
+				harvest->heard_regdom = 1;
+				ncfg_log_emitf("regulatory", NCFG_LOG_INFO,
+				    "the wireless regulatory domain is now %s, set by %s", change.code,
+				    ncfg_regdom_setter_name(change.set_by));
+			}
+		}
+		if (ncfg_main_woke_for(NCFG_MAIN_SOURCE_REGULATORY, &woke)) {
 			ncfg_reconcile_collapse(&harvest->wake, woke);
 		}
 	}
@@ -437,6 +515,7 @@ void ncfg_main_watchers_init(ncfg_main_watchers_t *watchers)
 	}
 	memset(watchers, 0, sizeof(*watchers));
 	ncfg_netlink_init(&watchers->netlink);
+	ncfg_netlink_init(&watchers->regulatory);
 	ncfg_rfkill_init(&watchers->rfkill);
 	ncfg_inotify_init(&watchers->radio_dir);
 	watchers->timer = -1;
@@ -489,6 +568,47 @@ static void add(ncfg_main_watchers_t *watchers, ncfg_main_source_kind_t kind, in
 	if (!ncfg_main_sources_add(&watchers->sources, &source, message, sizeof(message))) {
 		ncfg_log_emitf("loop", NCFG_LOG_WARNING, "%s", message);
 	}
+}
+
+/*
+ * Subscribe to nl80211's `regulatory` group, if there is an nl80211.
+ *
+ * Quiet where there is none: a machine with no wireless driver loaded has no
+ * domain worth reporting who set, and `attach` asks again when a radio
+ * appears. Where nl80211 is there and the subscription still fails, that is
+ * said, because the cost is an answer `ncfg status` will then never give.
+ */
+static void open_regulatory(ncfg_main_watchers_t *watchers)
+{
+	ncfg_genl_family_t family;
+	char               message[NCFG_ERROR_MAX];
+	uint32_t           group = 0;
+
+	if (watchers->has_regulatory || !watchers->kernel) {
+		return;
+	}
+	message[0] = '\0';
+	if (!ncfg_genl_family_open(NL80211_GENL_NAME, &watchers->regulatory, &family, message,
+	    sizeof(message))) {
+		ncfg_netlink_init(&watchers->regulatory);
+		return;
+	}
+	if (!ncfg_genl_family_group(&family, NL80211_MULTICAST_GROUP_REG, &group, message,
+	    sizeof(message)) ||
+	    !ncfg_netlink_join(&watchers->regulatory, group, message, sizeof(message))) {
+		ncfg_log_emitf("regulatory", NCFG_LOG_WARNING,
+		    "cannot listen for regulatory domain changes (%s); who set the domain will "
+		    "not be reported", message);
+		ncfg_genl_family_free(&family);
+		ncfg_netlink_close(&watchers->regulatory);
+		ncfg_netlink_init(&watchers->regulatory);
+		return;
+	}
+	watchers->nl80211 = family.id;
+	ncfg_genl_family_free(&family);
+	watchers->has_regulatory = 1;
+	add(watchers, NCFG_MAIN_SOURCE_REGULATORY, ncfg_netlink_descriptor(&watchers->regulatory),
+	    drain_regulatory, watchers, NULL);
 }
 
 int ncfg_main_watchers_open(ncfg_main_watchers_t *watchers, const ncfg_main_watch_t *what,
@@ -547,6 +667,8 @@ int ncfg_main_watchers_open(ncfg_main_watchers_t *watchers, const ncfg_main_watc
 			    ncfg_netlink_descriptor(&watchers->netlink), drain_kernel,
 			    &watchers->netlink, NULL);
 		}
+		watchers->kernel = 1;
+		open_regulatory(watchers);
 	}
 
 	if (what->config_dir) {
@@ -703,6 +825,9 @@ void ncfg_main_watchers_close(ncfg_main_watchers_t *watchers)
 	}
 	if (watchers->has_netlink) {
 		ncfg_netlink_close(&watchers->netlink);
+	}
+	if (watchers->has_regulatory) {
+		ncfg_netlink_close(&watchers->regulatory);
 	}
 	if (watchers->has_watch) {
 		ncfg_watch_close(&watchers->watch);
@@ -909,6 +1034,9 @@ static void attach(ncfg_main_watchers_t *watchers, const char *name)
 	memcpy(radio->interface, interface, sizeof(interface));
 	add(watchers, NCFG_MAIN_SOURCE_RADIO, ncfg_supplicant_client_descriptor(client),
 	    drain_radio, radio, radio->interface);
+	/* A radio is a wireless driver loaded, so nl80211 is there now if it was
+	 * not when the daemon started. */
+	open_regulatory(watchers);
 }
 
 void ncfg_main_watchers_refresh(void *context, ncfg_main_sources_t *sources)

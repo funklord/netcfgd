@@ -1257,6 +1257,80 @@ static void a_rejected_configuration_refuses_without_setting_diagnostics(const c
  * `/proc`, and a test that did it for real would be reading the developer's
  * own machine -- which is the one thing this suite must not do.
  */
+/* `regdom_set_by` on the state's observation, or "(none)". */
+static const char *set_by_now(const ncfg_daemon_state_t *state)
+{
+	if (!state->observed || !state->observed->regdom_set_by) {
+		return "(none)";
+	}
+	return state->observed->regdom_set_by;
+}
+
+/*
+ * Who set the regulatory domain is put on the observation only where it was
+ * heard setting the country observed.
+ *
+ * The notification and the question are two messages, and the domain can move
+ * between them -- so a setter heard for one country must not be printed beside
+ * another. And a lost notification forgets, because whoever set the domain
+ * since is not known.
+ */
+static void the_regulatory_setter_is_stamped_only_where_heard(const char *base)
+{
+	static const char *const germany = "{\"links\":[],\"regdom\":\"DE\"}";
+	ncfg_daemon_state_t  state;
+	ncfg_regdom_change_t change;
+	const char          *text = germany;
+	char                 config_dir[512];
+	char                 run_dir[512];
+	char                 err[NCFG_ERROR_MAX];
+
+	(void)testdir_in(base, "regdom-etc", config_dir, sizeof(config_dir));
+	(void)testdir_in(base, "regdom-run", run_dir, sizeof(run_dir));
+	(void)mkdir(config_dir, 0700);
+	(void)mkdir(run_dir, 0700);
+	write_config(config_dir, ORDINARY_CONFIG);
+	if (!ncfg_daemon_state_init(&state, "", config_dir, run_dir, err, sizeof(err))) {
+		check(0, "a state to stamp the regulatory setter on");
+		return;
+	}
+	state.observe = observe_links;
+	state.observe_context = &text;
+
+	check(ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err)) &&
+	        strcmp(set_by_now(&state), "(none)") == 0,
+	    "nothing heard: the domain is observed and nobody is named as its setter");
+
+	memset(&change, 0, sizeof(change));
+	(void)memcpy(change.code, "DE", 3u);
+	change.set_by = NCFG_REGDOM_SET_BY_ACCESS_POINT;
+	ncfg_daemon_state_heard_regdom(&state, &change);
+	check(ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err)) &&
+	        strcmp(set_by_now(&state), "access_point") == 0,
+	    "DE heard from an access point: the observation says so");
+
+	check(ncfg_daemon_state_reload(&state, err, sizeof(err)) &&
+	        ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err)) &&
+	        strcmp(set_by_now(&state), "access_point") == 0,
+	    "and a reload does not forget it: the kernel's domain did not move");
+
+	(void)memcpy(change.code, "00", 3u);
+	change.set_by = NCFG_REGDOM_SET_BY_KERNEL;
+	ncfg_daemon_state_heard_regdom(&state, &change);
+	check(ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err)) &&
+	        strcmp(set_by_now(&state), "(none)") == 0,
+	    "00 heard but DE observed: no setter, rather than the wrong one");
+
+	(void)memcpy(change.code, "DE", 3u);
+	change.set_by = NCFG_REGDOM_SET_BY_USER;
+	ncfg_daemon_state_heard_regdom(&state, &change);
+	ncfg_daemon_state_heard_regdom(&state, NULL);
+	check(ncfg_daemon_state_reobserve(&state, NULL, err, sizeof(err)) &&
+	        strcmp(set_by_now(&state), "(none)") == 0,
+	    "a lost notification forgets what was heard before it");
+	ncfg_daemon_state_free(&state);
+}
+
 static void the_observation_comes_through_a_seam(const char *base)
 {
 	static const char *const one_link =
@@ -1431,6 +1505,7 @@ int main(void)
 	the_state_reloads_and_holds_what_compiled(base);
 	a_rejected_configuration_refuses_without_setting_diagnostics(base);
 	the_observation_comes_through_a_seam(base);
+	the_regulatory_setter_is_stamped_only_where_heard(base);
 
 	testdir_remove(base);
 	if (failures == 0) {

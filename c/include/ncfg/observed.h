@@ -67,6 +67,7 @@
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
 #include "ncfg/json_write.h"
+#include "ncfg_json.h"
 #include "ncfg/value.h"
 
 /* ------------------------------------------------------------------------ *
@@ -1203,6 +1204,22 @@ typedef struct {
 	 * every client is answered from it.
 	 */
 	char *regdom;
+	/*
+	 * Who set `regdom`: `kernel`, `user`, `driver` or `access_point`
+	 * (`ncfg_regdom_setter_name`). NULL where nobody is known to have.
+	 *
+	 * **Never from the round that fills `regdom`.** `GET_REG` does not carry
+	 * the initiator; the `REG_CHANGE` notification does, at the moment of
+	 * change, and only a daemon subscribed then heard it. So a CLI observing
+	 * on its own never has this, a daemon has it only for a change made while
+	 * it ran, and it is stamped on only where the country heard is the
+	 * country observed -- a notification missed in between leaves it NULL
+	 * rather than naming whoever set the domain before.
+	 *
+	 * The case it answers is 0296's: a station adopting its access point's
+	 * country looks exactly like a country set by hand, until this says which.
+	 */
+	char *regdom_set_by;
 	ncfg_observed_address_t *addresses; /* sorted by interface then address */
 	size_t                   address_count;
 	ncfg_observed_route_t *routes; /* sorted canonically */
@@ -1399,6 +1416,19 @@ ncfg_observed_t *ncfg_observed_new(char *err, size_t err_size);
  */
 ncfg_observed_t *ncfg_observed_read(const char *text, size_t length, char *err,
     size_t err_size);
+
+/*
+ * The observation a daemon's `status` answer carries, already parsed.
+ *
+ * The answer is the observation's members with the envelope's `response`
+ * beside them (`ncfg_daemon_status_encode`), so this is `ncfg_observed_read`
+ * with that one member set aside and everything else held to the same
+ * refusal. A client asking the daemon gets the daemon's observation, which
+ * carries what only a running daemon knows -- who set the regulatory domain,
+ * the probe verdicts -- and a client observing on its own cannot.
+ */
+ncfg_observed_t *ncfg_observed_from_status(const ncfg_json_doc_t *doc, uint32_t object,
+    char *err, size_t err_size);
 
 /* Free the tree. A NULL observation, and one never filled in, are nothing. */
 void ncfg_observed_free(ncfg_observed_t *observed);

@@ -1024,10 +1024,10 @@ as new decisions** -- recorded here so they stop reading as open:
 - **A network's hooks mean "while on this network"** (10.34): its event
   phases fire on whichever interface is associated to it, and up and down map
   to association and disassociation.
-- **0296's mechanism**: report (built), then listen for `REG_CHANGE` to say who
-  set the domain; set a country only from a current location answer; a
-  configured country is an explicit override and belongs in `global`, since
-  the domain is per kernel.
+- **0296's mechanism**: report (built), listen for `REG_CHANGE` to say who
+  set the domain (built, 10.585); set a country only from a current location
+  answer; a configured country is an explicit override and belongs in
+  `global`, since the domain is per kernel.
 
 **And one question rather than a task: could this run on a microcontroller?**
 Put by the holder 2026-09-02. The core turns out to be portable already and the
@@ -12866,11 +12866,64 @@ returns to a country set by hand by itself, so once set it stays set without
 netcfgd fighting anybody. With no supplicant of netcfgd's on a radio, the plan
 says it is not set yet. Verified end to end in a vm: the built daemon with
 `regdom = "DE"` took a fresh kernel from `00` to `DE` in about a second,
-`ncfg status` read `DE`. **Who set the domain is not built**: a `GET_REG`
-reply carries the country and its rules and no initiator (attributes 33 and 34,
-read off a real kernel), so it needs a daemon on nl80211's regulatory
-multicast group -- and one started after the change, which is the boot case,
-would still answer "unknown". Parked on that cost against that answer.
+`ncfg status` read `DE`.
+
+**Who set the domain is built** (2026-10-28, asked for by the holder). A
+`GET_REG` reply carries the country and its rules and no initiator
+(attributes 33 and 34, read off a real kernel), so the daemon subscribes to
+nl80211's `regulatory` group -- a sixth watch, its own generic netlink socket,
+joined by group number since nl80211's are above the 32 a bind mask reaches --
+and keeps the last `REG_CHANGE` it heard on its state. Every observation it
+takes passes through `ncfg_daemon_state_reobserve`, which stamps
+`observed.regdom_set_by` (`kernel`, `user`, `driver`, `access_point`) **only
+where the country heard is the country observed**: the notification and the
+question are two messages, and a setter put on a country it was not heard
+setting is a wrong answer where none is the honest one. A lost notification
+(`ENOBUFS`, a cut datagram, one that will not read) forgets what was heard. A
+change made before the daemon started has no setter, which is the boot case
+and is said by saying nothing rather than by guessing. The kernel sends no
+country for the world domain, a custom world or an intersection, only the
+type; those are `00`, `99` and `98`, the names `GET_REG` uses. `user` is all
+of user space: `iw reg set`, netcfgd's own `global { regdom }` and hostapd's
+`country_code` are one request to the kernel.
+
+**`ncfg status` observes for itself and asks a running daemon for the setter
+alone**, under the stamp's rule: only where the daemon's domain is the one it
+just observed. Its own observation never could carry this, since only a
+process subscribed at the time heard it. **Taking the daemon's whole
+observation was built first and rejected the same day**: `tests/live/qdisc.sh`
+sets a qdisc with `tc` and asks 0.3 s later, and the daemon watches no `tc`
+group, so its observation was a pass old -- as it is for any sysctl, ethtool
+setting or resolver file -- and two checks failed. Having a status request
+cost the daemon a fresh observation would give both, and is the route the
+loop declines on purpose: a polling client would hold it at an observation a
+second (`ncfg_main_woke_for`). Whether the daemon's `status` answer should be
+fresher is a question about every client, not about this field, and is not
+decided here. `ncfg_observed_from_status` reads the answer (the type reader's
+`tag` slot sets the envelope's `response` aside); a daemon absent, refusing
+the caller's tier, or answering something unreadable costs the listing that
+one fact and nothing else.
+
+Verified by `make hull-regdom-heard`: the access point of the two-kernel rig,
+and a station running the host's build with an empty configuration. Before
+anything moves the daemon names nobody (the control: `00` set before it
+started); joining `de13` from the world domain, `DE access_point` within 0.1 s
+and `ncfg status` printing "set by the access point this machine is
+associated to"; leaving, `00 kernel`; `iw reg set SE`, `SE user`. Unit-level,
+`regdom_test` (the notification's three shapes, a radio's own change and
+another family's message passed over, four refusals), `daemon_test` (the
+stamp, its mismatch, a reload keeping it, a loss forgetting it) and
+`cli_test` (the status answer read, the setter taken only for the same
+domain), each with a sabotage that turned it red; `kernel_bytes` fuzzes the
+notification parser, seeded with one. **What it does not survive: cfg80211 unloaded and reloaded under a
+running daemon.** The family is re-registered with a new id and the old
+subscription is gone without a word, and a radio attaching retries only
+where nothing is subscribed. Rare outside a rig; noticing it would mean
+watching the genl controller's own notifications, and it has not earned that.
+**One test-harness fault found on the way**: a `cli_test` fake daemon that
+is never connected to waits for ever, so sabotaging a route to the daemon
+hangs the suite rather than failing it. It predates this; the bound belongs
+in the harness.
 
 **And one instrument fault, caught by the control.** The first table read
 channel 14 as usable under US, which it is not anywhere but Japan: `iw`

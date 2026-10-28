@@ -22,6 +22,7 @@
 #include "ncfg/log.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 
@@ -244,6 +245,31 @@ static void print_report(const ncfg_observed_t *observed, const char *name)
 }
 
 /*
+ * Who set it, in words, where a daemon heard. NULL for a word this build does
+ * not know, which prints nothing rather than the raw word.
+ *
+ * `user` gets its three usual sources named, because the kernel cannot tell
+ * them apart and "user" alone reads as "you", when the commonest one on a
+ * machine netcfgd manages is netcfgd's own `global { regdom }`.
+ */
+static const char *regdom_setter_text(const char *set_by)
+{
+	if (strcmp(set_by, "access_point") == 0) {
+		return "the access point this machine is associated to";
+	}
+	if (strcmp(set_by, "user") == 0) {
+		return "user space -- global { regdom }, iw reg set, or an access point run here";
+	}
+	if (strcmp(set_by, "driver") == 0) {
+		return "the wireless card's driver";
+	}
+	if (strcmp(set_by, "kernel") == 0) {
+		return "the kernel's own default";
+	}
+	return NULL;
+}
+
+/*
  * The wireless regulatory domain the observation read.
  *
  * Decision 0296 is why it is said: project.md 10.585 measured that a country
@@ -255,9 +281,17 @@ static void print_report(const ncfg_observed_t *observed, const char *name)
  * Nothing where the observation has none -- no radio, or a kernel that would
  * not say -- by `print_bluetooth`'s rule; the observer has already left a note
  * where it could not ask.
+ *
+ * Who set it follows where a daemon heard the change (`regdom_set_by`), which
+ * is what tells a country adopted from an access point from one set by hand
+ * -- the two look identical otherwise, and only one of them moves with the
+ * machine.
  */
 static void print_regdom(const ncfg_observed_t *observed)
 {
+	const char *setter = observed->regdom_set_by ?
+	    regdom_setter_text(observed->regdom_set_by) : NULL;
+
 	if (!observed->regdom) {
 		return;
 	}
@@ -266,9 +300,26 @@ static void print_regdom(const ncfg_observed_t *observed)
 		ncfg_out_line("wireless regulatory domain: 00, the world domain. No country is set,");
 		ncfg_out_line("so 6 GHz is off and some channels only listen until a network says");
 		ncfg_out_line("where this machine is.");
+		if (setter) {
+			ncfg_out_writef("set by %s.\n", setter);
+		}
+		return;
+	}
+	if (setter) {
+		ncfg_out_writef("wireless regulatory domain: %s, set by %s\n", observed->regdom,
+		    setter);
 		return;
 	}
 	ncfg_out_writef("wireless regulatory domain: %s\n", observed->regdom);
+}
+
+void ncfg_cli_take_regdom_setter(ncfg_observed_t *mine, const ncfg_observed_t *theirs)
+{
+	if (!mine || !theirs || !mine->regdom || mine->regdom_set_by || !theirs->regdom ||
+	    !theirs->regdom_set_by || strcmp(mine->regdom, theirs->regdom) != 0) {
+		return;
+	}
+	mine->regdom_set_by = strdup(theirs->regdom_set_by);
 }
 
 void ncfg_cli_print_status(const ncfg_observed_t *observed)

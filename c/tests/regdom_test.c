@@ -153,6 +153,169 @@ static void a_reply_is_a_country_only_when_it_names_one(void)
 	ncfg_buf_free(&payload);
 }
 
+/* The id the notifications below come from. Any number serves; one that is not
+ * nl80211's is the case `a_foreign_family_is_passed_over` needs. */
+#define NL80211_ID 35
+
+/*
+ * One whole netlink message of a family, as the `regulatory` group delivers
+ * it: the netlink header, the generic netlink one, then the attributes --
+ * `initiator` and `type` left out where negative, the country where NULL.
+ */
+static void notification(ncfg_buf_t *out, uint16_t family, uint8_t cmd, int initiator,
+    int type, const char *code)
+{
+	ncfg_genl_header_t header = { 0, 1 };
+	ncfg_wire_header_t outer;
+	ncfg_buf_t         payload;
+
+	header.cmd = cmd;
+	ncfg_buf_init(&payload, 0);
+	ncfg_genl_header_encode(&header, &payload);
+	if (initiator >= 0) {
+		ncfg_wire_attr_put_u8(&payload, NL80211_ATTR_REG_INITIATOR, (uint8_t)initiator);
+	}
+	if (type >= 0) {
+		ncfg_wire_attr_put_u8(&payload, NL80211_ATTR_REG_TYPE, (uint8_t)type);
+	}
+	if (code) {
+		ncfg_wire_attr_put_str(&payload, NL80211_ATTR_REG_ALPHA2, code);
+	}
+	/* A wiphy, as a driver's or a beacon's hint carries one: the change is
+	 * still the global domain's, and this must not be read as a radio's. */
+	ncfg_wire_attr_put_u32(&payload, NL80211_ATTR_WIPHY, 0);
+	memset(&outer, 0, sizeof(outer));
+	outer.len = (uint32_t)(NCFG_WIRE_NLMSG_HDR_LEN + payload.length);
+	outer.kind = family;
+	ncfg_wire_header_encode(&outer, out);
+	ncfg_buf_add(out, payload.data, payload.length);
+	ncfg_buf_free(&payload);
+}
+
+static void a_change_says_who_set_the_domain(void)
+{
+	ncfg_buf_t           bytes;
+	ncfg_regdom_change_t change;
+	char                 err[NCFG_ERROR_MAX];
+	int                  found = 0;
+	int                  read;
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_COUNTRY_IE,
+	    NL80211_REGDOM_TYPE_COUNTRY, "DE");
+	memset(&change, 0, sizeof(change));
+	read = ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	    sizeof(err));
+	check(read && found && strcmp(change.code, "DE") == 0 &&
+	        change.set_by == NCFG_REGDOM_SET_BY_ACCESS_POINT,
+	    "a beacon's country is DE, set by the access point");
+	check(strcmp(ncfg_regdom_setter_name(change.set_by), "access_point") == 0,
+	    "and the setter is written `access_point`");
+	ncfg_buf_free(&bytes);
+
+	/* The revert when the station leaves: the kernel, and no country in the
+	 * message at all -- the code comes from the type. */
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_CORE,
+	    NL80211_REGDOM_TYPE_WORLD, NULL);
+	read = ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	    sizeof(err));
+	check(read && found && strcmp(change.code, "00") == 0 &&
+	        change.set_by == NCFG_REGDOM_SET_BY_KERNEL,
+	    "the world domain is 00, set by the kernel, from the type alone");
+	ncfg_buf_free(&bytes);
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_USER,
+	    NL80211_REGDOM_TYPE_INTERSECTION, NULL);
+	read = ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	    sizeof(err));
+	check(read && found && strcmp(change.code, "98") == 0 &&
+	        change.set_by == NCFG_REGDOM_SET_BY_USER,
+	    "an intersection is 98, the name GET_REG gives it");
+	ncfg_buf_free(&bytes);
+
+	/* Two in one datagram: the later is the domain now. */
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_USER,
+	    NL80211_REGDOM_TYPE_COUNTRY, "SE");
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_DRIVER,
+	    NL80211_REGDOM_TYPE_COUNTRY, "JP");
+	read = ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	    sizeof(err));
+	check(read && found && strcmp(change.code, "JP") == 0 &&
+	        change.set_by == NCFG_REGDOM_SET_BY_DRIVER,
+	    "of two changes in one datagram, the later is the one kept");
+	ncfg_buf_free(&bytes);
+}
+
+static void what_is_not_a_global_change_is_passed_over(void)
+{
+	ncfg_buf_t           bytes;
+	ncfg_regdom_change_t change;
+	char                 err[NCFG_ERROR_MAX];
+	int                  found = 1;
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_WIPHY_REG_CHANGE, NL80211_REGDOM_SET_BY_DRIVER,
+	    NL80211_REGDOM_TYPE_COUNTRY, "US");
+	memset(&change, 0, sizeof(change));
+	check(ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	          sizeof(err)) && !found,
+	    "a radio's own domain changing is not the global domain changing");
+	ncfg_buf_free(&bytes);
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID + 1, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_USER,
+	    NL80211_REGDOM_TYPE_COUNTRY, "US");
+	found = 1;
+	check(ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change, err,
+	          sizeof(err)) && !found,
+	    "nor is a message from another family with the same command number");
+	ncfg_buf_free(&bytes);
+}
+
+static void a_change_that_does_not_read_is_refused(void)
+{
+	ncfg_buf_t           bytes;
+	ncfg_regdom_change_t change;
+	char                 err[NCFG_ERROR_MAX];
+	int                  found = 0;
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, 9, NL80211_REGDOM_TYPE_COUNTRY,
+	    "DE");
+	check(!ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change,
+	          err, sizeof(err)) && !found,
+	    "an initiator this build has no word for is refused, not guessed");
+	detail("said", err);
+	ncfg_buf_free(&bytes);
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, -1, NL80211_REGDOM_TYPE_COUNTRY,
+	    "DE");
+	check(!ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change,
+	          err, sizeof(err)),
+	    "so is a change that does not say who made it");
+	ncfg_buf_free(&bytes);
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_USER,
+	    NL80211_REGDOM_TYPE_COUNTRY, NULL);
+	check(!ncfg_regdom_change_parse(bytes.data, bytes.length, NL80211_ID, &found, &change,
+	          err, sizeof(err)),
+	    "and a country's change that names no country");
+	ncfg_buf_free(&bytes);
+
+	ncfg_buf_init(&bytes, 0);
+	notification(&bytes, NL80211_ID, NL80211_CMD_REG_CHANGE, NL80211_REGDOM_SET_BY_USER,
+	    NL80211_REGDOM_TYPE_COUNTRY, "DE");
+	check(!ncfg_regdom_change_parse(bytes.data, bytes.length - 4u, NL80211_ID, &found,
+	          &change, err, sizeof(err)),
+	    "and a datagram cut short of its own length");
+	ncfg_buf_free(&bytes);
+}
+
 static void the_live_check(void)
 {
 	const char        *live = getenv("NCFG_OBSERVE_LIVE");
@@ -252,6 +415,9 @@ int main(void)
 {
 	the_request_asks_for_the_global_domain();
 	a_reply_is_a_country_only_when_it_names_one();
+	a_change_says_who_set_the_domain();
+	what_is_not_a_global_change_is_passed_over();
+	a_change_that_does_not_read_is_refused();
 	the_live_check();
 
 	if (failures) {

@@ -729,6 +729,12 @@ static void the_status_listing_is_what_an_operator_reads(const char *text, size_
 	line(printed, "    192.168.0.1/24 [Ours]", "an address carries its ownership");
 	line(printed, "    172.16.1.1/24 [Foreign]", "and somebody else's says so");
 
+	/* Who set the regulatory domain, where a daemon heard: the witness has DE
+	 * from an access point, which is the case that looks like a country set
+	 * by hand until this says otherwise (0296). */
+	line(printed, "wireless regulatory domain: DE, set by the access point this machine is "
+	    "associated to", "the regulatory domain says who set it");
+
 	/*
 	 * **The adapter, which the observation has always carried and nothing
 	 * showed.** `observed.json` holds it and `tests/live/bluetooth.sh` asserts
@@ -2261,6 +2267,95 @@ static void an_apply_is_the_daemon_s_where_there_is_one(void)
  * exists to avoid is a table printed where a document was asked for -- and a
  * document printed where a table was asked for is the same fault backwards.
  */
+/*
+ * Who set the regulatory domain, taken from a daemon's status answer.
+ *
+ * `ncfg status` observes for itself -- the daemon's observation can be a pass
+ * old, which `tests/live/qdisc.sh` caught -- and asks the daemon only for the
+ * one fact a process observing on its own cannot have (0296). Two halves,
+ * each checked without a socket: reading the daemon's answer, and putting its
+ * setter on this program's observation only where both name one domain.
+ * Through the program it would need this host to have a radio, which is not
+ * a thing a suite may assume.
+ */
+static void the_regdom_setter_comes_from_the_daemon(const char *socket_text)
+{
+	static const char head[] = "{\"response\":\"status\",";
+	ncfg_proto_message_t message;
+	ncfg_observed_t     *theirs = NULL;
+	ncfg_observed_t     *mine;
+	char                 line[16384];
+	char                 sent[16500];
+	char                 err[NCFG_ERROR_MAX];
+
+	if (!witness_line(socket_text, head, line, sizeof(line))) {
+		check(0, "the status witness can be read");
+		return;
+	}
+	(void)snprintf(sent, sizeof(sent),
+	    "%s\"regdom\":\"DE\",\"regdom_set_by\":\"access_point\",%s", head,
+	    line + strlen(head));
+	if (ncfg_proto_response_read(sent, strlen(sent), &message, err, sizeof(err))) {
+		theirs = ncfg_observed_from_status(message.u.response.u.payload.doc,
+		    message.u.response.u.payload.object, err, sizeof(err));
+		ncfg_proto_message_free(&message);
+	}
+	check(theirs && theirs->regdom_set_by &&
+	        strcmp(theirs->regdom_set_by, "access_point") == 0,
+	    "a daemon's status answer reads as an observation, setter and all");
+	if (!theirs) {
+		detail("refused", err);
+		return;
+	}
+
+	(void)snprintf(sent, sizeof(sent), "%s\"regdom_mood\":\"fine\",%s", head,
+	    line + strlen(head));
+	{
+		ncfg_observed_t *odd = NULL;
+
+		if (ncfg_proto_response_read(sent, strlen(sent), &message, err, sizeof(err))) {
+			odd = ncfg_observed_from_status(message.u.response.u.payload.doc,
+			    message.u.response.u.payload.object, err, sizeof(err));
+			ncfg_proto_message_free(&message);
+		}
+		check(!odd, "  and one carrying a member this build does not know is refused");
+		ncfg_observed_free(odd);
+	}
+
+	mine = NULL;
+	(void)snprintf(sent, sizeof(sent), "%s\"regdom\":\"DE\",%s", head, line + strlen(head));
+	if (ncfg_proto_response_read(sent, strlen(sent), &message, err, sizeof(err))) {
+		mine = ncfg_observed_from_status(message.u.response.u.payload.doc,
+		    message.u.response.u.payload.object, err, sizeof(err));
+		ncfg_proto_message_free(&message);
+	}
+	if (!mine) {
+		check(0, "an observation of DE to put the setter on");
+		ncfg_observed_free(theirs);
+		return;
+	}
+	ncfg_cli_take_regdom_setter(mine, theirs);
+	check(mine->regdom_set_by && strcmp(mine->regdom_set_by, "access_point") == 0,
+	    "the same domain here: the daemon's setter is taken");
+
+	free(mine->regdom);
+	mine->regdom = strdup("SE");
+	free(mine->regdom_set_by);
+	mine->regdom_set_by = NULL;
+	ncfg_cli_take_regdom_setter(mine, theirs);
+	check(mine->regdom_set_by == NULL,
+	    "a different domain here: nothing, rather than DE's setter beside SE");
+
+	free(mine->regdom);
+	mine->regdom = strdup("DE");
+	free(theirs->regdom_set_by);
+	theirs->regdom_set_by = NULL;
+	ncfg_cli_take_regdom_setter(mine, theirs);
+	check(mine->regdom_set_by == NULL, "and a daemon that heard nothing names nobody");
+	ncfg_observed_free(mine);
+	ncfg_observed_free(theirs);
+}
+
 static void every_verb_that_renders_answers_json_too(const char *socket_text)
 {
 	char       *radios[] = { (char *)"ncfg", (char *)"wifi", (char *)"radios",
@@ -2564,6 +2659,7 @@ int main(void)
 		the_json_form_is_the_witness_with_its_tag_removed(socket_text);
 		an_explanation_says_how_many_facts_there_were(socket_text);
 		every_verb_that_renders_answers_json_too(socket_text);
+		the_regdom_setter_comes_from_the_daemon(socket_text);
 		a_monitor_in_json_is_the_line_the_daemon_sent(socket_text);
 	}
 	free(socket_text);

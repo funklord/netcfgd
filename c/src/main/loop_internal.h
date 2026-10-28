@@ -143,11 +143,11 @@
 /* How many radios are watched at once. A machine has one, or two. */
 #define NCFG_MAIN_RADIOS_MAX 8
 
-/* Seven fixed sources -- netlink, the configuration, `/dev/rfkill`, the
- * supplicant directory, the window timer, the pipe a waiting request is
- * announced on and the pipe a signal writes to -- and a descriptor per
- * radio. */
-#define NCFG_MAIN_SOURCES_MAX (7u + (size_t)NCFG_MAIN_RADIOS_MAX)
+/* Eight fixed sources -- netlink, nl80211's regulatory group, the
+ * configuration, `/dev/rfkill`, the supplicant directory, the window timer,
+ * the pipe a waiting request is announced on and the pipe a signal writes to
+ * -- and a descriptor per radio. */
+#define NCFG_MAIN_SOURCES_MAX (8u + (size_t)NCFG_MAIN_RADIOS_MAX)
 
 /*
  * How many requests may be waiting for the loop at once.
@@ -180,6 +180,14 @@ typedef enum {
 	 * is no separate answer.
 	 */
 	NCFG_MAIN_SOURCE_RFKILL,
+	/*
+	 * nl80211's `regulatory` group, which is the one netlink stream here whose
+	 * bytes are read: a `REG_CHANGE` says who set the domain, and nothing
+	 * asked afterwards can (`regdom.h`). A socket of its own because it is
+	 * generic netlink, which cannot share the route socket. Its wake is the
+	 * kernel's -- the domain moved, so look again.
+	 */
+	NCFG_MAIN_SOURCE_REGULATORY,
 	/* The supplicant's control directory: a radio appearing or leaving. */
 	NCFG_MAIN_SOURCE_RADIO_DIR,
 	/* One attached radio's control socket. */
@@ -229,6 +237,12 @@ typedef struct {
 	/* The supplicant directory moved, so the radios are worth looking at
 	 * again. */
 	int                   rescan;
+	/* The last `REG_CHANGE` this round read, where `heard_regdom`. */
+	ncfg_regdom_change_t  regdom;
+	int                   heard_regdom;
+	/* A regulatory notification was lost, so who set the domain is no longer
+	 * known. A change heard after the loss in the same round still stands. */
+	int                   lost_regdom;
 } ncfg_main_harvest_t;
 
 /* Add one, or say it did not fit. Always answers what the caller should do
@@ -796,6 +810,14 @@ typedef struct {
 typedef struct {
 	ncfg_netlink_t      netlink;
 	int                 has_netlink;
+	/* nl80211's `regulatory` group, and nl80211's id for reading what it
+	 * says. Opened where the kernel is watched, and tried again when a radio
+	 * attaches -- a machine that booted with no wireless driver loaded has no
+	 * nl80211 until one is. */
+	ncfg_netlink_t      regulatory;
+	int                 has_regulatory;
+	int                 kernel;
+	uint16_t            nl80211;
 	ncfg_watch_t        watch;
 	int                 has_watch;
 	ncfg_rfkill_t       rfkill;

@@ -100,5 +100,16 @@ int ncfg_fuzz_one(const unsigned char *data, size_t length)
 
 		(void)ncfg_regdom_parse(data, length, code, sizeof(code), err, sizeof(err));
 	}
+
+	/* And the notification of who changed it, which the daemon reads off the
+	 * `regulatory` group whole -- several messages to a datagram -- and keeps.
+	 * The family id is one a real kernel hands out, so the walk reaches the
+	 * attribute reads rather than passing every message over. */
+	{
+		ncfg_regdom_change_t change;
+		int                  found = 0;
+
+		(void)ncfg_regdom_change_parse(data, length, 35u, &found, &change, err, sizeof(err));
+	}
 	return 0;
 }

@@ -381,6 +381,37 @@ int ncfg_netlink_change_from(ssize_t read, int code, int *changed,
     char *err, size_t err_size);
 
 /*
+ * Join one more multicast group, by its number.
+ *
+ * `ncfg_netlink_open_protocol` takes a bitmask, which reaches the first 32
+ * groups and is right for rtnetlink's fixed ones. A generic netlink family's
+ * groups are numbered by the controller at registration and are not bounded
+ * by that, so they are joined this way -- `NETLINK_ADD_MEMBERSHIP`, which
+ * takes the number itself.
+ */
+int ncfg_netlink_join(ncfg_netlink_t *netlink, uint32_t group, char *err, size_t err_size);
+
+/*
+ * Take one datagram the kernel sent, keeping the bytes.
+ *
+ * `ncfg_netlink_wait_for_change` throws the bytes away because an rtnetlink
+ * event means only "look again". A `REG_CHANGE` is the other kind: it carries
+ * something no later question can recover, so it has to be read.
+ *
+ * `*length` is zero where nothing was taken -- nothing queued, a signal, or a
+ * datagram from a local process, which is dropped and counted as the wait's
+ * are. **`*gap` is set where something was lost**: `ENOBUFS`, or a datagram
+ * larger than `capacity`, which arrives cut and cannot be read. The caller
+ * cannot know what the lost one said, and must forget what it knew rather
+ * than keep a stale answer.
+ *
+ * Everything else is a failure and says so, `ncfg_netlink_change_from`'s
+ * bargain.
+ */
+int ncfg_netlink_next_event(ncfg_netlink_t *netlink, void *bytes, size_t capacity,
+    size_t *length, int *gap, char *err, size_t err_size);
+
+/*
  * One datagram source: `recv`, with the two flags this module uses.
  *
  * **The seam that makes the receive loop testable without a kernel.** Binding

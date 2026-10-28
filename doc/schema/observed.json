@@ -433,6 +433,7 @@
     }
   ],
   "regdom": "DE",
+  "regdom_set_by": "access_point",
   "addresses": [
     {
       "interface": "eth0",
