@@ -995,25 +995,39 @@ them because no test had ever carried those keys.
    entitlement, so every activation ends in a reject cause rather than a
    bearer. It needs a SIM with a live subscription and nothing else. The
    remaining items need a person and a device rather than a design.
-2. **The renderer's last refusals need a decision, not code.** `wireguard`,
-   `openvpn`, `tunnel`, `pppoe` and `tun` are what is left, and they are not
-   more keys: a WireGuard block carries a private key and OpenVPN names an
-   operator's file. **What may a snapshot contain?** That is the holder's, and
-   it blocks the work rather than delaying it.
+2. ~~The renderer's last refusals~~ -- **answered, re-read 2026-10-28.**
+   0029 had already said what a snapshot may contain: secrets do not travel.
+   The renderer has since rendered `wireguard`, `openvpn`, `tunnel`, `pppoe`
+   and `tun`, writing a secret as its `@secret:` reference and refusing only
+   one with no name to refer to. This item stood open after both, which is the
+   cost of a decision taken under another name (`working-practice.md`).
 3. **The permission tiers**, deferred by the holder with the shape already
    given -- `view` / `laptop` / `root`, replacing the current gradient. Written
    up under *Open: the permission system needs an overhaul*.
-4. **Being told *why* you are being stopped**, which is the half of the
-   2026-08-25 restart requirement that is still open. The other half landed:
-   a stop holds, the record survives, and a deb upgrade restarts a running
-   daemon. What is missing is that an upgrade and a final stop look identical
-   to the daemon, and nothing writes the intent down for the next copy.
-   **It had a concrete consumer, and that one is now closed by placement
-   rather than by intent**: an unresolved commit-confirm window was destroyed
-   by a real stop and survived a restart, and 0163 moved it out of the
-   directory systemd deletes (10.49). What that does *not* answer is still the
-   requirement -- netcfgd is told nothing, and the fix works by needing to know
-   nothing. The next consumer will not necessarily have that option.
+4. ~~Being told *why* you are being stopped~~ -- **answered by placement,
+   re-read 2026-10-28.** 0134 decided an unannounced stop holds, and 0163
+   moved the one thing that needed the intent -- the commit-confirm window --
+   out of the directory a stop deletes (10.49). Nothing consumes an intent
+   now; if a consumer appears, it is that consumer's question.
+
+**And what the holder answered 2026-10-28, from the project's goals rather than
+as new decisions** -- recorded here so they stop reading as open:
+
+- **`ncfg` is a client; the daemon applies.** A plain `ncfg apply` goes
+  through the daemon whenever one is there, and runs in-process only with no
+  daemon or with `--config-dir` naming another tree. That closes 10.41.2's
+  hold, arms a document's `confirm = N` on the same path, and answers the
+  bullet below about backends parented by a short-lived CLI.
+- **Editing the file is protected by `confirm = N`, not by racing it**
+  (10.41.3): `--confirm-within` after the watcher has applied a change should
+  say so rather than arm a window over nothing.
+- **A network's hooks mean "while on this network"** (10.34): its event
+  phases fire on whichever interface is associated to it, and up and down map
+  to association and disassociation.
+- **0296's mechanism**: report (built), then listen for `REG_CHANGE` to say who
+  set the domain; set a country only from a current location answer; a
+  configured country is an explicit override and belongs in `global`, since
+  the domain is per kernel.
 
 **And one question rather than a task: could this run on a microcontroller?**
 Put by the holder 2026-09-02. The core turns out to be portable already and the
@@ -1099,9 +1113,10 @@ anybody decides it is impossible.
   Closing one by implementing it is not a precedent for the rest, and the
   count is in this entry rather than in a count elsewhere because this is the
   copy a reader would come to.
-- **`ncfg apply` without `--confirm` spawns backends as children of a
-  short-lived CLI**, so which process owns dhcpcd depends on whether the
-  operator typed a flag. Raised with the holder; unanswered.
+- ~~**`ncfg apply` without `--confirm` spawns backends as children of a
+  short-lived CLI**~~ -- answered 2026-10-28: with a daemon running, a plain
+  apply is the daemon's, so it parents what it starts. With none, the CLI is
+  the only process there is to do it.
 
 **Two lessons from this pass that generalise, both about checks rather than
 code.** A coverage check keyed on a field *name* reports the union of every
@@ -9107,8 +9122,15 @@ the hold as the control variable -- three runs, identical each time:
 The log line the first record leaned on -- "no previous configuration
 recorded" on one side only -- does not discriminate in the C: all three cases
 print it once. `c_daemon_tryout.sh` already states the mechanism in passing.
-Whether a local apply *ought* to release a daemon's hold is a question nobody
-has asked; as built, "change nothing until asked" means asked over the socket.
+Whether a local apply *ought* to release a daemon's hold was answered
+2026-10-28, and not by teaching a local apply to: `ncfg` is a client, so a plain
+`ncfg apply` goes through the daemon whenever one is there and is a request
+like any other. In-process only with no daemon, or with `--config-dir` naming a
+tree the daemon is not reading. Routing it that way found the request path
+planning from the last tick's observation -- a lease report written just
+before the apply was not in it, so `switch_network.sh` delivered the old
+nameserver -- and the request now observes before it plans, as the in-process
+apply always did.
 
 ### 10.41.3 The watcher defers to a window -- the half that needs no clock
 
@@ -9158,6 +9180,14 @@ set the key rather than in general: where the document asks for a window, the
 change the watcher applies carries one, so there is nothing left to race. A
 machine that sets no key still has the race described above, and the settle is
 still not a thing to ship.
+
+**And the race is not something to win, answered 2026-10-28.** The safety net
+for editing the file is `confirm = N`, which the daemon arms on the pass that
+applies the edit. `--confirm-within` asked afterwards protects what it applies,
+and where the watcher got there first that is nothing: `ncfg apply` now says so
+-- the machine already matched, the window covers no change, `confirm = N` is
+what protects an edit -- rather than printing "window open" over an empty
+journal.
 
 `a_window_is_requested` is split out from `defers_to_a_window` so it can be
 tested at all: the tuples reaching the loop carry a `SyncSender`, and a
