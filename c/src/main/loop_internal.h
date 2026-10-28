@@ -1515,9 +1515,10 @@ void ncfg_main_service_release(ncfg_main_world_t *world);
  *
  * What did not fit is counted in `*missed`, which may be NULL. Interfaces
  * first and then networks, which is the order the planner visits them in --
- * and a network's are here because they run: their event phases fire on the
- * interface associated to the network (project.md 10.34), and the executor
- * refuses a script it has no hash for.
+ * and a network's are here because they run: their event phases on the
+ * interface associated to the network, up and down at association and
+ * disassociation (project.md 10.34), and the executor refuses a script it has
+ * no hash for.
  */
 size_t ncfg_main_hooks_of(const ncfg_document_t *document, ncfg_hook_ref_t *out, size_t out_max,
     size_t *missed);

@@ -8650,6 +8650,16 @@ the planner warns about exactly those now rather than about every hook. Also
 open: `ncfg hooks` lists interface hooks only, since its entry names an
 interface and the protocol's hook list has no member for a network.
 
+**Up and down built the same day.** The daemon compares which network each
+radio was on in the observation it replaces with the one it takes: a radio
+that left a network runs that network's `pre_down`, `down` and `post_down`,
+and one that joined runs `pre_up`, `up` and `post_up`, in order, with
+`NCFG_NETWORK` naming it. The supplicant's own events carry only its numeric
+id (netcfgd writes no `id_str`), so the observation is where the name is, and
+nothing has to be persisted. A daemon starting on a radio already on a network
+fires nothing, the roam hook's rule. So every phase of a network's hooks runs,
+and the planner no longer calls any of them inert.
+
 ## 10.35 cli and gui: a probe that blocked itself, and a menu nobody told
 
 Swept on 2026-09-04. 10.20 had already swept GUI behaviour for the

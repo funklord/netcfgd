@@ -871,9 +871,8 @@ static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for
 	ncfg_plan_t     *plan = planfix_plan("", "", STATED_NETWORK, "", "\"links\":[]",
 	    &document, &observed);
 
-	check(plan && planfix_warned(plan,
-	    "states addressing, `routes`, a `dns` policy and up/down hooks"),
-	    "a network's four inert halves are named, and only the ones it states");
+	check(plan && planfix_warned(plan, "states addressing, `routes` and a `dns` policy,"),
+	    "a network's inert halves are named, and its hooks are not among them");
 	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
 	    "and reported as a product gap rather than as a port gap");
 	check(planfix_whole(planfix_warning_with(plan, "states addressing"),
@@ -894,8 +893,7 @@ static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for
 
 /*
  * A network whose only hook is an event hook states nothing inert: since
- * project.md 10.34 was answered, `carrier`, `lease`, `roam`, `portal` and
- * `drift` on a network run on the interface associated to it.
+ * project.md 10.34 was answered, every phase of a network's hooks runs.
  */
 static void a_network_s_event_hook_is_not_called_inert(void)
 {

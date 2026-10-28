@@ -1494,6 +1494,78 @@ static void a_network_s_roam_hook_runs_on_its_radio(const char *base)
 	    "and a radio associated to no network runs nobody's");
 	harness_stop(&harness);
 }
+
+/*
+ * A network's up and down hooks are its association and disassociation
+ * (project.md 10.34): a radio that joins `home` between two observations runs
+ * `home`'s `pre_up`, `up` and `post_up` in that order, and leaving runs the
+ * three down hooks. The interface declares none of its own.
+ */
+static void a_network_s_up_and_down_hooks_are_joining_and_leaving(const char *base)
+{
+	harness_t               harness;
+	ncfg_reconcile_wake_t   wake;
+	ncfg_reconcile_report_t report;
+	char                    err[NCFG_ERROR_MAX];
+
+	if (!harness_start(&harness, base, "netjoin")) {
+		check(0, "a loop for joining a network");
+		harness_stop(&harness);
+		return;
+	}
+	harness.state.desired = document_of(
+	    "\"devices\":[],\"interfaces\":[],"
+	    "\"networks\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"security\":{\"type\":\"open\"},"
+	    "\"hooks\":["
+	    "{\"phase\":\"pre_up\",\"path\":\"/nonexistent/a\",\"sha256\":\"" ZEROS "\"},"
+	    "{\"phase\":\"up\",\"path\":\"/nonexistent/b\",\"sha256\":\"" ZEROS "\"},"
+	    "{\"phase\":\"post_up\",\"path\":\"/nonexistent/c\",\"sha256\":\"" ZEROS "\"},"
+	    "{\"phase\":\"down\",\"path\":\"/nonexistent/d\",\"sha256\":\"" ZEROS "\"}]}]");
+	harness.state.observed = observed_of(ON_HOME(""));
+	harness.state.observe = observe_fixture;
+	harness.state.observe_context = &harness.machine;
+	if (!harness.state.desired || !harness.state.observed) {
+		check(0, "the joining fixture reads");
+		harness_stop(&harness);
+		return;
+	}
+	memset(&wake, 0, sizeof(wake));
+	ncfg_reconcile_collapse(&wake, NCFG_WOKE_KERNEL);
+
+	harness.machine.body = ON_HOME(",\"network\":\"home\"");
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	{
+		int pre = step_at(&harness.world, "hook:pre_up:wlan0:NCFG_NETWORK=home");
+		int up = step_at(&harness.world, "hook:up:wlan0:NCFG_NETWORK=home");
+		int post = step_at(&harness.world, "hook:post_up:wlan0:NCFG_NETWORK=home");
+
+		check(pre >= 0 && up > pre && post > up,
+		    "joining a network runs its pre_up, up and post_up hooks, in that order");
+	}
+	check(step_at(&harness.world, "hook:down") < 0, "  and none of its down hooks");
+	if (failures) {
+		steps_said(&harness.world);
+	}
+
+	harness.world.count = 0;
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(step_at(&harness.world, "hook:pre_up") < 0 && step_at(&harness.world, "hook:down") < 0,
+	    "staying on it runs neither");
+
+	harness.world.count = 0;
+	harness.machine.body = ON_HOME("");
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, NULL, 0u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(step_at(&harness.world, "hook:down:wlan0:NCFG_NETWORK=home") >= 0 &&
+	    step_at(&harness.world, "hook:up") < 0,
+	    "and leaving it runs its down hooks");
+	harness_stop(&harness);
+}
 #undef ON_HOME
 
 /* ------------------------------------------------------------------------ *
@@ -2542,6 +2614,7 @@ int main(void)
 	a_held_loop_still_observes_and_still_reports(base);
 	a_roam_is_told_before_anything_looks(base);
 	a_network_s_roam_hook_runs_on_its_radio(base);
+	a_network_s_up_and_down_hooks_are_joining_and_leaving(base);
 	a_start_says_which_sim_a_modem_is_on(base);
 	a_byte_identical_rewrite_arms_nothing(base);
 	a_stale_timer_finds_nothing_to_do(base);

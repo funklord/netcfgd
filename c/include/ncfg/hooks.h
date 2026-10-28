@@ -207,9 +207,9 @@ void ncfg_hook_scripts_free(ncfg_hook_script_t *scripts, size_t count);
  * listing *is* the file, and here the listing is the document's claim about a
  * file.
  *
- * **Interface hooks only, and that is now a gap.** A `network` block's event
- * hooks run since project.md 10.34 was answered, on the interface associated
- * to it -- but an entry here names its `interface`, and the protocol's hook
+ * **Interface hooks only, and that is now a gap.** A `network` block's hooks
+ * all run since project.md 10.34 was answered, on the interface associated to
+ * it -- but an entry here names its `interface`, and the protocol's hook
  * list has no member for a network, so listing them would label each with the
  * wrong kind of name. Left out until the list can say which network.
  *

@@ -72,10 +72,10 @@ unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired)
 	}
 
 	/*
-	 * And every hook on every configured network. Their event phases run on
-	 * the interface associated to them (project.md 10.34); their up and down
-	 * phases do not yet, so counting every one makes the deadline generous by
-	 * a timeout where a network has those -- the safe direction.
+	 * And every hook on every configured network, which all run: the event
+	 * phases on the interface associated to it, up and down at association
+	 * and disassociation (project.md 10.34). An association they run on can
+	 * be caused by an apply.
 	 */
 	for (at = 0u; at < desired->network_count; at++) {
 		total += hooks_seconds(desired->networks[at].hooks,

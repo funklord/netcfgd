@@ -159,8 +159,10 @@ void ncfg_reconcile_portal_probe(void *context, const char *url, ncfg_portal_res
 	ncfg_portal_probe(NCFG_PORTAL_OWN_IMAGE, url, NCFG_PORTAL_EXPECT_DEFAULT, out);
 }
 
-/* Every hook of one phase in one list, run on this interface. */
-static void run_listed(const ncfg_reconcile_world_t *world, const ncfg_interface_t *interface,
+/* Every hook of one phase in one list, run on the interface named. A name
+ * rather than a block: a radio's network hooks run on it whether or not it has
+ * an `interface` block of its own. */
+static void run_listed(const ncfg_reconcile_world_t *world, const char *iface,
     const ncfg_hook_ref_t *hooks, size_t count, ncfg_hook_phase_t phase, const char *reason,
     const char *variable, const char *value)
 {
@@ -172,7 +174,7 @@ static void run_listed(const ncfg_reconcile_world_t *world, const ncfg_interface
 			continue;
 		}
 		memset(&env, 0, sizeof(env));
-		env.iface = interface->name;
+		env.iface = iface;
 		env.reason = reason;
 		world->hook(world->context, &hooks[at], &env, variable, value);
 	}
@@ -195,12 +197,12 @@ static void run_hooks(const ncfg_reconcile_t *loop, const ncfg_interface_t *inte
 	if (!loop->world.hook) {
 		return;
 	}
-	run_listed(&loop->world, interface, interface->hooks, interface->hook_count, phase, reason,
-	    variable, value);
+	run_listed(&loop->world, interface->name, interface->hooks, interface->hook_count, phase,
+	    reason, variable, value);
 	network = ncfg_observed_joined_network(loop->state->observed, loop->state->desired,
 	    interface->name);
 	if (network) {
-		run_listed(&loop->world, interface, network->hooks, network->hook_count, phase,
+		run_listed(&loop->world, interface->name, network->hooks, network->hook_count, phase,
 		    reason, variable, value);
 	}
 }
@@ -1059,6 +1061,141 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
 }
 
 /* ------------------------------------------------------------------------ *
+ * Joining and leaving a network
+ * ------------------------------------------------------------------------ *
+ *
+ * **A network's up and down hooks are its association and disassociation**
+ * (the holder, 2026-10-28; project.md 10.34). The observation says which
+ * network each radio is on, so a change between the observation this pass
+ * replaces and the one it takes is a radio leaving one network and joining
+ * another -- seen here, where both are in hand, with nothing to persist. The
+ * supplicant's own events carry only its numeric id, and netcfgd writes no
+ * `id_str`; the observation is where the name is.
+ */
+
+/* Radios a machine has, comfortably; a radio past this is not compared, which
+ * costs its network's up and down hooks and nothing else. */
+#define ASSOCIATIONS_MAX 16u
+#define NO_PREVIOUS      ((size_t)-1)
+
+/* `IFNAMSIZ`, and room for a network id that is an SSID's 64 hex characters
+ * with a prefix. A longer id is cut, and the network it names is then not
+ * found, so its up and down hooks do not run -- for an id nobody writes. */
+typedef struct {
+	char link[16];
+	char network[160];
+} association_t;
+
+/* Each radio and the network it is on, "" for none. NO_PREVIOUS where there
+ * is no observation yet. Copied rather than pointed at, since the observation
+ * they come from is about to be freed. */
+static size_t associations_of(const ncfg_observed_t *observed, association_t *out)
+{
+	size_t count = 0;
+	size_t at;
+
+	if (!observed) {
+		return NO_PREVIOUS;
+	}
+	for (at = 0; at < observed->link_count && count < ASSOCIATIONS_MAX; at++) {
+		const ncfg_observed_link_t *link = &observed->links[at];
+
+		if (!link->wireless || !link->name) {
+			continue;
+		}
+		(void)snprintf(out[count].link, sizeof(out[count].link), "%s", link->name);
+		(void)snprintf(out[count].network, sizeof(out[count].network), "%s",
+		    link->network ? link->network : "");
+		count++;
+	}
+	return count;
+}
+
+static const ncfg_wifi_network_t *network_named(const ncfg_document_t *desired, const char *id)
+{
+	size_t at;
+
+	if (!desired || !id || !id[0]) {
+		return NULL;
+	}
+	for (at = 0; at < desired->network_count; at++) {
+		if (desired->networks[at].id && strcmp(desired->networks[at].id, id) == 0) {
+			return &desired->networks[at];
+		}
+	}
+	return NULL;
+}
+
+/* One network's three hooks of a direction, in order, on one radio. */
+static void run_network_phases(const ncfg_reconcile_t *loop, const char *link,
+    const ncfg_wifi_network_t *network, const ncfg_hook_phase_t *phases, const char *reason)
+{
+	size_t at;
+
+	if (!network || !loop->world.hook) {
+		return;
+	}
+	for (at = 0; at < 3u; at++) {
+		run_listed(&loop->world, link, network->hooks, network->hook_count, phases[at], reason,
+		    "NCFG_NETWORK", network->id);
+	}
+}
+
+/* Down for the network a radio left, then up for the one it joined. */
+static void association_hooks(const ncfg_reconcile_t *loop, const association_t *before,
+    size_t before_count)
+{
+	static const ncfg_hook_phase_t down[3] = { NCFG_HOOK_PHASE_PRE_DOWN,
+		NCFG_HOOK_PHASE_DOWN, NCFG_HOOK_PHASE_POST_DOWN };
+	static const ncfg_hook_phase_t up[3] = { NCFG_HOOK_PHASE_PRE_UP, NCFG_HOOK_PHASE_UP,
+		NCFG_HOOK_PHASE_POST_UP };
+	association_t after[ASSOCIATIONS_MAX];
+	size_t        after_count = associations_of(loop->state->observed, after);
+	size_t        at;
+	size_t        other;
+
+	if (after_count == NO_PREVIOUS) {
+		return;
+	}
+	/* Every radio before: left a network it is no longer on, or vanished. */
+	for (at = 0; at < before_count; at++) {
+		const char *now = "";
+
+		for (other = 0; other < after_count; other++) {
+			if (strcmp(after[other].link, before[at].link) == 0) {
+				now = after[other].network;
+				break;
+			}
+		}
+		if (before[at].network[0] && strcmp(before[at].network, now) != 0) {
+			char reason[NCFG_DRIFT_SUMMARY_MAX];
+
+			(void)snprintf(reason, sizeof(reason), "left %s", before[at].network);
+			run_network_phases(loop, before[at].link,
+			    network_named(loop->state->desired, before[at].network), down, reason);
+		}
+	}
+	/* Every radio after: joined a network it was not on. */
+	for (at = 0; at < after_count; at++) {
+		const char *was = "";
+
+		for (other = 0; other < before_count; other++) {
+			if (strcmp(before[other].link, after[at].link) == 0) {
+				was = before[other].network;
+				break;
+			}
+		}
+		if (after[at].network[0] && strcmp(after[at].network, was) != 0) {
+			char reason[NCFG_DRIFT_SUMMARY_MAX];
+
+			(void)snprintf(reason, sizeof(reason), "joined %s", after[at].network);
+			run_network_phases(loop, after[at].link,
+			    network_named(loop->state->desired, after[at].network), up, reason);
+		}
+	}
+}
+
+/* ------------------------------------------------------------------------ *
  * Looking at the machine
  * ------------------------------------------------------------------------ */
 
@@ -1067,8 +1204,10 @@ static void reconcile_drift(ncfg_reconcile_t *loop, const ncfg_plan_t *plan, int
  * programs, and which card each SIM source turned out to hold. */
 static void reobserve(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *report)
 {
-	char message[NCFG_ERROR_MAX];
-	int  moved = 0;
+	char          message[NCFG_ERROR_MAX];
+	int           moved = 0;
+	association_t before[ASSOCIATIONS_MAX];
+	size_t        before_count = associations_of(loop->state->observed, before);
 
 	message[0] = '\0';
 	if (!ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message))) {
@@ -1076,6 +1215,12 @@ static void reobserve(ncfg_reconcile_t *loop, ncfg_reconcile_report_t *report)
 		    "the machine could not be re-read (%s); the previous observation stands",
 		    message);
 		return;
+	}
+	/* Only where there was an observation to compare with: a daemon starting
+	 * on a radio already on a network has seen no change, and firing then
+	 * would run the hooks on every start -- the roam hook's rule. */
+	if (before_count != NO_PREVIOUS) {
+		association_hooks(loop, before, before_count);
 	}
 	message[0] = '\0';
 	/* After the kernel and before anything reads it: the planner asks the
