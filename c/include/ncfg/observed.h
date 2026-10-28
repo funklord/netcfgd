@@ -1452,6 +1452,19 @@ int ncfg_observed_write_canonical(ncfg_observed_t *observed, ncfg_buf_t *buf, ch
 const ncfg_observed_link_t *ncfg_observed_link(const ncfg_observed_t *observed,
     const char *name);
 
+/*
+ * The configured network a link is associated to, or NULL.
+ *
+ * The link's `network` is the id of the `network` block the radio is on, as
+ * the observation read it; this is that block in `desired`. NULL for a link
+ * that is not a radio, a radio associated to nothing, and one joined to a
+ * network the document does not name. One lookup for the two places a
+ * network's hooks are run from -- the planner's and the daemon's -- so the
+ * question "which network is this interface on" has one answer.
+ */
+const ncfg_wifi_network_t *ncfg_observed_joined_network(const ncfg_observed_t *observed,
+    const ncfg_document_t *desired, const char *link);
+
 /* The prefixes delegated on an interface. */
 const ncfg_delegation_t *ncfg_observed_delegation(const ncfg_observed_t *observed,
     const char *interface);

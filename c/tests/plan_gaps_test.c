@@ -872,7 +872,7 @@ static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for
 	    &document, &observed);
 
 	check(plan && planfix_warned(plan,
-	    "states addressing, `routes`, a `dns` policy and hooks"),
+	    "states addressing, `routes`, a `dns` policy and up/down hooks"),
 	    "a network's four inert halves are named, and only the ones it states");
 	check(plan && planfix_warned(plan, "nothing acts on it in the Rust either"),
 	    "and reported as a product gap rather than as a port gap");
@@ -889,6 +889,25 @@ static void what_a_network_states_and_nothing_reads_is_not_something_to_wait_for
 	    "and no longer as something a later build of this port will do");
 	check(plan && !planfix_warned(plan, "only the set of network ids"),
 	    "and no longer claims the supplicant is given nothing but the ids");
+	planfix_release(plan, document, observed);
+}
+
+/*
+ * A network whose only hook is an event hook states nothing inert: since
+ * project.md 10.34 was answered, `carrier`, `lease`, `roam`, `portal` and
+ * `drift` on a network run on the interface associated to it.
+ */
+static void a_network_s_event_hook_is_not_called_inert(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan("", "",
+	    "{\"id\":\"home\",\"security\":{\"type\":\"open\"},"
+	    "\"hooks\":[{\"phase\":\"roam\",\"path\":\"/run/netcfgd/hooks/r\",\"sha256\":\"ab\"}]}",
+	    "", "\"links\":[]", &document, &observed);
+
+	check(plan && !planfix_warned(plan, "the `network` block `home` states"),
+	    "a network with only an event hook is not warned about");
 	planfix_release(plan, document, observed);
 }
 
@@ -1236,6 +1255,7 @@ int main(void)
 	a_modem_block_is_the_daemons_and_the_gap_is_named_exactly();
 
 	what_a_network_states_and_nothing_reads_is_not_something_to_wait_for();
+	a_network_s_event_hook_is_not_called_inert();
 	a_network_that_asks_for_none_of_it_says_nothing();
 	only_the_half_a_network_states_is_named();
 	a_networks_metric_no_longer_warns_because_it_is_applied();

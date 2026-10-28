@@ -322,6 +322,23 @@ const ncfg_observed_link_t *ncfg_observed_link(const ncfg_observed_t *observed, 
 	return NULL;
 }
 
+const ncfg_wifi_network_t *ncfg_observed_joined_network(const ncfg_observed_t *observed,
+    const ncfg_document_t *desired, const char *link)
+{
+	const ncfg_observed_link_t *found = ncfg_observed_link(observed, link);
+	size_t                      at;
+
+	if (!found || !found->network || !desired) {
+		return NULL;
+	}
+	for (at = 0; at < desired->network_count; at++) {
+		if (desired->networks[at].id && strcmp(desired->networks[at].id, found->network) == 0) {
+			return &desired->networks[at];
+		}
+	}
+	return NULL;
+}
+
 const ncfg_delegation_t *ncfg_observed_delegation(const ncfg_observed_t *observed,
     const char *interface)
 {

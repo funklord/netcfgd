@@ -159,24 +159,49 @@ void ncfg_reconcile_portal_probe(void *context, const char *url, ncfg_portal_res
 	ncfg_portal_probe(NCFG_PORTAL_OWN_IMAGE, url, NCFG_PORTAL_EXPECT_DEFAULT, out);
 }
 
-/* Run every hook of one phase that this interface declares. */
-static void run_hooks(const ncfg_reconcile_world_t *world, const ncfg_interface_t *interface,
-    ncfg_hook_phase_t phase, const char *reason, const char *variable, const char *value)
+/* Every hook of one phase in one list, run on this interface. */
+static void run_listed(const ncfg_reconcile_world_t *world, const ncfg_interface_t *interface,
+    const ncfg_hook_ref_t *hooks, size_t count, ncfg_hook_phase_t phase, const char *reason,
+    const char *variable, const char *value)
 {
 	ncfg_hook_env_t env;
 	size_t          at;
 
-	if (!world->hook) {
-		return;
-	}
-	for (at = 0; at < interface->hook_count; at++) {
-		if (interface->hooks[at].phase != (int)phase) {
+	for (at = 0; at < count; at++) {
+		if (hooks[at].phase != (int)phase) {
 			continue;
 		}
 		memset(&env, 0, sizeof(env));
 		env.iface = interface->name;
 		env.reason = reason;
-		world->hook(world->context, &interface->hooks[at], &env, variable, value);
+		world->hook(world->context, &hooks[at], &env, variable, value);
+	}
+}
+
+/*
+ * Run every hook of one phase this interface declares, and then those of the
+ * network it is on.
+ *
+ * **A network's hooks mean "while this machine is on this network"** (the
+ * holder, 2026-10-28; project.md 10.34), so a roam, a portal or drift on the
+ * interface associated to it is the network's event too. They run on the
+ * interface, with its name, because that is where the event happened.
+ */
+static void run_hooks(const ncfg_reconcile_t *loop, const ncfg_interface_t *interface,
+    ncfg_hook_phase_t phase, const char *reason, const char *variable, const char *value)
+{
+	const ncfg_wifi_network_t *network;
+
+	if (!loop->world.hook) {
+		return;
+	}
+	run_listed(&loop->world, interface, interface->hooks, interface->hook_count, phase, reason,
+	    variable, value);
+	network = ncfg_observed_joined_network(loop->state->observed, loop->state->desired,
+	    interface->name);
+	if (network) {
+		run_listed(&loop->world, interface, network->hooks, network->hook_count, phase,
+		    reason, variable, value);
 	}
 }
 
@@ -511,7 +536,7 @@ static void roam_hooks(ncfg_reconcile_t *loop, const ncfg_reconcile_roam_t *roam
 		}
 		(void)snprintf(reason, sizeof(reason), "moved to %s",
 		    roams[at].bssid ? roams[at].bssid : "");
-		run_hooks(&loop->world, interface, NCFG_HOOK_PHASE_ROAM, reason, "NCFG_BSSID",
+		run_hooks(loop, interface, NCFG_HOOK_PHASE_ROAM, reason, "NCFG_BSSID",
 		    roams[at].bssid);
 	}
 }
@@ -592,7 +617,7 @@ static void drift_hooks(ncfg_reconcile_t *loop, const ncfg_drifts_t *drifts)
 		 * the fact in the journal -- the failure this closes is the absence
 		 * of any record at all. */
 		announce_drift(drift);
-		run_hooks(&loop->world, interface, NCFG_HOOK_PHASE_DRIFT, drift->summary,
+		run_hooks(loop, interface, NCFG_HOOK_PHASE_DRIFT, drift->summary,
 		    "NCFG_ACTION", drift->action);
 		tell(&told, drift->interface, drift->summary);
 	}
@@ -714,7 +739,7 @@ static void portal_checks(ncfg_reconcile_t *loop)
 			continue;
 		}
 		(void)snprintf(reason, sizeof(reason), "a captive portal answered: %s", found.detail);
-		run_hooks(&loop->world, interface, NCFG_HOOK_PHASE_PORTAL, reason, "NCFG_URL", url);
+		run_hooks(loop, interface, NCFG_HOOK_PHASE_PORTAL, reason, "NCFG_URL", url);
 	}
 	remember(loop->state->paths.run, &told);
 }

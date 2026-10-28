@@ -477,17 +477,38 @@ static const char *hook_told(const ncfg_observed_t *observed, const char *interf
 	return NULL;
 }
 
-/* Whether this interface declares a hook for `phase`. */
-static int declares_hook(const ncfg_interface_t *interface, int phase)
+/* Whether a list of hooks has one for `phase`. */
+static int lists_hook(const ncfg_hook_ref_t *hooks, size_t count, int phase)
 {
 	size_t at;
 
-	for (at = 0; at < interface->hook_count; at++) {
-		if (interface->hooks[at].phase == phase) {
+	for (at = 0; at < count; at++) {
+		if (hooks[at].phase == phase) {
 			return 1;
 		}
 	}
 	return 0;
+}
+
+/*
+ * Whether this interface, or the network it is on, declares a hook for `phase`.
+ *
+ * **A network's hooks mean "while this machine is on this network"** (the
+ * holder, 2026-10-28; project.md 10.34): an event on the interface that is
+ * associated to it is that network's event too. Before this a network's hooks
+ * were compiled, hashed into the document and run at no phase at all.
+ */
+static int declares_hook(const ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    int phase)
+{
+	const ncfg_wifi_network_t *network;
+
+	if (lists_hook(interface->hooks, interface->hook_count, phase)) {
+		return 1;
+	}
+	network = ncfg_observed_joined_network(builder->observed, builder->desired,
+	    interface->name);
+	return network && lists_hook(network->hooks, network->hook_count, phase);
 }
 
 /*
@@ -499,22 +520,23 @@ static int declares_hook(const ncfg_interface_t *interface, int phase)
  * they fire on a value moving, so the value is in the environment and the
  * reason says what it moved from.
  */
-static void plan_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interface,
-    int phase, const char *now, const char *before, const ncfg_plan_ids_t *deps)
+static void push_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_hook_ref_t *hooks, size_t count, int phase, const char *now,
+    const char *before, const ncfg_plan_ids_t *deps)
 {
 	ncfg_op_t     op;
 	ncfg_reason_t reason;
 	size_t        at;
 
-	for (at = 0; at < interface->hook_count; at++) {
-		if (interface->hooks[at].phase != phase) {
+	for (at = 0; at < count; at++) {
+		if (hooks[at].phase != phase) {
 			continue;
 		}
 		memset(&op, 0, sizeof(op));
 		op.kind = NCFG_OP_HOOK_RUN;
 		op.u.hook.iface = interface->name;
 		op.u.hook.phase = phase;
-		op.u.hook.path = interface->hooks[at].path;
+		op.u.hook.path = hooks[at].path;
 		op.u.hook.value = now;
 		reason = ncfg_plan_reason_differs(interface->name,
 		    ncfg_hook_phase_name(phase), now,
@@ -522,6 +544,23 @@ static void plan_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *in
 		/* No inverse, as every hook: netcfgd cannot know what a script did. */
 		(void)ncfg_builder_push(builder, &op, &reason, deps ? deps->ids : NULL,
 		    deps ? deps->count : 0u, NULL);
+	}
+}
+
+/* The interface's own hooks for the phase, then the network's it is on --
+ * run on the interface, with the interface's name, since that is where the
+ * event happened. See `declares_hook`. */
+static void plan_event_hooks(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    int phase, const char *now, const char *before, const ncfg_plan_ids_t *deps)
+{
+	const ncfg_wifi_network_t *network = ncfg_observed_joined_network(builder->observed,
+	    builder->desired, interface->name);
+
+	push_event_hooks(builder, interface, interface->hooks, interface->hook_count, phase, now,
+	    before, deps);
+	if (network) {
+		push_event_hooks(builder, interface, network->hooks, network->hook_count, phase,
+		    now, before, deps);
 	}
 }
 
@@ -548,7 +587,7 @@ static void plan_carrier_hook(ncfg_builder_t *builder, const ncfg_interface_t *i
 	const char                 *told;
 	size_t                      at;
 
-	if (!declares_hook(interface, NCFG_HOOK_PHASE_CARRIER)) {
+	if (!declares_hook(builder, interface, NCFG_HOOK_PHASE_CARRIER)) {
 		return;
 	}
 	link = ncfg_observed_link(builder->observed, interface->name);
@@ -650,7 +689,7 @@ void ncfg_plan_lease_hooks(ncfg_builder_t *builder)
 		int                     wants_v6 = 0;
 		size_t                  at;
 
-		if (!interface->name || !declares_hook(interface, NCFG_HOOK_PHASE_LEASE)) {
+		if (!interface->name || !declares_hook(builder, interface, NCFG_HOOK_PHASE_LEASE)) {
 			continue;
 		}
 		for (at = 0; at < interface->addressing_count; at++) {

@@ -8640,6 +8640,16 @@ adds their timeouts to an apply's deadline. The count is kept -- generous by
 one timeout per network hook, and right the day they run -- and the comment
 now says they do not run yet. The phase question is still the holder's.
 
+**Answered 2026-10-28, and the event half built.** A network's hooks mean
+"while this machine is on this network". Its `carrier` and `lease` hooks are
+planned, and its `roam`, `portal` and `drift` hooks run, on the interface
+associated to it -- one lookup, `ncfg_observed_joined_network`, serving the
+planner and the daemon. **Its `pre_up` to `post_down` hooks still do not run**:
+up and down would have to be mapped onto association and disassociation, and
+the planner warns about exactly those now rather than about every hook. Also
+open: `ncfg hooks` lists interface hooks only, since its entry names an
+interface and the protocol's hook list has no member for a network.
+
 ## 10.35 cli and gui: a probe that blocked itself, and a menu nobody told
 
 Swept on 2026-09-04. 10.20 had already swept GUI behaviour for the

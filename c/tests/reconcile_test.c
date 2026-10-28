@@ -81,8 +81,10 @@ static ncfg_document_t *document_of(const char *body)
 	char             message[NCFG_ERROR_MAX];
 	ncfg_document_t *document;
 
+	/* A body that states its own networks gets them, not a second member. */
 	(void)snprintf(text, sizeof(text),
-	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{},\"networks\":[]%s%s}",
+	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"globals\":{}%s%s%s}",
+	    body && strstr(body, "\"networks\"") ? "" : ",\"networks\":[]",
 	    body && body[0] ? "," : "", body ? body : "");
 	message[0] = '\0';
 	document = ncfg_document_read(text, strlen(text), message, sizeof(message));
@@ -1433,6 +1435,67 @@ static void a_roam_is_told_before_anything_looks(const char *base)
 	harness_stop(&harness);
 }
 
+/*
+ * A roam on the interface associated to a network runs that network's `roam`
+ * hooks -- "while this machine is on this network" (the holder, 2026-10-28;
+ * project.md 10.34). The interface declares none of its own, so a hook that
+ * runs is the network's; the control is the same roam with the radio
+ * associated to nothing.
+ */
+#define ON_HOME(network)                                                                      \
+	"\"links\":[{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":true,"                \
+	"\"carrier\":true,\"wireless\":true" network ",\"ownership\":\"unknown\"}]"
+
+static void a_network_s_roam_hook_runs_on_its_radio(const char *base)
+{
+	harness_t               harness;
+	ncfg_reconcile_wake_t   wake;
+	ncfg_reconcile_roam_t   roam;
+	ncfg_reconcile_report_t report;
+	char                    err[NCFG_ERROR_MAX];
+
+	if (!harness_start(&harness, base, "netroam")) {
+		check(0, "a loop for a network's roam");
+		harness_stop(&harness);
+		return;
+	}
+	harness.state.desired = document_of(
+	    "\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}],"
+	    "\"networks\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"security\":{\"type\":\"open\"},"
+	    "\"hooks\":[{\"phase\":\"roam\",\"path\":\"/nonexistent/home-roam.sh\",\"sha256\":\""
+	    ZEROS "\"}]}]");
+	harness.state.observed = observed_of(ON_HOME(",\"network\":\"home\""));
+	harness.state.observe = observe_fixture;
+	harness.machine.body = ON_HOME(",\"network\":\"home\"");
+	harness.state.observe_context = &harness.machine;
+	if (!harness.state.desired || !harness.state.observed) {
+		check(0, "the network roam fixture reads");
+		harness_stop(&harness);
+		return;
+	}
+	roam.interface = "wlan0";
+	roam.bssid = "aa:bb:cc:dd:ee:03";
+	memset(&wake, 0, sizeof(wake));
+	ncfg_reconcile_collapse(&wake, NCFG_WOKE_KERNEL);
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, &roam, 1u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(step_at(&harness.world, "hook:roam:wlan0:NCFG_BSSID=aa:bb:cc:dd:ee:03") == 0,
+	    "a roam runs the roam hook of the network the radio is on");
+
+	harness.world.count = 0;
+	ncfg_observed_free(harness.state.observed);
+	harness.state.observed = observed_of(ON_HOME(""));
+	harness.machine.body = ON_HOME("");
+	err[0] = '\0';
+	(void)ncfg_reconcile_pass(&harness.loop, &wake, &roam, 1u, NULL, 0u, &report, err,
+	    sizeof(err));
+	check(step_at(&harness.world, "hook:roam") < 0,
+	    "and a radio associated to no network runs nobody's");
+	harness_stop(&harness);
+}
+#undef ON_HOME
+
 /* ------------------------------------------------------------------------ *
  * The reload, and the window over a change
  * ------------------------------------------------------------------------ */
@@ -2478,6 +2541,7 @@ int main(void)
 	a_pass_says_under_run_where_it_got_to(base);
 	a_held_loop_still_observes_and_still_reports(base);
 	a_roam_is_told_before_anything_looks(base);
+	a_network_s_roam_hook_runs_on_its_radio(base);
 	a_start_says_which_sim_a_modem_is_on(base);
 	a_byte_identical_rewrite_arms_nothing(base);
 	a_stale_timer_finds_nothing_to_do(base);

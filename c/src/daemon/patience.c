@@ -72,12 +72,10 @@ unsigned long ncfg_apply_stated_patience_seconds(const ncfg_document_t *desired)
 	}
 
 	/*
-	 * And every hook on every configured network, **although no pass runs
-	 * one yet** -- the planner warns about them instead (`plan/wifi.c`), and
-	 * which phase they fire at is open, project.md 10.34. Counting them makes
-	 * the deadline generous by one hook's timeout each where a network has
-	 * any, which is the safe direction; dropping them would leave this to be
-	 * remembered on the day they start running.
+	 * And every hook on every configured network. Their event phases run on
+	 * the interface associated to them (project.md 10.34); their up and down
+	 * phases do not yet, so counting every one makes the deadline generous by
+	 * a timeout where a network has those -- the safe direction.
 	 */
 	for (at = 0u; at < desired->network_count; at++) {
 		total += hooks_seconds(desired->networks[at].hooks,

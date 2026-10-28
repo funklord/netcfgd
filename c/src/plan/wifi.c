@@ -74,6 +74,20 @@
 #include <string.h>
 #include <strings.h>
 
+/* Whether a network declares any `pre_up` to `post_down` hook -- the phases
+ * that would need association mapped onto up and down to run. */
+static int lifecycle_hooks(const ncfg_wifi_network_t *network)
+{
+	size_t at;
+
+	for (at = 0; at < network->hook_count; at++) {
+		if (network->hooks[at].phase <= NCFG_HOOK_PHASE_POST_DOWN) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 /* ------------------------------------------------------------------------ *
  * What this build holds and does not act on
  * ------------------------------------------------------------------------ */
@@ -369,12 +383,12 @@ static void warn_regdom(ncfg_builder_t *builder)
  *     scope list from the globals and the interfaces alone. The only readers
  *     on either side are the canonicaliser, which sorts and validates them,
  *     and the renderer `ncfg profile save` writes them back through.
- *   * **hooks** are run by nothing either, and the Rust says so itself:
- *     `warn_unfired_hooks` warns per network that "a hook on a network is not
- *     run by this build at any phase". This build collects a network's hooks
- *     into the list an executor verifies a script's hash against, so that a
- *     `hook.run` naming one could be carried out -- and no pass emits that op
- *     for a network, which is the same state one step further on.
+ *   * **hooks** were run by nothing either, and are now half run: since
+ *     project.md 10.34 was answered, a network's event phases -- `carrier`,
+ *     `lease`, `roam`, `portal`, `drift` -- fire on the interface associated
+ *     to it, from `plan/link.c` and `daemon/reconcile_pass.c`. Its `pre_up`
+ *     to `post_down` hooks still do not, because up and down would have to be
+ *     mapped onto association, and those are what the warning below names.
  *   * **`metric` was the one real port gap of the five, and it is closed.**
  *     The Rust's planner applies `netcfgd_model::wifi::effective_metric` to
  *     the routes an interface declares and restarts a DHCP client that was
@@ -423,8 +437,12 @@ static void warn_networks_held(ncfg_builder_t *builder)
 			stated[count] = "a `dns` policy";
 			count++;
 		}
-		if (network->hook_count != 0u) {
-			stated[count] = "hooks";
+		/* Up and down only: since 10.34 was answered, a network's event
+		 * hooks run on the interface associated to it (`plan/link.c`,
+		 * `daemon/reconcile_pass.c`), and its up and down hooks wait on
+		 * mapping those phases to association, which is not built. */
+		if (lifecycle_hooks(network)) {
+			stated[count] = "up/down hooks";
 			count++;
 		}
 		if (count != 0u) {
@@ -449,7 +467,7 @@ static void warn_networks_held(ncfg_builder_t *builder)
 			ncfg_buf_addf(&block,
 			    "the `network` block `%s` states %s, and nothing applies %s: "
 			    "netcfgd plans addressing, routes, `dns` and hooks from an "
-			    "`interface` block, and a network's own only round-trip through "
+			    "`interface` block, and a network's own only round-trip via "
 			    "`ncfg profile save`",
 			    network->id, ncfg_buf_text(&names), count == 1u ? "it" : "them");
 			ncfg_plan_warn_unbuilt(builder, NULL, ncfg_buf_text(&block));

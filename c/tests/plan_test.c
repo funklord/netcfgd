@@ -526,10 +526,12 @@ static ncfg_document_t *document_of(const char *globals, const char *body)
 	char  message[NCFG_ERROR_MAX];
 	ncfg_document_t *document;
 
+	/* A body that states its own networks gets them, rather than a second
+	 * `networks` member the reader would refuse. */
 	(void)snprintf(text, sizeof(text),
 	    "{\"schema_version\":{\"major\":1,\"minor\":1},\"generated_by\":\"plan_test\","
-	    "\"globals\":%s,\"networks\":[],%s}",
-	    globals, body);
+	    "\"globals\":%s,%s%s}",
+	    globals, strstr(body, "\"networks\"") ? "" : "\"networks\":[],", body);
 	message[0] = '\0';
 	document = ncfg_document_read(text, strlen(text), message, sizeof(message));
 	if (!document) {
@@ -2324,6 +2326,53 @@ static void a_carrier_hook_fires_when_the_cable_moves(void)
 }
 
 /*
+ * A network's event hooks fire on the interface associated to it.
+ *
+ * **"While this machine is on this network"** (the holder, 2026-10-28;
+ * project.md 10.34): the interface declares no hook, the network does, and
+ * the radio is associated to it -- so the cable event is the network's. The
+ * control is the same radio associated to no network, which must plan
+ * nothing: a network's hooks are not every radio's.
+ */
+static void a_network_s_hooks_fire_on_the_interface_associated_to_it(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan;
+
+#define HOME_NETWORK \
+	"\"devices\":[],\"interfaces\":[{\"name\":\"wlan0\"}]," \
+	"\"networks\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"security\":{\"type\":\"open\"}," \
+	"\"hooks\":[{\"phase\":\"carrier\",\"path\":\"/run/netcfgd/hooks/home.carrier.0\"," \
+	"\"sha256\":\"ab\"}]}]"
+#define RADIO(network) \
+	"{\"name\":\"wlan0\",\"index\":3,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"wireless\":true" network ",\"ownership\":\"unknown\"}"
+
+	plan = plan_of("{}", HOME_NETWORK, "\"links\":[" RADIO(",\"network\":\"home\"") "]", NULL,
+	    &document, &observed);
+	if (plan) {
+		check(has_name(plan, "hook.run"),
+		    "a network's carrier hook fires on the radio associated to it");
+	} else {
+		check(0, "the associated fixture planned");
+	}
+	release(plan, document, observed);
+
+	plan = plan_of("{}", HOME_NETWORK, "\"links\":[" RADIO("") "]", NULL, &document,
+	    &observed);
+	if (plan) {
+		check(!has_name(plan, "hook.run"),
+		    "and not on a radio associated to no network");
+	} else {
+		check(0, "the unassociated fixture planned");
+	}
+	release(plan, document, observed);
+#undef HOME_NETWORK
+#undef RADIO
+}
+
+/*
  * A `lease` hook fires on an address netcfgd did not install.
  *
  * netcfgd does not implement DHCP (0004) and never sees the protocol, so "a
@@ -2471,6 +2520,7 @@ int main(void)
 	an_edited_tunnel_configuration_restarts_the_tunnel();
 	a_radio_that_is_switched_off_is_said();
 	a_carrier_hook_fires_when_the_cable_moves();
+	a_network_s_hooks_fire_on_the_interface_associated_to_it();
 	a_lease_hook_fires_on_an_address_netcfgd_did_not_install();
 
 	printf("\nplan: %d checks, %d failed\n", checks, failures);
