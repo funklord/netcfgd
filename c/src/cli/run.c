@@ -229,8 +229,8 @@ static const char *socket_for(const ncfg_cli_options_t *options, char *out, size
  * Replacing it with wording of this program's own would throw away the part
  * that says what to do about it.
  */
-static int ask_or_fail(const ncfg_cli_options_t *options, const ncfg_proto_request_t *request,
-    ncfg_proto_message_t *out, int *code)
+static int ask_or_fail_noting(const ncfg_cli_options_t *options,
+    const ncfg_proto_request_t *request, ncfg_proto_message_t *out, int *code, int *absent)
 {
 	char path[NCFG_CLI_TEXT_MAX];
 	char err[NCFG_ERROR_MAX];
@@ -239,8 +239,12 @@ static int ask_or_fail(const ncfg_cli_options_t *options, const ncfg_proto_reque
 		*code = fail("the run directory makes a socket path too long to connect to");
 		return 0;
 	}
-	if (!ncfg_cli_ask(path, request, out, err, sizeof(err))) {
-		*code = fail(err);
+	if (!ncfg_cli_ask_if_there(path, request, out, absent, err, sizeof(err))) {
+		/* Nobody there is not a failure to a caller that asked to be told:
+		 * it does the work itself, and says nothing about a daemon. */
+		if (!(absent && *absent)) {
+			*code = fail(err);
+		}
 		return 0;
 	}
 	if (out->kind != NCFG_PROTO_MESSAGE_RESPONSE) {
@@ -260,6 +264,12 @@ static int ask_or_fail(const ncfg_cli_options_t *options, const ncfg_proto_reque
 		return 0;
 	}
 	return 1;
+}
+
+static int ask_or_fail(const ncfg_cli_options_t *options, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *code)
+{
+	return ask_or_fail_noting(options, request, out, code, NULL);
 }
 
 /*
@@ -1546,6 +1556,9 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 	uint32_t count;
 	uint32_t at;
 	int      failed = 0;
+	/* Records that changed the machine, as against the one that armed the
+	 * window -- see the end of this function for why that count matters. */
+	uint32_t changed = 0;
 
 	if (!payload->doc) {
 		return fail("the daemon's journal could not be read");
@@ -1590,6 +1603,11 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 		if (shown && strcmp(shown, "Failed") == 0) {
 			failed = 1;
 		}
+		if (shown && strcmp(shown, "Done") == 0 &&
+		    !(op && op_length == strlen("commit.arm") &&
+		    memcmp(op, "commit.arm", op_length) == 0)) {
+			changed++;
+		}
 		if (!options->json) {
 			if (shown) {
 				ncfg_out_writef("%s %.*s\n", shown, (int)op_length,
@@ -1614,16 +1632,48 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 	 * default having been applied. Zero is the operator declining one, and
 	 * saying a window is open would be a false statement about the safety net.
 	 */
+	/*
+	 * **A window over nothing is said as one** (project.md 10.41.3). The
+	 * daemon applies an edited file the moment it is written, so `ncfg apply
+	 * --confirm-within N` run after an edit usually finds the change already
+	 * in effect: the journal is `commit.arm` alone, and the window has nothing
+	 * to put back if the change took the machine off the network. Saying
+	 * "window open" there would describe a safety net that is not under the
+	 * change. The one that is, for edits, is `confirm = N` in the file, which
+	 * the daemon arms on the pass that applies the edit.
+	 */
 	if (!options->json && options->confirm.value > 0) {
-		ncfg_out_writef("confirm window open for %llds -- run `ncfg confirm` to keep "
-		    "this, or `ncfg revert` to undo it now\n",
-		    (long long)options->confirm.value);
+		if (changed == 0) {
+			ncfg_out_line("the machine already matched this configuration -- the daemon "
+			    "applies an edited");
+			ncfg_out_line("file as soon as it is written -- so this window covers no "
+			    "change and `ncfg revert`");
+			ncfg_out_line("would put back nothing. To protect edits, set `confirm = N` "
+			    "in `global { }`:");
+			ncfg_out_line("the daemon then arms the window on the pass that applies "
+			    "them.");
+		} else {
+			ncfg_out_writef("confirm window open for %llds -- run `ncfg confirm` to "
+			    "keep this, or `ncfg revert` to undo it now\n",
+			    (long long)options->confirm.value);
+		}
 	}
 	return failed ? NCFG_CLI_EXIT_FAILED : NCFG_CLI_EXIT_OK;
 }
 
 /*
- * `ncfg apply --confirm-within N`, which is the daemon's to carry out.
+ * An apply the daemon carries out: always for `--confirm-within N`, and for a
+ * plain `ncfg apply` whenever a daemon is there.
+ *
+ * **A plain apply is the daemon's too, where there is one.** It used to run in
+ * this process whatever was running, and that made two programs apply one
+ * configuration: a daemon started with `--no-apply-on-start` was released by
+ * a request and never by a local apply, so its watcher went on ignoring every
+ * later edit (project.md 10.41.2), and a document's own `confirm = N` was
+ * armed by one path and not the other. `ncfg` is a client; the daemon applies.
+ * With no daemon, or with `--config-dir` naming a tree the daemon is not
+ * reading, the apply is this process's -- running without a daemon is a
+ * property of the design (section 4.4), not a fallback.
  *
  * **One implementation of the safety net, in the program that is still
  * running when the window expires.** A `ncfg` that armed one itself would have
@@ -1635,19 +1685,30 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
  * refuses, its sentence is what an operator reads: this build's does, and says
  * why, which is a better answer than a second refusal composed here.
  */
-static int apply_through_daemon(const ncfg_cli_options_t *options)
+static int apply_through_daemon(const ncfg_cli_options_t *options, int *absent)
 {
 	ncfg_proto_request_t request;
 	ncfg_proto_message_t message;
 	int                  code = NCFG_CLI_EXIT_OK;
 
+	ncfg_proto_str_t     consent[NCFG_CLI_LIST_MAX];
+	size_t               at;
+
 	memset(&request, 0, sizeof(request));
 	request.kind = NCFG_PROTO_REQ_APPLY;
-	request.u.apply.confirm.present = 1u;
+	/* A window only where one was asked for: absent, the daemon arms the
+	 * document's `confirm = N` if it has one, as the planner resolves it. */
+	request.u.apply.confirm.present = options->confirm.has ? 1u : 0u;
 	request.u.apply.confirm.value = options->confirm.value;
-	request.u.apply.allow_disruption.items = NULL;
-	request.u.apply.allow_disruption.count = 0u;
-	if (!ask_or_fail(options, &request, &message, &code)) {
+	/* **The consent travels.** This sent an empty list, so `--confirm-within`
+	 * with `--allow-disruption` dropped the consent and a guarded interface
+	 * was refused although the operator had said yes. */
+	for (at = 0; at < options->allow_disruption.count && at < NCFG_CLI_LIST_MAX; at++) {
+		consent[at] = ncfg_proto_str(options->allow_disruption.items[at]);
+	}
+	request.u.apply.allow_disruption.items = at > 0 ? consent : NULL;
+	request.u.apply.allow_disruption.count = at;
+	if (!ask_or_fail_noting(options, &request, &message, &code, absent)) {
 		return code;
 	}
 	/*
@@ -1762,7 +1823,15 @@ static int command_apply(const ncfg_cli_options_t *options)
 	int                     code;
 
 	if (options->confirm.has) {
-		return apply_through_daemon(options);
+		return apply_through_daemon(options, NULL);
+	}
+	if (!options->config_dir) {
+		int absent = 0;
+		int answered = apply_through_daemon(options, &absent);
+
+		if (!absent) {
+			return answered;
+		}
 	}
 	if (!the_machine || !the_machine->executor_open) {
 		return fail("this build of `ncfg` was started with no way to reach the "

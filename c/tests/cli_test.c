@@ -2198,6 +2198,60 @@ static const char *answered(const char *answer, char **argv, int argc, int *code
 }
 
 /*
+ * An apply is the daemon's wherever there is one.
+ *
+ * A plain `ncfg apply` with a daemon on the socket goes to it -- the journal
+ * printed is the fake's, which a local apply could not have produced -- and a
+ * window asked for over a journal that changed nothing says it covers nothing
+ * rather than "window open": `commit.arm` alone is the change the watcher
+ * applied before the request arrived (project.md 10.41.3).
+ */
+static void an_apply_is_the_daemon_s_where_there_is_one(void)
+{
+	static const char *changed =
+	    "{\"response\":\"journal\",\"records\":["
+	    "{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\",\"outcome\":\"done\"},"
+	    "{\"id\":2,\"op\":\"commit.arm\",\"outcome\":\"done\"}]}\n";
+	static const char *nothing =
+	    "{\"response\":\"journal\",\"records\":["
+	    "{\"id\":1,\"op\":\"commit.arm\",\"outcome\":\"done\"}]}\n";
+	char       *plain[] = { (char *)"ncfg", (char *)"apply", (char *)"--run-dir", testdir_path };
+	char       *window[] = { (char *)"ncfg", (char *)"apply", (char *)"--confirm-within",
+		(char *)"30", (char *)"--run-dir", testdir_path };
+	const char *printed;
+	int         code = 0;
+
+	printed = answered(changed, plain, 4, &code);
+	check(code == 0 && strstr(printed, "Done addr.add") != NULL,
+	    "a plain apply with a daemon there is carried out by the daemon");
+	check(strstr(printed, "confirm window") == NULL,
+	    "  and says nothing about a window nobody asked for");
+
+	printed = answered(changed, window, 6, &code);
+	check(code == 0 && strstr(printed, "confirm window open for 30s") != NULL,
+	    "a window over a change says it is open");
+
+	/* Nobody there: the apply is this process's, which in this test has no
+	 * way to reach the machine -- and says that, rather than that it could not
+	 * reach a daemon. */
+	{
+		char path[320];
+
+		(void)snprintf(path, sizeof(path), "%s/netcfgd.sock", testdir_path);
+		(void)unlink(path);
+	}
+	printed = ran_printing(plain, 4, &code);
+	check(strstr(printed, "cannot reach the daemon") == NULL,
+	    "with nobody there, a plain apply does not complain about a daemon");
+
+	printed = answered(nothing, window, 6, &code);
+	check(strstr(printed, "covers no change") != NULL &&
+	    strstr(printed, "confirm window open") == NULL,
+	    "a window over nothing says it covers nothing, and names `confirm = N`");
+	check(strstr(printed, "confirm = N") != NULL, "  pointing at what protects an edit");
+}
+
+/*
  * Each verb that renders an answer renders it both ways, from one request.
  *
  * Driven through `ncfg_cli_main` rather than by calling the writers, because
@@ -2427,6 +2481,51 @@ static void no_arm_refuses_the_flag_any_more(void)
 	free(source);
 }
 
+/*
+ * Whether anybody was there to ask, which decides where an apply runs.
+ *
+ * Learned from the one connection the request goes out on, not from a probe
+ * first: a probe spends a connection the daemon reads nothing from -- the
+ * first version of this test hung on exactly that, its one-shot fake daemon
+ * answering the probe and leaving the request unread -- and the daemon can
+ * come or go between the two. No socket, and a socket nothing listens on any
+ * more, are both nobody; a daemon that answers is somebody.
+ */
+static void nobody_there_is_told_apart_from_a_failure(void)
+{
+	ncfg_proto_request_t request;
+	ncfg_proto_message_t message;
+	struct sockaddr_un   address;
+	char                 path[512];
+	char                 err[NCFG_ERROR_MAX];
+	int                  listener;
+	int                  absent = 0;
+
+	memset(&request, 0, sizeof(request));
+	request.kind = NCFG_PROTO_REQ_RELOAD;
+	(void)snprintf(path, sizeof(path), "%s/there.sock", testdir_path);
+	(void)unlink(path);
+	check(!ncfg_cli_ask_if_there(path, &request, &message, &absent, err, sizeof(err)) &&
+	    absent, "no socket at all is nobody there");
+
+	memset(&address, 0, sizeof(address));
+	address.sun_family = AF_UNIX;
+	memcpy(address.sun_path, path, strlen(path));
+	listener = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (listener < 0 || bind(listener, (const struct sockaddr *)&address, sizeof(address)) < 0) {
+		check(0, "a socket file could be left for the check");
+		if (listener >= 0) {
+			(void)close(listener);
+		}
+		return;
+	}
+	(void)close(listener);
+	absent = 0;
+	check(!ncfg_cli_ask_if_there(path, &request, &message, &absent, err, sizeof(err)) &&
+	    absent, "and neither is the file a daemon leaves when nothing listens on it");
+	(void)unlink(path);
+}
+
 int main(void)
 {
 	char *observed_text;
@@ -2496,6 +2595,8 @@ int main(void)
 
 	the_socket_lives_under_the_run_directory();
 	the_conversation_is_one_request_and_one_answer();
+	nobody_there_is_told_apart_from_a_failure();
+	an_apply_is_the_daemon_s_where_there_is_one();
 	an_event_is_one_line();
 
 	a_name_that_is_not_text_is_refused_rather_than_repaired();

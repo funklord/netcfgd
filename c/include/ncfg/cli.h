@@ -541,6 +541,17 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, char *err, size_t err_size);
 
 /*
+ * The same, and `*absent` set where nobody was there to ask: no socket, or
+ * nothing listening on the one a daemon left. Asking and noticing absence in
+ * one connection, rather than probing first: a probe costs the daemon a
+ * connection it then reads nothing from, and the daemon can come or go
+ * between the two. A daemon that refuses this caller's permission is there,
+ * and its sentence comes back as any refusal does.
+ */
+int ncfg_cli_ask_if_there(const char *socket_path, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *absent, char *err, size_t err_size);
+
+/*
  * Where the socket is, for a given run directory.
  *
  * Writes `<run_dir>/netcfgd.sock` into `out` and returns it, or NULL where it

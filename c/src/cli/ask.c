@@ -65,7 +65,7 @@ const char *ncfg_cli_socket_path(const char *run_dir, char *out, size_t out_size
  * to check whether the daemon is running sends them to the journal for
  * something that is in a config file (0118).
  */
-static int connect_to(const char *path, char *err, size_t err_size)
+static int connect_to(const char *path, int *absent, char *err, size_t err_size)
 {
 	struct sockaddr_un address;
 	int                fd;
@@ -91,6 +91,12 @@ static int connect_to(const char *path, char *err, size_t err_size)
 		int why = errno;
 
 		close(fd);
+		/* No socket, or nothing listening on the one a daemon left: there is
+		 * no daemon, which a caller that can do the work itself may want to
+		 * know apart from a daemon that would not let it in. */
+		if (absent && (why == ENOENT || why == ECONNREFUSED)) {
+			*absent = 1;
+		}
 		if (why == EACCES || why == EPERM) {
 			ncfg_error_set(err, err_size,
 			    "not allowed to talk to netcfgd at %s: %s\n"
@@ -217,8 +223,26 @@ static void what_it_said_instead(int fd, int why, char *err, size_t err_size)
 	ncfg_proto_framer_free(&framer);
 }
 
+static int ask_noting(const char *socket_path, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *absent, char *err, size_t err_size);
+
 int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
     ncfg_proto_message_t *out, char *err, size_t err_size)
+{
+	return ask_noting(socket_path, request, out, NULL, err, err_size);
+}
+
+int ncfg_cli_ask_if_there(const char *socket_path, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *absent, char *err, size_t err_size)
+{
+	if (absent) {
+		*absent = 0;
+	}
+	return ask_noting(socket_path, request, out, absent, err, err_size);
+}
+
+static int ask_noting(const char *socket_path, const ncfg_proto_request_t *request,
+    ncfg_proto_message_t *out, int *absent, char *err, size_t err_size)
 {
 	ncfg_proto_framer_t framer;
 	ncfg_buf_t          line;
@@ -232,7 +256,7 @@ int ncfg_cli_ask(const char *socket_path, const ncfg_proto_request_t *request,
 		ncfg_buf_free(&line);
 		return 0;
 	}
-	fd = connect_to(socket_path, err, err_size);
+	fd = connect_to(socket_path, absent, err, err_size);
 	if (fd < 0) {
 		ncfg_buf_free(&line);
 		return 0;
@@ -299,7 +323,7 @@ int ncfg_cli_stream(const char *socket_path, int json, char *err, size_t err_siz
 		ncfg_buf_free(&line);
 		return 0;
 	}
-	fd = connect_to(socket_path, err, err_size);
+	fd = connect_to(socket_path, NULL, err, err_size);
 	if (fd < 0) {
 		ncfg_buf_free(&line);
 		return 0;
