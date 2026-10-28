@@ -394,13 +394,19 @@ fuzz: $(FUZZ_PROGRAMS)
 fuzz-list:
 	@echo $(FUZZ_TARGETS)
 
+# `-MMD -MP` here and not in `FUZZ_CFLAGS`, which the link line below shares,
+# because these objects are what goes stale. **They tracked no headers until
+# 2026-10-28**: `globals.regdom` widened `ncfg_document_t`, `lower.o` kept the
+# old layout beside a `document.o` that had the new one, and config_parse
+# crashed in `realloc` on a `devices` pointer read from the wrong offset -- a
+# fault in the build reported by the fuzzer as a fault in the parser.
 $(FUZZ_BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -MMD -MP -c $< -o $@
 
 $(FUZZ_BUILD_DIR)/client/%.o: ../client/%.c
 	@mkdir -p $(dir $@)
-	$(FUZZ_CC) $(FUZZ_CFLAGS) -c $< -o $@
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -MMD -MP -c $< -o $@
 
 $(FUZZ_LIB): $(FUZZ_OBJS)
 	$(AR) rcs $@ $(FUZZ_OBJS)
@@ -442,4 +448,4 @@ clean:
 # daemon unbuilt. It looked exactly like a build with nothing to do, which is
 # `build-and-commit.md`'s rule about a target that quietly does nothing,
 # arriving through the fix for the rule above it.
--include $(DEPS)
+-include $(DEPS) $(FUZZ_OBJS:.o=.d)
