@@ -40,6 +40,7 @@
 #include "testdir.h"
 
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,22 @@
 #include <unistd.h>
 
 static int failures;
+
+/* How long a fake daemon waits to be asked: `cli_test.c` says why there has
+ * to be a bound, and this is the same ten seconds. */
+#define FAKE_DAEMON_SECONDS 10u
+
+/* Reap a fake daemon, and say whether anybody asked it anything -- one the
+ * alarm killed was waited for and never asked. */
+static int fake_daemon_asked(pid_t child)
+{
+	int status = 0;
+
+	if (waitpid(child, &status, 0) != child) {
+		return 0;
+	}
+	return !(WIFSIGNALED(status) && WTERMSIG(status) == SIGALRM);
+}
 
 /*
  * Where a result goes, which is deliberately not `stdout`.
@@ -688,7 +705,13 @@ static void with_a_daemon_listening_the_text_goes_to_it(void)
 	}
 	child = fork();
 	if (child == 0) {
-		int fd = accept(listener, NULL, NULL);
+		int fd;
+
+		/* `cli_test.c`'s bound, for its reason: a program that never asks
+		 * would otherwise leave this in `accept` and the test in `waitpid`
+		 * for ever. */
+		(void)alarm(FAKE_DAEMON_SECONDS);
+		fd = accept(listener, NULL, NULL);
 
 		if (fd >= 0) {
 			char    got[8192];
@@ -718,7 +741,7 @@ static void with_a_daemon_listening_the_text_goes_to_it(void)
 	if (err[0] != '\0') {
 		detail("said", err);
 	}
-	(void)waitpid(child, NULL, 0);
+	check(fake_daemon_asked(child), "  and the daemon was asked rather than waited for");
 	(void)close(listener);
 	(void)unlink(socket_path);
 
@@ -1163,7 +1186,13 @@ static void json_over_the_socket_omits_what_ok_does_not_say(void)
 	}
 	child = fork();
 	if (child == 0) {
-		int fd = accept(listener, NULL, NULL);
+		int fd;
+
+		/* `cli_test.c`'s bound, for its reason: a program that never asks
+		 * would otherwise leave this in `accept` and the test in `waitpid`
+		 * for ever. */
+		(void)alarm(FAKE_DAEMON_SECONDS);
+		fd = accept(listener, NULL, NULL);
 
 		if (fd >= 0) {
 			char got[8192];
@@ -1187,7 +1216,7 @@ static void json_over_the_socket_omits_what_ok_does_not_say(void)
 	positional[1] = "site";
 	check(run_config(positional, 2u, err, sizeof(err)), "`config rm --json` over the socket");
 	printed = captured ? captured : "";
-	(void)waitpid(child, NULL, 0);
+	check(fake_daemon_asked(child), "  and the daemon was asked rather than waited for");
 	(void)close(listener);
 	(void)unlink(socket_path);
 
