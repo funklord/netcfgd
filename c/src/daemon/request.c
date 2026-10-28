@@ -188,6 +188,18 @@ int ncfg_daemon_apply_request(ncfg_reconcile_t *loop, const ncfg_daemon_apply_as
 	options.cycle = pending;
 	options.cycle_count = waiting;
 
+	/*
+	 * **Observed now, not at the last tick.** A request is somebody asking
+	 * for the machine to match the configuration at this moment, and the
+	 * tick's observation can predate what they just did -- measured: a lease
+	 * report written a moment before `ncfg apply` was not in the observation,
+	 * so the resolver scopes the plan delivered held the old nameserver
+	 * (switch_network.sh). The in-process apply observes first, and a request
+	 * has to mean the same thing whichever process carries it out. Taken
+	 * after the window's target, which reads the record and not the machine.
+	 */
+	message[0] = '\0';
+	(void)ncfg_daemon_state_reobserve(loop->state, &moved, message, sizeof(message));
 	message[0] = '\0';
 	plan = ncfg_plan_build(loop->state->desired, loop->state->observed, &options, message,
 	    sizeof(message));
