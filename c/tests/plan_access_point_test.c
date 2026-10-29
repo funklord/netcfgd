@@ -1443,6 +1443,40 @@ static void a_hundred_sixty_mhz_access_point_restarts_and_says_it_waits(void)
 	planfix_release(plan, document, observed);
 }
 
+#define HE_LINK HT_LINK(",\"high_throughput\":true,\"forty_mhz\":[\"5\"]," \
+	"\"very_high_throughput\":true,\"high_efficiency\":[\"5\"]")
+#define AT_80 FIVE_STARTED(",\"forty_mhz\":true,\"eighty_mhz\":true,\"very_high_throughput\":true")
+
+/*
+ * 802.11ax (10.600) is part of what hostapd was started as, and is wanted
+ * only where the hostapd this machine runs was built with it: a radio with
+ * HE and a hostapd without it -- or one nobody asked about -- plans nothing,
+ * since the line would stop that hostapd starting.
+ */
+static void eleven_ax_is_wanted_only_where_hostapd_has_it(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"hostapd_has_he\":true,\"links\":[" HE_LINK "]," RUNNING(AT_80), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && strcmp(stop->reason.field, "access_point.ieee80211ax") == 0,
+	    "an access point on an 802.11ax radio, with a hostapd that has it, restarts for it");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"hostapd_has_he\":false,\"links\":[" HE_LINK "]," RUNNING(AT_80), &document, &observed);
+	check(plan && plan->action_count == 0u,
+	    "  while with a hostapd built without it, nothing is planned");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"links\":[" HE_LINK "]," RUNNING(AT_80), &document, &observed);
+	check(plan && plan->action_count == 0u, "  and nor with one nobody asked about");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1484,6 +1518,7 @@ int main(void)
 	forty_megahertz_is_part_of_what_an_access_point_was_started_as();
 	eighty_megahertz_is_part_of_what_an_access_point_was_started_as();
 	a_hundred_sixty_mhz_access_point_restarts_and_says_it_waits();
+	eleven_ax_is_wanted_only_where_hostapd_has_it();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

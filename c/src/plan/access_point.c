@@ -310,6 +310,14 @@ static void radio_plan(const ncfg_builder_t *builder, const ncfg_access_point_t 
 		}
 		widths.vht_5 = link->very_high_throughput;
 		widths.vht160_5 = link->hundred_sixty_mhz;
+		/* 802.11ax only where the hostapd that runs it has it, or the line
+		 * stops it starting (10.600). */
+		if (builder->observed->hostapd_has_he.has && builder->observed->hostapd_has_he.value) {
+			for (at = 0; at < link->high_efficiency_count; at++) {
+				widths.he_24 |= strcmp(link->high_efficiency[at], "2.4") == 0;
+				widths.he_5 |= strcmp(link->high_efficiency[at], "5") == 0;
+			}
+		}
 	}
 	ncfg_access_point_channel_plan(point, &widths, plan, why);
 }
@@ -679,6 +687,13 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		field = "access_point.width";
 		(void)snprintf(desired, sizeof(desired), "%d", wanted.width);
 		(void)snprintf(observed, sizeof(observed), "%d", started_width(started));
+	} else if (radio_has_ht(builder, device) > 0 &&
+	    (started->high_efficiency != 0) != (wanted.he != 0)) {
+		/* `ieee80211ax` is read once (10.600). */
+		field = "access_point.ieee80211ax";
+		(void)snprintf(desired, sizeof(desired), "%s", wanted.he ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->high_efficiency ? "true" : "false");
 	} else if (radio_has_ht(builder, device) > 0 &&
 	    (started->very_high_throughput != 0) != (wanted.vht != 0)) {
 		field = "access_point.ieee80211ac";

@@ -24,6 +24,8 @@
  */
 #include "ncfg/observe.h"
 
+#include "ncfg/hostapd.h"
+
 #include "observe_internal.h"
 
 #include "ncfg/log.h"
@@ -206,6 +208,26 @@ static void note_the_round(const ncfg_observe_capture_t *capture)
 	}
 }
 
+/* Whether the named hostapd has 802.11ax (10.600); nothing named, nothing
+ * asked. Never fails the observation: an unreadable program is an absent
+ * answer, which gives no access point the line. */
+static int observe_hostapd_build(ncfg_observed_t *observed, const ncfg_observe_roots_t *roots)
+{
+	int has;
+
+	observed->hostapd_has_he.has = 0;
+	observed->hostapd_has_he.value = 0;
+	if (!roots || !roots->hostapd[0]) {
+		return 1;
+	}
+	has = ncfg_hostapd_program_has_he(roots->hostapd);
+	if (has >= 0) {
+		observed->hostapd_has_he.has = 1;
+		observed->hostapd_has_he.value = has;
+	}
+	return 1;
+}
+
 int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
     const ncfg_observe_kernel_t *netfilter, const ncfg_observe_kernel_t *genl,
     const char *run_dir, const ncfg_observe_roots_t *roots,
@@ -321,6 +343,7 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	     * before it is held up behind the wait.
 	     */
 	    !ncfg_observe_access_control(observed, run_dir, 0, err, err_size) ||
+	    !observe_hostapd_build(observed, roots) ||
 	    /*
 	     * **Before `derive`, because `derive` reads the link's network.** So
 	     * does `ncfg_observed_effective_metric`, and so does the inventory --

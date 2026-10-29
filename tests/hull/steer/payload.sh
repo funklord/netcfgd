@@ -175,11 +175,12 @@ failed=0
 case "$after" in *"bssid=$b1"*) ;; *) say "  the station did not move to $b1"; failed=1 ;; esac
 case "$record" in "$sta_mac "*" 1") ;; *) say "  the steer is not in the record"; failed=1 ;; esac
 [ "$again" -eq 0 ] || { say "  a plan after the move still steers"; failed=1; }
-# 10.597, 10.598: the 5 GHz access point on 36 is given 802.11ac at 80 MHz,
-# centred on 42, with 36's own [HT40+].
+# 10.597, 10.598, 10.600: the 5 GHz access point on 36 is given 802.11ac and
+# 802.11ax at 80 MHz, centred on 42, with 36's own [HT40+].
 case "$width" in "80 MHz") ;; *) say "  the 5 GHz access point does not run 80 MHz"; failed=1 ;; esac
-[ "$generation" = 5 ] || { say "  the station did not associate as 802.11ac (Wi-Fi 5)"; failed=1; }
-for line in 'ht_capab=\[HT40+\]' ieee80211ac=1 vht_oper_chwidth=1 vht_oper_centr_freq_seg0_idx=42; do
+[ "$generation" = 6 ] || { say "  the station did not associate as 802.11ax (Wi-Fi 6)"; failed=1; }
+for line in 'ht_capab=\[HT40+\]' ieee80211ac=1 vht_oper_chwidth=1 vht_oper_centr_freq_seg0_idx=42 \
+    ieee80211ax=1 he_oper_chwidth=1 he_oper_centr_freq_seg0_idx=42; do
 	grep -q "^$line\$" "$work/run/hostapd/wlan1.conf" ||
 		{ say "  wlan1.conf was not written $line"; failed=1; }
 done

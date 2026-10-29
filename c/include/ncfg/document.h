@@ -1802,6 +1802,10 @@ typedef struct {
 	int forty_mhz_5;
 	int vht_5;
 	int vht160_5;
+	/* 802.11ax for an access point, per band, and only where the hostapd
+	 * that will run it was built with it (10.600). */
+	int he_24;
+	int he_5;
 } ncfg_radio_widths_t;
 
 /* What an access point is given: its width in MHz, the 40 MHz secondary (1
@@ -1813,6 +1817,9 @@ typedef struct {
 	int secondary;
 	int centre;
 	int vht;
+	/* And 802.11ax: on 2.4 GHz where the radio has it, on 5 GHz only beside
+	 * 802.11ac -- measured, HE without VHT under it ran as Wi-Fi 4. */
+	int he;
 } ncfg_channel_plan_t;
 
 /*

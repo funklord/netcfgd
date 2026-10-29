@@ -511,6 +511,15 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 		}
 		world->ht[world->ht_count].widths.vht_5 = link->very_high_throughput;
 		world->ht[world->ht_count].widths.vht160_5 = link->hundred_sixty_mhz;
+		/* 802.11ax only where this machine's hostapd has it (10.600). */
+		for (band = 0; observed->hostapd_has_he.has && observed->hostapd_has_he.value &&
+		    band < link->high_efficiency_count; band++) {
+			if (strcmp(link->high_efficiency[band], "2.4") == 0) {
+				world->ht[world->ht_count].widths.he_24 = 1;
+			} else if (strcmp(link->high_efficiency[band], "5") == 0) {
+				world->ht[world->ht_count].widths.he_5 = 1;
+			}
+		}
 		world->ht_count++;
 	}
 	world->service.high_throughput = world->ht;

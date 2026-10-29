@@ -15,6 +15,7 @@
 #include "ncfg/buf.h"
 
 #include <errno.h>
+#include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -226,6 +227,58 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 		(void)snprintf(path_out, path_size, "%s", path);
 	}
 	return 1;
+}
+
+int ncfg_hostapd_program_has_he(const char *path)
+{
+	static char  cached_path[NCFG_HOSTAPD_PATH_MAX];
+	static off_t cached_size = -1;
+	static long  cached_time;
+	static int   cached = -1;
+	static const char keyword[] = "he_oper_chwidth";
+	char         chunk[65536 + sizeof(keyword)];
+	size_t       carried = 0;
+	struct stat  info;
+	FILE        *file;
+	int          found = 0;
+
+	if (!path || !path[0] || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) {
+		return -1;
+	}
+	if (cached >= 0 && strcmp(cached_path, path) == 0 && cached_size == info.st_size &&
+	    cached_time == (long)info.st_mtime) {
+		return cached;
+	}
+	file = fopen(path, "rb");
+	if (!file) {
+		return -1;
+	}
+	/* In chunks, carrying the tail of each so a keyword across two is
+	 * still found: the binary is a megabyte or more, and is read once. */
+	for (;;) {
+		size_t got = fread(chunk + carried, 1u, sizeof(chunk) - carried, file);
+		size_t have = carried + got;
+		size_t at;
+
+		for (at = 0; !found && at + sizeof(keyword) - 1u <= have; at++) {
+			found = memcmp(chunk + at, keyword, sizeof(keyword) - 1u) == 0;
+		}
+		if (found || got == 0) {
+			break;
+		}
+		carried = have < sizeof(keyword) - 1u ? have : sizeof(keyword) - 1u;
+		memmove(chunk, chunk + have - carried, carried);
+	}
+	if (ferror(file)) {
+		(void)fclose(file);
+		return -1;
+	}
+	(void)fclose(file);
+	(void)snprintf(cached_path, sizeof(cached_path), "%s", path);
+	cached_size = info.st_size;
+	cached_time = (long)info.st_mtime;
+	cached = found;
+	return found;
 }
 
 int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,

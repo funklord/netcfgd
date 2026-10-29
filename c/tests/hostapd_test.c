@@ -332,7 +332,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
 	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
-	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, { 0, 0, 0, 0 } };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, { 0, 0, 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 	char                       want[160];
@@ -380,7 +380,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
 	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
 	{
-		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, { 0, 0, 0, 0 } };
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, { 0, 0, 0, 0, 0, 0 } };
 
 		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
 		    NCFG_HOSTAPD_MISSING_ADDRESS,
@@ -450,7 +450,7 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 static void a_radio_with_802_11n_is_given_it(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, { 0, 0, 0, 0 } };
+	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, { 0, 0, 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -476,7 +476,7 @@ static ncfg_channel_plan_t plan_of(const char *band, int64_t channel, int64_t wi
     int forty_24, int forty_5, int vht)
 {
 	ncfg_access_point_t point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_radio_widths_t radio = { forty_24, forty_5, vht, vht > 1 };
+	ncfg_radio_widths_t radio = { forty_24, forty_5, vht, vht > 1, 0, 0 };
 	ncfg_channel_plan_t plan;
 	char                text[4];
 
@@ -505,7 +505,7 @@ static int secondary_of(const char *band, int64_t channel, int64_t width, int fo
 static void forty_megahertz_is_given_only_where_it_can_start(void)
 {
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 0, 0 } };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t lines;
 	char                 message[NCFG_ERROR_MAX];
 	char                 five[] = "5";
@@ -536,7 +536,7 @@ static void forty_megahertz_is_given_only_where_it_can_start(void)
 	point.width.value = 40;
 	why = NULL;
 	{
-		ncfg_radio_widths_t radio = { 1, 1, 0, 0 };
+		ncfg_radio_widths_t radio = { 1, 1, 0, 0, 0, 0 };
 		ncfg_channel_plan_t plan;
 
 		ncfg_access_point_channel_plan(&point, &radio, &plan, &why);
@@ -574,7 +574,7 @@ static void eighty_megahertz_is_the_block_the_channel_is_in(void)
 	static const int channel[] = { 36, 40, 44, 48, 52, 64, 100, 112, 116, 128, 149, 161 };
 	static const int centre[] = { 42, 42, 42, 42, 58, 58, 106, 106, 122, 122, 155, 155 };
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 1, 1 } };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 1, 1, 0, 0 } };
 	ncfg_hostapd_lines_t lines;
 	ncfg_channel_plan_t  plan;
 	char                 message[NCFG_ERROR_MAX];
@@ -716,7 +716,7 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, { 0, 0, 0, 0 } };
+	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, { 0, 0, 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -1183,6 +1183,79 @@ static void a_station_reply_is_read(void)
 	    "and a bare twelve digits is refused, because an ACL is the wrong place to guess");
 }
 
+/*
+ * 802.11ax (10.600): in the plan where the radio has it in that band, on 5
+ * GHz only beside 802.11ac, and written with its width beside 802.11ac's.
+ */
+static void eleven_ax_runs_where_the_radio_and_802_11ac_allow(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_radio_widths_t  both = { 1, 1, 1, 0, 1, 1 };
+	ncfg_radio_widths_t  no_ac = { 1, 1, 0, 0, 1, 1 };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 1, 1, 1, 0, 1, 1 } };
+	ncfg_hostapd_lines_t lines;
+	ncfg_channel_plan_t  plan;
+	char                 message[NCFG_ERROR_MAX];
+	char                 five[] = "5";
+
+	point.channel.has = 1;
+	point.channel.value = 6;
+	ncfg_access_point_channel_plan(&point, &both, &plan, NULL);
+	check(plan.he && plan.width == 20, "on 2.4 GHz a radio with 802.11ax runs it, at 20 MHz");
+	point.band = five;
+	point.channel.value = 36;
+	ncfg_access_point_channel_plan(&point, &no_ac, &plan, NULL);
+	check(!plan.he, "on 5 GHz without 802.11ac it does not -- measured, it ran as Wi-Fi 4");
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "ieee80211ax"), "1",
+		    "an access point on 36 with both is written ieee80211ax=1");
+		check_text(ncfg_hostapd_value_of(&lines, "he_oper_chwidth"), "1",
+		    "  its width in 802.11ax's own words");
+		check_text(ncfg_hostapd_value_of(&lines, "he_oper_centr_freq_seg0_idx"), "42",
+		    "  and its centre");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	local.widths.he_5 = 0;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check(ncfg_hostapd_value_of(&lines, "ieee80211ax") == NULL &&
+		    ncfg_hostapd_value_of(&lines, "he_oper_chwidth") == NULL,
+		    "and one on a radio, or a hostapd, without it has neither line");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
+/*
+ * Whether a hostapd binary has 802.11ax, by its keyword (10.600): present,
+ * absent, across the probe's chunk boundary, and unreadable.
+ */
+static void the_hostapd_build_is_asked_for_802_11ax(const char *run)
+{
+	char        path[512];
+	static char big[65536 + 64];
+	size_t      at;
+
+	(void)snprintf(path, sizeof(path), "%s/hostapd-with", run);
+	check(testdir_write(path, "\177ELF...vht_oper_chwidth\0he_oper_chwidth\0...", 43u) &&
+	    ncfg_hostapd_program_has_he(path) == 1,
+	    "a hostapd whose binary carries he_oper_chwidth has 802.11ax");
+	(void)snprintf(path, sizeof(path), "%s/hostapd-without", run);
+	check(testdir_write(path, "\177ELF...vht_oper_chwidth\0ieee80211ac\0", 36u) &&
+	    ncfg_hostapd_program_has_he(path) == 0,
+	    "  and one without it has not");
+	for (at = 0; at < sizeof(big); at++) {
+		big[at] = 'x';
+	}
+	memcpy(big + 65536 - 7, "he_oper_chwidth", 15u);
+	(void)snprintf(path, sizeof(path), "%s/hostapd-straddling", run);
+	check(testdir_write(path, big, sizeof(big)) && ncfg_hostapd_program_has_he(path) == 1,
+	    "  and a keyword across the probe's chunk boundary is still found");
+	(void)snprintf(path, sizeof(path), "%s/hostapd-absent", run);
+	check(ncfg_hostapd_program_has_he(path) == -1,
+	    "a hostapd that is not there is not known, rather than a no");
+}
+
 /* ------------------------------------------------------------- the files */
 
 /*
@@ -1492,6 +1565,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 
 int main(void)
 {
+	eleven_ax_runs_where_the_radio_and_802_11ac_allow();
 	eighty_megahertz_is_the_block_the_channel_is_in();
 	forty_megahertz_is_given_only_where_it_can_start();
 	a_radio_with_802_11n_is_given_it();
@@ -1539,6 +1613,7 @@ int main(void)
 
 	a_rewritten_configuration_is_still_only_readable_by_root(run);
 	a_steer_is_recorded_for_the_hour_and_no_longer(run);
+	the_hostapd_build_is_asked_for_802_11ax(run);
 	the_access_point_is_told_where_to_record_its_pid();
 	the_station_list_lives_and_dies_with_its_block(run);
 	a_daemon_that_will_not_start_is_quoted(run);

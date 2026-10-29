@@ -216,6 +216,15 @@ typedef struct {
 	 * this machine resolves a name. A caller that means the machine's says so.
 	 */
 	char resolv_conf[NCFG_OBSERVE_ROOT_MAX];
+	/*
+	 * The hostapd this machine will run, to ask whether it was built with
+	 * 802.11ax (10.600) -- a file, for `resolv_conf`'s reason, and **empty
+	 * asks nothing** for the same one: an observation that read whatever
+	 * `hostapd` a test machine happens to have would answer for that machine
+	 * rather than the one under test. The daemon and the command line name
+	 * the program they would start.
+	 */
+	char hostapd[NCFG_OBSERVE_ROOT_MAX];
 } ncfg_observe_roots_t;
 
 /*

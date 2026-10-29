@@ -178,7 +178,8 @@ case "$second" in *"bssid=$b1"*"key_mgmt=FT-PSK"*) ;; *) say "  the station did 
 [ "$roamed_ft" -ge 1 ] || { say "  the roam to $b1 was not a fast transition"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the third plan was not empty"; failed=1; }
 [ "$ht" -eq 2 ] || { say "  hwsim has 802.11n, and the access points were not given it"; failed=1; }
-[ "$generation" = 4 ] || { say "  the station did not associate as 802.11n (Wi-Fi 4)"; failed=1; }
+# 10.600: and as 802.11ax, the image's hostapd having it.
+[ "$generation" = 6 ] || { say "  the station did not associate as 802.11ax (Wi-Fi 6)"; failed=1; }
 # 10.597: 2.4 GHz stays at 20 MHz unless the document asks.
 case "$width" in "20 MHz") ;; *) say "  a 2.4 GHz access point did not stay at 20 MHz"; failed=1 ;; esac
 case "$reported" in *"$b0 op_class=81 chan=1 "*) ;; *) say "  roam-b did not report its sibling roam-a"; failed=1 ;; esac

@@ -357,6 +357,18 @@ void ncfg_hostapd_recorded_policy(const char *run, const char *device,
  * station's line.
  */
 #define NCFG_STEER_RECORD_SECONDS 3600
+
+/*
+ * Whether the hostapd at `path` was built with 802.11ax (10.600): whether
+ * its binary carries `he_oper_chwidth`, a configuration keyword that exists
+ * only where `CONFIG_IEEE80211AX` compiled its parser in. A hostapd without
+ * it does not ignore `ieee80211ax=1` -- it refuses the file as an unknown
+ * item and does not start, so this is asked before the line is written.
+ * The answer is kept per file, by its size and modification time, so a
+ * daemon's every pass does not read a megabyte. -1 where the file cannot be
+ * read, which is not "no" and is not "yes".
+ */
+int ncfg_hostapd_program_has_he(const char *path);
 int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,
     char *err, size_t err_size);
 int ncfg_hostapd_steered_read(const char *run, const char *device, int64_t now,

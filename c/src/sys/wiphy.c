@@ -35,6 +35,52 @@ int ncfg_wiphy_request(ncfg_buf_t *out, const ncfg_genl_family_t *family, uint32
 	return ok;
 }
 
+/* Whether a band's interface-type data has HE for an access point. -1 for
+ * a malformed area. */
+static int band_has_he_for_ap(const ncfg_wire_attr_t *data, char *err, size_t err_size)
+{
+	ncfg_wire_attrs_t entries;
+	ncfg_wire_attr_t  entry;
+	ncfg_wire_step_t  step;
+
+	ncfg_wire_attrs_start(&entries, data->value, data->length);
+	while ((step = ncfg_wire_attrs_next(&entries, &entry, err, err_size)) == NCFG_WIRE_OK) {
+		ncfg_wire_attrs_t inside;
+		ncfg_wire_attr_t  types;
+		ncfg_wire_attr_t  phy;
+		ncfg_wire_attr_t  ap;
+		ncfg_wire_attrs_t type_list;
+		ncfg_wire_step_t  found;
+
+		ncfg_wire_attrs_start(&inside, entry.value, entry.length);
+		found = ncfg_wire_attrs_find(&inside, NL80211_BAND_IFTYPE_ATTR_IFTYPES, &types, err,
+		    err_size);
+		if (found == NCFG_WIRE_BAD) {
+			return -1;
+		}
+		if (found != NCFG_WIRE_OK) {
+			continue;
+		}
+		ncfg_wire_attrs_start(&type_list, types.value, types.length);
+		found = ncfg_wire_attrs_find(&type_list, NL80211_IFTYPE_AP, &ap, err, err_size);
+		if (found == NCFG_WIRE_BAD) {
+			return -1;
+		}
+		if (found != NCFG_WIRE_OK) {
+			continue;
+		}
+		found = ncfg_wire_attrs_find(&inside, NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY, &phy, err,
+		    err_size);
+		if (found == NCFG_WIRE_BAD) {
+			return -1;
+		}
+		if (found == NCFG_WIRE_OK && phy.length > 0u) {
+			return 1;
+		}
+	}
+	return step == NCFG_WIRE_BAD ? -1 : 0;
+}
+
 int ncfg_wiphy_parse(const void *payload, size_t length, ncfg_wiphy_t *out, char *err,
     size_t err_size)
 {
@@ -75,6 +121,24 @@ int ncfg_wiphy_parse(const void *payload, size_t length, ncfg_wiphy_t *out, char
 		ncfg_wire_step_t  found;
 
 		ncfg_wire_attrs_start(&inside, band.value, band.length);
+		found = ncfg_wire_attrs_find(&inside, NL80211_BAND_ATTR_IFTYPE_DATA, &capability, err,
+		    err_size);
+		if (found == NCFG_WIRE_BAD) {
+			return 0;
+		}
+		if (found == NCFG_WIRE_OK) {
+			int he = band_has_he_for_ap(&capability, err, err_size);
+
+			if (he < 0) {
+				return 0;
+			}
+			if (he && band.kind == NL80211_BAND_2GHZ) {
+				out->he_24 = 1;
+			}
+			if (he && band.kind == NL80211_BAND_5GHZ) {
+				out->he_5 = 1;
+			}
+		}
 		found = ncfg_wire_attrs_find(&inside, NL80211_BAND_ATTR_VHT_CAPA, &capability, err,
 		    err_size);
 		if (found == NCFG_WIRE_BAD) {

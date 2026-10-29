@@ -751,6 +751,9 @@ static const ncfg_field_t observed_link_fields[] = {
 	    .offset = offsetof(ncfg_observed_link_t, very_high_throughput) },
 	{ .name = "hundred_sixty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_link_t, hundred_sixty_mhz) },
+	{ .name = "high_efficiency", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_link_t, high_efficiency),
+	    .count_offset = offsetof(ncfg_observed_link_t, high_efficiency_count) },
 	{ .name = "category", .kind = NCFG_F_OPT_ENUM, .choices = &link_category_set,
 	    .offset = offsetof(ncfg_observed_link_t, category) },
 	{ .name = "network", .kind = NCFG_F_STR,
@@ -1156,7 +1159,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "eighty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, eighty_mhz) },
 	{ .name = "hundred_sixty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_observed_access_point_t, hundred_sixty_mhz) }
+	    .offset = offsetof(ncfg_observed_access_point_t, hundred_sixty_mhz) },
+	{ .name = "high_efficiency", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, high_efficiency) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);
@@ -1377,6 +1382,8 @@ static const ncfg_field_t observed_fields[] = {
 	    .offset = offsetof(ncfg_observed_t, ports),
 	    .count_offset = offsetof(ncfg_observed_t, port_count) },
 	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, regdom) },
+	{ .name = "hostapd_has_he", .kind = NCFG_F_OPT_BOOL,
+	    .offset = offsetof(ncfg_observed_t, hostapd_has_he) },
 	{ .name = "regdom_set_by", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_t, regdom_set_by) },
 	{ .name = "addresses", .kind = NCFG_F_LIST, .type = &observed_address_type,

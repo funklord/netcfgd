@@ -632,8 +632,13 @@
 # access point listens for a minute or so before it beacons, at every start,
 # and radar can move it. It needs a radio that can do 160 and a `channel` in
 # one of the two blocks. 80 and 160 are 5 GHz widths. A width that cannot be
-# given is said, and the access point runs one step narrower. 802.11ax is not
-# written yet.
+# given is said, and the access point runs one step narrower.
+#
+# **802.11ax (Wi-Fi 6) is given where the radio has it for an access point**
+# -- on 2.4 GHz, and on 5 GHz beside 802.11ac, which it needs there -- **and
+# where this machine's hostapd was built with it.** A hostapd without it does
+# not ignore the line, it refuses the file and does not start, so netcfgd
+# asks the binary it will run before writing it.
 #
 #access_point "Home" {
 #	device  = "wlan0"

@@ -392,7 +392,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
     const char *roaming_key, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why,
     char *err, size_t err_size)
 {
-	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0, { 0, 0, 0, 0 } };
+	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0, { 0, 0, 0, 0, 0, 0 } };
 	const char                       *bridge;
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
@@ -544,6 +544,19 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 			if (ok && plan.centre) {
 				(void)snprintf(centre, sizeof(centre), "%d", plan.centre);
 				ok = add_line(out, "vht_oper_centr_freq_seg0_idx", centre, 0);
+			}
+		}
+		/* 802.11ax, and its width said in its own words as hostapd's
+		 * documentation asks -- the same values as 802.11ac's. hwsim ran HE
+		 * at 80 MHz with or without them, so they are written as the
+		 * documentation asks rather than as the vm could tell (10.600). */
+		if (ok && plan.he) {
+			ok = add_line(out, "ieee80211ax", "1", 0);
+			if (ok && plan.width >= 80) {
+				ok = add_line(out, "he_oper_chwidth", plan.width == 160 ? "2" : "1", 0);
+			}
+			if (ok && plan.width >= 80 && plan.centre) {
+				ok = add_line(out, "he_oper_centr_freq_seg0_idx", centre, 0);
 			}
 		}
 		if (!ok) {

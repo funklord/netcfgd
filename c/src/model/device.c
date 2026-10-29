@@ -174,6 +174,7 @@ void ncfg_access_point_channel_plan(const ncfg_access_point_t *access_point,
 	}
 	five = strcmp(band, BAND_24) != 0;
 	out->vht = five && radio->vht_5;
+	out->he = five ? (out->vht && radio->he_5) : radio->he_24;
 	width = access_point->width.has ? access_point->width.value
 	                                : (five ? (out->vht ? 80 : 40) : 20);
 	/*

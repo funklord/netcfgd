@@ -42,39 +42,51 @@ static int dump(const ncfg_observe_kernel_t *genl, const ncfg_genl_family_t *fam
 	return ok;
 }
 
-/* The bands a radio can do 40 MHz in, as the words a document spells them.
- * 0 only for memory. */
-static int forty(ncfg_observed_link_t *link, int in_24, int in_5)
+/* A list of the two band words, for whichever of the two is set, replacing
+ * what `list` held. 0 only for memory. */
+static int bands(char ***list, size_t *list_count, int in_24, int in_5)
 {
 	size_t count = (size_t)(in_24 != 0) + (size_t)(in_5 != 0);
 	size_t at;
 
-	for (at = 0; at < link->forty_mhz_count; at++) {
-		free(link->forty_mhz[at]);
+	for (at = 0; at < *list_count; at++) {
+		free((*list)[at]);
 	}
-	free(link->forty_mhz);
-	link->forty_mhz = NULL;
-	link->forty_mhz_count = 0;
+	free(*list);
+	*list = NULL;
+	*list_count = 0;
 	if (!count) {
 		return 1;
 	}
-	link->forty_mhz = calloc(count, sizeof(*link->forty_mhz));
-	if (!link->forty_mhz) {
+	*list = calloc(count, sizeof(**list));
+	if (!*list) {
 		return 0;
 	}
 	if (in_24) {
-		link->forty_mhz[link->forty_mhz_count] = strdup("2.4");
-		if (!link->forty_mhz[link->forty_mhz_count++]) {
+		(*list)[*list_count] = strdup("2.4");
+		if (!(*list)[(*list_count)++]) {
 			return 0;
 		}
 	}
 	if (in_5) {
-		link->forty_mhz[link->forty_mhz_count] = strdup("5");
-		if (!link->forty_mhz[link->forty_mhz_count++]) {
+		(*list)[*list_count] = strdup("5");
+		if (!(*list)[(*list_count)++]) {
 			return 0;
 		}
 	}
 	return 1;
+}
+
+/* The bands a radio can do 40 MHz in, and those it has 802.11ax in, as the
+ * words a document spells them. 0 only for memory. */
+static int forty(ncfg_observed_link_t *link, int in_24, int in_5)
+{
+	return bands(&link->forty_mhz, &link->forty_mhz_count, in_24, in_5);
+}
+
+static int efficient(ncfg_observed_link_t *link, int in_24, int in_5)
+{
+	return bands(&link->high_efficiency, &link->high_efficiency_count, in_24, in_5);
 }
 
 int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
@@ -89,6 +101,8 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 	unsigned char        forty_5[WIPHY_MAX];
 	unsigned char        vht_5[WIPHY_MAX];
 	unsigned char        vht160_5[WIPHY_MAX];
+	unsigned char        he_24[WIPHY_MAX];
+	unsigned char        he_5[WIPHY_MAX];
 	size_t               at;
 	size_t               link;
 	int                  radios = 0;
@@ -103,6 +117,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 		observed->links[link].very_high_throughput = 0;
 		observed->links[link].hundred_sixty_mhz = 0;
 		(void)forty(&observed->links[link], 0, 0);
+		(void)efficient(&observed->links[link], 0, 0);
 		radios |= observed->links[link].wireless;
 	}
 	if (!genl || !genl->exchange || !radios) {
@@ -132,6 +147,8 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 	memset(forty_5, 0, sizeof(forty_5));
 	memset(vht_5, 0, sizeof(vht_5));
 	memset(vht160_5, 0, sizeof(vht160_5));
+	memset(he_24, 0, sizeof(he_24));
+	memset(he_5, 0, sizeof(he_5));
 	for (at = 0; at < phys.count; at++) {
 		ncfg_wiphy_t part;
 
@@ -142,6 +159,8 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 			forty_5[part.index] |= (unsigned char)part.forty_mhz_5;
 			vht_5[part.index] |= (unsigned char)part.vht_5;
 			vht160_5[part.index] |= (unsigned char)part.vht160_5;
+			he_24[part.index] |= (unsigned char)part.he_24;
+			he_5[part.index] |= (unsigned char)part.he_5;
 		}
 	}
 	/* Answered for every interface the kernel placed on a radio, yes or no;
@@ -163,7 +182,8 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 				observed->links[link].very_high_throughput = vht_5[radio.wiphy];
 				observed->links[link].hundred_sixty_mhz = vht160_5[radio.wiphy];
 				if (!forty(&observed->links[link], forty_24[radio.wiphy],
-				        forty_5[radio.wiphy])) {
+				        forty_5[radio.wiphy]) ||
+				    !efficient(&observed->links[link], he_24[radio.wiphy], he_5[radio.wiphy])) {
 					ncfg_netlink_reply_free(&interfaces);
 					ncfg_netlink_reply_free(&phys);
 					ncfg_error_set(err, err_size, "out of memory recording %s's widths",

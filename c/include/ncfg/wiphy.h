@@ -46,6 +46,13 @@ typedef struct {
 	/* And 160 MHz there: bits 2-3 of `VHT_CAPA`, the supported channel
 	 * width set, non-zero (10.599). hwsim reports 0x038004fa. */
 	int      vht160_5;
+	/* And 802.11ax (HE) for an access point, per band (10.600): an entry
+	 * of the band's `IFTYPE_DATA` naming `NL80211_IFTYPE_AP` among its
+	 * interface types and carrying `HE_CAP_PHY`. Per interface type because
+	 * the kernel says it that way -- measured, hwsim lists one entry for
+	 * stations and one for access points. */
+	int      he_24;
+	int      he_5;
 } ncfg_wiphy_t;
 
 /* A split dump of every radio, to a family resolved. */

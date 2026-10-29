@@ -745,6 +745,20 @@ static int along_path(const char *program, char *out, size_t out_size, struct st
 	}
 }
 
+int ncfg_process_find(const char *program, char *out, size_t out_size)
+{
+	struct stat info;
+
+	if (!program || !program[0] || !out || out_size == 0) {
+		return 0;
+	}
+	if (strchr(program, '/')) {
+		return (size_t)snprintf(out, out_size, "%s", program) < out_size &&
+		    stat(out, &info) == 0;
+	}
+	return along_path(program, out, out_size, &info);
+}
+
 int ncfg_process_exec_refusal(const char *program, int error_number, char *text, size_t text_size)
 {
 	char candidate[CANDIDATE_MAX];

@@ -99,11 +99,12 @@ say "a second plan: $(head -1 "$work/plan.log")"
 
 failed=0
 [ "$radar" -ge 1 ] || { say "  the plan did not warn of the radar wait"; failed=1; }
-for line in 'vht_capab=\[VHT160\]' vht_oper_chwidth=2 vht_oper_centr_freq_seg0_idx=114 'ht_capab=\[HT40+\]' ieee80211ac=1; do
+for line in 'vht_capab=\[VHT160\]' vht_oper_chwidth=2 vht_oper_centr_freq_seg0_idx=114 'ht_capab=\[HT40+\]' ieee80211ac=1 \
+    ieee80211ax=1 he_oper_chwidth=2 he_oper_centr_freq_seg0_idx=114; do
 	grep -q "^$line\$" "$conf" || { say "  wlan0.conf was not written $line"; failed=1; }
 done
 [ "$width" = "160 MHz" ] || { say "  the station did not associate at 160 MHz"; failed=1; }
-[ "$generation" = 5 ] || { say "  the station did not associate as 802.11ac"; failed=1; }
+[ "$generation" = 6 ] || { say "  the station did not associate as 802.11ax"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the second plan was not empty"; failed=1; }
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -6 >> "$out"

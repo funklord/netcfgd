@@ -42,6 +42,7 @@
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
 #include "ncfg/plan.h"
+#include "ncfg/process.h"
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
 
@@ -924,6 +925,10 @@ static int observe_now(const ncfg_cli_options_t *options, const char *run_dir,
 	 * written and what is compared cannot become two files.
 	 */
 	(void)ncfg_dns_resolve_conf_path(NULL, roots.resolv_conf, sizeof(roots.resolv_conf));
+	/* The hostapd an apply from here would start, for 10.600's question. */
+	if (!ncfg_process_find("hostapd", roots.hostapd, sizeof(roots.hostapd))) {
+		roots.hostapd[0] = '\0';
+	}
 	/*
 	 * The one question an observation asks the secret store, and it is asked
 	 * **under the directory this invocation resolved** -- through

@@ -1596,6 +1596,25 @@ static void append_wiphy_vht(ncfg_buf_t *out, uint32_t index)
 	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, index);
 	ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_HT_CAPA, &ht, sizeof(ht));
 	ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_VHT_CAPA, &vht, sizeof(vht));
+	{
+		/* 802.11ax for an access point, as hwsim lists it (10.600). */
+		ncfg_buf_t kinds;
+		ncfg_buf_t entry;
+		ncfg_buf_t data;
+		uint8_t    phy[11] = { 0x02, 0xbf, 0xce };
+
+		ncfg_buf_init(&kinds, 0);
+		ncfg_buf_init(&entry, 0);
+		ncfg_buf_init(&data, 0);
+		ncfg_wire_attr_put(&kinds, NL80211_IFTYPE_AP, NULL, 0u);
+		ncfg_wire_attr_put_nested(&entry, NL80211_BAND_IFTYPE_ATTR_IFTYPES, &kinds);
+		ncfg_wire_attr_put(&entry, NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY, phy, sizeof(phy));
+		ncfg_wire_attr_put_nested(&data, 1, &entry);
+		ncfg_wire_attr_put_nested(&band, NL80211_BAND_ATTR_IFTYPE_DATA, &data);
+		ncfg_buf_free(&kinds);
+		ncfg_buf_free(&entry);
+		ncfg_buf_free(&data);
+	}
 	ncfg_wire_attr_put_nested(&bands, NL80211_BAND_5GHZ, &band);
 	ncfg_wire_attr_put_nested(&attrs, NL80211_ATTR_WIPHY_BANDS, &bands);
 	append_message(out, NL80211_FAMILY_ID, &body, &attrs);
@@ -1672,6 +1691,9 @@ static void whether_the_radio_has_802_11n(void)
 	    "  and 40 MHz in each band whose capability says so, in the document's words");
 	check(observed && observed->links[0].very_high_throughput,
 	    "  and 802.11ac, from the 5 GHz band's VHT_CAPA");
+	check(observed && observed->links[0].high_efficiency_count == 1u &&
+	    strcmp(observed->links[0].high_efficiency[0], "5") == 0,
+	    "  and 802.11ax for an access point, in that band");
 	ncfg_observed_free(observed);
 
 	memset(&asked, 0, sizeof(asked));

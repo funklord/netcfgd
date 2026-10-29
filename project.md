@@ -12597,6 +12597,62 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.600 802.11ax
+
+The next step 10.599 named, taken by a `/go` run 2026-10-29.
+
+### What 10.600 measured, hostapd 2.10 on hwsim
+
+| configuration | result |
+|---|---|
+| 2.4 GHz channel 1, `ieee80211ax=1` | `wifi_generation=6`, 20 MHz |
+| 5 GHz 36, 802.11ac at 80 MHz, `ieee80211ax=1`, `he_oper_*` at 80 | Wi-Fi 6, 80 MHz |
+| the same without the `he_oper_*` lines | also Wi-Fi 6, 80 MHz |
+| 5 GHz 36, `ieee80211ax=1` with no 802.11ac | **Wi-Fi 4**, 40 MHz |
+| 5 GHz 149, 802.11ac and ax at 40 | Wi-Fi 6, 40 MHz |
+
+hwsim lists HE per interface type -- "HE Iftypes: managed, P2P-client" and
+"HE Iftypes: AP, P2P-GO" -- so it is read for access points, from the
+band's `IFTYPE_DATA`.
+
+### The risk the vm cannot show, and what answers it
+
+**A hostapd built without `CONFIG_IEEE80211AX` refuses `ieee80211ax=1`** as
+an unknown configuration item and does not start: the item is parsed under
+that option and nowhere else. Debian's has it; whether every OpenWrt or
+Alpine variant does is not something to assume for every access point on
+an upgrade. So the hostapd that will run is asked:
+`ncfg_hostapd_program_has_he` reads the binary for `he_oper_chwidth`, a
+keyword that exists only where that parser was compiled in, cached by size
+and modification time. The daemon and `ncfg` name the program their exec
+would find, through `ncfg_process_find` into `roots.hostapd`, and the
+observation carries the answer as `hostapd_has_he`; **empty asks nothing**,
+as `roots.resolv_conf` does, so a test answers for the machine under test
+rather than whatever hostapd the build machine has. The planner and the
+executor both read it, so a hostapd without 802.11ax is never planned a
+line it cannot take -- which would otherwise be a restart every pass.
+
+### What 10.600 built
+
+- `IFTYPE_DATA` entries naming `NL80211_IFTYPE_AP` with `HE_CAP_PHY`, per
+  band, into the link's `high_efficiency: ["2.4", "5"]`.
+- The channel plan's `he`: on 2.4 GHz where the radio has it, on 5 GHz only
+  beside 802.11ac. Written as `ieee80211ax=1` and, at 80 and 160 MHz,
+  `he_oper_chwidth` and `he_oper_centr_freq_seg0_idx` with 802.11ac's values
+  -- as hostapd's documentation asks, since hwsim could not tell.
+- `ieee80211ax` read back into the restart identity. An access point on an
+  HE radio with an HE hostapd restarts once on upgrade.
+
+### What 10.600 showed live
+
+`hull-roam`'s station joins as Wi-Fi 6 on 2.4 GHz, `hull-steer`'s band
+machine moves it to Wi-Fi 6 at 80 MHz with the HE lines written, and
+`hull-width`'s joins as Wi-Fi 6 at 160 MHz. **The advisory machine's
+stand-in neighbour had to move to 5 GHz**: with netcfgd's 2.4 GHz access
+point now HE at 20 MHz (wpa_supplicant's estimate 286802 kbit/s), an HE
+neighbour at 40 MHz on 2.4 GHz did not beat it and the station rightly
+stayed -- the advisory request working as designed, a fourth time.
+
 ## 10.599 160 MHz
 
 **Asked for by the holder 2026-10-29** ("go ahead with 160 MHz").
@@ -12703,7 +12759,7 @@ unit tests could not have caught it: they wrote the element by hand in the
 
 **Next**: 160 MHz, from `VHT_CAPA`'s supported-width bits, where a domain
 allows a whole 160 MHz block (36-64, 100-128) -- done since, in 10.599;
-then 802.11ax.
+then 802.11ax, done in 10.600.
 
 ## 10.597 40 MHz
 

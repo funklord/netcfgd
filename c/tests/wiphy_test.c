@@ -89,6 +89,45 @@ static void part20(ncfg_buf_t *out)
 	ncfg_buf_free(&list);
 }
 
+/* Radio 5, one 5 GHz band with HE in an interface-type entry for `types`
+ * (a bit per NL80211_IFTYPE_*). */
+static void part_he(ncfg_buf_t *out, unsigned types)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_NEW_WIPHY, 1 };
+	ncfg_buf_t         list;
+	ncfg_buf_t         band;
+	ncfg_buf_t         data;
+	ncfg_buf_t         entry;
+	ncfg_buf_t         kinds;
+	uint8_t            phy[11] = { 0x02, 0xbf, 0xce };
+	unsigned           kind;
+
+	ncfg_buf_init(out, 0);
+	ncfg_buf_init(&list, 0);
+	ncfg_buf_init(&band, 0);
+	ncfg_buf_init(&data, 0);
+	ncfg_buf_init(&entry, 0);
+	ncfg_buf_init(&kinds, 0);
+	ncfg_genl_header_encode(&header, out);
+	ncfg_wire_attr_put_u32(out, NL80211_ATTR_WIPHY, 5u);
+	for (kind = 0; kind < 16u; kind++) {
+		if (types & (1u << kind)) {
+			ncfg_wire_attr_put(&kinds, (uint16_t)kind, NULL, 0u);
+		}
+	}
+	ncfg_wire_attr_put_nested(&entry, NL80211_BAND_IFTYPE_ATTR_IFTYPES, &kinds);
+	ncfg_wire_attr_put(&entry, NL80211_BAND_IFTYPE_ATTR_HE_CAP_PHY, phy, sizeof(phy));
+	ncfg_wire_attr_put_nested(&data, 1, &entry);
+	ncfg_wire_attr_put_nested(&band, NL80211_BAND_ATTR_IFTYPE_DATA, &data);
+	ncfg_wire_attr_put_nested(&list, NL80211_BAND_5GHZ, &band);
+	ncfg_wire_attr_put_nested(out, NL80211_ATTR_WIPHY_BANDS, &list);
+	ncfg_buf_free(&kinds);
+	ncfg_buf_free(&entry);
+	ncfg_buf_free(&data);
+	ncfg_buf_free(&band);
+	ncfg_buf_free(&list);
+}
+
 static void the_request(void)
 {
 	ncfg_genl_family_t family;
@@ -152,6 +191,16 @@ static void the_reply(void)
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
 	        radio.index == 2u && !radio.high_throughput,
 	    "a part with no bands is read, and is a part about something else");
+	ncfg_buf_free(&payload);
+	part_he(&payload, (1u << NL80211_IFTYPE_AP) | (1u << NL80211_IFTYPE_P2P_GO));
+	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
+	        radio.he_5 && !radio.he_24,
+	    "802.11ax is an interface-type entry naming access points, in its band");
+	ncfg_buf_free(&payload);
+	part_he(&payload, (1u << NL80211_IFTYPE_STATION) | (1u << NL80211_IFTYPE_P2P_CLIENT));
+	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
+	        !radio.he_5,
+	    "  and an entry for stations alone is not 802.11ax for an access point");
 	ncfg_buf_free(&payload);
 	part(&payload, 0u, 1, 1);
 	check(!ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)),

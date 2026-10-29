@@ -11,12 +11,15 @@
 # reports power minus 50 and `iw` takes no negative power, which is why the
 # threshold here is -45 rather than a real-world -75.
 #
-# **Why the neighbour runs 40 MHz.** wpa_supplicant 2.10 chooses among the
-# candidates by estimated throughput. Two 802.11g access points at -50 and
-# -30 dBm both estimate 54 Mbit/s, so it stayed where it was, which was the
-# first run of this rig; a real weak station estimates less and moves. Since
-# netcfgd gives its access point 802.11n (10.596) it is HT20, so the
-# neighbour is HT40 to be somewhere better to point.
+# **Why the neighbour runs 5 GHz at 80 MHz.** wpa_supplicant 2.10 chooses
+# among the candidates by estimated throughput. Two 802.11g access points at
+# -50 and -30 dBm both estimate 54 Mbit/s, so it stayed where it was, which
+# was the first run of this rig; a real weak station estimates less and
+# moves. Each width netcfgd gained (10.596-10.600) moved the stand-in up to
+# stay better, and at 2.4 GHz that ran out: netcfgd's access point is now
+# 802.11ax at 20 MHz, estimated 286802 kbit/s, and an HE 40 MHz neighbour on
+# 2.4 GHz did not beat it -- the station rightly stayed. So the neighbour is
+# 5 GHz, 802.11ac and ax at 80 MHz, which nothing on 2.4 GHz matches.
 #
 # Asserted:
 #   - the control: a plan before the station has settled steers nobody, and
@@ -66,10 +69,18 @@ interface=wlan1
 driver=nl80211
 ctrl_interface=$work/near
 ssid=weak
-hw_mode=g
-channel=6
+hw_mode=a
+channel=36
+country_code=US
+ieee80211d=1
 ieee80211n=1
-ht_capab=[HT40-]
+ht_capab=[HT40+]
+ieee80211ac=1
+vht_oper_chwidth=1
+vht_oper_centr_freq_seg0_idx=42
+ieee80211ax=1
+he_oper_chwidth=1
+he_oper_centr_freq_seg0_idx=42
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
@@ -89,7 +100,7 @@ access_point "far" {
 	ssid = "7765616b"
 	channel = 1
 	neighbour_reports = true
-	neighbour "$b1" { channel = 6 }
+	neighbour "$b1" { channel = 36 }
 	steering { signal = -45 }
 	wifi { psk = "@secret:weak" }
 }
@@ -108,6 +119,7 @@ say "a second ncfg apply rc=$?: $(grep -c 'neighbour.add' "$work/apply2.log") ne
 
 cat > "$work/sta.conf" <<CONF
 ctrl_interface=$work/sta
+country=US
 network={
 	ssid="weak"
 	psk="correcthorse"

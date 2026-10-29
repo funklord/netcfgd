@@ -604,6 +604,10 @@ typedef struct {
 	 * `high_throughput`. */
 	int            very_high_throughput;
 	int            hundred_sixty_mhz;
+	/* The bands in which it has 802.11ax for an access point (10.600),
+	 * answered with `high_throughput`. */
+	char         **high_efficiency;
+	size_t         high_efficiency_count;
 	/* **Carried rather than derived, before four clients derive it.** Absent
 	 * where nothing has computed it: a bare netlink snapshot. */
 	ncfg_optint_t category; /* ncfg_link_category_t where `has` */
@@ -1099,6 +1103,8 @@ typedef struct {
 	int           eighty_mhz;
 	/* And 160 MHz (`vht_oper_chwidth=2`, 10.599). */
 	int           hundred_sixty_mhz;
+	/* And 802.11ax (`ieee80211ax`, 10.600). */
+	int           high_efficiency;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */
@@ -1316,6 +1322,13 @@ typedef struct {
 	 * every client is answered from it.
 	 */
 	char *regdom;
+	/*
+	 * Whether the hostapd this machine runs was built with 802.11ax (10.600):
+	 * `ncfg_hostapd_program_has_he` on the program the roots name. Absent
+	 * where none was named or it could not be read, which gives no access
+	 * point 802.11ax -- the line would stop a hostapd without it starting.
+	 */
+	ncfg_optbool_t hostapd_has_he;
 	/*
 	 * Who set `regdom`: `kernel`, `user`, `driver` or `access_point`
 	 * (`ncfg_regdom_setter_name`). NULL where nobody is known to have.
