@@ -414,13 +414,34 @@ int main(void)
 		ncfg_buf_init(&message, 0);
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
-		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "input");
+		/* `prerouting`: 0294 gave the table the three filter chains and no
+		 * fourth, so a chain of any other name is still refused. */
+		ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, "prerouting");
 		nft_message(&message, nft_type(NFT_MSG_NEWCHAIN), NFPROTO_INET, 0, &attrs);
 		check(!ncfg_nft_writes_only_our_table(message.data, message.length, err,
 		    sizeof(err)),
-		    "and so is a second chain inside netcfgd's own table");
+		    "and so is a chain inside netcfgd's own table that is none of its five");
 		ncfg_buf_free(&attrs);
 		ncfg_buf_free(&message);
+
+		{
+			static const char *const filters[] = { "input", "forward", "output" };
+			size_t                   f;
+			int                      all = 1;
+
+			for (f = 0; f < 3u; f++) {
+				ncfg_buf_init(&message, 0);
+				ncfg_buf_init(&attrs, 0);
+				ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
+				ncfg_wire_attr_put_str(&attrs, NFTA_CHAIN_NAME, filters[f]);
+				nft_message(&message, nft_type(NFT_MSG_NEWCHAIN), NFPROTO_INET, 0, &attrs);
+				all = all && ncfg_nft_writes_only_our_table(message.data, message.length,
+				    err, sizeof(err));
+				ncfg_buf_free(&attrs);
+				ncfg_buf_free(&message);
+			}
+			check(all, "while the three filter chains 0294 added are allowed");
+		}
 
 		ncfg_buf_init(&message, 0);
 		ncfg_buf_init(&attrs, 0);

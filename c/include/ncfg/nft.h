@@ -74,10 +74,25 @@
 
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/document.h"
 
-/* The one table netcfgd owns, and the one chain in it. Decision 0022. */
+/* The one table netcfgd owns, and the chains in it. Decision 0022 gave it the
+ * NAT chain; 0294 added the three filter chains of layer one's firewall. */
 #define NCFG_NFT_TABLE "netcfgd"
 #define NCFG_NFT_CHAIN "postrouting"
+#define NCFG_NFT_CHAIN_INPUT   "input"
+#define NCFG_NFT_CHAIN_FORWARD "forward"
+#define NCFG_NFT_CHAIN_OUTPUT  "output"
+
+/*
+ * What a rule's comment can hold: nft refuses a comment over 128 characters,
+ * measured (0295), so the name and the digest share that rather than the
+ * kernel's 256.
+ */
+#define NCFG_NFT_COMMENT_MAX 128u
+/* The digest's hex characters in a comment: the first 64 bits of SHA-256,
+ * which is identity against accidental difference rather than a signature. */
+#define NCFG_NFT_DIGEST_HEX 16u
 
 /*
  * `NETLINK_NETFILTER`, the protocol a socket for this module is opened with.
@@ -240,6 +255,42 @@ int ncfg_nft_gen_read(const void *payload, size_t length, uint32_t *out, char *e
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size);
+
+/*
+ * The same transaction, carrying layer one's firewall as well (0294, 10.592).
+ *
+ * **One transaction for the whole table**, because the NAT chain and the
+ * three filter chains share it and the table is replaced wholesale: a NAT
+ * replacement that did not carry the firewall would delete it, and the
+ * reverse. `firewall` NULL is a document with no `firewall` block, which is
+ * the NAT-only transaction above, byte for byte.
+ *
+ * Each filter chain is a base chain at `filter` priority 0 on its hook, with
+ * the document's policy. Each rule is the expressions nftables itself would
+ * write for it, then the verdict, and carries its identity in nft's comment
+ * TLV (0295 B): `name=NAME sha256=DIGEST`, the digest over
+ * `ncfg_nft_firewall_rule_text`.
+ *
+ * **Refused before a byte is written**, rather than half-built: a rule whose
+ * name and digest do not fit a comment, addresses of two families in one rule
+ * (no packet can match both), and -- until anonymous sets land -- a match with
+ * more than one value.
+ */
+int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size);
+
+/*
+ * The text a rule's digest is taken over: every field that decides what the
+ * rule does, in one fixed order, with the chain it sits in.
+ *
+ * **netcfgd's own form, never the kernel's**: the bytes a dump returns are
+ * normalised by the kernel and differ between kernel versions (0295), so the
+ * digest is of what netcfgd meant. Public because the decoder (0295 A)
+ * recomputes it from what it read back, and the two must agree.
+ */
+int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *rule,
+    ncfg_buf_t *out);
 
 /*
  * Whether every nftables message in `bytes` that would *change* something

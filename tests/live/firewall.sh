@@ -1,0 +1,136 @@
+#!/bin/sh
+# Layer one's firewall, written to a real kernel and read back by nft.
+#
+#     unshare -rn sh tests/live/firewall.sh
+#
+# project.md 10.592 slice 2. `ncfg_nft_build_replace` writes the three filter
+# chains and every rule expression layer one has, and the only honest proof of
+# those bytes is a kernel taking them and a reader that is not netcfgd listing
+# them back. A user and network namespace can hold an nftables table -- measured
+# -- so this needs no root, and `nft` is the reader.
+#
+# HOW IT STOPS: a fixed list of steps, each a bounded command; the namespace is
+# the process's, so the table goes with it.
+
+set -eu
+
+repo=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+build="${NCFG_LIVE_BUILD:-$repo/c}"
+PATH="$PATH:/usr/sbin:/sbin"
+
+skip() {
+	if [ -n "${NCFG_LIVE:-}" ]; then
+		echo "firewall.sh: NCFG_LIVE is set but this cannot run: $1" >&2
+		exit 1
+	fi
+	echo "firewall.sh: skipping: $1"
+	exit 0
+}
+
+probe="$build/examples/live_firewall"
+[ -x "$probe" ] || skip "examples/live_firewall is not built (make -C c examples)"
+command -v nft >/dev/null 2>&1 || skip "no nft(8) to read the ruleset back with"
+nft list tables >/dev/null 2>&1 || skip "this namespace cannot use nftables"
+
+work=$(mktemp -d "${TMPDIR:-/tmp}/ncfg-firewall.XXXXXX")
+trap 'rm -rf "$work"' EXIT INT TERM
+
+failures=0
+check() {
+	if [ "$2" = "$3" ]; then
+		echo "ok   $1"
+	else
+		echo "FAIL $1"
+		echo "       expected: $3"
+		echo "       actual:   $2"
+		failures=$((failures + 1))
+	fi
+}
+has() { # $1 what, $2 fixed text the listing must hold
+	check "$1" "$(grep -cF -- "$2" "$work/listed" || true)" "1"
+}
+
+cat > "$work/netcfgd.conf" <<'CONF'
+firewall {
+	input {
+		policy = "drop"
+		accept "established" { state = ["established", "related"] }
+		accept "ssh" { protocol = "tcp"; port = 22; from = ["192.168.0.0/16"] }
+		accept "v6ping" { protocol = "icmpv6" }
+		drop "strangers" { mac = ["de:ad:be:*"] }
+		drop "one-station" { mac = ["02:00:00:00:01:00"] }
+		reject "one" { from = ["2001:db8::1"]; interface = "eth0" }
+	}
+	forward { policy = "drop" }
+	output {
+		policy = "accept"
+		drop "smtp-out" { protocol = "tcp"; port = 25; to = ["198.51.100.0/24"]; interface = "wan0" }
+	}
+}
+CONF
+
+"$probe" "$work" > "$work/sent" 2>&1 || true
+check "the kernel takes the transaction" "$(cat "$work/sent")" ""
+nft list ruleset > "$work/listed" 2>&1 || true
+
+has "the input chain is a filter chain at its hook, with the document's policy" \
+	"type filter hook input priority filter; policy drop;"
+has "and so is forward" "type filter hook forward priority filter; policy drop;"
+has "and output" "type filter hook output priority filter; policy accept;"
+has "a state set reads back as nft writes one" \
+	'ct state established,related accept comment "name=established sha256='
+has "a protocol, a port and a CIDR read back as written" \
+	'tcp dport 22 ip saddr 192.168.0.0/16 accept comment "name=ssh sha256='
+has "icmpv6 is the protocol nft calls ipv6-icmp" \
+	'meta l4proto ipv6-icmp accept comment "name=v6ping sha256='
+has "a station prefix is a mask nftables applies itself" \
+	'ether saddr & ff:ff:ff:00:00:00 == de:ad:be:00:00:00 drop comment "name=strangers'
+has "an exact station is an exact comparison" \
+	'ether saddr 02:00:00:00:01:00 drop comment "name=one-station'
+has "an IPv6 address, an arriving interface and a reject" \
+	'ip6 saddr 2001:db8::1 iifname "eth0" reject comment "name=one sha256='
+has "in output, the interface is the leaving one and the address the destination" \
+	'tcp dport 25 ip daddr 198.51.100.0/24 oifname "wan0" drop comment "name=smtp-out'
+check "nothing is written outside netcfgd's table" \
+	"$(grep -c '^table ' "$work/listed" || true)" "1"
+
+# A replacement: the table is there, and a smaller ruleset takes its place.
+cat > "$work/netcfgd.conf" <<'CONF'
+firewall {
+	input { policy = "accept" }
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$probe" "$work" --replace > "$work/sent" 2>&1 || true
+check "a replacement is taken too" "$(cat "$work/sent")" ""
+nft list ruleset > "$work/listed" 2>&1 || true
+check "and leaves none of the old rules behind" \
+	"$(grep -c 'comment "name=' "$work/listed" || true)" "0"
+has "with the new policy in place" "type filter hook input priority filter; policy accept;"
+
+# The two refusals of this slice, which must refuse before anything is sent.
+cat > "$work/netcfgd.conf" <<'CONF'
+firewall {
+	input {
+		policy = "accept"
+		drop "both" { from = ["10.0.0.1"]; to = ["2001:db8::1"] }
+	}
+	forward { policy = "accept" }
+	output { policy = "accept" }
+}
+CONF
+"$probe" "$work" --replace > "$work/sent" 2>&1 || true
+check "a rule matching both address families is refused, not sent" \
+	"$(grep -c 'no packet carries' "$work/sent" || true)" "1"
+nft list ruleset > "$work/listed" 2>&1 || true
+check "and the table it would have replaced is still there" \
+	"$(grep -c 'policy accept;' "$work/listed" || true)" "3"
+
+echo
+if [ "$failures" -eq 0 ]; then
+	echo "firewall.sh: all checks passed"
+else
+	echo "firewall.sh: $failures check(s) failed"
+	exit 1
+fi

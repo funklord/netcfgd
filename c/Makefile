@@ -182,7 +182,7 @@ all: $(LIB) $(PROGRAM) $(PROGRAM_LINK)
 #
 # `tests/live/association.sh` looks for `$(EXAMPLES)` by that exact path, the
 # Rust example of the same name being what it looks for in the other build.
-EXAMPLES = examples/live_association
+EXAMPLES = examples/live_association examples/live_firewall
 
 examples: $(EXAMPLES)
 

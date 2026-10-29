@@ -15,12 +15,18 @@
  */
 #include "ncfg/nft.h"
 
+#include "ncfg/sha256.h"
 #include "ncfg/wire.h"
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
+#include <linux/if_arp.h>
 #include <linux/netfilter.h>
+#include <linux/netfilter/nf_conntrack_common.h>
 #include <linux/netfilter/nf_tables.h>
 #include <linux/netfilter/nfnetlink.h>
 #include <linux/netfilter_ipv4.h>
@@ -186,6 +192,32 @@ static int name_must_be(const ncfg_wire_attrs_t *area, uint16_t kind, const char
 	return 1;
 }
 
+/* The chains netcfgd's table holds: the NAT chain of 0022 and the three filter
+ * chains of 0294. A fifth name in a message is refused by the audit. */
+static const char *const OUR_CHAINS[] = { NCFG_NFT_CHAIN, NCFG_NFT_CHAIN_INPUT,
+	NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT };
+
+static int chain_must_be_ours(const ncfg_wire_attrs_t *area, uint16_t kind, char *err,
+    size_t err_size)
+{
+	char   name[NCFG_NFT_NAME_MAX];
+	size_t at;
+
+	if (!read_name(area, kind, name, sizeof(name), NULL, 0)) {
+		ncfg_error_set(err, err_size, "a message that would change something and names no chain");
+		return 0;
+	}
+	for (at = 0; at < sizeof(OUR_CHAINS) / sizeof(OUR_CHAINS[0]); at++) {
+		if (strcmp(name, OUR_CHAINS[at]) == 0) {
+			return 1;
+		}
+	}
+	ncfg_error_set(err, err_size,
+	    "a message would write to chain `%s`; netcfgd's table holds `postrouting`, "
+	    "`input`, `forward` and `output` and nothing else (0022, 0294)", name);
+	return 0;
+}
+
 /* A batch marker names its subsystem in `res_id`, and a marker for another one
  * would open a transaction this module has no business opening. */
 static int marker_is_nftables(const ncfg_wire_message_t *message, char *err, size_t err_size)
@@ -251,11 +283,11 @@ static int audit_message(const ncfg_wire_message_t *message, char *err, size_t e
 	case NFT_MSG_NEWCHAIN:
 		return name_must_be(&area, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE, "table", err,
 		    err_size) &&
-		    name_must_be(&area, NFTA_CHAIN_NAME, NCFG_NFT_CHAIN, "chain", err, err_size);
+		    chain_must_be_ours(&area, NFTA_CHAIN_NAME, err, err_size);
 	case NFT_MSG_NEWRULE:
 		return name_must_be(&area, NFTA_RULE_TABLE, NCFG_NFT_TABLE, "table", err,
 		    err_size) &&
-		    name_must_be(&area, NFTA_RULE_CHAIN, NCFG_NFT_CHAIN, "chain", err, err_size);
+		    chain_must_be_ours(&area, NFTA_RULE_CHAIN, err, err_size);
 	default:
 		break;
 	}
@@ -574,9 +606,455 @@ static void masquerade_rule(ncfg_buf_t *rule, const char *uplink)
 	ncfg_buf_free(&meta);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Layer one's firewall (0294, 10.592)
+ * ------------------------------------------------------------------------ */
+
+/* A filter base chain: `type filter hook HOOK priority 0; policy POLICY;`. */
+static void filter_chain(ncfg_buf_t *attrs, const char *name, uint32_t hook, int policy)
+{
+	ncfg_buf_t nest;
+
+	ncfg_buf_init(&nest, 0);
+	put_be32(&nest, NFTA_HOOK_HOOKNUM, hook);
+	put_be32(&nest, NFTA_HOOK_PRIORITY, 0u);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_NAME, name);
+	ncfg_wire_attr_put_nested(attrs, NFTA_CHAIN_HOOK, &nest);
+	ncfg_wire_attr_put_str(attrs, NFTA_CHAIN_TYPE, "filter");
+	put_be32(attrs, NFTA_CHAIN_POLICY,
+	    policy == NCFG_FIREWALL_POLICY_DROP ? (uint32_t)NF_DROP : (uint32_t)NF_ACCEPT);
+	ncfg_buf_free(&nest);
+}
+
+/* `meta KEY` into register 1. */
+static void put_meta(ncfg_buf_t *list, uint32_t key)
+{
+	ncfg_buf_t data;
+
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_META_KEY, key);
+	put_be32(&data, NFTA_META_DREG, NFT_REG_1);
+	put_expression(list, "meta", &data);
+	ncfg_buf_free(&data);
+}
+
+/* `payload` from BASE at OFFSET for LENGTH bytes, into register 1. */
+static void put_payload(ncfg_buf_t *list, uint32_t base, uint32_t offset, uint32_t length)
+{
+	ncfg_buf_t data;
+
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_PAYLOAD_DREG, NFT_REG_1);
+	put_be32(&data, NFTA_PAYLOAD_BASE, base);
+	put_be32(&data, NFTA_PAYLOAD_OFFSET, offset);
+	put_be32(&data, NFTA_PAYLOAD_LEN, length);
+	put_expression(list, "payload", &data);
+	ncfg_buf_free(&data);
+}
+
+/* A value nested as `NFTA_DATA_VALUE`, which is how cmp and bitwise carry one. */
+static void put_data(ncfg_buf_t *attrs, uint16_t kind, const void *bytes, size_t length)
+{
+	ncfg_buf_t value;
+
+	ncfg_buf_init(&value, 0);
+	ncfg_wire_attr_put(&value, NFTA_DATA_VALUE, bytes, length);
+	ncfg_wire_attr_put_nested(attrs, kind, &value);
+	ncfg_buf_free(&value);
+}
+
+/* `register 1 OP BYTES`. */
+static void put_cmp(ncfg_buf_t *list, uint32_t op, const void *bytes, size_t length)
+{
+	ncfg_buf_t data;
+
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_CMP_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_CMP_OP, op);
+	put_data(&data, NFTA_CMP_DATA, bytes, length);
+	put_expression(list, "cmp", &data);
+	ncfg_buf_free(&data);
+}
+
+/* `register 1 = register 1 & MASK`, which is how a prefix -- of an address or
+ * a station -- is matched: mask, then compare. */
+static void put_mask(ncfg_buf_t *list, const uint8_t *mask, size_t length)
+{
+	ncfg_buf_t data;
+	uint8_t    zero[16];
+
+	memset(zero, 0, sizeof(zero));
+	ncfg_buf_init(&data, 0);
+	put_be32(&data, NFTA_BITWISE_SREG, NFT_REG_1);
+	put_be32(&data, NFTA_BITWISE_DREG, NFT_REG_1);
+	put_be32(&data, NFTA_BITWISE_LEN, (uint32_t)length);
+	put_data(&data, NFTA_BITWISE_MASK, mask, length);
+	put_data(&data, NFTA_BITWISE_XOR, zero, length);
+	put_expression(list, "bitwise", &data);
+	ncfg_buf_free(&data);
+}
+
+/* An address or CIDR, as the family nftables names it, its bytes and its
+ * prefix length. */
+typedef struct {
+	uint8_t  nfproto;
+	uint8_t  bytes[16];
+	uint32_t length;
+	uint32_t prefix;
+} nft_address_t;
+
+static int parse_address(const char *text, nft_address_t *out, char *err, size_t err_size)
+{
+	char        host[64];
+	const char *slash = strchr(text, '/');
+	size_t      span = slash ? (size_t)(slash - text) : strlen(text);
+	long        prefix = -1;
+
+	memset(out, 0, sizeof(*out));
+	if (span == 0u || span >= sizeof(host)) {
+		ncfg_error_set(err, err_size, "`%s` is not an address", text);
+		return 0;
+	}
+	memcpy(host, text, span);
+	host[span] = '\0';
+	if (inet_pton(AF_INET, host, out->bytes) == 1) {
+		out->nfproto = NFPROTO_IPV4;
+		out->length = 4u;
+	} else if (inet_pton(AF_INET6, host, out->bytes) == 1) {
+		out->nfproto = NFPROTO_IPV6;
+		out->length = 16u;
+	} else {
+		ncfg_error_set(err, err_size, "`%s` is not an IPv4 or IPv6 address", text);
+		return 0;
+	}
+	out->prefix = out->length * 8u;
+	if (slash) {
+		char *stop = NULL;
+
+		prefix = strtol(slash + 1, &stop, 10);
+		if (!stop || stop == slash + 1 || *stop != '\0' || prefix < 0 ||
+		    prefix > (long)(out->length * 8u)) {
+			ncfg_error_set(err, err_size, "`%s` has a prefix length its family cannot have",
+			    text);
+			return 0;
+		}
+		out->prefix = (uint32_t)prefix;
+	}
+	return 1;
+}
+
+/* Load an address field, mask it where the prefix is short, compare. */
+static void put_address_match(ncfg_buf_t *list, const nft_address_t *address, int source)
+{
+	uint8_t  mask[16];
+	uint8_t  network[16];
+	uint32_t offset;
+	uint32_t at;
+
+	if (address->nfproto == NFPROTO_IPV4) {
+		offset = source ? 12u : 16u;
+	} else {
+		offset = source ? 8u : 24u;
+	}
+	put_payload(list, NFT_PAYLOAD_NETWORK_HEADER, offset, address->length);
+	memset(mask, 0, sizeof(mask));
+	for (at = 0; at < address->prefix; at++) {
+		mask[at / 8u] = (uint8_t)(mask[at / 8u] | (0x80u >> (at % 8u)));
+	}
+	for (at = 0; at < address->length; at++) {
+		network[at] = (uint8_t)(address->bytes[at] & mask[at]);
+	}
+	if (address->prefix < address->length * 8u) {
+		put_mask(list, mask, address->length);
+	}
+	put_cmp(list, NFT_CMP_EQ, network, address->length);
+}
+
+/* The conntrack state bit for one of the document's words, or 0. */
+static uint32_t state_bit(const char *word)
+{
+	if (strcmp(word, "new") == 0) {
+		return NF_CT_STATE_BIT(IP_CT_NEW);
+	}
+	if (strcmp(word, "established") == 0) {
+		return NF_CT_STATE_BIT(IP_CT_ESTABLISHED);
+	}
+	if (strcmp(word, "related") == 0) {
+		return NF_CT_STATE_BIT(IP_CT_RELATED);
+	}
+	if (strcmp(word, "invalid") == 0) {
+		return NF_CT_STATE_INVALID_BIT;
+	}
+	return 0;
+}
+
+static uint8_t protocol_number(int protocol)
+{
+	switch (protocol) {
+	case NCFG_FIREWALL_PROTO_TCP:
+		return IPPROTO_TCP;
+	case NCFG_FIREWALL_PROTO_UDP:
+		return IPPROTO_UDP;
+	case NCFG_FIREWALL_PROTO_ICMP:
+		return IPPROTO_ICMP;
+	case NCFG_FIREWALL_PROTO_ICMPV6:
+		return IPPROTO_ICMPV6;
+	default:
+		return 0;
+	}
+}
+
+int ncfg_nft_firewall_rule_text(const char *chain, const ncfg_firewall_rule_t *rule,
+    ncfg_buf_t *out)
+{
+	static const char *const states[] = { "new", "established", "related", "invalid" };
+	size_t                   at;
+
+	if (!chain || !rule || !out) {
+		return 0;
+	}
+	/* One field per line, in a fixed order, so the text -- and the digest --
+	 * changes exactly when what the rule does changes. States in the
+	 * language's order rather than as written: a set, as nftables holds it. */
+	ncfg_buf_addf(out, "chain %s\naction %d\nprotocol %d\n", chain, rule->action,
+	    rule->protocol);
+	for (at = 0; at < rule->port_count; at++) {
+		ncfg_buf_addf(out, "port %lld\n", (long long)rule->ports[at]);
+	}
+	for (at = 0; at < rule->from_count; at++) {
+		ncfg_buf_addf(out, "from %s\n", rule->from[at]);
+	}
+	for (at = 0; at < rule->to_count; at++) {
+		ncfg_buf_addf(out, "to %s\n", rule->to[at]);
+	}
+	if (rule->interface) {
+		ncfg_buf_addf(out, "interface %s\n", rule->interface);
+	}
+	for (at = 0; at < sizeof(states) / sizeof(states[0]); at++) {
+		size_t one;
+
+		for (one = 0; one < rule->state_count; one++) {
+			if (strcmp(rule->states[one], states[at]) == 0) {
+				ncfg_buf_addf(out, "state %s\n", states[at]);
+				break;
+			}
+		}
+	}
+	for (at = 0; at < rule->mac_count; at++) {
+		ncfg_buf_addf(out, "mac %s\n", rule->mac[at]);
+	}
+	return !ncfg_buf_failed(out);
+}
+
+/* `name=NAME sha256=DIGEST`, as the comment nft writes and lists. */
+static int rule_comment(const char *chain, const ncfg_firewall_rule_t *rule, char *out,
+    size_t out_size, char *err, size_t err_size)
+{
+	ncfg_buf_t text;
+	char       digest[NCFG_SHA256_HEX_SIZE];
+	int        wrote;
+
+	ncfg_buf_init(&text, 0);
+	if (!ncfg_nft_firewall_rule_text(chain, rule, &text)) {
+		ncfg_buf_free(&text);
+		ncfg_error_set(err, err_size, "out of memory describing rule `%s`", rule->name);
+		return 0;
+	}
+	ncfg_sha256_hex(text.data, text.length, digest);
+	ncfg_buf_free(&text);
+	wrote = snprintf(out, out_size, "name=%s sha256=%.*s", rule->name,
+	    (int)NCFG_NFT_DIGEST_HEX, digest);
+	if (wrote < 0 || (size_t)wrote > NCFG_NFT_COMMENT_MAX || (size_t)wrote >= out_size) {
+		ncfg_error_set(err, err_size,
+		    "rule `%s/%s` has a name too long for the %u characters an nftables comment "
+		    "holds beside its digest", chain, rule->name, (unsigned)NCFG_NFT_COMMENT_MAX);
+		return 0;
+	}
+	return 1;
+}
+
+/*
+ * One rule, as the expressions nftables would write for it.
+ *
+ * The order is nftables' own -- the family, the protocol, the port, the
+ * addresses, the interface, the state, the station, and the verdict -- so
+ * that `nft list ruleset` prints what the document says in the words an
+ * operator would have typed.
+ */
+static int firewall_rule(ncfg_buf_t *attrs, const char *chain, const ncfg_firewall_rule_t *rule,
+    char *err, size_t err_size)
+{
+	ncfg_buf_t    expressions;
+	ncfg_buf_t    data;
+	ncfg_buf_t    verdict;
+	ncfg_buf_t    userdata;
+	nft_address_t from;
+	nft_address_t to;
+	char          comment[NCFG_NFT_COMMENT_MAX + 1u];
+	uint8_t       family = 0;
+	size_t        at;
+
+	/* Until anonymous sets land (10.592 slice 2b), one value per match. */
+	if (rule->port_count > 1u || rule->from_count > 1u || rule->to_count > 1u ||
+	    rule->mac_count > 1u) {
+		ncfg_error_set(err, err_size,
+		    "rule `%s/%s` matches more than one port, address or station, which this "
+		    "build cannot write to nftables yet", chain, rule->name);
+		return 0;
+	}
+	if (rule->from_count && !parse_address(rule->from[0], &from, err, err_size)) {
+		return 0;
+	}
+	if (rule->to_count && !parse_address(rule->to[0], &to, err, err_size)) {
+		return 0;
+	}
+	if (rule->from_count) {
+		family = from.nfproto;
+	}
+	if (rule->to_count) {
+		if (family && family != to.nfproto) {
+			ncfg_error_set(err, err_size,
+			    "rule `%s/%s` matches an IPv4 and an IPv6 address together, which no "
+			    "packet carries", chain, rule->name);
+			return 0;
+		}
+		family = to.nfproto;
+	}
+	if (!rule_comment(chain, rule, comment, sizeof(comment), err, err_size)) {
+		return 0;
+	}
+
+	ncfg_buf_init(&expressions, 0);
+	if (family) {
+		put_meta(&expressions, NFT_META_NFPROTO);
+		put_cmp(&expressions, NFT_CMP_EQ, &family, 1u);
+	}
+	if (rule->protocol != NCFG_FIREWALL_PROTO_ANY) {
+		const uint8_t number = protocol_number(rule->protocol);
+
+		put_meta(&expressions, NFT_META_L4PROTO);
+		put_cmp(&expressions, NFT_CMP_EQ, &number, 1u);
+	}
+	if (rule->port_count) {
+		const uint16_t port = htons((uint16_t)rule->ports[0]);
+
+		put_payload(&expressions, NFT_PAYLOAD_TRANSPORT_HEADER, 2u, 2u);
+		put_cmp(&expressions, NFT_CMP_EQ, &port, sizeof(port));
+	}
+	if (rule->from_count) {
+		put_address_match(&expressions, &from, 1);
+	}
+	if (rule->to_count) {
+		put_address_match(&expressions, &to, 0);
+	}
+	if (rule->interface) {
+		put_meta(&expressions, strcmp(chain, NCFG_NFT_CHAIN_OUTPUT) == 0 ? NFT_META_OIFNAME
+		                                                              : NFT_META_IIFNAME);
+		put_cmp(&expressions, NFT_CMP_EQ, rule->interface, strlen(rule->interface) + 1u);
+	}
+	if (rule->state_count) {
+		uint32_t bits = 0;
+		uint32_t none = 0;
+
+		for (at = 0; at < rule->state_count; at++) {
+			bits |= state_bit(rule->states[at]);
+		}
+		/* Host order: conntrack's state is a host-endian register, unlike
+		 * every other integer this module writes. */
+		ncfg_buf_init(&data, 0);
+		put_be32(&data, NFTA_CT_KEY, NFT_CT_STATE);
+		put_be32(&data, NFTA_CT_DREG, NFT_REG_1);
+		put_expression(&expressions, "ct", &data);
+		ncfg_buf_free(&data);
+		put_mask(&expressions, (const uint8_t *)&bits, sizeof(bits));
+		put_cmp(&expressions, NFT_CMP_NEQ, &none, sizeof(none));
+	}
+	if (rule->mac_count) {
+		uint8_t        mac[6];
+		uint8_t        mask[6] = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff };
+		const uint16_t ether = ARPHRD_ETHER;
+		const int      prefix = ncfg_station_is_prefix(rule->mac[0]);
+		unsigned       octet[6] = { 0, 0, 0, 0, 0, 0 };
+
+		if (sscanf(rule->mac[0], "%2x:%2x:%2x:%2x:%2x:%2x", &octet[0], &octet[1], &octet[2],
+		        &octet[3], &octet[4], &octet[5]) < (prefix ? 3 : 6)) {
+			ncfg_buf_free(&expressions);
+			ncfg_error_set(err, err_size, "rule `%s/%s` has a station `%s` it cannot read",
+			    chain, rule->name, rule->mac[0]);
+			return 0;
+		}
+		for (at = 0; at < 6u; at++) {
+			mac[at] = (uint8_t)octet[at];
+		}
+		if (prefix) {
+			mask[3] = mask[4] = mask[5] = 0;
+			mac[3] = mac[4] = mac[5] = 0;
+		}
+		/* nftables' own dependency for `ether saddr` in an inet table: the
+		 * header is only Ethernet's where the device is. Host order, as
+		 * `meta iiftype` is. */
+		put_meta(&expressions, NFT_META_IIFTYPE);
+		put_cmp(&expressions, NFT_CMP_EQ, &ether, sizeof(ether));
+		put_payload(&expressions, NFT_PAYLOAD_LL_HEADER, 6u, 6u);
+		if (prefix) {
+			put_mask(&expressions, mask, sizeof(mask));
+		}
+		put_cmp(&expressions, NFT_CMP_EQ, mac, sizeof(mac));
+	}
+
+	ncfg_buf_init(&data, 0);
+	if (rule->action == NCFG_FIREWALL_REJECT) {
+		const uint8_t code = NFT_REJECT_ICMPX_PORT_UNREACH;
+
+		put_be32(&data, NFTA_REJECT_TYPE, NFT_REJECT_ICMPX_UNREACH);
+		ncfg_wire_attr_put(&data, NFTA_REJECT_ICMP_CODE, &code, 1u);
+		put_expression(&expressions, "reject", &data);
+	} else {
+		ncfg_buf_t code;
+
+		ncfg_buf_init(&code, 0);
+		put_be32(&code, NFTA_VERDICT_CODE,
+		    rule->action == NCFG_FIREWALL_DROP ? (uint32_t)NF_DROP : (uint32_t)NF_ACCEPT);
+		ncfg_buf_init(&verdict, 0);
+		ncfg_wire_attr_put_nested(&verdict, NFTA_DATA_VERDICT, &code);
+		put_be32(&data, NFTA_IMMEDIATE_DREG, NFT_REG_VERDICT);
+		ncfg_wire_attr_put_nested(&data, NFTA_IMMEDIATE_DATA, &verdict);
+		put_expression(&expressions, "immediate", &data);
+		ncfg_buf_free(&verdict);
+		ncfg_buf_free(&code);
+	}
+	ncfg_buf_free(&data);
+
+	/* nft's comment TLV, measured (0295): type 0, a length counting the NUL,
+	 * the text and its NUL. */
+	ncfg_buf_init(&userdata, 0);
+	{
+		const uint8_t head[2] = { 0u, (uint8_t)(strlen(comment) + 1u) };
+
+		ncfg_buf_add(&userdata, head, sizeof(head));
+		ncfg_buf_add(&userdata, comment, strlen(comment) + 1u);
+	}
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_TABLE, NCFG_NFT_TABLE);
+	ncfg_wire_attr_put_str(attrs, NFTA_RULE_CHAIN, chain);
+	ncfg_wire_attr_put_nested(attrs, NFTA_RULE_EXPRESSIONS, &expressions);
+	ncfg_wire_attr_put(attrs, NFTA_RULE_USERDATA, userdata.data, userdata.length);
+	ncfg_buf_free(&userdata);
+	ncfg_buf_free(&expressions);
+	return 1;
+}
+
 int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
     const char *const *uplinks, size_t uplink_count, ncfg_nft_batch_t *batch,
     char *err, size_t err_size)
+{
+	return ncfg_nft_build_replace(out, first_seq, table_exists, uplinks, uplink_count, NULL,
+	    batch, err, err_size);
+}
+
+int ncfg_nft_build_replace(ncfg_buf_t *out, uint32_t first_seq, int table_exists,
+    const char *const *uplinks, size_t uplink_count, const ncfg_firewall_t *firewall,
+    ncfg_nft_batch_t *batch, char *err, size_t err_size)
 {
 	ncfg_buf_t transaction;
 	ncfg_buf_t attrs;
@@ -605,7 +1083,7 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 			return 0;
 		}
 	}
-	if (!table_exists && uplink_count == 0) {
+	if (!table_exists && uplink_count == 0 && !firewall) {
 		/* Nothing to remove and nothing to create. See `empty` in nft.h:
 		 * the begin-and-end transaction this would otherwise produce asks
 		 * for no acknowledgement and receives no reply, so a caller that
@@ -633,7 +1111,7 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 		ncfg_buf_free(&attrs);
 	}
 
-	if (ok && uplink_count > 0) {
+	if (ok && (uplink_count > 0 || firewall)) {
 		ncfg_buf_init(&attrs, 0);
 		ncfg_wire_attr_put_str(&attrs, NFTA_TABLE_NAME, NCFG_NFT_TABLE);
 		last_acked = seq;
@@ -643,7 +1121,7 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 		    seq++, NFPROTO_INET, &attrs, err, err_size);
 		ncfg_buf_free(&attrs);
 
-		if (ok) {
+		if (ok && uplink_count > 0) {
 			ncfg_buf_init(&attrs, 0);
 			nat_chain(&attrs);
 			last_acked = seq;
@@ -660,6 +1138,39 @@ int ncfg_nft_build_replace_nat(ncfg_buf_t *out, uint32_t first_seq, int table_ex
 			    (uint16_t)(NLM_F_ACK | NLM_F_CREATE), seq++, NFPROTO_INET, &attrs,
 			    err, err_size);
 			ncfg_buf_free(&attrs);
+		}
+		if (ok && firewall) {
+			const ncfg_firewall_chain_t *chains[3] = { &firewall->input, &firewall->forward,
+				&firewall->output };
+			static const char *const names[3] = { NCFG_NFT_CHAIN_INPUT,
+				NCFG_NFT_CHAIN_FORWARD, NCFG_NFT_CHAIN_OUTPUT };
+			static const uint32_t hooks[3] = { NF_INET_LOCAL_IN, NF_INET_FORWARD,
+				NF_INET_LOCAL_OUT };
+			size_t c;
+
+			for (c = 0; ok && c < 3u; c++) {
+				size_t r;
+
+				ncfg_buf_init(&attrs, 0);
+				filter_chain(&attrs, names[c], hooks[c], chains[c]->policy);
+				last_acked = seq;
+				ok = build(&transaction, NFT_MSG_NEWCHAIN,
+				    (uint16_t)(NLM_F_ACK | NLM_F_CREATE), seq++, NFPROTO_INET, &attrs,
+				    err, err_size);
+				ncfg_buf_free(&attrs);
+				for (r = 0; ok && r < chains[c]->rule_count; r++) {
+					ncfg_buf_init(&attrs, 0);
+					ok = firewall_rule(&attrs, names[c], &chains[c]->rules[r], err,
+					    err_size);
+					if (ok) {
+						last_acked = seq;
+						ok = build(&transaction, NFT_MSG_NEWRULE,
+						    (uint16_t)(NLM_F_ACK | NLM_F_CREATE | NLM_F_APPEND), seq++,
+						    NFPROTO_INET, &attrs, err, err_size);
+					}
+					ncfg_buf_free(&attrs);
+				}
+			}
 		}
 	}
 

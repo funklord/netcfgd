@@ -12627,7 +12627,20 @@ works on an accept as well as a drop.
    It means nothing on an interface with no Ethernet header (WireGuard, PPP),
    where it simply never matches; that is not refused, since `interface` is
    optional and a rule may span both kinds.
-2. **The `sys/nft` layer**: the three filter chains and every rule
+2. **The `sys/nft` layer.** *2a done*: `ncfg_nft_build_replace` writes the
+   table with the NAT chain, the three filter chains and their policies, and
+   each rule as nftables' own expressions -- family, protocol, destination
+   port, address with its prefix mask, arriving or leaving interface, state
+   as a conntrack bitmask, station with its mask, verdict -- carrying
+   `name=NAME sha256=DIGEST` in the comment TLV. `tests/live/firewall.sh`
+   sends it in an `unshare -rn` namespace and reads it back with `nft list
+   ruleset`: every rule lists as the document wrote it, a replacement leaves
+   nothing behind, and a rule matching both families is refused with the
+   table untouched; giving an IPv4 source the destination's offset fails it.
+   The audit now allows the three filter chains and still refuses a fifth.
+   *2b*: a match with several values -- refused by name until then, through
+   anonymous sets. *2c*: the decoder. The original plan, for the record:
+   the three filter chains and every rule
    expression layer one writes -- protocol, ports, addresses, interface,
    state, `ether saddr` with its mask, the verdict -- each rule carrying B's
    name and digest in nft's comment TLV; and A, the decoder of those back
