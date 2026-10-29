@@ -29,6 +29,7 @@
 #include "service_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/daemon.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/log.h"
 #include "ncfg/supplicant.h"
@@ -435,6 +436,112 @@ static int supplicant_context(const ncfg_service_t *service, const char *device,
 	return 1;
 }
 
+/*
+ * Whether the record says this radio's supplicant holds the document's set.
+ *
+ * The record the last population wrote, against the digest of what the
+ * document asks for now -- the observation's question, asked the same way.
+ * No record, or one that cannot be read or does not match, is "no": the
+ * caller then repopulates, which is always correct and only sometimes more
+ * than was needed.
+ */
+static int record_matches(const ncfg_service_t *service, const char *device)
+{
+	char   path[NCFG_SUPPLICANT_PATH_MAX];
+	char   recorded[NCFG_SUPPLICANT_SSID_HEX_SIZE + 8u];
+	char   digest[NCFG_SUPPLICANT_SSID_HEX_SIZE];
+	char   why[NCFG_ERROR_MAX];
+	FILE  *file;
+	size_t length;
+
+	if (!service->run_dir || service->run_dir[0] == '\0' ||
+	    !ncfg_service_networks_record_path(service->run_dir, device, path, sizeof(path), NULL,
+	    0)) {
+		return 0;
+	}
+	file = fopen(path, "rb");
+	if (!file) {
+		return 0;
+	}
+	length = fread(recorded, 1u, sizeof(recorded) - 1u, file);
+	(void)fclose(file);
+	recorded[length] = '\0';
+	while (length > 0u && (unsigned char)recorded[length - 1u] <= ' ') {
+		recorded[--length] = '\0';
+	}
+	why[0] = '\0';
+	if (!ncfg_service_radio_fingerprint(service->document, device, service->secrets, digest, why,
+	    sizeof(why))) {
+		return 0;
+	}
+	return strcmp(digest, recorded) == 0;
+}
+
+/*
+ * Re-enable what the document says to join automatically, leaving the rest.
+ *
+ * **What the reconcile for a disabled network was always meant to do**
+ * (e242b319, 10.368's answer: "re-enable what `autoconnect` names, and leave
+ * the current association alone"). It did not: a disabled network made the
+ * observation refute the record, the planner sent `wifi.set_profiles`, and
+ * this function cleared every network and added them back -- and removing the
+ * network a station is on disconnects it, after which the supplicant joins
+ * whichever it ranks first. So `ncfg wifi connect` lasted one pass: measured
+ * in hwsim, joined to `netcfgd-test` and back on `netcfgd-better` within the
+ * same second, the DHCP client restarted each time. It was invisible while the
+ * daemon stayed held through the live script's applies, and every apply going
+ * through the daemon (7e13290e) released it.
+ *
+ * `ENABLE_NETWORK` does not deselect, so the station stays where it is and the
+ * networks are back in its choice for the next time it has to choose.
+ *
+ * Only taken where the supplicant already holds exactly the document's set --
+ * the record matches and the list has as many entries as the document has
+ * networks. Anything else answers 0 and the caller repopulates in full.
+ */
+static int enable_only(ncfg_supplicant_client_t *client, const ncfg_service_t *service,
+    const char *device, int joins)
+{
+	char                     body[NCFG_SUPPLICANT_REPLY_MAX];
+	char                     command[64];
+	char                     why[NCFG_ERROR_MAX];
+	ncfg_supplicant_entry_t *entries = NULL;
+	size_t                   count = 0;
+	size_t                   at;
+	int                      ok = 1;
+
+	if (!joins || service->document->network_count == 0u || !record_matches(service, device)) {
+		return 0;
+	}
+	body[0] = '\0';
+	why[0] = '\0';
+	if (!ncfg_supplicant_ask(client, "LIST_NETWORKS", body, sizeof(body), why, sizeof(why)) ||
+	    !ncfg_supplicant_parse_network_list(body, &entries, &count, why, sizeof(why))) {
+		return 0;
+	}
+	if (count != service->document->network_count) {
+		ncfg_supplicant_entries_free(entries, count);
+		return 0;
+	}
+	for (at = 0u; ok && at < count; at++) {
+		const ncfg_wifi_network_t *network;
+
+		if (!ncfg_supplicant_entry_is_disabled(&entries[at])) {
+			continue;
+		}
+		network = ncfg_wifi_network_for(service->document->networks,
+		    service->document->network_count, &entries[at].ssid, NULL, -1);
+		if (!network || !network->autoconnect) {
+			continue;
+		}
+		(void)snprintf(command, sizeof(command), "ENABLE_NETWORK %lu",
+		    (unsigned long)entries[at].id);
+		ok = ncfg_supplicant_command(client, command, why, sizeof(why));
+	}
+	ncfg_supplicant_entries_free(entries, count);
+	return ok;
+}
+
 int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device, char *err,
     size_t err_size)
 {
@@ -533,6 +640,10 @@ int ncfg_service_set_profiles(const ncfg_service_t *service, const char *device,
 	}
 
 	ncfg_service_radio_policy(service->document, device, &mac_policy, &randomise, &joins);
+	if (enable_only(client, service, device, joins)) {
+		ncfg_supplicant_client_free(client);
+		return 1;
+	}
 	/* Cleared first, so a supplicant that survived a netcfgd crash -- or one
 	 * started by something else -- does not contribute networks the document
 	 * cannot account for. 0015. */

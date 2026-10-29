@@ -12595,6 +12595,42 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.589 `ncfg wifi connect` lasted one pass, and an apply's consents were dropped
+
+**Found by `make hull-hwsim`, which had failed one check -- "did not move to
+the preferred network" -- with and without the mesh work.** Two defects, the
+second hidden behind the first.
+
+**The consents.** `apply_through_daemon` sent `--allow-disruption` and sent
+`--strand-credentials` and `--restart-wedged` as nothing. A corner while only
+`--confirm-within` took that path; 7e13290e made every plain apply the
+daemon's, so on any machine with a daemon both were dropped: the daemon
+refused the restart the operator named and answered an empty journal with exit
+status 0. Fixed in 26312582, whose `Fixes:` trailer names `7e13290e6ef8`; the
+commit is `7e13290e2bdb`.
+
+**The reconcile for a disabled network repopulated, and that disconnects.**
+e242b319 meant to "re-enable what `autoconnect` names, and leave the current
+association alone" (10.368's answer). It reached that through
+`wifi.set_profiles`, which clears every network and adds them back -- and
+removing the network a station is on disconnects it, after which the
+supplicant joins whichever it ranks first. Measured in the vm: `ncfg wifi
+connect netcfgd-test` joined it, the next pass ran `wifi.set_profiles`, and the
+station was back on `netcfgd-better` within the second, the DHCP client
+restarted each way. **It was invisible while the daemon stayed held**: the live
+script's applies ran in-process, so the daemon started `--no-apply-on-start`
+was never released and never reconciled; 7e13290e released it. Now the
+executor re-enables without repopulating where the record says the supplicant
+holds the document's set and the list has that many networks --
+`ENABLE_NETWORK` does not deselect, so the station stays where it was put --
+and repopulates in full otherwise, as before.
+
+Checked: `hull-hwsim` passes all 27 checks again, including the two that
+first failure had masked (the station moves on `ncfg wifi connect`, and that
+is not a roam). `service_test` holds a disabled network to `ENABLE_NETWORK`
+with nothing removed, with the no-record control still repopulating;
+switching the new path off fails it. `cli_test` checks every consent travels.
+
 ## 10.588 A mesh (802.11s): the block, and joining it
 
 **What a `mesh` is here**: an 802.11s mesh one radio joins, the third thing a

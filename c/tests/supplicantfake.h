@@ -543,6 +543,7 @@ static inline int fake_start(const char *dir, const char *interface, const char 
 static inline void fake_stop(void)
 {
 	int status = 0;
+	int ended;
 
 	if (fake_pid <= 0) {
 		return;
@@ -559,11 +560,14 @@ static inline void fake_stop(void)
 	 * the hostapd fake stayed green (2026-10-29). Counted into `fake_faults`,
 	 * which each test's `main` adds to its failures.
 	 */
-	if (!((WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM) ||
-	    (WIFEXITED(status) && WEXITSTATUS(status) == 0))) {
+	/* Read through a copy: GCC's -Wdangling-pointer misreads `status` once
+	 * this is inlined into a caller that stops several fakes. */
+	ended = status;
+	if (!((WIFSIGNALED(ended) && WTERMSIG(ended) == SIGTERM) ||
+	    (WIFEXITED(ended) && WEXITSTATUS(ended) == 0))) {
 		fake_faults++;
 		printf("%-72s FAILED\n", "the supplicant fake ended as it was stopped, not of a fault");
-		printf("  status: %d\n", status);
+		printf("  status: %d\n", ended);
 	}
 	fake_pid = -1;
 	(void)unlink(fake_socket);

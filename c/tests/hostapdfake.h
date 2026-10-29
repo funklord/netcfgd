@@ -78,6 +78,9 @@ struct fake {
 	/* What `LIST_NETWORKS` holds, as one ssid per slot. */
 	char   networks[4][64];
 	size_t network_count;
+	/* Which of those it shows as `[DISABLED]`, as `SELECT_NETWORK` leaves every
+	 * network but the one selected. */
+	int    disabled[4];
 };
 
 static struct fake fake_config;
@@ -214,8 +217,8 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 		for (i = 0; i < state->network_count; i++) {
 			char line[128];
 
-			(void)snprintf(line, sizeof(line), "%zu\t%s\tany\t\n", i,
-			    state->networks[i]);
+			(void)snprintf(line, sizeof(line), "%zu\t%s\tany\t%s\n", i,
+			    state->networks[i], state->disabled[i] ? "[DISABLED]" : "");
 			(void)strncat(body, line, sizeof(body) - strlen(body) - 1u);
 		}
 		fake_reply(state, from, from_length, body);
@@ -361,6 +364,7 @@ static inline int fake_start(const char *dir, const char *interface)
 static inline void fake_stop(void)
 {
 	int status = 0;
+	int ended;
 
 	if (fake_pid <= 0) {
 		return;
@@ -376,11 +380,14 @@ static inline void fake_stop(void)
 	 * the hostapd fake stayed green (2026-10-29). Counted into `fake_faults`,
 	 * which each test's `main` adds to its failures.
 	 */
-	if (!((WIFSIGNALED(status) && WTERMSIG(status) == SIGTERM) ||
-	    (WIFEXITED(status) && WEXITSTATUS(status) == 0))) {
+	/* Read through a copy: GCC's -Wdangling-pointer misreads `status` once
+	 * this is inlined into a caller that stops several fakes. */
+	ended = status;
+	if (!((WIFSIGNALED(ended) && WTERMSIG(ended) == SIGTERM) ||
+	    (WIFEXITED(ended) && WEXITSTATUS(ended) == 0))) {
 		fake_faults++;
 		printf("%-72s FAILED\n", "the hostapd fake ended as it was stopped, not of a fault");
-		printf("  status: %d\n", status);
+		printf("  status: %d\n", ended);
 	}
 	fake_pid = -1;
 	(void)unlink(fake_socket);

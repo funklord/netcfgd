@@ -770,6 +770,68 @@ static void a_supplicant_is_filled_from_the_document(void)
 	fake_stop();
 }
 
+/*
+ * A network something disabled is enabled again, and nothing else is touched.
+ *
+ * The reconcile for a disabled network (e242b319) was meant to "re-enable what
+ * `autoconnect` names, and leave the current association alone", and cleared
+ * every network and added them back instead -- removing the one the station
+ * was on, which disconnects it. `hwsim.sh` measured `ncfg wifi connect` lasting
+ * one pass. Where the record says the supplicant holds the document's set, the
+ * only thing to send is `ENABLE_NETWORK`; the control is the same disabled
+ * network with no record, which still repopulates in full.
+ */
+static void a_disabled_network_is_enabled_and_nothing_removed(void)
+{
+	ncfg_service_t service;
+	char           message[NCFG_ERROR_MAX];
+	char           record[1024];
+
+	a_document(1, 1);
+	memset(&fake_config, 0, sizeof(fake_config));
+	if (!fake_start(supplicant_dir, "wlan0")) {
+		check(0, "a fake supplicant could be started");
+		return;
+	}
+	service = a_context();
+	message[0] = '\0';
+	/* The population that writes the record. */
+	(void)ncfg_service_set_profiles(&service, "wlan0", message, sizeof(message));
+	fake_stop();
+
+	memset(&fake_config, 0, sizeof(fake_config));
+	(void)snprintf(fake_config.networks[0], sizeof(fake_config.networks[0]), "Cafe");
+	fake_config.network_count = 1u;
+	fake_config.disabled[0] = 1;
+	if (!fake_start(supplicant_dir, "wlan0")) {
+		check(0, "a fake supplicant could be started again");
+		return;
+	}
+	message[0] = '\0';
+	check(ncfg_service_set_profiles(&service, "wlan0", message, sizeof(message)),
+	    "a radio holding the document's set with one disabled is reconciled");
+	check(heard_times("ENABLE_NETWORK 0") == 1,
+	    "  by enabling the network the document says to join automatically");
+	check(heard_times("REMOVE_NETWORK") == 0 && heard_times("ADD_NETWORK") == 0,
+	    "  and removing nothing, so the station stays where it was put");
+	fake_stop();
+
+	/* The control: no record, so nothing says the set is the document's. */
+	if (ncfg_service_networks_record_path(run_dir, "wlan0", record, sizeof(record), message,
+	    sizeof(message))) {
+		(void)unlink(record);
+	}
+	if (!fake_start(supplicant_dir, "wlan0")) {
+		check(0, "a fake supplicant could be started a third time");
+		return;
+	}
+	message[0] = '\0';
+	check(ncfg_service_set_profiles(&service, "wlan0", message, sizeof(message)) &&
+	        heard_times("REMOVE_NETWORK all") == 1,
+	    "while the same radio with no record is repopulated in full");
+	fake_stop();
+}
+
 static void a_radio_told_not_to_join_is_told_so(void)
 {
 	ncfg_service_t service;
@@ -1498,6 +1560,7 @@ int main(void)
 	a_station_is_added_once_and_not_twice();
 
 	a_supplicant_is_filled_from_the_document();
+	a_disabled_network_is_enabled_and_nothing_removed();
 	a_radio_told_not_to_join_is_told_so();
 	joining_asks_before_it_acts();
 	leaving_and_the_regulatory_domain();
