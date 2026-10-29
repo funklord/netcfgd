@@ -516,6 +516,21 @@ static void wpa3_fast_roaming_restarts_and_needs_a_bridge(void)
 	    "  and one whose radio is in no bridge is told its keys reach no other");
 	planfix_release(plan, document, observed);
 
+	/* The control: a radio in a bridge sends its keys where the others
+	 * listen, and is not warned -- or the check above would pass for a
+	 * warning that fires whatever the radio is in. */
+	/* `master` as the compiler writes it from the bridge's members: a
+	 * document read as JSON carries it rather than deriving it. */
+	plan = planfix_plan("{\"name\":\"wlan0\",\"kind\":{\"kind\":\"physical\"},"
+	    "\"master\":\"br0\"},"
+	    "{\"name\":\"br0\",\"kind\":{\"kind\":\"bridge\",\"members\":[\"wlan0\"]}}",
+	    RADIO_INTERFACE, "", FT_SAE_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN ",\"key_mgmt\":\"SAE\"")),
+	    &document, &observed);
+	check(plan && !planfix_warned(plan, "go nowhere they listen"),
+	    "  while one whose radio is in a bridge is not");
+	planfix_release(plan, document, observed);
+
 	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FT_SAE_POINT,
 	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN ",\"key_mgmt\":"
 	    "\"SAE FT-SAE\",\"mobility_domain\":\"4ea1\"") ",\"secret_matches\":false"),

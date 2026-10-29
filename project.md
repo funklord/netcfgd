@@ -12597,6 +12597,87 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.594 How the hosts reach each other, and what fuzznet and WireGuard are for
+
+Asked by the holder 2026-10-29: how the hosts reach each other for mesh,
+roaming and repeaters, and whether to link them over fuzznet or WireGuard.
+Answered from the renderer and the rigs rather than from memory.
+
+**No netcfgd talks to another for any of these.** A mesh is over the air:
+nodes peer by SAE on the shared channel and mesh ID, and the kernel forwards.
+A repeater is over the air: a station in four-address mode, given its own
+interface in the access point's bridge. FT-PSK needs **no path between the
+access points at all**: `ft_psk_generate_local` has each derive the roaming
+keys from the passphrase, and the station roams over the air. Only FT-SAE
+moves anything between access points -- hostapd's own key exchange, as
+Ethernet frames of ethertype 0x890d broadcast on the access points' bridge
+(`r0kh=ff:ff:ff:ff:ff:ff`, `r1kh` answering any), so the access points must
+share one Ethernet segment. `make hull-roam-sae` proves it as two netcfgds
+whose bridges are joined by a veth.
+
+**What crosses machines is agreement, not traffic**: the same mesh ID,
+passwords and roaming key everywhere, put on each machine by hand today.
+**Keeping that agreement is fuzznet's, as already decided** (10.567, 10.542):
+the estate-scope keys carry wire numbers for it and wait on fuzznet's record
+half. The open part is the secrets -- 0029 keeps them out of the document, so
+a roaming key or a mesh password reaching a new access point wants a path of
+its own, which is a question for fuzznet's design rather than this tree's.
+
+**WireGuard is not needed for these, and is not to be created implicitly.** A
+station roams only between access points in radio range of each other, which
+share a segment in practice; mesh and repeater links are their own transport,
+encrypted per hop by SAE. The one case it serves is FT-SAE access points on
+different segments: the key exchange is Ethernet-only, so it would need an
+Ethernet tunnel -- VXLAN or GRETAP over WireGuard -- bridged into the access
+points' bridge, which the language already expresses as the operator's
+choice. netcfgd making such a tunnel on its own would be configuration no
+file holds (constraint 1). Whether fuzznet itself wants WireGuard beneath it,
+for NAT or reachability, is fuzznet's; its messages are authenticated already.
+
+**What is checked, and what cannot be from one machine.** An FT-SAE access
+point whose radio is in no bridge is warned about (since `d3a6dd2c`), and the
+control half -- a bridged radio is not warned -- is tested now too. Access
+points in bridges on *different* segments are not detectable from one host:
+that needs the network-wide observation fuzznet is for.
+
+### How FT-PSK decides which access point a station uses
+
+**It does not; the station does.** Fast roaming makes a move between access
+points cheap -- the keys are ready at the target without a full handshake --
+but which access point a station is on is the station's choice, by signal.
+There is no controller, and nothing in netcfgd assigns stations. What exists
+to steer them is the access point's station list: deny a station on every
+access point but one and it can only associate there (0039, the
+"single-host half" of the Ubiquiti-style roaming 0036 named), and with estate
+host lists (10.591) that list is written once. `bss_transition=1` is set, so
+802.11v transition requests are accepted by stations that support them, but
+netcfgd sends none: band and signal steering are 10.587 item 5, parked
+behind neighbour reports (item 2).
+
+### Whether FT-SAE's Ethernet exchange is secure
+
+**Encrypted and authenticated, with replay protection, by the shared key** --
+hostapd's FT messages between access points (RRB-OUI) are sealed with the
+roaming key; the 2.10 binary's own strings name the encryption ("Failed to
+encrypt RRB-OUI message") and the sequence numbers that refuse a replay
+("Invalid sequence number", a sequence-number nonce). The key is SHA-256 of
+the `roaming_key` secret, 256 bits, which is what that scheme takes. Not
+measured on the wire here; the source of that claim is the binary.
+
+What it rests on, and what follows:
+
+- **The whole exchange is as strong as the secret.** The key is a hash of it,
+  so a low-entropy `roaming_key` can be guessed offline from captured frames.
+  It should be a random value of its own, not a word.
+- **It is one network-wide credential.** The wildcards mean any device on the
+  segment holding the key can ask for a station's keys, and one access point
+  compromised is all of them compromised. Per-pair keys (listing each
+  `r0kh`/`r1kh`) would narrow that, at the cost of every access point naming
+  every other -- a list fuzznet could keep, and nothing here can.
+- **It is broadcast on the LAN**, so a segment the access points share with
+  untrusted hosts carries it to them: sealed, but present. A management VLAN
+  for the access points' bridge keeps it off the user LAN.
+
 ## 10.593 An apply through the daemon reported as a local one does
 
 **Found by `make hull-natcap`**, run to check the op's rename against a real
