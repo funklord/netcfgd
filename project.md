@@ -12597,6 +12597,36 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.604 Associated, leased and named, over the air
+
+A `/go` run 2026-10-29. 10.601 served a veth and the access-point rigs
+associated stations that asked for no address, so the path a router exists
+for -- a phone joins, is given an address, and is listed by name -- had been
+run only in halves. **No image held hostapd and dnsmasq together**; the hwsim
+image does now (`hostapd` added to its build step and its tool check), and
+`make hull-ap-lease` runs it.
+
+- **One vm, two hwsim radios.** netcfgd runs the access point and a
+  `dhcp_server` on wlan0; wlan1's phy is moved into a namespace (`iw phy ...
+  set netns`), so the station's address is not also an address of the access
+  point's stack, where the server's replies would be delivered locally and
+  prove nothing about the air.
+- **Measured, VERDICT ok**: the first plan starts the access point, adds the
+  address, starts the DHCP server; the station joins in 3 s; dhcpcd is given
+  192.168.4.211 (inside the default .100--.249), router 192.168.4.1, the DNS
+  server named and the 12 h lease; `ncfg wifi clients wlan0` lists
+  `02:00:00:00:01:00  phone  192.168.4.211` through the daemon's socket, and
+  `--json` carries `"hostname":"phone"` and the address; a second plan has
+  nothing to do.
+- **The first run's red was the payload's own** -- a backend called
+  `hostapd` where the plan says `access_point`, a hook copied without its
+  execute bit, a JSON match with a space the compact form does not have --
+  and netcfgd's output in that run already showed the station named. Each
+  assertion was therefore seen red before it was seen green.
+- `hull-hwsim` and `hull-dhcp-server` pass on the rebuilt image. **An image
+  built before this has no hostapd**; the payload says so in its verdict,
+  and `make hull-image` rebuilds it.
+
 ## 10.603 A stations tab in the GUI
 
 **Asked for by the holder 2026-10-29** ("go ahead with a station view in the
@@ -12732,9 +12762,8 @@ offset into a DNS record. Found by grepping where it landed.
 
 ### Open
 
-- **Hostnames from the leases**: the lease file carries the name each
-  client sent, which 0040's station list and the GUI have wanted since the
-  start.
+- ~~**Hostnames from the leases**~~ -- done: 10.602 for the CLI and TUI,
+  10.603 for the GUI, and 10.604 ran the whole path over the air.
 - **DHCPv6** stays out (0297): RA and SLAAC address the hosts.
 - **Another `backend`**: udhcpd, odhcpd, Kea -- a key as `advertise.backend`
   has, once one is measured.
