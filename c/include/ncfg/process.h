@@ -428,12 +428,6 @@ int ncfg_process_hangup(pid_t pid, char *err, size_t err_size);
 int ncfg_process_become(uid_t uid, gid_t gid, const gid_t *groups, size_t group_count);
 
 /*
- * The file an exec of `program` would run: itself where it names a path, or
- * the first `PATH` entry holding it, as an exec looks. 0 where there is none.
- */
-int ncfg_process_find(const char *program, char *out, size_t out_size);
-
-/*
  * Why a program would not run, when the kernel said `EACCES`.
  *
  * **`Permission denied` on an exec has two causes and they need different

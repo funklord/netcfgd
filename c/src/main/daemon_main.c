@@ -45,7 +45,7 @@
 #include "ncfg/leftovers.h"
 #include "ncfg/log.h"
 #include "ncfg/observe.h"
-#include "ncfg/process.h"
+#include "ncfg/hostapd.h"
 #include "ncfg/rfkill.h"
 #include "ncfg/secrets.h"
 #include "ncfg/state.h"
@@ -863,10 +863,16 @@ static int start(const options_t *options)
 	 */
 	(void)snprintf(source.roots.resolv_conf, sizeof(source.roots.resolv_conf), "%s",
 	    where.resolv);
-	/* And the hostapd this daemon would start, found as its exec finds it,
-	 * so whether it has 802.11ax is asked of that one (10.600). */
-	if (!ncfg_process_find("hostapd", source.roots.hostapd, sizeof(source.roots.hostapd))) {
-		source.roots.hostapd[0] = '\0';
+	/* And the hostapd this daemon would start -- `ncfg_hostapd_binary`, the
+	 * one the start runs, `/usr/sbin` first -- so what it was built with is
+	 * asked of that one (10.600). `PATH` alone missed it where `/usr/sbin`
+	 * is not on `PATH`, leaving 802.11ax off for no reason. */
+	{
+		char *hostapd = ncfg_hostapd_binary();
+
+		(void)snprintf(source.roots.hostapd, sizeof(source.roots.hostapd), "%s",
+		    hostapd ? hostapd : "");
+		free(hostapd);
 	}
 	state.observe = ncfg_observe_source_observe;
 	state.observe_context = &source;
