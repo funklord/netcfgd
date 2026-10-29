@@ -838,6 +838,27 @@ static void an_access_point_round_trips(void)
 	free(plain);
 }
 
+/* A `mesh` round-trips, SAE and open alike (10.588). */
+static void a_mesh_round_trips(void)
+{
+	char *text;
+
+	round_trips("mesh \"backhaul\" {\n"
+	    "\tdevice = \"wlan2\"\n"
+	    "\tchannel = 36\n"
+	    "\tband = \"5\"\n"
+	    "\twifi { psk = \"@secret:mesh\" }\n"
+	    "}\n",
+	    "every field of a mesh survives a round trip");
+	round_trips("mesh \"lab\" {\n\tdevice = \"wlan3\"\n\tchannel = 6\n"
+	    "\twifi { open = true }\n}\n", "and an open one does too");
+	text = rendering_of("mesh \"backhaul\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n"
+	    "\twifi { psk = \"@secret:mesh\" }\n}\n");
+	check(text && strstr(text, "proto = \"wpa3\"") != NULL,
+	    "  writing the SAE it is, rather than the station default it is not");
+	free(text);
+}
+
 static void a_routing_rule_round_trips(void)
 {
 	char *full;
@@ -3754,6 +3775,7 @@ int main(int argc, char **argv)
 	a_label_the_lexer_cannot_read_bare();
 	the_hostname_policy_round_trips();
 	a_radios_own_policy_round_trips();
+	a_mesh_round_trips();
 	a_routing_rule_round_trips();
 	an_access_point_round_trips();
 	ethtool_and_qdisc_round_trip();

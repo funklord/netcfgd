@@ -67,7 +67,10 @@ static const struct {
 	/* Layer one's firewall: the narrowest, deliberately. An operator's rules
 	 * for the host in front of them are not estate business until a layer
 	 * exists that says they are (0294, and 0284's layers two and three). */
-	{ "firewall", NCFG_SCOPE_HOST_PRIVATE }
+	{ "firewall", NCFG_SCOPE_HOST_PRIVATE },
+	/* A mesh is the estate's, as a network is: every node names the same one.
+	 * Which radio joins it is host-private, as an access point's is. */
+	{ "mesh", NCFG_SCOPE_ESTATE }
 };
 
 #define EXPECTED_COUNT (sizeof(EXPECTED) / sizeof(EXPECTED[0]))

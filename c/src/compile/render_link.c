@@ -1025,6 +1025,67 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	ncfg_buf_free(&body);
 }
 
+/*
+ * One `mesh` block (10.588).
+ *
+ * The label is the mesh ID and there is no key for a different one, so a
+ * document whose two disagree -- which only one read from JSON can hold -- is
+ * refused rather than written as a label that compiles to another mesh. The
+ * rest are the lowering's refusals asked again, so nothing is written back that
+ * the compiler would refuse: no channel, a channel outside its band, and a
+ * security a mesh does not have.
+ */
+void ncfg_render_mesh(const ncfg_mesh_t *mesh, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing)
+{
+	ncfg_buf_t  body;
+	const char *band;
+	size_t      length = strlen(mesh->id ? mesh->id : "");
+
+	if (!mesh->id || length == 0u || length > NCFG_SSID_MAX_LEN ||
+	    length != mesh->mesh_id.length || memcmp(mesh->id, mesh->mesh_id.bytes, length) != 0) {
+		ncfg_render_refuse(missing, "mesh", mesh->id,
+		    "a mesh ID that is not its label, which the language cannot say");
+		return;
+	}
+	if (!mesh->channel.has) {
+		ncfg_render_refuse(missing, "mesh", mesh->id, "no channel, which a mesh needs");
+		return;
+	}
+	band = ncfg_access_point_effective_band(mesh->band, &mesh->channel);
+	if (band && !ncfg_channel_in_band(band, mesh->channel.value)) {
+		ncfg_render_refuse(missing, "mesh", mesh->id,
+		    "channel %lld, which is not in the %s GHz band", (long long)mesh->channel.value,
+		    band);
+		return;
+	}
+	if (mesh->security.kind != NCFG_SECURITY_OPEN &&
+	    !(mesh->security.kind == NCFG_SECURITY_PSK &&
+	    mesh->security.psk.proto != NCFG_PSK_PROTO_WPA2)) {
+		ncfg_render_refuse(missing, "mesh", mesh->id,
+		    "security a mesh does not have: SAE or none");
+		return;
+	}
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_add_text(&body, "\tdevice = ");
+	ncfg_render_quote(&body, mesh->device);
+	ncfg_buf_add_char(&body, '\n');
+	ncfg_buf_addf(&body, "\tchannel = %lld\n", (long long)mesh->channel.value);
+	if (mesh->band) {
+		ncfg_buf_add_text(&body, "\tband = ");
+		ncfg_render_quote(&body, mesh->band);
+		ncfg_buf_add_char(&body, '\n');
+	}
+	ncfg_buf_add_text(&body, "\twifi {\n");
+	render_security(&mesh->security, &body);
+	ncfg_buf_add_text(&body, "\t}\n");
+	ncfg_render_opening(text, "mesh", mesh->id, overrides);
+	ncfg_render_quote(text, mesh->id);
+	ncfg_buf_addf(text, " {\n%s}\n", ncfg_buf_text(&body));
+	ncfg_buf_free(&body);
+}
+
 void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {

@@ -2019,6 +2019,20 @@ static const ncfg_field_t access_point_fields[] = {
 };
 static const ncfg_type_t access_point_type = TYPE("access point", access_point_fields);
 
+static const ncfg_field_t mesh_fields[] = {
+	{ .name = "id", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_mesh_t, id) },
+	{ .name = "mesh_id", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED,
+	    .custom = &ssid_required_custom, .offset = offsetof(ncfg_mesh_t, mesh_id) },
+	{ .name = "device", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_mesh_t, device) },
+	{ .name = "security", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED,
+	    .custom = &security_custom, .offset = offsetof(ncfg_mesh_t, security) },
+	{ .name = "channel", .kind = NCFG_F_OPT_INT, R_U16, .offset = offsetof(ncfg_mesh_t, channel) },
+	{ .name = "band", .kind = NCFG_F_STR, .offset = offsetof(ncfg_mesh_t, band) }
+};
+static const ncfg_type_t mesh_type = TYPE("mesh", mesh_fields);
+
 /* ------------------------------------------------------------------------ *
  * Rules, bluetooth devices, linksets
  * ------------------------------------------------------------------------ */
@@ -2465,7 +2479,12 @@ static const ncfg_field_t document_fields[] = {
 	 */
 	{ .name = "firewall", .kind = NCFG_F_OPT_STRUCT, .type = &firewall_type,
 	    .element_size = sizeof(ncfg_firewall_t),
-	    .offset = offsetof(ncfg_document_t, firewall) }
+	    .offset = offsetof(ncfg_document_t, firewall) },
+	/* Left out when empty, so the witness and every document before 10.588
+	 * are unchanged -- an appended list, `firewall`'s reasoning. */
+	{ .name = "meshes", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY, .type = &mesh_type,
+	    .element_size = sizeof(ncfg_mesh_t), .offset = offsetof(ncfg_document_t, meshes),
+	    .count_offset = offsetof(ncfg_document_t, mesh_count) }
 };
 static const ncfg_type_t document_type = TYPE("document", document_fields);
 

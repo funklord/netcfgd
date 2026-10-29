@@ -84,6 +84,8 @@ typedef enum {
 	 * clothes.
 	 */
 	NCFG_BLOCK_FIREWALL,
+	/* An 802.11s mesh one radio joins (10.588). Last, for the reason above. */
+	NCFG_BLOCK_MESH,
 	NCFG_BLOCK_COUNT
 } ncfg_block_t;
 

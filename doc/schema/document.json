@@ -5347,5 +5347,22 @@
         "wlan0"
       ]
     }
+  ],
+  "meshes": [
+    {
+      "id": "backhaul",
+      "mesh_id": "6261636b6861756c",
+      "device": "wlan2",
+      "security": {
+        "type": "psk",
+        "passphrase": {
+          "provider": "file",
+          "name": "mesh"
+        },
+        "proto": "wpa3"
+      },
+      "channel": 36,
+      "band": "5"
+    }
   ]
 }

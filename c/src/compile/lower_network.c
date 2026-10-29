@@ -1111,3 +1111,136 @@ refused:
 	access_point_free(&access_point);
 	return 0;
 }
+
+static void mesh_free(ncfg_mesh_t *mesh)
+{
+	free(mesh->id);
+	free(mesh->device);
+	free(mesh->band);
+	ncfg_security_free(&mesh->security);
+	memset(mesh, 0, sizeof(*mesh));
+}
+
+/*
+ * A `mesh` block: an 802.11s mesh one radio joins (10.588).
+ *
+ * Shaped like `access_point`, deliberately -- a device, a channel, a band, and
+ * the same `wifi` block parsed by the same code -- because it is the same kind
+ * of thing: what one radio offers rather than a network any radio may join.
+ * What differs is refused here by name rather than accepted and ignored:
+ *
+ *   * **the channel is required**, since mesh points meet on the channel they
+ *     were given and do not search for one another;
+ *   * **security is SAE or none**: 802.11s authenticates peers with SAE alone,
+ *     so a WPA2-only `psk`, OWE and EAP have no meaning in a mesh.
+ */
+int ncfg_lower_mesh(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged, ncfg_mesh_t *out)
+{
+	const ncfg_ast_block_t *block = merged->block;
+	ncfg_mesh_t             mesh;
+	ncfg_span_t             channel_span = block->span;
+	const char             *why = NULL;
+	const char             *band;
+	int                     security_seen = 0;
+	size_t                  i;
+
+	memset(&mesh, 0, sizeof(mesh));
+	mesh.id = ncfg_require_label(ctx, block);
+	if (!mesh.id) {
+		return 0;
+	}
+	if (!ncfg_ssid_from_bytes(block->label, block->label_length, &mesh.mesh_id, &why)) {
+		ncfg_diag(ctx, block->span, "`%s` cannot be a mesh ID: %s", block->label, why);
+		mesh_free(&mesh);
+		return 0;
+	}
+	mesh.security.kind = NCFG_SECURITY_OPEN;
+
+	for (i = 0; i < merged->item_count; i++) {
+		const ncfg_ast_item_t *item = merged->items[i].item;
+
+		ctx->source = merged->items[i].source;
+		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT) {
+			const ncfg_ast_assignment_t *assignment = &item->as.assignment;
+			const char                  *key = assignment->key;
+
+			if (strcmp(key, "device") == 0) {
+				free(mesh.device);
+				mesh.device = ncfg_as_interface_name(ctx, assignment->value);
+			} else if (strcmp(key, "channel") == 0) {
+				channel_span = assignment->span;
+				ncfg_as_narrow_opt(ctx, assignment->value, 65535, &mesh.channel);
+			} else if (strcmp(key, "band") == 0) {
+				ncfg_lower_band(ctx, &mesh.band, assignment);
+			} else {
+				ncfg_diag(ctx, assignment->span, "unknown mesh key `%s`", key);
+			}
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_BLOCK) {
+			continue;
+		}
+		if (strcmp(item->as.block.head, "wifi") == 0) {
+			ncfg_security_t security;
+
+			security_seen = 1;
+			if (ncfg_lower_wifi_block(ctx, &item->as.block, NULL, &security)) {
+				ncfg_security_free(&mesh.security);
+				mesh.security = security;
+			}
+		} else {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `mesh`",
+			    item->as.block.head);
+		}
+	}
+
+	if (!mesh.device) {
+		ncfg_diag(ctx, block->span,
+		    "mesh `%s` does not say which radio joins it: add `device = \"wlan1\"`; the "
+		    "radio is given to the mesh and does nothing else", mesh.id);
+		goto refused;
+	}
+	if (!mesh.channel.has) {
+		ncfg_diag(ctx, block->span,
+		    "mesh `%s` has no `channel`: every node of a mesh is told the same one, because "
+		    "mesh points meet on it rather than searching for each other", mesh.id);
+		goto refused;
+	}
+	if (!security_seen) {
+		ncfg_diag(ctx, block->span,
+		    "mesh `%s` has no `wifi` block, so it would be open: add "
+		    "`wifi { psk = \"@secret:NAME\" }`, or `wifi { open = true }`", mesh.id);
+		goto refused;
+	}
+	if (mesh.security.kind == NCFG_SECURITY_PSK &&
+	    mesh.security.psk.proto == NCFG_PSK_PROTO_WPA2) {
+		ncfg_diag(ctx, block->span,
+		    "mesh `%s` asks for WPA2, and a mesh authenticates its peers with SAE alone: "
+		    "drop `proto` and the passphrase is used as the SAE password", mesh.id);
+		goto refused;
+	}
+	if (mesh.security.kind != NCFG_SECURITY_PSK && mesh.security.kind != NCFG_SECURITY_OPEN) {
+		ncfg_diag(ctx, block->span,
+		    "mesh `%s` asks for security a mesh does not have: 802.11s offers SAE (`psk`) "
+		    "or nothing (`open = true`)", mesh.id);
+		goto refused;
+	}
+	/* Said as what it is: a mesh's `psk` is a SAE password, so the document
+	 * records WPA3 rather than the transition mode a station's `psk` defaults
+	 * to, which no mesh peer would negotiate. */
+	if (mesh.security.kind == NCFG_SECURITY_PSK) {
+		mesh.security.psk.proto = NCFG_PSK_PROTO_WPA3;
+	}
+	band = ncfg_access_point_effective_band(mesh.band, &mesh.channel);
+	if (band && !ncfg_channel_in_band(band, mesh.channel.value)) {
+		ncfg_diag(ctx, channel_span, "channel %lld is not in the %s GHz band",
+		    (long long)mesh.channel.value, band);
+		goto refused;
+	}
+	*out = mesh;
+	return 1;
+
+refused:
+	mesh_free(&mesh);
+	return 0;
+}

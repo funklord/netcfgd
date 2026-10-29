@@ -1191,6 +1191,49 @@ static void the_compiler_and_the_renderer_agree_about_bands(void)
 	}
 }
 
+/*
+ * A `mesh`: one radio, a required channel, SAE or nothing (10.588). Each
+ * refusal names what a mesh needs, and a radio given to one does nothing else,
+ * whichever block is written first.
+ */
+static void mesh_cases(void)
+{
+	ncfg_document_t *document;
+
+	document = compiles("mesh \"backhaul\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n"
+	    "\twifi { psk = \"@secret:mesh\" }\n}\n", "a mesh compiles and names its radio");
+	if (document) {
+		check(document->mesh_count == 1u && strcmp(document->meshes[0].device, "wlan2") == 0 &&
+		    document->meshes[0].channel.value == 1, "  bound to one radio, on one channel");
+		check(document->meshes[0].security.psk.proto == NCFG_PSK_PROTO_WPA3,
+		    "  and its passphrase recorded as a SAE password, which is all a mesh has");
+		ncfg_document_free(document);
+	}
+	refuses("mesh \"m\" {\n\tchannel = 1\n\twifi { open = true }\n}\n",
+	    "does not say which radio", "a mesh without a device is refused");
+	refuses("mesh \"m\" {\n\tdevice = \"wlan2\"\n\twifi { open = true }\n}\n",
+	    "has no `channel`", "a mesh without a channel is refused, saying why it needs one");
+	refuses("mesh \"m\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n}\n",
+	    "so it would be open", "and one with no `wifi` block");
+	refuses("mesh \"m\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n"
+	    "\twifi { psk = \"@secret:mesh\"\n\tproto = \"wpa2\" }\n}\n",
+	    "SAE alone", "a WPA2 mesh is refused: peers authenticate with SAE");
+	refuses("mesh \"m\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n\twifi { owe = true }\n}\n",
+	    "security a mesh does not have", "and so is OWE");
+	refuses("mesh \"m\" {\n\tdevice = \"wlan2\"\n\tband = \"2.4\"\n\tchannel = 36\n"
+	    "\twifi { open = true }\n}\n", "not in the 2.4 GHz band",
+	    "a channel outside its band is refused");
+	refuses("mesh \"a\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n\twifi { open = true }\n}\n"
+	    "mesh \"b\" {\n\tdevice = \"wlan2\"\n\tchannel = 6\n\twifi { open = true }\n}\n",
+	    "given to mesh `a`", "two meshes on one radio are refused");
+	refuses("mesh \"a\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n\twifi { open = true }\n}\n"
+	    "access_point \"ap\" {\n\tdevice = \"wlan2\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "given to mesh `a`", "an access point on a mesh's radio is refused");
+	refuses("access_point \"ap\" {\n\tdevice = \"wlan2\"\n\twifi { psk = \"@secret:ap\" }\n}\n"
+	    "mesh \"a\" {\n\tdevice = \"wlan2\"\n\tchannel = 1\n\twifi { open = true }\n}\n",
+	    "runs access point `ap`", "  whichever of the two is written first");
+}
+
 static void access_point_cases(void)
 {
 	ncfg_document_t *document;
@@ -3274,6 +3317,7 @@ int main(void)
 	dns_cases();
 	network_cases();
 	access_point_cases();
+	mesh_cases();
 	the_compiler_and_the_renderer_agree_about_bands();
 	device_cases();
 	kind_cases();

@@ -168,6 +168,11 @@ static int compare_access_point(const void *left, const void *right)
 	    ((const ncfg_access_point_t *)right)->id);
 }
 
+static int compare_mesh(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_mesh_t *)left)->id, ((const ncfg_mesh_t *)right)->id);
+}
+
 static int compare_linkset(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_linkset_t *)left)->name,
@@ -382,6 +387,8 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 	stable_sort(document->rules, document->rule_count, sizeof(*document->rules), compare_rule);
 	stable_sort(document->access_points, document->access_point_count,
 	    sizeof(*document->access_points), compare_access_point);
+	stable_sort(document->meshes, document->mesh_count, sizeof(*document->meshes),
+	    compare_mesh);
 	/*
 	 * The sets themselves sort by name; **their members deliberately do not.**
 	 * A bridge's or a bond's members are a set and get sorted into canonical

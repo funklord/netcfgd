@@ -12595,6 +12595,53 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.588 A mesh (802.11s): the block, and joining it
+
+**What a `mesh` is here**: an 802.11s mesh one radio joins, the third thing a
+radio can be after a station and an access point. Every node of a mesh names
+the same mesh ID (the block's label), the same channel and the same security,
+and peers with any other that does -- no controller, no master. It is the
+wireless backhaul of 10.587's list, item 3.
+
+**Decided from the aims, the shape:**
+
+- **Bound to a device, like `access_point`**, because a mesh is something one
+  radio does rather than a network any radio may try. The radio does nothing
+  else: a second mesh or an access point on it is refused, whichever block is
+  written first -- one radio in two modes would have the planner pick one and
+  the other plan nothing in silence.
+- **`channel` is required.** Mesh points do not search for each other; they
+  meet on the channel they were given, so a mesh with no channel may never
+  form.
+- **SAE or nothing.** 802.11s authenticates peers with SAE alone, so `psk` is
+  a SAE password, the document records `proto = "wpa3"` rather than the
+  station default it is not, and WPA2, OWE and EAP are refused by name.
+- **Its keys travel; its `device` does not**, as an access point's: kind
+  numbers `0x0007xxxx`, and the block's default scope is the estate's.
+
+**Built, step 1 (2026-10-29): the block compiles, renders back and plans a
+warning.** Grammar, model (`meshes`, appended after `firewall` and left out
+when empty, so earlier documents are unchanged), sorting, `ncfg profile save`,
+the secret walk, and the scope tables. `ncfg plan` says a mesh is accepted and
+not yet joined, which stands until step 2: **the radio's supplicant is not
+told about it**. Tests in `lower_test` (each refusal, both orders of the radio
+conflict), `render_test` (SAE and open round trips) and `scope_test`; the
+witness carries one.
+
+**Step 2, next: joining.** The radio's supplicant is given the mesh as its one
+network -- `mode=5`, the mesh ID as `ssid`, `frequency`, `key_mgmt=SAE` --
+instead of the document's station networks, and the network-set fingerprint
+both the apply and the observation compute has to say the same. Then a hull
+rig: netcfgd's mesh node peering with a bare `wpa_supplicant` one in another
+network namespace on hwsim, and a ping across.
+
+**Found on the way: the example gate could not see two of the language's ten
+blocks.** It read the block heads out of the Rust's lowering, which has eight;
+the C's has `firewall` (0294) and `mesh` too, and `firewall` had never been
+written in `netcfgd.conf.example`. The gate reads the C's dispatch now and the
+example documents both; the NAT section's "NAT in it and nothing else" was
+0294's to correct and had not been.
+
 ## 10.587 Fast roaming between access points, and the access point modes still missing
 
 **Where the access point stood** (2026-10-29, asked by the holder: "are all
@@ -12670,7 +12717,8 @@ met by this gate later.
    `SET_NEIGHBOR`. An access point cannot learn its neighbours; they would be
    declared in the configuration until fleet management can say them.
 3. **Mesh (802.11s)**: a `mesh` block joined through `wpa_supplicant`
-   (`mode=5`, SAE), as wireless backhaul. hwsim does mesh points.
+   (`mode=5`, SAE), as wireless backhaul -- the block is built (10.588) and
+   joining it is that entry's step 2.
 4. **Repeater.** Four-address (WDS) station mode, so a bridged repeater works
    where `plan/radio.c` warns today that it cannot; Multi-AP backhaul
    (`multi_ap`) beside it; a routed relay (station and access point on one

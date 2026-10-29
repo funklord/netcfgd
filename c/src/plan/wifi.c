@@ -608,9 +608,32 @@ static void plan_profiles(ncfg_builder_t *builder)
 	free(profiles);
 }
 
+/*
+ * A `mesh` compiles and is not yet joined (10.588).
+ *
+ * Said, because the alternative is a block that plans nothing and a radio that
+ * is not meshing with nothing on the screen saying why. The grammar and the
+ * model land before the radio's supplicant is taught a mesh network, so this
+ * stands until it is.
+ */
+static void warn_meshes(ncfg_builder_t *builder)
+{
+	size_t at;
+
+	for (at = 0; at < builder->desired->mesh_count; at++) {
+		const ncfg_mesh_t *mesh = &builder->desired->meshes[at];
+
+		ncfg_plan_warnf(builder->plan, mesh->device,
+		    "mesh `%s` on %s is accepted and not yet joined by this build: the radio's "
+		    "supplicant is not told about meshes yet, so nothing is planned for it",
+		    mesh->id, mesh->device);
+	}
+}
+
 void ncfg_plan_wifi(ncfg_builder_t *builder)
 {
 	warn_held(builder);
+	warn_meshes(builder);
 	plan_profiles(builder);
 }
 

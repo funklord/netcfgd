@@ -792,6 +792,31 @@
 #	}
 #}
 
+# A MESH (802.11s): radios that link to each other with no access point and
+# no cable -- the backhaul between two rooms. Every node is configured the same
+# way and peers with any other that is; there is no master.
+#
+#   - The radio is given to the mesh and does nothing else: no `network` is
+#     joined on it and no `access_point` may name it.
+#   - `channel` is required. Mesh nodes meet on the channel they are given
+#     rather than searching for each other.
+#   - Security is SAE (`psk`, used as the SAE password) or none. WPA2 does not
+#     exist in a mesh.
+#
+# **Not yet joined by this build**: the block compiles, `ncfg plan` says so,
+# and the radio's supplicant is not told about it yet.
+
+#mesh "backhaul" {
+#	device  = "wlan2"
+#	channel = 36
+#	wifi {
+#		psk = "@secret:mesh"
+#	}
+#}
+#interface wlan2 {
+#	config = "10.20.0.1/24"
+#}
+
 # THE ADDRESS IS NOT OPTIONAL, and netcfgd cannot supply what comes after it.
 #
 # hostapd broadcasts and stations associate; that is the whole of what an

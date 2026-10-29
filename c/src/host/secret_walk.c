@@ -265,6 +265,13 @@ static void references_of(references_t *refs, const ncfg_document_t *document)
 		(void)snprintf(what, sizeof(what), "access point %s", text(document->access_points[i].id));
 		note_security(refs, what, &document->access_points[i].security);
 	}
+	/* And meshes, whose SAE password is a secret like any other (10.588). */
+	for (i = 0; i < document->mesh_count; i++) {
+		char what[160];
+
+		(void)snprintf(what, sizeof(what), "mesh %s", text(document->meshes[i].id));
+		note_security(refs, what, &document->meshes[i].security);
+	}
 
 	for (i = 0; i < refs->count; i++) {
 		ncfg_host_strings_sort_unique(refs->at[i].users, &refs->at[i].user_count);

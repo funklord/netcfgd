@@ -383,6 +383,11 @@ static int collect_overrides(const ncfg_document_t *base, ncfg_overrides_t *over
 			return 0;
 		}
 	}
+	for (i = 0; i < base->mesh_count; i++) {
+		if (!ncfg_overrides_add(overrides, "mesh", base->meshes[i].id, err, err_size)) {
+			return 0;
+		}
+	}
 	for (i = 0; i < base->linkset_count; i++) {
 		if (!ncfg_overrides_add(overrides, "linkset", base->linksets[i].name, err,
 		    err_size)) {

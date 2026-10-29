@@ -1565,6 +1565,31 @@ typedef struct {
 } ncfg_access_point_t;
 
 /*
+ * An 802.11s mesh one radio joins (project.md 10.588).
+ *
+ * **Bound to a device, as an access point is**: a mesh is a thing one radio
+ * does, and that radio does nothing else -- it neither joins `network`s nor
+ * runs an access point while it meshes. Every node of a mesh names the same
+ * mesh ID (the label), the same channel and the same security, and peers with
+ * any other that does; there is no controller and no master.
+ *
+ * **The channel is required.** A station finds an access point by scanning;
+ * mesh points do not search for each other, they meet on the channel they
+ * were given, so a mesh with no channel is one that may never form.
+ *
+ * Security is SAE or none -- 802.11s authenticates peers with SAE alone, so a
+ * `psk` here is a SAE password and no WPA generation applies.
+ */
+typedef struct {
+	char         *id; /* the mesh ID, and the sorting key */
+	ncfg_ssid_t   mesh_id;
+	char         *device;
+	ncfg_security_t security;
+	ncfg_optint_t channel;
+	char         *band;
+} ncfg_mesh_t;
+
+/*
  * Which band an access point will actually be brought up in, as the document
  * spells it -- `"2.4"`, `"5"`, or NULL for one this build cannot render.
  *
@@ -2083,6 +2108,10 @@ typedef struct {
 	 * document has no `firewall` block, which is not the same as one whose
 	 * chains are empty. */
 	ncfg_firewall_t         *firewall;
+	/* After the firewall, for the same reason: a document with no `mesh` is
+	 * the document it was. */
+	ncfg_mesh_t             *meshes; /* sorted by id */
+	size_t                   mesh_count;
 } ncfg_document_t;
 
 /*

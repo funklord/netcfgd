@@ -15,7 +15,7 @@
 #include <string.h>
 
 static const char *const BLOCK_NAMES[NCFG_BLOCK_COUNT] = { "global", "device", "interface",
-	"network", "access_point", "bluetooth", "rule", "linkset", "firewall" };
+	"network", "access_point", "bluetooth", "rule", "linkset", "firewall", "mesh" };
 
 const char *ncfg_block_name(int block)
 {
@@ -83,7 +83,10 @@ static const ncfg_scope_t BLOCK_DEFAULT[NCFG_BLOCK_COUNT] = {
 	[NCFG_BLOCK_BLUETOOTH] = NCFG_SCOPE_HOST_PRIVATE,
 	[NCFG_BLOCK_RULE] = NCFG_SCOPE_GROUP,
 	[NCFG_BLOCK_LINKSET] = NCFG_SCOPE_HOST,
-	[NCFG_BLOCK_FIREWALL] = NCFG_SCOPE_HOST_PRIVATE
+	[NCFG_BLOCK_FIREWALL] = NCFG_SCOPE_HOST_PRIVATE,
+	/* The mesh is the estate's, as a network is: every node of it names the
+	 * same one. Which radio joins it is this host's, below. */
+	[NCFG_BLOCK_MESH] = NCFG_SCOPE_ESTATE
 };
 
 ncfg_scope_t ncfg_block_default_scope(ncfg_block_t block)
@@ -255,7 +258,10 @@ static const struct {
 	 * box offers it is not, and an estate holding this would tell every host
 	 * to use one radio name.
 	 */
-	{ NCFG_BLOCK_ACCESS_POINT, "device", NCFG_SCOPE_HOST_PRIVATE }
+	{ NCFG_BLOCK_ACCESS_POINT, "device", NCFG_SCOPE_HOST_PRIVATE },
+
+	/* A `mesh`'s `device`, for the access point's reason. */
+	{ NCFG_BLOCK_MESH, "device", NCFG_SCOPE_HOST_PRIVATE }
 };
 
 #define EXCEPTION_COUNT (sizeof(EXCEPTIONS) / sizeof(EXCEPTIONS[0]))
@@ -272,6 +278,7 @@ static const struct {
  *     0x0001xxxx  global        0x0004xxxx  access_point
  *     0x0002xxxx  interface     0x0005xxxx  rule
  *     0x0003xxxx  network       0x0006xxxx  linkset
+ *                               0x0007xxxx  mesh
  *
  * `device` and `bluetooth` have no range because they are host-private
  * entire: nothing in them travels, so nothing in them has a number.
@@ -392,6 +399,12 @@ static const struct {
 	 * access point of it has to agree, which is why both travel. */
 	{ NCFG_BLOCK_ACCESS_POINT, "fast_roaming", 0x0004000cu },
 	{ NCFG_BLOCK_ACCESS_POINT, "mobility_domain", 0x0004000du },
+
+	/* mesh -- what every node of it has to agree on to peer at all. */
+	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },
+	{ NCFG_BLOCK_MESH, "band", 0x00070002u },
+	{ NCFG_BLOCK_MESH, "wifi.open", 0x00070003u },
+	{ NCFG_BLOCK_MESH, "wifi.psk", 0x00070004u },
 
 	/*
 	 * rule -- a policy expression, group-wide entire.

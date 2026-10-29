@@ -496,6 +496,49 @@ ncfg_document_t *ncfg_lower(const ncfg_merged_t *merged, const ncfg_hook_sink_t 
 	return ncfg_lower_with_provenance(merged, hooks, NULL, diags, err, err_size);
 }
 
+
+/*
+ * A radio given to a mesh does nothing else (10.588).
+ *
+ * Asked as each `mesh` and `access_point` is lowered, against the blocks
+ * already in the document, so the diagnostic points at the block that made
+ * the conflict. A second mesh on one radio, or an access point beside one,
+ * would have a radio asked to be in two modes at once, and whichever the
+ * planner reached first would win while the other planned nothing.
+ */
+static void check_mesh_radio(ncfg_lower_ctx_t *ctx, ncfg_span_t span, const char *device,
+    const char *what, const char *id)
+{
+	const ncfg_document_t *document = ctx->document;
+	size_t                 at;
+
+	if (!device) {
+		return;
+	}
+	for (at = 0; at < document->mesh_count; at++) {
+		if (document->meshes[at].device && strcmp(document->meshes[at].device, device) == 0) {
+			ncfg_diag(ctx, span,
+			    "%s `%s` is on %s, which is given to mesh `%s`; a radio given to a mesh "
+			    "does nothing else -- use another radio", what, id, device,
+			    document->meshes[at].id);
+			return;
+		}
+	}
+	if (strcmp(what, "mesh") != 0) {
+		return;
+	}
+	for (at = 0; at < document->access_point_count; at++) {
+		if (document->access_points[at].device &&
+		    strcmp(document->access_points[at].device, device) == 0) {
+			ncfg_diag(ctx, span,
+			    "mesh `%s` is on %s, which runs access point `%s`; a radio given to a mesh "
+			    "does nothing else -- use another radio", id, device,
+			    document->access_points[at].id);
+			return;
+		}
+	}
+}
+
 ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
     const ncfg_hook_sink_t *hooks, ncfg_provenance_t *provenance, ncfg_lower_diags_t *diags,
     char *err, size_t err_size)
@@ -637,6 +680,8 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 			if (!ncfg_lower_access_point(&ctx, block, &access_point)) {
 				continue;
 			}
+			check_mesh_radio(&ctx, block->block->span, access_point.device, "access point",
+			    access_point.id);
 			ncfg_record(&ctx, block->source, block->block->span, "access_point.%s",
 			    access_point.id);
 			{
@@ -645,6 +690,22 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 
 				if (slot) {
 					*slot = access_point;
+				}
+			}
+		} else if (strcmp(head, "mesh") == 0) {
+			ncfg_mesh_t mesh;
+
+			if (!ncfg_lower_mesh(&ctx, block, &mesh)) {
+				continue;
+			}
+			check_mesh_radio(&ctx, block->block->span, mesh.device, "mesh", mesh.id);
+			ncfg_record(&ctx, block->source, block->block->span, "mesh.%s", mesh.id);
+			{
+				ncfg_mesh_t *slot = ncfg_push(&ctx, &ctx.document->meshes,
+				    &ctx.document->mesh_count, sizeof(*slot));
+
+				if (slot) {
+					*slot = mesh;
 				}
 			}
 		} else if (strcmp(head, "network") == 0) {
@@ -689,7 +750,7 @@ ncfg_document_t *ncfg_lower_with_provenance(const ncfg_merged_t *merged,
 		} else {
 			ncfg_diag(&ctx, block->block->span,
 			    "unknown top-level block `%s`: the top-level blocks are interface, network, "
-			    "device, rule, linkset, access_point, firewall and global", head);
+			    "device, rule, linkset, access_point, mesh, firewall and global", head);
 		}
 	}
 

@@ -410,6 +410,7 @@ int ncfg_lower_network(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
     ncfg_wifi_network_t *out);
 int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block,
     ncfg_access_point_t *out);
+int ncfg_lower_mesh(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block, ncfg_mesh_t *out);
 /*
  * The keys a `wifi` block can carry, before they become an `ncfg_security_t`.
  *

@@ -117,6 +117,10 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 void ncfg_render_access_point(const ncfg_access_point_t *point,
     const ncfg_overrides_t *overrides, ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 
+/* One `mesh` block, beside the access point's for the same reason. */
+void ncfg_render_mesh(const ncfg_mesh_t *mesh, const ncfg_overrides_t *overrides,
+    ncfg_buf_t *text, ncfg_unrenderable_t *missing);
+
 void ncfg_render_network(const ncfg_wifi_network_t *network, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing);
 /* Takes the document, because undoing the ingress shaper is a question about
