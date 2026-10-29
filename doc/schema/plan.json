@@ -838,6 +838,29 @@
     },
     {
       "id": 32,
+      "subject": "wds:wlan0",
+      "op": {
+        "op": "link.set_wds",
+        "name": "wlan0",
+        "on": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "link.set_wds",
+        "name": "wlan0",
+        "on": true
+      }
+    },
+    {
+      "id": 33,
       "subject": "token:eth0",
       "op": {
         "op": "link.set_ipv6_token",
@@ -860,61 +883,10 @@
       }
     },
     {
-      "id": 33,
-      "subject": "iprule:host/100",
-      "op": {
-        "op": "rule.add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
-      },
-      "reason": {
-        "interface": "eth0",
-        "field": "addressing[0]",
-        "desired": "192.168.1.10/24",
-        "observed": "<absent>"
-      },
-      "depends_on": [
-        0
-      ],
-      "inverse": {
-        "op": "rule.add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
-      }
-    },
-    {
       "id": 34,
       "subject": "iprule:host/100",
       "op": {
-        "op": "rule.del",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -942,7 +914,7 @@
         0
       ],
       "inverse": {
-        "op": "rule.del",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -963,13 +935,25 @@
     },
     {
       "id": 35,
-      "subject": "qdisc:eth0",
+      "subject": "iprule:host/100",
       "op": {
-        "op": "qdisc.set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "rule.del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       },
       "reason": {
         "interface": "eth0",
@@ -981,19 +965,34 @@
         0
       ],
       "inverse": {
-        "op": "qdisc.set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "rule.del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       }
     },
     {
       "id": 36,
       "subject": "qdisc:eth0",
       "op": {
-        "op": "qdisc.reset",
-        "iface": "eth0"
+        "op": "qdisc.set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       },
       "reason": {
         "interface": "eth0",
@@ -1005,17 +1004,19 @@
         0
       ],
       "inverse": {
-        "op": "qdisc.reset",
-        "iface": "eth0"
+        "op": "qdisc.set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       }
     },
     {
       "id": 37,
-      "subject": "ingress:eth0",
+      "subject": "qdisc:eth0",
       "op": {
-        "op": "ingress.redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "qdisc.reset",
+        "iface": "eth0"
       },
       "reason": {
         "interface": "eth0",
@@ -1027,15 +1028,37 @@
         0
       ],
       "inverse": {
-        "op": "ingress.redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "qdisc.reset",
+        "iface": "eth0"
       }
     },
     {
       "id": 38,
       "subject": "ingress:eth0",
       "op": {
+        "op": "ingress.redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "ingress.redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      }
+    },
+    {
+      "id": 39,
+      "subject": "ingress:eth0",
+      "op": {
         "op": "ingress.redirect.clear",
         "iface": "eth0"
       },
@@ -1054,7 +1077,7 @@
       }
     },
     {
-      "id": 39,
+      "id": 40,
       "subject": "forwarding:eth0",
       "op": {
         "op": "sysctl.set_forwarding",
@@ -1077,7 +1100,7 @@
       }
     },
     {
-      "id": 40,
+      "id": 41,
       "subject": "privacy:eth0",
       "op": {
         "op": "sysctl.set_privacy",
@@ -1100,7 +1123,7 @@
       }
     },
     {
-      "id": 41,
+      "id": 42,
       "subject": "accept_ra:eth0",
       "op": {
         "op": "sysctl.set_accept_ra",
@@ -1123,7 +1146,7 @@
       }
     },
     {
-      "id": 42,
+      "id": 43,
       "subject": "hostname:host",
       "op": {
         "op": "hostname.set",
@@ -1144,7 +1167,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 44,
       "subject": "nat:host",
       "op": {
         "op": "nat.replace",
@@ -1169,7 +1192,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 45,
       "subject": "hook:eth0/post_up",
       "op": {
         "op": "hook.run",
@@ -1196,29 +1219,10 @@
       }
     },
     {
-      "id": 45,
-      "op": {
-        "op": "commit.arm",
-        "window_seconds": 90
-      },
-      "reason": {
-        "interface": "eth0",
-        "field": "addressing[0]",
-        "desired": "192.168.1.10/24",
-        "observed": "<absent>"
-      },
-      "depends_on": [
-        0
-      ],
-      "inverse": {
-        "op": "commit.arm",
-        "window_seconds": 90
-      }
-    },
-    {
       "id": 46,
       "op": {
-        "op": "commit.confirm"
+        "op": "commit.arm",
+        "window_seconds": 90
       },
       "reason": {
         "interface": "eth0",
@@ -1230,11 +1234,30 @@
         0
       ],
       "inverse": {
-        "op": "commit.confirm"
+        "op": "commit.arm",
+        "window_seconds": 90
       }
     },
     {
       "id": 47,
+      "op": {
+        "op": "commit.confirm"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "commit.confirm"
+      }
+    },
+    {
+      "id": 48,
       "op": {
         "op": "commit.revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"

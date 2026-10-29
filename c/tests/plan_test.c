@@ -4,7 +4,7 @@
  *
  * WHAT THE WITNESS COMPARISON PROVES, AND HOW
  *   `doc/schema/plan.json` is one plan carrying **every op there is** -- one
- *   sample each, forty-eight of them -- with an inverse on every action, one
+ *   sample each, forty-nine of them -- with an inverse on every action, one
  *   warning, one refusal and one stranded credential. It is built here by hand
  *   exactly as `crates/netcfgd-plan/tests/frozen.rs` builds it, written, and
  *   compared **byte for byte against the witness with its whitespace
@@ -367,6 +367,9 @@ static size_t witness_ops(ncfg_op_t *ops, size_t max, const ncfg_route_t *route,
 	OP(NCFG_OP_LINK_SET_OFFLOADS)->u.set_offloads.name = "eth0";
 	ops[at - 1u].u.set_offloads.features = features;
 	ops[at - 1u].u.set_offloads.feature_count = 1u;
+	/* Four-address mode on a station radio, for a repeater (10.587). */
+	OP(NCFG_OP_LINK_SET_WDS)->u.set_wds.name = "wlan0";
+	ops[at - 1u].u.set_wds.on = 1;
 	OP(NCFG_OP_LINK_SET_IPV6_TOKEN)->u.set_ipv6_token.name = "eth0";
 	ops[at - 1u].u.set_ipv6_token.token = "::5";
 	OP(NCFG_OP_RULE_ADD)->u.rule.rule = rule;
@@ -703,7 +706,7 @@ static void the_frozen_witness(void)
 
 	plan = build_witness(ops, &count);
 	check(plan != NULL && !ncfg_plan_failed(plan), "the witness plan is built");
-	check(count == 48u, "and carries every op there is: forty-eight");
+	check(count == 49u, "and carries every op there is: forty-nine");
 	if (!plan) {
 		free(raw);
 		return;

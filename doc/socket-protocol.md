@@ -532,6 +532,7 @@ are using and one that will cut them off.
 | `link.set_offloads` |  |  |
 | `link.set_tunnel` | yes |  |
 | `link.set_vxlan` | yes |  |
+| `link.set_wds` |  |  |
 | `link.unset_master` | yes |  |
 | `link.up` |  |  |
 | `nat.replace` |  |  |
