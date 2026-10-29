@@ -405,6 +405,11 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 		out->u.access_control.iface = ncfg_plan_intern(plan, in->u.access_control.iface);
 		out->u.access_control.station = ncfg_plan_intern(plan, in->u.access_control.station);
 		return;
+	case NCFG_OP_STATION_STEER:
+		out->u.steer.iface = ncfg_plan_intern(plan, in->u.steer.iface);
+		out->u.steer.station = ncfg_plan_intern(plan, in->u.steer.station);
+		out->u.steer.target = ncfg_plan_intern(plan, in->u.steer.target);
+		return;
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
 		out->u.neighbour.iface = ncfg_plan_intern(plan, in->u.neighbour.iface);

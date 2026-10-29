@@ -49,6 +49,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /*
  * The access point as it was started, out of the generated configuration.
@@ -260,8 +261,51 @@ static int neighbours_of(ncfg_supplicant_client_t *client, ncfg_observed_neighbo
 	return 1;
 }
 
-/* The addresses alone, for the observation. */
-static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count)
+static void free_steerable(ncfg_observed_steerable_t *list, size_t count)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		free(list[at].address);
+	}
+	free(list);
+}
+
+/*
+ * The ones that take BSS transition requests, with the two numbers steering
+ * decides on (10.595 item 2). 0 only for memory.
+ */
+static int steerable_of(const ncfg_hostapd_station_t *found, size_t found_count,
+    ncfg_observed_steerable_t **out, size_t *count)
+{
+	size_t at;
+
+	*out = NULL;
+	*count = 0u;
+	for (at = 0; at < found_count; at++) {
+		ncfg_observed_steerable_t *grown;
+
+		if (!found[at].bss_transition) {
+			continue;
+		}
+		grown = realloc(*out, (*count + 1u) * sizeof(**out));
+		if (!grown) {
+			return 0;
+		}
+		*out = grown;
+		(*out)[*count].address = observe_dup(found[at].address);
+		(*out)[*count].signal = found[at].signal_dbm;
+		(*out)[*count].connected = found[at].connected_seconds;
+		if (!(*out)[(*count)++].address) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/* The addresses alone, for the observation, and the steerable ones beside. */
+static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count,
+    ncfg_observed_steerable_t **steerable, size_t *steerable_count)
 {
 	ncfg_hostapd_station_t *found = NULL;
 	size_t                  found_count = 0u;
@@ -269,7 +313,16 @@ static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *
 
 	*out = NULL;
 	*count = 0u;
+	*steerable = NULL;
+	*steerable_count = 0u;
 	if (!ncfg_observe_hostapd_stations(client, &found, &found_count)) {
+		return 0;
+	}
+	if (!steerable_of(found, found_count, steerable, steerable_count)) {
+		free_steerable(*steerable, *steerable_count);
+		*steerable = NULL;
+		*steerable_count = 0u;
+		free(found);
 		return 0;
 	}
 	if (found_count) {
@@ -320,6 +373,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		size_t                          associated_count = 0;
 		ncfg_observed_neighbour_t      *neighbours = NULL;
 		size_t                          neighbour_count = 0;
+		ncfg_observed_steerable_t      *steerable = NULL;
+		size_t                          steerable_count = 0;
 
 		if (backend->kind != NCFG_BACKEND_ACCESS_POINT || !backend->running ||
 		    !backend->interface) {
@@ -361,7 +416,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		 * direction -- nothing is removed on the strength of it, because a
 		 * held entry is kept by the planner whether or not it is associated.
 		 */
-		if (!associated_of(client, &associated, &associated_count)) {
+		if (!associated_of(client, &associated, &associated_count, &steerable,
+		        &steerable_count)) {
 			associated = NULL;
 			associated_count = 0;
 		}
@@ -373,6 +429,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_hostapd_stations_free(accepted, accepted_count);
 			ncfg_hostapd_stations_free(associated, associated_count);
 			free_neighbours(neighbours, neighbour_count);
+			free_steerable(steerable, steerable_count);
 			ncfg_error_set(err, err_size, "out of memory recording %s's neighbours",
 			    backend->interface);
 			return 0;
@@ -386,6 +443,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_hostapd_stations_free(accepted, accepted_count);
 			ncfg_hostapd_stations_free(associated, associated_count);
 			free_neighbours(neighbours, neighbour_count);
+			free_steerable(steerable, steerable_count);
 			ncfg_error_set(err, err_size,
 			    "out of memory recording what %s is admitting", backend->interface);
 			return 0;
@@ -399,6 +457,15 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		lists->associated_count = associated_count;
 		lists->neighbours = neighbours;
 		lists->neighbour_count = neighbour_count;
+		lists->steerable = steerable;
+		lists->steerable_count = steerable_count;
+		if (!ncfg_hostapd_steered_read(run_dir, backend->interface, (int64_t)time(NULL),
+		        &lists->steered, &lists->steered_count)) {
+			ncfg_observed_access_control_free(lists);
+			ncfg_error_set(err, err_size, "out of memory reading whom %s has steered",
+			    backend->interface);
+			return 0;
+		}
 		ncfg_observed_access_control_free(backend->access_control);
 		backend->access_control = lists;
 		ncfg_observed_access_point_free(backend->started_with);

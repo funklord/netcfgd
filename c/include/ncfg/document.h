@@ -1688,7 +1688,27 @@ typedef struct {
 	 */
 	struct ncfg_neighbour *neighbours;
 	size_t                 neighbour_count;
+	/*
+	 * Moving stations to a better access point (project.md 10.595 item 2),
+	 * by BSS transition request, which the daemon sends. NULL is off, which
+	 * is the default: moving people's devices is a choice to make.
+	 */
+	struct ncfg_steering  *steering;
 } ncfg_access_point_t;
+
+/*
+ * `signal`: a station heard more weakly than this many dBm is asked, without
+ * being disconnected, to move to a neighbour of its own choosing. `band`: a
+ * station on 2.4 GHz heard at `NCFG_STEER_BAND_SIGNAL` or better is moved to
+ * this machine's 5 GHz access point of the network, with disassociation
+ * imminent -- the one case a station ignores an advisory request for.
+ */
+typedef struct ncfg_steering {
+	ncfg_optint_t signal;
+	int           band;
+} ncfg_steering_t;
+
+#define NCFG_STEER_BAND_SIGNAL (-60)
 
 /*
  * The operating class a neighbour report names for a channel (IEEE 802.11

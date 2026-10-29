@@ -986,6 +986,7 @@ ncfg_plan_t *ncfg_plan_build(const ncfg_document_t *desired, const ncfg_observed
 	 * nothing is addressed over it. */
 	ncfg_plan_access_control(&builder);
 	ncfg_plan_neighbours(&builder);
+	ncfg_plan_steering(&builder);
 	/*
 	 * Last of the reports, and after every pass that could have taken a key
 	 * away: `ncfg_plan_clearing` is what decides whether a device is being

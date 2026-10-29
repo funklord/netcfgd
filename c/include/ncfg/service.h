@@ -480,6 +480,18 @@ const char *ncfg_service_acl_command(int policy);
  * ssid=<hex>`, measured against hostapd 2.10. Read first, as the station
  * lists are, so a converged list is left alone rather than sent a duplicate.
  */
+/*
+ * Ask one station to move (10.595 item 2): `BSS_TM_REQ <station>
+ * neighbor=<bssid>,<info>,<class>,<channel>,<phy> ... pref=1 abridged=1`, with
+ * `disassoc_imminent=1 disassoc_timer=100` when `imminent`, each candidate
+ * taken from the access point's own neighbour list -- `target` alone, or all
+ * but its own entry. Measured against hostapd 2.10. The steer is then noted
+ * in the record `ncfg_hostapd_steered_read` reads, so it is not repeated
+ * within the hour.
+ */
+int ncfg_service_steer(const char *run_dir, const char *iface, const char *station,
+    const char *target, int imminent, int patience_ms, char *err, size_t err_size);
+
 int ncfg_service_neighbour(const char *run_dir, const char *iface, const char *bssid,
     const char *ssid, const char *nr, int adding, int patience_ms, char *err, size_t err_size);
 

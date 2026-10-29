@@ -12638,11 +12638,31 @@ WPA2 station in a namespace:
    hostapd holds the list in memory, so it is observed (`SHOW_NEIGHBOR`, on
    the connection the station lists already use) and converged by plan ops,
    as the station lists are: visible in `ncfg plan`, no restart.
-2. **Steering, opt-in per access point**: a minimum-signal kick and band
-   steering, both `BSS_TM_REQ` with disassociation imminent towards a
-   neighbour, sent by the daemon's loop to stations whose `ext_capab` says
-   they can be steered. Opt-in, because moving people's devices is a choice
-   to make, not a default.
+2. **Steering, opt-in per access point**, by `BSS_TM_REQ` to stations whose
+   `ext_capab` says they can be steered. Opt-in, because moving people's
+   devices is a choice to make, not a default. **Rewritten before it was
+   built**: the first version had both cases send disassociation imminent,
+   and the measurement above says what that costs. wpa_supplicant ignores
+   an advisory request while its own signal is good (the station stayed),
+   and a request with disassociation imminent disassociates it whether or
+   not it moved -- so a weak station with nowhere better to go would have
+   been cut off every round. So the two cases differ:
+   - **Weak signal (`signal = -75`): advisory**, naming every neighbour.
+     The station is weak, which is exactly when wpa_supplicant weighs the
+     candidates, and it decides; nobody is disconnected. Not disruptive.
+   - **Band (`band = true`): disassociation imminent**, towards this
+     machine's own 5 GHz access point of the network, for a station on
+     2.4 GHz heard at -60 dBm or better -- the one case where an advisory
+     request is ignored by design and where the target is known to be
+     near, being on the same box. Disruptive, so the control-path guard
+     refuses it on an operator's interface. **Once per station per hour**,
+     recorded in `/run` as it is sent, so a station whose 5 GHz is poor and
+     that comes back is not moved and cut again every round.
+   Both want a station connected a minute or more, so one that has just
+   arrived -- including from a steer -- is left to settle. Steering needs
+   `neighbour_reports`, which is where the targets come from, and that now
+   also writes `bss_transition=1`, so steering itself is the daemon's
+   behaviour and turning it on or off restarts nothing.
 
 ### Item 1 built
 
@@ -12688,6 +12708,46 @@ WPA2 station in a namespace:
   `/run/netcfgd` is shorter still, so it is not a fault users meet; it does
   mean `make check` under a long `TMPDIR` is red for a reason that is not
   the change being checked. Open, low.
+
+### Item 2 built
+
+- **The language**: `steering { signal = -75  band = true }` in an
+  access point, refused without `neighbour_reports`, empty, twice, or with
+  a signal that is not one. `neighbour_reports` now also writes
+  `bss_transition=1`, so steering is wholly the daemon's and its block
+  restarts nothing.
+- **Observed**: each associated station whose `ext_capab` has bit 19, with
+  its signal and connected time (`steerable`), and the steers of the last
+  hour (`steered`), from `<run>/hostapd/<radio>.steered` -- one line per
+  station, its last steer, rewritten with nothing older than the hour, so
+  the file is bounded by the window.
+- **`station.steer`**: `BSS_TM_REQ` with every neighbour but the access
+  point itself as a candidate, or the one target, `pref=1 abridged=1`, and
+  `disassoc_imminent=1 disassoc_timer=100` for a band steer. Disruptive
+  only when imminent, so the guard refuses a band steer on an operator's
+  interface and never an advisory one. No inverse, and the plan's
+  "cannot be undone" warning says so.
+- **Planned** for stations connected 60 s or more: band first, for a
+  station on 2.4 GHz at -60 dBm or better when this machine's 5 GHz access
+  point of the network is already on this one's neighbour list; otherwise
+  advisory below `signal`, when there is a neighbour at all. Held for the
+  hour after an imminent steer and five minutes after an advisory one. A
+  warning where `band = true` and the document runs no 5 GHz access point of
+  the network.
+- **The daemon sends steers under `on_drift = "report"`**, a third exception
+  beside `preference` and a pending SIM, in `ncfg_reconcile_restrict`: the
+  block is the configuration asking for continuous behaviour, it undoes
+  nothing anyone did, and otherwise steering would need a second setting
+  nobody would think of. The neighbour lists are still ordinary drift.
+- **Live, `make hull-steer`**: 2.4 GHz channel 1 and 5 GHz channel 36 on
+  one machine, a station joined on 2.4. A plan in its first seconds steered
+  nobody (the control); after 62 s the plan carried one imminent steer to
+  the 5 GHz BSSID, the apply moved the station to 5180 MHz, the record held
+  it, and the plan after steered nobody.
+- **Not shown live: the advisory case.** hwsim hears every station at
+  -20 dBm, so no station is weak, and the planner's half is shown by
+  `plan_access_point_test` alone. A real weak station, or hwsim's signal
+  attenuation if this image's kernel exposes it, is the reading still owed.
 
 ## 10.594 How the hosts reach each other, and what fuzznet and WireGuard are for
 

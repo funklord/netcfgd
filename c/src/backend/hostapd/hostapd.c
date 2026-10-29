@@ -12,6 +12,7 @@
 
 #include "../backend_internal.h"
 #include "ncfg/base.h"
+#include "ncfg/buf.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -225,6 +226,110 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 		(void)snprintf(path_out, path_size, "%s", path);
 	}
 	return 1;
+}
+
+int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,
+    char *err, size_t err_size)
+{
+	return ncfg_backend_path(out, out_size, run, "hostapd", device, ".steered", err, err_size);
+}
+
+/* A record line, or 0 for one that is not that shape or is out of the window. */
+static int steered_line(const char *line, int64_t now, char *station, size_t station_size,
+    int64_t *at, int *imminent)
+{
+	char      address[32];
+	long long when;
+	int       forced;
+	char      why[8];
+
+	if (sscanf(line, "%31s %lld %d", address, &when, &forced) != 3 ||
+	    !ncfg_station_address_normalize(address, station, station_size, why, sizeof(why)) ||
+	    when > now || now - when >= NCFG_STEER_RECORD_SECONDS) {
+		return 0;
+	}
+	*at = when;
+	*imminent = forced != 0;
+	return 1;
+}
+
+int ncfg_hostapd_steered_read(const char *run, const char *device, int64_t now,
+    ncfg_observed_steered_t **out, size_t *count)
+{
+	char        path[NCFG_HOSTAPD_PATH_MAX];
+	char       *text;
+	const char *line;
+
+	*out = NULL;
+	*count = 0;
+	if (!ncfg_hostapd_steered_path(run, device, path, sizeof(path), NULL, 0)) {
+		return 1;
+	}
+	text = ncfg_backend_read_file(path, NULL, ACL_CEILING);
+	if (!text) {
+		return 1;
+	}
+	for (line = text; line && *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		char                     station[NCFG_STATION_ADDRESS_SIZE];
+		int64_t                  at;
+		int                      imminent;
+		ncfg_observed_steered_t *grown;
+
+		if (!steered_line(line, now, station, sizeof(station), &at, &imminent)) {
+			continue;
+		}
+		grown = realloc(*out, (*count + 1u) * sizeof(**out));
+		if (!grown) {
+			free(text);
+			return 0;
+		}
+		*out = grown;
+		(*out)[*count].station = strdup(station);
+		(*out)[*count].ago = now - at;
+		(*out)[*count].imminent = imminent;
+		if (!(*out)[(*count)++].station) {
+			free(text);
+			return 0;
+		}
+	}
+	free(text);
+	return 1;
+}
+
+int ncfg_hostapd_steered_note(const char *run, const char *device, const char *station,
+    int imminent, int64_t now, char *err, size_t err_size)
+{
+	char        path[NCFG_HOSTAPD_PATH_MAX];
+	char       *text;
+	const char *line;
+	ncfg_buf_t  kept;
+	int         ok;
+
+	if (!ncfg_hostapd_steered_path(run, device, path, sizeof(path), err, err_size)) {
+		return 0;
+	}
+	ncfg_buf_init(&kept, 0);
+	text = ncfg_backend_read_file(path, NULL, ACL_CEILING);
+	for (line = text; line && *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		char    address[NCFG_STATION_ADDRESS_SIZE];
+		int64_t at;
+		int     forced;
+
+		if (steered_line(line, now, address, sizeof(address), &at, &forced) &&
+		    strcmp(address, station) != 0) {
+			ncfg_buf_addf(&kept, "%s %lld %d\n", address, (long long)at, forced);
+		}
+	}
+	free(text);
+	ncfg_buf_addf(&kept, "%s %lld %d\n", station, (long long)now, imminent ? 1 : 0);
+	if (ncfg_buf_failed(&kept)) {
+		ncfg_buf_free(&kept);
+		ncfg_error_set(err, err_size, "out of memory recording a steer on %s", device);
+		return 0;
+	}
+	ok = ncfg_backend_write_file(path, ncfg_buf_text(&kept), kept.length, 0644, err, err_size);
+	ncfg_buf_free(&kept);
+	return ok;
 }
 
 void ncfg_hostapd_recorded_policy(const char *run, const char *device, ncfg_observed_policy_t *out)

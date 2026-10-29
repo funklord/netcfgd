@@ -2120,6 +2120,14 @@ static const ncfg_field_t neighbour_fields[] = {
 };
 static const ncfg_type_t neighbour_type = TYPE("neighbour", neighbour_fields);
 
+static const ncfg_field_t steering_fields[] = {
+	{ .name = "signal", .kind = NCFG_F_OPT_INT, R_I32,
+	    .offset = offsetof(ncfg_steering_t, signal) },
+	{ .name = "band", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_steering_t, band) }
+};
+static const ncfg_type_t steering_type = TYPE("steering", steering_fields);
+
 static const ncfg_field_t access_point_fields[] = {
 	{ .name = "id", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_access_point_t, id) },
@@ -2155,7 +2163,10 @@ static const ncfg_field_t access_point_fields[] = {
 	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &neighbour_type, .element_size = sizeof(ncfg_neighbour_t),
 	    .offset = offsetof(ncfg_access_point_t, neighbours),
-	    .count_offset = offsetof(ncfg_access_point_t, neighbour_count) }
+	    .count_offset = offsetof(ncfg_access_point_t, neighbour_count) },
+	{ .name = "steering", .kind = NCFG_F_OPT_STRUCT, .type = &steering_type,
+	    .element_size = sizeof(ncfg_steering_t),
+	    .offset = offsetof(ncfg_access_point_t, steering) }
 };
 static const ncfg_type_t access_point_type = TYPE("access point", access_point_fields);
 

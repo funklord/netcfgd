@@ -635,6 +635,33 @@
     },
     {
       "id": 25,
+      "subject": "station:wlan0/02:00:00:00:00:cc",
+      "op": {
+        "op": "station.steer",
+        "iface": "wlan0",
+        "station": "02:00:00:00:00:cc",
+        "target": "02:00:00:00:02:00",
+        "imminent": true
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "station.steer",
+        "iface": "wlan0",
+        "station": "02:00:00:00:00:cc",
+        "target": "02:00:00:00:02:00",
+        "imminent": true
+      }
+    },
+    {
+      "id": 26,
       "subject": "bond:bond0",
       "op": {
         "op": "link.set_bond",
@@ -657,7 +684,7 @@
       }
     },
     {
-      "id": 26,
+      "id": 27,
       "subject": "bridge:br0",
       "op": {
         "op": "link.set_bridge",
@@ -678,7 +705,7 @@
       }
     },
     {
-      "id": 27,
+      "id": 28,
       "subject": "macvlan:mv0",
       "op": {
         "op": "link.set_macvlan",
@@ -699,7 +726,7 @@
       }
     },
     {
-      "id": 28,
+      "id": 29,
       "subject": "tunnel:tun-office",
       "op": {
         "op": "link.set_tunnel",
@@ -720,7 +747,7 @@
       }
     },
     {
-      "id": 29,
+      "id": 30,
       "subject": "vxlan:vx0",
       "op": {
         "op": "link.set_vxlan",
@@ -741,49 +768,14 @@
       }
     },
     {
-      "id": 30,
-      "subject": "wireguard:wg0",
-      "op": {
-        "op": "wg.set_device",
-        "iface": "wg0",
-        "private_key_ref": "@secret:wg0",
-        "listen_port": 51820,
-        "fwmark": 1
-      },
-      "reason": {
-        "interface": "eth0",
-        "field": "addressing[0]",
-        "desired": "192.168.1.10/24",
-        "observed": "<absent>"
-      },
-      "depends_on": [
-        0
-      ],
-      "inverse": {
-        "op": "wg.set_device",
-        "iface": "wg0",
-        "private_key_ref": "@secret:wg0",
-        "listen_port": 51820,
-        "fwmark": 1
-      }
-    },
-    {
       "id": 31,
       "subject": "wireguard:wg0",
       "op": {
-        "op": "wg.set_peers",
+        "op": "wg.set_device",
         "iface": "wg0",
-        "peers": [
-          {
-            "name": "office",
-            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-            "endpoint": "vpn.example:51820",
-            "allowed_ips": [
-              "10.0.0.0/24"
-            ],
-            "keepalive": 25
-          }
-        ]
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
       },
       "reason": {
         "interface": "eth0",
@@ -795,23 +787,58 @@
         0
       ],
       "inverse": {
-        "op": "wg.set_peers",
+        "op": "wg.set_device",
         "iface": "wg0",
-        "peers": [
-          {
-            "name": "office",
-            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-            "endpoint": "vpn.example:51820",
-            "allowed_ips": [
-              "10.0.0.0/24"
-            ],
-            "keepalive": 25
-          }
-        ]
+        "private_key_ref": "@secret:wg0",
+        "listen_port": 51820,
+        "fwmark": 1
       }
     },
     {
       "id": 32,
+      "subject": "wireguard:wg0",
+      "op": {
+        "op": "wg.set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "wg.set_peers",
+        "iface": "wg0",
+        "peers": [
+          {
+            "name": "office",
+            "public_key": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+            "endpoint": "vpn.example:51820",
+            "allowed_ips": [
+              "10.0.0.0/24"
+            ],
+            "keepalive": 25
+          }
+        ]
+      }
+    },
+    {
+      "id": 33,
       "subject": "dns:host",
       "op": {
         "op": "dns.apply",
@@ -858,7 +885,7 @@
       }
     },
     {
-      "id": 33,
+      "id": 34,
       "subject": "offloads:eth0",
       "op": {
         "op": "link.set_offloads",
@@ -891,7 +918,7 @@
       }
     },
     {
-      "id": 34,
+      "id": 35,
       "subject": "wds:wlan0",
       "op": {
         "op": "link.set_wds",
@@ -914,7 +941,7 @@
       }
     },
     {
-      "id": 35,
+      "id": 36,
       "subject": "token:eth0",
       "op": {
         "op": "link.set_ipv6_token",
@@ -937,61 +964,10 @@
       }
     },
     {
-      "id": 36,
-      "subject": "iprule:host/100",
-      "op": {
-        "op": "rule.add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
-      },
-      "reason": {
-        "interface": "eth0",
-        "field": "addressing[0]",
-        "desired": "192.168.1.10/24",
-        "observed": "<absent>"
-      },
-      "depends_on": [
-        0
-      ],
-      "inverse": {
-        "op": "rule.add",
-        "rule": {
-          "id": "from-lan",
-          "priority": 100,
-          "family": "inet",
-          "from": "192.168.0.0/24",
-          "to": "10.0.0.0/8",
-          "iif": "eth0",
-          "oif": "eth1",
-          "fwmark": 3,
-          "fwmask": 65535,
-          "table": 200,
-          "action": "lookup",
-          "suppress_prefixlength": 0,
-          "l3mdev": true,
-          "invert": true
-        }
-      }
-    },
-    {
       "id": 37,
       "subject": "iprule:host/100",
       "op": {
-        "op": "rule.del",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -1019,7 +995,7 @@
         0
       ],
       "inverse": {
-        "op": "rule.del",
+        "op": "rule.add",
         "rule": {
           "id": "from-lan",
           "priority": 100,
@@ -1040,13 +1016,25 @@
     },
     {
       "id": 38,
-      "subject": "qdisc:eth0",
+      "subject": "iprule:host/100",
       "op": {
-        "op": "qdisc.set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "rule.del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       },
       "reason": {
         "interface": "eth0",
@@ -1058,19 +1046,34 @@
         0
       ],
       "inverse": {
-        "op": "qdisc.set",
-        "iface": "eth0",
-        "kind": "cake",
-        "bandwidth_bits": 20000000,
-        "ingress": true
+        "op": "rule.del",
+        "rule": {
+          "id": "from-lan",
+          "priority": 100,
+          "family": "inet",
+          "from": "192.168.0.0/24",
+          "to": "10.0.0.0/8",
+          "iif": "eth0",
+          "oif": "eth1",
+          "fwmark": 3,
+          "fwmask": 65535,
+          "table": 200,
+          "action": "lookup",
+          "suppress_prefixlength": 0,
+          "l3mdev": true,
+          "invert": true
+        }
       }
     },
     {
       "id": 39,
       "subject": "qdisc:eth0",
       "op": {
-        "op": "qdisc.reset",
-        "iface": "eth0"
+        "op": "qdisc.set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       },
       "reason": {
         "interface": "eth0",
@@ -1082,17 +1085,19 @@
         0
       ],
       "inverse": {
-        "op": "qdisc.reset",
-        "iface": "eth0"
+        "op": "qdisc.set",
+        "iface": "eth0",
+        "kind": "cake",
+        "bandwidth_bits": 20000000,
+        "ingress": true
       }
     },
     {
       "id": 40,
-      "subject": "ingress:eth0",
+      "subject": "qdisc:eth0",
       "op": {
-        "op": "ingress.redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "qdisc.reset",
+        "iface": "eth0"
       },
       "reason": {
         "interface": "eth0",
@@ -1104,15 +1109,37 @@
         0
       ],
       "inverse": {
-        "op": "ingress.redirect",
-        "iface": "eth0",
-        "target": "ifb-eth0"
+        "op": "qdisc.reset",
+        "iface": "eth0"
       }
     },
     {
       "id": 41,
       "subject": "ingress:eth0",
       "op": {
+        "op": "ingress.redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "ingress.redirect",
+        "iface": "eth0",
+        "target": "ifb-eth0"
+      }
+    },
+    {
+      "id": 42,
+      "subject": "ingress:eth0",
+      "op": {
         "op": "ingress.redirect.clear",
         "iface": "eth0"
       },
@@ -1131,7 +1158,7 @@
       }
     },
     {
-      "id": 42,
+      "id": 43,
       "subject": "forwarding:eth0",
       "op": {
         "op": "sysctl.set_forwarding",
@@ -1154,7 +1181,7 @@
       }
     },
     {
-      "id": 43,
+      "id": 44,
       "subject": "privacy:eth0",
       "op": {
         "op": "sysctl.set_privacy",
@@ -1177,7 +1204,7 @@
       }
     },
     {
-      "id": 44,
+      "id": 45,
       "subject": "accept_ra:eth0",
       "op": {
         "op": "sysctl.set_accept_ra",
@@ -1200,7 +1227,7 @@
       }
     },
     {
-      "id": 45,
+      "id": 46,
       "subject": "hostname:host",
       "op": {
         "op": "hostname.set",
@@ -1221,7 +1248,7 @@
       }
     },
     {
-      "id": 46,
+      "id": 47,
       "subject": "nftables:host",
       "op": {
         "op": "nftables.replace",
@@ -1246,7 +1273,7 @@
       }
     },
     {
-      "id": 47,
+      "id": 48,
       "subject": "hook:eth0/post_up",
       "op": {
         "op": "hook.run",
@@ -1273,29 +1300,10 @@
       }
     },
     {
-      "id": 48,
-      "op": {
-        "op": "commit.arm",
-        "window_seconds": 90
-      },
-      "reason": {
-        "interface": "eth0",
-        "field": "addressing[0]",
-        "desired": "192.168.1.10/24",
-        "observed": "<absent>"
-      },
-      "depends_on": [
-        0
-      ],
-      "inverse": {
-        "op": "commit.arm",
-        "window_seconds": 90
-      }
-    },
-    {
       "id": 49,
       "op": {
-        "op": "commit.confirm"
+        "op": "commit.arm",
+        "window_seconds": 90
       },
       "reason": {
         "interface": "eth0",
@@ -1307,11 +1315,30 @@
         0
       ],
       "inverse": {
-        "op": "commit.confirm"
+        "op": "commit.arm",
+        "window_seconds": 90
       }
     },
     {
       "id": 50,
+      "op": {
+        "op": "commit.confirm"
+      },
+      "reason": {
+        "interface": "eth0",
+        "field": "addressing[0]",
+        "desired": "192.168.1.10/24",
+        "observed": "<absent>"
+      },
+      "depends_on": [
+        0
+      ],
+      "inverse": {
+        "op": "commit.confirm"
+      }
+    },
+    {
+      "id": 51,
       "op": {
         "op": "commit.revert",
         "to_document_hash": "0000000000000000000000000000000000000000000000000000000000000000"

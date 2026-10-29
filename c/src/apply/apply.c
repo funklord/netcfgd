@@ -312,6 +312,7 @@ int ncfg_apply_supported(const ncfg_op_t *op, char *err, size_t err_size)
 	case NCFG_OP_ACCESS_CONTROL_DEL:
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
+	case NCFG_OP_STATION_STEER:
 	case NCFG_OP_DNS_APPLY:
 	case NCFG_OP_SYSCTL_SET_FORWARDING:
 	case NCFG_OP_SYSCTL_SET_PRIVACY:

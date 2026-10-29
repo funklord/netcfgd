@@ -544,6 +544,7 @@ are using and one that will cut them off.
 | `route.del` | yes |  |
 | `rule.add` |  |  |
 | `rule.del` | yes |  |
+| `station.steer` |  |  |
 | `sysctl.set_accept_ra` |  |  |
 | `sysctl.set_forwarding` | yes |  |
 | `sysctl.set_privacy` |  |  |
@@ -573,6 +574,15 @@ driver's transmit path on some hardware and drops what is queued, which is a
 packet or two rather than a lost session — and a guard that blocked it would
 block the change most often made to fix a NIC that is already corrupting
 traffic.
+
+**Three answer for their first case, and the other case is the opposite.**
+A row is the op with nothing filled in. `access_control.add` is a station
+added to a deny list, which disconnects it; added to an allow list it cuts
+nothing, and `access_control.del` is the mirror. `station.steer` is an
+advisory transition request, which leaves the station where it chooses to
+be; with `imminent` set, a band steer, it is disassociated if it does not go,
+and the guard refuses it on a guarded interface as it does any other
+disruptive action.
 
 **The taxonomy is whole even where this build emits only part of it.**
 `ncfg/plan.h` says so in as many words: it is the vocabulary the socket

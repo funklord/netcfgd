@@ -251,6 +251,12 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		    ncfg_plan_acl_policy_word(op->u.access_control.list));
 		member_text(writer, "station", op->u.access_control.station);
 		break;
+	case NCFG_OP_STATION_STEER:
+		member_text(writer, "iface", op->u.steer.iface);
+		member_text(writer, "station", op->u.steer.station);
+		member_text(writer, "target", op->u.steer.target);
+		ncfg_json_write_member_bool(writer, "imminent", op->u.steer.imminent);
+		break;
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
 		member_text(writer, "iface", op->u.neighbour.iface);

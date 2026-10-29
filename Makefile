@@ -2530,7 +2530,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
-      hull-roam-sae
+      hull-roam-sae hull-steer
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2762,6 +2762,24 @@ hull-roam:
 	sed 's/^/roam: /' tests/hull/roam/verdict/roam; \
 	grep -q '^VERDICT ok' tests/hull/roam/verdict/roam
 
+# Band steering (10.595 item 2): one vm, three hwsim radios, netcfgd running
+# the network on 2.4 and 5 GHz with `steering { band = true }` on the first,
+# and a station joined on 2.4 GHz that must end up on 5 after a minute's
+# settling. The regdom rig's image.
+hull-steer:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/steer/verdict/steer
+	@mkdir -p tests/hull/steer/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/steer/hull.conf || true
+	@if [ ! -f tests/hull/steer/verdict/steer ]; then \
+		echo "steer: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/steer: /' tests/hull/steer/verdict/steer; \
+	grep -q '^VERDICT ok' tests/hull/steer/verdict/steer
+
 # netcfgd joining an 802.11s mesh (10.588): one vm, two hwsim radios, netcfgd's
 # node peering with a bare wpa_supplicant one in a network namespace, traffic
 # across, and a second plan with nothing to do. The regdom rig's image.
@@ -2951,7 +2969,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

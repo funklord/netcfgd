@@ -2491,6 +2491,13 @@ int ncfg_reconcile_host_wide(const ncfg_document_t *document);
  * act on that is to take the link down and up, so leaving it out of this
  * answer would have the cycle planned and then dropped, with the machine
  * sitting on a source nothing ever selected.
+ *
+ * A third is per action rather than per interface, and is in
+ * `ncfg_reconcile_restrict`: a **`station.steer`** is always kept (10.595
+ * item 2). The document's `steering` block asks for exactly that continuous
+ * behaviour, it puts back nothing somebody changed by hand, and dropping it
+ * under the default `report` would make steering a block that does nothing
+ * until a second setting nobody would think to look for.
  */
 int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t *sims,
     const char *interface);

@@ -1344,6 +1344,36 @@ static void access_point_cases(void)
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "named by its BSSID",
 	    "  and one named by something that is not a BSSID");
 
+	/* Steering (10.595 item 2): opt-in, and only where there are neighbours
+	 * to send a station to. */
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering {\n\t\tsignal = -75\n\t\tband = true\n\t}\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "an access point that steers on signal and band compiles");
+	if (document) {
+		const ncfg_steering_t *steering = document->access_points[0].steering;
+
+		check(steering && steering->signal.has && steering->signal.value == -75 &&
+		    steering->band, "  carrying both");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\tsteering { signal = -75 }\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "nowhere to send them", "steering with neighbour reports off is refused");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering { }\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "moves nobody", "  and so is a steering block that turns nothing on");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering { signal = 10 }\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "is not a signal strength", "  and a signal that is not a signal strength");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering { kick = true }\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "unknown steering key", "  and a key steering does not have");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering { band = true }\n\tsteering { signal = -75 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "a second `steering` block", "  and a second block");
+
 	refuses("access_point \"Home\" { wifi { psk = \"@secret:ap\" } }\n",
 	    "does not say which radio", "an access point without a device is refused");
 	refuses("access_point \"Home\" { device = \"wlan0\" }\n", "so it would be open",

@@ -1056,3 +1056,190 @@ void ncfg_plan_neighbours(ncfg_builder_t *builder)
 		free(wanted);
 	}
 }
+
+/* ------------------------------------------------------------------------ *
+ * Steering (10.595 item 2)
+ * ------------------------------------------------------------------------ */
+
+/* A station has to have been connected this long to be steered, so one that
+ * has just arrived -- from a steer, among others -- is left to settle. */
+#define STEER_SETTLED_SECONDS 60
+/* An advisory request is repeated no more often than this; one with
+ * disassociation imminent no more than once in the record's hour. */
+#define STEER_ADVISED_SECONDS 300
+
+/* Whether a report element names a 2.4 GHz operating class (81 or 82). */
+static int element_is_24(const char *nr)
+{
+	unsigned class;
+
+	return nr && strlen(nr) >= 22u && sscanf(nr + 20, "%2x", &class) == 1 &&
+	    (class == 81u || class == 82u);
+}
+
+static int element_is_5(const char *nr)
+{
+	unsigned class;
+
+	return nr && strlen(nr) >= 22u && sscanf(nr + 20, "%2x", &class) == 1 &&
+	    class >= 115u && class <= 125u;
+}
+
+/*
+ * This machine's own 5 GHz access point of the same network, by the BSSID
+ * its hostapd gives itself -- and only if this one already holds it as a
+ * neighbour, since the steer is built from that entry. NULL if none.
+ */
+static const char *band_target(ncfg_builder_t *builder, const ncfg_access_point_t *point,
+    const ncfg_observed_access_control_t *live)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 i;
+
+	for (i = 0; i < desired->access_point_count; i++) {
+		const ncfg_access_point_t       *other = &desired->access_points[i];
+		const ncfg_observed_backend_t   *theirs;
+		const ncfg_observed_neighbour_t *entry;
+		size_t                           h;
+
+		if (other == point || !other->device || strcmp(other->device, point->device) == 0 ||
+		    other->ssid.length != point->ssid.length ||
+		    memcmp(other->ssid.bytes, point->ssid.bytes, point->ssid.length) != 0) {
+			continue;
+		}
+		theirs = backend_of(builder->observed, NCFG_BACKEND_ACCESS_POINT, other->device);
+		entry = theirs ? own_entry(builder->observed, other->device, theirs->access_control)
+		               : NULL;
+		if (!entry || !element_is_5(entry->nr)) {
+			continue;
+		}
+		for (h = 0; h < live->neighbour_count; h++) {
+			if (strcmp(live->neighbours[h].bssid, entry->bssid) == 0) {
+				return entry->bssid;
+			}
+		}
+	}
+	return NULL;
+}
+
+/* Whether the document runs a 5 GHz access point of this one's network on
+ * another radio: by its band, or by a 5 GHz channel. */
+static int document_has_five(const ncfg_document_t *desired, const ncfg_access_point_t *point)
+{
+	size_t i;
+
+	for (i = 0; i < desired->access_point_count; i++) {
+		const ncfg_access_point_t *other = &desired->access_points[i];
+
+		if (other != point && other->device && strcmp(other->device, point->device) != 0 &&
+		    other->ssid.length == point->ssid.length &&
+		    memcmp(other->ssid.bytes, point->ssid.bytes, point->ssid.length) == 0 &&
+		    ((other->band && strcmp(other->band, "5") == 0) ||
+		        (other->channel.has && other->channel.value >= 36))) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/* Seconds since this station was last steered off this access point, or -1,
+ * and whether that steer was imminent. */
+static int64_t steered_ago(const ncfg_observed_access_control_t *live, const char *station,
+    int *imminent)
+{
+	size_t at;
+
+	*imminent = 0;
+	for (at = 0; at < live->steered_count; at++) {
+		if (strcmp(live->steered[at].station, station) == 0) {
+			*imminent = live->steered[at].imminent;
+			return live->steered[at].ago;
+		}
+	}
+	return -1;
+}
+
+static void push_steer(ncfg_builder_t *builder, const char *device, const char *station,
+    const char *target, int imminent, const char *field, const char *desired,
+    const char *observed)
+{
+	ncfg_op_t     op;
+	ncfg_reason_t reason;
+
+	memset(&op, 0, sizeof(op));
+	op.kind = NCFG_OP_STATION_STEER;
+	op.u.steer.iface = device;
+	op.u.steer.station = station;
+	op.u.steer.target = target;
+	op.u.steer.imminent = imminent;
+	reason = ncfg_plan_reason_differs(device, field, desired, observed);
+	/* No inverse: a station that has moved cannot be put back by the access
+	 * point it left, and one that has not is where it was. */
+	(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, NULL);
+}
+
+void ncfg_plan_steering(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 at;
+
+	for (at = 0; at < desired->access_point_count; at++) {
+		const ncfg_access_point_t              *point = &desired->access_points[at];
+		const ncfg_steering_t                  *steering = point->steering;
+		const ncfg_observed_backend_t          *running;
+		const ncfg_observed_access_control_t   *live;
+		const ncfg_observed_neighbour_t        *own;
+		const char                             *five = NULL;
+		size_t                                  others = 0;
+		size_t                                  i;
+
+		if (!steering || !point->neighbour_reports || !point->device) {
+			continue;
+		}
+		running = backend_of(builder->observed, NCFG_BACKEND_ACCESS_POINT, point->device);
+		live = running ? running->access_control : NULL;
+		own = live ? own_entry(builder->observed, point->device, live) : NULL;
+		if (!own) {
+			continue;
+		}
+		for (i = 0; i < live->neighbour_count; i++) {
+			others += &live->neighbours[i] != own;
+		}
+		if (steering->band && element_is_24(own->nr)) {
+			five = band_target(builder, point, live);
+			if (!five && !document_has_five(desired, point)) {
+				ncfg_plan_warnf(builder->plan, point->device,
+				    "access point `%s` steers stations to 5 GHz, and this document runs no "
+				    "5 GHz access point of the network on this machine, so none is moved",
+				    point->id);
+			}
+		}
+		for (i = 0; i < live->steerable_count; i++) {
+			const ncfg_observed_steerable_t *station = &live->steerable[i];
+			int                              imminent;
+			int64_t                          ago;
+			int64_t                          signal;
+
+			if (!station->signal.has || !station->connected.has ||
+			    station->connected.value < STEER_SETTLED_SECONDS) {
+				continue;
+			}
+			signal = station->signal.value;
+			ago = steered_ago(live, station->address, &imminent);
+			if (five && signal >= NCFG_STEER_BAND_SIGNAL &&
+			    (ago < 0 || (!imminent && ago >= STEER_ADVISED_SECONDS))) {
+				push_steer(builder, point->device, station->address, five, 1,
+				    "access_point.steering.band",
+				    ncfg_plan_internf(builder->plan, "5 GHz, %s", five),
+				    ncfg_plan_internf(builder->plan, "2.4 GHz at %lld dBm", (long long)signal));
+			} else if (steering->signal.has && signal < steering->signal.value && others &&
+			    (ago < 0 || (!imminent && ago >= STEER_ADVISED_SECONDS))) {
+				push_steer(builder, point->device, station->address, NULL, 0,
+				    "access_point.steering.signal",
+				    ncfg_plan_internf(builder->plan, "%lld dBm or better",
+				        (long long)steering->signal.value),
+				    ncfg_plan_internf(builder->plan, "%lld dBm", (long long)signal));
+			}
+		}
+	}
+}

@@ -1027,6 +1027,30 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 			}
 		}
 	}
+	if (point->steering) {
+		const ncfg_steering_t *steering = point->steering;
+
+		if (!point->neighbour_reports) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "steering with `neighbour_reports` off");
+		} else if (steering->signal.has && !ncfg_roam_signal_in_range(steering->signal.value)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "steering below %lld, which is not a signal strength",
+			    (long long)steering->signal.value);
+		} else if (!steering->signal.has && !steering->band) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a steering block that moves nobody");
+		} else {
+			ncfg_buf_add_text(&body, "\tsteering {\n");
+			if (steering->signal.has) {
+				ncfg_buf_addf(&body, "\t\tsignal = %lld\n", (long long)steering->signal.value);
+			}
+			if (steering->band) {
+				ncfg_buf_add_text(&body, "\t\tband = true\n");
+			}
+			ncfg_buf_add_text(&body, "\t}\n");
+		}
+	}
 	/* Only a stated one: the derived domain is the absence of this line, and
 	 * writing it out would pin a profile to an SSID it may be saved away from. */
 	if (point->mobility_domain) {

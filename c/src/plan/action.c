@@ -69,6 +69,8 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "neighbour.add";
 	case NCFG_OP_NEIGHBOUR_DEL:
 		return "neighbour.del";
+	case NCFG_OP_STATION_STEER:
+		return "station.steer";
 	case NCFG_OP_LINK_SET_BOND:
 		return "link.set_bond";
 	case NCFG_OP_LINK_SET_BRIDGE:
@@ -199,6 +201,10 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 		return op->u.access_control.list == NCFG_ACL_POLICY_DENY;
 	case NCFG_OP_ACCESS_CONTROL_DEL:
 		return op->u.access_control.list == NCFG_ACL_POLICY_ALLOW;
+	/* An advisory request leaves the station where it is unless it chooses
+	 * to go; disassociation imminent takes it off whether it goes or not. */
+	case NCFG_OP_STATION_STEER:
+		return op->u.steer.imminent;
 	/*
 	 * A hook is arbitrary shell and netcfgd cannot know what it does. What it
 	 * does know is which transition the hook belongs to, and the down phases
@@ -349,6 +355,8 @@ static const char *subject_class(int kind)
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
 		return "neighbour";
+	case NCFG_OP_STATION_STEER:
+		return "station";
 	case NCFG_OP_WG_SET_DEVICE:
 	case NCFG_OP_WG_SET_PEERS:
 		return "wireguard";
@@ -462,6 +470,10 @@ int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size)
 		(void)snprintf(detail, sizeof(detail), "%s", op->u.access_control.station ?
 		    op->u.access_control.station : "");
 		break;
+	case NCFG_OP_STATION_STEER:
+		(void)snprintf(detail, sizeof(detail), "%s", op->u.steer.station ?
+		    op->u.steer.station : "");
+		break;
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
 		(void)snprintf(detail, sizeof(detail), "%s", op->u.neighbour.bssid ?
@@ -545,6 +557,8 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 	case NCFG_OP_NEIGHBOUR_ADD:
 	case NCFG_OP_NEIGHBOUR_DEL:
 		return op->u.neighbour.iface;
+	case NCFG_OP_STATION_STEER:
+		return op->u.steer.iface;
 	case NCFG_OP_WG_SET_DEVICE:
 		return op->u.wg_device.iface;
 	case NCFG_OP_WG_SET_PEERS:

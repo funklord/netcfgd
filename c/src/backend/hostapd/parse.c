@@ -221,6 +221,11 @@ int ncfg_hostapd_parse_station(const char *reply, ncfg_hostapd_station_t *out)
 			take_number(&out->rx_bytes, value);
 		} else if (strcmp(line, "tx_bytes") == 0) {
 			take_number(&out->tx_bytes, value);
+		} else if (strcmp(line, "ext_capab") == 0 && strlen(value) >= 6u &&
+		    isxdigit((unsigned char)value[4]) && isxdigit((unsigned char)value[5])) {
+			char octet[3] = { value[4], value[5], '\0' };
+
+			out->bss_transition = (strtol(octet, NULL, 16) & 0x08) != 0;
 		}
 	}
 	return 1;

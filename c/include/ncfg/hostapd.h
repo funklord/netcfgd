@@ -339,6 +339,26 @@ void ncfg_hostapd_recorded_policy(const char *run, const char *device,
     ncfg_observed_policy_t *out);
 
 /*
+ * The stations netcfgd has steered off an access point (project.md 10.595
+ * item 2), `<run>/hostapd/<device>.steered`: one `<station> <unix time>
+ * <imminent>` line each, the last steer of each station only. The record is
+ * what keeps a station that came back from being moved again every round, so
+ * it is kept for `NCFG_STEER_RECORD_SECONDS` and nothing older is read or
+ * rewritten -- which also bounds the file.
+ *
+ * Read: what is in the record within the window, as of `now`; an absent or
+ * unreadable file is nobody steered. Note: one steer, `now`, replacing that
+ * station's line.
+ */
+#define NCFG_STEER_RECORD_SECONDS 3600
+int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,
+    char *err, size_t err_size);
+int ncfg_hostapd_steered_read(const char *run, const char *device, int64_t now,
+    ncfg_observed_steered_t **out, size_t *count);
+int ncfg_hostapd_steered_note(const char *run, const char *device, const char *station,
+    int imminent, int64_t now, char *err, size_t err_size);
+
+/*
  * How hostapd is invoked, as a list something can assert against.
  *
  * A function rather than four appends for the reason `udhcpc_start_args` is one
@@ -434,6 +454,10 @@ typedef struct {
 	ncfg_optint_t inactive_msec;
 	ncfg_optint_t rx_bytes;
 	ncfg_optint_t tx_bytes;
+	/* It takes BSS transition requests: bit 19 of its extended capabilities
+	 * (`ext_capab`, hex, least significant octet first), measured on a
+	 * wpa_supplicant station (project.md 10.595). */
+	int           bss_transition;
 } ncfg_hostapd_station_t;
 
 /*

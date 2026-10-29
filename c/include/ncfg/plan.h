@@ -99,6 +99,8 @@ typedef enum {
 	 * its control socket (10.595). */
 	NCFG_OP_NEIGHBOUR_ADD,
 	NCFG_OP_NEIGHBOUR_DEL,
+	/* A BSS transition request to one station (10.595 item 2). */
+	NCFG_OP_STATION_STEER,
 	NCFG_OP_LINK_SET_BOND,
 	NCFG_OP_LINK_SET_BRIDGE,
 	NCFG_OP_LINK_SET_MACVLAN,
@@ -248,6 +250,18 @@ typedef struct {
 			const char *ssid;
 			const char *nr;
 		} neighbour;
+		/*
+		 * `target` is the BSSID the station is moved to, from the access
+		 * point's own neighbour list; NULL is every neighbour on that list,
+		 * the station to choose. `imminent` is disassociation imminent:
+		 * the station is disassociated if it does not go.
+		 */
+		struct {
+			const char *iface;
+			const char *station;
+			const char *target;
+			int         imminent;
+		} steer;
 		struct {
 			const char   *iface;
 			/* A reference, never a key: a plan goes to /run and over the

@@ -65,10 +65,11 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   language and the same plan -- access points with station allow and deny
   lists that name shared host lists and manufacturer prefixes, fast roaming
   between access points (802.11r, by FT-PSK or FT-SAE) with neighbour
-  reports telling a station where the others are (802.11k), 802.11s mesh,
-  four-address repeaters, NAT, a firewall of named rules in netcfgd's own
-  nftables table that can match a sending station by address, prefix or host
-  list, router advertisements, a delegated prefix subnetted onto the
+  reports telling a station where the others are (802.11k) and steering
+  that moves weak stations on and strong ones to 5 GHz (802.11v), 802.11s
+  mesh, four-address repeaters, NAT, a firewall of named rules in netcfgd's
+  own nftables table that can match a sending station by address, prefix or
+  host list, router advertisements, a delegated prefix subnetted onto the
   interfaces behind it, VLAN-aware bridges, bonds, policy routing and traffic
   shaping -- on the OpenWrt-sized box it was designed for.
 - **It shows the change before making it.** `ncfg plan` lists every action in
@@ -145,7 +146,7 @@ netcfgd speaks netlink directly — there is no `ip` invocation anywhere.
 | enterprise (802.1X) | PEAP, TTLS, TLS and PWD, with identity, anonymous identity, CA and client certificates, and a phase-2 method |
 | hidden networks | `hidden = true` |
 | several saved networks | each its own `network` block; the supplicant picks which to join, and `metric` ranks them -- lower wins |
-| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a station allow or deny list -- exact addresses, shared `host_list`s, and on a deny list manufacturer (OUI) prefixes, which netcfgd expands into the stations it sees because hostapd cannot hold one. Fast roaming between access points (802.11r, by FT-PSK or FT-SAE), neighbour reports naming the others (802.11k) -- this machine's found, another machine's declared by BSSID and channel -- and four-address stations for a repeater. At 802.11a/g rates, since nothing writes `ieee80211n` yet |
+| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a station allow or deny list -- exact addresses, shared `host_list`s, and on a deny list manufacturer (OUI) prefixes, which netcfgd expands into the stations it sees because hostapd cannot hold one. Fast roaming between access points (802.11r, by FT-PSK or FT-SAE), neighbour reports naming the others (802.11k) -- this machine's found, another machine's declared by BSSID and channel -- steering (802.11v) that asks weak stations to move and moves strong 2.4 GHz ones to this machine's 5 GHz access point, and four-address stations for a repeater. At 802.11a/g rates, since nothing writes `ieee80211n` yet |
 | mesh and repeater | an 802.11s `mesh` a radio joins, and a station radio in four-address mode behind a bridge |
 | scanning | `ncfg wifi scan` lists what is in range, with signal and security |
 | joining and leaving | `ncfg wifi connect ID` and `ncfg wifi disconnect`, keeping the configuration either way |

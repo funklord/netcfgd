@@ -819,6 +819,13 @@ static void an_access_point_round_trips(void)
 	    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
 	    "\twifi { psk = \"@secret:ap\" }\n}\n",
 	    "neighbour reports and a declared neighbour round-trip");
+	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering {\n\t\tsignal = -75\n\t\tband = true\n\t}\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "steering round-trips");
+	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tsteering { band = true }\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "  and so does band steering alone");
 	plain = rendering_of("access_point \"roam\" {\n"
 	    "\tdevice = \"wlan0\"\n\tfast_roaming = true\n\twifi { psk = \"@secret:ap\" }\n}\n");
 	check(plain && strstr(plain, "fast_roaming = true") != NULL &&

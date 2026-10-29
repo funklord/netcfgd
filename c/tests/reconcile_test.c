@@ -537,6 +537,36 @@ static void a_restricted_plan_keeps_only_what_it_may_act_on(void)
 		check(0, "a host-wide restriction builds");
 	}
 
+	/* A steer is kept on an interface that only reports (10.595 item 2): the
+	 * `steering` block asked for it, and it puts back nothing anyone did. */
+	{
+		ncfg_plan_t  *steering = ncfg_plan_new(err, sizeof(err));
+		ncfg_op_t     op;
+		ncfg_reason_t reason;
+
+		memset(&op, 0, sizeof(op));
+		op.kind = NCFG_OP_STATION_STEER;
+		op.u.steer.iface = "eth1";
+		op.u.steer.station = "aa:00:00:00:00:02";
+		memset(&reason, 0, sizeof(reason));
+		reason.interface = "eth1";
+		reason.field = "access_point.steering.signal";
+		reason.desired = "-75 dBm or better";
+		reason.observed = "-85 dBm";
+		if (steering) {
+			(void)add_mtu(steering, "eth1", NULL, 0u);
+			(void)ncfg_plan_add(steering, &op, &reason, NULL, 0u, NULL);
+		}
+		err[0] = '\0';
+		kept = steering ? ncfg_reconcile_restrict(steering, document, NULL, 0, NULL, err,
+		    sizeof(err)) : NULL;
+		check(kept && kept->action_count == 1u &&
+		    kept->actions[0].op.kind == NCFG_OP_STATION_STEER,
+		    "a steer is sent on an interface whose drift is only reported, and nothing else is");
+		ncfg_plan_free(kept);
+		ncfg_plan_free(steering);
+	}
+
 	/* Restricting to nothing yields nothing, which is the ordinary converged
 	 * machine and the case a loop must not treat as work. */
 	{

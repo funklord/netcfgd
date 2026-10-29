@@ -358,6 +358,8 @@ void ncfg_plan_wifi(ncfg_builder_t *builder);
 void ncfg_plan_access_control(ncfg_builder_t *builder);
 /* The 802.11k neighbour lists of running access points (10.595). */
 void ncfg_plan_neighbours(ncfg_builder_t *builder);
+/* The stations those access points are asked to move (10.595 item 2). */
+void ncfg_plan_steering(ncfg_builder_t *builder);
 
 /*
  * A copy of `rule` the plan owns, strings and all.

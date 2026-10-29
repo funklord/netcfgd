@@ -1126,6 +1126,116 @@ static void neighbour_reports_are_part_of_what_an_access_point_was_started_as(vo
 	planfix_release(plan, document, observed);
 }
 
+/* ------------------------------------------------------------------------ *
+ * Steering (10.595 item 2)
+ * ------------------------------------------------------------------------ */
+
+/* wlan1's own entry as a 5 GHz radio would hold it: class 115, channel 36. */
+#define OWN_B5 "{\"bssid\":\"02:00:00:00:02:00\",\"ssid\":\"686f6d65\"," \
+	"\"nr\":\"0200000002008f000000732406\"}"
+#define STEERING_POINTS \
+	",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"device\":\"wlan0\"," \
+	"\"security\":{\"type\":\"open\"},\"neighbour_reports\":true," \
+	"\"steering\":{\"signal\":-75,\"band\":true}}," \
+	"{\"id\":\"home-5\",\"ssid\":\"686f6d65\",\"device\":\"wlan1\",\"channel\":36," \
+	"\"band\":\"5\",\"security\":{\"type\":\"open\"},\"neighbour_reports\":true}]"
+#define STATION(address, signal, connected) \
+	"{\"address\":\"" address "\",\"signal\":" signal ",\"connected\":" connected "}"
+#define STEERED(address, ago, imminent) \
+	"{\"station\":\"" address "\",\"ago\":" ago ",\"imminent\":" imminent "}"
+
+/* The steer this plan carries for a station, or NULL. */
+static const ncfg_op_t *steer_for(const ncfg_plan_t *plan, const char *station)
+{
+	size_t i;
+
+	for (i = 0; plan && i < plan->action_count; i++) {
+		const ncfg_op_t *op = &plan->actions[i].op;
+
+		if (op->kind == NCFG_OP_STATION_STEER && strcmp(op->u.steer.station, station) == 0) {
+			return op;
+		}
+	}
+	return NULL;
+}
+
+/*
+ * Six stations on a 2.4 GHz access point whose machine also runs the network
+ * on 5 GHz. A strong one is moved to 5 GHz with disassociation imminent; a
+ * weak one is asked to go where it likes and is not disconnected; one that
+ * has just arrived is left to settle; one moved within the hour is not moved
+ * again, nor one asked within five minutes -- while one asked longer ago than
+ * that is asked again.
+ */
+static void stations_are_steered_by_band_and_by_signal(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "", STEERING_POINTS,
+	    RADIO_LINKS ",\"backends\":["
+	    "{\"kind\":\"access_point\",\"interface\":\"wlan0\",\"running\":true"
+	    STARTED_WITH(AS_WRITTEN ",\"neighbour_reports\":true")
+	    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+	    "\"neighbours\":[" OWN_A "," OWN_B5 "],\"steerable\":["
+	    STATION("aa:00:00:00:00:01", "-40", "300") ","
+	    STATION("aa:00:00:00:00:02", "-85", "300") ","
+	    STATION("aa:00:00:00:00:03", "-40", "10") ","
+	    STATION("aa:00:00:00:00:04", "-40", "300") ","
+	    STATION("aa:00:00:00:00:05", "-85", "300") ","
+	    STATION("aa:00:00:00:00:06", "-85", "300") "],\"steered\":["
+	    STEERED("aa:00:00:00:00:04", "100", "true") ","
+	    STEERED("aa:00:00:00:00:05", "100", "false") ","
+	    STEERED("aa:00:00:00:00:06", "400", "false") "]}},"
+	    "{\"kind\":\"access_point\",\"interface\":\"wlan1\",\"running\":true"
+	    STARTED_WITH(",\"channel\":36,\"band\":\"5\",\"neighbour_reports\":true")
+	    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+	    "\"neighbours\":[" OWN_B5 "," OWN_A "]}}]",
+	    &document, &observed);
+	const ncfg_op_t *strong = steer_for(plan, "aa:00:00:00:00:01");
+	const ncfg_op_t *weak = steer_for(plan, "aa:00:00:00:00:02");
+
+	check(strong && strong->u.steer.imminent && strong->u.steer.target &&
+	    strcmp(strong->u.steer.target, "02:00:00:00:02:00") == 0 &&
+	    strcmp(strong->u.steer.iface, "wlan0") == 0,
+	    "a strong station on 2.4 GHz is moved to this machine's 5 GHz access point");
+	check(strong && ncfg_op_is_disruptive(strong),
+	    "  which disconnects it if it will not go, and is said to");
+	check(weak && !weak->u.steer.imminent && !weak->u.steer.target,
+	    "a weak one is asked to move to a neighbour of its choosing");
+	check(weak && !ncfg_op_is_disruptive(weak), "  which disconnects nobody");
+	check(plan && !steer_for(plan, "aa:00:00:00:00:03"),
+	    "one that has just arrived is left to settle");
+	check(plan && !steer_for(plan, "aa:00:00:00:00:04"),
+	    "one moved within the hour is not moved again");
+	check(plan && !steer_for(plan, "aa:00:00:00:00:05"),
+	    "one asked within five minutes is not asked again");
+	check(plan && steer_for(plan, "aa:00:00:00:00:06"),
+	    "  and one asked longer ago than that is");
+	check(plan && planfix_count(plan, "station.steer") == 3u &&
+	    planfix_count(plan, "neighbour.add") == 0u && !planfix_action(plan, "backend.stop"),
+	    "and that is the whole plan");
+	planfix_release(plan, document, observed);
+}
+
+/* An access point without steering moves nobody, however weak. */
+static void an_access_point_without_steering_moves_nobody(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "",
+	    REPORTING_POINTS(""),
+	    RADIO_LINKS ",\"backends\":["
+	    "{\"kind\":\"access_point\",\"interface\":\"wlan0\",\"running\":true"
+	    STARTED_WITH(AS_WRITTEN ",\"neighbour_reports\":true")
+	    ",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[],"
+	    "\"neighbours\":[" OWN_A "," OWN_B "],\"steerable\":["
+	    STATION("aa:00:00:00:00:02", "-90", "300") "]}}," REPORTING("wlan1", OWN_B "," OWN_A) "]",
+	    &document, &observed);
+
+	check(plan && plan->action_count == 0u, "an access point without steering moves nobody");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1160,6 +1270,8 @@ int main(void)
 	access_points_of_one_network_report_each_other();
 	a_neighbour_list_held_as_wanted_is_converged();
 	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
+	stations_are_steered_by_band_and_by_signal();
+	an_access_point_without_steering_moves_nobody();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

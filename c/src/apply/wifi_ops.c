@@ -40,6 +40,7 @@
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The longest path this module builds: a control directory and an interface. */
@@ -258,6 +259,120 @@ int ncfg_service_neighbour(const char *run_dir, const char *iface, const char *b
 	}
 	ncfg_supplicant_client_free(client);
 	return ok;
+}
+
+/*
+ * One `neighbor=` candidate out of a `SHOW_NEIGHBOR` line: the BSSID, then the
+ * report element's BSSID information (four octets, least significant first),
+ * operating class, channel and PHY type -- the measured spelling,
+ * `neighbor=02:00:00:00:01:00,0x8f,81,11,6`. 0 for a line that is not one.
+ */
+static int steer_candidate(const char *line, char *bssid, size_t bssid_size, char *out,
+    size_t out_size)
+{
+	char          address[32];
+	char          nr[256];
+	unsigned      octet[7];
+	unsigned long info;
+	size_t        at;
+
+	if (sscanf(line, "%31s ssid=%*s nr=%255[0-9a-fA-F]", address, nr) != 2 || strlen(nr) < 26u ||
+	    !ncfg_station_address_normalize(address, bssid, bssid_size, NULL, 0)) {
+		return 0;
+	}
+	for (at = 0; at < 7u; at++) {
+		if (sscanf(nr + 12u + 2u * at, "%2x", &octet[at]) != 1) {
+			return 0;
+		}
+	}
+	info = (unsigned long)octet[0] | ((unsigned long)octet[1] << 8) |
+	    ((unsigned long)octet[2] << 16) | ((unsigned long)octet[3] << 24);
+	return (size_t)snprintf(out, out_size, " neighbor=%s,0x%lx,%u,%u,%u", bssid, info, octet[4],
+	    octet[5], octet[6]) < out_size;
+}
+
+int ncfg_service_steer(const char *run_dir, const char *iface, const char *station,
+    const char *target, int imminent, int patience_ms, char *err, size_t err_size)
+{
+	char                      directory[WIFI_PATH_MAX];
+	char                      command[2048];
+	char                      body[NCFG_SUPPLICANT_REPLY_MAX];
+	char                      status[NCFG_SUPPLICANT_REPLY_MAX];
+	const char               *own;
+	const char               *line;
+	size_t                    used;
+	size_t                    named = 0;
+	ncfg_supplicant_client_t *client;
+	int                       ok;
+
+	if (!run_dir || !iface || !station) {
+		ncfg_error_set(err, err_size, "a steer is missing what it names");
+		return 0;
+	}
+	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), err, err_size)) {
+		return 0;
+	}
+	client = ncfg_supplicant_connect_within(directory, iface,
+	    patience_ms > 0 ? patience_ms : NCFG_SUPPLICANT_IMPATIENT_MS, err, err_size);
+	if (!client) {
+		char detail[NCFG_ERROR_MAX];
+
+		(void)snprintf(detail, sizeof(detail), "%s", err);
+		ncfg_error_set(err, err_size,
+		    "cannot reach the access point on %s to steer %s: %s", iface, station, detail);
+		return 0;
+	}
+	body[0] = '\0';
+	status[0] = '\0';
+	if (!ncfg_supplicant_ask(client, "SHOW_NEIGHBOR", body, sizeof(body), err, err_size) ||
+	    !ncfg_supplicant_ask(client, "STATUS", status, sizeof(status), err, err_size)) {
+		ncfg_supplicant_client_free(client);
+		return 0;
+	}
+	/* Its own entry is the one with its own BSSID, which is no candidate. */
+	own = strstr(status, "bssid[0]=");
+	own = own ? own + strlen("bssid[0]=") : "";
+	used = (size_t)snprintf(command, sizeof(command), "BSS_TM_REQ %s", station);
+	for (line = body; line && *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		char bssid[NCFG_STATION_ADDRESS_SIZE];
+		char candidate[96];
+
+		if (!steer_candidate(line, bssid, sizeof(bssid), candidate, sizeof(candidate)) ||
+		    strncasecmp(own, bssid, strlen(bssid)) == 0 ||
+		    (target && strcmp(target, bssid) != 0) ||
+		    used + strlen(candidate) >= sizeof(command)) {
+			continue;
+		}
+		memcpy(command + used, candidate, strlen(candidate) + 1u);
+		used += strlen(candidate);
+		named++;
+	}
+	if (named == 0u) {
+		ncfg_supplicant_client_free(client);
+		if (target) {
+			ncfg_error_set(err, err_size,
+			    "the access point on %s does not hold %s as a neighbour to steer %s to", iface,
+			    target, station);
+		} else {
+			ncfg_error_set(err, err_size,
+			    "the access point on %s holds no neighbour to steer %s to", iface, station);
+		}
+		return 0;
+	}
+	(void)snprintf(command + used, sizeof(command) - used, " pref=1 abridged=1%s",
+	    imminent ? " disassoc_imminent=1 disassoc_timer=100" : "");
+	ok = ncfg_supplicant_command(client, command, err, err_size);
+	ncfg_supplicant_client_free(client);
+	if (!ok) {
+		char detail[NCFG_ERROR_MAX];
+
+		(void)snprintf(detail, sizeof(detail), "%s", err);
+		ncfg_error_set(err, err_size, "hostapd would not steer %s on %s: %s", station, iface,
+		    detail);
+		return 0;
+	}
+	return ncfg_hostapd_steered_note(run_dir, iface, station, imminent, (int64_t)time(NULL), err,
+	    err_size);
 }
 
 /* ------------------------------------------------------------------------ *

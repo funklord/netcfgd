@@ -416,6 +416,10 @@ static const struct {
 	 * its own radio. */
 	{ NCFG_BLOCK_ACCESS_POINT, "neighbour_reports", 0x00040010u },
 	{ NCFG_BLOCK_ACCESS_POINT, "neighbour.channel", 0x00040011u },
+	/* Steering (10.595 item 2): how the network moves its stations, so the
+	 * estate's, as fast roaming is. */
+	{ NCFG_BLOCK_ACCESS_POINT, "steering.signal", 0x00040012u },
+	{ NCFG_BLOCK_ACCESS_POINT, "steering.band", 0x00040013u },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

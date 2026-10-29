@@ -984,7 +984,34 @@ typedef struct {
 	 */
 	struct ncfg_observed_neighbour *neighbours;
 	size_t                          neighbour_count;
+	/*
+	 * The associated stations that take BSS transition requests, with what
+	 * steering decides on (10.595 item 2): the signal hostapd hears each at
+	 * and how long it has been connected. Omitted when empty.
+	 */
+	struct ncfg_observed_steerable *steerable;
+	size_t                          steerable_count;
+	/*
+	 * The stations netcfgd has steered off this access point in the last
+	 * hour, from the record the executor keeps in `/run` beside hostapd's
+	 * socket: how many seconds ago, and whether disassociation was imminent.
+	 * What keeps a station that comes back from being moved every round.
+	 */
+	struct ncfg_observed_steered   *steered;
+	size_t                          steered_count;
 } ncfg_observed_access_control_t;
+
+typedef struct ncfg_observed_steerable {
+	char         *address;
+	ncfg_optint_t signal;
+	ncfg_optint_t connected;
+} ncfg_observed_steerable_t;
+
+typedef struct ncfg_observed_steered {
+	char   *station;
+	int64_t ago;
+	int     imminent;
+} ncfg_observed_steered_t;
 
 typedef struct ncfg_observed_neighbour {
 	char *bssid;

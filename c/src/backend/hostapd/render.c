@@ -360,8 +360,7 @@ static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t 
 		return add_line(lines, "mobility_domain", domain, 0) &&
 		    add_line(lines, "nas_identifier", holder, 0) &&
 		    add_line(lines, "ft_psk_generate_local", "1", 0) &&
-		    add_line(lines, "ft_over_ds", "0", 0) &&
-		    add_line(lines, "bss_transition", "1", 0);
+		    add_line(lines, "ft_over_ds", "0", 0);
 	}
 
 	used = (size_t)snprintf(holder, sizeof(holder), "netcfgd-%s-", domain);
@@ -381,8 +380,7 @@ static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t 
 	    add_line(lines, "ft_psk_generate_local", "1", 0) &&
 	    add_line(lines, "ft_over_ds", "0", 0) &&
 	    add_line(lines, "r0kh", r0kh, 1) &&
-	    add_line(lines, "r1kh", r1kh, 1) &&
-	    add_line(lines, "bss_transition", "1", 0);
+	    add_line(lines, "r1kh", r1kh, 1);
 	explicit_bzero(key, sizeof(key));
 	explicit_bzero(r0kh, sizeof(r0kh));
 	explicit_bzero(r1kh, sizeof(r1kh));
@@ -599,6 +597,15 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 	if (access_point->fast_roaming && !roaming_lines(out, access_point, local, roaming_key)) {
 		ncfg_hostapd_lines_free(out);
 		ncfg_error_set(err, err_size, "out of memory rendering fast roaming");
+		return 0;
+	}
+	/* 802.11v, once: fast roaming tells a station it may be steered, and so
+	 * do neighbour reports, so that the daemon's steering (10.595 item 2)
+	 * needs nothing in this file and turning it on restarts nothing. */
+	if ((access_point->fast_roaming || access_point->neighbour_reports) &&
+	    !add_line(out, "bss_transition", "1", 0)) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering BSS transition");
 		return 0;
 	}
 	return 1;

@@ -475,6 +475,8 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 		    "one with them answers a station's neighbour report request");
 		check_text(ncfg_hostapd_value_of(&lines, "rrm_beacon_report"), "1",
 		    "  and asks stations what they hear");
+		check_text(ncfg_hostapd_value_of(&lines, "bss_transition"), "1",
+		    "  and says a station may be steered, which steering then needs nothing more for");
 		for (at = 0; at < lines.count; at++) {
 			named |= strstr(lines.at[at].value, "02:00:00:00:09:00") != NULL;
 		}
@@ -925,6 +927,17 @@ static void a_station_reply_is_read(void)
 	    !station.rx_bytes.has && !station.authorized,
 	    "a station with no driver statistics is still a station, and not authorized yet");
 
+	/* BSS transition support, bit 19 of `ext_capab`, in the reply measured from a
+	 * wpa_supplicant station (10.595) and with that one bit cleared. */
+	check(ncfg_hostapd_parse_station("aa:bb:cc:dd:ee:ff\next_capab=04004a0201404040000120\n",
+	    &station) && station.bss_transition,
+	    "a station whose extended capabilities carry BSS transition can be steered");
+	check(ncfg_hostapd_parse_station("aa:bb:cc:dd:ee:ff\next_capab=0400420201404040000120\n",
+	    &station) && !station.bss_transition,
+	    "  and one with that bit clear cannot");
+	check(ncfg_hostapd_parse_station(BARE, &station) && !station.bss_transition,
+	    "  and nor can one that does not say");
+
 	/* Both spellings hostapd uses for "no more": an empty reply from a null
 	 * station, and FAIL for an address it does not know. */
 	check(!ncfg_hostapd_parse_station("", &station), "an empty reply is the end of the walk");
@@ -945,6 +958,60 @@ static void a_station_reply_is_read(void)
 }
 
 /* ------------------------------------------------------------- the files */
+
+/*
+ * The record of who was steered (10.595 item 2): the last steer per station,
+ * an hour of it, and nothing malformed or out of the window read back -- the
+ * window is also what bounds the file, since a rewrite keeps nothing older.
+ */
+static void a_steer_is_recorded_for_the_hour_and_no_longer(const char *run)
+{
+	char                     directory[512];
+	char                     path[NCFG_HOSTAPD_PATH_MAX];
+	char                     message[NCFG_ERROR_MAX];
+	ncfg_observed_steered_t *steered = NULL;
+	size_t                   count = 0;
+	size_t                   at;
+	char                    *body;
+	const int64_t            now = 1000000;
+
+	(void)snprintf(directory, sizeof(directory), "%s/hostapd", run);
+	testdir_mkdirp(directory);
+	check(ncfg_hostapd_steered_read(run, "wlan0", now, &steered, &count) && count == 0u,
+	    "no record is nobody steered");
+	check(ncfg_hostapd_steered_note(run, "wlan0", "aa:bb:cc:00:00:01", 1, now - 4000, message,
+	    sizeof(message)) &&
+	    ncfg_hostapd_steered_note(run, "wlan0", "aa:bb:cc:00:00:02", 0, now - 100, message,
+	    sizeof(message)) &&
+	    ncfg_hostapd_steered_note(run, "wlan0", "aa:bb:cc:00:00:02", 1, now - 10, message,
+	    sizeof(message)),
+	    "three steers are noted");
+	check(ncfg_hostapd_steered_read(run, "wlan0", now, &steered, &count) && count == 1u &&
+	    strcmp(steered[0].station, "aa:bb:cc:00:00:02") == 0 && steered[0].ago == 10 &&
+	    steered[0].imminent,
+	    "  and read back as one station's last steer, the hour-old one gone");
+	for (at = 0; at < count; at++) {
+		free(steered[at].station);
+	}
+	free(steered);
+	if (ncfg_hostapd_steered_path(run, "wlan0", path, sizeof(path), NULL, 0)) {
+		body = testdir_read(path, NULL);
+		check(body && strstr(body, "aa:bb:cc:00:00:01") == NULL &&
+		    strstr(body, "aa:bb:cc:00:00:02 999990 1\n") != NULL,
+		    "  and the file holds nothing older than the window");
+		free(body);
+		check(testdir_write(path, "nonsense\naa:bb:cc:00:00:03 2000000 0\n"
+		    "aa:bb:cc:00:00:04 999000 0\n", 64u),
+		    "a record somebody else wrote");
+		check(ncfg_hostapd_steered_read(run, "wlan0", now, &steered, &count) && count == 1u &&
+		    strcmp(steered[0].station, "aa:bb:cc:00:00:04") == 0 && !steered[0].imminent,
+		    "  is read for its good lines only, a steer in the future not among them");
+		for (at = 0; at < count; at++) {
+			free(steered[at].station);
+		}
+		free(steered);
+	}
+}
 
 static void a_rewritten_configuration_is_still_only_readable_by_root(const char *run)
 {
@@ -1242,6 +1309,7 @@ int main(void)
 	a_station_reply_is_read();
 
 	a_rewritten_configuration_is_still_only_readable_by_root(run);
+	a_steer_is_recorded_for_the_hour_and_no_longer(run);
 	the_access_point_is_told_where_to_record_its_pid();
 	the_station_list_lives_and_dies_with_its_block(run);
 	a_daemon_that_will_not_start_is_quoted(run);

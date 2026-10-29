@@ -1062,6 +1062,7 @@ static void access_point_free(ncfg_access_point_t *access_point)
 		}
 		free(access_point->neighbours);
 	}
+	free(access_point->steering);
 	memset(access_point, 0, sizeof(*access_point));
 }
 
@@ -1155,6 +1156,74 @@ static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *
 }
 
 /*
+ * `steering { signal = -75  band = true }` (10.595 item 2). A block that
+ * turns neither on would be steering that does nothing, so it is refused, as
+ * is a second one.
+ */
+static void lower_steering(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_access_point_t *access_point)
+{
+	ncfg_steering_t steering;
+	size_t          at;
+	int             flag;
+	int64_t         value;
+
+	memset(&steering, 0, sizeof(steering));
+	if (access_point->steering) {
+		ncfg_diag(ctx, block->span, "access point `%s` has a second `steering` block",
+		    access_point->id);
+		return;
+	}
+	for (at = 0; at < block->items.count; at++) {
+		const ncfg_ast_item_t       *item = block->items.at[at];
+		const ncfg_ast_assignment_t *assignment;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `steering`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "signal") == 0) {
+			if (!ncfg_as_i64(ctx, assignment->value, &value)) {
+				continue;
+			}
+			if (ncfg_roam_signal_in_range(value)) {
+				steering.signal.has = 1;
+				steering.signal.value = value;
+			} else {
+				ncfg_diag(ctx, assignment->span,
+				    "`%lld` is not a signal strength: dBm, negative, and between %d and "
+				    "%d; -75 is a station about to lose its link", (long long)value,
+				    NCFG_ROAM_SIGNAL_MIN, NCFG_ROAM_SIGNAL_MAX);
+			}
+		} else if (strcmp(assignment->key, "band") == 0) {
+			if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+				steering.band = flag;
+			}
+		} else {
+			ncfg_diag(ctx, assignment->span, "unknown steering key `%s`: signal and band",
+			    assignment->key);
+		}
+	}
+	if (!steering.signal.has && !steering.band) {
+		ncfg_diag(ctx, block->span,
+		    "access point `%s` has a `steering` block that moves nobody: set `signal = -75`, "
+		    "`band = true`, or both", access_point->id);
+		return;
+	}
+	access_point->steering = malloc(sizeof(*access_point->steering));
+	if (!access_point->steering) {
+		ncfg_lower_oom(ctx);
+		return;
+	}
+	*access_point->steering = steering;
+}
+
+/*
  * `neighbour "aa:bb:cc:dd:ee:ff" { channel = 36 }`: an access point of the same
  * network on another machine (10.595). The channel decides the operating class
  * a neighbour report carries, so it is required; a second block for one BSSID
@@ -1227,6 +1296,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	ncfg_span_t             domain_span = block->span;
 	ncfg_span_t             key_span = block->span;
 	ncfg_span_t             neighbour_span = block->span;
+	ncfg_span_t             steering_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
 	size_t                  i;
@@ -1351,6 +1421,9 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		} else if (strcmp(item->as.block.head, "neighbour") == 0) {
 			neighbour_span = item->as.block.span;
 			lower_neighbour(ctx, &item->as.block, &access_point);
+		} else if (strcmp(item->as.block.head, "steering") == 0) {
+			steering_span = item->as.block.span;
+			lower_steering(ctx, &item->as.block, &access_point);
 		} else if (strcmp(item->as.block.head, "access_control") == 0) {
 			ncfg_access_control_t acl;
 
@@ -1400,6 +1473,14 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		ncfg_diag(ctx, block->span,
 		    "access point `%s` has no `wifi` block, so it would be open: add "
 		    "`wifi { psk = \"@secret:NAME\" }`, or `wifi { open = true }`", access_point.id);
+		goto refused;
+	}
+	/* The targets are the neighbour list: with no reports there is nowhere a
+	 * station can be told to go. */
+	if (access_point.steering && !access_point.neighbour_reports) {
+		ncfg_diag(ctx, steering_span,
+		    "access point `%s` steers stations with `neighbour_reports` off, so there is "
+		    "nowhere to send them: set `neighbour_reports = true`", access_point.id);
 		goto refused;
 	}
 	if (!check_channel_in_band(ctx, &access_point, channel_span)) {

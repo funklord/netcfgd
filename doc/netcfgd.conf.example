@@ -878,6 +878,35 @@
 #	}
 #}
 
+# STEERING moves stations to a better access point of the network, by a BSS
+# transition request (802.11v). It needs `neighbour_reports`, which is where
+# the places to go come from, and turning it on or off restarts nothing:
+#
+#   - `signal = -75`: a station heard more weakly than this is asked to move
+#     to a neighbour of its choosing, at most every five minutes. It is not
+#     disconnected; a station that has nowhere better stays.
+#   - `band = true`: a station on 2.4 GHz heard at -60 dBm or better is moved
+#     to this machine's 5 GHz access point of the network. A station ignores
+#     a polite request while its signal is good, so this one is disconnected
+#     if it does not go -- once per station per hour, recorded in
+#     /run/netcfgd/hostapd/<radio>.steered, so one whose 5 GHz is poor and
+#     that comes back is left alone. Refused on a guarded interface.
+#   - Only stations connected a minute or more, and only those that say they
+#     can be steered. The daemon sends these whatever `on_drift` says: the
+#     block asking for them is the configuration, not drift.
+
+#access_point "Home" {
+#	device            = "wlan0"
+#	neighbour_reports = true
+#	steering {
+#		signal = -75
+#		band   = true
+#	}
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+
 # A REPEATER BEHIND AN ACCESS POINT. `wds = true` lets four-address (WDS)
 # stations join, which is what a repeater bridging a second LAN through this
 # network uses: hostapd gives each one an interface of its own and puts it in

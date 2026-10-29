@@ -157,6 +157,9 @@ int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, cha
 		return ncfg_service_neighbour(service->run_dir, op->u.neighbour.iface,
 		    op->u.neighbour.bssid, op->u.neighbour.ssid, op->u.neighbour.nr, 0,
 		    service->patience_ms, err, err_size);
+	case NCFG_OP_STATION_STEER:
+		return ncfg_service_steer(service->run_dir, op->u.steer.iface, op->u.steer.station,
+		    op->u.steer.target, op->u.steer.imminent, service->patience_ms, err, err_size);
 	/* Everything else, listed so that `-Wswitch` notices an op added to the
 	 * taxonomy and not answered anywhere. */
 	case NCFG_OP_LINK_CREATE:

@@ -64,6 +64,7 @@
 /* A `u64` in the Rust; the reader's own integer is signed, so this is where
  * the two meet. No shaped rate comes near it. */
 #define R_U64 .low = 0, .high = INT64_MAX
+#define R_I32 .low = -2147483647LL - 1, .high = 2147483647LL
 
 /* ------------------------------------------------------------------------ *
  * The sets value.h owns
@@ -1063,6 +1064,28 @@ static const ncfg_field_t observed_neighbour_fields[] = {
 static const ncfg_type_t observed_neighbour_type =
     TYPE("observed neighbour", observed_neighbour_fields);
 
+static const ncfg_field_t observed_steerable_fields[] = {
+	{ .name = "address", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_steerable_t, address) },
+	{ .name = "signal", .kind = NCFG_F_OPT_INT, R_I32,
+	    .offset = offsetof(ncfg_observed_steerable_t, signal) },
+	{ .name = "connected", .kind = NCFG_F_OPT_INT, R_U32,
+	    .offset = offsetof(ncfg_observed_steerable_t, connected) }
+};
+static const ncfg_type_t observed_steerable_type =
+    TYPE("steerable station", observed_steerable_fields);
+
+static const ncfg_field_t observed_steered_fields[] = {
+	{ .name = "station", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_steered_t, station) },
+	{ .name = "ago", .kind = NCFG_F_INT, .flags = NCFG_FF_REQUIRED, R_U32,
+	    .offset = offsetof(ncfg_observed_steered_t, ago) },
+	{ .name = "imminent", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_steered_t, imminent) }
+};
+static const ncfg_type_t observed_steered_type =
+    TYPE("steered station", observed_steered_fields);
+
 static const ncfg_field_t access_control_fields[] = {
 	{ .name = "policy", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED,
 	    .custom = &observed_policy_custom,
@@ -1081,7 +1104,15 @@ static const ncfg_field_t access_control_fields[] = {
 	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .type = &observed_neighbour_type, .element_size = sizeof(ncfg_observed_neighbour_t),
 	    .offset = offsetof(ncfg_observed_access_control_t, neighbours),
-	    .count_offset = offsetof(ncfg_observed_access_control_t, neighbour_count) }
+	    .count_offset = offsetof(ncfg_observed_access_control_t, neighbour_count) },
+	{ .name = "steerable", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_steerable_type, .element_size = sizeof(ncfg_observed_steerable_t),
+	    .offset = offsetof(ncfg_observed_access_control_t, steerable),
+	    .count_offset = offsetof(ncfg_observed_access_control_t, steerable_count) },
+	{ .name = "steered", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_steered_type, .element_size = sizeof(ncfg_observed_steered_t),
+	    .offset = offsetof(ncfg_observed_access_control_t, steered),
+	    .count_offset = offsetof(ncfg_observed_access_control_t, steered_count) }
 };
 static const ncfg_type_t access_control_type =
     TYPE("observed access control", access_control_fields);
