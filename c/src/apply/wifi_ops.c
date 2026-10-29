@@ -359,7 +359,13 @@ int ncfg_service_steer(const char *run_dir, const char *iface, const char *stati
 		}
 		return 0;
 	}
-	(void)snprintf(command + used, sizeof(command) - used, " pref=1 abridged=1%s",
+	/*
+	 * `valid_int=255`: the candidate list holds for 255 beacon intervals,
+	 * about 26 s. hostapd's default is 1, about 100 ms, and a station that
+	 * has to scan for the candidate first -- measured, wpa_supplicant does --
+	 * finds the list expired by the time it has looked (10.595).
+	 */
+	(void)snprintf(command + used, sizeof(command) - used, " pref=1 abridged=1 valid_int=255%s",
 	    imminent ? " disassoc_imminent=1 disassoc_timer=100" : "");
 	ok = ncfg_supplicant_command(client, command, err, err_size);
 	ncfg_supplicant_client_free(client);

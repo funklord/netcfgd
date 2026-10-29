@@ -139,8 +139,15 @@ say "  wlan0.steered: $record"
 again=$(grep -cE '^ +[0-9]+ +station\.steer ' "$work/plan-after.log")
 say "a plan after: $again steer(s)"
 
+# The request as the station received it: bit 0x4 of its mode is
+# disassociation imminent.
+mode=$(grep -o 'BSS Transition Management Request: dialog_token=[0-9]* request_mode=0x[0-9a-f]*' \
+	"$work/sta.log" | tail -1 | sed 's/.*request_mode=//')
+say "  the station was sent request_mode=${mode:-none}"
 sta_mac=$(cat /sys/class/net/wlan2/address)
 failed=0
+[ -n "$mode" ] && [ $(( mode & 4 )) -eq 4 ] || { say "  the station was not told disassociation is imminent"; failed=1; }
+
 [ "$early" -eq 0 ] || { say "  the control failed: a station that had just joined was steered"; failed=1; }
 [ "$planned" -eq 1 ] || { say "  the plan after the minute did not carry one steer"; failed=1; }
 case "$after" in *"bssid=$b1"*) ;; *) say "  the station did not move to $b1"; failed=1 ;; esac

@@ -12744,10 +12744,34 @@ WPA2 station in a namespace:
   nobody (the control); after 62 s the plan carried one imminent steer to
   the 5 GHz BSSID, the apply moved the station to 5180 MHz, the record held
   it, and the plan after steered nobody.
-- **Not shown live: the advisory case.** hwsim hears every station at
-  -20 dBm, so no station is weak, and the planner's half is shown by
-  `plan_access_point_test` alone. A real weak station, or hwsim's signal
-  attenuation if this image's kernel exposes it, is the reading still owed.
+- **The advisory case, live: `make hull-steer`'s second machine,
+  `weak.conf`.** netcfgd's access point on channel 1 with `steering { signal
+  = -45 }` and a declared neighbour -- a plain hostapd with 802.11n on
+  channel 6, standing in for another machine's. The station and netcfgd's
+  radio drop to 0 dBm. A plan in the first seconds steered nobody, the
+  station stayed put for the minute with the better access point in its scan
+  results, and the plan after carried one steer. The station received it as
+  `request_mode=0x3`, no disassociation bit (the band machine's is `0x7`),
+  moved to the neighbour, the record marked it `0`, and the next plan was
+  empty. Four things the run taught, each now in the code or the payload:
+  - **hostapd's default validity is one beacon interval, about 100 ms**, and
+    wpa_supplicant scans for the candidate before acting, so it found the
+    list expired. The executor sends `valid_int=255` (about 26 s);
+    `service_test` pins the exact command and a sabotage removing it goes
+    red there. Found only by the vm.
+  - **hwsim reports signal as transmit power minus 50, and `iw` takes no
+    negative power**, so -50 dBm is the weakest a station can be made, which
+    is why the threshold is -45 rather than a real-world -75.
+  - **wpa_supplicant 2.10 chooses by estimated throughput**: at -50 and
+    -30 dBm two 802.11g access points both estimate 54 Mbit/s, the tie keeps
+    the current one, and the station stayed. That is the advisory request
+    working as designed -- the station decides -- and why the neighbour here
+    runs 802.11n. A real weak station estimates less and moves.
+  - **The control caught a false pass.** A scan the payload asked for after
+    weakening the station gave wpa_supplicant the stronger neighbour, and it
+    roamed on its own inside the minute; the reading that "the steer moved
+    it" would have been wrong. Without bgscan an associated wpa_supplicant
+    reconsiders only on new scan results, so the payload no longer scans.
 
 ## 10.594 How the hosts reach each other, and what fuzznet and WireGuard are for
 

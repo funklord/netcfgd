@@ -81,6 +81,11 @@ struct fake {
 	/* Which of those it shows as `[DISABLED]`, as `SELECT_NETWORK` leaves every
 	 * network but the one selected. */
 	int    disabled[4];
+	/* What `SHOW_NEIGHBOR` answers, verbatim, and the BSSID hostapd's
+	 * `STATUS` gives as `bssid[0]=` -- empty for a fake that is not playing
+	 * an access point with neighbour reports (10.595). */
+	char   neighbours[512];
+	char   own_bssid[18];
 };
 
 static struct fake fake_config;
@@ -200,6 +205,19 @@ static inline void fake_handle(struct fake *state, const char *command, const st
 			return;
 		}
 		fake_acl(state, command, from, from_length);
+		return;
+	}
+	if (strcmp(command, "SHOW_NEIGHBOR") == 0) {
+		fake_reply(state, from, from_length, state->neighbours);
+		return;
+	}
+	if (starts_with(command, "BSS_TM_REQ ")) {
+		fake_reply(state, from, from_length, "OK\n");
+		return;
+	}
+	if (strcmp(command, "STATUS") == 0 && state->own_bssid[0]) {
+		(void)snprintf(body, sizeof(body), "state=ENABLED\nbssid[0]=%s\n", state->own_bssid);
+		fake_reply(state, from, from_length, body);
 		return;
 	}
 	if (strcmp(command, "STATUS") == 0) {

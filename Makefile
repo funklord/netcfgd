@@ -2762,23 +2762,35 @@ hull-roam:
 	sed 's/^/roam: /' tests/hull/roam/verdict/roam; \
 	grep -q '^VERDICT ok' tests/hull/roam/verdict/roam
 
-# Band steering (10.595 item 2): one vm, three hwsim radios, netcfgd running
-# the network on 2.4 and 5 GHz with `steering { band = true }` on the first,
-# and a station joined on 2.4 GHz that must end up on 5 after a minute's
-# settling. The regdom rig's image.
+# Steering (10.595 item 2), two vms one after the other, three hwsim radios
+# each. `hull.conf`: netcfgd running the network on 2.4 and 5 GHz with
+# `steering { band = true }` on the first, and a station joined on 2.4 GHz
+# that must end up on 5 after a minute's settling. `weak.conf`: a station
+# made weak by its transmit power, asked to move without being disconnected,
+# and going to the better neighbour it was pointed at. The regdom rig's image.
 hull-steer:
 	@$(MAKE) --no-print-directory -C c
 	@$(call hull_says,netcfgd/regdom)
 	@$(call hull_image,regdom)
-	@rm -f tests/hull/steer/verdict/steer
+	@rm -f tests/hull/steer/verdict/steer tests/hull/steer/verdict/weak
 	@mkdir -p tests/hull/steer/verdict
 	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/steer/hull.conf || true
-	@if [ ! -f tests/hull/steer/verdict/steer ]; then \
-		echo "steer: the payload left no verdict, so it never ran"; \
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/steer/weak.conf || true
+	@missing=0; \
+	for case in steer weak; do \
+		file=tests/hull/steer/verdict/$$case; \
+		if [ ! -f "$$file" ]; then \
+			echo "$$case: the payload left no verdict, so it never ran"; \
+			missing=$$((missing + 1)); \
+			continue; \
+		fi; \
+		sed "s/^/$$case: /" "$$file"; \
+		grep -q '^VERDICT ok' "$$file" || missing=$$((missing + 1)); \
+	done; \
+	if [ "$$missing" -ne 0 ]; then \
+		echo "steer: $$missing of 2 machine(s) did not pass"; \
 		exit 1; \
-	fi; \
-	sed 's/^/steer: /' tests/hull/steer/verdict/steer; \
-	grep -q '^VERDICT ok' tests/hull/steer/verdict/steer
+	fi
 
 # netcfgd joining an 802.11s mesh (10.588): one vm, two hwsim radios, netcfgd's
 # node peering with a bare wpa_supplicant one in a network namespace, traffic

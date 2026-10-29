@@ -585,6 +585,63 @@ static void the_acl_command_is_named_once(void)
 	    "a policy outside the set gets no word at all, which the caller refuses");
 }
 
+/*
+ * A steer, as hostapd is sent it (10.595 item 2). Every neighbour but the
+ * access point's own entry is a candidate for an advisory request; a target
+ * narrows it to one and a band steer adds disassociation imminent. Both carry
+ * `valid_int=255`: hostapd's default is about 100 ms, and the station that
+ * has to scan for the candidate first -- measured in a vm, wpa_supplicant
+ * does -- finds the list expired by then. And each is noted in the record.
+ */
+static void a_steer_names_its_candidates_and_holds_long_enough(void)
+{
+	char  message[NCFG_ERROR_MAX];
+	char  directory[1024];
+	char  path[NCFG_HOSTAPD_PATH_MAX];
+	char *record;
+
+	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), message,
+	    sizeof(message))) {
+		check(0, "the access point's control directory could be named");
+		return;
+	}
+	make_tree(directory);
+	memset(&fake_config, 0, sizeof(fake_config));
+	(void)snprintf(fake_config.own_bssid, sizeof(fake_config.own_bssid), "02:00:00:00:00:00");
+	(void)snprintf(fake_config.neighbours, sizeof(fake_config.neighbours), "%s",
+	    "02:00:00:00:01:00 ssid=7765616b nr=0200000001008f000000510606\n"
+	    "02:00:00:00:00:00 ssid=7765616b nr=0200000000008f000000510106\n"
+	    "02:00:00:00:09:00 ssid=7765616b nr=0200000009008f000000732406\n");
+	if (!fake_start(directory, "wlan0")) {
+		check(0, "a fake access point could be started");
+		return;
+	}
+	message[0] = '\0';
+	check(ncfg_service_steer(run_dir, "wlan0", "aa:00:00:00:00:02", NULL, 0, 500, message,
+	    sizeof(message)), "an advisory steer is sent");
+	check(heard_times("BSS_TM_REQ aa:00:00:00:00:02 neighbor=02:00:00:00:01:00,0x8f,81,6,6 "
+	    "neighbor=02:00:00:00:09:00,0x8f,115,36,6 pref=1 abridged=1 valid_int=255\n") == 1,
+	    "  naming every neighbour but itself, held for 255 beacons, nothing imminent");
+	message[0] = '\0';
+	check(ncfg_service_steer(run_dir, "wlan0", "aa:00:00:00:00:01", "02:00:00:00:09:00", 1, 500,
+	    message, sizeof(message)), "a band steer is sent");
+	check(heard_times("BSS_TM_REQ aa:00:00:00:00:01 neighbor=02:00:00:00:09:00,0x8f,115,36,6 "
+	    "pref=1 abridged=1 valid_int=255 disassoc_imminent=1 disassoc_timer=100\n") == 1,
+	    "  naming its one target, with disassociation imminent");
+	message[0] = '\0';
+	refused(ncfg_service_steer(run_dir, "wlan0", "aa:00:00:00:00:01", "02:00:00:00:07:00", 1,
+	    500, message, sizeof(message)), message, "does not hold 02:00:00:00:07:00",
+	    "a target the access point does not hold is refused rather than sent empty");
+	if (ncfg_hostapd_steered_path(run_dir, "wlan0", path, sizeof(path), NULL, 0)) {
+		record = testdir_read(path, NULL);
+		check(record && strstr(record, "aa:00:00:00:00:02 ") && strstr(record, " 0\n") &&
+		    strstr(record, "aa:00:00:00:00:01 ") && strstr(record, " 1\n"),
+		    "both sent steers are in the record, each saying which kind it was");
+		free(record);
+	}
+	fake_stop();
+}
+
 static void a_station_is_added_once_and_not_twice(void)
 {
 	char message[NCFG_ERROR_MAX];
@@ -1558,6 +1615,7 @@ int main(void)
 
 	the_acl_command_is_named_once();
 	a_station_is_added_once_and_not_twice();
+	a_steer_names_its_candidates_and_holds_long_enough();
 
 	a_supplicant_is_filled_from_the_document();
 	a_disabled_network_is_enabled_and_nothing_removed();

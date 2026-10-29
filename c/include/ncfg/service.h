@@ -482,10 +482,10 @@ const char *ncfg_service_acl_command(int policy);
  */
 /*
  * Ask one station to move (10.595 item 2): `BSS_TM_REQ <station>
- * neighbor=<bssid>,<info>,<class>,<channel>,<phy> ... pref=1 abridged=1`, with
- * `disassoc_imminent=1 disassoc_timer=100` when `imminent`, each candidate
- * taken from the access point's own neighbour list -- `target` alone, or all
- * but its own entry. Measured against hostapd 2.10. The steer is then noted
+ * neighbor=<bssid>,<info>,<class>,<channel>,<phy> ... pref=1 abridged=1
+ * valid_int=255`, with `disassoc_imminent=1 disassoc_timer=100` when
+ * `imminent`, each candidate taken from the access point's own neighbour
+ * list -- `target` alone, or all but its own entry. Measured against hostapd 2.10. The steer is then noted
  * in the record `ncfg_hostapd_steered_read` reads, so it is not repeated
  * within the hour.
  */
