@@ -12657,6 +12657,31 @@ leases.** Whether the log engine generalises to records, or records get an
 engine of their own shape, is fuzznet's design; netcfgd brings the caller.
 Signalled to fuzznet in its inbox, `20261029T1119Z`.
 
+### When: fuzznet's record half comes after its messaging core
+
+**The holder, 2026-10-29: fuzznet is the retention engine, and it is in a core
+refinement phase** -- fully functional over a limited subset, focused on
+messaging and the ecosystem that needs, with most of what this feature asks
+of it deferred until after. So persistence, distribution and retention of
+*seen* wait for fuzznet, and are not worked around here.
+
+**The feature splits at that seam, and the first half needs nothing from
+fuzznet:**
+
+1. **Now-able:** the lists as configuration, combining them, and wildcards
+   expanded against what is observed *at the time* -- the stations an access
+   point holds, the leases the DHCP server has out -- resolved into hostapd's
+   exact list and into firewall rules, and shown in `ncfg plan`. *Seen*
+   means "observed now" in this half.
+2. **After fuzznet's record half:** *seen* that persists per host, is shared
+   across machines, and is pruned by fuzznet's rules. The first half's
+   resolver takes this as a second source and does not change shape.
+
+**What is deliberately not built is a stopgap store**: a local file of seen
+hosts with its own pruning would be a second retention engine to retire, and
+a format other code would grow to depend on -- the placeholder 10.567 found
+this tree still holding for coordination.
+
 ### Still open
 
 - Which wildcard forms: an OUI prefix, a mask, a name pattern.
