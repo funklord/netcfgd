@@ -64,6 +64,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/un.h>
@@ -128,7 +129,8 @@ static void write_recorder(const char *path, const char *record, int status)
  */
 static pid_t spawn_marked_running(const char *marker, const char *body)
 {
-	pid_t child = fork();
+	const pid_t parent = getpid();
+	pid_t       child = fork();
 
 	if (child < 0) {
 		return -1;
@@ -137,6 +139,17 @@ static pid_t spawn_marked_running(const char *marker, const char *body)
 		const char *argv[5];
 
 		(void)setpgid(0, 0);
+		/* **Dies with the test, whatever kills the test.** The stubborn
+		 * client below ignores `TERM` on purpose, so a test binary that died
+		 * before `stop_marked` -- to its own `alarm`, or to a harness's
+		 * `SIGKILL` -- left it looping for ever: one was found reparented to
+		 * init three days after its run. `PDEATHSIG` is the kernel's to
+		 * deliver, so no cleanup path in the test has to survive for it to
+		 * happen. A parent that is already gone by now is the same case. */
+		(void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != parent) {
+			_exit(127);
+		}
 		argv[0] = "/bin/sh";
 		argv[1] = "-c";
 		argv[2] = body;

@@ -457,7 +457,7 @@ static void a_daemon_slow_to_exit_is_waited_for(const char *run)
 	    "# A radvd that answers SIGTERM and takes half a second over it. The\n"
 	    "# loop of short sleeps is deliberate: a trap does not interrupt a\n"
 	    "# foreground child, so a single long sleep would never run it.\n"
-	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; while :; do sleep 0.1; done' "
+	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; n=0; while [ $n -lt 1200 ]; do sleep 0.1; n=$((n+1)); done' "
 	    "radvd --config %s >/dev/null 2>&1 &\n"
 	    "# `$4` is the pidfile: the argument list is `--config X --pidfile Y\n"
 	    "# --logmethod stderr`, which the start test above asserts in full, so\n"

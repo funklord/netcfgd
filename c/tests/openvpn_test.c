@@ -68,6 +68,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/prctl.h>
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -669,6 +670,7 @@ static void a_daemon_slow_to_exit_is_waited_for(const char *base)
 	char  message[NCFG_ERROR_MAX];
 	char *written;
 	pid_t held;
+	pid_t               parent;
 
 	(void)testdir_in(base, "slowstop", run, sizeof(run));
 	check(mkdir(run, 0755) == 0, "a run directory for the slow stop");
@@ -694,9 +696,18 @@ static void a_daemon_slow_to_exit_is_waited_for(const char *base)
 	    pid_file);
 	check(write_program(holder, body), "a stand-in daemon that is slow to exit is written");
 
+	parent = getpid();
 	held = fork();
 	if (held == 0) {
 		(void)setpgid(0, 0);
+		/* Dies with the test, whatever kills it: this stand-in ignores
+		 * `TERM` on purpose and loops for ever, so a test binary that died
+		 * before stopping it would leave it running -- dhcp_test's twin was
+		 * found reparented to init three days after its run. */
+		(void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != parent) {
+			_exit(127);
+		}
 		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
 		_exit(127);
 	}
@@ -778,6 +789,7 @@ static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const
 	int                listener;
 	pid_t              server;
 	pid_t              held;
+	pid_t              parent;
 	char              *written;
 
 	(void)testdir_in(base, "mgmtslow", run, sizeof(run));
@@ -857,9 +869,15 @@ static void a_management_stop_does_not_pull_the_socket_from_the_next_start(const
 	    "exit 0\n",
 	    pid_file, socket_path);
 	check(write_program(holder, body), "a stand-in that outlives the command is written");
+	parent = getpid();
 	held = fork();
 	if (held == 0) {
 		(void)setpgid(0, 0);
+		/* Dies with the test, as the slow-stop stand-in above does. */
+		(void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != parent) {
+			_exit(127);
+		}
 		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
 		_exit(127);
 	}
@@ -1165,6 +1183,7 @@ static void a_tunnel_that_will_not_go_is_a_refusal(const char *base)
 	char  body[4096];
 	char  message[NCFG_ERROR_MAX];
 	pid_t held;
+	pid_t parent;
 	int   waited = 0;
 
 	(void)testdir_in(base, "stubborn", run, sizeof(run));
@@ -1184,9 +1203,15 @@ static void a_tunnel_that_will_not_go_is_a_refusal(const char *base)
 	    "while :; do sleep 0.05; done\n",
 	    pid_file);
 	check(write_program(holder, body), "a stand-in that ignores SIGTERM is written");
+	parent = getpid();
 	held = fork();
 	if (held == 0) {
 		(void)setpgid(0, 0);
+		/* Dies with the test, as the slow-stop stand-in above does. */
+		(void)prctl(PR_SET_PDEATHSIG, SIGKILL);
+		if (getppid() != parent) {
+			_exit(127);
+		}
 		(void)execl("/bin/sh", "sh", holder, socket_path, (char *)NULL);
 		_exit(127);
 	}

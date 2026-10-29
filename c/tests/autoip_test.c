@@ -218,7 +218,7 @@ static void a_client_slow_to_exit_is_waited_for(const char *run)
 	    "# reported honestly that the client would not go -- which is the right\n"
 	    "# behaviour for a client that will not go, and the wrong fixture for a\n"
 	    "# client that is merely slow.\n"
-	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; while :; do sleep 0.1; done' "
+	    "setsid sh -c 'trap \"sleep 0.5; exit 0\" TERM; n=0; while [ $n -lt 1200 ]; do sleep 0.1; n=$((n+1)); done' "
 	    "holder --force-bind %s >/dev/null 2>&1 &\n"
 	    "sleep 0.3\n"
 	    "exit 0\n",
