@@ -139,17 +139,19 @@ static int rendered(const ncfg_access_point_t *point, const char *passphrase,
 	int  ok;
 
 	message[0] = '\0';
-	ok = ncfg_hostapd_config(point, NULL, "/run/netcfgd/hostapd", passphrase, out, NULL, message,
-	    sizeof(message));
+	ok = ncfg_hostapd_config(point, NULL, "/run/netcfgd/hostapd", passphrase, NULL, out, NULL,
+	    message, sizeof(message));
 	if (!ok) {
 		printf("  this access point was expected to render: %s\n", kept(message));
 	}
 	return ok;
 }
 
-/* Render, expecting a refusal, and say which one it was. */
-static int refused(const ncfg_access_point_t *point, const char *passphrase,
-    ncfg_hostapd_unsupported_t want, const char *what)
+/* Render on a machine with `local`, expecting a refusal, and say which one it
+ * was. */
+static int refused_on(const ncfg_access_point_t *point, const ncfg_hostapd_local_t *local,
+    const char *passphrase, const char *roaming_key, ncfg_hostapd_unsupported_t want,
+    const char *what)
 {
 	ncfg_hostapd_lines_t       lines;
 	ncfg_hostapd_unsupported_t why = NCFG_HOSTAPD_OK;
@@ -157,8 +159,8 @@ static int refused(const ncfg_access_point_t *point, const char *passphrase,
 	int                        ok;
 
 	message[0] = '\0';
-	ok = ncfg_hostapd_config(point, NULL, "/run", passphrase, &lines, &why, message,
-	    sizeof(message));
+	ok = ncfg_hostapd_config(point, local, "/run", passphrase, roaming_key, &lines, &why,
+	    message, sizeof(message));
 	if (ok) {
 		ncfg_hostapd_lines_free(&lines);
 	}
@@ -168,6 +170,13 @@ static int refused(const ncfg_access_point_t *point, const char *passphrase,
 		printf("  said: %s\n", message);
 	}
 	return !ok;
+}
+
+/* Render, expecting a refusal, and say which one it was. */
+static int refused(const ncfg_access_point_t *point, const char *passphrase,
+    ncfg_hostapd_unsupported_t want, const char *what)
+{
+	return refused_on(point, NULL, passphrase, NULL, want, what);
 }
 
 /* --------------------------------------------------------- the rendering */
@@ -308,6 +317,78 @@ static void owe_needs_no_secret(void)
 }
 
 /*
+ * FT-SAE: WPA3 clients roam fast once a `roaming_key` lets the access points
+ * hand each other their keys, each line as the vm experiment of 10.587 found
+ * hostapd needs it -- every access point named by its radio, and the key
+ * holders wildcarded, so nothing lists the others.
+ *
+ * The key is SHA-256 over `roamingsecret`, computed outside this program with
+ * `printf %s roamingsecret | sha256sum`: an access point netcfgd does not run
+ * is given exactly that, so it is checked against the number.
+ */
+static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
+{
+	static const char          digest[] =
+	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
+	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
+	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00" };
+	ncfg_hostapd_lines_t       lines;
+	char                       message[NCFG_ERROR_MAX];
+	char                       want[160];
+	char                      *redacted;
+
+	point.fast_roaming = 1;
+	point.roaming_key = &key;
+	if (!ncfg_hostapd_config(&point, &local, "/run", "correcthorse", "roamingsecret", &lines,
+	    NULL, message, sizeof(message))) {
+		printf("  %s\n", kept(message));
+		check(0, "a WPA3 access point with fast roaming and a roaming key renders");
+		return;
+	}
+	check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"), "SAE FT-SAE",
+	    "WPA3 with a roaming key offers FT-SAE beside SAE");
+	check_text(ncfg_hostapd_value_of(&lines, "nas_identifier"), "netcfgd-8498-020000ab0100",
+	    "  each access point is named by its radio, since a shared name makes the target "
+	    "take itself for the key holder");
+	(void)snprintf(want, sizeof(want), "ff:ff:ff:ff:ff:ff * %s", digest);
+	check_text(ncfg_hostapd_value_of(&lines, "r0kh"), want,
+	    "  the keys are asked of every access point on the segment");
+	(void)snprintf(want, sizeof(want), "00:00:00:00:00:00 00:00:00:00:00:00 %s", digest);
+	check_text(ncfg_hostapd_value_of(&lines, "r1kh"), want,
+	    "  and any is answered, under SHA-256 of the secret");
+	redacted = ncfg_hostapd_to_redacted(point.id, &lines, message, sizeof(message));
+	check(redacted && !strstr(redacted, digest),
+	    "  the key is a secret: the printable file does not carry it");
+	free(redacted);
+	ncfg_hostapd_lines_free(&lines);
+
+	point.security.psk.proto = NCFG_PSK_PROTO_WPA2_WPA3;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", "roamingsecret", &lines,
+	    NULL, message, sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"),
+		    "WPA-PSK FT-PSK SAE FT-SAE",
+		    "transition mode with a roaming key roams both kinds of client fast");
+		check_text(ncfg_hostapd_value_of(&lines, "ft_psk_generate_local"), "1",
+		    "  its WPA2 clients still by local derivation, which distinct names do not "
+		    "disturb");
+		ncfg_hostapd_lines_free(&lines);
+	} else {
+		check(0, "transition mode with a roaming key renders");
+	}
+
+	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
+	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
+	{
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL };
+
+		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
+		    NCFG_HOSTAPD_MISSING_ADDRESS,
+		    "and so is a radio whose address is not known");
+	}
+}
+
+/*
  * Fast roaming: 802.11r by FT-PSK, each line as the two-access-point hwsim
  * experiment of 10.587 found hostapd needs it.
  *
@@ -352,6 +433,9 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 
 	point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
 	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "r0kh") == NULL &&
+		        ncfg_hostapd_value_of(&lines, "r1kh") == NULL,
+		    "FT-PSK alone exchanges no keys, so names no key holders");
 		check(ncfg_hostapd_value_of(&lines, "mobility_domain") == NULL &&
 		        ncfg_hostapd_value_of(&lines, "bss_transition") == NULL,
 		    "without it, no 802.11r or 802.11v line is written");
@@ -365,13 +449,14 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
  * hostapd makes them and they carry nothing (10.587 item 4). */
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
-	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_lines_t lines;
-	char                 message[NCFG_ERROR_MAX];
+	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	const ncfg_hostapd_local_t bridged = { "br0", NULL };
+	ncfg_hostapd_lines_t       lines;
+	char                       message[NCFG_ERROR_MAX];
 
 	point.wds = 1;
-	if (ncfg_hostapd_config(&point, "br0", "/run", "correcthorse", &lines, NULL, message,
-	    sizeof(message))) {
+	if (ncfg_hostapd_config(&point, &bridged, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
 		check_text(ncfg_hostapd_value_of(&lines, "wds_sta"), "1",
 		    "an access point taking repeaters takes four-address stations");
 		check_text(ncfg_hostapd_value_of(&lines, "wds_bridge"), "br0",
@@ -390,8 +475,8 @@ static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 		ncfg_hostapd_lines_free(&lines);
 	}
 	point.wds = 0;
-	if (ncfg_hostapd_config(&point, "br0", "/run", "correcthorse", &lines, NULL, message,
-	    sizeof(message))) {
+	if (ncfg_hostapd_config(&point, &bridged, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
 		check(ncfg_hostapd_value_of(&lines, "wds_sta") == NULL &&
 		        ncfg_hostapd_value_of(&lines, "wds_bridge") == NULL,
 		    "and one that does not take them writes neither, bridged or not");
@@ -1098,6 +1183,7 @@ int main(void)
 	only_the_arms_that_write_wpa_passphrase_are_length_checked();
 	owe_needs_no_secret();
 	fast_roaming_is_ft_psk_derived_where_it_runs();
+	fast_roaming_carries_sae_keys_under_a_roaming_key();
 	a_repeater_s_interface_joins_the_radio_s_bridge();
 	an_ssid_that_is_not_text_survives_as_hex();
 	the_band_follows_the_channel_when_nothing_says_otherwise();

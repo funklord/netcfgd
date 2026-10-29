@@ -1166,8 +1166,8 @@ static void the_compiler_and_the_renderer_agree_about_bands(void)
 		point.channel.has = 1;
 		point.channel.value = table[at].channel;
 		message[0] = '\0';
-		rendered_ok = ncfg_hostapd_config(&point, NULL, "/run/netcfgd/hostapd", NULL, &lines, NULL,
-		    message, sizeof(message));
+		rendered_ok = ncfg_hostapd_config(&point, NULL, "/run/netcfgd/hostapd", NULL, NULL,
+		    &lines, NULL, message, sizeof(message));
 
 		(void)snprintf(what, sizeof(what), "  band %s channel %d %s",
 		    table[at].band ? table[at].band : "(none)", table[at].channel,
@@ -1254,8 +1254,8 @@ static void access_point_cases(void)
 	}
 
 	/* Fast roaming: FT-PSK where each access point derives the keys itself, so
-	 * only where there is a passphrase to derive from and not on WPA3 alone
-	 * (10.587). */
+	 * only where there is a passphrase to derive from, and on WPA3 alone only
+	 * with a `roaming_key` to carry SAE's keys (10.587). */
 	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
 	    "\tfast_roaming = true\n\tmobility_domain = \"4F2A\"\n"
 	    "\twifi { psk = \"@secret:ap\" }\n}\n",
@@ -1268,8 +1268,30 @@ static void access_point_cases(void)
 	}
 	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
 	    "\twifi { psk = \"@secret:ap\"\n\tproto = \"wpa3\" }\n}\n",
-	    "`proto = \"wpa2+wpa3\"`",
-	    "fast roaming on WPA3 alone is refused, naming what does roam");
+	    "Add `roaming_key = \"@secret:NAME\"`",
+	    "fast roaming on WPA3 alone with no roaming key is refused, naming what it needs");
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\tfast_roaming = true\n\troaming_key = \"@secret:roam\"\n"
+	    "\twifi { psk = \"@secret:ap\"\n\tproto = \"wpa3\" }\n}\n",
+	    "and with one it compiles");
+	if (document) {
+		check(document->access_points[0].roaming_key &&
+		    strcmp(document->access_points[0].roaming_key->name, "roam") == 0,
+		    "  carrying the key as a reference, never a value");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\troaming_key = \"@secret:roam\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "names a `roaming_key` it would not use",
+	    "a roaming key without fast roaming is refused rather than ignored");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
+	    "\troaming_key = \"@secret:roam\"\n"
+	    "\twifi { psk = \"@secret:ap\"\n\tproto = \"wpa2\" }\n}\n",
+	    "WPA2 clients roam fast without one",
+	    "  and so is one on WPA2 alone, whose clients roam without it");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
+	    "\troaming_key = \"plaintext\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "@secret:", "  and a roaming key written as a value is refused, as a psk is");
 	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tfast_roaming = true\n"
 	    "\twifi { open = true }\n}\n", "no passphrase",
 	    "and on a network with no passphrase to derive keys from");

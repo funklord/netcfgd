@@ -881,6 +881,10 @@ static void access_point_free(ncfg_access_point_t *access_point)
 	free(access_point->band);
 	free(access_point->regdom);
 	free(access_point->mobility_domain);
+	if (access_point->roaming_key) {
+		free(access_point->roaming_key->name);
+		free(access_point->roaming_key);
+	}
 	ncfg_security_free(&access_point->security);
 	if (access_point->access_control) {
 		ncfg_strings_free(access_point->access_control->stations,
@@ -893,7 +897,13 @@ static void access_point_free(ncfg_access_point_t *access_point)
 int ncfg_can_roam_fast(const ncfg_access_point_t *point)
 {
 	return point->security.kind == NCFG_SECURITY_PSK &&
-	    point->security.psk.proto != NCFG_PSK_PROTO_WPA3;
+	    (point->security.psk.proto != NCFG_PSK_PROTO_WPA3 || point->roaming_key);
+}
+
+int ncfg_roaming_key_serves(const ncfg_access_point_t *point)
+{
+	return point->fast_roaming && point->security.kind == NCFG_SECURITY_PSK &&
+	    point->security.psk.proto != NCFG_PSK_PROTO_WPA2;
 }
 
 int ncfg_is_mobility_domain(const char *text)
@@ -914,14 +924,19 @@ int ncfg_is_mobility_domain(const char *text)
 /*
  * Fast roaming only where it can be offered, refused by name everywhere else.
  *
- * **FT-PSK is the one form built**, because it is the one where each access
- * point derives the keys from the passphrase by itself (hostapd's
- * `ft_psk_generate_local`): two machines running one network need nothing
- * shared but the configuration. WPA3's SAE has no such derivation -- its keys
- * come out of each association, so another access point has to be handed them
- * over the LAN -- and an open or OWE network has no passphrase to derive from.
- * Transition mode takes it, and only its WPA2 clients roam fast: an SAE client
- * there associates as it always did.
+ * **FT-PSK needs nothing shared**, because each access point derives the keys
+ * from the passphrase by itself (hostapd's `ft_psk_generate_local`): two
+ * machines running one network need only the configuration. WPA3's SAE has no
+ * such derivation -- its keys come out of each association, so another access
+ * point has to be handed them over the LAN, under a `roaming_key` they share
+ * (FT-SAE). Without one, transition mode roams its WPA2 clients fast and an
+ * SAE client associates as it always did, and WPA3 alone is refused: it would
+ * be fast roaming offered to nobody. An open or OWE network has no passphrase
+ * to derive from.
+ *
+ * A `roaming_key` where it carries nothing is refused for the reason a stray
+ * mobility domain is: without fast roaming, or on WPA2 alone, where FT-PSK
+ * needs no key, it is a setting that would do nothing.
  *
  * A mobility domain without fast roaming is refused rather than ignored: it is
  * a number somebody copied from another vendor's access point to make roaming
@@ -929,8 +944,16 @@ int ncfg_is_mobility_domain(const char *text)
  * wondering why it does not.
  */
 static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *point,
-    ncfg_span_t roaming_span, ncfg_span_t domain_span)
+    ncfg_span_t roaming_span, ncfg_span_t domain_span, ncfg_span_t key_span)
 {
+	if (point->roaming_key && !ncfg_roaming_key_serves(point)) {
+		ncfg_diag(ctx, key_span,
+		    "access point `%s` names a `roaming_key` it would not use: the key carries "
+		    "WPA3 clients' keys between access points for fast roaming, so it needs "
+		    "`fast_roaming = true` and a `proto` with WPA3 in it -- WPA2 clients roam fast "
+		    "without one", point->id);
+		return 0;
+	}
 	if (point->mobility_domain && !point->fast_roaming) {
 		ncfg_diag(ctx, domain_span,
 		    "access point `%s` names a mobility domain without `fast_roaming = true`; the "
@@ -948,12 +971,13 @@ static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *
 		    "keys from the passphrase", point->id);
 		return 0;
 	}
-	if (point->security.psk.proto == NCFG_PSK_PROTO_WPA3) {
+	if (point->security.psk.proto == NCFG_PSK_PROTO_WPA3 && !point->roaming_key) {
 		ncfg_diag(ctx, roaming_span,
-		    "access point `%s` asks for fast roaming on `proto = \"wpa3\"`, which is not "
-		    "built: SAE's keys come out of each association, so the access points would "
-		    "have to hand them to each other over the LAN. `proto = \"wpa2+wpa3\"` "
-		    "roams its WPA2 clients fast and lets WPA3 ones join as before", point->id);
+		    "access point `%s` asks for fast roaming on `proto = \"wpa3\"` with no "
+		    "`roaming_key`: SAE's keys come out of each association, so the access points "
+		    "hand them to each other over the LAN under a key they share. Add "
+		    "`roaming_key = \"@secret:NAME\"`, the same on every access point of the "
+		    "network", point->id);
 		return 0;
 	}
 	return 1;
@@ -967,6 +991,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	ncfg_span_t             channel_span = block->span;
 	ncfg_span_t             roaming_span = block->span;
 	ncfg_span_t             domain_span = block->span;
+	ncfg_span_t             key_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
 	size_t                  i;
@@ -1013,6 +1038,24 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.wds = flag;
 				}
+			} else if (strcmp(key, "roaming_key") == 0) {
+				ncfg_secret_ref_t secret;
+
+				key_span = assignment->span;
+				memset(&secret, 0, sizeof(secret));
+				if (!ncfg_as_secret(ctx, assignment->value, &secret)) {
+					continue;
+				}
+				if (!access_point.roaming_key) {
+					access_point.roaming_key = calloc(1, sizeof(*access_point.roaming_key));
+					if (!access_point.roaming_key) {
+						ncfg_lower_oom(ctx);
+						free(secret.name);
+						continue;
+					}
+				}
+				free(access_point.roaming_key->name);
+				*access_point.roaming_key = secret;
 			} else if (strcmp(key, "fast_roaming") == 0) {
 				roaming_span = assignment->span;
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
@@ -1105,7 +1148,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	if (!check_channel_in_band(ctx, &access_point, channel_span)) {
 		goto refused;
 	}
-	if (!check_fast_roaming(ctx, &access_point, roaming_span, domain_span)) {
+	if (!check_fast_roaming(ctx, &access_point, roaming_span, domain_span, key_span)) {
 		goto refused;
 	}
 	*out = access_point;

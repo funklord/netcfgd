@@ -133,6 +133,87 @@ static ncfg_optbool_t secret_answer(const ncfg_observed_t *observed)
 	return observed->backend_count == 1u ? observed->backends[0].secret_matches : none;
 }
 
+/* A WPA3-only access point roaming fast under the `roam-key` secret, and the
+ * file netcfgd writes for one: `sae_password` and no `wpa_passphrase`, and
+ * the key as the digest in `r1kh`. */
+#define WPA3_BLOCK \
+	"\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\"," \
+	"\"device\":\"wlan0\",\"security\":{\"type\":\"psk\",\"proto\":\"wpa3\"," \
+	"\"passphrase\":{\"provider\":\"file\",\"name\":\"home-psk\"}}," \
+	"\"fast_roaming\":true," \
+	"\"roaming_key\":{\"provider\":\"file\",\"name\":\"roam-key\"}}]"
+
+static int write_wpa3_hostapd(const char *passphrase, const char *roaming_key)
+{
+	char path[640];
+	char dir[640];
+	char digest[NCFG_SHA256_HEX_SIZE];
+	char body[512];
+
+	(void)snprintf(dir, sizeof(dir), "%s/hostapd", run_dir);
+	testdir_mkdirp(dir);
+	if (!ncfg_hostapd_config_path(run_dir, "wlan0", path, sizeof(path), NULL, 0)) {
+		return 0;
+	}
+	ncfg_sha256_hex(roaming_key, strlen(roaming_key), digest);
+	(void)snprintf(body, sizeof(body),
+	    "interface=wlan0\nssid=home\nwpa=2\nwpa_key_mgmt=SAE FT-SAE\n"
+	    "sae_password=%s\nr0kh=ff:ff:ff:ff:ff:ff * %s\n"
+	    "r1kh=00:00:00:00:00:00 00:00:00:00:00:00 %s\n", passphrase, digest, digest);
+	return testdir_write(path, body, strlen(body));
+}
+
+/* One currency round over the WPA3 access point, and its answer. */
+static ncfg_optbool_t wpa3_answer(void)
+{
+	ncfg_observed_t *observed = observed_with("access_point", "wlan0", 1);
+	ncfg_document_t *document = document_of(AP_DEVICE, WPA3_BLOCK);
+	char             message[NCFG_ERROR_MAX];
+	ncfg_optbool_t   answer = { 0, 0 };
+
+	if (observed && document) {
+		message[0] = '\0';
+		(void)ncfg_observe_currency(observed, run_dir, &resolver, document, message,
+		    sizeof(message));
+		answer = secret_answer(observed);
+	} else {
+		check(0, "the fixtures for a WPA3 access point read");
+	}
+	ncfg_observed_free(observed);
+	ncfg_document_free(document);
+	return answer;
+}
+
+/*
+ * WPA3 alone, which writes `sae_password` and no `wpa_passphrase` -- and with
+ * only the latter read, a WPA3 access point's passphrase was never compared,
+ * so a rotated one was never a restart. And its `roaming_key`, which hostapd
+ * also read once: rotating it alone is a restart too.
+ */
+static void a_wpa3_access_point_s_secrets_are_compared(void)
+{
+	ncfg_optbool_t answer;
+
+	(void)store("home-psk", CANARY);
+	(void)store("roam-key", "the-roaming-key");
+	(void)write_wpa3_hostapd(CANARY, "the-roaming-key");
+	answer = wpa3_answer();
+	check(answer.has && answer.value,
+	    "a WPA3 access point holding what the store has is current");
+
+	(void)store("home-psk", "the-new-one-entirely");
+	answer = wpa3_answer();
+	check(answer.has && !answer.value,
+	    "  a WPA3 passphrase the store has rotated is noticed, from `sae_password`");
+	(void)store("home-psk", CANARY);
+
+	(void)store("roam-key", "another-roaming-key");
+	answer = wpa3_answer();
+	check(answer.has && !answer.value,
+	    "  and so is a rotated roaming key, with the passphrase unchanged");
+	(void)store("roam-key", "the-roaming-key");
+}
+
 /* ------------------------------------------------------------------------ *
  * The passphrase
  * ------------------------------------------------------------------------ */
@@ -416,6 +497,7 @@ int main(void)
 	a_passphrase_that_has_not_changed_matches();
 	a_rotated_passphrase_is_noticed();
 	what_cannot_be_compared_says_nothing();
+	a_wpa3_access_point_s_secrets_are_compared();
 	a_tunnel_started_from_this_file_is_current();
 	a_file_the_document_names_and_nobody_can_read();
 	nothing_that_identifies_a_passphrase_is_written_down();

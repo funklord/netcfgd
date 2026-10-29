@@ -14,6 +14,7 @@
 #include "../backend_internal.h"
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
+#include "ncfg/sha256.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -323,25 +324,78 @@ static int psk_lines(ncfg_hostapd_lines_t *lines, int proto, const char *key_mgm
  *   * `ft_over_ds=0` -- over the air. Over the distribution system the station
  *     asks through its current access point, which forwards to the target over
  *     the LAN, and that is the key exchange local derivation exists to avoid.
+ *
+ * **FT-SAE, where a `roaming_key` is given, measured the same way** with the
+ * two access points on two bridges joined by a veth -- two machines' worth:
+ *
+ *   * the keys travel: `r0kh=ff:ff:ff:ff:ff:ff * <key>` asks every access
+ *     point on the segment, and `r1kh=00:00:00:00:00:00 00:00:00:00:00:00
+ *     <key>` answers any, so nothing lists the others. With mismatched keys
+ *     the roam is not a fast one.
+ *   * **so the name stops being shared**: with one `nas_identifier` on both,
+ *     the target takes itself for the key holder and the roam is not a fast
+ *     one either. Each is named by its radio's address instead -- and FT-PSK
+ *     roamed fast beside it under distinct names, keys mismatched, so local
+ *     derivation does not care.
+ *   * the key is SHA-256 of the secret, 64 hex digits, so the secret can be
+ *     any text and an access point netcfgd does not run is given
+ *     `printf %s <secret> | sha256sum`.
  */
-static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t *access_point)
+static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t *access_point,
+    const ncfg_hostapd_local_t *local, const char *roaming_key)
 {
-	char domain[NCFG_MOBILITY_DOMAIN_TEXT_MAX];
-	char holder[32];
+	char              domain[NCFG_MOBILITY_DOMAIN_TEXT_MAX];
+	char              holder[48];
+	char              r0kh[96];
+	char              r1kh[128];
+	char              key[NCFG_SHA256_HEX_SIZE];
+	size_t            at;
+	size_t            used;
+	int               sae = strstr(ncfg_access_point_key_mgmt(access_point), "FT-SAE") != NULL;
+	int               ok;
 
 	ncfg_access_point_mobility_domain(access_point, domain);
-	(void)snprintf(holder, sizeof(holder), "netcfgd-%s", domain);
-	return add_line(lines, "mobility_domain", domain, 0) &&
+	if (!sae) {
+		(void)snprintf(holder, sizeof(holder), "netcfgd-%s", domain);
+		return add_line(lines, "mobility_domain", domain, 0) &&
+		    add_line(lines, "nas_identifier", holder, 0) &&
+		    add_line(lines, "ft_psk_generate_local", "1", 0) &&
+		    add_line(lines, "ft_over_ds", "0", 0) &&
+		    add_line(lines, "bss_transition", "1", 0);
+	}
+
+	used = (size_t)snprintf(holder, sizeof(holder), "netcfgd-%s-", domain);
+	for (at = 0u; local->address[at] != '\0' && used + 1u < sizeof(holder); at++) {
+		if (isxdigit((unsigned char)local->address[at])) {
+			holder[used++] = (char)tolower((unsigned char)local->address[at]);
+		}
+	}
+	holder[used] = '\0';
+	ncfg_sha256_hex(roaming_key, strlen(roaming_key), key);
+	(void)snprintf(r0kh, sizeof(r0kh), "ff:ff:ff:ff:ff:ff * %s", key);
+	(void)snprintf(r1kh, sizeof(r1kh), "00:00:00:00:00:00 00:00:00:00:00:00 %s", key);
+	ok = add_line(lines, "mobility_domain", domain, 0) &&
 	    add_line(lines, "nas_identifier", holder, 0) &&
+	    /* For the WPA2 clients of transition mode, which still roam by
+	     * deriving locally. */
 	    add_line(lines, "ft_psk_generate_local", "1", 0) &&
 	    add_line(lines, "ft_over_ds", "0", 0) &&
+	    add_line(lines, "r0kh", r0kh, 1) &&
+	    add_line(lines, "r1kh", r1kh, 1) &&
 	    add_line(lines, "bss_transition", "1", 0);
+	explicit_bzero(key, sizeof(key));
+	explicit_bzero(r0kh, sizeof(r0kh));
+	explicit_bzero(r1kh, sizeof(r1kh));
+	return ok;
 }
 
-int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bridge,
-    const char *ctrl_dir, const char *passphrase, ncfg_hostapd_lines_t *out,
-    ncfg_hostapd_unsupported_t *why, char *err, size_t err_size)
+int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
+    const ncfg_hostapd_local_t *local, const char *ctrl_dir, const char *passphrase,
+    const char *roaming_key, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why,
+    char *err, size_t err_size)
 {
+	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL };
+	const char                       *bridge;
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
 	char              ssid[NCFG_SSID_MAX_LEN * 2u + 1u];
@@ -358,8 +412,29 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bri
 		return 0;
 	}
 	memset(out, 0, sizeof(*out));
+	if (!local) {
+		local = &nothing_local;
+	}
+	bridge = local->bridge;
 	if (!band_of(access_point, &band, why, err, err_size)) {
 		return 0;
+	}
+	/* Before anything is rendered, for the reason the passphrase is refused:
+	 * an access point up and offering FT-SAE it cannot complete fails every
+	 * WPA3 roam with nothing to say why. */
+	if (access_point->fast_roaming &&
+	    strstr(ncfg_access_point_key_mgmt(access_point) ?
+	    ncfg_access_point_key_mgmt(access_point) : "", "FT-SAE")) {
+		if (!roaming_key) {
+			return refuse(NCFG_HOSTAPD_MISSING_ROAMING_KEY, why, err, err_size,
+			    "this access point roams WPA3 clients fast and no `roaming_key` was "
+			    "resolved");
+		}
+		if (!local->address) {
+			return refuse(NCFG_HOSTAPD_MISSING_ADDRESS, why, err, err_size,
+			    "this access point roams WPA3 clients fast, which names it by its radio's "
+			    "address, and the address was not known");
+		}
 	}
 
 	/* `ssid2` rather than `ssid`, because an SSID is 0..32 arbitrary octets
@@ -510,7 +585,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bri
 		ncfg_error_set(err, err_size, "out of memory rendering four-address stations");
 		return 0;
 	}
-	if (access_point->fast_roaming && !roaming_lines(out, access_point)) {
+	if (access_point->fast_roaming && !roaming_lines(out, access_point, local, roaming_key)) {
 		ncfg_hostapd_lines_free(out);
 		ncfg_error_set(err, err_size, "out of memory rendering fast roaming");
 		return 0;

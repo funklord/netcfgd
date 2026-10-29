@@ -12763,7 +12763,7 @@ without fast transition took 199 ms in the same rig. hwsim has no radio, so the
 4-way handshake FT-PSK saves costs almost nothing there; the rig proves the
 mechanism, not a speed-up. On a real radio FT-PSK saves that one handshake --
 real but modest. The large saving is on networks whose handshake is expensive,
-SAE and 802.1X, which is the part not built.
+SAE and 802.1X: SAE is built now (item 1 below), 802.1X is not.
 
 **The example gate compiles against the C now**: it read the Rust's debug
 build, which refused `fast_roaming` -- `linkage`'s reason for moving (0266),
@@ -12771,10 +12771,36 @@ met by this gate later.
 
 ### What is still missing, in the order worth building
 
-1. **WPA3 fast roaming (FT-SAE).** The keys have to travel: hostapd's RRB over
-   the LAN between access points, with `r0kh`/`r1kh` and a shared key. Needs
-   the access points on one layer-2 segment and a key the configuration can
-   name as a secret.
+1. **WPA3 fast roaming (FT-SAE) -- built** (2026-10-29). `roaming_key =
+   "@secret:NAME"` on an `access_point` with `fast_roaming = true` and a
+   `proto` with WPA3 in it adds FT-SAE beside SAE; WPA3 alone with fast
+   roaming and no key stays refused, and a key that nothing would use
+   (no fast roaming, or WPA2 alone) is refused rather than ignored.
+   **Measured in a vm first**, two bare hostapds on two bridges joined by a
+   veth: the keys travel over RRB with `r0kh=ff:ff:ff:ff:ff:ff * <key>` and
+   `r1kh=00:00:00:00:00:00 00:00:00:00:00:00 <key>`, so nothing lists the
+   other access points; **with one `nas_identifier` on both the roam is not
+   a fast one** (the target takes itself for the key holder), so an access
+   point with a key is named `netcfgd-<domain>-<its radio's address>`; with
+   mismatched keys the roam is not a fast one; and FT-PSK still roams fast
+   under distinct names with keys mismatched, so transition mode carries both
+   in one hostapd and FT-PSK without a key renders exactly as before.
+   **The key is its own secret and not derived from the passphrase**:
+   whoever holds it can pull any station's PMK-R1 off the LAN, and SAE's
+   property is that the passphrase does not get you that. It goes to hostapd
+   as SHA-256 of the secret, so the secret is any text and another vendor's
+   access point is given `printf %s <secret> | sha256sum`. RRB rides the
+   radio's bridge, so a radio in none is warned about. A rotated key is a
+   restart, compared as the digest in `r1kh` and folded into
+   `secret_matches`. **Found on the way**: the passphrase comparison read
+   only `wpa_passphrase`, which a WPA3-only access point does not write, so
+   its passphrase was never compared and a rotation never restarted it; it
+   reads `sae_password` where there is no `wpa_passphrase` now. `make
+   hull-roam-sae` runs two netcfgds, one per namespace and bridge, sharing
+   only the configuration and the secrets: a station joins A by SAE (the
+   control) and roams to B by FT, both second plans empty; with the two
+   stores holding different keys the roam is not a fast one and the rig
+   says so.
 2. **Neighbour reports (802.11k)** -- `rrm_neighbor_report`, filled by
    `SET_NEIGHBOR`. An access point cannot learn its neighbours; they would be
    declared in the configuration until fleet management can say them.

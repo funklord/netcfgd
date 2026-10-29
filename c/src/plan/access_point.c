@@ -309,6 +309,31 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 		    point->id, point->device, point->device);
 	}
 
+	/*
+	 * **Nor does FT-SAE's key exchange.** hostapd hands a WPA3 station's keys
+	 * to the next access point over the bridge it is in, as Ethernet frames
+	 * of its own (RRB); a radio in none sends them to its own stations and no
+	 * other access point hears, so a WPA3 roam is never a fast one.
+	 */
+	for (i = 0; i < builder->desired->access_point_count; i++) {
+		const ncfg_access_point_t *point = &builder->desired->access_points[i];
+		const ncfg_device_t       *device;
+		const char                *key_mgmt = ncfg_access_point_key_mgmt(point);
+
+		if (!point->device || !key_mgmt || !strstr(key_mgmt, "FT-SAE")) {
+			continue;
+		}
+		device = ncfg_plan_device(builder->desired, point->device);
+		if (device && device->master) {
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, point->device,
+		    "access point `%s` roams WPA3 clients fast (`roaming_key`) and `%s` is in no "
+		    "bridge, so the keys it hands the other access points go nowhere they listen "
+		    "and a WPA3 roam is a full handshake. Put `%s` in the LAN's bridge",
+		    point->id, point->device, point->device);
+	}
+
 	for (i = 0; i < builder->desired->access_point_count; i++) {
 		const ncfg_access_point_t *point = &builder->desired->access_points[i];
 
@@ -564,7 +589,10 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		 * (0052) -- so the reason names the field and says which way it went,
 		 * and nothing in this plan can print a passphrase.
 		 */
-		field = "access_point.wifi.psk";
+		/* The roaming key is compared beside the passphrase and answered in
+		 * the same boolean, so the reason names both where there are two. */
+		field = point->roaming_key && point->fast_roaming ?
+		    "access_point.wifi.psk or roaming_key" : "access_point.wifi.psk";
 		(void)snprintf(desired, sizeof(desired), "the secret store's");
 		(void)snprintf(observed, sizeof(observed), "what the access point was started with");
 	} else {

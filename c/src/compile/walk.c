@@ -47,7 +47,7 @@ static const char *const CREDENTIAL_LEAVES[] = { "ca_cert", "client_cert", "priv
  * The keys whose value may be a stored secret and NOTHING else.
  *
  * Enumerated from the call sites rather than guessed: every `ncfg_as_secret`
- * in `lower_kind.c` and `lower_network.c` is reached under one of these three
+ * in `lower_kind.c` and `lower_network.c` is reached under one of these four
  * spellings, and that function emits a diagnostic for a bare string rather
  * than falling through to a path -- which is what makes these strict where
  * `CREDENTIAL_LEAVES` above is dual.
@@ -67,7 +67,8 @@ static const char *const CREDENTIAL_LEAVES[] = { "ca_cert", "client_cert", "priv
  * way, so over-matching there costs a value that could have travelled and
  * under-matching here would cost the key itself.
  */
-static const char *const SECRET_LEAVES[] = { "psk", "password", "preshared_key" };
+static const char *const SECRET_LEAVES[] = { "psk", "password", "preshared_key",
+	                                       "roaming_key" };
 
 /* The one spelling `ncfg_as_secret` accepts, so anything else under one of the
  * keys above is a path. Named here rather than guessed: `lower_value.c`

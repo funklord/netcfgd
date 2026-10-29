@@ -128,13 +128,14 @@ int ncfg_hostapd_write_acl(const char *run, const ncfg_access_point_t *access_po
 }
 
 int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access_point,
-    const char *bridge, const ncfg_secret_resolver_t *resolver, char *path_out, size_t path_size,
-    char *err, size_t err_size)
+    const ncfg_hostapd_local_t *local, const ncfg_secret_resolver_t *resolver, char *path_out,
+    size_t path_size, char *err, size_t err_size)
 {
 	char                 dir[NCFG_HOSTAPD_PATH_MAX];
 	char                 path[NCFG_HOSTAPD_PATH_MAX];
 	ncfg_hostapd_lines_t lines;
 	ncfg_secret_t       *passphrase = NULL;
+	ncfg_secret_t       *roaming_key = NULL;
 	char                *text;
 	char                 said[NCFG_ERROR_MAX];
 	int                  ok;
@@ -167,10 +168,25 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 		}
 	}
 
+	/* Only where it would be used, so a key the document keeps for a network
+	 * this access point is not roaming yet is not a reason it fails to start. */
+	if (access_point->roaming_key && access_point->fast_roaming) {
+		said[0] = '\0';
+		roaming_key = ncfg_secret_resolve(resolver, access_point->roaming_key, NULL, said,
+		    sizeof(said));
+		if (!roaming_key) {
+			ncfg_secret_free(passphrase);
+			ncfg_error_set(err, err_size, "`%s`: %s",
+			    access_point->id ? access_point->id : "", said);
+			return 0;
+		}
+	}
+
 	said[0] = '\0';
-	ok = ncfg_hostapd_config(access_point, bridge, dir, passphrase ? ncfg_secret_expose(passphrase)
-	                              : NULL,
-	    &lines, NULL, said, sizeof(said));
+	ok = ncfg_hostapd_config(access_point, local, dir,
+	    passphrase ? ncfg_secret_expose(passphrase) : NULL,
+	    roaming_key ? ncfg_secret_expose(roaming_key) : NULL, &lines, NULL, said, sizeof(said));
+	ncfg_secret_free(roaming_key);
 	if (!ok) {
 		ncfg_secret_free(passphrase);
 		ncfg_error_set(err, err_size, "`%s`: %s", access_point->id ? access_point->id : "",
@@ -262,8 +278,8 @@ size_t ncfg_hostapd_start_args(const char *program, const char *pid_path, const 
 }
 
 int ncfg_hostapd_start(const char *run, const ncfg_access_point_t *access_point,
-    const char *bridge, const ncfg_secret_resolver_t *resolver, const char *program, char *err,
-    size_t err_size)
+    const ncfg_hostapd_local_t *local, const ncfg_secret_resolver_t *resolver,
+    const char *program, char *err, size_t err_size)
 {
 	char        config[NCFG_HOSTAPD_PATH_MAX];
 	char        pid[NCFG_HOSTAPD_PATH_MAX];
@@ -278,8 +294,8 @@ int ncfg_hostapd_start(const char *run, const ncfg_access_point_t *access_point,
 		ncfg_error_set(err, err_size, "an access point was started with no access point");
 		return 0;
 	}
-	if (!ncfg_hostapd_write_config(run, access_point, bridge, resolver, config, sizeof(config), err,
-	    err_size)) {
+	if (!ncfg_hostapd_write_config(run, access_point, local, resolver, config, sizeof(config),
+	    err, err_size)) {
 		return 0;
 	}
 	if (!ncfg_hostapd_pid_path(run, access_point->device, pid, sizeof(pid), err, err_size) ||

@@ -401,6 +401,9 @@ static const struct {
 	{ NCFG_BLOCK_ACCESS_POINT, "mobility_domain", 0x0004000du },
 	/* Whether the network takes repeaters: the estate's, as the network is. */
 	{ NCFG_BLOCK_ACCESS_POINT, "wds", 0x0004000eu },
+	/* A reference, as `wifi.psk` is: the name the estate's access points
+	 * agree on, with the key in each machine's store. */
+	{ NCFG_BLOCK_ACCESS_POINT, "roaming_key", 0x0004000fu },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

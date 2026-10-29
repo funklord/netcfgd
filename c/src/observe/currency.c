@@ -90,7 +90,51 @@ static const char *tunnel_config_on(const ncfg_document_t *desired, const char *
 }
 
 /*
- * Whether the passphrase hostapd was started with is the one the store holds.
+ * Whether the `roaming_key` hostapd was started with is the one the store
+ * holds, from the key in its `r1kh` line: 1, 0, or -1 where nothing may be
+ * concluded. Compared as the digest the file carries, so the secret itself is
+ * hashed here and wiped, as the passphrase is.
+ */
+static int roaming_key_current(const char *text, const ncfg_access_point_t *point,
+    const ncfg_secret_resolver_t *secrets)
+{
+	/* Two addresses, two spaces and the digest: wider than a passphrase,
+	 * which a first draft sized it as -- the line did not fit, nothing was
+	 * compared, and a rotated key read as current. */
+	char           line[128];
+	char           digest[NCFG_SHA256_HEX_SIZE];
+	char           why[NCFG_ERROR_MAX];
+	const char    *started;
+	ncfg_secret_t *wanted;
+	int            same;
+
+	if (!point->roaming_key || !point->fast_roaming) {
+		return 1;
+	}
+	/* No line: started before the key was added, which the key management
+	 * arm restarts for first; not a fact about the key. */
+	if (!observe_config_value(text, "r1kh", line, sizeof(line))) {
+		return -1;
+	}
+	started = strrchr(line, ' ');
+	why[0] = '\0';
+	wanted = ncfg_secret_resolve(secrets, point->roaming_key, NULL, why, sizeof(why));
+	if (!started || !wanted) {
+		ncfg_secret_free(wanted);
+		explicit_bzero(line, sizeof(line));
+		return -1;
+	}
+	ncfg_sha256_hex(ncfg_secret_expose(wanted), strlen(ncfg_secret_expose(wanted)), digest);
+	same = strcmp(started + 1, digest) == 0;
+	ncfg_secret_free(wanted);
+	explicit_bzero(digest, sizeof(digest));
+	explicit_bzero(line, sizeof(line));
+	return same;
+}
+
+/*
+ * Whether the passphrase hostapd was started with is the one the store holds,
+ * and its `roaming_key` with it: both are secrets it read once.
  *
  * Left absent for an open network and for one this build does not render:
  * there is nothing to compare rather than something that differs.
@@ -104,6 +148,7 @@ static void access_point_currency(ncfg_observed_backend_t *backend, const char *
 	char                       why[NCFG_ERROR_MAX];
 	ncfg_secret_t             *wanted;
 	char                      *text;
+	int                        key;
 
 	if (!point || point->security.kind != NCFG_SECURITY_PSK) {
 		return;
@@ -115,13 +160,18 @@ static void access_point_currency(ncfg_observed_backend_t *backend, const char *
 	if (!text) {
 		return;
 	}
-	if (!observe_config_value(text, "wpa_passphrase", started, sizeof(started))) {
+	/* `sae_password` where there is no `wpa_passphrase`: a WPA3-only access
+	 * point writes only that, and reading the one key alone left its
+	 * passphrase never compared -- an edit to it was never a restart. */
+	if (!observe_config_value(text, "wpa_passphrase", started, sizeof(started)) &&
+	    !observe_config_value(text, "sae_password", started, sizeof(started))) {
 		/* A file netcfgd wrote for a PSK network always has one, so this is a
 		 * file somebody else wrote or one from a build that rendered
 		 * differently. Nothing may be concluded from it. */
 		free(text);
 		return;
 	}
+	key = roaming_key_current(text, point, secrets);
 	free(text);
 	why[0] = '\0';
 	wanted = ncfg_secret_resolve(secrets, &point->security.psk.passphrase, NULL, why,
@@ -137,7 +187,7 @@ static void access_point_currency(ncfg_observed_backend_t *backend, const char *
 		return;
 	}
 	backend->secret_matches.has = 1;
-	backend->secret_matches.value = strcmp(started, ncfg_secret_expose(wanted)) == 0;
+	backend->secret_matches.value = strcmp(started, ncfg_secret_expose(wanted)) == 0 && key != 0;
 	/* Both sides wiped before returning, which is `secrets.h`'s discipline: the
 	 * buffer is netcfgd's until the last instant, and clearing it shortens the
 	 * window in which a core dump or a later allocation carries a passphrase. */

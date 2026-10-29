@@ -994,6 +994,11 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 		ncfg_render_quote(&body, point->mobility_domain);
 		ncfg_buf_add_char(&body, '\n');
 	}
+	if (point->roaming_key) {
+		ncfg_buf_add_text(&body, "\troaming_key = ");
+		ncfg_render_quote_secret(&body, point->roaming_key);
+		ncfg_buf_add_char(&body, '\n');
+	}
 	ncfg_buf_add_text(&body, "\twifi {\n");
 	render_security(&point->security, &body);
 	ncfg_buf_add_text(&body, "\t}\n");

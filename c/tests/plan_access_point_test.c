@@ -494,6 +494,39 @@ static void fast_roaming_is_part_of_what_an_access_point_was_started_as(void)
 	planfix_release(plan, document, observed);
 }
 
+/* WPA3 fast roaming under a `roaming_key`: the key management it adds is a
+ * restart, a radio in no bridge is told its keys go nowhere, and a key the
+ * store has rotated restarts it under a reason that names the key. */
+#define FT_SAE_POINT POINT(",\"security\":{\"type\":\"psk\",\"passphrase\":" \
+	"{\"provider\":\"file\",\"name\":\"home\"},\"proto\":\"wpa3\"},\"fast_roaming\":true," \
+	"\"roaming_key\":{\"provider\":\"file\",\"name\":\"roam\"}")
+
+static void wpa3_fast_roaming_restarts_and_needs_a_bridge(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FT_SAE_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN ",\"key_mgmt\":\"SAE\"")),
+	    &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && stop->reason.desired && strcmp(stop->reason.desired, "SAE FT-SAE") == 0,
+	    "a roaming key on WPA3 restarts the access point to offer FT-SAE");
+	check(plan && planfix_warned(plan, "go nowhere they listen"),
+	    "  and one whose radio is in no bridge is told its keys reach no other");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FT_SAE_POINT,
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN ",\"key_mgmt\":"
+	    "\"SAE FT-SAE\",\"mobility_domain\":\"4ea1\"") ",\"secret_matches\":false"),
+	    &document, &observed);
+	stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+	check(stop && stop->reason.field &&
+	    strcmp(stop->reason.field, "access_point.wifi.psk or roaming_key") == 0,
+	    "a secret that moved restarts it, naming the roaming key beside the passphrase");
+	planfix_release(plan, document, observed);
+}
+
 /* A repeater turned on is a restart, and one with nothing to join says so. */
 static void an_access_point_taking_repeaters_restarts_and_needs_a_bridge(void)
 {
@@ -923,6 +956,7 @@ int main(void)
 	a_hidden_network_that_stopped_being_hidden_restarts();
 	fast_roaming_is_part_of_what_an_access_point_was_started_as();
 	an_access_point_taking_repeaters_restarts_and_needs_a_bridge();
+	wpa3_fast_roaming_restarts_and_needs_a_bridge();
 	an_edited_passphrase_restarts_without_the_passphrase_reaching_the_plan();
 	an_access_point_netcfgd_has_no_record_for_is_said_rather_than_guessed_at();
 	a_policy_that_moved_restarts_rather_than_being_half_applied();

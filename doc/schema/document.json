@@ -5331,7 +5331,11 @@
       "hidden": false,
       "fast_roaming": true,
       "mobility_domain": "4f2a",
-      "wds": true
+      "wds": true,
+      "roaming_key": {
+        "provider": "file",
+        "name": "roam"
+      }
     }
   ],
   "linksets": [

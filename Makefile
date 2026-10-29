@@ -2528,7 +2528,8 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # supervisor dead, which `running-code.md` measures. These four specs all say
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
-      hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds
+      hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
+      hull-roam-sae
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2795,6 +2796,23 @@ hull-wds:
 	sed 's/^/wds: /' tests/hull/wds/verdict/wds; \
 	grep -q '^VERDICT ok' tests/hull/wds/verdict/wds
 
+# WPA3 fast roaming (10.587): two access points, each run by its own netcfgd
+# in its own namespace and bridge, the bridges joined by a veth, and a station
+# that joins one by SAE and roams to the other by FT. The regdom rig's image.
+hull-roam-sae:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/roam-sae/verdict/roam-sae
+	@mkdir -p tests/hull/roam-sae/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/roam-sae/hull.conf || true
+	@if [ ! -f tests/hull/roam-sae/verdict/roam-sae ]; then \
+		echo "roam-sae: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/roam-sae: /' tests/hull/roam-sae/verdict/roam-sae; \
+	grep -q '^VERDICT ok' tests/hull/roam-sae/verdict/roam-sae
+
 # 31 checks, which is every one the native tier gets (10.530) since hull
 # `828f72d` mounted the guest's `/run` as an initramfs leaves it.
 #
@@ -2932,7 +2950,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

@@ -804,6 +804,13 @@ static void an_access_point_round_trips(void)
 	    "\twifi { psk = \"@secret:ap\" }\n"
 	    "}\n",
 	    "fast roaming and its mobility domain survive a round trip");
+	round_trips("access_point \"roam\" {\n"
+	    "\tdevice = \"wlan0\"\n"
+	    "\tfast_roaming = true\n"
+	    "\troaming_key = \"@secret:roam\"\n"
+	    "\twifi { psk = \"@secret:ap\" }\n"
+	    "}\n",
+	    "  and so does a roaming key, as the reference it was");
 	round_trips("device wlan1 {\n\twifi {\n\t\twds = true\n\t}\n}\n",
 	    "a radio in four-address mode round-trips");
 	round_trips("access_point \"rep\" {\n\tdevice = \"wlan0\"\n\twds = true\n"

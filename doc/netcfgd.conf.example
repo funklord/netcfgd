@@ -807,10 +807,16 @@
 #     so access points netcfgd runs agree without being told; state
 #     `mobility_domain` only to join another vendor's, using the four hex
 #     digits they show.
-#   - It needs a `psk` network on `wpa2` or `wpa2+wpa3` (the default). On
-#     `wpa2+wpa3` WPA2 clients roam fast and WPA3 ones join as before; `wpa3`
-#     alone is refused, because SAE's keys would have to travel between the
-#     access points, which is not built.
+#   - It needs a `psk` network. WPA2 clients roam fast with nothing more.
+#   - WPA3 clients roam fast only with a `roaming_key`: SAE's keys come out of
+#     each association, so the access points hand them to each other over the
+#     LAN under a key they share. The same secret on every access point of the
+#     network, its own rather than the passphrase -- whoever holds it can take
+#     any station's keys off the LAN -- and each radio in the LAN's bridge,
+#     which is where the keys travel. Without one, `wpa2+wpa3` (the default)
+#     roams its WPA2 clients fast and `wpa3` alone is refused. An access point
+#     netcfgd does not run is given `printf %s <secret> | sha256sum` as its
+#     r0kh/r1kh key.
 #   - A client without 802.11r still joins: the plain handshake is offered
 #     beside it.
 
@@ -827,6 +833,15 @@
 #	mobility_domain = "4f2a"
 #	wifi {
 #		psk = "@secret:ap"
+#	}
+#}
+#access_point "Home" {
+#	device       = "wlan2"
+#	fast_roaming = true
+#	roaming_key  = "@secret:roam"
+#	wifi {
+#		psk   = "@secret:ap"
+#		proto = "wpa3"
 #	}
 #}
 

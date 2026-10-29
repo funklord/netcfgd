@@ -1558,11 +1558,11 @@ typedef struct {
 	/*
 	 * 802.11r: a station moves to another access point of this network
 	 * without a full handshake, so a call or a copy carries on through it.
-	 * WPA2 key derivation only -- FT-PSK, with each access point deriving the
-	 * keys from the passphrase itself, so two machines need nothing shared --
-	 * and 802.11v's transition management is advertised beside it. WPA3's
-	 * SAE has no local derivation; its fast transition needs the access
-	 * points to exchange keys over the LAN, which is not built (10.587).
+	 * WPA2 clients by FT-PSK, with each access point deriving the keys from
+	 * the passphrase itself, so two machines need nothing shared -- and
+	 * 802.11v's transition management is advertised beside it. WPA3's SAE
+	 * has no local derivation: its clients roam fast only with a
+	 * `roaming_key` below (10.587).
 	 */
 	int                    fast_roaming;
 	/* The four hex digits every access point of the network must agree on,
@@ -1579,6 +1579,15 @@ typedef struct {
 	 * says when it is not.
 	 */
 	int                    wds;
+	/*
+	 * The key the access points of one network share to hand each other an
+	 * SAE station's keys over the LAN (hostapd's RRB), which is what lets a
+	 * WPA3 client roam fast: FT-SAE. NULL for none, and then only WPA2
+	 * clients roam fast. **Its own secret, not derived from the passphrase**:
+	 * whoever holds it can pull any station's keys off the LAN, and SAE's
+	 * point is that knowing the passphrase does not get you those.
+	 */
+	ncfg_secret_ref_t     *roaming_key;
 } ncfg_access_point_t;
 
 /*
@@ -1683,7 +1692,8 @@ const char *ncfg_security_key_mgmt(const ncfg_security_t *security);
 
 /*
  * The `wpa_key_mgmt` an access point runs: its security's, with fast
- * roaming's FT-PSK added beside WPA-PSK where it asks for it. Stated here for
+ * roaming's FT-PSK added beside WPA-PSK where it asks for it, and FT-SAE beside
+ * SAE where a `roaming_key` carries SAE's keys. Stated here for
  * `ncfg_security_key_mgmt`'s reason -- the renderer writes it and the planner
  * compares a running access point against it, and two copies is an access
  * point restarted on every pass.

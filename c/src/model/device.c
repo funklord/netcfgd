@@ -121,11 +121,18 @@ const char *ncfg_access_point_key_mgmt(const ncfg_access_point_t *point)
 		return NULL;
 	}
 	if (point->fast_roaming && point->security.kind == NCFG_SECURITY_PSK) {
+		/* FT-SAE only with a key to carry SAE's keys between access points;
+		 * without one an SAE client associates as it always did. */
 		switch (point->security.psk.proto) {
 		case NCFG_PSK_PROTO_WPA2:
 			return "WPA-PSK FT-PSK";
 		case NCFG_PSK_PROTO_WPA2_WPA3:
-			return "WPA-PSK FT-PSK SAE";
+			return point->roaming_key ? "WPA-PSK FT-PSK SAE FT-SAE" : "WPA-PSK FT-PSK SAE";
+		case NCFG_PSK_PROTO_WPA3:
+			if (point->roaming_key) {
+				return "SAE FT-SAE";
+			}
+			break;
 		default:
 			break;
 		}

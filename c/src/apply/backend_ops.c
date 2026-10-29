@@ -308,11 +308,52 @@ static int access_point_answers(const char *run_dir, const char *device)
 	return ncfg_supplicant_answers(directory, device);
 }
 
+/*
+ * A radio's MAC, as sysfs spells it, into `out` (18 bytes), or 0.
+ *
+ * Absent for the reasons `interface_index_of` is. Only FT-SAE needs it, and
+ * the renderer refuses that by name when it is missing, so an absent address
+ * costs nothing anywhere else.
+ */
+static int interface_address_of(const char *class_net, const char *iface, char out[18])
+{
+	char   path[BACKEND_PATH_MAX];
+	char   text[32];
+	FILE  *file;
+	size_t length;
+
+	if (!class_net || !class_net[0] || !iface || !iface[0]) {
+		return 0;
+	}
+	if ((size_t)snprintf(path, sizeof(path), "%s/%s/address", class_net, iface) >=
+	    sizeof(path)) {
+		return 0;
+	}
+	file = fopen(path, "rb");
+	if (!file) {
+		return 0;
+	}
+	if (!fgets(text, sizeof(text), file)) {
+		(void)fclose(file);
+		return 0;
+	}
+	(void)fclose(file);
+	length = strcspn(text, "\n");
+	if (length != 17u) {
+		return 0;
+	}
+	memcpy(out, text, 17u);
+	out[17] = '\0';
+	return 1;
+}
+
 static int start_access_point(const ncfg_service_t *service, const char *run_dir,
     const char *iface, char *err, size_t err_size)
 {
 	const ncfg_access_point_t *access_point = access_point_on(service->document, iface);
 	const ncfg_device_t       *device;
+	ncfg_hostapd_local_t       local;
+	char                       address[18];
 
 	if (!access_point) {
 		ncfg_error_set(err, err_size,
@@ -333,11 +374,13 @@ static int start_access_point(const ncfg_service_t *service, const char *run_dir
 		 * project is arranged against. */
 		return 1;
 	}
-	/* The radio's bridge, which hostapd is told where the access point takes
-	 * four-address stations. */
+	/* The radio's bridge, which hostapd puts it in, and its address, which
+	 * FT-SAE names the access point by. */
 	device = ncfg_document_device(service->document, iface);
-	return ncfg_hostapd_start(run_dir, access_point, device ? device->master : NULL,
-	    service->secrets, service->hostapd_program, err, err_size);
+	local.bridge = device ? device->master : NULL;
+	local.address = interface_address_of(service->class_net, iface, address) ? address : NULL;
+	return ncfg_hostapd_start(run_dir, access_point, &local, service->secrets,
+	    service->hostapd_program, err, err_size);
 }
 
 static int start_advertising(const ncfg_service_t *service, const char *run_dir,

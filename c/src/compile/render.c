@@ -1433,6 +1433,12 @@ static void refuse_unwritable_strings(const ncfg_document_t *document,
 			ncfg_render_refuse(missing, "access_point", point->id,
 			    "fast roaming on security that cannot carry it");
 		}
+		if (point->roaming_key && !ncfg_roaming_key_serves(point)) {
+			ncfg_render_refuse(missing, "access_point", point->id,
+			    "a `roaming_key` that neither fast roaming nor WPA3 would use");
+		}
+		refuse_nameless_secret(missing, "access_point", point->id, "a `roaming_key`",
+		    point->roaming_key);
 	}
 }
 
