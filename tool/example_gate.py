@@ -51,14 +51,14 @@ EXAMPLE = "doc/netcfgd.conf.example"
 # 2026-10-29, when an access point key the C had and the Rust did not -- 10.587's
 # `fast_roaming` -- was refused by the program nobody installs: `linkage`'s
 # reason for moving, met by this gate a release later. The block heads below
-# are still read out of the Rust's lowering, which knows the same eight.
+# are read out of the C's lowering as well, since 10.588.
 NCFG = "./c/ncfg"
 
 # Where the compiler decides what a top-level block is. The list is read from
 # it rather than written here, for the reason the planner's `FIRED_PHASES`
 # gives: a second copy is a thing that goes stale, and this one would go stale
 # in the direction of passing.
-LOWER = "crates/netcfgd-compile/src/lower.rs"
+LOWER = "c/src/compile/lower.c"
 
 # The blocks that cannot stand alone, by the line they start on and their first
 # line. Both are checked, so moving one without updating this is a failure
@@ -119,19 +119,17 @@ def compiles(text):
 
 
 def block_heads():
-	"""Every top-level block head the compiler accepts, read from `lower.rs`.
+	"""Every top-level block head the compiler accepts, read from `lower.c`.
 
-	The arms of the `match block.head.as_str()` that walks the merged document.
-	Nested heads -- `wifi`, `bridge`, `probe` and the rest -- are not this
-	question: they cannot be written on their own, and the gate above compiles
-	the blocks that contain them.
+	The `strcmp(head, "...")` arms of the dispatch over the merged document --
+	the C's, since the C ships (0266); this read the Rust's `match` until the
+	C gained `mesh` (10.588) and the Rust could not have said so. Nested heads
+	-- `wifi`, `bridge`, `probe` and the rest -- are not this question: they
+	cannot be written on their own, and the gate above compiles the blocks that
+	contain them.
 	"""
 	text = open(LOWER).read()
-	start = text.find("for block in &merged.blocks {")
-	if start < 0:
-		return []
-	body = text[start : text.find("\n\t}\n", start)]
-	return re.findall(r'^\t\t\t"([a-z_]+)"', body, re.MULTILINE)
+	return sorted(set(re.findall(r'strcmp\(head, "([a-z_]+)"\) == 0', text)))
 
 
 def check_every_block_is_documented():
