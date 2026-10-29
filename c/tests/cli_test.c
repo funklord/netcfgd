@@ -2277,14 +2277,37 @@ static void an_apply_is_the_daemon_s_where_there_is_one(void)
 	int         code = 0;
 
 	printed = answered(changed, plain, 4, &code);
-	check(code == 0 && strstr(printed, "Done addr.add") != NULL,
-	    "a plain apply with a daemon there is carried out by the daemon");
+	check(code == 0 && strstr(printed, "ok   addr.add eth0") != NULL,
+	    "a plain apply with a daemon there is carried out by the daemon, in the local marks");
 	check(strstr(printed, "confirm window") == NULL,
 	    "  and says nothing about a window nobody asked for");
 
 	printed = answered(changed, window, 6, &code);
 	check(code == 0 && strstr(printed, "confirm window open for 30s") != NULL,
 	    "a window over a change says it is open");
+
+	/* 0293: unmet is a failure, through the daemon as through this process. */
+	{
+		static const char *red =
+		    "{\"response\":\"journal\",\"records\":["
+		    "{\"id\":1,\"op\":\"addr.add\",\"interface\":\"eth0\",\"outcome\":\"done\"},"
+		    "{\"id\":2,\"op\":\"qdisc.set\",\"interface\":\"eth0\",\"outcome\":\"unmet\"}]}\n";
+
+		printed = answered(red, plain, 4, &code);
+		check(code != 0 && strstr(printed, "red  qdisc.set eth0") != NULL,
+		    "an apply through the daemon with something unmet fails, and marks it red");
+
+		/* `--json` printed nothing at all through the daemon. */
+		{
+			char *json[] = { (char *)"ncfg", (char *)"apply", (char *)"--json", (char *)"--run-dir",
+				testdir_path };
+
+			printed = answered(red, json, 5, &code);
+			check(code != 0 && strstr(printed, "\"records\": [") != NULL &&
+			    strstr(printed, "\"outcome\": \"unmet\"") != NULL,
+			    "  and under --json prints the journal, laid out as a local apply's");
+		}
+	}
 
 	/* Nobody there: the apply is this process's, which in this test has no
 	 * way to reach the machine -- and says that, rather than that it could not

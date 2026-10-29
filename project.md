@@ -12597,6 +12597,27 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.593 An apply through the daemon reported as a local one does
+
+**Found by `make hull-natcap`**, run to check the op's rename against a real
+kernel: nine checks failed, every one an apply that the kernel refused and
+`ncfg` reported as exit 0. Since 7e13290e a plain `ncfg apply` goes through
+the daemon wherever one runs, and the client's printer for the daemon's journal
+(`say_journal`) was a second answer to "how did the apply go" that 0293 had
+not reached: it had no word for `unmet`, printed it raw and did not count it,
+so an apply with something red exited 0 -- against 0293's "unmet is a failure".
+It also spoke another vocabulary (`Done`, `Failed`) from the local journal's
+marks, and **printed nothing at all under `--json`**, which a script parsing
+the output reads as an empty document.
+
+Now the daemon path uses the local marks (`ok  `, `FAIL`, `red `, `skip`,
+`back`) with the op and interface, counts `unmet` as a failure with the
+local summary, and under `--json` copies the daemon's records into the local
+document's shape -- the daemon writes them with the same journal writer, so
+the two are byte-identical, measured by applying one config through each.
+`cli_test` holds the marks, the exit and the JSON; `hull-natcap` passes all
+its checks again.
+
 ## 10.592 The firewall, enforced: host lists in its rules, and the slices to get there
 
 **Asked for by the holder 2026-10-29: host lists on the firewall side.** That

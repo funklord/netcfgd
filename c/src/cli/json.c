@@ -35,6 +35,7 @@
 #include "ncfg/json_write.h"
 
 #include <stddef.h>
+#include <string.h>
 
 /*
  * The one check at the end, and the sentence that says what could not be
@@ -354,4 +355,86 @@ int ncfg_cli_json_ok(ncfg_buf_t *out, char *err, size_t err_size)
 	ncfg_json_write_member_bool(&writer, "ok", 1);
 	ncfg_json_write_object_end(&writer);
 	return finish(&writer, "the answer", err, err_size);
+}
+
+/* One parsed value back into the writer, whatever it is. Depth is the
+ * parser's own bound, so this cannot recurse further than the input did. */
+static void copy_value(ncfg_json_writer_t *writer, const ncfg_json_doc_t *doc, uint32_t index)
+{
+	const ncfg_json_node_t *node = ncfg_json_node(doc, index);
+	uint32_t                at;
+
+	if (!node) {
+		ncfg_json_write_null(writer);
+		return;
+	}
+	switch (node->type) {
+	case NCFG_JSON_BOOL:
+		ncfg_json_write_bool(writer, node->bool_value);
+		return;
+	case NCFG_JSON_NUMBER:
+		ncfg_json_write_int(writer, ncfg_json_int(doc, index, 0));
+		return;
+	case NCFG_JSON_STRING: {
+		size_t      length = 0;
+		const char *text = ncfg_json_string(doc, index, &length);
+
+		ncfg_json_write_string_bytes(writer, text ? text : "", text ? length : 0u);
+		return;
+	}
+	case NCFG_JSON_ARRAY:
+		ncfg_json_write_array_begin(writer);
+		for (at = 0; at < node->child_count; at++) {
+			copy_value(writer, doc, ncfg_json_at(doc, index, at));
+		}
+		ncfg_json_write_array_end(writer);
+		return;
+	case NCFG_JSON_OBJECT: {
+		uint32_t child = node->first_child;
+
+		ncfg_json_write_object_begin(writer);
+		for (at = 0; at < node->child_count && child != NCFG_JSON_NONE; at++) {
+			size_t      key_length = 0;
+			const char *key = ncfg_json_key(doc, child, &key_length);
+			char        name[128];
+
+			if (key && key_length < sizeof(name)) {
+				memcpy(name, key, key_length);
+				name[key_length] = '\0';
+				ncfg_json_write_key(writer, name);
+				copy_value(writer, doc, child);
+			}
+			child = ncfg_json_node(doc, child)->next_sibling;
+		}
+		ncfg_json_write_object_end(writer);
+		return;
+	}
+	case NCFG_JSON_NULL:
+	default:
+		ncfg_json_write_null(writer);
+		return;
+	}
+}
+
+int ncfg_cli_json_journal(const ncfg_json_doc_t *doc, uint32_t object, ncfg_buf_t *out,
+    char *err, size_t err_size)
+{
+	ncfg_json_writer_t writer;
+	uint32_t           records = ncfg_json_member(doc, object, "records");
+
+	ncfg_json_write_init(&writer, out);
+	ncfg_json_write_object_begin(&writer);
+	ncfg_json_write_key(&writer, "records");
+	if (records == NCFG_JSON_NONE) {
+		ncfg_json_write_array_begin(&writer);
+		ncfg_json_write_array_end(&writer);
+	} else {
+		copy_value(&writer, doc, records);
+	}
+	ncfg_json_write_object_end(&writer);
+	if (ncfg_json_write_failed(&writer)) {
+		ncfg_error_set(err, err_size, "the daemon's journal could not be written as JSON");
+		return 0;
+	}
+	return 1;
 }

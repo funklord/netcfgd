@@ -1597,11 +1597,20 @@ static int command_wait_online(const ncfg_cli_options_t *options, const char **p
  */
 static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_options_t *options)
 {
+	/*
+	 * **The local journal's own marks** (`plan.c`'s `ncfg_cli_print_journal`),
+	 * because one command must not print two vocabularies depending on whether
+	 * a daemon is running. This said `Done`, `Failed` and so on, and had no
+	 * word for `unmet` at all: 0293's red outcome was printed as its raw wire
+	 * word and not counted, so an apply through the daemon with something red
+	 * exited 0, against 0293's "unmet is a failure" -- found by
+	 * `make hull-natcap`, whose checks were written against the local marks.
+	 */
 	static const struct {
 		const char *wire;
 		const char *shown;
-	} outcomes[] = { { "done", "Done" }, { "failed", "Failed" },
-		{ "skipped", "Skipped" }, { "reverted", "Reverted" } };
+	} outcomes[] = { { "done", "ok  " }, { "failed", "FAIL" }, { "unmet", "red " },
+		{ "skipped", "skip" }, { "reverted", "back" } };
 	uint32_t records;
 	uint32_t count;
 	uint32_t at;
@@ -1609,9 +1618,26 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 	/* Records that changed the machine, as against the one that armed the
 	 * window -- see the end of this function for why that count matters. */
 	uint32_t changed = 0;
+	uint32_t done = 0;
+	uint32_t unmet = 0;
 
 	if (!payload->doc) {
 		return fail("the daemon's journal could not be read");
+	}
+	if (options->json) {
+		ncfg_buf_t buf;
+		char       err[NCFG_ERROR_MAX];
+		int        code;
+
+		ncfg_buf_init(&buf, 0);
+		/* Laid out as the local apply's journal is, since `apply` is one of
+		 * the verbs a script reads with `sed`. */
+		code = say_json_for_a_person(&buf, ncfg_cli_json_journal(payload->doc, payload->object,
+		    &buf, err, sizeof(err)), err);
+		ncfg_buf_free(&buf);
+		if (code != NCFG_CLI_EXIT_OK) {
+			return code;
+		}
 	}
 	records = ncfg_json_member(payload->doc, payload->object, "records");
 	count = ncfg_json_count(payload->doc, records);
@@ -1650,18 +1676,30 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 				break;
 			}
 		}
-		if (shown && strcmp(shown, "Failed") == 0) {
+		if (shown && (strcmp(shown, "FAIL") == 0 || strcmp(shown, "red ") == 0)) {
 			failed = 1;
 		}
-		if (shown && strcmp(shown, "Done") == 0 &&
+		if (shown && strcmp(shown, "red ") == 0) {
+			unmet++;
+		}
+		if (shown && strcmp(shown, "ok  ") == 0) {
+			done++;
+		}
+		if (shown && strcmp(shown, "ok  ") == 0 &&
 		    !(op && op_length == strlen("commit.arm") &&
 		    memcmp(op, "commit.arm", op_length) == 0)) {
 			changed++;
 		}
 		if (!options->json) {
 			if (shown) {
-				ncfg_out_writef("%s %.*s\n", shown, (int)op_length,
-				    op ? op : "");
+				size_t      iface_length = 0;
+				const char *iface = ncfg_json_string(payload->doc,
+				    ncfg_json_member(payload->doc, record, "interface"), &iface_length);
+
+				/* The op and the interface it is about, as the local journal
+				 * starts its line. */
+				ncfg_out_writef("%s %.*s%s%.*s\n", shown, (int)op_length, op ? op : "",
+				    iface ? " " : "", (int)iface_length, iface ? iface : "");
 			} else {
 				/* An outcome word this build does not know is said as it
 				 * came, rather than as `?`: the daemon and the client can
@@ -1707,6 +1745,14 @@ static int say_journal(const ncfg_proto_payload_t *payload, const ncfg_cli_optio
 			    "keep this, or `ncfg revert` to undo it now\n",
 			    (long long)options->confirm.value);
 		}
+	}
+	/* The local path's summary, in its words, so that what an operator reads
+	 * does not depend on whether a daemon carried the apply out. */
+	if (!options->json && unmet > 0) {
+		(void)failf("%u done, %u unmet: the rest of the plan applied and what failed is "
+		    "listed above, red", (unsigned)done, (unsigned)unmet);
+		(void)fail("the machine is configured apart from those; re-run `ncfg apply` once "
+		    "the kernel or the hardware can carry them");
 	}
 	return failed ? NCFG_CLI_EXIT_FAILED : NCFG_CLI_EXIT_OK;
 }

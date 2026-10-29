@@ -528,6 +528,17 @@ int ncfg_cli_json_explanation(const ncfg_explanation_t *explanation, ncfg_buf_t 
  */
 int ncfg_cli_json_ok(ncfg_buf_t *out, char *err, size_t err_size);
 
+/*
+ * A journal the daemon sent, as `ncfg apply --json` prints one it ran itself:
+ * `{"records": [...]}`, the records copied value for value -- the daemon
+ * writes them with the same `ncfg_journal_write_members`, so the copy is the
+ * local document. An apply through the daemon printed nothing at all under
+ * `--json` before this, which a script parsing the output read as an empty
+ * document.
+ */
+int ncfg_cli_json_journal(const ncfg_json_doc_t *doc, uint32_t object, ncfg_buf_t *out,
+    char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * The socket conversation
  * ------------------------------------------------------------------------ */
