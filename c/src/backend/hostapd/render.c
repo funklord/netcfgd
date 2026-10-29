@@ -392,7 +392,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
     const char *roaming_key, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why,
     char *err, size_t err_size)
 {
-	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0, { 0, 0, 0 } };
+	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0, { 0, 0, 0, 0 } };
 	const char                       *bridge;
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
@@ -533,8 +533,13 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 		if (ok && plan.vht) {
 			ok = add_line(out, "ieee80211ac", "1", 0);
 		}
-		if (ok && plan.width == 80) {
-			ok = add_line(out, "vht_oper_chwidth", "1", 0);
+		/* `[VHT160]` is what makes hostapd run 160: measured, without it the
+		 * same file ran at 80 MHz and said nothing (10.599). */
+		if (ok && plan.width == 160) {
+			ok = add_line(out, "vht_capab", "[VHT160]", 0);
+		}
+		if (ok && plan.width >= 80) {
+			ok = add_line(out, "vht_oper_chwidth", plan.width == 160 ? "2" : "1", 0);
 			/* Absent for automatic selection, which fills it in: measured. */
 			if (ok && plan.centre) {
 				(void)snprintf(centre, sizeof(centre), "%d", plan.centre);

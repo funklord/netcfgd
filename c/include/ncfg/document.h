@@ -1801,6 +1801,7 @@ typedef struct {
 	int forty_mhz_24;
 	int forty_mhz_5;
 	int vht_5;
+	int vht160_5;
 } ncfg_radio_widths_t;
 
 /* What an access point is given: its width in MHz, the 40 MHz secondary (1

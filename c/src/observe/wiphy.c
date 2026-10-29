@@ -88,6 +88,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 	unsigned char        forty_24[WIPHY_MAX];
 	unsigned char        forty_5[WIPHY_MAX];
 	unsigned char        vht_5[WIPHY_MAX];
+	unsigned char        vht160_5[WIPHY_MAX];
 	size_t               at;
 	size_t               link;
 	int                  radios = 0;
@@ -100,6 +101,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 		observed->links[link].high_throughput.has = 0;
 		observed->links[link].high_throughput.value = 0;
 		observed->links[link].very_high_throughput = 0;
+		observed->links[link].hundred_sixty_mhz = 0;
 		(void)forty(&observed->links[link], 0, 0);
 		radios |= observed->links[link].wireless;
 	}
@@ -129,6 +131,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 	memset(forty_24, 0, sizeof(forty_24));
 	memset(forty_5, 0, sizeof(forty_5));
 	memset(vht_5, 0, sizeof(vht_5));
+	memset(vht160_5, 0, sizeof(vht160_5));
 	for (at = 0; at < phys.count; at++) {
 		ncfg_wiphy_t part;
 
@@ -138,6 +141,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 			forty_24[part.index] |= (unsigned char)part.forty_mhz_24;
 			forty_5[part.index] |= (unsigned char)part.forty_mhz_5;
 			vht_5[part.index] |= (unsigned char)part.vht_5;
+			vht160_5[part.index] |= (unsigned char)part.vht160_5;
 		}
 	}
 	/* Answered for every interface the kernel placed on a radio, yes or no;
@@ -157,6 +161,7 @@ int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
 				observed->links[link].high_throughput.has = 1;
 				observed->links[link].high_throughput.value = has_ht[radio.wiphy];
 				observed->links[link].very_high_throughput = vht_5[radio.wiphy];
+				observed->links[link].hundred_sixty_mhz = vht160_5[radio.wiphy];
 				if (!forty(&observed->links[link], forty_24[radio.wiphy],
 				        forty_5[radio.wiphy])) {
 					ncfg_netlink_reply_free(&interfaces);

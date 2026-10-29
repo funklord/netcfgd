@@ -332,7 +332,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
 	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
-	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, { 0, 0, 0 } };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0, { 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 	char                       want[160];
@@ -380,7 +380,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
 	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
 	{
-		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, { 0, 0, 0 } };
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0, { 0, 0, 0, 0 } };
 
 		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
 		    NCFG_HOSTAPD_MISSING_ADDRESS,
@@ -450,7 +450,7 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 static void a_radio_with_802_11n_is_given_it(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, { 0, 0, 0 } };
+	const ncfg_hostapd_local_t ht = { NULL, NULL, 1, { 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -476,7 +476,7 @@ static ncfg_channel_plan_t plan_of(const char *band, int64_t channel, int64_t wi
     int forty_24, int forty_5, int vht)
 {
 	ncfg_access_point_t point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_radio_widths_t radio = { forty_24, forty_5, vht };
+	ncfg_radio_widths_t radio = { forty_24, forty_5, vht, vht > 1 };
 	ncfg_channel_plan_t plan;
 	char                text[4];
 
@@ -505,7 +505,7 @@ static int secondary_of(const char *band, int64_t channel, int64_t width, int fo
 static void forty_megahertz_is_given_only_where_it_can_start(void)
 {
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 0 } };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 0, 0 } };
 	ncfg_hostapd_lines_t lines;
 	char                 message[NCFG_ERROR_MAX];
 	char                 five[] = "5";
@@ -536,7 +536,7 @@ static void forty_megahertz_is_given_only_where_it_can_start(void)
 	point.width.value = 40;
 	why = NULL;
 	{
-		ncfg_radio_widths_t radio = { 1, 1, 0 };
+		ncfg_radio_widths_t radio = { 1, 1, 0, 0 };
 		ncfg_channel_plan_t plan;
 
 		ncfg_access_point_channel_plan(&point, &radio, &plan, &why);
@@ -574,7 +574,7 @@ static void eighty_megahertz_is_the_block_the_channel_is_in(void)
 	static const int channel[] = { 36, 40, 44, 48, 52, 64, 100, 112, 116, 128, 149, 161 };
 	static const int centre[] = { 42, 42, 42, 42, 58, 58, 106, 106, 122, 122, 155, 155 };
 	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 1 } };
+	ncfg_hostapd_local_t local = { NULL, NULL, 1, { 0, 1, 1, 1 } };
 	ncfg_hostapd_lines_t lines;
 	ncfg_channel_plan_t  plan;
 	char                 message[NCFG_ERROR_MAX];
@@ -606,6 +606,27 @@ static void eighty_megahertz_is_the_block_the_channel_is_in(void)
 	plan = plan_of(NULL, 6, 0, 1, 1, 1);
 	check(plan.width == 20 && !plan.vht, "on 2.4 GHz there is no 802.11ac");
 
+	/* 160 MHz (10.599): only when asked, with the radio's bits, a channel,
+	 * and one of the two blocks; otherwise 80, saying why. `vht` of 2 below
+	 * is a radio that can do 160. */
+	plan = plan_of("5", 36, 160, 0, 1, 2);
+	check(plan.width == 160 && plan.centre == 50 && plan.secondary == 1,
+	    "`width = 160` on 36 is the block 36 to 64, centred on 50");
+	plan = plan_of("5", 64, 160, 0, 1, 2);
+	check(plan.width == 160 && plan.centre == 50 && plan.secondary == -1,
+	    "  and so on 64, with its own direction");
+	plan = plan_of("5", 100, 160, 0, 1, 2);
+	check(plan.width == 160 && plan.centre == 114, "  and on 100 the block 100 to 128, on 114");
+	plan = plan_of("5", 149, 160, 0, 1, 2);
+	check(plan.width == 80 && plan.centre == 155,
+	    "  while 149, in neither block, is 80 MHz");
+	plan = plan_of("5", -1, 160, 0, 1, 2);
+	check(plan.width == 80 && plan.centre == 0, "  and with no channel, 80 MHz");
+	plan = plan_of("5", 36, 160, 0, 1, 1);
+	check(plan.width == 80, "  and on a radio whose capability lacks 160 MHz, 80");
+	plan = plan_of("5", 36, 0, 0, 1, 2);
+	check(plan.width == 80, "and a radio that can do 160 is 80 MHz unless asked");
+
 	point.band = five;
 	point.channel.has = 1;
 	point.channel.value = 44;
@@ -618,6 +639,26 @@ static void eighty_megahertz_is_the_block_the_channel_is_in(void)
 		    "  centred on 42");
 		check_text(ncfg_hostapd_value_of(&lines, "ht_capab"), "[HT40+]",
 		    "  with 44's own 40 MHz direction");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.channel.value = 100;
+	point.width.has = 1;
+	point.width.value = 160;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "vht_oper_chwidth"), "2",
+		    "`width = 160` on 100 is written vht_oper_chwidth=2");
+		check_text(ncfg_hostapd_value_of(&lines, "vht_oper_centr_freq_seg0_idx"), "114",
+		    "  centred on 114");
+		check_text(ncfg_hostapd_value_of(&lines, "vht_capab"), "[VHT160]",
+		    "  with [VHT160], without which hostapd ran 80 MHz and said nothing");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.width.has = 0;
+	if (ncfg_hostapd_config(&point, &local, "/run", "correcthorse", NULL, &lines, NULL,
+	    message, sizeof(message))) {
+		check(ncfg_hostapd_value_of(&lines, "vht_capab") == NULL,
+		    "and an 80 MHz one has no vht_capab at all");
 		ncfg_hostapd_lines_free(&lines);
 	}
 	point.channel.has = 0;
@@ -675,7 +716,7 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, { 0, 0, 0 } };
+	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0, { 0, 0, 0, 0 } };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 

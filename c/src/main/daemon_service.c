@@ -510,6 +510,7 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 			}
 		}
 		world->ht[world->ht_count].widths.vht_5 = link->very_high_throughput;
+		world->ht[world->ht_count].widths.vht160_5 = link->hundred_sixty_mhz;
 		world->ht_count++;
 	}
 	world->service.high_throughput = world->ht;

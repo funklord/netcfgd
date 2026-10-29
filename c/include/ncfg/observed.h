@@ -600,8 +600,10 @@ typedef struct {
 	 * answered with `high_throughput` and empty where that is not. */
 	char         **forty_mhz;
 	size_t         forty_mhz_count;
-	/* 802.11ac on 5 GHz (10.598), answered with `high_throughput`. */
+	/* 802.11ac on 5 GHz (10.598), and 160 MHz there (10.599), answered with
+	 * `high_throughput`. */
 	int            very_high_throughput;
+	int            hundred_sixty_mhz;
 	/* **Carried rather than derived, before four clients derive it.** Absent
 	 * where nothing has computed it: a bare netlink snapshot. */
 	ncfg_optint_t category; /* ncfg_link_category_t where `has` */
@@ -1095,6 +1097,8 @@ typedef struct {
 	 * 10.598. */
 	int           very_high_throughput;
 	int           eighty_mhz;
+	/* And 160 MHz (`vht_oper_chwidth=2`, 10.599). */
+	int           hundred_sixty_mhz;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

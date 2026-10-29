@@ -1410,6 +1410,39 @@ static void a_sibling_at_80_mhz_is_still_a_5_ghz_target(void)
 	planfix_release(plan, document, observed);
 }
 
+#define VHT160_LINK HT_LINK(",\"high_throughput\":true,\"forty_mhz\":[\"5\"]," \
+	"\"very_high_throughput\":true,\"hundred_sixty_mhz\":true")
+
+/*
+ * 160 MHz is part of what hostapd was started as (10.599), and asking for it
+ * on 36 is said to cost the minute of radar listening its block takes in --
+ * which channel 36's own warning would not say.
+ */
+static void a_hundred_sixty_mhz_access_point_restarts_and_says_it_waits(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(",\"width\":160"),
+	    "\"links\":[" VHT160_LINK "],"
+	    RUNNING(FIVE_STARTED(",\"forty_mhz\":true,\"eighty_mhz\":true,"
+	    "\"very_high_throughput\":true")), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && strcmp(stop->reason.field, "access_point.width") == 0 &&
+	    strcmp(stop->reason.desired, "160") == 0 && strcmp(stop->reason.observed, "80") == 0,
+	    "`width = 160` on an access point running 80 restarts it for 160");
+	check(plan && planfix_warned(plan, "runs at 160 MHz, which takes in channels shared with radar"),
+	    "  and says it will be silent for a minute after it starts");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(",\"width\":160"),
+	    "\"links\":[" VHT160_LINK "],"
+	    RUNNING(FIVE_STARTED(",\"forty_mhz\":true,\"hundred_sixty_mhz\":true,"
+	    "\"very_high_throughput\":true")), &document, &observed);
+	check(plan && plan->action_count == 0u, "  and once it runs 160, plans nothing");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1450,6 +1483,7 @@ int main(void)
 	an_access_point_on_a_radio_with_802_11n_takes_it_once();
 	forty_megahertz_is_part_of_what_an_access_point_was_started_as();
 	eighty_megahertz_is_part_of_what_an_access_point_was_started_as();
+	a_hundred_sixty_mhz_access_point_restarts_and_says_it_waits();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

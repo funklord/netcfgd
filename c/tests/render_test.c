@@ -830,6 +830,8 @@ static void an_access_point_round_trips(void)
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "a stated width round-trips");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
 	    "\twidth = 80\n\twifi { psk = \"@secret:ap\" }\n}\n", "  and so does 80 on 5 GHz");
+	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 100\n"
+	    "\twidth = 160\n\twifi { psk = \"@secret:ap\" }\n}\n", "  and 160");
 	plain = rendering_of("access_point \"roam\" {\n"
 	    "\tdevice = \"wlan0\"\n\tfast_roaming = true\n\twifi { psk = \"@secret:ap\" }\n}\n");
 	check(plain && strstr(plain, "fast_roaming = true") != NULL &&

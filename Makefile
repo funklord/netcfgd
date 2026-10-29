@@ -2530,7 +2530,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
-      hull-roam-sae hull-steer
+      hull-roam-sae hull-steer hull-width
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2792,6 +2792,23 @@ hull-steer:
 		exit 1; \
 	fi
 
+# 160 MHz (10.599): one vm, two hwsim radios, netcfgd's access point on
+# channel 100 with `width = 160` through its minute of radar listening, and a
+# station that must associate at 160 MHz. The regdom rig's image.
+hull-width:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/regdom)
+	@$(call hull_image,regdom)
+	@rm -f tests/hull/width/verdict/width
+	@mkdir -p tests/hull/width/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/width/hull.conf || true
+	@if [ ! -f tests/hull/width/verdict/width ]; then \
+		echo "width: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/width: /' tests/hull/width/verdict/width; \
+	grep -q '^VERDICT ok' tests/hull/width/verdict/width
+
 # netcfgd joining an 802.11s mesh (10.588): one vm, two hwsim radios, netcfgd's
 # node peering with a bare wpa_supplicant one in a network namespace, traffic
 # across, and a second plan with nothing to do. The regdom rig's image.
@@ -2981,7 +2998,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

@@ -625,9 +625,15 @@
 #
 # `width = 20`, `40` or `80` narrows a 5 GHz access point, and keeps its
 # 802.11ac rates; `width = 40` asks for 40 on 2.4 GHz too, and needs a
-# `channel` there, since the second channel is above or below it. 80 is a 5
-# GHz width. A width that cannot be given is said, and the access point runs
-# one step narrower. 160 MHz and 802.11ax are not written yet.
+# `channel` there, since the second channel is above or below it.
+#
+# `width = 160` is never the default, because both of the band's 160 MHz
+# blocks, 36 to 64 and 100 to 128, take in channels shared with radar: the
+# access point listens for a minute or so before it beacons, at every start,
+# and radar can move it. It needs a radio that can do 160 and a `channel` in
+# one of the two blocks. 80 and 160 are 5 GHz widths. A width that cannot be
+# given is said, and the access point runs one step narrower. 802.11ax is not
+# written yet.
 #
 #access_point "Home" {
 #	device  = "wlan0"

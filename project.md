@@ -12597,6 +12597,50 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.599 160 MHz
+
+**Asked for by the holder 2026-10-29** ("go ahead with 160 MHz").
+
+**Never the default, decided from the band plan before the measurement.**
+Both of 5 GHz's 160 MHz blocks, 36-64 and 100-128, take in channels shared
+with radar, so a 160 MHz access point listens before it may beacon at every
+start and radar can move it off the channel. That is a cost worth paying on
+purpose and not one to hand everyone on upgrade, so `width = 160` asks for
+it and the default stays 80, whose blocks 36-48 and 149-161 need no wait.
+
+### What 10.599 measured, hostapd 2.10 on hwsim, US domain, DFS on
+
+| configuration | result |
+|---|---|
+| 36 `[HT40+]`, `vht_oper_chwidth=2`, centre 50, `vht_capab=[VHT160]` | 62 s of listening, then 160 MHz |
+| the same without `[VHT160]` | 61 s, then **80 MHz, said nowhere** |
+| 100 `[HT40+]`, centre 114, `[VHT160]` | 62 s, then 160 MHz |
+| 64 `[HT40-]`, centre 50, `[VHT160]` | 61 s, then 160 MHz |
+
+So `[VHT160]` is written with the width, and only where the radio says it
+can: bits 2-3 of `VHT_CAPA`, the supported channel width set, read into the
+link's `hundred_sixty_mhz` (hwsim's `0x038004fa` has them). The listening is
+real even with 36 as the primary, so a plan for 160 MHz on 36 to 48 says so
+in a warning of its own; a primary that is itself a radar channel already
+had one. Automatic selection at 160 was not measured, so 160 asks for a
+`channel` and is 80 without one.
+
+### What 10.599 built
+
+- `width = 160`, refused on 2.4 GHz with 80. In the channel plan: 160 MHz
+  centred on 50 or 114, for a channel in the block, on a radio with the
+  bits; otherwise one step down to 80, with the first reason kept.
+- The file: `vht_capab=[VHT160]`, `vht_oper_chwidth=2` and the centre.
+  `vht_oper_chwidth=2` is read back as `started_with.hundred_sixty_mhz`, so
+  160 is part of the restart identity with the other widths.
+- **And a gap in 10.595 it exposed**: see the correction there -- neighbour
+  lists are now sent by the daemon under `report`, and `hull-steer`'s band
+  machine applies until a plan has no neighbour left to add, bounded.
+- `make hull-width`: netcfgd's access point on 100 with `width = 160`; the
+  plan warns, the file holds all five lines, a station associates at
+  `WIDTH=160 MHz` as Wi-Fi 5 once the listening is over, and a second plan
+  has nothing to do.
+
 ## 10.598 802.11ac and 80 MHz
 
 **Asked for by the holder 2026-10-29** ("go ahead with 802.11ac").
@@ -12658,7 +12702,8 @@ unit tests could not have caught it: they wrote the element by hand in the
 20 MHz class, which is the fixture-built-from-the-code shape 10.116 names.
 
 **Next**: 160 MHz, from `VHT_CAPA`'s supported-width bits, where a domain
-allows a whole 160 MHz block (36-64, 100-128); then 802.11ax.
+allows a whole 160 MHz block (36-64, 100-128) -- done since, in 10.599;
+then 802.11ax.
 
 ## 10.597 40 MHz
 

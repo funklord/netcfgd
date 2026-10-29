@@ -990,11 +990,11 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	if (point->width.has) {
 		const char *band = ncfg_access_point_effective_band(point->band, &point->channel);
 
-		if (point->width.value == 80 && band && strcmp(band, "5") != 0) {
+		if (point->width.value >= 80 && band && strcmp(band, "5") != 0) {
 			ncfg_render_refuse(missing, "access_point", point->id,
-			    "a width of 80 MHz on 2.4 GHz");
+			    "a width of %lld MHz on 2.4 GHz", (long long)point->width.value);
 		} else if (point->width.value == 20 || point->width.value == 40 ||
-		    point->width.value == 80) {
+		    point->width.value == 80 || point->width.value == 160) {
 			ncfg_buf_addf(&body, "\twidth = %lld\n", (long long)point->width.value);
 		} else {
 			ncfg_render_refuse(missing, "access_point", point->id,

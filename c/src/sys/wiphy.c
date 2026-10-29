@@ -81,7 +81,13 @@ int ncfg_wiphy_parse(const void *payload, size_t length, ncfg_wiphy_t *out, char
 			return 0;
 		}
 		if (found == NCFG_WIRE_OK && band.kind == NL80211_BAND_5GHZ) {
+			uint32_t bits = 0;
+
+			if (!ncfg_wire_attr_u32(&capability, &bits, err, err_size)) {
+				return 0;
+			}
 			out->vht_5 = 1;
+			out->vht160_5 = (bits & 0x0000000cu) != 0u;
 		}
 		found = ncfg_wire_attrs_find(&inside, NL80211_BAND_ATTR_HT_CAPA, &capability, err,
 		    err_size);

@@ -127,6 +127,31 @@ static int block_of_80(int64_t channel)
 	return 0;
 }
 
+/* The centre of the 160 MHz block, or 0: 36-64 on 50 and 100-128 on 114,
+ * the two the band has (10.599). */
+static int block_of_160(int64_t channel)
+{
+	if (!pair_on_5(channel)) {
+		return 0;
+	}
+	if (channel >= 36 && channel <= 64) {
+		return 50;
+	}
+	if (channel >= 100 && channel <= 128) {
+		return 114;
+	}
+	return 0;
+}
+
+/* `why` set only where nothing earlier set it, so the first reason a wider
+ * width was not given is the one said. */
+static void reason(const char **why, const char *sentence)
+{
+	if (why && !*why) {
+		*why = sentence;
+	}
+}
+
 void ncfg_access_point_channel_plan(const ncfg_access_point_t *access_point,
     const ncfg_radio_widths_t *radio, ncfg_channel_plan_t *out, const char **why)
 {
@@ -151,17 +176,39 @@ void ncfg_access_point_channel_plan(const ncfg_access_point_t *access_point,
 	out->vht = five && radio->vht_5;
 	width = access_point->width.has ? access_point->width.value
 	                                : (five ? (out->vht ? 80 : 40) : 20);
+	/*
+	 * 160 MHz only when asked (10.599): both of the band's 160 MHz blocks
+	 * take in radar channels, so an access point listens for a minute
+	 * before it beacons -- measured, even on 36 -- and radar can move it.
+	 * With no channel it is 80, since automatic selection at 160 was not
+	 * measured.
+	 */
+	if (width == 160) {
+		if (!five) {
+			reason(why, "160 MHz is a 5 GHz width");
+			return;
+		}
+		if (!out->vht || !radio->vht160_5) {
+			reason(why, "the radio cannot do 160 MHz");
+		} else if (channel == 0) {
+			reason(why, "160 MHz needs a `channel`, in 36 to 64 or 100 to 128");
+		} else if (block_of_160(channel)) {
+			out->width = 160;
+			out->secondary = pair_on_5(channel);
+			out->centre = block_of_160(channel);
+			return;
+		} else {
+			reason(why, "this channel is in neither 160 MHz block, 36 to 64 or 100 to 128");
+		}
+		width = 80;
+	}
 	if (width == 80) {
 		if (!five) {
-			if (why) {
-				*why = "80 MHz is a 5 GHz width";
-			}
+			reason(why, "80 MHz is a 5 GHz width");
 			return;
 		}
 		if (!out->vht) {
-			if (why) {
-				*why = "the radio has no 802.11ac, which 80 MHz needs";
-			}
+			reason(why, "the radio has no 802.11ac, which 80 MHz needs");
 			width = 40;
 		} else if (channel == 0) {
 			/* Measured: automatic selection with an 80 MHz width and no
@@ -175,9 +222,7 @@ void ncfg_access_point_channel_plan(const ncfg_access_point_t *access_point,
 			out->centre = block_of_80(channel);
 			return;
 		} else {
-			if (why) {
-				*why = "this channel is in no 80 MHz block every regulatory domain allows";
-			}
+			reason(why, "this channel is in no 80 MHz block every regulatory domain allows");
 			width = 40;
 		}
 	}

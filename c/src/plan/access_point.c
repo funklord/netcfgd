@@ -309,6 +309,7 @@ static void radio_plan(const ncfg_builder_t *builder, const ncfg_access_point_t 
 			widths.forty_mhz_5 |= strcmp(link->forty_mhz[at], "5") == 0;
 		}
 		widths.vht_5 = link->very_high_throughput;
+		widths.vht160_5 = link->hundred_sixty_mhz;
 	}
 	ncfg_access_point_channel_plan(point, &widths, plan, why);
 }
@@ -336,6 +337,16 @@ static void warn_width(ncfg_builder_t *builder, const ncfg_access_point_t *point
 		why = "the radio has no 802.11n";
 	} else {
 		radio_plan(builder, point, point->device, &plan, &why);
+		if (plan.width == 160 && !(point->channel.has &&
+		        ncfg_channel_needs_radar_detection(point->channel.value))) {
+			/* Said where the channel's own warning would not be: 160 MHz
+			 * takes in radar channels from 36 too (measured, 10.599). */
+			ncfg_plan_warnf(builder->plan, point->device,
+			    "access point `%s` runs at 160 MHz, which takes in channels shared with "
+			    "radar: the radio has to listen before it may beacon, so the access point "
+			    "will be silent for a minute or so after it starts, and radar can move it. "
+			    "`width = 80` needs no such wait", point->id);
+		}
 		if (plan.width >= point->width.value) {
 			return;
 		}
@@ -530,6 +541,9 @@ static int same_text(const char *left, const char *right)
 /* The width a hostapd was started with, out of what its file said. */
 static int started_width(const ncfg_observed_access_point_t *started)
 {
+	if (started->hundred_sixty_mhz) {
+		return 160;
+	}
 	return started->eighty_mhz ? 80 : (started->forty_mhz ? 40 : 20);
 }
 

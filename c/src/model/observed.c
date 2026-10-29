@@ -749,6 +749,8 @@ static const ncfg_field_t observed_link_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_link_t, forty_mhz_count) },
 	{ .name = "very_high_throughput", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_link_t, very_high_throughput) },
+	{ .name = "hundred_sixty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_link_t, hundred_sixty_mhz) },
 	{ .name = "category", .kind = NCFG_F_OPT_ENUM, .choices = &link_category_set,
 	    .offset = offsetof(ncfg_observed_link_t, category) },
 	{ .name = "network", .kind = NCFG_F_STR,
@@ -1152,7 +1154,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "very_high_throughput", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, very_high_throughput) },
 	{ .name = "eighty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_observed_access_point_t, eighty_mhz) }
+	    .offset = offsetof(ncfg_observed_access_point_t, eighty_mhz) },
+	{ .name = "hundred_sixty_mhz", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, hundred_sixty_mhz) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);

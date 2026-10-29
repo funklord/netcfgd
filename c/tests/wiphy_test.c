@@ -135,6 +135,7 @@ static void the_reply(void)
 	check(radio.forty_mhz_5 && !radio.forty_mhz_24,
 	    "  and 40 MHz in that band alone, the second being 5 GHz, by the capability's bit 1");
 	check(radio.vht_5, "  and 802.11ac, the band carrying VHT_CAPA (hwsim's, measured)");
+	check(radio.vht160_5, "  and 160 MHz, that capability's supported-width bits being set");
 	ncfg_buf_free(&payload);
 	part20(&payload);
 	check(ncfg_wiphy_parse(payload.data, payload.length, &radio, err, sizeof(err)) &&
