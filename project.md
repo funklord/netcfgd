@@ -12597,6 +12597,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.591 Wanted, later: a host list manager
+
+**Asked for by the copyright holder 2026-10-29, explicitly deferred**: "a host
+list manager, so we can have seen devices, whitelists, blacklists of different
+sorts, preferably intermixable with a limited set of wildcard rules, but
+later." Nothing is built. This entry is so the request is findable when it is
+picked up, with what already exists beside it.
+
+**What it is**, as asked: named lists of hosts that other blocks refer to, of
+three kinds -- hosts *seen* (observed, not written), and allow and deny lists
+written by an operator -- that can be combined, with a small set of wildcard
+forms rather than a pattern language.
+
+**Footholds in the tree today**, none of which is a list another block can
+name:
+
+- `access_point { access_control { allow | deny = [...] } }` -- exact MAC
+  addresses, inline, one access point at a time
+  ([0039](doc/decision/0039-a-station-list-is-one-list.md)).
+- `ap_stations` on the socket -- the stations an access point is holding
+  now, which is one source of *seen*.
+- The firewall model (10.563, [0283](doc/decision/0283-firewall-and-queuing-are-in-scope.md))
+  -- address-keyed rules, the other likely consumer.
+- Leases netcfgd's DHCP server hands out, the other source of *seen*.
+
+**The constraint to design against is 0039, and it does not forbid the
+feature.** 0039 refuses `allow` and `deny` on one access point together,
+because hostapd holds exactly one list and a precedence rule would let a deny
+list silently do nothing. Intermixable lists are then a compile-time
+operation: the lists and their wildcards are resolved into the one concrete
+list each consumer can hold, and `ncfg plan` shows the resolved list, so the
+precedence is visible rather than silent. A wildcard hostapd cannot express (it
+takes exact MACs) has to be expanded against *seen* or refused, and which of
+those is the first open question.
+
+**Open, and the holder's when this is picked up**: which wildcard forms (an
+OUI prefix, a mask, a name pattern); whether *seen* is persisted, which would
+put observed data under `/etc` or a new state file and touches constraints 1
+and 2; and whether lists are per machine or belong to the site model (0271).
+
 ## 10.590 The tray joins a saved network, which is the whole interaction it was for
 
 **Found by walking the aims rather than by a defect.** The brief's second
