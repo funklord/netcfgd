@@ -601,9 +601,34 @@ static void a_supplicant_event_reaches_the_log(const char *base)
 	(void)ncfg_supplicant_command(tester,
 	    "TROUBLE CTRL-EVENT-CONNECTED - Connection to a0:a4:7f:23:9a:cf completed "
 	    "[id=0 id_str=]", message, sizeof(message));
-	clock_is_expired();
-	err[0] = '\0';
-	(void)ncfg_main_round(&run, &report, err, sizeof(err));
+	/*
+	 * **Rounds until the event has been read, bounded**, rather than one. The
+	 * fake is another process and emits when it gets to it; on a loaded
+	 * machine one round can look before the event is there, which is a round
+	 * correctly finding nothing -- and was this check failing one run in a
+	 * full `make check`, passing three in three alone. Fifty rounds is far
+	 * past any answer a fake gives, and the check below still fails if the
+	 * line never comes.
+	 */
+	{
+		int round;
+
+		for (round = 0; round < 50; round++) {
+			char *so_far;
+			int   seen;
+
+			clock_is_expired();
+			err[0] = '\0';
+			(void)ncfg_main_round(&run, &report, err, sizeof(err));
+			(void)fflush(stderr);
+			so_far = testdir_read(log_path, NULL);
+			seen = so_far && strstr(so_far, "wlan0: joined a0:a4:7f:23:9a:cf") != NULL;
+			free(so_far);
+			if (seen) {
+				break;
+			}
+		}
+	}
 	ncfg_log_accept(kept_level);
 
 	(void)fflush(stderr);
