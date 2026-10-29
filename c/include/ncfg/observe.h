@@ -937,6 +937,16 @@ int ncfg_observe_ports_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *
 int ncfg_observe_wds_from(const ncfg_observe_kernel_t *genl, ncfg_observed_t *observed,
     char *err, size_t err_size);
 
+/*
+ * Whether each radio has 802.11n, into its link's `high_throughput` (10.596):
+ * a `GET_INTERFACE` dump for which radio each interface is on, and a split
+ * `GET_WIPHY` dump for what each radio can do -- asked only where there is a
+ * radio. A kernel that will not say leaves them unanswered with a note, which
+ * costs an access point not yet started its HT rates and nothing else.
+ */
+int ncfg_observe_high_throughput_from(const ncfg_observe_kernel_t *genl,
+    ncfg_observed_t *observed, char *err, size_t err_size);
+
 /* ------------------------------------------------------------------------ *
  * What each WireGuard device is running, and whether it is current
  * ------------------------------------------------------------------------ */

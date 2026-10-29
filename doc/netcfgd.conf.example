@@ -615,11 +615,11 @@
 # out as well and the channel number decides; leave out both and it is 2.4 GHz,
 # which every radio has.
 #
-# **What this build does not write is any of `ieee80211n`, `ieee80211ac` or
-# `wmm_enabled`.** hostapd defaults them off, so an access point netcfgd starts
-# runs at 802.11a/g rates -- 54 Mbps -- whichever band it is in. Nothing is
-# wrong with the configuration; it is simply not a fast access point, and the
-# reason is worth knowing before measuring throughput and blaming the radio.
+# **802.11n is given where the radio has it**, which netcfgd asks the kernel,
+# so nothing here needs to say so: HT at 20 MHz, which every 802.11n radio can
+# do. What this build does not write yet is a wider channel (`ht_capab`),
+# 802.11ac or 802.11ax, so on 5 GHz an access point is not as fast as the
+# radio could be -- worth knowing before measuring throughput and blaming it.
 
 # **`regdom` here is not the one that does anything, and that is a trap worth
 # knowing about.** The language spells `regdom` in three places:

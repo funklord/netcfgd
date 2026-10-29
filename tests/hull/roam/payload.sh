@@ -136,7 +136,10 @@ until status | grep -q '^wpa_state=COMPLETED' || [ "$n" -gt 100 ]; do
 	n=$((n + 1))
 done
 first=$(status | grep -E '^(bssid|key_mgmt)=' | tr '\n' ' ')
-say "joins: $first"
+generation=$(status | sed -n 's/^wifi_generation=//p')
+say "joins: $first wifi_generation=${generation:-none}"
+ht=$(grep -c '^ieee80211n=1$' "$work/run/hostapd/wlan0.conf" "$work/run/hostapd/wlan1.conf" |
+	grep -c ':1$')
 
 wpa_cli -p "$work/sta" -i wlan2 set_network 0 bssid any >/dev/null
 wpa_cli -p "$work/sta" -i wlan2 scan >/dev/null
@@ -173,6 +176,8 @@ case "$second" in *"bssid=$b1"*"key_mgmt=FT-PSK"*) ;; *) say "  the station did 
 [ "$joined_open" -ge 1 ] || { say "  the control failed: no open-system authentication to $b0"; failed=1; }
 [ "$roamed_ft" -ge 1 ] || { say "  the roam to $b1 was not a fast transition"; failed=1; }
 [ "$again" -ge 1 ] || { say "  the third plan was not empty"; failed=1; }
+[ "$ht" -eq 2 ] || { say "  hwsim has 802.11n, and the access points were not given it"; failed=1; }
+[ "$generation" = 4 ] || { say "  the station did not associate as 802.11n (Wi-Fi 4)"; failed=1; }
 case "$reported" in *"$b0 op_class=81 chan=1 "*) ;; *) say "  roam-b did not report its sibling roam-a"; failed=1 ;; esac
 case "$reported" in *"02:00:00:00:09:00 op_class=115 chan=36 "*) ;; *) say "  roam-b did not report the declared neighbour on channel 36"; failed=1 ;; esac
 if [ "$failed" -ne 0 ]; then

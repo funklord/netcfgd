@@ -11,11 +11,12 @@
 # reports power minus 50 and `iw` takes no negative power, which is why the
 # threshold here is -45 rather than a real-world -75.
 #
-# **Why the neighbour runs 802.11n.** wpa_supplicant 2.10 chooses among the
+# **Why the neighbour runs 40 MHz.** wpa_supplicant 2.10 chooses among the
 # candidates by estimated throughput. Two 802.11g access points at -50 and
 # -30 dBm both estimate 54 Mbit/s, so it stayed where it was, which was the
-# first run of this rig; a real weak station estimates less and moves. HT20
-# beats 54 Mbit/s, so here the request has somewhere better to point.
+# first run of this rig; a real weak station estimates less and moves. Since
+# netcfgd gives its access point 802.11n (10.596) it is HT20, so the
+# neighbour is HT40 to be somewhere better to point.
 #
 # Asserted:
 #   - the control: a plan before the station has settled steers nobody, and
@@ -68,6 +69,7 @@ ssid=weak
 hw_mode=g
 channel=6
 ieee80211n=1
+ht_capab=[HT40-]
 wpa=2
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP

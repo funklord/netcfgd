@@ -332,7 +332,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	    "1e76efa2f1c48e99dc6ed03ae8cfd81a88ccc960995b427cccd51d47cc168e2f";
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA3);
 	ncfg_secret_ref_t          key = { NCFG_SECRET_PROVIDER_FILE, (char *)(void *)"roam" };
-	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00" };
+	const ncfg_hostapd_local_t local = { "br0", "02:00:00:AB:01:00", 0 };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 	char                       want[160];
@@ -380,7 +380,7 @@ static void fast_roaming_carries_sae_keys_under_a_roaming_key(void)
 	(void)refused_on(&point, &local, "correcthorse", NULL, NCFG_HOSTAPD_MISSING_ROAMING_KEY,
 	    "an unresolved roaming key is refused rather than rendered as a roam that fails");
 	{
-		const ncfg_hostapd_local_t nowhere = { "br0", NULL };
+		const ncfg_hostapd_local_t nowhere = { "br0", NULL, 0 };
 
 		(void)refused_on(&point, &nowhere, "correcthorse", "roamingsecret",
 		    NCFG_HOSTAPD_MISSING_ADDRESS,
@@ -445,6 +445,32 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 	}
 }
 
+/* 802.11n where the radio has it, and only there (10.596): HT20 with no
+ * `ht_capab`, which every HT radio can do. */
+static void a_radio_with_802_11n_is_given_it(void)
+{
+	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	const ncfg_hostapd_local_t ht = { NULL, NULL, 1 };
+	ncfg_hostapd_lines_t       lines;
+	char                       message[NCFG_ERROR_MAX];
+
+	if (ncfg_hostapd_config(&point, &ht, "/run", "correcthorse", NULL, &lines, NULL, message,
+	    sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "ieee80211n"), "1",
+		    "an access point on a radio with 802.11n is given it");
+		check(ncfg_hostapd_value_of(&lines, "ht_capab") == NULL,
+		    "  as HT20 with no optional capabilities, which every HT radio has");
+		ncfg_hostapd_lines_free(&lines);
+	} else {
+		check(0, "an access point on a radio with 802.11n renders");
+	}
+	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "ieee80211n") == NULL,
+		    "and one on a radio without it, or not known to have it, is not");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
 /* 802.11k (10.595): the file turns reports on, and the neighbours themselves
  * go over the control socket, so none of them is in it. */
 static void neighbour_reports_are_two_lines_and_no_neighbours(void)
@@ -490,7 +516,7 @@ static void neighbour_reports_are_two_lines_and_no_neighbours(void)
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
 {
 	ncfg_access_point_t        point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
-	const ncfg_hostapd_local_t bridged = { "br0", NULL };
+	const ncfg_hostapd_local_t bridged = { "br0", NULL, 0 };
 	ncfg_hostapd_lines_t       lines;
 	char                       message[NCFG_ERROR_MAX];
 
@@ -1266,6 +1292,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 
 int main(void)
 {
+	a_radio_with_802_11n_is_given_it();
 	neighbour_reports_are_two_lines_and_no_neighbours();
 	const char *run = testdir_make("hostapd");
 	char        stderr_path[512];

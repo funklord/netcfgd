@@ -1236,6 +1236,56 @@ static void an_access_point_without_steering_moves_nobody(void)
 	planfix_release(plan, document, observed);
 }
 
+/* ------------------------------------------------------------------------ *
+ * 802.11n (10.596)
+ * ------------------------------------------------------------------------ */
+
+#define HT_LINK(answer) PLANFIX_LINK("wlan0", ",\"wireless\":true" answer)
+
+/*
+ * The radio's answer decides `ieee80211n`, so a hostapd started without it on
+ * a radio that has it -- every one started before this build -- restarts once
+ * to take its HT rates, and then plans nothing. A radio not known to have it
+ * restarts nothing either way: a read that failed once must not take HT away
+ * and give it back.
+ */
+static void an_access_point_on_a_radio_with_802_11n_takes_it_once(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" HT_LINK(",\"high_throughput\":true") "]," RUNNING(STARTED_WITH(AS_WRITTEN)),
+	    &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && stop->reason.field &&
+	    strcmp(stop->reason.field, "access_point.ieee80211n") == 0 &&
+	    strcmp(stop->reason.desired, "true") == 0 && strcmp(stop->reason.observed, "false") == 0,
+	    "an access point started without 802.11n on a radio that has it restarts for it");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" HT_LINK(",\"high_throughput\":true") "],"
+	    RUNNING(STARTED_WITH(AS_WRITTEN ",\"high_throughput\":true")), &document, &observed);
+	check(plan && plan->action_count == 0u, "  and once it has it, plans nothing");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" HT_LINK("") "]," RUNNING(STARTED_WITH(AS_WRITTEN ",\"high_throughput\":true")),
+	    &document, &observed);
+	check(plan && plan->action_count == 0u,
+	    "a radio whose answer was not read restarts nothing, whatever hostapd has");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", OPEN_POINT,
+	    "\"links\":[" HT_LINK(",\"high_throughput\":false") "],"
+	    RUNNING(STARTED_WITH(AS_WRITTEN ",\"high_throughput\":true")), &document, &observed);
+	stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+	check(stop && strcmp(stop->reason.field, "access_point.ieee80211n") == 0,
+	    "while one that answers it has none restarts without it");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1272,6 +1322,7 @@ int main(void)
 	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
 	stations_are_steered_by_band_and_by_signal();
 	an_access_point_without_steering_moves_nobody();
+	an_access_point_on_a_radio_with_802_11n_takes_it_once();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

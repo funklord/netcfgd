@@ -742,6 +742,8 @@ static const ncfg_field_t observed_link_fields[] = {
 	    .offset = offsetof(ncfg_observed_link_t, wireless) },
 	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_link_t, wds) },
+	{ .name = "high_throughput", .kind = NCFG_F_OPT_BOOL,
+	    .offset = offsetof(ncfg_observed_link_t, high_throughput) },
 	{ .name = "category", .kind = NCFG_F_OPT_ENUM, .choices = &link_category_set,
 	    .offset = offsetof(ncfg_observed_link_t, category) },
 	{ .name = "network", .kind = NCFG_F_STR,
@@ -1135,7 +1137,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_observed_access_point_t, wds) },
 	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_observed_access_point_t, neighbour_reports) }
+	    .offset = offsetof(ncfg_observed_access_point_t, neighbour_reports) },
+	{ .name = "high_throughput", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, high_throughput) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);

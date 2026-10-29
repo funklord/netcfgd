@@ -590,6 +590,12 @@ typedef struct {
 	/* A station radio in four-address (WDS) mode, which is what lets it be a
 	 * bridge member (10.587 item 4). Asked of nl80211, and only of radios. */
 	int     wds;
+	/* A radio with 802.11n (HT) in some band, which is what decides whether
+	 * an access point on it is given `ieee80211n=1` (10.596). Asked of
+	 * nl80211, and only of radios. **Absent where it was not answered**, which
+	 * is not "no": a read that failed once must not restart an access point to
+	 * take its HT away and again to give it back. */
+	ncfg_optbool_t high_throughput;
 	/* **Carried rather than derived, before four clients derive it.** Absent
 	 * where nothing has computed it: a bare netlink snapshot. */
 	ncfg_optint_t category; /* ncfg_link_category_t where `has` */
@@ -1071,6 +1077,8 @@ typedef struct {
 	/* Whether it answers neighbour report requests (`rrm_neighbor_report`,
 	 * 10.595). */
 	int           neighbour_reports;
+	/* Whether it was given 802.11n (`ieee80211n`, 10.596). */
+	int           high_throughput;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

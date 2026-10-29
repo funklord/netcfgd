@@ -126,6 +126,9 @@ static ncfg_observed_access_point_t *started_with(const char *run_dir, const cha
 	if (observe_config_value(text, "rrm_neighbor_report", value, sizeof(value))) {
 		out->neighbour_reports = strcmp(value, "1") == 0;
 	}
+	if (observe_config_value(text, "ieee80211n", value, sizeof(value))) {
+		out->high_throughput = strcmp(value, "1") == 0;
+	}
 	free(text);
 	return out;
 }

@@ -350,6 +350,14 @@ typedef struct {
 	const ncfg_service_client_metric_t *client_metrics;
 	size_t                              client_metric_count;
 	/*
+	 * The radios that have 802.11n, by interface name, resolved from the
+	 * observation for `client_metrics`' reason: the half of the rule that
+	 * decides `ieee80211n=1` is what the radio reports (10.596). A radio not
+	 * named runs its access point at 802.11a/g rates.
+	 */
+	const char *const *high_throughput;
+	size_t             high_throughput_count;
+	/*
 	 * How long a control socket gets. 0 means `NCFG_SUPPLICANT_IMPATIENT_MS`.
 	 *
 	 * An argument because a test drives a fake that is deliberately silent and

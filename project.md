@@ -12597,6 +12597,46 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.596 802.11n where the radio has it
+
+**Asked for by the holder 2026-10-29** ("go ahead with ieee80211n"). Until
+now nothing wrote `ieee80211n` (10.116), so every netcfgd access point ran at
+802.11a/g rates, 54 Mbit/s at best, on hardware that has had HT since 2009.
+
+**No setting.** Whether a radio has HT is a fact about the radio, so it is
+read rather than written down: a split nl80211 `GET_WIPHY` dump, HT being
+any band's `NL80211_BAND_ATTR_HT_CAPA`, joined to interfaces by the wiphy
+index `GET_INTERFACE` carries (`src/observe/wiphy.c`). The observed link
+carries `high_throughput`; the executor is handed the HT radios by name, as
+it is the route metrics (`ncfg_service_t.high_throughput`), and writes
+`ieee80211n=1`.
+
+**HT20 and nothing more**: no `ht_capab`. Every HT radio can do it, and the
+optional features -- 40 MHz, short guard interval, the rest -- are bits of
+`HT_CAPA` this build does not read yet; asking hostapd for one the radio
+lacks fails the start. WMM, which HT requires, follows by hostapd's own
+default, and the live reading below is the evidence: wpa_supplicant will
+not associate as HT without it.
+
+**An unanswered read is not "no".** `high_throughput` is optional on the
+link, absent where the kernel did not say. The planner compares it with what
+hostapd was started with (`ieee80211n` in the file, read back as
+`started_with.high_throughput`) only where it was answered: otherwise one
+failed read would restart an access point to take HT away and the next to
+give it back. An access point started before this build, on an HT radio,
+restarts once to take it -- the cost of the change, paid once, on upgrade.
+
+**Live.** `make hull-roam`: both access points rendered with
+`ieee80211n=1`, and the station joined as `wifi_generation=4`, where earlier
+runs the same day showed `WIDTH=20 MHz (no HT)`. `make hull-steer`'s advisory
+machine needed its stand-in neighbour moved from HT20 to HT40: with netcfgd's
+access point now HT20 too, the two tied on wpa_supplicant's throughput
+estimate and the station rightly stayed. Both steering machines pass, and
+`make hull-wds` and `make hull-roam-sae` were run again over the change.
+
+**Next, in order**: 40 MHz from the `HT_CAPA` bits the radio reports, then
+802.11ac on 5 GHz from `VHT_CAPA`.
+
 ## 10.595 Neighbour reports and steering: measured, and the design
 
 **Asked for by the holder 2026-10-29** ("go ahead with neighbour reports and
@@ -46953,10 +46993,11 @@ range lives in the model despite `channel_in_band`'s rule against channel
 tables, and the exception is earned by it driving a warning rather than a
 refusal -- being wrong costs a sentence, not an access point.
 
-**Channel width is not a defect yet.** Nothing writes `ht_capab` or
-`vht_oper_chwidth`, and 10.116 recorded why: no `ieee80211n` either, so an
-access point runs at 802.11a/g rates and 20 MHz is the only width it has. Width
-becomes a question when that changes and not before. The station sets none of
+**Channel width is the next question, since 10.596.** Nothing writes
+`ht_capab` or `vht_oper_chwidth`. Until 10.596 nothing wrote `ieee80211n`
+either, so 20 MHz was the only width an access point had; now one on an HT
+radio is HT20, and 40 MHz wants the radio's `HT_CAPA` bits read as well as
+their presence. The station sets none of
 `disable_ht`/`disable_ht40`/`disable_vht`, which is right -- those exist to work
 around broken access points.
 
@@ -47536,12 +47577,13 @@ The renderer always emits both keys, so a real observation can never read back
 against a copy of itself. The comment three lines up had got exactly this right
 for `key_mgmt` and the reasoning had not been carried to its neighbours.
 
-**Not fixed, and recorded instead:** nothing writes `ieee80211n`,
-`ieee80211ac` or `wmm_enabled`, and hostapd defaults them off, so a netcfgd
-access point runs at 802.11a/g rates in either band. `ieee80211n=1` is one line;
-the `ht_capab` that belongs with it is a function of what the radio reports,
-which netcfgd does not observe. Implementing that against a machine with no
-spare radio to test on is how the fake above gets built again.
+**Recorded then, and closed by 10.596 for `ieee80211n`:** nothing wrote
+`ieee80211n`, `ieee80211ac` or `wmm_enabled`, and hostapd defaults them off,
+so a netcfgd access point ran at 802.11a/g rates in either band. Whether a
+radio has HT is now read from the kernel and `ieee80211n=1` written where it
+does, HT20 with no `ht_capab`; WMM follows by hostapd's default. `ht_capab`
+and 802.11ac remain, each a function of what the radio reports beyond the
+presence of HT.
 
 ## 10.115 Two spellings of one country
 

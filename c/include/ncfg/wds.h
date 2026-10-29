@@ -35,6 +35,10 @@ typedef struct {
 	/* Whether the reply carried `4ADDR` at all, and what it said. */
 	int      has_four_address;
 	int      four_address;
+	/* The radio it is on (`NL80211_ATTR_WIPHY`), which is what `wiphy.h`'s
+	 * capabilities are keyed by; `has_wiphy` 0 where the reply did not say. */
+	int      has_wiphy;
+	uint32_t wiphy;
 } ncfg_wds_interface_t;
 
 /* A dump of every wireless interface, to a family resolved. */

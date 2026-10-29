@@ -1547,6 +1547,133 @@ static ncfg_observed_t *one_link(int wireless)
 	return observed;
 }
 
+/* One part of a split `GET_WIPHY` dump: radio `index`, with one band that
+ * carries an HT capability or does not. */
+static void append_wiphy(ncfg_buf_t *out, uint32_t index, int ht)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_NEW_WIPHY, 1 };
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+	ncfg_buf_t         band;
+	ncfg_buf_t         bands;
+	uint16_t           capability = 0x017e;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_buf_init(&band, 0);
+	ncfg_buf_init(&bands, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, index);
+	if (ht) {
+		ncfg_wire_attr_put(&band, NL80211_BAND_ATTR_HT_CAPA, &capability, sizeof(capability));
+	}
+	ncfg_wire_attr_put_u32(&band, NL80211_BAND_ATTR_HT_AMPDU_FACTOR, 3);
+	ncfg_wire_attr_put_nested(&bands, NL80211_BAND_2GHZ, &band);
+	ncfg_wire_attr_put_nested(&attrs, NL80211_ATTR_WIPHY_BANDS, &bands);
+	append_message(out, NL80211_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+	ncfg_buf_free(&band);
+	ncfg_buf_free(&bands);
+}
+
+/* One `GET_INTERFACE` dump entry: `wlan0` on radio `wiphy`. */
+static void append_radio_interface(ncfg_buf_t *out, uint32_t wiphy)
+{
+	ncfg_genl_header_t header = { NL80211_CMD_NEW_INTERFACE, 1 };
+	ncfg_buf_t         body;
+	ncfg_buf_t         attrs;
+
+	ncfg_buf_init(&body, 0);
+	ncfg_buf_init(&attrs, 0);
+	ncfg_genl_header_encode(&header, &body);
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_IFINDEX, 3);
+	ncfg_wire_attr_put_str(&attrs, NL80211_ATTR_IFNAME, "wlan0");
+	ncfg_wire_attr_put_u32(&attrs, NL80211_ATTR_WIPHY, wiphy);
+	append_message(out, NL80211_FAMILY_ID, &body, &attrs);
+	ncfg_buf_free(&body);
+	ncfg_buf_free(&attrs);
+}
+
+/*
+ * Whether the radio has 802.11n (10.596), from the two dumps. A radio whose
+ * description carries HT in any part has it, one whose does not has not, and
+ * a round the kernel would not answer leaves the question unanswered -- which
+ * the planner reads as "leave a running access point alone", not as "no".
+ */
+static void whether_the_radio_has_802_11n(void)
+{
+	script_t               asked;
+	ncfg_observe_replay_t  replay;
+	ncfg_observe_kernel_t  genl;
+	ncfg_buf_t             family;
+	ncfg_buf_t             with;
+	ncfg_buf_t             without;
+	ncfg_buf_t             placed;
+	ncfg_observed_t       *observed;
+	char                   err[NCFG_ERROR_MAX];
+
+	ncfg_buf_init(&family, 0);
+	ncfg_buf_init(&with, 0);
+	ncfg_buf_init(&without, 0);
+	ncfg_buf_init(&placed, 0);
+	append_nl80211_family(&family);
+	/* Two parts for radio 1, the HT in the second: the split dump's shape. */
+	append_wiphy(&with, 0, 0);
+	append_wiphy(&with, 1, 0);
+	append_wiphy(&with, 1, 1);
+	append_done(&with);
+	append_wiphy(&without, 1, 0);
+	append_done(&without);
+	append_radio_interface(&placed, 1);
+	append_done(&placed);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &with);
+	queue(&asked, &placed);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(1);
+	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
+	    observed->links[0].high_throughput.has && observed->links[0].high_throughput.value,
+	    "a radio whose description carries HT in any part has 802.11n");
+	ncfg_observed_free(observed);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue(&asked, &without);
+	queue(&asked, &placed);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(1);
+	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
+	    observed->links[0].high_throughput.has && !observed->links[0].high_throughput.value,
+	    "  and one whose does not, has not -- an answer, not a silence");
+	ncfg_observed_free(observed);
+
+	memset(&asked, 0, sizeof(asked));
+	queue(&asked, &family);
+	queue_failure(&asked, EPERM);
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(1);
+	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
+	    !observed->links[0].high_throughput.has,
+	    "a kernel that will not say leaves it unanswered, and the observation stands");
+	ncfg_observed_free(observed);
+
+	memset(&asked, 0, sizeof(asked));
+	kernel_of(&genl, &replay, &asked);
+	observed = one_link(0);
+	check(observed && ncfg_observe_high_throughput_from(&genl, observed, err, sizeof(err)) &&
+	    !observed->links[0].high_throughput.has,
+	    "and a machine with no radio asks nothing");
+	ncfg_observed_free(observed);
+
+	ncfg_buf_free(&family);
+	ncfg_buf_free(&with);
+	ncfg_buf_free(&without);
+	ncfg_buf_free(&placed);
+}
+
 static void the_regulatory_domain_the_kernel_reports(void)
 {
 	script_t               asked;
@@ -1736,6 +1863,7 @@ int main(void)
 	a_ruleset_that_moved_is_read_again();
 	the_offloads_the_kernel_reports();
 	the_regulatory_domain_the_kernel_reports();
+	whether_the_radio_has_802_11n();
 	the_ports_a_card_describes();
 	the_chains_that_are_not_a_conflict();
 	a_kernel_that_will_not_answer();

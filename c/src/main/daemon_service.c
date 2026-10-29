@@ -58,6 +58,7 @@
 #include "ncfg/secrets.h"
 #include "ncfg/state.h"
 
+#include <stdio.h>
 #include <string.h>
 
 /* ------------------------------------------------------------------------ *
@@ -406,6 +407,7 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 	const ncfg_document_t *desired;
 	const ncfg_observed_t *observed;
 	size_t                 missed = 0;
+	size_t                 at;
 
 	if (!world) {
 		ncfg_error_set(err, err_size, "there is no world to take a service context from");
@@ -485,6 +487,21 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 	    (size_t)NCFG_MAIN_METRICS_MAX, &missed);
 	world->service.client_metrics = world->metrics;
 	world->service.client_metric_count = world->metric_count;
+	world->ht_count = 0;
+	for (at = 0; observed && at < observed->link_count &&
+	    world->ht_count < (size_t)NCFG_MAIN_METRICS_MAX; at++) {
+		const ncfg_observed_link_t *link = &observed->links[at];
+
+		if (link->high_throughput.has && link->high_throughput.value && link->name &&
+		    strlen(link->name) < sizeof(world->ht_names[0])) {
+			(void)snprintf(world->ht_names[world->ht_count], sizeof(world->ht_names[0]), "%s",
+			    link->name);
+			world->ht[world->ht_count] = world->ht_names[world->ht_count];
+			world->ht_count++;
+		}
+	}
+	world->service.high_throughput = world->ht;
+	world->service.high_throughput_count = world->ht_count;
 	if (missed > 0u) {
 		ncfg_log_emitf("apply", NCFG_LOG_WARNING,
 		    "%zu interface(s) of this configuration did not fit in the %d route "

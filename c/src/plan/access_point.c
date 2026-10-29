@@ -409,6 +409,16 @@ static int restart(ncfg_builder_t *builder, const char *device, const ncfg_reaso
 /* An SSID as the document writes it: lowercase hex, because 802.11 places no
  * encoding requirement on one and a name that is not text still has to reach a
  * reason line. `document.h` has the whole of the reason. */
+/* Whether the radio has 802.11n, as the observation read it (10.596): the
+ * same answer the executor is handed, so the file and this comparison agree.
+ * -1 where it was not answered, which compares with nothing. */
+static int radio_has_ht(const ncfg_builder_t *builder, const char *device)
+{
+	const ncfg_observed_link_t *link = ncfg_observed_link(builder->observed, device);
+
+	return link && link->high_throughput.has ? link->high_throughput.value != 0 : -1;
+}
+
 static void ssid_hex(const ncfg_ssid_t *ssid, char *out, size_t out_size)
 {
 	static const char digits[] = "0123456789abcdef";
@@ -574,6 +584,16 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		    point->neighbour_reports ? "true" : "false");
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->neighbour_reports ? "true" : "false");
+	} else if (radio_has_ht(builder, device) >= 0 &&
+	    (started->high_throughput != 0) != (radio_has_ht(builder, device) != 0)) {
+		/* `ieee80211n` is read once, and is the radio's answer rather than the
+		 * document's (10.596): an access point started before this build
+		 * wrote it is restarted once to take its HT rates. */
+		field = "access_point.ieee80211n";
+		(void)snprintf(desired, sizeof(desired), "%s",
+		    radio_has_ht(builder, device) ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->high_throughput ? "true" : "false");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

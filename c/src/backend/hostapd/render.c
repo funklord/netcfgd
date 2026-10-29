@@ -392,7 +392,7 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
     const char *roaming_key, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why,
     char *err, size_t err_size)
 {
-	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL };
+	static const ncfg_hostapd_local_t nothing_local = { NULL, NULL, 0 };
 	const char                       *bridge;
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
@@ -502,6 +502,20 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 			ncfg_error_set(err, err_size, "out of memory rendering the regulatory domain");
 			return 0;
 		}
+	}
+
+	/*
+	 * 802.11n where the radio has it (10.596). Without it hostapd runs the
+	 * access point at 802.11a/g rates -- 54 Mbit/s at best -- on hardware
+	 * that has carried HT since 2009. No `ht_capab`, so HT20 with none of
+	 * the optional features: every HT radio can do that, and the features a
+	 * radio has are a further reading this build does not take yet. WMM,
+	 * which HT requires, follows by hostapd's own default.
+	 */
+	if (local->high_throughput && !add_line(out, "ieee80211n", "1", 0)) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering 802.11n");
+		return 0;
 	}
 
 	if (access_point->hidden) {
