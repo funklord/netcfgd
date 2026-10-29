@@ -1742,6 +1742,8 @@ static int apply_through_daemon(const ncfg_cli_options_t *options, int *absent)
 	int                  code = NCFG_CLI_EXIT_OK;
 
 	ncfg_proto_str_t     consent[NCFG_CLI_LIST_MAX];
+	ncfg_proto_str_t     strand[NCFG_CLI_LIST_MAX];
+	ncfg_proto_str_t     wedged[NCFG_CLI_LIST_MAX];
 	size_t               at;
 
 	memset(&request, 0, sizeof(request));
@@ -1758,6 +1760,25 @@ static int apply_through_daemon(const ncfg_cli_options_t *options, int *absent)
 	}
 	request.u.apply.allow_disruption.items = at > 0 ? consent : NULL;
 	request.u.apply.allow_disruption.count = at;
+	/*
+	 * **And the other two consents, which did not.** `--strand-credentials`
+	 * and `--restart-wedged` were sent as nothing, which was a corner while
+	 * only `--confirm-within` came this way and became every apply when a
+	 * plain one did (7e13290e): the daemon planned without them, refused the
+	 * restart the operator had named, and answered an empty journal.
+	 * `tests/live/hwsim.sh` met it as a station that never moved to its
+	 * preferred network.
+	 */
+	for (at = 0; at < options->strand_credentials.count && at < NCFG_CLI_LIST_MAX; at++) {
+		strand[at] = ncfg_proto_str(options->strand_credentials.items[at]);
+	}
+	request.u.apply.strand_credentials.items = at > 0 ? strand : NULL;
+	request.u.apply.strand_credentials.count = at;
+	for (at = 0; at < options->restart_wedged.count && at < NCFG_CLI_LIST_MAX; at++) {
+		wedged[at] = ncfg_proto_str(options->restart_wedged.items[at]);
+	}
+	request.u.apply.restart_wedged.items = at > 0 ? wedged : NULL;
+	request.u.apply.restart_wedged.count = at;
 	if (!ask_or_fail_noting(options, &request, &message, &code, absent)) {
 		return code;
 	}

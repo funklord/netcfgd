@@ -1465,10 +1465,17 @@ static pid_t fake_daemon(const char *path, const char *answer, int *listener_out
 		fd = accept(listener, NULL, NULL);
 
 		if (fd >= 0) {
-			char    ignored[4096];
-			ssize_t got = recv(fd, ignored, sizeof(ignored), 0);
+			char    got_bytes[4096];
+			char    sent_path[340];
+			ssize_t got = recv(fd, got_bytes, sizeof(got_bytes), 0);
 
-			(void)got;
+			/* What the program asked, kept beside the socket for a case that
+			 * has to check what travelled -- `cli_profile_test.c`'s fake does
+			 * the same. */
+			if (got > 0) {
+				(void)snprintf(sent_path, sizeof(sent_path), "%s.sent", path);
+				(void)testdir_write(sent_path, got_bytes, (size_t)got);
+			}
 			if (answer) {
 				(void)send(fd, answer, strlen(answer), MSG_NOSIGNAL);
 			}
@@ -2300,6 +2307,41 @@ static void an_apply_is_the_daemon_s_where_there_is_one(void)
 }
 
 /*
+ * Every consent travels with an apply the daemon carries out.
+ *
+ * `--strand-credentials` and `--restart-wedged` were sent as nothing, which
+ * was a corner while only `--confirm-within` came this way and became every
+ * apply when a plain one did: the daemon planned without them and refused the
+ * restart the operator had named. `tests/live/hwsim.sh` met it as a station
+ * that never moved to its preferred network.
+ */
+static void every_consent_travels_with_an_apply(void)
+{
+	static const char *journal = "{\"response\":\"journal\",\"records\":[]}\n";
+	char       *apply[] = { (char *)"ncfg", (char *)"apply", (char *)"--restart-wedged",
+		(char *)"wlan2", (char *)"--strand-credentials", (char *)"home",
+		(char *)"--allow-disruption", (char *)"eth0", (char *)"--run-dir", testdir_path };
+	char        sent_path[340];
+	char       *sent;
+	int         code = -1;
+
+	(void)answered(journal, apply, 10, &code);
+	(void)snprintf(sent_path, sizeof(sent_path), "%s/netcfgd.sock.sent", testdir_path);
+	sent = testdir_read(sent_path, NULL);
+	check(sent && strstr(sent, "\"restart_wedged\":[\"wlan2\"]") != NULL,
+	    "`--restart-wedged` travels with an apply the daemon carries out");
+	check(sent && strstr(sent, "\"strand_credentials\":[\"home\"]") != NULL,
+	    "  and so does `--strand-credentials`");
+	check(sent && strstr(sent, "\"allow_disruption\":[\"eth0\"]") != NULL,
+	    "  as `--allow-disruption` already did");
+	if (sent && !strstr(sent, "restart_wedged\":[\"wlan2")) {
+		detail("sent", sent);
+	}
+	free(sent);
+	(void)unlink(sent_path);
+}
+
+/*
  * Each verb that renders an answer renders it both ways, from one request.
  *
  * Driven through `ncfg_cli_main` rather than by calling the writers, because
@@ -2735,6 +2777,7 @@ int main(void)
 	the_conversation_is_one_request_and_one_answer();
 	nobody_there_is_told_apart_from_a_failure();
 	an_apply_is_the_daemon_s_where_there_is_one();
+	every_consent_travels_with_an_apply();
 	an_event_is_one_line();
 
 	a_name_that_is_not_text_is_refused_rather_than_repaired();

@@ -385,9 +385,12 @@ echo "ok   the access point is beaconing"
 # **Every invocation gets the tmpfs, not just the daemon's.**
 #
 # `ip netns exec` unshares a *fresh mount namespace per invocation*, and
-# `ncfg apply` goes through the daemon only when `--confirm` is given -- without
-# it the CLI applies in its own process, so dhcpcd is the CLI's child rather
-# than the daemon's. Containing only the daemon therefore contained nothing:
+# `ncfg apply` went through the daemon only when `--confirm` was given --
+# without it the CLI applied in its own process, so dhcpcd was the CLI's child
+# rather than the daemon's. (Every apply goes to a running daemon since
+# 7e13290e; the tmpfs still goes to every invocation, which costs nothing and
+# covers a CLI run with no daemon.) Containing only the daemon therefore
+# contained nothing:
 # measured, the daemon sat in mnt:[4026536358] holding the tmpfs while dhcpcd
 # ran in mnt:[4026536361] and wrote its lease to the operator's real
 # /var/lib/dhcpcd.
