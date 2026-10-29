@@ -13356,6 +13356,13 @@ record half, above), and not before.
 **What a deny prefix costs**: a matching station associates and is denied
 within a pass of the reconcile loop, and after a hostapd restart the window
 opens once more, because hostapd starts with the written addresses only.
+**Corrected 2026-10-29: under the default `on_drift = "report"` the loop
+did not send it**, since `ncfg_reconcile_restrict` dropped the
+`access_control.add` as drift -- so a station of a denied manufacturer
+stayed connected until somebody ran `ncfg apply`. Found by the lens from
+10.599's neighbour-list gap, the same shape: an op planned only from what
+was observed after a start. A station put on a deny list is now always
+sent; taking one off, and the allow list, stay drift (`reconcile_test`).
 `ncfg_access_control_names` is the one answer to "does this list name that
 station", read by the planner and by `ap_stations`' `listed`, so `ncfg wifi
 clients` should flag a prefix-denied station still connected as it does a

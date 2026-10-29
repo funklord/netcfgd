@@ -565,15 +565,29 @@ static void a_restricted_plan_keeps_only_what_it_may_act_on(void)
 			neighbour.u.neighbour.ssid = "686f6d65";
 			neighbour.u.neighbour.nr = "0200000001008f000000510b06";
 			(void)ncfg_plan_add(steering, &neighbour, &reason, NULL, 0u, NULL);
+			memset(&neighbour, 0, sizeof(neighbour));
+			neighbour.kind = NCFG_OP_ACCESS_CONTROL_ADD;
+			neighbour.u.access_control.iface = "eth1";
+			neighbour.u.access_control.list = NCFG_ACL_POLICY_DENY;
+			neighbour.u.access_control.station = "aa:bb:cc:00:00:01";
+			(void)ncfg_plan_add(steering, &neighbour, &reason, NULL, 0u, NULL);
+			neighbour.u.access_control.list = NCFG_ACL_POLICY_ALLOW;
+			neighbour.u.access_control.station = "aa:bb:cc:00:00:02";
+			(void)ncfg_plan_add(steering, &neighbour, &reason, NULL, 0u, NULL);
+			neighbour.kind = NCFG_OP_ACCESS_CONTROL_DEL;
+			neighbour.u.access_control.list = NCFG_ACL_POLICY_DENY;
+			(void)ncfg_plan_add(steering, &neighbour, &reason, NULL, 0u, NULL);
 		}
 		err[0] = '\0';
 		kept = steering ? ncfg_reconcile_restrict(steering, document, NULL, 0, NULL, err,
 		    sizeof(err)) : NULL;
-		check(kept && kept->action_count == 2u &&
+		check(kept && kept->action_count == 3u &&
 		    kept->actions[0].op.kind == NCFG_OP_STATION_STEER &&
-		    kept->actions[1].op.kind == NCFG_OP_NEIGHBOUR_ADD,
-		    "a steer and a neighbour are sent on an interface whose drift is only reported, "
-		    "and nothing else is");
+		    kept->actions[1].op.kind == NCFG_OP_NEIGHBOUR_ADD &&
+		    kept->actions[2].op.kind == NCFG_OP_ACCESS_CONTROL_ADD &&
+		    kept->actions[2].op.u.access_control.list == NCFG_ACL_POLICY_DENY,
+		    "a steer, a neighbour and a deny are sent on an interface whose drift is only "
+		    "reported -- and not the MTU, an allow, or a station taken off the deny list");
 		ncfg_plan_free(kept);
 		ncfg_plan_free(steering);
 	}

@@ -2504,6 +2504,14 @@ int ncfg_reconcile_host_wide(const ncfg_document_t *document);
  * is up, so the lists are planned on the pass after the start -- and under
  * `report` there was no such pass. A fresh access point's reports stayed
  * empty, and band steering, which finds its target there, with them.
+ *
+ * **And a station put on a deny list**: a deny prefix (10.591) is expanded
+ * against the stations seen associated, so it is planned only after one
+ * arrives, and 10.591 promised it "denied within a pass of the reconcile
+ * loop" -- which under `report` never applied it, leaving a station of a
+ * denied manufacturer connected. A deny is the document's statement about
+ * who may not be on the network, and holding it is not fighting an operator.
+ * Taking a station off a list, and the allow list, stay drift.
  */
 int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t *sims,
     const char *interface);
