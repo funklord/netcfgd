@@ -114,6 +114,27 @@ static void a_server_serving_something_else_restarts(void)
 	planfix_release(plan, document, observed);
 }
 
+/* A reservation added to a server already running: the summary differs by
+ * its count and digest, so dnsmasq is restarted to give the host its address
+ * (10.605). The plan names the count, which is what an operator reads. */
+static void a_reservation_added_restarts_the_server(void)
+{
+	ncfg_document_t     *document;
+	ncfg_observed_t     *observed;
+	ncfg_plan_t         *plan = planfix_plan(LAN_DEVICE,
+	    SERVING("\"dns\":[\"9.9.9.9\"],\"hosts\":[{\"name\":\"printer\","
+	        "\"mac\":\"AA:BB:CC:DD:EE:01\",\"address\":\"192.168.1.10\"}]"),
+	    "", "", "\"links\":[" LAN_UP "]," LAN_ADDRESS "," DNSMASQ(WANTED), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && strcmp(stop->reason.field, "dhcp_server") == 0 &&
+	    strstr(stop->reason.desired, ", 1 host ") && !strstr(stop->reason.observed, "host"),
+	    "a reservation added restarts the server, the plan counting the hosts");
+	check(plan && planfix_count(plan, "backend.start") == 1u,
+	    "  and starts it again");
+	planfix_release(plan, document, observed);
+}
+
 static void a_server_the_document_dropped_is_stopped(void)
 {
 	ncfg_document_t *document;
@@ -134,6 +155,7 @@ int main(void)
 	a_server_with_no_dns_is_said();
 	a_server_serving_what_is_asked_is_left_alone();
 	a_server_serving_something_else_restarts();
+	a_reservation_added_restarts_the_server();
 	a_server_the_document_dropped_is_stopped();
 	printf("plan_dhcp_server_test: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

@@ -834,6 +834,11 @@ static void an_access_point_round_trips(void)
 	    "a DHCP server round-trips");
 	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server { }\n}\n",
 	    "  and so does one with every default");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\thost \"tv\" { mac = \"AA:BB:CC:DD:EE:02\"; address = \"192.168.1.11\" }\n"
+	    "\t\thost \"printer\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"192.168.1.10\" }\n"
+	    "\t}\n}\n",
+	    "  and so do reservations, in either order and either case");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
 	    "\twidth = 80\n\twifi { psk = \"@secret:ap\" }\n}\n", "  and so does 80 on 5 GHz");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 100\n"

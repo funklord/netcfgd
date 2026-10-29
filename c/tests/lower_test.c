@@ -1455,6 +1455,41 @@ static void access_point_cases(void)
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
 	    "\tdhcp_server { dns = [\"2001:db8::53\"] }\n}\n",
 	    "is not a DNS server a DHCPv4 server can offer", "  and an IPv6 DNS server");
+	/* Reservations (10.605): a labelled `host`, the MAC uppercased as every
+	 * hardware address in the document is, sorted by name. */
+	document = compiles("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server {\n"
+	    "\t\thost \"tv\" { mac = \"aa:bb:cc:dd:ee:02\"; address = \"10.0.0.150\" }\n"
+	    "\t\thost \"printer\" { mac = \"AA:BB:CC:DD:EE:01\"; address = \"10.0.0.10\" }\n"
+	    "\t}\n}\n", "a DHCP server with two reservations compiles");
+	if (document) {
+		const ncfg_dhcp_server_t *server = document->interfaces[0].dhcp_server;
+
+		check(server && server->host_count == 2u &&
+		    strcmp(server->hosts[0].name, "printer") == 0 &&
+		    strcmp(server->hosts[1].mac, "AA:BB:CC:DD:EE:02") == 0 &&
+		    strcmp(server->hosts[1].address, "10.0.0.150") == 0,
+		    "  sorted by name, the MAC uppercased, one inside the range allowed");
+		ncfg_document_free(document);
+	}
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { host \"tv\" { mac = \"aa:bb:cc:dd:ee\"; address = \"10.0.0.9\" } }\n}\n",
+	    "is not a hardware address", "  a reservation with a MAC that is not one is refused");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { host \"tv\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"10.0.1.9\" } }\n}\n",
+	    "is not inside the interface's network", "  and one outside the network");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { host \"tv\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"10.0.0.1\" } }\n}\n",
+	    "is the interface's own", "  and one given the router's address");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { host \"tv\" { mac = \"aa:bb:cc:dd:ee:01\" } }\n}\n",
+	    "needs both `mac` and `address`", "  and one with no address");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server {\n"
+	    "\t\thost \"tv\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"10.0.0.9\" }\n"
+	    "\t\thost \"tv2\" { mac = \"AA:BB:CC:DD:EE:01\"; address = \"10.0.0.8\" }\n\t}\n}\n",
+	    "share a name, a MAC or an address", "  and two sharing a MAC, whatever its case");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { host \"my tv\" { mac = \"aa:bb:cc:dd:ee:01\"; address = \"10.0.0.9\" } }\n}\n",
+	    "plain host name", "  and a name dnsmasq could not carry");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { pool = 5 }\n}\n",
 	    "unknown dhcp_server key", "  and a key it does not have");
 	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { }\n"

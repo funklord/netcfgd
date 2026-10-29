@@ -12,7 +12,10 @@
 #     with the name the client sent as its fourth column (10.602);
 #   - a second plan has nothing to do;
 #   - a changed lease is planned as a restart, the apply runs a new dnsmasq,
-#     and the lease file is kept across it.
+#     and the lease file is kept across it;
+#   - a reservation for the client's MAC (10.605) is planned as a restart
+#     counting one host, and the client asking again is given the reserved
+#     address, outside the range, where it held one inside it.
 #
 # Always exits 0 and reports through /verdict/dhcp-server.
 #
@@ -87,7 +90,25 @@ pid2=$(cat "$work/run/dhcp-server/lan0.pid" 2>/dev/null)
 kept=$(cat "$work/run/dhcp-server/lan0.leases" 2>/dev/null)
 say "  dnsmasq pid $pid1 -> $pid2; lease file kept: $(printf '%s' "$kept" | grep -c "$mac")"
 
+# A reservation, outside the range, for the client that already holds a lease
+# inside it: dnsmasq must move it rather than renew what it has.
+conf "lease = 3600
+		host \"desk\" { mac = \"$mac\"; address = \"192.168.7.50\" }"
+"$build/ncfg" plan > "$work/plan-host.log" 2>&1
+reserved_plan=$(grep -cE 'backend\.(stop|start) lan0 +dhcp_server.*1 host ' "$work/plan-host.log")
+say "after a reservation: $(grep -E 'backend\.' "$work/plan-host.log" | head -1 | tr -s ' ')"
+"$build/ncfg" apply > "$work/apply3.log" 2>&1
+say "ncfg apply rc=$?"
+say "  lan0.conf: $(grep '^dhcp-host=' "$work/run/dhcp-server/lan0.conf" 2>/dev/null)"
+reserved=$(client)
+say "the client is given: $reserved"
+
 failed=0
+case "$reserved" in
+	*"address=192.168.7.50 "*) ;;
+	*) say "  the client was not given its reserved address"; failed=1 ;;
+esac
+[ "$reserved_plan" -ge 1 ] || { say "  the reservation was not planned as a restart naming it"; failed=1; }
 [ "$starts" -eq 1 ] || { say "  the first plan did not start one DHCP server on lan0"; failed=1; }
 case "$given" in
 	*"address=192.168.7."*" routers=192.168.7.1 dns=192.168.7.53 lease=43200"*) ;;

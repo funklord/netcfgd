@@ -232,7 +232,97 @@ static void release_dhcp_server(ncfg_dhcp_server_t *server)
 		free(server->dns[at]);
 	}
 	free(server->dns);
+	for (at = 0; at < server->host_count; at++) {
+		free(server->hosts[at].name);
+		free(server->hosts[at].mac);
+		free(server->hosts[at].address);
+	}
+	free(server->hosts);
 	free(server);
+}
+
+/*
+ * `host "printer" { mac = "AA:BB:CC:DD:EE:FF"  address = "192.168.1.10" }`
+ * inside `dhcp_server` (10.605). The label is the name dnsmasq gives the host,
+ * labelled as an access point or a firewall rule is, because it is the
+ * reservation's identity: a plan names it, and two of one name are refused.
+ * The address is checked against the network with the range, after the block.
+ */
+static void lower_dhcp_host(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_dhcp_server_t *server)
+{
+	ncfg_dhcp_host_t  host;
+	ncfg_dhcp_host_t *grown;
+	size_t            i;
+
+	memset(&host, 0, sizeof(host));
+	host.name = ncfg_require_label(ctx, block);
+	if (!host.name) {
+		return;
+	}
+	for (i = 0; i < block->items.count; i++) {
+		const ncfg_ast_item_t       *item = block->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `host`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "mac") == 0) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+			char  canonical[18];
+			char  why[NCFG_ERROR_MAX];
+
+			if (!text) {
+				continue;
+			}
+			if (!ncfg_hardware_address_strict(text, canonical, sizeof(canonical), why,
+			        sizeof(why))) {
+				ncfg_diag(ctx, assignment->span, "%s", why);
+				free(text);
+				continue;
+			}
+			free(text);
+			free(host.mac);
+			host.mac = strdup(canonical);
+			if (!host.mac) {
+				ncfg_lower_oom(ctx);
+			}
+		} else if (strcmp(assignment->key, "address") == 0) {
+			char *text = ncfg_as_string(ctx, assignment->value);
+
+			if (!text) {
+				continue;
+			}
+			free(host.address);
+			host.address = text;
+		} else {
+			ncfg_diag(ctx, assignment->span, "unknown host key `%s`: mac and address",
+			    assignment->key);
+		}
+	}
+	if (!host.mac || !host.address) {
+		ncfg_diag(ctx, block->span, "host `%s` needs both `mac` and `address`", host.name);
+		free(host.name);
+		free(host.mac);
+		free(host.address);
+		return;
+	}
+	grown = realloc(server->hosts, (server->host_count + 1u) * sizeof(*grown));
+	if (!grown) {
+		ncfg_lower_oom(ctx);
+		free(host.name);
+		free(host.mac);
+		free(host.address);
+		return;
+	}
+	server->hosts = grown;
+	server->hosts[server->host_count++] = host;
 }
 
 /*
@@ -256,6 +346,10 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 		int64_t                      value;
 
 		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			if (strcmp(item->as.block.head, "host") == 0) {
+				lower_dhcp_host(ctx, &item->as.block, server);
+				continue;
+			}
 			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `dhcp_server`",
 			    item->as.block.head);
 			continue;
@@ -349,7 +443,8 @@ static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
 			ncfg_words_free(&words);
 		} else {
 			ncfg_diag(ctx, assignment->span,
-			    "unknown dhcp_server key `%s`: range, lease and dns", assignment->key);
+			    "unknown dhcp_server key `%s`: range, lease and dns, and `host` blocks",
+			    assignment->key);
 		}
 	}
 	return server;

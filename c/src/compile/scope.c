@@ -349,6 +349,9 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "dhcp_server.range", 0x00020023u },
 	{ NCFG_BLOCK_INTERFACE, "dhcp_server.lease", 0x00020024u },
 	{ NCFG_BLOCK_INTERFACE, "dhcp_server.dns", 0x00020025u },
+	/* A reservation (10.605), the interface's as the range is. */
+	{ NCFG_BLOCK_INTERFACE, "dhcp_server.host.mac", 0x00020026u },
+	{ NCFG_BLOCK_INTERFACE, "dhcp_server.host.address", 0x00020027u },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

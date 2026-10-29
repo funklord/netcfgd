@@ -9,9 +9,11 @@
 
 #include "ncfg/value.h"
 
+#include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 static uint32_t to_host(const unsigned char *bytes)
 {
@@ -25,6 +27,22 @@ static void dotted(uint32_t value, char *out)
 	    (unsigned)(value >> 16) & 255u, (unsigned)(value >> 8) & 255u, (unsigned)value & 255u);
 }
 
+int ncfg_dhcp_server_plain_name(const char *name)
+{
+	size_t at;
+
+	if (!name || !isalnum((unsigned char)name[0])) {
+		return 0;
+	}
+	for (at = 0; name[at]; at++) {
+		if (at >= 63u ||
+		    !(isalnum((unsigned char)name[at]) || name[at] == '-' || name[at] == '.')) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* A bare IPv4 address, as a number; 0 for anything else. */
 static int bare_ipv4(const char *text, uint32_t *out)
 {
@@ -35,6 +53,72 @@ static int bare_ipv4(const char *text, uint32_t *out)
 		return 0;
 	}
 	*out = to_host(address.bytes);
+	return 1;
+}
+
+/*
+ * The reservations, against the network served. The same four callers as the
+ * range, so a reservation the compiler took is one dnsmasq is given and the
+ * planner compares, and one it refused never reaches either.
+ */
+static int hosts_fit(const ncfg_dhcp_server_t *server, uint32_t own, uint32_t network,
+    uint32_t broadcast, uint32_t mask, const char **why)
+{
+	size_t at;
+	size_t other;
+
+	for (at = 0; at < server->host_count; at++) {
+		const ncfg_dhcp_host_t *host = &server->hosts[at];
+		char                    canonical[18];
+		uint32_t                address;
+
+		if (!ncfg_dhcp_server_plain_name(host->name)) {
+			if (why) {
+				*why = "a reservation's name is a plain host name: letters, digits, "
+				       "hyphens and dots, starting with a letter or digit";
+			}
+			return 0;
+		}
+		if (!ncfg_hardware_address_strict(host->mac, canonical, sizeof(canonical), NULL, 0)) {
+			if (why) {
+				*why = "a reservation's `mac` is six colon-separated hex octets, as in "
+				       "AA:BB:CC:DD:EE:FF";
+			}
+			return 0;
+		}
+		if (!bare_ipv4(host->address, &address)) {
+			if (why) {
+				*why = "a reservation's `address` is one IPv4 address, with no prefix";
+			}
+			return 0;
+		}
+		if ((address & mask) != network || address == network || address == broadcast) {
+			if (why) {
+				*why = "a reservation's `address` is not inside the interface's network";
+			}
+			return 0;
+		}
+		if (address == own) {
+			if (why) {
+				*why = "a reservation's `address` is the interface's own, which it would "
+				       "hand to a host";
+			}
+			return 0;
+		}
+		for (other = 0; other < at; other++) {
+			const ncfg_dhcp_host_t *earlier = &server->hosts[other];
+
+			if (strcmp(earlier->name, host->name) == 0 ||
+			    strcasecmp(earlier->mac, host->mac) == 0 ||
+			    strcmp(earlier->address, host->address) == 0) {
+				if (why) {
+					*why = "two reservations share a name, a MAC or an address, and "
+					       "dnsmasq would give one of them what the other asked for";
+				}
+				return 0;
+			}
+		}
+	}
 	return 1;
 }
 
@@ -132,6 +216,9 @@ int ncfg_dhcp_server_range(const ncfg_interface_t *interface, char *start, char 
 			}
 			return 0;
 		}
+	}
+	if (!hosts_fit(server, own, network, broadcast, mask, why)) {
+		return 0;
 	}
 	if (start) {
 		dotted(first, start);

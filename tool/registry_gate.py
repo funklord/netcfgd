@@ -166,12 +166,16 @@ CONTROL = (
 	# A VALUE of `advertise.backend`, which is how three of the six rows in
 	# 10.357 got written.
 	("NCFG_BLOCK_INTERFACE", "advertise.radvd", False, "a value, not a key"),
-	# A real key OF ANOTHER BLOCK -- bluetooth's. This is the row that
-	# prompted the gate, and a pooled key list accepts it.
-	("NCFG_BLOCK_INTERFACE", "address", False, "another block's key"),
+	# A real key OF ANOTHER BLOCK -- a routing rule's. A pooled key list
+	# accepts it. **This was `address`, bluetooth's, the row that prompted the
+	# gate, until an interface gained one** -- `dhcp_server.host.address`
+	# (project.md 10.605) -- after which a top-level `interface.address` row
+	# would pass here: the nesting blind spot the header names, now with an
+	# instance. The control moved to a key no interface file supplies.
+	("NCFG_BLOCK_INTERFACE", "lookup", False, "another block's key"),
 	# And the same spelling where it IS the block's, so the rejection above
 	# is about the block rather than about the word.
-	("NCFG_BLOCK_BLUETOOTH", "address", True, "the same key where it lives"),
+	("NCFG_BLOCK_RULE", "lookup", True, "the same key where it lives"),
 )
 
 

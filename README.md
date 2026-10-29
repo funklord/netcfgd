@@ -133,7 +133,7 @@ knows.
 | SLAAC | `config = "slaac"`, with privacy extensions and a stable interface token |
 | prefix delegation | a prefix delegated to one interface, subnetted onto others |
 | IPv4 link-local | `config = "link_local"`, coexisting with routable addresses rather than as a timeout fallback |
-| DHCP server | `dhcp_server { range, lease, dns }` on an interface with a static IPv4 address — the hosts behind a router given their addresses, served by `dnsmasq` with its DNS side off, the leases readable under `/run` |
+| DHCP server | `dhcp_server { range, lease, dns }` on an interface with a static IPv4 address, and `host "printer" { mac, address }` inside it for a fixed address — the hosts behind a router given their addresses, served by `dnsmasq` with its DNS side off, the leases readable under `/run` |
 | hostname | left alone, taken from the DHCP lease, or pinned in the config |
 | MTU, MAC | set per interface, including a MAC policy of permanent, per-network or per-connection |
 

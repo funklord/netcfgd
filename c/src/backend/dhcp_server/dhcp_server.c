@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <dirent.h>
 #include <pwd.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,38 @@ int ncfg_dhcp_server_summary(const ncfg_interface_t *interface, char *out, size_
 	for (at = 0; at < server->dns_count && used < out_size; at++) {
 		used += (size_t)snprintf(out + used, out_size - used, "%s%s", at ? " " : "",
 		    server->dns[at]);
+	}
+	/*
+	 * **A count and a digest, not the list** (10.605). The line is bounded
+	 * and a router may reserve dozens of hosts, so listing them would make a
+	 * long list unservable; but a changed reservation must still read as a
+	 * changed summary, or the planner would leave dnsmasq handing out the
+	 * old address. The count is what an operator reads in the plan, the
+	 * digest what makes any edit a difference. Absent with no reservations,
+	 * so a server that has none keeps the line it always had.
+	 */
+	if (server->host_count && used < out_size) {
+		uint32_t digest = 2166136261u;
+
+		for (at = 0; at < server->host_count; at++) {
+			const char *parts[3];
+			size_t      part;
+
+			parts[0] = server->hosts[at].name;
+			parts[1] = server->hosts[at].mac;
+			parts[2] = server->hosts[at].address;
+			for (part = 0; part < 3u; part++) {
+				const char *c = parts[part] ? parts[part] : "";
+
+				for (; *c; c++) {
+					digest = (digest ^ (unsigned char)tolower((unsigned char)*c)) *
+					    16777619u;
+				}
+				digest = (digest ^ 0u) * 16777619u;
+			}
+		}
+		used += (size_t)snprintf(out + used, out_size - used, ", %zu host%s %08x",
+		    server->host_count, server->host_count == 1u ? "" : "s", (unsigned)digest);
 	}
 	return used < out_size;
 }
@@ -155,6 +188,12 @@ char *ncfg_dhcp_server_render(const ncfg_interface_t *interface, const char *lea
 	    server->lease.has ? (long long)server->lease.value
 	                      : (long long)NCFG_DHCP_SERVER_LEASE_DEFAULT,
 	    leases_path ? leases_path : "");
+	/* One line per reservation: dnsmasq gives this MAC this address and
+	 * this name, and never gives the address to anybody else. */
+	for (at = 0; at < server->host_count; at++) {
+		ncfg_buf_addf(&buf, "dhcp-host=%s,%s,%s\n", server->hosts[at].mac,
+		    server->hosts[at].address, server->hosts[at].name);
+	}
 	if (server->dns_count) {
 		ncfg_buf_add_text(&buf, "dhcp-option=6");
 		for (at = 0; at < server->dns_count; at++) {
@@ -320,23 +359,6 @@ int ncfg_dhcp_server_stop(const char *run, const char *iface, char *err, size_t 
 	return 1;
 }
 
-/* A client's name, given only where it is a plain host name (10.602). */
-static int plain_hostname(const char *name)
-{
-	size_t at;
-
-	if (!name || !isalnum((unsigned char)name[0])) {
-		return 0;
-	}
-	for (at = 0; name[at]; at++) {
-		if (at >= NCFG_DHCP_SERVER_HOSTNAME_MAX - 1u ||
-		    !(isalnum((unsigned char)name[at]) || name[at] == '-' || name[at] == '.')) {
-			return 0;
-		}
-	}
-	return 1;
-}
-
 /* One lease file's answer for `mac`, or 0. */
 static int lease_in(const char *path, const char *mac, long long now, char *hostname,
     size_t hostname_size, char *address, size_t address_size)
@@ -362,7 +384,7 @@ static int lease_in(const char *path, const char *mac, long long now, char *host
 		found = 1;
 		(void)snprintf(address, address_size, "%s", leased_address);
 		(void)snprintf(hostname, hostname_size, "%s",
-		    strcmp(name, "*") != 0 && plain_hostname(name) ? name : "");
+		    strcmp(name, "*") != 0 && ncfg_dhcp_server_plain_name(name) ? name : "");
 	}
 	free(text);
 	return found;

@@ -179,6 +179,12 @@ static int compare_neighbour(const void *left, const void *right)
 	    ((const ncfg_neighbour_t *)right)->bssid);
 }
 
+static int compare_dhcp_host(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_dhcp_host_t *)left)->name,
+	    ((const ncfg_dhcp_host_t *)right)->name);
+}
+
 static int compare_host_list(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_host_list_t *)left)->name,
@@ -490,6 +496,16 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 
 	stable_sort(document->host_lists, document->host_list_count,
 	    sizeof(*document->host_lists), compare_host_list);
+	/* A DHCP server's reservations are a set, by name (10.605). Its `dns`
+	 * is not: the order is the order a client tries them. */
+	for (i = 0; i < document->interface_count; i++) {
+		ncfg_dhcp_server_t *server = document->interfaces[i].dhcp_server;
+
+		if (server) {
+			stable_sort(server->hosts, server->host_count, sizeof(*server->hosts),
+			    compare_dhcp_host);
+		}
+	}
 	for (i = 0; i < document->host_list_count; i++) {
 		sort_set(document->host_lists[i].mac, &document->host_lists[i].mac_count);
 	}

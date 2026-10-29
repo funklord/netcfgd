@@ -109,6 +109,38 @@ int main(void)
 	}
 	free(text);
 
+	/* Reservations (10.605): one dhcp-host line each, and the summary gains
+	 * a count and a digest -- so a changed address is a changed summary. */
+	{
+		char             host_name[] = "printer";
+		char             host_mac[] = "AA:BB:CC:DD:EE:01";
+		char             host_address[] = "192.168.1.10";
+		char             moved[] = "192.168.1.11";
+		ncfg_dhcp_host_t host = { host_name, host_mac, host_address };
+		char             before[NCFG_DHCP_SERVER_SUMMARY_MAX];
+
+		server.hosts = &host;
+		server.host_count = 1u;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(text && has_line(text, "dhcp-host=AA:BB:CC:DD:EE:01,192.168.1.10,printer"),
+		    "a reservation is a dhcp-host line: the MAC, its address and its name");
+		free(text);
+		check(ncfg_dhcp_server_summary(&lan, before, sizeof(before)) &&
+		    strncmp(before, summary, strlen(summary)) == 0 && strstr(before, ", 1 host "),
+		    "  the summary keeps what it said and counts the reservation");
+		host.address = moved;
+		check(ncfg_dhcp_server_summary(&lan, recorded, sizeof(recorded)) &&
+		    strcmp(recorded, before) != 0,
+		    "  and a reservation moved to another address is a different summary");
+		host.address = dns0;
+		text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
+		check(!text && strstr(message, "the interface's own"),
+		    "  one given the router's own address renders nothing, and says why");
+		free(text);
+		server.hosts = NULL;
+		server.host_count = 0u;
+	}
+
 	source.static_address.address = NULL;
 	text = ncfg_dhcp_server_render(&lan, "/x.leases", message, sizeof(message));
 	check(!text && strstr(message, "cannot serve DHCP"),

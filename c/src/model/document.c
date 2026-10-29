@@ -1894,6 +1894,16 @@ static const ncfg_type_t ra_type = TYPE("router advertisement policy", ra_fields
 
 /* A DHCP server's policy (0297). Every member omitted where unset, so an
  * interface without one is what it was. */
+static const ncfg_field_t dhcp_host_fields[] = {
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_dhcp_host_t, name) },
+	{ .name = "mac", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_dhcp_host_t, mac) },
+	{ .name = "address", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_dhcp_host_t, address) }
+};
+static const ncfg_type_t dhcp_host_type = TYPE("DHCP reservation", dhcp_host_fields);
+
 static const ncfg_field_t dhcp_server_fields[] = {
 	{ .name = "range_start", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_dhcp_server_t, range_start) },
@@ -1903,7 +1913,11 @@ static const ncfg_field_t dhcp_server_fields[] = {
 	    .offset = offsetof(ncfg_dhcp_server_t, lease) },
 	{ .name = "dns", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_dhcp_server_t, dns),
-	    .count_offset = offsetof(ncfg_dhcp_server_t, dns_count) }
+	    .count_offset = offsetof(ncfg_dhcp_server_t, dns_count) },
+	{ .name = "hosts", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &dhcp_host_type, .element_size = sizeof(ncfg_dhcp_host_t),
+	    .offset = offsetof(ncfg_dhcp_server_t, hosts),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, host_count) }
 };
 static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
 

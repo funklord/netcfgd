@@ -12597,6 +12597,55 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.605 Reservations: a fixed address for a named host
+
+A `/go` run 2026-10-29: after the range itself, the setting a router is most
+often asked for -- the printer, the NAS, the host a port would be forwarded
+to -- and an additive key under 0297's policy block, with no new daemon and
+no new grammar shape.
+
+```
+dhcp_server {
+	dns = ["192.168.1.1"]
+	host "printer" { mac = "AA:BB:CC:DD:EE:01"; address = "192.168.1.10" }
+}
+```
+
+- **Labelled, as an access point or a firewall rule is**: the label is the
+  reservation's identity and the name dnsmasq gives the host. A set, sorted
+  by name; the MAC uppercased as every hardware address in the document is,
+  so two spellings of one MAC are one reservation.
+- **Checked where the range is**, in `ncfg_dhcp_server_range`, so the
+  compiler, the profile renderer, dnsmasq's file and the planner refuse a bad
+  one alike: not a plain host name (10.602's rule, now the model's
+  `ncfg_dhcp_server_plain_name`, shared with the lease reader), not a MAC,
+  outside the network, the router's own address, or two sharing a name, MAC
+  or address. **An address inside the range is allowed**: dnsmasq never
+  gives it to anybody else.
+- **dnsmasq gets `dhcp-host=MAC,address,name`.** The `# serves:` line gains
+  `, N host(s) <digest>` -- a count for the operator reading the plan and an
+  FNV-1a digest of every reservation so that any edit is a difference, since
+  the line is bounded and a long list could not fit in it. Absent with no
+  reservations, so a running server with none is not restarted by the
+  upgrade. A changed reservation is a restart, as every other change is.
+- **Scope numbers** `dhcp_server.host.mac` 0x00020026 and
+  `dhcp_server.host.address` 0x00020027, the interface's as the range is.
+- **Live, `make hull-dhcp-server`**: a client holding .201 from the range is
+  given a reservation at .50; the plan reads `... dns 192.168.7.53, 1 host
+  9860f143 (was ... dns 192.168.7.53)`, the file carries
+  `dhcp-host=86:15:93:2A:9B:62,192.168.7.50,desk`, and the client asking
+  again is moved to .50.
+
+`make check` green; the installed binary read 1,321,928 bytes against the
+1,304,300 budget, inside its 3% tolerance, so the budget was left alone. The
+registry gate's control had used `address` as "another block's key", and an
+interface has one now; it moved to `lookup`, a routing rule's, and the gate's
+comment says why.
+
+Not done: a reservation by client identifier rather than MAC, and a reload
+by `SIGHUP` through `dhcp-hostsfile` instead of a restart -- leases survive a
+restart, so the gain is a second's outage, not worth a second mechanism yet.
+
 ## 10.604 Associated, leased and named, over the air
 
 A `/go` run 2026-10-29. 10.601 served a veth and the access-point rigs

@@ -1373,14 +1373,28 @@ typedef struct {
  * `range_start`/`range_end` are absent for the default, the 100th to the
  * 249th host. `lease` is seconds, absent for 12 hours. `dns` is the servers
  * offered and is never guessed: empty offers none (measured, dnsmasq with its
- * DNS side off offers no server unless one is named).
+ * DNS side off offers no server unless one is named). `hosts` are the
+ * reservations (project.md 10.605), a set sorted by name.
+ */
+/*
+ * One reservation: the host with this MAC is always given this address, and
+ * this name. `mac` is uppercase, as every hardware address in the document
+ * is; `address` is a bare IPv4 address inside the network served.
  */
 typedef struct {
-	char         *range_start;
-	char         *range_end;
-	ncfg_optint_t lease;
-	char        **dns;
-	size_t        dns_count;
+	char *name; /* the label, and the sorting key */
+	char *mac;
+	char *address;
+} ncfg_dhcp_host_t;
+
+typedef struct {
+	char             *range_start;
+	char             *range_end;
+	ncfg_optint_t     lease;
+	char            **dns;
+	size_t            dns_count;
+	ncfg_dhcp_host_t *hosts;
+	size_t            host_count;
 } ncfg_dhcp_server_t;
 
 #define NCFG_DHCP_SERVER_LEASE_DEFAULT 43200
@@ -1831,7 +1845,19 @@ int ncfg_channel_in_band(const char *band, int64_t channel);
  * no static IPv4 address to serve from, the network is too small for the
  * default, or a stated range is reversed, outside the network or takes in
  * the router's own address.
+ *
+ * **And the reservations**, which are the same question -- what this server
+ * may hand out -- so the four callers refuse a bad one alike: a name that is
+ * not a plain host name, a MAC that is not one, an address outside the
+ * network or the router's own, and two hosts sharing a name, a MAC or an
+ * address. An address inside the range is allowed: dnsmasq never gives it
+ * to anybody else.
  */
+/* A name dnsmasq may carry and a lease file may hold: letters, digits,
+ * hyphens and dots, starting with a letter or digit, shorter than 64. The
+ * rule 10.602 applies to a client's own name, and a reservation's. */
+int ncfg_dhcp_server_plain_name(const char *name);
+
 int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
     char *router, const char **why);
 
