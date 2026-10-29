@@ -122,6 +122,9 @@ static ncfg_observed_access_point_t *started_with(const char *run_dir, const cha
 	if (observe_config_value(text, "wds_sta", value, sizeof(value))) {
 		out->wds = strcmp(value, "1") == 0;
 	}
+	if (observe_config_value(text, "rrm_neighbor_report", value, sizeof(value))) {
+		out->neighbour_reports = strcmp(value, "1") == 0;
+	}
 	free(text);
 	return out;
 }
@@ -200,6 +203,63 @@ int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
 	return 1;
 }
 
+static void free_neighbours(ncfg_observed_neighbour_t *list, size_t count)
+{
+	size_t at;
+
+	for (at = 0; at < count; at++) {
+		free(list[at].bssid);
+		free(list[at].ssid);
+		free(list[at].nr);
+	}
+	free(list);
+}
+
+/*
+ * hostapd's neighbour list, one `BSSID ssid=HEX nr=HEX` per line (10.595,
+ * measured). A line that is not that shape is skipped rather than failing the
+ * round: the station lists are what converging needs, and a neighbour list
+ * this build cannot read is one it plans nothing against.
+ */
+static int neighbours_of(ncfg_supplicant_client_t *client, ncfg_observed_neighbour_t **out,
+    size_t *count)
+{
+	char        body[NCFG_SUPPLICANT_REPLY_MAX];
+	char        why[NCFG_ERROR_MAX];
+	const char *line;
+
+	*out = NULL;
+	*count = 0;
+	if (!ncfg_supplicant_ask(client, "SHOW_NEIGHBOR", body, sizeof(body), why, sizeof(why))) {
+		return 1;
+	}
+	for (line = body; line && *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		char                       bssid[NCFG_STATION_ADDRESS_SIZE];
+		char                       ssid[80];
+		char                       nr[256];
+		char                       normal[NCFG_STATION_ADDRESS_SIZE];
+		ncfg_observed_neighbour_t *grown;
+
+		if (sscanf(line, "%17s ssid=%79s nr=%255[0-9a-fA-F]", bssid, ssid, nr) != 3 ||
+		    !ncfg_station_address_normalize(bssid, normal, sizeof(normal), NULL, 0)) {
+			continue;
+		}
+		grown = realloc(*out, (*count + 1u) * sizeof(**out));
+		if (!grown) {
+			return 0;
+		}
+		*out = grown;
+		(*out)[*count].bssid = observe_dup(normal);
+		(*out)[*count].ssid = observe_dup(ssid);
+		(*out)[*count].nr = observe_dup(nr);
+		(*count)++;
+		if (!(*out)[*count - 1u].bssid || !(*out)[*count - 1u].ssid || !(*out)[*count - 1u].nr) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
 /* The addresses alone, for the observation. */
 static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count)
 {
@@ -258,6 +318,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		size_t                          denied_count = 0;
 		size_t                          accepted_count = 0;
 		size_t                          associated_count = 0;
+		ncfg_observed_neighbour_t      *neighbours = NULL;
+		size_t                          neighbour_count = 0;
 
 		if (backend->kind != NCFG_BACKEND_ACCESS_POINT || !backend->running ||
 		    !backend->interface) {
@@ -303,6 +365,18 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			associated = NULL;
 			associated_count = 0;
 		}
+		neighbours = NULL;
+		neighbour_count = 0;
+		if (!neighbours_of(client, &neighbours, &neighbour_count)) {
+			ncfg_supplicant_client_free(client);
+			ncfg_hostapd_stations_free(denied, denied_count);
+			ncfg_hostapd_stations_free(accepted, accepted_count);
+			ncfg_hostapd_stations_free(associated, associated_count);
+			free_neighbours(neighbours, neighbour_count);
+			ncfg_error_set(err, err_size, "out of memory recording %s's neighbours",
+			    backend->interface);
+			return 0;
+		}
 		ncfg_supplicant_client_free(client);
 		backend->answering.has = 1;
 		backend->answering.value = 1;
@@ -311,6 +385,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_hostapd_stations_free(denied, denied_count);
 			ncfg_hostapd_stations_free(accepted, accepted_count);
 			ncfg_hostapd_stations_free(associated, associated_count);
+			free_neighbours(neighbours, neighbour_count);
 			ncfg_error_set(err, err_size,
 			    "out of memory recording what %s is admitting", backend->interface);
 			return 0;
@@ -322,6 +397,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		lists->accepted_count = accepted_count;
 		lists->associated = associated;
 		lists->associated_count = associated_count;
+		lists->neighbours = neighbours;
+		lists->neighbour_count = neighbour_count;
 		ncfg_observed_access_control_free(backend->access_control);
 		backend->access_control = lists;
 		ncfg_observed_access_point_free(backend->started_with);

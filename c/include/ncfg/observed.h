@@ -976,7 +976,21 @@ typedef struct {
 	 */
 	char                 **associated;
 	size_t                 associated_count;
+	/*
+	 * The neighbour list hostapd holds (`SHOW_NEIGHBOR`, 10.595), its own
+	 * entry among them, in hostapd's words: the BSSID, the SSID as hex and
+	 * the report element as hex. Omitted when empty, which is every access
+	 * point without `neighbour_reports`.
+	 */
+	struct ncfg_observed_neighbour *neighbours;
+	size_t                          neighbour_count;
 } ncfg_observed_access_control_t;
+
+typedef struct ncfg_observed_neighbour {
+	char *bssid;
+	char *ssid;
+	char *nr;
+} ncfg_observed_neighbour_t;
 
 /*
  * Release one, and the access point beside it.
@@ -1027,6 +1041,9 @@ typedef struct {
 	char         *mobility_domain;
 	/* Whether it takes four-address stations (`wds_sta`). */
 	int           wds;
+	/* Whether it answers neighbour report requests (`rrm_neighbor_report`,
+	 * 10.595). */
+	int           neighbour_reports;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

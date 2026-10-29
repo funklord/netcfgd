@@ -854,3 +854,205 @@ void ncfg_plan_access_control(ncfg_builder_t *builder)
 		}
 	}
 }
+
+/* ------------------------------------------------------------------------ *
+ * 802.11k neighbours (10.595)
+ * ------------------------------------------------------------------------ */
+
+/* One entry as hostapd spells it. */
+typedef struct {
+	char bssid[NCFG_STATION_ADDRESS_SIZE];
+	char ssid[80];
+	char nr[256];
+} wanted_neighbour_t;
+
+/* The entry a running access point holds for itself: the one whose BSSID is
+ * its radio's address. */
+static const ncfg_observed_neighbour_t *own_entry(const ncfg_observed_t *observed,
+    const char *device, const ncfg_observed_access_control_t *live)
+{
+	const ncfg_observed_link_t *link = ncfg_observed_link(observed, device);
+	char                        mac[NCFG_STATION_ADDRESS_SIZE];
+	size_t                      at;
+
+	if (!link || !link->mac || !live ||
+	    !ncfg_station_address_normalize(link->mac, mac, sizeof(mac), NULL, 0)) {
+		return NULL;
+	}
+	for (at = 0; at < live->neighbour_count; at++) {
+		if (live->neighbours[at].bssid && strcmp(live->neighbours[at].bssid, mac) == 0) {
+			return &live->neighbours[at];
+		}
+	}
+	return NULL;
+}
+
+/*
+ * A declared neighbour's report element, from this access point's own as the
+ * template (measured: BSSID, BSSID info, operating class, channel, PHY type):
+ * the BSSID, the class and the channel replaced, the BSSID information and
+ * the PHY type kept, since the neighbour is an access point of the same
+ * network. Optional subelements are not carried. 0 where the template is too
+ * short to be one.
+ */
+static int declared_element(const char *own_nr, const ncfg_neighbour_t *neighbour, char *out,
+    size_t out_size)
+{
+	char   hex[13];
+	size_t at;
+	size_t put = 0;
+
+	if (!own_nr || strlen(own_nr) < 26u || out_size < 27u) {
+		return 0;
+	}
+	for (at = 0; neighbour->bssid[at] && put < 12u; at++) {
+		if (neighbour->bssid[at] != ':') {
+			hex[put++] = neighbour->bssid[at];
+		}
+	}
+	hex[put] = '\0';
+	if (put != 12u) {
+		return 0;
+	}
+	(void)snprintf(out, out_size, "%s%.8s%02x%02x%.2s", hex, own_nr + 12,
+	    (unsigned)ncfg_neighbour_class(neighbour->channel.value),
+	    (unsigned)neighbour->channel.value, own_nr + 24);
+	return 1;
+}
+
+static void push_neighbour(ncfg_builder_t *builder, int kind, const char *device,
+    const char *bssid, const char *ssid, const char *nr, const char *held_nr)
+{
+	static const char *const field = "access_point.neighbours";
+	ncfg_op_t                op;
+	ncfg_op_t                inverse;
+	ncfg_reason_t            reason;
+
+	memset(&op, 0, sizeof(op));
+	op.kind = kind;
+	op.u.neighbour.iface = device;
+	op.u.neighbour.bssid = bssid;
+	op.u.neighbour.ssid = ssid;
+	op.u.neighbour.nr = nr;
+	memset(&inverse, 0, sizeof(inverse));
+	inverse.kind = kind == NCFG_OP_NEIGHBOUR_ADD ? NCFG_OP_NEIGHBOUR_DEL : NCFG_OP_NEIGHBOUR_ADD;
+	inverse.u.neighbour = op.u.neighbour;
+	if (kind == NCFG_OP_NEIGHBOUR_ADD && held_nr) {
+		/* Held with another element: put that one back on undo. */
+		inverse.kind = NCFG_OP_NEIGHBOUR_ADD;
+		inverse.u.neighbour.nr = held_nr;
+	}
+	reason = kind == NCFG_OP_NEIGHBOUR_ADD
+	    ? ncfg_plan_reason_absent(device, field, ncfg_plan_internf(builder->plan, "%s", bssid))
+	    : ncfg_plan_reason_unwanted(device, field, ncfg_plan_internf(builder->plan, "%s", bssid));
+	(void)ncfg_builder_push(builder, &op, &reason, NULL, 0, &inverse);
+}
+
+void ncfg_plan_neighbours(ncfg_builder_t *builder)
+{
+	const ncfg_document_t *desired = builder->desired;
+	size_t                 at;
+
+	for (at = 0; at < desired->access_point_count; at++) {
+		const ncfg_access_point_t           *point = &desired->access_points[at];
+		const ncfg_observed_backend_t        *running;
+		const ncfg_observed_neighbour_t      *own;
+		wanted_neighbour_t                   *wanted;
+		size_t                               wanted_count = 0;
+		size_t                               room;
+		size_t                               i;
+
+		if (!point->neighbour_reports || !point->device) {
+			continue;
+		}
+		running = backend_of(builder->observed, NCFG_BACKEND_ACCESS_POINT, point->device);
+		if (!running || !running->access_control) {
+			continue;
+		}
+		/* Not running with reports yet -- the restart that turns them on is
+		 * planned elsewhere, and the list is converged on the next pass. */
+		own = own_entry(builder->observed, point->device, running->access_control);
+		if (!own) {
+			continue;
+		}
+		room = desired->access_point_count + point->neighbour_count;
+		wanted = calloc(room ? room : 1u, sizeof(*wanted));
+		if (!wanted) {
+			builder->plan->failed = 1;
+			return;
+		}
+		/* This machine's other access points of the network, by what each
+		 * one's hostapd says about itself. */
+		for (i = 0; i < desired->access_point_count; i++) {
+			const ncfg_access_point_t       *other = &desired->access_points[i];
+			const ncfg_observed_backend_t   *theirs;
+			const ncfg_observed_neighbour_t *entry;
+
+			if (i == at || !other->device || strcmp(other->device, point->device) == 0 ||
+			    other->ssid.length != point->ssid.length ||
+			    memcmp(other->ssid.bytes, point->ssid.bytes, point->ssid.length) != 0) {
+				continue;
+			}
+			theirs = backend_of(builder->observed, NCFG_BACKEND_ACCESS_POINT, other->device);
+			entry = theirs ? own_entry(builder->observed, other->device, theirs->access_control)
+			               : NULL;
+			if (!entry) {
+				continue;
+			}
+			(void)snprintf(wanted[wanted_count].bssid, sizeof(wanted[0].bssid), "%s",
+			    entry->bssid);
+			(void)snprintf(wanted[wanted_count].ssid, sizeof(wanted[0].ssid), "%s", entry->ssid);
+			(void)snprintf(wanted[wanted_count].nr, sizeof(wanted[0].nr), "%s", entry->nr);
+			wanted_count++;
+		}
+		/* And the declared ones, except this radio and any already found. */
+		for (i = 0; i < point->neighbour_count; i++) {
+			const ncfg_neighbour_t *declared = &point->neighbours[i];
+			size_t                  have;
+			int                     known = strcmp(declared->bssid, own->bssid) == 0;
+
+			for (have = 0; !known && have < wanted_count; have++) {
+				known = strcmp(wanted[have].bssid, declared->bssid) == 0;
+			}
+			if (known || !declared_element(own->nr, declared, wanted[wanted_count].nr,
+			        sizeof(wanted[0].nr))) {
+				continue;
+			}
+			(void)snprintf(wanted[wanted_count].bssid, sizeof(wanted[0].bssid), "%s",
+			    declared->bssid);
+			(void)snprintf(wanted[wanted_count].ssid, sizeof(wanted[0].ssid), "%s", own->ssid);
+			wanted_count++;
+		}
+		/* Converge: what is wanted and not held as wanted, then what is held
+		 * and not wanted. The access point's own entry is never touched. */
+		for (i = 0; i < wanted_count; i++) {
+			const ncfg_observed_neighbour_t *held = NULL;
+			size_t                           h;
+
+			for (h = 0; h < running->access_control->neighbour_count; h++) {
+				if (strcmp(running->access_control->neighbours[h].bssid, wanted[i].bssid) == 0) {
+					held = &running->access_control->neighbours[h];
+				}
+			}
+			if (held && strcasecmp(held->nr, wanted[i].nr) == 0) {
+				continue;
+			}
+			push_neighbour(builder, NCFG_OP_NEIGHBOUR_ADD, point->device, wanted[i].bssid,
+			    wanted[i].ssid, wanted[i].nr, held ? held->nr : NULL);
+		}
+		for (i = 0; i < running->access_control->neighbour_count; i++) {
+			const ncfg_observed_neighbour_t *held = &running->access_control->neighbours[i];
+			size_t                           w;
+			int                              keep = held == own;
+
+			for (w = 0; !keep && w < wanted_count; w++) {
+				keep = strcmp(wanted[w].bssid, held->bssid) == 0;
+			}
+			if (!keep) {
+				push_neighbour(builder, NCFG_OP_NEIGHBOUR_DEL, point->device, held->bssid,
+				    held->ssid, held->nr, NULL);
+			}
+		}
+		free(wanted);
+	}
+}

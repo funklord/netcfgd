@@ -535,6 +535,8 @@ are using and one that will cut them off.
 | `link.set_wds` |  |  |
 | `link.unset_master` | yes |  |
 | `link.up` |  |  |
+| `neighbour.add` |  |  |
+| `neighbour.del` |  |  |
 | `nftables.replace` |  |  |
 | `qdisc.reset` |  |  |
 | `qdisc.set` |  |  |

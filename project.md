@@ -12597,6 +12597,98 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.595 Neighbour reports and steering: measured, and the design
+
+**Asked for by the holder 2026-10-29** ("go ahead with neighbour reports and
+steering"), 10.587 items 2 and 5.
+
+### Measured first, in a vm on hwsim with hostapd 2.10
+
+Two access points of one network on two radios (channels 1 and 11), a
+WPA2 station in a namespace:
+
+- `rrm_neighbor_report=1` makes each hostapd hold its **own** entry:
+  `SHOW_NEIGHBOR` answers `02:00:00:00:01:00 ssid=72726d
+  nr=0200000001008f000000510b060603000000` -- the BSSID, the SSID in hex,
+  and the report element (BSSID, BSSID info `0x8f`, operating class 81,
+  channel 11, PHY type 6).
+- `SET_NEIGHBOR <bssid> ssid=<hex> nr=<hex>` with the other's entry answers
+  `OK`, and `SHOW_NEIGHBOR` then lists both.
+- The station's `NEIGHBOR_REP_REQUEST` came back as two
+  `RRM-NEIGHBOR-REP-RECEIVED` events, one per access point.
+- `BSS_TM_REQ <sta> neighbor=<bssid>,0x8f,81,11,6 pref=1 abridged=1` is
+  **accepted and advisory**: status 0, target the current access point, the
+  station stayed. With `disassoc_imminent=1 disassoc_timer=100` the station
+  **moved** to the named access point. A first attempt passing a sixth field
+  failed `FAIL`: that field is an optional-subelement hexdump.
+- A station that can be steered says so in `STA`'s `ext_capab` (bit 19,
+  BSS transition): `04004a02...` has it.
+
+### The design
+
+1. **Neighbour reports, `neighbour_reports = true` on an `access_point`**:
+   `rrm_neighbor_report=1` (and `rrm_beacon_report=1`). Opt-in, because
+   changing every access point's file restarts every access point on
+   upgrade. **Neighbours on one machine are automatic** -- every other access
+   point this document runs with the same SSID gives its own entry, read
+   from its hostapd -- which is the 2.4 GHz-and-5 GHz router, the commonest
+   case, and needs nothing from anyone. **Neighbours on other machines are
+   declared** -- `neighbour "aa:bb:cc:dd:ee:01" { channel = 36 }` inside the
+   access point -- until fuzznet can carry each host's own entries (10.594).
+   hostapd holds the list in memory, so it is observed (`SHOW_NEIGHBOR`, on
+   the connection the station lists already use) and converged by plan ops,
+   as the station lists are: visible in `ncfg plan`, no restart.
+2. **Steering, opt-in per access point**: a minimum-signal kick and band
+   steering, both `BSS_TM_REQ` with disassociation imminent towards a
+   neighbour, sent by the daemon's loop to stations whose `ext_capab` says
+   they can be steered. Opt-in, because moving people's devices is a choice
+   to make, not a default.
+
+### Item 1 built
+
+- **The language**: `neighbour_reports = true`, and `neighbour "BSSID" {
+  channel = N }` blocks inside the access point. Refused: a neighbour with
+  reports off (it would tell nobody), one without a channel, one on a
+  channel no operating class covers (`ncfg_neighbour_class`: 81, 82, 115,
+  118, 121, 124, 125), one declared twice, and a label that is not a BSSID.
+  BSSIDs are kept in hostapd's lowercase spelling.
+- **The element of a declared neighbour is this access point's own with the
+  BSSID, the class and the channel replaced**, BSSID info and PHY type kept
+  and the optional subelements dropped. That assumes the neighbour is of the
+  same kind, which a network of access points netcfgd runs is; a mixed
+  network reports a slightly wrong PHY type, which a station only uses as a
+  hint. Stated in the example file.
+- **The ops**: `neighbour.add` (`SET_NEIGHBOR`, which replaces an entry of
+  that BSSID) and `neighbour.del` (`REMOVE_NEIGHBOR`), neither disruptive,
+  each the other's inverse and an add's inverse carrying the element it
+  replaced. The access point's own entry is never planned. Nothing is
+  planned against a hostapd not yet running with reports on: the restart
+  that turns them on comes first, and the list converges on the next pass.
+- **Live, `make hull-roam`**: both access points report, roam-b declares
+  `02:00:00:00:09:00` on 36. The second apply planned three adds, a third
+  plan had nothing to do, and after its FT roam the station's own report
+  request to roam-b listed roam-a on channel 1, roam-b on 6 and the declared
+  one as class 115 channel 36. Neither sibling nor declared entry is
+  anything hostapd learns alone, so the reading cannot come from elsewhere.
+- **A rig's `verdict/` made by the other account is not writable from the
+  guest**, though it is `2775` group `users` and both accounts are in the
+  group: the guest's write came back `Permission denied`, so the vm's share
+  evidently does not carry the host user's supplementary groups. Removing
+  the empty directory and letting the target recreate it fixed it. Whoever
+  meets "the payload left no verdict" should look at the owner first.
+- **The document reader takes any neighbour, so the renderer refuses by name**
+  what the language would: a BSSID not in hostapd's spelling, one declared
+  twice, a channel no class covers, neighbours with reports off. Found by
+  `lower_test`'s extreme sweep (`"a:b"`, channel 0), which is that sweep
+  doing its job.
+- **`supplicant_launch_test` fails under a long `TMPDIR`**: the refusal for
+  a radio another manager holds quotes the run directory, and under
+  `/tmp/claude-1000` it runs past `NCFG_ERROR_MAX` and the check that the
+  advice is not truncated fails. With the default `TMPDIR` it passes, and
+  `/run/netcfgd` is shorter still, so it is not a fault users meet; it does
+  mean `make check` under a long `TMPDIR` is red for a reason that is not
+  the change being checked. Open, low.
+
 ## 10.594 How the hosts reach each other, and what fuzznet and WireGuard are for
 
 Asked by the holder 2026-10-29: how the hosts reach each other for mesh,

@@ -65,6 +65,10 @@ const char *ncfg_op_name(const ncfg_op_t *op)
 		return "access_control.add";
 	case NCFG_OP_ACCESS_CONTROL_DEL:
 		return "access_control.del";
+	case NCFG_OP_NEIGHBOUR_ADD:
+		return "neighbour.add";
+	case NCFG_OP_NEIGHBOUR_DEL:
+		return "neighbour.del";
 	case NCFG_OP_LINK_SET_BOND:
 		return "link.set_bond";
 	case NCFG_OP_LINK_SET_BRIDGE:
@@ -263,6 +267,10 @@ int ncfg_op_is_disruptive(const ncfg_op_t *op)
 	/* Measured: a station stays associated while its four-address mode is
 	 * changed (10.587), so nothing in flight is cut by it. */
 	case NCFG_OP_LINK_SET_WDS:
+	/* A neighbour list only changes what a station is told about where it
+	 * may go; nothing associated is moved by it (10.595). */
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
 	case NCFG_OP_COMMIT_REVERT:
 		return 0;
 	}
@@ -338,6 +346,9 @@ static const char *subject_class(int kind)
 	case NCFG_OP_ACCESS_CONTROL_ADD:
 	case NCFG_OP_ACCESS_CONTROL_DEL:
 		return "acl";
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
+		return "neighbour";
 	case NCFG_OP_WG_SET_DEVICE:
 	case NCFG_OP_WG_SET_PEERS:
 		return "wireguard";
@@ -451,6 +462,11 @@ int ncfg_op_subject(const ncfg_op_t *op, char *out, size_t out_size)
 		(void)snprintf(detail, sizeof(detail), "%s", op->u.access_control.station ?
 		    op->u.access_control.station : "");
 		break;
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
+		(void)snprintf(detail, sizeof(detail), "%s", op->u.neighbour.bssid ?
+		    op->u.neighbour.bssid : "");
+		break;
 	case NCFG_OP_HOOK_RUN:
 		(void)snprintf(detail, sizeof(detail), "%s",
 		    ncfg_hook_phase_name(op->u.hook.phase));
@@ -526,6 +542,9 @@ const char *ncfg_op_interface(const ncfg_op_t *op)
 	case NCFG_OP_ACCESS_CONTROL_ADD:
 	case NCFG_OP_ACCESS_CONTROL_DEL:
 		return op->u.access_control.iface;
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
+		return op->u.neighbour.iface;
 	case NCFG_OP_WG_SET_DEVICE:
 		return op->u.wg_device.iface;
 	case NCFG_OP_WG_SET_PEERS:

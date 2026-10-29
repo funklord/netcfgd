@@ -478,6 +478,8 @@ int ncfg_owned_absorb(ncfg_owned_state_t *owned, const ncfg_op_t *op)
 	case NCFG_OP_WIFI_SET_REGDOM:
 	case NCFG_OP_ACCESS_CONTROL_ADD:
 	case NCFG_OP_ACCESS_CONTROL_DEL:
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
 	case NCFG_OP_LINK_SET_BOND:
 	case NCFG_OP_LINK_SET_BRIDGE:
 	case NCFG_OP_LINK_SET_MACVLAN:

@@ -37,6 +37,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -180,6 +181,80 @@ int ncfg_service_access_control(const char *run_dir, const char *iface, int poli
 		ncfg_error_set(err, err_size,
 		    "hostapd would not %s %s %s %s's %s list: %s", adding ? "add" : "remove",
 		    address, adding ? "to" : "from", iface, list, detail);
+	}
+	ncfg_supplicant_client_free(client);
+	return ok;
+}
+
+/* Whether hostapd's `SHOW_NEIGHBOR` lists this entry as it would be sent: the
+ * BSSID, and for an addition the same element. */
+static int neighbour_held(const char *body, const char *bssid, const char *nr)
+{
+	const char *line;
+
+	for (line = body; line && *line; line = strchr(line, '\n') ? strchr(line, '\n') + 1 : NULL) {
+		char held_bssid[NCFG_STATION_ADDRESS_SIZE];
+		char held_nr[256];
+		char normal[NCFG_STATION_ADDRESS_SIZE];
+
+		if (sscanf(line, "%17s ssid=%*s nr=%255[0-9a-fA-F]", held_bssid, held_nr) != 2 ||
+		    !ncfg_station_address_normalize(held_bssid, normal, sizeof(normal), NULL, 0) ||
+		    strcmp(normal, bssid) != 0) {
+			continue;
+		}
+		return !nr || strcasecmp(held_nr, nr) == 0;
+	}
+	return 0;
+}
+
+int ncfg_service_neighbour(const char *run_dir, const char *iface, const char *bssid,
+    const char *ssid, const char *nr, int adding, int patience_ms, char *err, size_t err_size)
+{
+	char                      directory[WIFI_PATH_MAX];
+	char                      command[512];
+	char                      body[NCFG_SUPPLICANT_REPLY_MAX];
+	ncfg_supplicant_client_t *client;
+	int                       ok;
+
+	if (!run_dir || !iface || !bssid || !ssid || (adding && !nr)) {
+		ncfg_error_set(err, err_size, "a neighbour action is missing what it names");
+		return 0;
+	}
+	if (!ncfg_hostapd_ctrl_dir(run_dir, directory, sizeof(directory), err, err_size)) {
+		return 0;
+	}
+	client = ncfg_supplicant_connect_within(directory, iface,
+	    patience_ms > 0 ? patience_ms : NCFG_SUPPLICANT_IMPATIENT_MS, err, err_size);
+	if (!client) {
+		char detail[NCFG_ERROR_MAX];
+
+		(void)snprintf(detail, sizeof(detail), "%s", err);
+		ncfg_error_set(err, err_size,
+		    "cannot reach the access point on %s to change its neighbours: %s", iface, detail);
+		return 0;
+	}
+	body[0] = '\0';
+	if (!ncfg_supplicant_ask(client, "SHOW_NEIGHBOR", body, sizeof(body), err, err_size)) {
+		ncfg_supplicant_client_free(client);
+		return 0;
+	}
+	if (neighbour_held(body, bssid, adding ? nr : NULL) == (adding ? 1 : 0)) {
+		ncfg_supplicant_client_free(client);
+		return 1;
+	}
+	if (adding) {
+		(void)snprintf(command, sizeof(command), "SET_NEIGHBOR %s ssid=%s nr=%s", bssid, ssid,
+		    nr);
+	} else {
+		(void)snprintf(command, sizeof(command), "REMOVE_NEIGHBOR %s ssid=%s", bssid, ssid);
+	}
+	ok = ncfg_supplicant_command(client, command, err, err_size);
+	if (!ok) {
+		char detail[NCFG_ERROR_MAX];
+
+		(void)snprintf(detail, sizeof(detail), "%s", err);
+		ncfg_error_set(err, err_size, "hostapd would not %s neighbour %s on %s: %s",
+		    adding ? "add" : "remove", bssid, iface, detail);
 	}
 	ncfg_supplicant_client_free(client);
 	return ok;

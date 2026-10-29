@@ -173,6 +173,12 @@ static int compare_mesh(const void *left, const void *right)
 	return compare_text(((const ncfg_mesh_t *)left)->id, ((const ncfg_mesh_t *)right)->id);
 }
 
+static int compare_neighbour(const void *left, const void *right)
+{
+	return compare_text(((const ncfg_neighbour_t *)left)->bssid,
+	    ((const ncfg_neighbour_t *)right)->bssid);
+}
+
 static int compare_host_list(const void *left, const void *right)
 {
 	return compare_text(((const ncfg_host_list_t *)left)->name,
@@ -429,6 +435,13 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 	 */
 	stable_sort(document->linksets, document->linkset_count, sizeof(*document->linksets),
 	    compare_linkset);
+
+	/* A neighbour list is a set, by BSSID (10.595). */
+	for (i = 0; i < document->access_point_count; i++) {
+		stable_sort(document->access_points[i].neighbours,
+		    document->access_points[i].neighbour_count,
+		    sizeof(*document->access_points[i].neighbours), compare_neighbour);
+	}
 
 	for (i = 0; i < document->access_point_count; i++) {
 		ncfg_access_control_t *acl = document->access_points[i].access_control;

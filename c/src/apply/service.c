@@ -149,6 +149,14 @@ int ncfg_service_execute(const ncfg_service_t *service, const ncfg_op_t *op, cha
 		return ncfg_service_access_control(service->run_dir, op->u.access_control.iface,
 		    op->u.access_control.list, op->u.access_control.station, 0,
 		    service->patience_ms, err, err_size);
+	case NCFG_OP_NEIGHBOUR_ADD:
+		return ncfg_service_neighbour(service->run_dir, op->u.neighbour.iface,
+		    op->u.neighbour.bssid, op->u.neighbour.ssid, op->u.neighbour.nr, 1,
+		    service->patience_ms, err, err_size);
+	case NCFG_OP_NEIGHBOUR_DEL:
+		return ncfg_service_neighbour(service->run_dir, op->u.neighbour.iface,
+		    op->u.neighbour.bssid, op->u.neighbour.ssid, op->u.neighbour.nr, 0,
+		    service->patience_ms, err, err_size);
 	/* Everything else, listed so that `-Wswitch` notices an op added to the
 	 * taxonomy and not answered anywhere. */
 	case NCFG_OP_LINK_CREATE:

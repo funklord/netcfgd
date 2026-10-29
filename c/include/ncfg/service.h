@@ -474,6 +474,15 @@ const char *ncfg_service_acl_command(int policy);
  * `run_dir` is netcfgd's own, under which `ncfg_hostapd_ctrl_dir` is where the
  * socket lives.
  */
+/*
+ * Give a running hostapd an 802.11k neighbour, or take one away (10.595):
+ * `SET_NEIGHBOR <bssid> ssid=<hex> nr=<hex>` and `REMOVE_NEIGHBOR <bssid>
+ * ssid=<hex>`, measured against hostapd 2.10. Read first, as the station
+ * lists are, so a converged list is left alone rather than sent a duplicate.
+ */
+int ncfg_service_neighbour(const char *run_dir, const char *iface, const char *bssid,
+    const char *ssid, const char *nr, int adding, int patience_ms, char *err, size_t err_size);
+
 int ncfg_service_access_control(const char *run_dir, const char *iface, int policy,
     const char *station, int adding, int patience_ms, char *err, size_t err_size);
 

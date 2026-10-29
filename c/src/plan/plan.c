@@ -405,6 +405,13 @@ static void intern_op(ncfg_plan_t *plan, const ncfg_op_t *in, ncfg_op_t *out)
 		out->u.access_control.iface = ncfg_plan_intern(plan, in->u.access_control.iface);
 		out->u.access_control.station = ncfg_plan_intern(plan, in->u.access_control.station);
 		return;
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
+		out->u.neighbour.iface = ncfg_plan_intern(plan, in->u.neighbour.iface);
+		out->u.neighbour.bssid = ncfg_plan_intern(plan, in->u.neighbour.bssid);
+		out->u.neighbour.ssid = ncfg_plan_intern(plan, in->u.neighbour.ssid);
+		out->u.neighbour.nr = ncfg_plan_intern(plan, in->u.neighbour.nr);
+		return;
 	case NCFG_OP_WG_SET_DEVICE:
 		out->u.wg_device.iface = ncfg_plan_intern(plan, in->u.wg_device.iface);
 		out->u.wg_device.private_key_ref =

@@ -987,6 +987,46 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	if (point->wds) {
 		ncfg_buf_add_text(&body, "\twds = true\n");
 	}
+	if (point->neighbour_reports) {
+		ncfg_buf_add_text(&body, "\tneighbour_reports = true\n");
+	} else if (point->neighbour_count) {
+		ncfg_render_refuse(missing, "access_point", point->id,
+		    "declared neighbours with `neighbour_reports` off");
+	}
+	/* The reader takes any string and any channel; the language takes a
+	 * BSSID in hostapd's spelling, once, on a channel a report can name. */
+	{
+		size_t at;
+
+		for (at = 0; at < point->neighbour_count; at++) {
+			const ncfg_neighbour_t *neighbour = &point->neighbours[at];
+			char                    bssid[NCFG_STATION_ADDRESS_SIZE];
+			size_t                  before;
+			int                     twice = 0;
+
+			for (before = 0; before < at; before++) {
+				twice |= strcmp(point->neighbours[before].bssid, neighbour->bssid) == 0;
+			}
+			if (!ncfg_station_address_normalize(neighbour->bssid, bssid, sizeof(bssid), NULL,
+			        0) || strcmp(bssid, neighbour->bssid) != 0) {
+				ncfg_render_refuse(missing, "access_point", point->id,
+				    "a neighbour named `%s`, which is not a BSSID", neighbour->bssid);
+			} else if (twice) {
+				ncfg_render_refuse(missing, "access_point", point->id,
+				    "neighbour `%s` declared twice", neighbour->bssid);
+			} else if (!neighbour->channel.has ||
+			    ncfg_neighbour_class(neighbour->channel.value) == 0) {
+				ncfg_render_refuse(missing, "access_point", point->id,
+				    "neighbour `%s` on no channel a neighbour report can name",
+				    neighbour->bssid);
+			} else if (point->neighbour_reports) {
+				ncfg_buf_add_text(&body, "\tneighbour ");
+				ncfg_render_quote(&body, neighbour->bssid);
+				ncfg_buf_addf(&body, " { channel = %lld }\n",
+				    (long long)neighbour->channel.value);
+			}
+		}
+	}
 	/* Only a stated one: the derived domain is the absence of this line, and
 	 * writing it out would pin a profile to an SSID it may be saved away from. */
 	if (point->mobility_domain) {

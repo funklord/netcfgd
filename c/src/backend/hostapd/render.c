@@ -585,6 +585,17 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point,
 		ncfg_error_set(err, err_size, "out of memory rendering four-address stations");
 		return 0;
 	}
+	/* 802.11k (10.595): measured in a vm, `rrm_neighbor_report` is what makes
+	 * hostapd hold its own entry and answer a station's request; the beacon
+	 * report lets a station say what it hears, which steering reads. The
+	 * neighbours themselves are not in the file -- hostapd has no key for
+	 * them -- and are given over the control socket. */
+	if (access_point->neighbour_reports && (!add_line(out, "rrm_neighbor_report", "1", 0) ||
+	    !add_line(out, "rrm_beacon_report", "1", 0))) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering neighbour reports");
+		return 0;
+	}
 	if (access_point->fast_roaming && !roaming_lines(out, access_point, local, roaming_key)) {
 		ncfg_hostapd_lines_free(out);
 		ncfg_error_set(err, err_size, "out of memory rendering fast roaming");

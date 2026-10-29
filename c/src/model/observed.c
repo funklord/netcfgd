@@ -1052,6 +1052,17 @@ static void observed_policy_write(ncfg_json_writer_t *writer, const void *field)
 static const ncfg_custom_t observed_policy_custom = { observed_policy_read,
 	observed_policy_write, NULL, NULL, NULL };
 
+static const ncfg_field_t observed_neighbour_fields[] = {
+	{ .name = "bssid", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_neighbour_t, bssid) },
+	{ .name = "ssid", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_neighbour_t, ssid) },
+	{ .name = "nr", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_neighbour_t, nr) }
+};
+static const ncfg_type_t observed_neighbour_type =
+    TYPE("observed neighbour", observed_neighbour_fields);
+
 static const ncfg_field_t access_control_fields[] = {
 	{ .name = "policy", .kind = NCFG_F_CUSTOM, .flags = NCFG_FF_REQUIRED,
 	    .custom = &observed_policy_custom,
@@ -1066,7 +1077,11 @@ static const ncfg_field_t access_control_fields[] = {
 	 * every one before 10.591 -- is what it was. */
 	{ .name = "associated", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_access_control_t, associated),
-	    .count_offset = offsetof(ncfg_observed_access_control_t, associated_count) }
+	    .count_offset = offsetof(ncfg_observed_access_control_t, associated_count) },
+	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &observed_neighbour_type, .element_size = sizeof(ncfg_observed_neighbour_t),
+	    .offset = offsetof(ncfg_observed_access_control_t, neighbours),
+	    .count_offset = offsetof(ncfg_observed_access_control_t, neighbour_count) }
 };
 static const ncfg_type_t access_control_type =
     TYPE("observed access control", access_control_fields);
@@ -1087,7 +1102,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "mobility_domain", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_access_point_t, mobility_domain) },
 	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
-	    .offset = offsetof(ncfg_observed_access_point_t, wds) }
+	    .offset = offsetof(ncfg_observed_access_point_t, wds) },
+	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, neighbour_reports) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);

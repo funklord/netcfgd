@@ -815,6 +815,10 @@ static void an_access_point_round_trips(void)
 	    "a radio in four-address mode round-trips");
 	round_trips("access_point \"rep\" {\n\tdevice = \"wlan0\"\n\twds = true\n"
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "an access point taking repeaters round-trips");
+	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "neighbour reports and a declared neighbour round-trip");
 	plain = rendering_of("access_point \"roam\" {\n"
 	    "\tdevice = \"wlan0\"\n\tfast_roaming = true\n\twifi { psk = \"@secret:ap\" }\n}\n");
 	check(plain && strstr(plain, "fast_roaming = true") != NULL &&

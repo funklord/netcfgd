@@ -411,6 +411,11 @@ static const struct {
 	/* A reference, as `wifi.psk` is: the name the estate's access points
 	 * agree on, with the key in each machine's store. */
 	{ NCFG_BLOCK_ACCESS_POINT, "roaming_key", 0x0004000fu },
+	/* Neighbour reports, and the neighbours declared for them (10.595): the
+	 * network's, so one list serves every access point of it -- each skips
+	 * its own radio. */
+	{ NCFG_BLOCK_ACCESS_POINT, "neighbour_reports", 0x00040010u },
+	{ NCFG_BLOCK_ACCESS_POINT, "neighbour.channel", 0x00040011u },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

@@ -4,7 +4,7 @@
  *
  * WHAT THE WITNESS COMPARISON PROVES, AND HOW
  *   `doc/schema/plan.json` is one plan carrying **every op there is** -- one
- *   sample each, forty-nine of them -- with an inverse on every action, one
+ *   sample each, fifty-one of them -- with an inverse on every action, one
  *   warning, one refusal and one stranded credential. It is built here by hand
  *   exactly as `crates/netcfgd-plan/tests/frozen.rs` builds it, written, and
  *   compared **byte for byte against the witness with its whitespace
@@ -345,6 +345,15 @@ static size_t witness_ops(ncfg_op_t *ops, size_t max, const ncfg_route_t *route,
 	OP(NCFG_OP_ACCESS_CONTROL_DEL)->u.access_control.iface = "wlan0";
 	ops[at - 1u].u.access_control.list = NCFG_ACL_POLICY_ALLOW;
 	ops[at - 1u].u.access_control.station = "02:00:00:00:00:bb";
+	/* An 802.11k neighbour entry, in hostapd's own hex (10.595). */
+	OP(NCFG_OP_NEIGHBOUR_ADD)->u.neighbour.iface = "wlan0";
+	ops[at - 1u].u.neighbour.bssid = "02:00:00:00:02:00";
+	ops[at - 1u].u.neighbour.ssid = "686f6d65";
+	ops[at - 1u].u.neighbour.nr = "0200000002008f000000510b060603000000";
+	OP(NCFG_OP_NEIGHBOUR_DEL)->u.neighbour.iface = "wlan0";
+	ops[at - 1u].u.neighbour.bssid = "02:00:00:00:07:00";
+	ops[at - 1u].u.neighbour.ssid = "686f6d65";
+	ops[at - 1u].u.neighbour.nr = "0200000007008f000000510b06";
 	OP(NCFG_OP_LINK_SET_BOND)->u.set_bond.name = "bond0";
 	ops[at - 1u].u.set_bond.mode = 1;
 	OP(NCFG_OP_LINK_SET_BRIDGE)->u.named.name = "br0";
@@ -706,7 +715,7 @@ static void the_frozen_witness(void)
 
 	plan = build_witness(ops, &count);
 	check(plan != NULL && !ncfg_plan_failed(plan), "the witness plan is built");
-	check(count == 49u, "and carries every op there is: forty-nine");
+	check(count == 51u, "and carries every op there is: fifty-one");
 	if (!plan) {
 		free(raw);
 		return;
@@ -791,9 +800,10 @@ static void the_frozen_witness(void)
  * The tag used to be serde's `snake_case` of the variant while the name was a
  * function, so one operation had two spellings and only a client outside the
  * workspace could see both at once (0082). Here they are one function, so what
- * this checks instead is the list: a sorted roll-call of forty-nine names,
- * which fails when one is renamed, added or lost. `link.set_wds` is the
- * forty-ninth (10.587 item 4).
+ * this checks instead is the list: a sorted roll-call of fifty-one names,
+ * which fails when one is renamed, added or lost. `link.set_wds` was the
+ * forty-ninth (10.587 item 4); `neighbour.add` and `neighbour.del` are the
+ * fiftieth and fifty-first (10.595).
  */
 static void the_op_vocabulary(void)
 {
@@ -805,7 +815,8 @@ static void the_op_vocabulary(void)
 		"link.set_bond", "link.set_bridge", "link.set_ipv6_token", "link.set_mac",
 		"link.set_macvlan", "link.set_master", "link.set_mtu", "link.set_offloads",
 		"link.set_tunnel", "link.set_vxlan", "link.set_wds", "link.unset_master", "link.up",
-		"nftables.replace", "qdisc.reset", "qdisc.set", "route.add", "route.del", "rule.add",
+		"neighbour.add", "neighbour.del", "nftables.replace", "qdisc.reset", "qdisc.set",
+		"route.add", "route.del", "rule.add",
 		"rule.del", "sysctl.set_accept_ra", "sysctl.set_forwarding",
 		"sysctl.set_privacy", "wg.set_device", "wg.set_peers", "wifi.associate",
 		"wifi.disassociate", "wifi.set_profiles", "wifi.set_regdom" };
@@ -814,11 +825,11 @@ static void the_op_vocabulary(void)
 	size_t       i;
 	size_t       j;
 
-	check(count == 49u, "the vocabulary is forty-nine ops");
+	check(count == 51u, "the vocabulary is fifty-one ops");
 	for (i = 0; i < count; i++) {
 		int found = 0;
 
-		for (j = 0; j < 49u; j++) {
+		for (j = 0; j < 51u; j++) {
 			ncfg_op_t op;
 
 			memset(&op, 0, sizeof(op));
@@ -833,7 +844,7 @@ static void the_op_vocabulary(void)
 			complete = 0;
 		}
 	}
-	for (j = 0; j < 49u; j++) {
+	for (j = 0; j < 51u; j++) {
 		ncfg_op_t op;
 		int       found = 0;
 
@@ -890,6 +901,12 @@ static void what_counts_as_disruptive(void)
 	check(ncfg_op_is_disruptive(&op), "taking one off the allow list disconnects it");
 	op.u.access_control.list = NCFG_ACL_POLICY_DENY;
 	check(!ncfg_op_is_disruptive(&op), "taking one off the deny list interrupts nobody");
+
+	op.kind = NCFG_OP_NEIGHBOUR_ADD;
+	check(!ncfg_op_is_disruptive(&op),
+	    "telling an access point about a neighbour interrupts nobody");
+	op.kind = NCFG_OP_NEIGHBOUR_DEL;
+	check(!ncfg_op_is_disruptive(&op), "  and nor does forgetting one");
 
 	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_HOOK_RUN;

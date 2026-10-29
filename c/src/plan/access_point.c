@@ -567,6 +567,13 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		field = "access_point.wds";
 		(void)snprintf(desired, sizeof(desired), "%s", point->wds ? "true" : "false");
 		(void)snprintf(observed, sizeof(observed), "%s", started->wds ? "true" : "false");
+	} else if ((started->neighbour_reports != 0) != (point->neighbour_reports != 0)) {
+		/* `rrm_neighbor_report` is read once too (10.595). */
+		field = "access_point.neighbour_reports";
+		(void)snprintf(desired, sizeof(desired), "%s",
+		    point->neighbour_reports ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s",
+		    started->neighbour_reports ? "true" : "false");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

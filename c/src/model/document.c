@@ -310,6 +310,32 @@ int ncfg_station_address_normalize(const char *text, char *out, size_t out_size,
 	return 1;
 }
 
+int ncfg_neighbour_class(int64_t channel)
+{
+	if (channel >= 1 && channel <= 13) {
+		return 81;
+	}
+	if (channel == 14) {
+		return 82;
+	}
+	if (channel >= 36 && channel <= 48) {
+		return 115;
+	}
+	if (channel >= 52 && channel <= 64) {
+		return 118;
+	}
+	if (channel >= 100 && channel <= 144) {
+		return 121;
+	}
+	if (channel >= 149 && channel <= 161) {
+		return 124;
+	}
+	if (channel >= 165 && channel <= 177) {
+		return 125;
+	}
+	return 0;
+}
+
 int ncfg_station_is_prefix(const char *text)
 {
 	size_t length = text ? strlen(text) : 0u;
@@ -2086,6 +2112,14 @@ static const ncfg_field_t access_control_fields[] = {
 };
 static const ncfg_type_t access_control_type = TYPE("access control list", access_control_fields);
 
+static const ncfg_field_t neighbour_fields[] = {
+	{ .name = "bssid", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_neighbour_t, bssid) },
+	{ .name = "channel", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_neighbour_t, channel) }
+};
+static const ncfg_type_t neighbour_type = TYPE("neighbour", neighbour_fields);
+
 static const ncfg_field_t access_point_fields[] = {
 	{ .name = "id", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_access_point_t, id) },
@@ -2113,7 +2147,15 @@ static const ncfg_field_t access_point_fields[] = {
 	    .offset = offsetof(ncfg_access_point_t, wds) },
 	{ .name = "roaming_key", .kind = NCFG_F_OPT_STRUCT, .type = &secret_ref_type,
 	    .element_size = sizeof(ncfg_secret_ref_t),
-	    .offset = offsetof(ncfg_access_point_t, roaming_key) }
+	    .offset = offsetof(ncfg_access_point_t, roaming_key) },
+	/* Both omitted when off or empty, so every earlier document is what it
+	 * was (10.595). */
+	{ .name = "neighbour_reports", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_access_point_t, neighbour_reports) },
+	{ .name = "neighbours", .kind = NCFG_F_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .type = &neighbour_type, .element_size = sizeof(ncfg_neighbour_t),
+	    .offset = offsetof(ncfg_access_point_t, neighbours),
+	    .count_offset = offsetof(ncfg_access_point_t, neighbour_count) }
 };
 static const ncfg_type_t access_point_type = TYPE("access point", access_point_fields);
 

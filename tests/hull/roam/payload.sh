@@ -10,6 +10,13 @@
 # FT, so the first association is the control (it must be 0, which is what
 # shows the instrument can tell) and the roam is the reading (it must be 2).
 #
+# Both also answer 802.11k neighbour report requests (10.595), and roam-b
+# declares one neighbour that is not on this machine. The first apply starts
+# hostapd; the second converges each one's neighbour list -- the sibling's
+# own entry, and the declared one built from roam-b's -- and a third plan
+# must have nothing to do. After the roam the station asks roam-b for a
+# report and must be told about all three.
+#
 # The access points are netcfgd's -- `ncfg apply` renders and starts hostapd;
 # the station is a bare wpa_supplicant, because what is under test is what the
 # access points offer.
@@ -18,7 +25,7 @@
 # payloads do.
 #
 # HOW IT STOPS: every wait is bounded (the radios at 5 s, the access points at
-# 20 s, each association at 10 s), the steps are a fixed list, and the vm takes
+# 20 s, each association at 10 s, the report at 2 s), the steps are a fixed list, and the vm takes
 # hostapd and wpa_supplicant with it.
 set -u
 PATH=/usr/sbin:/sbin:/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
@@ -66,6 +73,7 @@ access_point "roam-a" {
 	ssid = "726f616d"
 	channel = 1
 	fast_roaming = true
+	neighbour_reports = true
 	wifi { psk = "@secret:roam" }
 }
 
@@ -74,6 +82,8 @@ access_point "roam-b" {
 	ssid = "726f616d"
 	channel = 6
 	fast_roaming = true
+	neighbour_reports = true
+	neighbour "02:00:00:00:09:00" { channel = 36 }
 	wifi { psk = "@secret:roam" }
 }
 CONF
@@ -98,6 +108,14 @@ until [ -S "$work/run/hostapd/wlan0" ] && [ -S "$work/run/hostapd/wlan1" ] ||
 done
 up=$(ls "$work/run/hostapd" 2>/dev/null | tr '\n' ' ')
 say "  run/hostapd: $up"
+
+# The lists, now that there is a hostapd to hold them: two entries on
+# roam-a's (none declared, its sibling's) and two on roam-b's. Then nothing.
+"$build/ncfg" apply > "$work/apply2.log" 2>&1
+say "a second ncfg apply rc=$?: $(grep -c 'neighbour.add' "$work/apply2.log") neighbour.add line(s)"
+"$build/ncfg" plan > "$work/plan.log" 2>&1
+again=$(grep -c '^nothing to do' "$work/plan.log")
+say "a third plan: $(head -1 "$work/plan.log")"
 
 b0=$(cat /sys/class/net/wlan0/address)
 b1=$(cat /sys/class/net/wlan1/address)
@@ -135,6 +153,13 @@ end=$(date +%s%N)
 second=$(status | grep -E '^(bssid|key_mgmt)=' | tr '\n' ' ')
 say "roams: $second after $(( (end - start) / 1000000 )) ms"
 
+# The neighbour report, asked of the access point the station is now on.
+wpa_cli -p "$work/sta" -i wlan2 neighbor_rep_request >/dev/null 2>&1
+sleep 2
+reported=$(grep 'RRM-NEIGHBOR-REP-RECEIVED' "$work/sta.log" | sed 's/.*bssid=//; s/ info=[^ ]*//' |
+	sort -u | tr '\n' ' ')
+say "  roam-b reports: $reported"
+
 # The control and the reading, out of the station's own account.
 joined_open=$(grep -c "SME: Authentication response: peer=$b0 auth_type=0 " "$work/sta.log")
 roamed_ft=$(grep -c "SME: Authentication response: peer=$b1 auth_type=2 " "$work/sta.log")
@@ -147,8 +172,13 @@ case "$first" in *"bssid=$b0"*"key_mgmt=FT-PSK"*) ;; *) say "  the first associa
 case "$second" in *"bssid=$b1"*"key_mgmt=FT-PSK"*) ;; *) say "  the station did not roam to $b1"; failed=1 ;; esac
 [ "$joined_open" -ge 1 ] || { say "  the control failed: no open-system authentication to $b0"; failed=1; }
 [ "$roamed_ft" -ge 1 ] || { say "  the roam to $b1 was not a fast transition"; failed=1; }
+[ "$again" -ge 1 ] || { say "  the third plan was not empty"; failed=1; }
+case "$reported" in *"$b0 op_class=81 chan=1 "*) ;; *) say "  roam-b did not report its sibling roam-a"; failed=1 ;; esac
+case "$reported" in *"02:00:00:00:09:00 op_class=115 chan=36 "*) ;; *) say "  roam-b did not report the declared neighbour on channel 36"; failed=1 ;; esac
 if [ "$failed" -ne 0 ]; then
 	sed 's/^/  apply: /' "$work/apply.log" | tail -10 >> "$out"
+	sed 's/^/  apply2: /' "$work/apply2.log" | tail -10 >> "$out"
+	sed 's/^/  plan: /' "$work/plan.log" | head -8 >> "$out"
 	grep -E 'SME: Authentication response|FT: ' "$work/sta.log" | tail -8 | sed 's/^/  sta: /' >> "$out"
 	say "VERDICT bad"
 else

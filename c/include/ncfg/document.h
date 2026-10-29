@@ -1671,7 +1671,39 @@ typedef struct {
 	 * point is that knowing the passphrase does not get you those.
 	 */
 	ncfg_secret_ref_t     *roaming_key;
+	/*
+	 * 802.11k neighbour reports (project.md 10.595): hostapd's
+	 * `rrm_neighbor_report`, so a station can ask which other access points
+	 * of the network it may move to. Off unless asked for, because changing
+	 * the file restarts the access point. Omitted when off.
+	 */
+	int                    neighbour_reports;
+	/*
+	 * Access points on other machines, declared until fuzznet can carry each
+	 * host's own entry (10.594): a BSSID and its channel. The access points
+	 * of the same network on this machine are neighbours without being
+	 * declared, from what their own hostapd says about itself. An entry
+	 * naming this access point's own radio is skipped, so one list can be
+	 * written for the whole network. Sorted by BSSID; omitted when empty.
+	 */
+	struct ncfg_neighbour *neighbours;
+	size_t                 neighbour_count;
 } ncfg_access_point_t;
+
+/*
+ * The operating class a neighbour report names for a channel (IEEE 802.11
+ * Annex E, global table): 81 for 2.4 GHz channels 1 to 13, 82 for 14, and
+ * the 20 MHz 5 GHz classes -- 115, 118, 121, 124 and 125. 0 for anything
+ * else. One answer for the compiler that refuses a channel and the planner
+ * that writes the report.
+ */
+int ncfg_neighbour_class(int64_t channel);
+
+/* One declared neighbour: lowercase `aa:bb:cc:dd:ee:ff`, and its channel. */
+typedef struct ncfg_neighbour {
+	char         *bssid;
+	ncfg_optint_t channel;
+} ncfg_neighbour_t;
 
 /*
  * An 802.11s mesh one radio joins (project.md 10.588).

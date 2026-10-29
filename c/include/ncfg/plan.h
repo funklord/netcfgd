@@ -95,6 +95,10 @@ typedef enum {
 	NCFG_OP_WIFI_SET_REGDOM,
 	NCFG_OP_ACCESS_CONTROL_ADD,
 	NCFG_OP_ACCESS_CONTROL_DEL,
+	/* An 802.11k neighbour given to, or taken from, a running hostapd over
+	 * its control socket (10.595). */
+	NCFG_OP_NEIGHBOUR_ADD,
+	NCFG_OP_NEIGHBOUR_DEL,
 	NCFG_OP_LINK_SET_BOND,
 	NCFG_OP_LINK_SET_BRIDGE,
 	NCFG_OP_LINK_SET_MACVLAN,
@@ -235,6 +239,15 @@ typedef struct {
 			int         list; /* ncfg_acl_policy_t */
 			const char *station;
 		} access_control;
+		/* hostapd's own spelling of an entry, as `SHOW_NEIGHBOR` prints one:
+		 * the BSSID, the SSID as hex, the report element as hex. A removal
+		 * carries the whole entry too, so its inverse can put it back. */
+		struct {
+			const char *iface;
+			const char *bssid;
+			const char *ssid;
+			const char *nr;
+		} neighbour;
 		struct {
 			const char   *iface;
 			/* A reference, never a key: a plan goes to /run and over the

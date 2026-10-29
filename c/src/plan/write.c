@@ -251,6 +251,13 @@ static void write_op(ncfg_json_writer_t *writer, const ncfg_op_t *op)
 		    ncfg_plan_acl_policy_word(op->u.access_control.list));
 		member_text(writer, "station", op->u.access_control.station);
 		break;
+	case NCFG_OP_NEIGHBOUR_ADD:
+	case NCFG_OP_NEIGHBOUR_DEL:
+		member_text(writer, "iface", op->u.neighbour.iface);
+		member_text(writer, "bssid", op->u.neighbour.bssid);
+		member_text(writer, "ssid", op->u.neighbour.ssid);
+		member_text(writer, "nr", op->u.neighbour.nr);
+		break;
 	case NCFG_OP_WG_SET_DEVICE:
 		member_text(writer, "iface", op->u.wg_device.iface);
 		member_text(writer, "private_key_ref", op->u.wg_device.private_key_ref);

@@ -1007,6 +1007,125 @@ static void a_station_radio_in_a_bridge_is_said(void)
 #undef BRIDGED_RADIO
 }
 
+/* ------------------------------------------------------------------------ *
+ * Neighbour reports (10.595)
+ * ------------------------------------------------------------------------ */
+
+/* Two radios, each an access point of one network, and both reporting. */
+#define TWO_RADIOS \
+	RADIO ",{\"name\":\"wlan1\",\"kind\":{\"kind\":\"physical\"}}"
+#define TWO_RADIO_INTERFACES RADIO_INTERFACE ",{\"name\":\"wlan1\",\"addressing\":[]}"
+#define REPORTING_POINTS(declared) \
+	",\"access_points\":[{\"id\":\"home\",\"ssid\":\"686f6d65\",\"device\":\"wlan0\"," \
+	"\"security\":{\"type\":\"open\"},\"neighbour_reports\":true" declared "}," \
+	"{\"id\":\"home-b\",\"ssid\":\"686f6d65\",\"device\":\"wlan1\"," \
+	"\"security\":{\"type\":\"open\"},\"neighbour_reports\":true}]"
+#define RADIO_LINKS \
+	"\"links\":[{\"name\":\"wlan0\",\"index\":2,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"unknown\",\"wireless\":true,\"mac\":\"02:00:00:00:01:00\"}," \
+	"{\"name\":\"wlan1\",\"index\":3,\"mtu\":1500,\"up\":true,\"carrier\":true," \
+	"\"ownership\":\"unknown\",\"wireless\":true,\"mac\":\"02:00:00:00:02:00\"}]"
+/* Each element as hostapd wrote it for itself -- the first one measured. */
+#define OWN_A "{\"bssid\":\"02:00:00:00:01:00\",\"ssid\":\"686f6d65\"," \
+	"\"nr\":\"0200000001008f000000510b060603000000\"}"
+#define OWN_B "{\"bssid\":\"02:00:00:00:02:00\",\"ssid\":\"686f6d65\"," \
+	"\"nr\":\"0200000002008f000000510b060603000000\"}"
+#define REPORTING(interface, neighbours) \
+	"{\"kind\":\"access_point\",\"interface\":\"" interface "\",\"running\":true" \
+	STARTED_WITH(AS_WRITTEN ",\"neighbour_reports\":true") \
+	",\"access_control\":{\"policy\":\"unset\",\"denied\":[],\"accepted\":[]," \
+	"\"neighbours\":[" neighbours "]}}"
+
+/* Whether a plan carries this neighbour op for this access point and BSSID,
+ * and with this element where one is named. */
+static int neighbour_op_for(const ncfg_plan_t *plan, const char *name, const char *device,
+    const char *bssid, const char *nr)
+{
+	size_t i;
+
+	for (i = 0; plan && i < plan->action_count; i++) {
+		const ncfg_op_t *op = &plan->actions[i].op;
+
+		if (strcmp(ncfg_op_name(op), name) == 0 &&
+		    strcmp(op->u.neighbour.iface, device) == 0 &&
+		    strcmp(op->u.neighbour.bssid, bssid) == 0 &&
+		    (!nr || strcmp(op->u.neighbour.nr, nr) == 0)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Each access point is told about the other, in the element the other's own
+ * hostapd wrote; a declared neighbour is built from this one's own element
+ * with its BSSID, class and channel; and an entry nothing names any more is
+ * removed. The own entries are never touched.
+ */
+static void access_points_of_one_network_report_each_other(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "",
+	    REPORTING_POINTS(",\"neighbours\":[{\"bssid\":\"02:00:00:00:09:00\",\"channel\":36}]"),
+	    RADIO_LINKS ",\"backends\":["
+	    REPORTING("wlan0", OWN_A ",{\"bssid\":\"02:00:00:00:07:00\",\"ssid\":\"686f6d65\","
+	        "\"nr\":\"0200000007008f000000510b06\"}") ","
+	    REPORTING("wlan1", OWN_B) "]",
+	    &document, &observed);
+
+	check(plan && neighbour_op_for(plan, "neighbour.add", "wlan0", "02:00:00:00:02:00",
+	    "0200000002008f000000510b060603000000"),
+	    "an access point is told about its sibling, in the sibling's own element");
+	check(plan && neighbour_op_for(plan, "neighbour.add", "wlan1", "02:00:00:00:01:00",
+	    "0200000001008f000000510b060603000000"),
+	    "and the sibling about it");
+	check(plan && neighbour_op_for(plan, "neighbour.add", "wlan0", "02:00:00:00:09:00",
+	    "0200000009008f000000732406"),
+	    "a declared neighbour takes its BSSID, class 115 and channel 36 into this one's element");
+	check(plan && neighbour_op_for(plan, "neighbour.del", "wlan0", "02:00:00:00:07:00", NULL),
+	    "an entry nothing names any more is removed");
+	check(plan && planfix_count(plan, "neighbour.add") == 3u &&
+	    planfix_count(plan, "neighbour.del") == 1u,
+	    "and the own entries are left alone");
+	check(plan && !planfix_action(plan, "backend.stop"),
+	    "and nothing restarts for any of it");
+	planfix_release(plan, document, observed);
+}
+
+/* The list as planned, held: nothing more to do. */
+static void a_neighbour_list_held_as_wanted_is_converged(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(TWO_RADIOS, TWO_RADIO_INTERFACES, "",
+	    REPORTING_POINTS(""),
+	    RADIO_LINKS ",\"backends\":[" REPORTING("wlan0", OWN_A "," OWN_B) ","
+	    REPORTING("wlan1", OWN_B "," OWN_A) "]",
+	    &document, &observed);
+
+	check(plan && plan->action_count == 0u, "a neighbour list held as wanted plans nothing");
+	planfix_release(plan, document, observed);
+}
+
+/* Turning reports on is part of what hostapd was started as. */
+static void neighbour_reports_are_part_of_what_an_access_point_was_started_as(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"neighbour_reports\":true"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+	const ncfg_action_t *stop = plan ? planfix_action(plan, "backend.stop") : NULL;
+
+	check(stop && stop->reason.field &&
+	    strcmp(stop->reason.field, "access_point.neighbour_reports") == 0,
+	    "turning neighbour reports on restarts the access point, and says why");
+	check(plan && !planfix_action(plan, "neighbour.add"),
+	    "and no list is converged on the hostapd being replaced");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1038,6 +1157,9 @@ int main(void)
 	an_access_point_with_no_address_is_said();
 	an_empty_allow_list_is_said();
 	a_station_radio_in_a_bridge_is_said();
+	access_points_of_one_network_report_each_other();
+	a_neighbour_list_held_as_wanted_is_converged();
+	neighbour_reports_are_part_of_what_an_access_point_was_started_as();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

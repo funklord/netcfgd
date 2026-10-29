@@ -1045,6 +1045,14 @@ static void access_point_free(ncfg_access_point_t *access_point)
 		    access_point->access_control->station_count);
 		free(access_point->access_control);
 	}
+	{
+		size_t at;
+
+		for (at = 0; at < access_point->neighbour_count; at++) {
+			free(access_point->neighbours[at].bssid);
+		}
+		free(access_point->neighbours);
+	}
 	memset(access_point, 0, sizeof(*access_point));
 }
 
@@ -1137,6 +1145,69 @@ static int check_fast_roaming(ncfg_lower_ctx_t *ctx, const ncfg_access_point_t *
 	return 1;
 }
 
+/*
+ * `neighbour "aa:bb:cc:dd:ee:ff" { channel = 36 }`: an access point of the same
+ * network on another machine (10.595). The channel decides the operating class
+ * a neighbour report carries, so it is required; a second block for one BSSID
+ * is refused rather than merged.
+ */
+static void lower_neighbour(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
+    ncfg_access_point_t *access_point)
+{
+	char              bssid[NCFG_STATION_ADDRESS_SIZE];
+	char              why[NCFG_ERROR_MAX];
+	ncfg_neighbour_t  one;
+	ncfg_neighbour_t *grown;
+	size_t            at;
+
+	memset(&one, 0, sizeof(one));
+	if (!block->label ||
+	    !ncfg_station_address_normalize(block->label, bssid, sizeof(bssid), why, sizeof(why))) {
+		ncfg_diag(ctx, block->span, "a `neighbour` is named by its BSSID: %s",
+		    block->label ? why : "this one has no label");
+		return;
+	}
+	for (at = 0; at < block->items.count; at++) {
+		const ncfg_ast_item_t *item = block->items.at[at];
+
+		if (item->kind == NCFG_AST_ITEM_ASSIGNMENT &&
+		    strcmp(item->as.assignment.key, "channel") == 0) {
+			ncfg_as_narrow_opt(ctx, item->as.assignment.value, 255, &one.channel);
+		} else if (item->kind == NCFG_AST_ITEM_ASSIGNMENT || item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->kind == NCFG_AST_ITEM_BLOCK ? item->as.block.span
+			                                                 : item->as.assignment.span,
+			    "a `neighbour` takes `channel` and nothing else");
+		}
+	}
+	if (!one.channel.has) {
+		ncfg_diag(ctx, block->span,
+		    "neighbour `%s` needs its `channel`: a neighbour report says where to look", bssid);
+		return;
+	}
+	if (ncfg_neighbour_class(one.channel.value) == 0) {
+		ncfg_diag(ctx, block->span,
+		    "neighbour `%s` is on channel %lld, which is not a 2.4 or 5 GHz channel a "
+		    "neighbour report can name", bssid, (long long)one.channel.value);
+		return;
+	}
+	for (at = 0; at < access_point->neighbour_count; at++) {
+		if (strcmp(access_point->neighbours[at].bssid, bssid) == 0) {
+			ncfg_diag(ctx, block->span, "neighbour `%s` is declared twice", bssid);
+			return;
+		}
+	}
+	one.bssid = ncfg_dup(ctx, bssid);
+	grown = one.bssid ? realloc(access_point->neighbours,
+	    (access_point->neighbour_count + 1u) * sizeof(*grown)) : NULL;
+	if (!grown) {
+		free(one.bssid);
+		ncfg_lower_oom(ctx);
+		return;
+	}
+	access_point->neighbours = grown;
+	access_point->neighbours[access_point->neighbour_count++] = one;
+}
+
 int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merged,
     ncfg_access_point_t *out)
 {
@@ -1146,6 +1217,7 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 	ncfg_span_t             roaming_span = block->span;
 	ncfg_span_t             domain_span = block->span;
 	ncfg_span_t             key_span = block->span;
+	ncfg_span_t             neighbour_span = block->span;
 	const char             *why = NULL;
 	int                     security_seen = 0;
 	size_t                  i;
@@ -1191,6 +1263,10 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 			} else if (strcmp(key, "wds") == 0) {
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.wds = flag;
+				}
+			} else if (strcmp(key, "neighbour_reports") == 0) {
+				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+					access_point.neighbour_reports = flag;
 				}
 			} else if (strcmp(key, "roaming_key") == 0) {
 				ncfg_secret_ref_t secret;
@@ -1263,6 +1339,9 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				ncfg_security_free(&access_point.security);
 				access_point.security = security;
 			}
+		} else if (strcmp(item->as.block.head, "neighbour") == 0) {
+			neighbour_span = item->as.block.span;
+			lower_neighbour(ctx, &item->as.block, &access_point);
 		} else if (strcmp(item->as.block.head, "access_control") == 0) {
 			ncfg_access_control_t acl;
 
@@ -1287,6 +1366,16 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 		}
 	}
 
+	/* A declared neighbour is given to hostapd only through its neighbour
+	 * reports, so a list with them off is a list that does nothing. */
+	if (access_point.neighbour_count && !access_point.neighbour_reports) {
+		ncfg_diag(ctx, neighbour_span,
+		    "access point `%s` declares neighbours with `neighbour_reports` off, so no "
+		    "station would be told about them: set `neighbour_reports = true`",
+		    access_point.id);
+		access_point_free(&access_point);
+		return 0;
+	}
 	if (!access_point.device) {
 		ncfg_diag(ctx, block->span,
 		    "access point `%s` does not say which radio runs it: add `device = \"wlan0\"`; "

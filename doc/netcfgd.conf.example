@@ -857,6 +857,27 @@
 #	}
 #}
 
+# NEIGHBOUR REPORTS (802.11k). A station can ask the access point it is on
+# which others offer the network, and where, so it looks there first rather
+# than scanning every channel before it roams:
+#
+#   - Every access point of the network on this machine is reported to the
+#     others with no more than `neighbour_reports = true` on each.
+#   - One on another machine is declared by the BSSID it shows and its
+#     channel, which are what a report carries. Its entry is built from this
+#     access point's own, so it is taken to be of the same kind.
+#   - Turning it on restarts the access point once; the list itself is kept
+#     current without one.
+
+#access_point "Home" {
+#	device            = "wlan0"
+#	neighbour_reports = true
+#	neighbour "aa:bb:cc:dd:ee:01" { channel = 36 }
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+
 # A REPEATER BEHIND AN ACCESS POINT. `wds = true` lets four-address (WDS)
 # stations join, which is what a repeater bridging a second LAN through this
 # network uses: hostapd gives each one an interface of its own and puts it in

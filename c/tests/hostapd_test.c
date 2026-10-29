@@ -445,6 +445,44 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 	}
 }
 
+/* 802.11k (10.595): the file turns reports on, and the neighbours themselves
+ * go over the control socket, so none of them is in it. */
+static void neighbour_reports_are_two_lines_and_no_neighbours(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_neighbour_t     neighbour;
+	ncfg_hostapd_lines_t lines;
+	char                 bssid[] = "02:00:00:00:09:00";
+
+	memset(&neighbour, 0, sizeof(neighbour));
+	neighbour.bssid = bssid;
+	neighbour.channel.has = 1;
+	neighbour.channel.value = 36;
+	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "rrm_neighbor_report") == NULL &&
+		        ncfg_hostapd_value_of(&lines, "rrm_beacon_report") == NULL,
+		    "an access point without neighbour reports writes neither line");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.neighbour_reports = 1;
+	point.neighbours = &neighbour;
+	point.neighbour_count = 1u;
+	if (rendered(&point, "correcthorse", &lines)) {
+		size_t at;
+		int    named = 0;
+
+		check_text(ncfg_hostapd_value_of(&lines, "rrm_neighbor_report"), "1",
+		    "one with them answers a station's neighbour report request");
+		check_text(ncfg_hostapd_value_of(&lines, "rrm_beacon_report"), "1",
+		    "  and asks stations what they hear");
+		for (at = 0; at < lines.count; at++) {
+			named |= strstr(lines.at[at].value, "02:00:00:00:09:00") != NULL;
+		}
+		check(!named, "  and no declared neighbour is written into the file");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
 /* Four-address stations, and the bridge their interfaces join -- without it
  * hostapd makes them and they carry nothing (10.587 item 4). */
 static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
@@ -1161,6 +1199,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 
 int main(void)
 {
+	neighbour_reports_are_two_lines_and_no_neighbours();
 	const char *run = testdir_make("hostapd");
 	char        stderr_path[512];
 	int         saved;

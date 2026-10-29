@@ -1302,6 +1302,48 @@ static void access_point_cases(void)
 	    "\tmobility_domain = \"4f2\"\n\twifi { psk = \"@secret:ap\" }\n}\n",
 	    "four hex digits", "and a domain that is not four hex digits");
 
+	/* Neighbour reports (10.595): this machine's own access points of the
+	 * network are found, and a neighbour elsewhere is declared by BSSID and
+	 * channel -- the two things a report has to carry. */
+	document = compiles("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\tneighbour_reports = true\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+	    "\tneighbour \"02:00:00:00:0A:00\" { channel = 6 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n",
+	    "an access point with neighbour reports and declared neighbours compiles");
+	if (document) {
+		const ncfg_access_point_t *point = &document->access_points[0];
+
+		check(point->neighbour_reports && point->neighbour_count == 2u &&
+		    point->neighbours[0].channel.value == 36,
+		    "  carrying both neighbours and their channels");
+		check(point->neighbour_count == 2u &&
+		    strcmp(point->neighbours[1].bssid, "02:00:00:00:0a:00") == 0,
+		    "  each BSSID in the one spelling hostapd prints");
+		ncfg_document_free(document);
+	}
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "set `neighbour_reports = true`",
+	    "a declared neighbour with reports off is refused rather than ignored");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "needs its `channel`",
+	    "  and so is one with no channel");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 200 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "not a 2.4 or 5 GHz channel",
+	    "  and one on a channel no report can name");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+	    "\tneighbour \"02:00:00:00:09:00\" { channel = 40 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "declared twice",
+	    "  and one declared twice");
+	refuses("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\tneighbour_reports = true\n"
+	    "\tneighbour \"next door\" { channel = 36 }\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "named by its BSSID",
+	    "  and one named by something that is not a BSSID");
+
 	refuses("access_point \"Home\" { wifi { psk = \"@secret:ap\" } }\n",
 	    "does not say which radio", "an access point without a device is refused");
 	refuses("access_point \"Home\" { device = \"wlan0\" }\n", "so it would be open",
