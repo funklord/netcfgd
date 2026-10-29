@@ -3647,8 +3647,12 @@ fuzz-rust:
 # below: most machines that build netcfgd are not desktops, and a gate that
 # demanded Qt on a router would be one people delete. CI installs Qt, which is
 # where the skip would otherwise become a vacuous pass.
+#
+# Three of its probes start the C daemon, so that is built first rather than
+# assumed (10.606).
 gui:
 	@if command -v qmake6 >/dev/null 2>&1; then \
+		$(MAKE) --no-print-directory -C c; \
 		$(MAKE) --no-print-directory -C gui; \
 		$(MAKE) --no-print-directory -C gui test; \
 	else \
