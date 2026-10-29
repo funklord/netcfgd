@@ -988,4 +988,17 @@ netcfgd
 # named for showing installed rules rather than only their identity.
 #
 # Recorded at 1265400 rather than left riding the tolerance.
-total 1265400
+#
+# Then the wireless day, 2026-10-29, +38,936 bytes to 1,304,296, measured by
+# building each commit from `git archive` (the firewall's 1,265,360 came back
+# exact, so the method reproduces the entry above): 802.11k neighbour reports
+# +17,000 (project.md 10.595), steering with the access_control fix +8,864,
+# 802.11n +240 (10.596), 40 MHz with steering's silent-station skip +8,296
+# (10.597), 802.11ac and the channel plan +64 (10.598), 160 MHz and the
+# daemon's neighbour lists +24 (10.599), and 802.11ax with the hostapd
+# build probe +4,448 (10.600). Most of it is the neighbour list's observer,
+# planner, executor and ops, and the width rule's two rewrites cost almost
+# nothing because each replaced the last.
+#
+# Recorded at 1304300 rather than left riding the tolerance.
+total 1304300
