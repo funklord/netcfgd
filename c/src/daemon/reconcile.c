@@ -250,7 +250,9 @@ ncfg_plan_t *ncfg_reconcile_restrict(const ncfg_plan_t *plan, const ncfg_documen
 		 */
 		if (ncfg_op_is_host_wide_config(&action->op)) {
 			wanted = host_wide;
-		} else if (action->op.kind == NCFG_OP_STATION_STEER) {
+		} else if (action->op.kind == NCFG_OP_STATION_STEER ||
+		    action->op.kind == NCFG_OP_NEIGHBOUR_ADD ||
+		    action->op.kind == NCFG_OP_NEIGHBOUR_DEL) {
 			/* Not drift: see `ncfg_reconcile_reconciles`. */
 			wanted = 1;
 		} else {

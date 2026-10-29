@@ -12844,6 +12844,14 @@ WPA2 station in a namespace:
   replaced. The access point's own entry is never planned. Nothing is
   planned against a hostapd not yet running with reports on: the restart
   that turns them on comes first, and the list converges on the next pass.
+  **Corrected in 10.599: under the default `on_drift = "report"` there was
+  no next pass**, so a fresh access point's reports stayed empty until
+  somebody ran `ncfg apply` again -- found when the 5 GHz hostapd, slower
+  to come up at 80 MHz, missed the rig's second apply and band steering,
+  which finds its target in the list, moved nobody. The daemon now always
+  sends `neighbour.add` and `neighbour.del`, beside `station.steer`, for
+  steering's reason: the document asks for the lists and filling them
+  undoes nothing anyone did.
 - **Live, `make hull-roam`**: both access points report, roam-b declares
   `02:00:00:00:09:00` on 36. The second apply planned three adds, a third
   plan had nothing to do, and after its FT roam the station's own report

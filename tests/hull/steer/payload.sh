@@ -18,7 +18,8 @@
 # Always exits 0 and reports through /verdict/steer, as the regdom rig's
 # payloads do.
 #
-# HOW IT STOPS: every wait is bounded (the radios at 5 s, the access points at
+# HOW IT STOPS: every wait is bounded (the radios at 5 s, the lists at fifteen
+# applies, the access points at
 # 20 s, the association at 10 s, the settling at 65 s, the move at 20 s), the
 # steps are a fixed list, and the vm takes hostapd and wpa_supplicant with it.
 set -u
@@ -88,9 +89,20 @@ until [ -S "$work/run/hostapd/wlan0" ] && [ -S "$work/run/hostapd/wlan1" ] ||
 	n=$((n + 1))
 done
 say "  run/hostapd: $(ls "$work/run/hostapd" 2>/dev/null | grep -v '\.' | tr '\n' ' ')"
-# The neighbour lists, now there is a hostapd to hold them.
-"$build/ncfg" apply > "$work/apply2.log" 2>&1
-say "a second ncfg apply rc=$?"
+# The neighbour lists, now there is a hostapd to hold them -- **repeated until
+# a plan has none left to add**, bounded at fifteen. An access point's own
+# entry exists only once its hostapd is up, and the 5 GHz one at 80 MHz
+# (10.598) takes longer than the socket appearing: one run planned nothing
+# here and the lists came a minute late, which the steering read as broken.
+n=0
+while [ "$n" -lt 15 ]; do
+	"$build/ncfg" apply > "$work/apply2.log" 2>&1
+	"$build/ncfg" plan > "$work/plan-lists.log" 2>&1
+	grep -q 'neighbour\.add' "$work/plan-lists.log" || break
+	sleep 1
+	n=$((n + 1))
+done
+say "the neighbour lists converged after $((n + 1)) apply(s)"
 
 b0=$(cat /sys/class/net/wlan0/address)
 b1=$(cat /sys/class/net/wlan1/address)

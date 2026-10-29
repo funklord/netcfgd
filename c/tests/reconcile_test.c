@@ -554,15 +554,26 @@ static void a_restricted_plan_keeps_only_what_it_may_act_on(void)
 		reason.desired = "-75 dBm or better";
 		reason.observed = "-85 dBm";
 		if (steering) {
+			ncfg_op_t neighbour;
+
 			(void)add_mtu(steering, "eth1", NULL, 0u);
 			(void)ncfg_plan_add(steering, &op, &reason, NULL, 0u, NULL);
+			memset(&neighbour, 0, sizeof(neighbour));
+			neighbour.kind = NCFG_OP_NEIGHBOUR_ADD;
+			neighbour.u.neighbour.iface = "eth1";
+			neighbour.u.neighbour.bssid = "02:00:00:00:01:00";
+			neighbour.u.neighbour.ssid = "686f6d65";
+			neighbour.u.neighbour.nr = "0200000001008f000000510b06";
+			(void)ncfg_plan_add(steering, &neighbour, &reason, NULL, 0u, NULL);
 		}
 		err[0] = '\0';
 		kept = steering ? ncfg_reconcile_restrict(steering, document, NULL, 0, NULL, err,
 		    sizeof(err)) : NULL;
-		check(kept && kept->action_count == 1u &&
-		    kept->actions[0].op.kind == NCFG_OP_STATION_STEER,
-		    "a steer is sent on an interface whose drift is only reported, and nothing else is");
+		check(kept && kept->action_count == 2u &&
+		    kept->actions[0].op.kind == NCFG_OP_STATION_STEER &&
+		    kept->actions[1].op.kind == NCFG_OP_NEIGHBOUR_ADD,
+		    "a steer and a neighbour are sent on an interface whose drift is only reported, "
+		    "and nothing else is");
 		ncfg_plan_free(kept);
 		ncfg_plan_free(steering);
 	}

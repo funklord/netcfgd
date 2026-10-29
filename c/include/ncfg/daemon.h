@@ -2498,6 +2498,12 @@ int ncfg_reconcile_host_wide(const ncfg_document_t *document);
  * behaviour, it puts back nothing somebody changed by hand, and dropping it
  * under the default `report` would make steering a block that does nothing
  * until a second setting nobody would think to look for.
+ *
+ * **And `neighbour.add` and `neighbour.del`**, for the same reason, found
+ * live (10.599): an access point's own entry exists only once its hostapd
+ * is up, so the lists are planned on the pass after the start -- and under
+ * `report` there was no such pass. A fresh access point's reports stayed
+ * empty, and band steering, which finds its target there, with them.
  */
 int ncfg_reconcile_reconciles(const ncfg_document_t *document, const ncfg_sims_t *sims,
     const char *interface);
