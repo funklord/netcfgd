@@ -1,26 +1,73 @@
 # netcfgd
 
-A Linux network configuration daemon whose plain-text config is the single
-source of truth, whose runtime state is greppable files in `/run`, and whose
-behaviour is a visible reconcile loop: `ncfg plan` shows what would change,
-`ncfg apply` makes it so. Terraform for interfaces, roughly.
+A Linux machine's network is configured by half a dozen programs at once: the
+kernel holds the addresses and routes, a DHCP client fetches a lease, a
+supplicant handles the wifi passphrase, something writes `/etc/resolv.conf`,
+and a VPN or a modem brings its own helper. Each has a configuration of its
+own, and the managers that tie them together keep a database of their own as
+well, so the answer to "what is this machine meant to be doing on the network"
+is spread across several files and some runtime state nobody wrote. Changing
+it on a machine you reach over that same network is the classic way to lock
+yourself out of it.
 
-You describe the network you want in `/etc/netcfgd/`. netcfgd compares that
-with the network you have and tells you the difference before it changes
-anything. Applying an already-correct state produces zero actions, runs zero
-hooks and touches nothing.
+netcfgd keeps the whole network in plain-text files under `/etc/netcfgd/`,
+in one small language, and treats them as the only authority. A daemon
+compares what the files ask for with what the kernel and the helpers actually
+hold, works out the difference as a list of actions, and carries out only
+that list -- `ncfg plan` prints it, with the reason for each action, before
+anything changes, and `ncfg apply` performs it. A machine that already matches
+its configuration is left exactly as it is. Everything it observes and does
+is written as plain files under `/run/netcfgd/`, so what it believes about the
+machine can be read with `cat` and `grep`.
 
-Three properties, in the order they matter:
+The programs that do this job today are **NetworkManager**, the desktop
+default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
+**netifrc** on Debian and Gentoo; **netifd** on OpenWrt; and **ConnMan** and
+**iwd** on embedded and wifi-only systems. What netcfgd does that they do not:
 
-- **Config files are the only authority.** Everything netcfgd does traces to a
-  file under `/etc/netcfgd/`. Nothing edits your configuration behind you, so
-  the file you wrote is the file that is running.
-- **It is not a black box.** `ncfg plan` prints the actions it would take and
-  why each one exists, down to which desired field differs from which observed
-  field. `ncfg explain` answers where a given address or route came from.
-- **The core has no mandatory dependencies** beyond libc and the kernel. No
-  D-Bus, no glib, no polkit, no systemd. Adapters that need those carry them
-  in their own packages.
+- **It shows the change before making it.** `ncfg plan` lists every action in
+  order -- add this address, start that client, deny this station -- each
+  with the configured value and the observed one that differ. `ncfg explain`
+  answers where a given address, route or policy came from. The others apply
+  a configuration and report the result; the nearest is netplan 1.0's `netplan
+  status --diff`, which shows where the system differs from its files but not
+  what applying them would do about it.
+- **A change can undo itself.** `ncfg apply --confirm-within 60` reverts on
+  its own unless `ncfg confirm` arrives, and `global { confirm = 60 }` puts the
+  same safety net under the changes the daemon applies by itself when it sees
+  an edited file -- so a mistake made over ssh comes back. netplan's `netplan
+  try` offers a timed revert for one command; here it is a property of the
+  machine.
+- **It removes only what it created.** netcfgd records what it installed and
+  leaves everything else alone, so an address added by hand or a route another
+  program owns is not its to delete. systemd-networkd removes routes it did not
+  configure unless told not to.
+- **It needs nothing but libc and the kernel.** No D-Bus, no glib, no polkit,
+  no systemd: the daemon and its command line are one binary of about 1.2 MB,
+  speaking netlink directly, and it ships service files for systemd, OpenRC,
+  sysvinit and OpenWrt's procd. NetworkManager and ConnMan need D-Bus;
+  systemd-networkd needs systemd.
+- **One language covers the whole network.** Wired links and 802.1X, wifi as a
+  station and as an access point -- with fast roaming between access points,
+  802.11s mesh, four-address repeaters, and station allow and deny lists that
+  can name shared host lists and manufacturer prefixes -- WireGuard, OpenVPN,
+  PPPoE, IP tunnels, bridges, bonds and VLANs, LTE modems with SIM fallback,
+  Bluetooth networking, scoped DNS, routing rules, NAT and traffic shaping.
+  systemd-networkd configures no wireless authentication at all and leaves it
+  to a separate supplicant with a configuration of its own.
+- **It chooses an uplink by asking, not by carrier.** A cable plugged into a
+  switch that has lost its own uplink has carrier and goes nowhere; a probe
+  script per interface decides whether a link is usable, and a failing one
+  withholds that link's routes as an unplugged cable would, so the working
+  wifi takes over.
+- **Secrets never sit in the configuration.** A passphrase is a reference,
+  resolved from a file, the kernel keyring, `pass` or a program you name, and
+  it stays out of `/run` and off any wire.
+- **The desktop keeps working.** A NetworkManager shim lets `nmcli`,
+  `nm-applet` and `plasma-nm` talk to netcfgd, beside its own command line,
+  full-screen text interface, and Qt window with a tray icon that joins saved
+  networks and reports whether the machine is actually routed rather than
+  merely associated.
 
 **Maturity:** substantially built, not yet proven, no release, interfaces not
 frozen. What has and has not met real hardware is tracked in
@@ -58,8 +105,9 @@ netcfgd speaks netlink directly — there is no `ip` invocation anywhere.
 | open, OWE | `open = true`, or opportunistic wireless encryption |
 | enterprise (802.1X) | PEAP, TTLS, TLS and PWD, with identity, anonymous identity, CA and client certificates, and a phase-2 method |
 | hidden networks | `hidden = true` |
-| several saved networks | each its own `network` block; the supplicant picks which to join, `priority` biases it |
-| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a MAC allow/deny list — at 802.11a/g rates, since nothing writes `ieee80211n` yet |
+| several saved networks | each its own `network` block; the supplicant picks which to join, and `metric` ranks them -- lower wins |
+| access point | run one with `hostapd`: SSID, channel, band, regulatory domain, hidden, and a station allow or deny list -- exact addresses, shared `host_list`s, and on a deny list manufacturer (OUI) prefixes, which netcfgd expands into the stations it sees because hostapd cannot hold one. Fast roaming between access points (802.11r, by FT-PSK or FT-SAE), and four-address stations for a repeater. At 802.11a/g rates, since nothing writes `ieee80211n` yet |
+| mesh and repeater | an 802.11s `mesh` a radio joins, and a station radio in four-address mode behind a bridge |
 | scanning | `ncfg wifi scan` lists what is in range, with signal and security |
 | joining and leaving | `ncfg wifi connect ID` and `ncfg wifi disconnect`, keeping the configuration either way |
 | which radio netcfgd manages | `ncfg wifi activate`/`deactivate`, over the control socket the GUI and the tray use. A kill switch is a different thing: its state is observed and streamed as events, and netcfgd never sets it — a blocked radio is reported, with the remedy, and left blocked |
