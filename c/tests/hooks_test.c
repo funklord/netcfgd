@@ -40,6 +40,9 @@
 #include "ncfg/document.h"
 #include "ncfg/hooks.h"
 #include "ncfg/lower.h"
+/* Directly, because the published vectors below are this file's and the
+ * digest has been base's own module since it moved down from host. */
+#include "ncfg/sha256.h"
 #include "ncfg/value.h"
 
 #include "testdir.h"
