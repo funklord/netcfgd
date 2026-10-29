@@ -2015,7 +2015,9 @@ static const ncfg_field_t access_point_fields[] = {
 	{ .name = "fast_roaming", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
 	    .offset = offsetof(ncfg_access_point_t, fast_roaming) },
 	{ .name = "mobility_domain", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_access_point_t, mobility_domain) }
+	    .offset = offsetof(ncfg_access_point_t, mobility_domain) },
+	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_access_point_t, wds) }
 };
 static const ncfg_type_t access_point_type = TYPE("access point", access_point_fields);
 

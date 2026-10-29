@@ -984,6 +984,9 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 	if (point->fast_roaming) {
 		ncfg_buf_add_text(&body, "\tfast_roaming = true\n");
 	}
+	if (point->wds) {
+		ncfg_buf_add_text(&body, "\twds = true\n");
+	}
 	/* Only a stated one: the derived domain is the absence of this line, and
 	 * writing it out would pin a profile to an SSID it may be saved away from. */
 	if (point->mobility_domain) {

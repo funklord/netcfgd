@@ -804,6 +804,8 @@ static void an_access_point_round_trips(void)
 	    "\twifi { psk = \"@secret:ap\" }\n"
 	    "}\n",
 	    "fast roaming and its mobility domain survive a round trip");
+	round_trips("access_point \"rep\" {\n\tdevice = \"wlan0\"\n\twds = true\n"
+	    "\twifi { psk = \"@secret:ap\" }\n}\n", "an access point taking repeaters round-trips");
 	plain = rendering_of("access_point \"roam\" {\n"
 	    "\tdevice = \"wlan0\"\n\tfast_roaming = true\n\twifi { psk = \"@secret:ap\" }\n}\n");
 	check(plain && strstr(plain, "fast_roaming = true") != NULL &&

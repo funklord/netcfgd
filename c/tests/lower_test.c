@@ -1166,7 +1166,7 @@ static void the_compiler_and_the_renderer_agree_about_bands(void)
 		point.channel.has = 1;
 		point.channel.value = table[at].channel;
 		message[0] = '\0';
-		rendered_ok = ncfg_hostapd_config(&point, "/run/netcfgd/hostapd", NULL, &lines, NULL,
+		rendered_ok = ncfg_hostapd_config(&point, NULL, "/run/netcfgd/hostapd", NULL, &lines, NULL,
 		    message, sizeof(message));
 
 		(void)snprintf(what, sizeof(what), "  band %s channel %d %s",

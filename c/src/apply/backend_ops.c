@@ -312,6 +312,7 @@ static int start_access_point(const ncfg_service_t *service, const char *run_dir
     const char *iface, char *err, size_t err_size)
 {
 	const ncfg_access_point_t *access_point = access_point_on(service->document, iface);
+	const ncfg_device_t       *device;
 
 	if (!access_point) {
 		ncfg_error_set(err, err_size,
@@ -332,8 +333,11 @@ static int start_access_point(const ncfg_service_t *service, const char *run_dir
 		 * project is arranged against. */
 		return 1;
 	}
-	return ncfg_hostapd_start(run_dir, access_point, service->secrets,
-	    service->hostapd_program, err, err_size);
+	/* The radio's bridge, which hostapd is told where the access point takes
+	 * four-address stations. */
+	device = ncfg_document_device(service->document, iface);
+	return ncfg_hostapd_start(run_dir, access_point, device ? device->master : NULL,
+	    service->secrets, service->hostapd_program, err, err_size);
 }
 
 static int start_advertising(const ncfg_service_t *service, const char *run_dir,

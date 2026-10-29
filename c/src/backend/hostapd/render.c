@@ -338,9 +338,9 @@ static int roaming_lines(ncfg_hostapd_lines_t *lines, const ncfg_access_point_t 
 	    add_line(lines, "bss_transition", "1", 0);
 }
 
-int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctrl_dir,
-    const char *passphrase, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why, char *err,
-    size_t err_size)
+int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bridge,
+    const char *ctrl_dir, const char *passphrase, ncfg_hostapd_lines_t *out,
+    ncfg_hostapd_unsupported_t *why, char *err, size_t err_size)
 {
 	static const char hex[] = "0123456789abcdef";
 	const char       *band = BAND_24;
@@ -492,6 +492,15 @@ int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctr
 		    "document has no field for one -- an `eap` block on an `access_point` describes "
 		    "a client's credentials, which is the wrong end of the exchange. Use `psk` or "
 		    "`owe` here");
+	}
+	/* Four-address stations, each given an interface hostapd puts in the
+	 * radio's bridge -- without `wds_bridge` it joins none and nothing
+	 * crosses, which a vm measured before this was written. */
+	if (access_point->wds && (!add_line(out, "wds_sta", "1", 0) ||
+	    (bridge && !add_line(out, "wds_bridge", bridge, 0)))) {
+		ncfg_hostapd_lines_free(out);
+		ncfg_error_set(err, err_size, "out of memory rendering four-address stations");
+		return 0;
 	}
 	if (access_point->fast_roaming && !roaming_lines(out, access_point)) {
 		ncfg_hostapd_lines_free(out);

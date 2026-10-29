@@ -128,8 +128,8 @@ int ncfg_hostapd_write_acl(const char *run, const ncfg_access_point_t *access_po
 }
 
 int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access_point,
-    const ncfg_secret_resolver_t *resolver, char *path_out, size_t path_size, char *err,
-    size_t err_size)
+    const char *bridge, const ncfg_secret_resolver_t *resolver, char *path_out, size_t path_size,
+    char *err, size_t err_size)
 {
 	char                 dir[NCFG_HOSTAPD_PATH_MAX];
 	char                 path[NCFG_HOSTAPD_PATH_MAX];
@@ -168,7 +168,7 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 	}
 
 	said[0] = '\0';
-	ok = ncfg_hostapd_config(access_point, dir, passphrase ? ncfg_secret_expose(passphrase)
+	ok = ncfg_hostapd_config(access_point, bridge, dir, passphrase ? ncfg_secret_expose(passphrase)
 	                              : NULL,
 	    &lines, NULL, said, sizeof(said));
 	if (!ok) {
@@ -262,7 +262,8 @@ size_t ncfg_hostapd_start_args(const char *program, const char *pid_path, const 
 }
 
 int ncfg_hostapd_start(const char *run, const ncfg_access_point_t *access_point,
-    const ncfg_secret_resolver_t *resolver, const char *program, char *err, size_t err_size)
+    const char *bridge, const ncfg_secret_resolver_t *resolver, const char *program, char *err,
+    size_t err_size)
 {
 	char        config[NCFG_HOSTAPD_PATH_MAX];
 	char        pid[NCFG_HOSTAPD_PATH_MAX];
@@ -277,7 +278,7 @@ int ncfg_hostapd_start(const char *run, const ncfg_access_point_t *access_point,
 		ncfg_error_set(err, err_size, "an access point was started with no access point");
 		return 0;
 	}
-	if (!ncfg_hostapd_write_config(run, access_point, resolver, config, sizeof(config), err,
+	if (!ncfg_hostapd_write_config(run, access_point, bridge, resolver, config, sizeof(config), err,
 	    err_size)) {
 		return 0;
 	}

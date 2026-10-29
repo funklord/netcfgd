@@ -285,6 +285,30 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 {
 	size_t i;
 
+	/*
+	 * **A repeater has nothing to join without a bridge.** hostapd gives each
+	 * four-address station an interface of its own and puts it in the bridge
+	 * the radio is in; a radio in none leaves those interfaces in nothing,
+	 * which was measured as a repeater that associates and carries no frame.
+	 */
+	for (i = 0; i < builder->desired->access_point_count; i++) {
+		const ncfg_access_point_t *point = &builder->desired->access_points[i];
+		const ncfg_device_t       *device;
+
+		if (!point->wds || !point->device) {
+			continue;
+		}
+		device = ncfg_plan_device(builder->desired, point->device);
+		if (device && device->master) {
+			continue;
+		}
+		ncfg_plan_warnf(builder->plan, point->device,
+		    "access point `%s` takes four-address stations (`wds = true`) and `%s` is in "
+		    "no bridge, so the interface hostapd makes for each one joins nothing and a "
+		    "repeater associates and carries nothing. Put `%s` in the LAN's bridge",
+		    point->id, point->device, point->device);
+	}
+
 	for (i = 0; i < builder->desired->access_point_count; i++) {
 		const ncfg_access_point_t *point = &builder->desired->access_points[i];
 
@@ -512,6 +536,12 @@ int ncfg_plan_access_point_restart_identity(ncfg_builder_t *builder,
 		(void)snprintf(desired, sizeof(desired), "%s", domain);
 		(void)snprintf(observed, sizeof(observed), "%s",
 		    started->mobility_domain ? started->mobility_domain : "<absent>");
+	} else if ((started->wds != 0) != (point->wds != 0)) {
+		/* hostapd reads `wds_sta` once, so a repeater turned on or off is a
+		 * restart; absent in the file is "off", as `hidden`'s is. */
+		field = "access_point.wds";
+		(void)snprintf(desired, sizeof(desired), "%s", point->wds ? "true" : "false");
+		(void)snprintf(observed, sizeof(observed), "%s", started->wds ? "true" : "false");
 	} else if ((started->hidden != 0) != (point->hidden != 0)) {
 		/* `ignore_broadcast_ssid` is written only when asked, so its absence
 		 * is "not hidden" rather than "not known" and needs no guard. */

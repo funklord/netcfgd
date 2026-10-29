@@ -12780,10 +12780,20 @@ met by this gate later.
    declared in the configuration until fleet management can say them.
 3. **Mesh (802.11s)**: a `mesh` block joined through `wpa_supplicant`
    (`mode=5`, SAE), as wireless backhaul -- built and joined (10.588).
-4. **Repeater.** Four-address (WDS) station mode, so a bridged repeater works
-   where `plan/radio.c` warns today that it cannot; Multi-AP backhaul
-   (`multi_ap`) beside it; a routed relay (station and access point on one
-   radio) is possible with what netcfgd already has, NAT included.
+4. **Repeater.** Four-address (WDS) mode at both ends, `wds = true` (OpenWrt's
+   spelling for both). **Measured in a vm first**: without four-address mode
+   the kernel will not put a station in a bridge at all and nothing crosses;
+   with `4addr on` on the station and hostapd's `wds_sta=1` and `wds_bridge`,
+   hostapd makes an interface per station (`wlan0.sta1`) in the bridge and an
+   echo crosses -- and **without `wds_bridge` that interface joins no bridge
+   and nothing crosses**, so the renderer is told the radio's bridge (its
+   device's `master`). **The access point side is built** (2026-10-29):
+   `wds = true` on an `access_point` renders both lines, a change restarts it,
+   and a radio in no bridge is warned about. **The station side is not yet**:
+   `device { wifi { wds = true } }` setting `4addr` over nl80211 with the link
+   down, the supplicant started with `-b <bridge>`, and `plan/radio.c`'s
+   bridging warning lifted for it. Multi-AP backhaul (`multi_ap`) and a routed
+   relay are the alternatives beside it.
 5. **Steering**: band steering and a minimum-signal kick are policy loops over
    802.11v transition requests, and want the neighbour reports first.
 

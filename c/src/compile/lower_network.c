@@ -1009,6 +1009,10 @@ int ncfg_lower_access_point(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *me
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
 					access_point.hidden = flag;
 				}
+			} else if (strcmp(key, "wds") == 0) {
+				if (ncfg_as_bool(ctx, assignment->value, &flag)) {
+					access_point.wds = flag;
+				}
 			} else if (strcmp(key, "fast_roaming") == 0) {
 				roaming_span = assignment->span;
 				if (ncfg_as_bool(ctx, assignment->value, &flag)) {

@@ -5329,7 +5329,8 @@
       },
       "hidden": false,
       "fast_roaming": true,
-      "mobility_domain": "4f2a"
+      "mobility_domain": "4f2a",
+      "wds": true
     }
   ],
   "linksets": [

@@ -399,6 +399,8 @@ static const struct {
 	 * access point of it has to agree, which is why both travel. */
 	{ NCFG_BLOCK_ACCESS_POINT, "fast_roaming", 0x0004000cu },
 	{ NCFG_BLOCK_ACCESS_POINT, "mobility_domain", 0x0004000du },
+	/* Whether the network takes repeaters: the estate's, as the network is. */
+	{ NCFG_BLOCK_ACCESS_POINT, "wds", 0x0004000eu },
 
 	/* mesh -- what every node of it has to agree on to peer at all. */
 	{ NCFG_BLOCK_MESH, "channel", 0x00070001u },

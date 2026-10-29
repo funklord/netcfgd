@@ -830,6 +830,21 @@
 #	}
 #}
 
+# A REPEATER BEHIND AN ACCESS POINT. `wds = true` lets four-address (WDS)
+# stations join, which is what a repeater bridging a second LAN through this
+# network uses: hostapd gives each one an interface of its own and puts it in
+# the bridge this radio is in, so the radio has to be in one -- `ncfg plan`
+# warns when it is not, because the repeater would associate and carry
+# nothing.
+
+#access_point "Home" {
+#	device = "wlan0"
+#	wds    = true
+#	wifi {
+#		psk = "@secret:ap"
+#	}
+#}
+
 # A MESH (802.11s): radios that link to each other with no access point and
 # no cable -- the backhaul between two rooms. Every node is configured the same
 # way and peers with any other that is; there is no master.

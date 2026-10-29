@@ -698,7 +698,8 @@
         "key_mgmt": "WPA-PSK FT-PSK SAE",
         "hidden": true,
         "regdom": "SE",
-        "mobility_domain": "4f2a"
+        "mobility_domain": "4f2a",
+        "wds": true
       },
       "secret_matches": true
     }

@@ -1562,6 +1562,15 @@ typedef struct {
 	 * (`ncfg_access_point_mobility_domain`). Stated only to join access
 	 * points that netcfgd does not run. */
 	char                  *mobility_domain;
+	/*
+	 * Accept four-address (WDS) stations, which is what lets a repeater
+	 * bridge through this access point: hostapd gives each such station an
+	 * interface of its own and puts it in the bridge this radio is in, so a
+	 * bridged frame from behind the station reaches the LAN with its own
+	 * address (10.587 item 4). Needs the radio in a bridge, which the planner
+	 * says when it is not.
+	 */
+	int                    wds;
 } ncfg_access_point_t;
 
 /*

@@ -150,9 +150,13 @@ const char *ncfg_hostapd_value_of(const ncfg_hostapd_lines_t *lines, const char 
  * 0 with the code in `*why` (which may be NULL) and a sentence in `err`. The
  * sentence never carries the passphrase -- a length is said, a value is not.
  */
-int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *ctrl_dir,
-    const char *passphrase, ncfg_hostapd_lines_t *out, ncfg_hostapd_unsupported_t *why, char *err,
-    size_t err_size);
+/* `bridge` is the bridge the access point's radio is in, or NULL: hostapd is
+ * told it as `wds_bridge` where the access point takes four-address stations,
+ * since the interface it makes for each one joins nothing otherwise --
+ * measured (10.587 item 4). */
+int ncfg_hostapd_config(const ncfg_access_point_t *access_point, const char *bridge,
+    const char *ctrl_dir, const char *passphrase, ncfg_hostapd_lines_t *out,
+    ncfg_hostapd_unsupported_t *why, char *err, size_t err_size);
 
 /* The file, with secrets in it. **Never log this.** */
 char *ncfg_hostapd_to_file(const char *id, const ncfg_hostapd_lines_t *lines, char *err,
@@ -274,8 +278,8 @@ pid_t ncfg_hostapd_running_pid(const char *run, const char *device);
  * the list unenforced.
  */
 int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access_point,
-    const ncfg_secret_resolver_t *resolver, char *path_out, size_t path_size, char *err,
-    size_t err_size);
+    const char *bridge, const ncfg_secret_resolver_t *resolver, char *path_out, size_t path_size,
+    char *err, size_t err_size);
 
 /*
  * Write the station list, or remove it when the document asks for none.
@@ -352,7 +356,8 @@ size_t ncfg_hostapd_start_args(const char *program, const char *pid_path, const 
  * and the *tail* of a failed start is neither of them.
  */
 int ncfg_hostapd_start(const char *run, const ncfg_access_point_t *access_point,
-    const ncfg_secret_resolver_t *resolver, const char *program, char *err, size_t err_size);
+    const char *bridge, const ncfg_secret_resolver_t *resolver, const char *program, char *err,
+    size_t err_size);
 
 /* Find `hostapd`, `/usr/sbin` first. Allocated, or NULL. */
 char *ncfg_hostapd_binary(void);

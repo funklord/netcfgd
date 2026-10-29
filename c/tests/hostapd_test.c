@@ -139,7 +139,7 @@ static int rendered(const ncfg_access_point_t *point, const char *passphrase,
 	int  ok;
 
 	message[0] = '\0';
-	ok = ncfg_hostapd_config(point, "/run/netcfgd/hostapd", passphrase, out, NULL, message,
+	ok = ncfg_hostapd_config(point, NULL, "/run/netcfgd/hostapd", passphrase, out, NULL, message,
 	    sizeof(message));
 	if (!ok) {
 		printf("  this access point was expected to render: %s\n", kept(message));
@@ -157,7 +157,7 @@ static int refused(const ncfg_access_point_t *point, const char *passphrase,
 	int                        ok;
 
 	message[0] = '\0';
-	ok = ncfg_hostapd_config(point, "/run", passphrase, &lines, &why, message,
+	ok = ncfg_hostapd_config(point, NULL, "/run", passphrase, &lines, &why, message,
 	    sizeof(message));
 	if (ok) {
 		ncfg_hostapd_lines_free(&lines);
@@ -357,6 +357,41 @@ static void fast_roaming_is_ft_psk_derived_where_it_runs(void)
 		    "without it, no 802.11r or 802.11v line is written");
 		check_text(ncfg_hostapd_value_of(&lines, "wpa_key_mgmt"), "WPA-PSK",
 		    "  and the key management is what it was");
+		ncfg_hostapd_lines_free(&lines);
+	}
+}
+
+/* Four-address stations, and the bridge their interfaces join -- without it
+ * hostapd makes them and they carry nothing (10.587 item 4). */
+static void a_repeater_s_interface_joins_the_radio_s_bridge(void)
+{
+	ncfg_access_point_t  point = point_of(NCFG_SECURITY_PSK, NCFG_PSK_PROTO_WPA2);
+	ncfg_hostapd_lines_t lines;
+	char                 message[NCFG_ERROR_MAX];
+
+	point.wds = 1;
+	if (ncfg_hostapd_config(&point, "br0", "/run", "correcthorse", &lines, NULL, message,
+	    sizeof(message))) {
+		check_text(ncfg_hostapd_value_of(&lines, "wds_sta"), "1",
+		    "an access point taking repeaters takes four-address stations");
+		check_text(ncfg_hostapd_value_of(&lines, "wds_bridge"), "br0",
+		    "  and puts each one's interface in the radio's bridge");
+		ncfg_hostapd_lines_free(&lines);
+	} else {
+		check(0, "an access point taking repeaters renders");
+	}
+	if (rendered(&point, "correcthorse", &lines)) {
+		check(ncfg_hostapd_value_of(&lines, "wds_sta") != NULL &&
+		        ncfg_hostapd_value_of(&lines, "wds_bridge") == NULL,
+		    "  with no bridge to name, none is invented -- the planner says so instead");
+		ncfg_hostapd_lines_free(&lines);
+	}
+	point.wds = 0;
+	if (ncfg_hostapd_config(&point, "br0", "/run", "correcthorse", &lines, NULL, message,
+	    sizeof(message))) {
+		check(ncfg_hostapd_value_of(&lines, "wds_sta") == NULL &&
+		        ncfg_hostapd_value_of(&lines, "wds_bridge") == NULL,
+		    "and one that does not take them writes neither, bridged or not");
 		ncfg_hostapd_lines_free(&lines);
 	}
 }
@@ -801,7 +836,7 @@ static void a_rewritten_configuration_is_still_only_readable_by_root(const char 
 	    "a secret of this test's own, never the machine's");
 
 	message[0] = '\0';
-	check(ncfg_hostapd_write_config(run, &point, &resolver, path, sizeof(path), message,
+	check(ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
 	      sizeof(message)),
 	    "the first write");
 	if (message[0] != '\0') {
@@ -814,7 +849,7 @@ static void a_rewritten_configuration_is_still_only_readable_by_root(const char 
 	 * broken: `open`'s mode applies only when the call creates the file. */
 	check(chmod(path, 0644) == 0, "and something widens it");
 	message[0] = '\0';
-	check(ncfg_hostapd_write_config(run, &point, &resolver, path, sizeof(path), message,
+	check(ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
 	      sizeof(message)),
 	    "the second write");
 	check(testdir_mode(path) == 0600, "narrows it again, which is the defect this exists for");
@@ -954,7 +989,7 @@ static void a_daemon_that_will_not_start_is_quoted(const char *run)
 	    "the stand-in daemon is written and executable");
 
 	message[0] = '\0';
-	check(!ncfg_hostapd_start(run, &point, &resolver, fake, message, sizeof(message)),
+	check(!ncfg_hostapd_start(run, &point, NULL, &resolver, fake, message, sizeof(message)),
 	    "a daemon that refuses the configuration fails the start");
 	(void)kept(message);
 	check(strstr(message, "Line 6: unknown configuration item") != NULL,
@@ -989,7 +1024,7 @@ static void the_credential_reaches_no_diagnostic(const char *run, const char *st
 	(void)testdir_in(run, "guest", secret, sizeof(secret));
 
 	message[0] = '\0';
-	check(ncfg_hostapd_write_config(run, &point, &resolver, path, sizeof(path), message,
+	check(ncfg_hostapd_write_config(run, &point, NULL, &resolver, path, sizeof(path), message,
 	      sizeof(message)),
 	    "the sweep's configuration is written");
 	if (message[0] != '\0') {
@@ -1060,6 +1095,7 @@ int main(void)
 	only_the_arms_that_write_wpa_passphrase_are_length_checked();
 	owe_needs_no_secret();
 	fast_roaming_is_ft_psk_derived_where_it_runs();
+	a_repeater_s_interface_joins_the_radio_s_bridge();
 	an_ssid_that_is_not_text_survives_as_hex();
 	the_band_follows_the_channel_when_nothing_says_otherwise();
 	no_channel_asks_hostapd_to_choose();

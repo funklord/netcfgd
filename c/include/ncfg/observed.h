@@ -1014,6 +1014,8 @@ typedef struct {
 	 * roaming. A changed domain splits it from the rest of its network, which
 	 * nothing else here would notice: the key management stays FT-PSK. */
 	char         *mobility_domain;
+	/* Whether it takes four-address stations (`wds_sta`). */
+	int           wds;
 } ncfg_observed_access_point_t;
 
 /* Release one. See `ncfg_observed_access_control_free`. NULL is nothing. */

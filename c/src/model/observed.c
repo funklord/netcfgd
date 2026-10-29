@@ -1078,7 +1078,9 @@ static const ncfg_field_t observed_access_point_fields[] = {
 	{ .name = "regdom", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_access_point_t, regdom) },
 	{ .name = "mobility_domain", .kind = NCFG_F_STR,
-	    .offset = offsetof(ncfg_observed_access_point_t, mobility_domain) }
+	    .offset = offsetof(ncfg_observed_access_point_t, mobility_domain) },
+	{ .name = "wds", .kind = NCFG_F_BOOL, .flags = NCFG_FF_OMIT_FALSE,
+	    .offset = offsetof(ncfg_observed_access_point_t, wds) }
 };
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);
