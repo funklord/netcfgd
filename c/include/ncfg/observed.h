@@ -1329,6 +1329,11 @@ typedef struct {
 	 * point 802.11ax -- the line would stop a hostapd without it starting.
 	 */
 	ncfg_optbool_t hostapd_has_he;
+	/* And the optional keywords netcfgd writes that it was built without
+	 * (`ncfg_hostapd_optional_keys`), answered where `hostapd_has_he` is:
+	 * each one a file this hostapd would refuse. */
+	char         **hostapd_lacks;
+	size_t         hostapd_lacks_count;
 	/*
 	 * Who set `regdom`: `kernel`, `user`, `driver` or `access_point`
 	 * (`ncfg_regdom_setter_name`). NULL where nobody is known to have.
@@ -1655,6 +1660,14 @@ int ncfg_observed_write_canonical(ncfg_observed_t *observed, ncfg_buf_t *buf, ch
 /* ------------------------------------------------------------------------ *
  * The questions the planner asks an observation
  * ------------------------------------------------------------------------ */
+
+/*
+ * Whether this machine's hostapd was found without `key`, one of
+ * `ncfg_hostapd_optional_keys` (10.600). 0 where it has it, and where nobody
+ * asked: "not known" is not a reason to withhold what every build but a few
+ * carries.
+ */
+int ncfg_observed_hostapd_lacks(const ncfg_observed_t *observed, const char *key);
 
 /* The link of this name, if the kernel has one. NULL otherwise. */
 const ncfg_observed_link_t *ncfg_observed_link(const ncfg_observed_t *observed,

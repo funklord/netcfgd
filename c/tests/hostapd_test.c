@@ -1254,6 +1254,15 @@ static void the_hostapd_build_is_asked_for_802_11ax(const char *run)
 	(void)snprintf(path, sizeof(path), "%s/hostapd-absent", run);
 	check(ncfg_hostapd_program_has_he(path) == -1,
 	    "a hostapd that is not there is not known, rather than a no");
+	{
+		unsigned present = 0;
+
+		(void)snprintf(path, sizeof(path), "%s/hostapd-minimal", run);
+		check(testdir_write(path, "\177ELF.wpa_passphrase.vht_oper_chwidth.rrm_neighbor_report.",
+		    57u) && ncfg_hostapd_program_keys(path, &present) == 1 &&
+		    present == ((1u << NCFG_HOSTAPD_KEY_VHT) | (1u << NCFG_HOSTAPD_KEY_RRM)),
+		    "a minimal hostapd is read for exactly the optional keywords it carries");
+	}
 }
 
 /* ------------------------------------------------------------- the files */

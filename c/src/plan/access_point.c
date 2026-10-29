@@ -308,8 +308,11 @@ static void radio_plan(const ncfg_builder_t *builder, const ncfg_access_point_t 
 			widths.forty_mhz_24 |= strcmp(link->forty_mhz[at], "2.4") == 0;
 			widths.forty_mhz_5 |= strcmp(link->forty_mhz[at], "5") == 0;
 		}
-		widths.vht_5 = link->very_high_throughput;
-		widths.vht160_5 = link->hundred_sixty_mhz;
+		/* 802.11ac where the radio has it, unless this machine's hostapd was
+		 * found built without it -- the line would stop it starting. */
+		widths.vht_5 = link->very_high_throughput &&
+		    !ncfg_observed_hostapd_lacks(builder->observed, "vht_oper_chwidth");
+		widths.vht160_5 = widths.vht_5 && link->hundred_sixty_mhz;
 		/* 802.11ax only where the hostapd that runs it has it, or the line
 		 * stops it starting (10.600). */
 		if (builder->observed->hostapd_has_he.has && builder->observed->hostapd_has_he.value) {
@@ -363,6 +366,67 @@ static void warn_width(ncfg_builder_t *builder, const ncfg_access_point_t *point
 	ncfg_plan_warnf(builder->plan, point->device,
 	    "access point `%s` asks for `width = %lld` and runs at %d MHz: %s", point->id,
 	    (long long)point->width.value, plan.width, why);
+}
+
+/*
+ * A feature the document asks of an access point that this machine's hostapd
+ * was built without (10.600). hostapd does not skip a line it cannot parse:
+ * it refuses the whole file and does not start, so the access point would be
+ * stopped by the restart and never come back. A keyword missing from the
+ * binary is certain -- the parser matches keys as strings -- so this is said
+ * whenever it is so, and the plan goes on: what to do is the operator's.
+ */
+static void warn_hostapd_build(ncfg_builder_t *builder, const ncfg_access_point_t *point)
+{
+	static const struct {
+		const char *key;
+		const char *feature;
+		const char *instead;
+	} needs[] = {
+		{ "sae_password", "WPA3 (SAE)",
+		    "set `proto = \"wpa2\"` in its `wifi` block, or install a hostapd with SAE" },
+		{ "mobility_domain", "802.11r, for `fast_roaming`",
+		    "remove `fast_roaming`, or install a hostapd with 802.11r" },
+		{ "bss_transition", "802.11v, which fast roaming and neighbour reports advertise",
+		    "remove `fast_roaming` and `neighbour_reports`, or install a hostapd with 802.11v" },
+		{ "rrm_neighbor_report", "802.11k, for `neighbour_reports`",
+		    "remove `neighbour_reports`, or install a hostapd with 802.11k" },
+		{ "wds_sta", "four-address stations, for `wds`",
+		    "remove `wds`, or install a hostapd built with it" }
+	};
+	const char *key_mgmt = ncfg_access_point_key_mgmt(point);
+	size_t      at;
+
+	if (!point->device || !builder->observed->hostapd_lacks_count) {
+		return;
+	}
+	for (at = 0; at < sizeof(needs) / sizeof(needs[0]); at++) {
+		int wanted;
+
+		switch (at) {
+		case 0:
+			wanted = key_mgmt && strstr(key_mgmt, "SAE") != NULL;
+			break;
+		case 1:
+			wanted = point->fast_roaming;
+			break;
+		case 2:
+			wanted = point->fast_roaming || point->neighbour_reports;
+			break;
+		case 3:
+			wanted = point->neighbour_reports;
+			break;
+		default:
+			wanted = point->wds;
+			break;
+		}
+		if (wanted && ncfg_observed_hostapd_lacks(builder->observed, needs[at].key)) {
+			ncfg_plan_warnf(builder->plan, point->device,
+			    "access point `%s` needs hostapd's `%s` (%s), and this machine's hostapd "
+			    "was built without it, so it would refuse its configuration and not start: "
+			    "%s", point->id, needs[at].key, needs[at].feature, needs[at].instead);
+		}
+	}
 }
 
 void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
@@ -454,6 +518,7 @@ void ncfg_plan_access_point_warn(ncfg_builder_t *builder)
 		warn_empty_allow(builder, point);
 		warn_second_access_point(builder, point);
 		warn_width(builder, point);
+		warn_hostapd_build(builder, point);
 	}
 }
 

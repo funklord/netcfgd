@@ -1166,6 +1166,18 @@ static const ncfg_field_t observed_access_point_fields[] = {
 static const ncfg_type_t observed_access_point_type =
     TYPE("running access point", observed_access_point_fields);
 
+int ncfg_observed_hostapd_lacks(const ncfg_observed_t *observed, const char *key)
+{
+	size_t at;
+
+	for (at = 0; observed && key && at < observed->hostapd_lacks_count; at++) {
+		if (observed->hostapd_lacks[at] && strcmp(observed->hostapd_lacks[at], key) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 void ncfg_observed_access_control_free(ncfg_observed_access_control_t *access_control)
 {
 	if (!access_control) {
@@ -1384,6 +1396,9 @@ static const ncfg_field_t observed_fields[] = {
 	{ .name = "regdom", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, regdom) },
 	{ .name = "hostapd_has_he", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_observed_t, hostapd_has_he) },
+	{ .name = "hostapd_lacks", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_t, hostapd_lacks),
+	    .count_offset = offsetof(ncfg_observed_t, hostapd_lacks_count) },
 	{ .name = "regdom_set_by", .kind = NCFG_F_STR,
 	    .offset = offsetof(ncfg_observed_t, regdom_set_by) },
 	{ .name = "addresses", .kind = NCFG_F_LIST, .type = &observed_address_type,

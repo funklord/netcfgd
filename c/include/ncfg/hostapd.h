@@ -369,6 +369,33 @@ void ncfg_hostapd_recorded_policy(const char *run, const char *device,
  * read, which is not "no" and is not "yes".
  */
 int ncfg_hostapd_program_has_he(const char *path);
+
+/*
+ * The configuration keywords netcfgd writes that a hostapd has only where
+ * a build option compiled their parser in (10.600), and which of them the
+ * binary at `path` carries, as a bit per entry of this table.
+ *
+ * **A keyword missing from the binary is certain**: hostapd matches each
+ * line's key by comparing strings, so a key whose string is not in the
+ * program is one it cannot accept, whatever its build options were. It
+ * refuses the whole file and does not start. A keyword present is only
+ * likely to be parsed, which is the direction that costs nothing.
+ *
+ * Read once per file, by size and modification time, as
+ * `ncfg_hostapd_program_has_he` is; -1 where the file cannot be read.
+ */
+enum {
+	NCFG_HOSTAPD_KEY_SAE,        /* sae_password: CONFIG_SAE, for WPA3 */
+	NCFG_HOSTAPD_KEY_FT,         /* mobility_domain: CONFIG_IEEE80211R_AP */
+	NCFG_HOSTAPD_KEY_WNM,        /* bss_transition: CONFIG_WNM_AP, 802.11v */
+	NCFG_HOSTAPD_KEY_RRM,        /* rrm_neighbor_report: 802.11k */
+	NCFG_HOSTAPD_KEY_WDS,        /* wds_sta: four-address stations */
+	NCFG_HOSTAPD_KEY_VHT,        /* vht_oper_chwidth: CONFIG_IEEE80211AC */
+	NCFG_HOSTAPD_KEY_HE,         /* he_oper_chwidth: CONFIG_IEEE80211AX */
+	NCFG_HOSTAPD_KEY_COUNT
+};
+extern const char *const ncfg_hostapd_optional_keys[NCFG_HOSTAPD_KEY_COUNT];
+int ncfg_hostapd_program_keys(const char *path, unsigned *present);
 int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,
     char *err, size_t err_size);
 int ncfg_hostapd_steered_read(const char *run, const char *device, int64_t now,

@@ -229,44 +229,60 @@ int ncfg_hostapd_write_config(const char *run, const ncfg_access_point_t *access
 	return 1;
 }
 
-int ncfg_hostapd_program_has_he(const char *path)
-{
-	static char  cached_path[NCFG_HOSTAPD_PATH_MAX];
-	static off_t cached_size = -1;
-	static long  cached_time;
-	static int   cached = -1;
-	static const char keyword[] = "he_oper_chwidth";
-	char         chunk[65536 + sizeof(keyword)];
-	size_t       carried = 0;
-	struct stat  info;
-	FILE        *file;
-	int          found = 0;
+const char *const ncfg_hostapd_optional_keys[NCFG_HOSTAPD_KEY_COUNT] = {
+	"sae_password", "mobility_domain", "bss_transition", "rrm_neighbor_report", "wds_sta",
+	"vht_oper_chwidth", "he_oper_chwidth"
+};
 
+int ncfg_hostapd_program_keys(const char *path, unsigned *present)
+{
+	static char     cached_path[NCFG_HOSTAPD_PATH_MAX];
+	static off_t    cached_size = -1;
+	static long     cached_time;
+	static unsigned cached;
+	static int      known;
+	/* The longest keyword, carried across chunks so one split by a chunk
+	 * boundary is still found. */
+	enum { CARRY = 32 };
+	char            chunk[65536 + CARRY];
+	size_t          carried = 0;
+	unsigned        found = 0;
+	unsigned        every = (1u << NCFG_HOSTAPD_KEY_COUNT) - 1u;
+	struct stat     info;
+	FILE           *file;
+
+	*present = 0;
 	if (!path || !path[0] || stat(path, &info) != 0 || !S_ISREG(info.st_mode)) {
 		return -1;
 	}
-	if (cached >= 0 && strcmp(cached_path, path) == 0 && cached_size == info.st_size &&
+	if (known && strcmp(cached_path, path) == 0 && cached_size == info.st_size &&
 	    cached_time == (long)info.st_mtime) {
-		return cached;
+		*present = cached;
+		return 1;
 	}
 	file = fopen(path, "rb");
 	if (!file) {
 		return -1;
 	}
-	/* In chunks, carrying the tail of each so a keyword across two is
-	 * still found: the binary is a megabyte or more, and is read once. */
 	for (;;) {
 		size_t got = fread(chunk + carried, 1u, sizeof(chunk) - carried, file);
 		size_t have = carried + got;
-		size_t at;
+		size_t key;
 
-		for (at = 0; !found && at + sizeof(keyword) - 1u <= have; at++) {
-			found = memcmp(chunk + at, keyword, sizeof(keyword) - 1u) == 0;
+		for (key = 0; key < NCFG_HOSTAPD_KEY_COUNT; key++) {
+			size_t length = strlen(ncfg_hostapd_optional_keys[key]);
+			size_t at;
+
+			for (at = 0; !(found & (1u << key)) && at + length <= have; at++) {
+				if (memcmp(chunk + at, ncfg_hostapd_optional_keys[key], length) == 0) {
+					found |= 1u << key;
+				}
+			}
 		}
-		if (found || got == 0) {
+		if (found == every || got == 0) {
 			break;
 		}
-		carried = have < sizeof(keyword) - 1u ? have : sizeof(keyword) - 1u;
+		carried = have < CARRY ? have : CARRY;
 		memmove(chunk, chunk + have - carried, carried);
 	}
 	if (ferror(file)) {
@@ -278,7 +294,19 @@ int ncfg_hostapd_program_has_he(const char *path)
 	cached_size = info.st_size;
 	cached_time = (long)info.st_mtime;
 	cached = found;
-	return found;
+	known = 1;
+	*present = found;
+	return 1;
+}
+
+int ncfg_hostapd_program_has_he(const char *path)
+{
+	unsigned present;
+
+	if (ncfg_hostapd_program_keys(path, &present) < 0) {
+		return -1;
+	}
+	return (present & (1u << NCFG_HOSTAPD_KEY_HE)) != 0;
 }
 
 int ncfg_hostapd_steered_path(const char *run, const char *device, char *out, size_t out_size,

@@ -1477,6 +1477,40 @@ static void eleven_ax_is_wanted_only_where_hostapd_has_it(void)
 	planfix_release(plan, document, observed);
 }
 
+/*
+ * What this machine's hostapd was built without (10.600): a feature the
+ * document asks for that needs a missing keyword is said before the restart
+ * that would leave the access point down; 802.11ac is withheld, as 802.11ax
+ * is, where its keyword is missing.
+ */
+static void a_feature_hostapd_lacks_is_said_and_802_11ac_withheld(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"psk\",\"passphrase\":"
+	    "{\"provider\":\"file\",\"name\":\"home\"}},\"fast_roaming\":true"),
+	    "\"hostapd_has_he\":false,\"hostapd_lacks\":[\"sae_password\",\"mobility_domain\"],"
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
+
+	check(plan && planfix_warned(plan, "needs hostapd's `mobility_domain` (802.11r"),
+	    "fast roaming on a hostapd without 802.11r is said, naming the keyword");
+	check(plan && planfix_warned(plan, "needs hostapd's `sae_password` (WPA3") &&
+	    planfix_warned(plan, "proto = \"wpa2\""),
+	    "  and the default WPA3 on one without SAE, with the way out");
+	check(plan && !planfix_warned(plan, "`bss_transition`"),
+	    "  and nothing it was not found without");
+	planfix_release(plan, document, observed);
+
+	plan = planfix_plan(RADIO, RADIO_INTERFACE, "", FIVE_POINT(""),
+	    "\"hostapd_has_he\":false,\"hostapd_lacks\":[\"vht_oper_chwidth\",\"he_oper_chwidth\"],"
+	    "\"links\":[" VHT_LINK "]," RUNNING(FIVE_STARTED(",\"forty_mhz\":true")),
+	    &document, &observed);
+	check(plan && plan->action_count == 0u,
+	    "an 802.11ac radio whose hostapd lacks it stays at 40 MHz without it");
+	planfix_release(plan, document, observed);
+}
+
 int main(void)
 {
 	a_radio_the_document_gives_an_access_point_starts_hostapd();
@@ -1519,6 +1553,7 @@ int main(void)
 	eighty_megahertz_is_part_of_what_an_access_point_was_started_as();
 	a_hundred_sixty_mhz_access_point_restarts_and_says_it_waits();
 	eleven_ax_is_wanted_only_where_hostapd_has_it();
+	a_feature_hostapd_lacks_is_said_and_802_11ac_withheld();
 
 	printf("plan access point: %d checks, %d failed\n", checks, failures);
 	return failures == 0 ? 0 : 1;

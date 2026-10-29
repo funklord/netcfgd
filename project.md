@@ -12643,6 +12643,31 @@ line it cannot take -- which would otherwise be a restart every pass.
 - `ieee80211ax` read back into the restart identity. An access point on an
   HE radio with an HE hostapd restarts once on upgrade.
 
+### The same risk in what was already written
+
+The lens from the probe, taken across every keyword the renderer writes:
+**a keyword missing from the binary is certain** -- hostapd matches keys as
+strings, so one whose string is not in the program cannot be accepted,
+whatever its build options -- and several of netcfgd's are behind options.
+`vht_oper_chwidth` is `CONFIG_IEEE80211AC`'s, and 10.598 wrote 802.11ac by
+default; `sae_password` is `CONFIG_SAE`'s, and the default `wpa2+wpa3`
+writes it; `mobility_domain` (802.11r), `bss_transition` (802.11v),
+`rrm_neighbor_report` and `wds_sta` back opt-in features. So the probe reads
+the binary once for all seven (`ncfg_hostapd_optional_keys`), the
+observation carries the ones it lacks as `hostapd_lacks`, and:
+
+- **802.11ac is withheld where its keyword is missing**, as 802.11ax is.
+  Unlike 802.11ax, an unasked hostapd still gets it: 10.598 gave it without
+  asking and nearly every build has it, so the asymmetry keeps that.
+- **A feature the document asks for that needs a missing keyword is a plan
+  warning**, naming the keyword, the feature and the way out -- `proto =
+  "wpa2"` for SAE, removing the feature or installing a hostapd with it --
+  before a restart would stop the access point and leave it down. The plan
+  goes on: whether to change the document or the hostapd is the operator's.
+
+`plan_access_point_test` asserts both, and `hostapd_test` that a minimal
+binary is read for exactly the keywords it carries.
+
 ### What 10.600 showed live
 
 `hull-roam`'s station joins as Wi-Fi 6 on 2.4 GHz, `hull-steer`'s band

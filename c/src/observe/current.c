@@ -208,22 +208,40 @@ static void note_the_round(const ncfg_observe_capture_t *capture)
 	}
 }
 
-/* Whether the named hostapd has 802.11ax (10.600); nothing named, nothing
- * asked. Never fails the observation: an unreadable program is an absent
- * answer, which gives no access point the line. */
-static int observe_hostapd_build(ncfg_observed_t *observed, const ncfg_observe_roots_t *roots)
+/* What the named hostapd was built with (10.600); nothing named, nothing
+ * asked. Fails the observation only for memory: an unreadable program is an
+ * absent answer, which gives no access point 802.11ax. */
+static int observe_hostapd_build(ncfg_observed_t *observed, const ncfg_observe_roots_t *roots,
+    char *err, size_t err_size)
 {
-	int has;
+	unsigned present = 0;
+	size_t   key;
 
 	observed->hostapd_has_he.has = 0;
 	observed->hostapd_has_he.value = 0;
-	if (!roots || !roots->hostapd[0]) {
+	if (!roots || !roots->hostapd[0] || ncfg_hostapd_program_keys(roots->hostapd, &present) < 0) {
 		return 1;
 	}
-	has = ncfg_hostapd_program_has_he(roots->hostapd);
-	if (has >= 0) {
-		observed->hostapd_has_he.has = 1;
-		observed->hostapd_has_he.value = has;
+	observed->hostapd_has_he.has = 1;
+	observed->hostapd_has_he.value = (present & (1u << NCFG_HOSTAPD_KEY_HE)) != 0;
+	for (key = 0; key < NCFG_HOSTAPD_KEY_COUNT; key++) {
+		char **grown;
+
+		if (present & (1u << key)) {
+			continue;
+		}
+		grown = realloc(observed->hostapd_lacks,
+		    (observed->hostapd_lacks_count + 1u) * sizeof(*grown));
+		if (!grown) {
+			ncfg_error_set(err, err_size, "out of memory recording what hostapd lacks");
+			return 0;
+		}
+		observed->hostapd_lacks = grown;
+		grown[observed->hostapd_lacks_count] = strdup(ncfg_hostapd_optional_keys[key]);
+		if (!grown[observed->hostapd_lacks_count++]) {
+			ncfg_error_set(err, err_size, "out of memory recording what hostapd lacks");
+			return 0;
+		}
 	}
 	return 1;
 }
@@ -343,7 +361,7 @@ int ncfg_observe_current_from(const ncfg_observe_kernel_t *kernel,
 	     * before it is held up behind the wait.
 	     */
 	    !ncfg_observe_access_control(observed, run_dir, 0, err, err_size) ||
-	    !observe_hostapd_build(observed, roots) ||
+	    !observe_hostapd_build(observed, roots, err, err_size) ||
 	    /*
 	     * **Before `derive`, because `derive` reads the link's network.** So
 	     * does `ncfg_observed_effective_metric`, and so does the inventory --

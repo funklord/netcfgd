@@ -509,8 +509,11 @@ int ncfg_main_service_of(ncfg_main_world_t *world, char *err, size_t err_size)
 				world->ht[world->ht_count].widths.forty_mhz_5 = 1;
 			}
 		}
-		world->ht[world->ht_count].widths.vht_5 = link->very_high_throughput;
-		world->ht[world->ht_count].widths.vht160_5 = link->hundred_sixty_mhz;
+		/* As the planner withholds them (10.600). */
+		world->ht[world->ht_count].widths.vht_5 = link->very_high_throughput &&
+		    !ncfg_observed_hostapd_lacks(observed, "vht_oper_chwidth");
+		world->ht[world->ht_count].widths.vht160_5 =
+		    world->ht[world->ht_count].widths.vht_5 && link->hundred_sixty_mhz;
 		/* 802.11ax only where this machine's hostapd has it (10.600). */
 		for (band = 0; observed->hostapd_has_he.has && observed->hostapd_has_he.value &&
 		    band < link->high_efficiency_count; band++) {
