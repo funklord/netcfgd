@@ -629,8 +629,9 @@ install:
 	@# Inert by construction rather than by convention: the loader takes
 	@# `netcfgd.conf` by exact name and `conf.d/*.conf` by extension, and this
 	@# is neither. `crates/netcfgd-compile/tests/example.rs` pins that, and
-	@# compiles every example in it so the file cannot describe a language the
-	@# compiler has stopped speaking.
+	@# `c/tests/lower_test.c` compiles every example in it against the C, so
+	@# the file cannot describe a language the shipped compiler has stopped
+	@# speaking.
 	install -m 0644 doc/netcfgd.conf.example \
 		$(DESTDIR)$(SYSCONFDIR)/netcfgd/netcfgd.conf.example
 	@# The switcher, installed by `install` rather than by `install-systemd`
