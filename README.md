@@ -380,15 +380,8 @@ sudo make install-gui
 
 [fmake](../fmake) is one Python file with nothing beyond the standard
 library, so it builds the client on a machine that has not got this
-project's toolchain set up. It covers the client, and `make build` is still
-the way for the daemon — but not for the reason this paragraph used to give.
-
-That reason was that the daemon had been a Cargo workspace fmake could not
-drive, and it is gone with 0266. fmake's own session ran it in a copy of
-this tree on 2026-10-08 and reported getting as far as the link: moc over
-the client's headers, twenty-two objects of the C daemon compiled, then a
-stop on two duplicate symbols between the daemon and the client, which are
-this tree's to settle rather than fmake's. 10.421 has them.
+project's toolchain set up. The daemon is built with `make build`; what fmake
+makes of it is in [project.md](project.md) 10.421 and 10.424.
 
 Then pick your init: `make install-systemd`, `install-openrc` or
 `install-procd`. Installing does **not** enable or start anything, and does
