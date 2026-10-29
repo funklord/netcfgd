@@ -2252,7 +2252,17 @@ footprint:
 # 5.9% above the highest of the three, which is the headroom 5120 had over the
 # Rust's 4856 -- the band is the same shape, moved down with the measurement,
 # rather than a round number chosen because it looked safe.
-RSS_LIMIT_KB ?= 3072
+#
+# **Re-derived 2026-10-29, for the reason 2026-09-07's was: the band had
+# stopped covering the noise.** Across one day's `make check` runs the peak
+# read 2812, 2816, 2868, 2880, 2896, 2964, 3028 and 3064 -- eight KB under the
+# limit at the top -- and five back-to-back `make rss` runs at load 8 gave
+# 2816, 3032, 2832, 2872, 2896. `RssAnon`, what netcfgd allocates, read 324
+# to 328 KB in every one of them, under the 344..348 above: the day added
+# text (802.11k/v, the 802.11n/ac widths, steering; `size` text 1088472) and
+# nothing resident. So the limit is the observed peak plus a band wider than
+# the observed spread (3064 + 264, the spread being 252), and still a ratchet.
+RSS_LIMIT_KB ?= 3328
 
 # **The control directory is redirected too, and was not (0224).**
 # `--config-dir` and `--run-dir` send this daemon's own state into a scratch
