@@ -1327,7 +1327,54 @@ typedef struct {
 	 * `/run` fallback. Reported, because an operator deciding whether to trust
 	 * a drift report needs to know which mechanism produced it (0002). */
 	int   address_proto_supported;
+	/* The firewall netcfgd's table holds, read back rule by rule (0295 A,
+	 * project.md 10.592). NULL where the table has no filter chain, which
+	 * is every machine whose document has no `firewall`. */
+	struct ncfg_observed_firewall *firewall;
 } ncfg_observed_t;
+
+/*
+ * One kernel rule of the installed firewall, as the decoder read it.
+ *
+ * Single-valued, as a kernel rule is: a written rule with several values is
+ * several of these sharing a name. Words rather than enums -- `accept`,
+ * `tcp` -- because this is what `ncfg status` shows and what an operator
+ * compares against the file they wrote. Addresses as the digest's text has
+ * them: the network, `/N` only where it is short.
+ */
+typedef struct {
+	char         *chain;
+	char         *name;
+	char         *digest;
+	char         *action;
+	char         *protocol;
+	ncfg_optint_t port;
+	char         *from;
+	char         *to;
+	char         *interface;
+	char        **states;
+	size_t        state_count;
+	char         *mac;
+} ncfg_observed_firewall_rule_t;
+
+typedef struct ncfg_observed_firewall {
+	/* `accept` or `drop`, or NULL where the chain is not there. */
+	char                          *input;
+	char                          *forward;
+	char                          *output;
+	/* In chain order -- input, forward, output -- and the kernel's within
+	 * each, which is the order the rules run in. */
+	ncfg_observed_firewall_rule_t *rules;
+	size_t                         rule_count;
+	/* Why each rule netcfgd could not read was refused: a hand edit inside
+	 * its table, reported as such and replaced on the next apply. */
+	char                         **unread;
+	size_t                         unread_count;
+} ncfg_observed_firewall_t;
+
+/* Release one and what it holds, for the pass that replaces it. NULL is
+ * nothing. */
+void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall);
 
 /* ------------------------------------------------------------------------ *
  * Which scopes a machine's DNS has, which is a rule and not a loop

@@ -44,6 +44,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <linux/netfilter.h>
+
 /*
  * One dump, built by nft.c and performed by the caller's exchange.
  *
@@ -182,10 +184,10 @@ static size_t ceiling_of(const ncfg_observe_kernel_t *kernel)
 	return kernel->records_max ? kernel->records_max : NCFG_OBSERVE_RECORDS_MAX;
 }
 
-static int read_uplinks(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
-    char *err, size_t err_size)
+static int read_uplinks(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_reply_t *rules,
+    ncfg_observed_t *observed, char *err, size_t err_size)
 {
-	ncfg_netlink_reply_t reply;
+	const ncfg_netlink_reply_t *reply_of = rules;
 	char               **found = NULL;
 	size_t               count = 0;
 	size_t               skipped = 0;
@@ -196,14 +198,18 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *ob
 	char                 note[NCFG_ERROR_MAX];
 
 	note[0] = '\0';
-	if (!dump(kernel, ncfg_nft_build_rule_dump, "rule", &reply, err, err_size)) {
-		return 0;
-	}
-	for (at = 0; at < reply.count; at++) {
-		char name[NCFG_NFT_IFNAME_MAX];
-		char why[NCFG_ERROR_MAX];
+	for (at = 0; at < reply_of->count; at++) {
+		char                   name[NCFG_NFT_IFNAME_MAX];
+		char                   why[NCFG_ERROR_MAX];
+		ncfg_nft_kernel_rule_t firewall;
 
-		if (!ncfg_nft_rule_uplink(reply.items[at].bytes, reply.items[at].length, name,
+		/* The dump is the whole table now (10.592), so the firewall's rules
+		 * are in it: they are read below, and are not refusals here. */
+		if (ncfg_nft_firewall_rule_read(reply_of->items[at].bytes, reply_of->items[at].length,
+		        &firewall, NULL, 0)) {
+			continue;
+		}
+		if (!ncfg_nft_rule_uplink(reply_of->items[at].bytes, reply_of->items[at].length, name,
 		    sizeof(name), why, sizeof(why))) {
 			/*
 			 * A rule netcfgd did not write is not netcfgd's to describe, and
@@ -224,17 +230,14 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *ob
 			    "which is more than an observation holds",
 			    ceiling_of(kernel));
 			observe_names_free(found, count);
-			ncfg_netlink_reply_free(&reply);
 			return 0;
 		}
 		if (!observe_list_add(&found, &count, name)) {
 			ncfg_error_set(err, err_size, "out of memory recording the installed NAT");
 			observe_names_free(found, count);
-			ncfg_netlink_reply_free(&reply);
 			return 0;
 		}
 	}
-	ncfg_netlink_reply_free(&reply);
 	if (skipped != 0) {
 		ncfg_log_emitf("observe", NCFG_LOG_NOTE,
 		    "%zu rule(s) in the nftables dump were not netcfgd's own masquerade and "
@@ -255,10 +258,10 @@ static int read_uplinks(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *ob
 	return 1;
 }
 
-static int read_conflicts(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *observed,
-    char *err, size_t err_size)
+static int read_conflicts(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_reply_t *chains,
+    ncfg_observed_t *observed, char *err, size_t err_size)
 {
-	ncfg_netlink_reply_t reply;
+	const ncfg_netlink_reply_t *reply_of = chains;
 	char               **found = NULL;
 	size_t               count = 0;
 	size_t               skipped = 0;
@@ -266,14 +269,11 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *
 	char                 note[NCFG_ERROR_MAX];
 
 	note[0] = '\0';
-	if (!dump(kernel, ncfg_nft_build_chain_dump, "chain", &reply, err, err_size)) {
-		return 0;
-	}
-	for (at = 0; at < reply.count; at++) {
+	for (at = 0; at < reply_of->count; at++) {
 		ncfg_nft_chain_t chain;
 		char             why[NCFG_ERROR_MAX];
 
-		if (!ncfg_nft_chain_read(reply.items[at].bytes, reply.items[at].length, &chain,
+		if (!ncfg_nft_chain_read(reply_of->items[at].bytes, reply_of->items[at].length, &chain,
 		    why, sizeof(why))) {
 			if (note[0] == '\0') {
 				ncfg_error_set(note, sizeof(note), "%s", why);
@@ -301,11 +301,9 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *
 			ncfg_error_set(err, err_size,
 			    "out of memory recording a conflicting nftables table");
 			observe_names_free(found, count);
-			ncfg_netlink_reply_free(&reply);
 			return 0;
 		}
 	}
-	ncfg_netlink_reply_free(&reply);
 	if (skipped != 0) {
 		ncfg_log_emitf("observe", NCFG_LOG_NOTE,
 		    "%zu payload(s) in the nftables chain dump could not be read, so a table "
@@ -317,6 +315,145 @@ static int read_conflicts(const ncfg_observe_kernel_t *kernel, ncfg_observed_t *
 	observe_names_free(observed->nat_conflicts, observed->nat_conflict_count);
 	observed->nat_conflicts = found;
 	observed->nat_conflict_count = count;
+	return 1;
+}
+
+/* One decoded kernel rule, in the observation's words. */
+static int observed_rule(const ncfg_nft_kernel_rule_t *one, ncfg_observed_firewall_rule_t *out)
+{
+	unsigned bit;
+
+	memset(out, 0, sizeof(*out));
+	out->chain = observe_dup(one->chain);
+	out->name = observe_dup(one->name);
+	out->digest = observe_dup(one->digest);
+	out->action = observe_dup(ncfg_nft_action_word(one->action));
+	out->protocol = observe_dup(ncfg_nft_protocol_word(one->protocol));
+	if (!out->chain || !out->name || !out->digest || !out->action || !out->protocol) {
+		return 0;
+	}
+	if (one->has_port) {
+		out->port.has = 1;
+		out->port.value = one->port;
+	}
+	if ((one->from[0] && !(out->from = observe_dup(one->from))) ||
+	    (one->to[0] && !(out->to = observe_dup(one->to))) ||
+	    (one->interface[0] && !(out->interface = observe_dup(one->interface))) ||
+	    (one->mac[0] && !(out->mac = observe_dup(one->mac)))) {
+		return 0;
+	}
+	for (bit = 0; bit < 4u; bit++) {
+		if ((one->states & (1u << bit)) &&
+		    !observe_list_add(&out->states, &out->state_count, ncfg_nft_state_word(bit))) {
+			return 0;
+		}
+	}
+	return 1;
+}
+
+/*
+ * The firewall netcfgd's table holds (0295 A, 10.592): each filter chain's
+ * policy, and every rule in it read back through the decoder. A rule the
+ * decoder refuses is kept as its reason, because a hand edit inside netcfgd's
+ * table is a thing to report and replace rather than to skip in silence.
+ */
+static int read_firewall(const ncfg_observe_kernel_t *kernel, const ncfg_netlink_reply_t *rule_dump,
+    const ncfg_netlink_reply_t *chain_dump, ncfg_observed_t *observed, char *err,
+    size_t err_size)
+{
+	static const char *const chains[3] = { NCFG_NFT_CHAIN_INPUT, NCFG_NFT_CHAIN_FORWARD,
+		NCFG_NFT_CHAIN_OUTPUT };
+	const ncfg_netlink_reply_t *reply = chain_dump;
+	ncfg_observed_firewall_t   *found;
+	size_t                      at;
+	size_t                      c;
+	int                         any = 0;
+
+	found = calloc(1u, sizeof(*found));
+	if (!found) {
+		ncfg_error_set(err, err_size, "out of memory recording the installed firewall");
+		return 0;
+	}
+	for (at = 0; at < reply->count; at++) {
+		ncfg_nft_chain_t chain;
+		char           **slot = NULL;
+
+		if (!ncfg_nft_chain_read(reply->items[at].bytes, reply->items[at].length, &chain, NULL,
+		        0) || strcmp(chain.table, NCFG_NFT_TABLE) != 0 ||
+		    strcmp(chain.kind, "filter") != 0 || !chain.has_policy) {
+			continue;
+		}
+		if (strcmp(chain.name, NCFG_NFT_CHAIN_INPUT) == 0) {
+			slot = &found->input;
+		} else if (strcmp(chain.name, NCFG_NFT_CHAIN_FORWARD) == 0) {
+			slot = &found->forward;
+		} else if (strcmp(chain.name, NCFG_NFT_CHAIN_OUTPUT) == 0) {
+			slot = &found->output;
+		}
+		if (slot) {
+			free(*slot);
+			*slot = observe_dup(chain.policy == NF_DROP ? "drop" : "accept");
+			any = 1;
+		}
+	}
+	if (!any) {
+		/* No filter chain: no firewall is installed, which is the observation
+		 * of every machine whose document has none. */
+		ncfg_observed_firewall_free(found);
+		ncfg_observed_firewall_free(observed->firewall);
+		observed->firewall = NULL;
+		return 1;
+	}
+
+	reply = rule_dump;
+	/* Chain order, then the kernel's: the dump's order is per chain, so the
+	 * rules are taken a chain at a time. */
+	for (c = 0; c < 3u; c++) {
+		for (at = 0; at < reply->count; at++) {
+			ncfg_nft_kernel_rule_t         one;
+			ncfg_observed_firewall_rule_t *slot;
+			char                           why[NCFG_ERROR_MAX];
+
+			if (!ncfg_nft_firewall_rule_read(reply->items[at].bytes, reply->items[at].length,
+			        &one, why, sizeof(why))) {
+				/* The NAT chain's rules are not the firewall's, and are read
+				 * as uplinks above; anything else is a refusal worth
+				 * keeping, once. */
+				if (c == 0u && strstr(why, "outside the three filter chains") == NULL &&
+				    !observe_list_add(&found->unread, &found->unread_count, why)) {
+					ncfg_observed_firewall_free(found);
+					ncfg_error_set(err, err_size, "out of memory recording the firewall");
+					return 0;
+				}
+				continue;
+			}
+			if (strcmp(one.chain, chains[c]) != 0) {
+				continue;
+			}
+			if (found->rule_count >= ceiling_of(kernel)) {
+				ncfg_observed_firewall_free(found);
+				ncfg_error_set(err, err_size,
+				    "netcfgd's firewall holds more than %zu rule(s), which is more than "
+				    "an observation holds", ceiling_of(kernel));
+				return 0;
+			}
+			slot = realloc(found->rules, (found->rule_count + 1u) * sizeof(*found->rules));
+			if (!slot) {
+				ncfg_observed_firewall_free(found);
+				ncfg_error_set(err, err_size, "out of memory recording the firewall");
+				return 0;
+			}
+			found->rules = slot;
+			found->rule_count++;
+			if (!observed_rule(&one, &found->rules[found->rule_count - 1u])) {
+				ncfg_observed_firewall_free(found);
+				ncfg_error_set(err, err_size, "out of memory recording the firewall");
+				return 0;
+			}
+		}
+	}
+	ncfg_observed_firewall_free(observed->firewall);
+	observed->firewall = found;
 	return 1;
 }
 
@@ -342,6 +479,8 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 		observe_names_free(observed->nat_conflicts, observed->nat_conflict_count);
 		observed->nat_conflicts = NULL;
 		observed->nat_conflict_count = 0;
+		ncfg_observed_firewall_free(observed->firewall);
+		observed->firewall = NULL;
 		return 1;
 	}
 	/*
@@ -382,11 +521,31 @@ int ncfg_observe_netfilter_from(const ncfg_observe_kernel_t *kernel, ncfg_observ
 			/* The uplinks first, because they are the half a planner acts on:
 			 * a conflict list that could not be built must not cost the
 			 * observation the answer it reconciles against. */
-			if (!read_uplinks(kernel, observed, err, err_size)) {
-				return 0;
-			}
-			if (!read_conflicts(kernel, observed, err, err_size)) {
-				return 0;
+			{
+				ncfg_netlink_reply_t rules;
+				ncfg_netlink_reply_t chains;
+				int                  read;
+
+				/* Two dumps a round, as before the firewall: the whole
+				 * table's rules and every chain, each read by the three
+				 * readers that need it. */
+				if (!dump(kernel, ncfg_nft_build_table_rule_dump, "rule", &rules, err,
+				        err_size)) {
+					return 0;
+				}
+				if (!dump(kernel, ncfg_nft_build_chain_dump, "chain", &chains, err,
+				        err_size)) {
+					ncfg_netlink_reply_free(&rules);
+					return 0;
+				}
+				read = read_uplinks(kernel, &rules, observed, err, err_size) &&
+				    read_conflicts(kernel, &chains, observed, err, err_size) &&
+				    read_firewall(kernel, &rules, &chains, observed, err, err_size);
+				ncfg_netlink_reply_free(&rules);
+				ncfg_netlink_reply_free(&chains);
+				if (!read) {
+					return 0;
+				}
 			}
 			if (!generation(kernel, &after, &had_after, err, err_size)) {
 				return 0;

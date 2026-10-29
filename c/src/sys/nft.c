@@ -1380,6 +1380,12 @@ int ncfg_nft_chain_read(const void *payload, size_t length, ncfg_nft_chain_t *ou
 	    !ncfg_wire_attr_string(&attr, out->kind, sizeof(out->kind), err, err_size)) {
 		return 0;
 	}
+	if (ncfg_wire_attrs_find(&area, NFTA_CHAIN_POLICY, &attr, NULL, 0) == NCFG_WIRE_OK) {
+		if (!attr_be32(&attr, &out->policy, err, err_size)) {
+			return 0;
+		}
+		out->has_policy = 1;
+	}
 	if (ncfg_wire_attrs_find(&area, NFTA_CHAIN_HOOK, &attr, NULL, 0) == NCFG_WIRE_OK) {
 		ncfg_wire_attrs_start(&hook, attr.value, attr.length);
 		if (ncfg_wire_attrs_find(&hook, NFTA_HOOK_HOOKNUM, &attr, NULL, 0) ==
@@ -1986,4 +1992,83 @@ int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
 		return 0;
 	}
 	return 1;
+}
+
+const char *ncfg_nft_action_word(int action)
+{
+	switch (action) {
+	case NCFG_FIREWALL_ACCEPT:
+		return "accept";
+	case NCFG_FIREWALL_DROP:
+		return "drop";
+	case NCFG_FIREWALL_REJECT:
+		return "reject";
+	default:
+		return NULL;
+	}
+}
+
+const char *ncfg_nft_protocol_word(int protocol)
+{
+	switch (protocol) {
+	case NCFG_FIREWALL_PROTO_ANY:
+		return "any";
+	case NCFG_FIREWALL_PROTO_TCP:
+		return "tcp";
+	case NCFG_FIREWALL_PROTO_UDP:
+		return "udp";
+	case NCFG_FIREWALL_PROTO_ICMP:
+		return "icmp";
+	case NCFG_FIREWALL_PROTO_ICMPV6:
+		return "icmpv6";
+	default:
+		return NULL;
+	}
+}
+
+const char *ncfg_nft_state_word(unsigned bit)
+{
+	static const char *const words[] = { "new", "established", "related", "invalid" };
+
+	return bit < sizeof(words) / sizeof(words[0]) ? words[bit] : NULL;
+}
+
+/* Two optional strings: absent and empty are one answer, which is how the
+ * decoder leaves a match it did not see. */
+static int same_text(const char *one, const char *other)
+{
+	return strcmp(one ? one : "", other ? other : "") == 0;
+}
+
+int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
+    const ncfg_observed_firewall_rule_t *observed)
+{
+	size_t   at;
+	unsigned states = 0;
+
+	if (!expected || !observed) {
+		return 0;
+	}
+	if (!same_text(expected->chain, observed->chain) ||
+	    !same_text(expected->name, observed->name) ||
+	    !same_text(expected->digest, observed->digest) ||
+	    !same_text(ncfg_nft_action_word(expected->action), observed->action) ||
+	    !same_text(ncfg_nft_protocol_word(expected->protocol), observed->protocol) ||
+	    expected->has_port != observed->port.has ||
+	    (expected->has_port && (int64_t)expected->port != observed->port.value) ||
+	    !same_text(expected->from, observed->from) || !same_text(expected->to, observed->to) ||
+	    !same_text(expected->interface, observed->interface) ||
+	    !same_text(expected->mac, observed->mac)) {
+		return 0;
+	}
+	for (at = 0; at < observed->state_count; at++) {
+		unsigned bit;
+
+		for (bit = 0; bit < 4u; bit++) {
+			if (same_text(ncfg_nft_state_word(bit), observed->states[at])) {
+				states |= 1u << bit;
+			}
+		}
+	}
+	return states == expected->states;
 }

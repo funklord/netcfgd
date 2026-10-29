@@ -75,6 +75,7 @@
 #include "ncfg/base.h"
 #include "ncfg/buf.h"
 #include "ncfg/document.h"
+#include "ncfg/observed.h"
 
 /* The one table netcfgd owns, and the chains in it. Decision 0022 gave it the
  * NAT chain; 0294 added the three filter chains of layer one's firewall. */
@@ -146,6 +147,9 @@ typedef struct {
 	/* Which hook it registers at, where it is a base chain. */
 	uint32_t hook;
 	int      has_hook;
+	/* A base chain's policy, `NF_ACCEPT` or `NF_DROP` (10.592). */
+	uint32_t policy;
+	int      has_policy;
 } ncfg_nft_chain_t;
 
 /*
@@ -360,6 +364,25 @@ typedef struct {
  */
 int ncfg_nft_firewall_rule_read(const void *payload, size_t length,
     ncfg_nft_kernel_rule_t *out, char *err, size_t err_size);
+
+/* The words the observation and `ncfg status` use: `accept`, `drop`,
+ * `reject`; `any`, `tcp`, `udp`, `icmp`, `icmpv6`; and the state for one of
+ * `ncfg_nft_kernel_rule_t`'s bits, by index. NULL outside each set. */
+const char *ncfg_nft_action_word(int action);
+const char *ncfg_nft_protocol_word(int protocol);
+const char *ncfg_nft_state_word(unsigned bit);
+
+/*
+ * Whether an installed rule, as observed, is exactly this decoded one.
+ *
+ * What the planner converges on (10.592): it encodes the document's firewall,
+ * decodes its own transaction into the kernel rules it should find, and
+ * compares those against the observation in order with this -- every field and
+ * the identity -- so a hand edit is a difference even where it kept the
+ * comment.
+ */
+int ncfg_nft_kernel_rule_matches(const ncfg_nft_kernel_rule_t *expected,
+    const ncfg_observed_firewall_rule_t *observed);
 
 /* One entry of a table dump. */
 int ncfg_nft_table_read(const void *payload, size_t length, ncfg_nft_table_t *out,

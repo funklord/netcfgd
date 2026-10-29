@@ -1235,6 +1235,56 @@ static const ncfg_type_t hook_state_type = TYPE("hook state", hook_state_fields)
  * choice rather than this port's.
  * ------------------------------------------------------------------------ */
 
+static const ncfg_field_t observed_firewall_rule_fields[] = {
+	{ .name = "chain", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, chain) },
+	{ .name = "name", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, name) },
+	{ .name = "digest", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, digest) },
+	{ .name = "action", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, action) },
+	{ .name = "protocol", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, protocol) },
+	{ .name = "port", .kind = NCFG_F_OPT_INT, R_U16,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, port) },
+	{ .name = "from", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, from) },
+	{ .name = "to", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, to) },
+	{ .name = "interface", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, interface) },
+	{ .name = "states", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_firewall_rule_t, states),
+	    .count_offset = offsetof(ncfg_observed_firewall_rule_t, state_count) },
+	{ .name = "mac", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_rule_t, mac) }
+};
+static const ncfg_type_t observed_firewall_rule_type =
+    TYPE("observed firewall rule", observed_firewall_rule_fields);
+
+static const ncfg_field_t observed_firewall_fields[] = {
+	{ .name = "input", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_t, input) },
+	{ .name = "forward", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_firewall_t, forward) },
+	{ .name = "output", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_firewall_t, output) },
+	{ .name = "rules", .kind = NCFG_F_LIST, .type = &observed_firewall_rule_type,
+	    .element_size = sizeof(ncfg_observed_firewall_rule_t),
+	    .offset = offsetof(ncfg_observed_firewall_t, rules),
+	    .count_offset = offsetof(ncfg_observed_firewall_t, rule_count) },
+	{ .name = "unread", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_firewall_t, unread),
+	    .count_offset = offsetof(ncfg_observed_firewall_t, unread_count) }
+};
+static const ncfg_type_t observed_firewall_type =
+    TYPE("observed firewall", observed_firewall_fields);
+
+void ncfg_observed_firewall_free(ncfg_observed_firewall_t *firewall)
+{
+	if (!firewall) {
+		return;
+	}
+	ncfg_type_free(&observed_firewall_type, firewall);
+	free(firewall);
+}
+
 static const ncfg_field_t observed_fields[] = {
 	{ .name = "connectivity", .kind = NCFG_F_OPT_STRUCT, .type = &connectivity_type,
 	    .element_size = sizeof(ncfg_connectivity_t),
@@ -1320,7 +1370,12 @@ static const ncfg_field_t observed_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_t, hook_state_count) },
 	{ .name = "hostname", .kind = NCFG_F_STR, .offset = offsetof(ncfg_observed_t, hostname) },
 	{ .name = "address_proto_supported", .kind = NCFG_F_BOOL,
-	    .offset = offsetof(ncfg_observed_t, address_proto_supported) }
+	    .offset = offsetof(ncfg_observed_t, address_proto_supported) },
+	/* Last and omitted when absent, so an observation with no firewall --
+	 * and every one before 10.592 -- is what it was. */
+	{ .name = "firewall", .kind = NCFG_F_OPT_STRUCT, .type = &observed_firewall_type,
+	    .element_size = sizeof(ncfg_observed_firewall_t),
+	    .offset = offsetof(ncfg_observed_t, firewall) }
 };
 static const ncfg_type_t observed_type = TYPE("observation", observed_fields);
 /* The same members under a status answer's envelope, whose `response` the
