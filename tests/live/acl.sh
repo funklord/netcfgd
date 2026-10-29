@@ -102,6 +102,7 @@ access_point "guest" {
 	wifi    { psk = "@secret:guest"; proto = "wpa2" }
 $1
 }
+${2:-}
 CONF
 }
 
@@ -615,6 +616,59 @@ check "the operator is told, in a sentence naming the interface" \
 # on busy machines.
 check "and nothing is stopped or started on the strength of it" \
 	"$(grep -cE 'backend\.(stop|start)' "$work/wedged.txt" || true)" "0"
+
+# ------------------------------------------------- a host list converges too
+
+# project.md 10.591. The access point names a list rather than the stations,
+# and the stations are resolved from it at compile time -- so what is worth
+# checking here is the edit that touches **only the list**: the access point's
+# block is byte for byte the same, and the running hostapd must still be told.
+# The station already on hostapd's list and in the host list is the control
+# for the first plan: it must stay, so a converger that replaced the whole list
+# would show up as a DEL_MAC that should not be there.
+start_fake --deny 00:11:22:33:44:55
+seed_run_state deny
+warm_fake || true
+banned() {
+	printf 'host_list "banned" { mac = [%s] }\n' "$1"
+}
+write_config '	access_control { deny = ["@host_list:banned"] }' \
+	"$(banned '"00:11:22:33:44:55", "aa:bb:cc:dd:ee:01"')"
+warm_fake || true
+
+"$ncfg" plan > "$work/listed.txt" 2>&1 || true
+check "a station a host list adds is planned for hostapd" \
+	"$(grep -c 'access_control.add' "$work/listed.txt" || true)" "1"
+check "and the one hostapd already holds, which the list names too, is kept" \
+	"$(grep -c 'access_control.del' "$work/listed.txt" || true)" "0"
+"$ncfg" apply > "$work/listed-apply.txt" 2>&1 || true
+wait_for_log 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:01' || true
+check "the list's station went out over the wire" \
+	"$(grep -c 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:01' "$work/fake.log" || true)" "1"
+"$ncfg" plan > "$work/listed-again.txt" 2>&1 || true
+check "and the next plan has nothing left to do for the list" \
+	"$(grep -c 'access_control\.' "$work/listed-again.txt" || true)" "0"
+
+# Only the list changes: one station joins it, the other leaves.
+write_config '	access_control { deny = ["@host_list:banned"] }' \
+	"$(banned '"aa:bb:cc:dd:ee:01", "aa:bb:cc:dd:ee:02"')"
+"$ncfg" plan > "$work/relisted.txt" 2>&1 || true
+check "editing only the host list plans the station that joined it" \
+	"$(grep -c 'access_control.add' "$work/relisted.txt" || true)" "1"
+check "and the one that left it" \
+	"$(grep -c 'access_control.del' "$work/relisted.txt" || true)" "1"
+check "without restarting the access point" \
+	"$(grep -c 'backend\.' "$work/relisted.txt" || true)" "0"
+"$ncfg" apply > "$work/relisted-apply.txt" 2>&1 || true
+wait_for_log 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:02' || true
+check "the joiner went out over the wire" \
+	"$(grep -c 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:02' "$work/fake.log" || true)" "1"
+wait_for_log 'cmd: DENY_ACL DEL_MAC 00:11:22:33:44:55' || true
+check "and so did the leaver's removal" \
+	"$(grep -c 'cmd: DENY_ACL DEL_MAC 00:11:22:33:44:55' "$work/fake.log" || true)" "1"
+"$ncfg" plan > "$work/relisted-again.txt" 2>&1 || true
+check "and then it has converged" \
+	"$(grep -c 'access_control\.' "$work/relisted-again.txt" || true)" "0"
 
 echo
 if [ "$failures" -eq 0 ]; then

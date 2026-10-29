@@ -12725,9 +12725,14 @@ Sabotage: not resolving fails two `lower_test` checks; rendering the
 stations instead of the reference fails both `render_test` checks.
 
 **What it does not do yet**: wildcards, and a list on the firewall's side.
-**Not run against a hostapd**: a changed list reaches a running access point
-the way a changed station list does, through the planner's existing
-`access_control.add` and `del`, and no rig has exercised it with a list.
+**A changed list reaches a running access point**, through the planner's
+existing `access_control.add` and `del`: `tests/live/acl.sh` edits only the
+`host_list` block, the access point's block unchanged, and the joiner's
+`ADD_MAC` and the leaver's `DEL_MAC` arrive with no restart, then nothing is
+left to plan. A station the list shares with what hostapd already holds is
+kept. That is against `fake_hostapd.py`, which implements the lists as
+`hostapd/ctrl_iface.c` does; not resolving lists fails six of its checks. No
+real hostapd has held a list from one.
 `ncfg_document_validate` does not check that a document read from JSON names
 only lists it carries; one compiled here always does.
 
