@@ -3584,9 +3584,11 @@ style-docs:
 # Two faults had been found in it by hand -- a missing `probe` block, and a
 # `mac_policy` value the compiler rejects.
 #
-# After `test`, because it compiles each block with the debug `ncfg` that the
-# test target has just built.
+# Against the C `ncfg`, which is what ships (0266), built here rather than
+# trusted to have been: a gate that fails for a missing binary is one that is
+# red for a reason unrelated to the example.
 example:
+	@$(MAKE) --no-print-directory -C c
 	@python3 tool/example_gate.py
 
 # The two programs compile the same configuration to the same document.

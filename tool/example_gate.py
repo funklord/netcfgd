@@ -47,7 +47,12 @@ import sys
 import tempfile
 
 EXAMPLE = "doc/netcfgd.conf.example"
-NCFG = "./target/debug/ncfg"
+# **The C, which is what ships** (0266). This read the Rust's debug build until
+# 2026-10-29, when an access point key the C had and the Rust did not -- 10.587's
+# `fast_roaming` -- was refused by the program nobody installs: `linkage`'s
+# reason for moving, met by this gate a release later. The block heads below
+# are still read out of the Rust's lowering, which knows the same eight.
+NCFG = "./c/ncfg"
 
 # Where the compiler decides what a top-level block is. The list is read from
 # it rather than written here, for the reason the planner's `FIRED_PHASES`
