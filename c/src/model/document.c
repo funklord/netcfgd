@@ -310,6 +310,85 @@ int ncfg_station_address_normalize(const char *text, char *out, size_t out_size,
 	return 1;
 }
 
+int ncfg_station_is_prefix(const char *text)
+{
+	size_t length = text ? strlen(text) : 0u;
+
+	return length > 0u && text[length - 1u] == '*';
+}
+
+int ncfg_station_prefix_normalize(const char *text, char *out, size_t out_size, char *err,
+    size_t err_size)
+{
+	char   separator;
+	size_t part;
+
+	if (!text || !out || out_size < NCFG_STATION_PREFIX_SIZE) {
+		ncfg_error_set(err, err_size, "a station prefix was normalised with nowhere to put it");
+		return 0;
+	}
+	separator = strchr(text, '-') ? '-' : ':';
+	/* `aa:bb:cc:*` and nothing else: three octets, the separator, the star. A
+	 * shorter or longer prefix is a different feature -- a mask -- and is
+	 * refused by name rather than read as the nearest thing to it. */
+	if (strlen(text) != NCFG_STATION_PREFIX_LEN || text[8] != separator || text[9] != '*') {
+		ncfg_error_set(err, err_size,
+		    "a station prefix is three octets and a star, such as `aa:bb:cc:*` -- the "
+		    "manufacturer's part of an address; `%s` is not one", text);
+		return 0;
+	}
+	for (part = 0u; part < 3u; part++) {
+		const char *at = text + part * 3u;
+
+		if (!hex_digit(at[0]) || !hex_digit(at[1]) || (part < 2u && at[2] != separator)) {
+			ncfg_error_set(err, err_size,
+			    "a station prefix is three two-digit hex octets and a star, such as "
+			    "`aa:bb:cc:*`; `%s` is not one", text);
+			return 0;
+		}
+		out[part * 3u] = lower_hex(at[0]);
+		out[part * 3u + 1u] = lower_hex(at[1]);
+		out[part * 3u + 2u] = ':';
+	}
+	out[9] = '*';
+	out[NCFG_STATION_PREFIX_LEN] = '\0';
+	return 1;
+}
+
+int ncfg_station_entry_matches(const char *entry, const char *address)
+{
+	if (!entry || !address) {
+		return 0;
+	}
+	if (ncfg_station_is_prefix(entry)) {
+		/* `aa:bb:cc:` -- the nine characters before the star. */
+		return strlen(entry) == NCFG_STATION_PREFIX_LEN &&
+		    strlen(address) == NCFG_STATION_ADDRESS_LEN &&
+		    strncmp(entry, address, NCFG_STATION_PREFIX_LEN - 1u) == 0;
+	}
+	return strcmp(entry, address) == 0;
+}
+
+int ncfg_access_control_names(const ncfg_access_control_t *acl, const char *address)
+{
+	size_t at;
+
+	if (!acl || !address) {
+		return 0;
+	}
+	for (at = 0; at < acl->station_count; at++) {
+		if (ncfg_station_entry_matches(acl->stations[at], address)) {
+			return 1;
+		}
+	}
+	for (at = 0; at < acl->prefix_count; at++) {
+		if (ncfg_station_entry_matches(acl->prefixes[at], address)) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 const char *ncfg_usable_name(const char *name)
 {
 	size_t at;
@@ -1992,6 +2071,10 @@ static const ncfg_field_t access_control_fields[] = {
 	{ .name = "stations", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_access_control_t, stations),
 	    .count_offset = offsetof(ncfg_access_control_t, station_count) },
+	/* Left out when empty, which is every list without a prefix (10.591). */
+	{ .name = "prefixes", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_access_control_t, prefixes),
+	    .count_offset = offsetof(ncfg_access_control_t, prefix_count) },
 	/* Both left out when empty, which is every block naming no host list, so
 	 * those documents are byte for byte what they were (10.591). */
 	{ .name = "lists", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,

@@ -141,6 +141,7 @@
 #include "ncfg/base.h"
 #include "ncfg/document.h"
 #include "ncfg/hooks.h"
+#include "ncfg/hostapd.h"
 #include "ncfg/netlink.h"
 #include "ncfg/observed.h"
 #include "ncfg/qdisc.h"
@@ -1415,6 +1416,24 @@ int ncfg_observe_resolv_currency(ncfg_observed_t *observed, const char *resolv_c
  */
 int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, int patience_ms,
     char *err, size_t err_size);
+
+/*
+ * Every station associated with a hostapd, by walking `STA-FIRST` and
+ * `STA-NEXT`, sorted by address.
+ *
+ * **One walk for its two readers**: the observation above, which needs the
+ * addresses to expand a deny list's prefix against (10.591), and `ap_stations`,
+ * which reports every field. Bounded by hostapd's own `aid` space, because a
+ * reply that echoed an address back unchanged would otherwise spin for ever.
+ * The walk ends on an empty reply or `FAIL`, which is what hostapd answers past
+ * the last station. 1 with `*out` the caller's to free (NULL for none); 0 when
+ * the list would not fit in memory, which is refused rather than reported
+ * short.
+ */
+#define NCFG_HOSTAPD_STATION_WALK_MAX 2007
+struct ncfg_supplicant_client;
+int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
+    ncfg_hostapd_station_t **out, size_t *count);
 
 /*
  * What each running supplicant is holding, and whether it answers.

@@ -2211,7 +2211,7 @@ static void an_access_point_keeps_the_lists_it_names(void)
 	    "\"lists\":[\"kids\",\"parents\"],\"written\":[\"00:00:00:00:00:03\"]}},"
 	    "{\"id\":\"guest\",\"ssid\":\"67\",\"device\":\"wlan1\","
 	    "\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"deny\","
-	    "\"stations\":[\"00:00:00:00:00:09\"]}}"
+	    "\"stations\":[\"00:00:00:00:00:09\"],\"prefixes\":[\"aa:bb:cc:*\"]}}"
 	    "],\"globals\":{}}\n"
 	    "{\"response\":\"status\",\"links\":[],\"addresses\":[],\"routes\":[]}\n")) {
 		return;
@@ -2223,8 +2223,8 @@ static void an_access_point_keeps_the_lists_it_names(void)
 		equals("one naming lists is shown naming them, then what was written beside them",
 		    points.items[0].stations,
 		    "@host_list:kids @host_list:parents 00:00:00:00:00:03");
-		equals("one naming none is shown its stations, as before", points.items[1].stations,
-		    "00:00:00:00:00:09");
+		equals("one naming none is shown its stations, and its prefixes beside them",
+		    points.items[1].stations, "00:00:00:00:00:09 aa:bb:cc:*");
 	} else {
 		ok("both of them", 0, NULL);
 	}

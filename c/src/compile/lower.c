@@ -517,8 +517,18 @@ static void resolve_host_lists(ncfg_lower_ctx_t *ctx, const deferred_t *referrer
 				continue;
 			}
 			for (mac = 0; mac < list->mac_count; mac++) {
-				(void)ncfg_push_string(ctx, &acl->stations, &acl->station_count,
-				    list->mac[mac]);
+				if (!ncfg_station_is_prefix(list->mac[mac])) {
+					(void)ncfg_push_string(ctx, &acl->stations, &acl->station_count,
+					    list->mac[mac]);
+				} else if (acl->policy == NCFG_ACL_POLICY_ALLOW) {
+					ncfg_diag(ctx, referrers[i].span,
+					    "access point `%s` allows host list `%s`, which holds the prefix "
+					    "`%s`: %s", referrers[i].name, acl->lists[at], list->mac[mac],
+					    NCFG_ALLOW_PREFIX_REFUSAL);
+				} else {
+					(void)ncfg_push_string(ctx, &acl->prefixes, &acl->prefix_count,
+					    list->mac[mac]);
+				}
 			}
 		}
 	}

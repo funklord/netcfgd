@@ -938,6 +938,35 @@ const char *ncfg_usable_name(const char *name);
 int ncfg_station_address_normalize(const char *text, char *out, size_t out_size, char *err,
     size_t err_size);
 
+/*
+ * An OUI prefix, `aa:bb:cc:*`: every station whose address begins with those
+ * three octets (project.md 10.591).
+ *
+ * **Written with the star, and held with it**, so the one spelling in a
+ * document is the one an operator wrote and a reader cannot mistake a prefix
+ * for an address. Ten characters and the NUL. `:` or `-` as the separator,
+ * either case, exactly three two-digit parts before the star.
+ *
+ * **Never handed to hostapd.** Measured against hostapd 2.10 in a vm with two
+ * hwsim radios: `00:11:22:00:00:00/ff:ff:ff:00:00:00` in an accept file is
+ * read as the exact address `00:11:22:00:00:00` and the mask dropped without a
+ * word, and `ADD_MAC` over the control socket does the same and answers `OK`.
+ * A prefix is therefore expanded into the addresses it matches before
+ * anything reaches hostapd -- see `ncfg_access_control_names`.
+ */
+#define NCFG_STATION_PREFIX_LEN  10u
+#define NCFG_STATION_PREFIX_SIZE (NCFG_STATION_PREFIX_LEN + 1u)
+
+/* Whether `text` is written as a prefix -- ends in `*` -- which decides which of
+ * the two normalisers says what is wrong with it. */
+int ncfg_station_is_prefix(const char *text);
+int ncfg_station_prefix_normalize(const char *text, char *out, size_t out_size, char *err,
+    size_t err_size);
+
+/* Whether one normalised entry -- an address or a prefix -- covers a normalised
+ * address. */
+int ncfg_station_entry_matches(const char *entry, const char *address);
+
 /* The language's word for the same kind -- `wireguard` and `openvpn` where the
  * document says `wire_guard` and `open_vpn`, and the same word everywhere
  * else. What an operator reads against the file they wrote uses this one; what
@@ -1531,6 +1560,16 @@ typedef struct {
 	char  **stations;
 	size_t  station_count;
 	/*
+	 * OUI prefixes, `aa:bb:cc:*`, resolved from the block and its lists as
+	 * `stations` is (10.591). **On a deny list only**: hostapd cannot hold
+	 * one (`ncfg_station_prefix_normalize` has the measurement), so the
+	 * planner expands each into the stations it matches among those seen --
+	 * associated now, or already on hostapd's list -- and a station refused
+	 * by an allow list is never seen to expand against. Omitted when empty.
+	 */
+	char  **prefixes;
+	size_t  prefix_count;
+	/*
 	 * The `host_list`s this block names, by name, sorted (project.md 10.591).
 	 *
 	 * **`stations` above is still the whole answer**: the lowerer resolves
@@ -1550,13 +1589,25 @@ typedef struct {
 } ncfg_access_control_t;
 
 /*
+ * Whether an access control list names a station: one of its `stations`, or
+ * covered by one of its `prefixes`. NULL names nothing.
+ *
+ * **One answer for every reader of the list** -- the planner deciding what
+ * hostapd should hold and `ap_stations` saying whether a connected station is
+ * one the document lists -- because a prefix gave the question a second half,
+ * and a reader that compared `stations` alone would call a prefix-denied
+ * station unlisted.
+ */
+int ncfg_access_control_names(const ncfg_access_control_t *acl, const char *address);
+
+/*
  * A named list of hosts that other blocks refer to (project.md 10.591).
  *
- * **Exact addresses only, for now**: `mac` holds lowercase
- * `aa:bb:cc:dd:ee:ff`, sorted and deduplicated as an access point's station
- * list is. Wildcards, and hosts that were seen rather than written, are the
- * later halves 10.591 describes; a list is configuration, and what has been
- * observed is not stored here.
+ * `mac` holds lowercase `aa:bb:cc:dd:ee:ff` addresses and `aa:bb:cc:*` OUI
+ * prefixes, sorted and deduplicated as an access point's station list is.
+ * Hosts that were seen rather than written are the later half 10.591
+ * describes; a list is configuration, and what has been observed is not
+ * stored here.
  */
 typedef struct {
 	char   *name; /* the label, and the sorting key */

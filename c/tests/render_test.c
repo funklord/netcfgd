@@ -866,6 +866,14 @@ static void a_host_list_round_trips(void)
 	check(text && strstr(text, "allow = [\"@host_list:office\"]") != NULL,
 	    "  the access point is saved naming the list, not its addresses");
 	free(text);
+	/* A prefix, with a list and without one (10.591). */
+	round_trips("host_list \"vendors\" { mac = [\"de:ad:be:*\"] }\n"
+	    "access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { deny = [\"@host_list:vendors\", \"aa:bb:cc:*\"] }\n}\n",
+	    "a prefix in a list and one beside it survive a round trip");
+	round_trips("access_point \"Home\" {\n\tdevice = \"wlan0\"\n\twifi { psk = \"@secret:ap\" }\n"
+	    "\taccess_control { deny = [\"aa:bb:cc:*\", \"00:00:00:00:00:01\"] }\n}\n",
+	    "and so does one written with no list at all");
 }
 
 /* A `mesh` round-trips, SAE and open alike (10.588). */

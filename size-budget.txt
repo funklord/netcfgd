@@ -970,4 +970,12 @@ netcfgd
 # field tables), the rest alignment.
 #
 # Recorded at 1238700 rather than left riding the tolerance.
-total 1238700
+#
+# Then OUI prefixes on a deny list, 2026-10-29, +4,392 bytes to 1,243,056
+# (project.md 10.591) -- the same figure as host lists, measured twice rather
+# than copied: the prefix normaliser and its refusals, the planner's expansion,
+# and the station walk moving from the daemon to the observer, which is a move
+# and costs nothing but the observation's half of it.
+#
+# Recorded at 1243100 rather than left riding the tolerance.
+total 1243100

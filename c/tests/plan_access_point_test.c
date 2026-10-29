@@ -651,6 +651,62 @@ static void a_policy_that_moved_restarts_rather_than_being_half_applied(void)
 	planfix_release(plan, document, observed);
 }
 
+/* Whether a plan carries this access control op for this station. */
+static int acl_op_for(const ncfg_plan_t *plan, const char *name, const char *station)
+{
+	size_t i;
+
+	for (i = 0; plan && i < plan->action_count; i++) {
+		const ncfg_op_t *op = &plan->actions[i].op;
+
+		if (strcmp(ncfg_op_name(op), name) == 0 && op->u.access_control.station &&
+		    strcmp(op->u.access_control.station, station) == 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * An OUI prefix on a deny list, expanded against what was seen (10.591).
+ *
+ * hostapd drops a mask without a word -- measured -- so the planner turns
+ * `aa:bb:cc:*` into the stations it has seen with that prefix. Four stations
+ * carry the four cases: one associated and matching, which is denied; one
+ * associated and not matching, which is left alone; one already on hostapd's
+ * deny list and matching, which stays although it is no longer associated --
+ * the half that stops a kicked station being released to come straight back;
+ * and one held and matching nothing, which is removed as before.
+ */
+static void a_prefix_on_a_deny_list_is_the_stations_seen_with_it(void)
+{
+	ncfg_document_t *document;
+	ncfg_observed_t *observed;
+	ncfg_plan_t     *plan = planfix_plan(RADIO, RADIO_INTERFACE, "",
+	    POINT(",\"security\":{\"type\":\"open\"},\"access_control\":{\"policy\":\"deny\","
+	    "\"stations\":[],\"prefixes\":[\"aa:bb:cc:*\"]}"),
+	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)
+	    ",\"access_control\":{\"policy\":{\"set\":\"deny\"},"
+	    "\"denied\":[\"aa:bb:cc:00:00:02\",\"11:22:33:00:00:09\"],\"accepted\":[],"
+	    "\"associated\":[\"aa:bb:cc:00:00:01\",\"de:ad:be:00:00:01\"]}"),
+	    &document, &observed);
+
+	check(plan && acl_op_for(plan, "access_control.add", "aa:bb:cc:00:00:01"),
+	    "an associated station a deny prefix covers is denied");
+	check(plan && !acl_op_for(plan, "access_control.add", "de:ad:be:00:00:01"),
+	    "and one it does not cover is left alone");
+	check(plan && !acl_op_for(plan, "access_control.del", "aa:bb:cc:00:00:02"),
+	    "and one already denied that it covers stays, though it is no longer associated");
+	check(plan && acl_op_for(plan, "access_control.del", "11:22:33:00:00:09"),
+	    "while one held that nothing covers is removed, as before");
+	check(plan && planfix_count(plan, "access_control.add") == 1u &&
+	    planfix_count(plan, "access_control.del") == 1u,
+	    "and that is the whole of the change");
+	check(plan && !planfix_action(plan, "backend.stop"),
+	    "without restarting the access point");
+	planfix_release(plan, document, observed);
+}
+
 /*
  * Before the station lists, because a restart makes them moot: the access
  * point comes back with the whole configuration rebuilt, and converging a list
@@ -961,6 +1017,7 @@ int main(void)
 	an_access_point_netcfgd_has_no_record_for_is_said_rather_than_guessed_at();
 	a_policy_that_moved_restarts_rather_than_being_half_applied();
 	a_restarted_access_point_has_its_station_lists_left_alone();
+	a_prefix_on_a_deny_list_is_the_stations_seen_with_it();
 	only_the_first_access_point_on_a_radio_is_restarted();
 	an_access_point_that_has_to_listen_first_is_said();
 	an_access_point_with_no_address_is_said();

@@ -1030,6 +1030,14 @@ void ncfg_render_access_point(const ncfg_access_point_t *point, const ncfg_overr
 			}
 			ncfg_render_quote(&body, addresses[i]);
 		}
+		/* Where no list is named, `written` was not kept and the prefixes are
+		 * the other half of what was written (10.591). */
+		for (i = 0; !acl->list_count && i < acl->prefix_count; i++, said++) {
+			if (said) {
+				ncfg_buf_add_text(&body, ", ");
+			}
+			ncfg_render_quote(&body, acl->prefixes[i]);
+		}
 		ncfg_buf_add_text(&body, "] }\n");
 	}
 

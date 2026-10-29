@@ -968,6 +968,14 @@ typedef struct {
 	size_t                 denied_count;
 	char                 **accepted;
 	size_t                 accepted_count;
+	/*
+	 * The stations associated with it now, normalised and sorted (10.591).
+	 * What a prefix on a deny list is expanded against: hostapd holds exact
+	 * addresses, so `aa:bb:cc:*` means the stations seen with that prefix.
+	 * Left out when empty.
+	 */
+	char                 **associated;
+	size_t                 associated_count;
 } ncfg_observed_access_control_t;
 
 /*

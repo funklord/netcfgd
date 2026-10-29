@@ -1421,6 +1421,44 @@ static void host_list_cases(void)
 	refuses("host_list \"two words\" { mac = [] }\n", "cannot name a host list",
 	    "a name a reference could not spell is refused");
 
+	/* OUI prefixes (10.591): a deny list's, written or through a list. */
+	document = compiles(AP_OPEN
+	    "\taccess_control { deny = [\"AA-BB-CC-*\", \"@host_list:vendors\"] }\n}\n"
+	    "host_list \"vendors\" { mac = [\"de:ad:be:*\", \"00:00:00:00:00:07\"] }\n",
+	    "a prefix on a deny list, written and through a list");
+	if (document) {
+		acl = document->access_points[0].access_control;
+		check(acl && acl->prefix_count == 2 && strcmp(acl->prefixes[0], "aa:bb:cc:*") == 0 &&
+		    strcmp(acl->prefixes[1], "de:ad:be:*") == 0,
+		    "  both prefixes are resolved, lowercased and with colons");
+		check(acl && acl->station_count == 1 &&
+		    strcmp(acl->stations[0], "00:00:00:00:00:07") == 0,
+		    "  and kept apart from the stations, which hostapd can hold");
+		check(acl && acl->written_count == 1 && strcmp(acl->written[0], "aa:bb:cc:*") == 0,
+		    "  and the one written beside the list is kept as written");
+		check(document->host_lists[0].mac_count == 2 &&
+		    strcmp(document->host_lists[0].mac[1], "de:ad:be:*") == 0,
+		    "  and the list keeps its prefix as it was given");
+		check(acl && ncfg_access_control_names(acl, "aa:bb:cc:12:34:56") &&
+		    ncfg_access_control_names(acl, "00:00:00:00:00:07") &&
+		    !ncfg_access_control_names(acl, "aa:bb:cd:12:34:56"),
+		    "  and the list names what its prefixes cover, and nothing else");
+		ncfg_document_free(document);
+	}
+	/* hostapd cannot hold a prefix and a refused station is never seen, so
+	 * there is nothing to expand an allowed prefix against. */
+	refuses(AP_OPEN "\taccess_control { allow = [\"aa:bb:cc:*\"] }\n}\n",
+	    "works on a deny list only", "a prefix on an allow list is refused");
+	refuses(AP_OPEN "\taccess_control { allow = [\"@host_list:vendors\"] }\n}\n"
+	    "host_list \"vendors\" { mac = [\"de:ad:be:*\"] }\n",
+	    "holds the prefix", "and so is one reached through a list an allow names");
+	refuses("host_list \"vendors\" { mac = [\"aa:bb:*\"] }\n", "three octets and a star",
+	    "a prefix shorter than the manufacturer's part is refused by name");
+	refuses("host_list \"vendors\" { mac = [\"aa:bb:cc:dd:*\"] }\n",
+	    "three octets and a star", "and so is a longer one");
+	refuses("host_list \"vendors\" { mac = [\"aa:bb:zz:*\"] }\n", "hex octets",
+	    "and one that is not hex");
+
 	/* Two lists and a literal on one side: the union, still one list. */
 	document = compiles(AP_OPEN
 	    "\taccess_control { deny = [\"@host_list:a\", \"@host_list:b\"] }\n}\n"

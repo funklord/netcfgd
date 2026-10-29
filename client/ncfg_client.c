@@ -1975,7 +1975,7 @@ static char *joined_words(const ncfg_json_doc_t *doc, uint32_t array);
  * writes the addresses a list stood for and drops the list -- the access point
  * then stops following it, and nothing says so. Where `lists` is present the
  * answer is each as `@host_list:NAME`, then the addresses written beside
- * them; where it is absent `stations` is exactly what was written.
+ * them; where it is absent what was written is `stations` and `prefixes`.
  */
 static char *editable_stations(const ncfg_json_doc_t *doc, uint32_t acl)
 {
@@ -1986,7 +1986,28 @@ static char *editable_stations(const ncfg_json_doc_t *doc, uint32_t acl)
 	size_t   length;
 
 	if (count == 0) {
-		return joined_words(doc, ncfg_json_member(doc, acl, "stations"));
+		/* With no list, what was written is the stations and the prefixes,
+		 * which the document keeps apart because hostapd can hold only the
+		 * first. */
+		char *stations = joined_words(doc, ncfg_json_member(doc, acl, "stations"));
+		char *prefixes = joined_words(doc, ncfg_json_member(doc, acl, "prefixes"));
+
+		if (!stations || !prefixes) {
+			free(stations);
+			free(prefixes);
+			return NULL;
+		}
+		if (!*prefixes) {
+			free(prefixes);
+			return stations;
+		}
+		joined = malloc(strlen(stations) + 1u + strlen(prefixes) + 1u);
+		if (joined) {
+			(void)sprintf(joined, "%s%s%s", stations, *stations ? " " : "", prefixes);
+		}
+		free(stations);
+		free(prefixes);
+		return joined;
 	}
 	written = joined_words(doc, ncfg_json_member(doc, acl, "written"));
 	if (!written) {

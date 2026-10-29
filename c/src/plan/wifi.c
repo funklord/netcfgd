@@ -680,6 +680,57 @@ static void converge_list(ncfg_builder_t *builder, const char *device, int list,
 	}
 }
 
+/*
+ * What a deny list should hold once its prefixes are expanded (10.591).
+ *
+ * hostapd holds exact addresses -- it drops a mask without a word, measured --
+ * so `aa:bb:cc:*` becomes the stations seen with that prefix. Two sources, and
+ * the second is what keeps this from oscillating: a denied station is
+ * disassociated, so it is not associated on the next pass, and a set drawn from
+ * the associated stations alone would release it to come straight back. So an
+ * entry hostapd already holds that a prefix covers stays, alongside every
+ * station associated now that one covers. The document's own stations come
+ * first and are kept whatever is seen.
+ *
+ * Returns a set the caller frees (the strings are borrowed), or NULL with a
+ * zero count when there is nothing to hold; `*failed` on out of memory.
+ */
+static char **expand_prefixes(const ncfg_access_control_t *wanted,
+    const ncfg_observed_access_control_t *live, char *const *held, size_t held_count,
+    size_t *count, int *failed)
+{
+	size_t  room = wanted->station_count + held_count + live->associated_count;
+	char  **set;
+	size_t  at;
+
+	*count = 0;
+	*failed = 0;
+	if (room == 0) {
+		return NULL;
+	}
+	set = calloc(room, sizeof(*set));
+	if (!set) {
+		*failed = 1;
+		return NULL;
+	}
+	for (at = 0; at < wanted->station_count; at++) {
+		set[(*count)++] = wanted->stations[at];
+	}
+	for (at = 0; at < held_count; at++) {
+		if (ncfg_access_control_names(wanted, held[at]) &&
+		    !lists(set, *count, held[at])) {
+			set[(*count)++] = held[at];
+		}
+	}
+	for (at = 0; at < live->associated_count; at++) {
+		if (ncfg_access_control_names(wanted, live->associated[at]) &&
+		    !lists(set, *count, live->associated[at])) {
+			set[(*count)++] = live->associated[at];
+		}
+	}
+	return set;
+}
+
 void ncfg_plan_access_control(ncfg_builder_t *builder)
 {
 	size_t at;
@@ -777,6 +828,24 @@ void ncfg_plan_access_control(ncfg_builder_t *builder)
 				    both[i], &live_count);
 				int          mine = has_policy && policy == both[i];
 
+				/* A prefix is only ever on a deny list -- the compiler refuses
+				 * one on an allow list -- and is expanded here, against what
+				 * this observation saw. */
+				if (mine && wanted && wanted->prefix_count && both[i] == NCFG_ACL_POLICY_DENY) {
+					size_t  want_count = 0;
+					int     failed = 0;
+					char  **want = expand_prefixes(wanted, live, held, live_count,
+					    &want_count, &failed);
+
+					if (failed) {
+						builder->plan->failed = 1;
+						continue;
+					}
+					converge_list(builder, device, both[i], want, want_count, held,
+					    live_count);
+					free(want);
+					continue;
+				}
 				converge_list(builder, device, both[i],
 				    mine && wanted ? wanted->stations : NULL,
 				    mine && wanted ? wanted->station_count : 0u, held,

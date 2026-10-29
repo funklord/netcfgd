@@ -757,8 +757,9 @@ refused:
 static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_access_control_t *out)
 {
-	int    policy = -1;
-	size_t at;
+	int         policy = -1;
+	size_t      at;
+	ncfg_span_t prefix_span = block->span;
 
 	memset(out, 0, sizeof(*out));
 	for (at = 0; at < block->items.count; at++) {
@@ -819,6 +820,20 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 				(void)ncfg_push_string(ctx, &out->lists, &out->list_count, name);
 				continue;
 			}
+			if (ncfg_station_is_prefix(words.at[i].text)) {
+				char prefix[NCFG_STATION_PREFIX_SIZE];
+
+				if (!ncfg_station_prefix_normalize(words.at[i].text, prefix, sizeof(prefix),
+				        why, sizeof(why))) {
+					ncfg_diag(ctx, words.at[i].span, "%s", why);
+					continue;
+				}
+				/* Refused on an allow list once the side is known, below. */
+				prefix_span = words.at[i].span;
+				(void)ncfg_push_string(ctx, &out->written, &out->written_count, prefix);
+				(void)ncfg_push_string(ctx, &out->prefixes, &out->prefix_count, prefix);
+				continue;
+			}
 			station = ncfg_normalize_station(ctx, words.at[i].text, why, sizeof(why));
 			if (!station) {
 				ncfg_diag(ctx, words.at[i].span, "%s", why);
@@ -828,6 +843,11 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 			(void)ncfg_push_string_owned(ctx, &out->stations, &out->station_count, station);
 		}
 		ncfg_words_free(&words);
+	}
+
+	if (policy == NCFG_ACL_POLICY_ALLOW && out->prefix_count) {
+		ncfg_diag(ctx, prefix_span, "%s", NCFG_ALLOW_PREFIX_REFUSAL);
+		goto refused;
 	}
 
 	/* What was written is kept only beside a list: without one it is the
@@ -853,6 +873,7 @@ static int lower_access_control(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *b
 
 refused:
 	ncfg_strings_free(out->stations, out->station_count);
+	ncfg_strings_free(out->prefixes, out->prefix_count);
 	ncfg_strings_free(out->lists, out->list_count);
 	ncfg_strings_free(out->written, out->written_count);
 	memset(out, 0, sizeof(*out));
@@ -887,7 +908,7 @@ int ncfg_is_host_list_name(const char *name)
  *
  *     host_list "office" { mac = ["aa:bb:cc:dd:ee:ff", ...] }
  *
- * Exact addresses only. A list is a set, so the order and the repeats are
+ * Exact addresses, and OUI prefixes `aa:bb:cc:*`. A list is a set, so the order and the repeats are
  * the canonical pass's to remove, and an empty one is accepted: it is a list
  * somebody is about to fill, and the access point naming it says what that
  * means for it.
@@ -939,8 +960,20 @@ int ncfg_lower_host_list(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *merge
 		}
 		for (at = 0; at < words.count; at++) {
 			char  why[NCFG_ERROR_MAX];
-			char *mac = ncfg_normalize_station(ctx, words.at[at].text, why, sizeof(why));
+			char *mac;
 
+			if (ncfg_station_is_prefix(words.at[at].text)) {
+				char prefix[NCFG_STATION_PREFIX_SIZE];
+
+				if (!ncfg_station_prefix_normalize(words.at[at].text, prefix, sizeof(prefix),
+				        why, sizeof(why))) {
+					ncfg_diag(ctx, words.at[at].span, "%s", why);
+					continue;
+				}
+				(void)ncfg_push_string(ctx, &out->mac, &out->mac_count, prefix);
+				continue;
+			}
+			mac = ncfg_normalize_station(ctx, words.at[at].text, why, sizeof(why));
 			if (!mac) {
 				ncfg_diag(ctx, words.at[at].span, "%s", why);
 				continue;

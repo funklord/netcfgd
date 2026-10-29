@@ -42,6 +42,7 @@
 #include "observe_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/buf.h"
 #include "ncfg/hostapd.h"
 #include "ncfg/supplicant.h"
 
@@ -140,6 +141,98 @@ static int list_of(ncfg_supplicant_client_t *client, const char *command, char *
 	return ncfg_hostapd_parse_acl_show(body, out, count, why, sizeof(why));
 }
 
+static int by_address(const void *left, const void *right)
+{
+	return strcmp(((const ncfg_hostapd_station_t *)left)->address,
+	    ((const ncfg_hostapd_station_t *)right)->address);
+}
+
+int ncfg_observe_hostapd_stations(struct ncfg_supplicant_client *client,
+    ncfg_hostapd_station_t **out, size_t *count)
+{
+	ncfg_buf_t collected;
+	char       command[64];
+	char       body[NCFG_SUPPLICANT_REPLY_MAX];
+	char       why[NCFG_ERROR_MAX];
+	char      *bytes;
+	size_t     length = 0u;
+	size_t     at;
+
+	*out = NULL;
+	*count = 0u;
+	/*
+	 * **Walked into a buffer**, and an `ncfg_buf_t` rather than an array of
+	 * the bound: that is a quarter of a megabyte on the stack for a walk that
+	 * usually finds three. The buffer's failure is sticky and read once, and
+	 * `ncfg_buf_take` hands over memory from `malloc` -- aligned for any type,
+	 * which is what makes the cast below defined rather than merely working.
+	 */
+	ncfg_buf_init(&collected, 0);
+	(void)snprintf(command, sizeof(command), "%s", "STA-FIRST");
+	for (at = 0; at < NCFG_HOSTAPD_STATION_WALK_MAX; at++) {
+		ncfg_hostapd_station_t station;
+
+		if (!ncfg_supplicant_ask(client, command, body, sizeof(body), why, sizeof(why))) {
+			break;
+		}
+		if (!ncfg_hostapd_parse_station(body, &station)) {
+			break;
+		}
+		ncfg_buf_add(&collected, &station, sizeof(station));
+		if ((size_t)snprintf(command, sizeof(command), "STA-NEXT %s", station.address) >=
+		    sizeof(command)) {
+			break;
+		}
+	}
+	if (ncfg_buf_failed(&collected)) {
+		ncfg_buf_free(&collected);
+		return 0;
+	}
+	bytes = ncfg_buf_take(&collected, &length);
+	ncfg_buf_free(&collected);
+	*out = bytes ? (ncfg_hostapd_station_t *)(void *)bytes : NULL;
+	*count = *out ? length / sizeof(**out) : 0u;
+	/* By address: hostapd's walk is its hash order, which differs between runs
+	 * of one machine. */
+	if (*count > 1u) {
+		qsort(*out, *count, sizeof(**out), by_address);
+	}
+	return 1;
+}
+
+/* The addresses alone, for the observation. */
+static int associated_of(ncfg_supplicant_client_t *client, char ***out, size_t *count)
+{
+	ncfg_hostapd_station_t *found = NULL;
+	size_t                  found_count = 0u;
+	size_t                  at;
+
+	*out = NULL;
+	*count = 0u;
+	if (!ncfg_observe_hostapd_stations(client, &found, &found_count)) {
+		return 0;
+	}
+	if (found_count) {
+		*out = calloc(found_count, sizeof(**out));
+		if (!*out) {
+			free(found);
+			return 0;
+		}
+	}
+	for (at = 0; at < found_count; at++) {
+		(*out)[at] = observe_dup(found[at].address);
+		if (!(*out)[at]) {
+			ncfg_hostapd_stations_free(*out, at);
+			*out = NULL;
+			free(found);
+			return 0;
+		}
+	}
+	*count = found_count;
+	free(found);
+	return 1;
+}
+
 int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, int patience_ms,
     char *err, size_t err_size)
 {
@@ -161,8 +254,10 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		ncfg_observed_access_control_t *lists;
 		char                          **denied = NULL;
 		char                          **accepted = NULL;
+		char                          **associated = NULL;
 		size_t                          denied_count = 0;
 		size_t                          accepted_count = 0;
+		size_t                          associated_count = 0;
 
 		if (backend->kind != NCFG_BACKEND_ACCESS_POINT || !backend->running ||
 		    !backend->interface) {
@@ -196,6 +291,18 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 			ncfg_supplicant_client_free(client);
 			continue;
 		}
+		/*
+		 * Who is associated, on the same connection (10.591). Not a reason to
+		 * call the daemon unanswering when it fails: the lists above were
+		 * answered, and they are what converging needs. A prefix then has
+		 * nothing new to expand against this pass, which is the cautious
+		 * direction -- nothing is removed on the strength of it, because a
+		 * held entry is kept by the planner whether or not it is associated.
+		 */
+		if (!associated_of(client, &associated, &associated_count)) {
+			associated = NULL;
+			associated_count = 0;
+		}
 		ncfg_supplicant_client_free(client);
 		backend->answering.has = 1;
 		backend->answering.value = 1;
@@ -203,6 +310,7 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		if (!lists) {
 			ncfg_hostapd_stations_free(denied, denied_count);
 			ncfg_hostapd_stations_free(accepted, accepted_count);
+			ncfg_hostapd_stations_free(associated, associated_count);
 			ncfg_error_set(err, err_size,
 			    "out of memory recording what %s is admitting", backend->interface);
 			return 0;
@@ -212,6 +320,8 @@ int ncfg_observe_access_control(ncfg_observed_t *observed, const char *run_dir, 
 		lists->denied_count = denied_count;
 		lists->accepted = accepted;
 		lists->accepted_count = accepted_count;
+		lists->associated = associated;
+		lists->associated_count = associated_count;
 		ncfg_observed_access_control_free(backend->access_control);
 		backend->access_control = lists;
 		ncfg_observed_access_point_free(backend->started_with);

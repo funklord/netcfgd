@@ -443,6 +443,7 @@ void ncfg_document_canonicalize(ncfg_document_t *document)
 		 * to reconcile.
 		 */
 		sort_set(acl->stations, &acl->station_count);
+		sort_set(acl->prefixes, &acl->prefix_count);
 		/* The names of the lists, and what was written beside them, are sets
 		 * for the same reason (10.591). */
 		sort_set(acl->lists, &acl->list_count);

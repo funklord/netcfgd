@@ -12709,11 +12709,10 @@ this tree still holding for coordination.
   dialog `@host_list:NAME` plus the written addresses instead of the
   resolved set (`ncfg_client_access_points`), which the dialog was filling
   from and writing back.
-- **Scope: estate, assumed.** An access point's `access_control` travels,
-  so a list it names has to travel with it or arrive as a reference to
-  nothing; `mac` is kind `0x00080001`. Whether lists are estate-wide is
-  still the open question below, and this default follows the reference
-  rather than answering it.
+- **Scope: estate-wide**, decided by the holder 2026-10-29. It is also what
+  the reference needs: an access point's `access_control` travels, so a list
+  it names has to travel with it or arrive as a reference to nothing. `mac`
+  is kind `0x00080001`.
 
 Checked: `lower_test` (resolution across declaration order, repeats
 dropped, the missing and malformed refusals, two lists and an empty one, a
@@ -12724,7 +12723,58 @@ example` with the new block as a named exception, `registry`, `agree`.
 Sabotage: not resolving fails two `lower_test` checks; rendering the
 stations instead of the reference fails both `render_test` checks.
 
-**What it does not do yet**: wildcards, and a list on the firewall's side.
+### Built: OUI prefixes on a deny list, 2026-10-29
+
+Asked for by the holder: `"aa:bb:cc:*"`, the manufacturer's three octets and a
+star, in an `access_control` or a `host_list`, beside addresses and lists.
+
+**hostapd cannot hold one, and says nothing about it.** Measured in a vm
+with two hwsim radios and hostapd 2.10, the AP at `02:00:00:00:00:00` and a
+station at `02:00:00:00:01:00`:
+
+| accept list holds | `ACCEPT_ACL SHOW` | the station |
+|---|---|---|
+| the station's address | that address | associates |
+| `02:00:00:00:00:00/ff:ff:ff:00:00:00` in the file | `02:00:00:00:00:00` | refused |
+| a mask for another OUI | `aa:bb:cc:00:00:00` | refused |
+| that mask by `ADD_MAC`, which answers `OK` | `02:00:00:00:00:00` | refused |
+
+So a mask is read as one exact address, from the file and over the socket,
+and `aa:bb:cc:*` is refused outright. **A prefix is therefore expanded into
+the addresses it matches, and only on a deny list.** The planner denies every
+station it sees associated with the prefix -- the observation reads them by
+`STA-FIRST` and `STA-NEXT` on the connection it already makes for the lists,
+the walk `ap_stations` used and now shares -- and keeps every entry hostapd
+already holds that a prefix covers. The second half is what stops it
+oscillating: a denied station is disassociated, is not associated on the next
+pass, and a set drawn from the associated alone would release it to come
+straight back.
+
+**On an allow list a prefix is refused at compile time**, written or reached
+through a list: a station an allow list refuses never associates, so there is
+nothing to expand against. That changes when *seen* persists (fuzznet's
+record half, above), and not before.
+
+**What a deny prefix costs**: a matching station associates and is denied
+within a pass of the reconcile loop, and after a hostapd restart the window
+opens once more, because hostapd starts with the written addresses only.
+`ncfg_access_control_names` is the one answer to "does this list name that
+station", read by the planner and by `ap_stations`' `listed`, so `ncfg wifi
+clients` should flag a prefix-denied station still connected as it does a
+listed one -- by construction, since no test drives that request with a
+prefix.
+
+Checked: `lower_test` (normalised, kept apart from the stations, written and
+through a list, the allow refusals, short, long and non-hex prefixes),
+`render_test` (round trips with and without a list), `plan_access_point_test`
+(associated and covered is denied, associated and not is left, held and
+covered stays, held and not is removed), `client_test` (the editor's form),
+`tests/live/acl.sh` against the fake (the address goes out and the prefix
+never does, then it converges), the witness and `make example`. Sabotage:
+dropping the held half fails two planner checks; not reading the associated
+stations fails two live checks.
+
+**What it does not do yet**: a list on the firewall's side.
 **A changed list reaches a running access point**, through the planner's
 existing `access_control.add` and `del`: `tests/live/acl.sh` edits only the
 `host_list` block, the access point's block unchanged, and the joiner's
@@ -12738,10 +12788,9 @@ only lists it carries; one compiled here always does.
 
 ### Still open
 
-- Which wildcard forms: an OUI prefix, a mask, a name pattern.
-- Whether the lists themselves are per host or estate-wide. The data is per
-  host by the decision above; a list written once for every access point in a
-  site is the site model's question (0271).
+- Wildcard forms beyond the OUI prefix -- a mask, a name pattern -- are not
+  asked for. A mask meets the same hostapd limit and would expand the same
+  way.
 
 ## 10.590 The tray joins a saved network, which is the whole interaction it was for
 

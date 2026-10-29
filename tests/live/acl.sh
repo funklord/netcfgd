@@ -670,6 +670,33 @@ check "and so did the leaver's removal" \
 check "and then it has converged" \
 	"$(grep -c 'access_control\.' "$work/relisted-again.txt" || true)" "0"
 
+# ------------------------------------------- a prefix is the stations seen
+
+# 10.591. hostapd drops a mask without a word, so `aa:bb:cc:*` is expanded into
+# the associated stations that carry it -- here the fake's `aa:bb:cc:dd:ee:ff`,
+# associated and on no list. `00:11:22:33:44:55` is associated too and carries
+# another prefix: it is the control, and must not be denied.
+start_fake
+seed_run_state deny
+warm_fake || true
+write_config '	access_control { deny = ["aa:bb:cc:*"] }'
+warm_fake || true
+
+"$ncfg" plan > "$work/prefix.txt" 2>&1 || true
+check "an associated station a deny prefix covers is planned for the deny list" \
+	"$(grep -c 'access_control.add.*aa:bb:cc:dd:ee:ff' "$work/prefix.txt" || true)" "1"
+check "and the associated one it does not cover is not" \
+	"$(grep -c 'access_control.add.*00:11:22:33:44:55' "$work/prefix.txt" || true)" "0"
+"$ncfg" apply > "$work/prefix-apply.txt" 2>&1 || true
+wait_for_log 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:ff' || true
+check "the prefix's station went out over the wire as an address" \
+	"$(grep -c 'cmd: DENY_ACL ADD_MAC aa:bb:cc:dd:ee:ff' "$work/fake.log" || true)" "1"
+check "and the prefix itself never did" \
+	"$(grep -c 'ADD_MAC aa:bb:cc:\*' "$work/fake.log" || true)" "0"
+"$ncfg" plan > "$work/prefix-again.txt" 2>&1 || true
+check "and then it has converged" \
+	"$(grep -c 'access_control\.' "$work/prefix-again.txt" || true)" "0"
+
 echo
 if [ "$failures" -eq 0 ]; then
 	echo "acl.sh: all checks passed"

@@ -1061,7 +1061,12 @@ static const ncfg_field_t access_control_fields[] = {
 	    .count_offset = offsetof(ncfg_observed_access_control_t, denied_count) },
 	{ .name = "accepted", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_observed_access_control_t, accepted),
-	    .count_offset = offsetof(ncfg_observed_access_control_t, accepted_count) }
+	    .count_offset = offsetof(ncfg_observed_access_control_t, accepted_count) },
+	/* Left out when empty, so an observation with nobody associated -- and
+	 * every one before 10.591 -- is what it was. */
+	{ .name = "associated", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_observed_access_control_t, associated),
+	    .count_offset = offsetof(ncfg_observed_access_control_t, associated_count) }
 };
 static const ncfg_type_t access_control_type =
     TYPE("observed access control", access_control_fields);

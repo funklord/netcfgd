@@ -950,6 +950,24 @@
 #	mac = ["00:11:22:33:44:01", "00:11:22:33:44:02"]
 #}
 
+# A deny list, or a list it names, can also hold an OUI prefix -- the
+# manufacturer's three octets and a star. hostapd itself holds only exact
+# addresses (it drops a mask without saying so), so netcfgd denies each station
+# it sees associated with that prefix, within a pass of the reconcile loop, and
+# keeps it denied while hostapd runs. An allow list cannot take one: a station
+# it refuses never associates, so there is nothing to see. List the addresses
+# to allow instead.
+
+#access_point "Shop" {
+#	device = "wlan2"
+#	wifi {
+#		psk = "@secret:shop"
+#	}
+#	access_control {
+#		deny = ["de:ad:be:*", "00:11:22:33:44:09"]
+#	}
+#}
+
 #access_point "Family" {
 #	device = "wlan1"
 #	wifi {
