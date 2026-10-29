@@ -12618,6 +12618,17 @@ the two are byte-identical, measured by applying one config through each.
 `cli_test` holds the marks, the exit and the JSON; `hull-natcap` passes all
 its checks again.
 
+**Its `Fixes:` trailer names the wrong commit**, as 10.589's did: 7d10ed66
+says `7e13290e6ef8`; the commit is `7e13290e2bdb`. Pushed, so left, and
+recorded here where the next reader of either will look.
+
+**A firewall change with no confirm window now says so in the plan**, the
+same day: an `input` that drops the operator's ssh would leave the machine
+out of reach with nothing to put it back, and 10.546 is the holder's word that
+the control path is part of what is configured. The warning names
+`--confirm-within` and `global { confirm }`; a document whose `confirm`
+arms a window plans without it (`plan_setting_test`).
+
 ## 10.592 The firewall, enforced: host lists in its rules, and the slices to get there
 
 **Asked for by the holder 2026-10-29: host lists on the firewall side.** That

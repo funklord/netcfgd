@@ -214,6 +214,26 @@ static void the_firewall_is_planned_with_the_table(void)
 	    "  and the plan carries each rule by its identity");
 	planfix_release(plan, document, observed);
 
+	/* 10.546: a firewall change with no confirm window says so, and one with a
+	 * window, from the document's `confirm`, does not. */
+	plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, "\"links\":[]", &document, &observed);
+	check(plan && planfix_warned(plan, "no confirm window armed"),
+	    "a firewall change with no confirm window warns that it could cut this connection");
+	planfix_release(plan, document, observed);
+	{
+		ncfg_document_t *armed = planfix_document("", "", "", FIREWALL_DOCUMENT);
+
+		if (armed) {
+			armed->globals.confirm_default.has = 1;
+			armed->globals.confirm_default.value = 60;
+			observed = planfix_observed("\"links\":[]");
+			plan = observed ? ncfg_plan_build(armed, observed, NULL, NULL, 0) : NULL;
+			check(plan && !planfix_warned(plan, "no confirm window armed"),
+			    "  and one under the document's confirm window does not");
+			planfix_release(plan, armed, observed);
+		}
+	}
+
 	observed_firewall(seen, sizeof(seen), 22, NULL);
 	plan = planfix_plan("", "", "", FIREWALL_DOCUMENT, seen, &document, &observed);
 	check(plan && planfix_count(plan, "nftables.replace") == 0u,

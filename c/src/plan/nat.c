@@ -381,6 +381,21 @@ void ncfg_plan_nat(ncfg_builder_t *builder)
 		free(wanted);
 		return;
 	}
+	/*
+	 * **A firewall change can cut the connection it is applied over** -- an
+	 * `input` that drops the operator's ssh -- and 10.546 is the holder's
+	 * word that the control path is part of what is configured. A confirm
+	 * window is what brings a machine back from that, so a change with none
+	 * says so before it runs rather than after the machine is out of reach.
+	 */
+	if (!firewall_same && desired->firewall &&
+	    !ncfg_plan_confirm_window(desired, builder->options).has) {
+		ncfg_plan_warn(builder->plan, NULL,
+		    "this changes the firewall with no confirm window armed: a rule or policy that "
+		    "drops the connection this is applied over would leave the machine out of reach "
+		    "with nothing to put it back. Apply with `--confirm-within 60`, or set "
+		    "`global { confirm = 60 }` so every change carries one");
+	}
 	memset(&op, 0, sizeof(op));
 	op.kind = NCFG_OP_NFTABLES_REPLACE;
 	op.u.nftables.uplinks = (const char *const *)wanted;
