@@ -4,10 +4,11 @@
  * WHY IT IS HERE
  *   The Rust keeps this in `netcfgd-model` so that the hash a hook is written
  *   with and the hash checked before it is executed cannot disagree.
- *   `document.h` is final and carries no hash, so the port's one copy lives
- *   beside the module that needs it first and every other caller uses this
- *   one. Two implementations of a digest is a hook refused at execution time
- *   for a difference nobody can see.
+ *   `document.h` is final and carries no hash, so the port has one copy and
+ *   every caller uses it. Two implementations of a digest is a hook refused
+ *   at execution time for a difference nobody can see. It lived in `host`
+ *   beside its first caller until the model needed it (`sha256.h` says why
+ *   it moved to `base`).
  *
  * WHY NOT A LIBRARY
  *   netcfgd links libc and the kernel and nothing else; taking OpenSSL for
@@ -16,7 +17,7 @@
  *   55/56/64-byte padding boundaries, because an implementation that is nearly
  *   right is worth nothing and looks fine.
  */
-#include "ncfg/hooks.h"
+#include "ncfg/sha256.h"
 
 #include <stdint.h>
 #include <string.h>

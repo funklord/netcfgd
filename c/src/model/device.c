@@ -53,7 +53,7 @@
  *   subject it is about.
  */
 #include "ncfg/document.h"
-#include "ncfg/hooks.h"
+#include "ncfg/sha256.h"
 
 #include <ctype.h>
 #include <string.h>

@@ -42,10 +42,10 @@
  * WHERE THE HASH LIVES
  *   The Rust keeps `sha256_hex` in `netcfgd-model` so that the hash written
  *   here and the hash checked before execution cannot disagree. `document.h`
- *   is final and carries no hash, so the one implementation is here and the
- *   runner calls it rather than growing a second: two implementations of one
- *   digest is a hook that is refused at execution time for a difference nobody
- *   can see.
+ *   is final and carries no hash, so there is one implementation -- in `base`
+ *   since 10.587, `sha256.h` -- and the runner calls it rather than growing a
+ *   second: two implementations of one digest is a hook that is refused at
+ *   execution time for a difference nobody can see.
  */
 #ifndef NCFG_HOOKS_H
 #define NCFG_HOOKS_H
@@ -54,17 +54,8 @@
 
 #include "ncfg/document.h"
 #include "ncfg/lower.h"
-
-/* 64 hex digits and the terminator. */
-#define NCFG_SHA256_HEX_SIZE 65
-
-/*
- * SHA-256 of `length` bytes, as lowercase hex, NUL-terminated.
- *
- * `out` is `NCFG_SHA256_HEX_SIZE` bytes. Never fails: there is nothing to
- * allocate and no input it refuses.
- */
-void ncfg_sha256_hex(const void *bytes, size_t length, char *out);
+/* The digest, which is `base`'s now; see `sha256.h`. */
+#include "ncfg/sha256.h"
 
 /*
  * The path a document gets when nothing was written.
