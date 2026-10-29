@@ -2311,7 +2311,8 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	    "{\"response\":\"document\",\"schema_version\":1,\"access_points\":["
 	    "{\"id\":\"wide\",\"ssid\":\"77\",\"device\":\"wlan0\","
 	    "\"security\":{\"type\":\"open\"},\"hidden\":false,\"width\":160,"
-	    "\"steering\":{\"band\":true}},"
+	    "\"neighbour_reports\":true,\"steering\":{\"signal\":-75,\"band\":true},"
+	    "\"fast_roaming\":true},"
 	    "{\"id\":\"small\",\"ssid\":\"73\",\"device\":\"wlan1\","
 	    "\"security\":{\"type\":\"open\"},\"hidden\":false}"
 	    "],\"globals\":{}}\n"
@@ -2332,10 +2333,19 @@ static void what_the_wifi_dialogs_cannot_carry_is_named(void)
 	got = ncfg_client_access_points(staged.client, &points, err, sizeof(err));
 	ok("the access points arrive", got == 1 && points.count == 2, err);
 	if (got == 1 && points.count == 2) {
-		equals("an access point's steering and width are named",
-		    points.items[0].unmodelled, "steering, width");
+		/* Width, neighbour reports and steering are fields since 10.607;
+		 * fast roaming, with its domain and key, is not. */
+		equals("an access point's fast roaming is named",
+		    points.items[0].unmodelled, "fast_roaming");
+		ok("  and its width, reports and steering are read into fields",
+		    points.items[0].width == 160 && points.items[0].neighbour_reports &&
+		        points.items[0].steering && points.items[0].steering_signal == -75 &&
+		        points.items[0].steering_band,
+		    NULL);
 		equals("and one the dialog can write whole names nothing",
 		    points.items[1].unmodelled, "");
+		ok("  and has no width and no steering", points.items[1].width == -1 &&
+		    !points.items[1].steering, NULL);
 	}
 	ncfg_access_points_free(&points);
 	staged_close(&staged);

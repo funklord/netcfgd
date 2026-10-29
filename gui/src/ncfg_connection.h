@@ -434,6 +434,14 @@ struct ncfg_access_point_config {
 	bool    answering = false;
 	QString started_band;
 	int     started_channel = -1;
+	/* The radio's shape and what it tells stations (10.607). `width` in MHz,
+	 * -1 for the channel's own; `steering_signal` 0 for no threshold. */
+	int     width = -1;
+	bool    neighbour_reports = false;
+	bool    wds = false;
+	bool    steering = false;
+	int     steering_signal = 0;
+	bool    steering_band = false;
 	/* What the access point dialog has no field for, comma-joined; empty for
 	 * one it can write back whole (project.md 10.606). */
 	QString unmodelled;

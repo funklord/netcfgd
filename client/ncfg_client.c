@@ -2243,11 +2243,23 @@ int ncfg_client_access_points(ncfg_client_t *client, ncfg_access_points_t *out, 
 
 		running_state(status, item->device ? item->device : "", item);
 
+		item->width = (int)ncfg_json_int(doc, ncfg_json_member(doc, entry, "width"), -1);
+		item->neighbour_reports =
+		    ncfg_json_bool(doc, ncfg_json_member(doc, entry, "neighbour_reports"), 0);
+		item->wds = ncfg_json_bool(doc, ncfg_json_member(doc, entry, "wds"), 0);
+		uint32_t steering = ncfg_json_member(doc, entry, "steering");
+		item->steering = ncfg_json_type(doc, steering) == NCFG_JSON_OBJECT;
+		item->steering_signal =
+		    (int)ncfg_json_int(doc, ncfg_json_member(doc, steering, "signal"), 0);
+		item->steering_band = ncfg_json_bool(doc, ncfg_json_member(doc, steering, "band"), 0);
+
 		/* What the access point dialog cannot write back (10.606): it saves
-		 * the block with `replace`, so each of these would be deleted. */
+		 * the block with `replace`, so each of these would be deleted. Width,
+		 * neighbour reports, wds and steering left this list when the dialog
+		 * gained fields for them (10.607). */
 		{
-			static const char *const beyond[] = { "fast_roaming", "mobility_domain", "wds",
-				"roaming_key", "neighbour_reports", "neighbours", "steering", "width" };
+			static const char *const beyond[] = { "fast_roaming", "mobility_domain",
+				"roaming_key", "neighbours" };
 
 			for (size_t at = 0; at < sizeof(beyond) / sizeof(beyond[0]); at++) {
 				if (member_says(doc, entry, beyond[at])) {

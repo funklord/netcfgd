@@ -181,35 +181,72 @@ int main(int argc, char **argv)
 		check("and netcfgd stops reporting it", !offered(&connection, name, &gone));
 	}
 
-	/* What the dialog has no field for (10.606). It saves the block whole, so
-	 * an access point written by hand with a `width` would lose it to Save;
-	 * the dialog has to refuse and leave the file as it was. */
+	/* Width and steering, carried (10.607): an access point written by hand
+	 * with both opens on them, and Save keeps them. */
 	{
 		const QString wide = QStringLiteral("gui-wide");
 		const QString text = QStringLiteral(
 		    "access_point \"gui-wide\" {\n\tdevice = \"radio0\"\n\tchannel = 6\n"
-		    "\twidth = 20\n\twifi { psk = \"@secret:gui-wide\" }\n}\n");
+		    "\twidth = 20\n\tneighbour_reports = true\n\tsteering { signal = -75 }\n"
+		    "\twifi { psk = \"@secret:gui-wide\" }\n}\n");
 		QString why;
-		check("an access point with a width is written by hand",
+		check("an access point with a width and steering is written by hand",
 		    connection.config_put(QStringLiteral("access-point-") + wide, text, true, &why),
 		    why);
 		ncfg_access_point_config existing;
-		check("and netcfgd names the width as something the dialog cannot carry",
-		    offered(&connection, wide, &existing) &&
-		        existing.unmodelled == QStringLiteral("width"),
+		check("and netcfgd says the dialog can carry all of it",
+		    offered(&connection, wide, &existing) && existing.unmodelled.isEmpty(),
+		    existing.unmodelled);
+		ncfg_access_point_dialog dialog(&connection, existing);
+		auto *width = dialog.findChild<QComboBox *>(QStringLiteral("ap_width"));
+		auto *signal = dialog.findChild<QSpinBox *>(QStringLiteral("ap_steering_signal"));
+		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("ap_save"));
+		check("the dialog opens on its width and its steering",
+		    width && width->currentData().toString() == QStringLiteral("20") && signal &&
+		        signal->value() == -75,
+		    width ? width->currentData().toString() : QString());
+		save->click();
+		ncfg_access_point_config after;
+		check("and Save keeps both",
+		    !dialog.outcome().isEmpty() && offered(&connection, wide, &after) &&
+		        after.width == 20 && after.neighbour_reports && after.steering &&
+		        after.steering_signal == -75,
+		    QString::number(after.width));
+		(void)connection.config_delete(QStringLiteral("access-point-") + wide, &why);
+	}
+
+	/* What the dialog still has no field for (10.606): a `neighbour` block.
+	 * It saves the block whole, so it must refuse and leave the file. */
+	{
+		const QString named = QStringLiteral("gui-near");
+		const QString text = QStringLiteral(
+		    "access_point \"gui-near\" {\n\tdevice = \"radio0\"\n\tchannel = 6\n"
+		    "\tneighbour_reports = true\n"
+		    "\tneighbour \"02:00:00:00:09:00\" { channel = 36 }\n"
+		    "\twifi { psk = \"@secret:gui-near\" }\n}\n");
+		QString why;
+		check("an access point naming a neighbour is written by hand",
+		    connection.config_put(QStringLiteral("access-point-") + named, text, true, &why),
+		    why);
+		ncfg_access_point_config existing;
+		check("and netcfgd names the neighbours as something the dialog cannot carry",
+		    offered(&connection, named, &existing) &&
+		        existing.unmodelled == QStringLiteral("neighbours"),
 		    existing.unmodelled);
 		ncfg_access_point_dialog dialog(&connection, existing);
 		auto *note = dialog.findChild<QLabel *>(QStringLiteral("ap_note"));
 		auto *save = dialog.findChild<QPushButton *>(QStringLiteral("ap_save"));
 		save->click();
 		check("so Save is refused, saying what it would delete",
-		    dialog.outcome().isEmpty() && note && note->text().contains(QStringLiteral("width")),
+		    dialog.outcome().isEmpty() && note &&
+		        note->text().contains(QStringLiteral("neighbours")),
 		    note ? note->text() : QString());
 		ncfg_access_point_config after;
-		check("and the width is still there",
-		    offered(&connection, wide, &after) && after.unmodelled == QStringLiteral("width"),
+		check("and the neighbour is still there",
+		    offered(&connection, named, &after) &&
+		        after.unmodelled == QStringLiteral("neighbours"),
 		    after.unmodelled);
-		(void)connection.config_delete(QStringLiteral("access-point-") + wide, &why);
+		(void)connection.config_delete(QStringLiteral("access-point-") + named, &why);
 	}
 
 	if (failures == 0) {

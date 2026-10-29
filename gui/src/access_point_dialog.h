@@ -14,6 +14,12 @@
  * the note says to give it an address, and the planner's own warning carries
  * the rest.
  *
+ * **Width, neighbour reports, steering and wds are fields** (project.md
+ * 10.607), the four this run of features added that are a word or a number.
+ * Fast roaming -- a mobility domain and a key, which is a secret -- and
+ * `neighbour` blocks are not, and an access point carrying either is refused
+ * on Save rather than written without it (10.606).
+ *
  * `admin`, because it writes configuration.
  */
 #ifndef NCFG_ACCESS_POINT_DIALOG_H
@@ -49,6 +55,9 @@ private slots:
 	void submit();
 	void remove();
 	void security_changed();
+	/* Steering needs neighbour reports: they are its list of where a station
+	 * can be told to go, and the compiler refuses one without the other. */
+	void reports_changed();
 
 private:
 	QString block_text() const;
@@ -70,6 +79,11 @@ private:
 	QCheckBox *hidden;
 	QComboBox *acl_policy;
 	QLineEdit *stations;
+	QComboBox *width;
+	QCheckBox *neighbour_reports;
+	QSpinBox  *steering_signal;
+	QCheckBox *steering_band;
+	QCheckBox *wds;
 	QLabel      *note;
 	QPushButton *save_button;
 	QPushButton *remove_button;

@@ -89,6 +89,39 @@ int main(int argc, char **argv)
 		    "naming the policy and every station on it");
 	}
 
+	/* Width, reports, steering and wds (10.607): each written only where it
+	 * says something, and steering as one block naming its triggers. */
+	{
+		ncfg_access_point_config shaped;
+		shaped.id = QStringLiteral("Wide");
+		shaped.device = QStringLiteral("wlan0");
+		shaped.security = QStringLiteral("open");
+		shaped.width = 80;
+		shaped.neighbour_reports = true;
+		shaped.steering = true;
+		shaped.steering_signal = -75;
+		shaped.steering_band = true;
+		shaped.wds = true;
+		const QString block = ncfg_access_point_block(shaped);
+		check(block.contains(QStringLiteral("width = 80")), "a stated width is written");
+		check(block.contains(QStringLiteral("neighbour_reports = true")),
+		    "and neighbour reports");
+		check(block.contains(QStringLiteral("steering { signal = -75; band = true }")),
+		    "and steering, as one block with both triggers");
+		check(block.contains(QStringLiteral("wds = true")), "and wds");
+
+		ncfg_access_point_config plain;
+		plain.id = QStringLiteral("Plain");
+		plain.device = QStringLiteral("wlan0");
+		plain.security = QStringLiteral("open");
+		const QString bare = ncfg_access_point_block(plain);
+		check(!bare.contains(QStringLiteral("width")) &&
+		        !bare.contains(QStringLiteral("neighbour_reports")) &&
+		        !bare.contains(QStringLiteral("steering")) &&
+		        !bare.contains(QStringLiteral("wds")),
+		    "and an access point that sets none of them states none of them");
+	}
+
 	if (failures == 0) {
 		fprintf(stderr, "access_point_block: all checks passed\n");
 	} else {

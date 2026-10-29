@@ -40,6 +40,17 @@ const choice bands[] = {
 	{ "6 GHz", "6" },
 };
 
+/* How wide the radio runs (10.597-10.599). The first is the channel's own
+ * width, which is what writing nothing means; 80 and 160 exist only on 5 GHz,
+ * and the compiler says so for a 2.4 GHz channel. */
+const choice widths[] = {
+	{ "as the channel allows", "" },
+	{ "20 MHz", "20" },
+	{ "40 MHz", "40" },
+	{ "80 MHz -- 5 GHz", "80" },
+	{ "160 MHz -- 5 GHz, mostly radar channels", "160" },
+};
+
 /* Who may associate. One list or the other, never both, because hostapd reads
  * one file or the other. */
 const choice acls[] = {
@@ -118,6 +129,28 @@ QString ncfg_access_point_block(const ncfg_access_point_config &settings)
 		body << QStringLiteral("\t\t%1 = [%2]")
 		        .arg(settings.acl_policy, quoted.join(QStringLiteral(", ")));
 		body << QStringLiteral("\t}");
+	}
+
+	/* Each only where it says something: the language's defaults are these
+	 * keys absent, and a block that stated them would read as a choice. */
+	if (settings.width > 0) {
+		body << QStringLiteral("\twidth = %1").arg(settings.width);
+	}
+	if (settings.neighbour_reports) {
+		body << QStringLiteral("\tneighbour_reports = true");
+	}
+	if (settings.steering) {
+		QStringList steer;
+		if (settings.steering_signal < 0) {
+			steer << QStringLiteral("signal = %1").arg(settings.steering_signal);
+		}
+		if (settings.steering_band) {
+			steer << QStringLiteral("band = true");
+		}
+		body << QStringLiteral("\tsteering { %1 }").arg(steer.join(QStringLiteral("; ")));
+	}
+	if (settings.wds) {
+		body << QStringLiteral("\twds = true");
 	}
 
 	QStringList block;
@@ -200,6 +233,37 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	stations->setPlaceholderText(QStringLiteral("00:11:22:33:44:55 -- addresses, "
 	            "separated by spaces"));
 	form->addRow(QStringLiteral("stations"), stations);
+
+	width = new QComboBox(this);
+	width->setObjectName(QStringLiteral("ap_width"));
+	fill(width, widths, sizeof(widths) / sizeof(widths[0]));
+	form->addRow(QStringLiteral("width"), width);
+
+	neighbour_reports = new QCheckBox(QStringLiteral("tell stations about the other access "
+	                    "points (802.11k)"), this);
+	neighbour_reports->setObjectName(QStringLiteral("ap_neighbour_reports"));
+	form->addRow(QString(), neighbour_reports);
+
+	/* Steering, as its two triggers: a weak signal, and a station on 2.4 GHz
+	 * that could be on 5. Neither on is no `steering` block at all. */
+	steering_signal = new QSpinBox(this);
+	steering_signal->setObjectName(QStringLiteral("ap_steering_signal"));
+	steering_signal->setRange(-100, 0);
+	steering_signal->setSuffix(QStringLiteral(" dBm"));
+	steering_signal->setSpecialValueText(QStringLiteral("not by signal"));
+	steering_signal->setValue(0);
+	steering_signal->setToolTip(QStringLiteral(
+	    "Ask a station heard weaker than this to move to another of this network's "
+	    "access points. -75 is a station about to lose its link."));
+	form->addRow(QStringLiteral("steer below"), steering_signal);
+
+	steering_band = new QCheckBox(QStringLiteral("steer 2.4 GHz stations to 5 GHz"), this);
+	steering_band->setObjectName(QStringLiteral("ap_steering_band"));
+	form->addRow(QString(), steering_band);
+
+	wds = new QCheckBox(QStringLiteral("let stations bridge through it (4-address)"), this);
+	wds->setObjectName(QStringLiteral("ap_wds"));
+	form->addRow(QString(), wds);
 	layout->addLayout(form);
 
 	note = new QLabel(this);
@@ -222,8 +286,10 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 	connect(save_button, &QPushButton::clicked, this, &ncfg_access_point_dialog::submit);
 	connect(security, &QComboBox::currentIndexChanged, this,
 	    &ncfg_access_point_dialog::security_changed);
+	connect(neighbour_reports, &QCheckBox::toggled, this,
+	    &ncfg_access_point_dialog::reports_changed);
 	layout->addWidget(buttons);
-	resize(560, 460);
+	resize(560, 600);
 
 	offer_radios();
 	if (editing) {
@@ -238,6 +304,11 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		hidden->setChecked(existing.hidden);
 		select(acl_policy, existing.acl_policy);
 		stations->setText(existing.stations);
+		select(width, existing.width > 0 ? QString::number(existing.width) : QString());
+		neighbour_reports->setChecked(existing.neighbour_reports);
+		steering_signal->setValue(existing.steering ? existing.steering_signal : 0);
+		steering_band->setChecked(existing.steering && existing.steering_band);
+		wds->setChecked(existing.wds);
 
 		/* **What hostapd actually took**, where it differs from what the block
 		 * asks for. A channel can be refused and a band unsupported, and
@@ -253,6 +324,13 @@ ncfg_access_point_dialog::ncfg_access_point_dialog(ncfg_connection *connection,
 		}
 	}
 	security_changed();
+	reports_changed();
+}
+
+void ncfg_access_point_dialog::reports_changed()
+{
+	steering_signal->setEnabled(neighbour_reports->isChecked());
+	steering_band->setEnabled(neighbour_reports->isChecked());
 }
 
 void ncfg_access_point_dialog::offer_radios()
@@ -299,6 +377,16 @@ QString ncfg_access_point_dialog::block_text() const
 	settings.hidden = hidden->isChecked();
 	settings.acl_policy = acl_policy->currentData().toString();
 	settings.stations = stations->text().trimmed();
+	settings.width = width->currentData().toString().isEmpty()
+	    ? -1
+	    : width->currentData().toString().toInt();
+	settings.neighbour_reports = neighbour_reports->isChecked();
+	/* Disabled controls say nothing: steering without reports is refused,
+	 * so unticking reports drops the steering with them. */
+	settings.steering_signal = settings.neighbour_reports ? steering_signal->value() : 0;
+	settings.steering_band = settings.neighbour_reports && steering_band->isChecked();
+	settings.steering = settings.steering_signal < 0 || settings.steering_band;
+	settings.wds = wds->isChecked();
 	return ncfg_access_point_block(settings);
 }
 

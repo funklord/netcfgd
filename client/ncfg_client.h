@@ -2037,10 +2037,19 @@ typedef struct {
 	int   answering;
 	char *started_band;
 	int   started_channel;
+	/* The radio's shape and what it tells stations (10.607): `width` in MHz,
+	 * -1 where the document leaves it to the channel; `steering` set where
+	 * the block has one, with `steering_signal` 0 for no signal threshold. */
+	int   width;
+	int   neighbour_reports;
+	int   wds;
+	int   steering;
+	int   steering_signal;
+	int   steering_band;
 	/* What the access point dialog has no field for, comma-joined, as on a
-	 * saved network: fast roaming and its keys, `wds`, neighbour reports and
-	 * neighbours, steering and `width` (project.md 10.606). Empty for one
-	 * the dialog can write back whole. */
+	 * saved network: fast roaming with its domain and key, and `neighbour`
+	 * blocks (project.md 10.606). Empty for one the dialog can write back
+	 * whole. */
 	char *unmodelled;
 } ncfg_access_point_config_t;
 

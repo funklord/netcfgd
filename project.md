@@ -12597,6 +12597,30 @@ netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
 
+## 10.607 The access point dialog carries width, reports, steering and wds
+
+A `/go` run 2026-10-30, the end state 10.606 named: refusing made the
+dialog safe, and carrying what it can is what makes it useful. The four
+members 10.593-10.600 added that are a word or a number are fields now -- a
+width list (the channel's own, 20, 40, 80 and 160 MHz, the last two marked
+5 GHz), a neighbour reports box, a steering signal in dBm with "not by
+signal" at 0 and a 2.4-to-5 GHz box, and wds. Steering's two controls are
+disabled while neighbour reports are off, because the compiler refuses
+steering without them and a disabled control writes nothing.
+
+The client reads `width`, `neighbour_reports`, `wds` and `steering` into
+fields on `ncfg_access_point_config_t`, and they left its `unmodelled` list;
+fast roaming with its domain and key, and `neighbour` blocks, stay on it --
+the key is a secret, and a neighbour list is a table this dialog does not
+have.
+
+- `access_point_block`: each is written only where it says something, and
+  steering as `steering { signal = -75; band = true }`.
+- `gui_wifi.sh`, 14 probes: an access point written by hand with `width =
+  20`, reports and `steering { signal = -75 }` opens on both and keeps both
+  through Save; one with a `neighbour` block is refused, naming it, and keeps
+  it. `client_test` reads the four and names only `fast_roaming`.
+
 ## 10.606 The wifi dialogs deleted what they could not show
 
 Found by a `/go` run 2026-10-29, deriving the lens from 10.605 -- a feature
