@@ -642,6 +642,7 @@ wrong way round three times before one table answered both.
 | `access_point` | yes | yes |  |
 | `dhcp4` | yes | yes |  |
 | `dhcp6` | yes | yes |  |
+| `dhcp_server` | yes | yes |  |
 | `dns` |  |  |  |
 | `link_local` | yes | yes |  |
 | `open_vpn` | yes | yes |  |
@@ -656,6 +657,11 @@ restart, and a DHCP client's is the client's own business. `dns` and
 `wire_guard` are started by nothing — the first is a file netcfgd writes and
 the second is configured through netlink rather than run as a daemon — and
 they are in the vocabulary because an observation can report either.
+
+**`dhcp_server` is the eleventh** (decision 0297): dnsmasq serving DHCPv4 with
+its DNS side off. It has no `reload`, since dnsmasq re-reads its hosts and
+leases on `SIGHUP` and not its range, so a changed policy is a stop and a
+start, the lease file kept across it.
 
 **`link_local` is the tenth and it is the C's own.** `ncfg_backend_kind_name`
 names ten and `c/include/ncfg/observed.h` says where the value is appended

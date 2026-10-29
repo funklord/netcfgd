@@ -195,6 +195,10 @@ static int backend_wanted(const ncfg_builder_t *builder, const ncfg_observed_bac
 		*field = "advertise";
 		interface = ncfg_plan_interface(builder->desired, backend->interface);
 		return interface && interface->advertise;
+	case NCFG_BACKEND_DHCP_SERVER:
+		*field = "dhcp_server";
+		interface = ncfg_plan_interface(builder->desired, backend->interface);
+		return interface && interface->dhcp_server;
 	case NCFG_BACKEND_ACCESS_POINT:
 		/* Asked in `ncfg_plan_access_point_wanted` for the supplicant's
 		 * reason, beside the pass that starts one. */

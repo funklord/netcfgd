@@ -87,6 +87,7 @@
 #include "ncfg/hostapd.h"
 #include "ncfg/openvpn.h"
 #include "ncfg/observed.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/ra.h"
 #include "ncfg/state.h"
 #include "ncfg/supplicant.h"
@@ -174,6 +175,7 @@ int ncfg_service_backend_supported(const ncfg_op_t *op, char *err, size_t err_si
 	switch ((ncfg_backend_kind_t)kind) {
 	case NCFG_BACKEND_ACCESS_POINT:
 	case NCFG_BACKEND_ROUTER_ADVERT:
+	case NCFG_BACKEND_DHCP_SERVER:
 	case NCFG_BACKEND_OPENVPN:
 	case NCFG_BACKEND_DHCP4:
 	case NCFG_BACKEND_SUPPLICANT:
@@ -243,6 +245,18 @@ static int run_dir_of(const ncfg_service_t *service, const char *doing, const ch
  * about. One radio is one BSS in this build, and the two have to agree on
  * which one or the plan names one access point and the executor starts
  * another. */
+static const ncfg_interface_t *interface_on(const ncfg_document_t *document, const char *name)
+{
+	size_t i;
+
+	for (i = 0; document && name && i < document->interface_count; i++) {
+		if (document->interfaces[i].name && strcmp(document->interfaces[i].name, name) == 0) {
+			return &document->interfaces[i];
+		}
+	}
+	return NULL;
+}
+
 static const ncfg_access_point_t *access_point_on(const ncfg_document_t *document,
     const char *device)
 {
@@ -392,6 +406,23 @@ static int start_access_point(const ncfg_service_t *service, const char *run_dir
 	}
 	return ncfg_hostapd_start(run_dir, access_point, &local, service->secrets,
 	    service->hostapd_program, err, err_size);
+}
+
+/* A DHCP server on an interface the document names, read out of the
+ * document the service holds -- a range resolved from the interface's own
+ * address, so there is nothing for a caller to resolve first (0297). */
+static int start_dhcp_server(const ncfg_service_t *service, const char *run_dir,
+    const char *iface, char *err, size_t err_size)
+{
+	const ncfg_interface_t *interface = interface_on(service->document, iface);
+
+	if (!interface || !interface->dhcp_server) {
+		ncfg_error_set(err, err_size,
+		    "backend.start asks for a DHCP server on %s, and the document this plan was "
+		    "built from has no `dhcp_server` block on it", iface);
+		return 0;
+	}
+	return ncfg_dhcp_server_start(run_dir, interface, NULL, err, err_size);
 }
 
 static int start_advertising(const ncfg_service_t *service, const char *run_dir,
@@ -781,6 +812,8 @@ int ncfg_service_backend_start(const ncfg_service_t *service, int kind, const ch
 		return start_access_point(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		return start_advertising(service, run_dir, iface, err, err_size);
+	case NCFG_BACKEND_DHCP_SERVER:
+		return start_dhcp_server(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_OPENVPN:
 		return start_tunnel(service, run_dir, iface, err, err_size);
 	case NCFG_BACKEND_DHCP4:
@@ -917,6 +950,8 @@ int ncfg_service_backend_stop(const ncfg_service_t *service, int kind, const cha
 		return stop_access_point(run_dir, iface, service->patience_ms, err, err_size);
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		return ncfg_ra_stop(run_dir, iface, err, err_size);
+	case NCFG_BACKEND_DHCP_SERVER:
+		return ncfg_dhcp_server_stop(run_dir, iface, err, err_size);
 	case NCFG_BACKEND_LINK_LOCAL:
 		/* By the pid netcfgd recorded, never by `--kill <iface>`, which would
 		 * stop whichever client is on the interface. `autoip.h` argues it. */

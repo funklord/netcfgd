@@ -660,7 +660,7 @@ profile, which is the radio rule read twice: an `802-3-ethernet` profile named
 WireGuard profile carries the peers and the private key, which this shim will
 not project.
 
-**And netcfgd shows who is connected.** `ncfg wifi clients` and a fifth TUI pane list the stations associated with an access point, read back over hostapd's control socket ([0040](doc/decision/0040-a-station-list-needs-a-station-list.md)). It is a live query rather than part of the observation, because there is no desired station list to reconcile against. The two halves are shown as one thing: a station that is on the deny list *and* connected is marked, which is 0039's restart gap made visible rather than silent. There is no hostname — hostapd knows addresses, and netcfgd runs no DHCP server to learn names from.
+**And netcfgd shows who is connected.** `ncfg wifi clients` and a fifth TUI pane list the stations associated with an access point, read back over hostapd's control socket ([0040](doc/decision/0040-a-station-list-needs-a-station-list.md)). It is a live query rather than part of the observation, because there is no desired station list to reconcile against. The two halves are shown as one thing: a station that is on the deny list *and* connected is marked, which is 0039's restart gap made visible rather than silent. There is no hostname — hostapd knows addresses, and netcfgd ran no DHCP server to learn names from (it can since 10.601; reading the names its leases carry is open).
 
 **Consequence of M9 being last, stated plainly:** multi-host management arrives at the very end, because conforming to RESTCONF *is* the multi-host answer (design doc §11.1). That is a deliberate choice — this is a single-host tool first, and nothing before M9 should be shaped by fleet considerations.
 
@@ -909,7 +909,7 @@ somebody else's.
 - **~~Nothing notices that an access point's *other* configuration changed.~~ Closed** ([0052](doc/decision/0052-a-daemon-is-compared-to-what-it-was-started-with.md)), passphrase included. The observation reads back what hostapd was started with, and an edited SSID, channel or stated band restarts it with the deauthentication warning. The secret is compared **in the observer**, which is the one place both halves are in hand, and what travels is a boolean -- the value is in neither the document nor the observation, and must not be in either. Two limits are left and both are deliberate: a **band the document does not state** is not compared, because an absent `band` means "work it out from the channel" and comparing what hostapd worked out would restart the radio on every reconcile; and a daemon **netcfgd did not start** has no record to compare against at all, which 0053 names as the next thing of this shape.
 - **`ieee80211r` is absent from Debian's hostapd — the *access point* half.** The station half is a different build option in a different program, and it is present: a real wpa_supplicant 2.10 here accepts `FT-PSK`, `FT-SAE` and `FT-EAP` as `key_mgmt` values, checked against its parser rather than inferred from the strings looking standard. So netcfgd can *join* a fast-transition network on a distribution that cannot *serve* one, and the two questions must not be answered together.
 - **`ieee80211r` is absent from Debian's hostapd.** Checked directly: not in the binary, and its parser rejects the option. OpenWrt's build generally includes it. So 802.11r fast transition is a per-distribution packaging question before it is a netcfgd feature, and any support has to detect it rather than assume — as [0026](doc/decision/0026-an-access-point-is-a-file-hostapd-reads.md) handles hostapd's other optional pieces.
-- **There is no client hostname to show.** hostapd knows hardware addresses; a friendly name would have to come from DHCP leases, and netcfgd runs no DHCP server. `ncfg wifi clients` shows a MAC rather than inventing a label.
+- **There is no client hostname to show.** hostapd knows hardware addresses; a friendly name would have to come from DHCP leases, and netcfgd ran no DHCP server -- it can since 10.601, and reading the names in its lease file is open. `ncfg wifi clients` shows a MAC rather than inventing a label.
 - **`wwan_hwsim` cannot test a modem protocol, which is what decided the modem design.** Read out of the running kernel's source: one `wwan_create_port` call, `WWAN_PORT_AT`, and its emulator does not parse commands — it looks for `A`, then `T`, echoes the line and appends `OK`. The core knows `MBIM`, `QMI`, `QCDM`, `FIREHOSE`, `XMMRPC` and `FASTBOOT` and the simulator creates none of them. So an MBIM backend would have been the first thing here with no live test, and [0044](doc/decision/0044-the-modem-helper-is-contained-the-way-an-adapter-is.md) supersedes [0043](doc/decision/0043-mbim-is-ours-and-the-quirks-are-a-table.md) on that basis.
 - **A stopped daemon must not keep its secret.** hostapd's generated configuration carries the passphrase in the clear — it has no indirection for one — and `stop` used to leave it in `/run`. Now removed, whether or not the daemon answered, since a hostapd that *died* is exactly the case where nobody comes back to tidy up. The check had to move to `acl.sh`: `ap.sh`'s hostapd never starts (a dummy has no radio), so nothing is ever stopped there and the check could not fire at all.
 - **`pppd` cannot be told to negotiate an address and not apply it.** `noip` disables IPCP and IP communication entirely; there is no "negotiate, let somebody else configure". So OpenVPN and PPPoE cannot be made symmetric about addressing, which is what [0047](doc/decision/0047-a-tunnels-address-stays-with-its-daemon.md) turns on — and routes, where `--route-noexec` and `nodefaultroute` both exist, are the half where symmetry is available and worth having.
@@ -12596,6 +12596,82 @@ may tick at 5 seconds, which is 10.472's finding in this suite already.
 netcfgd never writes, the delta reports `silent` and fails; restored, it
 passes. So it still catches the daemon going quiet, which is the property the
 check exists for, and has stopped asserting the one thing it could not know.
+
+## 10.601 A DHCP server, policy handed to dnsmasq
+
+**Asked for by the holder 2026-10-29** ("go ahead with amending 0009 for a
+DHCP server"), after the previous run parked it: 0009's table said **DHCPv4
+server: no**, and a station joining a netcfgd access point was given no
+address. [0297](doc/decision/0297-a-dhcp-server-is-policy-served-by-dnsmasq.md)
+amends that row to the shape the RA row already had -- policy yes,
+implementation dnsmasq -- and says why each choice below was made.
+
+### What 10.601 measured, dnsmasq 2.91 on the hwsim image
+
+- `port=0` turns dnsmasq's DNS side off, and **it then offers no DNS server
+  unless `dhcp-option=6` names one**; it offers its own address as the
+  router by default.
+- Two instances, two interfaces, `bind-interfaces`: both serve.
+- `dhcp-authoritative` NAKs a client asking for an address from another
+  network, so it gets a new one at once.
+- The lease file is plain text: expiry, MAC, address, name, client id.
+
+### What 10.601 built
+
+- `dhcp_server { range, lease, dns }` in an `interface` block. The range,
+  default and refusals are one model function, `ncfg_dhcp_server_range`, the
+  compiler, the renderer and the planner all call: the network is the
+  interface's first static IPv4 address; the default is its 100th host to
+  its 249th (OpenWrt's), cut at the last host; refused with no static IPv4
+  address, too small a network, a range outside it, backwards, or taking in
+  the router. `lease` from 120 s, default 12 h. `dns` never guessed: none is
+  a plan warning.
+- **An eleventh backend kind, `dhcp_server`**: start, stop, adoption, liveness,
+  teardown when the block goes, the ledger's row and the observation
+  witness. Files under `<run>/dhcp-server/<interface>.*`.
+- **The restart identity is a sentence.** The generated file's second line
+  is `# serves: <range>, <lease> s, dns <servers>`; the observer reads it
+  into the backend's `served`, the planner computes the same line from the
+  document, and a difference is a stop and a start whose reason shows both
+  -- dnsmasq does not re-read its range on `SIGHUP`. The lease file is kept.
+- The access point's no-address warning no longer says "netcfgd serves no
+  DHCP"; it names `dhcp_server`.
+
+### What the live run found, twice, in netcfgd's own code
+
+`make hull-dhcp-server` served correctly from the first run -- the client
+was given an address in the range, the router, the DNS server and the
+lease -- and failed because **every plan after the first planned the start
+again**: netcfgd did not recognise its own running server. Two causes, each
+a whole-argument or ownership rule `ncfg_process_pid_of` is right to keep:
+
+- The configuration path was passed fused, `--conf-file=<path>`, and the
+  marker must be **a whole argument** of `/proc/<pid>/cmdline`. Now `-C
+  <path>`, as radvd's `--config <path>`.
+- dnsmasq **drops to `nobody`** once it holds its sockets, and the owner rule
+  takes root or the asker. The file now says `user=nobody` rather than
+  leaving it to the build, and the check also accepts that uid -- no wider a
+  door, since the pid file is dnsmasq's, written as root into netcfgd's own
+  directory, and the marker is netcfgd's own path. Keeping dnsmasq root was
+  the alternative, and is a DHCP parser facing the network with root.
+
+Neither could have been caught by a unit test that reads its own rendering;
+both were the vm's. The second plan is now empty, a changed lease is a
+restart (dnsmasq's pid moved, the lease file kept), and every check passes.
+
+**And one mis-edit caught by reading back**: the `served` field was first
+inserted into `applied_dns_fields` rather than the backend's table -- a
+search for the next `},` -- which compiled and would have read a backend's
+offset into a DNS record. Found by grepping where it landed.
+
+### Open
+
+- **Hostnames from the leases**: the lease file carries the name each
+  client sent, which 0040's station list and the GUI have wanted since the
+  start.
+- **DHCPv6** stays out (0297): RA and SLAAC address the hosts.
+- **Another `backend`**: udhcpd, odhcpd, Kea -- a key as `advertise.backend`
+  has, once one is measured.
 
 ## 10.600 802.11ax
 
@@ -36740,8 +36816,9 @@ meant.
 **An access point whose interface has no address.** The existing warning says
 `interface wlan0 { }` is enough, and it is -- enough to bring the radio up and
 start hostapd. Follow it exactly and the SSID beacons, a station associates,
-and there is nothing on this end to talk to; netcfgd serves no DHCP either, so
-an address is necessary and not sufficient. **The bridged case is what makes
+and there is nothing on this end to talk to; netcfgd serves no DHCP either
+(**since 10.601 it can**, and the warning names `dhcp_server`), so an address
+is necessary and not sufficient. **The bridged case is what makes
 this hard**: an access point bridged into a LAN has no address of its own and
 is correct, and the Rust records that its own first version of this warning
 fired on exactly that arrangement. Both spellings are excluded -- members
@@ -49016,7 +49093,9 @@ Doing exactly that plans:
 an answer to "what do I need for an access point", which it is not. The SSID
 beacons, a station associates, and there is nothing on this end to talk to.
 
-**netcfgd serves no DHCP** -- `dnsmasq` is in this tree only as a `dns_mode`,
+**netcfgd serves no DHCP** (true when written; **10.601 and decision 0297
+changed it**, and the warning now names `dhcp_server`) -- `dnsmasq` is in this
+tree only as a `dns_mode`,
 which writes resolver configuration and hands out nothing. So an address is
 necessary and not sufficient, and the new warning says both halves rather than
 the easy one. Nothing can warn about the absent server, because netcfgd cannot

@@ -828,6 +828,12 @@ static void an_access_point_round_trips(void)
 	    "  and so does band steering alone");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\twidth = 20\n"
 	    "\twifi { psk = \"@secret:ap\" }\n}\n", "a stated width round-trips");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server {\n"
+	    "\t\trange = \"192.168.1.50-192.168.1.60\"\n\t\tlease = 3600\n"
+	    "\t\tdns = [\"192.168.1.1\", \"9.9.9.9\"]\n\t}\n}\n",
+	    "a DHCP server round-trips");
+	round_trips("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n\tdhcp_server { }\n}\n",
+	    "  and so does one with every default");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 36\n"
 	    "\twidth = 80\n\twifi { psk = \"@secret:ap\" }\n}\n", "  and so does 80 on 5 GHz");
 	round_trips("access_point \"home\" {\n\tdevice = \"wlan0\"\n\tchannel = 100\n"

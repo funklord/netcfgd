@@ -57,6 +57,7 @@
 #include "ncfg/openvpn.h"
 #include "ncfg/pppoe.h"
 #include "ncfg/process.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/ra.h"
 #include "ncfg/supplicant.h"
 
@@ -158,6 +159,14 @@ int ncfg_service_backend_handle(const char *run, int kind, const char *iface, ch
 		 * gone, which is the same recovery one layer in.
 		 */
 		return 0;
+	case NCFG_BACKEND_DHCP_SERVER:
+		/* dnsmasq is started with `-C <path>`, which carries the generated
+		 * file's path as an argument of its own, as radvd's `--config` does
+		 * (0297). */
+		return ncfg_dhcp_server_pid_path(run, iface, pid_path, pid_size, scratch,
+		           sizeof(scratch)) &&
+		    ncfg_dhcp_server_config_path(run, iface, marker, marker_size, scratch,
+		        sizeof(scratch));
 	case NCFG_BACKEND_ROUTER_ADVERT:
 		/* radvd is started with `--config <path>`, so the generated file is
 		 * what it recites. */

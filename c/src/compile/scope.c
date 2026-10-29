@@ -344,6 +344,11 @@ static const struct {
 	{ NCFG_BLOCK_INTERFACE, "dot1x.password", 0x00020020u },
 	{ NCFG_BLOCK_INTERFACE, "dot1x.phase2", 0x00020021u },
 	{ NCFG_BLOCK_INTERFACE, "dot1x.domain_suffix_match", 0x00020022u },
+	/* A DHCP server (0297): what a network hands out, so the interface's,
+	 * which travels with the block. */
+	{ NCFG_BLOCK_INTERFACE, "dhcp_server.range", 0x00020023u },
+	{ NCFG_BLOCK_INTERFACE, "dhcp_server.lease", 0x00020024u },
+	{ NCFG_BLOCK_INTERFACE, "dhcp_server.dns", 0x00020025u },
 
 	/*
 	 * network -- estate-wide entire but for its hooks, so everything the

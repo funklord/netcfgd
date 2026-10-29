@@ -1892,6 +1892,21 @@ static const ncfg_field_t ra_fields[] = {
 };
 static const ncfg_type_t ra_type = TYPE("router advertisement policy", ra_fields);
 
+/* A DHCP server's policy (0297). Every member omitted where unset, so an
+ * interface without one is what it was. */
+static const ncfg_field_t dhcp_server_fields[] = {
+	{ .name = "range_start", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, range_start) },
+	{ .name = "range_end", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_dhcp_server_t, range_end) },
+	{ .name = "lease", .kind = NCFG_F_OPT_INT, R_U32,
+	    .offset = offsetof(ncfg_dhcp_server_t, lease) },
+	{ .name = "dns", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
+	    .offset = offsetof(ncfg_dhcp_server_t, dns),
+	    .count_offset = offsetof(ncfg_dhcp_server_t, dns_count) }
+};
+static const ncfg_type_t dhcp_server_type = TYPE("DHCP server", dhcp_server_fields);
+
 static const ncfg_field_t guard_fields[] = {
 	{ .name = "reason", .kind = NCFG_F_STR, .flags = NCFG_FF_REQUIRED,
 	    .offset = offsetof(ncfg_guard_t, reason) }
@@ -1943,6 +1958,9 @@ static const ncfg_field_t interface_fields[] = {
 	{ .name = "advertise", .kind = NCFG_F_OPT_STRUCT, .type = &ra_type,
 	    .element_size = sizeof(ncfg_ra_policy_t),
 	    .offset = offsetof(ncfg_interface_t, advertise) },
+	{ .name = "dhcp_server", .kind = NCFG_F_OPT_STRUCT, .type = &dhcp_server_type,
+	    .element_size = sizeof(ncfg_dhcp_server_t),
+	    .offset = offsetof(ncfg_interface_t, dhcp_server) },
 	{ .name = "forwarding", .kind = NCFG_F_OPT_BOOL,
 	    .offset = offsetof(ncfg_interface_t, forwarding) },
 	{ .name = "nat", .kind = NCFG_F_OPT_BOOL, .offset = offsetof(ncfg_interface_t, nat) },

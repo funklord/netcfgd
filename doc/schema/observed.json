@@ -683,6 +683,12 @@
       ]
     },
     {
+      "kind": "dhcp_server",
+      "interface": "lan0",
+      "running": true,
+      "served": "192.168.1.100-192.168.1.249, 43200 s, dns 192.168.1.1"
+    },
+    {
       "kind": "open_vpn",
       "interface": "vpn0",
       "running": true,

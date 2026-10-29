@@ -2540,7 +2540,7 @@ hull_image = $(HULL) images 2>/dev/null | grep -q "^netcfgd/$(1)[[:space:]]" || 
 # `(backend vm)`, and a spec that changes that wants its own bound.
 hull: hull-hwsim hull-sandbox hull-openrc hull-natcap hull-wire hull-delegation \
       hull-delegation-lossy hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds \
-      hull-roam-sae hull-steer hull-width
+      hull-roam-sae hull-steer hull-width hull-dhcp-server
 
 # DHCPv6 prefix delegation across a wire, on the harness `hull-wire` proved.
 #
@@ -2819,6 +2819,25 @@ hull-width:
 	sed 's/^/width: /' tests/hull/width/verdict/width; \
 	grep -q '^VERDICT ok' tests/hull/width/verdict/width
 
+# A DHCP server netcfgd configures (0297, 10.601): one vm, a veth pair,
+# netcfgd's `dhcp_server` on one end and a dhcpcd client in a namespace on the
+# other -- the lease, the range, the router and DNS server given, a second plan
+# with nothing to do, and a changed lease restarting dnsmasq with the lease
+# file kept. The hwsim rig's image, which has dnsmasq-base and dhcpcd-base.
+hull-dhcp-server:
+	@$(MAKE) --no-print-directory -C c
+	@$(call hull_says,netcfgd/hwsim)
+	@$(call hull_image,hwsim)
+	@rm -f tests/hull/dhcp-server/verdict/dhcp-server
+	@mkdir -p tests/hull/dhcp-server/verdict
+	@timeout -k 30 $(HULL_TIMEOUT) $(HULL) run -f tests/hull/dhcp-server/hull.conf || true
+	@if [ ! -f tests/hull/dhcp-server/verdict/dhcp-server ]; then \
+		echo "dhcp-server: the payload left no verdict, so it never ran"; \
+		exit 1; \
+	fi; \
+	sed 's/^/dhcp-server: /' tests/hull/dhcp-server/verdict/dhcp-server; \
+	grep -q '^VERDICT ok' tests/hull/dhcp-server/verdict/dhcp-server
+
 # netcfgd joining an 802.11s mesh (10.588): one vm, two hwsim radios, netcfgd's
 # node peering with a bare wpa_supplicant one in a network namespace, traffic
 # across, and a second plan with nothing to do. The regdom rig's image.
@@ -3008,7 +3027,7 @@ hull-clean:
 	done
 	@rmdir $(DIST)/hull 2>/dev/null || true
 
-.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-image hull-clean
+.PHONY: hull hull-hwsim hull-sandbox hull-openrc hull-natcap hull-regdom hull-regdom-heard hull-roam hull-mesh hull-wds hull-roam-sae hull-steer hull-width hull-dhcp-server hull-image hull-clean
 
 # WHICH BUILD THE SCRIPTS DRIVE
 #   Every script under `tests/live/` takes its pair of binaries from one

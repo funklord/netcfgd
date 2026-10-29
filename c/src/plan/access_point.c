@@ -233,9 +233,10 @@ static int address_is_somewhere_else(const ncfg_document_t *desired, const char 
  * **hostapd running is not an access point working.** The warning above says
  * `interface wlan0 { }` is enough, and it is -- enough to bring the radio up
  * and start hostapd. Following it exactly gives a beaconing SSID a station
- * can associate with and then nothing on this end to talk to, because netcfgd
- * serves no DHCP either. So an address here is necessary and not sufficient,
- * and the sentence says both halves.
+ * can associate with and then nothing on this end to talk to. So an address
+ * here is necessary and not sufficient, and the sentence says both halves --
+ * the second being a `dhcp_server` to give the stations theirs, since 0297
+ * (it said "netcfgd serves no DHCP" until then).
  *
  * Only where there IS an `interface` block: with none, the warning above is
  * the one to read, and two warnings about the same missing thing is one of
@@ -253,10 +254,10 @@ static void warn_no_address(ncfg_builder_t *builder, const ncfg_access_point_t *
 	}
 	ncfg_plan_warnf(builder->plan, point->device,
 	    "access point `%s` runs on `%s`, which has no address: a station can associate "
-	    "and then has nothing here to talk to. netcfgd runs hostapd and serves no DHCP, "
-	    "so give the interface an address -- `interface %s { config = \"192.168.4.1/24\" "
-	    "}` -- and run a DHCP server on it, or expect every station to be configured by "
-	    "hand",
+	    "and then has nothing here to talk to. Give the interface an address, and a DHCP "
+	    "server to hand the stations theirs -- `interface %s { config = "
+	    "\"192.168.4.1/24\"  dhcp_server { dns = [\"...\"] } }` -- or put the radio in a "
+	    "bridge whose interface has them",
 	    point->id, point->device, point->device);
 }
 

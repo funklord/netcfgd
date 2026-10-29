@@ -118,7 +118,7 @@ static const ncfg_enum_t origin_set = WORD_SET("addressing origin", origin_words
 
 static const char *const backend_kind_words[] = { "dhcp4", "dhcp6", "supplicant",
 	"access_point", "wire_guard", "pppoe", "open_vpn", "dns", "router_advert",
-	"link_local" };
+	"link_local", "dhcp_server" };
 static const ncfg_enum_t backend_kind_set = WORD_SET("backend kind", backend_kind_words);
 
 static const char *const link_category_words[] = { "loopback", "ethernet", "wifi", "modem",
@@ -1223,7 +1223,9 @@ static const ncfg_field_t observed_backend_fields[] = {
 	    .offset = offsetof(ncfg_observed_backend_t, config_present) },
 	{ .name = "advertised", .kind = NCFG_F_STR_LIST, .flags = NCFG_FF_OMIT_EMPTY,
 	    .offset = offsetof(ncfg_observed_backend_t, advertised),
-	    .count_offset = offsetof(ncfg_observed_backend_t, advertised_count) }
+	    .count_offset = offsetof(ncfg_observed_backend_t, advertised_count) },
+	{ .name = "served", .kind = NCFG_F_STR,
+	    .offset = offsetof(ncfg_observed_backend_t, served) }
 };
 static const ncfg_type_t observed_backend_type = TYPE("backend", observed_backend_fields);
 

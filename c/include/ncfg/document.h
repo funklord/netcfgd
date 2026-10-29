@@ -1365,6 +1365,28 @@ typedef struct {
 } ncfg_ra_policy_t;
 
 /*
+ * What an interface offers the hosts behind it by DHCPv4 (decision 0297):
+ * policy, handed to dnsmasq, as `ncfg_ra_policy_t` is handed to radvd.
+ *
+ * The network served is the interface's own static IPv4 address, which is
+ * also the router offered; `ncfg_dhcp_server_range` says what is handed out.
+ * `range_start`/`range_end` are absent for the default, the 100th to the
+ * 249th host. `lease` is seconds, absent for 12 hours. `dns` is the servers
+ * offered and is never guessed: empty offers none (measured, dnsmasq with its
+ * DNS side off offers no server unless one is named).
+ */
+typedef struct {
+	char         *range_start;
+	char         *range_end;
+	ncfg_optint_t lease;
+	char        **dns;
+	size_t        dns_count;
+} ncfg_dhcp_server_t;
+
+#define NCFG_DHCP_SERVER_LEASE_DEFAULT 43200
+#define NCFG_DHCP_SERVER_LEASE_MIN 120
+
+/*
  * Why an interface must not be disrupted.
  *
  * The reason is a string rather than a flag because the refusal text is the
@@ -1409,7 +1431,7 @@ typedef struct {
 	int64_t hold_down;
 } ncfg_probe_policy_t;
 
-typedef struct {
+typedef struct ncfg_interface {
 	char                  *name; /* the sorting key */
 	int                    enabled;
 	ncfg_address_source_t *addressing;
@@ -1422,6 +1444,8 @@ typedef struct {
 	ncfg_optint_t          on_drift; /* ncfg_drift_policy_t where `has` */
 	ncfg_eap_config_t     *dot1x;    /* wired 802.1X */
 	ncfg_ra_policy_t      *advertise;
+	/* A DHCPv4 server on this interface (0297), or NULL. */
+	ncfg_dhcp_server_t    *dhcp_server;
 	/*
 	 * IP forwarding sysctl, and only that. Never a filter rule: decision 0022
 	 * lets netcfgd own one nftables table for NAT, on the grounds that
@@ -1794,6 +1818,22 @@ const char *ncfg_access_point_effective_band(const char *band, const ncfg_optint
  * the document already has a way to say and gets told rather than agreed with.
  */
 int ncfg_channel_in_band(const char *band, int64_t channel);
+
+/*
+ * The range a DHCP server on `interface` hands out (0297), as two dotted
+ * quads in `start` and `end` (each `NCFG_ADDRESS_MAX`), and the network and
+ * router it serves in `router` (the interface's first static IPv4 address,
+ * with its prefix). One answer for the compiler that refuses a server, the
+ * renderer that writes dnsmasq's file, and the planner that compares it.
+ *
+ * The default is the 100th to the 249th host of the network, OpenWrt's,
+ * cut at the last host before the broadcast. 0 with `why` set where there is
+ * no static IPv4 address to serve from, the network is too small for the
+ * default, or a stated range is reversed, outside the network or takes in
+ * the router's own address.
+ */
+int ncfg_dhcp_server_range(const struct ncfg_interface *interface, char *start, char *end,
+    char *router, const char **why);
 
 /* What a radio can do, as the observation read it: 40 MHz per band, and
  * 802.11ac on 5 GHz (10.597, 10.598). */

@@ -38,6 +38,7 @@
 #include "observe_internal.h"
 
 #include "ncfg/base.h"
+#include "ncfg/dhcp_server.h"
 #include "ncfg/ra.h"
 
 #include <stdio.h>
@@ -156,6 +157,25 @@ int ncfg_observe_advertised(ncfg_observed_t *observed, const char *run_dir, char
 		size_t                   count = 0;
 		char                    *text;
 
+		if (backend->kind == NCFG_BACKEND_DHCP_SERVER && backend->running &&
+		    backend->interface) {
+			char served[NCFG_DHCP_SERVER_SUMMARY_MAX];
+
+			/* What a DHCP server serves, by the line its file carries (0297).
+			 * None is "cannot tell", which plans nothing, as an empty prefix
+			 * list does below. */
+			if (ncfg_dhcp_server_recorded(run_dir, backend->interface, served,
+			        sizeof(served))) {
+				free(backend->served);
+				backend->served = observe_dup(served);
+				if (!backend->served) {
+					ncfg_error_set(err, err_size,
+					    "out of memory reading what %s is serving", backend->interface);
+					return 0;
+				}
+			}
+			continue;
+		}
 		if (backend->kind != NCFG_BACKEND_ROUTER_ADVERT || !backend->running ||
 		    !backend->interface) {
 			continue;

@@ -1395,6 +1395,71 @@ static void access_point_cases(void)
 	    "\twifi { psk = \"@secret:ap\" }\n}\n",
 	    "a second `steering` block", "  and a second block");
 
+	/* A DHCP server (0297): on an interface with a static IPv4 address, from
+	 * its 100th host to its 249th by default; every refusal names why. */
+	document = compiles("interface br0 {\n\tconfig = \"192.168.1.1/24\"\n"
+	    "\tdhcp_server { dns = [\"192.168.1.1\", \"9.9.9.9\"] }\n}\n",
+	    "an interface serving DHCP compiles");
+	if (document) {
+		const ncfg_interface_t *lan = &document->interfaces[0];
+		char                    start[NCFG_ADDRESS_MAX];
+		char                    end[NCFG_ADDRESS_MAX];
+		char                    router[NCFG_ADDRESS_MAX];
+
+		check(lan->dhcp_server && lan->dhcp_server->dns_count == 2u &&
+		    ncfg_dhcp_server_range(lan, start, end, router, NULL) &&
+		    strcmp(start, "192.168.1.100") == 0 && strcmp(end, "192.168.1.249") == 0 &&
+		    strcmp(router, "192.168.1.1/24") == 0,
+		    "  handing out .100 to .249 of the network, as the router .1");
+		ncfg_document_free(document);
+	}
+	document = compiles("interface br0 {\n\tdhcp_server {\n\t\trange = \"10.0.0.10 - 10.0.0.20\"\n"
+	    "\t\tlease = 3600\n\t}\n\tconfig = \"10.0.0.1/25\"\n}\n",
+	    "a stated range and lease compile, the address written after the block");
+	if (document) {
+		const ncfg_dhcp_server_t *server = document->interfaces[0].dhcp_server;
+
+		check(server && strcmp(server->range_start, "10.0.0.10") == 0 &&
+		    strcmp(server->range_end, "10.0.0.20") == 0 && server->lease.value == 3600,
+		    "  carrying both, the spaces around the dash dropped");
+		ncfg_document_free(document);
+	}
+	document = compiles("interface br0 {\n\tconfig = \"10.0.0.1/25\"\n\tdhcp_server { }\n}\n",
+	    "a /25 serves its default range, cut at its last host");
+	if (document) {
+		char start[NCFG_ADDRESS_MAX];
+		char end[NCFG_ADDRESS_MAX];
+
+		check(ncfg_dhcp_server_range(&document->interfaces[0], start, end, NULL, NULL) &&
+		    strcmp(start, "10.0.0.100") == 0 && strcmp(end, "10.0.0.126") == 0,
+		    "  .100 to .126");
+		ncfg_document_free(document);
+	}
+	refuses("interface br0 {\n\tconfig = \"dhcp\"\n\tdhcp_server { }\n}\n",
+	    "has none", "a DHCP server on an interface with no static IPv4 address is refused");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/26\"\n\tdhcp_server { }\n}\n",
+	    "too small for the default range", "  and on a network too small for the default");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.150/24\"\n\tdhcp_server { }\n}\n",
+	    "inside the default range", "  and where the router's own address is inside it");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { range = \"10.0.1.10-10.0.1.20\" }\n}\n",
+	    "not inside the interface's network", "  and a range outside the network");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { range = \"10.0.0.1-10.0.0.20\" }\n}\n",
+	    "takes in the interface's own address", "  and one that takes in the router");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { range = \"10.0.0.20-10.0.0.10\" }\n}\n",
+	    "runs backwards", "  and one that runs backwards");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { lease = 60 }\n}\n",
+	    "is not a lease dnsmasq takes", "  and a lease shorter than dnsmasq's two minutes");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n"
+	    "\tdhcp_server { dns = [\"2001:db8::53\"] }\n}\n",
+	    "is not a DNS server a DHCPv4 server can offer", "  and an IPv6 DNS server");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { pool = 5 }\n}\n",
+	    "unknown dhcp_server key", "  and a key it does not have");
+	refuses("interface br0 {\n\tconfig = \"10.0.0.1/24\"\n\tdhcp_server { }\n"
+	    "\tdhcp_server { }\n}\n", "a second `dhcp_server` block", "  and a second block");
+
 	refuses("access_point \"Home\" { wifi { psk = \"@secret:ap\" } }\n",
 	    "does not say which radio", "an access point without a device is refused");
 	refuses("access_point \"Home\" { device = \"wlan0\" }\n", "so it would be open",

@@ -1,6 +1,6 @@
 # 0009: netcfgd configures, it does not serve
 
-Status: accepted, amended by [0022](0022-netcfgd-may-own-one-nftables-table.md) and [0283](0283-firewall-and-queuing-are-in-scope.md)
+Status: accepted, amended by [0022](0022-netcfgd-may-own-one-nftables-table.md), [0283](0283-firewall-and-queuing-are-in-scope.md) and [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md)
 Date: 2026-07-28
 Milestone: model in M1, prefix delegation and PPPoE in M4, RA handoff in M4
 
@@ -43,7 +43,7 @@ argument:
 | RA sending on the LAN | **policy yes, implementation no** | handed to odhcpd/radvd, like the DNS backends |
 | `ip_forward` | **yes** | a sysctl over state netcfgd already owns |
 | IPv4 masquerade | ~~no~~ **yes, in netcfgd's own table** | amended by [0022](0022-netcfgd-may-own-one-nftables-table.md); see below for the original reasoning |
-| DHCPv4/v6 server | **no** | serving |
+| DHCPv4/v6 server | ~~no~~ **DHCPv4: policy yes, implementation no** | amended by [0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md): handed to dnsmasq, as RA is to radvd; DHCPv6 still no |
 | PPPoE | **yes** | a link kind, implemented by pppd |
 
 ### Prefix delegation needs an indirection, not a value
@@ -155,3 +155,12 @@ kind of thing as the protocol-110 tag decision 0002 already relies on.
 Nothing else in this record changes. "netcfgd configures; it does not serve"
 still decides the other four rows, and 0022 draws the line one layer down:
 netcfgd translates addresses, and never filters packets.
+
+## Amendment, 2026-10-29
+
+The DHCPv4 server row is amended by
+[0297](0297-a-dhcp-server-is-policy-served-by-dnsmasq.md), on the holder's
+instruction. It moves to the shape the RA row already had: netcfgd decides what
+is offered, and dnsmasq answers the requests. "netcfgd configures; it does not
+serve" is unchanged, and is the reason netcfgd does not answer a DHCP request
+itself.

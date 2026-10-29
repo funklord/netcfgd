@@ -774,7 +774,7 @@ static void every_startable_backend_can_also_be_stopped(void)
 	 * would pass the check above, and so would one where nothing was
 	 * startable -- which is what a `ncfg_apply_supported` that refused
 	 * everything would look like. */
-	check(walked == (int)NCFG_BACKEND_LINK_LOCAL + 1,
+	check(walked == (int)NCFG_BACKEND_DHCP_SERVER + 1,
 	    "  having walked the whole taxonomy rather than part of it");
 	check(startable >= 6, "  of which a useful number are kinds this build starts");
 }

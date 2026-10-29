@@ -1677,6 +1677,29 @@
 #	}
 #}
 
+# HANDING OUT ADDRESSES. `dhcp_server` serves DHCPv4 on an interface with a
+# static IPv4 address, through dnsmasq with its DNS side off (decision 0297):
+#
+#   - `range` defaults to the network's 100th host to its 249th, cut at its
+#     last host, and may not take in the interface's own address;
+#   - `lease` is seconds, 12 hours if unset;
+#   - `dns` is the servers offered, and is never guessed -- with none, the
+#     hosts get an address and resolve nothing, and the plan says so. Name
+#     the router's own address only if something on it answers DNS there.
+#
+# The router offered is the interface's address. Leases are kept in
+# /run/netcfgd/dhcp-server/<interface>.leases, and survive a restart, which is
+# what a changed `dhcp_server` block costs.
+
+#interface br0 {
+#	config = "192.168.1.1/24"
+#	dhcp_server {
+#		range = "192.168.1.100-192.168.1.199"
+#		lease = 43200
+#		dns   = ["192.168.1.1"]
+#	}
+#}
+
 # POLICY ROUTING. A rule sends some traffic to a different table -- which is
 # how a second uplink, or a VPN for one subnet only, is expressed.
 

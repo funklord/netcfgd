@@ -1058,6 +1058,7 @@ void ncfg_plan_interface_contents(ncfg_builder_t *builder, const ncfg_interface_
 	 * waits on: a router advertising a prefix it does not itself hold is
 	 * advertising a route to nowhere. */
 	ncfg_plan_advertise(builder, interface, &base, &addressing);
+	ncfg_plan_dhcp_server(builder, interface, &base, &addressing);
 
 	/*
 	 * Rule 6: post_up runs after the last addressing action completes -- and

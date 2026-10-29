@@ -715,6 +715,57 @@ static void render_advertise(const ncfg_ra_policy_t *policy, const char *name, n
 	ncfg_render_list_free(&prefixes);
 }
 
+/*
+ * A DHCP server (0297), refused by name where the document holds one the
+ * language would not: no static IPv4 address to serve from, a range outside
+ * it, a lease dnsmasq does not take, a server that is not an IPv4 address.
+ */
+static void render_dhcp_server(const ncfg_interface_t *interface, ncfg_buf_t *body,
+    ncfg_unrenderable_t *missing)
+{
+	const ncfg_dhcp_server_t *server = interface->dhcp_server;
+	const char               *why = NULL;
+	size_t                    at;
+
+	if (!ncfg_dhcp_server_range(interface, NULL, NULL, NULL, &why)) {
+		ncfg_render_refuse(missing, "interface", interface->name, "a DHCP server: %s",
+		    why ? why : "its range cannot be worked out");
+		return;
+	}
+	if (server->lease.has && (server->lease.value < NCFG_DHCP_SERVER_LEASE_MIN ||
+	        server->lease.value > 4294967295LL)) {
+		ncfg_render_refuse(missing, "interface", interface->name, "a DHCP lease of %lld s",
+		    (long long)server->lease.value);
+		return;
+	}
+	for (at = 0; at < server->dns_count; at++) {
+		ncfg_address_t address;
+
+		if (!server->dns[at] || !ncfg_address_parse(server->dns[at], &address, NULL, 0) ||
+		    address.is_ipv6 || address.has_prefix || strchr(server->dns[at], '"')) {
+			ncfg_render_refuse(missing, "interface", interface->name,
+			    "a DHCP server offering `%s` as a DNS server",
+			    server->dns[at] ? server->dns[at] : "");
+			return;
+		}
+	}
+	ncfg_buf_add_text(body, "\tdhcp_server {\n");
+	if (server->range_start && server->range_end) {
+		ncfg_buf_addf(body, "\t\trange = \"%s-%s\"\n", server->range_start, server->range_end);
+	}
+	if (server->lease.has) {
+		ncfg_buf_addf(body, "\t\tlease = %lld\n", (long long)server->lease.value);
+	}
+	if (server->dns_count) {
+		ncfg_buf_add_text(body, "\t\tdns = [");
+		for (at = 0; at < server->dns_count; at++) {
+			ncfg_buf_addf(body, "%s\"%s\"", at ? ", " : "", server->dns[at]);
+		}
+		ncfg_buf_add_text(body, "]\n");
+	}
+	ncfg_buf_add_text(body, "\t}\n");
+}
+
 void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrides_t *overrides,
     ncfg_buf_t *text, ncfg_unrenderable_t *missing)
 {
@@ -776,6 +827,9 @@ void ncfg_render_interface(const ncfg_interface_t *interface, const ncfg_overrid
 	}
 	if (interface->advertise) {
 		render_advertise(interface->advertise, name, &body, missing);
+	}
+	if (interface->dhcp_server) {
+		render_dhcp_server(interface, &body, missing);
 	}
 
 	ncfg_render_opening(text, "interface", name, overrides);

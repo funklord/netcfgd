@@ -129,8 +129,9 @@ check "the passphrase resolved from the secrets directory" \
 # `interface wlan0 { }` "is enough", and it is -- enough to bring the radio up
 # and start hostapd, which is what that sentence is about. Following it exactly
 # plans `link.up` and `backend.start` and no address, so the SSID beacons, a
-# station associates, and there is nothing on this end to talk to. netcfgd
-# serves no DHCP either, so an address here is necessary and not sufficient.
+# station associates, and there is nothing on this end to talk to. An address
+# here is necessary and not sufficient: the stations need a DHCP server to be
+# given theirs, which since decision 0297 the warning names as `dhcp_server`.
 #
 # The control comes first and from the config above, which has an address: a
 # warning that fired on every access point would tell nobody anything.
@@ -142,8 +143,8 @@ sed 's|^\tconfig = "192.168.9.1/24"||' "$work/etc/netcfgd.conf" > "$work/noaddr/
 NCFG_CONFIG_DIR="$work/noaddr" "$ncfg" plan > "$work/noaddr.log" 2>&1 || true
 check "one with no address is" \
 	"$(grep -c 'nothing here to talk to' "$work/noaddr.log" || true)" "1"
-check "and is told netcfgd serves no DHCP, which is the half it cannot fix" \
-	"$(grep -c 'serves no DHCP' "$work/noaddr.log" || true)" "1"
+check "and is told it needs a DHCP server as well, and how to write one" \
+	"$(grep -c 'dhcp_server {' "$work/noaddr.log" || true)" "1"
 
 # ------------------------------------------------ a radio on a bridge
 #

@@ -219,6 +219,142 @@ static void release_advertise(ncfg_ra_policy_t *policy)
 	free(policy->backend.command);
 }
 
+static void release_dhcp_server(ncfg_dhcp_server_t *server)
+{
+	size_t at;
+
+	if (!server) {
+		return;
+	}
+	free(server->range_start);
+	free(server->range_end);
+	for (at = 0; at < server->dns_count; at++) {
+		free(server->dns[at]);
+	}
+	free(server->dns);
+	free(server);
+}
+
+/*
+ * `dhcp_server { range = "A-B"  lease = N  dns = [...] }` (0297). The range
+ * is checked against the interface's address after the whole block, since
+ * `config` may come after this one; here only each value's own shape.
+ */
+static ncfg_dhcp_server_t *lower_dhcp_server(ncfg_lower_ctx_t *ctx,
+    const ncfg_ast_block_t *block)
+{
+	ncfg_dhcp_server_t *server = calloc(1, sizeof(*server));
+	size_t              i;
+
+	if (!server) {
+		ncfg_lower_oom(ctx);
+		return NULL;
+	}
+	for (i = 0; i < block->items.count; i++) {
+		const ncfg_ast_item_t       *item = block->items.at[i];
+		const ncfg_ast_assignment_t *assignment;
+		int64_t                      value;
+
+		if (item->kind == NCFG_AST_ITEM_BLOCK) {
+			ncfg_diag(ctx, item->as.block.span, "`%s` is not valid inside `dhcp_server`",
+			    item->as.block.head);
+			continue;
+		}
+		if (item->kind != NCFG_AST_ITEM_ASSIGNMENT) {
+			continue;
+		}
+		assignment = &item->as.assignment;
+		if (strcmp(assignment->key, "range") == 0) {
+			char       *text = ncfg_as_string(ctx, assignment->value);
+			char       *dash = text ? strchr(text, '-') : NULL;
+			const char *first = text;
+			char       *second = dash ? dash + 1 : NULL;
+			size_t      length;
+
+			if (!text) {
+				continue;
+			}
+			if (!dash) {
+				ncfg_diag(ctx, assignment->span,
+				    "`%s` is not a range: write it as two addresses, "
+				    "\"192.168.1.100-192.168.1.249\"", text);
+				free(text);
+				continue;
+			}
+			*dash = '\0';
+			while (*first == ' ') {
+				first++;
+			}
+			length = strlen(first);
+			while (length && first[length - 1u] == ' ') {
+				length--;
+			}
+			while (*second == ' ') {
+				second++;
+			}
+			free(server->range_start);
+			free(server->range_end);
+			server->range_start = strndup(first, length);
+			server->range_end = strdup(second);
+			length = server->range_end ? strlen(server->range_end) : 0u;
+			while (length && server->range_end[length - 1u] == ' ') {
+				server->range_end[--length] = '\0';
+			}
+			free(text);
+			if (!server->range_start || !server->range_end) {
+				ncfg_lower_oom(ctx);
+			}
+		} else if (strcmp(assignment->key, "lease") == 0) {
+			if (!ncfg_as_i64(ctx, assignment->value, &value)) {
+				continue;
+			}
+			if (value < NCFG_DHCP_SERVER_LEASE_MIN || value > 4294967295LL) {
+				ncfg_diag(ctx, assignment->span,
+				    "`lease = %lld` is not a lease dnsmasq takes: seconds, %d or more",
+				    (long long)value, NCFG_DHCP_SERVER_LEASE_MIN);
+				continue;
+			}
+			server->lease.has = 1;
+			server->lease.value = value;
+		} else if (strcmp(assignment->key, "dns") == 0) {
+			ncfg_words_t words;
+			size_t       at;
+
+			if (!ncfg_as_words(ctx, assignment->value, &words)) {
+				ncfg_words_free(&words);
+				continue;
+			}
+			for (at = 0; at < words.count; at++) {
+				ncfg_address_t address;
+				char         **grown;
+
+				if (!ncfg_address_parse(words.at[at].text, &address, NULL, 0) ||
+				    address.is_ipv6 || address.has_prefix) {
+					ncfg_diag(ctx, assignment->span,
+					    "`%s` is not a DNS server a DHCPv4 server can offer: an IPv4 "
+					    "address, with no prefix", words.at[at].text);
+					continue;
+				}
+				grown = realloc(server->dns, (server->dns_count + 1u) * sizeof(*grown));
+				if (!grown) {
+					ncfg_lower_oom(ctx);
+					break;
+				}
+				server->dns = grown;
+				server->dns[server->dns_count] = strdup(words.at[at].text);
+				if (!server->dns[server->dns_count++]) {
+					ncfg_lower_oom(ctx);
+				}
+			}
+			ncfg_words_free(&words);
+		} else {
+			ncfg_diag(ctx, assignment->span,
+			    "unknown dhcp_server key `%s`: range, lease and dns", assignment->key);
+		}
+	}
+	return server;
+}
+
 static int lower_advertise(ncfg_lower_ctx_t *ctx, const ncfg_ast_block_t *block,
     ncfg_ra_policy_t *out)
 {
@@ -609,11 +745,14 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
     ncfg_interface_t *out)
 {
 	ncfg_interface_t  interface;
+	ncfg_span_t       dhcp_server_span;
+	const char       *dhcp_server_source = NULL;
 	ncfg_dns_policy_t dns;
 	int               dns_touched = 0;
 	size_t            i;
 
 	memset(&interface, 0, sizeof(interface));
+	memset(&dhcp_server_span, 0, sizeof(dhcp_server_span));
 	memset(&dns, 0, sizeof(dns));
 	interface.name = ncfg_require_interface_label(ctx, block->block);
 	if (!interface.name) {
@@ -669,6 +808,15 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 				    "duplex and autonegotiation are settings of the adapter rather than of "
 				    "a connection over it: write `device <name> { ethtool { ... } }` and "
 				    "move the block there unchanged");
+			} else if (strcmp(head, "dhcp_server") == 0) {
+				if (interface.dhcp_server) {
+					ncfg_diag(ctx, inner->span,
+					    "interface `%s` has a second `dhcp_server` block", interface.name);
+					break;
+				}
+				interface.dhcp_server = lower_dhcp_server(ctx, inner);
+				dhcp_server_span = inner->span;
+				dhcp_server_source = ctx->source;
 			} else if (strcmp(head, "advertise") == 0) {
 				ncfg_ra_policy_t advertise;
 
@@ -706,6 +854,22 @@ int ncfg_lower_interface(ncfg_lower_ctx_t *ctx, const ncfg_merged_block_t *block
 		}
 	}
 
+	/* The range against the address it is served from, now that `config`
+	 * has been read wherever in the block it was (0297). */
+	if (interface.dhcp_server) {
+		char        start[NCFG_ADDRESS_MAX];
+		char        end[NCFG_ADDRESS_MAX];
+		char        router[NCFG_ADDRESS_MAX];
+		const char *why = NULL;
+
+		if (!ncfg_dhcp_server_range(&interface, start, end, router, &why)) {
+			ctx->source = dhcp_server_source;
+			ncfg_diag(ctx, dhcp_server_span, "interface `%s` cannot serve DHCP: %s",
+			    interface.name, why ? why : "its range cannot be worked out");
+			release_dhcp_server(interface.dhcp_server);
+			interface.dhcp_server = NULL;
+		}
+	}
 	if (dns_touched) {
 		interface.dns = calloc(1, sizeof(*interface.dns));
 		if (!interface.dns) {

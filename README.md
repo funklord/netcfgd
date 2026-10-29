@@ -69,9 +69,10 @@ default; **systemd-networkd**, often fed by **netplan**; **ifupdown** and
   that moves weak stations on and strong ones to 5 GHz (802.11v), 802.11s
   mesh, four-address repeaters, NAT, a firewall of named rules in netcfgd's
   own nftables table that can match a sending station by address, prefix or
-  host list, router advertisements, a delegated prefix subnetted onto the
-  interfaces behind it, VLAN-aware bridges, bonds, policy routing and traffic
-  shaping -- on the OpenWrt-sized box it was designed for.
+  host list, a DHCP server handing out the LAN's addresses, router
+  advertisements, a delegated prefix subnetted onto the interfaces behind
+  it, VLAN-aware bridges, bonds, policy routing and traffic shaping -- on
+  the OpenWrt-sized box it was designed for.
 - **It shows the change before making it.** `ncfg plan` lists every action in
   order -- add this address, start that client, deny this station -- each
   with the configured value and the observed one that differ. `ncfg explain`
@@ -132,6 +133,7 @@ knows.
 | SLAAC | `config = "slaac"`, with privacy extensions and a stable interface token |
 | prefix delegation | a prefix delegated to one interface, subnetted onto others |
 | IPv4 link-local | `config = "link_local"`, coexisting with routable addresses rather than as a timeout fallback |
+| DHCP server | `dhcp_server { range, lease, dns }` on an interface with a static IPv4 address — the hosts behind a router given their addresses, served by `dnsmasq` with its DNS side off, the leases readable under `/run` |
 | hostname | left alone, taken from the DHCP lease, or pinned in the config |
 | MTU, MAC | set per interface, including a MAC policy of permanent, per-network or per-connection |
 
@@ -543,6 +545,7 @@ feature that needs it.
 | VPN tunnel | `openvpn` | `openvpn` |
 | DSL / PPPoE | `pppd`, `pppoe` | `ppp`, `pppoe` |
 | router advertisement | `radvd` | `radvd` |
+| DHCP server | `dnsmasq` | `dnsmasq-base` |
 | cellular, MBIM | `mbimcli` | `libmbim-utils` |
 | cellular, MBIM on OpenWrt | `umbim` | **not packaged in Debian** — it is OpenWrt's, and is the point of that helper |
 | cellular, AT modules | none — a serial port is enough | |

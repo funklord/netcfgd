@@ -937,7 +937,10 @@ typedef enum {
 	 * machine that configures one and nowhere else. `autoip.h` has the whole
 	 * of it, including why the ownership claim here is the weakest of the ten.
 	 */
-	NCFG_BACKEND_LINK_LOCAL
+	NCFG_BACKEND_LINK_LOCAL,
+	/* A DHCPv4 server, dnsmasq with its DNS side off (decision 0297).
+	 * Appended, for the link-local client's reason. */
+	NCFG_BACKEND_DHCP_SERVER
 } ncfg_backend_kind_t;
 
 const char *ncfg_backend_kind_name(int kind);
@@ -1174,6 +1177,9 @@ typedef struct {
 	 * wire to use an address the upstream will not route. */
 	char **advertised;
 	size_t advertised_count;
+	/* What a running DHCP server's file says it serves (0297): the line
+	 * `ncfg_dhcp_server_summary` writes, compared against the document's. */
+	char  *served;
 } ncfg_observed_backend_t;
 
 /* How many times netcfgd has started one backend without it staying up. Reset

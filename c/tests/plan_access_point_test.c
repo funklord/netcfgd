@@ -883,7 +883,8 @@ static void an_access_point_with_no_address_is_said(void)
 	    "\"links\":[" UP_LINK "]," RUNNING(STARTED_WITH(AS_WRITTEN)), &document, &observed);
 	check(plan && planfix_warned(plan, "nothing here to talk to"),
 	    "one with an empty `addressing` list is");
-	check(plan && planfix_warned(plan, "serves no DHCP"),
+	check(plan && planfix_warned(plan, "a DHCP server to hand the stations theirs") &&
+	    planfix_warned(plan, "dhcp_server {"),
 	    "  and is told the half an address alone does not fix");
 	planfix_release(plan, document, observed);
 

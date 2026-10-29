@@ -1242,7 +1242,7 @@ static void the_ledger_walks_every_kind(const char *dir)
 	    "and every op but the four asked per kind");
 	check(creates == (size_t)NCFG_KIND_IFB + 1u,
 	    "and `link.create` once for every interface kind there is");
-	check(backends == ((size_t)NCFG_BACKEND_LINK_LOCAL + 1u) * 3u,
+	check(backends == ((size_t)NCFG_BACKEND_DHCP_SERVER + 1u) * 3u,
 	    "and each backend kind under each of the three backend verbs");
 	free(text);
 }

@@ -538,6 +538,9 @@ void ncfg_plan_access_point_restart_policy(ncfg_builder_t *builder, const char *
  */
 void ncfg_plan_advertise(ncfg_builder_t *builder, const ncfg_interface_t *interface,
     const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);
+/* What an interface hands out by DHCPv4 (0297). */
+void ncfg_plan_dhcp_server(ncfg_builder_t *builder, const ncfg_interface_t *interface,
+    const ncfg_plan_ids_t *base, const ncfg_plan_ids_t *addressing);
 
 /*
  * Which interfaces a `linkset` is not using, and the sentence that says so.
